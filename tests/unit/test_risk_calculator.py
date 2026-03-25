@@ -1,0 +1,420 @@
+"""
+Unit tests for domain/risk_calculator.py - Position sizing and risk calculation.
+All assertions use Decimal for precision, no float comparisons.
+"""
+import pytest
+from decimal import Decimal
+from src.domain.models import (
+    AccountSnapshot,
+    KlineData,
+    Direction,
+    PositionInfo,
+)
+from src.domain.risk_calculator import RiskCalculator, RiskConfig
+from src.domain.exceptions import DataQualityWarning
+
+
+def create_account(
+    total_balance: Decimal = Decimal("100000"),
+    available_balance: Decimal = Decimal("80000"),
+    unrealized_pnl: Decimal = Decimal("0"),
+    positions: list = None,
+) -> AccountSnapshot:
+    """Helper to create AccountSnapshot for testing."""
+    return AccountSnapshot(
+        total_balance=total_balance,
+        available_balance=available_balance,
+        unrealized_pnl=unrealized_pnl,
+        positions=positions or [],
+        timestamp=1234567890000,
+    )
+
+
+def create_kline(
+    symbol: str = "BTC/USDT:USDT",
+    timeframe: str = "15m",
+    open: Decimal = Decimal("100"),
+    high: Decimal = Decimal("110"),
+    low: Decimal = Decimal("90"),
+    close: Decimal = Decimal("105"),
+    volume: Decimal = Decimal("1000"),
+) -> KlineData:
+    """Helper to create KlineData for testing."""
+    return KlineData(
+        symbol=symbol,
+        timeframe=timeframe,
+        timestamp=1234567890000,
+        open=open,
+        high=high,
+        low=low,
+        close=close,
+        volume=volume,
+        is_closed=True,
+    )
+
+
+class TestRiskConfig:
+    """Test RiskConfig validation."""
+
+    def test_valid_config(self):
+        """Test valid configuration is accepted."""
+        config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        assert config.max_loss_percent == Decimal("0.01")
+        assert config.max_leverage == 10
+
+    def test_invalid_loss_percent_zero(self):
+        """Test that zero loss percent raises error."""
+        with pytest.raises(ValueError):
+            RiskConfig(max_loss_percent=Decimal("0"), max_leverage=10)
+
+    def test_invalid_loss_percent_greater_than_one(self):
+        """Test that loss percent > 1 raises error."""
+        with pytest.raises(ValueError):
+            RiskConfig(max_loss_percent=Decimal("1.5"), max_leverage=10)
+
+    def test_invalid_leverage_zero(self):
+        """Test that zero leverage raises error."""
+        with pytest.raises(ValueError):
+            RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=0)
+
+    def test_invalid_leverage_negative(self):
+        """Test that negative leverage raises error."""
+        with pytest.raises(ValueError):
+            RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=-1)
+
+
+class TestCalculateStopLoss:
+    """Test stop-loss calculation."""
+
+    @pytest.fixture
+    def calculator(self):
+        """Create risk calculator with test config."""
+        config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(config)
+
+    def test_stop_loss_long_below_low(self, calculator):
+        """Test LONG stop-loss is set below Pinbar low."""
+        kline = create_kline(open=Decimal("108"), high=Decimal("110"), low=Decimal("90"), close=Decimal("109"))
+        stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
+        assert stop_loss == kline.low
+
+    def test_stop_loss_short_above_high(self, calculator):
+        """Test SHORT stop-loss is set above Pinbar high."""
+        kline = create_kline(open=Decimal("92"), high=Decimal("110"), low=Decimal("90"), close=Decimal("91"))
+        stop_loss = calculator.calculate_stop_loss(kline, Direction.SHORT)
+        assert stop_loss == kline.high
+
+    def test_stop_loss_quantized(self, calculator):
+        """Test that stop-loss is properly quantized."""
+        kline = create_kline(
+            open=Decimal("108.123456"), high=Decimal("110.999999"),
+            low=Decimal("89.000001"), close=Decimal("109.555555"),
+        )
+        stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
+        assert stop_loss == Decimal("89.00")
+
+
+class TestCalculatePositionSize:
+    """Test position size calculation."""
+
+    @pytest.fixture
+    def calculator(self):
+        """Create risk calculator with test config."""
+        config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(config)
+
+    def test_position_size_basic_formula(self, calculator):
+        """Test basic position size formula using total_balance."""
+        # Use total_balance as per requirements
+        account = create_account(total_balance=Decimal("100000"))
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")  # 5 stop distance
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Risk amount = 100000 * 0.01 = 1000
+        # Stop distance = |100 - 95| = 5
+        # Position size = 1000 / 5 = 200
+        assert position_size == Decimal("200")
+
+    def test_position_size_uses_total_balance_not_available(self, calculator):
+        """Test that calculation uses total_balance, not available_balance."""
+        # available_balance is much lower, but we use total_balance
+        account = create_account(total_balance=Decimal("100000"), available_balance=Decimal("1000"))
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Should use total_balance = 100000, not available = 1000
+        # Position size = 1000 / 5 = 200
+        assert position_size == Decimal("200")
+
+    def test_position_size_with_leverage_cap(self, calculator):
+        """Test that position size respects leverage cap."""
+        account = create_account(total_balance=Decimal("10000"))
+        entry_price = Decimal("100")
+        stop_loss = Decimal("99")  # 1 stop distance
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Risk amount = 10000 * 0.01 = 100
+        # Stop distance = 1
+        # Position size = 100 / 1 = 100
+        # Position value = 100 * 100 = 10000
+        # Leverage = 10000 / 10000 = 1x
+        assert leverage <= calculator.config.max_leverage
+
+    def test_position_size_tight_stop_requires_higher_leverage(self, calculator):
+        """Test that tight stop-loss requires higher leverage."""
+        account = create_account(total_balance=Decimal("10000"))
+        entry_price = Decimal("100")
+        stop_loss = Decimal("99.9")  # 0.1 stop distance
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Risk amount = 10000 * 0.01 = 100
+        # Stop distance = 0.1
+        # Position size = 100 / 0.1 = 1000
+        # Position value = 1000 * 100 = 100000
+        # Leverage required = 100000 / 10000 = 10x
+        assert leverage == calculator.config.max_leverage
+
+    def test_position_size_zero_balance(self, calculator):
+        """Test position size is zero with no balance."""
+        account = create_account(total_balance=Decimal("0"))
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        assert position_size == Decimal("0")
+        assert leverage == 1
+
+    def test_position_size_stop_loss_distance_zero_raises(self, calculator):
+        """Test that zero stop-loss distance raises DataQualityWarning (W-001)."""
+        account = create_account(total_balance=Decimal("100000"))
+        entry_price = Decimal("100")
+        stop_loss = Decimal("100")  # Same as entry, distance = 0
+
+        with pytest.raises(DataQualityWarning) as exc_info:
+            calculator.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
+
+        assert exc_info.value.error_code == "W-001"
+        assert "Stop loss distance is zero" in str(exc_info.value)
+
+    def test_position_size_short_direction(self, calculator):
+        """Test position size calculation for SHORT."""
+        account = create_account(total_balance=Decimal("100000"))
+        entry_price = Decimal("100")
+        stop_loss = Decimal("105")  # 5 stop distance
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.SHORT
+        )
+
+        # Same formula as LONG
+        assert position_size == Decimal("200")
+
+
+class TestGenerateRiskInfo:
+    """Test risk info string generation."""
+
+    @pytest.fixture
+    def calculator(self):
+        """Create risk calculator with test config."""
+        config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(config)
+
+    def test_risk_info_format(self, calculator):
+        """Test risk info string format."""
+        account = create_account(total_balance=Decimal("100000"))
+        position_size = Decimal("200")
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        risk_info = calculator.generate_risk_info(
+            account, position_size, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Risk = |100 - 95| * 200 = 1000 USDT
+        assert "1.00%" in risk_info
+        assert "USDT" in risk_info
+
+
+class TestCalculateSignalResult:
+    """Test complete signal result calculation."""
+
+    @pytest.fixture
+    def calculator(self):
+        """Create risk calculator with test config."""
+        config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(config)
+
+    def test_signal_result_all_fields_populated(self, calculator):
+        """Test that signal result has all fields populated."""
+        account = create_account(total_balance=Decimal("100000"))
+        kline = create_kline(
+            symbol="BTC/USDT:USDT", timeframe="15m",
+            open=Decimal("108"), high=Decimal("110"),
+            low=Decimal("90"), close=Decimal("109"),
+        )
+
+        result = calculator.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.LONG,
+            tags=[{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}],
+        )
+
+        # Verify all fields are populated
+        assert result.symbol == "BTC/USDT:USDT"
+        assert result.timeframe == "15m"
+        assert result.direction == Direction.LONG
+        assert result.entry_price > Decimal("0")
+        assert result.suggested_stop_loss > Decimal("0")
+        assert result.suggested_position_size > Decimal("0")
+        assert result.current_leverage >= 1
+        assert result.tags == [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
+        assert result.risk_reward_info != ""
+
+    def test_signal_result_stop_loss_correct(self, calculator):
+        """Test that stop-loss is correctly calculated."""
+        account = create_account(total_balance=Decimal("100000"))
+        kline = create_kline(low=Decimal("90"))
+
+        result = calculator.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.LONG,
+            tags=[{"name": "EMA", "value": "Bullish"}],
+        )
+
+        # Stop loss should be at Pinbar low
+        assert result.suggested_stop_loss == Decimal("90")
+
+    def test_signal_result_position_size_reasonable(self, calculator):
+        """Test that position size is reasonable."""
+        account = create_account(total_balance=Decimal("100000"))
+        kline = create_kline(
+            open=Decimal("108"), high=Decimal("110"),
+            low=Decimal("90"), close=Decimal("109"),
+        )
+
+        result = calculator.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.LONG,
+            tags=[],
+        )
+
+        # Position value should be reasonable relative to balance
+        position_value = result.suggested_position_size * result.entry_price
+        max_position_value = account.total_balance * result.current_leverage
+
+        assert position_value <= max_position_value
+
+
+class TestDecimalPrecision:
+    """Test that all calculations maintain Decimal precision."""
+
+    @pytest.fixture
+    def calculator(self):
+        """Create risk calculator with test config."""
+        config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(config)
+
+    def test_no_float_leakage(self, calculator):
+        """Test that no float types leak into calculations."""
+        account = create_account(total_balance=Decimal("100000.12345678"))
+        kline = create_kline(
+            open=Decimal("108.12345678"), high=Decimal("110.99999999"),
+            low=Decimal("89.00000001"), close=Decimal("109.55555555"),
+        )
+
+        result = calculator.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.LONG,
+            tags=[],
+        )
+
+        # All Decimal fields should be Decimal type
+        assert isinstance(result.entry_price, Decimal)
+        assert isinstance(result.suggested_stop_loss, Decimal)
+        assert isinstance(result.suggested_position_size, Decimal)
+
+    def test_high_precision_prices(self, calculator):
+        """Test calculations work with high-precision crypto prices."""
+        account = create_account(total_balance=Decimal("100000"))
+
+        # ETH-like price with many decimals
+        kline = create_kline(
+            open=Decimal("3456.78901234"), high=Decimal("3460.12345678"),
+            low=Decimal("3400.00000001"), close=Decimal("3455.55555555"),
+        )
+
+        result = calculator.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.LONG,
+            tags=[],
+        )
+
+        # Should handle high precision without errors
+        assert result.entry_price > Decimal("0")
+        assert result.suggested_stop_loss > Decimal("0")
+
+
+class TestStopLossDistanceZero:
+    """Test boundary case: stop_loss_distance = 0 (Issue #7)."""
+
+    @pytest.fixture
+    def calculator(self):
+        """Create risk calculator with test config."""
+        config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(config)
+
+    def test_doji_candle_stop_loss_equals_entry(self, calculator):
+        """Test doji candle where stop_loss equals entry_price."""
+        account = create_account(total_balance=Decimal("100000"))
+        # Doji: open=high=low=close, so stop_loss = low = close = entry
+        kline = create_kline(open=Decimal("100"), high=Decimal("100"), low=Decimal("100"), close=Decimal("100"))
+
+        stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
+        entry_price = kline.close
+
+        # For doji, stop_loss == entry_price
+        assert stop_loss == entry_price
+
+        # Should raise DataQualityWarning when calculating position size
+        with pytest.raises(DataQualityWarning) as exc_info:
+            calculator.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
+
+        assert exc_info.value.error_code == "W-001"
+
+    def test_short_doji_stop_loss_equals_entry(self, calculator):
+        """Test SHORT position with doji candle."""
+        account = create_account(total_balance=Decimal("100000"))
+        kline = create_kline(open=Decimal("100"), high=Decimal("100"), low=Decimal("100"), close=Decimal("100"))
+
+        stop_loss = calculator.calculate_stop_loss(kline, Direction.SHORT)
+        entry_price = kline.close
+
+        # For doji, stop_loss == entry_price (high == close)
+        assert stop_loss == entry_price
+
+        with pytest.raises(DataQualityWarning) as exc_info:
+            calculator.calculate_position_size(account, entry_price, stop_loss, Direction.SHORT)
+
+        assert exc_info.value.error_code == "W-001"

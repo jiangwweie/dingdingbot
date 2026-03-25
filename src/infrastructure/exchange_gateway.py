@@ -1,0 +1,538 @@
+"""
+Exchange Gateway - All exchange communication (REST + WebSocket).
+Handles historical data warmup, real-time K-line streaming, and asset polling.
+"""
+import asyncio
+import time
+from typing import List, Dict, Any, Optional, Callable, Awaitable
+from decimal import Decimal
+
+try:
+    import ccxt.pro as ccxtpro
+except ImportError:
+    ccxtpro = None
+
+import ccxt.async_support as ccxt_async
+
+from src.domain.models import KlineData, AccountSnapshot, PositionInfo
+from src.domain.exceptions import FatalStartupError, ConnectionLostError, DataQualityWarning
+from src.infrastructure.logger import logger
+
+
+# ============================================================
+# Exchange Gateway
+# ============================================================
+class ExchangeGateway:
+    """
+    Handles all exchange communication:
+    - REST API for historical data warmup and asset queries
+    - WebSocket for real-time K-line streaming
+    """
+
+    # Timeframe mapping from user-friendly to ccxt format
+    TIMEFRAME_MAP = {
+        "1m": "1m",
+        "5m": "5m",
+        "15m": "15m",
+        "30m": "30m",
+        "1h": "1h",
+        "2h": "2h",
+        "4h": "4h",
+        "6h": "6h",
+        "12h": "12h",
+        "1d": "1d",
+        "1w": "1w",
+    }
+
+    def __init__(
+        self,
+        exchange_name: str,
+        api_key: str,
+        api_secret: str,
+        testnet: bool = False,
+        options: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Initialize Exchange Gateway.
+
+        Args:
+            exchange_name: Exchange name (ccxt id, e.g., 'binance')
+            api_key: API key (read-only permission required)
+            api_secret: API secret
+            testnet: Use testnet endpoint
+            options: Additional exchange options
+        """
+        self.exchange_name = exchange_name
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.testnet = testnet
+
+        # Build exchange options
+        exchange_options = {
+            'defaultType': 'swap',  # Default to futures/swap
+            'adjustForTimezone': True,
+            'recvWindow': 30000,
+            'timeout': 30000,
+        }
+        if options:
+            exchange_options.update(options)
+
+        # Create both REST and WebSocket exchange instances
+        self.rest_exchange = self._create_rest_exchange(exchange_options)
+        self.ws_exchange = None  # Created on demand
+
+        # Reconnection settings
+        self._max_reconnect_attempts = 10
+        self._initial_reconnect_delay = 1.0
+        self._max_reconnect_delay = 60.0
+
+        # WebSocket state
+        self._ws_running = False
+
+        # Asset snapshot cache
+        self._account_snapshot: Optional[AccountSnapshot] = None
+        self._asset_polling_task: Optional[asyncio.Task] = None
+        self._polling_failures = 0
+        self._max_polling_failures = 5
+
+        # Candle closure tracking (instance variable, not class variable)
+        self._candle_timestamps: Dict[str, int] = {}
+
+    def _create_rest_exchange(self, options: Dict[str, Any]):
+        """Create REST exchange instance"""
+        config = {
+            'apiKey': self.api_key,
+            'secret': self.api_secret,
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'swap',  # Force swap/futures mode
+                'warnOnFetchOpenOrdersWithoutSymbol': False,  # Suppress CCXT warnings
+            }
+        }
+
+        # Merge user-provided options
+        if options:
+            config['options'].update(options)
+
+        if self.testnet:
+            config['sandboxMode'] = True
+
+        # Create exchange by name
+        exchange_class = getattr(ccxt_async, self.exchange_name)
+        return exchange_class(config)
+
+    def _create_ws_exchange(self, options: Dict[str, Any]):
+        """Create WebSocket exchange instance"""
+        config = {
+            'apiKey': self.api_key,
+            'secret': self.api_secret,
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'swap',  # Force swap/futures mode
+                'warnOnFetchOpenOrdersWithoutSymbol': False,  # Suppress CCXT warnings
+            }
+        }
+
+        # Merge user-provided options
+        if options:
+            config['options'].update(options)
+
+        if self.testnet:
+            config['sandboxMode'] = True
+
+        # Create exchange by name
+        exchange_class = getattr(ccxtpro, self.exchange_name)
+        return exchange_class(config)
+
+    # ============================================================
+    # Lifecycle Management
+    # ============================================================
+    async def initialize(self) -> None:
+        """
+        Initialize exchange connections.
+        Verifies connectivity and sets up contracts mode.
+
+        Raises:
+            FatalStartupError: If exchange initialization fails
+        """
+        try:
+            # Load markets to verify connection
+            # defaultType is already set to 'swap' in _create_rest_exchange,
+            # so CCXT will only fetch futures market data
+            await self.rest_exchange.load_markets()
+            logger.info(f"Exchange {self.exchange_name} initialized successfully")
+            logger.info(f"Available symbols: {len(self.rest_exchange.symbols)}")
+
+        except Exception as e:
+            raise FatalStartupError(
+                f"Failed to initialize exchange: {e}",
+                "F-004"
+            )
+
+    async def close(self) -> None:
+        """Close all exchange connections"""
+        # Stop asset polling
+        if self._asset_polling_task:
+            self._asset_polling_task.cancel()
+            try:
+                await self._asset_polling_task
+            except asyncio.CancelledError:
+                pass
+
+        # Stop WebSocket
+        self._ws_running = False
+        if self.ws_exchange:
+            try:
+                await self.ws_exchange.close()
+            except Exception:
+                pass
+
+        # Close REST
+        try:
+            await self.rest_exchange.close()
+        except Exception:
+            pass
+
+        logger.info("Exchange connections closed")
+
+    # ============================================================
+    # REST API - Historical Data Warmup
+    # ============================================================
+    async def fetch_historical_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int = 100,
+    ) -> List[KlineData]:
+        """
+        Fetch historical K-line data via REST API.
+
+        Args:
+            symbol: Trading symbol (e.g., "BTC/USDT:USDT")
+            timeframe: Timeframe (e.g., "1h", "4h")
+            limit: Number of candles to fetch (default: 100)
+
+        Returns:
+            List of KlineData objects
+        """
+        try:
+            # Fetch OHLCV data
+            ohlcv_data = await self.rest_exchange.fetch_ohlcv(
+                symbol=symbol,
+                timeframe=timeframe,
+                limit=limit,
+            )
+
+            # Convert to KlineData models
+            result = []
+            for candle in ohlcv_data:
+                kline = self._parse_ohlcv(candle, symbol, timeframe)
+                if kline:
+                    result.append(kline)
+
+            logger.debug(f"Fetched {len(result)} historical bars for {symbol} {timeframe}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to fetch historical OHLCV for {symbol} {timeframe}: {e}")
+            raise
+
+    def _parse_ohlcv(self, candle: List[Any], symbol: str, timeframe: str) -> Optional[KlineData]:
+        """
+        Parse OHLCV candle to KlineData model.
+
+        Args:
+            candle: [timestamp, open, high, low, close, volume]
+            symbol: Trading symbol
+            timeframe: Timeframe
+
+        Returns:
+            KlineData object or None if invalid
+        """
+        try:
+            timestamp = int(candle[0])
+            open_price = Decimal(str(candle[1]))
+            high_price = Decimal(str(candle[2]))
+            low_price = Decimal(str(candle[3]))
+            close_price = Decimal(str(candle[4]))
+            volume = Decimal(str(candle[5]))
+
+            # Validate OHLCV data quality
+            if high_price < low_price:
+                raise DataQualityWarning(
+                    f"Invalid K-line: high ({high_price}) < low ({low_price})",
+                    "W-001"
+                )
+            if high_price < open_price or high_price < close_price:
+                raise DataQualityWarning(
+                    f"Invalid K-line: high ({high_price}) below open/close",
+                    "W-001"
+                )
+            if low_price > open_price or low_price > close_price:
+                raise DataQualityWarning(
+                    f"Invalid K-line: low ({low_price}) above open/close",
+                    "W-001"
+                )
+
+            return KlineData(
+                symbol=symbol,
+                timeframe=timeframe,
+                timestamp=timestamp,
+                open=open_price,
+                high=high_price,
+                low=low_price,
+                close=close_price,
+                volume=volume,
+                is_closed=True,
+            )
+
+        except DataQualityWarning:
+            raise
+        except Exception as e:
+            logger.warning(f"Failed to parse OHLCV candle: {e}")
+            return None
+
+    # ============================================================
+    # WebSocket - Real-time K-line Streaming
+    # ============================================================
+    async def subscribe_ohlcv(
+        self,
+        symbols: List[str],
+        timeframes: List[str],
+        callback: Callable[[KlineData], Awaitable[None]],
+        history_bars: int = 100,
+    ) -> None:
+        """
+        Subscribe to real-time K-line updates via WebSocket.
+        Only emits KlineData when candle is closed (is_closed=True).
+
+        Args:
+            symbols: List of symbols to subscribe
+            timeframes: List of timeframes to subscribe
+            callback: Async callback function for each closed candle
+            history_bars: Number of historical bars to preload
+        """
+        self._ws_running = True
+        self._reconnect_count = 0
+
+        # Create WebSocket exchange
+        self.ws_exchange = self._create_ws_exchange({
+            'defaultType': 'swap',
+        })
+
+        # Initialize WebSocket connection
+        await self.ws_exchange.load_markets()
+
+        # Subscribe to each symbol/timeframe combination
+        tasks = []
+        for symbol in symbols:
+            for timeframe in timeframes:
+                task = asyncio.create_task(
+                    self._subscribe_single_ohlcv(
+                        symbol, timeframe, callback, history_bars
+                    )
+                )
+                tasks.append(task)
+
+        # Wait for all subscriptions
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _subscribe_single_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str,
+        callback: Callable[[KlineData], Awaitable[None]],
+        history_bars: int,
+    ) -> None:
+        """
+        Subscribe to a single symbol/timeframe with reconnection logic.
+
+        Args:
+            symbol: Trading symbol
+            timeframe: Timeframe
+            callback: Callback for closed candles
+            history_bars: Historical bars to preload
+        """
+        # Local reconnect counter per symbol/timeframe (not shared)
+        reconnect_count = 0
+
+        while self._ws_running:
+            try:
+                logger.info(f"Subscribing to {symbol} {timeframe}")
+
+                while self._ws_running:
+                    # Watch OHLCV (this is a blocking call that receives updates)
+                    ohlcv = await self.ws_exchange.watch_ohlcv(symbol, timeframe)
+
+                    # Get the latest candle
+                    if not ohlcv:
+                        continue
+
+                    # Get last candle (most recent)
+                    candle = ohlcv[-1]
+                    kline = self._parse_ohlcv(candle, symbol, timeframe)
+
+                    if not kline:
+                        continue
+
+                    # Check if candle is closed (completed)
+                    # In CCXT, we need to track previous timestamp to detect closure
+                    if self._is_candle_closed(kline, symbol, timeframe):
+                        await callback(kline)
+
+            except asyncio.CancelledError:
+                logger.info(f"WebSocket subscription cancelled for {symbol} {timeframe}")
+                break
+
+            except Exception as e:
+                logger.error(f"WebSocket error for {symbol} {timeframe}: {e}")
+                reconnect_count += 1
+
+                if reconnect_count >= self._max_reconnect_attempts:
+                    raise ConnectionLostError(
+                        f"Max reconnection attempts exceeded for {symbol} {timeframe}",
+                        "C-001"
+                    )
+
+                # Exponential backoff
+                delay = min(
+                    self._initial_reconnect_delay * (2 ** (reconnect_count - 1)),
+                    self._max_reconnect_delay
+                )
+                logger.warning(f"Reconnecting in {delay:.1f}s (attempt {reconnect_count}/{self._max_reconnect_attempts})")
+                await asyncio.sleep(delay)
+
+    def _is_candle_closed(self, kline: KlineData, symbol: str, timeframe: str) -> bool:
+        """
+        Track if a candle has closed by detecting timestamp change.
+
+        Args:
+            kline: Current KlineData
+            symbol: Trading symbol
+            timeframe: Timeframe
+
+        Returns:
+            True if candle is newly closed
+        """
+        key = f"{symbol}:{timeframe}"
+        current_ts = kline.timestamp
+
+        if key in self._candle_timestamps:
+            if current_ts != self._candle_timestamps[key]:
+                # Timestamp changed - previous candle is closed
+                self._candle_timestamps[key] = current_ts
+                return True
+        else:
+            self._candle_timestamps[key] = current_ts
+
+        return False
+
+    # ============================================================
+    # Asset Polling - Account Balance & Positions
+    # ============================================================
+    async def start_asset_polling(
+        self,
+        interval_seconds: int = 60,
+    ) -> None:
+        """
+        Start background task to poll account balance and positions.
+
+        Args:
+            interval_seconds: Polling interval
+        """
+        if self._asset_polling_task:
+            self._asset_polling_task.cancel()
+            try:
+                await self._asset_polling_task
+            except asyncio.CancelledError:
+                pass
+
+        self._polling_failures = 0
+        self._asset_polling_task = asyncio.create_task(
+            self._poll_assets_loop(interval_seconds)
+        )
+        logger.info(f"Asset polling started (interval: {interval_seconds}s)")
+
+    async def _poll_assets_loop(self, interval_seconds: int) -> None:
+        """Background polling loop"""
+        while True:
+            try:
+                await self._poll_account()
+                self._polling_failures = 0
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self._polling_failures += 1
+                logger.error(f"Asset polling error ({self._polling_failures}): {e}")
+
+                if self._polling_failures >= self._max_polling_failures:
+                    raise ConnectionLostError(
+                        f"Asset polling failed {self._polling_failures} consecutive times",
+                        "C-002"
+                    )
+
+            await asyncio.sleep(interval_seconds)
+
+    async def _poll_account(self) -> None:
+        """
+        Poll account balance and positions, update cached snapshot.
+        """
+        try:
+            # Fetch balance
+            balance = await self.rest_exchange.fetch_balance()
+
+            # Fetch positions
+            positions = await self.rest_exchange.fetch_positions()
+
+            # Parse balance (futures account)
+            total_balance = Decimal('0')
+            available_balance = Decimal('0')
+            unrealized_pnl = Decimal('0')
+
+            if 'total' in balance:
+                # USDT balance for futures
+                if 'USDT' in balance['total']:
+                    total_balance = Decimal(str(balance['total']['USDT']))
+                if 'free' in balance and 'USDT' in balance['free']:
+                    available_balance = Decimal(str(balance['free']['USDT']))
+
+            # Parse positions
+            position_list: List[PositionInfo] = []
+            for pos in positions:
+                if pos.get('contracts') and pos['contracts'] > 0:
+                    leverage_val = pos.get('leverage')
+                    if leverage_val is None:
+                        leverage_val = 1
+                    position = PositionInfo(
+                        symbol=pos['symbol'],
+                        side=pos['side'] if pos['side'] else 'none',
+                        size=Decimal(str(pos['contracts'])),
+                        entry_price=Decimal(str(pos['entryPrice'])) if pos.get('entryPrice') else Decimal('0'),
+                        unrealized_pnl=Decimal(str(pos['unrealizedPnl'])) if pos.get('unrealizedPnl') else Decimal('0'),
+                        leverage=int(leverage_val),
+                    )
+                    position_list.append(position)
+                    unrealized_pnl += position.unrealized_pnl
+
+            # Update snapshot
+            self._account_snapshot = AccountSnapshot(
+                total_balance=total_balance,
+                available_balance=available_balance,
+                unrealized_pnl=unrealized_pnl,
+                positions=position_list,
+                timestamp=int(time.time() * 1000),
+            )
+
+            logger.debug(f"Asset snapshot updated: balance={total_balance}, positions={len(position_list)}")
+
+        except Exception as e:
+            raise
+
+    def get_account_snapshot(self) -> Optional[AccountSnapshot]:
+        """
+        Get the latest cached account snapshot.
+
+        Returns:
+            AccountSnapshot or None if not yet polled
+        """
+        return self._account_snapshot

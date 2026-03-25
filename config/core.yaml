@@ -1,0 +1,35 @@
+# ============================================================
+# 系统核心配置 - 仅架构师有权修改
+# ============================================================
+
+# 核心币池 (不可删改)
+core_symbols:
+  - "BTC/USDT:USDT"
+  - "ETH/USDT:USDT"
+  - "SOL/USDT:USDT"
+  - "BNB/USDT:USDT"
+
+# Pinbar 默认几何参数
+pinbar_defaults:
+  min_wick_ratio: 0.6          # 影线占全长的最低比例 (required, Decimal)
+  max_body_ratio: 0.3          # 实体占全长的最高比例 (required, Decimal)
+  body_position_tolerance: 0.3 # 实体位置偏差容许度 (required, Decimal)
+
+# EMA 指标配置
+ema:
+  period: 60                   # EMA 周期 (required, int)
+
+# MTF 层级校验映射 (低级别 -> 高级别)
+mtf_mapping:
+  "15m": "1h"
+  "1h": "4h"
+  "4h": "1d"
+  "1d": "1w"
+
+# 冷启动预热
+warmup:
+  history_bars: 100            # REST 预热拉取的历史 K 线数量 (required, int)
+
+# 信号处理流配置
+signal_pipeline:
+  cooldown_seconds: 14400      # 信号去重冷却期（秒），默认 4 小时 (required, int)

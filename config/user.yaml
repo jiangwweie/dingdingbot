@@ -1,0 +1,54 @@
+exchange:
+  name: binance
+  api_key: zsJTNLPRwBSYPMVPz5sHmXnsmtyQv6D3SYRSD628DAiQclKSCHwqIgDLwaDfiDS8
+  api_secret: DIN5M3SJ0lXoNJfvCAbIIMLfrQ1eiVqMRThOedUG2p2lCg0eWlc2OQJ16ySLg391
+  testnet: false
+user_symbols: []
+timeframes:
+- 1h
+- 4h
+- 1d
+- 1w
+active_strategies:
+- id: 1774425627045-23kz7m0av
+  name: 策略 1
+  triggers:
+  - id: 1774425627045-j7ta2ijxu
+    type: pinbar
+    enabled: true
+    params:
+      min_wick_ratio: 0.6
+      max_body_ratio: 0.3
+      body_position_tolerance: 0.1
+  trigger_logic: OR
+  trigger:
+    id: 1774425627045-j7ta2ijxu
+    type: pinbar
+    enabled: true
+    params:
+      min_wick_ratio: 0.5
+      max_body_ratio: 0.3
+      body_position_tolerance: 0.3
+  filters:
+  - id: 1774434505281-1ch0pol3e
+    type: mtf
+    enabled: true
+    params:
+      higher_timeframe: 4h
+      require_confirmation: true
+  filter_logic: AND
+  is_global: false
+  apply_to:
+  - ETH/USDT:USDT:1h
+strategy:
+  trend_filter_enabled: false
+  mtf_validation_enabled: false
+risk:
+  max_loss_percent: '0.02'
+  max_leverage: 10
+asset_polling:
+  interval_seconds: 60
+notification:
+  channels:
+  - type: feishu
+    webhook_url: https://open.feishu.cn/open-apis/bot/v2/hook/14797747-0403-4455-a7fe-f6b69cf0ef04

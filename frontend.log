@@ -1,0 +1,26 @@
+
+> react-example@0.0.0 dev
+> vite --port=3000 --host=0.0.0.0 --port 5173
+
+
+  VITE v6.4.1  ready in 316 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://192.168.250.132:5173/
+  ➜  Network: http://198.18.0.1:5173/
+18:51:40 [vite] http proxy error: /api/strategies
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+18:51:43 [vite] http proxy error: /api/strategies
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+18:58:33 [vite] (client) hmr update /src/components/StrategyBuilder.tsx, /src/index.css
+18:58:33 [vite] (client) hmr update /src/components/StrategyBuilder.tsx, /src/index.css
+18:58:49 [vite] (client) hmr update /src/components/StrategyBuilder.tsx, /src/index.css
+18:59:05 [vite] (client) hmr update /src/components/StrategyBuilder.tsx, /src/index.css
+18:59:28 [vite] (client) hmr update /src/components/StrategyBuilder.tsx, /src/index.css
+18:59:38 [vite] (client) hmr update /src/components/StrategyBuilder.tsx, /src/index.css
+18:59:40 [vite] (client) hmr update /src/index.css, /src/pages/Account.tsx, /src/pages/Dashboard.tsx, /src/pages/StrategyWorkbench.tsx, /src/pages/Diagnostics.tsx, /src/pages/Signals.tsx, /src/pages/SignalAttempts.tsx, /src/pages/Backtest.tsx, /src/components/SettingsPanel.tsx, /src/components/StrategyBuilder.tsx, /src/components/SignalDetailsDrawer.tsx
+18:59:52 [vite] (client) hmr update /src/index.css, /src/pages/Account.tsx, /src/pages/Dashboard.tsx, /src/pages/StrategyWorkbench.tsx, /src/pages/Diagnostics.tsx, /src/pages/Signals.tsx, /src/pages/SignalAttempts.tsx, /src/pages/Backtest.tsx, /src/components/SettingsPanel.tsx, /src/components/StrategyBuilder.tsx, /src/components/SignalDetailsDrawer.tsx

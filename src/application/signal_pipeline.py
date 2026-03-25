@@ -1,0 +1,399 @@
+"""
+Signal Pipeline - Core orchestration logic.
+Receives K-line data, runs strategy engine, calculates risk, and sends notifications.
+
+Supports:
+- Hot-reload observer pattern for dynamic strategy updates
+- Async lock for concurrency safety during config reload
+- Async queue worker for non-blocking SQLite persistence
+"""
+import asyncio
+import time
+import json
+from typing import Optional, Dict, List, Any
+from decimal import Decimal
+
+from src.domain.models import (
+    KlineData, SignalResult, AccountSnapshot, Direction,
+    StrategyDefinition, SignalAttempt,
+)
+from src.domain.strategy_engine import create_dynamic_runner
+from src.domain.risk_calculator import RiskCalculator, RiskConfig
+from src.infrastructure.notifier import NotificationService, get_notification_service
+from src.infrastructure.logger import logger
+from src.infrastructure.signal_repository import SignalRepository
+from src.application.config_manager import ConfigManager
+
+
+class SignalPipeline:
+    """
+    Signal processing pipeline:
+    K-line -> Strategy Engine -> Risk Calculator -> Notification -> Persistence
+
+    Features:
+    - Hot-reload observer for dynamic strategy updates
+    - Async lock for concurrency safety
+    - Async queue worker for batch SQLite persistence
+    """
+
+    def __init__(
+        self,
+        config_manager: ConfigManager,
+        risk_config: RiskConfig,
+        notification_service: Optional[NotificationService] = None,
+        signal_repository: Optional[SignalRepository] = None,
+        cooldown_seconds: int = 14400,  # Signal deduplication cooldown in seconds (default 4 hours)
+    ):
+        """
+        Initialize Signal Pipeline.
+
+        Args:
+            config_manager: ConfigManager instance (for hot-reload observer)
+            risk_config: Risk configuration
+            notification_service: Notification service instance
+            signal_repository: Optional signal repository for persistence
+            cooldown_seconds: Signal deduplication cooldown period in seconds
+        """
+        self._config_manager = config_manager
+        self._risk_config = risk_config
+        self._notification_service = notification_service or get_notification_service()
+        self._repository = signal_repository
+        self._cooldown_seconds = cooldown_seconds
+
+        # Store K-line history per symbol/timeframe (for warmup on reload)
+        self._kline_history: Dict[str, List[KlineData]] = {}
+
+        # Build dynamic strategy runner from config (uses _kline_history for warmup)
+        self._runner = self._build_and_warmup_runner()
+
+        # Concurrency lock for hot-reload safety
+        self._runner_lock = asyncio.Lock()
+
+        # Store latest account snapshot
+        self._account_snapshot: Optional[AccountSnapshot] = None
+
+        # Signal deduplication cache: key = "symbol:timeframe:direction:strategy", value = last fired timestamp
+        self._signal_cooldown_cache: Dict[str, float] = {}
+
+        # Async queue for batch persistence (backpressure relief)
+        self._attempts_queue: asyncio.Queue = asyncio.Queue()
+        self._flush_task: Optional[asyncio.Task] = None
+        self._start_flush_worker()
+
+        # Register observer for hot-reload
+        self._config_manager.add_observer(self.on_config_updated)
+
+    def _ensure_flush_worker(self) -> None:
+        """Ensure flush worker is running (lazy initialization)."""
+        if self._flush_task is None or self._flush_task.done():
+            self._start_flush_worker()
+
+    def _start_flush_worker(self) -> None:
+        """Start background task for batch flushing attempts to SQLite."""
+        try:
+            self._flush_task = asyncio.create_task(self._flush_attempts_worker())
+            logger.info("Attempt flush worker started")
+        except RuntimeError:
+            # No running event loop (e.g., during testing)
+            # Worker will start on first process_kline call
+            logger.debug("Flush worker deferred - no running event loop")
+
+    async def _flush_attempts_worker(self, batch_size: int = 10, flush_interval: float = 5.0) -> None:
+        """
+        Background worker that batches and flushes signal attempts to SQLite.
+
+        Args:
+            batch_size: Number of attempts to batch before flushing
+            flush_interval: Maximum time to wait before flushing (seconds)
+        """
+        buffer: List[tuple] = []
+        last_flush = time.time()
+
+        while True:
+            try:
+                # Wait for item or timeout
+                try:
+                    item = await asyncio.wait_for(self._attempts_queue.get(), timeout=1.0)
+                    buffer.append(item)
+                except asyncio.TimeoutError:
+                    pass
+
+                # Flush if batch is full or interval exceeded
+                now = time.time()
+                if len(buffer) >= batch_size or (buffer and now - last_flush >= flush_interval):
+                    await self._flush_buffer(buffer)
+                    buffer = []
+                    last_flush = now
+
+            except asyncio.CancelledError:
+                # Flush remaining on cancel
+                if buffer:
+                    await self._flush_buffer(buffer)
+                raise
+            except Exception as e:
+                logger.error(f"Flush worker error: {e}")
+                buffer = []
+
+    async def _flush_buffer(self, buffer: List[tuple]) -> None:
+        """Flush a batch of attempts to database."""
+        if not buffer or not self._repository:
+            return
+
+        try:
+            for attempt, symbol, timeframe in buffer:
+                await self._repository.save_attempt(attempt, symbol, timeframe)
+            logger.debug(f"Flushed {len(buffer)} attempts to database")
+        except Exception as e:
+            logger.error(f"Failed to flush attempts batch: {e}")
+
+    async def on_config_updated(self) -> None:
+        """
+        Observer callback for configuration hot-reload.
+
+        Called by ConfigManager when user.yaml is updated.
+        Rebuilds the strategy runner and warms up with cached K-line history.
+        """
+        logger.info("Configuration hot-reload triggered, rebuilding strategy runner...")
+
+        async with self._runner_lock:
+            # Step 1: Build new runner from updated config
+            self._runner = self._build_and_warmup_runner()
+
+            # Step 2: Clear stale cooldown cache (config params may have changed)
+            self._signal_cooldown_cache.clear()
+            logger.info("Signal cooldown cache cleared (stale cache prevention)")
+
+            logger.info("Strategy runner rebuilt and warmup complete")
+
+    def _build_and_warmup_runner(self) -> Any:
+        """
+        Build dynamic strategy runner from current config and warmup with K-line history.
+
+        Returns:
+            DynamicStrategyRunner instance
+        """
+        # Get active strategies from config
+        active_strategies = self._config_manager.user_config.active_strategies
+        core_config = self._config_manager.core_config
+
+        # Build runner using factory function
+        runner = create_dynamic_runner(active_strategies, core_config)
+
+        # Warmup: replay cached K-lines to restore EMA and other stateful indicators
+        if self._kline_history:
+            warmup_count = 0
+            for key, history in self._kline_history.items():
+                parts = key.split(":")
+                symbol = parts[0]
+                timeframe = parts[1]
+                for kline in history:
+                    runner.update_state(kline, symbol, timeframe)
+                    warmup_count += 1
+            logger.info(f"Runner warmup complete: {warmup_count} K-lines replayed")
+
+        return runner
+
+    def update_account_snapshot(self, snapshot: AccountSnapshot) -> None:
+        """
+        Update the latest account snapshot for risk calculations.
+
+        Args:
+            snapshot: Latest account snapshot
+        """
+        self._account_snapshot = snapshot
+        logger.debug(f"Account snapshot updated: balance={snapshot.total_balance}")
+
+    async def process_kline(self, kline: KlineData) -> None:
+        """
+        Process a single closed K-line.
+
+        Args:
+            kline: Closed K-line data
+        """
+        try:
+            # Ensure flush worker is running (lazy init)
+            self._ensure_flush_worker()
+
+            # Check pending signals for performance tracking (before processing new signal)
+            if self._repository is not None:
+                from src.application.performance_tracker import PerformanceTracker
+                tracker = PerformanceTracker()
+                await tracker.check_pending_signals(kline, self._repository)
+
+            # Store in history
+            self._store_kline(kline)
+
+            # Run strategy engine with lock protection (prevents race condition during hot-reload)
+            async with self._runner_lock:
+                attempts = self._run_strategy(kline)
+
+            # Persist all attempt records via async queue (fire-and-forget, backpressure relief)
+            if self._repository is not None:
+                try:
+                    for attempt in attempts:
+                        self._attempts_queue.put_nowait((attempt, kline.symbol, kline.timeframe))
+                except asyncio.QueueFull:
+                    logger.warning("Attempt queue full, dropping oldest entries")
+
+            # Process all SIGNAL_FIRED attempts
+            for attempt in attempts:
+                if attempt.final_result == "SIGNAL_FIRED" and attempt.pattern:
+                    # Signal deduplication: check cooldown period
+                    # Key includes strategy_name to allow concurrent strategies to fire independently
+                    dedup_key = f"{kline.symbol}:{kline.timeframe}:{attempt.pattern.direction.value}:{attempt.strategy_name}"
+                    now = time.time()
+                    last_fired = self._signal_cooldown_cache.get(dedup_key, 0)
+
+                    if now - last_fired < self._cooldown_seconds:
+                        remaining = int(self._cooldown_seconds - (now - last_fired)) // 60
+                        logger.debug(
+                            f"Signal deduplicated: {kline.symbol} {kline.timeframe} "
+                            f"{attempt.pattern.direction.value} [{attempt.strategy_name}] "
+                            f"(cooldown: {remaining}min remaining)"
+                        )
+                        # Skip notification and persistence, but attempt already recorded
+                        continue
+
+                    # Calculate complete signal result with risk
+                    signal = self._calculate_risk(kline, attempt.pattern.direction, attempt, attempt.strategy_name, attempt.pattern.score)
+
+                    # Send notification
+                    await self._notification_service.send_signal(signal)
+                    logger.info(f"Signal sent: {kline.symbol} {kline.timeframe} {attempt.pattern.direction.value} [{attempt.strategy_name}]")
+
+                    # Update cooldown cache after successful send
+                    self._signal_cooldown_cache[dedup_key] = now
+
+                    # Persist signal to database if repository is available
+                    if self._repository is not None:
+                        try:
+                            await self._repository.save_signal(signal)
+                            logger.info(f"Signal persisted: {kline.symbol} {kline.timeframe} [{attempt.strategy_name}]")
+                        except Exception as e:
+                            logger.error(f"Failed to persist signal: {e}")
+
+        except Exception as e:
+            logger.error(f"Error processing K-line: {e}")
+
+    def _store_kline(self, kline: KlineData) -> None:
+        """Store K-line in history for MTF analysis"""
+        key = f"{kline.symbol}:{kline.timeframe}"
+        if key not in self._kline_history:
+            self._kline_history[key] = []
+
+        # Keep last 200 bars
+        self._kline_history[key].append(kline)
+        if len(self._kline_history[key]) > 200:
+            self._kline_history[key] = self._kline_history[key][-200:]
+
+    def _run_strategy(self, kline: KlineData) -> List[SignalAttempt]:
+        """
+        Run strategy engine on K-line.
+
+        Args:
+            kline: K-line data
+
+        Returns:
+            List[SignalAttempt] with full filtering chain results for all strategies
+        """
+        # Get K-line history for strategies that need it (like Engulfing)
+        key = f"{kline.symbol}:{kline.timeframe}"
+        kline_history = self._kline_history.get(key, [])[:-1]  # Exclude current kline
+
+        # Update runner state
+        self._runner.update_state(kline)
+
+        # Run all strategies with attempt tracking
+        return self._runner.run_all(
+            kline=kline,
+            kline_history=kline_history,
+        )
+
+    def _calculate_risk(self, kline: KlineData, direction: Direction, attempt: SignalAttempt, strategy_name: str = "unknown", score: float = 0.0) -> SignalResult:
+        """
+        Calculate complete signal result with risk parameters.
+
+        Args:
+            kline: K-line data where signal was detected
+            direction: Signal direction
+            attempt: SignalAttempt that fired (contains filter_results for tag generation)
+            strategy_name: Strategy name that generated this signal
+            score: Pattern quality score (0.0 ~ 1.0)
+
+        Returns:
+            Complete SignalResult with all fields populated
+        """
+        # Create dummy account snapshot if not available
+        if not self._account_snapshot:
+            logger.warning("No account snapshot available, using dummy for risk calc")
+            self._account_snapshot = AccountSnapshot(
+                total_balance=Decimal("10000"),
+                available_balance=Decimal("10000"),
+                unrealized_pnl=Decimal("0"),
+                positions=[],
+                timestamp=0,
+            )
+
+        # Generate dynamic tags from filter_results
+        tags = self._generate_tags_from_filters(attempt.filter_results)
+
+        # Use risk_calculator's calculate_signal_result with tags
+        return self._risk_calculator.calculate_signal_result(
+            kline=kline,
+            account=self._account_snapshot,
+            direction=direction,
+            tags=tags,
+            kline_timestamp=kline.timestamp,
+            strategy_name=strategy_name,
+            score=score,
+        )
+
+    def _generate_tags_from_filters(self, filter_results: list) -> List[Dict[str, str]]:
+        """
+        Generate dynamic tags from filter results.
+
+        Args:
+            filter_results: List of (filter_name, FilterResult) tuples from attempt
+
+        Returns:
+            List of tag dicts e.g., [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
+        """
+        tags = []
+        for filter_name, filter_result in filter_results:
+            if filter_result.passed:
+                # Generate tag based on filter type
+                if filter_name == "ema" or filter_name == "ema_trend":
+                    # Extract trend direction from reason or params
+                    trend_value = self._extract_trend_from_reason(filter_result.reason)
+                    tags.append({"name": "EMA", "value": trend_value})
+                elif filter_name == "mtf":
+                    mtf_value = "Confirmed" if "confirm" in filter_result.reason.lower() else "Passed"
+                    tags.append({"name": "MTF", "value": mtf_value})
+                elif filter_name == "volume_surge":
+                    tags.append({"name": "Volume", "value": "Surge"})
+                elif filter_name == "volatility_filter":
+                    tags.append({"name": "Volatility", "value": "Normal"})
+                elif filter_name == "time_filter":
+                    tags.append({"name": "Time", "value": "Valid"})
+                elif filter_name == "price_action":
+                    tags.append({"name": "Price Action", "value": "Valid"})
+                else:
+                    # Generic tag for unknown filters
+                    tag_name = filter_name.replace("_", " ").title()
+                    tags.append({"name": tag_name, "value": "Passed"})
+        return tags
+
+    def _extract_trend_from_reason(self, reason: str) -> str:
+        """Extract trend direction from filter reason string."""
+        reason_lower = reason.lower()
+        if "bull" in reason_lower:
+            return "Bullish"
+        elif "bear" in reason_lower:
+            return "Bearish"
+        else:
+            return "Neutral"
+
+    @property
+    def _risk_calculator(self) -> RiskCalculator:
+        """Get risk calculator instance."""
+        return RiskCalculator(self._risk_config)
