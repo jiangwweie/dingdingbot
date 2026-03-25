@@ -350,13 +350,50 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ## 开发规范
 
-### 角色分工（Project Skills）
+### 🎭 角色分工（Project Skills）
 
+#### 架构组
 | 角色 | 命令 | 职责 | 红线 |
 |------|------|------|------|
 | 架构师 | `/architect` | 方案设计、编写 implementation_plan、审查代码 | 禁止写业务代码 |
-| 开发 | `/developer` | 根据任务书实现代码、编写测试 | 禁止改架构 |
 | 审查员 | `/reviewer` | 独立代码审查 | 拥有否决权 |
+
+#### 开发组（Agent Team）
+| 角色 | 命令 | 职责 | 技术栈 |
+|------|------|------|------|
+| 团队协调器 | `/coordinator` | 任务分解、角色调度、结果整合 | - |
+| 前端开发 | `/frontend` | React + TypeScript + TailwindCSS | React 18, TS 5, TailwindCSS 3 |
+| 后端开发 | `/backend` | Python + FastAPI + asyncio | Python 3.11, FastAPI, Pydantic v2 |
+| 测试专家 | `/qa` | 单元测试、集成测试、E2E 测试 | pytest, vitest |
+
+### 使用 Agent Team
+
+### 使用 Agent Team
+
+**方式 1: 使用 Slash Commands（推荐）**
+在项目目录下运行：
+```bash
+/coordinator   # 团队协调器（完整功能开发）
+/frontend      # 前端开发专家
+/backend       # 后端开发专家
+/qa            # 质量保障专家
+```
+
+**方式 2: 直接描述需求（自动分解）**
+```
+用户：添加策略预览功能
+→ Coordinator 自动分解为前端/后端/测试任务并并行执行
+```
+
+**方式 3: 并行调度（使用 Agent 工具）**
+```python
+Agent(subagent_type="frontend-dev", prompt="...")
+Agent(subagent_type="backend-dev", prompt="...")
+Agent(subagent_type="qa-tester", prompt="...")
+```
+
+> 📚 详细文档：`.claude/team/README.md`
+> 🚀 快速开始：`.claude/team/QUICKSTART.md`
 
 ### 任务文档
 
@@ -375,6 +412,32 @@ pytest tests/unit/test_strategy_engine.py -v
 ---
 
 ## 开发注意事项
+
+### 文件命名规范 ⚠️
+
+**重要**：为避免读取失败，所有文件名必须遵循以下规范：
+
+| 规则 | 示例 ✅ | 示例 ❌ |
+|------|---------|---------|
+| 禁止使用空格 | `子任务 F-强类型递归引擎.md` | `子任务 F - 强类型递归引擎.md` |
+| 使用连字符替代空格 | `2026-03-25-子任务 A-重构.md` | `2026-03-25-子任务 A - 重构.md` |
+| 使用 UTF-8 无 BOM 编码 | 所有 `.md` 文件 | - |
+| 中文文件名使用 NFC 格式 | `叮盘狗 - 系统演进.md` | `叮盘狗 - 系统演进.md` (NFD) |
+
+**修复工具**：
+```bash
+# 自动修复文件名中的 Unicode 和空格问题
+python3 scripts/fix_filenames.py
+```
+
+**读取中文文件**：
+```bash
+# 使用引号包裹路径
+cat "docs/tasks/叮盘狗 - 系统演进全景路线图.md"
+
+# 或使用 Python 脚本
+python3 scripts/read_markdown.py "docs/tasks/文件名.md"
+```
 
 ### WebSocket
 - 自动重连（指数退避：1s 初始，60s 最大）
@@ -402,6 +465,19 @@ pytest tests/unit/test_strategy_engine.py -v
 - `README.md` - 用户文档
 - `docs/` - 架构与任务文档
 - `.claude/skills/` - 项目角色技能定义
+
+---
+
+## 📝 读取中文 MD 文档
+
+如遇中文文件名的 MD 文档读取失败，使用以下脚本：
+
+```bash
+# 自动处理 Unicode 和空格问题
+python3 scripts/read_markdown.py "docs/tasks/叮盘狗 - 系统演进全景路线图.md"
+```
+
+**问题原因**：macOS 文件系统使用 NFD 格式存储 Unicode 文件名，且文件名中的空格可能导致匹配失败。
 
 ---
 
