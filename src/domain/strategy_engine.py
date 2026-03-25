@@ -213,6 +213,8 @@ class PinbarStrategy(Strategy):
             return None
 
         # Calculate score = dominant_wick / candle_range
+        # NOTE: Score is for UI display and sorting only, NOT for financial calculations.
+        # Financial calculations use Decimal exclusively.
         score = float(wick_ratio)
 
         return PatternResult(

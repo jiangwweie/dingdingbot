@@ -84,7 +84,7 @@ class SignalResult(BaseModel):
     pnl_ratio: float = 0.0       # Profit/Loss ratio (positive for win e.g. 1.5, negative for loss e.g. -1.0)
     kline_timestamp: int = 0     # K-line close timestamp in milliseconds (default 0 for legacy compatibility)
     strategy_name: str = "unknown"  # Strategy name that generated this signal (e.g., "pinbar", "engulfing")
-    score: float = 0.0           # Pattern quality score (0.0 ~ 1.0)
+    score: float = 0.0           # Pattern quality score (0.0 ~ 1.0). **NOTE**: This is for UI display and sorting only, NOT for financial calculations. Financial calculations use Decimal exclusively.
 
     # Legacy fields for backward compatibility (deprecated, will be removed in future)
     ema_trend: Optional[TrendDirection] = None  # Deprecated: use tags instead
@@ -211,7 +211,8 @@ class BacktestRequest(BaseModel):
     mtf_validation_enabled: Optional[bool] = Field(default=None, description="Override MTF validation")
 
     # New dynamic rule engine parameters (Phase K)
-    strategies: Optional[List[StrategyDefinition]] = Field(
+    # Using string reference to avoid forward declaration issue
+    strategies: Optional[List[Any]] = Field(
         default=None,
         description="Dynamic strategy definitions with filter chains (overrides legacy params)"
     )
