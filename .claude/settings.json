@@ -1,0 +1,33 @@
+{
+  "skills": {
+    "local": [
+      {
+        "name": "architect",
+        "description": "架构师角色 - 负责系统方案设计、编写 implementation_plan.md、制定技术底座。禁止执行任何业务代码变更。",
+        "path": "./.claude/skills/architect.md"
+      },
+      {
+        "name": "developer",
+        "description": "开发 Agent 角色 - 根据架构师的 implementation_plan.md 进行代码实现。禁止修改架构设计。",
+        "path": "./.claude/skills/developer.md"
+      },
+      {
+        "name": "reviewer",
+        "description": "代码审查员角色 - 独立审查代码是否符合架构规范和开发红线。",
+        "path": "./.claude/skills/reviewer.md"
+      }
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "请阅读以下项目文档并记住关键信息：\n\n1. CLAUDE.md - 项目架构、技术栈、核心模型、错误码系统\n2. docs/arch/系统开发规范与红线.md - 后端/前端/协作红线\n3. docs/arch/系统重构与架构演进梳理报告.md - 系统使命、技术债清单\n4. docs/tasks/叮盘狗 - 系统演进全景路线图.md - 四阶段演进路线\n\n阅读后请总结：\n- 项目使命（1 句话）\n- 当前演进阶段（第一阶段：架构筑基）\n- 核心开发红线（类型安全/Decimal/Domain 纯净性/零业务逻辑认知）\n- 待完成任务（强类型递归引擎/前端 Schema 驱动/动态标签系统）\n\n这将作为后续任务的上下文基准，确保不偏离架构方案。"
+          }
+        ]
+      }
+    ]
+  }
+}
