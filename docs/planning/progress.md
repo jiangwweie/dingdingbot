@@ -155,9 +155,9 @@
 
 ---
 
-## 2026-03-26 - 会话 9 (当前会话)
+## 2026-03-26 - 会话 9 (已完成)
 
-**目标**: 执行 S2-4（信号标签动态化）
+**目标**: 执行 S2-4（信号标签动态化）和 S2-1（实盘热重载）
 
 **进展**:
 - [x] **S2-4-1: 更新 SignalResult 模型** ✅
@@ -174,7 +174,7 @@
   - 7 个动态标签生成测试全部通过
   - 验证 SignalResult 包含动态 tags
 
-- [x] **代码提交** ✅
+- [x] **S2-4 代码提交** ✅
   - Git 提交：`f39105f`
   - 提交信息：`feat: S2-4 完成信号标签动态化重构`
 
@@ -185,13 +185,60 @@
 | S2-4-2 | ✅ 完成 | `web-front/src/lib/api.ts` |
 | S2-4-3 | ✅ 完成 | `tests/unit/test_signal_pipeline.py` |
 
+---
+
+**S2-1 实盘热重载功能**:
+
+- [x] **S2-1-1: 实现策略模板 Apply 端点** ✅
+  - 新增 `POST /api/strategies/{id}/apply` 端点
+  - 创建 `StrategyApplyRequest`/`StrategyApplyResponse` 模型
+
+- [x] **S2-1-2: ConfigManager 配置热重载集成** ✅
+  - 添加 `_update_lock` 保证原子更新
+  - Observer 正确触发通知 SignalPipeline
+
+- [x] **S2-1-3: SignalPipeline 热重载锁优化验证** ✅
+  - 验证 `async with self._get_runner_lock():` 保护重建过程
+  - 无并发竞争条件
+
+- [x] **S2-1-4: 状态回填 (Warmup) 优化验证** ✅
+  - 增强 warmup 日志记录回放 K 线数量
+  - EMA 等有状态指标无缝恢复
+
+- [x] **S2-1-5: 前端 Apply 交互实现** ✅
+  - `api.ts` 新增 `applyStrategy()` 函数
+  - `StrategyWorkbench` 添加"应用到实盘"按钮
+  - 确认对话框 + Toast 提示
+
+- [x] **S2-1-6: 集成测试与边界场景验证** ✅
+  - 新增 19 个集成测试
+  - 验证锁保护、队列背压、回滚机制、EMA 连续性
+  - 所有测试通过 (19/19)
+
+- [x] **S2-1 代码提交** ✅
+  - Git 提交：`8e78601`
+  - 提交信息：`feat: S2-1 完成实盘热重载功能`
+
+**S2-1 完成总结**:
+| 步骤 | 状态 | 文件 |
+|------|------|------|
+| S2-1-1 | ✅ 完成 | `src/interfaces/api.py` |
+| S2-1-2 | ✅ 完成 | `src/application/config_manager.py` |
+| S2-1-3 | ✅ 完成 | `src/application/signal_pipeline.py` |
+| S2-1-4 | ✅ 完成 | `src/application/signal_pipeline.py` |
+| S2-1-5 | ✅ 完成 | `web-front/src/lib/api.ts`, `StrategyWorkbench.tsx` |
+| S2-1-6 | ✅ 完成 | `tests/integration/test_hot_reload.py` |
+
 **交付物**:
-- SignalResult 模型清理（移除 legacy 字段）
-- 前端 Signal 接口更新（支持动态 tags）
-- 7 个新增单元测试（100% 通过）
+- POST /api/strategies/{id}/apply 端点
+- ConfigManager 原子更新机制
+- SignalPipeline 热重载锁保护
+- 前端 Apply 交互 UI
+- 24 个新增测试（100% 通过）
+- TypeScript 编译通过
 
 **下一步**:
-1. S2-1（实盘热重载）- 依赖 S2-4 已完成，可开始
-2. S2-3（前端清理）- 独立任务，可并行
+1. S2-3（前端硬编码组件清理）- 独立任务，可并行
+2. 准备第二阶段发布 (v0.2.0)
 
 ---
