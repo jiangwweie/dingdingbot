@@ -1,10 +1,20 @@
-# Crypto Signal Monitor
+# 盯盘狗 🐶
 
-加密货币信号监测与风险评估系统 - 基于 Pinbar 形态识别、EMA 趋势过滤和多周期校验的交易信号监测系统。
+**加密货币量化交易信号监控系统** - 完全动态化、高并发、强状态一致性的交易信号监控与回测沙箱系统。
 
-**核心原则：Zero Execution Policy（零执行政策）** - 系统仅为观测与通知工具，严禁集成任何交易下单接口。
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
+[![Pydantic v2](https://img.shields.io/badge/Pydantic-v2-red.svg)](https://docs.pydantic.dev/)
 
-## 快速开始
+---
+
+## 🎯 核心原则
+
+**Zero Execution Policy（零执行政策）** - 系统仅为观测与通知工具，严禁集成任何交易下单接口。
+
+---
+
+## 🚀 快速开始
 
 ### 1. 安装依赖
 
@@ -16,14 +26,14 @@ pip install -r requirements.txt
 
 ### 2. 配置文件
 
-编辑 `config/user.yaml` 设置你的交易所凭证和偏好：
+编辑 `config/user.yaml` 设置交易所凭证：
 
 ```yaml
 exchange:
   name: "binance"
-  api_key: "your-read-only-api-key"
+  api_key: "your-read-only-api-key"  # ⚠️ 必须只读权限
   api_secret: "your-secret"
-  testnet: true
+  testnet: false  # 使用测试网
 
 timeframes:
   - "15m"
@@ -39,107 +49,148 @@ notification:
 ### 3. 运行系统
 
 ```bash
+# 运行主程序（实时监控 + REST API）
 python src/main.py
+
+# 访问 REST API: http://localhost:8000
+# - GET /api/signals     - 查询历史信号
+# - POST /api/backtest   - 运行回测
+# - GET /api/strategies  - 获取策略模板
 ```
 
-## 项目结构
+### 4. 运行回测
+
+```bash
+python tests/backtest.py
+```
+
+---
+
+## 📦 项目结构
 
 ```
-crypto-signal-monitor/
+dingdingbot/
 ├── src/
-│   ├── domain/                 # 领域核心层（策略/风控计算）
+│   ├── domain/                 # 领域核心层（纯业务逻辑）
 │   │   ├── models.py           # Pydantic 数据模型
 │   │   ├── exceptions.py       # 统一异常体系
-│   │   ├── indicators.py       # EMA 指标计算
-│   │   ├── strategy_engine.py  # Pinbar 策略引擎
+│   │   ├── indicators.py       # EMA 等指标计算
+│   │   ├── filter_factory.py   # 动态过滤器工厂
+│   │   ├── strategy_engine.py  # 动态策略引擎
+│   │   ├── strategies/         # 具体策略实现
 │   │   └── risk_calculator.py  # 风控试算
 │   │
 │   ├── application/            # 应用服务层
-│   │   ├── config_manager.py   # 配置加载与合并
-│   │   └── signal_pipeline.py  # 信号处理管道
+│   │   ├── config_manager.py   # 配置加载/合并/热重载
+│   │   ├── signal_pipeline.py  # 信号处理管道
+│   │   ├── backtester.py       # 回测沙箱
+│   │   └── performance_tracker.py
 │   │
-│   ├── infrastructure/         # 基础设施层（所有 I/O）
-│   │   ├── exchange_gateway.py # 交易所网关（REST+WS）
-│   │   ├── notifier.py         # 通知推送（飞书/企微）
-│   │   └── logger.py           # 日志与脱敏
+│   ├── infrastructure/         # 基础设施层（I/O）
+│   │   ├── exchange_gateway.py # 交易所网关
+│   │   ├── notifier.py         # 通知推送
+│   │   ├── logger.py           # 日志与脱敏
+│   │   └── signal_repository.py # SQLite 持久化
+│   │
+│   ├── interfaces/             # REST API
+│   │   └── api.py
 │   │
 │   └── main.py                 # 启动入口
 │
 ├── config/
-│   ├── core.yaml               # 系统核心配置（只读）
-│   └── user.yaml               # 用户配置（可修改）
+│   ├── core.yaml               # 系统核心配置
+│   └── user.yaml               # 用户配置
 │
+├── web-front/                  # 前端策略工作台
+├── docs/                       # 架构文档
 └── tests/
-    └── unit/                   # 单元测试
+    ├── unit/                   # 单元测试
+    ├── e2e/                    # 端到端测试
+    └── integration/            # 集成测试
 ```
 
-## 核心功能
+---
+
+## 🔧 核心功能
 
 ### 信号识别策略
 
-1. **Pinbar 形态检测**
-   - 颜色不敏感（阴阳线均可）
-   - 基于影线/实体/全长的几何比例关系
-   - 可配置参数：`min_wick_ratio`, `max_body_ratio`, `body_position_tolerance`
+支持**多 Trigger + 多 Filter**组合策略：
 
-2. **EMA60 趋势过滤**
-   - 价格在 EMA 上方：仅识别看多信号
-   - 价格在 EMA 下方：仅识别看空信号
-   - 可通过 `trend_filter_enabled` 开关
+| 类型 | 支持的模式 |
+|------|-----------|
+| **Trigger** | Pinbar（锤子线）、Engulfing（吞没）、Doji（十字星） |
+| **Filter** | EMA 趋势、MTF 多周期、ATR 波动率、成交量突增、时间过滤 |
 
-3. **多周期（MTF）校验**
-   - 跨周期共振验证：15m→1h, 1h→4h, 4h→1d, 1d→1w
-   - 可通过 `mtf_validation_enabled` 开关
+#### Pinbar 形态检测
+- 颜色不敏感（阴阳线均可）
+- 可配置参数：`min_wick_ratio`、`max_body_ratio`、`body_position_tolerance`
+
+#### MTF 多周期共振
+- 自动映射：15m→1h、1h→4h、4h→1d、1d→1w
+- 状态：`CONFIRMED`（确认）、`REJECTED`（拒绝）、`DISABLED`（禁用）
 
 ### 风控试算
 
 - 单笔最大损失：基于账户余额百分比（默认 1%）
-- 仓位计算公式：`Position_Size = (Balance × Loss_Percent) / Stop_Loss_Distance`
-- 杠杆熔断：强制遵循配置的 `max_leverage` 上限
-- 所有计算使用 `Decimal` 类型，严禁 `float` 精度丢失
+- 仓位公式：`Position_Size = (Balance × Loss_Percent) / Stop_Loss_Distance`
+- 所有计算使用 `Decimal` 类型，零精度丢失
 
 ### 通知推送
 
-- 支持飞书 Webhook 和企业微信机器人
-- 纯文本 Markdown 格式，禁止截图
-- 核心字段：币种、周期、方向、入场价、止损、仓位、MTF 状态、EMA 趋势
+| 渠道 | 支持 |
+|------|------|
+| 飞书 Webhook | ✅ |
+| 企业微信 | ✅ |
+| Telegram | ✅ |
 
-## 配置说明
+- 纯文本 Markdown 格式
+- 核心字段：币种、周期、方向、入场价、止损、仓位、动态标签
+
+### REST API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/signals` | GET/DELETE | 查询/删除历史信号 |
+| `/api/backtest` | POST | 运行策略回测 |
+| `/api/strategies` | GET/POST/DELETE | 策略模板管理 |
+| `/api/strategies/meta` | GET | 获取动态 Schema |
+
+---
+
+## ⚙️ 配置说明
 
 ### 核心配置（`config/core.yaml`）
 
-系统级配置，通常不需要修改：
+系统级配置，通常无需修改：
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `core_symbols` | 核心监测币种 | BTC, ETH, SOL, BNB |
 | `pinbar_defaults.min_wick_ratio` | 影线占比下限 | 0.6 |
-| `pinbar_defaults.max_body_ratio` | 实体占比上限 | 0.3 |
 | `ema.period` | EMA 周期 | 60 |
-| `warmup.history_bars` | REST 预热 K 线数量 | 100 |
+| `warmup.history_bars` | REST 预热 K 线数 | 100 |
 
 ### 用户配置（`config/user.yaml`）
 
-用户可根据需要修改：
-
 | 参数 | 说明 |
 |------|------|
-| `exchange.api_key` | 交易所 API Key（**只读权限**） |
+| `exchange.api_key` | 交易所 API Key（**必须只读权限**） |
 | `exchange.testnet` | 是否使用测试网 |
 | `user_symbols` | 自定义监测币种 |
 | `timeframes` | 监测时间周期 |
-| `strategy.trend_filter_enabled` | EMA 趋势过滤开关 |
-| `strategy.mtf_validation_enabled` | MTF 校验开关 |
 | `risk.max_loss_percent` | 单笔最大亏损比例 |
 | `risk.max_leverage` | 最大杠杆倍数 |
 | `notification.channels` | 通知渠道配置 |
 
-## 异常与错误码
+---
+
+## ⚠️ 异常与错误码
 
 | 错误码 | 级别 | 说明 |
 |--------|------|------|
-| `F-001` | FATAL | API Key 包含交易权限 |
-| `F-002` | FATAL | API Key 包含提现权限 |
+| `F-001` | FATAL | API Key 有交易权限 |
+| `F-002` | FATAL | API Key 有提现权限 |
 | `F-003` | FATAL | 必填配置缺失 |
 | `F-004` | FATAL | 交易所初始化失败 |
 | `C-001` | CRITICAL | WebSocket 重连超限 |
@@ -147,7 +198,9 @@ crypto-signal-monitor/
 | `W-001` | WARNING | K 线数据质量异常 |
 | `W-002` | WARNING | 数据延迟超限 |
 
-## 运行测试
+---
+
+## 🧪 测试
 
 ```bash
 # 安装测试依赖
@@ -158,38 +211,70 @@ pytest tests/unit/ -v
 
 # 运行覆盖率报告
 pytest tests/unit/ --cov=src --cov-report=html
+
+# 运行特定测试
+pytest tests/unit/test_strategy_engine.py -v
 ```
-
-## 安全注意事项
-
-1. **API Key 权限**：必须使用只读权限的 API Key，系统启动时会校验权限
-2. **敏感信息脱敏**：所有日志和通知中的 API Key、Secret、Webhook URL 都会自动脱敏
-3. **零执行政策**：系统代码中不得出现任何下单、撤单、转账相关的方法调用
-
-## 技术栈
-
-- Python 3.11+
-- FastAPI + Uvicorn
-- Pydantic v2
-- ccxt (async_support)
-- aiohttp
-- PyYAML
-- pytest
-
-## 开发说明
-
-本项目采用 **Clean Architecture** 分层设计：
-
-- **Domain Layer** (`src/domain/`)：纯业务逻辑，无外部依赖
-- **Application Layer** (`src/application/`)：应用编排
-- **Infrastructure Layer** (`src/infrastructure/`)：所有 I/O 操作
-- **Interfaces Layer** (`src/interfaces/`)：对外 API（预留）
-
-**红线规则**：
-- `domain/` 目录下严禁出现 `ccxt`、`aiohttp`、`requests` 等 I/O 库
-- 所有金融计算必须使用 `Decimal`，禁止使用 `float`
-- 严禁裸 `print()`，必须使用 `logging`
 
 ---
 
-*本系统仅为行情观测与通知工具，不构成任何投资建议。*
+## 🔒 安全注意事项
+
+1. **API Key 权限**：必须使用只读权限，系统启动时自动校验
+2. **敏感信息脱敏**：所有日志中的 API Key、Secret、Webhook URL 自动脱敏
+3. **零执行政策**：代码中不得出现任何下单、撤单、转账相关方法
+
+---
+
+## 🛠️ 技术栈
+
+| 领域 | 技术 |
+|------|------|
+| 后端 | Python 3.11+、FastAPI、asyncio |
+| 数据验证 | Pydantic v2 |
+| 交易所 | CCXT (async_support + WebSocket) |
+| 数据库 | SQLite |
+| 前端 | React、TypeScript、TailwindCSS |
+| 测试 | pytest、pytest-asyncio |
+
+---
+
+## 📚 开发文档
+
+- `CLAUDE.md` - 开发者快速指南
+- `docs/arch/` - 架构规范与设计文档
+- `docs/tasks/` - 子任务说明与演进路线
+
+---
+
+## 📈 演进路线
+
+### 🟢 第一阶段：架构筑基（当前）
+- 强类型递归逻辑树
+- 前端 Schema 驱动
+- 动态标签系统
+
+### 🟡 第二阶段：交互升维
+- 热预览接口（Dry Run）
+- 逻辑路径可视化
+- 策略模板 CRUD
+
+### 🟠 第三阶段：风控执行
+- 多周期数据对齐
+- 动态风险头寸
+- 交易所挂单集成
+
+### 🔵 第四阶段：工业化
+- 配置快照版本化
+- 异步 I/O 队列
+- 指标计算缓存
+
+---
+
+## 📄 许可证
+
+本项目仅供学习交流使用，不构成任何投资建议。
+
+---
+
+*本系统仅为行情观测与通知工具。*

@@ -27,12 +27,12 @@ class TraceEvent:
     Unlike simple FilterResult, this captures expected vs actual values
     for debugging and audit purposes.
     """
-    filter_name: str
+    node_name: str
     passed: bool
     reason: str
     expected: Optional[str] = None      # e.g., "bullish"
     actual: Optional[str] = None        # e.g., "bearish"
-    context_data: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_filter_result(self) -> FilterResult:
         """Convert to legacy FilterResult for backward compatibility."""
@@ -160,7 +160,7 @@ class EmaTrendFilterDynamic(FilterBase):
     def check(self, pattern: PatternResult, context: FilterContext) -> TraceEvent:
         if not self._enabled:
             return TraceEvent(
-                filter_name=self.name,
+                node_name=self.name,
                 passed=True,
                 reason="filter_disabled"
             )
@@ -168,7 +168,7 @@ class EmaTrendFilterDynamic(FilterBase):
         current_trend = context.current_trend
         if current_trend is None:
             return TraceEvent(
-                filter_name=self.name,
+                node_name=self.name,
                 passed=False,
                 reason="ema_data_not_ready",
                 expected="valid_ema_trend",
@@ -179,7 +179,7 @@ class EmaTrendFilterDynamic(FilterBase):
         if pattern.direction == Direction.LONG:
             if current_trend == TrendDirection.BULLISH:
                 return TraceEvent(
-                    filter_name=self.name,
+                    node_name=self.name,
                     passed=True,
                     reason="trend_match",
                     expected="bullish",
@@ -187,7 +187,7 @@ class EmaTrendFilterDynamic(FilterBase):
                 )
             else:
                 return TraceEvent(
-                    filter_name=self.name,
+                    node_name=self.name,
                     passed=False,
                     reason="bearish_trend_blocks_long",
                     expected="bullish",
@@ -196,7 +196,7 @@ class EmaTrendFilterDynamic(FilterBase):
         else:  # SHORT
             if current_trend == TrendDirection.BEARISH:
                 return TraceEvent(
-                    filter_name=self.name,
+                    node_name=self.name,
                     passed=True,
                     reason="trend_match",
                     expected="bearish",
@@ -204,7 +204,7 @@ class EmaTrendFilterDynamic(FilterBase):
                 )
             else:
                 return TraceEvent(
-                    filter_name=self.name,
+                    node_name=self.name,
                     passed=False,
                     reason="bullish_trend_blocks_short",
                     expected="bearish",
@@ -253,7 +253,7 @@ class MtfFilterDynamic(FilterBase):
     def check(self, pattern: PatternResult, context: FilterContext) -> TraceEvent:
         if not self._enabled:
             return TraceEvent(
-                filter_name=self.name,
+                node_name=self.name,
                 passed=True,
                 reason="filter_disabled"
             )
@@ -264,61 +264,61 @@ class MtfFilterDynamic(FilterBase):
         if higher_tf is None:
             # No higher timeframe available (e.g., 1w)
             return TraceEvent(
-                filter_name=self.name,
+                node_name=self.name,
                 passed=True,
                 reason="no_higher_timeframe",
-                context_data={"current_timeframe": current_tf}
+                metadata={"current_timeframe": current_tf}
             )
 
         higher_tf_trend = context.higher_tf_trends.get(higher_tf)
         if higher_tf_trend is None:
             return TraceEvent(
-                filter_name=self.name,
+                node_name=self.name,
                 passed=False,
                 reason="higher_tf_data_unavailable",
                 expected=f"trend_data_for_{higher_tf}",
                 actual="no_data",
-                context_data={"higher_timeframe": higher_tf}
+                metadata={"higher_timeframe": higher_tf}
             )
 
         # Check if signal direction matches higher timeframe trend
         if pattern.direction == Direction.LONG:
             if higher_tf_trend == TrendDirection.BULLISH:
                 return TraceEvent(
-                    filter_name=self.name,
+                    node_name=self.name,
                     passed=True,
                     reason="mtf_confirmed_bullish",
                     expected="bullish",
                     actual="bullish",
-                    context_data={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
                 )
             else:
                 return TraceEvent(
-                    filter_name=self.name,
+                    node_name=self.name,
                     passed=False,
                     reason="mtf_rejected_bearish_higher_tf",
                     expected="bullish",
                     actual="bearish",
-                    context_data={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
                 )
         else:  # SHORT
             if higher_tf_trend == TrendDirection.BEARISH:
                 return TraceEvent(
-                    filter_name=self.name,
+                    node_name=self.name,
                     passed=True,
                     reason="mtf_confirmed_bearish",
                     expected="bearish",
                     actual="bearish",
-                    context_data={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
                 )
             else:
                 return TraceEvent(
-                    filter_name=self.name,
+                    node_name=self.name,
                     passed=False,
                     reason="mtf_rejected_bullish_higher_tf",
                     expected="bearish",
                     actual="bullish",
-                    context_data={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
                 )
 
 
@@ -387,7 +387,7 @@ class AtrFilterDynamic(FilterBase):
     def check(self, pattern: PatternResult, context: FilterContext) -> TraceEvent:
         if not self._enabled:
             return TraceEvent(
-                filter_name=self.name,
+                node_name=self.name,
                 passed=True,
                 reason="filter_disabled"
             )
@@ -395,7 +395,7 @@ class AtrFilterDynamic(FilterBase):
         # ATR filter not yet fully implemented - placeholder
         # In full implementation, would check if ATR ratio meets minimum threshold
         return TraceEvent(
-            filter_name=self.name,
+            node_name=self.name,
             passed=True,
             reason="atr_threshold_met"
         )
@@ -425,7 +425,7 @@ class PlaceholderFilter(FilterBase):
         return None
         
     def check(self, pattern, context) -> TraceEvent:
-        return TraceEvent(filter_name=self.name, passed=True, reason="placeholder_auto_pass")
+        return TraceEvent(node_name=self.name, passed=True, reason="placeholder_auto_pass")
 
 class FilterFactory:
     """

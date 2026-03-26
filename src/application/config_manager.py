@@ -183,7 +183,7 @@ class ConfigManager:
 
         # Hot-reload state
         self._observers: Set[Callable[[], Awaitable[None]]] = set()
-        self._update_lock = asyncio.Lock()
+        self._update_lock: Optional[asyncio.Lock] = None  # Lazily initialized
 
     def load_core_config(self) -> CoreConfig:
         """Load and validate core.yaml"""
@@ -421,6 +421,16 @@ class ConfigManager:
     # ============================================================
     # Hot-Reload & Observer Pattern
     # ============================================================
+    def _get_update_lock(self) -> asyncio.Lock:
+        """Get or create the update lock for thread-safe config updates."""
+        if self._update_lock is None:
+            try:
+                self._update_lock = asyncio.Lock()
+            except RuntimeError:
+                # No running event loop
+                pass
+        return self._update_lock
+
     def add_observer(self, callback: Callable[[], Awaitable[None]]) -> None:
         """
         Add an observer callback to be invoked when configuration is updated.
@@ -462,7 +472,7 @@ class ConfigManager:
         if not self._core_config:
             raise FatalStartupError("Core config not loaded", "F-003")
 
-        async with self._update_lock:
+        async with self._get_update_lock():
             # Step 1: Merge with existing config for partial updates
             existing_dict = self._user_config.model_dump() if self._user_config else {}
             merged_dict = self._deep_merge(existing_dict, new_config_dict)

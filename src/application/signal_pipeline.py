@@ -4,7 +4,7 @@ Receives K-line data, runs strategy engine, calculates risk, and sends notificat
 
 Supports:
 - Hot-reload observer pattern for dynamic strategy updates
-- Async lock for concurrency safety during config reload
+- Async lock protection for concurrency safety during config reload
 - Async queue worker for non-blocking SQLite persistence
 """
 import asyncio
@@ -63,11 +63,10 @@ class SignalPipeline:
         # Store K-line history per symbol/timeframe (for warmup on reload)
         self._kline_history: Dict[str, List[KlineData]] = {}
 
-        # Build dynamic strategy runner from config (uses _kline_history for warmup)
-        self._runner = self._build_and_warmup_runner()
-
-        # Concurrency lock for hot-reload safety
-        self._runner_lock = asyncio.Lock()
+        # Concurrency primitives - lazily initialized when event loop is available
+        self._runner_lock: Optional[asyncio.Lock] = None
+        self._attempts_queue: Optional[asyncio.Queue] = None
+        self._flush_task: Optional[asyncio.Task] = None
 
         # Store latest account snapshot
         self._account_snapshot: Optional[AccountSnapshot] = None
@@ -75,16 +74,34 @@ class SignalPipeline:
         # Signal deduplication cache: key = "symbol:timeframe:direction:strategy", value = last fired timestamp
         self._signal_cooldown_cache: Dict[str, float] = {}
 
-        # Async queue for batch persistence (backpressure relief)
-        self._attempts_queue: asyncio.Queue = asyncio.Queue()
-        self._flush_task: Optional[asyncio.Task] = None
-        self._start_flush_worker()
+        # Build dynamic strategy runner from config (uses _kline_history for warmup)
+        self._runner = self._build_and_warmup_runner()
 
         # Register observer for hot-reload
         self._config_manager.add_observer(self.on_config_updated)
 
+    def _ensure_async_primitives(self) -> None:
+        """
+        Lazily initialize async primitives (Lock, Queue) when event loop is available.
+        This prevents RuntimeError when no event loop exists during testing.
+        """
+        if self._runner_lock is None:
+            try:
+                self._runner_lock = asyncio.Lock()
+            except RuntimeError:
+                # No running event loop
+                pass
+
+        if self._attempts_queue is None:
+            try:
+                self._attempts_queue = asyncio.Queue()
+            except RuntimeError:
+                # No running event loop
+                pass
+
     def _ensure_flush_worker(self) -> None:
         """Ensure flush worker is running (lazy initialization)."""
+        self._ensure_async_primitives()
         if self._flush_task is None or self._flush_task.done():
             self._start_flush_worker()
 
@@ -155,7 +172,7 @@ class SignalPipeline:
         """
         logger.info("Configuration hot-reload triggered, rebuilding strategy runner...")
 
-        async with self._runner_lock:
+        async with self._get_runner_lock():
             # Step 1: Build new runner from updated config
             self._runner = self._build_and_warmup_runner()
 
@@ -164,6 +181,20 @@ class SignalPipeline:
             logger.info("Signal cooldown cache cleared (stale cache prevention)")
 
             logger.info("Strategy runner rebuilt and warmup complete")
+
+    def _get_runner_lock(self) -> asyncio.Lock:
+        """Get or create the runner lock."""
+        self._ensure_async_primitives()
+        if self._runner_lock is None:
+            self._runner_lock = asyncio.Lock()
+        return self._runner_lock
+
+    def _get_attempts_queue(self) -> asyncio.Queue:
+        """Get or create the attempts queue."""
+        self._ensure_async_primitives()
+        if self._attempts_queue is None:
+            self._attempts_queue = asyncio.Queue()
+        return self._attempts_queue
 
     def _build_and_warmup_runner(self) -> Any:
         """
@@ -182,14 +213,20 @@ class SignalPipeline:
         # Warmup: replay cached K-lines to restore EMA and other stateful indicators
         if self._kline_history:
             warmup_count = 0
+            warmup_details = []
             for key, history in self._kline_history.items():
                 parts = key.split(":")
                 symbol = parts[0]
                 timeframe = parts[1]
+                count = len(history)
+                warmup_details.append(f"{symbol}:{timeframe}({count} bars)")
                 for kline in history:
-                    runner.update_state(kline, symbol, timeframe)
+                    # The runner's update_state takes only kline, symbol/timeframe are extracted internally
+                    runner.update_state(kline)
                     warmup_count += 1
-            logger.info(f"Runner warmup complete: {warmup_count} K-lines replayed")
+
+            logger.info(f"Runner warmup complete: {warmup_count} K-lines replayed from {len(warmup_details)} streams")
+            logger.debug(f"Warmup details: {', '.join(warmup_details)}")
 
         return runner
 
@@ -211,8 +248,11 @@ class SignalPipeline:
             kline: Closed K-line data
         """
         try:
-            # Ensure flush worker is running (lazy init)
+            # Ensure async primitives and flush worker are running (lazy init)
             self._ensure_flush_worker()
+
+            # Ensure lock is available for this call
+            lock = self._get_runner_lock()
 
             # Check pending signals for performance tracking (before processing new signal)
             if self._repository is not None:
@@ -224,14 +264,15 @@ class SignalPipeline:
             self._store_kline(kline)
 
             # Run strategy engine with lock protection (prevents race condition during hot-reload)
-            async with self._runner_lock:
+            async with lock:
                 attempts = self._run_strategy(kline)
 
             # Persist all attempt records via async queue (fire-and-forget, backpressure relief)
             if self._repository is not None:
+                queue = self._get_attempts_queue()
                 try:
                     for attempt in attempts:
-                        self._attempts_queue.put_nowait((attempt, kline.symbol, kline.timeframe))
+                        queue.put_nowait((attempt, kline.symbol, kline.timeframe))
                 except asyncio.QueueFull:
                     logger.warning("Attempt queue full, dropping oldest entries")
 
@@ -304,8 +345,10 @@ class SignalPipeline:
         self._runner.update_state(kline)
 
         # Run all strategies with attempt tracking
+        # Note: higher_tf_trends is optional, pass empty dict for now
         return self._runner.run_all(
             kline=kline,
+            higher_tf_trends={},  # Empty dict for no higher timeframe trends
             kline_history=kline_history,
         )
 

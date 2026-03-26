@@ -1,0 +1,56 @@
+# 盯盘狗用户配置文件
+# ⚠️ 提交前请确保已删除或脱敏真实 API 密钥
+
+exchange:
+  name: "binance"
+  api_key: "YOUR_API_KEY_HERE"      # ⚠️ 替换为你的 API Key（只读权限）
+  api_secret: "YOUR_SECRET_HERE"    # ⚠️ 替换为你的 Secret
+  testnet: true                     # 建议使用测试网测试
+
+user_symbols: []                    # 自定义监测币种（留空使用核心币种）
+
+timeframes:
+  - "15m"
+  - "1h"
+  - "4h"
+
+# 动态策略配置
+active_strategies:
+  - id: "strategy-1"
+    name: "Pinbar + MTF"
+    triggers:
+      - id: "trigger-1"
+        type: "pinbar"
+        enabled: true
+        params:
+          min_wick_ratio: 0.6
+          max_body_ratio: 0.3
+          body_position_tolerance: 0.1
+    trigger_logic: "OR"
+    filters:
+      - id: "filter-1"
+        type: "mtf"
+        enabled: true
+        params:
+          higher_timeframe: "4h"
+          require_confirmation: true
+    filter_logic: "AND"
+    is_global: true
+    apply_to: []
+
+# 遗留配置（向后兼容）
+strategy:
+  trend_filter_enabled: false
+  mtf_validation_enabled: false
+
+risk:
+  max_loss_percent: "0.01"    # 单笔最大亏损 1%
+  max_leverage: 10            # 最大杠杆倍数
+
+asset_polling:
+  interval_seconds: 60        # 资产轮询间隔（秒）
+
+notification:
+  channels:
+    - type: "feishu"
+      webhook_url: "YOUR_WEBHOOK_URL_HERE"  # ⚠️ 替换为你的飞书 Webhook

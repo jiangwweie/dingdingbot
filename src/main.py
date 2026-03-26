@@ -231,6 +231,9 @@ async def run_application():
                 for kline in result:
                     # Store in pipeline history for MTF and runner warmup
                     pipeline._store_kline(kline)
+
+        # Rebuild runner with warmup data to restore EMA and other stateful indicators
+        pipeline._runner = pipeline._build_and_warmup_runner()
         logger.info("Historical data fed to pipeline for EMA warmup")
 
         # =============================================

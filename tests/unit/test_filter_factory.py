@@ -142,14 +142,14 @@ class TestTraceEvent:
     def test_trace_event_creation(self):
         """Test creating a TraceEvent."""
         event = TraceEvent(
-            filter_name="ema_trend",
+            node_name="ema_trend",
             passed=False,
             reason="bearish_trend_blocks_long",
             expected="bullish",
             actual="bearish",
         )
 
-        assert event.filter_name == "ema_trend"
+        assert event.node_name == "ema_trend"
         assert event.passed is False
         assert event.expected == "bullish"
         assert event.actual == "bearish"
@@ -157,7 +157,7 @@ class TestTraceEvent:
     def test_trace_event_to_filter_result(self):
         """Test converting TraceEvent to FilterResult."""
         event = TraceEvent(
-            filter_name="mtf",
+            node_name="mtf",
             passed=True,
             reason="trend_match",
         )
@@ -169,15 +169,15 @@ class TestTraceEvent:
     def test_trace_event_with_context_data(self):
         """Test TraceEvent with additional context."""
         event = TraceEvent(
-            filter_name="mtf",
+            node_name="mtf",
             passed=False,
             reason="mtf_rejected",
             expected="bullish",
             actual="bearish",
-            context_data={"higher_timeframe": "1h", "higher_trend": "bearish"},
+            metadata={"higher_timeframe": "1h", "higher_trend": "bearish"},
         )
 
-        assert event.context_data["higher_timeframe"] == "1h"
+        assert event.metadata["higher_timeframe"] == "1h"
 
 
 # ============================================================
@@ -414,7 +414,7 @@ class TestStrategyWithFilters:
                 return None
 
             def check(self, pattern, context):
-                return TraceEvent(filter_name="pass", passed=True, reason="ok")
+                return TraceEvent(node_name="pass", passed=True, reason="ok")
 
         class FailFilter(FilterBase):
             @property
@@ -432,7 +432,7 @@ class TestStrategyWithFilters:
                 return None
 
             def check(self, pattern, context):
-                return TraceEvent(filter_name="fail", passed=False, reason="test_fail")
+                return TraceEvent(node_name="fail", passed=False, reason="test_fail")
 
         wrapped = StrategyWithFilters(
             name="pinbar",

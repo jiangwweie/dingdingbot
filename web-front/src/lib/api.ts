@@ -1,5 +1,8 @@
 import useSWR from 'swr';
 
+// Import recursive logic tree types from types/strategy.ts
+import type { LogicNode, LogicNodeChildren } from '../types/strategy';
+
 export const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) {
@@ -33,8 +36,7 @@ export interface Signal {
   take_profit?: string;
   position_size: string;
   leverage: number;
-  ema_trend: 'bullish' | 'bearish';
-  mtf_status: 'confirmed' | 'rejected' | 'disabled' | 'unavailable';
+  tags?: Array<{ name: string; value: string }>;  // Dynamic filter tags (e.g., [{"name": "EMA", "value": "Bullish"}])
   status: 'pending' | 'won' | 'lost';
   pnl_ratio?: string | null;
   win_rate?: number;
@@ -42,6 +44,9 @@ export interface Signal {
   score?: number | string | null;
   kline_timestamp?: number;
   risk_reward_info?: string;
+  // Legacy fields (deprecated, kept for backward compatibility with old signals)
+  ema_trend?: 'bullish' | 'bearish';
+  mtf_status?: 'confirmed' | 'rejected' | 'disabled' | 'unavailable';
 }
 
 /**
@@ -367,10 +372,10 @@ export interface BacktestReport {
  * Trace event for diagnostic tracking
  */
 export interface TraceEvent {
-  stage: string;
+  node_name: string;
   passed: boolean;
   reason?: string;
-  details?: Record<string, any>;
+  metadata?: Record<string, any>;
 }
 
 /**
@@ -626,4 +631,142 @@ export async function fetchStrategyMetadata(): Promise<StrategyMetadata> {
     throw error;
   }
   return res.json();
+}
+
+// ============================================================================
+// Strategy Preview API (热预览接口)
+// ============================================================================
+
+/**
+ * Trace node in preview response
+ */
+export interface TraceNode {
+  node_id: string;
+  node_type: 'gate' | 'trigger' | 'filter';
+  gate_type?: 'AND' | 'OR' | 'NOT';
+  trigger_type?: TriggerType;
+  filter_type?: FilterType;
+  passed: boolean;
+  reason?: string;
+  metadata?: Record<string, any>;
+  children?: TraceNode[];
+}
+
+/**
+ * Preview request parameters
+ */
+export interface PreviewRequest {
+  logic_tree: LogicNode | LogicNodeChildren;
+  symbol: string;
+  timeframe: string;
+}
+
+/**
+ * Preview response
+ */
+export interface PreviewResponse {
+  signal_fired: boolean;
+  trace_tree: TraceNode;
+  details?: Record<string, any>;
+}
+
+/**
+ * Preview a strategy configuration against recent kline data
+ */
+export async function previewStrategy(payload: PreviewRequest): Promise<PreviewResponse> {
+  const res = await fetch('/api/strategies/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to preview strategy');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Apply a strategy template to live trading engine
+ * @param id - Strategy template ID to apply
+ */
+export async function applyStrategy(id: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`/api/strategies/${id}/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to apply strategy');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+// ============================================================================
+// Strategy Format Conversion Utilities (Legacy -> LogicNode)
+// ============================================================================
+
+/**
+ * Convert legacy StrategyDefinition (flat trigger+filters) to LogicNode (recursive tree)
+ *
+ * Legacy format:
+ * { trigger: TriggerConfig, filters: FilterConfig[], filter_logic: 'AND'|'OR' }
+ *
+ * New format (LogicNode):
+ * { gate: 'AND'|'OR'|'NOT', children: (LogicNode | LeafNode)[] }
+ */
+export function convertStrategyToLogicNode(strategy: StrategyDefinition): import('../types/strategy').LogicNode {
+  // Import types dynamically to avoid circular dependency
+  const children: Array<import('../types/strategy').LogicNode | import('../types/strategy').LeafNode> = [];
+
+  // Add trigger as first child
+  children.push({
+    type: 'trigger',
+    id: strategy.trigger.id,
+    config: strategy.trigger,
+  });
+
+  // Add filters as children
+  for (const filter of strategy.filters) {
+    children.push({
+      type: 'filter',
+      id: filter.id,
+      config: filter,
+    });
+  }
+
+  // Create root AND node (all conditions must pass)
+  return {
+    gate: 'AND',
+    children,
+  };
+}
+
+/**
+ * Convert LogicNode back to legacy StrategyDefinition format
+ */
+export function convertLogicNodeToStrategy(
+  node: import('../types/strategy').LogicNode,
+  strategyName: string
+): StrategyDefinition {
+  const triggerChildren = node.children.filter(
+    (child): child is import('../types/strategy').TriggerLeaf => 'type' in child && child.type === 'trigger'
+  );
+  const filterChildren = node.children.filter(
+    (child): child is import('../types/strategy').FilterLeaf => 'type' in child && child.type === 'filter'
+  );
+
+  return {
+    id: generateId(),
+    name: strategyName,
+    trigger: triggerChildren[0]?.config || { id: generateId(), type: 'pinbar', enabled: true, params: {} },
+    filters: filterChildren.map((f) => f.config),
+    filter_logic: 'AND',
+    is_global: true,
+    apply_to: [],
+  };
 }

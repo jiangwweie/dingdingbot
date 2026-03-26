@@ -1,0 +1,31 @@
+{
+  "skills": {
+    "local": [
+      {
+        "name": "team-coordinator",
+        "description": "团队协调器 - 负责任务分解、分配给前端/后端/测试角色、协调并行执行。",
+        "path": "./.claude/team/team-coordinator/SKILL.md"
+      },
+      {
+        "name": "backend-dev",
+        "description": "后端开发专家 - 负责 Python + FastAPI + asyncio 后端实现。",
+        "path": "./.claude/team/backend-dev/SKILL.md"
+      },
+      {
+        "name": "frontend-dev",
+        "description": "前端开发专家 - 负责 React + TypeScript + TailwindCSS 前端实现。",
+        "path": "./.claude/team/frontend-dev/SKILL.md"
+      },
+      {
+        "name": "qa-tester",
+        "description": "质量保障专家 - 负责测试策略设计、单元测试、集成测试。",
+        "path": "./.claude/team/qa-tester/SKILL.md"
+      },
+      {
+        "name": "code-reviewer",
+        "description": "代码审查员 - 负责独立代码审查、架构一致性检查、安全隐患识别。",
+        "path": "./.claude/team/code-reviewer/SKILL.md"
+      }
+    ]
+  }
+}

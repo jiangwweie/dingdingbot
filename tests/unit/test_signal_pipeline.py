@@ -1,5 +1,5 @@
 """
-Unit tests for signal_pipeline.py - Signal deduplication mechanism.
+Unit tests for signal_pipeline.py - Signal deduplication mechanism and dynamic tags.
 """
 import pytest
 import asyncio
@@ -7,9 +7,9 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.application.signal_pipeline import SignalPipeline
-from src.domain.models import KlineData, Direction, TrendDirection, MtfStatus, AccountSnapshot
+from src.domain.models import KlineData, Direction, TrendDirection, MtfStatus, AccountSnapshot, SignalResult
 from src.domain.risk_calculator import RiskConfig
-from src.domain.strategy_engine import PinbarConfig
+from src.domain.strategy_engine import PinbarConfig, SignalAttempt, PatternResult, FilterResult
 
 
 def create_kline(
@@ -199,3 +199,132 @@ class TestSignalDeduplication:
 
         expected_key = "BTC/USDT:USDT:15m:long:pinbar"
         assert expected_key in pipeline._signal_cooldown_cache
+
+
+class TestDynamicTags:
+    """Test dynamic tag generation from filter results."""
+
+    @pytest.fixture
+    def pipeline(self):
+        """Create a signal pipeline with mocked dependencies."""
+        mock_config_manager = MagicMock()
+        mock_config_manager.user_config = MagicMock()
+        mock_config_manager.user_config.active_strategies = []
+        mock_config_manager.core_config = MagicMock()
+        mock_config_manager.add_observer = MagicMock()
+
+        risk_config = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+        )
+
+        mock_notifier = MagicMock()
+        mock_notifier.send_signal = AsyncMock()
+
+        mock_repository = MagicMock()
+        mock_repository.save_signal = AsyncMock()
+        mock_repository.save_attempt = AsyncMock()
+
+        pipeline = SignalPipeline(
+            config_manager=mock_config_manager,
+            risk_config=risk_config,
+            notification_service=mock_notifier,
+            signal_repository=mock_repository,
+        )
+
+        pipeline.update_account_snapshot(AccountSnapshot(
+            total_balance=Decimal("10000"),
+            available_balance=Decimal("10000"),
+            unrealized_pnl=Decimal("0"),
+            positions=[],
+            timestamp=1234567890000,
+        ))
+
+        return pipeline
+
+    def test_generate_tags_from_filters_ema(self, pipeline):
+        """Test EMA filter generates correct tag."""
+        filter_results = [
+            ("ema", FilterResult(passed=True, reason="Price is above EMA - bullish trend")),
+        ]
+        tags = pipeline._generate_tags_from_filters(filter_results)
+        assert len(tags) == 1
+        assert tags[0] == {"name": "EMA", "value": "Bullish"}
+
+    def test_generate_tags_from_filters_ema_bearish(self, pipeline):
+        """Test EMA bearish filter generates correct tag."""
+        filter_results = [
+            ("ema", FilterResult(passed=True, reason="Price is below EMA - bearish trend")),
+        ]
+        tags = pipeline._generate_tags_from_filters(filter_results)
+        assert len(tags) == 1
+        assert tags[0] == {"name": "EMA", "value": "Bearish"}
+
+    def test_generate_tags_from_filters_mtf(self, pipeline):
+        """Test MTF filter generates correct tag."""
+        filter_results = [
+            ("mtf", FilterResult(passed=True, reason="Higher timeframe confirms trend")),
+        ]
+        tags = pipeline._generate_tags_from_filters(filter_results)
+        assert len(tags) == 1
+        assert tags[0] == {"name": "MTF", "value": "Confirmed"}
+
+    def test_generate_tags_from_filters_volume_surge(self, pipeline):
+        """Test Volume Surge filter generates correct tag."""
+        filter_results = [
+            ("volume_surge", FilterResult(passed=True, reason="Volume surge detected")),
+        ]
+        tags = pipeline._generate_tags_from_filters(filter_results)
+        assert len(tags) == 1
+        assert tags[0] == {"name": "Volume", "value": "Surge"}
+
+    def test_generate_tags_from_filters_multiple(self, pipeline):
+        """Test multiple filters generate multiple tags."""
+        filter_results = [
+            ("ema", FilterResult(passed=True, reason="Price is above EMA - bullish trend")),
+            ("mtf", FilterResult(passed=True, reason="Higher timeframe confirms trend")),
+            ("volume_surge", FilterResult(passed=True, reason="Volume surge detected")),
+        ]
+        tags = pipeline._generate_tags_from_filters(filter_results)
+        assert len(tags) == 3
+        assert tags[0] == {"name": "EMA", "value": "Bullish"}
+        assert tags[1] == {"name": "MTF", "value": "Confirmed"}
+        assert tags[2] == {"name": "Volume", "value": "Surge"}
+
+    def test_generate_tags_only_passed(self, pipeline):
+        """Test that only passed filters generate tags."""
+        filter_results = [
+            ("ema", FilterResult(passed=True, reason="Price is above EMA - bullish trend")),
+            ("mtf", FilterResult(passed=False, reason="Higher timeframe conflicts")),
+        ]
+        tags = pipeline._generate_tags_from_filters(filter_results)
+        assert len(tags) == 1
+        assert tags[0] == {"name": "EMA", "value": "Bullish"}
+
+    def test_signal_result_contains_tags(self, pipeline):
+        """Test that SignalResult contains dynamic tags."""
+        kline = create_kline(close=Decimal("150"))
+
+        # Create attempt with filter results
+        mock_attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=PatternResult(
+                strategy_name="pinbar",
+                direction=Direction.LONG,
+                score=0.8,
+                details={},
+            ),
+            filter_results=[
+                ("ema", FilterResult(passed=True, reason="Price is above EMA - bullish trend")),
+                ("mtf", FilterResult(passed=True, reason="Higher timeframe confirms trend")),
+            ],
+            final_result="SIGNAL_FIRED",
+        )
+
+        # Manually call _calculate_risk to get SignalResult
+        signal = pipeline._calculate_risk(kline, Direction.LONG, mock_attempt, "pinbar", 0.8)
+
+        assert isinstance(signal, SignalResult)
+        assert len(signal.tags) == 2
+        assert {"name": "EMA", "value": "Bullish"} in signal.tags
+        assert {"name": "MTF", "value": "Confirmed"} in signal.tags
