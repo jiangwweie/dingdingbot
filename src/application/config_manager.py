@@ -421,6 +421,16 @@ class ConfigManager:
     # ============================================================
     # Hot-Reload & Observer Pattern
     # ============================================================
+    def _get_update_lock(self) -> asyncio.Lock:
+        """Get or create the update lock for thread-safe config updates."""
+        if self._update_lock is None:
+            try:
+                self._update_lock = asyncio.Lock()
+            except RuntimeError:
+                # No running event loop
+                pass
+        return self._update_lock
+
     def add_observer(self, callback: Callable[[], Awaitable[None]]) -> None:
         """
         Add an observer callback to be invoked when configuration is updated.

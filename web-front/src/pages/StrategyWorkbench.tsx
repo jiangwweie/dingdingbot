@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useApi, fetchSystemConfig, updateSystemConfig, StrategyDefinition, previewStrategy, PreviewRequest, PreviewResponse, TraceNode } from '../lib/api';
+import { useApi, fetchSystemConfig, updateSystemConfig, StrategyDefinition, previewStrategy, PreviewRequest, PreviewResponse, TraceNode, applyStrategy } from '../lib/api';
 import { Plus, Trash2, Edit2, Save, X, AlertCircle, CheckCircle, Zap, ChevronDown, ChevronRight, Upload, Play } from 'lucide-react';
 import { cn } from '../lib/utils';
 import StrategyBuilder from '../components/StrategyBuilder';
@@ -27,6 +27,9 @@ export default function StrategyWorkbench() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [deployStatus, setDeployStatus] = useState<'idle' | 'deploying' | 'deployed' | 'error'>('idle');
+  const [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'applied' | 'error'>('idle');
+  const [showApplyConfirm, setShowApplyConfirm] = useState(false);
+  const [strategyToApply, setStrategyToApply] = useState<CustomStrategy | null>(null);
 
   // Preview state
   const [previewStatus, setPreviewStatus] = useState<'idle' | 'previewing' | 'previewed' | 'error'>('idle');
@@ -223,6 +226,37 @@ export default function StrategyWorkbench() {
     }
   };
 
+  // Apply strategy to live trading engine
+  const handleApplyStrategy = async () => {
+    if (!strategyToApply) return;
+
+    setApplyStatus('applying');
+    try {
+      await applyStrategy(String(strategyToApply.id));
+      setApplyStatus('applied');
+      setShowApplyConfirm(false);
+      setStrategyToApply(null);
+      await mutateStrategies();
+      setTimeout(() => setApplyStatus('idle'), 3000);
+    } catch (err: any) {
+      console.error('Apply strategy failed:', err);
+      setErrorMessage(err.info?.detail || '应用策略失败，请重试');
+      setApplyStatus('error');
+      setTimeout(() => setApplyStatus('idle'), 3000);
+    }
+  };
+
+  // Confirm apply dialog handlers
+  const confirmApply = (strategy: CustomStrategy) => {
+    setStrategyToApply(strategy);
+    setShowApplyConfirm(true);
+  };
+
+  const cancelApply = () => {
+    setShowApplyConfirm(false);
+    setStrategyToApply(null);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -280,6 +314,65 @@ export default function StrategyWorkbench() {
           <div>
             <p className="text-sm text-amber-800 font-medium">策略下发失败</p>
             <p className="text-xs text-amber-600 mt-0.5">请检查系统配置接口是否正常</p>
+          </div>
+        </div>
+      )}
+
+      {/* Apply Status */}
+      {applyStatus === 'applied' && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
+          <CheckCircle className="w-5 h-5 text-green-600" />
+          <div>
+            <p className="text-sm text-green-800 font-medium">策略已应用到实盘引擎！</p>
+            <p className="text-xs text-green-600 mt-0.5">策略现在开始对指定币种和周期生效</p>
+          </div>
+        </div>
+      )}
+
+      {applyStatus === 'error' && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-red-800 font-medium">应用策略失败</p>
+            <p className="text-xs text-red-600 mt-0.5">请检查后端接口是否正常</p>
+          </div>
+        </div>
+      )}
+
+      {/* Apply Confirmation Dialog */}
+      {showApplyConfirm && strategyToApply && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-amber-600" />
+              <h3 className="text-lg font-semibold">确认应用到实盘</h3>
+            </div>
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">
+                确定要将策略模板 <span className="font-medium text-gray-900">"{strategyToApply.name}"</span> 应用到实盘引擎吗？
+              </p>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs text-amber-800">
+                  <strong>注意：</strong> 此操作会将策略配置下发到实盘引擎，策略将立即对配置的币种和周期生效。
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={cancelApply}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleApplyStrategy}
+                disabled={applyStatus === 'applying'}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <Upload className="w-4 h-4" />
+                {applyStatus === 'applying' ? '应用中...' : '确认应用'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -351,35 +444,54 @@ export default function StrategyWorkbench() {
                 strategies.map((strategy) => (
                   <div
                     key={strategy.id}
-                    onClick={() => loadStrategyDetails(strategy.id)}
                     className={cn(
-                      "w-full p-4 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 cursor-pointer",
+                      "w-full p-4 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 group",
                       selectedStrategy?.id === strategy.id && "bg-blue-50"
                     )}
                   >
-                    <div className={cn(
-                      "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
-                      selectedStrategy?.id === strategy.id
-                        ? "bg-blue-100 text-blue-600"
-                        : "bg-amber-100 text-amber-600"
-                    )}>
-                      <Zap className="w-5 h-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{strategy.name}</p>
-                      {strategy.description && (
-                        <p className="text-xs text-gray-500 truncate">{strategy.description}</p>
-                      )}
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteStrategy(strategy.id);
-                      }}
-                      className="p-1.5 hover:bg-red-100 rounded transition-colors opacity-0 group-hover:opacity-100"
+                    <div
+                      onClick={() => loadStrategyDetails(strategy.id)}
+                      className="flex-1 min-w-0 cursor-pointer"
                     >
-                      <Trash2 className="w-4 h-4 text-red-500" />
-                    </button>
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
+                          selectedStrategy?.id === strategy.id
+                            ? "bg-blue-100 text-blue-600"
+                            : "bg-amber-100 text-amber-600"
+                        )}>
+                          <Zap className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{strategy.name}</p>
+                          {strategy.description && (
+                            <p className="text-xs text-gray-500 truncate">{strategy.description}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          confirmApply(strategy);
+                        }}
+                        className="p-1.5 hover:bg-blue-100 rounded transition-colors opacity-0 group-hover:opacity-100"
+                        title="应用到实盘"
+                      >
+                        <Upload className="w-4 h-4 text-blue-600" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteStrategy(strategy.id);
+                        }}
+                        className="p-1.5 hover:bg-red-100 rounded transition-colors opacity-0 group-hover:opacity-100"
+                        title="删除策略"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </button>
+                    </div>
                   </div>
                 ))
               )}

@@ -213,15 +213,20 @@ class SignalPipeline:
         # Warmup: replay cached K-lines to restore EMA and other stateful indicators
         if self._kline_history:
             warmup_count = 0
+            warmup_details = []
             for key, history in self._kline_history.items():
                 parts = key.split(":")
                 symbol = parts[0]
                 timeframe = parts[1]
+                count = len(history)
+                warmup_details.append(f"{symbol}:{timeframe}({count} bars)")
                 for kline in history:
                     # The runner's update_state takes only kline, symbol/timeframe are extracted internally
                     runner.update_state(kline)
                     warmup_count += 1
-            logger.info(f"Runner warmup complete: {warmup_count} K-lines replayed")
+
+            logger.info(f"Runner warmup complete: {warmup_count} K-lines replayed from {len(warmup_details)} streams")
+            logger.debug(f"Warmup details: {', '.join(warmup_details)}")
 
         return runner
 
@@ -340,8 +345,10 @@ class SignalPipeline:
         self._runner.update_state(kline)
 
         # Run all strategies with attempt tracking
+        # Note: higher_tf_trends is optional, pass empty dict for now
         return self._runner.run_all(
             kline=kline,
+            higher_tf_trends={},  # Empty dict for no higher timeframe trends
             kline_history=kline_history,
         )
 

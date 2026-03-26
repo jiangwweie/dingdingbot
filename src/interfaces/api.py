@@ -20,6 +20,8 @@ Endpoints:
     POST /api/strategies - Create new strategy template
     PUT /api/strategies/{id} - Update strategy template
     DELETE /api/strategies/{id} - Delete strategy template
+    POST /api/strategies/preview - Preview strategy configuration (dry-run)
+    POST /api/strategies/{id}/apply - Apply strategy template to live trading
 """
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -530,7 +532,7 @@ async def clear_all_attempts():
 # ============================================================
 # Config Management Endpoints
 # ============================================================
-from src.infrastructure.logger import mask_secret
+from src.infrastructure.logger import mask_secret, logger
 
 
 def _mask_config_value(value: Any, is_sensitive: bool = False) -> Any:
@@ -1046,6 +1048,20 @@ class StrategyPreviewResponse(BaseModel):
     details: Optional[Dict[str, Any]] = Field(default=None, description="Additional details if signal fired")
 
 
+class StrategyApplyRequest(BaseModel):
+    """Request model for applying a strategy template to live trading."""
+    enabled: bool = Field(default=True, description="Whether to enable the strategy after applying")
+    apply_to: Optional[List[str]] = Field(default=None, description="Specific symbol:timeframe scopes to apply. If None, applies globally")
+
+
+class StrategyApplyResponse(BaseModel):
+    """Response model for strategy apply endpoint."""
+    status: str = Field(..., description="Status of the apply operation")
+    message: str = Field(..., description="Human-readable result message")
+    strategy_id: int = Field(..., description="Applied strategy template ID")
+    strategy_name: str = Field(..., description="Applied strategy name")
+
+
 @app.post("/api/strategies/preview", response_model=StrategyPreviewResponse)
 async def preview_strategy(request: StrategyPreviewRequest):
     """
@@ -1195,4 +1211,117 @@ async def preview_strategy(request: StrategyPreviewRequest):
     except HTTPException:
         raise
     except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================
+# S2-1: Strategy Apply Endpoint (一键下发实盘)
+# ============================================================
+@app.post("/api/strategies/{strategy_id}/apply", response_model=StrategyApplyResponse)
+async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None):
+    """
+    Apply a custom strategy template to live trading.
+
+    This endpoint:
+    1. Loads the strategy template from database
+    2. Validates the strategy structure
+    3. Adds the strategy to user_config.active_strategies
+    4. Triggers hot-reload observer to rebuild the strategy runner
+    5. Persists the updated config to user.yaml
+
+    Args:
+        strategy_id: Strategy template ID to apply
+        request: Optional apply options (enabled status, scope)
+
+    Returns:
+        StrategyApplyResponse with apply result
+
+    Raises:
+        404: Strategy template not found
+        400: Invalid strategy definition
+        503: Config manager not initialized
+    """
+    try:
+        # Default request if not provided
+        if request is None:
+            request = StrategyApplyRequest(enabled=True, apply_to=None)
+
+        # Get config manager
+        config_manager = _get_config_manager()
+        repo = _get_repository()
+
+        # Step 1: Load strategy template from database
+        strategy_record = await repo.get_custom_strategy_by_id(strategy_id)
+        if strategy_record is None:
+            raise HTTPException(status_code=404, detail="Strategy template not found")
+
+        # Step 2: Parse and validate strategy definition
+        import json
+        from src.domain.models import StrategyDefinition
+
+        try:
+            strategy_def = StrategyDefinition(**json.loads(strategy_record["strategy_json"]))
+        except Exception as validation_error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid strategy definition: {str(validation_error)}"
+            )
+
+        # Step 3: Update strategy definition with apply options (use model_copy for immutability)
+        update_dict = {}
+        if request.apply_to is not None:
+            update_dict["apply_to"] = request.apply_to
+            update_dict["is_global"] = False
+
+        if update_dict:
+            strategy_def = strategy_def.model_copy(update=update_dict)
+
+        # Step 4: Get current active strategies and add/replace this strategy
+        current_config = config_manager.user_config
+        active_strategies = list(current_config.active_strategies)
+
+        # Check if strategy with same name already exists
+        existing_idx = None
+        for i, strat in enumerate(active_strategies):
+            if strat.name == strategy_def.name:
+                existing_idx = i
+                break
+
+        if existing_idx is not None:
+            # Replace existing strategy
+            active_strategies[existing_idx] = strategy_def
+            logger.info(f"Replaced existing strategy '{strategy_def.name}' (id={strategy_id})")
+        else:
+            # Add new strategy
+            active_strategies.append(strategy_def)
+            logger.info(f"Added new strategy '{strategy_def.name}' (id={strategy_id})")
+
+        # Step 5: Build config update payload
+        config_update = {
+            "active_strategies": [s.model_dump(mode='json') for s in active_strategies]
+        }
+
+        # Step 6: Call hot-reload method (validates + atomic swap + persist + notify observers)
+        try:
+            new_config = await config_manager.update_user_config(config_update)
+        except ValidationError as e:
+            logger.error(f"Config validation failed during apply: {e}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"Config validation failed: {str(e)}"
+            )
+
+        logger.info(f"Strategy template {strategy_id} ('{strategy_def.name}') applied successfully")
+
+        return StrategyApplyResponse(
+            status="success",
+            message=f"Strategy '{strategy_def.name}' applied to live trading",
+            strategy_id=strategy_id,
+            strategy_name=strategy_def.name,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to apply strategy template {strategy_id}: {e}")
         return {"error": str(e)}

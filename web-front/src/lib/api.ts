@@ -687,3 +687,21 @@ export async function previewStrategy(payload: PreviewRequest): Promise<PreviewR
   }
   return res.json();
 }
+
+/**
+ * Apply a strategy template to live trading engine
+ * @param id - Strategy template ID to apply
+ */
+export async function applyStrategy(id: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`/api/strategies/${id}/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to apply strategy');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}

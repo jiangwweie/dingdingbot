@@ -190,7 +190,7 @@ class TestTraceTreeConversion:
                     node_type="trigger",
                     passed=True,
                     reason="pattern_detected",
-                    details={"wick_ratio": 0.7}
+                    metadata={"wick_ratio": 0.7}
                 )
             ]
         )
