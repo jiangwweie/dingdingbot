@@ -7,11 +7,41 @@
 - Discriminator Union 类型区分
 - 嵌套深度限制 ≤ 3
 """
-from typing import Union, List, Annotated, Literal, Optional
+from typing import Union, List, Annotated, Literal, Optional, Any, Dict
 from pydantic import BaseModel, Field, model_validator, ValidationError
 from pydantic import field_validator
 
-from src.domain.models import TriggerConfig, FilterConfig
+
+# ============================================================
+# Trigger and Filter Config (moved here to avoid circular imports)
+# ============================================================
+class FilterConfig(BaseModel):
+    """Unified dynamic Filter Configuration model."""
+    id: str = Field(default_factory=lambda: "")
+    type: Literal["ema", "ema_trend", "mtf", "atr", "volume_surge", "volatility_filter", "time_filter", "price_action"] = Field(..., description="Filter type (e.g., 'ema_trend', 'mtf')")
+    enabled: bool = Field(default=True, description="Whether this filter is active")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Filter parameters")
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy(cls, data: Any) -> Any:
+        """Migrate legacy flat parameters into nested params dictionary."""
+        if isinstance(data, dict):
+            if "params" not in data:
+                params = {}
+                for k in list(data.keys()):
+                    if k not in ("id", "type", "enabled"):
+                        params[k] = data.pop(k)
+                data["params"] = params
+        return data
+
+
+class TriggerConfig(BaseModel):
+    """Trigger pattern configuration"""
+    id: str = Field(default_factory=lambda: "")
+    type: Literal["pinbar", "engulfing", "doji", "hammer"] = Field(..., description="Trigger pattern type")
+    enabled: bool = Field(default=True, description="Whether this trigger is active")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Pattern-specific parameters")
 
 
 # ============================================================
@@ -192,3 +222,9 @@ def create_not_node(child: Union["LogicNode", LeafNode]) -> LogicNode:
         LogicNode 实例
     """
     return LogicNode(gate="NOT", children=[child])
+
+
+# ============================================================
+# Rebuild models to resolve forward references
+# ============================================================
+LogicNode.model_rebuild()

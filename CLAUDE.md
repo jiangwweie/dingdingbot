@@ -352,19 +352,14 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ### 🎭 角色分工（Project Skills）
 
-#### 架构组
-| 角色 | 命令 | 职责 | 红线 |
-|------|------|------|------|
-| 架构师 | `/architect` | 方案设计、编写 implementation_plan、审查代码 | 禁止写业务代码 |
-| 审查员 | `/reviewer` | 独立代码审查 | 拥有否决权 |
-
-#### 开发组（Agent Team）
+#### Agent Team（5 人_full stack 团队）
 | 角色 | 命令 | 职责 | 技术栈 |
 |------|------|------|------|
 | 团队协调器 | `/coordinator` | 任务分解、角色调度、结果整合 | - |
-| 前端开发 | `/frontend` | React + TypeScript + TailwindCSS | React 18, TS 5, TailwindCSS 3 |
 | 后端开发 | `/backend` | Python + FastAPI + asyncio | Python 3.11, FastAPI, Pydantic v2 |
+| 前端开发 | `/frontend` | React + TypeScript + TailwindCSS | React 18, TS 5, TailwindCSS 3 |
 | 测试专家 | `/qa` | 单元测试、集成测试、E2E 测试 | pytest, vitest |
+| 代码审查员 | `/reviewer` | 独立代码审查、架构一致性检查 | Clean Architecture, OWASP |
 
 ### 使用 Agent Team
 
@@ -408,6 +403,12 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 - `docs/arch/系统开发规范与红线.md` - **必须首先阅读**
 - `docs/arch/系统重构与架构演进梳理报告.md` - 系统使命与技术债
+
+### 规划文件
+
+- `docs/planning/task_plan.md` - 任务阶段与进度追踪
+- `docs/planning/findings.md` - 研究发现与技术笔记
+- `docs/planning/progress.md` - 会话日志与错误记录
 
 ---
 

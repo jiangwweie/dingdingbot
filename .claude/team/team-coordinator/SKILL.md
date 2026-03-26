@@ -300,3 +300,72 @@ def assign_task(role, file_path):
 - [ ] 后端 API 完成 → 前端才能对接
 - [ ] 前端类型定义 → 测试才能编写
 - [ ] 所有任务完成 → QA 才能最终验证
+
+---
+
+## 🔧 全局技能调度指南 (Global Skills Orchestration)
+
+**作为 Coordinator，你必须根据任务阶段调度对应的全局 skills：**
+
+### 任务分解阶段
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 需求模糊需要探索 | `brainstorming` | `Agent(subagent_type="brainstorming", prompt="...")` |
+| 复杂项目需要规划 | `planning-with-files-zh` | `/planning-with-files:planning-with-files` 或 `Agent(subagent_type="planning-with-files-zh")` |
+| 已有计划需要执行 | 从 `task_plan.md` 读取 | 直接读取文件继续执行（无需调用技能） |
+
+**注意**：`planning-with-files-zh` 比 `writing-plans`/`executing-plans` 更强大：
+- ✅ 持久化文件追踪（task_plan.md, findings.md, progress.md）
+- ✅ 自动 Hook 提醒更新进度
+- ✅ 会话恢复支持
+- ✅ 中文化
+
+### 任务执行阶段
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 并行执行独立任务 | `dispatching-parallel-agents` | 在单消息中并行调用多个 `Agent()` |
+| 前端需要 UI 设计 | `ui-ux-pro-max` | 分配任务时提醒 frontend-dev 调用 |
+| 前端需要复杂组件 | `web-artifacts-builder` | 分配任务时提醒 frontend-dev 调用 |
+| 前端 E2E 测试 | `webapp-testing` | 分配任务时提醒 qa-tester 调用 |
+
+### 代码完成阶段
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 代码需要简化优化 | `code-simplifier` | 通知 backend/frontend-dev 调用 `/simplify` |
+| 需要正式代码审查 | `code-review` | `/reviewer` 或 `Agent(subagent_type="code-reviewer")` |
+| 测试失败需要调试 | `systematic-debugging` | 通知对应角色调用 |
+
+### 完成阶段
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 功能完成需要合并 | `finishing-a-development-branch` | `Agent(subagent_type="finishing-a-development-branch")` |
+| 请求正式审查 | `requesting-code-review` | `Agent(subagent_type="requesting-code-review")` |
+| 完成前最终验证 | `verification-before-completion` | `Agent(subagent_type="verification-before-completion")` |
+
+### 调度示例
+```python
+# 阶段 1: 需求探索
+Agent(subagent_type="brainstorming", prompt="分析策略预览功能需求，识别关键交互场景")
+
+# 阶段 2: 并行调度 (单消息中多 Agent 调用)
+Agent(subagent_type="backend-dev", prompt="实现 /api/strategies/preview 接口")
+Agent(subagent_type="frontend-dev", prompt="实现预览按钮组件，调用 ui-ux-pro-max 设计样式")
+Agent(subagent_type="qa-tester", prompt="编写接口和组件测试，必要时调用 webapp-testing")
+
+# 阶段 3: 代码简化 (各角色完成后主动调用)
+# backend-dev 完成后: Agent(subagent_type="code-simplifier", ...)
+# frontend-dev 完成后: Agent(subagent_type="code-simplifier", ...)
+
+# 阶段 4: 审查与验证
+Agent(subagent_type="code-reviewer", prompt="审查预览功能的代码质量")
+Agent(subagent_type="verification-before-completion", prompt="运行测试验证功能完整性")
+```
+
+### Coordinator 的检查清单
+
+在分配任务时，确保各角色知道调用哪些 skills：
+
+- [ ] **Backend Dev** → 完成后调用 `code-simplifier`
+- [ ] **Frontend Dev** → 设计中调用 `ui-ux-pro-max`，完成后调用 `code-simplifier`
+- [ ] **QA Tester** → E2E 测试调用 `webapp-testing`，失败时调用 `systematic-debugging`
+- [ ] **所有人** → 复杂需求先调用 `brainstorming`

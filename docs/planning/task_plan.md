@@ -16,8 +16,8 @@
 |------|------|------|--------|
 | F-1 | 定义递归 LogicNode 类型 | completed | backend-dev |
 | F-2 | 实现递归评估引擎 | completed | backend-dev |
-| F-3 | 升级 StrategyDefinition | pending | backend-dev |
-| F-4 | 实现热预览接口 | pending | backend-dev |
+| F-3 | 升级 StrategyDefinition | completed | backend-dev |
+| F-4 | 实现热预览接口 | in_progress | backend-dev |
 | E-1 | 定义前端递归类型 | pending | frontend-dev |
 | E-2 | 实现递归渲染组件 | pending | frontend-dev |
 | E-3 | 实现热预览交互 | pending | frontend-dev |

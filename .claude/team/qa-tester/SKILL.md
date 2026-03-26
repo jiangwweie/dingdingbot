@@ -301,3 +301,34 @@ pytest tests/unit/test_strategy_engine.py::TestPinbarDetection -v
 # 前端测试
 cd web-front && npm test
 ```
+
+---
+
+## 🔧 全局技能调用指南 (Global Skills Integration)
+
+**你必须主动调用以下全局 skills 来提升工作质量：**
+
+### 测试执行相关
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 前端 E2E 测试/Playwright | `webapp-testing` | `Agent(subagent_type="webapp-testing")` |
+| 测试代码需要简化 | `code-simplifier` | `/simplify` |
+| 需要审查测试质量 | `code-review` | `/reviewer` |
+
+### 测试分析
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 测试失败需要分析根因 | `systematic-debugging` | `Agent(subagent_type="systematic-debugging")` |
+| 复杂测试场景需要规划 | `brainstorming` | `Agent(subagent_type="brainstorming")` |
+
+### 调用示例
+```python
+# 前端 E2E 测试
+Agent(subagent_type="webapp-testing", prompt="为策略工作台页面编写 Playwright E2E 测试")
+
+# 测试失败分析
+Agent(subagent_type="systematic-debugging", prompt="test_recursive_engine.py::test_or_node 失败，分析原因并复现")
+
+# 简化测试代码
+Agent(subagent_type="code-simplifier", prompt="简化 tests/unit/test_recursive_engine.py 中的重复代码")
+```

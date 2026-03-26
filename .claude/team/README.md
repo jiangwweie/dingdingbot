@@ -221,6 +221,84 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 ---
 
+## 全局技能集成 (Global Skills Integration)
+
+**每个 Agent Team 成员都应主动调用全局 skills 来提升工作质量：**
+
+### 全局 Skills 与 Agent 映射
+
+| Agent 角色 | 应调用的全局 Skills | 使用场景 |
+|-----------|---------------------|----------|
+| **Frontend Dev** | `ui-ux-pro-max` | UI 设计、配色方案、组件样式优化 |
+| | `frontend-design` | 高设计质量的前端实现 |
+| | `web-artifacts-builder` | 复杂多组件 Web 工件 |
+| | `code-simplifier` | 代码完成后优化简化 |
+| | `banner-design` | Banner/视觉设计 |
+| | `slides` | 幻灯片设计 |
+| | `brand-guidelines` | 品牌规范指导 |
+| **Backend Dev** | `code-simplifier` | 代码完成后优化简化 |
+| | `brainstorming` | 复杂需求分析 |
+| | `systematic-debugging` | 遇到 Bug 时调试 |
+| **QA Tester** | `webapp-testing` | 前端 Playwright E2E 测试 |
+| | `code-simplifier` | 测试代码简化 |
+| | `systematic-debugging` | 测试失败分析 |
+| **Coordinator** | `brainstorming` | 需求分解前探索 |
+| | `planning-with-files-zh` | 制定执行计划（替代 writing-plans/executing-plans） |
+| | `dispatching-parallel-agents` | 并行任务调度 |
+| | `finishing-a-development-branch` | 完成分支合并 |
+| | `verification-before-completion` | 完成前验证 |
+| | `requesting-code-review` | 请求正式审查 |
+| **Code Reviewer** | `code-review` | 正式代码审查流程 |
+| | `code-simplifier` | 识别代码复杂度问题 |
+
+### 调用方式
+
+```python
+# 方式 1: 使用 Agent 工具调用
+Agent(subagent_type="ui-ux-pro-max", prompt="为递归逻辑树渲染器设计配色方案")
+
+# 方式 2: 使用 Slash Command（如果已注册）
+/simplify  # 简化当前代码
+
+# 方式 3: 在分配任务时提醒
+Agent(subagent_type="frontend-dev",
+      prompt="实现预览按钮，完成后调用 code-simplifier 优化代码")
+```
+
+### 各角色技能调用时机
+
+```
+Frontend Dev 工作流:
+  1. 接收需求
+  2. 需要 UI 设计 → 调用 ui-ux-pro-max
+  3. 实现组件
+  4. 完成后 → 调用 code-simplifier 优化
+
+Backend Dev 工作流:
+  1. 接收需求
+  2. 复杂需求 → 调用 brainstorming 分析
+  3. 实现功能
+  4. 完成后 → 调用 code-simplifier 优化
+  5. 遇到 Bug → 调用 systematic-debugging
+
+QA Tester 工作流:
+  1. 编写测试
+  2. E2E 测试 → 调用 webapp-testing
+  3. 测试失败 → 调用 systematic-debugging 分析
+  4. 完成后 → 调用 code-simplifier 简化测试代码
+
+Coordinator 工作流:
+  1. 接收需求
+  2. 需求模糊 → 调用 brainstorming 探索
+  3. 复杂项目 → 调用 planning-with-files-zh 制定计划
+     → 文件创建在 docs/planning/ 目录
+  4. 执行阶段 → 读取 docs/planning/task_plan.md 继续执行
+     → 或调用 dispatching-parallel-agents 并行调度
+  5. 完成前 → 调用 verification-before-completion 验证
+```
+
+---
+
 ## 故障排除
 
 ### 问题 1: 子 Agent 无法加载技能

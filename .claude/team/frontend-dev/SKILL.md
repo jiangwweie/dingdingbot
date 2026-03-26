@@ -86,6 +86,45 @@ function NodeRenderer({ node, depth = 0 }) {
 4. 添加交互与动画
 5. 自测视觉完整性
 
+---
+
+## 🔧 全局技能调用指南 (Global Skills Integration)
+
+**你必须主动调用以下全局 skills 来提升工作质量：**
+
+### UI/UX 设计相关
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 需要配色方案/组件样式 | `ui-ux-pro-max` | `/ui-ux-pro-max` 或 `Agent(subagent_type="ui-ux-pro-max")` |
+| 需要高设计质量的前端实现 | `frontend-design` | `Agent(subagent_type="frontend-design")` |
+| 创建复杂多组件 Web 工件 | `web-artifacts-builder` | `Agent(subagent_type="web-artifacts-builder")` |
+| 需要 Banner/视觉设计 | `banner-design` | `Agent(subagent_type="banner-design")` |
+| 需要幻灯片设计 | `slides` | `Agent(subagent_type="slides")` |
+
+### 代码优化
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 组件完成后需要简化/优化 | `code-simplifier` | `/simplify` |
+| 需要品牌规范指导 | `brand-guidelines` | `Agent(subagent_type="brand-guidelines")` |
+| 需要主题样式 | `theme-factory` | `Agent(subagent_type="theme-factory")` |
+
+### 需求分析
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 需求模糊需要探索 | `brainstorming` | `Agent(subagent_type="brainstorming")` |
+
+### 调用示例
+```python
+# 需要 UI 设计建议
+Agent(subagent_type="ui-ux-pro-max", prompt="为递归逻辑树渲染器设计配色方案和视觉层次")
+
+# 复杂组件实现
+Agent(subagent_type="frontend-design", prompt="实现可递归渲染的 NodeRenderer 组件，使用 React + TailwindCSS")
+
+# 代码完成后简化
+Agent(subagent_type="code-simplifier", prompt="简化 web-front/src/components/NodeRenderer.tsx 的代码结构")
+```
+
 ## 输出要求
 
 - ✅ 生产级代码

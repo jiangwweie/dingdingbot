@@ -1027,3 +1027,172 @@ async def delete_custom_strategy(strategy_id: int):
         raise
     except Exception as e:
         return {"error": str(e)}
+
+
+# ============================================================
+# F-4: Strategy Preview Endpoint (热预览接口)
+# ============================================================
+class StrategyPreviewRequest(BaseModel):
+    """Request model for strategy preview endpoint."""
+    logic_tree: Dict[str, Any] = Field(..., description="Recursive logic tree configuration")
+    symbol: str = Field(..., description="Symbol to preview, e.g., 'BTC/USDT:USDT'")
+    timeframe: str = Field(..., description="Timeframe, e.g., '15m', '1h'")
+
+
+class StrategyPreviewResponse(BaseModel):
+    """Response model for strategy preview endpoint."""
+    signal_fired: bool = Field(..., description="Whether signal was triggered")
+    trace_tree: Dict[str, Any] = Field(..., description="Complete trace tree showing evaluation path")
+    details: Optional[Dict[str, Any]] = Field(default=None, description="Additional details if signal fired")
+
+
+@app.post("/api/strategies/preview", response_model=StrategyPreviewResponse)
+async def preview_strategy(request: StrategyPreviewRequest):
+    """
+    Preview a strategy configuration against recent kline data.
+
+    This endpoint performs a dry-run evaluation without persistence or hot-reload.
+    Returns the complete trace tree showing the evaluation path.
+
+    Request body:
+    {
+        "logic_tree": { ... recursive logic tree ... },
+        "symbol": "BTC/USDT:USDT",
+        "timeframe": "15m"
+    }
+
+    Response:
+    {
+        "signal_fired": true/false,
+        "trace_tree": { ... complete trace tree ... },
+        "details": { ... additional details if signal fired ... }
+    }
+    """
+    try:
+        # Get exchange gateway for kline data
+        exchange = _exchange_gateway
+        if exchange is None:
+            raise HTTPException(status_code=503, detail="Exchange gateway not initialized")
+
+        # Fetch recent kline data
+        klines = await exchange.fetch_historical_ohlcv(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            limit=100
+        )
+
+        if not klines:
+            raise HTTPException(status_code=404, detail="No kline data available")
+
+        # Get the latest closed kline
+        latest_kline = None
+        for kline in reversed(klines):
+            if kline.get('is_closed', False):
+                latest_kline = kline
+                break
+
+        if latest_kline is None:
+            latest_kline = klines[-1]
+
+        # Convert to KlineData model
+        from src.domain.models import KlineData, Direction
+        from decimal import Decimal
+
+        kline_data = KlineData(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            timestamp=latest_kline['timestamp'],
+            open=Decimal(str(latest_kline['open'])),
+            high=Decimal(str(latest_kline['high'])),
+            low=Decimal(str(latest_kline['low'])),
+            close=Decimal(str(latest_kline['close'])),
+            volume=Decimal(str(latest_kline['volume'])),
+            is_closed=latest_kline.get('is_closed', True)
+        )
+
+        # Build StrategyDefinition from logic_tree
+        from src.domain.models import StrategyDefinition
+        from src.domain.logic_tree import LogicNode
+
+        # Create StrategyDefinition with logic_tree
+        strategy_def = StrategyDefinition(
+            name="preview",
+            logic_tree=request.logic_tree
+        )
+
+        # Create runner for evaluation
+        from src.domain.strategy_engine import create_dynamic_runner
+        runner = create_dynamic_runner([strategy_def])
+
+        # Update state with kline
+        runner.update_state(kline_data)
+
+        # Evaluate using recursive engine
+        from src.domain.recursive_engine import evaluate_node, TraceNode
+        from src.domain.strategy_engine import FilterContext
+
+        # Build filter context
+        context = FilterContext(
+            higher_tf_trends={},  # Preview mode: no higher timeframe trends
+            current_trend=None,
+            current_timeframe=request.timeframe,
+            kline=kline_data
+        )
+
+        # Evaluate the logic tree
+        trace_tree = evaluate_node(
+            node=strategy_def.logic_tree,
+            kline=kline_data,
+            context=context,
+            runner=runner
+        )
+
+        # Check if signal fired (root node passed)
+        signal_fired = trace_tree.passed
+
+        # Build response details
+        details = None
+        if signal_fired:
+            # Extract trigger details from trace tree
+            def find_trigger_details(node: TraceNode) -> Optional[Dict]:
+                if node.node_type == "trigger" and node.passed:
+                    return node.details
+                for child in node.children:
+                    result = find_trigger_details(child)
+                    if result:
+                        return result
+                return None
+
+            trigger_details = find_trigger_details(trace_tree)
+            if trigger_details:
+                details = {
+                    "trigger": trigger_details,
+                    "kline": {
+                        "open": str(kline_data.open),
+                        "high": str(kline_data.high),
+                        "low": str(kline_data.low),
+                        "close": str(kline_data.close),
+                    }
+                }
+
+        # Convert TraceNode to dict for JSON response
+        def trace_to_dict(node: TraceNode) -> Dict:
+            return {
+                "node_id": node.node_id,
+                "node_type": node.node_type,
+                "passed": node.passed,
+                "reason": node.reason,
+                "details": node.details,
+                "children": [trace_to_dict(child) for child in node.children]
+            }
+
+        return StrategyPreviewResponse(
+            signal_fired=signal_fired,
+            trace_tree=trace_to_dict(trace_tree),
+            details=details
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}

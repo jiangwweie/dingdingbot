@@ -279,6 +279,43 @@ flake8 src/
 
 ---
 
+## 🔧 全局技能调用指南 (Global Skills Integration)
+
+**你必须主动调用以下全局 skills 来提升审查质量：**
+
+### 审查相关
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 正式代码审查流程 | `code-review` | `/code-review` 或 `Agent(subagent_type="code-review")` |
+| 代码需要简化优化 | `code-simplifier` | `/simplify` 或 `Agent(subagent_type="code-simplifier")` |
+| 复杂问题需要分析 | `brainstorming` | `Agent(subagent_type="brainstorming")` |
+
+### 审查辅助
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 识别代码复杂度问题 | `code-simplifier` | 先调用简化技能识别问题区域 |
+| 系统性问题分析 | `systematic-debugging` | `Agent(subagent_type="systematic-debugging")` |
+
+### 调用示例
+```python
+# 正式审查流程
+Agent(subagent_type="code-review", prompt="审查 PR #123 的代码质量")
+
+# 识别简化机会
+Agent(subagent_type="code-simplifier", prompt="分析 src/domain/strategy_engine.py 的复杂度，识别可简化区域")
+
+# 复杂 Bug 分析
+Agent(subagent_type="systematic-debugging", prompt="审查发现的并发问题：多个 observer 同时触发导致重复通知")
+```
+
+### 审查完成后的行动
+1. **审查通过** → 通知 Coordinator 可以合并
+2. **需要改进** → 将问题返回给对应角色修复
+3. **发现简化机会** → 调用 `code-simplifier` 识别具体问题
+4. **发现深层 Bug** → 调用 `systematic-debugging` 分析根因
+
+---
+
 ## 与 QA Tester 的详细对比
 
 ### 核心区别

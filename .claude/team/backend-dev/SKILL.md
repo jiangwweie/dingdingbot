@@ -129,6 +129,34 @@ async def test_strategy_runner():
 4. 编写单元测试
 5. 运行 `pytest` 验证
 
+---
+
+## 🔧 全局技能调用指南 (Global Skills Integration)
+
+**你必须主动调用以下全局 skills 来提升工作质量：**
+
+### 代码完成后
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 实现完成后需要简化/优化代码 | `code-simplifier` | `/simplify` |
+| 代码复杂需要审查 | `code-review` | `/reviewer` |
+| 遇到难以定位的 Bug | `systematic-debugging` | 使用 `Agent(subagent_type="systematic-debugging")` |
+
+### 需求分析阶段
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 需求模糊需要探索 | `brainstorming` | 使用 `Agent(subagent_type="brainstorming")` |
+| 复杂功能需要规划 | `writing-plans` | 使用 `Agent(subagent_type="writing-plans")` |
+
+### 调用示例
+```python
+# 实现完成后调用简化
+Agent(subagent_type="code-simplifier", prompt="请简化 src/domain/recursive_engine.py 的代码")
+
+# 遇到 Bug 时调用调试
+Agent(subagent_type="systematic-debugging", prompt="测试失败：test_recursive_engine.py::test_and_node - 分析原因")
+```
+
 ## 输出要求
 
 - ✅ 符合 Clean Architecture
