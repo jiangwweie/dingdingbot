@@ -93,3 +93,96 @@ web-front/src/components/
 ### React 递归组件
 - https://react.dev/learn/passing-data-deeply-context
 - https://advanced-react.com/advanced-patterns/recursion
+
+---
+
+## 第二阶段研究发现（2026-03-26）
+
+### 系统状态验证结果
+
+**已完成功能**:
+1. 递归逻辑树引擎 - `src/domain/logic_tree.py` + `src/domain/recursive_engine.py` ✅
+2. 热预览接口 - `POST /api/strategies/preview` ✅
+3. 前端递归组件 - `NodeRenderer.tsx`, `LogicGateControl.tsx`, `LeafNodeForm.tsx` ✅
+4. Trace 树可视化 - `TraceTreeViewer.tsx` ✅
+5. 策略模板 CRUD - `GET/POST/PUT/DELETE /api/strategies` ✅
+6. 策略元数据接口 - `GET /api/strategies/meta` ✅
+
+**待完成功能**:
+1. 一键下发实盘 - 策略模板应用到实盘监控
+2. 信号标签动态化 - 移除 `ema_trend`/`mtf_status` 硬编码
+3. 前端硬编码组件清理 - 确认是否还有遗留
+
+### 技术债清单
+
+| 编号 | 问题 | 影响范围 | 优先级 |
+|------|------|----------|--------|
+| #1 | TraceEvent 字段命名不一致 | 前后端数据对齐 | 高 |
+| #2 | SignalResult 硬编码标签 | 通知卡片动态化 | 高 |
+| #3 | FilterConfig.params 为 Dict[str, Any] | API 类型安全 | 中 |
+| #4 | 前端可能还有硬编码组件 | Schema 驱动纯度 | 中 |
+
+### 下一阶段技术方案
+
+### 下一阶段技术方案
+
+**一键下发实盘方案**:
+```
+用户操作：选择模板 → 点击"应用"
+    ↓
+前端：POST /api/strategies/{id}/apply
+    ↓
+后端：
+  1. 从数据库加载策略模板
+  2. 反序列化为 StrategyDefinition
+  3. 调用 ConfigManager 更新 user_config
+  4. 触发信号管道热重载
+  5. 回填 K 线状态（200+ 根）
+    ↓
+响应：{ success: true, message: "策略已应用" }
+```
+
+**关键实现点**:
+- 使用 `asyncio.Lock()` 保护配置替换过程
+- 原子操作：先创建新 Runner，再替换指针
+- 状态回填：从交易所拉取历史 K 线
+
+**信号标签动态化方案**:
+```
+旧流程:
+  process_kline → _legacy_engine.get_ema_trend() → SignalResult(ema_trend="Bullish")
+
+新流程:
+  process_kline → 从 attempt.filter_results 提取通过的过滤器
+               → 生成 tags = [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
+               → SignalResult(tags=...)
+```
+
+**热重载并发控制**:
+```python
+class SignalPipeline:
+    def __init__(self):
+        self._runner_lock = asyncio.Lock()  # 互斥锁
+        self._attempts_queue = asyncio.Queue()  # 异步背压队列
+
+    async def on_config_updated(self, new_config):
+        async with self._runner_lock:
+            # 重建 Runner
+            self._runner = create_dynamic_runner(new_config)
+            # 预热：用历史 K 线恢复状态
+            await self._warmup_runner(self._kline_history)
+        # 清空冷却缓存
+        self._signal_cooldown_cache.clear()
+
+    async def _flush_attempts_worker(self):
+        """后台 Worker 批量落盘，避免阻塞主事件循环"""
+        while True:
+            attempts = await self._attempts_queue.get_batch()
+            await self._repository.save_batch(attempts)
+```
+
+### 相关文件参考
+
+- `docs/tasks/2026-03-25-子任务 B-策略工作台与 CRUD 接口开发.md` - 策略模板库设计
+- `docs/tasks/2026-03-25-子任务 C-信号结果动态标签系统重构.md` - 信号标签动态化
+- `docs/tasks/2026-03-25-子任务 A-实盘引擎热重载与稳定性重构.md` - 热重载机制

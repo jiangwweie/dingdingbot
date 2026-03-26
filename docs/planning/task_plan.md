@@ -205,3 +205,163 @@
 - `src/domain/strategy_engine.py`
 - `web-front/src/types/strategy.ts`
 - `web-front/src/components/`
+
+---
+
+## 第二阶段：交互升维（当前阶段）
+
+**目标**: 完成技术债清理和核心重构，实现策略模板到实盘监控的无缝对接
+
+### 阶段概览
+| 阶段 | 任务 | 状态 | 负责人 | 优先级 |
+|------|------|------|--------|--------|
+| S2-2 | 统一 TraceEvent 字段命名 | ✅ completed | backend-dev | 高 |
+| S2-4 | 信号标签动态化（子任务 C） | ⏸️ pending | backend-dev | 高 |
+| S2-1 | 一键下发实盘热重载（子任务 A） | ⏸️ pending | backend-dev | 高 |
+| S2-3 | 前端硬编码组件清理 | ⏸️ pending | frontend-dev | 中 |
+
+---
+
+## 执行顺序与依赖
+
+```
+S2-2 (字段统一) ✅
+    ↓
+S2-4 (信号标签动态化) ← 独立，可先行
+    ↓
+S2-1 (实盘热重载) ← 依赖 S2-4 完成
+    ↓
+S2-3 (前端清理) ← 独立，可并行
+```
+
+---
+
+### 阶段 S2-2: 统一 TraceEvent 字段命名 ✅
+
+**完成时间**: 2026-03-26
+
+**文件**:
+- 修改：`src/domain/filter_factory.py` - `TraceEvent.filter_name` → `node_name`, `context_data` → `metadata`
+- 修改：`src/domain/recursive_engine.py` - `TraceNode.details` → `metadata`
+- 修改：`web-front/src/lib/api.ts` - `TraceEvent.stage` → `node_name`, `details` → `metadata`
+- 修改：`tests/unit/test_filter_factory.py` - 测试适配
+- 修改：`tests/unit/test_recursive_engine.py` - 测试适配
+- 修改：`tests/unit/test_preview_api.py` - 测试适配
+
+**测试结果**:
+```
+======================== 48 passed, 3 warnings in 0.30s ========================
+```
+
+---
+
+### 阶段 S2-4: 信号标签动态化（子任务 C）
+
+**目标**: 移除 `ema_trend`/`mtf_status` 硬编码字段，改用动态 tags 数组
+
+**文件**:
+- 修改：`src/domain/models.py` - SignalResult 模型
+- 修改：`src/domain/risk_calculator.py` - 移除硬编码标签
+- 修改：`src/application/signal_pipeline.py` - 动态标签生成逻辑
+- 修改：`src/infrastructure/notifier.py` - 通知消息格式化
+- 修改：`src/infrastructure/signal_repository.py` - 落库字段升级
+- 修改：`web-front/src/lib/api.ts` - Signal 接口定义
+
+**步骤**:
+1. [ ] 更新 SignalResult 模型，添加 `tags: List[Dict[str, str]]`
+2. [ ] 移除 `ema_trend`/`mtf_status` 字段
+3. [ ] 更新 risk_calculator.calculate_signal_result() 签名
+4. [ ] 更新 signal_pipeline.process_kline() 动态标签生成
+5. [ ] 更新 notifier 通知卡片渲染
+6. [ ] 更新 signal_repository 落库逻辑 (tags_json)
+7. [ ] 更新前端 Signal 接口
+8. [ ] 编写测试验证
+
+**验收标准**:
+- 信号结果支持动态标签数组
+- 通知卡片显示动态标签内容
+- 移除对 Legacy 引擎的依赖
+- 向后兼容旧数据格式
+
+---
+
+### 阶段 S2-1: 一键下发实盘热重载（子任务 A）
+
+**目标**: 实现策略模板到实盘监控的无缝下发，支持热重载不重启
+
+**文件**:
+- 修改：`src/application/signal_pipeline.py` - 热重载 Observer 模式
+- 修改：`src/application/config_manager.py` - 配置监听器
+- 修改：`src/interfaces/api.py` - 新增 `/api/strategies/{id}/apply` 端点
+- 新增：`src/infrastructure/strategy_repository.py` - 策略模板仓储
+
+**步骤**:
+1. [ ] 实现 ConfigManager 异步监听器注册
+2. [ ] 实现 SignalPipeline._build_and_warmup_runner()
+3. [ ] 添加 asyncio.Lock() 保护并发竞争
+4. [ ] 实现异步 Queue Worker 剥离 SQLite 同步背压
+5. [ ] 实现配置变更时清空信号冷却缓存
+6. [ ] 新增策略模板 Apply 端点
+7. [ ] 更新 main.py 入口函数
+8. [ ] 编写测试验证
+
+**验收标准**:
+- 策略模板一键下发实盘
+- 配置热重载不重启进程
+- EMA 等有状态指标无缝恢复
+- 无并发竞争条件
+- SQLite 异步批量落盘
+
+---
+
+### 阶段 S2-3: 前端硬编码组件清理
+
+**目标**: 移除所有硬编码的过滤器组件，实现 100% Schema 驱动
+
+**待清理组件**:
+- `StrategyBuilder.tsx` → 替换为递归 NodeRenderer
+- `PinbarParamsEditor.tsx` → 已移除
+- `EmaFilterEditor.tsx` → 已移除
+- `MtfFilterEditor.tsx` → 待移除
+
+**文件**:
+- 删除：`web-front/src/components/StrategyBuilder.tsx` (如仍存在)
+- 删除：`web-front/src/components/*Editor.tsx` (所有硬编码编辑器)
+
+**步骤**:
+1. [ ] 检查并列出所有硬编码组件
+2. [ ] 确认 NodeRenderer 已完全替代
+3. [ ] 删除旧组件
+4. [ ] 更新导入引用
+5. [ ] 运行 TypeScript 编译验证
+
+**验收标准**:
+- 移除所有硬编码编辑器组件
+- TypeScript 编译无错误
+- 前端 100% Schema 驱动
+
+---
+
+## 第三阶段：风控执行（未来规划）
+
+### 阶段 S3-1: 多周期数据对齐优化
+
+**目标**: 优化 MTF 过滤器的多周期数据对齐逻辑
+
+### 阶段 S3-2: 动态风险头寸计算
+
+**目标**: 根据账户实时状态动态计算风险头寸
+
+### 阶段 S3-3: 交易所挂单集成（可选）
+
+**目标**: 集成交易所挂单功能（需用户授权）
+
+---
+
+## 第四阶段：工业化调优（未来规划）
+
+### 阶段 S4-1: 配置快照版本化（Rollback）
+
+### 阶段 S4-2: 异步 I/O 队列
+
+### 阶段 S4-3: 指标计算缓存
