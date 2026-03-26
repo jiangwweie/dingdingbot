@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useApi, fetchSystemConfig, updateSystemConfig, StrategyDefinition } from '../lib/api';
-import { Plus, Trash2, Edit2, Save, X, AlertCircle, CheckCircle, Zap, ChevronDown, ChevronRight, Upload } from 'lucide-react';
+import { useApi, fetchSystemConfig, updateSystemConfig, StrategyDefinition, previewStrategy, PreviewRequest, PreviewResponse, TraceNode } from '../lib/api';
+import { Plus, Trash2, Edit2, Save, X, AlertCircle, CheckCircle, Zap, ChevronDown, ChevronRight, Upload, Play } from 'lucide-react';
 import { cn } from '../lib/utils';
 import StrategyBuilder from '../components/StrategyBuilder';
+import TraceTreeViewer from '../components/TraceTreeViewer';
 import { generateId, getDefaultTriggerParams, TriggerType } from '../lib/api';
+import { LogicNode } from '../types/strategy';
 
 interface CustomStrategy {
   id: number;
@@ -25,6 +27,12 @@ export default function StrategyWorkbench() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [deployStatus, setDeployStatus] = useState<'idle' | 'deploying' | 'deployed' | 'error'>('idle');
+
+  // Preview state
+  const [previewStatus, setPreviewStatus] = useState<'idle' | 'previewing' | 'previewed' | 'error'>('idle');
+  const [previewResult, setPreviewResult] = useState<PreviewResponse | null>(null);
+  const [previewSymbol, setPreviewSymbol] = useState('BTC/USDT:USDT');
+  const [previewTimeframe, setPreviewTimeframe] = useState('15m');
 
   // Fetch custom strategies list
   const { data: strategiesData, mutate: mutateStrategies } = useApi<{ strategies: CustomStrategy[] }>('/api/strategies');
@@ -168,6 +176,50 @@ export default function StrategyWorkbench() {
       console.error('Failed to deploy strategy:', err);
       setDeployStatus('error');
       setTimeout(() => setDeployStatus('idle'), 3000);
+    }
+  };
+
+  // Preview strategy (Hot Preview / Dry Run)
+  const handlePreviewStrategy = async () => {
+    if (editingStrategy.length === 0) return;
+
+    setPreviewStatus('previewing');
+    setPreviewResult(null);
+
+    try {
+      const strategy = editingStrategy[0];
+
+      // Build logic tree from strategy
+      // For backward compatibility, convert flat trigger+filters to logic tree
+      const logicTree: LogicNode = {
+        gate: 'AND',
+        children: [
+          {
+            type: 'trigger',
+            id: strategy.trigger.id,
+            config: strategy.trigger,
+          },
+          ...strategy.filters.map(f => ({
+            type: 'filter' as const,
+            id: f.id,
+            config: f,
+          })),
+        ],
+      };
+
+      const payload: PreviewRequest = {
+        logic_tree: logicTree,
+        symbol: previewSymbol,
+        timeframe: previewTimeframe,
+      };
+
+      const result = await previewStrategy(payload);
+      setPreviewResult(result);
+      setPreviewStatus('previewed');
+    } catch (err: any) {
+      console.error('Preview failed:', err);
+      setErrorMessage(err.info?.detail || '预览失败，请重试');
+      setPreviewStatus('error');
     }
   };
 
@@ -354,6 +406,14 @@ export default function StrategyWorkbench() {
                     返回列表
                   </button>
                   <button
+                    onClick={handlePreviewStrategy}
+                    disabled={previewStatus === 'previewing'}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Play className="w-4 h-4" />
+                    {previewStatus === 'previewing' ? '预览中...' : '立即测试'}
+                  </button>
+                  <button
                     onClick={handleDeployStrategy}
                     disabled={deployStatus === 'deploying'}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
@@ -371,6 +431,47 @@ export default function StrategyWorkbench() {
                   </button>
                 </div>
               </div>
+
+              {/* Preview Controls */}
+              {previewStatus === 'previewed' && previewResult && (
+                <div className="p-4 bg-gray-50 border-b border-gray-100">
+                  <div className="flex items-center gap-4 mb-3">
+                    <label className="text-sm font-medium text-gray-700">币种:</label>
+                    <select
+                      value={previewSymbol}
+                      onChange={(e) => setPreviewSymbol(e.target.value)}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-black transition-colors"
+                    >
+                      <option value="BTC/USDT:USDT">BTC/USDT</option>
+                      <option value="ETH/USDT:USDT">ETH/USDT</option>
+                      <option value="SOL/USDT:USDT">SOL/USDT</option>
+                      <option value="BNB/USDT:USDT">BNB/USDT</option>
+                    </select>
+
+                    <label className="text-sm font-medium text-gray-700">周期:</label>
+                    <select
+                      value={previewTimeframe}
+                      onChange={(e) => setPreviewTimeframe(e.target.value)}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-black transition-colors"
+                    >
+                      <option value="5m">5m</option>
+                      <option value="15m">15m</option>
+                      <option value="1h">1h</option>
+                      <option value="4h">4h</option>
+                      <option value="1d">1d</option>
+                    </select>
+
+                    <button
+                      onClick={handlePreviewStrategy}
+                      disabled={previewStatus === 'previewing'}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                    >
+                      <Play className="w-3 h-3" />
+                      重新测试
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="p-4">
                 <StrategyBuilder
                   strategies={editingStrategy}
@@ -378,6 +479,16 @@ export default function StrategyWorkbench() {
                   readOnly={false}
                 />
               </div>
+
+              {/* Preview Result - Trace Tree Viewer */}
+              {previewStatus === 'previewed' && previewResult && (
+                <div className="p-4 border-t border-gray-100">
+                  <TraceTreeViewer
+                    traceTree={previewResult.trace_tree}
+                    signalFired={previewResult.signal_fired}
+                  />
+                </div>
+              )}
             </div>
           ) : !isCreating ? (
             <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-gray-400 bg-white rounded-2xl shadow-sm border border-gray-100">

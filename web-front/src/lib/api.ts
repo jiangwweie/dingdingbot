@@ -1,5 +1,8 @@
 import useSWR from 'swr';
 
+// Import recursive logic tree types from types/strategy.ts
+import type { LogicNode, LogicNodeChildren } from '../types/strategy';
+
 export const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) {
@@ -623,6 +626,61 @@ export async function fetchStrategyMetadata(): Promise<StrategyMetadata> {
   if (!res.ok) {
     const error = new Error('Failed to fetch strategy metadata');
     (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+// ============================================================================
+// Strategy Preview API (热预览接口)
+// ============================================================================
+
+/**
+ * Trace node in preview response
+ */
+export interface TraceNode {
+  node_id: string;
+  node_type: 'gate' | 'trigger' | 'filter';
+  gate_type?: 'AND' | 'OR' | 'NOT';
+  trigger_type?: TriggerType;
+  filter_type?: FilterType;
+  passed: boolean;
+  reason?: string;
+  details?: Record<string, any>;
+  children?: TraceNode[];
+}
+
+/**
+ * Preview request parameters
+ */
+export interface PreviewRequest {
+  logic_tree: LogicNode | LogicNodeChildren;
+  symbol: string;
+  timeframe: string;
+}
+
+/**
+ * Preview response
+ */
+export interface PreviewResponse {
+  signal_fired: boolean;
+  trace_tree: TraceNode;
+  details?: Record<string, any>;
+}
+
+/**
+ * Preview a strategy configuration against recent kline data
+ */
+export async function previewStrategy(payload: PreviewRequest): Promise<PreviewResponse> {
+  const res = await fetch('/api/strategies/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to preview strategy');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
     throw error;
   }
   return res.json();
