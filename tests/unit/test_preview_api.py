@@ -201,7 +201,7 @@ class TestTraceTreeConversion:
                 "node_type": node.node_type,
                 "passed": node.passed,
                 "reason": node.reason,
-                "details": node.details,
+                "metadata": node.metadata,
                 "children": [trace_to_dict(child) for child in node.children]
             }
 
@@ -211,4 +211,4 @@ class TestTraceTreeConversion:
         assert result["node_type"] == "AND"
         assert result["passed"] is True
         assert len(result["children"]) == 1
-        assert result["children"][0]["details"]["wick_ratio"] == 0.7
+        assert result["children"][0]["metadata"]["wick_ratio"] == 0.7

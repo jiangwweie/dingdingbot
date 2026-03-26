@@ -152,7 +152,7 @@ class TestTraceNode:
         assert node.passed is True
         assert node.reason == "all_children_passed"
         assert node.children == []
-        assert node.details == {}
+        assert node.metadata == {}
 
     def test_trace_node_with_children(self):
         """创建带子节点的 TraceNode"""
@@ -192,15 +192,15 @@ class TestTraceNode:
             node_type="ema_trend",
             passed=False,
             reason="bearish_trend_blocks_long",
-            details={
+            metadata={
                 "expected": "bullish",
                 "actual": "bearish",
                 "ema_value": "49500"
             }
         )
 
-        assert node.details["expected"] == "bullish"
-        assert node.details["actual"] == "bearish"
+        assert node.metadata["expected"] == "bullish"
+        assert node.metadata["actual"] == "bearish"
 
 
 # ============================================================

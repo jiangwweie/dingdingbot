@@ -33,11 +33,11 @@ class TraceNode(BaseModel):
     passed: bool = Field(..., description="是否通过评估")
     reason: str = Field(..., description="通过/失败原因")
     children: List["TraceNode"] = Field(default_factory=list, description="子节点追踪结果")
-    details: Dict[str, Any] = Field(default_factory=dict, description="中间结果/详细数据")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="中间结果/详细数据")
 
     @classmethod
     def create_pass(cls, node_id: str, node_type: str, reason: str,
-                    children: List["TraceNode"] = None, details: Dict[str, Any] = None) -> "TraceNode":
+                    children: List["TraceNode"] = None, metadata: Dict[str, Any] = None) -> "TraceNode":
         """快捷创建通过的 TraceNode"""
         return cls(
             node_id=node_id,
@@ -45,12 +45,12 @@ class TraceNode(BaseModel):
             passed=True,
             reason=reason,
             children=children or [],
-            details=details or {}
+            metadata=metadata or {}
         )
 
     @classmethod
     def create_fail(cls, node_id: str, node_type: str, reason: str,
-                    children: List["TraceNode"] = None, details: Dict[str, Any] = None) -> "TraceNode":
+                    children: List["TraceNode"] = None, metadata: Dict[str, Any] = None) -> "TraceNode":
         """快捷创建失败的 TraceNode"""
         return cls(
             node_id=node_id,
@@ -58,7 +58,7 @@ class TraceNode(BaseModel):
             passed=False,
             reason=reason,
             children=children or [],
-            details=details or {}
+            metadata=metadata or {}
         )
 
 
@@ -190,7 +190,7 @@ def _evaluate_and_node(
                 node_type="AND",
                 reason=f"child_{idx}_failed: {child_result.reason}",
                 children=evaluated_children,
-                details={"failed_child_index": idx, "failed_child_type": child_result.node_type}
+                metadata={"failed_child_index": idx, "failed_child_type": child_result.node_type}
             )
 
     # 所有子节点都通过
@@ -199,7 +199,7 @@ def _evaluate_and_node(
         node_type="AND",
         reason="all_children_passed",
         children=evaluated_children,
-        details={"total_children": len(children)}
+        metadata={"total_children": len(children)}
     )
 
 
@@ -240,7 +240,7 @@ def _evaluate_or_node(
                 node_type="OR",
                 reason=f"child_{idx}_passed: {child_result.reason}",
                 children=evaluated_children,
-                details={"passed_child_index": idx, "passed_child_type": child_result.node_type}
+                metadata={"passed_child_index": idx, "passed_child_type": child_result.node_type}
             )
 
     # 所有子节点都失败
@@ -249,7 +249,7 @@ def _evaluate_or_node(
         node_type="OR",
         reason="all_children_failed",
         children=evaluated_children,
-        details={"total_children": len(children)}
+        metadata={"total_children": len(children)}
     )
 
 
@@ -289,7 +289,7 @@ def _evaluate_not_node(
             node_type="NOT",
             reason=f"child_passed_negated: {child_result.reason}",
             children=[child_result],
-            details={"original_child_result": "passed"}
+            metadata={"original_child_result": "passed"}
         )
     else:
         # 子节点失败 → NOT 节点通过
@@ -298,7 +298,7 @@ def _evaluate_not_node(
             node_type="NOT",
             reason=f"child_failed_negated: {child_result.reason}",
             children=[child_result],
-            details={"original_child_result": "failed"}
+            metadata={"original_child_result": "failed"}
         )
 
 
@@ -385,7 +385,7 @@ def _evaluate_trigger_leaf(
             node_id=node_id,
             node_type="trigger",
             reason=f"pattern_detected: {trigger_type}",
-            details={
+            metadata={
                 "trigger_type": trigger_type,
                 "strategy_name": matched_strategy,
                 "direction": pattern_result.direction.value if pattern_result.direction else None,
@@ -398,7 +398,7 @@ def _evaluate_trigger_leaf(
             node_id=node_id,
             node_type="trigger",
             reason=f"no_pattern_detected: {trigger_type}",
-            details={
+            metadata={
                 "trigger_type": trigger_type,
                 "trigger_enabled": node.config.enabled,
             }
@@ -434,7 +434,7 @@ def _evaluate_filter_leaf(
             node_id=node_id,
             node_type="filter",
             reason="filter_disabled",
-            details={
+            metadata={
                 "filter_type": filter_type,
             }
         )
@@ -453,7 +453,7 @@ def _evaluate_filter_leaf(
             node_id=node_id,
             node_type="filter",
             reason="no_pattern_to_filter",
-            details={
+            metadata={
                 "filter_type": filter_type,
             }
         )
@@ -472,11 +472,11 @@ def _evaluate_filter_leaf(
                 node_id=node_id,
                 node_type="filter",
                 reason=trace_event.reason,
-                details={
+                metadata={
                     "filter_type": filter_type,
                     "expected": trace_event.expected,
                     "actual": trace_event.actual,
-                    "context_data": trace_event.context_data,
+                    "metadata": trace_event.metadata,
                 }
             )
         else:
@@ -484,11 +484,11 @@ def _evaluate_filter_leaf(
                 node_id=node_id,
                 node_type="filter",
                 reason=trace_event.reason,
-                details={
+                metadata={
                     "filter_type": filter_type,
                     "expected": trace_event.expected,
                     "actual": trace_event.actual,
-                    "context_data": trace_event.context_data,
+                    "metadata": trace_event.metadata,
                 }
             )
     except Exception as e:
@@ -497,7 +497,7 @@ def _evaluate_filter_leaf(
             node_id=node_id,
             node_type="filter",
             reason=f"filter_execution_error: {str(e)}",
-            details={
+            metadata={
                 "filter_type": filter_type,
                 "error_type": type(e).__name__,
             }

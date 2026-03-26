@@ -370,10 +370,10 @@ export interface BacktestReport {
  * Trace event for diagnostic tracking
  */
 export interface TraceEvent {
-  stage: string;
+  node_name: string;
   passed: boolean;
   reason?: string;
-  details?: Record<string, any>;
+  metadata?: Record<string, any>;
 }
 
 /**
@@ -646,7 +646,7 @@ export interface TraceNode {
   filter_type?: FilterType;
   passed: boolean;
   reason?: string;
-  details?: Record<string, any>;
+  metadata?: Record<string, any>;
   children?: TraceNode[];
 }
 
