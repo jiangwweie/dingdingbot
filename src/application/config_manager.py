@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator, ValidationError
 
 from src.domain.exceptions import FatalStartupError
 from src.infrastructure.logger import logger, register_secret, mask_secret
-from src.domain.models import FilterConfig, StrategyDefinition, TriggerConfig
+from src.domain.models import FilterConfig, StrategyDefinition, TriggerConfig, RiskConfig
 
 
 # ============================================================
@@ -74,18 +74,6 @@ class StrategyConfig(BaseModel):
     """
     trend_filter_enabled: bool = Field(default=True, description="Enable EMA60 trend filter")
     mtf_validation_enabled: bool = Field(default=True, description="Enable MTF validation")
-
-
-class RiskConfig(BaseModel):
-    max_loss_percent: Decimal = Field(..., description="Max loss per trade as % of balance")
-    max_leverage: int = Field(..., ge=1, le=125, description="Maximum leverage allowed")
-
-    @field_validator('max_loss_percent')
-    @classmethod
-    def validate_loss_percent(cls, v):
-        if v <= 0 or v > Decimal('1'):
-            raise ValueError("Max loss percent must be between 0 and 1")
-        return v
 
 
 class AssetPollingConfig(BaseModel):

@@ -61,6 +61,43 @@ class TestRiskConfig:
         config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         assert config.max_loss_percent == Decimal("0.01")
         assert config.max_leverage == 10
+        assert config.max_total_exposure == Decimal("0.8")  # Default value
+
+    def test_valid_config_with_custom_exposure(self):
+        """Test custom max_total_exposure is accepted."""
+        config = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+            max_total_exposure=Decimal("0.5")
+        )
+        assert config.max_total_exposure == Decimal("0.5")
+
+    def test_invalid_config_exposure_zero(self):
+        """Test that zero exposure is accepted (allows 0% exposure limit)."""
+        config = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+            max_total_exposure=Decimal("0")
+        )
+        assert config.max_total_exposure == Decimal("0")
+
+    def test_invalid_config_exposure_greater_than_one(self):
+        """Test that exposure > 1 raises error."""
+        with pytest.raises(ValueError):
+            RiskConfig(
+                max_loss_percent=Decimal("0.01"),
+                max_leverage=10,
+                max_total_exposure=Decimal("1.5")
+            )
+
+    def test_invalid_config_exposure_negative(self):
+        """Test that negative exposure raises error."""
+        with pytest.raises(ValueError):
+            RiskConfig(
+                max_loss_percent=Decimal("0.01"),
+                max_leverage=10,
+                max_total_exposure=Decimal("-0.1")
+            )
 
     def test_invalid_loss_percent_zero(self):
         """Test that zero loss percent raises error."""
@@ -118,19 +155,29 @@ class TestCalculatePositionSize:
     """Test position size calculation."""
 
     @pytest.fixture
-    def calculator(self):
-        """Create risk calculator with test config."""
+    def calculator_default(self):
+        """Create risk calculator with default config (max_total_exposure=0.8)."""
         config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         return RiskCalculator(config)
 
-    def test_position_size_basic_formula(self, calculator):
-        """Test basic position size formula using total_balance."""
-        # Use total_balance as per requirements
-        account = create_account(total_balance=Decimal("100000"))
+    @pytest.fixture
+    def calculator_custom_exposure(self):
+        """Create risk calculator with custom max_total_exposure."""
+        config = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+            max_total_exposure=Decimal("0.5")
+        )
+        return RiskCalculator(config)
+
+    def test_position_size_basic_formula_no_positions(self, calculator_default):
+        """Test basic position size formula with no existing positions."""
+        # No positions, so full available_balance can be used
+        account = create_account(total_balance=Decimal("100000"), available_balance=Decimal("100000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("95")  # 5 stop distance
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -139,28 +186,127 @@ class TestCalculatePositionSize:
         # Position size = 1000 / 5 = 200
         assert position_size == Decimal("200")
 
-    def test_position_size_uses_total_balance_not_available(self, calculator):
-        """Test that calculation uses total_balance, not available_balance."""
-        # available_balance is much lower, but we use total_balance
-        account = create_account(total_balance=Decimal("100000"), available_balance=Decimal("1000"))
+    def test_position_size_uses_available_balance_not_total(self, calculator_default):
+        """Test that calculation uses available_balance, not total_balance."""
+        # available_balance is lower, we use available_balance (Scheme B)
+        account = create_account(total_balance=Decimal("100000"), available_balance=Decimal("50000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
-        # Should use total_balance = 100000, not available = 1000
-        # Position size = 1000 / 5 = 200
-        assert position_size == Decimal("200")
+        # Should use available_balance = 50000, not total = 100000
+        # Risk amount = 50000 * 0.01 = 500
+        # Stop distance = 5
+        # Position size = 500 / 5 = 100
+        assert position_size == Decimal("100")
 
-    def test_position_size_with_leverage_cap(self, calculator):
+    def test_position_size_reduced_with_existing_positions(self, calculator_default):
+        """Test that position size is reduced when existing positions consume exposure."""
+        # Current positions: 40% exposure (40000 / 100000)
+        positions = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="long",
+                size=Decimal("1"),
+                entry_price=Decimal("40000"),
+                unrealized_pnl=Decimal("0"),
+                leverage=10
+            )
+        ]
+        account = create_account(
+            total_balance=Decimal("100000"),
+            available_balance=Decimal("60000"),
+            positions=positions
+        )
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator_default.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Current exposure = 40% (0.4)
+        # Available exposure = 80% - 40% = 40% (0.4)
+        # Base risk = 60000 * 0.01 = 600
+        # Exposure limited risk = 60000 * 0.4 = 24000
+        # Risk amount = min(600, 24000) = 600 (base risk is lower)
+        # Position size = 600 / 5 = 120
+        assert position_size == Decimal("120")
+
+    def test_position_size_limited_by_exposure_cap(self, calculator_custom_exposure):
+        """Test that position size is limited when approaching exposure cap."""
+        # Current positions: 45% exposure (45000 / 100000)
+        positions = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="long",
+                size=Decimal("1"),
+                entry_price=Decimal("45000"),
+                unrealized_pnl=Decimal("0"),
+                leverage=10
+            )
+        ]
+        account = create_account(
+            total_balance=Decimal("100000"),
+            available_balance=Decimal("55000"),
+            positions=positions
+        )
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator_custom_exposure.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Current exposure = 45% (0.45)
+        # Available exposure = 50% - 45% = 5% (0.05)
+        # Base risk = 55000 * 0.01 = 550
+        # Exposure limited risk = 55000 * 0.05 = 2750
+        # Risk amount = min(550, 2750) = 550 (base risk is lower)
+        # Position size = 550 / 5 = 110
+        assert position_size == Decimal("110")
+
+    def test_position_size_zero_when_exposure_full(self, calculator_default):
+        """Test that position size is zero when exposure is at or above limit."""
+        # Current positions: 80% exposure (at limit)
+        positions = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="long",
+                size=Decimal("2"),
+                entry_price=Decimal("40000"),
+                unrealized_pnl=Decimal("0"),
+                leverage=10
+            )
+        ]
+        account = create_account(
+            total_balance=Decimal("100000"),
+            available_balance=Decimal("20000"),
+            positions=positions
+        )
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator_default.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Current exposure = 80% (0.8)
+        # Available exposure = 80% - 80% = 0
+        # Risk amount = 0 (no available exposure)
+        assert position_size == Decimal("0")
+        assert leverage == 1
+
+    def test_position_size_with_leverage_cap(self, calculator_default):
         """Test that position size respects leverage cap."""
         account = create_account(total_balance=Decimal("10000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("99")  # 1 stop distance
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -169,15 +315,15 @@ class TestCalculatePositionSize:
         # Position size = 100 / 1 = 100
         # Position value = 100 * 100 = 10000
         # Leverage = 10000 / 10000 = 1x
-        assert leverage <= calculator.config.max_leverage
+        assert leverage <= calculator_default.config.max_leverage
 
-    def test_position_size_tight_stop_requires_higher_leverage(self, calculator):
+    def test_position_size_tight_stop_requires_higher_leverage(self, calculator_default):
         """Test that tight stop-loss requires higher leverage."""
         account = create_account(total_balance=Decimal("10000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("99.9")  # 0.1 stop distance
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -186,44 +332,45 @@ class TestCalculatePositionSize:
         # Position size = 100 / 0.1 = 1000
         # Position value = 1000 * 100 = 100000
         # Leverage required = 100000 / 10000 = 10x
-        assert leverage == calculator.config.max_leverage
+        assert leverage == calculator_default.config.max_leverage
 
-    def test_position_size_zero_balance(self, calculator):
+    def test_position_size_zero_balance(self, calculator_default):
         """Test position size is zero with no balance."""
         account = create_account(total_balance=Decimal("0"))
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
         assert position_size == Decimal("0")
         assert leverage == 1
 
-    def test_position_size_stop_loss_distance_zero_raises(self, calculator):
+    def test_position_size_stop_loss_distance_zero_raises(self, calculator_default):
         """Test that zero stop-loss distance raises DataQualityWarning (W-001)."""
         account = create_account(total_balance=Decimal("100000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("100")  # Same as entry, distance = 0
 
         with pytest.raises(DataQualityWarning) as exc_info:
-            calculator.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
+            calculator_default.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
 
         assert exc_info.value.error_code == "W-001"
         assert "Stop loss distance is zero" in str(exc_info.value)
 
-    def test_position_size_short_direction(self, calculator):
+    def test_position_size_short_direction(self, calculator_default):
         """Test position size calculation for SHORT."""
-        account = create_account(total_balance=Decimal("100000"))
+        # Use same parameters as basic formula test for consistency
+        account = create_account(total_balance=Decimal("100000"), available_balance=Decimal("100000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("105")  # 5 stop distance
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.SHORT
         )
 
-        # Same formula as LONG
+        # Same formula as LONG: 100000 * 0.01 / 5 = 200
         assert position_size == Decimal("200")
 
 
@@ -418,3 +565,185 @@ class TestStopLossDistanceZero:
             calculator.calculate_position_size(account, entry_price, stop_loss, Direction.SHORT)
 
         assert exc_info.value.error_code == "W-001"
+
+
+class TestAdvancedBoundaryCases:
+    """Test advanced boundary cases for Scheme B dynamic risk calculation."""
+
+    @pytest.fixture
+    def calculator(self):
+        """Create risk calculator with default config."""
+        config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(config)
+
+    def test_position_size_with_unrealized_loss(self, calculator):
+        """Test that unrealized loss does not directly affect calculation (uses available_balance)."""
+        positions = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="long",
+                size=Decimal("1"),
+                entry_price=Decimal("40000"),
+                unrealized_pnl=Decimal("-5000"),  # Losing position
+                leverage=10
+            )
+        ]
+        # available_balance already reflects the margin locked, but not unrealized loss
+        account = create_account(
+            total_balance=Decimal("95000"),  # Reduced by unrealized loss
+            available_balance=Decimal("55000"),  # Available for new positions
+            unrealized_pnl=Decimal("-5000"),
+            positions=positions
+        )
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Uses available_balance = 55000
+        # Risk amount = 55000 * 0.01 = 550
+        # Position size = 550 / 5 = 110
+        assert position_size == Decimal("110")
+
+    def test_position_size_with_unrealized_profit(self, calculator):
+        """Test that unrealized profit increases total_balance but calculation uses available_balance."""
+        positions = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="long",
+                size=Decimal("1"),
+                entry_price=Decimal("40000"),
+                unrealized_pnl=Decimal("+5000"),  # Winning position
+                leverage=10
+            )
+        ]
+        account = create_account(
+            total_balance=Decimal("105000"),  # Increased by unrealized profit
+            available_balance=Decimal("65000"),  # More available due to profit
+            unrealized_pnl=Decimal("+5000"),
+            positions=positions
+        )
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Uses available_balance = 65000
+        # Risk amount = 65000 * 0.01 = 650
+        # Position size = 650 / 5 = 130
+        assert position_size == Decimal("130")
+
+    def test_position_size_multiple_positions_consume_exposure(self, calculator):
+        """Test that multiple positions correctly consume exposure room."""
+        positions = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="long",
+                size=Decimal("1"),
+                entry_price=Decimal("20000"),
+                unrealized_pnl=Decimal("0"),
+                leverage=10
+            ),
+            PositionInfo(
+                symbol="ETH/USDT:USDT",
+                side="long",
+                size=Decimal("10"),
+                entry_price=Decimal("1500"),
+                unrealized_pnl=Decimal("0"),
+                leverage=10
+            )
+        ]
+        # Total position value = 20000 + 15000 = 35000 (35% exposure)
+        account = create_account(
+            total_balance=Decimal("100000"),
+            available_balance=Decimal("65000"),
+            unrealized_pnl=Decimal("0"),
+            positions=positions
+        )
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Current exposure = 35%
+        # Available exposure = 80% - 35% = 45%
+        # Base risk = 65000 * 0.01 = 650
+        # Exposure limited risk = 65000 * 0.45 = 29250
+        # Risk amount = min(650, 29250) = 650
+        # Position size = 650 / 5 = 130
+        assert position_size == Decimal("130")
+
+    def test_position_size_extreme_exposure_limit(self, calculator):
+        """Test with very tight exposure limit (10%)."""
+        config = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+            max_total_exposure=Decimal("0.1")  # Only 10% total exposure allowed
+        )
+        tight_calculator = RiskCalculator(config)
+
+        positions = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="long",
+                size=Decimal("1"),
+                entry_price=Decimal("8000"),  # 8% exposure
+                unrealized_pnl=Decimal("0"),
+                leverage=10
+            )
+        ]
+        account = create_account(
+            total_balance=Decimal("100000"),
+            available_balance=Decimal("92000"),
+            positions=positions
+        )
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = tight_calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Current exposure = 8%
+        # Available exposure = 10% - 8% = 2%
+        # Base risk = 92000 * 0.01 = 920
+        # Exposure limited risk = 92000 * 0.02 = 1840
+        # Risk amount = min(920, 1840) = 920 (base risk is still lower)
+        # Position size = 920 / 5 = 184
+        assert position_size == Decimal("184")
+
+    def test_position_size_exposure_already_exceeded(self, calculator):
+        """Test that zero position is returned when exposure already exceeds limit."""
+        positions = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="long",
+                size=Decimal("3"),
+                entry_price=Decimal("30000"),  # 90% exposure
+                unrealized_pnl=Decimal("0"),
+                leverage=10
+            )
+        ]
+        account = create_account(
+            total_balance=Decimal("100000"),
+            available_balance=Decimal("10000"),
+            positions=positions
+        )
+        entry_price = Decimal("100")
+        stop_loss = Decimal("95")
+
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+
+        # Current exposure = 90% (> 80% limit)
+        # Available exposure = max(0, 80% - 90%) = 0
+        # Risk amount = 0
+        assert position_size == Decimal("0")
+        assert leverage == 1

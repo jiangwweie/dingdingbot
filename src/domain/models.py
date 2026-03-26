@@ -2,7 +2,7 @@
 Global Pydantic models - shared contract between Dev A (Infrastructure) and Dev B (Domain).
 DO NOT modify without architect approval.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from decimal import Decimal
 from typing import Optional, List, Dict, Any, Union, Annotated, Literal
 from enum import Enum
@@ -85,6 +85,35 @@ class SignalResult(BaseModel):
     kline_timestamp: int = 0     # K-line close timestamp in milliseconds (default 0 for legacy compatibility)
     strategy_name: str = "unknown"  # Strategy name that generated this signal (e.g., "pinbar", "engulfing")
     score: float = 0.0           # Pattern quality score (0.0 ~ 1.0). **NOTE**: This is for UI display and sorting only, NOT for financial calculations. Financial calculations use Decimal exclusively.
+
+
+# ============================================================
+# Risk Configuration Models
+# ============================================================
+class RiskConfig(BaseModel):
+    """Risk management configuration"""
+    max_loss_percent: Decimal = Field(..., description="Max loss per trade as % of balance")
+    max_leverage: int = Field(..., ge=1, le=125, description="Maximum leverage allowed")
+    max_total_exposure: Decimal = Field(
+        default=Decimal('0.8'),
+        ge=0,
+        le=1,
+        description="Maximum total exposure as % of balance (e.g., 0.8 = 80%)"
+    )
+
+    @field_validator('max_loss_percent')
+    @classmethod
+    def validate_loss_percent(cls, v):
+        if v <= 0 or v > Decimal('1'):
+            raise ValueError("Max loss percent must be between 0 and 1")
+        return v
+
+    @field_validator('max_total_exposure')
+    @classmethod
+    def validate_total_exposure(cls, v):
+        if v < 0 or v > Decimal('1'):
+            raise ValueError("Max total exposure must be between 0 and 1")
+        return v
 
 
 # ============================================================

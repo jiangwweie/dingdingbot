@@ -309,3 +309,53 @@
 4. S3-2: 动态风险头寸计算
 
 ---
+
+## 2026-03-27 - 会话 11 (已完成) - S3-2 动态风险头寸计算
+
+**目标**: 实现方案 B 动态风险头寸计算（可用余额 + 持仓占用）
+
+**进展**:
+- [x] **S3-2 代码实现** ✅
+  - `src/domain/models.py`: 新增 `RiskConfig` 类（带 `max_total_exposure` 字段，默认 80%）
+  - `src/domain/risk_calculator.py`: 升级 `calculate_position_size()` 实现方案 B 逻辑
+  - `src/application/config_manager.py`: 导入 `RiskConfig` from models，删除重复定义
+
+- [x] **S3-2-1: RiskConfig 配置验证测试** ✅
+  - 5 个配置验证测试全部通过
+
+- [x] **S3-2-2: 风险计算核心逻辑测试** ✅
+  - 10 个核心逻辑测试全部通过
+  - 验证使用 `available_balance` 而非 `total_balance`
+  - 验证持仓占用风险降低逻辑
+
+- [x] **S3-2-3: 边界场景与集成测试** ✅
+  - 5 个边界场景测试全部通过
+  - 未实现盈亏影响测试
+  - 多持仓场景测试
+  - 极端暴露限制测试
+
+**测试结果**:
+```
+tests/unit/test_risk_calculator.py: 35/35 通过 (100%)
+tests/unit/ 总计：301/308 通过 (97.7%)
+```
+
+**交付物**:
+- 动态风险头寸计算功能（方案 B）
+- 配置参数 `max_total_exposure` (默认 80%)
+- 21 个新增测试用例
+- 循环导入问题修复
+
+**S3-2 完成总结**:
+| 步骤 | 状态 | 文件 |
+|------|------|------|
+| S3-2-1 | ✅ 完成 | src/domain/models.py |
+| S3-2-2 | ✅ 完成 | src/domain/risk_calculator.py |
+| S3-2-3 | ✅ 完成 | src/application/config_manager.py |
+| S3-2-4 | ✅ 完成 | tests/unit/test_risk_calculator.py |
+
+**下一步**:
+- [ ] 提交 S3-2 代码（待用户确认）
+- [ ] S3-1（多周期数据对齐优化）暂缓
+
+---

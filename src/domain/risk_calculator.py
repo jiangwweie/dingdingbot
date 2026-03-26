@@ -12,33 +12,8 @@ from .models import (
     Direction,
     AccountSnapshot,
     PositionInfo,
+    RiskConfig,
 )
-
-
-class RiskConfig:
-    """Risk management configuration."""
-
-    def __init__(
-        self,
-        max_loss_percent: Decimal,
-        max_leverage: int,
-    ):
-        """
-        Initialize risk configuration.
-
-        Args:
-            max_loss_percent: Maximum loss as fraction of account balance (e.g., 0.01 = 1%)
-            max_leverage: Maximum allowed leverage
-        """
-        if not (Decimal(0) < max_loss_percent <= Decimal(1)):
-            raise ValueError(
-                f"max_loss_percent must be in (0, 1], got {max_loss_percent}"
-            )
-        if max_leverage < 1:
-            raise ValueError(f"max_leverage must be >= 1, got {max_leverage}")
-
-        self.max_loss_percent = Decimal(max_loss_percent)
-        self.max_leverage = int(max_leverage)
 
 
 class RiskCalculator:
@@ -104,7 +79,11 @@ class RiskCalculator:
 
         Core formula:
         Position_Size = Risk_Amount / Stop_Distance
-        where Risk_Amount = Balance * Max_Loss_Percent
+        where Risk_Amount = Available_Balance * Max_Loss_Percent
+
+        Dynamic risk adjustment (Scheme B):
+        - Considers current position exposure
+        - Reduces risk when approaching max_total_exposure limit
 
         Args:
             account: Current account snapshot
@@ -115,38 +94,66 @@ class RiskCalculator:
         Returns:
             Tuple of (position_size, leverage_to_use)
         """
-        # Use total balance as per requirements
-        balance = account.total_balance
-        if balance <= Decimal(0):
+        # Handle zero/negative balance
+        if account.total_balance <= Decimal(0):
             return Decimal(0), 1
 
-        # Calculate risk amount
-        risk_amount = balance * self.config.max_loss_percent
+        if account.available_balance <= Decimal(0):
+            return Decimal(0), 1
 
-        # Calculate stop-loss distance (absolute price difference)
+        # Step 1: Calculate current total exposure from all positions
+        total_position_value = sum(
+            pos.size * pos.entry_price for pos in account.positions
+        )
+
+        # Step 2: Calculate current exposure ratio
+        current_exposure_ratio = (
+            total_position_value / account.total_balance
+            if account.total_balance > 0
+            else Decimal(0)
+        )
+
+        # Step 3: Calculate available exposure room
+        available_exposure = max(
+            Decimal(0),
+            self.config.max_total_exposure - current_exposure_ratio
+        )
+
+        # Step 4: Calculate base risk amount using available balance
+        base_risk_amount = account.available_balance * self.config.max_loss_percent
+
+        # Step 5: Apply exposure limit - reduce risk if approaching limit
+        exposure_limited_risk = account.available_balance * available_exposure
+        risk_amount = min(base_risk_amount, exposure_limited_risk)
+
+        # If no risk budget available, return zero position
+        if risk_amount <= Decimal(0):
+            return Decimal(0), 1
+
+        # Step 6: Calculate stop-loss distance (absolute price difference)
         stop_distance = abs(entry_price - stop_loss)
         if stop_distance == Decimal(0):
             from .exceptions import DataQualityWarning
             raise DataQualityWarning("Stop loss distance is zero (doji candle)", "W-001")
 
-        # Calculate position size: risk_amount / stop_distance
+        # Step 7: Calculate position size: risk_amount / stop_distance
         position_size = risk_amount / stop_distance
 
-        # Apply leverage cap
-        max_position_value = balance * Decimal(self.config.max_leverage)
+        # Step 8: Apply leverage cap
+        max_position_value = account.available_balance * Decimal(self.config.max_leverage)
         max_position_size = max_position_value / entry_price
         position_size = min(position_size, max_position_size)
 
-        # Calculate leverage to use
+        # Step 9: Calculate leverage to use
         position_value = position_size * entry_price
-        leverage_required = position_value / balance if balance > 0 else Decimal(1)
+        leverage_required = position_value / account.available_balance if account.available_balance > 0 else Decimal(1)
         leverage_to_use = min(
             int(leverage_required.quantize(Decimal("1"), rounding=ROUND_DOWN)) + 1,
             self.config.max_leverage,
         )
         leverage_to_use = max(leverage_to_use, 1)
 
-        # Quantize to reasonable precision
+        # Step 10: Quantize to reasonable precision
         position_size = position_size.quantize(self._precision, rounding=ROUND_DOWN)
 
         return position_size, leverage_to_use
