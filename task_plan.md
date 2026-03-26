@@ -14,7 +14,7 @@
 **阶段概览**:
 | 阶段 | 任务 | 状态 | 负责人 |
 |------|------|------|--------|
-| F-1 | 定义递归 LogicNode 类型 | pending | backend-dev |
+| F-1 | 定义递归 LogicNode 类型 | completed | backend-dev |
 | F-2 | 实现递归评估引擎 | pending | backend-dev |
 | F-3 | 升级 StrategyDefinition | pending | backend-dev |
 | F-4 | 实现热预览接口 | pending | backend-dev |
