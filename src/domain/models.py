@@ -86,10 +86,6 @@ class SignalResult(BaseModel):
     strategy_name: str = "unknown"  # Strategy name that generated this signal (e.g., "pinbar", "engulfing")
     score: float = 0.0           # Pattern quality score (0.0 ~ 1.0). **NOTE**: This is for UI display and sorting only, NOT for financial calculations. Financial calculations use Decimal exclusively.
 
-    # Legacy fields for backward compatibility (deprecated, will be removed in future)
-    ema_trend: Optional[TrendDirection] = None  # Deprecated: use tags instead
-    mtf_status: Optional[MtfStatus] = None      # Deprecated: use tags instead
-
 
 # ============================================================
 # Domain Layer Internal Models (for Strategy/Filter abstraction)

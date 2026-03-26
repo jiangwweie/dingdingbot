@@ -36,8 +36,7 @@ export interface Signal {
   take_profit?: string;
   position_size: string;
   leverage: number;
-  ema_trend: 'bullish' | 'bearish';
-  mtf_status: 'confirmed' | 'rejected' | 'disabled' | 'unavailable';
+  tags?: Array<{ name: string; value: string }>;  // Dynamic filter tags (e.g., [{"name": "EMA", "value": "Bullish"}])
   status: 'pending' | 'won' | 'lost';
   pnl_ratio?: string | null;
   win_rate?: number;
@@ -45,6 +44,9 @@ export interface Signal {
   score?: number | string | null;
   kline_timestamp?: number;
   risk_reward_info?: string;
+  // Legacy fields (deprecated, kept for backward compatibility with old signals)
+  ema_trend?: 'bullish' | 'bearish';
+  mtf_status?: 'confirmed' | 'rejected' | 'disabled' | 'unavailable';
 }
 
 /**
