@@ -11,6 +11,7 @@ interface TraceTreeViewerProps {
 interface TraceNodeItemProps {
   node: TraceNode;
   depth?: number;
+  key?: React.Key;
 }
 
 /**

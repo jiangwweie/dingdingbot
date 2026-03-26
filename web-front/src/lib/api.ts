@@ -705,3 +705,68 @@ export async function applyStrategy(id: string): Promise<{ success: boolean; mes
   }
   return res.json();
 }
+
+// ============================================================================
+// Strategy Format Conversion Utilities (Legacy -> LogicNode)
+// ============================================================================
+
+/**
+ * Convert legacy StrategyDefinition (flat trigger+filters) to LogicNode (recursive tree)
+ *
+ * Legacy format:
+ * { trigger: TriggerConfig, filters: FilterConfig[], filter_logic: 'AND'|'OR' }
+ *
+ * New format (LogicNode):
+ * { gate: 'AND'|'OR'|'NOT', children: (LogicNode | LeafNode)[] }
+ */
+export function convertStrategyToLogicNode(strategy: StrategyDefinition): import('../types/strategy').LogicNode {
+  // Import types dynamically to avoid circular dependency
+  const children: Array<import('../types/strategy').LogicNode | import('../types/strategy').LeafNode> = [];
+
+  // Add trigger as first child
+  children.push({
+    type: 'trigger',
+    id: strategy.trigger.id,
+    config: strategy.trigger,
+  });
+
+  // Add filters as children
+  for (const filter of strategy.filters) {
+    children.push({
+      type: 'filter',
+      id: filter.id,
+      config: filter,
+    });
+  }
+
+  // Create root AND node (all conditions must pass)
+  return {
+    gate: 'AND',
+    children,
+  };
+}
+
+/**
+ * Convert LogicNode back to legacy StrategyDefinition format
+ */
+export function convertLogicNodeToStrategy(
+  node: import('../types/strategy').LogicNode,
+  strategyName: string
+): StrategyDefinition {
+  const triggerChildren = node.children.filter(
+    (child): child is import('../types/strategy').TriggerLeaf => 'type' in child && child.type === 'trigger'
+  );
+  const filterChildren = node.children.filter(
+    (child): child is import('../types/strategy').FilterLeaf => 'type' in child && child.type === 'filter'
+  );
+
+  return {
+    id: generateId(),
+    name: strategyName,
+    trigger: triggerChildren[0]?.config || { id: generateId(), type: 'pinbar', enabled: true, params: {} },
+    filters: filterChildren.map((f) => f.config),
+    filter_logic: 'AND',
+    is_global: true,
+    apply_to: [],
+  };
+}

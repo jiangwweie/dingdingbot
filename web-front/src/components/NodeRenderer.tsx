@@ -68,7 +68,7 @@ export default function NodeRenderer({
         onRemoveChild={onRemoveChild}
       >
         {node.children.map((child, index) => (
-          <div key={child.id || `child-${index}`} className="ml-4 border-l-2 border-gray-200 pl-4">
+          <div key={('id' in child ? child.id : undefined) || `child-${index}`} className="ml-4 border-l-2 border-gray-200 pl-4">
             <NodeRenderer
               node={child}
               onChange={(newNode) => {

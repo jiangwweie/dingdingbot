@@ -13,30 +13,45 @@
 // Trigger and Filter Config Types
 // ============================================================
 
-export type FilterType =
-  | "ema"
-  | "ema_trend"
-  | "mtf"
-  | "atr"
-  | "volume_surge"
-  | "volatility_filter"
-  | "time_filter"
-  | "price_action";
+// Import types from api.ts for consistency
+import type {
+  TriggerType,
+  FilterType,
+  TriggerConfig as APITriggerConfig,
+  FilterConfig as APIFilterConfig,
+  PinbarParams,
+  EngulfingParams,
+  DojiParams,
+  HammerParams,
+  EmaFilterParams,
+  MtfFilterParams,
+  VolumeSurgeFilterParams,
+  VolatilityFilterParams,
+  TimeFilterParams,
+  PriceActionFilterParams,
+} from '../lib/api';
 
-export interface FilterConfig {
-  id: string;
-  type: FilterType;
-  enabled?: boolean;
-  params: Record<string, unknown>;
+export type { TriggerType, FilterType } from '../lib/api';
+
+/**
+ * Trigger 配置（与 api.ts 兼容）
+ */
+export interface TriggerConfig extends Omit<APITriggerConfig, 'params'> {
+  params: PinbarParams | EngulfingParams | DojiParams | HammerParams | Record<string, unknown>;
 }
 
-export type TriggerType = "pinbar" | "engulfing" | "doji" | "hammer";
-
-export interface TriggerConfig {
-  id: string;
-  type: TriggerType;
-  enabled?: boolean;
-  params: Record<string, unknown>;
+/**
+ * Filter 配置（与 api.ts 兼容）
+ */
+export interface FilterConfig extends Omit<APIFilterConfig, 'params'> {
+  params:
+    | EmaFilterParams
+    | MtfFilterParams
+    | VolumeSurgeFilterParams
+    | VolatilityFilterParams
+    | TimeFilterParams
+    | PriceActionFilterParams
+    | Record<string, unknown>;
 }
 
 // ============================================================
@@ -137,21 +152,21 @@ export interface StrategyDefinition {
  * 判断是否为叶子节点
  */
 export function isLeafNode(node: LogicNode | LeafNode): node is LeafNode {
-  return node.type === "trigger" || node.type === "filter";
+  return "type" in node && (node.type === "trigger" || node.type === "filter");
 }
 
 /**
  * 判断是否为 Trigger 叶子节点
  */
 export function isTriggerLeaf(node: LogicNode | LeafNode): node is TriggerLeaf {
-  return node.type === "trigger";
+  return "type" in node && node.type === "trigger";
 }
 
 /**
  * 判断是否为 Filter 叶子节点
  */
 export function isFilterLeaf(node: LogicNode | LeafNode): node is FilterLeaf {
-  return node.type === "filter";
+  return "type" in node && node.type === "filter";
 }
 
 /**
