@@ -225,55 +225,39 @@ class BacktestRequest(BaseModel):
 # ============================================================
 # Dynamic Rule Engine Models (Phase K)
 # ============================================================
-from typing import Union, Literal, Dict, Any, Optional
+# Import from logic_tree to avoid circular imports
+from src.domain.logic_tree import TriggerConfig, FilterConfig
 from pydantic import model_validator
-
-
-class FilterConfig(BaseModel):
-    """Unified dynamic Filter Configuration model."""
-    id: str = Field(default_factory=lambda: "")
-    type: Literal["ema", "ema_trend", "mtf", "atr", "volume_surge", "volatility_filter", "time_filter", "price_action"] = Field(..., description="Filter type (e.g., 'ema_trend', 'mtf')")
-    enabled: bool = Field(default=True, description="Whether this filter is active")
-    params: Dict[str, Any] = Field(default_factory=dict, description="Filter parameters")
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy(cls, data: Any) -> Any:
-        """Migrate legacy flat parameters into nested params dictionary."""
-        if isinstance(data, dict):
-            if "params" not in data:
-                params = {}
-                for k in list(data.keys()):
-                    if k not in ("id", "type", "enabled"):
-                        params[k] = data.pop(k)
-                data["params"] = params
-        return data
-
-class TriggerConfig(BaseModel):
-    """Trigger pattern configuration"""
-    id: str = Field(default_factory=lambda: "")
-    type: Literal["pinbar", "engulfing", "doji", "hammer"] = Field(..., description="Trigger pattern type")
-    enabled: bool = Field(default=True, description="Whether this trigger is active")
-    params: Dict[str, Any] = Field(default_factory=dict, description="Pattern-specific parameters")
 
 
 class StrategyDefinition(BaseModel):
     """
     Dynamic strategy definition with attached filters.
+
+    支持新旧两种格式：
+    - 新格式使用 logic_tree 字段（推荐）
+    - 旧格式使用 triggers/filters 字段（已废弃，自动迁移）
     """
     id: str = Field(default_factory=lambda: "")
     name: str = Field(..., description="Strategy name (e.g., 'pinbar', 'engulfing')")
-    
+
+    # ===== 新字段（推荐）=====
+    logic_tree: Optional[Union["LogicNode", "LeafNode"]] = Field(
+        default=None,
+        description="Recursive logic tree (recommended)"
+    )
+
+    # ===== 旧字段（已废弃，保留用于向后兼容）=====
     # Core pattern triggers (supports multiple with AND/OR logic)
-    triggers: List[TriggerConfig] = Field(default_factory=list, description="Core pattern triggers")
-    trigger_logic: Literal["AND", "OR"] = Field(default="OR", description="How to combine triggers")
-    
+    triggers: List[TriggerConfig] = Field(default_factory=list, description="Core pattern triggers (deprecated)")
+    trigger_logic: Literal["AND", "OR"] = Field(default="OR", description="How to combine triggers (deprecated)")
+
     # Legacy trigger (kept for backward compatibility)
     trigger: Optional[TriggerConfig] = Field(default=None, description="The core pattern trigger (legacy)")
-    
-    filters: List[FilterConfig] = Field(default_factory=list, description="Attached filter chain")
-    filter_logic: Literal["AND", "OR"] = Field(default="AND", description="How to combine filter results")
-    
+
+    filters: List[FilterConfig] = Field(default_factory=list, description="Attached filter chain (deprecated)")
+    filter_logic: Literal["AND", "OR"] = Field(default="AND", description="How to combine filter results (deprecated)")
+
     # Environment scope (Fallback Mechanism)
     is_global: bool = Field(default=True, description="Applies to all symbols and timeframes")
     apply_to: List[str] = Field(default_factory=list, description="Specific symbol:timeframe scopes e.g., 'BTC/USDT:USDT:15m'")
@@ -286,6 +270,124 @@ class StrategyDefinition(BaseModel):
             if "trigger" in data and ("triggers" not in data or not data["triggers"]):
                 data["triggers"] = [data["trigger"]]
         return data
+
+    @model_validator(mode="after")
+    def migrate_to_logic_tree(self) -> "StrategyDefinition":
+        """
+        如果 logic_tree 为空且存在旧字段，自动迁移到 logic_tree
+
+        触发 DeprecationWarning 警告
+        """
+        import warnings
+
+        # 只有在 logic_tree 为空且存在 triggers 时才迁移
+        if self.logic_tree is None and (self.triggers or self.trigger):
+            warnings.warn(
+                f"Strategy '{self.name}' 使用已废弃的 triggers/filters 字段，"
+                f"将自动迁移到 logic_tree。请使用 logic_tree 字段。",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            self.logic_tree = self._build_from_legacy()
+        return self
+
+    def _build_from_legacy(self) -> Union["LogicNode", "LeafNode"]:
+        """
+        从旧字段构建逻辑树
+
+        构建逻辑：
+        1. 单个 trigger → 直接使用 TriggerLeaf
+        2. 多个 trigger → 用 trigger_logic 组合
+        3. 单个 filter → 直接使用 FilterLeaf
+        4. 多个 filter → 用 filter_logic 组合
+        5. trigger 组 AND filter 组 → AND 组合
+        """
+        from src.domain.logic_tree import LogicNode, TriggerLeaf, FilterLeaf
+
+        children = []
+
+        # 构建 trigger 部分
+        if self.triggers:
+            trigger_leafs = [
+                TriggerLeaf(type="trigger", id=t.id or f"trigger_{i}", config=t)
+                for i, t in enumerate(self.triggers)
+            ]
+            if len(trigger_leafs) == 1:
+                children.append(trigger_leafs[0])
+            else:
+                children.append(LogicNode(
+                    gate=self.trigger_logic,
+                    children=trigger_leafs
+                ))
+
+        # 构建 filter 部分
+        if self.filters:
+            filter_leafs = [
+                FilterLeaf(type="filter", id=f.id or f"filter_{i}", config=f)
+                for i, f in enumerate(self.filters)
+            ]
+            if len(filter_leafs) == 1:
+                children.append(filter_leafs[0])
+            else:
+                children.append(LogicNode(
+                    gate=self.filter_logic,
+                    children=filter_leafs
+                ))
+
+        # 合并
+        if len(children) == 0:
+            raise ValueError(f"Strategy '{self.name}' 必须至少有一个 trigger 或 filter")
+        if len(children) == 1:
+            return children[0]
+        return LogicNode(gate="AND", children=children)
+
+    def get_triggers_from_logic_tree(self) -> List[TriggerConfig]:
+        """
+        从 logic_tree 中提取所有 Trigger 配置
+
+        用于向后兼容旧的 create_dynamic_runner() 接口
+
+        Returns:
+            List[TriggerConfig] - 所有 trigger 配置
+        """
+        from src.domain.logic_tree import LogicNode, TriggerLeaf
+
+        triggers = []
+
+        def extract(node):
+            if isinstance(node, TriggerLeaf):
+                triggers.append(node.config)
+            elif isinstance(node, LogicNode):
+                for child in node.children:
+                    extract(child)
+
+        if self.logic_tree:
+            extract(self.logic_tree)
+        return triggers
+
+    def get_filters_from_logic_tree(self) -> List[FilterConfig]:
+        """
+        从 logic_tree 中提取所有 Filter 配置
+
+        用于向后兼容旧的 create_dynamic_runner() 接口
+
+        Returns:
+            List[FilterConfig] - 所有 filter 配置
+        """
+        from src.domain.logic_tree import LogicNode, FilterLeaf
+
+        filters = []
+
+        def extract(node):
+            if isinstance(node, FilterLeaf):
+                filters.append(node.config)
+            elif isinstance(node, LogicNode):
+                for child in node.children:
+                    extract(child)
+
+        if self.logic_tree:
+            extract(self.logic_tree)
+        return filters
 
 
 class SignalStats(BaseModel):
@@ -330,3 +432,10 @@ class BacktestReport(BaseModel):
 
     # Raw attempts (optional, can be excluded for large reports)
     attempts: List[Dict[str, Any]] = Field(default_factory=list, description="Detailed attempt records")
+
+
+# ============================================================
+# Rebuild StrategyDefinition to resolve forward references
+# ============================================================
+from src.domain.logic_tree import LogicNode, LeafNode
+StrategyDefinition.model_rebuild()

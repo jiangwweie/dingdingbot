@@ -950,6 +950,8 @@ def create_dynamic_runner(
     """
     Create a DynamicStrategyRunner from strategy definitions.
 
+    优先使用 logic_tree 字段（新格式），如果不存在则回退到旧字段。
+
     Args:
         strategy_definitions: List of StrategyDefinition from config
         core_config: Optional CoreConfig for default parameters
@@ -960,12 +962,22 @@ def create_dynamic_runner(
     strategies_with_filters = []
 
     for strat_def in strategy_definitions:
-        triggers = getattr(strat_def, "triggers", [])
-        if not triggers:
-            # Fallback to legacy trigger
-            legacy_trigger = getattr(strat_def, "trigger", None)
-            if legacy_trigger:
-                triggers = [legacy_trigger]
+        # 优先使用 logic_tree 字段（新格式）
+        logic_tree = getattr(strat_def, "logic_tree", None)
+
+        if logic_tree is not None:
+            # 新格式：从 logic_tree 提取 triggers 和 filters
+            triggers = strat_def.get_triggers_from_logic_tree()
+            filters_config = strat_def.get_filters_from_logic_tree()
+        else:
+            # 旧格式：使用 triggers/filters 字段
+            triggers = getattr(strat_def, "triggers", [])
+            if not triggers:
+                # Fallback to legacy trigger
+                legacy_trigger = getattr(strat_def, "trigger", None)
+                if legacy_trigger:
+                    triggers = [legacy_trigger]
+            filters_config = getattr(strat_def, "filters", [])
 
         if not triggers:
             continue
@@ -975,7 +987,7 @@ def create_dynamic_runner(
         apply_to = getattr(strat_def, "apply_to", [])
 
         # Create filter chain from config
-        filters = FilterFactory.create_chain(strat_def.filters)
+        filters = FilterFactory.create_chain(filters_config)
 
         # Handle OR logic by expanding to multiple independent runners
         # (AND logic for morphological patterns is rare, treated as OR for now)
