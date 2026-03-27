@@ -14,11 +14,16 @@ from typing import Optional, Dict, List, Any
 from decimal import Decimal
 
 from src.domain.models import (
-    KlineData, SignalResult, AccountSnapshot, Direction,
+    KlineData, SignalResult, AccountSnapshot, Direction, TrendDirection,
     StrategyDefinition, SignalAttempt,
 )
 from src.domain.strategy_engine import create_dynamic_runner
 from src.domain.risk_calculator import RiskCalculator, RiskConfig
+from src.domain.indicators import EMACalculator
+from src.domain.timeframe_utils import (
+    get_higher_timeframe,
+    get_last_closed_kline_index,
+)
 from src.infrastructure.notifier import NotificationService, get_notification_service
 from src.infrastructure.logger import logger
 from src.infrastructure.signal_repository import SignalRepository
@@ -74,6 +79,10 @@ class SignalPipeline:
         # Signal deduplication cache: key = "symbol:timeframe:direction:strategy", value = last fired timestamp
         self._signal_cooldown_cache: Dict[str, float] = {}
 
+        # S3-1: MTF EMA indicators (one per symbol:timeframe combination)
+        self._mtf_ema_indicators: Dict[str, EMACalculator] = {}
+        self._mtf_ema_period = config_manager.user_config.mtf_ema_period or 60
+
         # Build dynamic strategy runner from config (uses _kline_history for warmup)
         self._runner = self._build_and_warmup_runner()
 
@@ -102,6 +111,9 @@ class SignalPipeline:
     def _ensure_flush_worker(self) -> None:
         """Ensure flush worker is running (lazy initialization)."""
         self._ensure_async_primitives()
+        # Only start flush worker if async primitives are available
+        if self._attempts_queue is None or self._runner_lock is None:
+            return  # No event loop available (e.g., during testing)
         if self._flush_task is None or self._flush_task.done():
             self._start_flush_worker()
 
@@ -344,13 +356,93 @@ class SignalPipeline:
         # Update runner state
         self._runner.update_state(kline)
 
-        # Run all strategies with attempt tracking
-        # Note: higher_tf_trends is optional, pass empty dict for now
+        # S3-1: Calculate higher timeframe trends for MTF filtering
+        higher_tf_trends = self._get_closest_higher_tf_trends(kline)
+
+        # Log MTF status for debugging
+        if higher_tf_trends:
+            logger.debug(
+                f"MTF trends for {kline.symbol}:{kline.timeframe}: "
+                f"{higher_tf_trends}"
+            )
+
+        # Run all strategies with MTF trends
         return self._runner.run_all(
             kline=kline,
-            higher_tf_trends={},  # Empty dict for no higher timeframe trends
+            higher_tf_trends=higher_tf_trends,  # Changed from {} to calculated trends
             kline_history=kline_history,
         )
+
+    def _get_closest_higher_tf_trends(self, kline: KlineData) -> Dict[str, TrendDirection]:
+        """
+        Calculate higher timeframe trends for MTF filtering.
+
+        Uses the last CLOSED kline of each higher timeframe to ensure
+        data consistency and avoid using incomplete running klines.
+
+        Args:
+            kline: Current kline that triggered a signal
+
+        Returns:
+            Dict mapping timeframe to TrendDirection
+            e.g., {"1h": TrendDirection.BULLISH, "4h": TrendDirection.BEARISH}
+        """
+        result: Dict[str, TrendDirection] = {}
+        current_tf = kline.timeframe
+
+        # Get higher timeframe from config
+        higher_tf = get_higher_timeframe(
+            current_tf,
+            self._config_manager.user_config.mtf_mapping
+        )
+
+        if higher_tf is None:
+            return result  # No higher timeframe (e.g., 1w)
+
+        # Fetch higher timeframe klines from history
+        key = f"{kline.symbol}:{higher_tf}"
+        higher_tf_klines = self._kline_history.get(key, [])
+
+        if len(higher_tf_klines) == 0:
+            return result  # No data available
+
+        # Find last closed kline index
+        last_closed_idx = get_last_closed_kline_index(
+            higher_tf_klines,
+            kline.timestamp,
+            higher_tf
+        )
+
+        if last_closed_idx < 0:
+            return result  # No closed kline found
+
+        last_closed_kline = higher_tf_klines[last_closed_idx]
+
+        # Get or create EMA indicator for this symbol:timeframe
+        ema_key = f"{kline.symbol}:{higher_tf}"
+        if ema_key not in self._mtf_ema_indicators:
+            self._mtf_ema_indicators[ema_key] = EMACalculator(period=self._mtf_ema_period)
+
+        ema = self._mtf_ema_indicators[ema_key]
+
+        # Update EMA with last closed kline's close price
+        ema.update(last_closed_kline.close)
+
+        if not ema.is_ready:
+            return result  # EMA needs more data
+
+        # Determine trend direction from EMA
+        # Use price vs EMA to determine trend
+        ema_value = ema.value
+        if ema_value is None:
+            return result
+
+        if last_closed_kline.close > ema_value:
+            result[higher_tf] = TrendDirection.BULLISH
+        else:
+            result[higher_tf] = TrendDirection.BEARISH
+
+        return result
 
     def _calculate_risk(self, kline: KlineData, direction: Direction, attempt: SignalAttempt, strategy_name: str = "unknown", score: float = 0.0) -> SignalResult:
         """

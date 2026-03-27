@@ -81,7 +81,7 @@ class TestSignalDeduplication:
 
         return pipeline
 
-    def _force_signal(self, pipeline, kline, direction=Direction.LONG):
+    async def _force_signal(self, pipeline, kline, direction=Direction.LONG):
         """
         Force a signal to fire by mocking the strategy engine.
         This bypasses actual pinbar detection for testing deduplication logic.
@@ -102,9 +102,10 @@ class TestSignalDeduplication:
 
         # Mock _run_strategy to return a list with our forced signal
         with patch.object(pipeline, '_run_strategy', return_value=[mock_attempt]):
-            asyncio.run(pipeline.process_kline(kline))
+            await pipeline.process_kline(kline)
 
-    def test_signal_dedup_within_cooldown(self, pipeline):
+    @pytest.mark.asyncio
+    async def test_signal_dedup_within_cooldown(self, pipeline):
         """
         Test that signals within cooldown period are deduplicated.
         First signal should be sent, second identical signal should be skipped.
@@ -113,14 +114,15 @@ class TestSignalDeduplication:
         kline2 = create_kline(close=Decimal("151"), timestamp=1234567890000 + 60000)  # 1 minute later
 
         # First signal should succeed
-        self._force_signal(pipeline, kline1, Direction.LONG)
+        await self._force_signal(pipeline, kline1, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 1
 
         # Second signal within cooldown should be deduplicated
-        self._force_signal(pipeline, kline2, Direction.LONG)
+        await self._force_signal(pipeline, kline2, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 1  # Still 1, not 2
 
-    def test_signal_dedup_different_direction(self, pipeline):
+    @pytest.mark.asyncio
+    async def test_signal_dedup_different_direction(self, pipeline):
         """
         Test that LONG and SHORT signals have separate dedup keys.
         A LONG signal should not affect SHORT signal deduplication.
@@ -129,14 +131,15 @@ class TestSignalDeduplication:
         kline_short = create_kline(close=Decimal("149"))
 
         # LONG signal
-        self._force_signal(pipeline, kline_long, Direction.LONG)
+        await self._force_signal(pipeline, kline_long, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 1
 
         # SHORT signal should NOT be deduplicated (different direction)
-        self._force_signal(pipeline, kline_short, Direction.SHORT)
+        await self._force_signal(pipeline, kline_short, Direction.SHORT)
         assert pipeline._notification_service.send_signal.call_count == 2
 
-    def test_signal_dedup_expires_after_cooldown(self, pipeline):
+    @pytest.mark.asyncio
+    async def test_signal_dedup_expires_after_cooldown(self, pipeline):
         """
         Test that signals expire after cooldown period.
         Signal fired 5 hours ago should allow new signal.
@@ -148,7 +151,7 @@ class TestSignalDeduplication:
         kline2 = create_kline(close=Decimal("151"), timestamp=1234567890000 + 120000)  # 2 minutes later
 
         # First signal
-        self._force_signal(pipeline, kline1, Direction.LONG)
+        await self._force_signal(pipeline, kline1, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 1
 
         # Manually set the cache to expire (simulate time passage)
@@ -156,10 +159,11 @@ class TestSignalDeduplication:
         pipeline._signal_cooldown_cache[dedup_key] = 0  # Force expiry
 
         # Second signal after cooldown expiry should succeed
-        self._force_signal(pipeline, kline2, Direction.LONG)
+        await self._force_signal(pipeline, kline2, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 2
 
-    def test_signal_dedup_different_symbol(self, pipeline):
+    @pytest.mark.asyncio
+    async def test_signal_dedup_different_symbol(self, pipeline):
         """
         Test that different symbols have separate dedup keys.
         """
@@ -167,14 +171,15 @@ class TestSignalDeduplication:
         kline_eth = create_kline(symbol="ETH/USDT:USDT", close=Decimal("2200"))
 
         # BTC signal
-        self._force_signal(pipeline, kline_btc, Direction.LONG)
+        await self._force_signal(pipeline, kline_btc, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 1
 
         # ETH signal should NOT be deduplicated (different symbol)
-        self._force_signal(pipeline, kline_eth, Direction.LONG)
+        await self._force_signal(pipeline, kline_eth, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 2
 
-    def test_signal_dedup_different_timeframe(self, pipeline):
+    @pytest.mark.asyncio
+    async def test_signal_dedup_different_timeframe(self, pipeline):
         """
         Test that different timeframes have separate dedup keys.
         """
@@ -182,20 +187,21 @@ class TestSignalDeduplication:
         kline_1h = create_kline(timeframe="1h", close=Decimal("151"))
 
         # 15m signal
-        self._force_signal(pipeline, kline_15m, Direction.LONG)
+        await self._force_signal(pipeline, kline_15m, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 1
 
         # 1h signal should NOT be deduplicated (different timeframe)
-        self._force_signal(pipeline, kline_1h, Direction.LONG)
+        await self._force_signal(pipeline, kline_1h, Direction.LONG)
         assert pipeline._notification_service.send_signal.call_count == 2
 
-    def test_dedup_key_format(self, pipeline):
+    @pytest.mark.asyncio
+    async def test_dedup_key_format(self, pipeline):
         """
         Test that dedup key uses correct format: symbol:timeframe:direction:strategy_name
         """
         kline = create_kline(symbol="BTC/USDT:USDT", timeframe="15m", close=Decimal("150"))
 
-        self._force_signal(pipeline, kline, Direction.LONG)
+        await self._force_signal(pipeline, kline, Direction.LONG)
 
         expected_key = "BTC/USDT:USDT:15m:long:pinbar"
         assert expected_key in pipeline._signal_cooldown_cache
