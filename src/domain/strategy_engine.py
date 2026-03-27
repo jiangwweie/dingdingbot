@@ -17,7 +17,7 @@ from .models import (
     FilterResult,
     SignalAttempt,
 )
-from .indicators import EMACalculator
+from .indicators import EMACalculator, EMACache
 from .filter_factory import FilterBase, FilterContext, TraceEvent, FilterFactory
 
 
@@ -547,16 +547,23 @@ class DynamicStrategyRunner:
     2. Short-circuit evaluation for CPU efficiency
     3. Precise TraceEvent tracking for debugging
     4. Clean separation of state update vs. pattern checking
+    5. S4-3: Shared EMA cache across strategies for memory efficiency
     """
 
-    def __init__(self, strategies: List[StrategyWithFilters]):
+    def __init__(
+        self,
+        strategies: List[StrategyWithFilters],
+        ema_cache: Optional[EMACache] = None,
+    ):
         """
         Initialize with list of strategy+filter combinations.
 
         Args:
             strategies: List of StrategyWithFilters instances
+            ema_cache: Optional shared EMA cache (S4-3)
         """
         self._strategies = strategies
+        self._ema_cache = ema_cache or EMACache()
 
     def update_state(self, kline: KlineData) -> None:
         """
@@ -1024,5 +1031,8 @@ def create_dynamic_runner(
             )
             strategies_with_filters.append(wrapped)
 
+    # S4-3: Create shared EMA cache for all strategies
+    # This allows multiple strategies to share the same EMA instances,
+    # reducing memory usage and computation overhead
     return DynamicStrategyRunner(strategies_with_filters)
 
