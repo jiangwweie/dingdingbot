@@ -26,6 +26,9 @@ mtf_mapping:
   "4h": "1d"
   "1d": "1w"
 
+# MTF EMA 周期配置
+mtf_ema_period: 60             # MTF 趋势计算使用的 EMA 周期 (required, int)
+
 # 冷启动预热
 warmup:
   history_bars: 100            # REST 预热拉取的历史 K 线数量 (required, int)

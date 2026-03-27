@@ -56,6 +56,15 @@ class CoreConfig(BaseModel):
     pinbar_defaults: PinbarDefaults
     ema: EmaConfig
     mtf_mapping: MtfMapping
+
+    # S3-1: Add MTF EMA period config
+    mtf_ema_period: int = Field(
+        default=60,
+        description="Default EMA period for MTF trend calculation",
+        ge=5,
+        le=200
+    )
+
     warmup: WarmupConfig
     signal_pipeline: SignalPipelineConfig = Field(default_factory=SignalPipelineConfig)
 
@@ -112,7 +121,31 @@ class UserConfig(BaseModel):
     asset_polling: AssetPollingConfig = Field(default_factory=AssetPollingConfig)
     notification: NotificationConfig
 
+    # MTF Configuration (S3-1)
+    mtf_ema_period: int = Field(
+        default=60,
+        description="EMA period for MTF trend calculation",
+        ge=5,
+        le=200
+    )
+    mtf_mapping: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "15m": "1h",
+            "1h": "4h",
+            "4h": "1d",
+            "1d": "1w",
+        },
+        description="MTF timeframe mapping: lower -> higher"
+    )
+
     model_config = {'protected_namespaces': ()}
+
+    @field_validator('mtf_ema_period')
+    @classmethod
+    def validate_mtf_ema_period(cls, v):
+        if v < 5 or v > 200:
+            raise ValueError("mtf_ema_period must be between 5 and 200")
+        return v
 
     @field_validator('active_strategies', mode='after')
     @classmethod
