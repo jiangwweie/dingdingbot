@@ -46,8 +46,16 @@ class WarmupConfig(BaseModel):
     history_bars: int = Field(..., ge=10, description="Number of historical bars to fetch")
 
 
+class SignalQueueConfig(BaseModel):
+    """Queue configuration for async I/O."""
+    batch_size: int = Field(default=10, ge=1, description="批量落盘大小")
+    flush_interval: float = Field(default=5.0, ge=0.1, description="最大等待时间 (秒)")
+    max_queue_size: int = Field(default=1000, ge=100, description="队列最大容量")
+
+
 class SignalPipelineConfig(BaseModel):
     cooldown_seconds: int = Field(default=14400, ge=60, description="Signal deduplication cooldown in seconds")
+    queue: SignalQueueConfig = Field(default_factory=SignalQueueConfig)
 
 
 class CoreConfig(BaseModel):

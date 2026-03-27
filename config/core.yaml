@@ -36,3 +36,7 @@ warmup:
 # 信号处理流配置
 signal_pipeline:
   cooldown_seconds: 14400      # 信号去重冷却期（秒），默认 4 小时 (required, int)
+  queue:
+    batch_size: 10             # 批量落盘大小 (required, int)
+    flush_interval: 5.0        # 最大等待时间 (秒) (required, float)
+    max_queue_size: 1000       # 队列最大容量 (required, int)

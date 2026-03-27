@@ -65,6 +65,11 @@ class SignalPipeline:
         self._repository = signal_repository
         self._cooldown_seconds = cooldown_seconds
 
+        # Queue configuration from core.yaml (S4-2)
+        self._queue_batch_size = config_manager.core_config.signal_pipeline.queue.batch_size
+        self._queue_flush_interval = config_manager.core_config.signal_pipeline.queue.flush_interval
+        self._queue_max_size = config_manager.core_config.signal_pipeline.queue.max_queue_size
+
         # Store K-line history per symbol/timeframe (for warmup on reload)
         self._kline_history: Dict[str, List[KlineData]] = {}
 
@@ -118,18 +123,88 @@ class SignalPipeline:
             self._start_flush_worker()
 
     def _start_flush_worker(self) -> None:
-        """Start background task for batch flushing attempts to SQLite."""
+        """Start background task for batch flushing attempts to SQLite with recovery."""
         try:
-            self._flush_task = asyncio.create_task(self._flush_attempts_worker())
-            logger.info("Attempt flush worker started")
+            self._flush_task = asyncio.create_task(
+                self._flush_attempts_worker(
+                    batch_size=self._queue_batch_size,
+                    flush_interval=self._queue_flush_interval,
+                )
+            )
+            logger.info(
+                f"Attempt flush worker started (batch_size={self._queue_batch_size}, "
+                f"flush_interval={self._queue_flush_interval}s, max_size={self._queue_max_size})"
+            )
+            # Schedule recovery check
+            asyncio.create_task(self._monitor_flush_worker())
         except RuntimeError:
             # No running event loop (e.g., during testing)
             # Worker will start on first process_kline call
             logger.debug("Flush worker deferred - no running event loop")
 
+    async def _monitor_flush_worker(self) -> None:
+        """
+        Monitor flush worker health and restart on failure (S4-2).
+
+        Implements exponential backoff with max restart limit.
+        """
+        restart_count = 0
+        max_restarts = 5
+        restart_delay = 1.0
+
+        while restart_count < max_restarts:
+            try:
+                # Wait for worker to complete (should not happen unless error)
+                if self._flush_task and not self._flush_task.done():
+                    await self._flush_task
+
+                # If we reach here, worker completed without error (unexpected)
+                logger.info("Flush worker completed normally")
+                return
+
+            except Exception as e:
+                restart_count += 1
+                logger.error(
+                    f"Flush worker crashed (restart {restart_count}/{max_restarts}): {e}"
+                )
+
+                if restart_count >= max_restarts:
+                    logger.error(
+                        "CRITICAL: Flush worker exceeded max restarts, "
+                        "data persistence may be compromised"
+                    )
+                    return
+
+                # Exponential backoff before restart
+                delay = restart_delay * (2 ** (restart_count - 1))
+                logger.info(f"Waiting {delay}s before restart...")
+                await asyncio.sleep(delay)
+
+                # Attempt restart
+                try:
+                    self._ensure_async_primitives()
+                    if self._attempts_queue is None or self._runner_lock is None:
+                        logger.debug("Cannot restart flush worker: no event loop")
+                        return
+
+                    self._flush_task = asyncio.create_task(
+                        self._flush_attempts_worker(
+                            batch_size=self._queue_batch_size,
+                            flush_interval=self._queue_flush_interval,
+                        )
+                    )
+                    logger.info(f"Flush worker restarted (attempt #{restart_count})")
+
+                except Exception as restart_e:
+                    logger.error(f"Failed to restart flush worker: {restart_e}")
+
     async def _flush_attempts_worker(self, batch_size: int = 10, flush_interval: float = 5.0) -> None:
         """
         Background worker that batches and flushes signal attempts to SQLite.
+
+        Features (S4-2):
+        - Backpressure monitoring: alerts when queue approaches max capacity
+        - Consecutive error tracking: alerts on repeated failures
 
         Args:
             batch_size: Number of attempts to batch before flushing
@@ -137,9 +212,20 @@ class SignalPipeline:
         """
         buffer: List[tuple] = []
         last_flush = time.time()
+        consecutive_drops = 0  # Track consecutive drop events
 
         while True:
             try:
+                # Check queue size for backpressure monitoring
+                queue_size = self._attempts_queue.qsize()
+
+                # Alert if queue is approaching max capacity (80% threshold)
+                if queue_size > int(self._queue_max_size * 0.8):
+                    logger.warning(
+                        f"BACKPRESSURE ALERT: Queue size ({queue_size}) approaching "
+                        f"max capacity ({self._queue_max_size})"
+                    )
+
                 # Wait for item or timeout
                 try:
                     item = await asyncio.wait_for(self._attempts_queue.get(), timeout=1.0)
@@ -153,6 +239,7 @@ class SignalPipeline:
                     await self._flush_buffer(buffer)
                     buffer = []
                     last_flush = now
+                    consecutive_drops = 0  # Reset on successful flush
 
             except asyncio.CancelledError:
                 # Flush remaining on cancel
@@ -161,6 +248,14 @@ class SignalPipeline:
                 raise
             except Exception as e:
                 logger.error(f"Flush worker error: {e}")
+                consecutive_drops += 1
+
+                # Alert on consecutive errors
+                if consecutive_drops >= 3:
+                    logger.error(
+                        f"CRITICAL: {consecutive_drops} consecutive flush worker errors, "
+                        f"potential database connectivity issue"
+                    )
                 buffer = []
 
     async def _flush_buffer(self, buffer: List[tuple]) -> None:
