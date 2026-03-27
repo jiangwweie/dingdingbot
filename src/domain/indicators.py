@@ -14,7 +14,7 @@ import asyncio
 @dataclass
 class CacheEntry:
     """Cache entry with expiration tracking."""
-    calculator: EMACalculator
+    calculator: 'EMACalculator'
     last_access: float = field(default_factory=time.time)
     access_count: int = 0
 
@@ -54,7 +54,7 @@ class EMACache:
         symbol: str,
         timeframe: str,
         period: int,
-    ) -> EMACalculator:
+    ) -> 'EMACalculator':
         """
         Get existing EMA calculator or create new one.
 

@@ -430,6 +430,147 @@ class ExchangeGateway:
     # ============================================================
     # Asset Polling - Account Balance & Positions
     # ============================================================
+
+    # ============================================================
+    # WebSocket Asset Push (S5-1)
+    # ============================================================
+    async def subscribe_account_updates(
+        self,
+        callback: Callable[[AccountSnapshot], Awaitable[None]],
+    ) -> None:
+        """
+        订阅账户资产实时更新（含降级逻辑）
+
+        Args:
+            callback: 资产更新时的异步回调
+        """
+        if ccxtpro is None:
+            logger.warning("CCXT Pro 未安装，降级到轮询模式")
+            await self._poll_assets_loop_with_callback(callback)
+            return
+
+        try:
+            await self._ws_subscribe_account_loop(callback)
+        except Exception as e:
+            logger.warning(f"WebSocket 订阅失败，降级到轮询模式：{e}")
+            await self._poll_assets_loop_with_callback(callback)
+
+    async def _ws_subscribe_account_loop(
+        self,
+        callback: Callable[[AccountSnapshot], Awaitable[None]],
+    ) -> None:
+        """
+        WebSocket 订阅循环（含重连逻辑）
+
+        Args:
+            callback: 资产更新时的异步回调
+        """
+        self._ws_running = True
+        reconnect_count = 0
+
+        # 创建 WebSocket 交换实例
+        self.ws_exchange = self._create_ws_exchange({
+            'defaultType': 'swap',
+        })
+
+        # 加载市场数据
+        await self.ws_exchange.load_markets()
+        logger.info("WebSocket 账户订阅已启动")
+
+        try:
+            while self._ws_running:
+                try:
+                    # 使用 CCXT Pro watch_balance() 方法
+                    balance = await self.ws_exchange.watch_balance()
+
+                    # 解析并回调
+                    snapshot = self._parse_ws_balance(balance)
+                    await callback(snapshot)
+
+                except asyncio.CancelledError:
+                    logger.info("WebSocket 账户订阅被取消")
+                    break
+
+                except Exception as e:
+                    reconnect_count += 1
+                    if reconnect_count >= self._max_reconnect_attempts:
+                        raise ConnectionLostError(
+                            f"WebSocket 重连失败超过 {self._max_reconnect_attempts} 次",
+                            "C-001"
+                        )
+
+                    # 指数退避
+                    delay = min(
+                        self._initial_reconnect_delay * (2 ** (reconnect_count - 1)),
+                        self._max_reconnect_delay
+                    )
+                    logger.warning(
+                        f"WebSocket 重连中... {delay:.1f}s "
+                        f"(尝试 {reconnect_count}/{self._max_reconnect_attempts})"
+                    )
+                    await asyncio.sleep(delay)
+
+        finally:
+            self._ws_running = False
+            if self.ws_exchange:
+                await self.ws_exchange.close()
+
+    def _parse_ws_balance(
+        self,
+        balance: Dict[str, Any],
+    ) -> AccountSnapshot:
+        """
+        解析 WebSocket 余额消息为 AccountSnapshot
+
+        Args:
+            balance: CCXT Pro watch_balance() 返回的余额数据
+
+        Returns:
+            AccountSnapshot 对象
+        """
+        total_balance = Decimal('0')
+        available_balance = Decimal('0')
+        unrealized_pnl = Decimal('0')
+
+        # 解析 USDT 余额
+        if 'total' in balance and 'USDT' in balance['total']:
+            total_balance = Decimal(str(balance['total']['USDT']))
+        if 'free' in balance and 'USDT' in balance['free']:
+            available_balance = Decimal(str(balance['free']['USDT']))
+
+        return AccountSnapshot(
+            total_balance=total_balance,
+            available_balance=available_balance,
+            unrealized_pnl=unrealized_pnl,
+            positions=[],  # WebSocket 余额不包含持仓，需要单独获取
+            timestamp=int(time.time() * 1000),
+        )
+
+    async def _poll_assets_loop_with_callback(
+        self,
+        callback: Callable[[AccountSnapshot], Awaitable[None]],
+        interval_seconds: int = 60,
+    ) -> None:
+        """
+        降级轮询模式（带回调）
+
+        Args:
+            callback: 资产更新时的异步回调
+            interval_seconds: 轮询间隔
+        """
+        logger.info(f"降级轮询模式已启动（间隔：{interval_seconds}s）")
+
+        while True:
+            try:
+                snapshot = await self._poll_account()
+                await callback(snapshot)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"降级轮询失败：{e}")
+
+            await asyncio.sleep(interval_seconds)
+
     async def start_asset_polling(
         self,
         interval_seconds: int = 60,
@@ -473,9 +614,12 @@ class ExchangeGateway:
 
             await asyncio.sleep(interval_seconds)
 
-    async def _poll_account(self) -> None:
+    async def _poll_account(self) -> AccountSnapshot:
         """
-        Poll account balance and positions, update cached snapshot.
+        Poll account balance and positions, return snapshot.
+
+        Returns:
+            AccountSnapshot object
         """
         try:
             # Fetch balance
@@ -514,8 +658,8 @@ class ExchangeGateway:
                     position_list.append(position)
                     unrealized_pnl += position.unrealized_pnl
 
-            # Update snapshot
-            self._account_snapshot = AccountSnapshot(
+            # Create snapshot
+            snapshot = AccountSnapshot(
                 total_balance=total_balance,
                 available_balance=available_balance,
                 unrealized_pnl=unrealized_pnl,
@@ -523,7 +667,11 @@ class ExchangeGateway:
                 timestamp=int(time.time() * 1000),
             )
 
+            # Update cache
+            self._account_snapshot = snapshot
+
             logger.debug(f"Asset snapshot updated: balance={total_balance}, positions={len(position_list)}")
+            return snapshot
 
         except Exception as e:
             raise

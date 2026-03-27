@@ -33,6 +33,21 @@ class TrendDirection(str, Enum):
 
 
 # ============================================================
+# Signal Status Tracking Models (S5-2)
+# ============================================================
+class SignalStatus(str, Enum):
+    """信号状态枚举"""
+    GENERATED = "generated"      # 已生成
+    PENDING = "pending"          # 等待成交
+    FILLED = "filled"            # 已成交
+    CANCELLED = "cancelled"      # 已取消
+    REJECTED = "rejected"        # 被拒绝
+
+
+# Note: SignalTrack is defined after SignalResult to avoid forward reference issues
+
+
+# ============================================================
 # A -> B : Input Data Models (Infrastructure provides these)
 # ============================================================
 class KlineData(BaseModel):
@@ -86,6 +101,25 @@ class SignalResult(BaseModel):
     kline_timestamp: int = 0     # K-line close timestamp in milliseconds (default 0 for legacy compatibility)
     strategy_name: str = "unknown"  # Strategy name that generated this signal (e.g., "pinbar", "engulfing")
     score: float = 0.0           # Pattern quality score (0.0 ~ 1.0). **NOTE**: This is for UI display and sorting only, NOT for financial calculations. Financial calculations use Decimal exclusively.
+
+
+# ============================================================
+# Signal Status Tracking Models (S5-2, continued)
+# ============================================================
+class SignalTrack(BaseModel):
+    """信号全生命周期跟踪"""
+    signal_id: str
+    original_signal: SignalResult
+    status: SignalStatus
+    created_at: int  # 毫秒时间戳
+    updated_at: int  # 毫秒时间戳
+    filled_price: Optional[Decimal] = None
+    filled_at: Optional[int] = None
+    reject_reason: Optional[str] = None
+    cancel_reason: Optional[str] = None
+
+    class Config:
+        use_enum_values = True
 
 
 # ============================================================
@@ -458,6 +492,19 @@ class BacktestReport(BaseModel):
 
     # Raw attempts (optional, can be excluded for large reports)
     attempts: List[Dict[str, Any]] = Field(default_factory=list, description="Detailed attempt records")
+
+
+# ============================================================
+# WebSocket Asset Push Configuration (S5-1)
+# ============================================================
+class WebSocketAssetConfig(BaseModel):
+    """WebSocket 资产推送配置"""
+    enabled: bool = Field(default=True, description="是否启用 WebSocket 推送")
+    reconnect_delay: float = Field(default=1.0, description="初始重连延迟（秒）")
+    max_reconnect_delay: float = Field(default=60.0, description="最大重连延迟（秒）")
+    max_reconnect_attempts: int = Field(default=10, description="最大重连尝试次数")
+    fallback_to_polling: bool = Field(default=True, description="WebSocket 失败时降级轮询")
+    polling_interval: int = Field(default=60, description="轮询间隔（秒）")
 
 
 # ============================================================
