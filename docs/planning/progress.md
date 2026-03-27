@@ -359,3 +359,43 @@ tests/unit/ 总计：301/308 通过 (97.7%)
 - [ ] S3-1（多周期数据对齐优化）暂缓
 
 ---
+
+## 2026-03-27 - 会话 12 (已完成) - S3-1 MTF 数据对齐集成测试
+
+**目标**: 完成 S3-1 Task 5 集成测试
+
+**进展**:
+- [x] **Step 1: 创建集成测试框架** ✅
+  - 创建 `tests/integration/test_mtf_e2e.py`
+  - 添加 3 个基础测试
+  - 提交：3d7daab
+
+- [x] **Step 2: 添加 MTF 趋势对齐测试** ✅
+  - 添加 `test_mtf_trend_uses_last_closed_kline`
+  - 验证 MTF 使用最后闭合 K 线
+
+- [x] **Step 3: 添加 MTF 过滤器集成测试** ✅
+  - 添加 `test_mtf_bullish_trend_allows_long_signal`
+  - 添加 `test_mtf_bearish_trend_blocks_long_signal`
+  - 提交：93edce5
+
+**测试结果**:
+```
+tests/integration/test_mtf_e2e.py: 6/6 通过 ✅
+```
+
+**S3-1 完成总结**:
+| Task | 状态 | 提交 |
+|------|------|------|
+| Task 1: timeframe_utils.py | ✅ 完成 | 48b97fa |
+| Task 2: config_manager.py | ✅ 完成 | a5406a3 |
+| Task 3: core.yaml | ✅ 完成 | a5406a3 |
+| Task 4: signal_pipeline.py | ✅ 完成 | 57846a3 |
+| Task 5: 集成测试 | ✅ 完成 | 93edce5 |
+
+**下一步**:
+- [ ] Task 6: 运行完整测试套件 + 覆盖率检查
+- [ ] 更新 S3-1 状态为完成
+- [ ] 准备第三阶段发布 (v0.3.0)
+
+---
