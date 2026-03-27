@@ -1250,3 +1250,14 @@ class SignalRepository:
         )
         await self._db.commit()
         return cursor.rowcount > 0
+
+    async def get_all_attempts(self) -> List[dict]:
+        """
+        Get all signal attempts from database.
+
+        Returns:
+            List of all attempt records
+        """
+        async with self._db.execute("SELECT * FROM signal_attempts") as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]

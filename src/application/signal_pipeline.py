@@ -629,6 +629,38 @@ class SignalPipeline:
         else:
             return "Neutral"
 
+    def get_queue_size(self) -> int:
+        """
+        Get current queue size.
+
+        Returns:
+            Number of items currently in the attempt queue
+        """
+        self._ensure_async_primitives()
+        if self._attempts_queue is None:
+            return 0
+        return self._attempts_queue.qsize()
+
+    async def close(self) -> None:
+        """
+        Close the pipeline and cleanup resources.
+
+        Cancels the flush worker and closes the notification service.
+        """
+        # Cancel flush worker
+        if self._flush_task and not self._flush_task.done():
+            self._flush_task.cancel()
+            try:
+                await self._flush_task
+            except asyncio.CancelledError:
+                pass
+
+        # Close notification service
+        if self._notification_service:
+            await self._notification_service.close()
+
+        logger.info("SignalPipeline closed")
+
     @property
     def _risk_calculator(self) -> RiskCalculator:
         """Get risk calculator instance."""
