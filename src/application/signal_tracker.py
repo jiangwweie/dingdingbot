@@ -132,5 +132,5 @@ class SignalStatusTracker:
 
     def _generate_signal_id(self, signal: SignalResult) -> str:
         """生成信号唯一 ID"""
-        unique_str = f"{signal.symbol}{signal.timeframe}{signal.timestamp}{time.time()}"
+        unique_str = f"{signal.symbol}{signal.timeframe}{signal.kline_timestamp}{time.time()}"
         return hashlib.sha256(unique_str.encode()).hexdigest()[:16]
