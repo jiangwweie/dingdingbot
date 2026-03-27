@@ -344,6 +344,33 @@ S2-3 (前端清理) ← 独立，可并行
 
 ## 第三阶段：风控执行（已完成）
 
+**完成时间**: 2026-03-27
+
+**交付物**:
+- S3-1: MTF 多周期数据对齐优化 ✅
+- S3-2: 动态风险头寸计算（方案 B） ✅
+- S3-2: 16 个集成测试 ✅
+- 测试修复：test_signal_repository.py 修复 ✅
+
+**测试结果**:
+```
+tests/unit/test_risk_calculator.py: 35/35 通过 (100%)
+tests/integration/test_risk_headroom.py: 16/16 通过 (100%)
+tests/integration/test_mtf_e2e.py: 6/6 通过 (100%)
+tests/unit/test_signal_repository.py: 21/21 通过 (100%)
+tests/unit/: 329/329 通过 (100%)
+tests/integration/: 41/41 通过 (100%)
+总计：370/370 通过 (100%)
+```
+
+**Git 提交**:
+- S3-2 核心功能：`1aa9619`
+- S3-1 MTF 对齐：`93edce5`
+- S3-2 集成测试：会话 13
+- S3 测试修复：`8c5eb73`
+
+---
+
 ### 阶段 S3-2: 动态风险头寸计算 ✅
 
 **目标**: 根据账户实时状态动态计算风险头寸（方案 B）
