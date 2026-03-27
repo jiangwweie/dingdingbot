@@ -34,7 +34,7 @@ from src.infrastructure.signal_repository import SignalRepository
 from src.domain.models import (
     SignalQuery, SignalDeleteRequest, SignalDeleteResponse,
     AttemptQuery, AttemptDeleteRequest, AttemptDeleteResponse,
-    BacktestRequest, BacktestReport,
+    BacktestRequest, BacktestReport, SignalStatus, SignalTrack,
 )
 
 
@@ -45,6 +45,7 @@ _repository: Optional[SignalRepository] = None
 _account_getter: Optional[Callable[[], Any]] = None
 _config_manager: Optional[Any] = None  # ConfigManager instance
 _exchange_gateway: Optional[Any] = None  # ExchangeGateway instance
+_signal_tracker: Optional[Any] = None  # SignalStatusTracker instance
 
 
 def set_dependencies(
@@ -52,6 +53,7 @@ def set_dependencies(
     account_getter: Callable[[], Any],
     config_manager: Optional[Any] = None,
     exchange_gateway: Optional[Any] = None,
+    signal_tracker: Optional[Any] = None,
 ) -> None:
     """
     Inject dependencies for API endpoints.
@@ -61,12 +63,14 @@ def set_dependencies(
         account_getter: Function that returns AccountSnapshot or None
         config_manager: Optional ConfigManager instance
         exchange_gateway: Optional ExchangeGateway instance
+        signal_tracker: Optional SignalStatusTracker instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
     _exchange_gateway = exchange_gateway
+    _signal_tracker = signal_tracker
 
 
 def _get_repository() -> SignalRepository:
@@ -88,6 +92,13 @@ def _get_exchange_gateway() -> Any:
     if _exchange_gateway is None:
         raise HTTPException(status_code=503, detail="Exchange gateway not initialized")
     return _exchange_gateway
+
+
+def _get_signal_tracker() -> Any:
+    """Get signal tracker or raise error if not initialized."""
+    if _signal_tracker is None:
+        raise HTTPException(status_code=503, detail="Signal tracker not initialized")
+    return _signal_tracker
 
 
 # ============================================================
@@ -1493,3 +1504,48 @@ async def delete_snapshot(snapshot_id: int):
         raise
     except Exception as e:
         return {"error": str(e)}
+
+
+# ============================================================
+# Signal Status Tracking Endpoints (S5-2)
+# ============================================================
+@app.get("/api/signals/{signal_id}/status", response_model=SignalTrack)
+async def get_signal_status(signal_id: str):
+    """
+    查询单个信号状态
+
+    Args:
+        signal_id: 信号标识
+
+    Returns:
+        信号状态信息
+
+    Raises:
+        HTTPException: 404 信号不存在
+    """
+    tracker = _get_signal_tracker()
+    track = await tracker.get_signal_status(signal_id)
+
+    if not track:
+        raise HTTPException(status_code=404, detail="信号不存在")
+
+    return track
+
+
+@app.get("/api/signals/status", response_model=List[SignalTrack])
+async def list_signal_statuses(
+    status: Optional[SignalStatus] = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+) -> List[SignalTrack]:
+    """
+    批量查询信号状态
+
+    Args:
+        status: 状态过滤
+        limit: 结果数量限制
+
+    Returns:
+        信号状态列表
+    """
+    tracker = _get_signal_tracker()
+    return await tracker.list_statuses(status_filter=status, limit=limit)

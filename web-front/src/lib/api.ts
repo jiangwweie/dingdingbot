@@ -860,3 +860,72 @@ export async function applySnapshot(id: number): Promise<void> {
     throw error;
   }
 }
+
+// ============================================================================
+// Signal Status Tracking API (S5-2 - 信号状态跟踪)
+// ============================================================================
+
+/**
+ * Signal status enumeration
+ */
+export enum SignalStatus {
+  GENERATED = 'generated',
+  PENDING = 'pending',
+  FILLED = 'filled',
+  CANCELLED = 'cancelled',
+  REJECTED = 'rejected',
+}
+
+/**
+ * Signal track interface for status tracking
+ */
+export interface SignalTrack {
+  signal_id: string;
+  original_signal: Signal;
+  status: SignalStatus;
+  created_at: number;
+  updated_at: number;
+  filled_price?: string;
+  filled_at?: number;
+  reject_reason?: string;
+  cancel_reason?: string;
+}
+
+/**
+ * Fetch signal status by ID
+ */
+export async function getSignalStatus(signalId: string): Promise<SignalTrack> {
+  const res = await fetch(`/api/signals/${signalId}/status`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch signal status');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * List all signal statuses with optional filtering
+ */
+export async function listSignalStatuses(
+  status?: SignalStatus,
+  limit = 50
+): Promise<SignalTrack[]> {
+  const params = new URLSearchParams();
+  if (status) params.append('status', status);
+  params.append('limit', limit.toString());
+
+  const res = await fetch(`/api/signals/status?${params}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch signal statuses');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}

@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from src.domain.models import (
     KlineData, SignalResult, AccountSnapshot, Direction, TrendDirection,
-    StrategyDefinition, SignalAttempt,
+    StrategyDefinition, SignalAttempt, SignalStatus,
 )
 from src.domain.strategy_engine import create_dynamic_runner
 from src.domain.risk_calculator import RiskCalculator, RiskConfig
@@ -28,6 +28,7 @@ from src.infrastructure.notifier import NotificationService, get_notification_se
 from src.infrastructure.logger import logger
 from src.infrastructure.signal_repository import SignalRepository
 from src.application.config_manager import ConfigManager
+from src.application.signal_tracker import SignalStatusTracker
 
 
 class SignalPipeline:
@@ -64,6 +65,7 @@ class SignalPipeline:
         self._notification_service = notification_service or get_notification_service()
         self._repository = signal_repository
         self._cooldown_seconds = cooldown_seconds
+        self._status_tracker = SignalStatusTracker(signal_repository)
 
         # Queue configuration from core.yaml (S4-2)
         self._queue_batch_size = config_manager.core_config.signal_pipeline.queue.batch_size
@@ -405,6 +407,10 @@ class SignalPipeline:
                     # Calculate complete signal result with risk
                     signal = self._calculate_risk(kline, attempt.pattern.direction, attempt, attempt.strategy_name, attempt.pattern.score)
 
+                    # Start tracking signal status
+                    signal_id = await self._status_tracker.track_signal(signal)
+                    await self._status_tracker.update_status(signal_id, SignalStatus.PENDING)
+
                     # Send notification
                     await self._notification_service.send_signal(signal)
                     logger.info(f"Signal sent: {kline.symbol} {kline.timeframe} {attempt.pattern.direction.value} [{attempt.strategy_name}]")
@@ -415,7 +421,7 @@ class SignalPipeline:
                     # Persist signal to database if repository is available
                     if self._repository is not None:
                         try:
-                            await self._repository.save_signal(signal)
+                            await self._repository.save_signal(signal, signal_id, "PENDING")
                             logger.info(f"Signal persisted: {kline.symbol} {kline.timeframe} [{attempt.strategy_name}]")
                         except Exception as e:
                             logger.error(f"Failed to persist signal: {e}")

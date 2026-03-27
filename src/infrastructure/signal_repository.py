@@ -132,6 +132,20 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # Add signal_id column to signals table (S5-2)
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN signal_id TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Create index for signal_id
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signals_signal_id ON signals(signal_id)
+        """)
+
         # Create index for status
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)
@@ -374,12 +388,17 @@ class SignalRepository:
             "recent_attempts": recent_attempts,
         }
 
-    async def save_signal(self, signal: SignalResult) -> None:
+    async def save_signal(self, signal: SignalResult, signal_id: str = None, status: str = "PENDING") -> str:
         """
         Save a signal to the database.
 
         Args:
             signal: SignalResult to save
+            signal_id: Optional signal ID from tracker (for external tracking)
+            status: Initial signal status
+
+        Returns:
+            signal_id: The database signal ID or provided tracker ID
         """
         created_at = datetime.now(timezone.utc).isoformat()
         tags_json = json.dumps(signal.tags)
@@ -390,8 +409,8 @@ class SignalRepository:
                 created_at, symbol, timeframe, direction,
                 entry_price, stop_loss, position_size, leverage,
                 tags_json, risk_info, status, pnl_ratio,
-                kline_timestamp, strategy_name, score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                kline_timestamp, strategy_name, score, signal_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -404,14 +423,16 @@ class SignalRepository:
                 signal.current_leverage,
                 tags_json,
                 signal.risk_reward_info,
-                signal.status,
+                status,
                 signal.pnl_ratio,
                 signal.kline_timestamp,
                 signal.strategy_name,
                 signal.score,
+                signal_id,
             ),
         )
         await self._db.commit()
+        return signal_id or str(created_at)
 
     async def get_signals(
         self,
