@@ -6,7 +6,7 @@ import asyncio
 from decimal import Decimal
 
 from src.infrastructure.signal_repository import SignalRepository
-from src.domain.models import SignalResult, Direction, TrendDirection, MtfStatus
+from src.domain.models import SignalResult, Direction
 from src.domain.strategy_engine import SignalAttempt, PatternResult, FilterResult
 
 
@@ -43,8 +43,7 @@ class TestSignalRepository:
             suggested_stop_loss=Decimal("34500.00"),
             suggested_position_size=Decimal("1.5"),
             current_leverage=5,
-            ema_trend=TrendDirection.BULLISH,
-            mtf_status=MtfStatus.CONFIRMED,
+            tags=[{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}],
             risk_reward_info="Risk 1% = 750 USDT",
         )
 
@@ -62,8 +61,9 @@ class TestSignalRepository:
         assert saved["stop_loss"] == "34500.00"
         assert saved["position_size"] == "1.5"
         assert saved["leverage"] == 5
-        assert saved["ema_trend"] == "bullish"
-        assert saved["mtf_status"] == "confirmed"
+        # Repository returns tags_json as the stored JSON string
+        import json
+        assert json.loads(saved["tags_json"]) == [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
         assert saved["risk_info"] == "Risk 1% = 750 USDT"
 
     @pytest.mark.asyncio
@@ -77,8 +77,7 @@ class TestSignalRepository:
             suggested_stop_loss=Decimal("34500.00"),
             suggested_position_size=Decimal("1.5"),
             current_leverage=5,
-            ema_trend=TrendDirection.BULLISH,
-            mtf_status=MtfStatus.CONFIRMED,
+            tags=[{"name": "EMA", "value": "Bullish"}],
             risk_reward_info="Risk 1% = 750 USDT",
         )
 
@@ -90,8 +89,7 @@ class TestSignalRepository:
             suggested_stop_loss=Decimal("2150.00"),
             suggested_position_size=Decimal("10.0"),
             current_leverage=3,
-            ema_trend=TrendDirection.BULLISH,
-            mtf_status=MtfStatus.CONFIRMED,
+            tags=[{"name": "EMA", "value": "Bullish"}],
             risk_reward_info="Risk 1% = 500 USDT",
         )
 
@@ -123,8 +121,7 @@ class TestSignalRepository:
             suggested_stop_loss=Decimal("34500.00"),
             suggested_position_size=Decimal("1.5"),
             current_leverage=5,
-            ema_trend=TrendDirection.BULLISH,
-            mtf_status=MtfStatus.CONFIRMED,
+            tags=[{"name": "EMA", "value": "Bullish"}],
             risk_reward_info="Risk 1% = 750 USDT",
         )
 
@@ -136,8 +133,7 @@ class TestSignalRepository:
             suggested_stop_loss=Decimal("2250.00"),
             suggested_position_size=Decimal("10.0"),
             current_leverage=3,
-            ema_trend=TrendDirection.BEARISH,
-            mtf_status=MtfStatus.CONFIRMED,
+            tags=[{"name": "EMA", "value": "Bearish"}],
             risk_reward_info="Risk 1% = 500 USDT",
         )
 
@@ -171,8 +167,7 @@ class TestSignalRepository:
                 suggested_stop_loss=Decimal("34500.00"),
                 suggested_position_size=Decimal("1.5"),
                 current_leverage=5,
-                ema_trend=TrendDirection.BULLISH,
-                mtf_status=MtfStatus.CONFIRMED,
+                tags=[{"name": "EMA", "value": "Bullish"}],
                 risk_reward_info=f"Risk 1% = {750 + i} USDT",
                 status="PENDING",
                 pnl_ratio=0.0,
@@ -188,8 +183,7 @@ class TestSignalRepository:
             suggested_stop_loss=Decimal("2250.00"),
             suggested_position_size=Decimal("10.0"),
             current_leverage=3,
-            ema_trend=TrendDirection.BEARISH,
-            mtf_status=MtfStatus.CONFIRMED,
+            tags=[{"name": "EMA", "value": "Bearish"}],
             risk_reward_info="Risk 1% = 500 USDT",
             status="PENDING",
             pnl_ratio=0.0,
@@ -218,8 +212,7 @@ class TestSignalRepository:
             suggested_stop_loss=Decimal("34999.98765432"),
             suggested_position_size=Decimal("1.23456789"),
             current_leverage=5,
-            ema_trend=TrendDirection.BULLISH,
-            mtf_status=MtfStatus.CONFIRMED,
+            tags=[{"name": "EMA", "value": "Bullish"}],
             risk_reward_info="Risk 1% = 123.456789 USDT",
         )
 
@@ -257,8 +250,7 @@ class TestSignalRepository:
                 suggested_stop_loss=Decimal(f"{34500 + i}"),
                 suggested_position_size=Decimal("1.5"),
                 current_leverage=5,
-                ema_trend=TrendDirection.BULLISH,
-                mtf_status=MtfStatus.CONFIRMED,
+                tags=[{"name": "EMA", "value": "Bullish"}],
                 risk_reward_info=f"Risk 1% = {750 + i} USDT",
             )
             await repository.save_signal(signal)
@@ -538,8 +530,7 @@ class TestSignalAttempts:
                 suggested_stop_loss=Decimal("34500"),
                 suggested_position_size=Decimal("1.5"),
                 current_leverage=5,
-                ema_trend=TrendDirection.BULLISH,
-                mtf_status=MtfStatus.CONFIRMED,
+                tags=[{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}],
                 risk_reward_info="Risk 1% = 750 USDT",
             )
             await repository.save_signal(signal_btc)
@@ -553,8 +544,7 @@ class TestSignalAttempts:
                 suggested_stop_loss=Decimal("2250"),
                 suggested_position_size=Decimal("10"),
                 current_leverage=3,
-                ema_trend=TrendDirection.BEARISH,
-                mtf_status=MtfStatus.CONFIRMED,
+                tags=[{"name": "EMA", "value": "Bearish"}, {"name": "MTF", "value": "Confirmed"}],
                 risk_reward_info="Risk 1% = 500 USDT",
             )
             await repository.save_signal(signal_eth)
@@ -584,24 +574,24 @@ class TestPerformanceTracking:
         # Insert signals with different statuses manually
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "bullish", "confirmed", "Risk 1%", "PENDING", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
         )
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "bearish", "confirmed", "Risk 1%", "WON", "38000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "WON", "38000")
         )
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "bullish", "confirmed", "Risk 1%", "LOST", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "LOST", "42000")
         )
         await repository._db.commit()
 
@@ -625,10 +615,10 @@ class TestPerformanceTracking:
         # Insert signal without take_profit
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "bullish", "confirmed", "Risk 1%", "PENDING", None)
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", None)
         )
         await repository._db.commit()
 
@@ -643,10 +633,10 @@ class TestPerformanceTracking:
         # Insert a pending signal
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "bullish", "confirmed", "Risk 1%", "PENDING", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
         )
         await repository._db.commit()
 
@@ -667,10 +657,10 @@ class TestPerformanceTracking:
         # Insert a pending signal
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "bearish", "confirmed", "Risk 1%", "PENDING", "38000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "PENDING", "38000")
         )
         await repository._db.commit()
 
@@ -689,10 +679,10 @@ class TestPerformanceTracking:
         # Insert a pending signal
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "bullish", "confirmed", "Risk 1%", "PENDING", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
         )
         await repository._db.commit()
 
@@ -711,31 +701,31 @@ class TestPerformanceTracking:
         # Insert signals with different statuses
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "bullish", "confirmed", "Risk 1%", "WON", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "WON", "42000")
         )
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "bullish", "confirmed", "Risk 1%", "WON", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "WON", "42000")
         )
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "bearish", "confirmed", "Risk 1%", "LOST", "38000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "LOST", "38000")
         )
         await repository._db.execute(
             """
-            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, ema_trend, mtf_status, risk_info, status, take_profit_1)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "bullish", "confirmed", "Risk 1%", "PENDING", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
         )
         await repository._db.commit()
 
