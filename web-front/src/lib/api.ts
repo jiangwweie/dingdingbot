@@ -770,3 +770,93 @@ export function convertLogicNodeToStrategy(
     apply_to: [],
   };
 }
+
+// ============================================================================
+// Config Snapshot API (配置快照版本化 - S5-3)
+// ============================================================================
+
+/**
+ * Config snapshot interface
+ */
+export interface ConfigSnapshot {
+  id: number;
+  version: string;
+  config_json: string;
+  description: string;
+  created_at: string;
+  created_by: string;
+  is_active: boolean;
+}
+
+/**
+ * Create snapshot request
+ */
+export interface CreateSnapshotRequest {
+  version: string;
+  description: string;
+  config_json?: string;
+}
+
+/**
+ * Fetch all config snapshots
+ */
+export async function fetchSnapshots(): Promise<{ total: number; data: ConfigSnapshot[] }> {
+  const res = await fetch('/api/config/snapshots', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch snapshots');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Create a new config snapshot
+ */
+export async function createSnapshot(payload: CreateSnapshotRequest): Promise<ConfigSnapshot> {
+  const res = await fetch('/api/config/snapshots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to create snapshot');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Delete a config snapshot
+ */
+export async function deleteSnapshot(id: number): Promise<void> {
+  const res = await fetch(`/api/config/snapshots/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to delete snapshot');
+    (error as any).status = res.status;
+    throw error;
+  }
+}
+
+/**
+ * Activate a config snapshot (rollback)
+ */
+export async function applySnapshot(id: number): Promise<void> {
+  const res = await fetch(`/api/config/snapshots/${id}/activate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to activate snapshot');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+}

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Activity, BarChart2, Stethoscope, Wallet, Bug, Settings, FlaskConical, Zap } from 'lucide-react';
+import { Activity, BarChart2, Stethoscope, Wallet, Bug, Settings, FlaskConical, Zap, Save } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 import SettingsPanel from './SettingsPanel';
@@ -25,6 +25,7 @@ export default function Layout() {
     { to: '/diagnostics', icon: Stethoscope, label: '诊断' },
     { to: '/account', icon: Wallet, label: '账户' },
     { to: '/strategies', icon: Zap, label: '策略工作台' },
+    { to: '/snapshots', icon: Save, label: '配置快照' },
   ];
 
   return (
