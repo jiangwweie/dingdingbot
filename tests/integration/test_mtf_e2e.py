@@ -218,3 +218,121 @@ class TestMtfFilterIntegration:
         # Should have 1h trend based on 10:00 kline
         assert "1h" in trends
         # Trend should be BULLISH (prices were rising, EMA is below current price)
+
+    def test_mtf_bullish_trend_allows_long_signal(self):
+        """
+        Verify MTF filter allows LONG signal when higher TF trend is BULLISH.
+
+        Scenario:
+        - 1h trend: BULLISH (rising prices)
+        - 15m produces LONG signal (bullish pinbar)
+        Expected: MTF should allow this signal (directions match)
+        """
+        from src.domain.indicators import EMACalculator
+        from src.domain.filter_factory import MtfFilterDynamic, FilterContext
+        from src.domain.models import Direction, PatternResult
+
+        pipeline = create_test_pipeline(mtf_ema_period=10)
+
+        # Create 1h klines with rising prices (bullish trend)
+        klines_1h = [
+            create_kline(timestamp=hour_to_ms(i), close=str(50000 + i * 100), timeframe="1h")
+            for i in range(20)
+        ]
+        pipeline._kline_history["BTC/USDT:USDT:1h"] = klines_1h
+
+        # Pre-warm EMA
+        ema = EMACalculator(period=10)
+        for kline in klines_1h:
+            ema.update(kline.close)
+        pipeline._mtf_ema_indicators["BTC/USDT:USDT:1h"] = ema
+
+        # 15m kline that would produce LONG signal
+        kline_15m = create_kline(
+            timeframe="15m",
+            timestamp=hour_to_ms(15) + (15 * 60 * 1000),
+            close="51600",
+        )
+
+        # Calculate MTF trends
+        trends = pipeline._get_closest_higher_tf_trends(kline_15m)
+
+        # Verify 1h trend is available
+        assert "1h" in trends
+
+        # Use MTF filter directly to verify it allows LONG when 1h is bullish
+        mtf_filter = MtfFilterDynamic()
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+        context = FilterContext(
+            current_timeframe="15m",
+            higher_tf_trends=trends,
+        )
+        result = mtf_filter.check(pattern, context)
+
+        # MTF should allow LONG when higher TF is bullish
+        assert result.passed is True
+
+    def test_mtf_bearish_trend_blocks_long_signal(self):
+        """
+        Verify MTF filter blocks LONG signal when higher TF trend is BEARISH.
+
+        Scenario:
+        - 1h trend: BEARISH (falling prices)
+        - 15m produces LONG signal (bullish pinbar)
+        Expected: MTF should block this signal (directions conflict)
+        """
+        from src.domain.indicators import EMACalculator
+        from src.domain.filter_factory import MtfFilterDynamic, FilterContext
+        from src.domain.models import Direction, PatternResult
+
+        pipeline = create_test_pipeline(mtf_ema_period=10)
+
+        # Create 1h klines with falling prices (bearish trend)
+        klines_1h = [
+            create_kline(timestamp=hour_to_ms(i), close=str(55000 - i * 100), timeframe="1h")
+            for i in range(20)
+        ]
+        pipeline._kline_history["BTC/USDT:USDT:1h"] = klines_1h
+
+        # Pre-warm EMA
+        ema = EMACalculator(period=10)
+        for kline in klines_1h:
+            ema.update(kline.close)
+        pipeline._mtf_ema_indicators["BTC/USDT:USDT:1h"] = ema
+
+        # 15m kline that would produce LONG signal
+        kline_15m = create_kline(
+            timeframe="15m",
+            timestamp=hour_to_ms(15) + (15 * 60 * 1000),
+            close="53400",
+        )
+
+        # Calculate MTF trends
+        trends = pipeline._get_closest_higher_tf_trends(kline_15m)
+
+        # Verify 1h trend is available and bearish
+        assert "1h" in trends
+        assert trends["1h"] == TrendDirection.BEARISH
+
+        # Use MTF filter directly to verify it blocks LONG when 1h is bearish
+        mtf_filter = MtfFilterDynamic()
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+        context = FilterContext(
+            current_timeframe="15m",
+            higher_tf_trends=trends,
+        )
+        result = mtf_filter.check(pattern, context)
+
+        # MTF should block LONG when higher TF is bearish
+        assert result.passed is False
+        assert "mtf_rejected" in result.reason
