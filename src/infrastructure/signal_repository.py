@@ -154,6 +154,29 @@ class SignalRepository:
             CREATE INDEX IF NOT EXISTS idx_custom_strategies_name ON custom_strategies(name)
         """)
 
+        # Create config_snapshots table for configuration version control
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS config_snapshots (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                version       TEXT NOT NULL,
+                config_json   TEXT NOT NULL,
+                description   TEXT DEFAULT '',
+                created_at    TEXT NOT NULL,
+                created_by    TEXT DEFAULT 'user',
+                is_active     INTEGER DEFAULT 0
+            )
+        """)
+
+        # Create index for version lookup
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_snapshots_version ON config_snapshots(version)
+        """)
+
+        # Create index for active snapshot
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_snapshots_active ON config_snapshots(is_active)
+        """)
+
         # Add strategy_name and score columns to signals table (for multi-strategy support)
         try:
             await self._db.execute("""
@@ -1064,6 +1087,145 @@ class SignalRepository:
         """
         cursor = await self._db.execute(
             "DELETE FROM custom_strategies WHERE id = ?", (strategy_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    # ========================================================================
+    # Config Snapshot CRUD Methods
+    # ========================================================================
+
+    async def create_config_snapshot(
+        self,
+        version: str,
+        config_json: str,
+        description: str = "",
+        created_by: str = "user",
+    ) -> int:
+        """
+        Create a new config snapshot.
+
+        Args:
+            version: Version tag, e.g., 'v1.0.0'
+            config_json: Serialized UserConfig JSON
+            description: Snapshot description
+            created_by: Creator identifier
+
+        Returns:
+            ID of the newly created snapshot
+        """
+        created_at = datetime.now(timezone.utc).isoformat()
+
+        # Deactivate all existing snapshots
+        await self._db.execute(
+            "UPDATE config_snapshots SET is_active = 0 WHERE is_active = 1"
+        )
+
+        cursor = await self._db.execute(
+            """
+            INSERT INTO config_snapshots (version, config_json, description, created_at, created_by, is_active)
+            VALUES (?, ?, ?, ?, ?, 1)
+            """,
+            (version, config_json, description, created_at, created_by),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def get_config_snapshots(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """
+        Get all config snapshots with pagination.
+
+        Args:
+            limit: Maximum number of results to return
+            offset: Number of results to skip
+
+        Returns:
+            {"total": int, "data": list[dict]}
+        """
+        # Get total count
+        async with self._db.execute(
+            "SELECT COUNT(*) as count FROM config_snapshots"
+        ) as cursor:
+            row = await cursor.fetchone()
+            total = row["count"]
+
+        # Get paginated data
+        async with self._db.execute(
+            """
+            SELECT * FROM config_snapshots
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return {"total": total, "data": [dict(row) for row in rows]}
+
+    async def get_config_snapshot_by_id(self, snapshot_id: int) -> Optional[dict]:
+        """
+        Get a single snapshot by ID.
+
+        Args:
+            snapshot_id: Snapshot record ID
+
+        Returns:
+            Snapshot dict with all fields, or None if not found
+        """
+        async with self._db.execute(
+            "SELECT * FROM config_snapshots WHERE id = ?", (snapshot_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_active_config_snapshot(self) -> Optional[dict]:
+        """
+        Get the currently active snapshot.
+
+        Returns:
+            Active snapshot dict with all fields, or None if not found
+        """
+        async with self._db.execute(
+            "SELECT * FROM config_snapshots WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def activate_config_snapshot(self, snapshot_id: int) -> bool:
+        """
+        Activate a snapshot (deactivate all others first).
+
+        Args:
+            snapshot_id: Snapshot record ID
+
+        Returns:
+            True if activated successfully, False if not found
+        """
+        # Deactivate all
+        await self._db.execute("UPDATE config_snapshots SET is_active = 0")
+
+        # Activate target
+        cursor = await self._db.execute(
+            "UPDATE config_snapshots SET is_active = 1 WHERE id = ?", (snapshot_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def delete_config_snapshot(self, snapshot_id: int) -> bool:
+        """
+        Delete a config snapshot by ID.
+
+        Args:
+            snapshot_id: Snapshot record ID
+
+        Returns:
+            True if deleted successfully, False if not found
+        """
+        cursor = await self._db.execute(
+            "DELETE FROM config_snapshots WHERE id = ?", (snapshot_id,)
         )
         await self._db.commit()
         return cursor.rowcount > 0

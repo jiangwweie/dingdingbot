@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 from decimal import Decimal
 from typing import Optional, List, Dict, Any, Union, Annotated, Literal
 from enum import Enum
+from datetime import datetime, timezone
 
 
 # ============================================================
@@ -457,6 +458,22 @@ class BacktestReport(BaseModel):
 
     # Raw attempts (optional, can be excluded for large reports)
     attempts: List[Dict[str, Any]] = Field(default_factory=list, description="Detailed attempt records")
+
+
+# ============================================================
+# Config Snapshot Models (for configuration version control)
+# ============================================================
+class ConfigSnapshot(BaseModel):
+    """Configuration snapshot for version control and rollback."""
+    id: Optional[int] = None
+    version: str = Field(..., description="Version tag, e.g., 'v1.0.0'")
+    config_json: str = Field(..., description="Serialized UserConfig JSON")
+    description: str = Field(default="", description="Snapshot description")
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Creation timestamp (ISO 8601)")
+    created_by: str = Field(default="user", description="Creator identifier")
+
+    # Index fields for quick lookup
+    is_active: bool = Field(default=False, description="Whether this snapshot is currently active")
 
 
 # ============================================================

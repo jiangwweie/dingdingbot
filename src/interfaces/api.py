@@ -1325,3 +1325,171 @@ async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None)
     except Exception as e:
         logger.error(f"Failed to apply strategy template {strategy_id}: {e}")
         return {"error": str(e)}
+
+
+# ============================================================
+# Config Snapshots Management Endpoints
+# ============================================================
+
+class ConfigSnapshotCreate(BaseModel):
+    """Request model for creating a config snapshot."""
+    version: str = Field(..., description="Version tag, e.g., 'v1.0.0'")
+    config_json: str = Field(..., description="Serialized UserConfig JSON")
+    description: str = Field(default="", description="Snapshot description")
+    created_by: str = Field(default="user", description="Creator identifier")
+
+
+class ConfigSnapshotResponse(BaseModel):
+    """Response model for config snapshot."""
+    id: int
+    version: str
+    config_json: str
+    description: str
+    created_at: str
+    created_by: str
+    is_active: bool
+
+
+class ConfigSnapshotListResponse(BaseModel):
+    """Response model for config snapshot list."""
+    total: int
+    data: List[ConfigSnapshotResponse]
+
+
+@app.post("/api/config/snapshots", response_model=ConfigSnapshotResponse)
+async def create_snapshot(request: ConfigSnapshotCreate):
+    """
+    Create a new config snapshot.
+
+    Request body:
+    {
+        "version": "v1.0.0",
+        "config_json": "{...}",
+        "description": "Initial config",
+        "created_by": "user"
+    }
+
+    Returns:
+        Created snapshot with is_active=true
+    """
+    try:
+        repo = _get_repository()
+        snapshot_id = await repo.create_config_snapshot(
+            version=request.version,
+            config_json=request.config_json,
+            description=request.description,
+            created_by=request.created_by,
+        )
+        return ConfigSnapshotResponse(
+            id=snapshot_id,
+            version=request.version,
+            config_json=request.config_json,
+            description=request.description,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            created_by=request.created_by,
+            is_active=True,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/config/snapshots", response_model=ConfigSnapshotListResponse)
+async def list_snapshots(limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)):
+    """
+    List all config snapshots with pagination.
+
+    Args:
+        limit: Maximum number of results (1-200)
+        offset: Number of results to skip
+
+    Returns:
+        Paginated list of snapshots
+    """
+    try:
+        repo = _get_repository()
+        result = await repo.get_config_snapshots(limit=limit, offset=offset)
+        return ConfigSnapshotListResponse(
+            total=result["total"],
+            data=[ConfigSnapshotResponse(**item) for item in result["data"]],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/config/snapshots/{snapshot_id}", response_model=ConfigSnapshotResponse)
+async def get_snapshot(snapshot_id: int):
+    """
+    Get a single snapshot by ID.
+
+    Args:
+        snapshot_id: Snapshot record ID
+
+    Returns:
+        Snapshot details
+    """
+    try:
+        repo = _get_repository()
+        snapshot = await repo.get_config_snapshot_by_id(snapshot_id)
+        if not snapshot:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return ConfigSnapshotResponse(**snapshot)
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/config/snapshots/{snapshot_id}/activate")
+async def activate_snapshot(snapshot_id: int):
+    """
+    Activate a config snapshot (rollback to this version).
+
+    Args:
+        snapshot_id: Snapshot record ID
+
+    Returns:
+        Success message
+    """
+    try:
+        repo = _get_repository()
+        snapshot = await repo.get_config_snapshot_by_id(snapshot_id)
+        if not snapshot:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+
+        success = await repo.activate_config_snapshot(snapshot_id)
+        if success:
+            # TODO: Trigger config reload with snapshot config
+            return {"message": f"Activated snapshot {snapshot_id}"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to activate snapshot")
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/config/snapshots/{snapshot_id}")
+async def delete_snapshot(snapshot_id: int):
+    """
+    Delete a config snapshot.
+
+    Args:
+        snapshot_id: Snapshot record ID
+
+    Returns:
+        Success message
+    """
+    try:
+        repo = _get_repository()
+        success = await repo.delete_config_snapshot(snapshot_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return {"message": f"Deleted snapshot {snapshot_id}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
