@@ -342,7 +342,7 @@ S2-3 (前端清理) ← 独立，可并行
 
 ---
 
-## 第三阶段：风控执行（进行中）
+## 第三阶段：风控执行（已完成）
 
 ### 阶段 S3-2: 动态风险头寸计算 ✅
 
@@ -354,6 +354,7 @@ S2-3 (前端清理) ← 独立，可并行
 - `src/domain/models.py` - RiskConfig 新增 `max_total_exposure` 字段
 - `src/domain/risk_calculator.py` - 升级 `calculate_position_size()` 实现方案 B
 - `tests/unit/test_risk_calculator.py` - 21 个新增测试用例（35 个测试 100% 通过）
+- `tests/integration/test_risk_headroom.py` - 16 个集成测试（100% 通过）
 
 **方案 B 逻辑**:
 - 使用 `available_balance` 而非 `total_balance`
@@ -364,17 +365,32 @@ S2-3 (前端清理) ← 独立，可并行
 **测试结果**:
 ```
 tests/unit/test_risk_calculator.py: 35/35 通过 (100%)
+tests/integration/test_risk_headroom.py: 16/16 通过 (100%)
+tests/integration/ 总计：41/41 通过 (100%)
 ```
 
-**Git 提交**: 待提交
+**Git 提交**: `1aa9619`
 
 ---
 
-### 阶段 S3-1: 多周期数据对齐优化 ⏸️ 暂缓
+### 阶段 S3-1: 多周期数据对齐优化 ✅
 
 **目标**: 优化 MTF 过滤器的多周期数据对齐逻辑
 
-**状态**: 等待 S3-2 提交后开始
+**完成时间**: 2026-03-27
+
+**交付物**:
+- `src/utils/timeframe_utils.py` - MTF 周期映射工具
+- `src/application/config_manager.py` - 新增 MTF 配置字段
+- `config/core.yaml` - MTF 默认配置
+- `tests/integration/test_mtf_e2e.py` - 6 个集成测试
+
+**测试结果**:
+```
+tests/integration/test_mtf_e2e.py: 6/6 通过 (100%)
+```
+
+**Git 提交**: `93edce5`
 
 ---
 

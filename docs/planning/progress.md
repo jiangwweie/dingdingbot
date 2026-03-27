@@ -360,6 +360,44 @@ tests/unit/ 总计：301/308 通过 (97.7%)
 
 ---
 
+## 2026-03-27 - 会话 13 (已完成) - S3-2 集成测试补充
+
+**目标**: 为 S3-2 动态风险头寸计算创建集成测试
+
+**进展**:
+- [x] **创建集成测试文件** ✅
+  - 创建 `tests/integration/test_risk_headroom.py`
+  - 16 个集成测试全部通过
+
+- [x] **测试覆盖场景** ✅
+  - TestRealAccountSnapshotIntegration: 真实账户快照集成 (3 个测试)
+  - TestMultiPositionExposureScenarios: 多持仓暴露场景 (4 个测试)
+  - TestRiskConfigContinuityAfterHotReload: 热重载连续性 (2 个测试)
+  - TestEndToEndSignalPipelineWithRisk: 端到端信号管道集成 (3 个测试)
+  - TestBoundaryAndEdgeCases: 边界和边缘场景 (4 个测试)
+
+**测试结果**:
+```
+tests/integration/test_risk_headroom.py: 16/16 通过 (100%)
+tests/integration/ 总计：41/41 通过 (100%)
+```
+
+**S3-2 完成总结**:
+| 步骤 | 状态 | 文件 |
+|------|------|------|
+| S3-2-1 | ✅ 完成 | src/domain/models.py |
+| S3-2-2 | ✅ 完成 | src/domain/risk_calculator.py |
+| S3-2-3 | ✅ 完成 | src/application/config_manager.py |
+| S3-2-4 | ✅ 完成 | tests/unit/test_risk_calculator.py (35 个测试) |
+| S3-2-5 | ✅ 完成 | tests/integration/test_risk_headroom.py (16 个测试) |
+
+**下一步**:
+- [ ] 更新 task_plan.md 标记 S3-1/S3-2 完成
+- [ ] 创建 v0.3.0-phase3 发布说明
+- [ ] 创建 Git 标签 v0.3.0-phase3
+
+---
+
 ## 2026-03-27 - 会话 12 (已完成) - S3-1 MTF 数据对齐集成测试
 
 **目标**: 完成 S3-1 Task 5 集成测试
