@@ -29,7 +29,7 @@ from src.infrastructure.logger import logger, setup_logger, register_secret
 # ============================================================
 # Global State
 # ============================================================
-_shutdown_event = asyncio.Event()
+_shutdown_event: Optional[asyncio.Event] = None  # Created in run_application()
 _exchange_gateway: Optional[ExchangeGateway] = None
 _notification_service: Optional[NotificationService] = None
 
@@ -37,10 +37,8 @@ _notification_service: Optional[NotificationService] = None
 # ============================================================
 # Signal Handlers
 # ============================================================
-def setup_signal_handlers():
+def setup_signal_handlers(loop: asyncio.AbstractEventLoop):
     """Set up graceful shutdown signal handlers"""
-    loop = asyncio.get_event_loop()
-
     for sig in (sys_signal.SIGINT, sys_signal.SIGTERM):
         try:
             loop.add_signal_handler(
@@ -139,11 +137,18 @@ async def run_application():
     Main application entry point.
     Orchestrates the complete startup and runtime flow.
     """
-    global _exchange_gateway, _notification_service
+    global _exchange_gateway, _notification_service, _shutdown_event
+
+    # Create shutdown event in the current event loop
+    _shutdown_event = asyncio.Event()
 
     logger.info("=" * 60)
     logger.info("Crypto Signal Monitor - Starting")
     logger.info("=" * 60)
+
+    # Get current event loop for signal handlers
+    loop = asyncio.get_event_loop()
+    setup_signal_handlers(loop)
 
     try:
         # =============================================
@@ -274,24 +279,42 @@ async def run_application():
         logger.info("=" * 60)
 
         # =============================================
-        # Phase 7.5: Start REST API Server
+        # Phase 7.5: Start REST API Server (embedded)
         # =============================================
         import os
+        import uvicorn
+        from src.interfaces.api import app as api_app, set_dependencies
+
         api_port = int(os.environ.get("BACKEND_PORT", 8000))
         logger.info(f"Phase 7.5: Starting REST API server on port {api_port}...")
-        
-        from src.interfaces.api import app, set_dependencies
-        import uvicorn
+
+        # Set API dependencies (shared with main process)
+        from src.application.signal_tracker import SignalStatusTracker
+        _status_tracker = SignalStatusTracker(repository=signal_repository)
+
         set_dependencies(
             repository=signal_repository,
             account_getter=_exchange_gateway.get_account_snapshot,
             config_manager=config_manager,
             exchange_gateway=_exchange_gateway,
+            signal_tracker=_status_tracker,
         )
-        api_config = uvicorn.Config(app, host="0.0.0.0", port=api_port, log_level="warning")
+        logger.info("API dependencies initialized")
+
+        # Start uvicorn server as a background task
+        api_config = uvicorn.Config(
+            api_app,
+            host="0.0.0.0",
+            port=api_port,
+            log_level="warning",
+            lifespan="off",
+        )
         api_server = uvicorn.Server(api_config)
         api_task = asyncio.create_task(api_server.serve())
-        logger.info(f"REST API server started at http://localhost:{api_port}")
+
+        # Wait a moment for API server to initialize
+        await asyncio.sleep(2)
+        logger.info(f"REST API server ready at http://localhost:{api_port}")
 
         # =============================================
         # Event Loop - Wait for shutdown
@@ -302,13 +325,6 @@ async def run_application():
         ws_task.cancel()
         try:
             await ws_task
-        except asyncio.CancelledError:
-            pass
-
-        # Cancel API task
-        api_task.cancel()
-        try:
-            await api_task
         except asyncio.CancelledError:
             pass
 
@@ -342,6 +358,17 @@ async def run_application():
         # Cleanup
         if _exchange_gateway:
             await _exchange_gateway.close()
+
+        # Stop API server task
+        if 'api_task' in locals():
+            logger.info("Stopping API server...")
+            api_task.cancel()
+            try:
+                await api_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("API server shutdown complete")
+
         logger.info("Application shutdown complete")
 
 
@@ -357,9 +384,6 @@ def main():
         # Create event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-
-        # Setup signal handlers
-        setup_signal_handlers()
 
         # Run application
         loop.run_until_complete(run_application())

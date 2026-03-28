@@ -1,51 +1,77 @@
 #!/bin/bash
+# ============================================================
+# 盯盘狗 - 停止脚本
+# 功能：停止前后端服务，不会报错退出
+# ============================================================
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$(dirname "$DIR")"
 
-echo "Stopping Backend..."
+echo "========================================="
+echo "盯盘狗 - 停止服务"
+echo "========================================="
+
+# 停止后端
+echo -n "停止后端服务... "
 if [ -f "$ROOT_DIR/.backend.pid" ]; then
-    PID=$(cat "$ROOT_DIR/.backend.pid")
-    if kill -0 $PID 2>/dev/null; then
-        kill $PID
-        echo "Backend (PID $PID) stopped."
+    PID=$(cat "$ROOT_DIR/.backend.pid" 2>/dev/null)
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+        kill "$PID" 2>/dev/null
+        sleep 1
+        # 如果还在运行，强制停止
+        if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" 2>/dev/null
+        fi
+        echo "后端 (PID $PID) 已停止"
     else
-        echo "Backend (PID $PID) is not running."
+        echo "后端服务未运行"
     fi
-    rm "$ROOT_DIR/.backend.pid"
+    rm -f "$ROOT_DIR/.backend.pid"
 else
-    # Fallback cleanup
-    pkill -f "python3 -m src.main" || echo "No rogue backend process found."
+    # 备用方案：清理可能的进程
+    pkill -f "python3.*src.main" 2>/dev/null && echo "清理了残留后端进程" || echo "后端服务未运行"
 fi
 
-echo "Stopping Frontend..."
+# 停止前端
+echo -n "停止前端服务... "
 if [ -f "$ROOT_DIR/.frontend.pid" ]; then
-    PID=$(cat "$ROOT_DIR/.frontend.pid")
-    if kill -0 $PID 2>/dev/null; then
-        # Use pkill -P to kill child processes of npm (node)
-        pkill -P $PID || true
-        kill $PID
-        echo "Frontend (PID $PID) stopped."
+    PID=$(cat "$ROOT_DIR/.frontend.pid" 2>/dev/null)
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+        # 先杀子进程（node/vite）
+        pkill -P "$PID" 2>/dev/null || true
+        sleep 0.5
+        kill "$PID" 2>/dev/null
+        sleep 0.5
+        # 如果还在运行，强制停止
+        if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" 2>/dev/null
+        fi
+        echo "前端 (PID $PID) 已停止"
     else
-        echo "Frontend (PID $PID) is not running."
+        echo "前端服务未运行"
     fi
-    rm "$ROOT_DIR/.frontend.pid"
+    rm -f "$ROOT_DIR/.frontend.pid"
 else
-    # Fallback cleanup
-    pkill -f "vite|npm run dev" || echo "No rogue frontend process found."
+    # 备用方案：清理可能的进程
+    pkill -f "vite.*--port" 2>/dev/null && echo "清理了残留前端进程" || echo "前端服务未运行"
 fi
 
-# Ensure ports are completely freed (kill any process bound to these ports)
-echo "Cleaning up ports..."
-for PORT in 8000 8080 5173; do
+# 清理端口占用（备用方案）
+echo "清理可能的端口占用..."
+for PORT in 8000 5173; do
     PIDS=$(lsof -ti:$PORT 2>/dev/null)
     if [ -n "$PIDS" ]; then
-        echo "Killing processes on port $PORT: $PIDS"
+        echo "  端口 $PORT 被占用，清理中..."
         echo "$PIDS" | xargs kill -9 2>/dev/null || true
     fi
 done
 
-# Also kill any remaining uvicorn processes
-pkill -9 -f "uvicorn" 2>/dev/null || true
+# 清理 uvicorn 进程
+pkill -f "uvicorn.*src.interfaces.api" 2>/dev/null && echo "清理了残留 API 进程" || true
 
-echo "Cleanup complete."
+echo "========================================="
+echo "所有服务已停止"
+echo "========================================="
+
+# 始终成功退出
+exit 0

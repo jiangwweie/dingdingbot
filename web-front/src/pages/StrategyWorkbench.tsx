@@ -443,7 +443,7 @@ export default function StrategyWorkbench() {
               ) : (
                 strategies.map((strategy) => (
                   <div
-                    key={strategy.id}
+                    key={String(strategy.id)}
                     className={cn(
                       "w-full p-4 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 group",
                       selectedStrategy?.id === strategy.id && "bg-blue-50"

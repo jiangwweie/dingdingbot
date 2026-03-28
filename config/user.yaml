@@ -5,47 +5,39 @@ exchange:
   testnet: false
 user_symbols: []
 timeframes:
+- 15m
 - 1h
-- 4h
-- 1d
-- 1w
 active_strategies:
-- id: 1774425627045-23kz7m0av
-  name: 策略 1
+- id: ''
+  name: test_pinbar
+  logic_tree:
+    type: trigger
+    id: trigger_0
+    config:
+      id: ''
+      type: pinbar
+      enabled: true
+      params: {}
   triggers:
-  - id: 1774425627045-j7ta2ijxu
+  - id: ''
     type: pinbar
     enabled: true
-    params:
-      min_wick_ratio: 0.6
-      max_body_ratio: 0.3
-      body_position_tolerance: 0.1
+    params: {}
   trigger_logic: OR
   trigger:
-    id: 1774425627045-j7ta2ijxu
+    id: ''
     type: pinbar
     enabled: true
-    params:
-      min_wick_ratio: 0.5
-      max_body_ratio: 0.3
-      body_position_tolerance: 0.3
-  filters:
-  - id: 1774434505281-1ch0pol3e
-    type: mtf
-    enabled: true
-    params:
-      higher_timeframe: 4h
-      require_confirmation: true
+    params: {}
+  filters: []
   filter_logic: AND
-  is_global: false
-  apply_to:
-  - ETH/USDT:USDT:1h
-strategy:
-  trend_filter_enabled: false
-  mtf_validation_enabled: false
+  is_global: true
+  apply_to: []
+strategy: null
 risk:
-  max_loss_percent: '0.02'
-  max_leverage: 10
+  max_loss_percent: '0.01'
+  max_leverage: 125
+  max_total_exposure: '0.8'
 asset_polling:
   interval_seconds: 60
 notification:

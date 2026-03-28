@@ -168,7 +168,7 @@ export default function Dashboard() {
                   const symbol = signal.symbol.replace(':USDT', '');
                   return (
                     <Link
-                      key={signal.id}
+                      key={String(signal.id)}
                       to={`/signals?highlight=${signal.id}`}
                       className="block p-4 rounded-xl hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-100"
                     >

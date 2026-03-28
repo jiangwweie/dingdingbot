@@ -231,7 +231,7 @@ export default function StrategyBuilder({
 
         return (
           <div
-            key={strategy.id}
+            key={String(strategy.id)}
             className="bg-white rounded-xl border border-gray-200 overflow-hidden"
           >
             {/* Strategy Header */}
@@ -381,7 +381,7 @@ export default function StrategyBuilder({
                       </span>
                       {strategy.filters.map((filter, filterIndex) => (
                         <div
-                          key={filter.id}
+                          key={String(filter.id)}
                           className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-2"
                         >
                           <div className="flex items-center justify-between mb-2">

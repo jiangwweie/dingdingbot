@@ -193,7 +193,7 @@ export default function Snapshots() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {snapshots.map((snapshot) => (
-                <tr key={snapshot.id} className="hover:bg-gray-50">
+                <tr key={String(snapshot.id)} className="hover:bg-gray-50">
                   <td className="px-6 py-4 font-medium">{snapshot.version}</td>
                   <td className="px-6 py-4 text-gray-600">{snapshot.description || '-'}</td>
                   <td className="px-6 py-4 text-gray-500">

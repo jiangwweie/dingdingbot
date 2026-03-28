@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useApi } from '../lib/api';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
@@ -733,7 +733,7 @@ export default function Signals() {
 
                   return (
                     <tr
-                      key={signal.id}
+                      key={String(signal.id)}
                       onClick={() => openDrawer(signal.id)}
                       className={cn(
                         "hover:bg-gray-50/50 transition-colors cursor-pointer group",
@@ -755,7 +755,11 @@ export default function Signals() {
                           )}
                         </button>
                       </td>
-                      {visibleColumns.map((col) => renderCell(signal, col.id))}
+                      {visibleColumns.map((col) => (
+                        <Fragment key={col.id}>
+                          {renderCell(signal, col.id)}
+                        </Fragment>
+                      ))}
                     </tr>
                   );
                 })

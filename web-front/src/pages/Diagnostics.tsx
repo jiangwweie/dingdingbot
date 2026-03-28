@@ -185,9 +185,9 @@ export default function Diagnostics() {
                   recentAttempts.map((attempt: any) => {
                     const isLong = attempt.direction === 'long';
                     const isShort = attempt.direction === 'short';
-                    
+
                     return (
-                      <tr key={attempt.id} className="hover:bg-gray-50/50 transition-colors">
+                      <tr key={String(attempt.id)} className="hover:bg-gray-50/50 transition-colors">
                         <td className="px-6 py-4 text-gray-500">
                           {format(new Date(attempt.created_at), 'MM-dd HH:mm:ss')}
                         </td>

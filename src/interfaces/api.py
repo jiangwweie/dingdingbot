@@ -1114,28 +1114,15 @@ async def preview_strategy(request: StrategyPreviewRequest):
         # Get the latest closed kline
         latest_kline = None
         for kline in reversed(klines):
-            if kline.get('is_closed', False):
+            if kline.is_closed:
                 latest_kline = kline
                 break
 
         if latest_kline is None:
             latest_kline = klines[-1]
 
-        # Convert to KlineData model
-        from src.domain.models import KlineData, Direction
-        from decimal import Decimal
-
-        kline_data = KlineData(
-            symbol=request.symbol,
-            timeframe=request.timeframe,
-            timestamp=latest_kline['timestamp'],
-            open=Decimal(str(latest_kline['open'])),
-            high=Decimal(str(latest_kline['high'])),
-            low=Decimal(str(latest_kline['low'])),
-            close=Decimal(str(latest_kline['close'])),
-            volume=Decimal(str(latest_kline['volume'])),
-            is_closed=latest_kline.get('is_closed', True)
-        )
+        # Use the KlineData object directly
+        kline_data = latest_kline
 
         # Build StrategyDefinition from logic_tree
         from src.domain.models import StrategyDefinition
@@ -1222,7 +1209,15 @@ async def preview_strategy(request: StrategyPreviewRequest):
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Preview strategy error: {e}")
+        # Return error in a way that doesn't trigger response validation
+        # Since response_model is StrategyPreviewResponse, we need to return that type
+        # But we can include error details in the fields
+        return StrategyPreviewResponse(
+            signal_fired=False,
+            trace_tree={"error": str(e), "node_id": "error", "node_type": "error", "passed": False, "reason": str(e), "children": []},
+            details={"error": str(e)}
+        )
 
 
 # ============================================================

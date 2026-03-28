@@ -384,7 +384,7 @@ export default function SignalAttempts() {
 
                   return (
                     <tr
-                      key={attempt.id}
+                      key={String(attempt.id)}
                       className={cn(
                         "hover:bg-gray-50/50 transition-colors",
                         isSelected && "bg-apple-blue/5"
