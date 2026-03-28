@@ -739,3 +739,144 @@ tests/integration/: 41/41 通过 (100%)
 - [ ] 根据实际效果微调参数
 
 ---
+
+## 2026-03-28 - 会话：回测功能修复 + 诊断分析师角色创建
+
+**目标**: 修复回测功能问题、创建诊断分析师角色、完成今日工作总结
+
+### 已完成工作
+
+#### 1. 回测功能修复 ✅
+
+**问题**: 用户报告回测 30 天数据，结果为 0 个信号，candles_analyzed 仅 100
+
+**根因定位**:
+1. `BacktestRequest.strategies` 类型定义为 `List[Any]`，导致 Pydantic 无法正确反序列化
+2. `_build_dynamic_runner()` 缺少手动反序列化逻辑
+3. `_fetch_klines()` 忽略 `start_time/end_time` 参数
+
+**修复内容**:
+
+**文件 1**: `src/domain/models.py` (line 275-278)
+```python
+# 修改前
+strategies: Optional[List[Any]] = Field(...)
+
+# 修改后
+strategies: Optional[List[Dict[str, Any]]] = Field(...)
+```
+
+**文件 2**: `src/application/backtester.py` (line 217-235)
+```python
+def _build_dynamic_runner(self, strategy_definitions: List[Any]) -> DynamicStrategyRunner:
+    from src.domain.models import StrategyDefinition
+
+    strategies = []
+    for strat_def in strategy_definitions:
+        if isinstance(strat_def, StrategyDefinition):
+            strategies.append(strat_def)
+        else:
+            try:
+                strategies.append(StrategyDefinition(**strat_def))
+            except Exception as e:
+                logger.warning(f"Failed to deserialize strategy: {e}")
+                continue
+
+    return create_dynamic_runner(strategies)
+```
+
+**文件 3**: `src/application/backtester.py` (line 264-296)
+```python
+async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
+    # 检查时间范围参数
+    if request.start_time and request.end_time:
+        duration_ms = int(request.end_time) - int(request.start_time)
+        timeframe_minutes = self._parse_timeframe(request.timeframe)
+        expected_bars = duration_ms // (timeframe_minutes * 60 * 1000)
+        limit = max(int(expected_bars * 1.2), request.limit, 1000)
+
+    # ...fetch...
+
+    # 按时间范围过滤
+    if request.start_time and request.end_time:
+        klines = [k for k in klines if start_ts <= k.timestamp <= end_ts]
+```
+
+**验证结果**:
+- 4h 周期回测：186 根 K 线，1 个有效信号 ✅
+- 15m 周期回测：1500 根 K 线，4 个有效信号 ✅
+
+---
+
+#### 2. 诊断分析师角色创建 ✅
+
+**交付物**:
+- `.claude/commands/diagnostic.md` - 诊断分析师命令配置
+- `.claude/team/diagnostic-analyst/SKILL.md` - 技能定义
+- `.claude/team/diagnostic-analyst/QUICKSTART.md` - 快速入门指南
+
+**核心原则**:
+- ❌ 不修改业务代码
+- ❌ 不创建新业务功能
+- ✅ 只分析问题，输出诊断报告和修复方案
+
+---
+
+#### 3. config/user.yaml 注释优化 ✅
+
+**修改内容**:
+- 增加详细的中文注释说明每个配置项
+- 说明 legacy 字段（trigger/triggers/filters）的用途
+- 添加 MTF 配置说明
+
+---
+
+#### 4. 回测信号详情查看功能需求分析 📋
+
+**用户需求**: 回测结果中的信号，点击详情展示 K 线图表和信号标记
+
+**实现方案**:
+1. 前端：`Backtest.tsx` 添加"查看信号详情"按钮
+2. 后端：新增 `GET /api/backtest/{signal_id}/context` 接口
+3. 前端：复用信号上下文查看器组件展示 K 线图
+
+**状态**: 待实施（已记录到待办事项）
+
+---
+
+### 待办事项汇总
+
+| 编号 | 任务 | 优先级 | 预计工作量 | 状态 |
+|------|------|--------|----------|------|
+| S2-5 | ATR 过滤器核心逻辑实现 | 🔴 最高 | 4-6 小时 | ⏸️ pending |
+| 回测信号图表 | 实现信号详情 K 线图展示 | 🟠 高 | 2-3 小时 | ⏸️ pending |
+| S2-4 | 信号标签动态化 | 🟡 中 | 2-3 小时 | ⏸️ pending |
+| S2-1 | 实盘热重载 | 🟡 中 | 6-8 小时 | ⏸️ pending |
+| S2-3 | 前端硬编码清理 | 🟡 中 | 2-3 小时 | ⏸️ pending |
+
+---
+
+### Git 提交记录
+
+| 提交号 | 信息 |
+|--------|------|
+| (待提交) | feat: 修复回测功能策略反序列化 + 时间范围支持 |
+| 88d2e8f | feat(frontend): 添加立即测试功能提示说明 |
+| 17bfeed | fix: 修复 API 接口和前端 React key 警告 + 启动脚本优化 |
+
+---
+
+### 系统状态
+
+**Phase 4+5 达到生产就绪标准** ✅
+
+| 阶段 | 状态 | 备注 |
+|------|------|------|
+| Phase 1 (架构筑基) | ✅ 完成 | v0.1.0 |
+| Phase 2 (交互升维) | ✅ 完成 | v0.2.0 |
+| Phase 3 (风控执行) | ✅ 完成 | v0.3.0 |
+| Phase 4+5 (工业化调优 + 状态增强) | ✅ 完成 | v0.6.0 |
+| 回测功能修复 | ✅ 完成 | 2026-03-28 |
+| S2-5 (ATR 过滤器) | ⏸️ 待执行 | **最高优先级** |
+
+---

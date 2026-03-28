@@ -9,6 +9,7 @@ import {
   fetchSystemConfig,
   updateSystemConfig,
   generateId,
+  convertStrategyToLogicNode,
 } from '../lib/api';
 import useSWR from 'swr';
 import StrategyBuilder from './StrategyBuilder';
@@ -36,6 +37,19 @@ const validateSymbol = (value: string): boolean => {
   const regex = /^[A-Z0-9]+\/[A-Z0-9]+(:[A-Z0-9]+)?$/i;
   return regex.test(value);
 };
+
+/**
+ * 初始化策略的 logic_tree 字段（如果缺失）
+ */
+function ensureLogicTree(strategy: StrategyDefinition): StrategyDefinition {
+  if (!strategy.logic_tree) {
+    return {
+      ...strategy,
+      logic_tree: convertStrategyToLogicNode(strategy),
+    };
+  }
+  return strategy;
+}
 
 export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('strategies');
@@ -69,7 +83,9 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     if (config) {
       // Handle new format with active_strategies
       if ('active_strategies' in config) {
-        setStrategies(config.active_strategies || []);
+        // Ensure all strategies have logic_tree initialized
+        const initializedStrategies = (config.active_strategies || []).map(ensureLogicTree);
+        setStrategies(initializedStrategies);
       }
       setRiskForm(config.risk || riskForm);
       setUserSymbols(config.user_symbols || []);

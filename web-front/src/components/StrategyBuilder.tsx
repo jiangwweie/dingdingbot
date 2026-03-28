@@ -11,17 +11,6 @@ import {
   convertStrategyToLogicNode,
   convertLogicNodeToStrategy,
 } from '../lib/api';
-import {
-  LogicNode,
-  LeafNode,
-  TriggerLeaf,
-  FilterLeaf,
-  createAndNode,
-  createTriggerLeaf,
-  createFilterLeaf,
-  isTriggerLeaf,
-  isFilterLeaf,
-} from '../types/strategy';
 import NodeRenderer from './NodeRenderer';
 
 interface StrategyBuilderProps {
@@ -98,6 +87,20 @@ export default function StrategyBuilder({
       filter_logic: 'AND' as const,
       is_global: true,
       apply_to: [],
+      logic_tree: convertStrategyToLogicNode({
+        id: generateId(),
+        name: `新策略 ${strategies.length + 1}`,
+        trigger: {
+          id: generateId(),
+          type: 'pinbar',
+          enabled: true,
+          params: getDefaultTriggerParams('pinbar'),
+        },
+        filters: [],
+        filter_logic: 'AND' as const,
+        is_global: true,
+        apply_to: [],
+      }),
     };
     onChange([...strategies, newStrategy]);
   }, [strategies, onChange]);
@@ -115,6 +118,10 @@ export default function StrategyBuilder({
       enabled: true,
       params: getDefaultTriggerParams(triggerType),
     };
+
+    // 重建 logic_tree
+    strategy.logic_tree = convertStrategyToLogicNode(strategy);
+
     onChange(newStrategies);
   }, [strategies, onChange]);
 
@@ -130,6 +137,10 @@ export default function StrategyBuilder({
       enabled: true,
       params: {},
     });
+
+    // 重建 logic_tree
+    strategy.logic_tree = convertStrategyToLogicNode(strategy);
+
     onChange(newStrategies);
   }, [strategies, onChange]);
 
@@ -140,6 +151,10 @@ export default function StrategyBuilder({
     if (!strategy) return;
 
     strategy.filters = strategy.filters.filter((_, i) => i !== filterIndex);
+
+    // 重建 logic_tree
+    strategy.logic_tree = convertStrategyToLogicNode(strategy);
+
     onChange(newStrategies);
   }, [strategies, onChange]);
 
@@ -149,7 +164,12 @@ export default function StrategyBuilder({
     const strategy = newStrategies[strategyIndex];
     if (!strategy) return;
 
+    // 更新 trigger 字段
     strategy.trigger = updatedTrigger;
+
+    // 重建 logic_tree
+    strategy.logic_tree = convertStrategyToLogicNode(strategy);
+
     onChange(newStrategies);
   }, [strategies, onChange]);
 
@@ -162,6 +182,10 @@ export default function StrategyBuilder({
     const filterIndex = strategy.filters.findIndex(f => f.id === updatedFilter.id);
     if (filterIndex !== -1) {
       strategy.filters[filterIndex] = updatedFilter;
+
+      // 重建 logic_tree
+      strategy.logic_tree = convertStrategyToLogicNode(strategy);
+
       onChange(newStrategies);
     }
   }, [strategies, onChange]);

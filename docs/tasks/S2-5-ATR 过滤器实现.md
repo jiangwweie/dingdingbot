@@ -267,4 +267,45 @@ atr = ((prev_atr * (period - 1)) + current_tr) / period
 
 ---
 
-*最后更新*: 2026-03-28
+## 附录：Pinbar 策略参数优化建议
+
+### 问题背景
+
+用户发现某些有效的 Pinbar 形态被系统过滤掉，特征是：
+- 下影线占总长度的约 50%（当前要求≥60%）
+- 实体位置居中（当前要求实体在顶部/底部 10% 区域内）
+
+### 当前参数 vs 建议参数
+
+| 参数 | 当前值 | 建议值 | 说明 |
+|------|-------|-------|------|
+| `min_wick_ratio` | 0.6 (60%) | 0.5 (50%) | 覆盖"下影线占一半"的形态 |
+| `max_body_ratio` | 0.3 (30%) | 0.35 (35%) | 稍微放宽实体大小限制 |
+| `body_position_tolerance` | 0.1 (10%) | 0.3 (30%) | 允许实体在中点偏上区域（≥55% 位置） |
+
+### 实体位置计算验证
+
+```python
+# tolerance = 0.3 时的实体位置要求（看涨 Pinbar）
+body_position >= (1 - tolerance - body_ratio / 2)
+body_position >= (1 - 0.3 - 0.175)  # body_ratio=0.35
+body_position >= 0.525
+```
+
+**效果**：实体中心在 52.5% 以上即可（中点偏上），而不是当前的 75% 以上。
+
+### 实施建议
+
+1. **先调整参数验证效果**：修改 `config/core.yaml` 中的 `pinbar_defaults`
+2. **观察历史信号变化**：使用预览功能验证是否覆盖想要的形态
+3. **根据实际效果微调**：如果信号过多则适当收紧，过少则适当放宽
+
+### 相关文件
+
+- `config/core.yaml` - Pinbar 默认配置
+- `src/domain/strategy_engine.py:27-58` - `PinbarConfig` 类定义
+- `src/domain/strategy_engine.py:144-229` - Pinbar 检测逻辑
+
+---
+
+*最后更新*: 2026-03-28（添加 Pinbar 参数优化建议）

@@ -1,7 +1,7 @@
 import useSWR from 'swr';
 
 // Import recursive logic tree types from types/strategy.ts
-import type { LogicNode, LogicNodeChildren } from '../types/strategy';
+import type { LogicNode, LogicNodeChildren, LeafNode } from '../types/strategy';
 
 export const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -63,6 +63,7 @@ export interface SignalAttempt {
   filter_stage?: 'ema_trend' | 'mtf' | null;
   filter_reason?: string | null;
   details?: Record<string, any>;
+  evaluation_summary?: string;
 }
 
 /**
@@ -280,6 +281,7 @@ export interface StrategyDefinition {
   filter_logic: 'AND' | 'OR'; // How to combine filter results
   is_global: boolean; // Applies to all symbols and timeframes (default: true)
   apply_to: string[]; // Specific scope entries e.g., 'BTC/USDT:USDT:15m' (default: [])
+  logic_tree?: LogicNode | LeafNode; // Optional recursive logic tree (new format)
 }
 
 // ============================================================================
@@ -667,6 +669,7 @@ export interface PreviewRequest {
 export interface PreviewResponse {
   signal_fired: boolean;
   trace_tree: TraceNode;
+  evaluation_summary?: string;
   details?: Record<string, any>;
 }
 

@@ -664,6 +664,26 @@ export default function StrategyWorkbench() {
                     )}
                   </div>
 
+                  {/* 评估报告 */}
+                  {previewResult.evaluation_summary && (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold text-gray-700">评估报告</h4>
+                        <button
+                          onClick={() => {
+                            alert(`评估报告:\n\n${previewResult.evaluation_summary}`);
+                          }}
+                          className="text-xs text-apple-blue hover:underline"
+                        >
+                          查看详情
+                        </button>
+                      </div>
+                      <pre className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap font-sans">
+                        {previewResult.evaluation_summary}
+                      </pre>
+                    </div>
+                  )}
+
                   <TraceTreeViewer
                     traceTree={previewResult.trace_tree}
                     signalFired={previewResult.signal_fired}

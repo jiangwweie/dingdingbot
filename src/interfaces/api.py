@@ -1056,6 +1056,7 @@ class StrategyPreviewResponse(BaseModel):
     """Response model for strategy preview endpoint."""
     signal_fired: bool = Field(..., description="Whether signal was triggered")
     trace_tree: Dict[str, Any] = Field(..., description="Complete trace tree showing evaluation path")
+    evaluation_summary: str = Field(..., description="Human-readable evaluation report in natural language")
     details: Optional[Dict[str, Any]] = Field(default=None, description="Additional details if signal fired")
 
 
@@ -1196,13 +1197,173 @@ async def preview_strategy(request: StrategyPreviewRequest):
                 "node_type": node.node_type,
                 "passed": node.passed,
                 "reason": node.reason,
-                "details": node.details,
+                "details": node.metadata,
                 "children": [trace_to_dict(child) for child in node.children]
             }
+
+        # Convert TraceNode to human-readable text
+        def trace_to_human_text(node: TraceNode, indent: int = 0) -> str:
+            """
+            Recursively convert TraceNode to natural language description.
+
+            Args:
+                node: TraceNode to convert
+                indent: Indentation level for formatting
+
+            Returns:
+                Human-readable string describing the evaluation result
+            """
+            lines = []
+            prefix = "  " * indent
+
+            # Determine node display type
+            node_type_display = node.node_type.upper()
+
+            # Build result icon and status
+            result_icon = "✅" if node.passed else "❌"
+
+            if node.node_type in ("AND", "OR", "NOT"):
+                # Logic gate node
+                if node.node_type == "AND":
+                    node_label = "逻辑门 (AND)"
+                    if node.passed:
+                        reason_text = "所有条件满足"
+                    else:
+                        # Parse child failure info from reason
+                        reason_text = _parse_and_reason(node.reason)
+                elif node.node_type == "OR":
+                    node_label = "逻辑门 (OR)"
+                    if node.passed:
+                        reason_text = _parse_or_reason(node.reason, passed=True)
+                    else:
+                        reason_text = "所有条件均不满足"
+                else:  # NOT
+                    node_label = "逻辑门 (NOT)"
+                    reason_text = "条件被反转" + ("通过" if node.passed else "失败")
+
+                lines.append(f"{prefix}{node_label} - {result_icon}")
+                lines.append(f"{prefix}  → 原因：{reason_text}")
+
+            elif node.node_type == "trigger":
+                # Trigger node
+                trigger_type = node.metadata.get("trigger_type", "unknown")
+                trigger_name = _get_trigger_display_name(trigger_type)
+
+                if node.passed:
+                    reason_text = f"检测到{trigger_name}"
+                else:
+                    reason_text = f"未检测到{trigger_name}形态"
+
+                lines.append(f"{prefix}触发器 ({trigger_name}) - {result_icon}")
+                lines.append(f"{prefix}  → 原因：{reason_text}")
+
+                # Add detailed analysis for failed triggers
+                if not node.passed and indent == 0:
+                    lines.append(f"{prefix}  → 详细分析：当前 K 线数据未满足{trigger_name}形态条件")
+
+            elif node.node_type == "filter":
+                # Filter node
+                filter_type = node.metadata.get("filter_type", "unknown")
+                filter_name = _get_filter_display_name(filter_type)
+
+                if node.passed:
+                    reason_text = f"{filter_name}检查通过"
+                else:
+                    reason_text = f"{filter_name}检查失败：{node.reason}"
+
+                lines.append(f"{prefix}过滤器 ({filter_name}) - {result_icon}")
+                lines.append(f"{prefix}  → 原因：{reason_text}")
+            else:
+                # Unknown node type
+                lines.append(f"{prefix}{node.node_type} - {result_icon}")
+                lines.append(f"{prefix}  → 原因：{node.reason}")
+
+            # Recursively process children
+            for child in node.children:
+                child_text = trace_to_human_text(child, indent + 1)
+                lines.append(child_text)
+
+            return "\n".join(lines)
+
+        def _parse_and_reason(reason: str) -> str:
+            """Parse AND node failure reason to extract child failure info."""
+            # Format: "child_N_failed: detailed_reason"
+            if reason.startswith("child_"):
+                parts = reason.split(": ", 1)
+                if len(parts) >= 2:
+                    child_info = parts[0].replace("_", " ").title()
+                    detailed_reason = parts[1].split(":")[0] if ":" in parts[1] else parts[1]
+                    return f"{child_info}: {detailed_reason}"
+            return reason
+
+        def _parse_or_reason(reason: str, passed: bool) -> str:
+            """Parse OR node reason."""
+            if passed and reason.startswith("child_"):
+                parts = reason.split(": ", 1)
+                if len(parts) >= 2:
+                    return parts[0].replace("_", " ").title()
+            return reason
+
+        def _get_trigger_display_name(trigger_type: str) -> str:
+            """Get display name for trigger type."""
+            trigger_names = {
+                "pinbar": "Pinbar",
+                "engulfing": "Engulfing",
+                "doji": "Doji",
+                "hammer": "Hammer",
+            }
+            return trigger_names.get(trigger_type, trigger_type.title())
+
+        def _get_filter_display_name(filter_type: str) -> str:
+            """Get display name for filter type."""
+            filter_names = {
+                "ema": "EMA 趋势",
+                "ema_trend": "EMA 趋势",
+                "mtf": "多周期共振",
+                "atr": "ATR 波动率",
+                "volume_surge": "成交量突增",
+                "volatility_filter": "波动率过滤",
+                "time_filter": "时间过滤",
+                "price_action": "价格行为",
+            }
+            return filter_names.get(filter_type, filter_type.title())
+
+        # Build evaluation summary
+        summary_lines = []
+        summary_lines.append(f"评估结果：{'信号触发' if signal_fired else '信号未触发'} {result_icon}")
+        summary_lines.append("")
+        summary_lines.append("评估路径：")
+        summary_lines.append(trace_to_human_text(trace_tree))
+
+        # Add detailed analysis section for failed signals
+        if not signal_fired:
+            summary_lines.append("")
+            summary_lines.append("详细分析：")
+
+            def find_failure_reasons(node: TraceNode, reasons: list):
+                if not node.passed:
+                    if node.node_type == "trigger":
+                        trigger_type = node.metadata.get("trigger_type", "unknown")
+                        reasons.append(f"- {trigger_type.upper()}形态检测失败：未满足形态条件")
+                    elif node.node_type == "filter":
+                        filter_type = node.metadata.get("filter_type", "unknown")
+                        reasons.append(f"- {filter_type}过滤器拦截：{node.reason}")
+                for child in node.children:
+                    find_failure_reasons(child, reasons)
+
+            failure_reasons = []
+            find_failure_reasons(trace_tree, failure_reasons)
+            if failure_reasons:
+                summary_lines.extend(failure_reasons[:5])  # Limit to top 5 reasons
+            else:
+                summary_lines.append("- 逻辑树根节点评估失败，无需继续评估")
+
+        evaluation_summary = "\n".join(summary_lines)
 
         return StrategyPreviewResponse(
             signal_fired=signal_fired,
             trace_tree=trace_to_dict(trace_tree),
+            evaluation_summary=evaluation_summary,
             details=details
         )
 
@@ -1213,9 +1374,11 @@ async def preview_strategy(request: StrategyPreviewRequest):
         # Return error in a way that doesn't trigger response validation
         # Since response_model is StrategyPreviewResponse, we need to return that type
         # But we can include error details in the fields
+        error_summary = f"评估结果：错误 ❌\n\n详细分析：\n- 策略预览执行失败：{str(e)}"
         return StrategyPreviewResponse(
             signal_fired=False,
             trace_tree={"error": str(e), "node_id": "error", "node_type": "error", "passed": False, "reason": str(e), "children": []},
+            evaluation_summary=error_summary,
             details={"error": str(e)}
         )
 

@@ -452,12 +452,17 @@ export default function SignalAttempts() {
                         {attempt.details ? (
                           <button
                             onClick={() => {
-                              const detailsStr = JSON.stringify(attempt.details, null, 2);
-                              alert(`详情 JSON:\n${detailsStr}`);
+                              // 优先显示语义化评估报告（如果有）
+                              if (attempt.evaluation_summary) {
+                                alert(`评估报告:\n\n${attempt.evaluation_summary}`);
+                              } else {
+                                const detailsStr = JSON.stringify(attempt.details, null, 2);
+                                alert(`详情 JSON:\n${detailsStr}`);
+                              }
                             }}
                             className="text-xs text-apple-blue hover:underline"
                           >
-                            查看 JSON
+                            查看详情
                           </button>
                         ) : (
                           <span className="text-gray-400 text-xs">-</span>

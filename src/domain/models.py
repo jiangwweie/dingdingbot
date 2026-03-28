@@ -271,8 +271,8 @@ class BacktestRequest(BaseModel):
     mtf_validation_enabled: Optional[bool] = Field(default=None, description="Override MTF validation")
 
     # New dynamic rule engine parameters (Phase K)
-    # Using string reference to avoid forward declaration issue
-    strategies: Optional[List[Any]] = Field(
+    # Using Dict to accept JSON payload, will be deserialized to StrategyDefinition
+    strategies: Optional[List[Dict[str, Any]]] = Field(
         default=None,
         description="Dynamic strategy definitions with filter chains (overrides legacy params)"
     )

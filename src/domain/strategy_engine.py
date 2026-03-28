@@ -578,6 +578,7 @@ class DynamicStrategyRunner:
         self,
         kline: KlineData,
         higher_tf_trends: Dict[str, TrendDirection],
+        current_trend: Optional[TrendDirection] = None,
         kline_history: Optional[List[KlineData]] = None,
     ) -> List[SignalAttempt]:
         """
@@ -591,6 +592,7 @@ class DynamicStrategyRunner:
         Args:
             kline: Current K-line
             higher_tf_trends: Higher timeframe trends for MTF
+            current_trend: Current timeframe trend (optional, will auto-detect if not provided)
             kline_history: Optional history for multi-candle strategies
 
         Returns:
@@ -632,17 +634,19 @@ class DynamicStrategyRunner:
                 continue
 
             # Build filter context
-            # Get current trend from first stateful filter (usually EMA)
-            current_trend = None
-            for f in strat.filters:
-                if f.is_stateful:
-                    current_trend = f.get_current_trend(kline, kline.symbol, kline.timeframe)
-                    if current_trend is not None:
-                        break
+            # Priority 1: Use current_trend parameter if provided
+            # Priority 2: Auto-detect from first stateful filter (usually EMA)
+            effective_current_trend = current_trend
+            if effective_current_trend is None:
+                for f in strat.filters:
+                    if f.is_stateful:
+                        effective_current_trend = f.get_current_trend(kline, kline.symbol, kline.timeframe)
+                        if effective_current_trend is not None:
+                            break
 
             context = FilterContext(
                 higher_tf_trends=higher_tf_trends,
-                current_trend=current_trend,
+                current_trend=effective_current_trend,
                 current_timeframe=kline.timeframe,
                 kline=kline,
             )
@@ -679,13 +683,14 @@ class DynamicStrategyRunner:
         self,
         kline: KlineData,
         higher_tf_trends: Dict[str, TrendDirection],
+        current_trend: Optional[TrendDirection] = None,
     ) -> SignalAttempt:
         """
         Run all strategies, return first SIGNAL_FIRED attempt.
 
         Legacy compatibility method.
         """
-        attempts = self.run_all(kline, higher_tf_trends)
+        attempts = self.run_all(kline, higher_tf_trends, current_trend)
 
         for attempt in attempts:
             if attempt.final_result == "SIGNAL_FIRED":

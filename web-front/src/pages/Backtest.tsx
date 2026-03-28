@@ -24,6 +24,7 @@ import {
   TraceEvent,
 } from '../lib/api';
 import StrategyBuilder from '../components/StrategyBuilder';
+import QuickDateRangePicker from '../components/QuickDateRangePicker';
 
 // Timeframe options
 const TIMEFRAMES = [
@@ -59,8 +60,8 @@ export default function Backtest() {
   // Form state
   const [symbol, setSymbol] = useState('BTC/USDT:USDT');
   const [timeframe, setTimeframe] = useState('1h');
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [endTime, setEndTime] = useState<number | null>(null);
 
   // Strategy definitions
   const [strategies, setStrategies] = useState<StrategyDefinition[]>([]);
@@ -76,27 +77,13 @@ export default function Backtest() {
   // View mode for results
   const [viewMode, setViewMode] = useState<'dashboard' | 'logs'>('dashboard');
 
-  // Calculate datetime string to UNIX milliseconds
-  const parseDateTimeToMs = useCallback((dateTimeStr: string): number | null => {
-    if (!dateTimeStr) return null;
-    const date = new Date(dateTimeStr);
-    if (isNaN(date.getTime())) return null;
-    return date.getTime();
-  }, []);
-
   // Validate form
   const validateForm = useCallback((): boolean => {
     if (!startTime || !endTime) {
       setError('请选择起始和结束时间');
       return false;
     }
-    const startMs = parseDateTimeToMs(startTime);
-    const endMs = parseDateTimeToMs(endTime);
-    if (!startMs || !endMs) {
-      setError('时间格式无效');
-      return false;
-    }
-    if (startMs >= endMs) {
+    if (startTime >= endTime) {
       setError('起始时间必须早于结束时间');
       return false;
     }
@@ -105,7 +92,7 @@ export default function Backtest() {
       return false;
     }
     return true;
-  }, [startTime, endTime, parseDateTimeToMs, strategies.length]);
+  }, [startTime, endTime, strategies.length]);
 
   // Handle backtest execution
   const handleRunBacktest = useCallback(async () => {
@@ -119,8 +106,8 @@ export default function Backtest() {
       const payload: BacktestRequest = {
         symbol,
         timeframe,
-        start_time: parseDateTimeToMs(startTime)!,
-        end_time: parseDateTimeToMs(endTime)!,
+        start_time: startTime!,
+        end_time: endTime!,
         strategies,
         risk_overrides: riskOverrides,
       };
@@ -163,7 +150,6 @@ export default function Backtest() {
     strategies,
     riskOverrides,
     validateForm,
-    parseDateTimeToMs,
   ]);
 
   // Filter breakdown stats
@@ -235,29 +221,16 @@ export default function Backtest() {
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  起始时间
-                </label>
-                <input
-                  type="datetime-local"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  结束时间
-                </label>
-                <input
-                  type="datetime-local"
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                时间范围
+              </label>
+              <QuickDateRangePicker
+                startTime={startTime}
+                endTime={endTime}
+                onStartChange={setStartTime}
+                onEndChange={setEndTime}
+              />
             </div>
           </div>
 

@@ -216,7 +216,23 @@ class Backtester:
 
     def _build_dynamic_runner(self, strategy_definitions: List[StrategyDefinition]) -> DynamicStrategyRunner:
         """Build DynamicStrategyRunner from strategy definitions."""
-        return create_dynamic_runner(strategy_definitions)
+        from src.domain.models import StrategyDefinition
+
+        # 手动反序列化为 StrategyDefinition 对象
+        # 因为 BacktestRequest.strategies 使用 List[Dict] 而非 List[StrategyDefinition]
+        strategies = []
+        for strat_def in strategy_definitions:
+            if isinstance(strat_def, StrategyDefinition):
+                strategies.append(strat_def)
+            else:
+                # 从 dict 反序列化
+                try:
+                    strategies.append(StrategyDefinition(**strat_def))
+                except Exception as e:
+                    logger.warning(f"Failed to deserialize strategy: {e}")
+                    continue
+
+        return create_dynamic_runner(strategies)
 
     def _build_strategy_config(self, request: BacktestRequest) -> IsolatedStrategyConfig:
         """Build isolated strategy config from request."""
@@ -248,16 +264,42 @@ class Backtester:
     async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
         """Fetch historical K-line data."""
         try:
+            # 检查是否有时间范围参数
+            if request.start_time and request.end_time:
+                # 计算需要的 K 线数量
+                duration_ms = int(request.end_time) - int(request.start_time)
+                timeframe_minutes = self._parse_timeframe(request.timeframe)
+                expected_bars = duration_ms // (timeframe_minutes * 60 * 1000)
+                # 添加 20% 缓冲，并确保至少满足 limit 要求
+                limit = max(int(expected_bars * 1.2), request.limit, 1000)
+                logger.info(f"Time range specified: fetching ~{expected_bars} bars (limit: {limit})")
+            else:
+                limit = request.limit
+
             klines = await self._gateway.fetch_historical_ohlcv(
                 symbol=request.symbol,
                 timeframe=request.timeframe,
-                limit=request.limit,
+                limit=limit,
             )
+
+            # 按时间范围过滤
+            if request.start_time and request.end_time:
+                start_ts = int(request.start_time)
+                end_ts = int(request.end_time)
+                filtered_klines = [k for k in klines if start_ts <= k.timestamp <= end_ts]
+                logger.info(f"Filtered from {len(klines)} to {len(filtered_klines)} candles within time range")
+                klines = filtered_klines
+
             logger.info(f"Fetched {len(klines)} candles for {request.symbol} {request.timeframe}")
             return klines
         except Exception as e:
             logger.error(f"Failed to fetch K-lines: {e}")
             raise
+
+    def _parse_timeframe(self, timeframe: str) -> int:
+        """解析时间框架为分钟数"""
+        mapping = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080}
+        return mapping.get(timeframe, 15)
 
     async def _run_strategy_loop(
         self,

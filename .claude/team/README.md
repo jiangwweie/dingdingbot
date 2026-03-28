@@ -12,13 +12,13 @@
 │         (任务分解 + 协调 + 结果整合)              │
 └─────────────────────────────────────────────────┘
                       │
-        ┌─────────────┼─────────────┬─────────────┐
-        ▼             ▼             ▼             ▼
-┌───────────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐
-│ Frontend Dev  │ │ Backend   │ │   QA      │ │  Code     │
-│    (前端)     │ │  (后端)   │ │  Tester   │ │ Reviewer  │
-│               │ │           │ │  (测试)   │ │  (审查)   │
-└───────────────┘ └───────────┘ └───────────┘ └───────────┘
+        ┌─────────────┼─────────────┬─────────────┬─────────────┐
+        ▼             ▼             ▼             ▼             ▼
+┌───────────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌──────────────┐
+│ Frontend Dev  │ │ Backend   │ │   QA      │ │  Code     ││  Diagnostic  │
+│    (前端)     │ │  (后端)   │ │  Tester   │ │ Reviewer  ││   Analyst    │
+│               │ │           │ │  (测试)   │ │  (审查)   ││  (诊断分析师)│
+└───────────────┘ └───────────┘ └───────────┘ └───────────┘ └──────────────┘
 ```
 
 ---
@@ -49,6 +49,12 @@
 - **职责**: 代码审查、架构一致性检查、安全隐患识别
 - **触发场景**: 代码完成后审查、架构把关、合并前审查
 - **使用方式**: 输入 `/reviewer` 或分配审查任务
+
+### Diagnostic Analyst (`/diagnostic`)
+- **职责**: 问题根因分析、共性问题排查、技术债识别
+- **核心原则**: **只分析问题，不修改代码**
+- **触发场景**: 疑难杂症诊断、系统性问题排查、架构一致性审查
+- **使用方式**: 输入 `/diagnostic` 或分配诊断任务
 
 ---
 
@@ -123,14 +129,15 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 ### 文件所有权矩阵
 
-| 文件路径 | Frontend | Backend | QA | Coordinator | Reviewer |
-|----------|----------|---------|----|-------------|----------|
-| `web-front/**` | ✅ 全权 | ❌ 禁止 | ⚠️ 仅测试 | ⚠️ 仅配置 | 🔍 审查 |
-| `src/**` | ❌ 禁止 | ✅ 全权 | ⚠️ 仅测试 | ⚠️ 仅协调 | 🔍 审查 |
-| `tests/**` | ⚠️ 协助 | ⚠️ 协助 | ✅ 全权 | ⚠️ 仅协调 | ✅ 修改测试 |
-| `config/**` | ❌ 禁止 | ✅ 全权 | ❌ 禁止 | ⚠️ 仅协调 | 🔍 审查 |
-| `CLAUDE.md` | ❌ 禁止 | ❌ 禁止 | ❌ 禁止 | ✅ 全权 | 🔍 审查 |
-| `.claude/team/**` | ⚠️ 建议 | ⚠️ 建议 | ⚠️ 建议 | ✅ 全权 | ⚠️ 建议 |
+| 文件路径 | Frontend | Backend | QA | Coordinator | Reviewer | Diagnostic |
+|----------|----------|---------|----|-------------|----------|------------|
+| `web-front/**` | ✅ 全权 | ❌ 禁止 | ⚠️ 仅测试 | ⚠️ 仅配置 | 🔍 审查 | 🔍 审查 |
+| `src/**` | ❌ 禁止 | ✅ 全权 | ⚠️ 仅测试 | ⚠️ 仅协调 | ✅ 修改测试 | 🔍 审查 |
+| `tests/**` | ⚠️ 协助 | ⚠️ 协助 | ✅ 全权 | ⚠️ 仅协调 | ✅ 修改测试 | ⚠️ 运行验证 |
+| `config/**` | ❌ 禁止 | ✅ 全权 | ❌ 禁止 | ⚠️ 仅协调 | 🔍 审查 | 🔍 审查 |
+| `CLAUDE.md` | ❌ 禁止 | ❌ 禁止 | ❌ 禁止 | ✅ 全权 | 🔍 审查 | ❌ 禁止 |
+| `.claude/team/**` | ⚠️ 建议 | ⚠️ 建议 | ⚠️ 建议 | ✅ 全权 | 🔍 审查 | ❌ 禁止 |
+| `docs/**` | ⚠️ 建议 | ⚠️ 建议 | ⚠️ 建议 | ✅ 全权 | ⚠️ 建议 | ✅ 全权 |
 
 **图例**: ✅ 全权负责 | ❌ 禁止修改 | ⚠️ 有限权限 | 🔍 仅审查
 
@@ -164,6 +171,13 @@ Agent(subagent_type="qa-tester", prompt="...")
 ```
 ✅ 可修改：tests/** (测试代码)
 🔍 审查：src/**, web-front/**, config/** (仅审查意见，不直接修改)
+```
+
+#### Diagnostic Analyst 边界
+```
+✅ 可修改：docs/** (诊断报告、分析笔记)
+🔍 审查：src/**, web-front/**, config/** (仅分析问题，不修改代码)
+⚠️ 运行：tests/** (运行测试验证假设，但不修改测试代码)
 ```
 
 ### 冲突解决流程
@@ -206,11 +220,12 @@ Agent(subagent_type="qa-tester", prompt="...")
 ### 技能文件位置
 ```
 .claude/team/
-├── frontend-dev/SKILL.md      # 前端开发专家
-├── backend-dev/SKILL.md       # 后端开发专家
-├── qa-tester/SKILL.md         # 质量保障专家
-├── code-reviewer/SKILL.md     # 代码审查员
-└── team-coordinator/SKILL.md  # 团队协调器
+├── frontend-dev/SKILL.md       # 前端开发专家
+├── backend-dev/SKILL.md        # 后端开发专家
+├── qa-tester/SKILL.md          # 质量保障专家
+├── code-reviewer/SKILL.md      # 代码审查员
+├── diagnostic-analyst/SKILL.md # 诊断分析师
+└── team-coordinator/SKILL.md   # 团队协调器
 ```
 
 ### 如何扩展团队
@@ -250,6 +265,9 @@ Agent(subagent_type="qa-tester", prompt="...")
 | | `requesting-code-review` | 请求正式审查 |
 | **Code Reviewer** | `code-review` | 正式代码审查流程 |
 | | `code-simplifier` | 识别代码复杂度问题 |
+| **Diagnostic Analyst** | `systematic-debugging` | 系统性 Bug 排查 |
+| | `brainstorming` | 复杂问题根因分析 |
+| | `planning-with-files-zh` | 制定诊断计划 |
 
 ### 调用方式
 
@@ -286,6 +304,14 @@ QA Tester 工作流:
   2. E2E 测试 → 调用 webapp-testing
   3. 测试失败 → 调用 systematic-debugging 分析
   4. 完成后 → 调用 code-simplifier 简化测试代码
+
+Diagnostic Analyst 工作流:
+  1. 接收问题报告
+  2. 问题澄清 → 复述问题、确认期望行为
+  3. 生成假设 → 列出 3-5 个可能原因
+  4. 系统排查 → 调用 systematic-debugging
+  5. 根因分析 → 调用 brainstorming 进行 5 Why 分析
+  6. 输出报告 → 调用 planning-with-files-zh 整理诊断报告
 
 Coordinator 工作流:
   1. 接收需求
