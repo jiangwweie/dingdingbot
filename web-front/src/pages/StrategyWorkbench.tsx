@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useApi, fetchSystemConfig, updateSystemConfig, StrategyDefinition, previewStrategy, PreviewRequest, PreviewResponse, TraceNode, applyStrategy } from '../lib/api';
+import { useApi, fetchSystemConfig, updateSystemConfig, StrategyDefinition, previewStrategy, PreviewRequest, PreviewResponse, TraceNode, applyStrategy, convertStrategyToLogicNode } from '../lib/api';
 import { Plus, Trash2, Edit2, Save, X, AlertCircle, CheckCircle, Zap, ChevronDown, ChevronRight, Upload, Play } from 'lucide-react';
 import { cn } from '../lib/utils';
 import StrategyBuilder from '../components/StrategyBuilder';
@@ -15,6 +15,19 @@ interface CustomStrategy {
   strategy_json?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+/**
+ * 初始化策略的 logic_tree 字段（如果缺失）
+ */
+function ensureLogicTree(strategy: StrategyDefinition): StrategyDefinition {
+  if (!strategy.logic_tree) {
+    return {
+      ...strategy,
+      logic_tree: convertStrategyToLogicNode(strategy),
+    };
+  }
+  return strategy;
 }
 
 export default function StrategyWorkbench() {
@@ -53,7 +66,8 @@ export default function StrategyWorkbench() {
       const data = await res.json();
       if (data.strategy) {
         setSelectedStrategy(data);
-        setEditingStrategy([data.strategy]);
+        // Ensure logic_tree is initialized
+        setEditingStrategy([ensureLogicTree(data.strategy)]);
       }
     } catch (err) {
       console.error('Failed to load strategy details:', err);
@@ -66,26 +80,42 @@ export default function StrategyWorkbench() {
 
     setSaveStatus('saving');
     try {
+      const newStrategy: StrategyDefinition = {
+        id: generateId(),
+        name: newStrategyName,
+        trigger: {
+          id: generateId(),
+          type: 'pinbar' as TriggerType,
+          enabled: true,
+          params: getDefaultTriggerParams('pinbar'),
+        },
+        filters: [],
+        filter_logic: 'AND' as const,
+        is_global: true,
+        apply_to: [],
+        logic_tree: convertStrategyToLogicNode({
+          id: generateId(),
+          name: newStrategyName,
+          trigger: {
+            id: generateId(),
+            type: 'pinbar' as TriggerType,
+            enabled: true,
+            params: getDefaultTriggerParams('pinbar'),
+          },
+          filters: [],
+          filter_logic: 'AND' as const,
+          is_global: true,
+          apply_to: [],
+        }),
+      };
+
       const res = await fetch('/api/strategies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newStrategyName,
           description: newStrategyDesc || null,
-          strategy: {
-            id: generateId(),
-            name: newStrategyName,
-            trigger: {
-              id: generateId(),
-              type: 'pinbar' as TriggerType,
-              enabled: true,
-              params: getDefaultTriggerParams('pinbar'),
-            },
-            filters: [],
-            filter_logic: 'AND' as const,
-            is_global: true,
-            apply_to: [],
-          },
+          strategy: newStrategy,
         }),
       });
 
@@ -594,7 +624,46 @@ export default function StrategyWorkbench() {
 
               {/* Preview Result - Trace Tree Viewer */}
               {previewStatus === 'previewed' && previewResult && (
-                <div className="p-4 border-t border-gray-100">
+                <div className="p-4 border-t border-gray-100 space-y-4">
+                  {/* 提示信息 */}
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-amber-800">
+                        <p className="font-medium">关于立即测试</p>
+                        <p className="mt-1 text-amber-700">
+                          仅评估<strong>当前最新一根 K 线</strong>，如果未检测到信号属于正常现象。
+                          Pinbar 等形态在市场中较为稀缺，通常需要等待合适的 K 线形态出现。
+                        </p>
+                        <p className="mt-2 text-amber-700">
+                          <strong>想查看历史表现？</strong>前往 <a href="/backtest" className="underline font-medium hover:text-amber-900">回测沙箱</a> 查看策略在历史数据上的表现。
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 结果状态 */}
+                  <div className={cn(
+                    "rounded-lg p-3 border",
+                    previewResult.signal_fired
+                      ? "bg-green-50 border-green-200"
+                      : "bg-gray-50 border-gray-200"
+                  )}>
+                    <p className={cn(
+                      "text-sm font-medium",
+                      previewResult.signal_fired ? "text-green-800" : "text-gray-600"
+                    )}>
+                      {previewResult.signal_fired
+                        ? "✅ 当前 K 线满足策略条件，信号触发！"
+                        : "ℹ️ 当前 K 线不满足策略条件，未检测到信号"}
+                    </p>
+                    {!previewResult.signal_fired && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        原因：{previewResult.trace_tree?.reason || '未知'}
+                      </p>
+                    )}
+                  </div>
+
                   <TraceTreeViewer
                     traceTree={previewResult.trace_tree}
                     signalFired={previewResult.signal_fired}
