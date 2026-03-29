@@ -442,7 +442,7 @@ class TestAtrFilterDynamic:
         # min_atr_ratio=0.5, so min_range = 1.0 * 0.5 = 0.5
         # candle_range = 0.02 < 0.5, should be rejected
         key = "BTC/USDT:USDT:15m"
-        f._atr_values[key] = [Decimal("1.0")] * 14
+        f._atr_state[key] = {"tr_values": [Decimal("1.0")] * 14, "atr": Decimal("1.0"), "prev_close": None}
 
         context = FilterContext(
             higher_tf_trends={},
@@ -485,7 +485,7 @@ class TestAtrFilterDynamic:
         # min_atr_ratio=0.5, so min_range = 100 * 0.5 = 50
         # candle_range = 200 > 50, should pass
         key = "BTC/USDT:USDT:15m"
-        f._atr_values[key] = [Decimal("100")] * 14
+        f._atr_state[key] = {"tr_values": [Decimal("100")] * 14, "atr": Decimal("100"), "prev_close": None}
 
         context = FilterContext(
             higher_tf_trends={},
@@ -525,7 +525,7 @@ class TestAtrFilterDynamic:
 
         # Pre-populate ATR data
         key = "ETH/USDT:USDT:1h"
-        f._atr_values[key] = [Decimal("50")] * 14
+        f._atr_state[key] = {"tr_values": [Decimal("50")] * 14, "atr": Decimal("50"), "prev_close": None}
 
         context = FilterContext(
             higher_tf_trends={},
@@ -595,7 +595,7 @@ class TestAtrFilterDynamic:
         # ATR=2.0, min_atr_ratio=0.5, min_range = 2.0 * 0.5 = 1.0
         # candle_range = 1.0 == min_range, should PASS (not strictly less than)
         key = "BTC/USDT:USDT:15m"
-        f._atr_values[key] = [Decimal("2.0")] * 14
+        f._atr_state[key] = {"tr_values": [Decimal("2.0")] * 14, "atr": Decimal("2.0"), "prev_close": None}
 
         context = FilterContext(
             higher_tf_trends={},
@@ -657,7 +657,7 @@ class TestAtrFilterDynamic:
         # ATR=20, min_atr_ratio=0.3, min_range = 20 * 0.3 = 6
         # candle_range = 10 > 6, should pass
         key = "SOL/USDT:USDT:15m"
-        f._atr_values[key] = [Decimal("20")] * 14
+        f._atr_state[key] = {"tr_values": [Decimal("20")] * 14, "atr": Decimal("20"), "prev_close": None}
 
         context = FilterContext(
             higher_tf_trends={},

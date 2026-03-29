@@ -18,7 +18,7 @@ from .models import (
     SignalAttempt,
 )
 from .indicators import EMACalculator, EMACache
-from .filter_factory import FilterBase, FilterContext, TraceEvent, FilterFactory
+from .filter_factory import FilterBase, FilterContext, TraceEvent, FilterFactory, AtrFilterDynamic
 
 
 # ============================================================
@@ -129,9 +129,49 @@ class Filter(ABC):
 
 
 # ============================================================
+# Pattern Strategy Base Class - Unified Scoring
+# ============================================================
+class PatternStrategy(Strategy):
+    """
+    Base class for pattern-based strategies (Pinbar, Engulfing, etc.).
+
+    Provides unified scoring formula that all pattern strategies inherit:
+    score = pattern_ratio × 0.7 + min(atr_ratio, 2.0) × 0.3
+
+    This ensures fair comparison within the same strategy type.
+    """
+
+    def calculate_score(
+        self,
+        pattern_ratio: Decimal,  # 形态质量比例 (0~1)
+        atr_ratio: Optional[Decimal] = None,  # ATR 倍数 (可选)
+    ) -> float:
+        """
+        统一评分公式（所有形态策略共用）
+
+        Args:
+            pattern_ratio: 形态质量比例（0~1），如 Pinbar 的 wick_ratio
+            atr_ratio: ATR 倍数（可选），candle_range / ATR
+
+        Returns:
+            最终评分（0~1）
+        """
+        base_score = float(pattern_ratio)
+
+        if atr_ratio and atr_ratio > 0:
+            # ATR 加分（波幅质量），上限 2 倍
+            atr_bonus = min(float(atr_ratio), 2.0) * 0.3
+            score = base_score * 0.7 + atr_bonus
+        else:
+            score = base_score
+
+        return min(score, 1.0)
+
+
+# ============================================================
 # PinbarStrategy Implementation
 # ============================================================
-class PinbarStrategy(Strategy):
+class PinbarStrategy(PatternStrategy):
     """Pinbar strategy implementation."""
 
     def __init__(self, config: PinbarConfig):
@@ -141,7 +181,7 @@ class PinbarStrategy(Strategy):
     def name(self) -> str:
         return "pinbar"
 
-    def detect(self, kline: KlineData) -> Optional[PatternResult]:
+    def detect(self, kline: KlineData, atr_value: Optional[Decimal] = None) -> Optional[PatternResult]:
         """
         Detect Pinbar geometric pattern on a single K-line.
 
@@ -212,10 +252,17 @@ class PinbarStrategy(Strategy):
         if direction is None:
             return None
 
-        # Calculate score = dominant_wick / candle_range
-        # NOTE: Score is for UI display and sorting only, NOT for financial calculations.
-        # Financial calculations use Decimal exclusively.
-        score = float(wick_ratio)
+        # Calculate score using unified formula from PatternStrategy base class
+        # score = pattern_ratio × 0.7 + min(atr_ratio, 2.0) × 0.3
+        pattern_ratio = wick_ratio  # Pinbar 使用影线占比作为形态质量
+
+        if atr_value and atr_value > 0:
+            candle_range = kline.high - kline.low
+            atr_ratio = candle_range / atr_value
+            score = self.calculate_score(pattern_ratio, atr_ratio)
+        else:
+            # Fallback to legacy scoring when ATR not available
+            score = float(pattern_ratio)
 
         return PatternResult(
             strategy_name="pinbar",
@@ -574,6 +621,27 @@ class DynamicStrategyRunner:
         for strat in self._strategies:
             strat.update_state(kline)
 
+    def _get_atr_for_kline(self, kline: KlineData) -> Optional[Decimal]:
+        """
+        S6-2-2: Get ATR value for the current kline from any ATR filter.
+
+        Searches through all strategies' filters for an ATR filter and
+        returns its current ATR value.
+
+        Args:
+            kline: Current K-line data
+
+        Returns:
+            ATR value if available, None otherwise
+        """
+        for strat in self._strategies:
+            for f in strat.filters:
+                if isinstance(f, AtrFilterDynamic):
+                    atr = f._get_atr(kline.symbol, kline.timeframe)
+                    if atr is not None:
+                        return atr
+        return None
+
     def run_all(
         self,
         kline: KlineData,
@@ -614,14 +682,30 @@ class DynamicStrategyRunner:
             # We already updated states (EMA) in update_state(), so we just return empty.
             return attempts
 
+        # S6-2-2: Get ATR value for scoring (from ATR filter if available)
+        atr_value = self._get_atr_for_kline(kline)
+
         for strat in active_strats:
             # Detect pattern
             pattern = None
 
+            # S6-2-2: Pass atr_value to detect() if strategy supports it
             if hasattr(strat.strategy, 'detect_with_history') and kline_history:
-                pattern = strat.strategy.detect_with_history(kline, kline_history)
+                # Check if detect_with_history supports atr_value parameter
+                import inspect
+                sig = inspect.signature(strat.strategy.detect_with_history)
+                if 'atr_value' in sig.parameters:
+                    pattern = strat.strategy.detect_with_history(kline, kline_history, atr_value)
+                else:
+                    pattern = strat.strategy.detect_with_history(kline, kline_history)
             elif hasattr(strat.strategy, 'detect'):
-                pattern = strat.strategy.detect(kline)
+                # Check if detect supports atr_value parameter
+                import inspect
+                sig = inspect.signature(strat.strategy.detect)
+                if 'atr_value' in sig.parameters:
+                    pattern = strat.strategy.detect(kline, atr_value)
+                else:
+                    pattern = strat.strategy.detect(kline)
 
             if pattern is None:
                 attempts.append(SignalAttempt(

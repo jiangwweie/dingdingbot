@@ -16,16 +16,29 @@ from src.infrastructure.logger import logger, mask_secret
 # ============================================================
 # Message Formatter
 # ============================================================
-def format_signal_message(signal: SignalResult) -> str:
+def format_signal_message(
+    signal: SignalResult,
+    superseded_signal: Optional[dict] = None,
+    opposing_signal: Optional[dict] = None,
+) -> str:
     """
     Format SignalResult to Markdown message for notification.
 
     Args:
         signal: SignalResult object
+        superseded_signal: Optional dict with old signal data (for cover notifications)
+        opposing_signal: Optional dict with opposing signal data
 
     Returns:
         Markdown formatted message string
     """
+    # Use specialized templates if applicable
+    if superseded_signal:
+        return format_cover_signal_message(signal, superseded_signal)
+    if opposing_signal:
+        return format_opposing_signal_message(signal, opposing_signal)
+
+    # Standard signal notification
     # Direction emoji and text
     if signal.direction == Direction.LONG:
         direction_text = "🟢 看多 (LONG)"
@@ -54,6 +67,136 @@ def format_signal_message(signal: SignalResult) -> str:
 风控信息：{signal.risk_reward_info}
 
 ---
+⚠️ 本系统仅为观测与通知工具，不构成投资建议
+"""
+    return message
+
+
+def format_cover_signal_message(signal: SignalResult, superseded_signal: dict) -> str:
+    """
+    覆盖通知模板 - 包含评分对比
+
+    Args:
+        signal: 新信号（覆盖者）
+        superseded_signal: 旧信号数据（包含 score）
+
+    Returns:
+        Markdown formatted cover notification message
+    """
+    # Direction emoji and text
+    if signal.direction == Direction.LONG:
+        direction_text = "🟢 看多 (LONG)"
+    else:
+        direction_text = "🔴 看空 (SHORT)"
+
+    # Build tags section dynamically
+    tags_section = ""
+    if signal.tags:
+        tags_section = "\n".join([f"  {tag.get('name', 'Unknown')}: {tag.get('value', 'N/A')}" for tag in signal.tags])
+        tags_section = f"\n指标标签:\n{tags_section}\n"
+    else:
+        tags_section = "\n指标标签：无\n"
+
+    # Calculate score improvement
+    new_score = signal.score
+    old_score = superseded_signal.get('score', 0)
+    score_improvement = ((new_score - old_score) / old_score * 100) if old_score > 0 else 0
+
+    # Build message
+    message = f"""【信号覆盖提醒】⚡
+
+币种：{signal.symbol}
+周期：{signal.timeframe}
+方向：{direction_text}
+入场价：{signal.entry_price}（更新）
+止损位：{signal.suggested_stop_loss}（更新）
+建议仓位：{signal.suggested_position_size}
+当前杠杆：{signal.current_leverage}x
+
+【覆盖原因】
+新信号评分：{new_score:.2f}（原信号评分：{old_score:.2f}）
+评分提升：{score_improvement:+.0f}%
+
+{tags_section}
+风控信息：{signal.risk_reward_info}
+
+---
+⚡ 此信号覆盖了之前的信号 (ID: {superseded_signal.get('signal_id', 'unknown')}),因为形态质量更优
+⚠️ 本系统仅为观测与通知工具，不构成投资建议
+"""
+    return message
+
+
+def format_opposing_signal_message(signal: SignalResult, opposing_signal: dict) -> str:
+    """
+    反向信号通知模板 - 包含市场分歧提示
+
+    Args:
+        signal: 当前信号
+        opposing_signal: 反向信号数据（包含 direction, score）
+
+    Returns:
+        Markdown formatted opposing signal notification message
+    """
+    # Direction emoji and text
+    if signal.direction == Direction.LONG:
+        direction_text = "🟢 看多 (LONG)"
+    else:
+        direction_text = "🔴 看空 (SHORT)"
+
+    # Build tags section dynamically
+    tags_section = ""
+    if signal.tags:
+        tags_section = "\n".join([f"  {tag.get('name', 'Unknown')}: {tag.get('value', 'N/A')}" for tag in signal.tags])
+        tags_section = f"\n指标标签:\n{tags_section}\n"
+    else:
+        tags_section = "\n指标标签：无\n"
+
+    # Opposing signal info
+    opp_direction = opposing_signal.get('direction', 'UNKNOWN')
+    opp_score = opposing_signal.get('score', 0)
+
+    if opp_direction == Direction.LONG.value:
+        opp_direction_text = "🟢 看多 (LONG)"
+    else:
+        opp_direction_text = "🔴 看空 (SHORT)"
+
+    # Determine if opposing signal has higher score
+    current_score = signal.score
+    is_opposing_higher = opp_score > current_score
+
+    # Build message
+    if is_opposing_higher:
+        warning_section = f"""【市场分歧提示】
+当前方向信号评分：{current_score:.2f}
+反向方向信号评分：{opp_score:.2f}（更高）
+
+⚠️ 注意：存在更优的反向信号，市场可能出现分歧
+"""
+    else:
+        warning_section = f"""【市场分歧提示】
+当前方向信号评分：{current_score:.2f}
+反向方向信号评分：{opp_score:.2f}
+
+⚠️ 市场存在反向信号，请谨慎判断
+"""
+
+    message = f"""【反向信号提醒】⚠️
+
+币种：{signal.symbol}
+周期：{signal.timeframe}
+方向：{direction_text} ← 与原信号相反
+入场价：{signal.entry_price}
+止损位：{signal.suggested_stop_loss}
+建议仓位：{signal.suggested_position_size}
+当前杠杆：{signal.current_leverage}x
+
+{warning_section}
+{tags_section}
+风控信息：{signal.risk_reward_info}
+
+---
+⚠️ 市场存在反向信号，请谨慎判断
 ⚠️ 本系统仅为观测与通知工具，不构成投资建议
 """
     return message
@@ -305,14 +448,21 @@ class NotificationService:
             else:
                 logger.warning(f"Unknown channel type: {channel_type}")
 
-    async def send_signal(self, signal: SignalResult) -> None:
+    async def send_signal(
+        self,
+        signal: SignalResult,
+        superseded_signal: Optional[dict] = None,
+        opposing_signal: Optional[dict] = None,
+    ) -> None:
         """
         Send signal notification to all channels.
 
         Args:
             signal: SignalResult to send
+            superseded_signal: Optional dict with old signal data (for cover notifications)
+            opposing_signal: Optional dict with opposing signal data
         """
-        message = format_signal_message(signal)
+        message = format_signal_message(signal, superseded_signal, opposing_signal)
         await self._broadcast(message)
 
     async def send_system_alert(
