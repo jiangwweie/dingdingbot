@@ -160,6 +160,7 @@ async def get_signals(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     symbol: Optional[str] = Query(default=None),
+    timeframe: Optional[str] = Query(default=None),
     direction: Optional[str] = Query(default=None),
     strategy_name: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
@@ -176,6 +177,7 @@ async def get_signals(
         limit: Maximum number of results (1-200)
         offset: Number of results to skip
         symbol: Optional symbol filter (e.g., "BTC/USDT:USDT")
+        timeframe: Optional timeframe filter (e.g., "15m", "1h", "4h", "1d")
         direction: Optional direction filter ("long" or "short")
         strategy_name: Optional strategy name filter ("pinbar", "engulfing")
         status: Optional status filter ("PENDING", "WON", "LOST")
@@ -191,6 +193,7 @@ async def get_signals(
             limit=limit,
             offset=offset,
             symbol=symbol,
+            timeframe=timeframe,
             direction=direction,
             strategy_name=strategy_name,
             status=status,

@@ -885,6 +885,7 @@ class SignalRepository:
         limit: int = 50,
         offset: int = 0,
         symbol: str = None,
+        timeframe: str = None,
         direction: str = None,
         strategy_name: str = None,
         status: str = None,
@@ -902,6 +903,7 @@ class SignalRepository:
             limit: Maximum number of results to return
             offset: Number of results to skip
             symbol: Optional symbol filter (e.g., "BTC/USDT:USDT")
+            timeframe: Optional timeframe filter (e.g., "15m", "1h", "4h", "1d")
             direction: Optional direction filter ("long" or "short")
             strategy_name: Optional strategy name filter ("pinbar", "engulfing")
             status: Optional status filter ("PENDING", "WON", "LOST")
@@ -909,6 +911,7 @@ class SignalRepository:
             end_time: Optional end time filter (ISO 8601 or timestamp)
             sort_by: Sort field ("created_at" or "pattern_score"), default "created_at"
             order: Sort order ("asc" or "desc"), default "desc"
+            source: Optional source filter ('live' or 'backtest')
 
         Returns:
             {"total": int (filtered total), "data": list[dict]}
@@ -931,6 +934,10 @@ class SignalRepository:
         if symbol:
             where_clauses.append("symbol = ?")
             params.append(symbol)
+
+        if timeframe:
+            where_clauses.append("timeframe = ?")
+            params.append(timeframe)
 
         if direction:
             where_clauses.append("direction = ?")

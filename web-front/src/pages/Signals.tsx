@@ -305,6 +305,7 @@ export default function Signals() {
   // Filters
   const [symbolFilter, setSymbolFilter] = useState('');
   const [directionFilter, setDirectionFilter] = useState('');
+  const [timeframeFilter, setTimeframeFilter] = useState('');
   const [strategyFilter, setStrategyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');  // '' = all, 'live', 'backtest'
@@ -329,6 +330,7 @@ export default function Signals() {
   let url = `/api/signals?limit=${limit}&offset=${offset}`;
   if (symbolFilter) url += `&symbol=${symbolFilter}`;
   if (directionFilter) url += `&direction=${directionFilter}`;
+  if (timeframeFilter) url += `&timeframe=${timeframeFilter}`;
   if (strategyFilter) url += `&strategy_name=${strategyFilter}`;
   if (statusFilter) url += `&status=${statusFilter.toUpperCase()}`;
   if (sourceFilter) url += `&source=${sourceFilter}`;
@@ -349,6 +351,7 @@ export default function Signals() {
   const clearFilters = () => {
     setSymbolFilter('');
     setDirectionFilter('');
+    setTimeframeFilter('');
     setStrategyFilter('');
     setStatusFilter('');
     setSourceFilter('');
@@ -637,6 +640,18 @@ export default function Signals() {
               <option value="">全部方向</option>
               <option value="long">做多</option>
               <option value="short">做空</option>
+            </select>
+
+            <select
+              value={timeframeFilter}
+              onChange={(e) => { setTimeframeFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部周期</option>
+              <option value="15m">15m</option>
+              <option value="1h">1h</option>
+              <option value="4h">4h</option>
+              <option value="1d">1d</option>
             </select>
 
             <select
