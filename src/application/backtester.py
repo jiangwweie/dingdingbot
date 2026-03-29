@@ -680,6 +680,11 @@ class Backtester:
                 attempt.pattern.direction,
             )
 
+            # Generate dynamic tags from filter_results (same as real-time signals)
+            tags = self._generate_tags_from_filter_results(attempt.filter_results)
+            # Add backtest source tag
+            tags.append({"name": "Source", "value": "Backtest"})
+
             # Build SignalResult
             signal = SignalResult(
                 symbol=request.symbol,
@@ -689,7 +694,7 @@ class Backtester:
                 suggested_stop_loss=stop_loss,
                 suggested_position_size=position_size,
                 current_leverage=leverage,
-                tags=[{"name": "backtest", "value": "historical"}],
+                tags=tags,
                 risk_reward_info=f"Risk {risk_config.max_loss_percent*100}% = {calculator._quantize_price(account_snapshot.available_balance * risk_config.max_loss_percent, entry_kline.close)} USDT",
                 status="PENDING",
                 pnl_ratio=0.0,
@@ -703,6 +708,32 @@ class Backtester:
             saved_count += 1
 
         return saved_count
+
+    def _generate_tags_from_filter_results(self, filter_results: list) -> List[Dict[str, str]]:
+        """
+        Generate dynamic tags from filter results (same as signal_pipeline.py).
+
+        Args:
+            filter_results: List of (filter_name, FilterResult) tuples from attempt
+
+        Returns:
+            List of tag dicts e.g., [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
+        """
+        tags = []
+        for filter_name, filter_result in filter_results:
+            if filter_result.passed:
+                if filter_name == "ema" or filter_name == "ema_trend":
+                    # Extract trend direction from reason
+                    trend_value = "Bullish" if "bullish" in filter_result.reason.lower() else "Bearish"
+                    tags.append({"name": "EMA", "value": trend_value})
+                elif filter_name == "mtf":
+                    mtf_value = "Confirmed" if "confirm" in filter_result.reason.lower() else "Passed"
+                    tags.append({"name": "MTF", "value": mtf_value})
+                elif filter_name == "atr":
+                    tags.append({"name": "ATR", "value": "Passed"})
+                elif filter_name == "volume_surge":
+                    tags.append({"name": "Volume", "value": "Surge"})
+        return tags
 
 
 # ============================================================
