@@ -266,6 +266,23 @@ export default function Backtest() {
         </div>
       </div>
 
+      {/* Info Banner */}
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+        <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+          <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-blue-900">如何使用回测沙箱</h3>
+          <div className="mt-2 text-sm text-blue-700 space-y-1">
+            <p><strong>第 1 步：</strong> 前往 <button onClick={() => window.location.href = '/strategies'} className="text-blue-600 hover:underline font-medium">策略工作台</button> 创建或编辑策略组合</p>
+            <p><strong>第 2 步：</strong> 使用"预览"功能快速验证策略逻辑（单根 K 线）</p>
+            <p><strong>第 3 步：</strong> 点击右上角"从策略工作台导入"，选择已保存的策略执行历史回测</p>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Control Panel */}
         <div className="lg:col-span-1 space-y-4">
