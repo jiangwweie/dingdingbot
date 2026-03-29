@@ -1,6 +1,44 @@
 # 进度日志
 
-## 2026-03-29 - 会话：S6-2 Pinbar 评分优化与信号覆盖设计 (进行中)
+## 2026-03-29 - 会话：MTF 过滤 `higher_tf_data_unavailable` 问题修复 (已完成)
+
+**目标**: 修复 ETH/USDT 1h 回测时 MTF 过滤器错误返回 `higher_tf_data_unavailable` 的问题
+
+**背景**:
+- ETH/USDT 1h 回测记录显示 MTF 过滤失败，原因 `higher_tf_data_unavailable`
+- 预期 4h MTF 数据应该可用（1h → 4h 映射，时间戳对齐正确）
+- 数据库记录：`kline_timestamp=1774760400000` (13:00 本地时间/05:00 UTC) 被过滤
+
+**根因分析**:
+
+1. **1h 数据加载**: 当指定时间范围时，`limit = max(expected_bars * 1.2, request.limit, 1000)` → 至少 1000 根
+2. **4h 数据加载**: 仅使用 `request.limit`（默认 100）→ 只获取 100 根
+3. **交易所行为**: `fetch_ohlcv` 从"当前最新时间"往前推，不是从指定时间开始
+4. **时间戳不覆盖**: 100 根 4h K 线可能无法覆盖 1h 数据的时间范围
+
+**修复方案**:
+
+```python
+# 1. 覆盖 kline 范围需要的 4h K 线
+expected_higher_tf_bars = duration_ms / (4h * 60 * 1000) + 5
+
+# 2. 从"当前时间"回溯需要的 4h K 线
+current_ts = int(time.time() * 1000)
+bars_from_now = (current_ts - min_kline_ts) / (4h * 60 * 1000) + 10
+
+# 3. 使用较大值，确保覆盖
+limit = max(expected_higher_tf_bars, bars_from_now, 1000)
+```
+
+**修改文件**:
+- `src/application/backtester.py` - 修复两处 MTF 数据加载逻辑
+- `docs/diagnosis/2026-03-29-MTF 过滤 higher_tf_data_unavailable 问题修复.md` - 诊断文档
+
+**Git 提交**: `ffaaf40`
+
+---
+
+## 2026-03-29 - 会话：S6-2 Pinbar 评分优化与信号覆盖设计 (已完成)
 
 **目标**: 设计 Pinbar 评分优化方案，实现信号覆盖机制，解决"十字星"低质量信号问题
 
