@@ -40,3 +40,9 @@ signal_pipeline:
     batch_size: 10             # 批量落盘大小 (required, int)
     flush_interval: 5.0        # 最大等待时间 (秒) (required, float)
     max_queue_size: 1000       # 队列最大容量 (required, int)
+
+# ATR 过滤器配置 (S6-2)
+atr_filter:
+  enabled: true                # 是否启用 ATR 过滤器
+  period: 14                   # ATR 计算周期（业界标准）
+  min_atr_ratio: 0.5           # 最小 ATR 倍数（K 线波幅/ATR，低于此值过滤）

@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useApi } from '../lib/api';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Filter, X, ChevronLeft, ChevronRight, ArrowRight, Trash2, CheckSquare, Square, Settings, GripVertical, ChevronUp, ChevronDown, MoreVertical, Calendar, SlidersHorizontal, ArrowUpDown } from 'lucide-react';
+import { Filter, X, ChevronLeft, ChevronRight, ArrowRight, Trash2, CheckSquare, Square, Settings, GripVertical, ChevronUp, ChevronDown, MoreVertical, Calendar, SlidersHorizontal, ArrowUpDown, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SignalDetailsModal from '../components/SignalDetailsDrawer';
-import { deleteSignals, type Signal } from '../lib/api';
+import { deleteSignals, type Signal, SignalStatus } from '../lib/api';
+import { SignalStatusBadge } from '../components/SignalStatusBadge';
 
 // Strategy badge colors
 const STRATEGY_COLORS: Record<string, string> = {
@@ -35,6 +36,7 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'mtf_status', label: 'MTF 状态', visible: true },
   { id: 'status', label: '信号状态', visible: true },
   { id: 'pnl_ratio', label: '盈亏比', visible: true },
+  { id: 'coverage', label: '信号覆盖', visible: true },  // 新增：信号覆盖信息
   { id: 'action', label: '操作', visible: true },
 ];
 
@@ -231,16 +233,19 @@ export default function Signals() {
       case 'status':
         return (
           <td className="px-6 py-4">
-            {signal.status ? (
-              <span className={cn(
-                "px-2 py-1 rounded text-xs font-medium",
-                statusClass
-              )}>
-                {translateSignalStatus(signal.status)}
-              </span>
-            ) : (
-              <span className="text-gray-400 text-xs">-</span>
-            )}
+            <div className="flex items-center gap-2">
+              {signal.status ? (
+                <SignalStatusBadge status={signal.status} />
+              ) : (
+                <span className="text-gray-400 text-xs">-</span>
+              )}
+              {/* 被替代提示 */}
+              {signal.superseded_by && (
+                <span className="text-xs text-gray-500" title="已被更高分信号替代">
+                  被替代
+                </span>
+              )}
+            </div>
           </td>
         );
       case 'pnl_ratio':
@@ -253,6 +258,29 @@ export default function Signals() {
             ) : (
               <span className="text-gray-400">-</span>
             )}
+          </td>
+        );
+      case 'coverage':
+        return (
+          <td className="px-6 py-4">
+            <div className="flex items-center gap-2">
+              {/* 被替代提示 */}
+              {signal.superseded_by ? (
+                <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600" title="已被更高分信号替代">
+                  已被替代
+                </span>
+              ) : signal.opposing_signal_id ? (
+                /* 对立信号提示 */
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  <span className="text-xs text-amber-700">
+                    反向信号 {signal.opposing_signal_score ? `(分 ${(parseFloat(String(signal.opposing_signal_score)) * 100).toFixed(0)})` : ''}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-gray-400 text-xs">-</span>
+              )}
+            </div>
           </td>
         );
       case 'action':
@@ -280,6 +308,7 @@ export default function Signals() {
   const [strategyFilter, setStrategyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');  // '' = all, 'live', 'backtest'
+  const [hideSuperseded, setHideSuperseded] = useState(false);  // 隐藏被替代信号
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [sortBy, setSortBy] = useState('created_at');
@@ -307,6 +336,7 @@ export default function Signals() {
   if (endDate) url += `&end_time=${endDate}T23:59:59Z`;
   if (sortBy) url += `&sort_by=${sortBy}`;
   if (order) url += `&order=${order}`;
+  if (hideSuperseded) url += `&exclude_superseded=true`;
 
   const { data, error, mutate } = useApi<{ total: number; data: Signal[] }>(url);
 
@@ -322,6 +352,7 @@ export default function Signals() {
     setStrategyFilter('');
     setStatusFilter('');
     setSourceFilter('');
+    setHideSuperseded(false);
     setStartDate('');
     setEndDate('');
     setSortBy('created_at');
@@ -614,10 +645,22 @@ export default function Signals() {
               className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
             >
               <option value="">全部状态</option>
-              <option value="pending">监控中</option>
+              <option value="active">监控中</option>
+              <option value="superseded">已替代</option>
               <option value="won">止盈</option>
               <option value="lost">止损</option>
             </select>
+
+            {/* 隐藏被替代信号开关 */}
+            <label className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={hideSuperseded}
+                onChange={(e) => { setHideSuperseded(e.target.checked); setPage(1); }}
+                className="w-4 h-4 text-apple-blue border-gray-300 rounded focus:ring-apple-blue"
+              />
+              <span className="text-sm text-amber-800 font-medium">仅看有效信号</span>
+            </label>
           </div>
         </div>
 
@@ -812,6 +855,8 @@ export default function Signals() {
               ) : (
                 signals.map((signal) => {
                   const isSelected = selectedIds.has(signal.id);
+                  const isSuperseded = signal.status === SignalStatus.SUPERSEDED;
+                  const hasOpposingSignal = signal.opposing_signal_id != null && signal.opposing_signal_id !== '';
 
                   return (
                     <tr
@@ -819,7 +864,8 @@ export default function Signals() {
                       onClick={() => openModal(signal.id)}
                       className={cn(
                         "hover:bg-gray-50/50 transition-colors cursor-pointer group",
-                        isSelected && "bg-apple-blue/5"
+                        isSelected && "bg-apple-blue/5",
+                        isSuperseded && "bg-gray-100"
                       )}
                     >
                       <td className="px-6 py-4">

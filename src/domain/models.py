@@ -42,6 +42,9 @@ class SignalStatus(str, Enum):
     FILLED = "filled"            # 已成交
     CANCELLED = "cancelled"      # 已取消
     REJECTED = "rejected"        # 被拒绝
+    # S6-2: Signal covering status
+    ACTIVE = "active"            # 当前有效信号
+    SUPERSEDED = "superseded"    # 已被更优信号替代
 
 
 # Note: SignalTrack is defined after SignalResult to avoid forward reference issues

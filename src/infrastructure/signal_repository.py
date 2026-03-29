@@ -285,6 +285,31 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # S6-2-3: Add columns for signal covering mechanism
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN superseded_by TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN opposing_signal_id TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN opposing_signal_score REAL
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
         # Create index for source
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_signals_source ON signals(source)
@@ -701,6 +726,127 @@ class SignalRepository:
         logger.info(f"信号已保存：id={signal_id_result}, {signal.symbol}:{signal.timeframe}")
 
         return signal_id_result
+
+    # ============================================================
+    # S6-2-3: Signal Covering Mechanism Methods
+    # ============================================================
+
+    async def update_signal_status_by_tracker_id(self, signal_id: str, status: str) -> None:
+        """
+        Update signal status (supports SUPERSEDED).
+
+        Args:
+            signal_id: Signal ID (signal_id field from tracker)
+            status: New status (e.g., 'ACTIVE', 'SUPERSEDED')
+        """
+        await self._db.execute(
+            "UPDATE signals SET status = ? WHERE signal_id = ?",
+            (status, signal_id)
+        )
+        await self._db.commit()
+        logger.debug(f"Signal status updated: signal_id={signal_id}, status={status}")
+
+    async def update_superseded_by(self, signal_id: str, superseded_by: str) -> None:
+        """
+        Mark signal as superseded by another signal.
+
+        Args:
+            signal_id: Signal ID to mark as superseded
+            superseded_by: Signal ID that superseded this one
+        """
+        await self._db.execute(
+            """
+            UPDATE signals
+            SET superseded_by = ?, status = 'superseded'
+            WHERE signal_id = ?
+            """,
+            (superseded_by, signal_id)
+        )
+        await self._db.commit()
+        logger.debug(f"Signal marked as superseded: signal_id={signal_id}, superseded_by={superseded_by}")
+
+    async def get_active_signal(self, dedup_key: str) -> Optional[dict]:
+        """
+        Get the ACTIVE signal for a given dedup key.
+
+        Args:
+            dedup_key: Deduplication key (format: symbol:timeframe:direction:strategy_name)
+                       Note: symbol may contain colons (e.g., "BTC/USDT:USDT")
+
+        Returns:
+            Signal dict if found, None otherwise
+        """
+        # Parse dedup_key - symbol may contain colons, so we split from the end
+        # Format: symbol:timeframe:direction:strategy_name
+        # Example: BTC/USDT:USDT:15m:long:pinbar
+        parts = dedup_key.split(":")
+        if len(parts) < 4:
+            logger.warning(f"Invalid dedup_key format: {dedup_key}")
+            return None
+
+        # Extract from the end: strategy_name, direction, timeframe, and the rest is symbol
+        strategy_name = parts[-1]
+        direction = parts[-2]
+        timeframe = parts[-3]
+        symbol = ":".join(parts[:-3])  # Join remaining parts as symbol
+
+        # Build WHERE clause
+        # Support both uppercase ACTIVE and lowercase active for backward compatibility
+        where_clauses = [
+            "symbol = ?",
+            "timeframe = ?",
+            "direction = ?",
+            "(status = 'ACTIVE' OR status = 'active')"
+        ]
+        params = [symbol, timeframe, direction]
+
+        if strategy_name:
+            where_clauses.append("strategy_name = ?")
+            params.append(strategy_name)
+
+        where_sql = " AND ".join(where_clauses)
+
+        async with self._db.execute(
+            f"SELECT * FROM signals WHERE {where_sql} ORDER BY created_at DESC LIMIT 1",
+            params
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return dict(row)
+
+    async def get_opposing_signal(
+        self,
+        symbol: str,
+        timeframe: str,
+        direction: str
+    ) -> Optional[dict]:
+        """
+        Get the opposing direction ACTIVE signal.
+
+        Args:
+            symbol: Trading symbol
+            timeframe: Timeframe
+            direction: Current signal direction ("long" or "short")
+
+        Returns:
+            Signal dict if found, None otherwise
+        """
+        # Determine opposing direction
+        opposing_direction = "short" if direction == "long" else "long"
+
+        async with self._db.execute(
+            """
+            SELECT * FROM signals
+            WHERE symbol = ? AND timeframe = ? AND direction = ? AND (status = 'ACTIVE' OR status = 'active')
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (symbol, timeframe, opposing_direction)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return dict(row)
 
     async def get_signals(
         self,
