@@ -977,7 +977,14 @@ class SignalRepository:
 
         async with self._db.execute(query_sql, params) as cursor:
             rows = await cursor.fetchall()
-            return {"total": filtered_total, "data": [dict(row) for row in rows]}
+            # Normalize status to lowercase for frontend SignalStatus enum compatibility
+            data = []
+            for row in rows:
+                row_dict = dict(row)
+                if row_dict.get("status"):
+                    row_dict["status"] = row_dict["status"].lower()
+                data.append(row_dict)
+            return {"total": filtered_total, "data": data}
 
     async def delete_signals(
         self,
