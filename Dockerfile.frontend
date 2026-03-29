@@ -5,14 +5,15 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
-COPY web-front/package.json web-front/package-lock.json* ./
+# Copy only package files first for better caching
+COPY web-front/package.json ./
+COPY web-front/package-lock.json* ./
 
-# Install dependencies (remove node_modules and lock file for clean install)
-RUN rm -rf node_modules package-lock.json
-RUN npm install
+# Clean install dependencies (remove lock file and node_modules for native bindings fix)
+RUN rm -rf node_modules package-lock.json 2>/dev/null || true
+RUN npm install --legacy-peer-deps
 
-# Copy source code
+# Copy source code (node_modules excluded by .dockerignore)
 COPY web-front/ ./
 
 # Build the application
