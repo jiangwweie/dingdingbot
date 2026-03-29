@@ -765,6 +765,13 @@ class Backtester:
                 attempt.pattern.direction,
             )
 
+            # S6-3: Calculate take profit levels
+            take_profit_levels = calculator.calculate_take_profit_levels(
+                entry_kline.close,
+                stop_loss,
+                attempt.pattern.direction,
+            )
+
             # Generate dynamic tags from filter_results (same as real-time signals)
             tags = self._generate_tags_from_filter_results(attempt.filter_results)
             # Add backtest source tag
@@ -786,6 +793,7 @@ class Backtester:
                 kline_timestamp=attempt.kline_timestamp,
                 strategy_name=attempt.strategy_name,
                 score=attempt.pattern.score,
+                take_profit_levels=take_profit_levels,
             )
 
             # Save to database with source='backtest'

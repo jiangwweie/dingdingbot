@@ -333,14 +333,15 @@ class AtrFilterDynamic(FilterBase):
     """
     ATR volatility filter for filtering out low-volatility noise.
 
-    Stateful: Maintains ATR calculation per symbol/timeframe.
+    Stateful: Maintains ATR calculation per symbol/timeframe using Wilder's smoothing method.
     """
 
     def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"), enabled: bool = False):
         self._period = period
         self._min_atr_ratio = min_atr_ratio
         self._enabled = enabled
-        self._atr_values: Dict[str, List[Decimal]] = {}  # key: "symbol:timeframe"
+        # key: "symbol:timeframe", value: {"tr_values": List[Decimal], "atr": Optional[Decimal], "prev_close": Optional[Decimal]}
+        self._atr_state: Dict[str, Dict[str, Any]] = {}
 
     @property
     def name(self) -> str:
@@ -351,28 +352,51 @@ class AtrFilterDynamic(FilterBase):
         return True
 
     def update_state(self, kline: KlineData, symbol: str, timeframe: str) -> None:
-        """Update ATR state for every kline."""
+        """
+        Update ATR state for every kline using Wilder's smoothing method.
+
+        Wilder's ATR formula:
+        - First ATR = Simple average of first `period` TR values
+        - Subsequent ATR = (prev_ATR × (period-1) + current_TR) / period
+        """
         key = f"{symbol}:{timeframe}"
-        if key not in self._atr_values:
-            self._atr_values[key] = []
+        if key not in self._atr_state:
+            self._atr_state[key] = {
+                "tr_values": [],
+                "atr": None,
+                "prev_close": None
+            }
 
-        # Calculate true range
-        if len(self._atr_values[key]) > 0:
-            prev_close = self._atr_values[key][-1] if hasattr(self._atr_values[key][-1], '__float__') else kline.open
+        state = self._atr_state[key]
+
+        # Calculate True Range (TR)
+        if state["prev_close"] is not None:
+            true_range = max(
+                kline.high - kline.low,
+                abs(kline.high - state["prev_close"]),
+                abs(kline.low - state["prev_close"])
+            )
         else:
-            prev_close = kline.open
+            # First bar: use high - low as TR
+            true_range = kline.high - kline.low
 
-        true_range = max(
-            kline.high - kline.low,
-            abs(kline.high - prev_close),
-            abs(kline.low - prev_close)
-        )
+        state["tr_values"].append(true_range)
+        state["prev_close"] = kline.close
 
-        self._atr_values[key].append(true_range)
+        # Update ATR using Wilder's method
+        if len(state["tr_values"]) == self._period:
+            # First ATR: simple average of first `period` TR values
+            state["atr"] = sum(state["tr_values"]) / self._period
+        elif len(state["tr_values"]) > self._period:
+            # Subsequent ATR: Wilder's smoothing
+            # ATR = (prev_ATR × (period-1) + current_TR) / period
+            prev_atr = state["atr"]
+            if prev_atr is not None:
+                state["atr"] = (prev_atr * (self._period - 1) + true_range) / self._period
 
-        # Keep only recent values for efficiency
-        if len(self._atr_values[key]) > self._period * 2:
-            self._atr_values[key] = self._atr_values[key][-self._period:]
+        # Keep only necessary TR values (for potential recalculation)
+        if len(state["tr_values"]) > self._period + 1:
+            state["tr_values"] = state["tr_values"][-(self._period + 1):]
 
     def get_current_trend(self, kline: KlineData, symbol: str, timeframe: str) -> Optional[TrendDirection]:
         """No-op: ATR filter doesn't track trend."""
@@ -381,12 +405,10 @@ class AtrFilterDynamic(FilterBase):
     def _get_atr(self, symbol: str, timeframe: str) -> Optional[Decimal]:
         """Get current ATR value."""
         key = f"{symbol}:{timeframe}"
-        values = self._atr_values.get(key, [])
-        if len(values) < self._period:
+        state = self._atr_state.get(key)
+        if state is None or state["atr"] is None:
             return None
-
-        # Simple average for ATR
-        return sum(values[-self._period:]) / len(values[-self._period:])
+        return state["atr"]
 
     def check(self, pattern: PatternResult, context: FilterContext) -> TraceEvent:
         if not self._enabled:

@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 # ============================================================
@@ -89,7 +89,7 @@ _formatter = SecretMaskingFormatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)
 # ============================================================
 # Log Rotation and Cleanup
 # ============================================================
-def extract_date_from_filename(filename: str) -> str | None:
+def extract_date_from_filename(filename: str) -> Optional[str]:
     """
     Extract date string from log filename.
 

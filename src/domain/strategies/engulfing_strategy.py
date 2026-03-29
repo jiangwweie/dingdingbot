@@ -9,9 +9,10 @@ from decimal import Decimal
 from typing import Optional, List
 
 from ..models import KlineData, Direction, PatternResult
+from ..strategy_engine import PatternStrategy
 
 
-class EngulfingStrategy:
+class EngulfingStrategy(PatternStrategy):
     """
     Engulfing Pattern (吞没形态) 策略实现。
 
@@ -39,7 +40,7 @@ class EngulfingStrategy:
         """返回策略名称"""
         return "engulfing"
 
-    def detect(self, kline: KlineData, prev_kline: Optional[KlineData] = None) -> Optional[PatternResult]:
+    def detect(self, kline: KlineData, prev_kline: Optional[KlineData] = None, atr_value: Optional[Decimal] = None) -> Optional[PatternResult]:
         """
         检测吞没形态。
 
@@ -102,14 +103,21 @@ class EngulfingStrategy:
         # 计算吞没比率：当前实体 / 前一根实体
         engulfing_ratio = curr_body / prev_body
 
-        # 计算打分：将 engulfing_ratio 映射到 (0.5, 1.0] 范围
-        # score = engulfing_ratio / (engulfing_ratio + 1) + 0.5
-        # 简化：直接使用归一化公式，让 score 在 0.5-1.0 之间
-        # 当 engulfing_ratio = 1 时，score = 0.5
-        # 当 engulfing_ratio = 3 时，score = 0.75
-        # 当 engulfing_ratio = 9 时，score ≈ 0.9
-        score = Decimal("0.5") + Decimal("0.5") * (engulfing_ratio - Decimal(1)) / engulfing_ratio
-        score = max(Decimal("0.5"), min(Decimal("1.0"), score))  # 确保在 [0.5, 1.0] 范围内
+        # S6-2-2: 使用统一的评分公式（基类 PatternStrategy 提供）
+        # 基础分 = engulfing_ratio 归一化到 0~1
+        # 如果有 ATR 值，则使用 ATR 调整评分
+        pattern_ratio = Decimal("1.0") - Decimal("1.0") / (engulfing_ratio + Decimal("1.0"))
+        # pattern_ratio 范围：当 engulfing_ratio=1 时为 0.5，engulfing_ratio 越大越接近 1
+
+        if atr_value and atr_value > 0:
+            candle_range = curr_high - curr_low
+            atr_ratio = candle_range / atr_value
+            score = self.calculate_score(pattern_ratio, atr_ratio)
+        else:
+            # Fallback to legacy scoring when ATR not available
+            score = float(pattern_ratio)
+
+        score = max(0.5, min(1.0, score))  # 确保在 [0.5, 1.0] 范围内
 
         # 确定方向
         direction = Direction.LONG if is_bullish_engulfing else Direction.SHORT
@@ -125,7 +133,7 @@ class EngulfingStrategy:
         return PatternResult(
             strategy_name="engulfing",
             direction=direction,
-            score=float(score),
+            score=score,
             details={
                 "engulfing_ratio": float(engulfing_ratio),
                 "curr_body": float(curr_body),
@@ -136,13 +144,14 @@ class EngulfingStrategy:
             },
         )
 
-    def detect_with_history(self, kline: KlineData, history: List[KlineData]) -> Optional[PatternResult]:
+    def detect_with_history(self, kline: KlineData, history: List[KlineData], atr_value: Optional[Decimal] = None) -> Optional[PatternResult]:
         """
         从历史 K 线中自动获取前一根 K 线并检测吞没形态。
 
         Args:
             kline: 当前 K 线数据
             history: K 线历史列表 (按时间顺序排列，最后一根是最新的)
+            atr_value: 可选的 ATR 值（用于评分调整）
 
         Returns:
             PatternResult 如果检测到吞没形态，None otherwise
@@ -151,4 +160,4 @@ class EngulfingStrategy:
             return None
 
         prev_kline = history[-1]
-        return self.detect(kline, prev_kline)
+        return self.detect(kline, prev_kline, atr_value)

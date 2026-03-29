@@ -747,3 +747,177 @@ class TestAdvancedBoundaryCases:
         # Risk amount = 0
         assert position_size == Decimal("0")
         assert leverage == 1
+
+
+# ============================================================
+# S6-3: Multi-Level Take Profit Tests
+# ============================================================
+from src.domain.models import TakeProfitConfig, TakeProfitLevel
+
+
+class TestTakeProfitConfig:
+    """Test TakeProfitConfig model."""
+
+    def test_default_config(self):
+        """Test default take profit config."""
+        config = TakeProfitConfig()
+        assert config.enabled is True
+        assert len(config.levels) == 2
+        assert config.levels[0].id == "TP1"
+        assert config.levels[0].position_ratio == Decimal("0.5")
+        assert config.levels[0].risk_reward == Decimal("1.5")
+        assert config.levels[1].id == "TP2"
+        assert config.levels[1].position_ratio == Decimal("0.5")
+        assert config.levels[1].risk_reward == Decimal("3.0")
+
+    def test_custom_config(self):
+        """Test custom take profit config."""
+        config = TakeProfitConfig(
+            enabled=True,
+            levels=[
+                TakeProfitLevel(id="TP1", position_ratio=Decimal("0.4"), risk_reward=Decimal("1.2")),
+                TakeProfitLevel(id="TP2", position_ratio=Decimal("0.3"), risk_reward=Decimal("2.5")),
+                TakeProfitLevel(id="TP3", position_ratio=Decimal("0.3"), risk_reward=Decimal("5.0")),
+            ]
+        )
+        assert config.enabled is True
+        assert len(config.levels) == 3
+
+
+class TestCalculateTakeProfitLevels:
+    """Test multi-level take profit calculation."""
+
+    @pytest.fixture
+    def calculator_default(self):
+        """Create risk calculator with default take profit config."""
+        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(risk_config)
+
+    def test_calculate_take_profit_levels_long(self, calculator_default):
+        """测试 LONG 方向止盈价格计算"""
+        entry_price = Decimal("40000")
+        stop_loss = Decimal("38000")  # 止损距离 = 2000
+        direction = Direction.LONG
+
+        levels = calculator_default.calculate_take_profit_levels(
+            entry_price, stop_loss, direction
+        )
+
+        # 验证
+        assert len(levels) == 2
+
+        # TP1: 40000 + (2000 * 1.5) = 43000
+        assert levels[0]["id"] == "TP1"
+        assert Decimal(levels[0]["price"]) == Decimal("43000")
+        assert levels[0]["position_ratio"] == "0.5"
+        assert levels[0]["risk_reward"] == "1.5"
+
+        # TP2: 40000 + (2000 * 3.0) = 46000
+        assert levels[1]["id"] == "TP2"
+        assert Decimal(levels[1]["price"]) == Decimal("46000")
+        assert levels[1]["position_ratio"] == "0.5"
+        assert levels[1]["risk_reward"] == "3.0"
+
+    def test_calculate_take_profit_levels_short(self, calculator_default):
+        """测试 SHORT 方向止盈价格计算"""
+        entry_price = Decimal("40000")
+        stop_loss = Decimal("42000")  # 止损距离 = 2000
+        direction = Direction.SHORT
+
+        levels = calculator_default.calculate_take_profit_levels(
+            entry_price, stop_loss, direction
+        )
+
+        # 验证
+        assert len(levels) == 2
+
+        # TP1: 40000 - (2000 * 1.5) = 37000 (SHORT 止盈在下方)
+        assert levels[0]["id"] == "TP1"
+        assert Decimal(levels[0]["price"]) == Decimal("37000")
+
+        # TP2: 40000 - (2000 * 3.0) = 34000
+        assert levels[1]["id"] == "TP2"
+        assert Decimal(levels[1]["price"]) == Decimal("34000")
+
+    def test_take_profit_config_override(self):
+        """测试用户配置覆盖默认值"""
+        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        custom_tp_config = TakeProfitConfig(
+            enabled=True,
+            levels=[
+                TakeProfitLevel(id="TP1", position_ratio=Decimal("0.4"), risk_reward=Decimal("1.2")),
+                TakeProfitLevel(id="TP2", position_ratio=Decimal("0.3"), risk_reward=Decimal("2.5")),
+                TakeProfitLevel(id="TP3", position_ratio=Decimal("0.3"), risk_reward=Decimal("5.0")),
+            ]
+        )
+        calculator = RiskCalculator(risk_config, custom_tp_config)
+
+        entry_price = Decimal("100")
+        stop_loss = Decimal("90")  # 止损距离 = 10
+        direction = Direction.LONG
+
+        levels = calculator.calculate_take_profit_levels(
+            entry_price, stop_loss, direction, custom_tp_config
+        )
+
+        # 验证 3 个级别
+        assert len(levels) == 3
+
+        # TP1: 100 + (10 * 1.2) = 112
+        assert levels[0]["id"] == "TP1"
+        assert Decimal(levels[0]["price"]) == Decimal("112")
+
+        # TP2: 100 + (10 * 2.5) = 125
+        assert levels[1]["id"] == "TP2"
+        assert Decimal(levels[1]["price"]) == Decimal("125")
+
+        # TP3: 100 + (10 * 5.0) = 150
+        assert levels[2]["id"] == "TP3"
+        assert Decimal(levels[2]["price"]) == Decimal("150")
+
+    def test_take_profit_disabled(self):
+        """测试止盈配置禁用时返回空列表"""
+        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        disabled_tp_config = TakeProfitConfig(enabled=False, levels=[])
+        calculator = RiskCalculator(risk_config, disabled_tp_config)
+
+        entry_price = Decimal("40000")
+        stop_loss = Decimal("38000")
+        direction = Direction.LONG
+
+        levels = calculator.calculate_take_profit_levels(
+            entry_price, stop_loss, direction, disabled_tp_config
+        )
+
+        # 验证返回空列表
+        assert levels == []
+
+    def test_take_profit_levels_in_signal_result(self, calculator_default):
+        """测试信号结果包含止盈级别"""
+        account = create_account(total_balance=Decimal("100000"))
+        kline = create_kline(
+            symbol="BTC/USDT:USDT", timeframe="15m",
+            open=Decimal("108"), high=Decimal("110"),
+            low=Decimal("90"), close=Decimal("109"),
+        )
+
+        result = calculator_default.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.LONG,
+            tags=[],
+        )
+
+        # 验证信号包含止盈级别
+        assert result.take_profit_levels is not None
+        assert len(result.take_profit_levels) >= 2
+
+        # 验证止盈价格计算正确
+        # 止损距离 = 109 - 90 = 19
+        # TP1 = 109 + 19 * 1.5 = 137.5
+        # TP2 = 109 + 19 * 3.0 = 166
+        tp1 = next(tp for tp in result.take_profit_levels if tp["id"] == "TP1")
+        tp2 = next(tp for tp in result.take_profit_levels if tp["id"] == "TP2")
+
+        assert abs(Decimal(tp1["price"]) - Decimal("137.50")) < Decimal("1")  # 允许 1 以内误差
+        assert abs(Decimal(tp2["price"]) - Decimal("166.00")) < Decimal("1")

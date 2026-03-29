@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from src.infrastructure.notifier import (
     format_signal_message,
     format_system_alert,
+    format_cover_signal_message,
+    format_opposing_signal_message,
     NotificationService,
     FeishuWebhook,
     WeComWebhook,
@@ -331,3 +333,234 @@ class TestNotificationService:
         )
 
         mock_channel.send.assert_called_once()
+
+
+class TestFormatCoverSignalMessage:
+    """Test cover signal message formatting"""
+
+    def test_format_cover_signal_basic(self):
+        """Test formatting a cover signal message"""
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65200.00"),
+            suggested_stop_loss=Decimal("64700.00"),
+            suggested_position_size=Decimal("0.15"),
+            current_leverage=10,
+            tags=[{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}],
+            risk_reward_info="Risk 1% = 300 USDT",
+            score=0.85,
+        )
+
+        superseded_signal = {
+            "signal_id": "signal-123",
+            "score": 0.72,
+        }
+
+        message = format_cover_signal_message(signal, superseded_signal)
+
+        assert "【信号覆盖提醒】⚡" in message
+        assert "BTC/USDT:USDT" in message
+        assert "15m" in message
+        assert "🟢 看多 (LONG)" in message
+        assert "65200" in message
+        assert "（更新）" in message
+        assert "新信号评分：0.85" in message
+        assert "原信号评分：0.72" in message
+        assert "评分提升：+18%" in message or "评分提升：+18" in message
+        assert "signal-123" in message
+        assert "因为形态质量更优" in message
+
+    def test_format_cover_signal_score_decrease(self):
+        """Test cover signal with different score improvement"""
+        signal = SignalResult(
+            symbol="ETH/USDT:USDT",
+            timeframe="1h",
+            direction=Direction.SHORT,
+            entry_price=Decimal("2200.00"),
+            suggested_stop_loss=Decimal("2250.00"),
+            suggested_position_size=Decimal("1.0"),
+            current_leverage=5,
+            tags=[{"name": "EMA", "value": "Bearish"}],
+            risk_reward_info="Risk 1% = 100 USDT",
+            score=0.90,
+        )
+
+        superseded_signal = {
+            "signal_id": "signal-456",
+            "score": 0.60,
+        }
+
+        message = format_cover_signal_message(signal, superseded_signal)
+
+        assert "新信号评分：0.90" in message
+        assert "原信号评分：0.60" in message
+        assert "评分提升：+50%" in message
+
+
+class TestFormatOpposingSignalMessage:
+    """Test opposing signal message formatting"""
+
+    def test_format_opposing_signal_basic(self):
+        """Test formatting an opposing signal message"""
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.SHORT,
+            entry_price=Decimal("64800.00"),
+            suggested_stop_loss=Decimal("65300.00"),
+            suggested_position_size=Decimal("0.15"),
+            current_leverage=10,
+            tags=[{"name": "EMA", "value": "Bearish"}],
+            risk_reward_info="Risk 1% = 300 USDT",
+            score=0.78,
+        )
+
+        opposing_signal = {
+            "direction": "LONG",
+            "score": 0.82,
+        }
+
+        message = format_opposing_signal_message(signal, opposing_signal)
+
+        assert "【反向信号提醒】⚠️" in message
+        assert "🔴 看空 (SHORT)" in message
+        assert "← 与原信号相反" in message
+        assert "市场分歧提示" in message
+        assert "当前方向信号评分：0.78" in message
+        assert "反向方向信号评分：0.82" in message
+        assert "存在更优的反向信号" in message
+
+    def test_format_opposing_signal_lower_score(self):
+        """Test opposing signal with lower score"""
+        signal = SignalResult(
+            symbol="ETH/USDT:USDT",
+            timeframe="1h",
+            direction=Direction.LONG,
+            entry_price=Decimal("2200.00"),
+            suggested_stop_loss=Decimal("2150.00"),
+            suggested_position_size=Decimal("1.0"),
+            current_leverage=5,
+            tags=[],
+            risk_reward_info="Risk 1% = 100 USDT",
+            score=0.85,
+        )
+
+        opposing_signal = {
+            "direction": "SHORT",
+            "score": 0.70,
+        }
+
+        message = format_opposing_signal_message(signal, opposing_signal)
+
+        assert "🟢 看多 (LONG)" in message
+        assert "当前方向信号评分：0.85" in message
+        assert "反向方向信号评分：0.70" in message
+        # Should not say opposing is higher
+        assert "存在更优的反向信号" not in message
+
+
+class TestFormatSignalMessageWithOptionalParams:
+    """Test format_signal_message with optional parameters"""
+
+    def test_format_signal_standard(self):
+        """Test standard signal formatting (no optional params)"""
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65000.00"),
+            suggested_stop_loss=Decimal("64500.00"),
+            suggested_position_size=Decimal("0.15"),
+            current_leverage=10,
+            tags=[{"name": "EMA", "value": "Bullish"}],
+            risk_reward_info="Risk 1% = 300 USDT",
+            score=0.75,
+        )
+
+        message = format_signal_message(signal)
+
+        assert "【交易信号提醒】" in message
+        assert "覆盖" not in message
+        assert "反向" not in message
+
+    def test_format_signal_with_superseded(self):
+        """Test signal formatting with superseded_signal param"""
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65200.00"),
+            suggested_stop_loss=Decimal("64700.00"),
+            suggested_position_size=Decimal("0.15"),
+            current_leverage=10,
+            tags=[],
+            risk_reward_info="Risk 1% = 300 USDT",
+            score=0.85,
+        )
+
+        superseded_signal = {
+            "signal_id": "signal-789",
+            "score": 0.70,
+        }
+
+        message = format_signal_message(signal, superseded_signal=superseded_signal)
+
+        assert "【信号覆盖提醒】⚡" in message
+        assert "signal-789" in message
+
+    def test_format_signal_with_opposing(self):
+        """Test signal formatting with opposing_signal param"""
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65000.00"),
+            suggested_stop_loss=Decimal("64500.00"),
+            suggested_position_size=Decimal("0.15"),
+            current_leverage=10,
+            tags=[],
+            risk_reward_info="Risk 1% = 300 USDT",
+            score=0.75,
+        )
+
+        opposing_signal = {
+            "direction": "SHORT",
+            "score": 0.80,
+        }
+
+        message = format_signal_message(signal, opposing_signal=opposing_signal)
+
+        assert "【反向信号提醒】⚠️" in message
+        assert "存在反向信号" in message
+
+    def test_format_signal_with_both(self):
+        """Test signal formatting with both superseded and opposing"""
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65200.00"),
+            suggested_stop_loss=Decimal("64700.00"),
+            suggested_position_size=Decimal("0.15"),
+            current_leverage=10,
+            tags=[],
+            risk_reward_info="Risk 1% = 300 USDT",
+            score=0.85,
+        )
+
+        superseded_signal = {
+            "signal_id": "signal-old",
+            "score": 0.70,
+        }
+
+        opposing_signal = {
+            "direction": "SHORT",
+            "score": 0.80,
+        }
+
+        # When both are provided, superseded takes precedence
+        message = format_signal_message(signal, superseded_signal=superseded_signal, opposing_signal=opposing_signal)
+
+        assert "【信号覆盖提醒】⚡" in message

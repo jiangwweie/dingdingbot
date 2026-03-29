@@ -33,11 +33,18 @@ export interface Signal {
   direction: 'long' | 'short';
   entry_price: string;
   stop_loss: string;
-  take_profit?: string;
+  take_profit?: string;  // 遗留字段（兼容旧数据）
+  take_profit_levels?: Array<{  // S6-3: 多级别止盈
+    id: string;              // TP1, TP2, ...
+    position_ratio: string;  // 仓位比例
+    risk_reward: string;     // 盈亏比
+    price: string;           // 止盈价格
+    status?: string;         // PENDING/WON/CANCELLED
+  }>;
   position_size: string;
   leverage: number;
   tags?: Array<{ name: string; value: string }>;  // Dynamic filter tags (e.g., [{"name": "EMA", "value": "Bullish"}])
-  status: 'pending' | 'won' | 'lost';
+  status: SignalStatus;
   pnl_ratio?: string | null;
   win_rate?: number;
   strategy_name?: string | null;
@@ -45,6 +52,10 @@ export interface Signal {
   kline_timestamp?: number;
   risk_reward_info?: string;
   source?: 'live' | 'backtest';  // Signal source: live trading or backtest
+  // Signal coverage fields (S6-2)
+  superseded_by?: string | null;  // ID of the signal that superseded this one
+  opposing_signal_id?: string | null;  // ID of opposing direction signal
+  opposing_signal_score?: number | string | null;  // Score of opposing signal
   // Legacy fields (deprecated, kept for backward compatibility with old signals)
   ema_trend?: 'bullish' | 'bearish';
   mtf_status?: 'confirmed' | 'rejected' | 'disabled' | 'unavailable';
@@ -971,9 +982,13 @@ export async function applySnapshot(id: number): Promise<void> {
 export enum SignalStatus {
   GENERATED = 'generated',
   PENDING = 'pending',
+  ACTIVE = 'active',
+  SUPERSEDED = 'superseded',
   FILLED = 'filled',
   CANCELLED = 'cancelled',
   REJECTED = 'rejected',
+  WON = 'won',
+  LOST = 'lost',
 }
 
 /**

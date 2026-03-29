@@ -42,6 +42,9 @@ class SignalStatus(str, Enum):
     FILLED = "filled"            # 已成交
     CANCELLED = "cancelled"      # 已取消
     REJECTED = "rejected"        # 被拒绝
+    # S6-2: Signal covering status
+    ACTIVE = "active"            # 当前有效信号
+    SUPERSEDED = "superseded"    # 已被更优信号替代
 
 
 # Note: SignalTrack is defined after SignalResult to avoid forward reference issues
@@ -102,6 +105,12 @@ class SignalResult(BaseModel):
     strategy_name: str = "unknown"  # Strategy name that generated this signal (e.g., "pinbar", "engulfing")
     score: float = 0.0           # Pattern quality score (0.0 ~ 1.0). **NOTE**: This is for UI display and sorting only, NOT for financial calculations. Financial calculations use Decimal exclusively.
 
+    # Multi-level take profit (S6-3)
+    take_profit_levels: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="多级别止盈列表，结构：[{id, position_ratio, risk_reward, price}, ...]"
+    )
+
 
 # ============================================================
 # Signal Status Tracking Models (S5-2, continued)
@@ -149,6 +158,29 @@ class RiskConfig(BaseModel):
         if v < 0 or v > Decimal('1'):
             raise ValueError("Max total exposure must be between 0 and 1")
         return v
+
+
+# ============================================================
+# Multi-Level Take Profit Models (S6-3)
+# ============================================================
+class TakeProfitLevel(BaseModel):
+    """单个止盈级别"""
+    id: str = Field(..., description="止盈级别标识，如 TP1, TP2")
+    position_ratio: Decimal = Field(..., description="仓位比例 (0.5 = 50%)")
+    risk_reward: Decimal = Field(..., description="盈亏比 (1.5 = 1:1.5)")
+    price: Decimal = Field(default=Decimal(0), description="计算后的止盈价格")
+
+
+class TakeProfitConfig(BaseModel):
+    """止盈策略配置"""
+    enabled: bool = Field(default=True, description="是否启用多级别止盈")
+    levels: List[TakeProfitLevel] = Field(
+        default_factory=lambda: [
+            TakeProfitLevel(id="TP1", position_ratio=Decimal("0.5"), risk_reward=Decimal("1.5")),
+            TakeProfitLevel(id="TP2", position_ratio=Decimal("0.5"), risk_reward=Decimal("3.0")),
+        ],
+        description="止盈级别列表"
+    )
 
 
 # ============================================================

@@ -285,12 +285,37 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # S6-2-3: Add columns for signal covering mechanism
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN superseded_by TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN opposing_signal_id TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN opposing_signal_score REAL
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
         # Create index for source
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_signals_source ON signals(source)
         """)
 
-        # Create indexes for signal_attempts
+        # Create index for signal_attempts
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_attempts_symbol ON signal_attempts(symbol)
         """)
@@ -299,6 +324,30 @@ class SignalRepository:
         """)
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_attempts_final_result ON signal_attempts(final_result)
+        """)
+
+        # S6-3: Create signal_take_profits table for multi-level take-profit tracking
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS signal_take_profits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                tp_id TEXT NOT NULL,              -- "TP1", "TP2"
+                position_ratio TEXT NOT NULL,     -- 仓位比例
+                risk_reward TEXT NOT NULL,        -- 盈亏比
+                price_level TEXT NOT NULL,        -- 止盈价格
+                status TEXT DEFAULT 'PENDING',    -- PENDING/WON/CANCELLED
+                filled_at TEXT,
+                pnl_ratio TEXT,
+                FOREIGN KEY (signal_id) REFERENCES signals(id) ON DELETE CASCADE
+            )
+        """)
+
+        # Create indexes for signal_take_profits
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signal_tp_signal_id ON signal_take_profits(signal_id)
+        """)
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signal_tp_status ON signal_take_profits(status)
         """)
 
         await self._db.commit()
@@ -662,6 +711,9 @@ class SignalRepository:
         created_at = datetime.now(timezone.utc).isoformat()
         tags_json = json.dumps(signal.tags)
 
+        # Use signal_id if provided, otherwise use created_at as signal_id
+        signal_id_value = signal_id or created_at
+
         await self._db.execute(
             """
             INSERT INTO signals (
@@ -688,7 +740,7 @@ class SignalRepository:
                 signal.kline_timestamp,
                 signal.strategy_name,
                 signal.score,
-                signal_id,
+                signal_id_value,
                 source,
                 '',  # ema_trend (legacy field, empty for new signals)
                 '',  # mtf_status (legacy field, empty for new signals)
@@ -697,10 +749,135 @@ class SignalRepository:
         )
         await self._db.commit()
 
-        signal_id_result = signal_id or str(created_at)
+        signal_id_result = signal_id_value
         logger.info(f"信号已保存：id={signal_id_result}, {signal.symbol}:{signal.timeframe}")
 
+        # S6-3: Save take profit levels if present
+        if signal.take_profit_levels:
+            await self.store_take_profit_levels(signal_id_result, signal.take_profit_levels)
+
         return signal_id_result
+
+    # ============================================================
+    # S6-2-3: Signal Covering Mechanism Methods
+    # ============================================================
+
+    async def update_signal_status_by_tracker_id(self, signal_id: str, status: str) -> None:
+        """
+        Update signal status (supports SUPERSEDED).
+
+        Args:
+            signal_id: Signal ID (signal_id field from tracker)
+            status: New status (e.g., 'ACTIVE', 'SUPERSEDED')
+        """
+        await self._db.execute(
+            "UPDATE signals SET status = ? WHERE signal_id = ?",
+            (status, signal_id)
+        )
+        await self._db.commit()
+        logger.debug(f"Signal status updated: signal_id={signal_id}, status={status}")
+
+    async def update_superseded_by(self, signal_id: str, superseded_by: str) -> None:
+        """
+        Mark signal as superseded by another signal.
+
+        Args:
+            signal_id: Signal ID to mark as superseded
+            superseded_by: Signal ID that superseded this one
+        """
+        await self._db.execute(
+            """
+            UPDATE signals
+            SET superseded_by = ?, status = 'superseded'
+            WHERE signal_id = ?
+            """,
+            (superseded_by, signal_id)
+        )
+        await self._db.commit()
+        logger.debug(f"Signal marked as superseded: signal_id={signal_id}, superseded_by={superseded_by}")
+
+    async def get_active_signal(self, dedup_key: str) -> Optional[dict]:
+        """
+        Get the ACTIVE signal for a given dedup key.
+
+        Args:
+            dedup_key: Deduplication key (format: symbol:timeframe:direction:strategy_name)
+                       Note: symbol may contain colons (e.g., "BTC/USDT:USDT")
+
+        Returns:
+            Signal dict if found, None otherwise
+        """
+        # Parse dedup_key - symbol may contain colons, so we split from the end
+        # Format: symbol:timeframe:direction:strategy_name
+        # Example: BTC/USDT:USDT:15m:long:pinbar
+        parts = dedup_key.split(":")
+        if len(parts) < 4:
+            logger.warning(f"Invalid dedup_key format: {dedup_key}")
+            return None
+
+        # Extract from the end: strategy_name, direction, timeframe, and the rest is symbol
+        strategy_name = parts[-1]
+        direction = parts[-2]
+        timeframe = parts[-3]
+        symbol = ":".join(parts[:-3])  # Join remaining parts as symbol
+
+        # Build WHERE clause
+        # Support both uppercase ACTIVE and lowercase active for backward compatibility
+        where_clauses = [
+            "symbol = ?",
+            "timeframe = ?",
+            "direction = ?",
+            "(status = 'ACTIVE' OR status = 'active')"
+        ]
+        params = [symbol, timeframe, direction]
+
+        if strategy_name:
+            where_clauses.append("strategy_name = ?")
+            params.append(strategy_name)
+
+        where_sql = " AND ".join(where_clauses)
+
+        async with self._db.execute(
+            f"SELECT * FROM signals WHERE {where_sql} ORDER BY created_at DESC LIMIT 1",
+            params
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return dict(row)
+
+    async def get_opposing_signal(
+        self,
+        symbol: str,
+        timeframe: str,
+        direction: str
+    ) -> Optional[dict]:
+        """
+        Get the opposing direction ACTIVE signal.
+
+        Args:
+            symbol: Trading symbol
+            timeframe: Timeframe
+            direction: Current signal direction ("long" or "short")
+
+        Returns:
+            Signal dict if found, None otherwise
+        """
+        # Determine opposing direction
+        opposing_direction = "short" if direction == "long" else "long"
+
+        async with self._db.execute(
+            """
+            SELECT * FROM signals
+            WHERE symbol = ? AND timeframe = ? AND direction = ? AND (status = 'ACTIVE' OR status = 'active')
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (symbol, timeframe, opposing_direction)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return dict(row)
 
     async def get_signals(
         self,
@@ -708,6 +885,7 @@ class SignalRepository:
         limit: int = 50,
         offset: int = 0,
         symbol: str = None,
+        timeframe: str = None,
         direction: str = None,
         strategy_name: str = None,
         status: str = None,
@@ -725,6 +903,7 @@ class SignalRepository:
             limit: Maximum number of results to return
             offset: Number of results to skip
             symbol: Optional symbol filter (e.g., "BTC/USDT:USDT")
+            timeframe: Optional timeframe filter (e.g., "15m", "1h", "4h", "1d")
             direction: Optional direction filter ("long" or "short")
             strategy_name: Optional strategy name filter ("pinbar", "engulfing")
             status: Optional status filter ("PENDING", "WON", "LOST")
@@ -732,6 +911,7 @@ class SignalRepository:
             end_time: Optional end time filter (ISO 8601 or timestamp)
             sort_by: Sort field ("created_at" or "pattern_score"), default "created_at"
             order: Sort order ("asc" or "desc"), default "desc"
+            source: Optional source filter ('live' or 'backtest')
 
         Returns:
             {"total": int (filtered total), "data": list[dict]}
@@ -754,6 +934,10 @@ class SignalRepository:
         if symbol:
             where_clauses.append("symbol = ?")
             params.append(symbol)
+
+        if timeframe:
+            where_clauses.append("timeframe = ?")
+            params.append(timeframe)
 
         if direction:
             where_clauses.append("direction = ?")
@@ -803,7 +987,23 @@ class SignalRepository:
 
         async with self._db.execute(query_sql, params) as cursor:
             rows = await cursor.fetchall()
-            return {"total": filtered_total, "data": [dict(row) for row in rows]}
+            # Normalize status to lowercase for frontend SignalStatus enum compatibility
+            data = []
+            for row in rows:
+                row_dict = dict(row)
+                if row_dict.get("status"):
+                    row_dict["status"] = row_dict["status"].lower()
+
+                # S6-3: Load take profit levels for each signal
+                signal_id_str = row_dict.get("signal_id")
+                if signal_id_str:
+                    tp_levels = await self.get_take_profit_levels(signal_id_str)
+                    row_dict["take_profit_levels"] = tp_levels
+                else:
+                    row_dict["take_profit_levels"] = []
+
+                data.append(row_dict)
+            return {"total": filtered_total, "data": data}
 
     async def delete_signals(
         self,
@@ -916,7 +1116,17 @@ class SignalRepository:
             row = await cursor.fetchone()
             if row is None:
                 return None
-            return dict(row)
+            signal = dict(row)
+
+            # S6-3: Load take profit levels
+            signal_id_str = signal.get("signal_id")
+            if signal_id_str:
+                tp_levels = await self.get_take_profit_levels(signal_id_str)
+                signal["take_profit_levels"] = tp_levels
+            else:
+                signal["take_profit_levels"] = []
+
+            return signal
 
     async def get_stats(self) -> dict:
         """
@@ -1541,3 +1751,138 @@ class SignalRepository:
         async with self._db.execute("SELECT * FROM signal_attempts") as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    # ============================================================
+    # S6-3: Multi-Level Take Profit CRUD Methods
+    # ============================================================
+
+    async def store_take_profit_levels(
+        self,
+        signal_id: str,
+        take_profit_levels: List[Dict[str, str]],
+    ) -> None:
+        """
+        保存止盈级别到数据库
+
+        Args:
+            signal_id: 信号 ID
+            take_profit_levels: 止盈级别列表，结构:
+                [
+                    {"id": "TP1", "position_ratio": "0.5", "risk_reward": "1.5", "price": "43000"},
+                    ...
+                ]
+        """
+        # Get numeric signal_id for foreign key
+        cursor = await self._db.execute("SELECT id FROM signals WHERE signal_id = ?", (signal_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            logger.warning(f"Signal not found for take profit storage: signal_id={signal_id}")
+            return
+
+        numeric_signal_id = row[0]
+
+        for tp in take_profit_levels:
+            await self._db.execute(
+                """
+                INSERT INTO signal_take_profits
+                (signal_id, tp_id, position_ratio, risk_reward, price_level, status)
+                VALUES (?, ?, ?, ?, ?, 'PENDING')
+                """,
+                (
+                    numeric_signal_id,
+                    tp["id"],
+                    tp["position_ratio"],
+                    tp["risk_reward"],
+                    tp["price"],
+                ),
+            )
+        await self._db.commit()
+        logger.debug(f"Stored {len(take_profit_levels)} take-profit levels for signal {signal_id}")
+
+    async def get_take_profit_levels(
+        self,
+        signal_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取信号的止盈级别
+
+        Args:
+            signal_id: 信号 ID
+
+        Returns:
+            止盈级别列表:
+                [
+                    {
+                        "id": 1,
+                        "tp_id": "TP1",
+                        "position_ratio": "0.5",
+                        "risk_reward": "1.5",
+                        "price_level": "43000.00",
+                        "status": "PENDING"
+                    },
+                    ...
+                ]
+        """
+        # Get numeric signal_id for foreign key
+        cursor = await self._db.execute("SELECT id FROM signals WHERE signal_id = ?", (signal_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return []
+
+        numeric_signal_id = row[0]
+
+        async with self._db.execute(
+            """
+            SELECT id, tp_id, position_ratio, risk_reward, price_level, status, filled_at, pnl_ratio
+            FROM signal_take_profits
+            WHERE signal_id = ?
+            ORDER BY tp_id
+            """,
+            (numeric_signal_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def update_take_profit_status(
+        self,
+        signal_id: str,
+        tp_id: str,
+        status: str,
+        pnl_ratio: Optional[Decimal] = None,
+        filled_at: Optional[str] = None,
+    ) -> None:
+        """
+        更新止盈级别状态
+
+        Args:
+            signal_id: 信号 ID
+            tp_id: 止盈级别 ID (如 "TP1")
+            status: 新状态 ("WON" / "CANCELLED")
+            pnl_ratio: 盈亏比（可选）
+            filled_at: 成交时间（可选）
+        """
+        # Get numeric signal_id for foreign key
+        cursor = await self._db.execute("SELECT id FROM signals WHERE signal_id = ?", (signal_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            logger.warning(f"Signal not found for take profit status update: signal_id={signal_id}")
+            return
+
+        numeric_signal_id = row[0]
+
+        await self._db.execute(
+            """
+            UPDATE signal_take_profits
+            SET status = ?, pnl_ratio = ?, filled_at = ?
+            WHERE signal_id = ? AND tp_id = ?
+            """,
+            (
+                status,
+                str(pnl_ratio) if pnl_ratio else None,
+                filled_at,
+                numeric_signal_id,
+                tp_id,
+            ),
+        )
+        await self._db.commit()
+        logger.debug(f"Updated take-profit status: signal_id={signal_id}, tp_id={tp_id}, status={status}")

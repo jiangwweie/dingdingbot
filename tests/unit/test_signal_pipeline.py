@@ -334,3 +334,214 @@ class TestDynamicTags:
         assert len(signal.tags) == 2
         assert {"name": "EMA", "value": "Bullish"} in signal.tags
         assert {"name": "MTF", "value": "Confirmed"} in signal.tags
+
+
+class TestSignalCovering:
+    """Test S6-2-4: Signal covering mechanism."""
+
+    @pytest.fixture
+    def pipeline_with_repo(self):
+        """Create a signal pipeline with repository for covering tests."""
+        # Mock config manager
+        mock_config_manager = MagicMock()
+        mock_config_manager.user_config = MagicMock()
+        mock_config_manager.user_config.active_strategies = []
+        mock_config_manager.core_config = MagicMock()
+        mock_config_manager.core_config.signal_pipeline.queue.batch_size = 10
+        mock_config_manager.core_config.signal_pipeline.queue.flush_interval = 5.0
+        mock_config_manager.core_config.signal_pipeline.queue.max_queue_size = 1000
+        mock_config_manager.add_observer = MagicMock()
+
+        risk_config = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+        )
+
+        # Mock notification service
+        mock_notifier = MagicMock()
+        mock_notifier.send_signal = AsyncMock()
+
+        # Mock signal repository with covering methods
+        mock_repository = MagicMock()
+        mock_repository.save_signal = AsyncMock()
+        mock_repository.save_attempt = AsyncMock()
+        mock_repository.update_superseded_by = AsyncMock()
+
+        pipeline = SignalPipeline(
+            config_manager=mock_config_manager,
+            risk_config=risk_config,
+            notification_service=mock_notifier,
+            signal_repository=mock_repository,
+            cooldown_seconds=14400,  # 4 hours
+        )
+
+        # Set account snapshot for risk calculation
+        pipeline.update_account_snapshot(AccountSnapshot(
+            total_balance=Decimal("10000"),
+            available_balance=Decimal("10000"),
+            unrealized_pnl=Decimal("0"),
+            positions=[],
+            timestamp=1234567890000,
+        ))
+
+        return pipeline
+
+    async def _force_signal_with_score(self, pipeline, kline, direction=Direction.LONG, score=0.8, disable_strategy=True):
+        """Force a signal with specific score."""
+        mock_attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=PatternResult(
+                strategy_name="pinbar",
+                direction=direction,
+                score=score,
+                details={},
+            ),
+            filter_results=[],
+            final_result="SIGNAL_FIRED",
+        )
+
+        if disable_strategy:
+            with patch.object(pipeline, '_run_strategy', return_value=[mock_attempt]):
+                await pipeline.process_kline(kline)
+        else:
+            # For integration tests, don't mock _run_strategy
+            pass
+
+    @pytest.mark.asyncio
+    async def test_check_cover_no_existing_signal(self, pipeline_with_repo):
+        """Test _check_cover returns False when no existing signal."""
+        kline = create_kline()
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=PatternResult(strategy_name="pinbar", direction=Direction.LONG, score=0.8, details={}),
+            filter_results=[],
+            final_result="SIGNAL_FIRED",
+        )
+
+        # Cache is empty, should return False
+        should_cover, superseded_id, old_data = await pipeline_with_repo._check_cover(
+            kline, attempt, score=0.8
+        )
+
+        assert should_cover is False
+        assert superseded_id is None
+        assert old_data is None
+
+    @pytest.mark.asyncio
+    async def test_check_cover_new_score_higher(self, pipeline_with_repo):
+        """Test _check_cover returns True when new score is higher."""
+        import time
+
+        kline = create_kline()
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=PatternResult(strategy_name="pinbar", direction=Direction.LONG, score=0.8, details={}),
+            filter_results=[],
+            final_result="SIGNAL_FIRED",
+        )
+
+        # Setup cache with lower score old signal
+        dedup_key = f"{kline.symbol}:{kline.timeframe}:{Direction.LONG.value}:pinbar"
+        pipeline_with_repo._signal_cache[dedup_key] = {
+            "timestamp": time.time(),
+            "signal_id": "old-signal-123",
+            "score": 0.6,  # Lower than new score
+        }
+
+        # Mock DB fetch to return None (no additional data needed)
+        with patch.object(pipeline_with_repo._repository._db, 'execute') as mock_execute:
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone = MagicMock(return_value=None)
+            mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+            mock_cursor.__exit__ = MagicMock(return_value=None)
+            mock_execute.return_value = mock_cursor
+
+            should_cover, superseded_id, old_data = await pipeline_with_repo._check_cover(
+                kline, attempt, score=0.8
+            )
+
+        assert should_cover is True
+        assert superseded_id == "old-signal-123"
+
+    @pytest.mark.asyncio
+    async def test_check_cover_new_score_lower(self, pipeline_with_repo):
+        """Test _check_cover returns False when new score is not higher."""
+        import time
+
+        kline = create_kline()
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=PatternResult(strategy_name="pinbar", direction=Direction.LONG, score=0.7, details={}),
+            filter_results=[],
+            final_result="SIGNAL_FIRED",
+        )
+
+        # Setup cache with higher score old signal
+        dedup_key = f"{kline.symbol}:{kline.timeframe}:{Direction.LONG.value}:pinbar"
+        pipeline_with_repo._signal_cache[dedup_key] = {
+            "timestamp": time.time(),
+            "signal_id": "old-signal-456",
+            "score": 0.85,  # Higher than new score
+        }
+
+        should_cover, superseded_id, old_data = await pipeline_with_repo._check_cover(
+            kline, attempt, score=0.7
+        )
+
+        assert should_cover is False
+        assert superseded_id is None
+
+    @pytest.mark.asyncio
+    async def test_check_cover_time_window_expired(self, pipeline_with_repo):
+        """Test _check_cover returns False when time window expired."""
+        kline = create_kline()
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=PatternResult(strategy_name="pinbar", direction=Direction.LONG, score=0.9, details={}),
+            filter_results=[],
+            final_result="SIGNAL_FIRED",
+        )
+
+        # Setup cache with expired timestamp (15m window = 4 hours)
+        dedup_key = f"{kline.symbol}:{kline.timeframe}:{Direction.LONG.value}:pinbar"
+        old_timestamp = 1234567890000 / 1000  # Very old timestamp
+        pipeline_with_repo._signal_cache[dedup_key] = {
+            "timestamp": old_timestamp,
+            "signal_id": "old-signal-789",
+            "score": 0.5,
+        }
+
+        should_cover, superseded_id, old_data = await pipeline_with_repo._check_cover(
+            kline, attempt, score=0.9
+        )
+
+        assert should_cover is False
+        assert superseded_id is None
+
+    @pytest.mark.asyncio
+    async def test_get_timeframe_window(self, pipeline_with_repo):
+        """Test _get_timeframe_window returns correct values."""
+        assert pipeline_with_repo._get_timeframe_window("15m") == 4 * 3600  # 4 hours
+        assert pipeline_with_repo._get_timeframe_window("1h") == 24 * 3600  # 24 hours
+        assert pipeline_with_repo._get_timeframe_window("4h") == 72 * 3600  # 72 hours
+        assert pipeline_with_repo._get_timeframe_window("1d") == 30 * 24 * 3600  # 30 days
+        assert pipeline_with_repo._get_timeframe_window("1w") == 90 * 24 * 3600  # 90 days
+        assert pipeline_with_repo._get_timeframe_window("unknown") == 24 * 3600  # Default
+
+    @pytest.mark.asyncio
+    async def test_cache_key_format(self, pipeline_with_repo):
+        """Test that cache key format is correct for covering."""
+        import time
+
+        # Setup cache
+        dedup_key = "BTC/USDT:USDT:15m:long:pinbar"
+        pipeline_with_repo._signal_cache[dedup_key] = {
+            "timestamp": time.time(),
+            "signal_id": "test-signal",
+            "score": 0.75,
+        }
+
+        # Verify cache can be accessed with correct key
+        assert dedup_key in pipeline_with_repo._signal_cache
+        assert pipeline_with_repo._signal_cache[dedup_key]["score"] == 0.75
+        assert pipeline_with_repo._signal_cache[dedup_key]["signal_id"] == "test-signal"
