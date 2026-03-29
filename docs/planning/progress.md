@@ -1,5 +1,60 @@
 # 进度日志
 
+## 2026-03-29 - 会话：回测沙箱 source 字段集成 (已完成)
+
+**目标**: 完成回测沙箱与信号系统的 source 字段集成，实现回测/实盘信号区分
+
+**背景**:
+- 回测沙箱功能需要与策略工作台集成
+- 回测产生的信号需要保存到信号列表
+- 需要区分回测信号和实盘信号
+
+**进展**:
+
+### 后端修改 ✅
+- [x] ** models.py**: 添加 `source` 字段到 `SignalQuery` 和 `SignalDeleteRequest`
+- [x] **signal_repository.py**:
+  - 数据库迁移：`ALTER TABLE signals ADD COLUMN source TEXT DEFAULT 'live'`
+  - 创建索引：`idx_signals_source`
+  - `save_signal()` 支持 `source` 参数 (默认 `'live'`)
+  - `get_signals()` 支持 `source` 过滤
+  - `delete_signals()` 支持 `source` 过滤
+- [x] **api.py**:
+  - `GET /api/signals` 添加 `source` 查询参数 (pattern 验证)
+  - `GET /api/backtest/signals` 便捷端点（固定 `source='backtest'`）
+- [x] **backtester.py**: 回测信号保存时显式设置 `source='backtest'`
+
+### 前端修改 ✅
+- [x] **api.ts**:
+  - `Signal` 接口添加 `source?: 'live' | 'backtest'`
+  - `deleteSignals` payload 支持 `source` 字段
+- [x] **Signals.tsx**:
+  - 添加 `sourceFilter` 状态
+  - 添加来源筛选下拉框（全部来源/实盘信号/回测信号）
+  - URL 构建器支持 source 参数
+  - 删除 payload 支持 source 字段
+  - 清空筛选逻辑包含 sourceFilter
+- [x] **前端编译**: 通过 ✅
+
+### 代码审查 ✅
+
+| 审查项 | 结果 |
+|--------|------|
+| 新旧格式兼容性 | ✅ 通过（DEFAULT 'live' 保证向后兼容） |
+| 关联影响分析 | ✅ 影响范围可控 |
+| 信号列表筛选 | ✅ 功能完整 |
+
+**代码审查报告**:
+- 向后兼容性：⭐⭐⭐⭐⭐
+- 代码质量：⭐⭐⭐⭐⭐
+- 前端体验：⭐⭐⭐⭐⭐
+
+**改进建议** (可选):
+1. 在 `SignalDetailsDrawer` 中显示来源信息
+2. 添加数据库迁移版本号追踪
+
+---
+
 ## 2026-03-25 - 会话 1 (已结束)
 
 **目标**: 创建子任务 F 和 E 的实现计划
