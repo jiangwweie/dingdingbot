@@ -6,6 +6,10 @@ from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Tuple, List, Dict, Any
 import json
 
+from src.infrastructure.logger import setup_logger
+
+logger = setup_logger(__name__)
+
 from .models import (
     KlineData,
     SignalResult,
@@ -57,6 +61,8 @@ class RiskCalculator:
         Returns:
             Suggested stop-loss price level
         """
+        logger.debug(f"止损计算：direction={direction.value}, entry={kline.close}")
+
         if direction == Direction.LONG:
             # Stop loss slightly below the Pinbar low
             # Use the low of the Pinbar candle
@@ -94,6 +100,8 @@ class RiskCalculator:
         Returns:
             Tuple of (position_size, leverage_to_use)
         """
+        logger.debug(f"仓位计算：balance={account.total_balance}, risk={self.config.max_loss_percent}")
+
         # Handle zero/negative balance
         if account.total_balance <= Decimal(0):
             return Decimal(0), 1
@@ -254,6 +262,8 @@ class RiskCalculator:
         risk_info = self.generate_risk_info(
             account, position_size, entry_price, stop_loss, direction
         )
+
+        logger.info(f"风险计算完成：stop_loss={stop_loss}, position_size={position_size}, leverage={leverage}")
 
         return SignalResult(
             symbol=kline.symbol,

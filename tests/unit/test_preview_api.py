@@ -68,6 +68,7 @@ class TestStrategyPreviewResponse:
         response = StrategyPreviewResponse(
             signal_fired=True,
             trace_tree=trace_tree,
+            evaluation_summary="=== 信号评估报告 ===\n最终结果：信号触发",
             details={"trigger": "pinbar", "direction": "long"}
         )
 
@@ -87,7 +88,8 @@ class TestStrategyPreviewResponse:
 
         response = StrategyPreviewResponse(
             signal_fired=False,
-            trace_tree=trace_tree
+            trace_tree=trace_tree,
+            evaluation_summary="=== 信号评估报告 ===\n最终结果：未触发"
         )
 
         assert response.signal_fired is False

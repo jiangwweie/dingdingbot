@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Play,
   Clock,
@@ -13,6 +13,8 @@ import {
   PieChart,
   Table as TableIcon,
   Zap,
+  Upload,
+  History,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -22,9 +24,14 @@ import {
   StrategyDefinition,
   RiskConfig,
   TraceEvent,
+  fetchStrategyTemplates,
+  fetchBacktestSignals,
+  type Signal,
 } from '../lib/api';
 import StrategyBuilder from '../components/StrategyBuilder';
 import QuickDateRangePicker from '../components/QuickDateRangePicker';
+import StrategyTemplatePicker from '../components/StrategyTemplatePicker';
+import SignalDetailsDrawer from '../components/SignalDetailsDrawer';
 
 // Timeframe options
 const TIMEFRAMES = [
@@ -76,6 +83,36 @@ export default function Backtest() {
 
   // View mode for results
   const [viewMode, setViewMode] = useState<'dashboard' | 'logs'>('dashboard');
+
+  // Strategy template picker state
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [templates, setTemplates] = useState<Array<{ id: number; name: string; description: string | null }>>([]);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+
+  // Backtest signals history state
+  const [showHistory, setShowHistory] = useState(false);
+  const [backtestSignals, setBacktestSignals] = useState<Signal[]>([]);
+  const [isLoadingSignals, setIsLoadingSignals] = useState(false);
+
+  // Signal details drawer state
+  const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
+  const [showDetailsDrawer, setShowDetailsDrawer] = useState(false);
+
+  // Fetch templates on mount
+  useEffect(() => {
+    const loadTemplates = async () => {
+      setIsLoadingTemplates(true);
+      try {
+        const data = await fetchStrategyTemplates();
+        setTemplates(data);
+      } catch (err) {
+        console.error('Failed to fetch strategy templates:', err);
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    };
+    loadTemplates();
+  }, []);
 
   // Validate form
   const validateForm = useCallback((): boolean => {
@@ -165,6 +202,42 @@ export default function Backtest() {
     return values.reduce((a, b) => a + b, 0);
   }, [report, filterStats]);
 
+  // Handle strategy template import
+  const handleImportTemplate = useCallback(async (templateStrategy: StrategyDefinition) => {
+    // Fetch full strategy details
+    try {
+      const res = await fetch(`/api/strategies/${templateStrategy.id}`);
+      const data = await res.json();
+      if (data.strategy) {
+        setStrategies([data.strategy]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch strategy details:', err);
+    }
+    setShowTemplatePicker(false);
+  }, []);
+
+  // Handle fetch backtest signals history
+  const handleFetchHistory = useCallback(async () => {
+    setIsLoadingSignals(true);
+    setShowHistory(true);
+    try {
+      const data = await fetchBacktestSignals({ limit: 100 });
+      setBacktestSignals(data.signals || []);
+    } catch (err) {
+      console.error('Failed to fetch backtest signals:', err);
+      setError('加载回测历史失败');
+    } finally {
+      setIsLoadingSignals(false);
+    }
+  }, []);
+
+  // Handle signal click to show details
+  const handleSignalClick = useCallback((signal: Signal) => {
+    setSelectedSignal(signal);
+    setShowDetailsDrawer(true);
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -174,6 +247,39 @@ export default function Backtest() {
           <p className="text-sm text-gray-500 mt-1">
             配置策略组合，执行历史数据回测验证
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleFetchHistory}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            <History className="w-4 h-4" />
+            回测历史
+          </button>
+          <button
+            onClick={() => setShowTemplatePicker(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            从策略工作台导入
+          </button>
+        </div>
+      </div>
+
+      {/* Info Banner */}
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+        <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+          <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-blue-900">如何使用回测沙箱</h3>
+          <div className="mt-2 text-sm text-blue-700 space-y-1">
+            <p><strong>第 1 步：</strong> 前往 <button onClick={() => window.location.href = '/strategies'} className="text-blue-600 hover:underline font-medium">策略工作台</button> 创建或编辑策略组合</p>
+            <p><strong>第 2 步：</strong> 使用"预览"功能快速验证策略逻辑（单根 K 线）</p>
+            <p><strong>第 3 步：</strong> 点击右上角"从策略工作台导入"，选择已保存的策略执行历史回测</p>
+          </div>
         </div>
       </div>
 
@@ -585,6 +691,126 @@ export default function Backtest() {
           )}
         </div>
       </div>
+
+      {/* Strategy Template Picker */}
+      <StrategyTemplatePicker
+        open={showTemplatePicker}
+        onClose={() => setShowTemplatePicker(false)}
+        onSelect={handleImportTemplate}
+        templates={templates}
+        isLoading={isLoadingTemplates}
+      />
+
+      {/* Backtest Signals History Drawer */}
+      {showHistory && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl max-w-4xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <History className="w-5 h-5" />
+                回测信号历史
+              </h3>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+              >
+                <XCircle className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {isLoadingSignals ? (
+                <div className="text-center py-8 text-gray-400">
+                  <div className="w-5 h-5 border-2 border-gray-300 border-t-black rounded-full animate-spin mx-auto" />
+                  <p className="mt-2 text-sm">加载中...</p>
+                </div>
+              ) : backtestSignals.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <History className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                  <p className="text-sm">暂无回测信号记录</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">时间</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">币种</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">周期</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">方向</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">策略</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">入场价</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">止损价</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-600">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {backtestSignals.map((signal, index) => (
+                      <tr
+                        key={index}
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => handleSignalClick(signal)}
+                      >
+                        <td className="px-4 py-3 text-gray-600">
+                          {new Date(signal.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-xs text-gray-700">{signal.symbol}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">
+                          {signal.timeframe}
+                        </td>
+                        <td className="px-4 py-3">
+                          {signal.direction === 'long' ? (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 flex items-center gap-1 w-fit">
+                              <TrendingUp className="w-3 h-3" />
+                              做多
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 flex items-center gap-1 w-fit">
+                              <TrendingDown className="w-3 h-3" />
+                              做空
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={cn(
+                            'px-2 py-1 rounded-full text-xs font-medium',
+                            getStrategyBadgeClass(signal.strategy_name)
+                          )}>
+                            {translateStrategy(signal.strategy_name)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 text-xs">
+                          {signal.entry_price}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 text-xs">
+                          {signal.stop_loss}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button className="text-xs text-blue-600 hover:underline">
+                            查看详情
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Signal Details Drawer */}
+      {selectedSignal && (
+        <SignalDetailsDrawer
+          signal={selectedSignal}
+          open={showDetailsDrawer}
+          onClose={() => {
+            setShowDetailsDrawer(false);
+            setSelectedSignal(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -612,4 +838,24 @@ function getTriggerDisplayName(type: string): string {
     hammer: 'Hammer',
   };
   return names[type] || type;
+}
+
+// Helper function to get strategy badge class
+function getStrategyBadgeClass(strategy?: string | null): string {
+  if (!strategy) return 'bg-gray-100 text-gray-500';
+  const key = strategy.toLowerCase();
+  const colors: Record<string, string> = {
+    pinbar: 'bg-purple-100 text-purple-700',
+    engulfing: 'bg-orange-100 text-orange-700',
+  };
+  return colors[key] || 'bg-gray-100 text-gray-500';
+}
+
+// Helper function to translate strategy name
+function translateStrategy(strategy?: string | null): string {
+  if (!strategy) return '-';
+  const key = strategy.toLowerCase();
+  if (key === 'pinbar') return 'Pinbar';
+  if (key === 'engulfing') return 'Engulfing';
+  return strategy;
 }

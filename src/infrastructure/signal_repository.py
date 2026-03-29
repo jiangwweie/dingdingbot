@@ -10,7 +10,14 @@ from typing import Optional, List, Dict, Any
 
 import aiosqlite
 
-from src.domain.models import SignalResult, SignalQuery, SignalDeleteRequest, AttemptQuery, AttemptDeleteRequest
+from src.domain.models import (
+    SignalResult, SignalQuery, SignalDeleteRequest, AttemptQuery, AttemptDeleteRequest,
+    SignalAttempt, PatternResult, FilterResult
+)
+from src.domain.logic_tree import LogicNode, LeafNode, TriggerLeaf, FilterLeaf
+from src.infrastructure.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class SignalRepository:
@@ -27,6 +34,7 @@ class SignalRepository:
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
+        logger.info(f"数据库初始化完成：{db_path}")
 
     async def initialize(self) -> None:
         """
@@ -132,6 +140,24 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # Add evaluation_summary column to signal_attempts table for semantic reports
+        try:
+            await self._db.execute("""
+                ALTER TABLE signal_attempts ADD COLUMN evaluation_summary TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Add trace_tree column to signal_attempts table for trace visualization
+        try:
+            await self._db.execute("""
+                ALTER TABLE signal_attempts ADD COLUMN trace_tree JSON
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
         # Add signal_id column to signals table (S5-2)
         try:
             await self._db.execute("""
@@ -207,6 +233,63 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # Add source column to distinguish live vs backtest signals (S6-2)
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN source TEXT DEFAULT 'live'
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Add tags_json column for dynamic signal tags (backtest support)
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN tags_json TEXT DEFAULT '[]'
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Add risk_info column for signal risk description
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN risk_info TEXT DEFAULT ''
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Add pattern_score column for signal pattern quality score (0~1)
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN pattern_score REAL
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Add legacy columns for backward compatibility (ema_trend, mtf_status)
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN ema_trend TEXT DEFAULT ''
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN mtf_status TEXT DEFAULT ''
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Create index for source
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signals_source ON signals(source)
+        """)
+
         # Create indexes for signal_attempts
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_attempts_symbol ON signal_attempts(symbol)
@@ -219,6 +302,169 @@ class SignalRepository:
         """)
 
         await self._db.commit()
+
+    def _generate_evaluation_summary(self, attempt: SignalAttempt, symbol: str, timeframe: str) -> str:
+        """
+        Generate a semantic evaluation summary report for a signal attempt.
+
+        Args:
+            attempt: SignalAttempt object
+            symbol: Trading pair symbol
+            timeframe: Timeframe string
+
+        Returns:
+            Chinese evaluation summary report string
+        """
+        lines = []
+
+        # Header
+        lines.append(f"=== 信号评估报告 ===")
+        lines.append(f"币种：{symbol}")
+        lines.append(f"周期：{timeframe}")
+        lines.append(f"策略：{attempt.strategy_name}")
+        lines.append("")
+
+        # Final result
+        lines.append("【评估结果】")
+        if attempt.final_result == "SIGNAL_FIRED":
+            direction_str = "看涨" if attempt.direction == "long" else "看跌" if attempt.direction == "short" else "未知"
+            lines.append(f"最终结果：信号触发 ({direction_str})")
+        elif attempt.final_result == "NO_PATTERN":
+            lines.append("最终结果：未检测到有效形态")
+        elif attempt.final_result == "FILTERED":
+            lines.append("最终结果：信号被过滤器拦截")
+        else:
+            lines.append(f"最终结果：{attempt.final_result}")
+        lines.append("")
+
+        # Pattern detection
+        lines.append("【形态检测】")
+        if attempt.pattern:
+            direction_str = "看涨" if attempt.pattern.direction == "long" else "看跌" if attempt.pattern.direction == "short" else "未知"
+            lines.append(f"检测到形态：{attempt.pattern.strategy_name} ({direction_str})")
+            lines.append(f"形态评分：{attempt.pattern.score:.2f}")
+            # Add pattern details if available
+            if attempt.pattern.details:
+                details = attempt.pattern.details
+                if "wick_ratio" in details:
+                    lines.append(f"影线占比：{details['wick_ratio']:.2f}")
+                if "body_ratio" in details:
+                    lines.append(f"实体占比：{details['body_ratio']:.2f}")
+        else:
+            lines.append("未检测到形态")
+        lines.append("")
+
+        # Filter results
+        lines.append("【过滤器结果】")
+        if attempt.filter_results:
+            for f_name, f_result in attempt.filter_results:
+                status = "通过" if f_result.passed else "失败"
+                lines.append(f"  - {f_name}: {status} ({f_result.reason})")
+        else:
+            lines.append("无过滤器")
+        lines.append("")
+
+        # Final summary
+        lines.append("【最终结果】")
+        if attempt.final_result == "SIGNAL_FIRED":
+            lines.append("所有条件满足，信号已触发")
+        elif attempt.final_result == "NO_PATTERN":
+            lines.append("未检测到有效 K 线形态，不生成信号")
+        elif attempt.final_result == "FILTERED":
+            # Find the first failed filter
+            for f_name, f_result in attempt.filter_results:
+                if not f_result.passed:
+                    lines.append(f"被过滤器 '{f_name}' 拦截：{f_result.reason}")
+                    break
+
+        return "\n".join(lines)
+
+    def _build_trace_tree(self, attempt: SignalAttempt) -> dict:
+        """
+        Build a TraceTree structure representing the signal evaluation path.
+
+        Args:
+            attempt: SignalAttempt object
+
+        Returns:
+            dict representing the trace tree structure:
+            {
+                "node_id": str,
+                "node_type": "and_gate" | "trigger" | "filter",
+                "passed": bool,
+                "reason": str,
+                "metadata": dict,
+                "children": list
+            }
+        """
+        import uuid
+
+        # Determine overall pass status
+        overall_passed = attempt.final_result == "SIGNAL_FIRED"
+
+        # Build root node (AND gate)
+        root = {
+            "node_id": str(uuid.uuid4()),
+            "node_type": "and_gate",
+            "passed": overall_passed,
+            "reason": "all_conditions_met" if overall_passed else "condition_failed",
+            "metadata": {
+                "strategy_name": attempt.strategy_name,
+                "final_result": attempt.final_result
+            },
+            "children": []
+        }
+
+        # Add trigger node if pattern exists
+        if attempt.pattern:
+            trigger_passed = True  # If we have a pattern, the trigger passed
+            trigger_node = {
+                "node_id": str(uuid.uuid4()),
+                "node_type": "trigger",
+                "passed": trigger_passed,
+                "reason": "pattern_detected" if trigger_passed else "no_pattern",
+                "metadata": {
+                    "trigger_type": attempt.pattern.strategy_name,
+                    "direction": attempt.pattern.direction.value if attempt.pattern.direction else None,
+                    "score": attempt.pattern.score,
+                    "details": attempt.pattern.details
+                },
+                "children": []
+            }
+            root["children"].append(trigger_node)
+        else:
+            # No pattern detected
+            trigger_node = {
+                "node_id": str(uuid.uuid4()),
+                "node_type": "trigger",
+                "passed": False,
+                "reason": "no_pattern_detected",
+                "metadata": {
+                    "trigger_type": attempt.strategy_name,
+                    "direction": None,
+                    "score": None,
+                    "details": None
+                },
+                "children": []
+            }
+            root["children"].append(trigger_node)
+
+        # Add filter nodes
+        for f_name, f_result in attempt.filter_results:
+            filter_node = {
+                "node_id": str(uuid.uuid4()),
+                "node_type": "filter",
+                "passed": f_result.passed,
+                "reason": f_result.reason,
+                "metadata": {
+                    "filter_name": f_name,
+                    "filter_type": f_name  # Could be extended with actual filter type
+                },
+                "children": []
+            }
+            root["children"].append(filter_node)
+
+        return root
 
     async def save_attempt(self, attempt, symbol: str, timeframe: str) -> None:
         """
@@ -246,7 +492,7 @@ class SignalRepository:
                 filter_reason = f_result.reason
                 break
 
-        # Build details JSON
+        # Build details JSON (for backward compatibility)
         details_dict = {
             "pattern": attempt.pattern.details if attempt.pattern else None,
             "filters": [
@@ -256,13 +502,21 @@ class SignalRepository:
         }
         details_json = json.dumps(details_dict)
 
+        # Generate evaluation summary report
+        evaluation_summary = self._generate_evaluation_summary(attempt, symbol, timeframe)
+
+        # Build trace tree structure
+        trace_tree = self._build_trace_tree(attempt)
+        trace_tree_json = json.dumps(trace_tree)
+
         await self._db.execute(
             """
             INSERT INTO signal_attempts (
                 created_at, symbol, timeframe, strategy_name,
                 direction, pattern_score, final_result,
-                filter_stage, filter_reason, details, kline_timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                filter_stage, filter_reason, details, kline_timestamp,
+                evaluation_summary, trace_tree
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -276,9 +530,13 @@ class SignalRepository:
                 filter_reason,
                 details_json,
                 kline_timestamp,
+                evaluation_summary,
+                trace_tree_json,
             ),
         )
         await self._db.commit()
+
+        logger.debug(f"Attempt 已记录：{symbol}:{timeframe} {final_result}")
 
     async def get_diagnostics(
         self,
@@ -388,7 +646,7 @@ class SignalRepository:
             "recent_attempts": recent_attempts,
         }
 
-    async def save_signal(self, signal: SignalResult, signal_id: str = None, status: str = "PENDING") -> str:
+    async def save_signal(self, signal: SignalResult, signal_id: str = None, status: str = "PENDING", source: str = "live") -> str:
         """
         Save a signal to the database.
 
@@ -396,6 +654,7 @@ class SignalRepository:
             signal: SignalResult to save
             signal_id: Optional signal ID from tracker (for external tracking)
             status: Initial signal status
+            source: Signal source - 'live' for real-time signals, 'backtest' for historical backtest
 
         Returns:
             signal_id: The database signal ID or provided tracker ID
@@ -409,8 +668,9 @@ class SignalRepository:
                 created_at, symbol, timeframe, direction,
                 entry_price, stop_loss, position_size, leverage,
                 tags_json, risk_info, status, pnl_ratio,
-                kline_timestamp, strategy_name, score, signal_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                kline_timestamp, strategy_name, score, signal_id, source,
+                ema_trend, mtf_status, pattern_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -429,10 +689,18 @@ class SignalRepository:
                 signal.strategy_name,
                 signal.score,
                 signal_id,
+                source,
+                '',  # ema_trend (legacy field, empty for new signals)
+                '',  # mtf_status (legacy field, empty for new signals)
+                signal.score,  # pattern_score (same as score, for sorting compatibility)
             ),
         )
         await self._db.commit()
-        return signal_id or str(created_at)
+
+        signal_id_result = signal_id or str(created_at)
+        logger.info(f"信号已保存：id={signal_id_result}, {signal.symbol}:{signal.timeframe}")
+
+        return signal_id_result
 
     async def get_signals(
         self,
@@ -447,6 +715,7 @@ class SignalRepository:
         end_time: str = None,
         sort_by: str = "created_at",
         order: str = "desc",
+        source: str = None,  # Filter by source: 'live' or 'backtest'
     ) -> dict:
         """
         Query signals with pagination and optional filtering.
@@ -506,6 +775,10 @@ class SignalRepository:
             where_clauses.append("created_at <= ?")
             params.append(end_time)
 
+        if source:
+            where_clauses.append("source = ?")
+            params.append(source)
+
         where_sql = " AND ".join(where_clauses)
 
         # Get filtered total count
@@ -543,6 +816,7 @@ class SignalRepository:
         status: str = None,
         start_time: str = None,
         end_time: str = None,
+        source: str = None,
     ) -> int:
         """
         Delete signals by ids or by filter conditions.
@@ -557,6 +831,7 @@ class SignalRepository:
             status: Optional status filter
             start_time: Optional start time filter
             end_time: Optional end time filter
+            source: Optional source filter ('live' or 'backtest')
 
         Returns:
             Number of deleted records
@@ -571,6 +846,7 @@ class SignalRepository:
             status = request.status
             start_time = request.start_time
             end_time = request.end_time
+            source = request.source
 
         # If ids provided, delete by IDs
         if ids and len(ids) > 0:
@@ -612,6 +888,10 @@ class SignalRepository:
         if end_time:
             where_clauses.append("created_at <= ?")
             params.append(end_time)
+
+        if source:
+            where_clauses.append("source = ?")
+            params.append(source)
 
         where_sql = " AND ".join(where_clauses)
 

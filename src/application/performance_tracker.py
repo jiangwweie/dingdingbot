@@ -36,6 +36,8 @@ class PerformanceTracker:
             if not pending_signals:
                 return
 
+            logger.info(f"开始检查待处理信号：{kline.symbol}，共 {len(pending_signals)} 个信号")
+
             for signal in pending_signals:
                 await self._check_signal(signal, kline, repository)
 

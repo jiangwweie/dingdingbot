@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useApi } from '../lib/api';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Filter, X, ChevronLeft, ChevronRight, ArrowRight, Trash2, CheckSquare, Square, Settings, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
+import { Filter, X, ChevronLeft, ChevronRight, ArrowRight, Trash2, CheckSquare, Square, Settings, GripVertical, ChevronUp, ChevronDown, MoreVertical, Calendar, SlidersHorizontal, ArrowUpDown } from 'lucide-react';
 import { cn } from '../lib/utils';
-import SignalDetailsDrawer from '../components/SignalDetailsDrawer';
+import SignalDetailsModal from '../components/SignalDetailsDrawer';
 import { deleteSignals, type Signal } from '../lib/api';
 
 // Strategy badge colors
@@ -261,7 +261,7 @@ export default function Signals() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                openDrawer(signal.id);
+                openModal(signal.id);
               }}
               className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs text-apple-blue hover:underline"
             >
@@ -279,6 +279,7 @@ export default function Signals() {
   const [directionFilter, setDirectionFilter] = useState('');
   const [strategyFilter, setStrategyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');  // '' = all, 'live', 'backtest'
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [sortBy, setSortBy] = useState('created_at');
@@ -287,10 +288,11 @@ export default function Signals() {
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showActionMenu, setShowActionMenu] = useState(false);
 
-  // Drawer
+  // Modal
   const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const offset = (page - 1) * limit;
 
@@ -300,6 +302,7 @@ export default function Signals() {
   if (directionFilter) url += `&direction=${directionFilter}`;
   if (strategyFilter) url += `&strategy_name=${strategyFilter}`;
   if (statusFilter) url += `&status=${statusFilter.toUpperCase()}`;
+  if (sourceFilter) url += `&source=${sourceFilter}`;
   if (startDate) url += `&start_time=${startDate}T00:00:00Z`;
   if (endDate) url += `&end_time=${endDate}T23:59:59Z`;
   if (sortBy) url += `&sort_by=${sortBy}`;
@@ -318,6 +321,7 @@ export default function Signals() {
     setDirectionFilter('');
     setStrategyFilter('');
     setStatusFilter('');
+    setSourceFilter('');
     setStartDate('');
     setEndDate('');
     setSortBy('created_at');
@@ -344,14 +348,14 @@ export default function Signals() {
     setSelectedIds(newSet);
   };
 
-  // Drawer handlers
-  const openDrawer = (signalId: string) => {
+  // Modal handlers
+  const openModal = (signalId: string) => {
     setSelectedSignalId(signalId);
-    setIsDrawerOpen(true);
+    setIsModalOpen(true);
   };
 
-  const closeDrawer = () => {
-    setIsDrawerOpen(false);
+  const closeModal = () => {
+    setIsModalOpen(false);
     setSelectedSignalId(null);
   };
 
@@ -372,12 +376,31 @@ export default function Signals() {
     }
   };
 
-  const handleDeleteAll = async () => {
+  const handleClearAllHistory = async () => {
+    if (!confirm('⚠️ 危险操作警告：此操作将删除所有历史信号记录，包括所有币种、所有策略的数据。\n\n确定要继续吗？此操作不可恢复。')) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteSignals({ delete_all: true });
+      await mutate();
+      setSelectedIds(new Set());
+      setPage(1);
+      clearFilters();
+      setShowActionMenu(false);
+    } catch (err) {
+      alert('删除失败，请重试');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteFiltered = async () => {
     const filterDesc = [];
     if (symbolFilter) filterDesc.push(`币种=${symbolFilter}`);
     if (directionFilter) filterDesc.push(`方向=${directionFilter === 'long' ? '做多' : '做空'}`);
     if (strategyFilter) filterDesc.push(`策略=${strategyFilter}`);
     if (statusFilter) filterDesc.push(`状态=${statusFilter}`);
+    if (sourceFilter) filterDesc.push(`来源=${sourceFilter === 'live' ? '实盘' : '回测'}`);
     if (startDate) filterDesc.push(`开始日期=${startDate}`);
     if (endDate) filterDesc.push(`结束日期=${endDate}`);
 
@@ -391,6 +414,7 @@ export default function Signals() {
       if (directionFilter) payload.direction = directionFilter;
       if (strategyFilter) payload.strategy_name = strategyFilter;
       if (statusFilter) payload.status = statusFilter.toUpperCase();
+      if (sourceFilter) payload.source = sourceFilter;
       if (startDate) payload.start_time = `${startDate}T00:00:00Z`;
       if (endDate) payload.end_time = `${endDate}T23:59:59Z`;
 
@@ -398,23 +422,7 @@ export default function Signals() {
       await mutate();
       setSelectedIds(new Set());
       setPage(1);
-    } catch (err) {
-      alert('删除失败，请重试');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const handleClearAllHistory = async () => {
-    if (!confirm('⚠️ 危险操作警告：此操作将删除所有历史信号记录，包括所有币种、所有策略的数据。\n\n确定要继续吗？此操作不可恢复。')) return;
-
-    setIsDeleting(true);
-    try {
-      await deleteSignals({ delete_all: true });
-      await mutate();
-      setSelectedIds(new Set());
-      setPage(1);
-      clearFilters();
+      setShowActionMenu(false);
     } catch (err) {
       alert('删除失败，请重试');
     } finally {
@@ -459,18 +467,95 @@ export default function Signals() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      {/* Header */}
+      <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">信号历史</h1>
           <p className="text-sm text-gray-500 mt-1">查询和筛选所有历史信号记录</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
-          {/* Sort controls */}
-          <div className="flex items-center gap-2 px-2 text-gray-400">
-            <Filter className="w-4 h-4" />
+        <div className="flex items-center gap-3">
+          {/* Action Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setShowActionMenu(!showActionMenu)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <MoreVertical className="w-4 h-4" />
+              操作
+            </button>
+
+            {showActionMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowActionMenu(false)}
+                />
+                <div className="absolute right-0 mt-1 w-56 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-20">
+                  {/* Delete Selected */}
+                  <button
+                    onClick={handleDeleteSelected}
+                    disabled={isDeleting || selectedIds.size === 0}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <div className="text-left">
+                      <div>删除选中项</div>
+                      <div className="text-xs text-gray-400">
+                        {selectedIds.size > 0 ? `已选中 ${selectedIds.size} 条记录` : '请选择要删除的记录'}
+                      </div>
+                    </div>
+                  </button>
+                  <div className="h-px bg-gray-100 my-1" />
+                  {/* Delete Filtered */}
+                  <button
+                    onClick={handleDeleteFiltered}
+                    disabled={isDeleting}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-apple-red hover:bg-red-50 transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <div className="text-left">
+                      <div>删除当前筛选匹配项</div>
+                      <div className="text-xs text-gray-400">仅删除符合筛选条件的记录</div>
+                    </div>
+                  </button>
+                  <div className="h-px bg-gray-100 my-1" />
+                  {/* Clear All History */}
+                  <button
+                    onClick={handleClearAllHistory}
+                    disabled={isDeleting}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-apple-red hover:bg-red-50 transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <div className="text-left">
+                      <div>清空所有历史信号</div>
+                      <div className="text-xs text-gray-400">删除全部记录，不可恢复</div>
+                    </div>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
+          {/* Column Configuration */}
+          <button
+            onClick={() => setIsColumnConfigOpen(!isColumnConfigOpen)}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+          >
+            <Settings className="w-4 h-4" />
+            自定义列
+          </button>
+        </div>
+      </div>
+
+      {/* Sort Controls - Independent Row */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+            <ArrowUpDown className="w-3 h-3" />
+            排序
+          </div>
+          <div className="h-4 w-px bg-gray-200" />
           <select
             value={sortBy}
             onChange={(e) => { setSortBy(e.target.value); setPage(1); }}
@@ -480,7 +565,6 @@ export default function Signals() {
             <option value="created_at">按时间</option>
             <option value="pattern_score">按形态评分</option>
           </select>
-
           <select
             value={order}
             onChange={(e) => { setOrder(e.target.value); setPage(1); }}
@@ -490,91 +574,109 @@ export default function Signals() {
             <option value="desc">降序</option>
             <option value="asc">升序</option>
           </select>
+        </div>
+      </div>
 
-          <div className="h-4 w-px bg-gray-200" />
-
-          <select
-            value={symbolFilter}
-            onChange={(e) => { setSymbolFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            <option value="">全部币种</option>
-            <option value="BTC/USDT:USDT">BTC</option>
-            <option value="ETH/USDT:USDT">ETH</option>
-            <option value="SOL/USDT:USDT">SOL</option>
-            <option value="BNB/USDT:USDT">BNB</option>
-          </select>
-
-          <select
-            value={directionFilter}
-            onChange={(e) => { setDirectionFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            <option value="">全部方向</option>
-            <option value="long">做多</option>
-            <option value="short">做空</option>
-          </select>
-
-          <select
-            value={strategyFilter}
-            onChange={(e) => { setStrategyFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            <option value="">全部策略</option>
-            <option value="pinbar">Pinbar</option>
-            <option value="engulfing">Engulfing</option>
-          </select>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            <option value="">全部状态</option>
-            <option value="pending">监控中</option>
-            <option value="won">止盈</option>
-            <option value="lost">止损</option>
-          </select>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
-              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-              placeholder="开始日期"
-            />
-            <span className="text-gray-400 text-xs">-</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
-              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-              placeholder="结束日期"
-            />
+      {/* Filters - Two Rows with Visual Groups */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+        {/* Basic Filters */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+            <SlidersHorizontal className="w-3 h-3" />
+            基础筛选
           </div>
-
-          {(symbolFilter || directionFilter || strategyFilter || statusFilter || startDate || endDate) && (
-            <button
-              onClick={clearFilters}
-              className="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-              title="清空筛选"
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={symbolFilter}
+              onChange={(e) => { setSymbolFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
             >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+              <option value="">全部币种</option>
+              <option value="BTC/USDT:USDT">BTC</option>
+              <option value="ETH/USDT:USDT">ETH</option>
+              <option value="SOL/USDT:USDT">SOL</option>
+              <option value="BNB/USDT:USDT">BNB</option>
+            </select>
+
+            <select
+              value={directionFilter}
+              onChange={(e) => { setDirectionFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部方向</option>
+              <option value="long">做多</option>
+              <option value="short">做空</option>
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部状态</option>
+              <option value="pending">监控中</option>
+              <option value="won">止盈</option>
+              <option value="lost">止损</option>
+            </select>
+          </div>
         </div>
 
-        {/* Clear All History Button */}
-        <button
-          onClick={handleClearAllHistory}
-          disabled={isDeleting}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-apple-red rounded-lg hover:bg-apple-red/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
-          title="删除所有历史信号记录"
-        >
-          <Trash2 className="w-4 h-4" />
-          清空历史信号
-        </button>
+        {/* Advanced Filters */}
+        <div className="space-y-1.5 pt-2 border-t border-gray-100">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+            <Calendar className="w-3 h-3" />
+            高级筛选
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={strategyFilter}
+              onChange={(e) => { setStrategyFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部策略</option>
+              <option value="pinbar">Pinbar</option>
+              <option value="engulfing">Engulfing</option>
+            </select>
+
+            <select
+              value={sourceFilter}
+              onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部来源</option>
+              <option value="live">实盘信号</option>
+              <option value="backtest">回测信号</option>
+            </select>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
+                className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+                placeholder="开始日期"
+              />
+              <span className="text-gray-400 text-xs">-</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
+                className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+                placeholder="结束日期"
+              />
+            </div>
+
+            {(symbolFilter || directionFilter || strategyFilter || statusFilter || sourceFilter || startDate || endDate) && (
+              <button
+                onClick={clearFilters}
+                className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+                清空筛选
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Column Configuration Panel */}
@@ -663,26 +765,6 @@ export default function Signals() {
         )}
       </div>
 
-      {/* Action Bar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between bg-apple-blue/5 rounded-xl p-3 border border-apple-blue/20">
-          <div className="flex items-center gap-2">
-            <CheckSquare className="w-4 h-4 text-apple-blue" />
-            <span className="text-sm font-medium text-apple-blue">已选中 {selectedIds.size} 条记录</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleDeleteSelected}
-              disabled={isDeleting}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-apple-red rounded-lg hover:bg-apple-red/90 disabled:opacity-50 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              删除选中项
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col min-h-[600px]">
         <div className="overflow-x-auto flex-1">
@@ -734,7 +816,7 @@ export default function Signals() {
                   return (
                     <tr
                       key={String(signal.id)}
-                      onClick={() => openDrawer(signal.id)}
+                      onClick={() => openModal(signal.id)}
                       className={cn(
                         "hover:bg-gray-50/50 transition-colors cursor-pointer group",
                         isSelected && "bg-apple-blue/5"
@@ -768,23 +850,10 @@ export default function Signals() {
           </table>
         </div>
 
-        {/* Pagination & Delete All */}
+        {/* Pagination */}
         <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/30">
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-gray-500">
-              共 <span className="font-medium text-gray-900">{total}</span> 条 / 第 <span className="font-medium text-gray-900">{page}</span> 页
-            </div>
-            {(symbolFilter || directionFilter || strategyFilter || statusFilter || startDate || endDate) && (
-              <button
-                onClick={handleDeleteAll}
-                disabled={isDeleting}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-apple-red bg-white border border-apple-red/30 rounded-lg hover:bg-apple-red/5 disabled:opacity-50 transition-colors"
-                title="删除当前筛选条件下的所有记录"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                清空当前筛选匹配项
-              </button>
-            )}
+          <div className="text-sm text-gray-500">
+            共 <span className="font-medium text-gray-900">{total}</span> 条 / 第 <span className="font-medium text-gray-900">{page}</span> 页
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -805,11 +874,11 @@ export default function Signals() {
         </div>
       </div>
 
-      {/* Signal Details Drawer */}
-      <SignalDetailsDrawer
+      {/* Signal Details Modal */}
+      <SignalDetailsModal
         signalId={selectedSignalId || ''}
-        isOpen={isDrawerOpen}
-        onClose={closeDrawer}
+        isOpen={isModalOpen}
+        onClose={closeModal}
       />
     </div>
   );

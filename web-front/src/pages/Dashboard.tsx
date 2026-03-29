@@ -1,9 +1,12 @@
 import { useApi } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Activity, ArrowRight, BarChart3, Clock, TrendingDown, TrendingUp, Target, Wallet, AlertCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Activity, ArrowRight, BarChart3, Clock, TrendingDown, TrendingUp, Target, Wallet, AlertCircle, Settings } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
+import ConfigStatusCard from '../components/ConfigStatusCard';
+import SettingsPanel from '../components/SettingsPanel';
+import { useState } from 'react';
 
 export default function Dashboard() {
   const { data: health, error: healthError } = useApi<any>('/api/health');
@@ -11,6 +14,8 @@ export default function Dashboard() {
   const { data: signalsData, error: signalsError } = useApi<any>('/api/signals?limit=5');
   const { data: diagnostics, error: diagError } = useApi<any>('/api/diagnostics?hours=24');
   const { data: accountData, error: accountError } = useApi<any>('/api/account', 60000);
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const isLoading = !health && !healthError;
 
@@ -85,6 +90,9 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Section 1.5: Config Status Card */}
+      <ConfigStatusCard onOpenSettings={() => setSettingsOpen(true)} />
 
       {/* Section 1: System Status */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -283,6 +291,7 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

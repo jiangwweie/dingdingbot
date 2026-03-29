@@ -1,56 +1,141 @@
-# 盯盘狗用户配置文件
-# ⚠️ 提交前请确保已删除或脱敏真实 API 密钥
+# ============================================================
+# 用户配置文件 - 盯盘狗 🐶
+# ============================================================
+# 说明：此文件由系统自动维护，也可手动编辑
+#       修改后自动热重载（无需重启进程）
+# ============================================================
 
+# ------------------------------------------------------------
+# 交易所配置
+# ------------------------------------------------------------
 exchange:
-  name: "binance"
-  api_key: "YOUR_API_KEY_HERE"      # ⚠️ 替换为你的 API Key（只读权限）
-  api_secret: "YOUR_SECRET_HERE"    # ⚠️ 替换为你的 Secret
-  testnet: true                     # 建议使用测试网测试
+  name: binance                      # 交易所：binance/okx/bybit 等
+  api_key: YOUR_API_KEY_HERE         # ⚠️ 请替换为你的 API 密钥（只读权限）
+  api_secret: YOUR_API_SECRET_HERE   # ⚠️ 请替换为你的 API 密钥（只读权限）
+  testnet: false                     # true=测试网，false=生产环境
 
-user_symbols: []                    # 自定义监测币种（留空使用核心币种）
+# ------------------------------------------------------------
+# 监控币池
+# ------------------------------------------------------------
+# 说明：user_symbols 为空时使用 core.yaml 中的 core_symbols
+user_symbols: []
 
+# ------------------------------------------------------------
+# 时间周期
+# ------------------------------------------------------------
+# 可选值：15m, 1h, 4h, 1d, 1w
 timeframes:
-  - "15m"
-  - "1h"
-  - "4h"
+  - 15m
+  - 1h
 
-# 动态策略配置
+# ------------------------------------------------------------
+# 激活的策略列表
+# ------------------------------------------------------------
+# 说明：支持多策略并行，每个策略独立运行
 active_strategies:
-  - id: "strategy-1"
-    name: "Pinbar + MTF"
-    triggers:
-      - id: "trigger-1"
-        type: "pinbar"
+  - id: your-strategy-id-here      # ⚠️ 策略 ID（从策略工作台获取）
+    name: 01pinbar-ema60            # 策略名称
+    is_global: true                 # true=应用于所有币种，false=仅 apply_to 列表
+    apply_to: []                    # 作用域（空且 is_global=true 时应用于所有）
+
+    # 策略逻辑树（Phase K 新格式）
+    logic_tree:
+      gate: AND                     # 逻辑门：AND=所有条件满足，OR=任一条件满足
+      children:
+        - type: trigger             # 触发器节点
+          id: trigger-xxx           # ⚠️ 节点 ID（自动生成）
+          config:
+            id: trigger-xxx         # ⚠️ 节点 ID（自动生成）
+            type: pinbar            # Pinbar 形态策略
+            enabled: true
+            params:
+              min_wick_ratio: 0.5     # 影线占比最低 50%（原 60% → 放宽）
+              max_body_ratio: 0.35    # 实体占比最高 35%（原 30% → 放宽）
+              body_position_tolerance: 0.3  # 实体位置容差 30%（原 10% → 允许居中）
+
+        - type: filter              # 过滤器节点 1: MTF 多周期趋势确认
+          id: filter-mtf-xxx        # ⚠️ 节点 ID（自动生成）
+          config:
+            id: filter-mtf-xxx      # ⚠️ 节点 ID（自动生成）
+            type: mtf
+            enabled: true
+            params: {}
+
+        - type: filter              # 过滤器节点 2: EMA 趋势过滤
+          id: filter-ema-xxx        # ⚠️ 节点 ID（自动生成）
+          config:
+            id: filter-ema-xxx      # ⚠️ 节点 ID（自动生成）
+            type: ema
+            enabled: true
+            params: {}
+
+    # 触发器组合逻辑（遗留字段，兼容旧格式）
+    trigger_logic: OR               # 触发器组合方式：AND=所有满足，OR=任一满足
+      - id: trigger-xxx
+        type: pinbar
         enabled: true
         params:
           min_wick_ratio: 0.6
           max_body_ratio: 0.3
           body_position_tolerance: 0.1
-    trigger_logic: "OR"
+
+    # 触发器定义（遗留字段，兼容旧格式）
+    trigger:
+      id: trigger-xxx
+      type: pinbar
+      enabled: true
+      params:
+        min_wick_ratio: 0.5
+        max_body_ratio: 0.35
+        body_position_tolerance: 0.3
+
+    # 过滤器链（遗留字段，兼容旧格式）
     filters:
-      - id: "filter-1"
-        type: "mtf"
+      - id: filter-mtf-xxx
+        type: mtf
         enabled: true
-        params:
-          higher_timeframe: "4h"
-          require_confirmation: true
-    filter_logic: "AND"
-    is_global: true
-    apply_to: []
+        params: {}
+      - id: filter-ema-xxx
+        type: ema
+        enabled: true
+        params: {}
 
-# 遗留配置（向后兼容）
-strategy:
-  trend_filter_enabled: false
-  mtf_validation_enabled: false
+    # 过滤器组合逻辑（遗留字段，兼容旧格式）
+    filter_logic: AND
 
+# ------------------------------------------------------------
+# 遗留策略配置（已废弃，仅兼容旧版本）
+# ------------------------------------------------------------
+strategy: null
+
+# ------------------------------------------------------------
+# 风控配置
+# ------------------------------------------------------------
 risk:
-  max_loss_percent: "0.01"    # 单笔最大亏损 1%
-  max_leverage: 10            # 最大杠杆倍数
+  max_loss_percent: '0.02'           # 单笔最大亏损 2%（基于可用余额）
+  max_leverage: 125                  # 最大杠杆倍数
+  max_total_exposure: '0.8'          # 最大总仓位占用 80%
 
+# ------------------------------------------------------------
+# 资产轮询
+# ------------------------------------------------------------
 asset_polling:
-  interval_seconds: 60        # 资产轮询间隔（秒）
+  interval_seconds: 60               # 轮询间隔 60 秒
 
+# ------------------------------------------------------------
+# 通知渠道
+# ------------------------------------------------------------
 notification:
   channels:
-    - type: "feishu"
-      webhook_url: "YOUR_WEBHOOK_URL_HERE"  # ⚠️ 替换为你的飞书 Webhook
+    - type: feishu                   # 飞书机器人
+      webhook_url: https://example.com/your-webhook-url  # ⚠️ 请替换为你的飞书 webhook URL
+
+# ------------------------------------------------------------
+# MTF 配置（全局覆盖）
+# ------------------------------------------------------------
+mtf_ema_period: 60                   # MTF 趋势计算使用的 EMA 周期
+mtf_mapping:                         # MTF 周期映射（低周期 → 高周期）
+  15m: 1h
+  1h: 4h
+  4h: 1d
+  1d: 1w

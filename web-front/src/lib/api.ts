@@ -44,6 +44,7 @@ export interface Signal {
   score?: number | string | null;
   kline_timestamp?: number;
   risk_reward_info?: string;
+  source?: 'live' | 'backtest';  // Signal source: live trading or backtest
   // Legacy fields (deprecated, kept for backward compatibility with old signals)
   ema_trend?: 'bullish' | 'bearish';
   mtf_status?: 'confirmed' | 'rejected' | 'disabled' | 'unavailable';
@@ -64,6 +65,7 @@ export interface SignalAttempt {
   filter_reason?: string | null;
   details?: Record<string, any>;
   evaluation_summary?: string;
+  trace_tree?: TraceNode;
 }
 
 /**
@@ -89,6 +91,7 @@ export async function deleteSignals(payload: {
   status?: string;
   start_time?: string;
   end_time?: string;
+  source?: string;  // 'live' or 'backtest'
 }): Promise<{ message: string; deleted_count: number }> {
   const res = await fetch('/api/signals', {
     method: 'DELETE',
@@ -149,7 +152,8 @@ export type FilterType =
   | 'volume_surge'
   | 'volatility_filter'
   | 'time_filter'
-  | 'price_action';
+  | 'price_action'
+  | 'atr';
 
 /**
  * EMA Filter parameters
@@ -201,6 +205,16 @@ export interface PriceActionFilterParams {
   min_body_size?: number;
   max_body_size?: number;
   require_closed_candle: boolean;
+}
+
+/**
+ * ATR (Average True Range) Filter parameters
+ * Uses ATR to filter out low-volatility noise
+ */
+export interface AtrFilterParams {
+  period?: number;           // ATR 计算周期，默认 14
+  min_atr_ratio?: number;    // 最小 ATR 比率，默认 0.001 (0.1%)
+  enabled?: boolean;         // 是否启用
 }
 
 /**
@@ -400,6 +414,23 @@ export interface BacktestSignalLog {
 }
 
 /**
+ * Fetch strategy templates list for backtest sandbox
+ */
+export async function fetchStrategyTemplates(): Promise<{ id: number; name: string; description: string | null }[]> {
+  const res = await fetch('/api/strategies/templates', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch strategy templates');
+    (error as any).status = res.status;
+    throw error;
+  }
+  const data = await res.json();
+  return data.templates || [];
+}
+
+/**
  * Fetch current system configuration
  */
 export async function fetchSystemConfig(): Promise<SystemConfig> {
@@ -437,6 +468,8 @@ export async function updateSystemConfig(
 
 /**
  * Run backtest with given parameters
+ *
+ * Backtest signals are automatically saved to database.
  */
 export async function runBacktest(payload: BacktestRequest): Promise<BacktestReport> {
   const res = await fetch('/api/backtest', {
@@ -452,6 +485,67 @@ export async function runBacktest(payload: BacktestRequest): Promise<BacktestRep
   }
   const data = await res.json();
   return data.report || data;
+}
+
+/**
+ * Save backtest signals to database
+ */
+export async function saveBacktestSignals(payload: {
+  symbol: string;
+  timeframe: string;
+  signals: Array<{
+    direction: 'long' | 'short';
+    entry_price: string;
+    stop_loss: string;
+    position_size: string;
+    leverage: number;
+    tags: Array<{ name: string; value: string }>;
+    risk_reward_info: string;
+    strategy_name: string;
+    score: number;
+    kline_timestamp: number;
+  }>;
+}): Promise<{ message: string; saved_count: number }> {
+  const res = await fetch('/api/backtest/save-signals', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to save backtest signals');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch backtest signals from database
+ */
+export async function fetchBacktestSignals(params?: {
+  symbol?: string;
+  timeframe?: string;
+  strategy_name?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ signals: Signal[]; total: number }> {
+  const queryParams = new URLSearchParams();
+  if (params?.symbol) queryParams.append('symbol', params.symbol);
+  if (params?.timeframe) queryParams.append('timeframe', params.timeframe);
+  if (params?.strategy_name) queryParams.append('strategy_name', params.strategy_name);
+  if (params?.limit) queryParams.append('limit', String(params.limit));
+  if (params?.offset) queryParams.append('offset', String(params.offset));
+
+  const res = await fetch(`/api/backtest/signals?${queryParams}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch backtest signals');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
 }
 
 /**
@@ -491,6 +585,8 @@ export function getDefaultFilterParams(type: FilterType): Record<string, any> {
       return { session: 'any' as const, exclude_weekend: true };
     case 'price_action':
       return { require_closed_candle: true };
+    case 'atr':
+      return { period: 14, min_atr_ratio: 0.001, enabled: true };
     default:
       return {};
   }
@@ -532,6 +628,7 @@ export function getFilterDisplayName(type: FilterType): string {
     volatility_filter: '波动率过滤',
     time_filter: '时间窗口过滤',
     price_action: '价格行为过滤',
+    atr: 'ATR 波动率过滤',
   };
   return names[type] || type;
 }

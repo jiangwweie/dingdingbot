@@ -8,6 +8,7 @@ Key Design Principles:
 4. **Dynamic Rule Engine Support**: Supports both legacy and new dynamic strategy definitions.
 """
 import asyncio
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
@@ -130,6 +131,7 @@ class Backtester:
         self,
         request: BacktestRequest,
         account_snapshot: Optional[AccountSnapshot] = None,
+        repository = None,  # SignalRepository for saving signals (always saved if provided)
     ) -> BacktestReport:
         """
         Run backtest with isolated config sandbox.
@@ -138,10 +140,14 @@ class Backtester:
         1. Legacy mode: Simple pinbar + EMA + MTF config
         2. Dynamic rule engine mode: Multiple strategies with custom filter chains
 
+        Backtest signals are automatically saved to database with source='backtest'.
+        Signals can be viewed in the Signals page with K-line chart visualization.
+
         Args:
             request: Backtest request parameters
             account_snapshot: Optional account snapshot for position sizing.
                               If not provided, uses a default snapshot.
+            repository: SignalRepository instance for saving signals
 
         Returns:
             BacktestReport with detailed statistics
@@ -186,6 +192,14 @@ class Backtester:
         # Step 5: Calculate statistics
         signal_stats = self._calculate_signal_stats(attempts)
         reject_reasons = self._calculate_reject_reasons(attempts)
+
+        # Step 5.5: Save signals to database (if repository is provided)
+        saved_count = 0
+        if repository is not None:
+            saved_count = await self._save_backtest_signals(
+                attempts, klines, request, repository
+            )
+            logger.info(f"Saved {saved_count} backtest signals to database")
 
         # Step 6: Simulate win rate (simplified - based on stop-loss distance)
         simulated_win_rate, avg_gain, avg_loss = await self._simulate_win_rate(
@@ -323,18 +337,60 @@ class Backtester:
 
         if higher_tf:
             try:
+                # Calculate limit for higher timeframe data
+                # Must ensure coverage of the klines time range
+                if klines:
+                    min_kline_ts = min(k.timestamp for k in klines)
+                    max_kline_ts = max(k.timestamp for k in klines)
+
+                    # Calculate how many higher TF candles are needed to cover from max_kline_ts back to min_kline_ts
+                    # But we also need to ensure the OLDEST 4h candle <= min_kline_ts
+                    # Since exchange returns from "now" backwards, we need to calculate:
+                    # limit = (max_kline_ts - min_kline_ts) / (higher_tf_interval) + buffer
+                    higher_tf_minutes = self._parse_timeframe(higher_tf)
+                    duration_ms = max_kline_ts - min_kline_ts
+                    expected_higher_tf_bars = max(
+                        int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,  # +5 for edge cases
+                        100  # minimum to ensure coverage
+                    )
+
+                    # Also consider request.start_time and request.end_time if provided
+                    # This is the ACTUAL time range we need to cover
+                    if request.start_time and request.end_time:
+                        start_ts = int(request.start_time)
+                        end_ts = int(request.end_time)
+                        full_duration_ms = end_ts - start_ts
+                        full_expected_bars = int(full_duration_ms / (higher_tf_minutes * 60 * 1000)) + 5
+                        expected_higher_tf_bars = max(expected_higher_tf_bars, full_expected_bars, 1000)
+
+                    # CRITICAL: Exchange returns candles from "latest available" backwards.
+                    # We need to ensure the oldest returned candle <= min_kline_ts.
+                    # Calculate bars needed from "now" back to min_kline_ts.
+                    current_ts = int(time.time() * 1000)
+                    time_from_now_ms = current_ts - min_kline_ts
+                    bars_from_now = int(time_from_now_ms / (higher_tf_minutes * 60 * 1000)) + 10  # +10 buffer
+
+                    # Use the larger of the two calculations
+                    limit = max(expected_higher_tf_bars, bars_from_now, 1000)
+
+                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, need {bars_from_now} bars from now)")
+                else:
+                    limit = max(request.limit, 1000)
+
                 higher_tf_klines_list = await self._gateway.fetch_historical_ohlcv(
                     symbol=request.symbol,
                     timeframe=higher_tf,
-                    limit=request.limit,
+                    limit=limit,
                 )
 
                 # Build a map of timestamp -> trend
-                for i, kline in enumerate(higher_tf_klines_list):
+                for kline in higher_tf_klines_list:
                     ts = kline.timestamp
                     higher_tf_data[ts] = {
                         higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
                     }
+
+                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
@@ -376,10 +432,50 @@ class Backtester:
 
         if higher_tf:
             try:
+                # Calculate limit for higher timeframe data
+                # Must ensure coverage of the klines time range
+                if klines:
+                    min_kline_ts = min(k.timestamp for k in klines)
+                    max_kline_ts = max(k.timestamp for k in klines)
+
+                    # Calculate how many higher TF candles are needed to cover from max_kline_ts back to min_kline_ts
+                    # But we also need to ensure the OLDEST 4h candle <= min_kline_ts
+                    # Since exchange returns from "now" backwards, we need to calculate:
+                    # limit = (max_kline_ts - min_kline_ts) / (higher_tf_interval) + buffer
+                    higher_tf_minutes = self._parse_timeframe(higher_tf)
+                    duration_ms = max_kline_ts - min_kline_ts
+                    expected_higher_tf_bars = max(
+                        int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,  # +5 for edge cases
+                        100  # minimum to ensure coverage
+                    )
+
+                    # Also consider request.start_time and request.end_time if provided
+                    # This is the ACTUAL time range we need to cover
+                    if request.start_time and request.end_time:
+                        start_ts = int(request.start_time)
+                        end_ts = int(request.end_time)
+                        full_duration_ms = end_ts - start_ts
+                        full_expected_bars = int(full_duration_ms / (higher_tf_minutes * 60 * 1000)) + 5
+                        expected_higher_tf_bars = max(expected_higher_tf_bars, full_expected_bars, 1000)
+
+                    # CRITICAL: Exchange returns candles from "latest available" backwards.
+                    # We need to ensure the oldest returned candle <= min_kline_ts.
+                    # Calculate bars needed from "now" back to min_kline_ts.
+                    current_ts = int(time.time() * 1000)
+                    time_from_now_ms = current_ts - min_kline_ts
+                    bars_from_now = int(time_from_now_ms / (higher_tf_minutes * 60 * 1000)) + 10  # +10 buffer
+
+                    # Use the larger of the two calculations
+                    limit = max(expected_higher_tf_bars, bars_from_now, 1000)
+
+                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, need {bars_from_now} bars from now)")
+                else:
+                    limit = max(request.limit, 1000)
+
                 higher_tf_klines_list = await self._gateway.fetch_historical_ohlcv(
                     symbol=request.symbol,
                     timeframe=higher_tf,
-                    limit=request.limit,
+                    limit=limit,
                 )
 
                 # Build a map of timestamp -> trend
@@ -388,6 +484,8 @@ class Backtester:
                     higher_tf_data[ts] = {
                         higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
                     }
+
+                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
@@ -607,6 +705,121 @@ class Backtester:
             ],
         }
 
+    async def _save_backtest_signals(
+        self,
+        attempts: List[SignalAttempt],
+        klines: List[KlineData],
+        request: BacktestRequest,
+        repository,  # SignalRepository
+    ) -> int:
+        """
+        Save fired signals from backtest to database.
+
+        Args:
+            attempts: List of signal attempts
+            klines: List of K-line data
+            request: Backtest request
+            repository: SignalRepository instance
+
+        Returns:
+            Number of signals saved
+        """
+        from src.domain.risk_calculator import RiskCalculator
+        from src.domain.models import SignalResult, AccountSnapshot
+
+        saved_count = 0
+        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=20)
+        calculator = RiskCalculator(risk_config)
+
+        # Create mock account for position sizing
+        account_snapshot = AccountSnapshot(
+            total_balance=Decimal("10000"),
+            available_balance=Decimal("10000"),
+            unrealized_pnl=Decimal("0"),
+            positions=[],
+            timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
+        )
+
+        # Build kline map for quick lookup
+        kline_map = {k.timestamp: k for k in klines}
+
+        for attempt in attempts:
+            if attempt.final_result != "SIGNAL_FIRED" or not attempt.pattern:
+                continue
+
+            # Get entry kline
+            entry_kline = kline_map.get(attempt.kline_timestamp)
+            if not entry_kline:
+                continue
+
+            # Calculate stop loss
+            stop_loss = calculator.calculate_stop_loss(
+                entry_kline, attempt.pattern.direction
+            )
+
+            # Calculate position size
+            position_size, leverage = calculator.calculate_position_size(
+                account_snapshot,
+                entry_kline.close,
+                stop_loss,
+                attempt.pattern.direction,
+            )
+
+            # Generate dynamic tags from filter_results (same as real-time signals)
+            tags = self._generate_tags_from_filter_results(attempt.filter_results)
+            # Add backtest source tag
+            tags.append({"name": "Source", "value": "Backtest"})
+
+            # Build SignalResult
+            signal = SignalResult(
+                symbol=request.symbol,
+                timeframe=request.timeframe,
+                direction=attempt.pattern.direction,
+                entry_price=entry_kline.close,
+                suggested_stop_loss=stop_loss,
+                suggested_position_size=position_size,
+                current_leverage=leverage,
+                tags=tags,
+                risk_reward_info=f"Risk {risk_config.max_loss_percent*100}% = {calculator._quantize_price(account_snapshot.available_balance * risk_config.max_loss_percent, entry_kline.close)} USDT",
+                status="PENDING",
+                pnl_ratio=0.0,
+                kline_timestamp=attempt.kline_timestamp,
+                strategy_name=attempt.strategy_name,
+                score=attempt.pattern.score,
+            )
+
+            # Save to database with source='backtest'
+            await repository.save_signal(signal, source="backtest")
+            saved_count += 1
+
+        return saved_count
+
+    def _generate_tags_from_filter_results(self, filter_results: list) -> List[Dict[str, str]]:
+        """
+        Generate dynamic tags from filter results (same as signal_pipeline.py).
+
+        Args:
+            filter_results: List of (filter_name, FilterResult) tuples from attempt
+
+        Returns:
+            List of tag dicts e.g., [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
+        """
+        tags = []
+        for filter_name, filter_result in filter_results:
+            if filter_result.passed:
+                if filter_name == "ema" or filter_name == "ema_trend":
+                    # Extract trend direction from reason
+                    trend_value = "Bullish" if "bullish" in filter_result.reason.lower() else "Bearish"
+                    tags.append({"name": "EMA", "value": trend_value})
+                elif filter_name == "mtf":
+                    mtf_value = "Confirmed" if "confirm" in filter_result.reason.lower() else "Passed"
+                    tags.append({"name": "MTF", "value": mtf_value})
+                elif filter_name == "atr":
+                    tags.append({"name": "ATR", "value": "Passed"})
+                elif filter_name == "volume_surge":
+                    tags.append({"name": "Volume", "value": "Surge"})
+        return tags
+
 
 # ============================================================
 # Convenience function
@@ -615,17 +828,21 @@ async def run_backtest(
     gateway: ExchangeGateway,
     request: BacktestRequest,
     account_snapshot: Optional[AccountSnapshot] = None,
+    repository = None,  # Optional SignalRepository for saving signals
 ) -> BacktestReport:
     """
     Run a backtest with isolated sandbox.
+
+    Backtest signals are automatically saved to database if repository is provided.
 
     Args:
         gateway: Exchange gateway for fetching data
         request: Backtest request parameters
         account_snapshot: Optional account snapshot
+        repository: Optional SignalRepository for saving signals
 
     Returns:
         BacktestReport with detailed statistics
     """
     backtester = Backtester(gateway)
-    return await backtester.run_backtest(request, account_snapshot)
+    return await backtester.run_backtest(request, account_snapshot, repository=repository)

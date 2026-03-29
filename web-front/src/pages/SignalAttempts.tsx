@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { useApi } from '../lib/api';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Filter, X, ChevronLeft, ChevronRight, Trash2, CheckSquare, Square } from 'lucide-react';
+import { Filter, X, ChevronLeft, ChevronRight, Trash2, CheckSquare, Square, MoreVertical, Calendar, SlidersHorizontal, Activity, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { deleteAttempts, type SignalAttempt } from '../lib/api';
+import { deleteAttempts, type SignalAttempt, type TraceNode } from '../lib/api';
+import TraceTreeViewer from '../components/TraceTreeViewer';
 
 // Strategy badge colors
 const STRATEGY_COLORS: Record<string, string> = {
@@ -53,6 +54,68 @@ const translateFilterStage = (stage?: string | null): string => {
   }
 };
 
+/**
+ * 将 details JSON 翻译为可读的中文报告
+ */
+const renderDetailsReport = (details?: Record<string, any>): string => {
+  if (!details) return '无详细数据';
+
+  const lines: string[] = [];
+
+  // Pattern 部分
+  if (details.pattern) {
+    const pattern = details.pattern;
+    lines.push('【形态检测】');
+    if (pattern.direction) {
+      lines.push(`  方向：${pattern.direction === 'long' ? '做多' : '做空'}`);
+    }
+    if (pattern.type) {
+      const typeMap: Record<string, string> = {
+        pinbar: 'Pinbar 形态',
+        engulfing: '吞没形态',
+        doji: '十字星',
+        hammer: '锤头线',
+      };
+      lines.push(`  类型：${typeMap[pattern.type] || pattern.type}`);
+    }
+    if (pattern.score !== undefined && pattern.score !== null) {
+      lines.push(`  评分：${(Number(pattern.score) * 100).toFixed(0)}%`);
+    }
+    if (pattern.wick_ratio !== undefined) {
+      lines.push(`  影线占比：${(Number(pattern.wick_ratio) * 100).toFixed(0)}%`);
+    }
+    if (pattern.body_ratio !== undefined) {
+      lines.push(`  实体占比：${(Number(pattern.body_ratio) * 100).toFixed(0)}%`);
+    }
+    lines.push('');
+  }
+
+  // Filters 部分
+  if (details.filters && details.filters.length > 0) {
+    lines.push('【过滤器结果】');
+    details.filters.forEach((f: any, i: number) => {
+      const filterNameMap: Record<string, string> = {
+        ema: 'EMA 趋势',
+        ema_trend: 'EMA 趋势',
+        mtf: '多周期确认',
+        atr: 'ATR 波动率',
+        volume_surge: '成交量突增',
+        volatility_filter: '波动率过滤',
+        time_filter: '时间过滤',
+        price_action: '价格行为',
+      };
+      const name = filterNameMap[f.name] || f.name;
+      const status = f.passed ? '✅ 通过' : '❌ 失败';
+      lines.push(`  ${i + 1}. ${name}: ${status}`);
+      if (!f.passed && f.reason) {
+        lines.push(`     原因：${f.reason}`);
+      }
+    });
+  }
+
+  return lines.join('\n');
+};
+
 const renderScore = (score?: number | string | null): string | number => {
   if (!score || Number(score) === 0) return '-';
   const scoreNum = typeof score === 'string' ? parseFloat(score) : score;
@@ -62,7 +125,11 @@ const renderScore = (score?: number | string | null): string | number => {
 
 export default function SignalAttempts() {
   const [page, setPage] = useState(1);
+  const [hoursFilter, setHoursFilter] = useState('24');
   const limit = 50;
+
+  // Modal state
+  const [selectedAttempt, setSelectedAttempt] = useState<SignalAttempt | null>(null);
 
   // Filters
   const [symbolFilter, setSymbolFilter] = useState('');
@@ -76,6 +143,7 @@ export default function SignalAttempts() {
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showActionMenu, setShowActionMenu] = useState(false);
 
   const offset = (page - 1) * limit;
 
@@ -89,12 +157,21 @@ export default function SignalAttempts() {
   if (startDate) url += `&start_time=${startDate}T00:00:00Z`;
   if (endDate) url += `&end_time=${endDate}T23:59:59Z`;
 
+  // Diagnostics URL
+  let diagnosticsUrl = `/api/diagnostics?hours=${hoursFilter}`;
+  if (symbolFilter) diagnosticsUrl += `&symbol=${symbolFilter}`;
+
   const { data, error, mutate } = useApi<{ total: number; data: SignalAttempt[] }>(url);
+  const { data: diagnosticsData, error: diagnosticsError } = useApi<any>(diagnosticsUrl);
 
   const isLoading = !data && !error;
   const attempts = data?.data || [];
   const total = data?.total || 0;
   const totalPages = Math.ceil(total / limit);
+
+  // Diagnostics data
+  const summary = diagnosticsData?.summary;
+  const diagnosticsLoading = !diagnosticsData && !diagnosticsError;
 
   // Clear all filters
   const clearFilters = () => {
@@ -105,6 +182,7 @@ export default function SignalAttempts() {
     setFilterStageFilter('');
     setStartDate('');
     setEndDate('');
+    setHoursFilter('24');
     setPage(1);
   };
 
@@ -144,7 +222,25 @@ export default function SignalAttempts() {
     }
   };
 
-  const handleDeleteAll = async () => {
+  const handleClearAllHistory = async () => {
+    if (!confirm('⚠️ 危险操作警告：此操作将删除所有尝试记录，包括所有币种、所有策略的数据。\n\n确定要继续吗？此操作不可恢复。')) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteAttempts({ delete_all: true });
+      await mutate();
+      setSelectedIds(new Set());
+      setPage(1);
+      clearFilters();
+      setShowActionMenu(false);
+    } catch (err) {
+      alert('删除失败，请重试');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteFiltered = async () => {
     const filterDesc = [];
     if (symbolFilter) filterDesc.push(`币种=${symbolFilter}`);
     if (timeframeFilter) filterDesc.push(`周期=${timeframeFilter}`);
@@ -172,23 +268,7 @@ export default function SignalAttempts() {
       await mutate();
       setSelectedIds(new Set());
       setPage(1);
-    } catch (err) {
-      alert('删除失败，请重试');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const handleClearAllHistory = async () => {
-    if (!confirm('⚠️ 危险操作警告：此操作将删除所有尝试记录，包括所有币种、所有策略的数据。\n\n确定要继续吗？此操作不可恢复。')) return;
-
-    setIsDeleting(true);
-    try {
-      await deleteAttempts({ delete_all: true });
-      await mutate();
-      setSelectedIds(new Set());
-      setPage(1);
-      clearFilters();
+      setShowActionMenu(false);
     } catch (err) {
       alert('删除失败，请重试');
     } finally {
@@ -198,112 +278,252 @@ export default function SignalAttempts() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      {/* Header */}
+      <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">尝试溯源日志</h1>
           <p className="text-sm text-gray-500 mt-1">查看每次 K 线触发的策略尝试与过滤详情</p>
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-1.5 px-2 text-gray-400">
-            <Filter className="w-4 h-4" />
-          </div>
-
-          <select
-            value={symbolFilter}
-            onChange={(e) => { setSymbolFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+        {/* Action Menu */}
+        <div className="relative">
+          <button
+            onClick={() => setShowActionMenu(!showActionMenu)}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
           >
-            <option value="">全部币种</option>
-            <option value="BTC/USDT:USDT">BTC</option>
-            <option value="ETH/USDT:USDT">ETH</option>
-            <option value="SOL/USDT:USDT">SOL</option>
-            <option value="BNB/USDT:USDT">BNB</option>
-          </select>
+            <MoreVertical className="w-4 h-4" />
+            操作
+          </button>
 
-          <select
-            value={timeframeFilter}
-            onChange={(e) => { setTimeframeFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            <option value="">全部周期</option>
-            <option value="15m">15 分钟</option>
-            <option value="1h">1 小时</option>
-            <option value="4h">4 小时</option>
-            <option value="1d">1 天</option>
-          </select>
-
-          <select
-            value={strategyFilter}
-            onChange={(e) => { setStrategyFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            <option value="">全部策略</option>
-            <option value="pinbar">Pinbar</option>
-            <option value="engulfing">Engulfing</option>
-          </select>
-
-          <select
-            value={resultFilter}
-            onChange={(e) => { setResultFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            <option value="">全部结果</option>
-            <option value="SIGNAL_FIRED">信号触发</option>
-            <option value="NO_PATTERN">无形态</option>
-            <option value="FILTERED">被过滤</option>
-          </select>
-
-          <select
-            value={filterStageFilter}
-            onChange={(e) => { setFilterStageFilter(e.target.value); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            <option value="">全部过滤阶段</option>
-            <option value="ema_trend">EMA 趋势</option>
-            <option value="mtf">MTF 验证</option>
-          </select>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
-              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-              placeholder="开始日期"
-            />
-            <span className="text-gray-400 text-xs">-</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
-              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-              placeholder="结束日期"
-            />
-          </div>
-
-          {(symbolFilter || timeframeFilter || strategyFilter || resultFilter || filterStageFilter || startDate || endDate) && (
-            <button
-              onClick={clearFilters}
-              className="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-              title="清空筛选"
-            >
-              <X className="w-4 h-4" />
-            </button>
+          {showActionMenu && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setShowActionMenu(false)}
+              />
+              <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-20">
+                <button
+                  onClick={() => {
+                    handleDeleteFiltered();
+                  }}
+                  disabled={isDeleting}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <div className="text-left">
+                    <div>删除当前筛选匹配项</div>
+                    <div className="text-xs text-gray-400">仅删除符合筛选条件的记录</div>
+                  </div>
+                </button>
+                <div className="h-px bg-gray-100 my-1" />
+                <button
+                  onClick={handleClearAllHistory}
+                  disabled={isDeleting}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-apple-red hover:bg-red-50 transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <div className="text-left">
+                    <div>清空所有历史记录</div>
+                    <div className="text-xs text-gray-400">删除全部尝试记录，不可恢复</div>
+                  </div>
+                </button>
+              </div>
+            </>
           )}
         </div>
+      </div>
 
-        {/* Clear All History Button */}
-        <button
-          onClick={handleClearAllHistory}
-          disabled={isDeleting}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-apple-red rounded-lg hover:bg-apple-red/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
-          title="删除所有尝试记录"
-        >
-          <Trash2 className="w-4 h-4" />
-          清空所有尝试
-        </button>
+      {/* Stats Overview Cards (from Diagnostics) */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 text-gray-500 mb-2">
+            <Activity className="w-4 h-4" />
+            <h3 className="text-sm font-medium">处理 K 线总数</h3>
+          </div>
+          <div className="text-3xl font-semibold tracking-tight">
+            {diagnosticsLoading ? '-' : summary?.total_klines || 0}
+          </div>
+        </div>
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 text-gray-400 mb-2">
+            <XCircle className="w-4 h-4" />
+            <h3 className="text-sm font-medium">未识别形态</h3>
+          </div>
+          <div className="text-3xl font-semibold tracking-tight text-gray-400">
+            {diagnosticsLoading ? '-' : summary?.no_pattern || 0}
+          </div>
+        </div>
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 text-apple-green mb-2">
+            <CheckCircle2 className="w-4 h-4" />
+            <h3 className="text-sm font-medium text-gray-500">已触发信号</h3>
+          </div>
+          <div className="text-3xl font-semibold tracking-tight text-apple-green">
+            {diagnosticsLoading ? '-' : summary?.signal_fired || 0}
+          </div>
+        </div>
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 text-apple-orange mb-2">
+            <AlertTriangle className="w-4 h-4" />
+            <h3 className="text-sm font-medium text-gray-500">被过滤</h3>
+          </div>
+          <div className="text-3xl font-semibold tracking-tight text-apple-orange">
+            {diagnosticsLoading ? '-' : summary?.filtered || 0}
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Breakdown Chart (from Diagnostics) */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-semibold tracking-tight">过滤原因分布</h2>
+          <select
+            value={hoursFilter}
+            onChange={(e) => setHoursFilter(e.target.value)}
+            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+          >
+            <option value="6">过去 6 小时</option>
+            <option value="12">过去 12 小时</option>
+            <option value="24">过去 24 小时</option>
+            <option value="72">过去 72 小时</option>
+          </select>
+        </div>
+        {diagnosticsLoading ? (
+          <div className="space-y-4 animate-pulse">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-6 bg-gray-100 rounded" />
+            ))}
+          </div>
+        ) : !summary?.filter_breakdown || Object.keys(summary.filter_breakdown).length === 0 ? (
+          <div className="h-32 flex items-center justify-center text-gray-400">
+            暂无过滤记录
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {Object.entries(summary.filter_breakdown).map(([key, value]: [string, any]) => {
+              const label = translateFilterStage(key);
+              const maxVal = Math.max(...Object.values(summary.filter_breakdown) as number[]);
+              return (
+                <div key={key}>
+                  <div className="flex justify-between text-sm mb-1.5">
+                    <span className="text-gray-600 font-medium">{label}</span>
+                    <span className="text-gray-900 font-mono">{value} 次</span>
+                  </div>
+                  <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="bg-apple-orange h-full rounded-full"
+                      style={{ width: `${(value / maxVal) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Filters - Two Rows with Visual Groups */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+        {/* Basic Filters */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+            <SlidersHorizontal className="w-3 h-3" />
+            基础筛选
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={symbolFilter}
+              onChange={(e) => { setSymbolFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部币种</option>
+              <option value="BTC/USDT:USDT">BTC</option>
+              <option value="ETH/USDT:USDT">ETH</option>
+              <option value="SOL/USDT:USDT">SOL</option>
+              <option value="BNB/USDT:USDT">BNB</option>
+            </select>
+
+            <select
+              value={timeframeFilter}
+              onChange={(e) => { setTimeframeFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部周期</option>
+              <option value="15m">15 分钟</option>
+              <option value="1h">1 小时</option>
+              <option value="4h">4 小时</option>
+              <option value="1d">1 天</option>
+            </select>
+
+            <select
+              value={strategyFilter}
+              onChange={(e) => { setStrategyFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部策略</option>
+              <option value="pinbar">Pinbar</option>
+              <option value="engulfing">Engulfing</option>
+            </select>
+
+            <select
+              value={resultFilter}
+              onChange={(e) => { setResultFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部结果</option>
+              <option value="SIGNAL_FIRED">信号触发</option>
+              <option value="NO_PATTERN">无形态</option>
+              <option value="FILTERED">被过滤</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Advanced Filters */}
+        <div className="space-y-1.5 pt-2 border-t border-gray-100">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+            <Calendar className="w-3 h-3" />
+            高级筛选
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={filterStageFilter}
+              onChange={(e) => { setFilterStageFilter(e.target.value); setPage(1); }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value="">全部过滤阶段</option>
+              <option value="ema_trend">EMA 趋势</option>
+              <option value="mtf">MTF 验证</option>
+            </select>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
+                className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+                placeholder="开始日期"
+              />
+              <span className="text-gray-400 text-xs">-</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
+                className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+                placeholder="结束日期"
+              />
+            </div>
+
+            {(symbolFilter || timeframeFilter || strategyFilter || resultFilter || filterStageFilter || startDate || endDate) && (
+              <button
+                onClick={clearFilters}
+                className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+                清空筛选
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Action Bar */}
@@ -451,15 +671,7 @@ export default function SignalAttempts() {
                       <td className="px-6 py-4">
                         {attempt.details ? (
                           <button
-                            onClick={() => {
-                              // 优先显示语义化评估报告（如果有）
-                              if (attempt.evaluation_summary) {
-                                alert(`评估报告:\n\n${attempt.evaluation_summary}`);
-                              } else {
-                                const detailsStr = JSON.stringify(attempt.details, null, 2);
-                                alert(`详情 JSON:\n${detailsStr}`);
-                              }
-                            }}
+                            onClick={() => setSelectedAttempt(attempt)}
                             className="text-xs text-apple-blue hover:underline"
                           >
                             查看详情
@@ -476,23 +688,10 @@ export default function SignalAttempts() {
           </table>
         </div>
 
-        {/* Pagination & Delete All */}
+        {/* Pagination */}
         <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/30">
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-gray-500">
-              共 <span className="font-medium text-gray-900">{total}</span> 条 / 第 <span className="font-medium text-gray-900">{page}</span> 页
-            </div>
-            {(symbolFilter || timeframeFilter || strategyFilter || resultFilter || filterStageFilter || startDate || endDate) && (
-              <button
-                onClick={handleDeleteAll}
-                disabled={isDeleting}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-apple-red bg-white border border-apple-red/30 rounded-lg hover:bg-apple-red/5 disabled:opacity-50 transition-colors"
-                title="删除当前筛选条件下的所有记录"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                清空当前筛选匹配项
-              </button>
-            )}
+          <div className="text-sm text-gray-500">
+            共 <span className="font-medium text-gray-900">{total}</span> 条 / 第 <span className="font-medium text-gray-900">{page}</span> 页
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -512,6 +711,103 @@ export default function SignalAttempts() {
           </div>
         </div>
       </div>
+
+      {/* Detail Modal */}
+      {selectedAttempt && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setSelectedAttempt(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">尝试详情</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {selectedAttempt.symbol} · {selectedAttempt.timeframe} · {selectedAttempt.strategy_name}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedAttempt(null)}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="px-6 py-4 overflow-y-auto max-h-[calc(80vh-120px)] space-y-4">
+              {/* Priority 1: Evaluation Summary (if available) */}
+              {selectedAttempt.evaluation_summary ? (
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">评估报告</h3>
+                  <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
+                    {selectedAttempt.evaluation_summary}
+                  </pre>
+                </div>
+              ) : null}
+
+              {/* Priority 2: Trace Tree Visualization (if available) */}
+              {selectedAttempt.trace_tree ? (
+                <TraceTreeViewer
+                  traceTree={selectedAttempt.trace_tree}
+                  signalFired={selectedAttempt.final_result === 'SIGNAL_FIRED'}
+                />
+              ) : null}
+
+              {/* Priority 3: Fallback to legacy details rendering */}
+              {(!selectedAttempt.evaluation_summary && !selectedAttempt.trace_tree) && (
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">详细数据</h3>
+                  <pre className="text-sm text-gray-800 whitespace-pre-wrap font-mono text-xs leading-relaxed">
+                    {renderDetailsReport(selectedAttempt.details)}
+                  </pre>
+                </div>
+              )}
+
+              {/* Meta Info */}
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+                <div>
+                  <div className="text-xs text-gray-500">形态评分</div>
+                  <div className="text-sm font-medium text-gray-900">
+                    {renderScore(selectedAttempt.pattern_score)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">最终结果</div>
+                  <div className="text-sm font-medium">
+                    <span className={cn(
+                      "px-2 py-1 rounded text-xs font-medium",
+                      getFinalResultBadgeClass(selectedAttempt.final_result)
+                    )}>
+                      {translateFinalResult(selectedAttempt.final_result)}
+                    </span>
+                  </div>
+                </div>
+                {selectedAttempt.filter_stage && (
+                  <div>
+                    <div className="text-xs text-gray-500">过滤阶段</div>
+                    <div className="text-sm font-medium text-gray-900">
+                      {translateFilterStage(selectedAttempt.filter_stage)}
+                    </div>
+                  </div>
+                )}
+                {selectedAttempt.filter_reason && (
+                  <div>
+                    <div className="text-xs text-gray-500">过滤原因</div>
+                    <div className="text-sm font-medium text-gray-900">
+                      {selectedAttempt.filter_reason}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

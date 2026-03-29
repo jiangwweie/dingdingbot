@@ -376,6 +376,26 @@ class SignalPipeline:
             async with lock:
                 attempts = self._run_strategy(kline)
 
+            # Log filter rejection details for analysis
+            for attempt in attempts:
+                if attempt.pattern is None:
+                    continue  # No pattern detected, skip filter logging
+
+                symbol = kline.symbol
+                timeframe = kline.timeframe
+                pattern_type = attempt.strategy_name
+                direction = attempt.pattern.direction.value
+
+                for filter_name, filter_result in attempt.filter_results:
+                    if not filter_result.passed:
+                        metadata_json = json.dumps(filter_result.metadata) if filter_result.metadata else "{}"
+                        logger.warning(
+                            f"[FILTER_REJECTED] symbol={symbol} timeframe={timeframe} "
+                            f"pattern={pattern_type} direction={direction} "
+                            f"filter={filter_name} reason={filter_result.reason} "
+                            f"metadata={metadata_json}"
+                        )
+
             # Persist all attempt records via async queue (fire-and-forget, backpressure relief)
             if self._repository is not None:
                 queue = self._get_attempts_queue()

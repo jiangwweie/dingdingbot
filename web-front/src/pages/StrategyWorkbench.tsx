@@ -306,6 +306,23 @@ export default function StrategyWorkbench() {
         )}
       </div>
 
+      {/* Info Banner */}
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+        <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+          <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-blue-900">策略工作台 vs 回测沙箱</h3>
+          <div className="mt-2 text-sm text-blue-700 space-y-1">
+            <p><strong>策略工作台：</strong> 创建/编辑策略组合，使用"预览"功能快速验证策略逻辑（单根 K 线），可将策略部署到实盘</p>
+            <p><strong>回测沙箱：</strong> 导入已保存的策略，在历史数据上执行完整回测，查看详细绩效报告</p>
+            <p className="text-blue-600/80 mt-2">💡 建议工作流程：在工作台创建策略 → 预览验证 → 保存到模板 → 导入回测沙箱执行历史回测</p>
+          </div>
+        </div>
+      </div>
+
       {/* Error Message */}
       {errorMessage && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
