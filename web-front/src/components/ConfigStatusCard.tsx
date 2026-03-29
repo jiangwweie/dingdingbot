@@ -13,7 +13,6 @@ interface ExchangeConfig {
 
 interface NotificationChannel {
   type: string;
-  enabled: boolean;
   webhook_url?: string;
 }
 
@@ -23,12 +22,10 @@ interface NotificationConfig {
 
 interface StrategyFilter {
   type: string;
-  enabled: boolean;
 }
 
 interface StrategyDefinition {
   name: string;
-  enabled: boolean;
   filters: StrategyFilter[];
 }
 
@@ -88,9 +85,11 @@ export default function ConfigStatusCard({ onOpenSettings }: ConfigStatusCardPro
   const apiKeyMasked = config?.exchange?.api_key ? formatApiKey(config.exchange.api_key) : '未配置';
 
   // Get active strategies summary
-  const activeStrategies = config?.active_strategies?.filter(s => s.enabled) || [];
+  // Note: active_strategies from backend already contains enabled strategies,
+  // no need to filter by 'enabled' field
+  const activeStrategies = config?.active_strategies || [];
   const strategyNames = activeStrategies.map(s => s.name).join(', ') || '无';
-  const filtersCount = activeStrategies.reduce((acc, s) => acc + (s.filters?.filter(f => f.enabled).length || 0), 0);
+  const filtersCount = activeStrategies.reduce((acc, s) => acc + (s.filters?.length || 0), 0);
 
   // Get risk config
   const risk = config?.risk;
@@ -108,8 +107,9 @@ export default function ConfigStatusCard({ onOpenSettings }: ConfigStatusCardPro
     .join(', ') || '-';
 
   // Get notification channels
+  // Note: channels with webhook_url are considered enabled
   const channels = config?.notification?.channels || [];
-  const enabledChannels = channels.filter(c => c.enabled);
+  const enabledChannels = channels.filter(c => c.webhook_url);
   const channelNames = enabledChannels.map(c => {
     switch (c.type) {
       case 'feishu':
