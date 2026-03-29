@@ -638,4 +638,732 @@ def format_signal_message(signal: SignalResult) -> str:
 
 ---
 
+## 十四、接口文档
+
+### 14.1 REST API 接口
+
+#### GET /api/signals - 获取信号列表
+
+**请求参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| limit | int | 否 | 返回数量限制 (默认 50, 最大 500) |
+| offset | int | 否 | 偏移量 (默认 0) |
+| symbol | string | 否 | 币种过滤，如 "BTC/USDT:USDT" |
+| direction | string | 否 | 方向过滤 ("long" / "short") |
+| status | string | 否 | 状态过滤 ("PENDING" / "WON" / "LOST") |
+| strategy_name | string | 否 | 策略名称过滤 |
+| start_time | string | 否 | 开始时间 (ISO 8601 或时间戳) |
+| end_time | string | 否 | 结束时间 (ISO 8601 或时间戳) |
+
+**响应格式**:
+
+```json
+{
+  "signals": [
+    {
+      "id": 1234,
+      "symbol": "BTC/USDT:USDT",
+      "timeframe": "15m",
+      "direction": "long",
+      "entry_price": "40000.00",
+      "stop_loss": "38000.00",
+      "position_size": "0.05263157",
+      "leverage": 5,
+      "status": "PENDING",
+      "pnl_ratio": 0,
+      "score": 0.85,
+      "strategy_name": "pinbar",
+      "kline_timestamp": 1743264000000,
+      "created_at": "2026-03-29T12:00:00Z",
+      "take_profit_levels": [
+        {
+          "id": "TP1",
+          "position_ratio": "0.5",
+          "risk_reward": "1.5",
+          "price": "43000.00"
+        },
+        {
+          "id": "TP2",
+          "position_ratio": "0.5",
+          "risk_reward": "3.0",
+          "price": "46000.00"
+        }
+      ],
+      "tags": [
+        {"name": "EMA", "value": "Bullish"},
+        {"name": "ATR", "value": "0.65"}
+      ]
+    }
+  ],
+  "total": 150,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+---
+
+#### GET /api/signals/{id} - 获取信号详情
+
+**路径参数**:
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| id | int | 信号 ID |
+
+**响应格式**:
+
+```json
+{
+  "signal": {
+    "id": 1234,
+    "symbol": "BTC/USDT:USDT",
+    "timeframe": "15m",
+    "direction": "long",
+    "entry_price": "40000.00",
+    "stop_loss": "38000.00",
+    "position_size": "0.05263157",
+    "leverage": 5,
+    "status": "PENDING",
+    "pnl_ratio": 0,
+    "score": 0.85,
+    "strategy_name": "pinbar",
+    "kline_timestamp": 1743264000000,
+    "created_at": "2026-03-29T12:00:00Z",
+    "take_profit_levels": [
+      {
+        "id": "TP1",
+        "position_ratio": "0.5",
+        "risk_reward": "1.5",
+        "price": "43000.00",
+        "status": "PENDING"
+      },
+      {
+        "id": "TP2",
+        "position_ratio": "0.5",
+        "risk_reward": "3.0",
+        "price": "46000.00",
+        "status": "PENDING"
+      }
+    ],
+    "tags": [
+      {"name": "EMA", "value": "Bullish"}
+    ]
+  }
+}
+```
+
+---
+
+#### GET /api/signals/{id}/context - 获取信号上下文（含 K 线数据）
+
+**路径参数**:
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| id | int | 信号 ID |
+
+**响应格式**:
+
+```json
+{
+  "signal": {
+    "id": 1234,
+    "symbol": "BTC/USDT:USDT",
+    "timeframe": "15m",
+    "direction": "long",
+    "entry_price": "40000.00",
+    "stop_loss": "38000.00",
+    "take_profit_levels": [
+      {"id": "TP1", "price": "43000.00", "position_ratio": "0.5", "risk_reward": "1.5"},
+      {"id": "TP2", "price": "46000.00", "position_ratio": "0.5", "risk_reward": "3.0"}
+    ],
+    "kline_timestamp": 1743264000000
+  },
+  "klines": [
+    [1743260400000, 39800, 40100, 39700, 39900],  // [time, open, high, low, close]
+    [1743261300000, 39900, 40200, 39850, 40000],
+    [1743262200000, 40000, 40300, 39950, 40100],
+    ...  // 信号前后各 10 根 K 线，共 21 根
+  ]
+}
+```
+
+---
+
+### 14.2 数据库操作接口
+
+#### SignalRepository 方法
+
+```python
+class SignalRepository:
+    # ========== 写操作 ==========
+
+    async def store_take_profit_levels(
+        self,
+        signal_id: int,
+        take_profit_levels: List[Dict[str, Any]],
+    ) -> None:
+        """
+        保存止盈级别到数据库
+
+        Args:
+            signal_id: 信号 ID
+            take_profit_levels: 止盈级别列表，结构:
+                [
+                    {"id": "TP1", "position_ratio": "0.5", "risk_reward": "1.5", "price": "43000"},
+                    ...
+                ]
+        """
+
+    async def update_take_profit_status(
+        self,
+        signal_id: int,
+        tp_id: str,
+        status: str,
+        pnl_ratio: Optional[Decimal] = None,
+        filled_at: Optional[str] = None,
+    ) -> None:
+        """
+        更新止盈级别状态
+
+        Args:
+            signal_id: 信号 ID
+            tp_id: 止盈级别 ID (如 "TP1")
+            status: 新状态 ("WON" / "CANCELLED")
+            pnl_ratio: 盈亏比（可选）
+            filled_at: 成交时间（可选）
+        """
+
+    # ========== 读操作 ==========
+
+    async def get_take_profit_levels(
+        self,
+        signal_id: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取信号的止盈级别
+
+        Args:
+            signal_id: 信号 ID
+
+        Returns:
+            止盈级别列表:
+                [
+                    {
+                        "id": 1,
+                        "tp_id": "TP1",
+                        "position_ratio": "0.5",
+                        "risk_reward": "1.5",
+                        "price_level": "43000.00",
+                        "status": "PENDING"
+                    },
+                    ...
+                ]
+        """
+
+    async def get_pending_signals(self, symbol: str) -> List[Dict[str, Any]]:
+        """
+        获取待处理信号（包含止盈级别）
+
+        Args:
+            symbol: 币种
+
+        Returns:
+            信号列表，每个信号包含 take_profit_levels 字段
+        """
+```
+
+---
+
+## 十五、测试用例设计
+
+### 15.1 单元测试
+
+#### 测试文件：`tests/unit/test_risk_calculator.py`
+
+**用例 1: LONG 方向止盈计算**
+
+```python
+async def test_calculate_take_profit_levels_long():
+    """测试 LONG 方向止盈价格计算"""
+    config = TakeProfitConfig(
+        enabled=True,
+        levels=[
+            TakeProfitLevel(id="TP1", position_ratio=Decimal("0.5"), risk_reward=Decimal("1.5")),
+            TakeProfitLevel(id="TP2", position_ratio=Decimal("0.5"), risk_reward=Decimal("3.0")),
+        ]
+    )
+    calculator = RiskCalculator(config)
+
+    entry_price = Decimal("40000")
+    stop_loss = Decimal("38000")  # 止损距离 = 2000
+    direction = Direction.LONG
+
+    levels = calculator.calculate_take_profit_levels(entry_price, stop_loss, direction, config)
+
+    # 验证
+    assert len(levels) == 2
+
+    # TP1: 40000 + (2000 * 1.5) = 43000
+    assert levels[0].id == "TP1"
+    assert levels[0].price == Decimal("43000")
+    assert levels[0].position_ratio == Decimal("0.5")
+    assert levels[0].risk_reward == Decimal("1.5")
+
+    # TP2: 40000 + (2000 * 3.0) = 46000
+    assert levels[1].id == "TP2"
+    assert levels[1].price == Decimal("46000")
+    assert levels[1].position_ratio == Decimal("0.5")
+    assert levels[1].risk_reward == Decimal("3.0")
+```
+
+**用例 2: SHORT 方向止盈计算**
+
+```python
+async def test_calculate_take_profit_levels_short():
+    """测试 SHORT 方向止盈价格计算"""
+    config = TakeProfitConfig(
+        enabled=True,
+        levels=[
+            TakeProfitLevel(id="TP1", position_ratio=Decimal("0.5"), risk_reward=Decimal("1.5")),
+        ]
+    )
+    calculator = RiskCalculator(config)
+
+    entry_price = Decimal("40000")
+    stop_loss = Decimal("42000")  # 止损距离 = 2000
+    direction = Direction.SHORT
+
+    levels = calculator.calculate_take_profit_levels(entry_price, stop_loss, direction, config)
+
+    # 验证
+    assert len(levels) == 1
+
+    # TP1: 40000 - (2000 * 1.5) = 37000 (SHORT 止盈在下方)
+    assert levels[0].id == "TP1"
+    assert levels[0].price == Decimal("37000")
+```
+
+**用例 3: 用户配置覆盖默认值**
+
+```python
+async def test_take_profit_config_override():
+    """测试用户配置覆盖默认值"""
+    config = TakeProfitConfig(
+        enabled=True,
+        levels=[
+            TakeProfitLevel(id="TP1", position_ratio=Decimal("0.4"), risk_reward=Decimal("1.2")),
+            TakeProfitLevel(id="TP2", position_ratio=Decimal("0.3"), risk_reward=Decimal("2.5")),
+            TakeProfitLevel(id="TP3", position_ratio=Decimal("0.3"), risk_reward=Decimal("5.0")),
+        ]
+    )
+    calculator = RiskCalculator(config)
+
+    entry_price = Decimal("100")
+    stop_loss = Decimal("90")  # 止损距离 = 10
+    direction = Direction.LONG
+
+    levels = calculator.calculate_take_profit_levels(entry_price, stop_loss, direction, config)
+
+    # 验证 3 个级别
+    assert len(levels) == 3
+
+    # TP1: 100 + (10 * 1.2) = 112
+    assert levels[0].price == Decimal("112")
+    # TP2: 100 + (10 * 2.5) = 125
+    assert levels[1].price == Decimal("125")
+    # TP3: 100 + (10 * 5.0) = 150
+    assert levels[2].price == Decimal("150")
+```
+
+**用例 4: 止盈配置禁用**
+
+```python
+async def test_take_profit_disabled():
+    """测试止盈配置禁用时返回空列表"""
+    config = TakeProfitConfig(enabled=False, levels=[])
+    calculator = RiskCalculator(config)
+
+    entry_price = Decimal("40000")
+    stop_loss = Decimal("38000")
+    direction = Direction.LONG
+
+    levels = calculator.calculate_take_profit_levels(
+        entry_price, stop_loss, direction, config
+    )
+
+    # 验证返回空列表
+    assert levels == []
+```
+
+---
+
+#### 测试文件：`tests/unit/test_signal_repository.py`
+
+**用例 5: 保存止盈级别**
+
+```python
+async def test_store_take_profit_levels():
+    """测试保存止盈级别到数据库"""
+    repository = SignalRepository("test.db")
+    await repository.initialize()
+
+    # 先创建测试信号
+    signal_id = await repository._db.execute(
+        """
+        INSERT INTO signals (symbol, timeframe, direction, entry_price, stop_loss, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("BTC/USDT:USDT", "15m", "long", "40000", "38000", "2026-03-29T12:00:00Z")
+    )
+    await repository._db.commit()
+
+    # 保存止盈级别
+    take_profit_levels = [
+        {"id": "TP1", "position_ratio": "0.5", "risk_reward": "1.5", "price": "43000"},
+        {"id": "TP2", "position_ratio": "0.5", "risk_reward": "3.0", "price": "46000"},
+    ]
+    await repository.store_take_profit_levels(signal_id, take_profit_levels)
+
+    # 验证
+    async with repository._db.execute(
+        "SELECT * FROM signal_take_profits WHERE signal_id = ?", (signal_id,)
+    ) as cursor:
+        rows = await cursor.fetchall()
+
+        assert len(rows) == 2
+        assert rows[0]["tp_id"] == "TP1"
+        assert rows[0]["price_level"] == "43000"
+        assert rows[0]["status"] == "PENDING"
+        assert rows[1]["tp_id"] == "TP2"
+        assert rows[1]["price_level"] == "46000"
+
+    await repository.close()
+```
+
+**用例 6: 获取止盈级别**
+
+```python
+async def test_get_take_profit_levels():
+    """测试获取止盈级别"""
+    repository = SignalRepository("test.db")
+    await repository.initialize()
+
+    # 先创建测试数据
+    signal_id = await repository._db.execute(
+        """
+        INSERT INTO signals (symbol, timeframe, direction, entry_price, stop_loss, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("BTC/USDT:USDT", "15m", "long", "40000", "38000", "2026-03-29T12:00:00Z")
+    )
+    await repository.store_take_profit_levels(signal_id, [
+        {"id": "TP1", "position_ratio": "0.5", "risk_reward": "1.5", "price": "43000"},
+        {"id": "TP2", "position_ratio": "0.5", "risk_reward": "3.0", "price": "46000"},
+    ])
+
+    # 获取
+    levels = await repository.get_take_profit_levels(signal_id)
+
+    # 验证
+    assert len(levels) == 2
+    assert levels[0]["tp_id"] == "TP1"
+    assert levels[0]["price_level"] == "43000"
+    assert levels[1]["tp_id"] == "TP2"
+
+    await repository.close()
+```
+
+---
+
+### 15.2 集成测试
+
+#### 测试文件：`tests/integration/test_take_profit.py`
+
+**用例 7: 完整信号生成流程**
+
+```python
+async def test_signal_generation_with_tp():
+    """测试信号生成包含止盈级别的完整流程"""
+    # 初始化组件
+    config_manager = load_all_configs()
+    calculator = RiskCalculator(config_manager.core_config.take_profit)
+    repository = SignalRepository("test.db")
+
+    # 模拟 K 线和账户数据
+    kline = KlineData(
+        symbol="BTC/USDT:USDT",
+        timeframe="15m",
+        timestamp=1743264000000,
+        open=Decimal("39800"),
+        high=Decimal("40200"),
+        low=Decimal("39700"),
+        close=Decimal("40000"),
+        volume=Decimal("1000"),
+        is_closed=True
+    )
+
+    account = AccountSnapshot(
+        total_balance=Decimal("100000"),
+        available_balance=Decimal("50000"),
+        unrealized_pnl=Decimal("0"),
+        positions=[],
+        timestamp=1743264000000
+    )
+
+    # 生成信号
+    signal = calculator.calculate_signal_result(
+        kline=kline,
+        account=account,
+        direction=Direction.LONG,
+        tags=[{"name": "EMA", "value": "Bullish"}],
+        kline_timestamp=1743264000000,
+        strategy_name="pinbar",
+        score=0.85
+    )
+
+    # 验证信号包含止盈级别
+    assert signal.take_profit_levels is not None
+    assert len(signal.take_profit_levels) >= 2
+
+    # 验证止盈价格计算正确
+    tp1 = next(tp for tp in signal.take_profit_levels if tp["id"] == "TP1")
+    tp2 = next(tp for tp in signal.take_profit_levels if tp["id"] == "TP2")
+
+    # 止损距离 = 40000 - 38000 = 2000
+    # TP1 = 40000 + 2000 * 1.5 = 43000
+    assert Decimal(tp1["price"]) == Decimal("43000")
+    # TP2 = 40000 + 2000 * 3.0 = 46000
+    assert Decimal(tp2["price"]) == Decimal("46000")
+
+    await repository.close()
+```
+
+**用例 8: API 返回验证**
+
+```python
+async def test_api_response_with_tp():
+    """测试 API 返回包含 take_profit_levels"""
+    # 启动测试服务器
+    async with TestClient(app) as client:
+        # 创建测试信号
+        response = await client.post("/api/signals", json={
+            "symbol": "BTC/USDT:USDT",
+            "timeframe": "15m",
+            "direction": "long",
+            "entry_price": "40000",
+            "stop_loss": "38000",
+            "take_profit_levels": [
+                {"id": "TP1", "price": "43000", "position_ratio": "0.5", "risk_reward": "1.5"},
+                {"id": "TP2", "price": "46000", "position_ratio": "0.5", "risk_reward": "3.0"},
+            ]
+        })
+
+        assert response.status_code == 200
+        signal_id = response.json()["id"]
+
+        # 获取信号详情
+        response = await client.get(f"/api/signals/{signal_id}")
+        data = response.json()
+
+        # 验证响应包含止盈级别
+        assert "take_profit_levels" in data["signal"]
+        assert len(data["signal"]["take_profit_levels"]) == 2
+
+        tp_levels = data["signal"]["take_profit_levels"]
+        assert tp_levels[0]["id"] == "TP1"
+        assert tp_levels[0]["price"] == "43000"
+        assert tp_levels[1]["id"] == "TP2"
+        assert tp_levels[1]["price"] == "46000"
+```
+
+---
+
+### 15.3 前端测试
+
+#### 测试文件：`web-front/src/components/__tests__/SignalDetailsDrawer.test.tsx`
+
+**用例 9: K 线图渲染止盈线**
+
+```typescript
+import { render, screen } from '@testing-library/react';
+import SignalDetailsDrawer from '../SignalDetailsDrawer';
+import { fetchSignalContext } from '../../lib/api';
+
+// Mock API 调用
+jest.mock('../../lib/api');
+
+describe('SignalDetailsDrawer', () => {
+  it('should render take profit lines on chart', async () => {
+    const mockSignal = {
+      id: 1234,
+      symbol: 'BTC/USDT:USDT',
+      direction: 'long',
+      entry_price: '40000',
+      stop_loss: '38000',
+      take_profit_levels: [
+        { id: 'TP1', price: '43000', position_ratio: '0.5', risk_reward: '1.5' },
+        { id: 'TP2', price: '46000', position_ratio: '0.5', risk_reward: '3.0' },
+      ],
+      kline_timestamp: 1743264000000,
+    };
+
+    (fetchSignalContext as jest.Mock).mockResolvedValue({
+      signal: mockSignal,
+      klines: [
+        [1743260400000, 39800, 40100, 39700, 39900],
+        // ... 更多 K 线
+      ],
+    });
+
+    render(<SignalDetailsDrawer signalId="1234" isOpen={true} onClose={() => {}} />);
+
+    // 等待图表加载
+    await screen.findByTestId('kline-chart');
+
+    // 验证止盈信息展示
+    expect(screen.getByText('TP1')).toBeInTheDocument();
+    expect(screen.getByText('43000.00')).toBeInTheDocument();
+    expect(screen.getByText('TP2')).toBeInTheDocument();
+    expect(screen.getByText('46000.00')).toBeInTheDocument();
+  });
+});
+```
+
+---
+
+### 15.4 端到端测试
+
+#### 测试文件：`tests/e2e/test_take_profit_flow.py`
+
+**用例 10: 完整止盈流程测试**
+
+```python
+async def test_end_to_end_take_profit_flow():
+    """
+    端到端测试：从信号生成到前端渲染的完整流程
+
+    测试步骤:
+    1. 后端生成信号（含止盈级别）
+    2. 保存到数据库
+    3. API 返回正确的 JSON 格式
+    4. 前端正确渲染 K 线图和止盈线
+    """
+    # 步骤 1-3: 后端测试
+    from src.domain.risk_calculator import RiskCalculator, TakeProfitConfig, TakeProfitLevel
+    from src.infrastructure.signal_repository import SignalRepository
+    from src.domain.models import Direction, KlineData, AccountSnapshot
+    from decimal import Decimal
+
+    # 初始化
+    config = TakeProfitConfig(
+        enabled=True,
+        levels=[
+            TakeProfitLevel(id="TP1", position_ratio=Decimal("0.5"), risk_reward=Decimal("1.5")),
+            TakeProfitLevel(id="TP2", position_ratio=Decimal("0.5"), risk_reward=Decimal("3.0")),
+        ]
+    )
+    calculator = RiskCalculator(config)
+    repository = SignalRepository("test.db")
+
+    # 生成信号
+    kline = KlineData(
+        symbol="BTC/USDT:USDT",
+        timeframe="15m",
+        timestamp=1743264000000,
+        open=Decimal("40000"),
+        high=Decimal("40500"),
+        low=Decimal("39500"),
+        close=Decimal("40000"),
+        volume=Decimal("1000"),
+        is_closed=True
+    )
+
+    account = AccountSnapshot(
+        total_balance=Decimal("100000"),
+        available_balance=Decimal("50000"),
+        unrealized_pnl=Decimal("0"),
+        positions=[],
+        timestamp=1743264000000
+    )
+
+    signal = calculator.calculate_signal_result(
+        kline=kline,
+        account=account,
+        direction=Direction.LONG,
+        tags=[],
+        kline_timestamp=1743264000000,
+        strategy_name="pinbar",
+        score=0.8
+    )
+
+    # 验证信号数据
+    assert signal.entry_price == Decimal("40000")
+    assert signal.suggested_stop_loss == Decimal("39500")  # Pinbar low
+    assert len(signal.take_profit_levels) >= 2
+
+    # 验证止盈价格
+    stop_distance = Decimal("500")  # 40000 - 39500
+    expected_tp1 = Decimal("40000") + (stop_distance * Decimal("1.5"))  # 40750
+    expected_tp2 = Decimal("40000") + (stop_distance * Decimal("3.0"))  # 41500
+
+    tp1 = signal.take_profit_levels[0]
+    tp2 = signal.take_profit_levels[1]
+
+    assert abs(Decimal(tp1["price"]) - expected_tp1) < Decimal("1")  # 允许 1 以内误差
+    assert abs(Decimal(tp2["price"]) - expected_tp2) < Decimal("1")
+
+    await repository.close()
+```
+
+---
+
+### 15.5 测试用例汇总表
+
+| 编号 | 测试名称 | 类型 | 文件 | 状态 |
+|------|----------|------|------|------|
+| UT-1 | LONG 方向止盈计算 | 单元 | test_risk_calculator.py | ⏸️ |
+| UT-2 | SHORT 方向止盈计算 | 单元 | test_risk_calculator.py | ⏸️ |
+| UT-3 | 用户配置覆盖默认值 | 单元 | test_risk_calculator.py | ⏸️ |
+| UT-4 | 止盈配置禁用 | 单元 | test_risk_calculator.py | ⏸️ |
+| UT-5 | 保存止盈级别 | 单元 | test_signal_repository.py | ⏸️ |
+| UT-6 | 获取止盈级别 | 单元 | test_signal_repository.py | ⏸️ |
+| IT-1 | 完整信号生成流程 | 集成 | test_take_profit.py | ⏸️ |
+| IT-2 | API 返回验证 | 集成 | test_take_profit.py | ⏸️ |
+| FT-1 | K 线图渲染止盈线 | 前端 | SignalDetailsDrawer.test.tsx | ⏸️ |
+| ET-1 | 端到端流程测试 | E2E | test_take_profit_flow.py | ⏸️ |
+
+---
+
+## 十六、实现检查清单
+
+### 后端
+
+- [ ] 定义 `TakeProfitLevel` 和 `TakeProfitConfig` 模型
+- [ ] 实现 `calculate_take_profit_levels()` 方法
+- [ ] 创建 `signal_take_profits` 表
+- [ ] 实现 `store_take_profit_levels()` 方法
+- [ ] 实现 `get_take_profit_levels()` 方法
+- [ ] 修改 API 返回包含 `take_profit_levels`
+- [ ] 修改通知消息格式
+- [ ] 编写单元测试
+- [ ] 编写集成测试
+
+### 前端
+
+- [ ] 扩展 `Signal` 类型定义
+- [ ] K 线图绘制止盈线（绿色虚线）
+- [ ] 数据面板展示多级别止盈信息
+- [ ] 编写前端测试
+
+### 配置
+
+- [ ] `core.yaml` 添加默认止盈配置
+- [ ] `user.yaml` 示例配置
+
+---
+
 *文档结束*
