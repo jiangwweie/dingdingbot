@@ -1,5 +1,158 @@
 # 进度日志
 
+## 2026-03-29 - 会话：S6-2 Pinbar 评分优化与信号覆盖设计 (进行中)
+
+**目标**: 设计 Pinbar 评分优化方案，实现信号覆盖机制，解决"十字星"低质量信号问题
+
+**背景**:
+- 用户回测发现：21:00 十字星 Pinbar（Score 0.727，波幅 116 USDT）和 22:00 真突破 Pinbar（Score 0.715，波幅 527 USDT）同时存在
+- 当前评分只看几何比例，无法区分"十字星"和"真突破"
+- 更高质量的信号出现时，没有覆盖/替代机制
+
+**需求**:
+1. 使用 ATR 门槛（min_atr_ratio=0.5）过滤低波幅 K 线
+2. 评分公式加入 ATR 归一化因子：`score = wick_ratio×0.7 + min(atr_ratio,2.0)×0.3`
+3. 同方向更高分信号出现时，自动替代旧信号（标记 SUPERSEDED）
+4. 通知增强：覆盖时明确告知用户，反向信号时提示风险
+
+### 关键设计决策 ✅
+
+#### 决策 1: 覆盖范围 - 同策略内覆盖
+- Pinbar 只和 Pinbar 比，Engulfing 只和 Engulfing 比
+- `dedup_key` 包含 `strategy_name`（现有逻辑保持不变）
+- 不同策略的分数不互相比较
+
+#### 决策 2: 评分公式 - 统一基类提供
+- 在 `PatternStrategy` 基类中提供 `calculate_score()` 方法
+- Pinbar 和 Engulfing 都复用同一公式，保证同策略内分数可比性
+- 评分与覆盖逻辑解耦：评分=策略内部事务，覆盖=系统通用框架
+
+#### 决策 3: ATR 门槛过滤 - 策略共用
+- `AtrFilterDynamic` 作为通用 Filter，所有策略自动应用
+- 统一配置 `min_atr_ratio=0.5`
+
+### 任务分解 ✅
+
+| 编号 | 任务 | 状态 | 预计工时 |
+|------|------|------|----------|
+| S6-2-1 | ATR 过滤器配置与集成 | ⏸️ pending | 2-3h |
+| S6-2-2 | 评分公式优化 (ATR 调整) | ⏸️ pending | 1-2h |
+| S6-2-3 | 数据库字段扩展 | ⏸️ pending | 1h |
+| S6-2-4 | 信号覆盖逻辑（整合冷却期） | ⏸️ pending | 2-3h |
+| S6-2-5 | 通知消息增强 | ⏸️ pending | 1-2h |
+| S6-2-6 | 前端信号列表增强 | ⏸️ pending | 2-3h |
+
+### 设计文档位置 📍
+
+**主设计文档**: `docs/tasks/2026-03-29-子任务 S6-2-Pinbar 评分优化与信号覆盖.md`
+
+**文档内容包括**:
+- 问题背景与数据分析（21:00 vs 22:00 Pinbar 案例）
+- 核心规则（ATR 门槛、评分公式、覆盖规则）
+- 现状分析（架构摸底，已有组件清单）
+- 任务分解（6 个子任务的详细实现方案）
+- 设计决策记录（覆盖范围、评分公式、ATR 过滤）
+- 依赖关系与验收标准
+- 影响范围（SignalStatus 扩展的前后端引用清单）
+
+### 现状分析 ✅
+
+**已有组件**:
+- `AtrFilterDynamic` 类已存在于 `filter_factory.py:332`（需配置启用）
+- 冷却期逻辑已存在于 `signal_pipeline.py:411-425`（需修改支持覆盖）
+
+**需要扩展的**:
+- `SignalStatus` 枚举：添加 `ACTIVE`、`SUPERSEDED`
+- `PinbarStrategy.detect()`：添加 ATR 评分调整
+- `signal_repository`：添加 `superseded_by` 等字段和操作
+- 前端组件：支持新状态渲染
+
+### SignalStatus 影响分析 ✅
+
+**影响范围**:
+- 后端：`models.py`、`signal_tracker.py`、`signal_pipeline.py`、`signal_repository.py`
+- 前端：`api.ts`、`SignalStatusBadge.tsx`、`Signals.tsx`
+- 数据库：添加 `superseded_by`、`opposing_signal_id`、`opposing_signal_score` 字段
+
+**最小修改清单**: 6 个文件（前后端各 3 个）
+
+### 下一步
+
+1. 从 S6-2-1 开始 - ATR 过滤器配置（工作量最小，快速验证）
+2. S6-2-3 数据库扩展可独立先行
+3. 每完成一个子任务就运行测试验证
+
+**Git 提交**: 待提交
+
+---
+
+## 2026-03-29 - 会话：MTF 过滤 `higher_tf_data_unavailable` 问题修复 (已完成)
+
+**目标**: 修复回测时 MTF 过滤器错误返回 `higher_tf_data_unavailable` 的问题
+
+**背景**:
+- ETH/USDT 1h 回测记录显示 MTF 过滤失败，原因 `higher_tf_data_unavailable`
+- 预期 4h MTF 数据应该可用（1h → 4h 映射，时间戳对齐正确）
+- 数据库记录：`kline_timestamp=1774760400000` (13:00 本地时间/05:00 UTC) 被过滤
+
+**根因分析**:
+
+1. **1h 数据加载**: 当指定时间范围时，`limit = max(expected_bars * 1.2, request.limit, 1000)` → 至少 1000 根
+2. **4h 数据加载**: 仅使用 `request.limit`（默认 100）→ 只获取 100 根
+3. **交易所行为**: `fetch_ohlcv` 从"当前最新时间"往前推，不是从指定时间开始
+4. **时间戳不覆盖**: 100 根 4h K 线可能无法覆盖 1h 数据的时间范围
+
+**进展**:
+
+### 任务 1: 问题诊断 ✅
+- [x] 分析数据库 `signal_attempts` 记录
+- [x] 确认时间戳对齐逻辑正确（1h 05:00 → 4h 04:00）
+- [x] 定位问题在 `_run_strategy_loop` 和 `_run_dynamic_strategy_loop` 方法
+
+### 任务 2: 修复实现 ✅
+- [x] 修改 `src/application/backtester.py`:
+  - 计算覆盖 kline 范围需要的 4h K 线数量
+  - 计算从"当前时间"回溯到 `min_kline_ts` 需要的 4h K 线数量
+  - 使用两者中较大值，确保至少 1000 根
+  - 添加诊断日志：`Fetching {limit} {higher_tf} candles for MTF (need {bars_from_now} bars from now)`
+
+### 修复逻辑
+
+```python
+# 1. 覆盖 kline 范围需要的 4h K 线
+expected_higher_tf_bars = duration_ms / (4h * 60 * 1000) + 5
+
+# 2. 从"当前时间"回溯需要的 4h K 线
+current_ts = int(time.time() * 1000)
+bars_from_now = (current_ts - min_kline_ts) / (4h * 60 * 1000) + 10
+
+# 3. 使用较大值，确保覆盖
+limit = max(expected_higher_tf_bars, bars_from_now, 1000)
+```
+
+### 任务 3: 文档沉淀 ✅
+- [x] 创建 `docs/diagnosis/2026-03-29-MTF 过滤 higher_tf_data_unavailable 问题修复.md`
+- [x] 记录问题现象、根因分析、修复方案、验证方法
+
+**验收标准**:
+- ✅ 代码语法检查通过
+- ✅ 修复逻辑覆盖两个方法（`_run_strategy_loop` 和 `_run_dynamic_strategy_loop`）
+- ✅ 添加 `import time` 支持当前时间戳计算
+- ✅ 诊断文档完整，便于后续排查
+
+**修改文件**:
+- `src/application/backtester.py` - 添加 `import time`，修复 4h 数据加载逻辑
+- `docs/diagnosis/2026-03-29-MTF 过滤 higher_tf_data_unavailable 问题修复.md` - 新诊断文档
+
+**Git 提交**: 待提交
+
+**后续验证**:
+1. 运行 ETH/USDT 1h 回测测试
+2. 检查日志：`INFO: Loaded {N} 4h candles for MTF validation`
+3. 检查数据库：`filter_reason` 不再出现 `higher_tf_data_unavailable`
+
+---
+
 ## 2026-03-29 - 会话：日志系统完善 (已完成)
 
 **目标**: 完善日志系统，实现文件持久化、按天轮转、过滤原因追踪
