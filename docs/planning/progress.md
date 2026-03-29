@@ -848,11 +848,11 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 
 | 编号 | 任务 | 优先级 | 预计工作量 | 状态 |
 |------|------|--------|----------|------|
-| S2-5 | ATR 过滤器核心逻辑实现 | 🔴 最高 | 4-6 小时 | ⏸️ pending |
+| S2-5 | ATR 过滤器核心逻辑实现 | 🔴 最高 | 4-6 小时 | 🔄 进行中 (其他窗口) |
 | 回测信号图表 | 实现信号详情 K 线图展示 | 🟠 高 | 2-3 小时 | ⏸️ pending |
-| S2-4 | 信号标签动态化 | 🟡 中 | 2-3 小时 | ⏸️ pending |
-| S2-1 | 实盘热重载 | 🟡 中 | 6-8 小时 | ⏸️ pending |
-| S2-3 | 前端硬编码清理 | 🟡 中 | 2-3 小时 | ⏸️ pending |
+| S6-1 | 冷却缓存优化 | 🟡 中 | 3-4 小时 | ⏸️ pending |
+| 立即测试增强 | 方案 A（多 K 线测试） | 🟡 中 | 2-3 小时 | ⏸️ pending |
+| Pinbar 参数优化 | 调整默认参数 | 🟡 中 | 30 分钟 | ⏸️ pending |
 
 ---
 
@@ -860,7 +860,7 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 
 | 提交号 | 信息 |
 |--------|------|
-| (待提交) | feat: 修复回测功能策略反序列化 + 时间范围支持 |
+| 41f271f | feat: 回测功能修复 + 诊断分析师角色创建 |
 | 88d2e8f | feat(frontend): 添加立即测试功能提示说明 |
 | 17bfeed | fix: 修复 API 接口和前端 React key 警告 + 启动脚本优化 |
 
@@ -876,7 +876,45 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 | Phase 2 (交互升维) | ✅ 完成 | v0.2.0 |
 | Phase 3 (风控执行) | ✅ 完成 | v0.3.0 |
 | Phase 4+5 (工业化调优 + 状态增强) | ✅ 完成 | v0.6.0 |
-| 回测功能修复 | ✅ 完成 | 2026-03-28 |
-| S2-5 (ATR 过滤器) | ⏸️ 待执行 | **最高优先级** |
+| 回测功能修复 | ✅ 完成 | 41f271f |
+| S2-5 (ATR 过滤器) | 🔄 进行中 | 其他窗口处理中 |
+| 回测沙箱集成 | ✅ 完成 | 2026-03-29 会话 |
+
+---
+
+## 2026-03-29 - 会话：回测沙箱集成策略工作台 + 信号历史
+
+**目标**: 实现回测沙箱与策略工作台的集成，支持策略模板导入和回测信号持久化
+
+**进展**:
+- [x] **后端 API 实现** ✅
+  - `GET /api/strategies/templates` - 获取策略模板列表
+  - `POST /api/backtest` - 支持 `save_signals` 参数
+  - `GET /api/backtest/signals` - 查询回测信号历史
+  - `signal_repository.save_signal()` - 添加 `source` 字段支持
+
+- [x] **前端组件实现** ✅
+  - `StrategyTemplatePicker.tsx` - 策略模板选择器
+  - 修改 `Backtest.tsx` - 添加导入按钮和历史列表
+  - 复用 `SignalDetailsDrawer` - 信号详情查看
+
+- [x] **数据库迁移** ✅
+  - `signals.source` 字段 - 区分实盘/回测信号
+  - 创建索引 `idx_signals_source`
+
+- [x] **TypeScript 编译验证** ✅
+  - `npm run build` 成功完成
+  - 构建产物：`dist/assets/index-2NBGMy6D.js` (679.63 kB)
+
+**交付物**:
+- 策略模板单选导入功能
+- 回测信号持久化到数据库
+- 回测信号历史查询接口
+- 信号详情抽屉复用
+
+**用户确认需求**:
+1. ✅ 回测信号持久化到数据库（带 `source` 字段区分）
+2. ✅ 策略模板单选导入
+3. ✅ 回测信号详情页展示 K 线图表（复用现有组件）
 
 ---

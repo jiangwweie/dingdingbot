@@ -200,6 +200,7 @@ class SignalQuery(BaseModel):
     status: Optional[str] = None  # PENDING, WON, LOST
     start_time: Optional[str] = None  # ISO 8601 or timestamp
     end_time: Optional[str] = None
+    source: Optional[str] = None  # 'live' or 'backtest'
 
 
 class SignalDeleteRequest(BaseModel):
@@ -212,6 +213,7 @@ class SignalDeleteRequest(BaseModel):
     status: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
+    source: Optional[str] = None  # 'live' or 'backtest'
 
 
 class SignalDeleteResponse(BaseModel):

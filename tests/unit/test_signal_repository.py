@@ -734,3 +734,201 @@ class TestPerformanceTracking:
         assert stats["won_count"] == 2
         assert stats["lost_count"] == 1
         assert stats["win_rate"] == 2 / 3  # 2 won out of 3 closed
+
+
+class TestEvaluationSummaryAndTraceTree:
+    """Test evaluation_summary and trace_tree generation."""
+
+    @pytest.mark.asyncio
+    async def test_save_attempt_generates_evaluation_summary(self, repository):
+        """Test that save_attempt generates evaluation_summary field."""
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.85,
+            details={"wick_ratio": 0.7, "body_ratio": 0.2},
+        )
+
+        filter_results = [
+            ("ema_trend", FilterResult(passed=True, reason="trend_match")),
+            ("mtf_validation", FilterResult(passed=True, reason="confirmed")),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="SIGNAL_FIRED",
+        )
+
+        await repository.save_attempt(attempt, "BTC/USDT:USDT", "1h")
+
+        # Verify evaluation_summary is saved
+        async with repository._db.execute(
+            "SELECT evaluation_summary FROM signal_attempts WHERE symbol = ?", ("BTC/USDT:USDT",)
+        ) as cursor:
+            row = await cursor.fetchone()
+            summary = row["evaluation_summary"]
+            assert summary is not None
+            assert "信号评估报告" in summary
+            assert "币种：BTC/USDT:USDT" in summary
+            assert "周期：1h" in summary
+            assert "策略：pinbar" in summary
+            assert "【评估结果】" in summary
+            assert "信号触发" in summary
+            assert "【形态检测】" in summary
+            assert "【过滤器结果】" in summary
+            assert "【最终结果】" in summary
+
+    @pytest.mark.asyncio
+    async def test_save_attempt_generates_trace_tree(self, repository):
+        """Test that save_attempt generates trace_tree field."""
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.92,
+            details={"wick_ratio": 0.8, "body_ratio": 0.15},
+        )
+
+        filter_results = [
+            ("ema_trend", FilterResult(passed=True, reason="trend_match")),
+            ("mtf_validation", FilterResult(passed=True, reason="confirmed")),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="SIGNAL_FIRED",
+        )
+
+        await repository.save_attempt(attempt, "ETH/USDT:USDT", "4h")
+
+        # Verify trace_tree is saved
+        async with repository._db.execute(
+            "SELECT trace_tree FROM signal_attempts WHERE symbol = ?", ("ETH/USDT:USDT",)
+        ) as cursor:
+            row = await cursor.fetchone()
+            trace_tree_json = row["trace_tree"]
+            assert trace_tree_json is not None
+
+            import json
+            trace_tree = json.loads(trace_tree_json)
+
+            # Verify root node structure
+            assert "node_id" in trace_tree
+            assert "node_type" in trace_tree
+            assert trace_tree["node_type"] == "and_gate"
+            assert "passed" in trace_tree
+            assert trace_tree["passed"] is True  # SIGNAL_FIRED
+            assert "reason" in trace_tree
+            assert "metadata" in trace_tree
+            assert "children" in trace_tree
+
+            # Verify children nodes
+            assert len(trace_tree["children"]) >= 2  # At least trigger + filters
+
+            # First child should be trigger
+            trigger_node = trace_tree["children"][0]
+            assert trigger_node["node_type"] == "trigger"
+            assert trigger_node["passed"] is True
+            assert trigger_node["metadata"]["trigger_type"] == "pinbar"
+            assert trigger_node["metadata"]["score"] == 0.92
+
+            # Remaining children should be filters
+            filter_nodes = trace_tree["children"][1:]
+            assert len(filter_nodes) == 2
+            assert filter_nodes[0]["node_type"] == "filter"
+            assert filter_nodes[0]["passed"] is True
+            assert filter_nodes[0]["metadata"]["filter_name"] == "ema_trend"
+
+    @pytest.mark.asyncio
+    async def test_save_attempt_no_pattern_generates_correct_summary(self, repository):
+        """Test evaluation_summary for NO_PATTERN attempt."""
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=None,
+            filter_results=[],
+            final_result="NO_PATTERN",
+        )
+
+        await repository.save_attempt(attempt, "SOL/USDT:USDT", "15m")
+
+        # Verify evaluation_summary
+        async with repository._db.execute(
+            "SELECT evaluation_summary FROM signal_attempts WHERE symbol = ?", ("SOL/USDT:USDT",)
+        ) as cursor:
+            row = await cursor.fetchone()
+            summary = row["evaluation_summary"]
+            assert summary is not None
+            assert "未检测到有效形态" in summary
+
+        # Verify trace_tree
+        async with repository._db.execute(
+            "SELECT trace_tree FROM signal_attempts WHERE symbol = ?", ("SOL/USDT:USDT",)
+        ) as cursor:
+            row = await cursor.fetchone()
+            trace_tree_json = row["trace_tree"]
+            import json
+            trace_tree = json.loads(trace_tree_json)
+
+            # Root should not pass
+            assert trace_tree["passed"] is False
+
+            # Trigger node should not pass
+            trigger_node = trace_tree["children"][0]
+            assert trigger_node["node_type"] == "trigger"
+            assert trigger_node["passed"] is False
+            assert trigger_node["reason"] == "no_pattern_detected"
+
+    @pytest.mark.asyncio
+    async def test_save_attempt_filtered_generates_correct_summary(self, repository):
+        """Test evaluation_summary for FILTERED attempt."""
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.SHORT,
+            score=0.75,
+            details={"wick_ratio": 0.65, "body_ratio": 0.25},
+        )
+
+        filter_results = [
+            ("ema_trend", FilterResult(passed=True, reason="trend_match")),
+            ("mtf_validation", FilterResult(passed=False, reason="bearish_trend_blocks_short")),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="FILTERED",
+        )
+
+        await repository.save_attempt(attempt, "BNB/USDT:USDT", "1h")
+
+        # Verify evaluation_summary mentions the failed filter
+        async with repository._db.execute(
+            "SELECT evaluation_summary FROM signal_attempts WHERE symbol = ?", ("BNB/USDT:USDT",)
+        ) as cursor:
+            row = await cursor.fetchone()
+            summary = row["evaluation_summary"]
+            assert summary is not None
+            assert "被过滤器" in summary
+            assert "mtf_validation" in summary
+
+        # Verify trace_tree
+        async with repository._db.execute(
+            "SELECT trace_tree FROM signal_attempts WHERE symbol = ?", ("BNB/USDT:USDT",)
+        ) as cursor:
+            row = await cursor.fetchone()
+            trace_tree_json = row["trace_tree"]
+            import json
+            trace_tree = json.loads(trace_tree_json)
+
+            # Root should not pass
+            assert trace_tree["passed"] is False
+
+            # Find the failed filter node
+            filter_nodes = [n for n in trace_tree["children"] if n["node_type"] == "filter"]
+            mtf_node = next(n for n in filter_nodes if n["metadata"]["filter_name"] == "mtf_validation")
+            assert mtf_node["passed"] is False
+            assert mtf_node["reason"] == "bearish_trend_blocks_short"

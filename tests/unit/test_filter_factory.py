@@ -355,6 +355,323 @@ class TestMtfFilterDynamic:
 
 
 # ============================================================
+# AtrFilterDynamic Tests
+# ============================================================
+class TestAtrFilterDynamic:
+    """Test ATR volatility filter dynamic implementation."""
+
+    def test_filter_properties(self):
+        """Test ATR filter properties."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        assert f.name == "atr_volatility"
+        assert f.is_stateful is True
+        assert f._period == 14
+        assert f._min_atr_ratio == Decimal("0.5")
+
+    def test_update_state(self, sample_kline):
+        """Test updating ATR state with klines."""
+        f = AtrFilterDynamic(period=14, enabled=True)
+
+        # Update state with multiple klines for ATR warmup
+        for i in range(20):
+            kline = KlineData(
+                symbol="BTC/USDT:USDT",
+                timeframe="15m",
+                timestamp=1000000 + i * 60000,
+                open=Decimal("50000") + i,
+                high=Decimal("50100") + i,
+                low=Decimal("49900") + i,
+                close=Decimal("50050") + i,
+                volume=Decimal("1000"),
+                is_closed=True,
+            )
+            f.update_state(kline, "BTC/USDT:USDT", "15m")
+
+        # ATR should have value after warmup (14 periods)
+        atr = f._get_atr("BTC/USDT:USDT", "15m")
+        assert atr is not None
+        assert atr > 0
+
+    def test_atr_filter_disabled_always_passes(self, sample_kline):
+        """Test that disabled ATR filter always passes."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=False)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={"wick_ratio": 0.7},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=sample_kline,
+        )
+
+        event = f.check(pattern, context)
+        assert event.passed is True
+        assert event.reason == "filter_disabled"
+
+    def test_atr_filter_rejects_low_volatility(self):
+        """Test that low volatility klines are rejected."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        # Create small volatility kline (波幅仅 0.02)
+        kline = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            timestamp=1000000,
+            open=Decimal("100"),
+            high=Decimal("100.01"),  # 波幅很小
+            low=Decimal("99.99"),
+            close=Decimal("100"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={"wick_ratio": 0.7},
+        )
+
+        # Pre-populate ATR data with high ATR (1.0)
+        # min_atr_ratio=0.5, so min_range = 1.0 * 0.5 = 0.5
+        # candle_range = 0.02 < 0.5, should be rejected
+        key = "BTC/USDT:USDT:15m"
+        f._atr_values[key] = [Decimal("1.0")] * 14
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=kline,
+        )
+
+        event = f.check(pattern, context)
+        assert event.passed is False
+        assert event.reason == "insufficient_volatility"
+        assert "candle_range" in event.metadata
+        assert "atr" in event.metadata
+        assert "min_required" in event.metadata
+
+    def test_atr_filter_accepts_normal_volatility(self):
+        """Test that normal volatility klines pass."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        # Create normal volatility kline (波幅 200)
+        kline = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            timestamp=1000000,
+            open=Decimal("50000"),
+            high=Decimal("50150"),  # 波幅 150
+            low=Decimal("49950"),   # 波幅 150
+            close=Decimal("50100"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={"wick_ratio": 0.7},
+        )
+
+        # Pre-populate ATR data with ATR=100
+        # min_atr_ratio=0.5, so min_range = 100 * 0.5 = 50
+        # candle_range = 200 > 50, should pass
+        key = "BTC/USDT:USDT:15m"
+        f._atr_values[key] = [Decimal("100")] * 14
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=kline,
+        )
+
+        event = f.check(pattern, context)
+        assert event.passed is True
+        assert event.reason == "volatility_sufficient"
+        assert "candle_range" in event.metadata
+        assert "atr" in event.metadata
+        assert event.metadata["ratio"] == 2.0  # 200 / 100 = 2.0
+
+    def test_atr_filter_returns_metadata(self):
+        """Test that TraceEvent contains proper metadata."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        kline = KlineData(
+            symbol="ETH/USDT:USDT",
+            timeframe="1h",
+            timestamp=2000000,
+            open=Decimal("3000"),
+            high=Decimal("3050"),
+            low=Decimal("2980"),
+            close=Decimal("3030"),
+            volume=Decimal("500"),
+            is_closed=True,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.SHORT,
+            score=0.75,
+            details={"wick_ratio": 0.65},
+        )
+
+        # Pre-populate ATR data
+        key = "ETH/USDT:USDT:1h"
+        f._atr_values[key] = [Decimal("50")] * 14
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="1h",
+            kline=kline,
+        )
+
+        event = f.check(pattern, context)
+
+        # Verify metadata structure
+        assert isinstance(event.metadata, dict)
+        assert "candle_range" in event.metadata
+        assert "atr" in event.metadata
+        assert "ratio" in event.metadata
+        assert event.metadata["candle_range"] == 70.0  # 3050 - 2980
+        assert event.metadata["atr"] == 50.0
+        assert event.metadata["ratio"] == 1.4  # 70 / 50 = 1.4
+
+    def test_atr_filter_data_not_ready(self, sample_kline):
+        """Test ATR filter when ATR data is not ready (not enough periods)."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={"wick_ratio": 0.7},
+        )
+
+        # Don't populate ATR data - should fail with atr_data_not_ready
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=sample_kline,
+        )
+
+        event = f.check(pattern, context)
+        assert event.passed is False
+        assert event.reason == "atr_data_not_ready"
+        assert "required_period" in event.metadata
+        assert event.metadata["required_period"] == 14
+
+    def test_atr_filter_edge_case_equals_min(self):
+        """Test edge case where candle_range equals min_required exactly."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        # Create kline where candle_range == min_required exactly
+        kline = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            timestamp=1000000,
+            open=Decimal("100"),
+            high=Decimal("100.5"),  # candle_range = 1.0
+            low=Decimal("99.5"),    # candle_range = 1.0
+            close=Decimal("100"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={"wick_ratio": 0.7},
+        )
+
+        # ATR=2.0, min_atr_ratio=0.5, min_range = 2.0 * 0.5 = 1.0
+        # candle_range = 1.0 == min_range, should PASS (not strictly less than)
+        key = "BTC/USDT:USDT:15m"
+        f._atr_values[key] = [Decimal("2.0")] * 14
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=kline,
+        )
+
+        event = f.check(pattern, context)
+        # candle_range (1.0) is NOT < min_range (1.0), so it passes
+        assert event.passed is True
+        assert event.reason == "volatility_sufficient"
+        assert event.metadata["ratio"] == 0.5  # 1.0 / 2.0 = 0.5
+
+    def test_atr_filter_kline_missing(self):
+        """Test ATR filter when kline data is None."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={"wick_ratio": 0.7},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=None,  # No kline data
+        )
+
+        event = f.check(pattern, context)
+        assert event.passed is False
+        assert event.reason == "kline_data_missing"
+        assert event.metadata["error"] == "kline is None"
+
+    def test_atr_filter_short_signal(self):
+        """Test ATR filter works for SHORT signals too."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.3"), enabled=True)
+
+        kline = KlineData(
+            symbol="SOL/USDT:USDT",
+            timeframe="15m",
+            timestamp=1000000,
+            open=Decimal("100"),
+            high=Decimal("105"),   # candle_range = 10
+            low=Decimal("95"),
+            close=Decimal("96"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.SHORT,
+            score=0.75,
+            details={"wick_ratio": 0.65},
+        )
+
+        # ATR=20, min_atr_ratio=0.3, min_range = 20 * 0.3 = 6
+        # candle_range = 10 > 6, should pass
+        key = "SOL/USDT:USDT:15m"
+        f._atr_values[key] = [Decimal("20")] * 14
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=kline,
+        )
+
+        event = f.check(pattern, context)
+        assert event.passed is True
+        assert event.reason == "volatility_sufficient"
+        assert event.metadata["ratio"] == 0.5  # 10 / 20 = 0.5
+
+
+# ============================================================
 # StrategyWithFilters Tests
 # ============================================================
 class TestStrategyWithFilters:

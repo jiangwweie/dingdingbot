@@ -130,6 +130,8 @@ class Backtester:
         self,
         request: BacktestRequest,
         account_snapshot: Optional[AccountSnapshot] = None,
+        save_signals: bool = False,
+        repository = None,  # Optional SignalRepository for saving signals
     ) -> BacktestReport:
         """
         Run backtest with isolated config sandbox.
@@ -142,6 +144,8 @@ class Backtester:
             request: Backtest request parameters
             account_snapshot: Optional account snapshot for position sizing.
                               If not provided, uses a default snapshot.
+            save_signals: If True, save fired signals to database (default False)
+            repository: SignalRepository instance for saving signals
 
         Returns:
             BacktestReport with detailed statistics
@@ -186,6 +190,14 @@ class Backtester:
         # Step 5: Calculate statistics
         signal_stats = self._calculate_signal_stats(attempts)
         reject_reasons = self._calculate_reject_reasons(attempts)
+
+        # Step 5.5: Save signals to database if requested
+        saved_count = 0
+        if save_signals and repository is not None:
+            saved_count = await self._save_backtest_signals(
+                attempts, klines, request, repository
+            )
+            logger.info(f"Saved {saved_count} backtest signals to database")
 
         # Step 6: Simulate win rate (simplified - based on stop-loss distance)
         simulated_win_rate, avg_gain, avg_loss = await self._simulate_win_rate(
@@ -606,6 +618,90 @@ class Backtester:
                 for name, r in attempt.filter_results
             ],
         }
+
+    async def _save_backtest_signals(
+        self,
+        attempts: List[SignalAttempt],
+        klines: List[KlineData],
+        request: BacktestRequest,
+        repository,  # SignalRepository
+    ) -> int:
+        """
+        Save fired signals from backtest to database.
+
+        Args:
+            attempts: List of signal attempts
+            klines: List of K-line data
+            request: Backtest request
+            repository: SignalRepository instance
+
+        Returns:
+            Number of signals saved
+        """
+        from src.domain.risk_calculator import RiskCalculator
+        from src.domain.models import SignalResult, AccountSnapshot
+
+        saved_count = 0
+        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=20)
+        calculator = RiskCalculator(risk_config)
+
+        # Create mock account for position sizing
+        account_snapshot = AccountSnapshot(
+            total_balance=Decimal("10000"),
+            available_balance=Decimal("10000"),
+            unrealized_pnl=Decimal("0"),
+            positions=[],
+            timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
+        )
+
+        # Build kline map for quick lookup
+        kline_map = {k.timestamp: k for k in klines}
+
+        for attempt in attempts:
+            if attempt.final_result != "SIGNAL_FIRED" or not attempt.pattern:
+                continue
+
+            # Get entry kline
+            entry_kline = kline_map.get(attempt.kline_timestamp)
+            if not entry_kline:
+                continue
+
+            # Calculate stop loss
+            stop_loss = calculator.calculate_stop_loss(
+                entry_kline, attempt.pattern.direction
+            )
+
+            # Calculate position size
+            position_size, leverage = calculator.calculate_position_size(
+                account_snapshot,
+                entry_kline.close,
+                stop_loss,
+                attempt.pattern.direction,
+            )
+
+            # Build SignalResult
+            signal = SignalResult(
+                symbol=request.symbol,
+                timeframe=request.timeframe,
+                direction=attempt.pattern.direction,
+                entry_price=entry_kline.close,
+                suggested_stop_loss=stop_loss,
+                suggested_position_size=position_size,
+                current_leverage=leverage,
+                tags=[{"name": "backtest", "value": "historical"}],
+                risk_reward_info=f"Risk {risk_config.max_loss_percent*100}% = {calculator._quantize_price(account_snapshot.available_balance * risk_config.max_loss_percent, entry_kline.close)} USDT",
+                status="PENDING",
+                pnl_ratio=0.0,
+                kline_timestamp=attempt.kline_timestamp,
+                strategy_name=attempt.strategy_name,
+                score=attempt.pattern.score,
+            )
+
+            # Save to database with source='backtest'
+            await repository.save_signal(signal, source="backtest")
+            saved_count += 1
+
+        return saved_count
 
 
 # ============================================================

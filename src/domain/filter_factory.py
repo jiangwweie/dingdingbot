@@ -392,12 +392,55 @@ class AtrFilterDynamic(FilterBase):
                 reason="filter_disabled"
             )
 
-        # ATR filter not yet fully implemented - placeholder
-        # In full implementation, would check if ATR ratio meets minimum threshold
+        kline = context.kline
+        if kline is None:
+            return TraceEvent(
+                node_name=self.name,
+                passed=False,
+                reason="kline_data_missing",
+                metadata={"error": "kline is None"}
+            )
+
+        atr = self._get_atr(kline.symbol, kline.timeframe)
+
+        if atr is None:
+            return TraceEvent(
+                node_name=self.name,
+                passed=False,
+                reason="atr_data_not_ready",
+                metadata={
+                    "symbol": kline.symbol,
+                    "timeframe": kline.timeframe,
+                    "required_period": self._period,
+                }
+            )
+
+        # 计算 K 线波幅与 ATR 的比率
+        candle_range = kline.high - kline.low
+        min_range = atr * self._min_atr_ratio
+
+        if candle_range < min_range:
+            return TraceEvent(
+                node_name=self.name,
+                passed=False,
+                reason="insufficient_volatility",
+                metadata={
+                    "candle_range": float(candle_range),
+                    "atr": float(atr),
+                    "min_required": float(min_range),
+                    "ratio": float(candle_range / atr),
+                }
+            )
+
         return TraceEvent(
             node_name=self.name,
             passed=True,
-            reason="atr_threshold_met"
+            reason="volatility_sufficient",
+            metadata={
+                "candle_range": float(candle_range),
+                "atr": float(atr),
+                "ratio": float(candle_range / atr),
+            }
         )
 
 

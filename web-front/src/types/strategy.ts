@@ -29,6 +29,7 @@ import type {
   VolatilityFilterParams,
   TimeFilterParams,
   PriceActionFilterParams,
+  AtrFilterParams,
 } from '../lib/api';
 
 export type { TriggerType, FilterType } from '../lib/api';
@@ -51,6 +52,7 @@ export interface FilterConfig extends Omit<APIFilterConfig, 'params'> {
     | VolatilityFilterParams
     | TimeFilterParams
     | PriceActionFilterParams
+    | AtrFilterParams
     | Record<string, unknown>;
 }
 

@@ -279,6 +279,7 @@ export default function Signals() {
   const [directionFilter, setDirectionFilter] = useState('');
   const [strategyFilter, setStrategyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');  // '' = all, 'live', 'backtest'
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [sortBy, setSortBy] = useState('created_at');
@@ -300,6 +301,7 @@ export default function Signals() {
   if (directionFilter) url += `&direction=${directionFilter}`;
   if (strategyFilter) url += `&strategy_name=${strategyFilter}`;
   if (statusFilter) url += `&status=${statusFilter.toUpperCase()}`;
+  if (sourceFilter) url += `&source=${sourceFilter}`;
   if (startDate) url += `&start_time=${startDate}T00:00:00Z`;
   if (endDate) url += `&end_time=${endDate}T23:59:59Z`;
   if (sortBy) url += `&sort_by=${sortBy}`;
@@ -318,6 +320,7 @@ export default function Signals() {
     setDirectionFilter('');
     setStrategyFilter('');
     setStatusFilter('');
+    setSourceFilter('');
     setStartDate('');
     setEndDate('');
     setSortBy('created_at');
@@ -378,6 +381,7 @@ export default function Signals() {
     if (directionFilter) filterDesc.push(`方向=${directionFilter === 'long' ? '做多' : '做空'}`);
     if (strategyFilter) filterDesc.push(`策略=${strategyFilter}`);
     if (statusFilter) filterDesc.push(`状态=${statusFilter}`);
+    if (sourceFilter) filterDesc.push(`来源=${sourceFilter === 'live' ? '实盘' : '回测'}`);
     if (startDate) filterDesc.push(`开始日期=${startDate}`);
     if (endDate) filterDesc.push(`结束日期=${endDate}`);
 
@@ -391,6 +395,7 @@ export default function Signals() {
       if (directionFilter) payload.direction = directionFilter;
       if (strategyFilter) payload.strategy_name = strategyFilter;
       if (statusFilter) payload.status = statusFilter.toUpperCase();
+      if (sourceFilter) payload.source = sourceFilter;
       if (startDate) payload.start_time = `${startDate}T00:00:00Z`;
       if (endDate) payload.end_time = `${endDate}T23:59:59Z`;
 
@@ -536,6 +541,16 @@ export default function Signals() {
             <option value="lost">止损</option>
           </select>
 
+          <select
+            value={sourceFilter}
+            onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
+            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+          >
+            <option value="">全部来源</option>
+            <option value="live">实盘信号</option>
+            <option value="backtest">回测信号</option>
+          </select>
+
           <div className="flex items-center gap-2">
             <input
               type="date"
@@ -554,7 +569,7 @@ export default function Signals() {
             />
           </div>
 
-          {(symbolFilter || directionFilter || strategyFilter || statusFilter || startDate || endDate) && (
+          {(symbolFilter || directionFilter || strategyFilter || statusFilter || sourceFilter || startDate || endDate) && (
             <button
               onClick={clearFilters}
               className="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
@@ -774,7 +789,7 @@ export default function Signals() {
             <div className="text-sm text-gray-500">
               共 <span className="font-medium text-gray-900">{total}</span> 条 / 第 <span className="font-medium text-gray-900">{page}</span> 页
             </div>
-            {(symbolFilter || directionFilter || strategyFilter || statusFilter || startDate || endDate) && (
+            {(symbolFilter || directionFilter || strategyFilter || statusFilter || sourceFilter || startDate || endDate) && (
               <button
                 onClick={handleDeleteAll}
                 disabled={isDeleting}

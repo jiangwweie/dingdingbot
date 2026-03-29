@@ -165,6 +165,7 @@ async def get_signals(
     status: Optional[str] = Query(default=None),
     start_time: Optional[str] = Query(default=None),
     end_time: Optional[str] = Query(default=None),
+    source: Optional[str] = Query(default=None, pattern="^(live|backtest)$"),
     sort_by: str = Query(default="created_at", pattern="^(created_at|pattern_score)$"),
     order: str = Query(default="desc", pattern="^(asc|desc|ASC|DESC)$"),
 ):
@@ -180,6 +181,7 @@ async def get_signals(
         status: Optional status filter ("PENDING", "WON", "LOST")
         start_time: Optional start time filter (ISO 8601)
         end_time: Optional end time filter (ISO 8601)
+        source: Optional source filter ("live" or "backtest")
         sort_by: Sort field ("created_at" or "pattern_score"), default "created_at"
         order: Sort order ("asc" or "desc"), default "desc"
     """
@@ -194,6 +196,7 @@ async def get_signals(
             status=status,
             start_time=start_time,
             end_time=end_time,
+            source=source,
             sort_by=sort_by,
             order=order,
         )
@@ -290,6 +293,53 @@ async def get_signal_stats():
         repo = _get_repository()
         stats = await repo.get_stats()
         return stats
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/backtest/signals")
+async def get_backtest_signals(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    symbol: Optional[str] = Query(default=None),
+    timeframe: Optional[str] = Query(default=None),
+    strategy_name: Optional[str] = Query(default=None),
+):
+    """
+    Query backtest signals with pagination.
+
+    Args:
+        limit: Maximum number of results (1-200)
+        offset: Number of results to skip
+        symbol: Optional symbol filter
+        timeframe: Optional timeframe filter
+        strategy_name: Optional strategy name filter
+
+    Returns:
+        {"signals": list[Signal], "total": int}
+    """
+    try:
+        repo = _get_repository()
+        result = await repo.get_signals(
+            limit=limit,
+            offset=offset,
+            symbol=symbol,
+            direction=None,
+            strategy_name=strategy_name,
+            status=None,
+            start_time=None,
+            end_time=None,
+            sort_by="created_at",
+            order="desc",
+            source="backtest",  # Only fetch backtest signals
+        )
+
+        return {
+            "signals": result["data"],
+            "total": result["total"],
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -683,6 +733,7 @@ async def update_config(
 @app.post("/api/backtest")
 async def run_backtest(
     request: BacktestRequest,
+    save_signals: Optional[bool] = False,
 ):
     """
     Run strategy backtest on historical data.
@@ -698,7 +749,8 @@ async def run_backtest(
         "max_body_ratio": 0.3,
         "body_position_tolerance": 0.1,
         "trend_filter_enabled": true,
-        "mtf_validation_enabled": true
+        "mtf_validation_enabled": true,
+        "save_signals": false  // Optional: save fired signals to database
     }
 
     Returns:
@@ -717,8 +769,11 @@ async def run_backtest(
         # Get current account snapshot for position sizing
         account_snapshot = _account_getter() if _account_getter else None
 
+        # Get repository for saving signals
+        repository = _get_repository() if save_signals else None
+
         # Run backtest
-        report = await backtester.run_backtest(request, account_snapshot)
+        report = await backtester.run_backtest(request, account_snapshot, save_signals=save_signals, repository=repository)
 
         return {
             "status": "success",
@@ -862,6 +917,28 @@ async def get_strategy_metadata():
         "triggers": triggers,
         "filters": filters,
     }
+
+
+@app.get("/api/strategies/templates")
+async def list_strategy_templates():
+    """
+    Get simplified strategy template list for backtest sandbox.
+
+    Returns only basic info (id, name, description) for quick selection.
+    Use GET /api/strategies/{id} to fetch full strategy details.
+    """
+    try:
+        repo = _get_repository()
+        strategies = await repo.get_all_custom_strategies()
+        templates = [
+            {"id": s["id"], "name": s["name"], "description": s["description"]}
+            for s in strategies
+        ]
+        return {"templates": templates}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/api/strategies")
@@ -1330,6 +1407,7 @@ async def preview_strategy(request: StrategyPreviewRequest):
 
         # Build evaluation summary
         summary_lines = []
+        result_icon = "✅" if signal_fired else "❌"
         summary_lines.append(f"评估结果：{'信号触发' if signal_fired else '信号未触发'} {result_icon}")
         summary_lines.append("")
         summary_lines.append("评估路径：")
