@@ -363,12 +363,17 @@ class Backtester:
                         full_expected_bars = int(full_duration_ms / (higher_tf_minutes * 60 * 1000)) + 5
                         expected_higher_tf_bars = max(expected_higher_tf_bars, full_expected_bars, 1000)
 
-                    # IMPORTANT: The exchange returns candles from "latest available" backwards.
-                    # We need to ensure that the oldest returned candle has timestamp <= min_kline_ts
-                    # Conservative approach: always fetch at least 1000 candles for higher TF
-                    limit = max(expected_higher_tf_bars, 1000)
+                    # CRITICAL: Exchange returns candles from "latest available" backwards.
+                    # We need to ensure the oldest returned candle <= min_kline_ts.
+                    # Calculate bars needed from "now" back to min_kline_ts.
+                    current_ts = int(time.time() * 1000)
+                    time_from_now_ms = current_ts - min_kline_ts
+                    bars_from_now = int(time_from_now_ms / (higher_tf_minutes * 60 * 1000)) + 10  # +10 buffer
 
-                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, duration: {duration_ms}ms)")
+                    # Use the larger of the two calculations
+                    limit = max(expected_higher_tf_bars, bars_from_now, 1000)
+
+                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, need {bars_from_now} bars from now)")
                 else:
                     limit = max(request.limit, 1000)
 
@@ -453,12 +458,17 @@ class Backtester:
                         full_expected_bars = int(full_duration_ms / (higher_tf_minutes * 60 * 1000)) + 5
                         expected_higher_tf_bars = max(expected_higher_tf_bars, full_expected_bars, 1000)
 
-                    # IMPORTANT: The exchange returns candles from "latest available" backwards.
-                    # We need to ensure that the oldest returned candle has timestamp <= min_kline_ts
-                    # Conservative approach: always fetch at least 1000 candles for higher TF
-                    limit = max(expected_higher_tf_bars, 1000)
+                    # CRITICAL: Exchange returns candles from "latest available" backwards.
+                    # We need to ensure the oldest returned candle <= min_kline_ts.
+                    # Calculate bars needed from "now" back to min_kline_ts.
+                    current_ts = int(time.time() * 1000)
+                    time_from_now_ms = current_ts - min_kline_ts
+                    bars_from_now = int(time_from_now_ms / (higher_tf_minutes * 60 * 1000)) + 10  # +10 buffer
 
-                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, duration: {duration_ms}ms)")
+                    # Use the larger of the two calculations
+                    limit = max(expected_higher_tf_bars, bars_from_now, 1000)
+
+                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, need {bars_from_now} bars from now)")
                 else:
                     limit = max(request.limit, 1000)
 
