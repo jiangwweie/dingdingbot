@@ -238,6 +238,24 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # Add tags_json column for dynamic signal tags (backtest support)
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN tags_json TEXT DEFAULT '[]'
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Add risk_info column for signal risk description
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN risk_info TEXT DEFAULT ''
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
         # Create index for source
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_signals_source ON signals(source)
