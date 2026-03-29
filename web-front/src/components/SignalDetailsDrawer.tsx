@@ -6,7 +6,7 @@ import { fetchSignalContext, Signal } from '../lib/api';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 
-interface SignalDetailsDrawerProps {
+interface SignalDetailsModalProps {
   signalId: string;
   isOpen: boolean;
   onClose: () => void;
@@ -18,7 +18,7 @@ const APPLE_RED = '#FF3B30';
 const APPLE_GRAY = '#86868B';
 const APPLE_BLUE = '#007AFF';
 
-export default function SignalDetailsDrawer({ signalId, isOpen, onClose }: SignalDetailsDrawerProps) {
+export default function SignalDetailsModal({ signalId, isOpen, onClose }: SignalDetailsModalProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -261,17 +261,19 @@ export default function SignalDetailsDrawer({ signalId, isOpen, onClose }: Signa
         onClick={onClose}
       />
 
-      {/* Drawer */}
+      {/* Modal */}
       <div
         className={cn(
-          "fixed top-0 right-0 h-full w-[85%] max-w-[900px] z-50",
-          "bg-white/80 backdrop-blur-xl border-l border-gray-100/50 shadow-2xl",
-          "transition-transform duration-500 ease-out",
-          isOpen ? "translate-x-0" : "translate-x-full"
+          "fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
+          "w-[90%] h-[85%] max-w-[1400px] max-h-[900px]",
+          "z-50 bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl",
+          "border border-gray-100/50",
+          "transition-all duration-300",
+          isOpen ? "opacity-100 scale-100" : "opacity-0 scale-95"
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-100/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100/50">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">信号详情</h2>
             <p className="text-sm text-gray-500 mt-1">交易复盘与数据分析</p>
@@ -290,198 +292,208 @@ export default function SignalDetailsDrawer({ signalId, isOpen, onClose }: Signa
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-apple-blue border-t-transparent" />
           </div>
         ) : data ? (
-          <div className="flex h-[calc(100%-90px)]">
-            {/* Left: K-line Chart (65%) */}
-            <div className="w-[65%] border-r border-gray-100/50 flex flex-col">
-              <div className="p-4 border-b border-gray-100/50">
-                <h3 className="text-sm font-medium text-gray-700">K 线复盘</h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  信号前后各 10 根 K 线
-                </p>
+          <div className="h-[calc(100%-73px)] overflow-y-auto p-6">
+            {/* Top Row: Core Info Cards (5 cards horizontally) */}
+            <div className="grid grid-cols-5 gap-4 mb-6">
+              {/* Time */}
+              <div className="bg-white/60 rounded-xl p-4 shadow-sm border border-gray-100/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="w-4 h-4 text-gray-400" />
+                  <span className="text-xs text-gray-500 uppercase">时间</span>
+                </div>
+                <div className="text-sm font-mono text-gray-900 truncate">
+                  {data.signal.kline_timestamp
+                    ? format(new Date(data.signal.kline_timestamp), 'MM-dd HH:mm')
+                    : format(new Date(data.signal.created_at), 'MM-dd HH:mm')
+                  }
+                </div>
               </div>
-              <div className="flex-1 p-4">
-                <div
-                  ref={chartContainerRef}
-                  className="w-full h-full rounded-xl overflow-hidden border border-gray-100"
-                />
+
+              {/* Symbol */}
+              <div className="bg-white/60 rounded-xl p-4 shadow-sm border border-gray-100/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <Target className="w-4 h-4 text-gray-400" />
+                  <span className="text-xs text-gray-500 uppercase">币种</span>
+                </div>
+                <div className="text-sm font-semibold text-gray-900 truncate">
+                  {data.signal.symbol.replace(':USDT', '')}
+                </div>
+              </div>
+
+              {/* Entry Price */}
+              <div className="bg-white/60 rounded-xl p-4 shadow-sm border border-gray-100/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <Zap className="w-4 h-4 text-gray-400" />
+                  <span className="text-xs text-gray-500 uppercase">入场价</span>
+                </div>
+                <div className="text-sm font-mono text-gray-900">
+                  {data.signal.entry_price ? Number(data.signal.entry_price).toFixed(2) : '-'}
+                </div>
+              </div>
+
+              {/* Stop Loss */}
+              <div className="bg-white/60 rounded-xl p-4 shadow-sm border border-gray-100/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="w-4 h-4 text-gray-400" />
+                  <span className="text-xs text-gray-500 uppercase">止损价</span>
+                </div>
+                <div className="text-sm font-mono text-apple-red">
+                  {data.signal.stop_loss ? Number(data.signal.stop_loss).toFixed(2) : '-'}
+                </div>
+              </div>
+
+              {/* Take Profit */}
+              <div className="bg-white/60 rounded-xl p-4 shadow-sm border border-gray-100/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="w-4 h-4 text-gray-400" />
+                  <span className="text-xs text-gray-500 uppercase">止盈价</span>
+                </div>
+                <div className="text-sm font-mono text-apple-green">
+                  {data.signal.take_profit ? Number(data.signal.take_profit).toFixed(2) : '-'}
+                </div>
               </div>
             </div>
 
-            {/* Right: Data Panel (35%) */}
-            <div className="w-[35%] flex flex-col overflow-y-auto">
-              <div className="p-4 space-y-4">
-                {/* Basic Info Card */}
-                <div className="bg-white/60 rounded-2xl p-4 shadow-sm border border-gray-100/50">
-                  <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                    基本信息
-                  </h4>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">交易对</span>
-                      <span className="text-sm font-semibold text-gray-900">
-                        {data.signal.symbol.replace(':USDT', '')}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">周期</span>
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs font-mono">
-                        {data.signal.timeframe}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">方向</span>
-                      <span className={cn(
-                        "px-2 py-1 rounded text-xs font-medium",
-                        data.signal.direction === 'long'
-                          ? "bg-apple-green/10 text-apple-green"
-                          : "bg-apple-red/10 text-apple-red"
-                      )}>
-                        {translateDirection(data.signal.direction)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">状态</span>
-                      <span className={cn(
-                        "px-2 py-1 rounded text-xs font-medium",
-                        getStatusColor(data.signal.status)
-                      )}>
-                        {translateStatus(data.signal.status)}
-                      </span>
-                    </div>
+            {/* Main Content: K-line Chart (80%) + Data Panel (20%) */}
+            <div className="grid grid-cols-[80%_20%] gap-6 h-[calc(100%-140px)]">
+              {/* Left: K-line Chart */}
+              <div className="bg-white/60 rounded-xl border border-gray-100/50 flex flex-col overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100/50 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700">K 线复盘</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">信号前后各 10 根 K 线</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      "px-2 py-1 rounded text-xs font-medium",
+                      data.signal.direction === 'long'
+                        ? "bg-apple-green/10 text-apple-green"
+                        : "bg-apple-red/10 text-apple-red"
+                    )}>
+                      {translateDirection(data.signal.direction)}
+                    </span>
+                    <span className={cn(
+                      "px-2 py-1 rounded text-xs font-medium",
+                      getStatusColor(data.signal.status)
+                    )}>
+                      {translateStatus(data.signal.status)}
+                    </span>
                   </div>
                 </div>
-
-                {/* Price Info Card */}
-                <div className="bg-white/60 rounded-2xl p-4 shadow-sm border border-gray-100/50">
-                  <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                    <Shield className="w-3 h-3 inline mr-1" />
-                    价格信息
-                  </h4>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">入场价</span>
-                      <span className="text-sm font-mono text-gray-900">
-                        {data.signal.entry_price ? Number(data.signal.entry_price).toFixed(2) : '-'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">止损价</span>
-                      <span className="text-sm font-mono text-apple-red">
-                        {data.signal.stop_loss ? Number(data.signal.stop_loss).toFixed(2) : '-'}
-                      </span>
-                    </div>
-                    {data.signal.take_profit && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-400">止盈价</span>
-                        <span className="text-sm font-mono text-apple-green">
-                          {Number(data.signal.take_profit).toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                <div className="flex-1 p-4">
+                  <div
+                    ref={chartContainerRef}
+                    className="w-full h-full rounded-lg overflow-hidden border border-gray-100"
+                  />
                 </div>
+              </div>
 
-                {/* Risk Info Card */}
-                <div className="bg-white/60 rounded-2xl p-4 shadow-sm border border-gray-100/50">
-                  <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                    <Target className="w-3 h-3 inline mr-1" />
-                    风控参数
-                  </h4>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">建议仓位</span>
-                      <span className="text-sm font-mono text-gray-900">
-                        {data.signal.position_size}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">杠杆</span>
-                      <span className="text-sm font-mono text-gray-900">
-                        {data.signal.leverage}x
-                      </span>
-                    </div>
-                    {data.signal.pnl_ratio !== undefined && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-400">盈亏比</span>
-                        <span className={cn(
-                          "text-sm font-mono",
-                          Number(data.signal.pnl_ratio) >= 0
-                            ? "text-apple-green"
-                            : "text-apple-red"
-                        )}>
-                          {Number(data.signal.pnl_ratio) > 0 ? '+' : ''}
-                          {Number(data.signal.pnl_ratio).toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-                    {data.signal.win_rate && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-400">胜率评估</span>
-                        <span className="text-sm font-mono text-apple-blue">
-                          {(data.signal.win_rate * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Strategy Info Card */}
-                <div className="bg-white/60 rounded-2xl p-4 shadow-sm border border-gray-100/50">
-                  <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                    <Zap className="w-3 h-3 inline mr-1" />
-                    策略信号
-                  </h4>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">触发策略</span>
-                      <span className={cn(
-                        "px-2 py-1 rounded text-xs font-medium",
-                        getStrategyBadgeClass(data.signal.strategy_name)
-                      )}>
-                        {translateStrategy(data.signal.strategy_name)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">形态打分</span>
-                      <span className="text-sm font-mono text-gray-900">
-                        {renderScore(data.signal.score)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">EMA 趋势</span>
-                      <span className={cn(
-                        "text-xs font-medium",
-                        data.signal.ema_trend === 'bullish'
-                          ? "text-apple-green"
-                          : "text-apple-red"
-                      )}>
-                        {translateEmaTrend(data.signal.ema_trend)}
-                      </span>
+              {/* Right: Data Panel (20%, 2-column grid) */}
+              <div className="bg-white/60 rounded-xl border border-gray-100/50 p-4 overflow-y-auto">
+                <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
+                  数据详情
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Direction */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">方向</div>
+                    <div className={cn(
+                      "text-sm font-medium",
+                      data.signal.direction === 'long'
+                        ? "text-apple-green"
+                        : "text-apple-red"
+                    )}>
+                      {translateDirection(data.signal.direction)}
                     </div>
                   </div>
-                </div>
 
-                {/* Time Info */}
-                <div className="bg-white/60 rounded-2xl p-4 shadow-sm border border-gray-100/50">
-                  <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                    <Clock className="w-3 h-3 inline mr-1" />
-                    时间信息
-                  </h4>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">K 线时间</span>
-                      <span className="text-xs font-mono text-gray-600">
-                        {data.signal.kline_timestamp
-                          ? format(new Date(data.signal.kline_timestamp), 'MM-dd HH:mm:ss', { locale: zhCN })
-                          : format(new Date(data.signal.created_at), 'MM-dd HH:mm:ss', { locale: zhCN })
-                        }
-                      </span>
+                  {/* Status */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">状态</div>
+                    <div className={cn(
+                      "text-sm font-medium",
+                      getStatusColor(data.signal.status)
+                    )}>
+                      {translateStatus(data.signal.status)}
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">创建时间</span>
-                      <span className="text-xs font-mono text-gray-600">
-                        {format(new Date(data.signal.created_at), 'MM-dd HH:mm:ss', { locale: zhCN })}
-                      </span>
+                  </div>
+
+                  {/* Timeframe */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">周期</div>
+                    <div className="text-sm font-mono text-gray-900">
+                      {data.signal.timeframe}
+                    </div>
+                  </div>
+
+                  {/* Strategy */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">策略</div>
+                    <div className={cn(
+                      "text-sm font-medium",
+                      getStrategyBadgeClass(data.signal.strategy_name)
+                    )}>
+                      {translateStrategy(data.signal.strategy_name)}
+                    </div>
+                  </div>
+
+                  {/* Score */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">评分</div>
+                    <div className="text-sm font-mono text-gray-900">
+                      {renderScore(data.signal.score)}
+                    </div>
+                  </div>
+
+                  {/* Position Size */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">仓位</div>
+                    <div className="text-sm font-mono text-gray-900">
+                      {data.signal.position_size}
+                    </div>
+                  </div>
+
+                  {/* Leverage */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">杠杆</div>
+                    <div className="text-sm font-mono text-gray-900">
+                      {data.signal.leverage}x
+                    </div>
+                  </div>
+
+                  {/* PnL Ratio */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">盈亏比</div>
+                    <div className={cn(
+                      "text-sm font-mono",
+                      data.signal.pnl_ratio !== undefined && data.signal.pnl_ratio !== null
+                        ? (Number(data.signal.pnl_ratio) >= 0 ? "text-apple-green" : "text-apple-red")
+                        : "text-gray-400"
+                    )}>
+                      {data.signal.pnl_ratio !== undefined && data.signal.pnl_ratio !== null
+                        ? `${Number(data.signal.pnl_ratio) > 0 ? '+' : ''}${Number(data.signal.pnl_ratio).toFixed(2)}`
+                        : '-'}
+                    </div>
+                  </div>
+
+                  {/* EMA Trend */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">EMA</div>
+                    <div className={cn(
+                      "text-sm font-medium",
+                      data.signal.ema_trend === 'bullish'
+                        ? "text-apple-green"
+                        : "text-apple-red"
+                    )}>
+                      {translateEmaTrend(data.signal.ema_trend)}
+                    </div>
+                  </div>
+
+                  {/* MTF Status */}
+                  <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50">
+                    <div className="text-xs text-gray-400 mb-1">MTF</div>
+                    <div className="text-sm text-gray-600">
+                      {translateMtfStatus(data.signal.mtf_status)}
                     </div>
                   </div>
                 </div>

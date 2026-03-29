@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Filter, X, ChevronLeft, ChevronRight, ArrowRight, Trash2, CheckSquare, Square, Settings, GripVertical, ChevronUp, ChevronDown, MoreVertical, Calendar, SlidersHorizontal, ArrowUpDown } from 'lucide-react';
 import { cn } from '../lib/utils';
-import SignalDetailsDrawer from '../components/SignalDetailsDrawer';
+import SignalDetailsModal from '../components/SignalDetailsDrawer';
 import { deleteSignals, type Signal } from '../lib/api';
 
 // Strategy badge colors
@@ -261,7 +261,7 @@ export default function Signals() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                openDrawer(signal.id);
+                openModal(signal.id);
               }}
               className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs text-apple-blue hover:underline"
             >
@@ -290,9 +290,9 @@ export default function Signals() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showActionMenu, setShowActionMenu] = useState(false);
 
-  // Drawer
+  // Modal
   const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const offset = (page - 1) * limit;
 
@@ -348,14 +348,14 @@ export default function Signals() {
     setSelectedIds(newSet);
   };
 
-  // Drawer handlers
-  const openDrawer = (signalId: string) => {
+  // Modal handlers
+  const openModal = (signalId: string) => {
     setSelectedSignalId(signalId);
-    setIsDrawerOpen(true);
+    setIsModalOpen(true);
   };
 
-  const closeDrawer = () => {
-    setIsDrawerOpen(false);
+  const closeModal = () => {
+    setIsModalOpen(false);
     setSelectedSignalId(null);
   };
 
@@ -816,7 +816,7 @@ export default function Signals() {
                   return (
                     <tr
                       key={String(signal.id)}
-                      onClick={() => openDrawer(signal.id)}
+                      onClick={() => openModal(signal.id)}
                       className={cn(
                         "hover:bg-gray-50/50 transition-colors cursor-pointer group",
                         isSelected && "bg-apple-blue/5"
@@ -874,11 +874,11 @@ export default function Signals() {
         </div>
       </div>
 
-      {/* Signal Details Drawer */}
-      <SignalDetailsDrawer
+      {/* Signal Details Modal */}
+      <SignalDetailsModal
         signalId={selectedSignalId || ''}
-        isOpen={isDrawerOpen}
-        onClose={closeDrawer}
+        isOpen={isModalOpen}
+        onClose={closeModal}
       />
     </div>
   );
