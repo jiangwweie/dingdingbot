@@ -366,9 +366,9 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
                   <div className="space-y-1">
                     {data.signal.take_profit_levels.map((tp) => (
                       <div key={tp.id} className="flex justify-between text-xs">
-                        <span className="text-gray-500">{tp.id}:</span>
+                        <span className="text-gray-500">{tp.tp_id}:</span>
                         <span className="font-mono text-apple-green">
-                          {Number(tp.price).toFixed(2)}
+                          {Number(tp.price_level).toFixed(2)}
                           <span className="text-gray-400 ml-1">
                             ({Number(tp.position_ratio) * 100}% @ 1:{Number(tp.risk_reward)})
                           </span>
@@ -538,10 +538,10 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
                         <div className="space-y-1.5">
                           {data.signal.take_profit_levels.map((tp) => (
                             <div key={tp.id} className="flex justify-between items-center text-xs bg-apple-green/5 rounded px-2 py-1">
-                              <span className="font-medium text-gray-600">{tp.id}</span>
+                              <span className="font-medium text-gray-600">{tp.tp_id}</span>
                               <div className="text-right">
                                 <div className="font-mono text-apple-green">
-                                  {Number(tp.price).toFixed(2)}
+                                  {Number(tp.price_level).toFixed(2)}
                                 </div>
                                 <div className="text-gray-400 text-[10px]">
                                   {Number(tp.position_ratio) * 100}% @ 1:{Number(tp.risk_reward)}
