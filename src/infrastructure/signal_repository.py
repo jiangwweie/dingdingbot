@@ -711,6 +711,9 @@ class SignalRepository:
         created_at = datetime.now(timezone.utc).isoformat()
         tags_json = json.dumps(signal.tags)
 
+        # Use signal_id if provided, otherwise use created_at as signal_id
+        signal_id_value = signal_id or created_at
+
         await self._db.execute(
             """
             INSERT INTO signals (
@@ -737,7 +740,7 @@ class SignalRepository:
                 signal.kline_timestamp,
                 signal.strategy_name,
                 signal.score,
-                signal_id,
+                signal_id_value,
                 source,
                 '',  # ema_trend (legacy field, empty for new signals)
                 '',  # mtf_status (legacy field, empty for new signals)
@@ -746,7 +749,7 @@ class SignalRepository:
         )
         await self._db.commit()
 
-        signal_id_result = signal_id or str(created_at)
+        signal_id_result = signal_id_value
         logger.info(f"信号已保存：id={signal_id_result}, {signal.symbol}:{signal.timeframe}")
 
         # S6-3: Save take profit levels if present
@@ -983,6 +986,15 @@ class SignalRepository:
                 row_dict = dict(row)
                 if row_dict.get("status"):
                     row_dict["status"] = row_dict["status"].lower()
+
+                # S6-3: Load take profit levels for each signal
+                signal_id_str = row_dict.get("signal_id")
+                if signal_id_str:
+                    tp_levels = await self.get_take_profit_levels(signal_id_str)
+                    row_dict["take_profit_levels"] = tp_levels
+                else:
+                    row_dict["take_profit_levels"] = []
+
                 data.append(row_dict)
             return {"total": filtered_total, "data": data}
 
