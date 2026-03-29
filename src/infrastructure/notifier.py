@@ -115,6 +115,7 @@ def format_signal_message(
 ) -> str:
     """
     Format SignalResult to Markdown message for notification.
+    Using Style D (紧凑卡片风格) as default.
 
     Args:
         signal: SignalResult object
@@ -130,50 +131,13 @@ def format_signal_message(
     if opposing_signal:
         return format_opposing_signal_message(signal, opposing_signal)
 
-    # Standard signal notification
-    # Direction emoji and text
-    if signal.direction == Direction.LONG:
-        direction_text = "🟢 看多 (LONG)"
-    else:
-        direction_text = "🔴 看空 (SHORT)"
-
-    # Build tags section dynamically with translation
-    tags_section = ""
-    if signal.tags:
-        translated_tags = []
-        for tag in signal.tags:
-            translated = translate_tag(tag.get('name', 'Unknown'), tag.get('value', 'N/A'))
-            if translated:
-                translated_tags.append(translated)
-        if translated_tags:
-            tags_section = "\n".join(translated_tags)
-            tags_section = f"\n指标标签:\n{tags_section}\n"
-        else:
-            tags_section = "\n指标标签：无\n"
-    else:
-        tags_section = "\n指标标签：无\n"
-
-    # Build take profit section (S6-3) - single line format
-    tp_section = f"止盈目标：{format_take_profit_levels(signal.take_profit_levels)}\n\n"
-
-    # Build message
-    message = f"""【交易信号提醒】
-
-币种：{signal.symbol}
-周期：{signal.timeframe} | {format_score(signal.score)}分
-方向：{direction_text}
-入场价：{signal.entry_price}
-止损位：{signal.suggested_stop_loss}
-{tp_section}建议仓位：{signal.suggested_position_size}
-当前杠杆：{signal.current_leverage}x
-{tags_section}风控信息：{signal.risk_reward_info}
-"""
-    return message
+    # Default to Style D (紧凑卡片风格)
+    return format_signal_message_style_d(signal)
 
 
 def format_cover_signal_message(signal: SignalResult, superseded_signal: dict) -> str:
     """
-    覆盖通知模板 - 包含评分对比
+    覆盖通知模板 - 包含评分对比（风格 D）
 
     Args:
         signal: 新信号（覆盖者）
@@ -184,59 +148,55 @@ def format_cover_signal_message(signal: SignalResult, superseded_signal: dict) -
     """
     # Direction emoji and text
     if signal.direction == Direction.LONG:
-        direction_text = "🟢 看多 (LONG)"
+        direction_icon = "🟢"
+        direction_text = "多"
     else:
-        direction_text = "🔴 看空 (SHORT)"
+        direction_icon = "🔴"
+        direction_text = "空"
 
-    # Build tags section dynamically with translation
-    tags_section = ""
-    if signal.tags:
-        translated_tags = []
-        for tag in signal.tags:
-            translated = translate_tag(tag.get('name', 'Unknown'), tag.get('value', 'N/A'))
-            if translated:
-                translated_tags.append(translated)
-        if translated_tags:
-            tags_section = "\n".join(translated_tags)
-            tags_section = f"\n指标标签:\n{tags_section}\n"
-        else:
-            tags_section = "\n指标标签：无\n"
-    else:
-        tags_section = "\n指标标签：无\n"
+    # Strategy name (short)
+    strategy_short = signal.strategy_name or "Pinbar"
+    if len(strategy_short) > 15:
+        strategy_short = strategy_short[:12] + "..."
 
-    # Build take profit section (S6-3) - single line format
-    tp_section = f"止盈目标：{format_take_profit_levels(signal.take_profit_levels)}\n\n"
+    # Take profit
+    tp_str = format_take_profit_levels(signal.take_profit_levels)
+
+    # Tags compact
+    tags_str = format_tags_compact(signal.tags) if signal.tags else "无"
 
     # Calculate score improvement
     new_score = signal.score
     old_score = superseded_signal.get('score', 0)
     score_improvement = ((new_score - old_score) / old_score * 100) if old_score > 0 else 0
 
-    # Build message
-    message = f"""【信号覆盖提醒】⚡
+    message = f"""
+📡 盯盘狗 🐶 交易决策雷达
+━━━━━━━━━━━━━━━━━━━
+📢【信号覆盖】⚡
 
-币种：{signal.symbol}
-周期：{signal.timeframe} | {format_score(new_score)}分
-方向：{direction_text}
-入场价：{signal.entry_price}（更新）
-止损位：{signal.suggested_stop_loss}（更新）
-{tp_section}建议仓位：{signal.suggested_position_size}
-当前杠杆：{signal.current_leverage}x
+📊 {strategy_short} · {format_score(new_score)}分
+#{signal.symbol} | {signal.timeframe} | {direction_icon} {direction_text}
+
+💰 入场：`{signal.entry_price}`（更新）
+🛑 止损：`{signal.suggested_stop_loss}`（更新）
+🎯 止盈：`{tp_str}`
+🔧 杠杆：`{signal.current_leverage}x`
 
 【覆盖原因】
-新信号评分：{format_score(new_score)}分（原信号评分：{format_score(old_score)}分）
-评分提升：{score_improvement:+.0f}%
+新评分：{format_score(new_score)}分 | 原评分：{format_score(old_score)}分
+提升：{score_improvement:+.0f}%
 
-{tags_section}风控信息：{signal.risk_reward_info}
-
-⚡ 此信号覆盖了之前的信号 (ID: {superseded_signal.get('signal_id', 'unknown')}),因为形态质量更优
+📐 {tags_str}
+⚖️ {signal.risk_reward_info}
+━━━━━━━━━━━━━━━━━━━
 """
     return message
 
 
 def format_opposing_signal_message(signal: SignalResult, opposing_signal: dict) -> str:
     """
-    反向信号通知模板 - 包含市场分歧提示
+    反向信号通知模板 - 包含市场分歧提示（风格 D）
 
     Args:
         signal: 当前信号
@@ -247,72 +207,71 @@ def format_opposing_signal_message(signal: SignalResult, opposing_signal: dict) 
     """
     # Direction emoji and text
     if signal.direction == Direction.LONG:
-        direction_text = "🟢 看多 (LONG)"
+        direction_icon = "🟢"
+        direction_text = "多"
     else:
-        direction_text = "🔴 看空 (SHORT)"
+        direction_icon = "🔴"
+        direction_text = "空"
 
-    # Build tags section dynamically with translation
-    tags_section = ""
-    if signal.tags:
-        translated_tags = []
-        for tag in signal.tags:
-            translated = translate_tag(tag.get('name', 'Unknown'), tag.get('value', 'N/A'))
-            if translated:
-                translated_tags.append(translated)
-        if translated_tags:
-            tags_section = "\n".join(translated_tags)
-            tags_section = f"\n指标标签:\n{tags_section}\n"
-        else:
-            tags_section = "\n指标标签：无\n"
-    else:
-        tags_section = "\n指标标签：无\n"
+    # Strategy name (short)
+    strategy_short = signal.strategy_name or "Pinbar"
+    if len(strategy_short) > 15:
+        strategy_short = strategy_short[:12] + "..."
+
+    # Take profit
+    tp_str = format_take_profit_levels(signal.take_profit_levels)
+
+    # Tags compact
+    tags_str = format_tags_compact(signal.tags) if signal.tags else "无"
 
     # Opposing signal info
     opp_direction = opposing_signal.get('direction', 'UNKNOWN')
     opp_score = opposing_signal.get('score', 0)
 
     if opp_direction == Direction.LONG.value:
-        opp_direction_text = "🟢 看多 (LONG)"
+        opp_icon = "🟢"
+        opp_text = "多"
     else:
-        opp_direction_text = "🔴 看空 (SHORT)"
+        opp_icon = "🔴"
+        opp_text = "空"
 
     # Determine if opposing signal has higher score
     current_score = signal.score
     is_opposing_higher = opp_score > current_score
 
-    # Build take profit section (S6-3) - single line format
-    tp_section = f"止盈目标：{format_take_profit_levels(signal.take_profit_levels)}\n\n"
-
     # Build message
     if is_opposing_higher:
-        warning_section = f"""【市场分歧提示】
-当前方向信号评分：{format_score(current_score)}分
-反向方向信号评分：{format_score(opp_score)}分（更高）
+        warning_section = f"""
+【市场分歧提示】
+当前信号：{format_score(current_score)}分
+反向信号：{format_score(opp_score)}分 ⚠️ 更高
 
-⚠️ 注意：存在更优的反向信号，市场可能出现分歧
+注意：存在更优的反向信号 ({opp_icon}{opp_text})
 """
     else:
-        warning_section = f"""【市场分歧提示】
-当前方向信号评分：{format_score(current_score)}分
-反向方向信号评分：{format_score(opp_score)}分
-
-⚠️ 市场存在反向信号，请谨慎判断
+        warning_section = f"""
+【市场分歧提示】
+当前信号：{format_score(current_score)}分
+反向信号：{format_score(opp_score)}分 ({opp_icon}{opp_text})
 """
 
-    message = f"""【反向信号提醒】⚠️
+    message = f"""
+📡 盯盘狗 🐶 交易决策雷达
+━━━━━━━━━━━━━━━━━━━
+📢【反向信号】⚠️
 
-币种：{signal.symbol}
-周期：{signal.timeframe} | {format_score(current_score)}分
-方向：{direction_text} ← 与原信号相反
-入场价：{signal.entry_price}
-止损位：{signal.suggested_stop_loss}
-{tp_section}建议仓位：{signal.suggested_position_size}
-当前杠杆：{signal.current_leverage}x
+📊 {strategy_short} · {format_score(current_score)}分
+#{signal.symbol} | {signal.timeframe} | {direction_icon} {direction_text} ← 与原信号相反
+
+💰 入场：`{signal.entry_price}`
+🛑 止损：`{signal.suggested_stop_loss}`
+🎯 止盈：`{tp_str}`
+🔧 杠杆：`{signal.current_leverage}x`
 
 {warning_section}
-{tags_section}风控信息：{signal.risk_reward_info}
-
-⚠️ 市场存在反向信号，请谨慎判断
+📐 {tags_str}
+⚖️ {signal.risk_reward_info}
+━━━━━━━━━━━━━━━━━━━
 """
     return message
 
