@@ -10,7 +10,7 @@ Supports:
 import asyncio
 import time
 import json
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 from decimal import Decimal
 
 from src.domain.models import (
@@ -775,7 +775,7 @@ class SignalPipeline:
         kline: KlineData,
         attempt: SignalAttempt,
         score: float,
-    ) -> tuple[bool, Optional[str], Optional[dict]]:
+    ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
         """
         Check if new signal should cover (supersede) existing active signal.
 
@@ -819,14 +819,17 @@ class SignalPipeline:
             old_signal_data = None
             if self._repository:
                 try:
-                    async with self._repository._db.execute(
-                        "SELECT * FROM signals WHERE signal_id = ?", (old_signal_id,)
-                    ) as cursor:
-                        row = await cursor.fetchone()
-                        if row:
-                            old_signal_data = dict(row)
-                except (TypeError, AttributeError):
+                    # Use repository method instead of direct DB access
+                    old_signal_data = await self._repository.get_active_signal(dedup_key)
+                    if old_signal_data is None:
+                        # Fallback: use cache data
+                        old_signal_data = {
+                            "signal_id": old_signal_id,
+                            "score": old_score,
+                        }
+                except Exception as e:
                     # Fallback for tests with mock objects - use cache data
+                    logger.warning(f"Failed to fetch old signal from DB: {e}")
                     old_signal_data = {
                         "signal_id": old_signal_id,
                         "score": old_score,
