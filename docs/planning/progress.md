@@ -882,7 +882,7 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 
 ---
 
-## 2026-03-29 - 会话：回测沙箱集成策略工作台 + 信号历史
+## 2026-03-29 - 会话：回测沙箱集成策略工作台 + 溯源日志优化 ✅
 
 **目标**: 实现回测沙箱与策略工作台的集成，支持策略模板导入和回测信号持久化
 
@@ -892,29 +892,46 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
   - `POST /api/backtest` - 支持 `save_signals` 参数
   - `GET /api/backtest/signals` - 查询回测信号历史
   - `signal_repository.save_signal()` - 添加 `source` 字段支持
+  - `src/interfaces/api.py` - 修复 `result_icon` 未定义错误
 
 - [x] **前端组件实现** ✅
   - `StrategyTemplatePicker.tsx` - 策略模板选择器
   - 修改 `Backtest.tsx` - 添加导入按钮和历史列表
   - 复用 `SignalDetailsDrawer` - 信号详情查看
+  - 修改 `SignalAttempts.tsx` - 改进详情页为模态框，集成 TraceTreeViewer
 
 - [x] **数据库迁移** ✅
   - `signals.source` 字段 - 区分实盘/回测信号
   - 创建索引 `idx_signals_source`
+  - `signal_attempts.evaluation_summary` 字段 - 语义化评估报告
+  - `signal_attempts.trace_tree` 字段 - Trace 树可视化
 
 - [x] **TypeScript 编译验证** ✅
   - `npm run build` 成功完成
   - 构建产物：`dist/assets/index-2NBGMy6D.js` (679.63 kB)
 
+- [x] **代码提交** ✅
+  - Git 提交：`cc0e1dd`
+  - 提交信息：`feat: 回测沙箱集成策略工作台 + 溯源日志详情优化`
+
 **交付物**:
 - 策略模板单选导入功能
-- 回测信号持久化到数据库
+- 回测信号持久化到数据库（带 source 字段）
 - 回测信号历史查询接口
 - 信号详情抽屉复用
+- 溯源日志模态框改进（支持 evaluation_summary 和 trace_tree）
+- 数据库迁移脚本 `003_add_attempt_report_fields.sql`
 
-**用户确认需求**:
-1. ✅ 回测信号持久化到数据库（带 `source` 字段区分）
-2. ✅ 策略模板单选导入
-3. ✅ 回测信号详情页展示 K 线图表（复用现有组件）
+**Git 提交**: `cc0e1dd`
+
+---
+
+### 当前待办事项
+
+| 编号 | 任务 | 优先级 | 预计工作量 | 状态 |
+|------|------|--------|----------|------|
+| S2-5 | ATR 过滤器核心逻辑实现 | 🔴 最高 | 4-6 小时 | ⏸️ pending |
+| S6-1 | 冷却缓存优化 | 🟡 中 | 3-4 小时 | ⏸️ pending |
+| Pinbar 参数优化 | 调整默认参数覆盖更多形态 | 🟡 低 | 30 分钟 | ⏸️ pending |
 
 ---
