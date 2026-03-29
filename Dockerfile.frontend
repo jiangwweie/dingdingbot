@@ -1,19 +1,17 @@
 # 盯盘狗 🐶 前端 Dockerfile
-# Node.js 18 Alpine for production
+# Node.js 18 + Nginx for production
 
 FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copy only package files first for better caching
+# Copy package files
 COPY web-front/package.json ./
-COPY web-front/package-lock.json* ./
 
-# Clean install dependencies (remove lock file and node_modules for native bindings fix)
-RUN rm -rf node_modules package-lock.json 2>/dev/null || true
+# Install dependencies with --legacy-peer-deps for TailwindCSS compatibility
 RUN npm install --legacy-peer-deps
 
-# Copy source code (node_modules excluded by .dockerignore)
+# Copy source code
 COPY web-front/ ./
 
 # Build the application
@@ -21,6 +19,9 @@ RUN npm run build
 
 # Production stage - use nginx to serve static files
 FROM nginx:alpine
+
+# Remove default nginx static assets
+RUN rm -rf /usr/share/nginx/html/*
 
 # Copy custom nginx config
 COPY web-front/nginx.conf /etc/nginx/conf.d/default.conf
