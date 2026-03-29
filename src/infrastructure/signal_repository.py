@@ -637,8 +637,9 @@ class SignalRepository:
                 created_at, symbol, timeframe, direction,
                 entry_price, stop_loss, position_size, leverage,
                 tags_json, risk_info, status, pnl_ratio,
-                kline_timestamp, strategy_name, score, signal_id, source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                kline_timestamp, strategy_name, score, signal_id, source,
+                ema_trend, mtf_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -658,6 +659,8 @@ class SignalRepository:
                 signal.score,
                 signal_id,
                 source,
+                '',  # ema_trend (legacy field, empty for new signals)
+                '',  # mtf_status (legacy field, empty for new signals)
             ),
         )
         await self._db.commit()
