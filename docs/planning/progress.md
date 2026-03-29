@@ -59,6 +59,8 @@ filter=atr_volatility reason=insufficient_volatility
 metadata={"candle_range": 123.5, "atr": 250.0, "min_required": 150.0, "ratio": 0.492}
 ```
 
+**Git 提交**: `3187bfa` - 已推送到 dev 分支
+
 ---
 
 ## 2026-03-29 - 会话：信号详情组件改为居中弹窗 (已完成)

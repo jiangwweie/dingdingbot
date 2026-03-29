@@ -131,6 +131,40 @@ async def test_strategy_runner():
 
 ---
 
+## 📚 架构规范文档
+
+**开发前必须阅读的架构文档：**
+
+| 文档 | 路径 | 用途 |
+|------|------|------|
+| **日志系统架构规范** | `docs/arch/logging-system-spec.md` | 日志级别、轮转策略、过滤日志格式 |
+| **系统开发规范与红线** | `docs/arch/系统开发规范与红线.md` | Clean Architecture、类型安全、异步规范 |
+
+### 日志系统规范摘要
+
+**日志级别使用：**
+- `INFO` - 正常业务流程（系统启动、信号发送）
+- `WARNING` - 信号被过滤、背压告警
+- `ERROR` - 操作失败但可恢复
+- `CRITICAL` - 系统无法继续运行
+
+**日志格式：**
+```python
+from src.infrastructure.logger import setup_logger
+logger = setup_logger(__name__)
+
+logger.info("正常业务流程")
+logger.warning(f"[FILTER_REJECTED] symbol=... filter=... reason=...")
+logger.error("操作失败")
+```
+
+**日志轮转策略：**
+- 按天轮转 (`TimedRotatingFileHandler`)
+- 保留 30 天
+- 7 天前自动压缩为 `.gz`
+
+---
+
 ## 🔧 全局技能调用指南 (Global Skills Integration)
 
 **你必须主动调用以下全局 skills 来提升工作质量：**

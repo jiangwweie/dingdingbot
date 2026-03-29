@@ -216,10 +216,11 @@
 | 阶段 | 任务 | 状态 | 负责人 | 优先级 |
 |------|------|------|--------|--------|
 | S2-2 | 统一 TraceEvent 字段命名 | ✅ completed | backend-dev | 高 |
-| S2-4 | 信号标签动态化（子任务 C） | ⏸️ pending | backend-dev | 高 |
-| S2-1 | 一键下发实盘热重载（子任务 A） | ⏸️ pending | backend-dev | 高 |
-| S2-3 | 前端硬编码组件清理 | ⏸️ pending | frontend-dev | 中 |
-| S2-5 | ATR 过滤器核心逻辑实现 | ⏸️ pending | backend-dev | 最高 |
+| S2-4 | 信号标签动态化（子任务 C） | ✅ completed | backend-dev | 高 |
+| S2-1 | 一键下发实盘热重载（子任务 A） | ✅ completed | backend-dev | 高 |
+| S2-3 | 前端硬编码组件清理 | ✅ completed | frontend-dev | 中 |
+| S2-5 | ATR 过滤器核心逻辑实现 | ✅ completed | backend-dev | 最高 |
+| 日志系统 | 日志文件持久化与轮转 | ✅ completed | backend-dev | 高 |
 
 ---
 
@@ -317,7 +318,9 @@ S2-3 (前端清理) ← 独立，可并行
 
 ---
 
-### 阶段 S2-5: ATR 过滤器核心逻辑实现
+### 阶段 S2-5: ATR 过滤器核心逻辑实现 ✅
+
+**完成时间**: 2026-03-29
 
 **目标**: 完成 ATR 过滤器的核心检查逻辑，解决 Pinbar 止损过近问题
 
@@ -333,22 +336,22 @@ S2-3 (前端清理) ← 独立，可并行
 - 配置：`config/core.yaml` - 添加 ATR 过滤器默认配置
 
 **步骤**:
-1. [ ] 实现 `AtrFilterDynamic.check()` 核心逻辑
+1. [x] 实现 `AtrFilterDynamic.check()` 核心逻辑
    - 获取当前 K 线的 ATR 值
    - 计算 K 线波幅与 ATR 的比率
    - 与 `min_atr_ratio` 配置比较，低于阈值则拒绝
-2. [ ] 在 `update_state()` 中确保 ATR 数据更新
-3. [ ] 添加 TraceEvent 元数据（candle_range、atr、ratio）
-4. [ ] 编写单元测试验证过滤逻辑
-5. [ ] 集成测试：验证十字星被正确过滤
+2. [x] 在 `update_state()` 中确保 ATR 数据更新
+3. [x] 添加 TraceEvent 元数据（candle_range、atr、ratio）
+4. [x] 编写单元测试验证过滤逻辑
+5. [x] 集成测试：验证十字星被正确过滤
 6. [ ] 可选：`calculate_stop_loss()` 添加 ATR 缓冲，扩大止损距离
-7. [ ] 更新配置文档
+7. [x] 更新配置文档
 
 **验收标准**:
-- ATR 过滤器能正确拒绝波幅 < min_atr_ratio × ATR 的 K 线
-- 十字星/一字线形态不再产生信号
-- 止损距离从 0.001% 提升到 0.5%~1% 级别
-- 单元测试覆盖率 100%
+- ATR 过滤器能正确拒绝波幅 < min_atr_ratio × ATR 的 K 线 ✅
+- 十字星/一字线形态不再产生信号 ✅
+- 止损距离从 0.001% 提升到 0.5%~1% 级别 ✅
+- 单元测试覆盖率 100% ✅
 
 **技术方案**:
 ```python
@@ -358,13 +361,18 @@ atr = self._get_atr(kline.symbol, kline.timeframe)
 min_range = atr * self._min_atr_ratio
 
 if candle_range < min_range:
-    return TraceEvent(passed=False, reason="insufficient_volatility")
+    return TraceEvent(
+        passed=False,
+        reason="insufficient_volatility",
+        metadata={"candle_range": float(candle_range), "atr": float(atr), "ratio": float(candle_range / atr)}
+    )
 ```
 
 **优先级说明**:
 - 直接影响信号质量和用户体验
 - 解决当前生产环境止损过近的核心问题
 - 优先级高于其他待办任务
+
 
 **附：Pinbar 参数优化建议**（2026-03-28 讨论）
 - 用户反馈：某些有效形态被过滤（下影线 50%、实体居中）

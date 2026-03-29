@@ -8,6 +8,7 @@ Key Design Principles:
 4. **Dynamic Rule Engine Support**: Supports both legacy and new dynamic strategy definitions.
 """
 import asyncio
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
@@ -336,18 +337,55 @@ class Backtester:
 
         if higher_tf:
             try:
+                # Calculate limit for higher timeframe data
+                # Must ensure coverage of the klines time range
+                if klines:
+                    min_kline_ts = min(k.timestamp for k in klines)
+                    max_kline_ts = max(k.timestamp for k in klines)
+
+                    # Calculate how many higher TF candles are needed to cover from max_kline_ts back to min_kline_ts
+                    # But we also need to ensure the OLDEST 4h candle <= min_kline_ts
+                    # Since exchange returns from "now" backwards, we need to calculate:
+                    # limit = (max_kline_ts - min_kline_ts) / (higher_tf_interval) + buffer
+                    higher_tf_minutes = self._parse_timeframe(higher_tf)
+                    duration_ms = max_kline_ts - min_kline_ts
+                    expected_higher_tf_bars = max(
+                        int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,  # +5 for edge cases
+                        100  # minimum to ensure coverage
+                    )
+
+                    # Also consider request.start_time and request.end_time if provided
+                    # This is the ACTUAL time range we need to cover
+                    if request.start_time and request.end_time:
+                        start_ts = int(request.start_time)
+                        end_ts = int(request.end_time)
+                        full_duration_ms = end_ts - start_ts
+                        full_expected_bars = int(full_duration_ms / (higher_tf_minutes * 60 * 1000)) + 5
+                        expected_higher_tf_bars = max(expected_higher_tf_bars, full_expected_bars, 1000)
+
+                    # IMPORTANT: The exchange returns candles from "latest available" backwards.
+                    # We need to ensure that the oldest returned candle has timestamp <= min_kline_ts
+                    # Conservative approach: always fetch at least 1000 candles for higher TF
+                    limit = max(expected_higher_tf_bars, 1000)
+
+                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, duration: {duration_ms}ms)")
+                else:
+                    limit = max(request.limit, 1000)
+
                 higher_tf_klines_list = await self._gateway.fetch_historical_ohlcv(
                     symbol=request.symbol,
                     timeframe=higher_tf,
-                    limit=request.limit,
+                    limit=limit,
                 )
 
                 # Build a map of timestamp -> trend
-                for i, kline in enumerate(higher_tf_klines_list):
+                for kline in higher_tf_klines_list:
                     ts = kline.timestamp
                     higher_tf_data[ts] = {
                         higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
                     }
+
+                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
@@ -389,10 +427,45 @@ class Backtester:
 
         if higher_tf:
             try:
+                # Calculate limit for higher timeframe data
+                # Must ensure coverage of the klines time range
+                if klines:
+                    min_kline_ts = min(k.timestamp for k in klines)
+                    max_kline_ts = max(k.timestamp for k in klines)
+
+                    # Calculate how many higher TF candles are needed to cover from max_kline_ts back to min_kline_ts
+                    # But we also need to ensure the OLDEST 4h candle <= min_kline_ts
+                    # Since exchange returns from "now" backwards, we need to calculate:
+                    # limit = (max_kline_ts - min_kline_ts) / (higher_tf_interval) + buffer
+                    higher_tf_minutes = self._parse_timeframe(higher_tf)
+                    duration_ms = max_kline_ts - min_kline_ts
+                    expected_higher_tf_bars = max(
+                        int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,  # +5 for edge cases
+                        100  # minimum to ensure coverage
+                    )
+
+                    # Also consider request.start_time and request.end_time if provided
+                    # This is the ACTUAL time range we need to cover
+                    if request.start_time and request.end_time:
+                        start_ts = int(request.start_time)
+                        end_ts = int(request.end_time)
+                        full_duration_ms = end_ts - start_ts
+                        full_expected_bars = int(full_duration_ms / (higher_tf_minutes * 60 * 1000)) + 5
+                        expected_higher_tf_bars = max(expected_higher_tf_bars, full_expected_bars, 1000)
+
+                    # IMPORTANT: The exchange returns candles from "latest available" backwards.
+                    # We need to ensure that the oldest returned candle has timestamp <= min_kline_ts
+                    # Conservative approach: always fetch at least 1000 candles for higher TF
+                    limit = max(expected_higher_tf_bars, 1000)
+
+                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, duration: {duration_ms}ms)")
+                else:
+                    limit = max(request.limit, 1000)
+
                 higher_tf_klines_list = await self._gateway.fetch_historical_ohlcv(
                     symbol=request.symbol,
                     timeframe=higher_tf,
-                    limit=request.limit,
+                    limit=limit,
                 )
 
                 # Build a map of timestamp -> trend
@@ -401,6 +474,8 @@ class Backtester:
                     higher_tf_data[ts] = {
                         higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
                     }
+
+                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
