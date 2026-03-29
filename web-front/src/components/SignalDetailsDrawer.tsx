@@ -156,7 +156,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
         title: '入场价',
       });
     }
-    
+
     if (data.signal.stop_loss) {
       candleSeries.createPriceLine({
         price: Number(data.signal.stop_loss),
@@ -165,6 +165,20 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
         lineStyle: 2, // Dashed
         axisLabelVisible: true,
         title: '止损价',
+      });
+    }
+
+    // S6-3: Add visual horizontal lines for Take Profit levels (green dashed lines)
+    if (data.signal.take_profit_levels && data.signal.take_profit_levels.length > 0) {
+      data.signal.take_profit_levels.forEach((tp) => {
+        candleSeries.createPriceLine({
+          price: Number(tp.price),
+          color: APPLE_GREEN,
+          lineWidth: 1,
+          lineStyle: 2, // Dashed
+          axisLabelVisible: true,
+          title: `${tp.id} (${Number(tp.position_ratio) * 100}%)`,
+        });
       });
     }
 
@@ -342,15 +356,31 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
                 </div>
               </div>
 
-              {/* Take Profit */}
+              {/* Take Profit - S6-3 Multi-Level */}
               <div className="bg-white/60 rounded-xl p-4 shadow-sm border border-gray-100/50">
                 <div className="flex items-center gap-2 mb-2">
                   <TrendingUp className="w-4 h-4 text-gray-400" />
-                  <span className="text-xs text-gray-500 uppercase">止盈价</span>
+                  <span className="text-xs text-gray-500 uppercase">止盈目标</span>
                 </div>
-                <div className="text-sm font-mono text-apple-green">
-                  {data.signal.take_profit ? Number(data.signal.take_profit).toFixed(2) : '-'}
-                </div>
+                {data.signal.take_profit_levels && data.signal.take_profit_levels.length > 0 ? (
+                  <div className="space-y-1">
+                    {data.signal.take_profit_levels.map((tp) => (
+                      <div key={tp.id} className="flex justify-between text-xs">
+                        <span className="text-gray-500">{tp.id}:</span>
+                        <span className="font-mono text-apple-green">
+                          {Number(tp.price).toFixed(2)}
+                          <span className="text-gray-400 ml-1">
+                            ({Number(tp.position_ratio) * 100}% @ 1:{Number(tp.risk_reward)})
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm font-mono text-apple-green">
+                    {data.signal.take_profit ? Number(data.signal.take_profit).toFixed(2) : '-'}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -496,6 +526,33 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
                       {translateMtfStatus(data.signal.mtf_status)}
                     </div>
                   </div>
+
+                  {/* S6-3: Take Profit Levels - Full Grid Display */}
+                  {data.signal.take_profit_levels && data.signal.take_profit_levels.length > 0 && (
+                    <>
+                      <div className="bg-white/80 rounded-lg p-3 border border-gray-100/50 col-span-2">
+                        <div className="text-xs text-gray-400 mb-2 flex items-center gap-1">
+                          <TrendingUp className="w-3 h-3" />
+                          止盈目标
+                        </div>
+                        <div className="space-y-1.5">
+                          {data.signal.take_profit_levels.map((tp) => (
+                            <div key={tp.id} className="flex justify-between items-center text-xs bg-apple-green/5 rounded px-2 py-1">
+                              <span className="font-medium text-gray-600">{tp.id}</span>
+                              <div className="text-right">
+                                <div className="font-mono text-apple-green">
+                                  {Number(tp.price).toFixed(2)}
+                                </div>
+                                <div className="text-gray-400 text-[10px]">
+                                  {Number(tp.position_ratio) * 100}% @ 1:{Number(tp.risk_reward)}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

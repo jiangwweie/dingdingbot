@@ -315,7 +315,7 @@ class SignalRepository:
             CREATE INDEX IF NOT EXISTS idx_signals_source ON signals(source)
         """)
 
-        # Create indexes for signal_attempts
+        # Create index for signal_attempts
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_attempts_symbol ON signal_attempts(symbol)
         """)
@@ -324,6 +324,30 @@ class SignalRepository:
         """)
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_attempts_final_result ON signal_attempts(final_result)
+        """)
+
+        # S6-3: Create signal_take_profits table for multi-level take-profit tracking
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS signal_take_profits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                tp_id TEXT NOT NULL,              -- "TP1", "TP2"
+                position_ratio TEXT NOT NULL,     -- 仓位比例
+                risk_reward TEXT NOT NULL,        -- 盈亏比
+                price_level TEXT NOT NULL,        -- 止盈价格
+                status TEXT DEFAULT 'PENDING',    -- PENDING/WON/CANCELLED
+                filled_at TEXT,
+                pnl_ratio TEXT,
+                FOREIGN KEY (signal_id) REFERENCES signals(id) ON DELETE CASCADE
+            )
+        """)
+
+        # Create indexes for signal_take_profits
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signal_tp_signal_id ON signal_take_profits(signal_id)
+        """)
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signal_tp_status ON signal_take_profits(status)
         """)
 
         await self._db.commit()
@@ -725,6 +749,10 @@ class SignalRepository:
         signal_id_result = signal_id or str(created_at)
         logger.info(f"信号已保存：id={signal_id_result}, {signal.symbol}:{signal.timeframe}")
 
+        # S6-3: Save take profit levels if present
+        if signal.take_profit_levels:
+            await self.store_take_profit_levels(signal_id_result, signal.take_profit_levels)
+
         return signal_id_result
 
     # ============================================================
@@ -1062,7 +1090,17 @@ class SignalRepository:
             row = await cursor.fetchone()
             if row is None:
                 return None
-            return dict(row)
+            signal = dict(row)
+
+            # S6-3: Load take profit levels
+            signal_id_str = signal.get("signal_id")
+            if signal_id_str:
+                tp_levels = await self.get_take_profit_levels(signal_id_str)
+                signal["take_profit_levels"] = tp_levels
+            else:
+                signal["take_profit_levels"] = []
+
+            return signal
 
     async def get_stats(self) -> dict:
         """
@@ -1687,3 +1725,138 @@ class SignalRepository:
         async with self._db.execute("SELECT * FROM signal_attempts") as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    # ============================================================
+    # S6-3: Multi-Level Take Profit CRUD Methods
+    # ============================================================
+
+    async def store_take_profit_levels(
+        self,
+        signal_id: str,
+        take_profit_levels: List[Dict[str, str]],
+    ) -> None:
+        """
+        保存止盈级别到数据库
+
+        Args:
+            signal_id: 信号 ID
+            take_profit_levels: 止盈级别列表，结构:
+                [
+                    {"id": "TP1", "position_ratio": "0.5", "risk_reward": "1.5", "price": "43000"},
+                    ...
+                ]
+        """
+        # Get numeric signal_id for foreign key
+        cursor = await self._db.execute("SELECT id FROM signals WHERE signal_id = ?", (signal_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            logger.warning(f"Signal not found for take profit storage: signal_id={signal_id}")
+            return
+
+        numeric_signal_id = row[0]
+
+        for tp in take_profit_levels:
+            await self._db.execute(
+                """
+                INSERT INTO signal_take_profits
+                (signal_id, tp_id, position_ratio, risk_reward, price_level, status)
+                VALUES (?, ?, ?, ?, ?, 'PENDING')
+                """,
+                (
+                    numeric_signal_id,
+                    tp["id"],
+                    tp["position_ratio"],
+                    tp["risk_reward"],
+                    tp["price"],
+                ),
+            )
+        await self._db.commit()
+        logger.debug(f"Stored {len(take_profit_levels)} take-profit levels for signal {signal_id}")
+
+    async def get_take_profit_levels(
+        self,
+        signal_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取信号的止盈级别
+
+        Args:
+            signal_id: 信号 ID
+
+        Returns:
+            止盈级别列表:
+                [
+                    {
+                        "id": 1,
+                        "tp_id": "TP1",
+                        "position_ratio": "0.5",
+                        "risk_reward": "1.5",
+                        "price_level": "43000.00",
+                        "status": "PENDING"
+                    },
+                    ...
+                ]
+        """
+        # Get numeric signal_id for foreign key
+        cursor = await self._db.execute("SELECT id FROM signals WHERE signal_id = ?", (signal_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return []
+
+        numeric_signal_id = row[0]
+
+        async with self._db.execute(
+            """
+            SELECT id, tp_id, position_ratio, risk_reward, price_level, status, filled_at, pnl_ratio
+            FROM signal_take_profits
+            WHERE signal_id = ?
+            ORDER BY tp_id
+            """,
+            (numeric_signal_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def update_take_profit_status(
+        self,
+        signal_id: str,
+        tp_id: str,
+        status: str,
+        pnl_ratio: Optional[Decimal] = None,
+        filled_at: Optional[str] = None,
+    ) -> None:
+        """
+        更新止盈级别状态
+
+        Args:
+            signal_id: 信号 ID
+            tp_id: 止盈级别 ID (如 "TP1")
+            status: 新状态 ("WON" / "CANCELLED")
+            pnl_ratio: 盈亏比（可选）
+            filled_at: 成交时间（可选）
+        """
+        # Get numeric signal_id for foreign key
+        cursor = await self._db.execute("SELECT id FROM signals WHERE signal_id = ?", (signal_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            logger.warning(f"Signal not found for take profit status update: signal_id={signal_id}")
+            return
+
+        numeric_signal_id = row[0]
+
+        await self._db.execute(
+            """
+            UPDATE signal_take_profits
+            SET status = ?, pnl_ratio = ?, filled_at = ?
+            WHERE signal_id = ? AND tp_id = ?
+            """,
+            (
+                status,
+                str(pnl_ratio) if pnl_ratio else None,
+                filled_at,
+                numeric_signal_id,
+                tp_id,
+            ),
+        )
+        await self._db.commit()
+        logger.debug(f"Updated take-profit status: signal_id={signal_id}, tp_id={tp_id}, status={status}")

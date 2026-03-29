@@ -53,6 +53,14 @@ def format_signal_message(
     else:
         tags_section = "\n指标标签：无\n"
 
+    # Build take profit section (S6-3)
+    tp_section = ""
+    if signal.take_profit_levels and len(signal.take_profit_levels) > 0:
+        tp_lines = [f"  {tp['id']}: {tp['price']} ({tp['position_ratio']} @ 1:{tp['risk_reward']})" for tp in signal.take_profit_levels]
+        tp_section = "\n止盈目标:\n" + "\n".join(tp_lines) + "\n"
+    else:
+        tp_section = "\n止盈目标：无\n"
+
     # Build message
     message = f"""【交易信号提醒】
 
@@ -61,7 +69,7 @@ def format_signal_message(
 方向：{direction_text}
 入场价：{signal.entry_price}
 止损位：{signal.suggested_stop_loss}
-建议仓位：{signal.suggested_position_size}
+{tp_section}建议仓位：{signal.suggested_position_size}
 当前杠杆：{signal.current_leverage}x
 {tags_section}
 风控信息：{signal.risk_reward_info}
@@ -89,6 +97,14 @@ def format_cover_signal_message(signal: SignalResult, superseded_signal: dict) -
     else:
         direction_text = "🔴 看空 (SHORT)"
 
+    # Build take profit section (S6-3)
+    tp_section = ""
+    if signal.take_profit_levels and len(signal.take_profit_levels) > 0:
+        tp_lines = [f"  {tp['id']}: {tp['price']} ({tp['position_ratio']} @ 1:{tp['risk_reward']})" for tp in signal.take_profit_levels]
+        tp_section = "\n止盈目标:\n" + "\n".join(tp_lines) + "\n"
+    else:
+        tp_section = "\n止盈目标：无\n"
+
     # Build tags section dynamically
     tags_section = ""
     if signal.tags:
@@ -110,7 +126,7 @@ def format_cover_signal_message(signal: SignalResult, superseded_signal: dict) -
 方向：{direction_text}
 入场价：{signal.entry_price}（更新）
 止损位：{signal.suggested_stop_loss}（更新）
-建议仓位：{signal.suggested_position_size}
+{tp_section}建议仓位：{signal.suggested_position_size}
 当前杠杆：{signal.current_leverage}x
 
 【覆盖原因】

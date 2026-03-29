@@ -3,7 +3,7 @@ Risk Calculator - Position sizing and stop-loss calculation.
 All calculations use Decimal for precision, no float allowed.
 """
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 import json
 
 from src.infrastructure.logger import setup_logger
@@ -17,6 +17,8 @@ from .models import (
     AccountSnapshot,
     PositionInfo,
     RiskConfig,
+    TakeProfitConfig,
+    TakeProfitLevel,
 )
 
 
@@ -33,14 +35,16 @@ class RiskCalculator:
     - Stop_Loss_Distance: |Entry_Price - Stop_Loss| / Entry_Price (as percentage)
     """
 
-    def __init__(self, config: RiskConfig):
+    def __init__(self, config: RiskConfig, take_profit_config: Optional[TakeProfitConfig] = None):
         """
         Initialize risk calculator.
 
         Args:
             config: Risk configuration
+            take_profit_config: Optional take profit configuration (uses default if not provided)
         """
         self.config = config
+        self.take_profit_config = take_profit_config or self._get_default_take_profit_config()
         self._precision = Decimal("0.00000001")  # 8 decimal places for crypto
 
     def calculate_stop_loss(
@@ -192,6 +196,67 @@ class RiskCalculator:
 
         return price.quantize(precision, rounding=ROUND_HALF_UP)
 
+    def _get_default_take_profit_config(self) -> TakeProfitConfig:
+        """获取默认止盈配置"""
+        return TakeProfitConfig(
+            enabled=True,
+            levels=[
+                TakeProfitLevel(id="TP1", position_ratio=Decimal("0.5"), risk_reward=Decimal("1.5")),
+                TakeProfitLevel(id="TP2", position_ratio=Decimal("0.5"), risk_reward=Decimal("3.0")),
+            ]
+        )
+
+    def calculate_take_profit_levels(
+        self,
+        entry_price: Decimal,
+        stop_loss: Decimal,
+        direction: Direction,
+        config: Optional[TakeProfitConfig] = None,
+    ) -> List[Dict[str, str]]:
+        """
+        计算多级别止盈价格
+
+        核心公式:
+        - LONG: TP = Entry + (|Entry - Stop| × RiskReward)
+        - SHORT: TP = Entry - (|Entry - Stop| × RiskReward)
+
+        Args:
+            entry_price: 入场价格
+            stop_loss: 止损价格
+            direction: 方向 (LONG/SHORT)
+            config: 止盈配置（可选，使用默认配置如果为空）
+
+        Returns:
+            止盈级别列表，结构：[{id, position_ratio, risk_reward, price}, ...]
+        """
+        # 如果未提供配置，使用默认配置
+        if config is None:
+            config = self._get_default_take_profit_config()
+
+        # 如果配置禁用，返回空列表
+        if not config.enabled:
+            return []
+
+        stop_distance = abs(entry_price - stop_loss)
+        levels = []
+
+        for level in config.levels:
+            if direction == Direction.LONG:
+                tp_price = entry_price + (stop_distance * level.risk_reward)
+            else:  # SHORT
+                tp_price = entry_price - (stop_distance * level.risk_reward)
+
+            quantized_price = self._quantize_price(tp_price, entry_price)
+
+            levels.append({
+                "id": level.id,
+                "position_ratio": str(level.position_ratio),
+                "risk_reward": str(level.risk_reward),
+                "price": str(quantized_price),
+            })
+
+        return levels
+
     def generate_risk_info(
         self,
         account: AccountSnapshot,
@@ -263,7 +328,12 @@ class RiskCalculator:
             account, position_size, entry_price, stop_loss, direction
         )
 
-        logger.info(f"风险计算完成：stop_loss={stop_loss}, position_size={position_size}, leverage={leverage}")
+        # Calculate take profit levels (S6-3)
+        take_profit_levels = self.calculate_take_profit_levels(
+            entry_price, stop_loss, direction, self.take_profit_config
+        )
+
+        logger.info(f"风险计算完成：stop_loss={stop_loss}, position_size={position_size}, leverage={leverage}, take_profit_levels={len(take_profit_levels)}")
 
         return SignalResult(
             symbol=kline.symbol,
@@ -278,4 +348,5 @@ class RiskCalculator:
             kline_timestamp=kline_timestamp,
             strategy_name=strategy_name,
             score=score,
+            take_profit_levels=take_profit_levels,
         )

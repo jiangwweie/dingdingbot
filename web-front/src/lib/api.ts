@@ -33,7 +33,14 @@ export interface Signal {
   direction: 'long' | 'short';
   entry_price: string;
   stop_loss: string;
-  take_profit?: string;
+  take_profit?: string;  // 遗留字段（兼容旧数据）
+  take_profit_levels?: Array<{  // S6-3: 多级别止盈
+    id: string;              // TP1, TP2, ...
+    position_ratio: string;  // 仓位比例
+    risk_reward: string;     // 盈亏比
+    price: string;           // 止盈价格
+    status?: string;         // PENDING/WON/CANCELLED
+  }>;
   position_size: string;
   leverage: number;
   tags?: Array<{ name: string; value: string }>;  // Dynamic filter tags (e.g., [{"name": "EMA", "value": "Bullish"}])

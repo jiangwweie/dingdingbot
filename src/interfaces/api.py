@@ -465,6 +465,14 @@ async def get_signal_context(signal_id: int):
         finally:
             await exchange.close()
 
+        # S6-3: Load take profit levels if not already loaded
+        if "take_profit_levels" not in signal:
+            signal_id_str = signal.get("signal_id")
+            if signal_id_str:
+                signal["take_profit_levels"] = await repo.get_take_profit_levels(signal_id_str)
+            else:
+                signal["take_profit_levels"] = []
+
         return {
             "signal": signal,
             "klines": ohlcv,
