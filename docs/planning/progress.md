@@ -1,5 +1,66 @@
 # 进度日志
 
+## 2026-03-29 - 会话：日志系统完善 (已完成)
+
+**目标**: 完善日志系统，实现文件持久化、按天轮转、过滤原因追踪
+
+**背景**:
+- 原系统只有控制台输出，重启后日志丢失
+- 无法追溯信号被过滤的具体原因
+- 关键路径缺少日志记录，排查问题困难
+
+**需求**:
+1. 日志文件持久化，按天轮转归档
+2. 信号被过滤时记录详细原因（仅日志，不需前端展示）
+3. 完善关键路径日志记录
+4. 日志级别：过滤=WARNING
+
+**进展**:
+
+### 任务 1: 日志架构设计 ✅
+- [x] 创建 `docs/arch/logging-system-spec.md` 规范文档
+- [x] 定义日志级别使用规范
+- [x] 设计按天轮转策略（7 天压缩，30 天删除）
+
+### 任务 2: 日志持久化与轮转实现 ✅
+- [x] 修改 `src/infrastructure/logger.py`:
+  - 添加 `TimedRotatingFileHandler` 按天轮转
+  - 启动时自动创建 `logs/` 目录
+  - 启动时压缩 7 天前日志为 `.gz`
+  - 启动时删除 30 天前日志
+  - 保持 `StreamHandler` 控制台输出
+  - 控制台级别：INFO，文件级别：DEBUG
+
+### 任务 3: 信号过滤日志实现 ✅
+- [x] 扩展 `FilterResult` 数据类，添加 `metadata` 字段
+- [x] 修改 `src/application/signal_pipeline.py`:
+  - 在 `process_kline()` 中遍历 `filter_results`
+  - 对被拒绝的过滤器记录 WARNING 日志
+  - 日志格式：`[FILTER_REJECTED] symbol=... filter=... reason=... metadata=...`
+
+### 任务 4: 关键路径日志完善 ✅
+- [x] `src/infrastructure/signal_repository.py`:
+  - 数据库初始化、信号保存、attempt 记录
+- [x] `src/domain/risk_calculator.py`:
+  - 止损计算、仓位计算、风险计算完成
+- [x] `src/application/performance_tracker.py`:
+  - 待处理信号检查日志
+
+**验收结果**:
+- ✅ 所有 371 个单元测试通过
+- ✅ `logs/` 目录自动创建并生成日志文件
+- ✅ 日志按天轮转配置正确
+- ✅ 过滤日志格式便于 grep 分析
+
+**日志格式示例**:
+```
+[FILTER_REJECTED] symbol=BTC/USDT:USDT timeframe=15m pattern=pinbar direction=long
+filter=atr_volatility reason=insufficient_volatility
+metadata={"candle_range": 123.5, "atr": 250.0, "min_required": 150.0, "ratio": 0.492}
+```
+
+---
+
 ## 2026-03-29 - 会话：信号详情组件改为居中弹窗 (已完成)
 
 **目标**: 将信号列表页的详情查看组件从右侧抽屉改为居中弹窗布局

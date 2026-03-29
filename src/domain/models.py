@@ -171,6 +171,11 @@ class FilterResult:
     """单个过滤器的判断结果"""
     passed: bool
     reason: str                    # 通过或拒绝的原因，如 "trend_match" 或 "bearish_trend_blocks_long"
+    metadata: Dict[str, Any] = None  # 详细数据字典，如 candle_range, atr, ratio 等
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
 
 
 @dc_dataclass

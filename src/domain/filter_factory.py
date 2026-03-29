@@ -36,7 +36,11 @@ class TraceEvent:
 
     def to_filter_result(self) -> FilterResult:
         """Convert to legacy FilterResult for backward compatibility."""
-        return FilterResult(passed=self.passed, reason=self.reason)
+        return FilterResult(
+            passed=self.passed,
+            reason=self.reason,
+            metadata=self.metadata
+        )
 
 
 # ============================================================

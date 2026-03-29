@@ -15,6 +15,9 @@ from src.domain.models import (
     SignalAttempt, PatternResult, FilterResult
 )
 from src.domain.logic_tree import LogicNode, LeafNode, TriggerLeaf, FilterLeaf
+from src.infrastructure.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class SignalRepository:
@@ -31,6 +34,7 @@ class SignalRepository:
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
+        logger.info(f"数据库初始化完成：{db_path}")
 
     async def initialize(self) -> None:
         """
@@ -260,6 +264,22 @@ class SignalRepository:
         try:
             await self._db.execute("""
                 ALTER TABLE signals ADD COLUMN pattern_score REAL
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
+        # Add legacy columns for backward compatibility (ema_trend, mtf_status)
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN ema_trend TEXT DEFAULT ''
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN mtf_status TEXT DEFAULT ''
             """)
         except aiosqlite.OperationalError as e:
             if "duplicate column name" not in str(e).lower():
@@ -516,6 +536,8 @@ class SignalRepository:
         )
         await self._db.commit()
 
+        logger.debug(f"Attempt 已记录：{symbol}:{timeframe} {final_result}")
+
     async def get_diagnostics(
         self,
         symbol: str = None,
@@ -674,7 +696,11 @@ class SignalRepository:
             ),
         )
         await self._db.commit()
-        return signal_id or str(created_at)
+
+        signal_id_result = signal_id or str(created_at)
+        logger.info(f"信号已保存：id={signal_id_result}, {signal.symbol}:{signal.timeframe}")
+
+        return signal_id_result
 
     async def get_signals(
         self,
