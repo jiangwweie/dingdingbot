@@ -172,12 +172,12 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
     if (data.signal.take_profit_levels && data.signal.take_profit_levels.length > 0) {
       data.signal.take_profit_levels.forEach((tp) => {
         candleSeries.createPriceLine({
-          price: Number(tp.price),
+          price: Number(tp.price_level),
           color: APPLE_GREEN,
           lineWidth: 1,
           lineStyle: 2, // Dashed
           axisLabelVisible: true,
-          title: `${tp.id} (${Number(tp.position_ratio) * 100}%)`,
+          title: `${tp.tp_id} (${Number(tp.position_ratio) * 100}%)`,
         });
       });
     }
