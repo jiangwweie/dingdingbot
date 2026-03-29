@@ -256,6 +256,15 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # Add pattern_score column for signal pattern quality score (0~1)
+        try:
+            await self._db.execute("""
+                ALTER TABLE signals ADD COLUMN pattern_score REAL
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
         # Create index for source
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_signals_source ON signals(source)
@@ -638,8 +647,8 @@ class SignalRepository:
                 entry_price, stop_loss, position_size, leverage,
                 tags_json, risk_info, status, pnl_ratio,
                 kline_timestamp, strategy_name, score, signal_id, source,
-                ema_trend, mtf_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ema_trend, mtf_status, pattern_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -661,6 +670,7 @@ class SignalRepository:
                 source,
                 '',  # ema_trend (legacy field, empty for new signals)
                 '',  # mtf_status (legacy field, empty for new signals)
+                signal.score,  # pattern_score (same as score, for sorting compatibility)
             ),
         )
         await self._db.commit()
