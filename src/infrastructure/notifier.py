@@ -4,7 +4,7 @@ Formats SignalResult to Markdown and sends system alerts.
 """
 import asyncio
 import traceback
-from typing import List, Optional
+from typing import List, Optional, Dict
 from decimal import Decimal
 
 import aiohttp
@@ -85,6 +85,29 @@ def format_take_profit_levels(take_profit_levels: List[dict]) -> str:
         tp_parts.append(f"{tp_id}: {price}")
 
     return " | ".join(tp_parts)
+
+
+def format_tags_compact(tags: List[Dict[str, str]]) -> str:
+    """
+    Format tags as compact string for style D.
+    e.g., "MTF 确认 | EMA 趋势看跌"
+    """
+    if not tags:
+        return "无"
+
+    parts = []
+    for tag in tags:
+        name = tag.get('name', '')
+        value = tag.get('value', '')
+        # Skip Source tag
+        if name == 'Source':
+            continue
+        # Translate
+        translated_name = TAG_TRANSLATIONS.get(name, name)
+        translated_value = TAG_VALUE_TRANSLATIONS.get(value, value)
+        parts.append(f"{translated_name}{translated_value}")
+
+    return " | ".join(parts)
 def format_signal_message(
     signal: SignalResult,
     superseded_signal: Optional[dict] = None,
@@ -329,6 +352,115 @@ def format_system_alert(error_code: str, error_message: str, traceback_str: Opti
     message += """
 
 ⚠️ 请尽快检查系统状态
+"""
+    return message
+
+
+# ============================================================
+# Style C: 区块分隔风格
+# ============================================================
+def format_signal_message_style_c(signal: SignalResult) -> str:
+    """
+    Style C: 区块分隔风格 - 使用分隔线和区块
+
+    ═══════════════════════════════
+         🚨 交易信号提醒
+    ═══════════════════════════════
+    """
+    # Direction emoji and text
+    if signal.direction == Direction.LONG:
+        direction_icon = "🟢"
+        direction_text = "看多"
+    else:
+        direction_icon = "🔴"
+        direction_text = "看空"
+
+    # Take profit
+    tp_str = format_take_profit_levels(signal.take_profit_levels)
+
+    # Tags compact
+    tags_str = format_tags_compact(signal.tags) if signal.tags else "无"
+
+    message = f"""
+═══════════════════════════════
+     🚨 交易信号提醒
+═══════════════════════════════
+
+🪙 {signal.symbol}
+⏱️ {signal.timeframe} | 📊 {format_score(signal.score)}分
+
+{direction_icon} {direction_text}
+
+───────────────────────────────
+💰 入场价：{signal.entry_price}
+🛑 止损位：{signal.suggested_stop_loss}
+🎯 止盈：{tp_str}
+───────────────────────────────
+
+📊 仓位：{signal.suggested_position_size}
+🔧 杠杆：{signal.current_leverage}x
+
+📐 指标：{tags_str}
+⚖️ 风控：{signal.risk_reward_info}
+
+═══════════════════════════════
+"""
+    return message
+
+
+# ============================================================
+# Style D: 紧凑卡片风格
+# ============================================================
+def format_signal_message_style_d(signal: SignalResult) -> str:
+    """
+    Style D: 紧凑卡片风格 - 类似 CryptoRadar
+
+    📡 盯盘狗 🐶 交易信号雷达
+    ━━━━━━━━━━━━━━━━━━━
+    """
+    # Direction emoji and text
+    if signal.direction == Direction.LONG:
+        direction_icon = "🟢"
+        direction_text = "多"
+    else:
+        direction_icon = "🔴"
+        direction_text = "空"
+
+    # Strategy name (short)
+    strategy_short = signal.strategy_name or "Pinbar"
+    if len(strategy_short) > 15:
+        strategy_short = strategy_short[:12] + "..."
+
+    # Take profit
+    tp_str = format_take_profit_levels(signal.take_profit_levels)
+
+    # Tags compact
+    tags_str = format_tags_compact(signal.tags) if signal.tags else "无"
+
+    # Risk info short
+    risk_short = signal.risk_reward_info
+    if "Risk" in risk_short:
+        # Extract percentage and USDT amount
+        risk_short = risk_short.replace("Risk ", "").replace(" = ", " = ")
+        if "USDT" in risk_short:
+            risk_short = risk_short.replace(" USDT", "U")
+
+    message = f"""
+📡 盯盘狗 🐶 交易决策雷达
+━━━━━━━━━━━━━━━━━━━
+📢【普通信号】
+
+📊 {strategy_short} · {format_score(signal.score)}分
+#{signal.symbol} | {signal.timeframe} | {direction_icon} {direction_text}
+
+💰 入场：`{signal.entry_price}`
+🛑 止损：`{signal.suggested_stop_loss}`
+🎯 止盈：`{tp_str}`
+🔧 杠杆：`{signal.current_leverage}x`
+
+📐 {tags_str}
+⚖️ {signal.risk_reward_info}
+━━━━━━━━━━━━━━━━━━━
 """
     return message
 
@@ -611,3 +743,36 @@ def get_notification_service() -> NotificationService:
     if _notification_service is None:
         _notification_service = NotificationService()
     return _notification_service
+
+
+# ============================================================
+# Helper functions for testing styles
+# ============================================================
+def send_style_c(signal: SignalResult, webhook_url: str) -> bool:
+    """Send style C notification"""
+    import asyncio
+
+    async def _send():
+        service = NotificationService()
+        service.add_channel(FeishuWebhook(webhook_url))
+        message = format_signal_message_style_c(signal)
+        result = await service._broadcast(message)
+        await service.close()
+        return result
+
+    return asyncio.run(_send())
+
+
+def send_style_d(signal: SignalResult, webhook_url: str) -> bool:
+    """Send style D notification"""
+    import asyncio
+
+    async def _send():
+        service = NotificationService()
+        service.add_channel(FeishuWebhook(webhook_url))
+        message = format_signal_message_style_d(signal)
+        result = await service._broadcast(message)
+        await service.close()
+        return result
+
+    return asyncio.run(_send())
