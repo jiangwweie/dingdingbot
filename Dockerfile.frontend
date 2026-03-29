@@ -8,8 +8,9 @@ WORKDIR /app
 # Copy package files
 COPY web-front/package.json web-front/package-lock.json* ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (remove node_modules and lock file for clean install)
+RUN rm -rf node_modules package-lock.json
+RUN npm install
 
 # Copy source code
 COPY web-front/ ./
