@@ -930,8 +930,58 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 
 | 编号 | 任务 | 优先级 | 预计工作量 | 状态 |
 |------|------|--------|----------|------|
-| S2-5 | ATR 过滤器核心逻辑实现 | 🔴 最高 | 4-6 小时 | ⏸️ pending |
 | S6-1 | 冷却缓存优化 | 🟡 中 | 3-4 小时 | ⏸️ pending |
 | Pinbar 参数优化 | 调整默认参数覆盖更多形态 | 🟡 低 | 30 分钟 | ⏸️ pending |
+
+---
+
+## 2026-03-29 - 会话：S2-5 ATR 过滤器完成 + 溯源日志报告增强 ✅
+
+**目标**: 实现 ATR 过滤器核心逻辑，完善溯源日志语义化报告展示
+
+**进展**:
+- [x] **S2-5: ATR 过滤器核心逻辑实现** ✅
+  - `src/domain/filter_factory.py` - 实现 `AtrFilterDynamic.check()` 方法
+  - 计算 K 线波幅与 ATR 的比率，过滤低波幅 K 线
+  - 返回包含 `candle_range`、`atr`、`ratio` 等元数据的 TraceEvent
+  - 前端类型对齐：添加 `AtrFilterParams` 接口和 `FilterType='atr'`
+
+- [x] **溯源日志报告增强** ✅
+  - `src/infrastructure/signal_repository.py` - 新增 `_generate_evaluation_summary()` 和 `_build_trace_tree()` 函数
+  - `signal_attempts` 表添加 `evaluation_summary` (TEXT) 和 `trace_tree` (JSON) 字段
+  - 前端 `SignalAttempts.tsx` 添加模态框，优先显示语义化报告
+  - 支持 `TraceTreeViewer` 可视化评估路径
+
+- [x] **测试验证** ✅
+  - 单元测试：371/371 通过 (100%)
+  - TypeScript 编译：通过
+
+- [x] **数据库迁移** ✅
+  - 创建 `src/infrastructure/migrations/003_add_attempt_report_fields.sql`
+  - 执行迁移成功
+
+**交付物**:
+- ATR 过滤器核心逻辑（动态波动率阈值）
+- 语义化评估报告生成（中文格式）
+- TraceTree 可视化数据结构
+- 前端模态框展示组件
+- 数据库迁移脚本
+
+**S2-5 完成总结**:
+| 步骤 | 状态 | 文件 |
+|------|------|------|
+| S2-5-1 | ✅ 完成 | `src/domain/filter_factory.py` |
+| S2-5-2 | ✅ 完成 | `tests/unit/test_filter_factory.py` |
+| S2-5-3 | ✅ 完成 | `web-front/src/lib/api.ts`, `src/types/strategy.ts` |
+
+**溯源日志增强总结**:
+| 步骤 | 状态 | 文件 |
+|------|------|------|
+| Step 1 | ✅ 完成 | 数据库迁移 |
+| Step 2 | ✅ 完成 | `src/infrastructure/signal_repository.py` |
+| Step 3 | ✅ 完成 | `web-front/src/pages/SignalAttempts.tsx` |
+| Step 4 | ✅ 完成 | 测试验证 |
+
+**Git 提交**: 待提交
 
 ---
