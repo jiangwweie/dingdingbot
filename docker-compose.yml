@@ -11,8 +11,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Config files (read-only from host) - 外部挂载
-      - /usr/local/monitorDog/config:/app/config:ro
+      # Config files - 外部挂载（可写，支持前端配置更新）
+      - /usr/local/monitorDog/config:/app/config
       # Database persistence - 外部挂载
       - /usr/local/monitorDog/data:/app/data
       # Logs persistence - 外部挂载
