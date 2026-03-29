@@ -16,6 +16,75 @@ from src.infrastructure.logger import logger, mask_secret
 # ============================================================
 # Message Formatter
 # ============================================================
+
+# Translation map for tag names
+TAG_TRANSLATIONS = {
+    'MTF': 'MTF',
+    'EMA': 'EMA 趋势',
+    'Source': None,  # Do not display Source tag
+}
+
+# Translation map for tag values
+TAG_VALUE_TRANSLATIONS = {
+    'Confirmed': '确认',
+    'Rejected': '拒绝',
+    'Passed': '通过',
+    'Unavailable': '不可用',
+    'Bullish': '看涨',
+    'Bearish': '看跌',
+    'Backtest': '回测',
+    'Live': '实盘',
+}
+
+
+def translate_tag(name: str, value: str) -> Optional[str]:
+    """
+    Translate tag name and value to Chinese.
+
+    Args:
+        name: Tag name (e.g., "MTF", "EMA", "Source")
+        value: Tag value (e.g., "Confirmed", "Bullish")
+
+    Returns:
+        Translated tag string or None if should be hidden
+    """
+    # Check if this tag should be hidden
+    tag_name = TAG_TRANSLATIONS.get(name)
+    if tag_name is None:
+        return None
+
+    # Translate value
+    translated_value = TAG_VALUE_TRANSLATIONS.get(value, value)
+
+    return f"  {tag_name}: {translated_value}"
+
+
+def format_score(score: float) -> int:
+    """Convert score (0-1) to integer (0-100)"""
+    return int(round(score * 100))
+
+
+def format_take_profit_levels(take_profit_levels: List[dict]) -> str:
+    """
+    Format take profit levels as single line.
+
+    Args:
+        take_profit_levels: List of TP dicts with tp_id and price_level
+
+    Returns:
+        Formatted string like "TP1: 71000 | TP2: 72000" or "无"
+    """
+    if not take_profit_levels or len(take_profit_levels) == 0:
+        return "无"
+
+    tp_parts = []
+    for tp in take_profit_levels:
+        # Support both new (tp_id, price_level) and legacy (id, price) field names
+        tp_id = tp.get('tp_id', tp.get('id', 'TP'))
+        price = tp.get('price_level', tp.get('price', 'N/A'))
+        tp_parts.append(f"{tp_id}: {price}")
+
+    return " | ".join(tp_parts)
 def format_signal_message(
     signal: SignalResult,
     superseded_signal: Optional[dict] = None,
@@ -45,37 +114,36 @@ def format_signal_message(
     else:
         direction_text = "🔴 看空 (SHORT)"
 
-    # Build tags section dynamically
+    # Build tags section dynamically with translation
     tags_section = ""
     if signal.tags:
-        tags_section = "\n".join([f"  {tag.get('name', 'Unknown')}: {tag.get('value', 'N/A')}" for tag in signal.tags])
-        tags_section = f"\n指标标签:\n{tags_section}\n"
+        translated_tags = []
+        for tag in signal.tags:
+            translated = translate_tag(tag.get('name', 'Unknown'), tag.get('value', 'N/A'))
+            if translated:
+                translated_tags.append(translated)
+        if translated_tags:
+            tags_section = "\n".join(translated_tags)
+            tags_section = f"\n指标标签:\n{tags_section}\n"
+        else:
+            tags_section = "\n指标标签：无\n"
     else:
         tags_section = "\n指标标签：无\n"
 
-    # Build take profit section (S6-3)
-    tp_section = ""
-    if signal.take_profit_levels and len(signal.take_profit_levels) > 0:
-        tp_lines = [f"  {tp['id']}: {tp['price']} ({tp['position_ratio']} @ 1:{tp['risk_reward']})" for tp in signal.take_profit_levels]
-        tp_section = "\n止盈目标:\n" + "\n".join(tp_lines) + "\n"
-    else:
-        tp_section = "\n止盈目标：无\n"
+    # Build take profit section (S6-3) - single line format
+    tp_section = f"止盈目标：{format_take_profit_levels(signal.take_profit_levels)}\n\n"
 
     # Build message
     message = f"""【交易信号提醒】
 
 币种：{signal.symbol}
-周期：{signal.timeframe}
+周期：{signal.timeframe} | {format_score(signal.score)}分
 方向：{direction_text}
 入场价：{signal.entry_price}
 止损位：{signal.suggested_stop_loss}
 {tp_section}建议仓位：{signal.suggested_position_size}
 当前杠杆：{signal.current_leverage}x
-{tags_section}
-风控信息：{signal.risk_reward_info}
-
----
-⚠️ 本系统仅为观测与通知工具，不构成投资建议
+{tags_section}风控信息：{signal.risk_reward_info}
 """
     return message
 
@@ -97,21 +165,24 @@ def format_cover_signal_message(signal: SignalResult, superseded_signal: dict) -
     else:
         direction_text = "🔴 看空 (SHORT)"
 
-    # Build take profit section (S6-3)
-    tp_section = ""
-    if signal.take_profit_levels and len(signal.take_profit_levels) > 0:
-        tp_lines = [f"  {tp['id']}: {tp['price']} ({tp['position_ratio']} @ 1:{tp['risk_reward']})" for tp in signal.take_profit_levels]
-        tp_section = "\n止盈目标:\n" + "\n".join(tp_lines) + "\n"
-    else:
-        tp_section = "\n止盈目标：无\n"
-
-    # Build tags section dynamically
+    # Build tags section dynamically with translation
     tags_section = ""
     if signal.tags:
-        tags_section = "\n".join([f"  {tag.get('name', 'Unknown')}: {tag.get('value', 'N/A')}" for tag in signal.tags])
-        tags_section = f"\n指标标签:\n{tags_section}\n"
+        translated_tags = []
+        for tag in signal.tags:
+            translated = translate_tag(tag.get('name', 'Unknown'), tag.get('value', 'N/A'))
+            if translated:
+                translated_tags.append(translated)
+        if translated_tags:
+            tags_section = "\n".join(translated_tags)
+            tags_section = f"\n指标标签:\n{tags_section}\n"
+        else:
+            tags_section = "\n指标标签：无\n"
     else:
         tags_section = "\n指标标签：无\n"
+
+    # Build take profit section (S6-3) - single line format
+    tp_section = f"止盈目标：{format_take_profit_levels(signal.take_profit_levels)}\n\n"
 
     # Calculate score improvement
     new_score = signal.score
@@ -122,7 +193,7 @@ def format_cover_signal_message(signal: SignalResult, superseded_signal: dict) -
     message = f"""【信号覆盖提醒】⚡
 
 币种：{signal.symbol}
-周期：{signal.timeframe}
+周期：{signal.timeframe} | {format_score(new_score)}分
 方向：{direction_text}
 入场价：{signal.entry_price}（更新）
 止损位：{signal.suggested_stop_loss}（更新）
@@ -130,15 +201,12 @@ def format_cover_signal_message(signal: SignalResult, superseded_signal: dict) -
 当前杠杆：{signal.current_leverage}x
 
 【覆盖原因】
-新信号评分：{new_score:.2f}（原信号评分：{old_score:.2f}）
+新信号评分：{format_score(new_score)}分（原信号评分：{format_score(old_score)}分）
 评分提升：{score_improvement:+.0f}%
 
-{tags_section}
-风控信息：{signal.risk_reward_info}
+{tags_section}风控信息：{signal.risk_reward_info}
 
----
 ⚡ 此信号覆盖了之前的信号 (ID: {superseded_signal.get('signal_id', 'unknown')}),因为形态质量更优
-⚠️ 本系统仅为观测与通知工具，不构成投资建议
 """
     return message
 
@@ -160,11 +228,19 @@ def format_opposing_signal_message(signal: SignalResult, opposing_signal: dict) 
     else:
         direction_text = "🔴 看空 (SHORT)"
 
-    # Build tags section dynamically
+    # Build tags section dynamically with translation
     tags_section = ""
     if signal.tags:
-        tags_section = "\n".join([f"  {tag.get('name', 'Unknown')}: {tag.get('value', 'N/A')}" for tag in signal.tags])
-        tags_section = f"\n指标标签:\n{tags_section}\n"
+        translated_tags = []
+        for tag in signal.tags:
+            translated = translate_tag(tag.get('name', 'Unknown'), tag.get('value', 'N/A'))
+            if translated:
+                translated_tags.append(translated)
+        if translated_tags:
+            tags_section = "\n".join(translated_tags)
+            tags_section = f"\n指标标签:\n{tags_section}\n"
+        else:
+            tags_section = "\n指标标签：无\n"
     else:
         tags_section = "\n指标标签：无\n"
 
@@ -181,18 +257,21 @@ def format_opposing_signal_message(signal: SignalResult, opposing_signal: dict) 
     current_score = signal.score
     is_opposing_higher = opp_score > current_score
 
+    # Build take profit section (S6-3) - single line format
+    tp_section = f"止盈目标：{format_take_profit_levels(signal.take_profit_levels)}\n\n"
+
     # Build message
     if is_opposing_higher:
         warning_section = f"""【市场分歧提示】
-当前方向信号评分：{current_score:.2f}
-反向方向信号评分：{opp_score:.2f}（更高）
+当前方向信号评分：{format_score(current_score)}分
+反向方向信号评分：{format_score(opp_score)}分（更高）
 
 ⚠️ 注意：存在更优的反向信号，市场可能出现分歧
 """
     else:
         warning_section = f"""【市场分歧提示】
-当前方向信号评分：{current_score:.2f}
-反向方向信号评分：{opp_score:.2f}
+当前方向信号评分：{format_score(current_score)}分
+反向方向信号评分：{format_score(opp_score)}分
 
 ⚠️ 市场存在反向信号，请谨慎判断
 """
@@ -200,20 +279,17 @@ def format_opposing_signal_message(signal: SignalResult, opposing_signal: dict) 
     message = f"""【反向信号提醒】⚠️
 
 币种：{signal.symbol}
-周期：{signal.timeframe}
+周期：{signal.timeframe} | {format_score(current_score)}分
 方向：{direction_text} ← 与原信号相反
 入场价：{signal.entry_price}
 止损位：{signal.suggested_stop_loss}
-建议仓位：{signal.suggested_position_size}
+{tp_section}建议仓位：{signal.suggested_position_size}
 当前杠杆：{signal.current_leverage}x
 
 {warning_section}
-{tags_section}
-风控信息：{signal.risk_reward_info}
+{tags_section}风控信息：{signal.risk_reward_info}
 
----
 ⚠️ 市场存在反向信号，请谨慎判断
-⚠️ 本系统仅为观测与通知工具，不构成投资建议
 """
     return message
 
@@ -243,6 +319,7 @@ def format_system_alert(error_code: str, error_message: str, traceback_str: Opti
 
     if traceback_str:
         message += f"""
+
 堆栈摘要:
 ```
 {traceback_str}
@@ -250,7 +327,7 @@ def format_system_alert(error_code: str, error_message: str, traceback_str: Opti
 """
 
     message += """
----
+
 ⚠️ 请尽快检查系统状态
 """
     return message
