@@ -468,8 +468,10 @@ export async function updateSystemConfig(
 
 /**
  * Run backtest with given parameters
+ *
+ * Backtest signals are automatically saved to database.
  */
-export async function runBacktest(payload: BacktestRequest & { save_signals?: boolean }): Promise<BacktestReport> {
+export async function runBacktest(payload: BacktestRequest): Promise<BacktestReport> {
   const res = await fetch('/api/backtest', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

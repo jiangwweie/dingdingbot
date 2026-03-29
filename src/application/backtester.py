@@ -130,8 +130,7 @@ class Backtester:
         self,
         request: BacktestRequest,
         account_snapshot: Optional[AccountSnapshot] = None,
-        save_signals: bool = False,
-        repository = None,  # Optional SignalRepository for saving signals
+        repository = None,  # SignalRepository for saving signals (always saved if provided)
     ) -> BacktestReport:
         """
         Run backtest with isolated config sandbox.
@@ -140,11 +139,13 @@ class Backtester:
         1. Legacy mode: Simple pinbar + EMA + MTF config
         2. Dynamic rule engine mode: Multiple strategies with custom filter chains
 
+        Backtest signals are automatically saved to database with source='backtest'.
+        Signals can be viewed in the Signals page with K-line chart visualization.
+
         Args:
             request: Backtest request parameters
             account_snapshot: Optional account snapshot for position sizing.
                               If not provided, uses a default snapshot.
-            save_signals: If True, save fired signals to database (default False)
             repository: SignalRepository instance for saving signals
 
         Returns:
@@ -191,9 +192,9 @@ class Backtester:
         signal_stats = self._calculate_signal_stats(attempts)
         reject_reasons = self._calculate_reject_reasons(attempts)
 
-        # Step 5.5: Save signals to database if requested
+        # Step 5.5: Save signals to database (if repository is provided)
         saved_count = 0
-        if save_signals and repository is not None:
+        if repository is not None:
             saved_count = await self._save_backtest_signals(
                 attempts, klines, request, repository
             )
@@ -711,17 +712,21 @@ async def run_backtest(
     gateway: ExchangeGateway,
     request: BacktestRequest,
     account_snapshot: Optional[AccountSnapshot] = None,
+    repository = None,  # Optional SignalRepository for saving signals
 ) -> BacktestReport:
     """
     Run a backtest with isolated sandbox.
+
+    Backtest signals are automatically saved to database if repository is provided.
 
     Args:
         gateway: Exchange gateway for fetching data
         request: Backtest request parameters
         account_snapshot: Optional account snapshot
+        repository: Optional SignalRepository for saving signals
 
     Returns:
         BacktestReport with detailed statistics
     """
     backtester = Backtester(gateway)
-    return await backtester.run_backtest(request, account_snapshot)
+    return await backtester.run_backtest(request, account_snapshot, repository=repository)

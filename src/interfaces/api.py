@@ -733,10 +733,12 @@ async def update_config(
 @app.post("/api/backtest")
 async def run_backtest(
     request: BacktestRequest,
-    save_signals: Optional[bool] = False,
 ):
     """
     Run strategy backtest on historical data.
+
+    Backtest signals are automatically saved to database with source='backtest'.
+    You can view them in the Signals page with K-line chart visualization.
 
     Request body (BacktestRequest):
     {
@@ -749,8 +751,7 @@ async def run_backtest(
         "max_body_ratio": 0.3,
         "body_position_tolerance": 0.1,
         "trend_filter_enabled": true,
-        "mtf_validation_enabled": true,
-        "save_signals": false  // Optional: save fired signals to database
+        "mtf_validation_enabled": true
     }
 
     Returns:
@@ -769,11 +770,11 @@ async def run_backtest(
         # Get current account snapshot for position sizing
         account_snapshot = _account_getter() if _account_getter else None
 
-        # Get repository for saving signals
-        repository = _get_repository() if save_signals else None
+        # Get repository for saving signals (always save backtest signals)
+        repository = _get_repository()
 
         # Run backtest
-        report = await backtester.run_backtest(request, account_snapshot, save_signals=save_signals, repository=repository)
+        report = await backtester.run_backtest(request, account_snapshot, repository=repository)
 
         return {
             "status": "success",
