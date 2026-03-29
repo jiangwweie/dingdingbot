@@ -390,6 +390,25 @@ Agent(subagent_type="qa-tester", prompt="...")
 > 📚 详细文档：`.claude/team/README.md`
 > 🚀 快速开始：`.claude/team/QUICKSTART.md`
 
+---
+
+## 🚀 全自动复杂任务交付流水线
+
+**复杂任务（涉及前端 + 后端 + 测试）必须走全自动工作流**:
+
+```
+【阶段 0】需求接收 → 【阶段 1】契约设计 → 【阶段 2】任务分解 → 【阶段 3】并行开发 → 【阶段 4】审查验证 → 【阶段 5】测试执行 → 【阶段 6】提交汇报
+```
+
+**核心原则**:
+- **契约先行**: 先写接口契约表，作为 SSOT
+- **并行执行**: 前后端独立任务并行开发
+- **自动审查**: Reviewer 对照契约表检查
+- **无人值守**: 简单问题自解，严重问题标记 blocked 最后汇报
+
+**详细文档**: `docs/workflows/auto-pipeline.md`
+**契约模板**: `docs/templates/contract-template.md`
+
 ### 任务文档
 
 开发前请阅读对应子任务文档：
