@@ -452,10 +452,9 @@ class TestAtrFilterDynamic:
 
         event = f.check(pattern, context)
         assert event.passed is False
-        assert event.reason == "insufficient_volatility"
+        assert event.reason == "insufficient_absolute_volatility"  # Scheme C: absolute range threshold
         assert "candle_range" in event.metadata
-        assert "atr" in event.metadata
-        assert "min_required" in event.metadata
+        assert "min_required" in event.metadata  # Scheme C: min_absolute_range
 
     def test_atr_filter_accepts_normal_volatility(self):
         """Test that normal volatility klines pass."""

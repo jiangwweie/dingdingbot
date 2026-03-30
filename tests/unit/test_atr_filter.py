@@ -340,3 +340,145 @@ class TestAtrFilterEndToEnd:
         # 真突破 should pass: ratio = 527/400 = 1.32 > 0.5
         assert event2.passed is True, f"真突破 should pass, got {event2.reason}"
         assert event2.metadata.get("ratio", 0) > 0.5
+
+
+class TestSchemeCMinAbsoluteRange:
+    """方案 C：ATR 绝对波幅阈值测试"""
+
+    def test_min_absolute_range_parameter(self):
+        """测试 min_absolute_range 参数初始化"""
+        filter = AtrFilterDynamic(
+            period=14,
+            min_atr_ratio=Decimal("0.5"),
+            min_absolute_range=Decimal("0.2"),
+            enabled=True
+        )
+        assert filter._min_absolute_range == Decimal("0.2")
+
+    def test_insufficient_absolute_volatility(self):
+        """测试绝对波幅不足时被过滤"""
+        filter = AtrFilterDynamic(
+            period=14,
+            min_atr_ratio=Decimal("0.5"),
+            min_absolute_range=Decimal("0.5"),  # 最小波幅 0.5 USDT
+            enabled=True
+        )
+
+        # 喂入足够周期的 K 线以建立 ATR
+        for i in range(20):
+            kline = create_kline(
+                timestamp=i * 1000,
+                high=Decimal("50100"),
+                low=Decimal("50000"),
+                close=Decimal("50050"),
+            )
+            filter.update_state(kline, kline.symbol, kline.timeframe)
+
+        # 创建一根波幅很小的 K 线（波幅 0.1 < 0.5）
+        low_volatility_kline = create_kline(
+            timestamp=100000,
+            high=Decimal("50050.1"),  # Range = 0.1 USDT
+            low=Decimal("50050"),
+            close=Decimal("50050.05"),
+        )
+        filter.update_state(low_volatility_kline, low_volatility_kline.symbol, low_volatility_kline.timeframe)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.7,
+            details={}
+        )
+        context = FilterContext(higher_tf_trends={}, kline=low_volatility_kline)
+
+        event = filter.check(pattern, context)
+
+        # 验证因绝对波幅不足被过滤
+        assert event.passed is False
+        assert event.reason == "insufficient_absolute_volatility"
+        assert event.metadata.get("candle_range") == 0.1
+        assert event.metadata.get("min_required") == 0.5
+
+    def test_sufficient_absolute_volatility(self):
+        """测试绝对波幅足够时通过"""
+        filter = AtrFilterDynamic(
+            period=14,
+            min_atr_ratio=Decimal("0.5"),
+            min_absolute_range=Decimal("0.5"),  # 最小波幅 0.5 USDT
+            enabled=True
+        )
+
+        # 喂入足够周期的 K 线以建立 ATR（波幅较小，以便 ATR 也较小）
+        for i in range(20):
+            kline = create_kline(
+                timestamp=i * 1000,
+                high=Decimal("50002"),  # 波幅 2 USDT
+                low=Decimal("50000"),
+                close=Decimal("50001"),
+            )
+            filter.update_state(kline, kline.symbol, kline.timeframe)
+
+        # 创建一根波幅足够的 K 线（波幅 1.0 > 0.5）
+        high_volatility_kline = create_kline(
+            timestamp=100000,
+            high=Decimal("50001"),  # Range = 1.0 USDT
+            low=Decimal("50000"),
+            close=Decimal("50000.5"),
+        )
+        filter.update_state(high_volatility_kline, high_volatility_kline.symbol, high_volatility_kline.timeframe)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.7,
+            details={}
+        )
+        context = FilterContext(higher_tf_trends={}, kline=high_volatility_kline)
+
+        event = filter.check(pattern, context)
+
+        # 验证通过检查
+        assert event.passed is True
+        assert event.reason == "volatility_sufficient"
+
+    def test_absolute_range_check_before_atr_ratio(self):
+        """测试绝对波幅检查在 ATR 比率检查之前执行"""
+        filter = AtrFilterDynamic(
+            period=14,
+            min_atr_ratio=Decimal("0.001"),  # 非常小的 ATR 比率
+            min_absolute_range=Decimal("1.0"),  # 但绝对波幅要求较高
+            enabled=True
+        )
+
+        # 喂入足够周期的 K 线以建立 ATR
+        for i in range(20):
+            kline = create_kline(
+                timestamp=i * 1000,
+                high=Decimal("50100"),
+                low=Decimal("50000"),
+                close=Decimal("50050"),
+            )
+            filter.update_state(kline, kline.symbol, kline.timeframe)
+
+        # 创建一根 ATR 比率足够但绝对波幅不足的 K 线
+        low_range_kline = create_kline(
+            timestamp=100000,
+            high=Decimal("50050.5"),  # Range = 0.5 < 1.0
+            low=Decimal("50050"),
+            close=Decimal("50050.25"),
+        )
+        filter.update_state(low_range_kline, low_range_kline.symbol, low_range_kline.timeframe)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.7,
+            details={}
+        )
+        context = FilterContext(higher_tf_trends={}, kline=low_range_kline)
+
+        event = filter.check(pattern, context)
+
+        # 验证因绝对波幅不足被过滤（而非 ATR 比率）
+        assert event.passed is False
+        assert event.reason == "insufficient_absolute_volatility"

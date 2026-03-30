@@ -498,7 +498,7 @@ class SignalRepository:
             }
             root["children"].append(trigger_node)
 
-        # Add filter nodes
+        # Add filter nodes - Scheme D: merge f_result.metadata
         for f_name, f_result in attempt.filter_results:
             filter_node = {
                 "node_id": str(uuid.uuid4()),
@@ -507,7 +507,8 @@ class SignalRepository:
                 "reason": f_result.reason,
                 "metadata": {
                     "filter_name": f_name,
-                    "filter_type": f_name  # Could be extended with actual filter type
+                    "filter_type": f_name,
+                    **f_result.metadata  # ✅ Scheme D: merge metadata
                 },
                 "children": []
             }
@@ -541,11 +542,16 @@ class SignalRepository:
                 filter_reason = f_result.reason
                 break
 
-        # Build details JSON (for backward compatibility)
+        # Build details JSON (for backward compatibility) - Scheme D: include metadata
         details_dict = {
             "pattern": attempt.pattern.details if attempt.pattern else None,
             "filters": [
-                {"name": f_name, "passed": f_result.passed, "reason": f_result.reason}
+                {
+                    "name": f_name,
+                    "passed": f_result.passed,
+                    "reason": f_result.reason,
+                    "metadata": f_result.metadata  # ✅ Scheme D: include metadata
+                }
                 for f_name, f_result in attempt.filter_results
             ]
         }

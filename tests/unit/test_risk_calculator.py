@@ -921,3 +921,77 @@ class TestCalculateTakeProfitLevels:
 
         assert abs(Decimal(tp1["price"]) - Decimal("137.50")) < Decimal("1")  # 允许 1 以内误差
         assert abs(Decimal(tp2["price"]) - Decimal("166.00")) < Decimal("1")
+
+
+class TestSchemeBStopLossDistanceCheck:
+    """方案 B：最小止损距离检查测试"""
+
+    @pytest.fixture
+    def calculator_default(self):
+        """Create risk calculator with default take profit config."""
+        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
+        return RiskCalculator(risk_config)
+
+    def test_stop_loss_too_close_adjusted_long(self, calculator_default):
+        """测试 LONG 信号止损距离过小时自动调整"""
+        account = create_account(total_balance=Decimal("100000"))
+        # 创建一根 K 线，其高点与收盘价非常接近（止损距离 < 0.1%）
+        kline = create_kline(
+            symbol="BTC/USDT:USDT", timeframe="15m",
+            open=Decimal("100"), high=Decimal("100.05"),
+            low=Decimal("99"), close=Decimal("100"),  # 止损 = 100.05, 距离 = 0.05%
+        )
+
+        result = calculator_default.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.LONG,
+            tags=[],
+        )
+
+        # 验证止损已被调整到最小距离 (0.1%)
+        # 入场价 100, 最小止损距离 = 100 * 0.001 = 0.1
+        # 调整后的止损 = 100 * (1 - 0.001) = 99.9
+        assert result.suggested_stop_loss <= Decimal("99.9")
+
+    def test_stop_loss_too_close_adjusted_short(self, calculator_default):
+        """测试 SHORT 信号止损距离过小时自动调整"""
+        account = create_account(total_balance=Decimal("100000"))
+        # 创建一根 K 线，其低点与收盘价非常接近（止损距离 < 0.1%）
+        kline = create_kline(
+            symbol="BTC/USDT:USDT", timeframe="15m",
+            open=Decimal("100"), high=Decimal("101"),
+            low=Decimal("99.95"), close=Decimal("100"),  # 止损 = 99.95, 距离 = 0.05%
+        )
+
+        result = calculator_default.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.SHORT,
+            tags=[],
+        )
+
+        # 验证止损已被调整到最小距离 (0.1%)
+        # 入场价 100, 最小止损距离 = 100 * 0.001 = 0.1
+        # 调整后的止损 = 100 * (1 + 0.001) = 100.1
+        assert result.suggested_stop_loss >= Decimal("100.1")
+
+    def test_stop_loss_normal_distance_unchanged(self, calculator_default):
+        """测试正常止损距离保持不变"""
+        account = create_account(total_balance=Decimal("100000"))
+        # 创建一根 K 线，其高点与收盘价距离足够（> 0.1%）
+        kline = create_kline(
+            symbol="BTC/USDT:USDT", timeframe="15m",
+            open=Decimal("100"), high=Decimal("105"),
+            low=Decimal("90"), close=Decimal("102"),  # 止损 = 105, 距离 = 5/102 ≈ 4.9%
+        )
+
+        result = calculator_default.calculate_signal_result(
+            kline=kline,
+            account=account,
+            direction=Direction.SHORT,
+            tags=[],
+        )
+
+        # 验证止损保持为 K 线高点（未被调整）
+        assert result.suggested_stop_loss == Decimal("105")

@@ -932,3 +932,197 @@ class TestEvaluationSummaryAndTraceTree:
             mtf_node = next(n for n in filter_nodes if n["metadata"]["filter_name"] == "mtf_validation")
             assert mtf_node["passed"] is False
             assert mtf_node["reason"] == "bearish_trend_blocks_short"
+
+
+class TestSchemeDMetadataPersistence:
+    """方案 D: metadata 保存修复测试"""
+
+    @pytest.mark.asyncio
+    async def test_save_attempt_includes_metadata_in_details(self, repository):
+        """测试 save_attempt 保存 metadata 到 details 字段"""
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={"wick_ratio": 0.7, "body_ratio": 0.2},
+        )
+
+        filter_results = [
+            (
+                "atr_volatility",
+                FilterResult(
+                    passed=True,
+                    reason="volatility_sufficient",
+                    metadata={
+                        "candle_range": 150.0,
+                        "atr": 300.0,
+                        "ratio": 0.5,
+                    }
+                )
+            ),
+            (
+                "ema_trend",
+                FilterResult(
+                    passed=True,
+                    reason="trend_match",
+                    metadata={"trend": "bullish", "ema_value": 49500.0}
+                )
+            ),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="SIGNAL_FIRED",
+        )
+
+        await repository.save_attempt(attempt, "BTC/USDT:USDT", "15m")
+
+        # Verify details JSON includes metadata
+        async with repository._db.execute(
+            "SELECT details FROM signal_attempts WHERE symbol = ?", ("BTC/USDT:USDT",)
+        ) as cursor:
+            row = await cursor.fetchone()
+            details_json = row["details"]
+            import json
+            details = json.loads(details_json)
+
+            # Verify filter metadata is present
+            assert "filters" in details
+            assert len(details["filters"]) == 2
+
+            # Check ATR filter metadata
+            atr_filter = next(f for f in details["filters"] if f["name"] == "atr_volatility")
+            assert "metadata" in atr_filter
+            assert atr_filter["metadata"]["candle_range"] == 150.0
+            assert atr_filter["metadata"]["atr"] == 300.0
+            assert atr_filter["metadata"]["ratio"] == 0.5
+
+            # Check EMA filter metadata
+            ema_filter = next(f for f in details["filters"] if f["name"] == "ema_trend")
+            assert "metadata" in ema_filter
+            assert ema_filter["metadata"]["trend"] == "bullish"
+            assert ema_filter["metadata"]["ema_value"] == 49500.0
+
+    @pytest.mark.asyncio
+    async def test_build_trace_tree_merges_metadata(self, repository):
+        """测试 _build_trace_tree 合并 FilterResult.metadata"""
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.SHORT,
+            score=0.75,
+            details={"wick_ratio": 0.65},
+        )
+
+        filter_results = [
+            (
+                "atr_volatility",
+                FilterResult(
+                    passed=False,
+                    reason="insufficient_absolute_volatility",
+                    metadata={
+                        "candle_range": 0.08,
+                        "min_required": 0.1,
+                    }
+                )
+            ),
+            (
+                "mtf",
+                FilterResult(
+                    passed=True,
+                    reason="mtf_confirmed_bearish",
+                    metadata={
+                        "higher_timeframe": "4h",
+                        "higher_trend": "bearish",
+                    }
+                )
+            ),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="FILTERED",
+        )
+
+        await repository.save_attempt(attempt, "ETH/USDT:USDT", "1h")
+
+        # Verify trace_tree includes merged metadata
+        async with repository._db.execute(
+            "SELECT trace_tree FROM signal_attempts WHERE symbol = ?", ("ETH/USDT:USDT",)
+        ) as cursor:
+            row = await cursor.fetchone()
+            trace_tree_json = row["trace_tree"]
+            import json
+            trace_tree = json.loads(trace_tree_json)
+
+            # Find filter nodes
+            filter_nodes = [n for n in trace_tree["children"] if n["node_type"] == "filter"]
+            assert len(filter_nodes) == 2
+
+            # Check ATR filter metadata merge
+            atr_node = next(n for n in filter_nodes if n["metadata"]["filter_name"] == "atr_volatility")
+            assert atr_node["passed"] is False
+            assert atr_node["reason"] == "insufficient_absolute_volatility"
+            # Verify metadata is merged
+            assert atr_node["metadata"]["candle_range"] == 0.08
+            assert atr_node["metadata"]["min_required"] == 0.1
+            assert atr_node["metadata"]["filter_name"] == "atr_volatility"
+
+            # Check MTF filter metadata merge
+            mtf_node = next(n for n in filter_nodes if n["metadata"]["filter_name"] == "mtf")
+            assert mtf_node["passed"] is True
+            assert mtf_node["reason"] == "mtf_confirmed_bearish"
+            # Verify metadata is merged
+            assert mtf_node["metadata"]["higher_timeframe"] == "4h"
+            assert mtf_node["metadata"]["higher_trend"] == "bearish"
+            assert mtf_node["metadata"]["filter_name"] == "mtf"
+
+    @pytest.mark.asyncio
+    async def test_get_attempts_returns_metadata(self, repository):
+        """测试 get_attempts API 返回 metadata 字段"""
+        pattern = PatternResult(
+            strategy_name="engulfing",
+            direction=Direction.LONG,
+            score=0.85,
+            details={},
+        )
+
+        filter_results = [
+            (
+                "volume_surge",
+                FilterResult(
+                    passed=True,
+                    reason="volume_confirmed",
+                    metadata={"volume_ratio": 2.5, "avg_volume": 1000}
+                )
+            ),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="engulfing",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="SIGNAL_FIRED",
+        )
+
+        await repository.save_attempt(attempt, "SOL/USDT:USDT", "4h")
+
+        # Use get_attempts API
+        result = await repository.get_attempts(limit=10)
+        attempts = result["data"]
+
+        assert len(attempts) == 1
+        saved_attempt = attempts[0]
+
+        # Verify details contains metadata
+        import json
+        details = json.loads(saved_attempt["details"])
+        assert "filters" in details
+
+        volume_filter = next(f for f in details["filters"] if f["name"] == "volume_surge")
+        assert "metadata" in volume_filter
+        assert volume_filter["metadata"]["volume_ratio"] == 2.5
+        assert volume_filter["metadata"]["avg_volume"] == 1000

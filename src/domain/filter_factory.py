@@ -336,9 +336,10 @@ class AtrFilterDynamic(FilterBase):
     Stateful: Maintains ATR calculation per symbol/timeframe using Wilder's smoothing method.
     """
 
-    def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"), enabled: bool = False):
+    def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"), min_absolute_range: Decimal = Decimal("0.1"), enabled: bool = False):
         self._period = period
         self._min_atr_ratio = min_atr_ratio
+        self._min_absolute_range = min_absolute_range  # Scheme C: Minimum absolute range
         self._enabled = enabled
         # key: "symbol:timeframe", value: {"tr_values": List[Decimal], "atr": Optional[Decimal], "prev_close": Optional[Decimal]}
         self._atr_state: Dict[str, Dict[str, Any]] = {}
@@ -441,8 +442,22 @@ class AtrFilterDynamic(FilterBase):
                 }
             )
 
-        # 计算 K 线波幅与 ATR 的比率
+        # Calculate candle range
         candle_range = kline.high - kline.low
+
+        # Scheme C: Check absolute range threshold
+        if candle_range < self._min_absolute_range:
+            return TraceEvent(
+                node_name=self.name,
+                passed=False,
+                reason="insufficient_absolute_volatility",
+                metadata={
+                    "candle_range": float(candle_range),
+                    "min_required": float(self._min_absolute_range),
+                }
+            )
+
+        # Check ATR ratio
         min_range = atr * self._min_atr_ratio
 
         if candle_range < min_range:
@@ -561,6 +576,7 @@ class FilterFactory:
             return filter_class(
                 period=params.get('period', 14),
                 min_atr_ratio=params.get('min_atr_ratio', Decimal("0.001")),
+                min_absolute_range=params.get('min_absolute_range', Decimal("0.1")),
                 enabled=enabled
             )
         elif filter_type in ["volume_surge", "volatility_filter", "time_filter", "price_action"]:

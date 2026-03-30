@@ -318,6 +318,23 @@ class RiskCalculator:
         # Calculate stop-loss
         stop_loss = self.calculate_stop_loss(kline, direction)
 
+        # Scheme B: Minimum stop-loss distance check (0.1%)
+        min_stop_distance_ratio = Decimal("0.001")  # 0.1%
+        stop_distance_ratio = abs(entry_price - stop_loss) / entry_price
+
+        if stop_distance_ratio < min_stop_distance_ratio:
+            # Stop loss too close - log warning and clamp to minimum
+            logger.warning(
+                f"止损距离过小：{stop_distance_ratio*100:.4f}% < {min_stop_distance_ratio*100:.3f}% "
+                f"(symbol={kline.symbol}, timeframe={kline.timeframe}, direction={direction.value})"
+            )
+            # Adjust stop loss to minimum acceptable distance
+            if direction == Direction.LONG:
+                stop_loss = entry_price * (Decimal(1) - min_stop_distance_ratio)
+            else:  # SHORT
+                stop_loss = entry_price * (Decimal(1) + min_stop_distance_ratio)
+            logger.info(f"止损已调整为最小距离：{stop_loss}")
+
         # Calculate position size and leverage
         position_size, leverage = self.calculate_position_size(
             account, entry_price, stop_loss, direction

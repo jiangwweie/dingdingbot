@@ -605,131 +605,129 @@ tests/integration/test_mtf_e2e.py: 6/6 通过 (100%)
 
 ---
 
-### 2026-03-28 完成工作
+### 2026-03-30 完成工作
 
-#### 1. 诊断分析师角色创建 ✅
+#### 1. 信号时间链路全面整改 ✅
 
-**目标**: 创建系统诊断分析师角色，专门负责疑难杂症诊断
-
-**交付物**:
-- 创建 `.claude/commands/diagnostic.md` - 诊断分析师命令配置
-- 创建 `.claude/team/diagnostic-analyst/SKILL.md` - 技能定义
-- 创建 `.claude/team/diagnostic-analyst/QUICKSTART.md` - 快速入门指南
-
-**核心原则**:
-- ❌ 不修改业务代码
-- ❌ 不创建新业务功能
-- ✅ 只分析问题，输出诊断报告和修复方案
-
-**使用方式**:
-```bash
-/diagnostic
-```
-
----
-
-#### 2. 立即测试功能优化（方案 C） ✅
-
-**目标**: 添加前端提示说明，引导用户理解立即测试的局限性
+**目标**: 统一所有信号时间显示为北京时间 (UTC+8)，与币安 App 显示一致
 
 **问题背景**:
-- 用户反馈"立即测试"没有信号触发，认为功能有问题
-- 实际上接口工作正常，只是当前 K 线不满足形态条件
-- 需要明确告知用户：仅评估当前一根 K 线
+- 用户反馈 Web 系统显示的时间与币安 App 不一致
+- 浏览器时区非 UTC+8 时显示错误时间
+- K 线图 X 轴时间标签显示混乱
+
+**诊断报告编号**: DA-20260330-001 (异常信号问题诊断报告 - 时区差异部分)
+
+**时间链路分析**:
+```
+币安交易所 (UTC 毫秒) → CCXT → ExchangeGateway → StrategyEngine →
+SignalRepository → API → 前端显示
+```
 
 **交付物**:
-- 修改：`web-front/src/pages/StrategyWorkbench.tsx`
-  - 添加提示警告框，说明立即测试的局限性
-  - 添加结果状态提示（触发/未触发）
-  - 引导用户使用回测沙箱查看历史表现
 
-**修改内容**:
-```tsx
-{/* 提示信息 */}
-<div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-  <p>仅评估当前最新一根 K 线，如果未检测到信号属于正常现象。</p>
-  <p>想查看历史表现？前往 <a href="/backtest">回测沙箱</a></p>
-</div>
+| 类别 | 文件 | 修改内容 |
+|------|------|----------|
+| **工具函数** | `web-front/src/lib/utils.ts` | 新增 `formatBeijingTime()` 函数 |
+| **类型定义** | `web-front/src/lib/api.ts` | `SignalAttempt` 添加 `kline_timestamp` 字段 |
+| **信号列表** | `web-front/src/pages/Signals.tsx` | 使用 `formatBeijingTime` 显示 |
+| **信号详情** | `web-front/src/components/SignalDetailsDrawer.tsx` | ①文本时间 ②K 线图 `timeZone: 'Asia/Shanghai'` |
+| **溯源记录** | `web-front/src/pages/SignalAttempts.tsx` | 优先使用 `kline_timestamp` 显示 |
+| **仪表盘** | `web-front/src/pages/Dashboard.tsx` | 使用 `formatBeijingTime` 显示 |
+| **回测页面** | `web-front/src/pages/Backtest.tsx` | 使用 `formatBeijingTime` 显示 |
+| **配置快照** | `web-front/src/pages/Snapshots.tsx` | 使用 `formatBeijingTime` 显示 |
+| **账户页面** | `web-front/src/pages/Account.tsx` | 使用 `formatBeijingTime` 显示 |
+| **日期选择器** | `web-front/src/components/QuickDateRangePicker.tsx` | 使用 `formatBeijingTime` 显示 |
 
-{/* 结果状态 */}
-<div>
-  <p>✅ 当前 K 线满足策略条件，信号触发！</p>
-  或
-  <p>ℹ️ 当前 K 线不满足策略条件，未检测到信号</p>
-</div>
+**核心技术修复**:
+
+1. **`formatBeijingTime()` 函数**
+```typescript
+// 强制 UTC+8 时区转换
+const BEIJING_TZ_OFFSET_MS = 8 * 60 * 60 * 1000;  // 28800000 毫秒
+const beijingTime = new Date(timestamp + BEIJING_TZ_OFFSET_MS);
 ```
 
-**Git 提交**: `88d2e8f`
+2. **K 线图时区配置**
+```typescript
+// lightweight-charts 配置
+timeScale: {
+  timeZone: 'Asia/Shanghai',  // 强制显示北京时间
+  timeVisible: true,
+  secondsVisible: false,
+}
+// 数据转换：毫秒 → 秒
+time: (k[0] / 1000) as UTCTimestamp
+```
+
+**显示效果**:
+| 位置 | 显示格式 | 示例 |
+|------|----------|------|
+| 信号列表 | `MM-dd HH:mm (CST)` | `03-30 18:15 (CST)` |
+| 信号详情 | `MM-dd HH:mm (CST)` | `03-30 18:15 (CST)` |
+| K 线图 X 轴 | `MM-dd HH:mm` | `03-30 18:15` |
+| 溯源记录 | `MM-dd HH:mm (CST)` | `03-30 18:15 (CST)` |
+
+**验收标准**:
+- ✅ 信号列表页：显示北京时间 + (CST) 标识
+- ✅ 信号详情页：显示北京时间 + (CST) 标识
+- ✅ K 线图：X 轴时间标签显示北京时间
+- ✅ 溯源记录：显示北京时间 + (CST) 标识
+- ✅ 所有时间戳单位统一为毫秒
+- ✅ 与币安 App 时间显示一致
 
 ---
 
-#### 3. API 响应验证问题诊断 ✅
+#### 2. ATR 问题 BCD 方案修复 ✅
 
-**问题**: `/api/strategies/preview` 接口返回 `'TraceNode' object has no attribute 'details'`
+**目标**: 修复诊断报告 DA-20260330-001 中识别的 ATR 相关三个核心问题
 
-**根因定位**:
-- `api.py:1199` 访问 `node.details`，但 `TraceNode` 定义的是 `metadata` 字段
-- 字段命名不一致导致 AttributeError
-
-**诊断报告编号**: DA-20260328-001
-
-**修复方案** (已完成):
-```python
-# src/interfaces/api.py:1199
-# 修改前：
-"details": node.details,
-# 修改后:
-"details": node.metadata,
-```
-
-**验证结果**:
-- 接口已正常返回 trace_tree
-- 用户确认"接口已经可以正常返回数据了"
-
----
-
-#### 4. 回测结果为空信号诊断 📋
-
-**用户报告**: 回测 30 天数据，但结果为 0 个信号
-
-**诊断发现**:
-1. **时间范围参数未生效** 🔴
-   - `Backtester._fetch_klines()` 只使用 `limit` 参数
-   - `start_time/end_time` 被忽略
-   - 实际只获取 100 根 K 线（约 1 天）
-
-2. **`total_attempts = 0` 异常** 🟡
-   - 可能原因：`DynamicStrategyRunner.run_all()` 返回空列表
-   - 需要添加调试日志确认
-
-**诊断报告编号**: DA-20260328-002
+**问题背景**:
+- 实盘监控系统触发异常信号，仓位计算失败 (`position_size=0`)
+- 根因：止损距离过小 (0.000487%)，远低于合理交易风险
 
 **修复方案**:
-- 方案 A：实现时间范围支持（2-3 小时）
-- 方案 B：添加调试日志定位问题（30 分钟）
 
-**状态**: 等待用户确认优先级
+| 方案 | 问题 | 修复内容 | 状态 |
+|------|------|----------|------|
+| **B** | 止损距离过小 | 最小止损距离检查 (≥ 0.1%) | ✅ |
+| **C** | ATR 无法过滤绝对波幅 | 绝对波幅阈值 (≥ 0.1 USDT) | ✅ |
+| **D** | metadata 未保存 | 保存到 details 和 trace_tree | ✅ |
+
+**交付物**:
+
+| 类别 | 文件 | 修改内容 |
+|------|------|----------|
+| **后端** | `src/domain/risk_calculator.py` | 方案 B：止损距离自动调整 |
+| **后端** | `src/domain/filter_factory.py` | 方案 C：`min_absolute_range` 检查 |
+| **后端** | `src/infrastructure/signal_repository.py` | 方案 D：metadata 保存修复 |
+| **配置** | `config/core.yaml` | 添加 `min_absolute_range: 0.1` |
+| **测试** | `tests/integration/test_atr_bcd_fix.py` | 新增 9 个集成测试 |
+
+**测试结果**: **67/67 测试通过 (100%)**
+
+| 测试类别 | 通过 | 失败 | 通过率 |
+|----------|------|------|--------|
+| 方案 C 单元测试 | 17 | 0 | 100% |
+| 方案 B 单元测试 | 3 | 0 | 100% |
+| 方案 D 单元测试 | 38 | 0 | 100% |
+| 集成测试 | 9 | 0 | 100% |
+
+**契约表**: `docs/designs/atr-bcd-fix-contract.md`
+
+**测试报告**: `docs/designs/atr-bcd-fix-test-report.md`
+
+**验收标准**:
+- ✅ 止损距离 < 0.1% 的信号被自动调整止损
+- ✅ ATR 绝对波幅 < 0.1 USDT 被过滤
+- ✅ API 返回完整 metadata（candle_range、atr、ratio 等）
 
 ---
 
-#### 5. 立即测试功能局限性分析 📋
-
-**问题**: 用户反馈"立即测试"功能没效果
-
-**分析结果**:
-- 接口工作正常 ✅
-- 只评估当前一根 K 线（最新闭合 K 线）
-- 没有高周期数据预热（MTF 过滤器无法工作）
-- 没有 EMA 预热（EMA 过滤器无法工作）
-
-**改进方案**:
-- 方案 A：增强版立即测试（测试 100 根 K 线）- 2-3 小时
-- 方案 B：添加"最近信号"模式 - 1 小时
-- 方案 C：最小改动（前端提示）- 30 分钟 ✅ 已实施
-
-**用户选择**: 方案 C ✅ 已完成
+**状态**: 等待用户确认修复方向
 
 ---
+
 
 ### 待办事项汇总
 
