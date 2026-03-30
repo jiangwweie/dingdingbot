@@ -337,6 +337,12 @@ class BacktestRequest(BaseModel):
         description="Fee rate for v3_pms mode (default 0.04%)"
     )
 
+    # Phase 4: 订单编排
+    order_strategy: Optional['OrderStrategy'] = Field(
+        default=None,
+        description="订单策略配置（用于多级别止盈）"
+    )
+
 
 # ============================================================
 # Dynamic Rule Engine Models (Phase K)
@@ -618,6 +624,10 @@ class OrderRole(str, Enum):
     """订单角色"""
     ENTRY = "ENTRY"               # 入场开仓
     TP1 = "TP1"                   # 第一目标位止盈
+    TP2 = "TP2"                   # 第二目标位止盈
+    TP3 = "TP3"                   # 第三目标位止盈
+    TP4 = "TP4"                   # 第四目标位止盈
+    TP5 = "TP5"                   # 第五目标位止盈
     SL = "SL"                     # 止损单
 
 
@@ -685,6 +695,10 @@ class Order(FinancialModel):
     # 契约表 3.1: 所有平仓单 (TP/SL) 必须携带 reduceOnly=True，防止保证金不足错误
     reduce_only: bool = Field(default=False, description="仅减仓平仓 (实盘约束)")
 
+    # Phase 4 订单编排扩展
+    parent_order_id: Optional[str] = None  # 父订单 ID (用于订单链)
+    oco_group_id: Optional[str] = None     # OCO 组 ID (同一组的订单互斥)
+
 
 class Position(FinancialModel):
     """
@@ -709,6 +723,117 @@ class Position(FinancialModel):
     total_fees_paid: Decimal = Field(default=Decimal('0'), description="累计支付的手续费")
 
     is_closed: bool = False      # current_qty 归零时标记为 True
+
+
+# ============================================================
+# v3.0 Phase 4: 订单编排模型
+# ============================================================
+
+class OrderStrategy(FinancialModel):
+    """
+    订单策略：定义订单编排规则
+
+    核心职责:
+    1. 定义止盈级别数量和各级别比例
+    2. 定义各级止盈比例
+    3. 定义初始止损 RR 倍数
+    4. 配置 OCO 和移动止损功能
+    """
+    id: str = Field(..., description="策略 ID")
+    name: str = Field(..., description="策略名称")
+
+    # 止盈级别配置
+    tp_levels: int = Field(default=1, ge=1, le=5, description="止盈级别数量 (1-5)")
+    tp_ratios: List[Decimal] = Field(default_factory=list, description="各级止盈比例 (总和=1.0)")
+    tp_targets: List[Decimal] = Field(default_factory=lambda: [Decimal('1.5')], description="各级 TP 目标 RR 倍数 (如 [1.5, 2.0, 3.0])")
+
+    # 风控配置
+    initial_stop_loss_rr: Optional[Decimal] = Field(default=None, description="初始止损 RR 倍数 (如 -1.0 表示亏损 1R)")
+    trailing_stop_enabled: bool = Field(default=True, description="是否启用移动止损")
+
+    # OCO 配置
+    oco_enabled: bool = Field(default=True, description="是否启用 OCO 逻辑")
+
+    def validate_ratios(self) -> bool:
+        """
+        验证比例总和是否为 1.0
+
+        返回:
+            True: 比例有效
+            False: 比例无效
+        """
+        if not self.tp_ratios:
+            return False
+        total = sum(self.tp_ratios)
+        # 使用 Decimal 精度比较，允许小误差
+        return abs(total - Decimal('1.0')) < Decimal('0.0001')
+
+    @field_validator('tp_ratios')
+    @classmethod
+    def validate_tp_ratios_sum(cls, v):
+        """验证 tp_ratios 总和是否接近 1.0"""
+        if v and sum(v) != Decimal('1.0'):
+            total = sum(v)
+            if abs(total - Decimal('1.0')) > Decimal('0.0001'):
+                raise ValueError(f"tp_ratios 总和必须为 1.0，当前为 {total}")
+        return v
+
+    def get_tp_ratio(self, level: int) -> Decimal:
+        """
+        获取指定级别的比例
+
+        Args:
+            level: TP 级别 (1-based)
+
+        Returns:
+            该级别的比例，如果级别超出范围则返回 0
+        """
+        if level < 1 or level > len(self.tp_ratios):
+            return Decimal('0')
+        return self.tp_ratios[level - 1]
+
+    def get_tp_target_price(
+        self,
+        entry_price: Decimal,
+        stop_loss: Decimal,
+        tp_level: int,
+        direction: Direction,
+        tp_targets: List[Decimal],
+    ) -> Decimal:
+        """
+        计算 TP 目标价格 (基于实际开仓价)
+
+        公式:
+            LONG: tp_price = entry_price + RR × (entry_price - stop_loss)
+            SHORT: tp_price = entry_price - RR × (stop_loss - entry_price)
+
+        Args:
+            entry_price: 入场价 (实际开仓价)
+            stop_loss: 止损价
+            tp_level: TP 级别 (1-based)
+            direction: 方向
+            tp_targets: 各级 TP 目标 (RR 倍数，如 [1.0, 2.0, 3.0])
+
+        Returns:
+            TP 目标价格
+
+        Raises:
+            ValueError: 当 TP 级别超出范围时
+        """
+        if tp_level < 1 or tp_level > len(tp_targets):
+            raise ValueError(f"TP 级别 {tp_level} 超出范围 (1-{len(tp_targets)})")
+
+        rr_multiple = tp_targets[tp_level - 1]
+        price_distance = entry_price - stop_loss
+
+        if direction == Direction.LONG:
+            # LONG: tp_price = entry + RR × (entry - sl)
+            return entry_price + rr_multiple * price_distance
+        else:
+            # SHORT: tp_price = entry - RR × (sl - entry)
+            # 注意：price_distance = entry_price - stop_loss (可能是负数)
+            # 对于 SHORT，sl > entry，所以 sl - entry 是正数
+            return entry_price - rr_multiple * (stop_loss - entry_price)
 
 
 # ============================================================

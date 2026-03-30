@@ -33,9 +33,11 @@ from src.domain.models import (
     Order,
     Signal,
     OrderStatus,
+    OrderStrategy,
 )
 from src.domain.matching_engine import MockMatchingEngine
 from src.domain.risk_manager import DynamicRiskManager
+from src.domain.order_manager import OrderManager
 from src.domain.strategy_engine import (
     StrategyEngine,
     StrategyConfig,
@@ -867,7 +869,8 @@ class Backtester:
         """
         from src.domain.matching_engine import MockMatchingEngine
         from src.domain.risk_calculator import RiskCalculator
-        from src.domain.models import OrderType, OrderRole, OrderSide
+        from src.domain.models import OrderType, OrderRole, OrderStrategy
+        from src.domain.order_manager import OrderManager
         import uuid
 
         # Step 1: Initialize MockMatchingEngine
@@ -991,54 +994,32 @@ class Backtester:
                         attempt.pattern.direction,
                     )
 
-                    # Create ENTRY order
-                    entry_order = Order(
-                        id=f"ord_{uuid.uuid4().hex[:8]}",
-                        signal_id=signal_id,
-                        symbol=request.symbol,
-                        direction=attempt.pattern.direction,
-                        order_type=OrderType.MARKET,
-                        order_role=OrderRole.ENTRY,
-                        requested_qty=position_size,
-                        status=OrderStatus.OPEN,
-                        created_at=kline.timestamp,
-                        updated_at=kline.timestamp,
-                    )
-                    active_orders.append(entry_order)
+                    # Create ENTRY order using OrderManager (Phase 4)
+                    # Note: TP/SL orders will be generated dynamically after ENTRY is filled
+                    order_manager = OrderManager()
 
-                    # Create TP1 and SL orders (will be executed in future klines)
-                    # TP1 order
-                    tp1_price = kline.close + (kline.close - stop_loss) * Decimal('1.5')  # 1.5R take profit
-                    tp1_order = Order(
-                        id=f"ord_tp1_{uuid.uuid4().hex[:8]}",
-                        signal_id=signal_id,
-                        symbol=request.symbol,
-                        direction=attempt.pattern.direction,
-                        order_type=OrderType.LIMIT,
-                        order_role=OrderRole.TP1,
-                        price=tp1_price,
-                        requested_qty=position_size,
-                        status=OrderStatus.OPEN,
-                        created_at=kline.timestamp,
-                        updated_at=kline.timestamp,
+                    # 使用 request 中的 order_strategy，如果未提供则使用默认单 TP 策略
+                    strategy = request.order_strategy or OrderStrategy(
+                        id="default_single_tp",
+                        name="Default Single TP",
+                        tp_levels=1,
+                        tp_ratios=[Decimal('1.0')],
+                        tp_targets=[Decimal('1.5')],  # 默认 1.5R 止盈
+                        initial_stop_loss_rr=Decimal('-1.0'),
+                        trailing_stop_enabled=True,
+                        oco_enabled=True,
                     )
-                    active_orders.append(tp1_order)
 
-                    # SL order
-                    sl_order = Order(
-                        id=f"ord_sl_{uuid.uuid4().hex[:8]}",
+                    entry_orders = order_manager.create_order_chain(
+                        strategy=strategy,
                         signal_id=signal_id,
                         symbol=request.symbol,
                         direction=attempt.pattern.direction,
-                        order_type=OrderType.STOP_MARKET,
-                        order_role=OrderRole.SL,
-                        trigger_price=stop_loss,
-                        requested_qty=position_size,
-                        status=OrderStatus.OPEN,
-                        created_at=kline.timestamp,
-                        updated_at=kline.timestamp,
+                        total_qty=position_size,
+                        initial_sl_rr=Decimal('-1.0'),
+                        tp_targets=strategy.tp_targets,  # 使用 strategy 配置的 tp_targets
                     )
-                    active_orders.append(sl_order)
+                    active_orders.extend(entry_orders)
 
             # Step 7: Run MockMatchingEngine
             executed = engine.match_orders_for_kline(
@@ -1047,6 +1028,21 @@ class Backtester:
                 positions_map=positions_map,
                 account=account,
             )
+
+            # Step 7.5: Handle ENTRY filled events to dynamically generate TP/SL orders
+            # OrderManager handles order chain lifecycle
+            order_manager = OrderManager()
+            for order in list(active_orders):  # Use list() to avoid modification during iteration
+                if order.status == OrderStatus.FILLED and order.order_role == OrderRole.ENTRY:
+                    # ENTRY filled: dynamically generate TP and SL orders based on actual_exec_price
+                    new_orders = order_manager.handle_order_filled(
+                        filled_order=order,
+                        active_orders=active_orders,
+                        positions_map=positions_map,
+                        strategy=strategy,  # 使用 strategy 配置的 tp_targets
+                        tp_targets=strategy.tp_targets,  # 使用 strategy 配置的 tp_targets
+                    )
+                    active_orders.extend(new_orders)
 
             # Track executed orders
             for order in executed:
