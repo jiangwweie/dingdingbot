@@ -11,7 +11,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Config files - 外部挂载（可写，支持前端配置更新）
+      # Config files - 外部挂载（user.yaml 可写支持热重载，core.yaml 只读）
       - /usr/local/monitorDog/config/user-prod.yaml:/app/config/user.yaml
       - /usr/local/monitorDog/config/core.yaml:/app/config/core.yaml:ro
       # Database persistence - 外部挂载
