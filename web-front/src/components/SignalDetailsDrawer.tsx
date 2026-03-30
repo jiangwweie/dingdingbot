@@ -62,8 +62,8 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
-        // Set timezone to Tokyo (JST, UTC+9) to match Binance app
-        timeZone: 'Asia/Tokyo',
+        // Use UTC timezone - we handle timezone conversion in data preprocessing
+        timeZone: 'Etc/UTC',
       },
       crosshair: {
         vertLine: {
@@ -93,25 +93,35 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
 
     candleSeriesRef.current = candleSeries;
 
-    // Prepare data - lightweight-charts will handle timezone conversion via timeScale.timeZone config
-    // K-line timestamps from API are already in UTC milliseconds (exchange standard)
-    const klineData: CandlestickData[] = data.klines.map((k) => ({
-      time: (k[0] / 1000) as UTCTimestamp, // Convert ms to seconds for lightweight-charts
-      open: k[1],
-      high: k[2],
-      low: k[3],
-      close: k[4],
-    }));
+    // Prepare data - convert UTC timestamps to Tokyo timezone timestamps
+    // K-line timestamps from API are UTC milliseconds (exchange standard)
+    // Since lightweight-charts timeZone config doesn't work as expected,
+    // we manually convert UTC timestamps to Tokyo time (UTC+9)
+    const TOKYO_OFFSET_SECONDS = 9 * 60 * 60; // 9 hours in seconds
+
+    const klineData: CandlestickData[] = data.klines.map((k) => {
+      const utcSeconds = k[0] / 1000;
+      // Convert UTC to Tokyo time by adding 9 hours
+      const tokyoSeconds = utcSeconds + TOKYO_OFFSET_SECONDS;
+
+      return {
+        time: tokyoSeconds as UTCTimestamp,
+        open: k[1],
+        high: k[2],
+        low: k[3],
+        close: k[4],
+      };
+    });
 
     candleSeries.setData(klineData);
 
-    // Find the exact signal candle by timestamp (UTC seconds)
-    const signalTimestamp = data.signal.kline_timestamp
-      ? Math.floor(data.signal.kline_timestamp / 1000)
+    // Find the exact signal candle by timestamp (Tokyo time seconds)
+    const signalTokyoTimestamp = data.signal.kline_timestamp
+      ? Math.floor(data.signal.kline_timestamp / 1000) + TOKYO_OFFSET_SECONDS
       : null;
-      
-    const signalCandle = signalTimestamp 
-      ? klineData.find(k => Number(k.time) === signalTimestamp)
+
+    const signalCandle = signalTokyoTimestamp
+      ? klineData.find(k => Number(k.time) === signalTokyoTimestamp)
       : null;
 
     if (signalCandle) {
