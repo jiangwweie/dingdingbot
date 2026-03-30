@@ -11,12 +11,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Config files (read-only from host)
-      - ./config:/app/config:ro
-      # Database persistence
-      - ./data:/app/data
-      # Logs persistence
-      - ./logs:/app/logs
+      # Config files - 外部挂载（可写，支持前端配置更新）
+      - /usr/local/monitorDog/config/user-prod.yaml:/app/config/user.yaml
+      - /usr/local/monitorDog/config/core.yaml:/app/config/core.yaml:ro
+      # Database persistence - 外部挂载
+      - /usr/local/monitorDog/data/signals-prod.db:/app/data/signals.db
+      # Logs persistence - 外部挂载
+      - /usr/local/monitorDog/logs:/app/logs
     environment:
       - TZ=Asia/Shanghai
       - PYTHONPATH=/app
@@ -51,8 +52,3 @@ services:
 networks:
   monitor-dog-network:
     driver: bridge
-
-volumes:
-  config:
-  data:
-  logs:
