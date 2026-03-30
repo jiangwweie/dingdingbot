@@ -37,3 +37,4 @@ data/
 # Node
 node_modules/
 dist/
+*.pyc
