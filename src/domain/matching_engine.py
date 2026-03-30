@@ -296,7 +296,7 @@ class MockMatchingEngine:
                     direction=order.direction,
                     entry_price=exec_price,
                     current_qty=order.requested_qty,
-                    highest_price_since_entry=exec_price,
+                    watermark_price=exec_price,
                     realized_pnl=Decimal('0'),
                     total_fees_paid=fee_paid,
                     is_closed=False,

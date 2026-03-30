@@ -288,7 +288,7 @@ class TakeProfitTracker:
 
 | 阶段 | 名称 | 工期 | 开始日期 | 结束日期 | 里程碑 |
 |------|------|------|----------|----------|--------|
-| Phase 1 | 模型筑基 | 2 周 | 2026-05-06 | 2026-05-17 | 新模型 + 数据库迁移 |
+| Phase 1 | 模型筑基 | 2 周 | 2026-05-06 | 2026-05-17 | 新模型 + 数据库迁移 ✅ |
 | Phase 2 | 撮合引擎 | 3 周 | 2026-05-19 | 2026-06-06 | 悲观撮合 + 回测对比 |
 | Phase 3 | 风控状态机 | 2 周 | 2026-06-09 | 2026-06-20 | Trailing Stop 实盘模拟 |
 | Phase 4 | 订单编排 | 2 周 | 2026-06-23 | 2026-07-04 | Signal→Orders 裂变 |
@@ -297,36 +297,44 @@ class TakeProfitTracker:
 
 ---
 
-### 5.2 Phase 1: 模型筑基（2 周）
+### 5.2 Phase 1: 模型筑基（2 周） ✅ 已完成
+
+**状态**: ✅ 已完成 (2026-03-30)
 
 **目标**: 实现 v3.0 核心模型，不改动现有业务逻辑
 
 **任务分解**:
 ```
 Week 1:
-├─ 新增 Order/Position/Account 实体类
-├─ 新增 OrderStatus/OrderType/OrderRole 枚举
-├─ 统一 Direction 为大写
-└─ 数据库迁移脚本编写
+├─ 新增 Order/Position/Account 实体类 ✅
+├─ 新增 OrderStatus/OrderType/OrderRole 枚举 ✅
+├─ 统一 Direction 为大写 ✅
+└─ 数据库迁移脚本编写 ✅
 
 Week 2:
-├─ 数据库表创建 (orders/positions/accounts)
-├─ 单元测试编写 (覆盖率 ≥ 90%)
-├─ Code Review (领域层纯净性检查)
-└─ 提交到 dev 分支
+├─ 数据库表创建 (orders/positions/accounts) ✅
+├─ 单元测试编写 (覆盖率 ≥ 90%) ✅
+├─ Code Review (领域层纯净性检查) ✅
+└─ 提交到 dev 分支 ✅
 ```
 
 **验收标准**:
-- [ ] 新模型通过 Pydantic v2 验证
-- [ ] 数据库迁移脚本可回滚
-- [ ] 单元测试覆盖率 ≥ 90%
-- [ ] 无 I/O 依赖污染领域层
+- [x] 新模型通过 Pydantic v2 验证
+- [x] 数据库迁移脚本可回滚
+- [x] 单元测试覆盖率 ≥ 90% (143 测试，100% 通过)
+- [x] 无 I/O 依赖污染领域层
 
 **交付物**:
 - `src/domain/models.py` (新增 Order/Position/Account)
+- `src/infrastructure/v3_orm.py` (SQLAlchemy ORM 模型)
 - `migrations/versions/001_unify_direction_enum.py`
-- `migrations/versions/002_create_orders_positions_tables.sql`
-- `tests/unit/test_v3_models.py`
+- `migrations/versions/002_create_orders_positions_tables.py`
+- `migrations/versions/003_create_signals_accounts_tables.py`
+- `tests/unit/test_v3_models.py` (22 测试)
+- `tests/unit/test_v3_orm.py` (27 测试)
+- `tests/integration/test_v3_phase1_integration.py` (70 测试)
+- `web-front/src/types/v3-models.ts` (前端类型定义)
+- `docs/v3/v3-phase1-complete-report.md` (完成报告)
 
 ---
 
@@ -561,7 +569,7 @@ Week 2:
 
 | 检查点 | 日期 | 检查内容 | 通过标准 |
 |--------|------|---------|---------|
-| M1 | 2026-05-17 | Phase 1 完成 | 新模型 + 数据库迁移通过 |
+| M1 | 2026-05-17 | Phase 1 完成 | 新模型 + 数据库迁移通过 ✅ |
 | M2 | 2026-06-06 | Phase 2 完成 | v2/v3 回测对比报告 |
 | M3 | 2026-06-20 | Phase 3 完成 | Trailing Stop 模拟测试 |
 | M4 | 2026-07-04 | Phase 4 完成 | 订单编排端到端测试 |

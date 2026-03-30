@@ -105,7 +105,7 @@ def create_position(
         direction=direction,
         entry_price=entry_price,
         current_qty=current_qty,
-        highest_price_since_entry=entry_price,
+        watermark_price=entry_price,
     )
 
 
