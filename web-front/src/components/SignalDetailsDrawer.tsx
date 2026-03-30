@@ -42,7 +42,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
   useEffect(() => {
     if (!isOpen || !data || !chartContainerRef.current) return;
 
-    // Create chart
+    // Create chart with Tokyo timezone configuration
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: '#FFFFFF' },
@@ -62,6 +62,8 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
+        // Set timezone to Tokyo (JST, UTC+9) to match Binance app
+        timeZone: 'Asia/Tokyo',
       },
       crosshair: {
         vertLine: {
@@ -91,12 +93,10 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
 
     candleSeriesRef.current = candleSeries;
 
-    // Prepare data
-    // Convert UTC timestamps to Tokyo timezone (JST, UTC+9) to match Binance app
-    // The offset shifts UTC time to display correctly in Tokyo timezone
-    const JST_OFFSET = 9 * 60 * 60 * 1000; // Tokyo timezone offset in ms
+    // Prepare data - lightweight-charts will handle timezone conversion via timeScale.timeZone config
+    // K-line timestamps from API are already in UTC milliseconds (exchange standard)
     const klineData: CandlestickData[] = data.klines.map((k) => ({
-      time: (k[0] / 1000) as UTCTimestamp, // lightweight-charts handles UTC timestamps correctly
+      time: (k[0] / 1000) as UTCTimestamp, // Convert ms to seconds for lightweight-charts
       open: k[1],
       high: k[2],
       low: k[3],
@@ -105,7 +105,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
 
     candleSeries.setData(klineData);
 
-    // Find the exact signal candle by timestamp
+    // Find the exact signal candle by timestamp (UTC seconds)
     const signalTimestamp = data.signal.kline_timestamp
       ? Math.floor(data.signal.kline_timestamp / 1000)
       : null;

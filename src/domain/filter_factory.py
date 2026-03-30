@@ -336,9 +336,14 @@ class AtrFilterDynamic(FilterBase):
     Stateful: Maintains ATR calculation per symbol/timeframe using Wilder's smoothing method.
     """
 
-    def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"), enabled: bool = False):
+    # S6-4-2: 最小绝对波幅阈值（防止极小波幅 K 线产生异常信号）
+    MIN_ABSOLUTE_CANDLE_RANGE = Decimal("0.0001")  # 最小波幅 0.0001 (根据价格尺度可调整)
+
+    def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"),
+                 min_absolute_range: Optional[Decimal] = None, enabled: bool = False):
         self._period = period
         self._min_atr_ratio = min_atr_ratio
+        self._min_absolute_range = min_absolute_range if min_absolute_range is not None else self.MIN_ABSOLUTE_CANDLE_RANGE
         self._enabled = enabled
         # key: "symbol:timeframe", value: {"tr_values": List[Decimal], "atr": Optional[Decimal], "prev_close": Optional[Decimal]}
         self._atr_state: Dict[str, Dict[str, Any]] = {}
@@ -427,6 +432,19 @@ class AtrFilterDynamic(FilterBase):
                 metadata={"error": "kline is None"}
             )
 
+        # S6-4-2: 检查绝对波幅阈值（防止极小波幅 K 线产生异常信号）
+        candle_range = kline.high - kline.low
+        if candle_range < self._min_absolute_range:
+            return TraceEvent(
+                node_name=self.name,
+                passed=False,
+                reason="candle_range_too_small",
+                metadata={
+                    "candle_range": float(candle_range),
+                    "min_absolute_range": float(self._min_absolute_range),
+                }
+            )
+
         atr = self._get_atr(kline.symbol, kline.timeframe)
 
         if atr is None:
@@ -442,7 +460,6 @@ class AtrFilterDynamic(FilterBase):
             )
 
         # 计算 K 线波幅与 ATR 的比率
-        candle_range = kline.high - kline.low
         min_range = atr * self._min_atr_ratio
 
         if candle_range < min_range:
@@ -561,6 +578,7 @@ class FilterFactory:
             return filter_class(
                 period=params.get('period', 14),
                 min_atr_ratio=params.get('min_atr_ratio', Decimal("0.001")),
+                min_absolute_range=params.get('min_absolute_range'),
                 enabled=enabled
             )
         elif filter_type in ["volume_surge", "volatility_filter", "time_filter", "price_action"]:

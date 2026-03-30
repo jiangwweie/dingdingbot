@@ -500,15 +500,21 @@ class SignalRepository:
 
         # Add filter nodes
         for f_name, f_result in attempt.filter_results:
+            # S6-4-3: 修复 FilterResult.metadata 保存逻辑 - 保存完整的 metadata 信息
+            filter_metadata = {
+                "filter_name": f_name,
+                "filter_type": f_name,  # Could be extended with actual filter type
+            }
+            # 如果 f_result 有 metadata，合并到 filter_metadata 中
+            if hasattr(f_result, 'metadata') and f_result.metadata:
+                filter_metadata.update(f_result.metadata)
+
             filter_node = {
                 "node_id": str(uuid.uuid4()),
                 "node_type": "filter",
                 "passed": f_result.passed,
                 "reason": f_result.reason,
-                "metadata": {
-                    "filter_name": f_name,
-                    "filter_type": f_name  # Could be extended with actual filter type
-                },
+                "metadata": filter_metadata,
                 "children": []
             }
             root["children"].append(filter_node)

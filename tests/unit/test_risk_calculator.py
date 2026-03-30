@@ -524,7 +524,10 @@ class TestDecimalPrecision:
 
 
 class TestStopLossDistanceZero:
-    """Test boundary case: stop_loss_distance = 0 (Issue #7)."""
+    """Test boundary case: stop_loss_distance = 0 (Issue #7).
+
+    S6-4 Fix: Now applies minimum stop-loss distance (>= 0.1%) instead of raising exception.
+    """
 
     @pytest.fixture
     def calculator(self):
@@ -532,8 +535,8 @@ class TestStopLossDistanceZero:
         config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         return RiskCalculator(config)
 
-    def test_doji_candle_stop_loss_equals_entry(self, calculator):
-        """Test doji candle where stop_loss equals entry_price."""
+    def test_doji_candle_stop_loss_adjusted_to_minimum(self, calculator):
+        """Test doji candle: stop_loss is adjusted to minimum 0.1% distance."""
         account = create_account(total_balance=Decimal("100000"))
         # Doji: open=high=low=close, so stop_loss = low = close = entry
         kline = create_kline(open=Decimal("100"), high=Decimal("100"), low=Decimal("100"), close=Decimal("100"))
@@ -541,30 +544,39 @@ class TestStopLossDistanceZero:
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
         entry_price = kline.close
 
-        # For doji, stop_loss == entry_price
-        assert stop_loss == entry_price
+        # S6-4 Fix: For doji, stop_loss is adjusted to minimum 0.1% below entry
+        min_stop_distance = entry_price * calculator.MIN_STOP_LOSS_RATIO
+        expected_stop_loss = entry_price - min_stop_distance
+        assert stop_loss == expected_stop_loss
+        assert stop_loss < entry_price
 
-        # Should raise DataQualityWarning when calculating position size
-        with pytest.raises(DataQualityWarning) as exc_info:
-            calculator.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
+        # Position size calculation should now work without raising exception
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.LONG
+        )
+        assert position_size > 0
+        assert leverage >= 1
 
-        assert exc_info.value.error_code == "W-001"
-
-    def test_short_doji_stop_loss_equals_entry(self, calculator):
-        """Test SHORT position with doji candle."""
+    def test_short_doji_stop_loss_adjusted_to_minimum(self, calculator):
+        """Test SHORT position with doji candle: stop_loss adjusted to minimum 0.1% distance."""
         account = create_account(total_balance=Decimal("100000"))
         kline = create_kline(open=Decimal("100"), high=Decimal("100"), low=Decimal("100"), close=Decimal("100"))
 
         stop_loss = calculator.calculate_stop_loss(kline, Direction.SHORT)
         entry_price = kline.close
 
-        # For doji, stop_loss == entry_price (high == close)
-        assert stop_loss == entry_price
+        # S6-4 Fix: For doji, stop_loss is adjusted to minimum 0.1% above entry
+        min_stop_distance = entry_price * calculator.MIN_STOP_LOSS_RATIO
+        expected_stop_loss = entry_price + min_stop_distance
+        assert stop_loss == expected_stop_loss
+        assert stop_loss > entry_price
 
-        with pytest.raises(DataQualityWarning) as exc_info:
-            calculator.calculate_position_size(account, entry_price, stop_loss, Direction.SHORT)
-
-        assert exc_info.value.error_code == "W-001"
+        # Position size calculation should now work without raising exception
+        position_size, leverage = calculator.calculate_position_size(
+            account, entry_price, stop_loss, Direction.SHORT
+        )
+        assert position_size > 0
+        assert leverage >= 1
 
 
 class TestAdvancedBoundaryCases:
