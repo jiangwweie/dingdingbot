@@ -539,16 +539,118 @@ tests/integration/test_mtf_e2e.py: 6/6 通过 (100%)
 
 ---
 
-## 第六阶段：优化与改进（进行中）
+## 第六阶段：优化与改进（❌ 全部废弃）
 
-**目标**: 基于实际使用反馈和架构演进，进行针对性优化
+**状态**: ❌ **全部废弃** - 2026-03-30
 
-### 阶段概览
+**废弃说明**: 除 v3 迁移外，所有待办事项全部废弃。团队资源集中投入到 v3.0 迁移。
+
+**原阶段概览 (仅供参考)**:
 | 阶段 | 任务 | 状态 | 优先级 |
 |------|------|------|--------|
-| S6-1 | 冷却缓存优化 | ⏸️ pending | 中 |
-| 立即测试功能优化 | 方案 C 实施 | ✅ completed | 高 |
-| TraceNode.details 修复 | API 响应验证修复 | ✅ completed | 高 |
+| ~~S6-1~~ | ~~冷却缓存优化~~ | ❌ 已废弃 | - |
+| ~~立即测试功能优化~~ | ~~方案 C 实施~~ | ✅ 已完成 | - |
+| ~~TraceNode.details 修复~~ | ~~API 响应验证修复~~ | ✅ 已完成 | - |
+
+---
+
+## 🎯 当前首要目标：v3.0 迁移
+
+**工期**: 14 周（2026-05-06 ~ 2026-08-24）
+
+**阶段概览**:
+| 阶段 | 名称 | 工期 | 开始日期 | 结束日期 | 状态 |
+|------|------|------|----------|----------|------|
+| Phase 0 | v3 准备 | 1 周 | 2026-05-06 | 2026-05-13 | ✅ 已完成 |
+| Phase 1 | 模型筑基 | 2 周 | 2026-05-19 | 2026-06-01 | ✅ 已完成 (2026-03-30) |
+| Phase 2 | 撮合引擎 | 3 周 | 2026-06-02 | 2026-06-22 | ⏳ 待启动 |
+| Phase 3 | 风控状态机 | 2 周 | 2026-06-23 | 2026-07-06 | ⏳ pending |
+| Phase 4 | 订单编排 | 2 周 | 2026-07-07 | 2026-07-20 | ⏳ pending |
+| Phase 5 | 实盘集成 | 3 周 | 2026-07-21 | 2026-08-10 | ⏳ pending |
+| Phase 6 | 前端适配 | 2 周 | 2026-08-11 | 2026-08-24 | ⏳ pending |
+
+**详细文档**: `docs/v3/v3-evolution-roadmap.md`
+
+---
+
+## Phase 1: 模型筑基 - 完成报告
+
+**完成时间**: 2026-03-30
+**执行状态**: ✅ 全部完成
+
+### 任务完成概览
+
+| 任务 ID | 任务名称 | 状态 | 交付物 |
+|---------|----------|------|--------|
+| P1-1 | 实现 v3 SQLAlchemy ORM 模型 | ✅ | `src/infrastructure/v3_orm.py` |
+| P1-2 | 编写 ORM 模型单元测试 | ✅ | `tests/unit/test_v3_orm.py` (27 测试) |
+| P1-3 | 定义前端 TypeScript 类型 | ✅ | `web-front/src/types/v3-models.ts` |
+| P1-4 | 执行数据库迁移 | ✅ | 3 个迁移文件，4 个核心表 |
+| P1-5 | 审查与验证 | ✅ | 修复 5 个问题 |
+| P1-6 | 测试执行 | ✅ | 70 个集成测试全部通过 |
+
+### 测试覆盖
+
+**总计 143 个测试，100% 通过**
+
+| 测试文件 | 测试数 | 说明 |
+|----------|--------|------|
+| `tests/unit/test_v3_models.py` | 22 | Pydantic 模型测试 |
+| `tests/unit/test_v3_orm.py` | 27 | ORM 模型测试 |
+| `tests/unit/test_v3_orm_regression.py` | 24 | ORM 回归测试 |
+| `tests/integration/test_v3_phase1_integration.py` | 70 | Phase 1 集成测试 |
+
+### 数据库结构
+
+```
+数据库：v3_dev.db
+├── accounts       ✅ (5 字段，主键 account_id)
+├── signals        ✅ (11 字段，CHECK 约束)
+├── orders         ✅ (16 字段，外键级联)
+└── positions      ✅ (12 字段，外键级联)
+```
+
+### 迁移文件
+
+| 迁移 ID | 文件名 | 说明 |
+|---------|--------|------|
+| 001 | `2026-05-01-001_unify_direction_enum.py` | Direction 枚举统一（LONG/SHORT） |
+| 002 | `2026-05-02-002_create_orders_positions_tables.py` | 创建 orders + positions 表 |
+| 003 | `2026-05-03-003_create_signals_accounts_tables.py` | 创建 signals + accounts 表 |
+
+### 修复问题汇总
+
+| 问题 | 严重性 | 修复状态 |
+|------|--------|----------|
+| pattern_score 类型错误（Integer → Float） | 高 | ✅ 已修复 |
+| signals/accounts 表缺失 | 高 | ✅ 已创建（迁移 003） |
+| SQLite 外键约束未生效 | 中 | ✅ 已启用（PRAGMA foreign_keys = ON） |
+| Direction 枚举测试过时 | 低 | ✅ 已更新 |
+
+### 交付文档
+
+- `docs/v3/v3-phase1-complete-report.md` - Phase 1 完成报告
+- `docs/v3/v3-evolution-roadmap.md` - 已更新 Phase 1 状态
+- `CLAUDE.md` - 已更新项目阶段
+
+---
+
+## 下一步：Phase 2 - 撮合引擎
+
+**计划启动日期**: 2026-05-19
+**工期**: 3 周
+
+**核心任务**:
+1. 实现 MockMatchingEngine（悲观撮合）
+2. 支持 v3 回测模式 (`mode="v3_pms"`)
+3. v2/v3 回测对比验证
+4. 滑点和手续费计算
+
+**验收标准**:
+- [ ] v3.0 回测报告包含真实盈亏统计
+- [ ] 同一策略 v2/v3 回测结果差异可解释
+- [ ] 单元测试覆盖撮合边界 case
+- [ ] 滑点/手续费计算精度验证
 
 ---
 
@@ -725,18 +827,20 @@ if score > old_score:
 
 ### 待办事项汇总
 
-**实盘导向任务规划 (2026-03-30)**:
+**🚫 全部废弃 (2026-03-30)**: 除 v3 迁移外，所有待办事项全部废弃。团队资源集中投入到 v3.0 迁移。
 
-基于用户目标（止盈追踪 → 交易所测试/实盘），重新梳理优先级：
+~~**实盘导向任务规划 (2026-03-30)**:~~
+
+~~基于用户目标（止盈追踪 → 交易所测试/实盘），重新梳理优先级：~~
 
 | 优先级 | 任务 | 预计工作量 | 状态 | 说明 |
 |--------|------|-----------|------|------|
-| P0 | 止盈追踪逻辑 | 48h | ⏳ 进行中 | 实盘核心功能，2026-04 完成 |
-| P0 | 多交易所适配 | ✅ completed | 实盘刚需 | Bybit/OKX 配置驱动切换 |
-| v3 | v3.0 迁移 | 14 周 | ⏸️ 待启动 | 2026-05 启动，详见 docs/v3/v3-evolution-roadmap.md |
-| P1 | 可视化 - 逻辑路径 | 4-6h | ⏸️ 待执行 | 策略调试 |
-| P1 | 可视化 - 资金监控 | 4-6h | ⏸️ 待执行 | 资金曲线 |
-| P2 | 性能统计 | 5-8h | ⏸️ 待执行 | 异步导出 + Python 分析 |
+| ~~P0~~ | ~~止盈追踪逻辑~~ | ~~48h~~ | ❌ **已废弃** | 整合到 v3 Phase 3 |
+| ~~P0~~ | ~~多交易所适配~~ | ✅ completed | 实盘刚需 | Bybit/OKX 配置驱动切换 |
+| **v3** | **v3.0 迁移** | **14 周** | 🔄 **当前首要目标** | 2026-05 启动，详见 docs/v3/v3-evolution-roadmap.md |
+| ~~P1~~ | ~~可视化 - 逻辑路径~~ | ~~4-6h~~ | ❌ **已废弃** | 整合到 v3 Phase 6 |
+| ~~P1~~ | ~~可视化 - 资金监控~~ | ~~4-6h~~ | ❌ **已废弃** | 整合到 v3 Phase 6 |
+| ~~P2~~ | ~~性能统计~~ | ~~5-8h~~ | ❌ **已废弃** | 整合到 v3 Phase 6 |
 
 ---
 
@@ -797,7 +901,7 @@ cp config/user.okx.yaml.example config/user.yaml
 - ~~#3 冷却缓存固定 4 小时~~ → ❌ 已废弃 (信号覆盖机制替代)
 - ~~#4 多交易所适配~~ → ✅ 已完成 (`0e214af`)
 - ~~#5 Pydantic class Config 弃用~~ → ✅ 已迁移到 ConfigDict
-- ~~#TP-2 实盘止盈追踪逻辑未实现~~ → ✅ P0 进行中 (2026-04)
+- ~~#TP-2 实盘止盈追踪逻辑未实现~~ → ❌ **已废弃** (整合到 v3 Phase 3)
 
 | 编号 | 问题 | 影响范围 | 优先级 | 状态 |
 |------|------|----------|--------|------|
@@ -808,5 +912,83 @@ cp config/user.okx.yaml.example config/user.yaml
 - v2.0 回测本质是"信号级模拟器"，非真实盈亏计算
 - v3.0 Phase 2 将实现真正的订单级撮合引擎，止盈逻辑是核心功能
 - 避免重复开发和未来维护负担
+
+---
+
+## Phase 5 实盘集成开发计划（2026-03-30 设计完成）
+
+**状态**: ✅ 设计完成，待开发
+
+**设计文档**:
+- `docs/designs/phase5-real-exchange-integration-contract.md` (v1.3)
+- `docs/designs/phase5-environment-compatibility-brainstorm.md`
+- `docs/designs/phase5-contract-review-report.md` (v1.2)
+- `docs/designs/phase5-development-checklist.md`
+
+### 开发任务清单
+
+| 编号 | 任务 | 预计工时 | 优先级 | 说明 |
+|------|------|----------|--------|------|
+| T-001 | ExchangeGateway 订单接口 | 4h | P0 | REST 下单、取消、查询 |
+| T-002 | WebSocket 订单推送监听 | 4h | P0 | CCXT.Pro watch_orders |
+| T-003 | 并发保护机制实现 | 4h | P0 | Asyncio Lock + DB 行锁 |
+| T-004 | 启动对账服务 | 4h | P0 | 仓位对账、订单对账 |
+| T-005 | 资金保护管理器 | 3h | P0 | 单笔/每日/仓位限制 |
+| T-006 | DCA 分批建仓实现 | 6h | P0 | 2-5 批次，价格/跌幅触发 |
+| T-007 | 飞书告警集成 | 2h | P1 | 多事件类型通知 |
+| T-008 | 区域切换支持 | 2h | P2 | 东京↔香港脚本 |
+| T-009 | 单元测试编写 | 6h | P0 | 资金保护、DCA、并发 |
+| T-010 | 集成测试编写 | 8h | P0 | E2E 端到端测试 |
+
+**预计总工时**: ~39 小时（约 5 个工作日）
+
+### 开发前准备
+
+**环境准备**:
+- [ ] 确认 Binance 测试网 API 密钥可用
+- [ ] 确认东京 AWS 服务器可访问
+- [ ] 准备飞书 Webhook URL
+- [ ] 配置环境变量（.env 文件）
+
+**依赖安装**:
+```bash
+pip install ccxt>=4.2.24
+pip install -r requirements.txt
+```
+
+**配置准备**:
+```yaml
+# .env
+EXCHANGE_NAME=binance
+EXCHANGE_TESTNET=true
+EXCHANGE_API_KEY=<测试网密钥>
+EXCHANGE_API_SECRET=<测试网密钥>
+DATABASE_URL=sqlite+aiosqlite:///./data/v3_dev.db
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+CAPITAL_PROTECTION_ENABLED=true
+SINGLE_TRADE_MAX_LOSS_PERCENT=2.0
+DAILY_MAX_LOSS_PERCENT=5.0
+```
+
+### 核心设计决策
+
+| 决策项 | 决策结果 |
+|--------|----------|
+| 交易所支持 | Binance (测试网 + 生产网) |
+| 数据库策略 | SQLite (开发) / PostgreSQL (测试 + 生产) |
+| 服务器位置 | 东京 AWS (预留香港切换) |
+| 告警渠道 | 飞书 Webhook |
+| DCA 分批建仓 | Phase 5 实现 (2-5 批次) |
+| 资金保护 | 单笔 2% / 每日 5% / 仓位 20% |
+| 并发保护 | Asyncio Lock + DB 行锁 (双层) |
+
+### Gemini 审查问题修复
+
+| 问题 | 修复状态 | 说明 |
+|------|----------|------|
+| G-001: CCXT.Pro 依赖包废弃 | ✅ | 修正为 `ccxt>=4.2.24` |
+| G-002: WebSocket 去重逻辑 | ✅ | 基于 filled_qty 推进 |
+| G-003: 内存锁泄漏风险 | ✅ | 平仓后自动清理 |
+| G-004: Base Asset 手续费说明 | ✅ | 明确 U 本位合约定位 |
 
 ---
