@@ -732,10 +732,56 @@ if score > old_score:
 | 优先级 | 任务 | 预计工作量 | 状态 | 说明 |
 |--------|------|-----------|------|------|
 | P0 | 止盈追踪逻辑 | 6-8h | ⏸️ 待执行 | 实盘核心功能 |
-| P0 | 多交易所适配 | 6-8h | ⏸️ 待规划 | 实盘刚需 |
+| P0 | 多交易所适配 | ✅ completed | 实盘刚需 | Bybit/OKX 配置驱动切换 |
 | P1 | 可视化 - 逻辑路径 | 4-6h | ⏸️ 待执行 | 策略调试 |
 | P1 | 可视化 - 资金监控 | 4-6h | ⏸️ 待执行 | 资金曲线 |
 | P2 | 性能统计 | 5-8h | ⏸️ 待执行 | 异步导出 + Python 分析 |
+
+---
+
+### 2026-03-30 完成：多交易所适配
+
+**目标**: 实现 Bybit 和 OKX 的多交易所适配，支持配置驱动切换
+
+**交付物**:
+- 创建：`config/user.bybit.yaml.example` - Bybit 配置模板
+- 创建：`config/user.okx.yaml.example` - OKX 配置模板
+- 创建：`docs/arch/2026-03-30-多交易所适配验证报告.md`
+- 创建：`tests/integration/test_multi_exchange_integration.py` - 集成测试
+- 创建：`tests/integration/test_exchange_live_connection.py` - 实时连接测试
+- 修改：`tests/unit/test_exchange_gateway.py` - 参数化测试支持 3 交易所
+- 修改：`src/domain/models.py` - Pydantic v2 ConfigDict 迁移
+
+**测试结果**:
+```
+tests/unit/test_exchange_gateway.py: 66/66 通过 (100%)
+tests/integration/test_multi_exchange_integration.py: 25/25 通过 (100%)
+tests/integration/test_exchange_live_connection.py: 2/2 通过 (100%)
+总计：93 项测试全部通过
+```
+
+**核心功能**:
+- ✅ 配置驱动切换交易所（binance/bybit/okx）
+- ✅ 核心币种池兼容性验证（BTC/ETH/SOL/BNB）
+- ✅ CCXT.Pro WebSocket 支持（watch_ohlcv/watch_balance）
+- ✅ 完整的单元测试和集成测试覆盖
+- ✅ 代码审查发现并修复 3 个低优先级问题
+
+**快速切换**:
+```bash
+# 切换到 Bybit
+cp config/user.bybit.yaml.example config/user.yaml
+
+# 切换到 OKX
+cp config/user.okx.yaml.example config/user.yaml
+```
+
+**Git 提交**: `0e214af`
+
+**待办**:
+- ⏳ 用户申请 API Key 后进行实盘验证
+
+---
 
 **已废弃任务 (2026-03-30)**:
 - ~~S6-1 冷却缓存优化~~ → ❌ 已废弃 (信号覆盖机制已解决重复通知问题)
@@ -748,6 +794,8 @@ if score > old_score:
 - ~~#1 回测时间范围参数未生效~~ → ✅ 已实现 start_time/end_time 支持
 - ~~#2 ATR 过滤器占位符实现~~ → ✅ 已完成 (`3c60ae2`)
 - ~~#3 冷却缓存固定 4 小时~~ → ❌ 已废弃 (信号覆盖机制替代)
+- ~~#4 多交易所适配~~ → ✅ 已完成 (`0e214af`)
+- ~~#5 Pydantic class Config 弃用~~ → ✅ 已迁移到 ConfigDict
 
 | 编号 | 问题 | 影响范围 | 优先级 |
 |------|------|----------|--------|
