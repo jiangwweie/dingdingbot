@@ -2,6 +2,7 @@
 Global Pydantic models - shared contract between Dev A (Infrastructure) and Dev B (Domain).
 DO NOT modify without architect approval.
 """
+import time
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from decimal import Decimal
 from typing import Optional, List, Dict, Any, Union, Annotated, Literal
@@ -610,6 +611,7 @@ class OrderStatus(str, Enum):
     FILLED = "FILLED"             # 完全成交
     CANCELED = "CANCELED"         # 已撤销
     REJECTED = "REJECTED"         # 交易所拒单
+    EXPIRED = "EXPIRED"           # 已过期
 
 
 class OrderType(str, Enum):
@@ -617,6 +619,7 @@ class OrderType(str, Enum):
     MARKET = "MARKET"             # 市价单
     LIMIT = "LIMIT"               # 限价单
     STOP_MARKET = "STOP_MARKET"   # 条件市价单
+    STOP_LIMIT = "STOP_LIMIT"     # 条件限价单
     TRAILING_STOP = "TRAILING_STOP"  # 移动止损单
 
 
@@ -698,6 +701,62 @@ class Order(FinancialModel):
     # Phase 4 订单编排扩展
     parent_order_id: Optional[str] = None  # 父订单 ID (用于订单链)
     oco_group_id: Optional[str] = None     # OCO 组 ID (同一组的订单互斥)
+
+
+# ============================================================
+# Phase 5: 订单操作结果模型
+# ============================================================
+class OrderPlacementResult(FinancialModel):
+    """
+    订单下单结果
+
+    用于 place_order() 方法的返回值
+    """
+    order_id: str                        # 系统生成的订单 ID
+    exchange_order_id: Optional[str] = None  # 交易所返回的订单 ID
+    symbol: str
+    order_type: OrderType
+    direction: Direction
+    side: str                            # "buy" | "sell"
+    amount: Decimal
+    price: Optional[Decimal] = None
+    trigger_price: Optional[Decimal] = None
+    reduce_only: bool = False
+    client_order_id: Optional[str] = None
+    status: OrderStatus = OrderStatus.PENDING
+    created_at: int = Field(default_factory=lambda: int(time.time() * 1000))
+
+    # 错误信息（当下单失败时）
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+    @property
+    def is_success(self) -> bool:
+        """是否下单成功"""
+        return self.error_code is None
+
+
+class OrderCancelResult(FinancialModel):
+    """
+    订单取消结果
+
+    用于 cancel_order() 方法的返回值
+    """
+    order_id: str                        # 系统订单 ID
+    exchange_order_id: Optional[str] = None  # 交易所订单 ID
+    symbol: str
+    status: OrderStatus = OrderStatus.CANCELED
+    canceled_at: int = Field(default_factory=lambda: int(time.time() * 1000))
+    message: str = "Order canceled successfully"
+
+    # 错误信息（当取消失败时）
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+    @property
+    def is_success(self) -> bool:
+        """是否取消成功"""
+        return self.error_code is None
 
 
 class Position(FinancialModel):
@@ -901,3 +960,168 @@ class PMSBacktestReport(FinancialModel):
     max_drawdown: Decimal        # 最大回撤 (%)
     sharpe_ratio: Optional[Decimal] = None  # 夏普比率
     positions: List[PositionSummary] = Field(default_factory=list)
+
+
+# ============================================================
+# Phase 5: Reconciliation Models
+# ============================================================
+
+class PositionMismatch(FinancialModel):
+    """仓位不匹配记录"""
+    symbol: str = Field(..., description="币种对")
+    local_qty: Decimal = Field(..., description="本地记录数量")
+    exchange_qty: Decimal = Field(..., description="交易所记录数量")
+    discrepancy: Decimal = Field(..., description="差异数量")
+
+
+class OrderMismatch(FinancialModel):
+    """订单不匹配记录"""
+    order_id: str = Field(..., description="订单 ID")
+    local_status: OrderStatus = Field(..., description="本地状态")
+    exchange_status: str = Field(..., description="交易所状态")
+
+
+class ReconciliationReport(FinancialModel):
+    """
+    对账报告响应
+
+    Phase 5: 实盘集成 - 对账服务
+    Reference: docs/designs/phase5-contract.md Section 9
+    """
+    symbol: str = Field(..., description="币种对")
+    reconciliation_time: int = Field(..., description="对账时间戳（毫秒）")
+    grace_period_seconds: int = Field(..., description="宽限期秒数")
+
+    # 仓位差异
+    position_mismatches: List[PositionMismatch] = Field(
+        default_factory=list,
+        description="仓位不匹配列表"
+    )
+    missing_positions: List["PositionInfo"] = Field(
+        default_factory=list,
+        description="本地缺失的仓位"
+    )
+
+    # 订单差异
+    order_mismatches: List[OrderMismatch] = Field(
+        default_factory=list,
+        description="订单不匹配列表"
+    )
+    orphan_orders: List["OrderResponse"] = Field(
+        default_factory=list,
+        description="孤儿订单列表"
+    )
+
+    # 对账结论
+    is_consistent: bool = Field(..., description="是否一致（无差异）")
+    total_discrepancies: int = Field(..., description="总差异数")
+    requires_attention: bool = Field(..., description="是否需要人工介入")
+    summary: str = Field(..., description="对账结论摘要")
+
+
+class OrderResponse(FinancialModel):
+    """
+    订单响应（用于对账报告中的孤儿订单）
+
+    简化版本，仅包含必要字段
+    """
+    order_id: str
+    exchange_order_id: Optional[str] = None
+    symbol: str
+    order_type: OrderType
+    direction: Direction
+    order_role: OrderRole
+    status: OrderStatus
+    amount: Decimal
+    filled_amount: Decimal = Field(default=Decimal("0"))
+    price: Optional[Decimal] = None
+    trigger_price: Optional[Decimal] = None
+    average_exec_price: Optional[Decimal] = None
+    reduce_only: bool = Field(default=False)
+    created_at: int
+    updated_at: int
+
+
+# Forward reference rebuild
+ReconciliationReport.model_rebuild()
+
+
+# ============================================================
+# Phase 5: Capital Protection Models
+# ============================================================
+
+class CapitalProtectionConfig(BaseModel):
+    """
+    资金保护配置
+
+    Phase 5: 实盘集成 - 资金保护管理器
+    Reference: docs/designs/phase5-detailed-design.md Section 3.4
+    """
+    enabled: bool = Field(default=True, description="是否启用资金保护")
+
+    # 单笔交易限制
+    single_trade: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "max_loss_percent": Decimal("2.0"),    # 单笔最大损失 2% of balance
+            "max_position_percent": Decimal("20"), # 单次最大仓位 20% of balance
+        },
+        description="单笔交易限制配置"
+    )
+
+    # 每日限制
+    daily: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "max_loss_percent": Decimal("5.0"),    # 每日最大回撤 5% of balance
+            "max_trade_count": 50,                 # 每日最大交易次数
+        },
+        description="每日限制配置"
+    )
+
+    # 账户限制
+    account: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "min_balance": Decimal("100"),         # 最低余额保留 (USDT)
+            "max_leverage": 10,                    # 最大杠杆倍数
+        },
+        description="账户限制配置"
+    )
+
+
+class DailyTradeStats(BaseModel):
+    """
+    每日交易统计
+
+    用于追踪当日交易表现，在每日重置时清零
+    """
+    trade_count: int = Field(default=0, description="当日交易次数")
+    realized_pnl: Decimal = Field(default=Decimal("0"), description="当日已实现盈亏 (USDT)")
+    last_reset_date: str = Field(default_factory=lambda: datetime.now(timezone.utc).date().isoformat(), description="最后重置日期")
+
+
+class OrderCheckResult(BaseModel):
+    """
+    订单检查结果
+
+    Phase 5: 资金保护检查结果
+    Reference: docs/designs/phase5-contract.md Section 10
+    """
+    allowed: bool = Field(..., description="是否允许下单")
+    reason: Optional[str] = Field(None, description="拒绝原因代码")
+    reason_message: Optional[str] = Field(None, description="拒绝原因人类可读描述")
+
+    # 详细检查结果
+    single_trade_check: Optional[bool] = Field(None, description="单笔交易检查是否通过")
+    position_limit_check: Optional[bool] = Field(None, description="仓位限制检查是否通过")
+    daily_loss_check: Optional[bool] = Field(None, description="每日亏损检查是否通过")
+    daily_count_check: Optional[bool] = Field(None, description="每日次数检查是否通过")
+    balance_check: Optional[bool] = Field(None, description="余额检查是否通过")
+
+    # 详细数据
+    estimated_loss: Optional[Decimal] = Field(None, description="预计损失（USDT）")
+    max_allowed_loss: Optional[Decimal] = Field(None, description="最大允许损失（USDT）")
+    position_value: Optional[Decimal] = Field(None, description="仓位价值（USDT）")
+    max_allowed_position: Optional[Decimal] = Field(None, description="最大允许仓位（USDT）")
+    daily_pnl: Optional[Decimal] = Field(None, description="当日盈亏（USDT）")
+    daily_trade_count: Optional[int] = Field(None, description="当日交易次数")
+    available_balance: Optional[Decimal] = Field(None, description="可用余额（USDT）")
+    min_required_balance: Optional[Decimal] = Field(None, description="最低保留余额（USDT）")

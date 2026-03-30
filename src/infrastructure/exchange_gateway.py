@@ -14,8 +14,9 @@ except ImportError:
 
 import ccxt.async_support as ccxt_async
 
-from src.domain.models import KlineData, AccountSnapshot, PositionInfo
-from src.domain.exceptions import FatalStartupError, ConnectionLostError, DataQualityWarning
+from src.domain.models import KlineData, AccountSnapshot, PositionInfo, OrderPlacementResult, OrderCancelResult, OrderStatus, OrderType, Order, OrderRole
+from decimal import Decimal
+from src.domain.exceptions import FatalStartupError, ConnectionLostError, DataQualityWarning, InsufficientMarginError, InvalidOrderError, OrderNotFoundError, OrderAlreadyFilledError, RateLimitError
 from src.infrastructure.logger import logger
 
 
@@ -97,6 +98,9 @@ class ExchangeGateway:
 
         # Candle closure tracking (instance variable, not class variable)
         self._candle_timestamps: Dict[str, int] = {}
+
+        # Order state tracking (G-002: dedup based on filled_qty)
+        self._order_local_state: Dict[str, Dict[str, Any]] = {}  # order_id -> {filled_qty, status, updated_at}
 
     def _create_rest_exchange(self, options: Dict[str, Any]):
         """Create REST exchange instance"""
@@ -684,3 +688,579 @@ class ExchangeGateway:
             AccountSnapshot or None if not yet polled
         """
         return self._account_snapshot
+
+    # ============================================================
+    # Phase 5: Order Management APIs
+    # ============================================================
+
+    async def place_order(
+        self,
+        symbol: str,
+        order_type: str,           # "market", "limit", "stop_market"
+        side: str,                 # "buy" (开多/平空), "sell" (开空/平多)
+        amount: Decimal,           # 数量
+        price: Optional[Decimal] = None,      # 限价单价格
+        trigger_price: Optional[Decimal] = None,  # 条件单触发价
+        reduce_only: bool = False,  # 仅减仓（平仓单必须设置）
+        client_order_id: Optional[str] = None,  # 客户端订单 ID
+    ) -> OrderPlacementResult:
+        """
+        下单接口
+
+        Args:
+            symbol: 币种对，如 "BTC/USDT:USDT"
+            order_type: 订单类型 ("market", "limit", "stop_market")
+            side: 买卖方向 ("buy" | "sell")
+            amount: 订单数量
+            price: 限价单价格（LIMIT 订单必填）
+            trigger_price: 条件单触发价（STOP_MARKET 订单必填）
+            reduce_only: 是否仅减仓（平仓单必须为 True）
+            client_order_id: 客户端订单 ID（可选）
+
+        Returns:
+            OrderPlacementResult: 订单放置结果
+
+        Raises:
+            InsufficientMarginError: 保证金不足
+            InvalidOrderError: 订单参数错误
+            RateLimitError: API 频率限制
+        """
+        import uuid
+        import ccxt
+
+        # 生成系统订单 ID
+        system_order_id = str(uuid.uuid4())
+
+        # 参数验证（在 try 块之外，直接抛出异常）
+        if order_type == "limit" and price is None:
+            raise InvalidOrderError("LIMIT 订单必须指定价格", "F-011")
+
+        if order_type == "stop_market" and trigger_price is None:
+            raise InvalidOrderError("STOP_MARKET 订单必须指定触发价", "F-011")
+
+        try:
+            # 映射订单类型到 CCXT 格式
+            ccxt_type = self._map_order_type_to_ccxt(order_type)
+
+            # 构建 CCXT 下单参数
+            params = {
+                'reduceOnly': reduce_only,
+            }
+
+            if client_order_id:
+                params['clientOrderId'] = client_order_id
+
+            # 调用 CCXT create_order 方法
+            order = await self.rest_exchange.create_order(
+                symbol=symbol,
+                type=ccxt_type,
+                side=side,
+                amount=float(amount),
+                price=float(price) if price is not None else None,
+                params=params,
+            )
+
+            # 解析订单响应
+            order_status = self._parse_order_status(order.get('status', 'open'))
+
+            return OrderPlacementResult(
+                order_id=system_order_id,
+                exchange_order_id=order.get('id'),
+                symbol=symbol,
+                order_type=OrderType(order_type.upper()),
+                direction=self._map_side_to_direction(side, reduce_only),
+                side=side,
+                amount=amount,
+                price=price,
+                trigger_price=trigger_price,
+                reduce_only=reduce_only,
+                client_order_id=client_order_id,
+                status=order_status,
+            )
+
+        except ccxt.InsufficientFunds as e:
+            logger.warning(f"保证金不足：{e}")
+            raise InsufficientMarginError(f"保证金不足以下单：{e}", "F-010")
+
+        except ccxt.InvalidOrder as e:
+            logger.warning(f"订单参数错误：{e}")
+            raise InvalidOrderError(f"订单参数错误：{e}", "F-011")
+
+        except ccxt.DDoSProtection as e:
+            logger.warning(f"API 频率限制：{e}")
+            raise RateLimitError(f"API 频率限制：{e}", "C-010")
+
+        except ccxt.NetworkError as e:
+            logger.error(f"网络错误：{e}")
+            raise ConnectionLostError(f"网络错误：{e}", "C-001")
+
+        except Exception as e:
+            logger.error(f"下单失败：{e}")
+            return OrderPlacementResult(
+                order_id=system_order_id,
+                symbol=symbol,
+                order_type=OrderType(order_type.upper()),
+                direction=self._map_side_to_direction(side, reduce_only),
+                side=side,
+                amount=amount,
+                price=price,
+                trigger_price=trigger_price,
+                reduce_only=reduce_only,
+                client_order_id=client_order_id,
+                error_code="F-011",
+                error_message=f"下单失败：{str(e)}",
+            )
+
+    async def cancel_order(self, order_id: str, symbol: str) -> OrderCancelResult:
+        """
+        取消订单
+
+        Args:
+            order_id: 交易所订单 ID
+            symbol: 币种对
+
+        Returns:
+            OrderCancelResult: 订单取消结果
+
+        Raises:
+            OrderNotFoundError: 订单不存在
+            OrderAlreadyFilledError: 订单已成交（无法取消）
+            RateLimitError: API 频率限制
+        """
+        import ccxt
+
+        try:
+            # 调用 CCXT cancel_order 方法
+            order = await self.rest_exchange.cancel_order(order_id, symbol)
+
+            # 解析订单状态
+            order_status = self._parse_order_status(order.get('status', 'canceled'))
+
+            if order_status == OrderStatus.FILLED:
+                raise OrderAlreadyFilledError(f"订单已成交，无法取消：{order_id}", "F-013")
+
+            return OrderCancelResult(
+                order_id=order_id,
+                exchange_order_id=order.get('id'),
+                symbol=symbol,
+                status=order_status,
+                message="Order canceled successfully",
+            )
+
+        except ccxt.OrderNotFound as e:
+            logger.warning(f"订单不存在：{e}")
+            raise OrderNotFoundError(f"订单不存在：{order_id}", "F-012")
+
+        except ccxt.OrderNotFillable as e:
+            logger.warning(f"订单已成交：{e}")
+            raise OrderAlreadyFilledError(f"订单已成交，无法取消：{order_id}", "F-013")
+
+        except ccxt.DDoSProtection as e:
+            logger.warning(f"API 频率限制：{e}")
+            raise RateLimitError(f"API 频率限制：{e}", "C-010")
+
+        except ccxt.NetworkError as e:
+            logger.error(f"网络错误：{e}")
+            raise ConnectionLostError(f"网络错误：{e}", "C-001")
+
+        except Exception as e:
+            logger.error(f"取消订单失败：{e}")
+            raise
+
+    async def fetch_order(self, order_id: str, symbol: str) -> OrderPlacementResult:
+        """
+        查询订单状态
+
+        Args:
+            order_id: 交易所订单 ID
+            symbol: 币种对
+
+        Returns:
+            OrderPlacementResult: 订单状态结果
+
+        Raises:
+            OrderNotFoundError: 订单不存在
+            RateLimitError: API 频率限制
+        """
+        import ccxt
+
+        try:
+            # 调用 CCXT fetch_order 方法
+            order = await self.rest_exchange.fetch_order(order_id, symbol)
+
+            # 解析订单状态
+            order_status = self._parse_order_status(order.get('status', 'open'))
+
+            # 解析订单数据
+            amount = Decimal(str(order.get('amount', 0))) if order.get('amount') else Decimal('0')
+            price = Decimal(str(order['price'])) if order.get('price') else None
+            average_exec_price = Decimal(str(order['average'])) if order.get('average') else None
+
+            return OrderPlacementResult(
+                order_id=order_id,
+                exchange_order_id=order.get('id'),
+                symbol=symbol,
+                order_type=self._parse_order_type(order.get('type', 'limit')),
+                direction=self._map_side_to_direction(order.get('side', 'buy'), False),
+                side=order.get('side', 'buy'),
+                amount=amount,
+                price=price,
+                reduce_only=order.get('reduceOnly', False),
+                status=order_status,
+            )
+
+        except ccxt.OrderNotFound as e:
+            logger.warning(f"订单不存在：{e}")
+            raise OrderNotFoundError(f"订单不存在：{order_id}", "F-012")
+
+        except ccxt.DDoSProtection as e:
+            logger.warning(f"API 频率限制：{e}")
+            raise RateLimitError(f"API 频率限制：{e}", "C-010")
+
+        except ccxt.NetworkError as e:
+            logger.error(f"网络错误：{e}")
+            raise ConnectionLostError(f"网络错误：{e}", "C-001")
+
+        except Exception as e:
+            logger.error(f"查询订单失败：{e}")
+            raise
+
+    async def fetch_ticker_price(self, symbol: str) -> Decimal:
+        """
+        获取盘口价格（用于市价单预估）
+
+        Args:
+            symbol: 币种对
+
+        Returns:
+            Decimal: 最新市场价格
+
+        Raises:
+            ConnectionLostError: 无法获取价格
+        """
+        import ccxt
+
+        try:
+            # 调用 CCXT fetch_ticker 方法
+            ticker = await self.rest_exchange.fetch_ticker(symbol)
+
+            # 获取最新成交价（优先使用 last，否则使用 close）
+            price = ticker.get('last') or ticker.get('close') or ticker.get('bid') or ticker.get('ask')
+
+            if price is None:
+                raise ConnectionLostError(f"无法获取 {symbol} 的价格", "C-001")
+
+            return Decimal(str(price))
+
+        except ccxt.NetworkError as e:
+            logger.error(f"网络错误，无法获取价格：{e}")
+            raise ConnectionLostError(f"网络错误：{e}", "C-001")
+
+        except Exception as e:
+            logger.error(f"获取价格失败：{e}")
+            raise
+
+    # ============================================================
+    # Helper Methods
+    # ============================================================
+
+    def _map_order_type_to_ccxt(self, order_type: str) -> str:
+        """
+        映射订单类型到 CCXT 格式
+
+        Args:
+            order_type: 内部订单类型 ("market", "limit", "stop_market")
+
+        Returns:
+            CCXT 订单类型
+        """
+        type_mapping = {
+            "market": "market",
+            "limit": "limit",
+            "stop_market": "stop",  # CCXT 使用 "stop" 表示条件单
+        }
+        return type_mapping.get(order_type.lower(), order_type.lower())
+
+    def _map_side_to_direction(self, side: str, reduce_only: bool) -> "Direction":
+        """
+        映射 side 到 Direction 枚举
+
+        Args:
+            side: "buy" | "sell"
+            reduce_only: 是否减仓
+
+        Returns:
+            Direction 枚举
+        """
+        from src.domain.models import Direction
+
+        # 开仓单：buy=LONG, sell=SHORT
+        # 平仓单：buy=SHORT(平空), sell=LONG(平多)
+        if not reduce_only:
+            return Direction.LONG if side == "buy" else Direction.SHORT
+        else:
+            # 平仓单：方向与原始持仓相反
+            return Direction.SHORT if side == "buy" else Direction.LONG
+
+    def _parse_order_status(self, ccxt_status: str) -> OrderStatus:
+        """
+        解析 CCXT 订单状态到内部 OrderStatus
+
+        Args:
+            ccxt_status: CCXT 返回的订单状态
+
+        Returns:
+            OrderStatus 枚举
+        """
+        status_mapping = {
+            'open': OrderStatus.OPEN,
+            'closed': OrderStatus.FILLED,
+            'canceled': OrderStatus.CANCELED,
+            'rejected': OrderStatus.REJECTED,
+            'expired': OrderStatus.EXPIRED,
+        }
+        # 部分成交处理
+        if ccxt_status == 'open':
+            # 需要检查是否有已成交数量，这里简化处理
+            return OrderStatus.OPEN
+        return status_mapping.get(ccxt_status.lower(), OrderStatus.PENDING)
+
+    def _parse_order_type(self, ccxt_type: str) -> OrderType:
+        """
+        解析 CCXT 订单类型到内部 OrderType
+
+        Args:
+            ccxt_type: CCXT 返回的订单类型
+
+        Returns:
+            OrderType 枚举
+        """
+        type_mapping = {
+            'market': OrderType.MARKET,
+            'limit': OrderType.LIMIT,
+            'stop': OrderType.STOP_MARKET,
+            'stop_market': OrderType.STOP_MARKET,
+            'stop_limit': OrderType.STOP_LIMIT,
+        }
+        return type_mapping.get(ccxt_type.lower(), OrderType.LIMIT)
+
+    # ============================================================
+    # Phase 5: WebSocket Order Push Monitoring (G-002)
+    # ============================================================
+
+    async def watch_orders(
+        self,
+        symbol: str,
+        callback: Callable[[Order], Awaitable[None]],
+    ) -> None:
+        """
+        WebSocket 监听订单推送
+
+        G-002 修复：基于 filled_qty 去重，而非时间戳
+        避免同一毫秒多次 Partial Fill 导致重复处理
+
+        Args:
+            symbol: 币种对，如 "BTC/USDT:USDT"
+            callback: 订单更新时的异步回调
+
+        Raises:
+            ConnectionLostError: WebSocket 重连超限
+        """
+        if ccxtpro is None:
+            logger.warning("CCXT Pro 未安装，无法使用 WebSocket 订单推送")
+            return
+
+        self._ws_running = True
+        reconnect_count = 0
+
+        # 创建 WebSocket 交换实例
+        self.ws_exchange = self._create_ws_exchange({
+            'defaultType': 'swap',
+        })
+
+        # 加载市场数据
+        await self.ws_exchange.load_markets()
+        logger.info(f"WebSocket 订单监听已启动：{symbol}")
+
+        try:
+            while self._ws_running:
+                try:
+                    # 使用 CCXT Pro watch_orders 方法
+                    orders = await self.ws_exchange.watch_orders(symbol)
+
+                    # 处理每个订单更新
+                    for raw_order in orders:
+                        order = await self._handle_order_update(raw_order)
+                        if order:
+                            await callback(order)
+
+                except asyncio.CancelledError:
+                    logger.info(f"WebSocket 订单监听被取消：{symbol}")
+                    break
+
+                except Exception as e:
+                    reconnect_count += 1
+                    if reconnect_count >= self._max_reconnect_attempts:
+                        raise ConnectionLostError(
+                            f"WebSocket 重连失败超过 {self._max_reconnect_attempts} 次：{symbol}",
+                            "C-001"
+                        )
+
+                    # 指数退避
+                    delay = min(
+                        self._initial_reconnect_delay * (2 ** (reconnect_count - 1)),
+                        self._max_reconnect_delay
+                    )
+                    logger.warning(
+                        f"WebSocket 重连中... {delay:.1f}s "
+                        f"(尝试 {reconnect_count}/{self._max_reconnect_attempts})"
+                    )
+                    await asyncio.sleep(delay)
+
+        finally:
+            self._ws_running = False
+            if self.ws_exchange:
+                await self.ws_exchange.close()
+
+    async def _handle_order_update(self, raw_order: Dict[str, Any]) -> Optional[Order]:
+        """
+        处理订单更新
+
+        G-002 修复核心：
+        - 基于 filled_qty 推进判断
+        - 避免同一毫秒多次 Partial Fill 导致重复处理
+
+        Args:
+            raw_order: CCXT 原始订单数据
+
+        Returns:
+            Order 对象，如果是重复更新则返回 None
+        """
+        import uuid
+
+        try:
+            # 解析订单数据
+            order_id = str(raw_order.get('id', uuid.uuid4()))
+            symbol = raw_order.get('symbol', '')
+            status = raw_order.get('status', 'open')
+            order_type = raw_order.get('type', 'limit')
+            side = raw_order.get('side', 'buy')
+
+            # 解析数量和价格（使用 Decimal 精度）
+            amount = Decimal(str(raw_order.get('amount', 0))) if raw_order.get('amount') else Decimal('0')
+            filled_qty = Decimal(str(raw_order.get('filled', 0))) if raw_order.get('filled') else Decimal('0')
+            remaining = Decimal(str(raw_order.get('remaining', 0))) if raw_order.get('remaining') else Decimal('0')
+            price = Decimal(str(raw_order['price'])) if raw_order.get('price') else None
+            average_exec_price = Decimal(str(raw_order['average'])) if raw_order.get('average') else None
+
+            # 解析时间戳
+            timestamp = raw_order.get('timestamp')
+            if timestamp is None:
+                timestamp = int(time.time() * 1000)
+            elif isinstance(timestamp, float):
+                timestamp = int(timestamp)
+
+            # G-002 修复：基于 filled_qty 去重
+            local_state = self._order_local_state.get(order_id)
+            if local_state:
+                local_filled_qty = local_state.get('filled_qty', Decimal('0'))
+                local_status = local_state.get('status', 'open')
+
+                # 如果成交量未增加且状态未变化，跳过重复推送
+                if filled_qty <= local_filled_qty and status == local_status:
+                    logger.debug(f"订单 {order_id} 重复更新：filled_qty={filled_qty}, status={status}")
+                    return None
+
+                # 如果成交量减少（异常情况），记录警告
+                if filled_qty < local_filled_qty:
+                    logger.warning(
+                        f"订单 {order_id} filled_qty 异常减少："
+                        f"{local_filled_qty} -> {filled_qty}"
+                    )
+
+            # 更新本地状态
+            self._order_local_state[order_id] = {
+                'filled_qty': filled_qty,
+                'status': status,
+                'updated_at': timestamp,
+            }
+
+            # 解析订单状态
+            order_status = self._parse_order_status_with_filled_qty(status, filled_qty, amount)
+
+            # 构建 Order 对象
+            order = Order(
+                id=order_id,
+                signal_id=raw_order.get('clientOrderId', ''),  # 使用 clientOrderId 作为 signal_id
+                exchange_order_id=order_id,
+                symbol=symbol,
+                direction=self._map_side_to_direction(side, raw_order.get('reduceOnly', False)),
+                order_type=self._parse_order_type(order_type),
+                order_role=OrderRole.ENTRY,  # 默认设为 ENTRY，具体角色由上层业务逻辑判断
+                price=price,
+                trigger_price=None,  # CCXT 不直接返回 trigger_price
+                requested_qty=amount,
+                filled_qty=filled_qty,
+                average_exec_price=average_exec_price,
+                status=order_status,
+                created_at=timestamp,
+                updated_at=timestamp,
+                reduce_only=raw_order.get('reduceOnly', False),
+            )
+
+            logger.info(
+                f"订单更新：{order_id} {symbol} {order_status.value} "
+                f"filled={filled_qty}/{amount} price={average_exec_price or price}"
+            )
+
+            return order
+
+        except Exception as e:
+            logger.error(f"处理订单更新失败：{e}")
+            return None
+
+    def _parse_order_status_with_filled_qty(
+        self,
+        ccxt_status: str,
+        filled_qty: Decimal,
+        amount: Decimal,
+    ) -> OrderStatus:
+        """
+        解析 CCXT 订单状态，支持部分成交判断
+
+        Args:
+            ccxt_status: CCXT 返回的订单状态
+            filled_qty: 已成交数量
+            amount: 订单总数量
+
+        Returns:
+            OrderStatus 枚举
+        """
+        status_mapping = {
+            'open': OrderStatus.OPEN,
+            'closed': OrderStatus.FILLED,
+            'canceled': OrderStatus.CANCELED,
+            'rejected': OrderStatus.REJECTED,
+            'expired': OrderStatus.EXPIRED,
+        }
+
+        # 首先检查标准状态
+        base_status = status_mapping.get(ccxt_status.lower(), OrderStatus.PENDING)
+
+        # 特殊处理：open 状态下检查是否有部分成交
+        if ccxt_status.lower() == 'open':
+            if filled_qty > 0 and filled_qty < amount:
+                return OrderStatus.PARTIALLY_FILLED
+
+        return base_status
+
+    def clear_order_state(self, order_id: str) -> None:
+        """
+        清除订单本地状态（用于订单完成后清理内存）
+
+        Args:
+            order_id: 订单 ID
+        """
+        if order_id in self._order_local_state:
+            del self._order_local_state[order_id]
+            logger.debug(f"已清除订单状态：{order_id}")
