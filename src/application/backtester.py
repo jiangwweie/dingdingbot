@@ -35,6 +35,7 @@ from src.domain.models import (
     OrderStatus,
 )
 from src.domain.matching_engine import MockMatchingEngine
+from src.domain.risk_manager import DynamicRiskManager
 from src.domain.strategy_engine import (
     StrategyEngine,
     StrategyConfig,
@@ -1097,10 +1098,21 @@ class Backtester:
                         total_pnl += position.realized_pnl
                         total_fees_paid += position.total_fees_paid
 
+            # 【新增】Step 8: 风控状态机评估与状态突变
+            # 在撮合引擎撮合订单后，对每个活跃仓位执行风控状态评估
+            # T+1 时序声明：TP1 引发的 SL 修改在下一根 K 线生效
+            dynamic_risk_manager = DynamicRiskManager(
+                trailing_percent=Decimal('0.02'),      # 默认 2%
+                step_threshold=Decimal('0.005'),       # 默认 0.5%
+            )
+            for position in positions_map.values():
+                if not position.is_closed and position.current_qty > 0:
+                    dynamic_risk_manager.evaluate_and_mutate(kline, position, active_orders)
+
             # Remove executed/cancelled orders from active list
             active_orders = [o for o in active_orders if o.status == OrderStatus.OPEN]
 
-        # Step 8: Build PMSBacktestReport
+        # Step 9: Build PMSBacktestReport
         final_balance = account.total_balance
         total_return = ((final_balance - initial_balance) / initial_balance) * Decimal('100')
         win_rate = (Decimal(winning_trades) / Decimal(total_trades) * Decimal('100')) if total_trades > 0 else Decimal('0')

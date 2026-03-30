@@ -681,6 +681,10 @@ class Order(FinancialModel):
     # 平仓附加属性
     exit_reason: Optional[str] = None  # 用于统计: INITIAL_SL, BREAKEVEN_STOP, TRAILING_PROFIT
 
+    # Phase 3 Reduce Only 约束
+    # 契约表 3.1: 所有平仓单 (TP/SL) 必须携带 reduceOnly=True，防止保证金不足错误
+    reduce_only: bool = Field(default=False, description="仅减仓平仓 (实盘约束)")
+
 
 class Position(FinancialModel):
     """
@@ -696,7 +700,9 @@ class Position(FinancialModel):
     current_qty: Decimal         # 当前持仓体积 (TP1 触发后会变小)
 
     # 动态风控水位线
-    highest_price_since_entry: Decimal
+    # LONG: 追踪入场后的最高价 (High Watermark)
+    # SHORT: 追踪入场后的最低价 (Low Watermark)
+    watermark_price: Optional[Decimal] = None
 
     # 业绩追踪
     realized_pnl: Decimal = Field(default=Decimal('0'), description="已实现盈亏 (落袋为安)")
