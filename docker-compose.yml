@@ -20,6 +20,10 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - PYTHONPATH=/app
+      # Database URL (SQLite for development)
+      - DATABASE_URL=sqlite+aiosqlite:///./data/v3_dev.db
+      # Set to 'true' to enable SQL query logging
+      - SQL_ECHO=false
     networks:
       - monitor-dog-network
     healthcheck:
@@ -27,7 +31,29 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 40s  # Extended for Alembic migrations
+
+  # PostgreSQL Service (Optional - for production testing)
+  # Uncomment to use PostgreSQL instead of SQLite
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: monitor-dog-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: v3
+  #     POSTGRES_PASSWORD: v3_password
+  #     POSTGRES_DB: v3_prod
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - monitor-dog-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U v3"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
   # Frontend Web Service
   frontend:
@@ -56,3 +82,4 @@ volumes:
   config:
   data:
   logs:
+  # postgres_data:
