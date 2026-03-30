@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 # Enum Types
 # ============================================================
 class Direction(str, Enum):
-    """Signal direction"""
-    LONG = "long"
-    SHORT = "short"
+    """Signal direction (v3.0 Phase 1: unified uppercase)"""
+    LONG = "LONG"
+    SHORT = "SHORT"
 
 
 class MtfStatus(str, Enum):
@@ -319,6 +319,24 @@ class BacktestRequest(BaseModel):
         description="Risk config overrides for this backtest"
     )
 
+    # v3.0 PMS mode (Phase 2)
+    mode: Literal["v2_classic", "v3_pms"] = Field(
+        default="v2_classic",
+        description="Backtest mode: 'v2_classic' (signal-level) or 'v3_pms' (position-level with matching engine)"
+    )
+    initial_balance: Optional[Decimal] = Field(
+        default=Decimal('10000'),
+        description="Initial balance for v3_pms mode"
+    )
+    slippage_rate: Optional[Decimal] = Field(
+        default=Decimal('0.001'),
+        description="Slippage rate for v3_pms mode (default 0.1%)"
+    )
+    fee_rate: Optional[Decimal] = Field(
+        default=Decimal('0.0004'),
+        description="Fee rate for v3_pms mode (default 0.04%)"
+    )
+
 
 # ============================================================
 # Dynamic Rule Engine Models (Phase K)
@@ -566,3 +584,189 @@ class ConfigSnapshot(BaseModel):
 # ============================================================
 from src.domain.logic_tree import LogicNode, LeafNode
 StrategyDefinition.model_rebuild()
+
+
+# ============================================================
+# v3.0 Core Models (Phase 1)
+# ============================================================
+class FinancialModel(BaseModel):
+    """v3 金融模型基类：统一定义十进制配置，拒绝隐式浮点数转换"""
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+
+# ----- v3.0 枚举类型 -----
+
+class OrderStatus(str, Enum):
+    """订单状态（与 CCXT 对齐）"""
+    PENDING = "PENDING"           # 尚未发送到交易所
+    OPEN = "OPEN"                 # 挂单中
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"  # 部分成交
+    FILLED = "FILLED"             # 完全成交
+    CANCELED = "CANCELED"         # 已撤销
+    REJECTED = "REJECTED"         # 交易所拒单
+
+
+class OrderType(str, Enum):
+    """订单类型"""
+    MARKET = "MARKET"             # 市价单
+    LIMIT = "LIMIT"               # 限价单
+    STOP_MARKET = "STOP_MARKET"   # 条件市价单
+    TRAILING_STOP = "TRAILING_STOP"  # 移动止损单
+
+
+class OrderRole(str, Enum):
+    """订单角色"""
+    ENTRY = "ENTRY"               # 入场开仓
+    TP1 = "TP1"                   # 第一目标位止盈
+    SL = "SL"                     # 止损单
+
+
+# ----- v3.0 核心实体模型 -----
+
+class Account(FinancialModel):
+    """资产账户：管理基础本金（可用现金）"""
+    account_id: str = "default_wallet"
+    total_balance: Decimal = Field(default=Decimal('0'), description="钱包总余额 (现金)")
+    frozen_margin: Decimal = Field(default=Decimal('0'), description="冻结的开仓保证金")
+
+    @property
+    def available_balance(self) -> Decimal:
+        return self.total_balance - self.frozen_margin
+
+
+class Signal(FinancialModel):
+    """
+    意图层：只负责记录策略在某根 K 线发现的机会
+    （它不再承担具体成交盈亏的状态机角色）
+    """
+    id: str
+    strategy_id: str             # 触发该信号的策略名称
+    symbol: str
+    direction: Direction
+    timestamp: int               # 信号生成的 K 线时间戳
+
+    # 策略的初始意图
+    expected_entry: Decimal      # 预期入场价
+    expected_sl: Decimal         # 预期初始止损
+    pattern_score: float         # 形态评分
+
+    # 信号层的生命周期
+    is_active: bool = True
+
+
+class Order(FinancialModel):
+    """
+    执行层：与交易所真实交互的物理凭证
+    """
+    id: str
+    signal_id: str               # 关联的外键：属于哪个信号触发的动作
+    exchange_order_id: Optional[str] = None  # 真实 API 返回的单号
+    symbol: str
+    direction: Direction
+    order_type: OrderType
+    order_role: OrderRole
+
+    # 价格与数量体系
+    price: Optional[Decimal] = None          # 限价单的挂单价格
+    trigger_price: Optional[Decimal] = None  # 条件单的触发价格
+
+    requested_qty: Decimal       # 计划委托数量
+    filled_qty: Decimal = Field(default=Decimal('0'))  # 真实成交数量
+    average_exec_price: Optional[Decimal] = None       # 真实成交均价
+
+    status: OrderStatus = OrderStatus.PENDING
+    created_at: int
+    updated_at: int
+
+    # 平仓附加属性
+    exit_reason: Optional[str] = None  # 用于统计: INITIAL_SL, BREAKEVEN_STOP, TRAILING_PROFIT
+
+
+class Position(FinancialModel):
+    """
+    资产层：PMS 系统的绝对核心，代表当前持有敞口
+    """
+    id: str
+    signal_id: str               # 关联是由哪个信号引发的这笔持仓
+    symbol: str
+    direction: Direction
+
+    # 核心资产状态 (采用业界标准：被平仓时均价死咬不变)
+    entry_price: Decimal         # 开仓均价 (一旦 ENTRY 订单成交后，固定不变)
+    current_qty: Decimal         # 当前持仓体积 (TP1 触发后会变小)
+
+    # 动态风控水位线
+    highest_price_since_entry: Decimal
+
+    # 业绩追踪
+    realized_pnl: Decimal = Field(default=Decimal('0'), description="已实现盈亏 (落袋为安)")
+    total_fees_paid: Decimal = Field(default=Decimal('0'), description="累计支付的手续费")
+
+    is_closed: bool = False      # current_qty 归零时标记为 True
+
+
+# ============================================================
+# v3.0 Phase 2: PMS 回测报告模型
+# ============================================================
+
+class PositionSummary(FinancialModel):
+    """
+    仓位摘要：用于 PMS 回测报告
+    """
+    position_id: str
+    signal_id: str
+    symbol: str
+    direction: Direction
+    entry_price: Decimal
+    exit_price: Optional[Decimal] = None  # 平仓价（仅当仓位关闭时）
+    entry_time: int              # 开仓时间戳 (ms)
+    exit_time: Optional[int] = None  # 平仓时间戳 (ms)
+    realized_pnl: Decimal = Field(default=Decimal('0'), description="已实现盈亏")
+    exit_reason: Optional[str] = None  # 平仓原因 (TP1/SL/TRAILING)
+
+
+class PMSBacktestReport(FinancialModel):
+    """
+    v3.0 PMS 模式回测报告
+
+    与 v2.0 回测报告的区别:
+    - 基于真实仓位管理 (Position 实体)
+    - 基于真实订单执行 (Order 实体)
+    - 包含手续费和滑点影响
+    - 支持多级别止盈统计
+
+    字段说明:
+    - strategy_id: 策略 ID
+    - strategy_name: 策略名称
+    - backtest_start/end: 回测时间范围
+    - initial_balance: 初始资金
+    - final_balance: 最终余额
+    - total_return: 总收益率 (%)
+    - total_trades: 总交易次数
+    - winning_trades: 盈利交易次数
+    - losing_trades: 亏损交易次数
+    - win_rate: 胜率 (%)
+    - total_pnl: 总盈亏 (USDT)
+    - total_fees_paid: 总手续费
+    - total_slippage_cost: 总滑点成本
+    - max_drawdown: 最大回撤 (%)
+    - sharpe_ratio: 夏普比率 (可选)
+    - positions: 仓位历史摘要列表
+    """
+    strategy_id: str
+    strategy_name: str
+    backtest_start: int          # 回测开始时间戳 (ms)
+    backtest_end: int            # 回测结束时间戳 (ms)
+    initial_balance: Decimal
+    final_balance: Decimal
+    total_return: Decimal        # 总收益率 (%)
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: Decimal            # 胜率 (%)
+    total_pnl: Decimal           # 总盈亏 (USDT)
+    total_fees_paid: Decimal     # 总手续费
+    total_slippage_cost: Decimal # 总滑点成本
+    max_drawdown: Decimal        # 最大回撤 (%)
+    sharpe_ratio: Optional[Decimal] = None  # 夏普比率
+    positions: List[PositionSummary] = Field(default_factory=list)

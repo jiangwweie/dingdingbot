@@ -11,7 +11,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from dataclasses import dataclass
 
 from src.domain.models import (
@@ -26,7 +26,15 @@ from src.domain.models import (
     BacktestReport,
     SignalStats,
     StrategyDefinition,
+    PMSBacktestReport,
+    PositionSummary,
+    Account,
+    Position,
+    Order,
+    Signal,
+    OrderStatus,
 )
+from src.domain.matching_engine import MockMatchingEngine
 from src.domain.strategy_engine import (
     StrategyEngine,
     StrategyConfig,
@@ -132,13 +140,14 @@ class Backtester:
         request: BacktestRequest,
         account_snapshot: Optional[AccountSnapshot] = None,
         repository = None,  # SignalRepository for saving signals (always saved if provided)
-    ) -> BacktestReport:
+    ) -> Union[BacktestReport, PMSBacktestReport]:
         """
         Run backtest with isolated config sandbox.
 
         Supports both:
         1. Legacy mode: Simple pinbar + EMA + MTF config
         2. Dynamic rule engine mode: Multiple strategies with custom filter chains
+        3. v3_pms mode: Position-level backtesting with MockMatchingEngine
 
         Backtest signals are automatically saved to database with source='backtest'.
         Signals can be viewed in the Signals page with K-line chart visualization.
@@ -150,10 +159,15 @@ class Backtester:
             repository: SignalRepository instance for saving signals
 
         Returns:
-            BacktestReport with detailed statistics
+            BacktestReport (v2_classic mode) or PMSBacktestReport (v3_pms mode)
         """
-        # Determine mode: Dynamic rule engine or legacy
+        # Determine mode: v3_pms or dynamic rule engine or legacy
+        use_v3_pms = request.mode == "v3_pms"
         use_dynamic = request.strategies is not None and len(request.strategies) > 0
+
+        if use_v3_pms:
+            # v3 PMS mode: Use MockMatchingEngine for position-level backtesting
+            return await self._run_v3_pms_backtest(request, repository)
 
         if use_dynamic:
             # Step 1: Build dynamic strategy runner from strategy definitions
@@ -827,6 +841,308 @@ class Backtester:
                 elif filter_name == "volume_surge":
                     tags.append({"name": "Volume", "value": "Surge"})
         return tags
+
+    async def _run_v3_pms_backtest(
+        self,
+        request: BacktestRequest,
+        repository = None,
+    ) -> PMSBacktestReport:
+        """
+        Run v3 PMS mode backtest with MockMatchingEngine.
+
+        Core logic:
+        1. Generate signals from strategy definitions (or legacy pinbar)
+        2. Create Orders from signals
+        3. Use MockMatchingEngine to simulate order execution
+        4. Track Position and Account state changes
+        5. Generate PMSBacktestReport with position-level statistics
+
+        Args:
+            request: Backtest request with v3_pms mode
+            repository: Optional SignalRepository for saving signals
+
+        Returns:
+            PMSBacktestReport with detailed position-level statistics
+        """
+        from src.domain.matching_engine import MockMatchingEngine
+        from src.domain.risk_calculator import RiskCalculator
+        from src.domain.models import OrderType, OrderRole, OrderSide
+        import uuid
+
+        # Step 1: Initialize MockMatchingEngine
+        engine = MockMatchingEngine(
+            slippage_rate=request.slippage_rate or Decimal('0.001'),
+            fee_rate=request.fee_rate or Decimal('0.0004'),
+        )
+
+        # Step 2: Fetch historical K-line data
+        klines = await self._fetch_klines(request)
+        if not klines:
+            raise ValueError("No K-line data fetched for backtest")
+
+        # Step 3: Build strategy runner (same as dynamic mode)
+        use_dynamic = request.strategies is not None and len(request.strategies) > 0
+        if use_dynamic:
+            runner = self._build_dynamic_runner(request.strategies)
+            strategy_id = request.strategies[0].get('id', 'unknown')
+            strategy_name = request.strategies[0].get('name', 'unknown')
+        else:
+            strategy_config = self._build_strategy_config(request)
+            runner = IsolatedStrategyRunner(strategy_config)
+            strategy_id = 'pinbar'
+            strategy_name = 'pinbar'
+
+        # Step 4: Initialize Account and state tracking
+        initial_balance = request.initial_balance or Decimal('10000')
+        account = Account(
+            account_id="backtest_wallet",
+            total_balance=initial_balance,
+            frozen_margin=Decimal('0'),
+        )
+
+        # Risk calculator for position sizing
+        risk_config = RiskConfig(
+            max_loss_percent=Decimal('0.01'),  # 1% risk per trade
+            max_leverage=20,
+        )
+        calculator = RiskCalculator(risk_config)
+
+        # State tracking
+        positions_map: Dict[str, Position] = {}  # {signal_id: Position}
+        active_orders: List[Order] = []  # All open orders
+        position_summaries: List[PositionSummary] = []
+        all_executed_orders: List[Order] = []
+
+        # Statistics tracking
+        total_trades = 0
+        winning_trades = 0
+        losing_trades = 0
+        total_pnl = Decimal('0')
+        total_fees_paid = Decimal('0')
+        total_slippage_cost = Decimal('0')
+
+        # Step 5: Generate signals and create orders
+        higher_tf_data = {}  # For MTF validation
+
+        # Fetch higher timeframe data if needed
+        higher_tf = self.MTF_MAPPING.get(request.timeframe)
+        if higher_tf:
+            try:
+                limit = max(request.limit, 1000)
+                higher_tf_klines_list = await self._gateway.fetch_historical_ohlcv(
+                    symbol=request.symbol,
+                    timeframe=higher_tf,
+                    limit=limit,
+                )
+                for kline in higher_tf_klines_list:
+                    higher_tf_data[kline.timestamp] = {
+                        higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
+                    }
+            except Exception as e:
+                logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
+
+        # Step 6: Main backtest loop
+        for kline in klines:
+            # Update strategy state
+            runner.update_state(kline)
+
+            # Get higher TF trends
+            higher_tf_trends = self._get_closest_higher_tf_trends(kline.timestamp, higher_tf_data)
+
+            # Run strategy to generate signals
+            if use_dynamic:
+                attempts = runner.run_all(kline, higher_tf_trends)
+            else:
+                attempt = runner.run(kline, higher_tf_trends)
+                attempts = [attempt]
+
+            # Create ENTRY orders for fired signals
+            for attempt in attempts:
+                if attempt.final_result == "SIGNAL_FIRED" and attempt.pattern:
+                    # Create signal
+                    signal_id = f"sig_{uuid.uuid4().hex[:8]}"
+                    stop_loss = calculator.calculate_stop_loss(kline, attempt.pattern.direction)
+
+                    signal = Signal(
+                        id=signal_id,
+                        strategy_id=attempt.strategy_name,
+                        symbol=request.symbol,
+                        direction=attempt.pattern.direction,
+                        timestamp=kline.timestamp,
+                        expected_entry=kline.close,
+                        expected_sl=stop_loss,
+                        pattern_score=attempt.pattern.score,
+                        is_active=True,
+                    )
+
+                    # Calculate position size
+                    account_snapshot = AccountSnapshot(
+                        total_balance=account.total_balance,
+                        available_balance=account.available_balance,
+                        unrealized_pnl=Decimal('0'),
+                        positions=[],
+                        timestamp=kline.timestamp,
+                    )
+                    position_size, leverage = calculator.calculate_position_size(
+                        account_snapshot,
+                        kline.close,
+                        stop_loss,
+                        attempt.pattern.direction,
+                    )
+
+                    # Create ENTRY order
+                    entry_order = Order(
+                        id=f"ord_{uuid.uuid4().hex[:8]}",
+                        signal_id=signal_id,
+                        symbol=request.symbol,
+                        direction=attempt.pattern.direction,
+                        order_type=OrderType.MARKET,
+                        order_role=OrderRole.ENTRY,
+                        requested_qty=position_size,
+                        status=OrderStatus.OPEN,
+                        created_at=kline.timestamp,
+                        updated_at=kline.timestamp,
+                    )
+                    active_orders.append(entry_order)
+
+                    # Create TP1 and SL orders (will be executed in future klines)
+                    # TP1 order
+                    tp1_price = kline.close + (kline.close - stop_loss) * Decimal('1.5')  # 1.5R take profit
+                    tp1_order = Order(
+                        id=f"ord_tp1_{uuid.uuid4().hex[:8]}",
+                        signal_id=signal_id,
+                        symbol=request.symbol,
+                        direction=attempt.pattern.direction,
+                        order_type=OrderType.LIMIT,
+                        order_role=OrderRole.TP1,
+                        price=tp1_price,
+                        requested_qty=position_size,
+                        status=OrderStatus.OPEN,
+                        created_at=kline.timestamp,
+                        updated_at=kline.timestamp,
+                    )
+                    active_orders.append(tp1_order)
+
+                    # SL order
+                    sl_order = Order(
+                        id=f"ord_sl_{uuid.uuid4().hex[:8]}",
+                        signal_id=signal_id,
+                        symbol=request.symbol,
+                        direction=attempt.pattern.direction,
+                        order_type=OrderType.STOP_MARKET,
+                        order_role=OrderRole.SL,
+                        trigger_price=stop_loss,
+                        requested_qty=position_size,
+                        status=OrderStatus.OPEN,
+                        created_at=kline.timestamp,
+                        updated_at=kline.timestamp,
+                    )
+                    active_orders.append(sl_order)
+
+            # Step 7: Run MockMatchingEngine
+            executed = engine.match_orders_for_kline(
+                kline=kline,
+                active_orders=active_orders,
+                positions_map=positions_map,
+                account=account,
+            )
+
+            # Track executed orders
+            for order in executed:
+                all_executed_orders.append(order)
+
+                # Calculate slippage cost (for MARKET orders)
+                if order.order_type == OrderType.MARKET and order.average_exec_price:
+                    # For MARKET orders, compare exec price with kline.open
+                    if order.direction == Direction.LONG:
+                        expected_price = kline.open * (Decimal('1') + engine.slippage_rate)
+                    else:
+                        expected_price = kline.open * (Decimal('1') - engine.slippage_rate)
+                    slippage = abs(order.average_exec_price - expected_price)
+                    total_slippage_cost += slippage * order.filled_qty
+
+                # Track position changes
+                if order.order_role == OrderRole.ENTRY:
+                    # New position opened
+                    position = positions_map.get(order.signal_id)
+                    if position:
+                        position_summaries.append(PositionSummary(
+                            position_id=position.id,
+                            signal_id=position.signal_id,
+                            symbol=request.symbol,
+                            direction=position.direction,
+                            entry_price=position.entry_price,
+                            entry_time=kline.timestamp,
+                        ))
+
+                elif order.order_role in [OrderRole.TP1, OrderRole.SL]:
+                    # Position closed (partially or fully)
+                    position = positions_map.get(order.signal_id)
+                    if position and position.is_closed:
+                        # Update position summary
+                        for summary in position_summaries:
+                            if summary.position_id == position.id:
+                                summary.exit_price = order.average_exec_price
+                                summary.exit_time = kline.timestamp
+                                summary.realized_pnl = position.realized_pnl
+                                summary.exit_reason = order.exit_reason or order.order_role.value
+                                break
+
+                        # Update statistics
+                        total_trades += 1
+                        if position.realized_pnl > 0:
+                            winning_trades += 1
+                        else:
+                            losing_trades += 1
+                        total_pnl += position.realized_pnl
+                        total_fees_paid += position.total_fees_paid
+
+            # Remove executed/cancelled orders from active list
+            active_orders = [o for o in active_orders if o.status == OrderStatus.OPEN]
+
+        # Step 8: Build PMSBacktestReport
+        final_balance = account.total_balance
+        total_return = ((final_balance - initial_balance) / initial_balance) * Decimal('100')
+        win_rate = (Decimal(winning_trades) / Decimal(total_trades) * Decimal('100')) if total_trades > 0 else Decimal('0')
+
+        # Calculate max drawdown (simplified)
+        max_drawdown = Decimal('0')
+        peak = initial_balance
+        for summary in position_summaries:
+            if summary.exit_price:
+                current_balance = initial_balance + summary.realized_pnl
+                if current_balance > peak:
+                    peak = current_balance
+                drawdown = (peak - current_balance) / peak * Decimal('100')
+                if drawdown > max_drawdown:
+                    max_drawdown = drawdown
+
+        report = PMSBacktestReport(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            backtest_start=klines[0].timestamp,
+            backtest_end=klines[-1].timestamp,
+            initial_balance=initial_balance,
+            final_balance=final_balance,
+            total_return=total_return,
+            total_trades=total_trades,
+            winning_trades=winning_trades,
+            losing_trades=losing_trades,
+            win_rate=win_rate,
+            total_pnl=total_pnl,
+            total_fees_paid=total_fees_paid,
+            total_slippage_cost=total_slippage_cost,
+            max_drawdown=max_drawdown,
+            sharpe_ratio=None,
+            positions=position_summaries,
+        )
+
+        logger.info(
+            f"v3 PMS backtest completed: {request.symbol} {request.timeframe}, "
+            f"{total_trades} trades, win_rate={win_rate:.2f}%, pnl={total_pnl:.2f} USDT"
+        )
+
+        return report
 
 
 # ============================================================
