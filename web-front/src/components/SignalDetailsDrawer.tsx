@@ -5,6 +5,7 @@ import { cn } from '../lib/utils';
 import { fetchSignalContext, Signal } from '../lib/api';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import { toZonedTime } from 'date-fns-tz';
 
 interface SignalDetailsModalProps {
   signalId: string;
@@ -91,11 +92,11 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
     candleSeriesRef.current = candleSeries;
 
     // Prepare data
-    // lightweight-charts displays UTC by default. We shift the timestamp to show local browser time.
-    const tzOffsetMs = new Date().getTimezoneOffset() * 60 * 1000;
-
+    // Convert UTC timestamps to Tokyo timezone (JST, UTC+9) to match Binance app
+    // The offset shifts UTC time to display correctly in Tokyo timezone
+    const JST_OFFSET = 9 * 60 * 60 * 1000; // Tokyo timezone offset in ms
     const klineData: CandlestickData[] = data.klines.map((k) => ({
-      time: ((k[0] - tzOffsetMs) / 1000) as UTCTimestamp,
+      time: (k[0] / 1000) as UTCTimestamp, // lightweight-charts handles UTC timestamps correctly
       open: k[1],
       high: k[2],
       low: k[3],
@@ -104,9 +105,9 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
 
     candleSeries.setData(klineData);
 
-    // Find the exact signal candle by shifted timestamp
-    const signalTimestamp = data.signal.kline_timestamp 
-      ? Math.floor((data.signal.kline_timestamp - tzOffsetMs) / 1000) 
+    // Find the exact signal candle by timestamp
+    const signalTimestamp = data.signal.kline_timestamp
+      ? Math.floor(data.signal.kline_timestamp / 1000)
       : null;
       
     const signalCandle = signalTimestamp 
@@ -316,10 +317,11 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
                   <span className="text-xs text-gray-500 uppercase">时间</span>
                 </div>
                 <div className="text-sm font-mono text-gray-900 truncate">
-                  {data.signal.kline_timestamp
-                    ? format(new Date(data.signal.kline_timestamp), 'MM-dd HH:mm')
-                    : format(new Date(data.signal.created_at), 'MM-dd HH:mm')
-                  }
+                  {(() => {
+                    const ts = data.signal.kline_timestamp || data.signal.created_at;
+                    const tokyoTime = toZonedTime(new Date(ts), 'Asia/Tokyo');
+                    return format(tokyoTime, 'MM-dd HH:mm');
+                  })()}
                 </div>
               </div>
 
