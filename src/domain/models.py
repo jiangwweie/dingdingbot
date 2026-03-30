@@ -2,7 +2,7 @@
 Global Pydantic models - shared contract between Dev A (Infrastructure) and Dev B (Domain).
 DO NOT modify without architect approval.
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from decimal import Decimal
 from typing import Optional, List, Dict, Any, Union, Annotated, Literal
 from enum import Enum
@@ -127,8 +127,7 @@ class SignalTrack(BaseModel):
     reject_reason: Optional[str] = None
     cancel_reason: Optional[str] = None
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # ============================================================

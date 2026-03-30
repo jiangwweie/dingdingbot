@@ -1,6 +1,8 @@
 """
 Test Exchange Gateway - REST warmup, WebSocket subscription, asset polling.
 Uses aioresponses for mocking HTTP requests.
+
+Supports multi-exchange testing: binance, bybit, okx
 """
 import pytest
 import asyncio
@@ -12,31 +14,45 @@ from src.domain.models import KlineData
 from src.domain.exceptions import FatalStartupError, DataQualityWarning
 
 
+# ============================================================
+# Multi-Exchange Test Fixtures
+# ============================================================
+@pytest.fixture(params=["binance", "bybit", "okx"], ids=lambda x: f"exchange={x}")
+def exchange_name(request):
+    """Parametrized exchange name fixture"""
+    return request.param
+
+
+@pytest.fixture
+def exchange_credentials():
+    """Common test credentials for all exchanges"""
+    return {
+        "api_key": "test_key",
+        "api_secret": "test_secret",
+        "testnet": True,
+    }
+
+
 class TestExchangeGatewayInit:
     """Test ExchangeGateway initialization"""
 
-    def test_init_with_params(self):
-        """Test initialization with basic parameters"""
-        gateway = ExchangeGateway(
-            exchange_name="binance",
-            api_key="test_key",
-            api_secret="test_secret",
-            testnet=True,
+    @pytest.fixture
+    def gateway(self, exchange_name, exchange_credentials):
+        """Create gateway instance for testing with parametrized exchange"""
+        return ExchangeGateway(
+            exchange_name=exchange_name,
+            **exchange_credentials,
         )
 
-        assert gateway.exchange_name == "binance"
+    def test_init_with_params(self, gateway, exchange_name):
+        """Test initialization with basic parameters"""
+        assert gateway.exchange_name == exchange_name
         assert gateway.api_key == "test_key"
         assert gateway.testnet is True
         assert gateway._max_reconnect_attempts == 10
 
-    def test_init_default_options(self):
+    def test_init_default_options(self, gateway):
         """Test that default options include swap type"""
-        gateway = ExchangeGateway(
-            exchange_name="binance",
-            api_key="test_key",
-            api_secret="test_secret",
-        )
-
         # REST exchange should have swap as default type
         assert gateway.rest_exchange.options.get("defaultType") == "swap"
 
@@ -45,13 +61,11 @@ class TestParseOhlcv:
     """Test OHLCV parsing and validation"""
 
     @pytest.fixture
-    def gateway(self):
-        """Create gateway instance for testing"""
+    def gateway(self, exchange_name, exchange_credentials):
+        """Create gateway instance for testing with parametrized exchange"""
         return ExchangeGateway(
-            exchange_name="binance",
-            api_key="test_key",
-            api_secret="test_secret",
-            testnet=True,
+            exchange_name=exchange_name,
+            **exchange_credentials,
         )
 
     def test_parse_valid_ohlcv(self, gateway):
@@ -157,15 +171,17 @@ class TestFetchHistoricalOhlcv:
         return mock_class
 
     @pytest.fixture
-    def gateway(self, mock_exchange_class):
-        """Create gateway with mocked exchange"""
+    def gateway(self, exchange_name, exchange_credentials, mock_exchange_class):
+        """Create gateway with mocked exchange (parametrized by exchange)"""
         with patch('src.infrastructure.exchange_gateway.ccxt_async') as mock_ccxt:
+            # Setup mock for all exchanges
             mock_ccxt.binance = mock_exchange_class
+            mock_ccxt.bybit = mock_exchange_class
+            mock_ccxt.okx = mock_exchange_class
+
             gateway = ExchangeGateway(
-                exchange_name="binance",
-                api_key="test_key",
-                api_secret="test_secret",
-                testnet=True,
+                exchange_name=exchange_name,
+                **exchange_credentials,
             )
             yield gateway
 
@@ -218,13 +234,11 @@ class TestAssetPolling:
     """Test asset polling functionality"""
 
     @pytest.fixture
-    def gateway(self):
-        """Create gateway instance"""
+    def gateway(self, exchange_name, exchange_credentials):
+        """Create gateway instance with parametrized exchange"""
         return ExchangeGateway(
-            exchange_name="binance",
-            api_key="test_key",
-            api_secret="test_secret",
-            testnet=True,
+            exchange_name=exchange_name,
+            **exchange_credentials,
         )
 
     @pytest.mark.asyncio
@@ -254,12 +268,11 @@ class TestAssetPolling:
 class TestReconnectionLogic:
     """Test WebSocket reconnection logic"""
 
-    def test_reconnect_delay_calculation(self):
+    def test_reconnect_delay_calculation(self, exchange_name, exchange_credentials):
         """Test exponential backoff delay calculation"""
         gateway = ExchangeGateway(
-            exchange_name="binance",
-            api_key="test_key",
-            api_secret="test_secret",
+            exchange_name=exchange_name,
+            **exchange_credentials,
         )
 
         # Initial delay
@@ -285,3 +298,229 @@ class TestReconnectionLogic:
             gateway._max_reconnect_delay,
         )
         assert delay_10 == 60.0  # Capped at max_reconnect_delay
+
+
+# ============================================================
+# Additional Unit Tests for Previously Untested Methods
+# ============================================================
+
+class TestIsCandleClosed:
+    """Test _is_candle_closed method - candle close detection"""
+
+    @pytest.fixture
+    def gateway(self, exchange_name, exchange_credentials):
+        """Create gateway instance for testing"""
+        return ExchangeGateway(
+            exchange_name=exchange_name,
+            **exchange_credentials,
+        )
+
+    def test_first_candle_not_closed(self, gateway):
+        """Test that first candle for a symbol/timeframe is not marked as closed"""
+        kline = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            timestamp=1700000000000,
+            open=Decimal("35000"),
+            high=Decimal("35500"),
+            low=Decimal("34800"),
+            close=Decimal("35200"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+
+        result = gateway._is_candle_closed(kline, "BTC/USDT:USDT", "1h")
+        assert result is False  # First candle, not closed
+
+    def test_same_timestamp_not_closed(self, gateway):
+        """Test that same timestamp means candle not yet closed"""
+        # First candle
+        kline1 = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            timestamp=1700000000000,
+            open=Decimal("35000"),
+            high=Decimal("35500"),
+            low=Decimal("34800"),
+            close=Decimal("35200"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+        gateway._is_candle_closed(kline1, "BTC/USDT:USDT", "1h")
+
+        # Same timestamp
+        kline2 = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            timestamp=1700000000000,  # Same timestamp
+            open=Decimal("35200"),
+            high=Decimal("35600"),
+            low=Decimal("35100"),
+            close=Decimal("35400"),
+            volume=Decimal("1100"),
+            is_closed=True,
+        )
+
+        result = gateway._is_candle_closed(kline2, "BTC/USDT:USDT", "1h")
+        assert result is False  # Still same candle, not closed
+
+    def test_new_timestamp_candle_closed(self, gateway):
+        """Test that new timestamp means previous candle closed"""
+        # First candle
+        kline1 = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            timestamp=1700000000000,
+            open=Decimal("35000"),
+            high=Decimal("35500"),
+            low=Decimal("34800"),
+            close=Decimal("35200"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+        gateway._is_candle_closed(kline1, "BTC/USDT:USDT", "1h")
+
+        # New candle
+        kline2 = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            timestamp=1700003600000,  # +1 hour
+            open=Decimal("35200"),
+            high=Decimal("35600"),
+            low=Decimal("35100"),
+            close=Decimal("35400"),
+            volume=Decimal("1100"),
+            is_closed=True,
+        )
+
+        result = gateway._is_candle_closed(kline2, "BTC/USDT:USDT", "1h")
+        assert result is True  # New candle, previous closed
+
+    def test_multiple_symbols_independent(self, gateway):
+        """Test that different symbols track independently"""
+        # BTC first candle
+        kline_btc1 = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            timestamp=1700000000000,
+            open=Decimal("35000"),
+            high=Decimal("35500"),
+            low=Decimal("34800"),
+            close=Decimal("35200"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+        gateway._is_candle_closed(kline_btc1, "BTC/USDT:USDT", "1h")
+
+        # ETH new candle (should not affect BTC tracking)
+        kline_eth1 = KlineData(
+            symbol="ETH/USDT:USDT",
+            timeframe="1h",
+            timestamp=1700000000000,
+            open=Decimal("2000"),
+            high=Decimal("2050"),
+            low=Decimal("1980"),
+            close=Decimal("2020"),
+            volume=Decimal("5000"),
+            is_closed=True,
+        )
+        result_eth = gateway._is_candle_closed(kline_eth1, "ETH/USDT:USDT", "1h")
+        assert result_eth is False  # First ETH candle
+
+    def test_multiple_timeframes_independent(self, gateway):
+        """Test that different timeframes track independently"""
+        # 1h first candle
+        kline_1h = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            timestamp=1700000000000,
+            open=Decimal("35000"),
+            high=Decimal("35500"),
+            low=Decimal("34800"),
+            close=Decimal("35200"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+        gateway._is_candle_closed(kline_1h, "BTC/USDT:USDT", "1h")
+
+        # 4h candle (should not affect 1h tracking)
+        kline_4h = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="4h",
+            timestamp=1700000000000,
+            open=Decimal("35000"),
+            high=Decimal("35500"),
+            low=Decimal("34800"),
+            close=Decimal("35200"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+        result_4h = gateway._is_candle_closed(kline_4h, "BTC/USDT:USDT", "4h")
+        assert result_4h is False  # First 4h candle
+
+
+class TestParseWsBalance:
+    """Test _parse_ws_balance method - WebSocket balance parsing"""
+
+    @pytest.fixture
+    def gateway(self, exchange_name, exchange_credentials):
+        """Create gateway instance for testing"""
+        return ExchangeGateway(
+            exchange_name=exchange_name,
+            **exchange_credentials,
+        )
+
+    def test_parse_balance_with_usdt(self, gateway):
+        """Test parsing balance with USDT data"""
+        balance = {
+            "total": {"USDT": 10000.5},
+            "free": {"USDT": 8000.25},
+        }
+
+        snapshot = gateway._parse_ws_balance(balance)
+
+        assert snapshot.total_balance == Decimal("10000.5")
+        assert snapshot.available_balance == Decimal("8000.25")
+        assert snapshot.unrealized_pnl == Decimal("0")
+        assert snapshot.positions == []
+        assert isinstance(snapshot.timestamp, int)
+
+    def test_parse_balance_empty(self, gateway):
+        """Test parsing empty balance"""
+        balance = {
+            "total": {},
+            "free": {},
+        }
+
+        snapshot = gateway._parse_ws_balance(balance)
+
+        assert snapshot.total_balance == Decimal("0")
+        assert snapshot.available_balance == Decimal("0")
+        assert snapshot.unrealized_pnl == Decimal("0")
+        assert snapshot.positions == []
+
+    def test_parse_balance_missing_usdt(self, gateway):
+        """Test parsing balance without USDT"""
+        balance = {
+            "total": {"BTC": 0.5, "ETH": 10},
+            "free": {"BTC": 0.3, "ETH": 5},
+        }
+
+        snapshot = gateway._parse_ws_balance(balance)
+
+        assert snapshot.total_balance == Decimal("0")
+        assert snapshot.available_balance == Decimal("0")
+
+    def test_parse_balance_partial(self, gateway):
+        """Test parsing balance with only total or free"""
+        # Only total
+        balance_total = {"total": {"USDT": 10000}}
+        snapshot_total = gateway._parse_ws_balance(balance_total)
+        assert snapshot_total.total_balance == Decimal("10000")
+        assert snapshot_total.available_balance == Decimal("0")
+
+        # Only free
+        balance_free = {"free": {"USDT": 8000}}
+        snapshot_free = gateway._parse_ws_balance(balance_free)
+        assert snapshot_free.total_balance == Decimal("0")
+        assert snapshot_free.available_balance == Decimal("8000")
