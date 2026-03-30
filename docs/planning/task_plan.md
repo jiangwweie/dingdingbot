@@ -992,3 +992,81 @@ DAILY_MAX_LOSS_PERCENT=5.0
 | G-004: Base Asset 手续费说明 | ✅ | 明确 U 本位合约定位 |
 
 ---
+
+## Phase 5: 实盘集成 - 编码完成（待审查修复）
+
+**创建日期**: 2026-03-30
+**状态**: 🟡 暂停中（等待审查问题修复）
+**Git 提交**: `57eacd3` + `3db2d03`
+
+### 阶段概览
+
+| 任务 | 状态 | 测试数 | 文件 |
+|------|------|--------|------|
+| P5-1: ExchangeGateway 订单接口 | ✅ completed | 66 | `src/infrastructure/exchange_gateway.py` |
+| P5-2: PositionManager 并发保护 | ✅ completed | 27 | `src/application/position_manager.py` |
+| P5-3: WebSocket 订单推送监听 | ✅ completed | 14 | `src/infrastructure/exchange_gateway.py` |
+| P5-4: 飞书告警集成 | ✅ completed | 32 | `src/infrastructure/notifier_feishu.py` |
+| P5-5: 启动对账服务 | ✅ completed | 15 | `src/application/reconciliation.py` |
+| P5-6: 资金保护管理器 | ✅ completed | 21 | `src/application/capital_protection.py` |
+| P5-7: DCA 分批建仓策略 | ✅ completed | 30 | `src/domain/dca_strategy.py` |
+| P5-8: 代码审查 | ✅ completed | - | `docs/reviews/phase5-code-review.md` |
+
+**测试覆盖**: 205+ 个单元测试，全部通过 ✅
+
+### Gemini 评审问题修复（Phase 5 设计）
+
+| 编号 | 问题 | 修复方案 | 状态 |
+|------|------|----------|------|
+| **G-001** | asyncio.Lock 释放后使用 | WeakValueDictionary | ✅ |
+| **G-002** | 市价单价格缺失 | fetch_ticker_price | ✅ |
+| **G-003** | DCA 限价单吃单陷阱 | 提前预埋限价单 | ✅ |
+| **G-004** | 对账幽灵偏差 | 10 秒 Grace Period | ✅ |
+
+### 代码审查发现的问题
+
+**审查报告**: `docs/reviews/phase5-code-review.md`
+
+| 严重性 | 数量 | 问题说明 | 预计工时 |
+|--------|------|----------|----------|
+| 🔴 严重 | 7 | Pydantic 模型缺失（OrderRequest/OrderResponse 等） | ~7h |
+| 🟡 一般 | 3 | 枚举对齐/日志脱敏/错误码统一 | ~1.5h |
+
+### 待修复任务
+
+| 编号 | 任务 | 文件 | 预计工时 |
+|------|------|------|----------|
+| P5-001 | OrderRequest 模型 | `src/domain/models.py` | 1h |
+| P5-002 | OrderResponse 模型 | `src/domain/models.py` | 1h |
+| P5-003 | OrderCancelResponse 模型 | `src/domain/models.py` | 0.5h |
+| P5-004 | PositionResponse 模型 | `src/domain/models.py` | 1h |
+| P5-005 | AccountBalance/AccountResponse | `src/domain/models.py` | 1h |
+| P5-006 | ReconciliationRequest 模型 | `src/domain/models.py` | 0.5h |
+| P5-007 | 前端 TypeScript 类型 | `web-front/src/types/order.ts` | 2h |
+| P5-008 | OrderRole 枚举对齐 | `src/domain/models.py` | 0.5h |
+| P5-009 | 日志脱敏检查 | 多处 | 0.5h |
+| P5-010 | 错误码统一使用 | 多处 | 0.5h |
+
+### 下一步计划
+
+1. 修复 P5-001 ~ P5-010（预计 ~8.5h）
+2. 重新运行代码审查验证
+3. 执行集成测试（Binance Testnet E2E）
+4. 提交 Phase 5 代码
+
+### 相关文件
+
+- 交接文档：`docs/planning/phase5-session-handoff.md`
+- 详细设计：`docs/designs/phase5-detailed-design.md` (v1.1)
+- 契约表：`docs/designs/phase5-contract.md`
+- 审查报告：`docs/reviews/phase5-code-review.md`
+- 进度日志：`docs/planning/progress.md`
+
+### Git 提交
+
+```
+57eacd3 feat(phase5): 实盘集成核心功能实现（审查中）
+3db2d03 docs: 更新 Phase 5 进度日志（编码完成，待审查修复）
+```
+
+---
