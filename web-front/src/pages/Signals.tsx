@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useApi } from '../lib/api';
-import { format } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
 import { Filter, X, ChevronLeft, ChevronRight, ArrowRight, Trash2, CheckSquare, Square, Settings, GripVertical, ChevronUp, ChevronDown, MoreVertical, Calendar, SlidersHorizontal, ArrowUpDown, AlertTriangle } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, formatBeijingTime } from '../lib/utils';
 import SignalDetailsModal from '../components/SignalDetailsDrawer';
 import { deleteSignals, type Signal, SignalStatus } from '../lib/api';
 import { SignalStatusBadge } from '../components/SignalStatusBadge';
@@ -139,9 +137,10 @@ export default function Signals() {
       : 'text-gray-400';
 
     // Use kline_timestamp if available, fallback to created_at
+    // Display in Beijing Time (UTC+8) for consistency with Binance App
     const displayTime = signal.kline_timestamp
-      ? format(new Date(signal.kline_timestamp), 'MM-dd HH:mm:ss', { locale: zhCN })
-      : format(new Date(signal.created_at), 'MM-dd HH:mm:ss', { locale: zhCN });
+      ? formatBeijingTime(signal.kline_timestamp, 'short')
+      : formatBeijingTime(signal.created_at, 'short');
 
     switch (columnId) {
       case 'time':

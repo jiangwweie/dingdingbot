@@ -16,7 +16,7 @@ import {
   Upload,
   History,
 } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, formatBeijingTime } from '../lib/utils';
 import {
   runBacktest,
   BacktestRequest,
@@ -608,7 +608,7 @@ export default function Backtest() {
                           return (
                           <tr key={index} className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-gray-600">
-                              {new Date(timestamp).toLocaleString()}
+                              {formatBeijingTime(timestamp, 'short')}
                             </td>
                             <td className="px-4 py-3">
                               <span className="text-xs text-gray-700">
@@ -750,7 +750,7 @@ export default function Backtest() {
                         onClick={() => handleSignalClick(signal)}
                       >
                         <td className="px-4 py-3 text-gray-600">
-                          {new Date(signal.created_at).toLocaleString()}
+                          {formatBeijingTime(signal.created_at, 'short')}
                         </td>
                         <td className="px-4 py-3">
                           <span className="text-xs text-gray-700">{signal.symbol}</span>

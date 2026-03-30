@@ -1,6 +1,5 @@
 import { useApi } from '../lib/api';
-import { formatDistanceToNow } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
+import { formatBeijingTime } from '../lib/utils';
 import { Activity, ArrowRight, BarChart3, Clock, TrendingDown, TrendingUp, Target, Wallet, AlertCircle, Settings } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
@@ -109,7 +108,7 @@ export default function Dashboard() {
             </span>
           </div>
           <p className="text-xs text-gray-400 mt-2">
-            {health?.timestamp ? formatDistanceToNow(new Date(health.timestamp), { addSuffix: true, locale: zhCN }) : '未知'}更新
+            {health?.timestamp ? `${formatBeijingTime(health.timestamp, 'time')} 更新` : '未知'}更新
           </p>
         </div>
 
@@ -204,7 +203,7 @@ export default function Dashboard() {
                             {signal.position_size} <span className="text-gray-400 font-normal">({signal.leverage}x)</span>
                           </div>
                           <div className="text-xs text-gray-400 mt-1">
-                            {formatDistanceToNow(new Date(signal.created_at), { addSuffix: true, locale: zhCN })}
+                            {formatBeijingTime(signal.created_at, 'short')}
                           </div>
                         </div>
                       </div>

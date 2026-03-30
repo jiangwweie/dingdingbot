@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createChart, createSeriesMarkers, IChartApi, ISeriesApi, CandlestickData, UTCTimestamp, CandlestickSeries, SeriesMarker, ColorType } from 'lightweight-charts';
 import { X, TrendingUp, TrendingDown, Target, Shield, Zap, Clock, BarChart3 } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, formatBeijingTime } from '../lib/utils';
 import { fetchSignalContext, Signal } from '../lib/api';
-import { format } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
 
 interface SignalDetailsModalProps {
   signalId: string;
@@ -41,7 +39,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
   useEffect(() => {
     if (!isOpen || !data || !chartContainerRef.current) return;
 
-    // Create chart
+    // Create chart with Beijing Time (UTC+8) configuration
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: '#FFFFFF' },
@@ -61,6 +59,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
+        timeZone: 'Asia/Shanghai',  // Force Beijing Time (UTC+8)
       },
       crosshair: {
         vertLine: {
@@ -91,11 +90,10 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
     candleSeriesRef.current = candleSeries;
 
     // Prepare data
-    // lightweight-charts displays UTC by default. We shift the timestamp to show local browser time.
-    const tzOffsetMs = new Date().getTimezoneOffset() * 60 * 1000;
-
+    // lightweight-charts requires UTC timestamp in seconds
+    // The chart is configured with timeZone: 'Asia/Shanghai' to display Beijing Time
     const klineData: CandlestickData[] = data.klines.map((k) => ({
-      time: ((k[0] - tzOffsetMs) / 1000) as UTCTimestamp,
+      time: (k[0] / 1000) as UTCTimestamp,  // Convert milliseconds to seconds
       open: k[1],
       high: k[2],
       low: k[3],
@@ -104,12 +102,12 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
 
     candleSeries.setData(klineData);
 
-    // Find the exact signal candle by shifted timestamp
-    const signalTimestamp = data.signal.kline_timestamp 
-      ? Math.floor((data.signal.kline_timestamp - tzOffsetMs) / 1000) 
+    // Find the exact signal candle by timestamp
+    const signalTimestamp = data.signal.kline_timestamp
+      ? Math.floor(data.signal.kline_timestamp / 1000)
       : null;
-      
-    const signalCandle = signalTimestamp 
+
+    const signalCandle = signalTimestamp
       ? klineData.find(k => Number(k.time) === signalTimestamp)
       : null;
 
@@ -317,8 +315,8 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
                 </div>
                 <div className="text-sm font-mono text-gray-900 truncate">
                   {data.signal.kline_timestamp
-                    ? format(new Date(data.signal.kline_timestamp), 'MM-dd HH:mm')
-                    : format(new Date(data.signal.created_at), 'MM-dd HH:mm')
+                    ? formatBeijingTime(data.signal.kline_timestamp, 'short')
+                    : formatBeijingTime(data.signal.created_at, 'short')
                   }
                 </div>
               </div>

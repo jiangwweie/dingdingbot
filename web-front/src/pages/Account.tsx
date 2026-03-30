@@ -1,6 +1,5 @@
 import { useApi } from '../lib/api';
-import { format } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
+import { formatBeijingTime } from '../lib/utils';
 import { Wallet, TrendingUp, TrendingDown, Clock, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -45,7 +44,7 @@ export default function Account() {
         {data?.timestamp && (
           <div className="flex items-center gap-1.5 text-xs text-gray-400 bg-white px-3 py-1.5 rounded-full shadow-sm border border-gray-100">
             <Clock className="w-3.5 h-3.5" />
-            <span>快照时间：{format(new Date(data.timestamp), 'HH:mm:ss', { locale: zhCN })}</span>
+            <span>快照时间：{formatBeijingTime(data.timestamp, 'time')}</span>
           </div>
         )}
       </div>

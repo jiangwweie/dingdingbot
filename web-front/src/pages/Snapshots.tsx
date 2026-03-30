@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useApi } from '../lib/api';
-import { format } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
+import { formatBeijingTime } from '../lib/utils';
 import { Plus, Trash2, RotateCcw, CheckCircle, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -197,7 +196,7 @@ export default function Snapshots() {
                   <td className="px-6 py-4 font-medium">{snapshot.version}</td>
                   <td className="px-6 py-4 text-gray-600">{snapshot.description || '-'}</td>
                   <td className="px-6 py-4 text-gray-500">
-                    {format(new Date(snapshot.created_at), 'yyyy-MM-dd HH:mm', { locale: zhCN })}
+                    {formatBeijingTime(snapshot.created_at, 'short')}
                   </td>
                   <td className="px-6 py-4">
                     {snapshot.is_active ? (

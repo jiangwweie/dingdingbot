@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useApi } from '../lib/api';
-import { format } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
+import { formatBeijingTime } from '../lib/utils';
 import { Filter, X, ChevronLeft, ChevronRight, Trash2, CheckSquare, Square, MoreVertical, Calendar, SlidersHorizontal, Activity, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { deleteAttempts, type SignalAttempt, type TraceNode } from '../lib/api';
@@ -626,7 +625,10 @@ export default function SignalAttempts() {
                         </button>
                       </td>
                       <td className="px-6 py-4 text-gray-500">
-                        {format(new Date(attempt.created_at), 'MM-dd HH:mm:ss', { locale: zhCN })}
+                        {attempt.kline_timestamp
+                          ? formatBeijingTime(attempt.kline_timestamp, 'short')
+                          : formatBeijingTime(attempt.created_at, 'short')
+                        }
                       </td>
                       <td className="px-6 py-4 font-semibold text-gray-900">
                         {attempt.symbol.replace(':USDT', '')}

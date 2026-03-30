@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Calendar, Clock } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, formatBeijingTime } from '../lib/utils';
 
 interface QuickDateRangePickerProps {
   startTime: number | null;  // UNIX 毫秒戳
@@ -31,16 +31,10 @@ export default function QuickDateRangePicker({
 }: QuickDateRangePickerProps) {
   const [isCustom, setIsCustom] = useState(false);
 
-  // Format timestamp to YYYY-MM-DD HH:mm
+  // Format timestamp to YYYY-MM-DD HH:mm (Beijing Time)
   const formatTimestamp = (ts: number | null): string => {
     if (!ts) return '-';
-    const date = new Date(ts);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}`;
+    return formatBeijingTime(ts, 'date') + ' ' + formatBeijingTime(ts, 'time').replace(' (CST)', '');
   };
 
   // Handle quick option selection

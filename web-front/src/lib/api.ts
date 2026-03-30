@@ -67,6 +67,7 @@ export interface Signal {
 export interface SignalAttempt {
   id: string;
   created_at: string;
+  kline_timestamp?: number;  // K-line close timestamp in milliseconds
   symbol: string;
   timeframe: string;
   strategy_name: string;
