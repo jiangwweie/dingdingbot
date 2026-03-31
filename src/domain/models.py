@@ -1421,3 +1421,23 @@ class CapitalProtectionCheckResult(BaseModel):
     daily_loss_limit: Optional[DailyLossCheck] = Field(None, description="每日亏损限制检查")
     daily_trade_count: Optional[TradeCountCheck] = Field(None, description="每日交易次数检查")
     min_balance: Optional[MinBalanceCheck] = Field(None, description="最低余额检查")
+
+
+# ============================================================
+# API Error Response Models (MIN-001)
+# ============================================================
+class ErrorResponse(BaseModel):
+    """
+    统一错误响应模型
+
+    MIN-001: 统一错误响应格式
+    Reference: docs/arch/系统开发规范与红线.md - API 错误处理规范
+
+    所有 API 错误响应统一格式：
+    - error_code: 错误代码（F-xxx, C-xxx, W-xxx 或 HTTP 状态码）
+    - message: 人类可读的错误描述
+    """
+    error_code: str = Field(..., description="错误代码")
+    message: str = Field(..., description="错误描述")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)

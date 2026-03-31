@@ -1,5 +1,49 @@
 # 进度日志
 
+## 2026-03-31 - Phase 6 P2 优化问题修复 (MIN-001, MIN-002) ✅
+
+### 完成工作
+
+**Phase 6 代码审查 P2 优化问题修复** ✅
+
+#### 修复的问题汇总
+
+| 编号 | 严重性 | 问题 | 修复 | 状态 |
+|------|--------|------|------|------|
+| MIN-001 | P2 | 统一错误响应格式 | 创建 `ErrorResponse` 模型 + 全局异常处理器 | ✅ 已修复 |
+| MIN-002 | P2 | 添加请求日志脱敏 | 取消/查询订单端点添加 `mask_secret()` 脱敏 | ✅ 已修复 |
+
+#### 修复详情
+
+**MIN-001: 统一错误响应格式**
+- 文件：`src/domain/models.py`
+  - 添加 `ErrorResponse` 模型：`{error_code: str, message: str}`
+- 文件：`src/interfaces/api.py`
+  - 导入 `ErrorResponse` 模型
+  - 添加全局异常处理器：
+    - `http_exception_handler` - 处理 HTTPException
+    - `validation_exception_handler` - 处理请求验证错误
+    - `general_exception_handler` - 处理未预料异常
+
+**MIN-002: 添加请求日志脱敏**
+- 文件：`src/interfaces/api.py`
+  - `cancel_order` 端点：添加请求日志，`order_id` 使用 `mask_secret()` 脱敏
+  - `get_order` 端点：添加请求日志，`order_id` 使用 `mask_secret()` 脱敏
+  - `create_order` 端点：已有 `client_order_id` 脱敏（保持不变）
+
+#### Git 提交
+
+待提交
+
+#### 验证
+
+- ✅ 后端 Python 语法检查通过
+- ✅ `ErrorResponse` 模型序列化正常
+- ✅ 全局异常处理器注册成功
+- ✅ `mask_secret` 脱敏功能正常
+
+---
+
 ## 2026-04-01 - Phase 6 所有 P0/P1 问题修复完成 ✅
 
 ### 完成工作

@@ -51,6 +51,7 @@ from src.domain.models import (
     AccountBalance, AccountResponse,
     ReconciliationRequest, ReconciliationReport,
     OrderType, OrderStatus, OrderRole, Direction,
+    ErrorResponse,  # MIN-001: 统一错误响应格式
 )
 
 
@@ -151,6 +152,52 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ============================================================
+# Global Exception Handler (MIN-001)
+# ============================================================
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    """
+    统一处理 HTTP 异常，返回标准化错误响应格式
+
+    MIN-001: 统一错误响应格式
+    """
+    # 如果 detail 已经是 dict 格式（包含 error_code 和 message），直接使用
+    if isinstance(exc.detail, dict):
+        return ErrorResponse(
+            error_code=exc.detail.get("error_code", str(exc.status_code)),
+            message=exc.detail.get("message", str(exc.detail))
+        )
+    # 否则使用默认格式
+    return ErrorResponse(
+        error_code=str(exc.status_code),
+        message=str(exc.detail)
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    """统一处理请求验证错误"""
+    return ErrorResponse(
+        error_code="VALIDATION_ERROR",
+        message=f"请求参数验证失败：{str(exc.errors())}"
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc: Exception):
+    """统一处理未预料的异常"""
+    logger.error(f"未处理的异常：{str(exc)}")
+    return ErrorResponse(
+        error_code="INTERNAL_ERROR",
+        message="服务器内部错误"
+    )
 
 
 # ============================================================
@@ -2032,6 +2079,10 @@ async def cancel_order(order_id: str, symbol: str = Query(..., description="币�
     try:
         gateway = _get_exchange_gateway()
 
+        # 记录请求日志（order_id 脱敏）
+        order_id_display = mask_secret(order_id, visible_chars=8)
+        logger.info(f"取消订单请求：order_id={order_id_display}, symbol={symbol}")
+
         # 调用 ExchangeGateway 取消订单
         result = await gateway.cancel_order(order_id=order_id, symbol=symbol)
 
@@ -2092,6 +2143,10 @@ async def get_order(order_id: str, symbol: str = Query(..., description="币种�
     """
     try:
         gateway = _get_exchange_gateway()
+
+        # 记录请求日志（order_id 脱敏）
+        order_id_display = mask_secret(order_id, visible_chars=8)
+        logger.info(f"查询订单请求：order_id={order_id_display}, symbol={symbol}")
 
         # 调用 ExchangeGateway 查询订单
         result = await gateway.fetch_order(order_id=order_id, symbol=symbol)
