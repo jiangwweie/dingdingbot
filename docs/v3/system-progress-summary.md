@@ -1,8 +1,8 @@
 # 盯盘狗系统整体进度与后续规划总览
 
-**统计日期**: 2026-03-30
+**统计日期**: 2026-03-31
 **当前版本**: v2.0 (多交易所支持完成)
-**下一版本**: v3.0 (PMS 仓位中心模型)
+**下一版本**: v3.0 (PMS 仓位中心模型) - Phase 1-5 已完成
 
 ---
 
@@ -56,29 +56,45 @@
 
 ### 2.2 🎯 v3.0 迁移（当前首要目标）
 
-| 阶段 | 名称 | 工期 | 开始日期 | 结束日期 | 核心交付物 |
-|------|------|------|----------|----------|-----------|
-| Phase 0 | v3 准备 | 1 周 | 2026-05-06 | 2026-05-13 | Alembic 选型、Schema 设计 |
-| Phase 1 | 模型筑基 | 2 周 | 2026-05-19 | 2026-06-01 | Order/Position/Account 模型 |
-| Phase 2 | 撮合引擎 | 3 周 | 2026-06-02 | 2026-06-22 | MockMatchingEngine、回测对比 |
-| Phase 3 | 风控状态机 | 2 周 | 2026-06-23 | 2026-07-06 | DynamicRiskManager、Trailing Stop |
-| Phase 4 | 订单编排 | 2 周 | 2026-07-07 | 2026-07-20 | OrderManager、SignalToOrderAdapter |
-| Phase 5 | 实盘集成 | 3 周 | 2026-07-21 | 2026-08-10 | CCXT 订单管理、WebSocket 推送 |
-| Phase 6 | 前端适配 | 2 周 | 2026-08-11 | 2026-08-24 | 仓位管理页面、净值曲线 |
+**状态更新 (2026-03-31)**: Phase 1-5 已完成，系统性审查 100% 通过
 
-**总工期**: 14 周（3.5 个月）
+| 阶段 | 名称 | 工期 | 开始日期 | 结束日期 | 核心交付物 | 状态 |
+|------|------|------|----------|----------|-----------|------|
+| Phase 0 | v3 准备 | 1 周 | 2026-05-06 | 2026-05-13 | Alembic 选型、Schema 设计 | ⏳ 待启动 |
+| Phase 1 | 模型筑基 | 2 周 | 2026-03-28 | 2026-03-30 | Order/Position/Account 模型 | ✅ 已完成 |
+| Phase 2 | 撮合引擎 | 3 周 | 2026-03-30 | 2026-03-30 | MockMatchingEngine、回测对比 | ✅ 已完成 |
+| Phase 3 | 风控状态机 | 2 周 | 2026-03-30 | 2026-03-30 | DynamicRiskManager、Trailing Stop | ✅ 已完成 |
+| Phase 4 | 订单编排 | 2 周 | 2026-03-30 | 2026-03-30 | OrderManager、SignalToOrderAdapter | ✅ 已完成 |
+| Phase 5 | 实盘集成 | 3 周 | 2026-03-30 | 2026-03-31 | CCXT 订单管理、WebSocket 推送 | ✅ 已完成 |
+| Phase 6 | 前端适配 | 2 周 | 2026-08-11 | 2026-08-24 | 仓位管理页面、净值曲线 | ⏳ 待启动 |
+
+**Phase 1-5 审查结果**:
+- 审查项：57/57 通过 (100%)
+- 单元测试：241/241 通过 (100%)
+- 审查报告：`docs/reviews/phase1-5-comprehensive-review-report.md`
+
+**总工期**: 14 周（3.5 个月）- Phase 1-5 提前完成
 
 ---
 
-### 2.3 🎯 Phase 5 实盘集成准备（2026-03-30 完成）
+### 2.3 🎯 Phase 5 实盘集成（2026-03-31 完成）
 
-**状态**: ✅ 设计完成，待开发
+**状态**: ✅ 编码完成，系统性审查 100% 通过
 
-**设计文档**:
-- ✅ `docs/designs/phase5-real-exchange-integration-contract.md` (v1.3)
-- ✅ `docs/designs/phase5-environment-compatibility-brainstorm.md`
-- ✅ `docs/designs/phase5-contract-review-report.md` (v1.2)
-- ✅ `docs/designs/phase5-development-checklist.md`
+**审查报告**:
+- ✅ `docs/reviews/phase1-5-comprehensive-review-report.md` - Phase 1-5 系统性审查 (57 项 100% 通过)
+- ✅ `docs/reviews/phase5-code-review.md` - Phase 5 专项审查 (10 个问题全部修复)
+
+**核心交付物**:
+| 模块 | 文件 | 测试数 | 状态 |
+|------|------|--------|------|
+| ExchangeGateway | `src/infrastructure/exchange_gateway.py` | 66 | ✅ |
+| PositionManager | `src/application/position_manager.py` | 27 | ✅ |
+| CapitalProtection | `src/application/capital_protection.py` | 21 | ✅ |
+| DcaStrategy | `src/domain/dca_strategy.py` | 30 | ✅ |
+| Reconciliation | `src/application/reconciliation.py` | 15 | ✅ |
+| Pydantic 模型 | `src/domain/models.py` | 27 | ✅ |
+| 前端类型 | `web-front/src/types/order.ts` | 45 | ✅ |
 
 **核心设计决策**:
 | 决策项 | 决策结果 |
@@ -92,13 +108,20 @@
 | 并发保护 | Asyncio Lock + DB 行锁 (双层) |
 
 **Gemini 审查问题修复**: 4 个关键问题全部修复 ✅
+- G-001: asyncio.Lock 释放后使用 → WeakValueDictionary
+- G-002: 市价单价格缺失 → fetch_ticker_price
+- G-003: DCA 限价单吃单陷阱 → place_all_orders_upfront
+- G-004: 对账幽灵偏差 → 10 秒 Grace Period
 
-**开发任务清单**: 10 个任务，~39 小时预计工时
+**测试结果**:
+- Phase 5 单元测试：110/110 通过 (100%)
+- Phase 1-5 总计：241/241 通过 (100%)
 
 **用户确认事项**:
 - ✅ 测试网 API 密钥已准备好
 - ✅ 东京 AWS 服务器已备好
 - ⏳ 飞书 Webhook URL 待配置
+- ⏳ Binance Testnet E2E 集成测试待执行
 
 ---
 
@@ -152,15 +175,17 @@
 
 ## 六、里程碑检查点
 
-| 里程碑 | 日期 | 检查内容 | 通过标准 |
-|--------|------|---------|---------|
-| ~~M-P0~~ | ~~2026-04-07~~ | ~~止盈追踪完成~~ | ❌ **已废弃** (整合到 v3 Phase 3) |
-| M1 | 2026-06-01 | Phase 1 完成 | 新模型 + 数据库迁移通过 |
-| M2 | 2026-06-22 | Phase 2 完成 | v2/v3 回测对比报告 |
-| M3 | 2026-07-06 | Phase 3 完成 | Trailing Stop 模拟测试 |
-| M4 | 2026-07-20 | Phase 4 完成 | 订单编排端到端测试 |
-| M5 | 2026-08-10 | Phase 5 完成 | 实盘 E2E 测试 |
-| M6 | 2026-08-24 | Phase 6 完成 | 前端上线 |
+| 里程碑 | 日期 | 检查内容 | 通过标准 | 状态 |
+|--------|------|---------|---------|------|
+| ~~M-P0~~ | ~~2026-04-07~~ | ~~止盈追踪完成~~ | ❌ **已废弃** (整合到 v3 Phase 3) | ❌ |
+| M1 | 2026-03-30 | Phase 1 完成 | 新模型 + 数据库迁移通过 | ✅ 已完成 |
+| M2 | 2026-03-30 | Phase 2 完成 | MockMatchingEngine、回测对比 | ✅ 已完成 |
+| M3 | 2026-03-30 | Phase 3 完成 | DynamicRiskManager、Trailing Stop | ✅ 已完成 |
+| M4 | 2026-03-30 | Phase 4 完成 | OrderManager、订单编排端到端测试 | ✅ 已完成 |
+| M5 | 2026-03-31 | Phase 5 完成 | 实盘集成代码 + 系统性审查 100% 通过 | ✅ 已完成 |
+| M6 | 2026-08-11 | Phase 6 前端适配 | 仓位管理页面、净值曲线 | ⏳ 待启动 |
+| M7 | 2026-05-05 | Phase 0 v3 准备 | Alembic 选型、数据库 Schema 设计 | ⏳ 待启动 |
+| M8 | 2026-08-24 | E2E 集成测试 | Binance Testnet 实盘模拟 | ⏳ 待启动 |
 
 ---
 
@@ -203,32 +228,62 @@
 |------|------|------|
 | Gemini 讨论技术文档 | `docs/GEMINI_DISCUSSION_DOC.md` | ✅ 已完成 |
 | v3 迁移分析报告 | `docs/v3/v3-migration-analysis-report.md` | ✅ 已完成 |
-| v3 演进路线图 | `docs/v3/v3-evolution-roadmap.md` | ✅ 已完成 |
-| 任务计划 | `docs/planning/task_plan.md` | ✅ 已更新 |
-| 进度日志 | `docs/planning/progress.md` | 🔄 持续更新 |
+| v3 演进路线图 | `docs/v3/v3-evolution-roadmap.md` | 🔄 待更新 |
+| 任务计划 | `docs/planning/task_plan.md` | 🔄 待更新 |
+| 进度日志 | `docs/planning/progress.md` | ✅ 已更新 |
+| Phase 1 完成报告 | `docs/v3/v3-phase1-complete-report.md` | ✅ 已完成 |
+| Phase 2 完成报告 | `docs/v3/v3-phase2-complete-report.md` | ✅ 已完成 |
+| Phase 3 完成报告 | `docs/v3/v3-phase3-complete-report.md` | ✅ 已完成 |
+| Phase 4 完成报告 | `docs/v3/v3-phase4-complete-report.md` | ✅ 已完成 |
+| Phase 1-5 审查报告 | `docs/reviews/phase1-5-comprehensive-review-report.md` | ✅ 已完成 |
+| Phase 5 审查报告 | `docs/reviews/phase5-code-review.md` | ✅ 已完成 |
 
 ---
 
-## 十、Git 提交历史（最近 10 条）
+## 十、Git 提交历史（最近 20 条）
 
 ```
-511c1a1 docs: 创建 v3.0 演进路线图
-4ae99ce docs: 创建 Gemini 讨论技术文档
-7cd9c48 docs: 更新进度 - 多交易所适配完成
-0e214af feat: 多交易所适配 (Bybit/OKX) 与测试覆盖增强
-a318cb2 docs: 归档废弃文档与整理归档目录
-4bfb2b7 docs: 更新实盘导向任务规划与冷却缓存废弃说明
-7438821 feat: 添加前端部署脚本
-a43090b fix: 构建前删除 node_modules 和 package-lock.json
-f29c26c fix: 修正 COPY 路径
-9c6e0eb fix: 使用 node:18-bookworm 解决 TailwindCSS 问题
+11bba9a docs: Phase 1-5 系统性代码审查完成（57 项 100% 通过）
+cd2c0af docs: 更新 2026-03-31 进度日志
+054e8b1 docs: 更新契约表 OrderRole 枚举为 v3.0 PMS 精细定义
+38ae1a9 docs: 更新 Phase 5 审查报告状态为全部修复
+9b611d6 docs: 更新 Phase 1-4 验证完成状态
+dc76346 fix(v3): 更新 CHECK 约束以匹配演化的枚举值
+63d9514 feat(phase5): 审查问题修复 - 补充契约表定义的模型和类型 (P5-001~P5-007)
+b9939f0 docs: 将 planning-with-files 标准写入 agent 准则
+3db2d03 docs: 更新 Phase 5 进度日志（编码完成，待审查修复）
+57eacd3 feat(phase5): 实盘集成核心功能实现（审查中）
+8e1d1cd misc: 添加测试覆盖率和记忆文件
+b73892d misc: 异常体系扩展、CLAUDE.md 更新、依赖修正
+3f9878e feat(v3): Phase 1 模型筑基 - ORM 模型与数据库迁移
+6efb3fd docs: v3 迁移文档补充
+ae8ae06 docs: Phase 5 实盘集成设计完成 (v1.3)
+c2b22f3 feat(v3): Phase 4 订单编排实现
+bd6ddc8 docs: 创建 Phase 3 完成报告
+629c759 feat(v3): Phase 3 风控状态机实现
+8680bdb feat(v3): Phase 2 撮合引擎实现
+af6fc56 docs: 整合 v3 规划到统一项目计划
 ```
 
 ---
 
 ## 十一、下一步行动
 
-### 🎯 当前首要目标：v3 迁移准备（2026-05-06 启动）
+### 🎯 当前首要目标：Binance Testnet E2E 集成测试
+
+**Phase 1-5 已完成**,系统性审查 100% 通过，下一步执行实盘集成测试：
+
+- [ ] Binance Testnet API 密钥配置
+- [ ] 飞书 Webhook URL 配置
+- [ ] E2E 测试场景设计
+  - [ ] 入场开仓 → TP1 止盈 → 剩余打损
+  - [ ] 入场开仓 → SL 止损
+  - [ ] 多单并行处理
+  - [ ] 并发保护验证（TP1/SL 同时触发）
+- [ ] 对账服务验证
+- [ ] 飞书告警推送验证
+
+### Phase 0: v3 迁移准备（2026-05-06 启动）
 
 - [ ] Alembic 技术调研
 - [ ] 数据库 Schema 设计（orders/positions/accounts 表）

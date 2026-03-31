@@ -1030,22 +1030,28 @@ class TestEnumTypes:
         assert OrderStatus.FILLED.value == "FILLED"
         assert OrderStatus.CANCELED.value == "CANCELED"
         assert OrderStatus.REJECTED.value == "REJECTED"
-        assert len(OrderStatus) == 6
+        assert OrderStatus.EXPIRED.value == "EXPIRED"
+        assert len(OrderStatus) == 7
 
     def test_order_type_enum(self):
         """OrderType 枚举值"""
         assert OrderType.MARKET.value == "MARKET"
         assert OrderType.LIMIT.value == "LIMIT"
         assert OrderType.STOP_MARKET.value == "STOP_MARKET"
+        assert OrderType.STOP_LIMIT.value == "STOP_LIMIT"
         assert OrderType.TRAILING_STOP.value == "TRAILING_STOP"
-        assert len(OrderType) == 4
+        assert len(OrderType) == 5
 
     def test_order_role_enum(self):
         """OrderRole 枚举值"""
         assert OrderRole.ENTRY.value == "ENTRY"
         assert OrderRole.TP1.value == "TP1"
+        assert OrderRole.TP2.value == "TP2"
+        assert OrderRole.TP3.value == "TP3"
+        assert OrderRole.TP4.value == "TP4"
+        assert OrderRole.TP5.value == "TP5"
         assert OrderRole.SL.value == "SL"
-        assert len(OrderRole) == 3
+        assert len(OrderRole) == 7
 
     @pytest.mark.asyncio
     async def test_direction_in_orm(self, db_session):
@@ -2442,9 +2448,9 @@ class TestSummaryReport:
     def test_all_enums_defined(self):
         """确认所有枚举类型已定义"""
         assert len(Direction) == 2
-        assert len(OrderStatus) == 6
-        assert len(OrderType) == 4
-        assert len(OrderRole) == 3
+        assert len(OrderStatus) == 7
+        assert len(OrderType) == 5
+        assert len(OrderRole) == 7
 
     def test_decimal_type_used_for_financial_fields(self):
         """确认所有金额字段使用 Decimal 类型"""
