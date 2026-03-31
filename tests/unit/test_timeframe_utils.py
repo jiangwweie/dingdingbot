@@ -120,19 +120,23 @@ class TestParseTimeframeToMs:
 class TestGetLastClosedKlineIndex:
     def test_15m_signal_uses_1h_closed(self):
         """
-        15m kline at 10:15 should use 10:00 as last closed 1h kline.
+        15m kline at 10:15 should use 09:00 as last closed 1h kline.
+        The 10:00-11:00 1h kline is NOT yet closed at 10:15.
+
+        This is the critical bug fix - previously the code incorrectly
+        returned the 10:00 kline, causing MTF过滤器 to fail.
         """
         klines = [
-            create_kline(hour_to_ms(9), "50000"),   # 09:00
-            create_kline(hour_to_ms(10), "51000"),  # 10:00
-            create_kline(hour_to_ms(11), "52000"),  # 11:00
+            create_kline(hour_to_ms(9), "50000"),   # 09:00 (closes at 10:00)
+            create_kline(hour_to_ms(10), "51000"),  # 10:00 (closes at 11:00)
+            create_kline(hour_to_ms(11), "52000"),  # 11:00 (closes at 12:00)
         ]
         # Current 15m kline at 10:15
         current_ts = minute_to_ms(10, 15)
 
         idx = get_last_closed_kline_index(klines, current_ts, "1h")
 
-        assert idx == 1  # Should return 10:00 kline
+        assert idx == 0  # Should return 09:00 kline, NOT 10:00 (not yet closed)
 
     def test_boundary_exactly_on_period(self):
         """
@@ -188,3 +192,59 @@ class TestGetLastClosedKlineIndex:
         idx = get_last_closed_kline_index(klines, current_ts, "1d")
 
         assert idx == 0  # Should return Day 1 kline (Day 2 is current)
+
+    def test_critical_bug_15m_uses_1h_not_yet_closed(self):
+        """
+        Critical bug fix verification: 15m kline at 20:15 should NOT use
+        20:00's 1h kline because it doesn't close until 21:00.
+
+        This was the root cause of MTF过滤器 always reporting
+        higher_tf_data_unavailable.
+        """
+        base = 1700000000000
+        klines = [
+            create_kline(base + 19 * 3600000, "50000"),  # 19:00 (closed at 20:00)
+            create_kline(base + 20 * 3600000, "51000"),  # 20:00 (closes at 21:00)
+            create_kline(base + 21 * 3600000, "52000"),  # 21:00 (closes at 22:00)
+        ]
+        # 15m kline at 20:15 - the 20:00-21:00 1h kline is NOT yet closed
+        current_ts = base + 20 * 3600000 + 15 * 60000  # 20:15
+
+        idx = get_last_closed_kline_index(klines, current_ts, "1h")
+
+        assert idx == 0  # Should return 19:00 kline, NOT 20:00
+
+    def test_1h_kline_just_closed(self):
+        """
+        When current timestamp equals kline end time, kline is available.
+        15m kline at 21:00 should use 20:00's 1h kline (just closed).
+        """
+        base = 1700000000000
+        klines = [
+            create_kline(base + 19 * 3600000, "50000"),  # 19:00
+            create_kline(base + 20 * 3600000, "51000"),  # 20:00 (closes at 21:00)
+        ]
+        # 15m kline at exactly 21:00 - the 20:00-21:00 1h kline JUST closed
+        current_ts = base + 21 * 3600000  # 21:00
+
+        idx = get_last_closed_kline_index(klines, current_ts, "1h")
+
+        assert idx == 1  # Should return 20:00 kline (just closed)
+
+    def test_multiple_closed_klines_uses_latest(self):
+        """
+        When multiple klines are closed, should use the most recent one.
+        """
+        base = 1700000000000
+        klines = [
+            create_kline(base + 17 * 3600000, "49000"),  # 17:00
+            create_kline(base + 18 * 3600000, "50000"),  # 18:00
+            create_kline(base + 19 * 3600000, "51000"),  # 19:00
+            create_kline(base + 20 * 3600000, "52000"),  # 20:00 (closes at 21:00)
+        ]
+        # 15m kline at 21:30 - both 19:00 and 20:00 1h klines are closed
+        current_ts = base + 21 * 3600000 + 30 * 60000  # 21:30
+
+        idx = get_last_closed_kline_index(klines, current_ts, "1h")
+
+        assert idx == 3  # Should return 20:00 kline (most recent closed)
