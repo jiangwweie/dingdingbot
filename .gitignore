@@ -20,12 +20,14 @@ ENV/
 Thumbs.db
 
 # Logs
-*.log
+logs/*.log
+logs/*.pid
+logs/.coverage
 
 # Database
 *.db
 *.sqlite
-data/
+data/*
 
 # Secrets - DO NOT COMMIT REAL KEYS
 # config/user.yaml - 已移出，改用 git assume-unchanged 保护本地配置
