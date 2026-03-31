@@ -1,5 +1,38 @@
 # 进度日志
 
+## 2026-03-31 - 文件结构重组收尾（清理临时文件）
+
+### 完成工作
+
+**文件结构重组 Phase 3 - 清理临时文件**
+
+清理 `docs/planning/` 目录中的临时总结文件和已废弃文档：
+
+| 删除文件 | 说明 |
+|----------|------|
+| `today-summary-20260328.md` | 临时会话总结 |
+| `PROGRESS-SUMMARY-2026-03-29.md` | 临时进度总结 |
+| `s4-coordination.md` | S4 协调文档（已完成） |
+| `phase5-session-handoff.md` | Phase 5 会话交接（已完成） |
+| `phase5-plan.md` | Phase 5 计划（已整合到 task_plan.md） |
+| `s6-2-5-delivery-report.md` | S6-2 交付报告（S6 已废弃） |
+| `s6-2-delivery-report.md` | S6-2 交付报告（S6 已废弃） |
+| `s6-2-design.md` | S6-2 设计文档（S6 已废弃） |
+| `S6-2-FINAL-SUMMARY.md` | S6-2 最终总结（S6 已废弃） |
+| `s62-progress-summary.md` | S6-2 进度总结（S6 已废弃） |
+
+**保留的核心文件**：
+- `findings.md` - 研究发现与技术笔记
+- `progress.md` - 进度日志与会话记录
+- `task_plan.md` - 任务计划与阶段追踪
+
+**Git 提交**:
+```
+docs: 清理 planning 目录临时文件（10 个）
+```
+
+---
+
 ## 2026-03-31 - 文件结构重组完成（Phase 1 & 2）
 
 ### 完成工作
