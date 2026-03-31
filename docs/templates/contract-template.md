@@ -2,7 +2,7 @@
 
 > **创建日期**: {{YYYY-MM-DD}}
 > **任务 ID**: {{Task ID}}
-> ** Coordinator**: {{Name}}
+> **Coordinator**: {{Name}}
 
 ---
 
@@ -25,9 +25,9 @@
 
 ### 2.2 请求参数（Query Params）
 
-| 字段 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| | | | | |
+| 字段 | 类型 | 必填 | 约束条件 | 默认值 | 说明 |
+|------|------|------|----------|--------|------|
+| | | | | | |
 
 ### 2.3 请求体（Request Body）
 
@@ -38,9 +38,30 @@ class {{RequestModelName}}(BaseModel):
     ...
 ```
 
-| 字段 | 类型 | 必填 | 默认值 | 说明 | 前端对应字段 |
-|------|------|------|--------|------|--------------|
-| {{field_name}} | {{string\|number\|boolean\|object}} | 是/否 | - | {{说明}} | {{propName}} |
+| 字段 | 类型 | 必填等级 | 约束条件 | 默认值 | 说明 | 前端对应字段 |
+|------|------|----------|----------|--------|------|--------------|
+| {{field_name}} | {{string\|number\|boolean\|object}} | REQUIRED | `minLength: 1, maxLength: 50` | - | {{说明}} | {{propName}} |
+
+**必填等级说明**:
+| 等级 | 后端 | 前端 | 说明 |
+|------|------|------|------|
+| **REQUIRED** | ❌ 拒绝请求 | ❌ 禁用提交 | 业务 + 技术双重要求 |
+| **CONDITIONAL** | ⚠️ 条件校验 | ⚠️ 动态显示/隐藏 | 依赖其他字段状态（见约束条件） |
+| **OPTIONAL** | ✅ 可空 | ✅ 可选填 | 有合理默认值 |
+
+**约束条件格式规范**:
+```python
+# String 类型
+`minLength: N, maxLength: M, pattern: "regex"`
+# Number 类型
+`min: N, max: M, step: 0.01`
+# Array 类型
+`minItems: N, maxItems: M`
+# Enum
+`["VALUE1", "VALUE2", "VALUE3"]`
+# Conditional 示例
+`required_when: {field: "orderType", equals: "LIMIT"}`
+```
 
 ---
 
@@ -55,9 +76,9 @@ class {{ResponseModelName}}(BaseModel):
     ...
 ```
 
-| 字段 | 类型 | 必填 | 说明 | TypeScript 类型 |
-|------|------|------|------|-----------------|
-| {{field_name}} | {{string\|number\|boolean\|object}} | 是/否 | {{说明}} | {{type}} |
+| 字段 | 类型 | 必填 | 约束条件 | 说明 | TypeScript 类型 |
+|------|------|------|----------|------|-----------------|
+| {{field_name}} | {{string\|number\|boolean\|object}} | 是/否 | `minLength: 1` | {{说明}} | {{type}} |
 
 ### 3.2 错误响应
 
@@ -125,6 +146,13 @@ interface {{ComponentName}}Props {
 # src/domain/models.py 或新建文件
 class {{ModelName}}(BaseModel):
     {{field_name}}: {{type}}
+    # 约束验证器
+    @field_validator('{{field_name}}')
+    @classmethod
+    def validate_{{field_name}}(cls, v):
+        if len(v) < 1 or len(v) > 50:
+            raise ValueError('{{field_name}} must be between 1 and 50 characters')
+        return v
 ```
 
 ### 6.2 前端 TypeScript 类型
@@ -138,9 +166,18 @@ export interface {{InterfaceName}} {
 
 ### 6.3 对齐检查表
 
-| 字段 | 后端类型 | 前端类型 | 是否一致 |
-|------|----------|----------|----------|
-| {{field}} | {{type}} | {{type}} | ✅ / ❌ |
+| 字段 | 后端类型 | 前端类型 | 约束一致 | 必填一致 |
+|------|----------|----------|----------|----------|
+| {{field}} | {{type}} | {{type}} | ✅ / ❌ | ✅ / ❌ |
+
+### 6.4 前后端校验分工
+
+| 校验规则 | 前端校验 | 后端校验 | 说明 |
+|----------|----------|----------|------|
+| 必填检查 | ✅ | ✅ | 前端禁用提交，后端返回 400 |
+| 格式校验 | ✅ | ✅ | 前端即时反馈，后端最终验证 |
+| 业务规则 | ❌ | ✅ | 如唯一性检查、权限验证 |
+| 长度限制 | ✅ | ✅ | 前端 input maxLength，后端 validator |
 
 ---
 
@@ -154,6 +191,13 @@ export interface {{InterfaceName}} {
 | QA Tester | | | |
 | Code Reviewer | | | |
 
+**审查检查清单**:
+- [ ] 所有字段的必填等级已明确（REQUIRED/CONDITIONAL/OPTIONAL）
+- [ ] 所有字段的约束条件已定义（长度/范围/格式）
+- [ ] CONDITIONAL 字段的触发条件已说明
+- [ ] 前后端校验分工已明确
+- [ ] 错误响应格式已定义
+
 ---
 
 ## 变更记录
@@ -161,11 +205,23 @@ export interface {{InterfaceName}} {
 | 版本 | 日期 | 变更内容 | 变更人 |
 |------|------|----------|--------|
 | v1.0 | YYYY-MM-DD | 初始版本 | |
+| v1.1 | YYYY-MM-DD | 增加字段约束定义规范 | |
 
 ---
 
 **使用说明**:
 1. 复制此模板到 `docs/designs/<task-name>-contract.md`
 2. 替换所有 `{{占位符}}` 为实际内容
-3. 在阶段 1（契约设计）完成时填写
-4. 作为后续开发、审查、测试的 SSOT
+3. **必填等级和约束条件必须填写**，不能留空
+4. 在阶段 1（契约设计）完成时填写
+5. 作为后续开发、审查、测试的 SSOT
+
+**字段约束填写示例**:
+
+| 字段 | 类型 | 必填等级 | 约束条件 | 说明 |
+|------|------|----------|----------|------|
+| symbol | string | REQUIRED | `pattern: "^[A-Z]+/[A-Z]+:[A-Z]+$"` | 交易对，如 BTC/USDT:USDT |
+| quantity | number | REQUIRED | `min: 0.001, max: 1000000, step: 0.001` | 下单数量 |
+| orderType | string | REQUIRED | `["MARKET", "LIMIT", "STOP_MARKET", "STOP_LIMIT"]` | 订单类型 |
+| limitPrice | number | CONDITIONAL | `min: 0, required_when: {field: "orderType", equals: "LIMIT"}` | 限价单价格 |
+| remark | string | OPTIONAL | `maxLength: 200, default: ""` | 备注信息 |

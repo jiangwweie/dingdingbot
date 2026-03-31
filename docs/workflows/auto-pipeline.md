@@ -44,12 +44,19 @@
 
 1. 创建契约文件：`docs/designs/<task-name>-contract.md`
 2. 使用模板：`docs/templates/contract-template.md`
-3. 填写以下内容：
+3. 填写以下内容（**必须精确到字段约束**）：
    - API 端点定义（路径、方法）
-   - 请求/响应 Schema（字段名、类型、必填、说明）
+   - 请求/响应 Schema（字段名、类型、**必填等级、约束条件**）
    - 错误码定义
    - 前端组件 Props 定义
 4. 将契约表分发给 Backend/Frontend/QA 角色
+
+**契约表必填字段检查清单**:
+- [ ] 所有字段的**必填等级**已明确（REQUIRED/CONDITIONAL/OPTIONAL）
+- [ ] 所有字段的**约束条件**已定义（长度/范围/格式/正则）
+- [ ] CONDITIONAL 字段的触发条件已说明（如 `required_when: {field: "orderType", equals: "LIMIT"}`）
+- [ ] 前后端校验分工已明确（前端即时校验 vs 后端最终验证）
+- [ ] 默认值已标注（针对 OPTIONAL 字段）
 
 **契约表示例结构**:
 
@@ -61,20 +68,38 @@
 |------|------|------|
 | /api/xxx | POST | 说明 |
 
-## 请求 Schema
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| field_name | string | 是 | 说明 |
+## 请求 Schema（精确到约束）
+| 字段 | 类型 | 必填等级 | 约束条件 | 说明 |
+|------|------|----------|----------|------|
+| symbol | string | REQUIRED | `pattern: "^[A-Z]+/[A-Z]+$"` | 交易对 |
+| quantity | number | REQUIRED | `min: 0.001, max: 1000000` | 数量 |
+| limitPrice | number | CONDITIONAL | `required_when: {field: "type", equals: "LIMIT"}` | 限价 |
+| remark | string | OPTIONAL | `maxLength: 200, default: ""` | 备注 |
 
 ## 响应 Schema
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| field_name | string | 是 | 说明 |
+| 字段 | 类型 | 必填 | 约束条件 | 说明 |
+|------|------|------|----------|------|
+| orderId | string | 是 | `minLength: 1` | 订单 ID |
+| status | string | 是 | `["PENDING", "OPEN", "FILLED"]` | 状态 |
 
 ## 前端 Props
 | 组件 | Prop | 类型 | 必填 | 说明 |
 |------|------|------|------|------|
 | ComponentName | propName | string | 是 | 说明 |
+```
+
+**约束条件格式规范**:
+```python
+# String 类型
+`minLength: N, maxLength: M, pattern: "regex"`
+# Number 类型
+`min: N, max: M, step: 0.01`
+# Array 类型
+`minItems: N, maxItems: M`
+# Enum
+`["VALUE1", "VALUE2", "VALUE3"]`
+# Conditional 示例
+`required_when: {field: "orderType", equals: "LIMIT"}`
 ```
 
 ---
@@ -174,9 +199,11 @@
 1. 通知 Reviewer 介入
 2. Reviewer 对照契约表检查：
    - [ ] API 字段命名与契约表一致
-   - [ ] 必填/可选字段对齐
+   - [ ] **必填等级与契约表一致**（REQUIRED/CONDITIONAL/OPTIONAL）
+   - [ ] **约束条件已实现**（长度/范围/格式/正则）
    - [ ] 错误响应格式统一
    - [ ] 前端类型定义与契约表一致
+   - [ ] **前后端校验分工已落实**（前端即时校验 + 后端最终验证）
    - [ ] 代码质量（复杂度、可读性）
 
 3. **审查问题处理**:
@@ -186,6 +213,15 @@
 4. **审查通过** → 进入测试阶段
 
 **Reviewer 输出**: 审查报告（包含问题列表和修复状态）
+
+**审查签字检查清单**（必须全部勾选）:
+```
+- [ ] 所有字段的必填等级已明确（REQUIRED/CONDITIONAL/OPTIONAL）
+- [ ] 所有字段的约束条件已定义（长度/范围/格式/正则）
+- [ ] CONDITIONAL 字段的触发条件已说明
+- [ ] 前后端校验分工已明确
+- [ ] 错误响应格式已定义
+```
 
 ---
 
@@ -266,9 +302,13 @@
 - 覆盖率：Z%
 
 ### 🔗 契约对齐情况
-- 字段命名：一致 ✅
-- 类型定义：一致 ✅
-- 错误处理：一致 ✅
+| 检查项 | 状态 |
+|--------|------|
+| 字段命名 | ✅ 一致 |
+| 类型定义 | ✅ 一致 |
+| **必填等级** | ✅ 一致 |
+| **约束条件** | ✅ 已实现 |
+| 错误处理 | ✅ 一致 |
 
 ### 📝 相关文档
 - 契约表：docs/designs/<task>-contract.md
@@ -332,9 +372,10 @@
 - [ ] 契约文件已创建
 - [ ] API 端点定义完整
 - [ ] 请求/响应 Schema 完整
-- [ ] 字段类型、必填状态明确
+- [ ] **字段类型、必填等级、约束条件明确**
 - [ ] 前端 Props 定义完整
 - [ ] 契约表已分发给所有角色
+- [ ] **必填等级和约束条件无留空**
 
 ### 阶段 2 检查清单（任务分解）
 - [ ] 所有任务已创建
@@ -353,6 +394,8 @@
 ### 阶段 4 检查清单（审查验证）
 - [ ] Reviewer 已介入
 - [ ] 契约对齐检查通过
+- [ ] **字段必填等级与契约表一致**
+- [ ] **字段约束条件已实现（前后端）
 - [ ] 代码质量检查通过
 - [ ] 审查问题已修复
 
