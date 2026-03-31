@@ -33,7 +33,8 @@ htmlcov/
 data/
 
 # Secrets - DO NOT COMMIT REAL KEYS
-# config/user.yaml - 已移出，改用 git assume-unchanged 保护本地配置
+config/user.yaml
+config/user.yml
 
 # Environment
 .env
