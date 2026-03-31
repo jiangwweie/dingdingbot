@@ -1,103 +1,67 @@
 # 进度日志
 
+## 2026-03-31 - Phase 6 完成！仅待 E2E 测试
+
+### Phase 6 最终状态
+
+**Phase 6 v3.0 前端适配：87.5% 完成 (7/8)**
+
+所有组件开发已完成，仅待 E2E 集成测试：
+
+| 任务 | Agent | 状态 | 交付物 |
+|------|-------|------|--------|
+| P6-001: 后端 REST API 端点 | - | ✅ 完成 | 9 个 API 端点 + 3 个模型 |
+| P6-010: 补充 API 端点 | - | ✅ 完成 | check/close 端点 |
+| P6-002: 前端 API 调用层 | `a4585451a488c89f3` | ✅ 完成 | 12 个 API 函数 |
+| P6-003: 仓位管理页面 | `a44ef8b5d0e5f5f79` | ✅ 完成 | Positions.tsx + 6 组件 |
+| P6-004: 订单管理页面 | `a852787e8c43b62cc` | ✅ 完成 | Orders.tsx + 3 组件 |
+| P6-005: 账户净值曲线可视化 | `afe3402fbe5b2e6a9` | ✅ 完成 | Account.tsx + 5 组件 |
+| P6-006: PMS 回测报告组件 | `a83da6640e9e6f19a` | ✅ 完成 | 5 个回测组件 |
+| P6-007: 多级别止盈可视化 | `a79c59da237614eb7` | ✅ 完成 | 4 个 TP/SL 组件 |
+| P6-008: E2E 集成测试 | - | ⏳ pending | 待启动 |
+
+### 组件汇总
+
+**页面 (3 个)**:
+- `Orders.tsx` - 订单管理
+- `Positions.tsx` - 仓位管理
+- `Account.tsx` - 账户详情
+
+**通用组件 (20+ 个)**:
+- 徽章类：`DirectionBadge`, `PnLBadge`, `OrderStatusBadge`, `OrderRoleBadge`
+- 表格类：`OrdersTable`, `PositionsTable`, `TradeStatisticsTable`
+- 抽屉类：`OrderDetailsDrawer`, `PositionDetailsDrawer`
+- 对话框类：`CreateOrderModal`, `ClosePositionModal`
+- 图表类：`EquityCurveChart`, `PositionDistributionPie`, `EquityComparisonChart`, `PnLDistributionHistogram`, `MonthlyReturnHeatmap`
+- 卡片类：`AccountOverviewCards`, `PnLStatisticsCards`, `BacktestOverviewCards`, `TakeProfitStats`
+- 进度条类：`TPProgressBar`, `SLOrderDisplay`
+- 其他：`DecimalDisplay`, `DateRangeSelector`, `TPChainDisplay`
+
+### 进度看板
+
+```
+Phase 6 v3.0 前端适配：87.5% 完成
+
+[████████████████████] 100% 后端 API 层
+[████████████████████] 100% 前端 API 层
+[████████████████████] 100% 订单管理页面
+[████████████████████] 100% 仓位管理页面
+[████████████████████] 100% 账户页面
+[████████████████████] 100% 回测报告组件
+[████████████████████] 100% 多级别止盈
+[░░░░░░░░░░░░░░░░░░░░]   0% E2E 测试 ← 下一步
+```
+
+### 下一步
+
+- [ ] 启动 P6-008: E2E 集成测试
+- [ ] 编写 E2E 测试用例（订单/仓位/账户完整流程）
+- [ ] 运行测试并修复问题
+- [ ] Phase 6 总结汇报
+
+---
+
 ## 2026-03-31 - P6-007 多级别止盈可视化完成
-
-### P6-007: 多级别止盈可视化 ✅
-
-实现仓位详情页的多级别止盈（TP1-TP5）可视化展示和止损订单展示。
-
-#### 新增组件
-
-1. **TPProgressBar.tsx** (`web-front/src/components/v3/TPProgressBar.tsx`)
-   - 单个 TP 订单的成交进度条（0-100%）
-   - 盈亏比例计算（基于入场价和止盈价）
-   - 状态图标（待触发/执行中/已完成）
-   - 已成交数量 / 订单数量显示
-
-2. **TakeProfitStats.tsx** (`web-front/src/components/v3/TakeProfitStats.tsx`)
-   - 4 个统计卡片网格：
-     - 已实现止盈（已完成订单的盈亏）
-     - 未实现止盈（部分成交订单的未成交部分盈亏）
-     - 总目标止盈（所有订单完全成交的理论盈亏）
-     - 执行进度（已成交数量 / 总数量百分比）
-   - 总体执行进度条可视化
-
-#### 增强组件
-
-1. **TPChainDisplay.tsx** (`web-front/src/components/v3/TPChainDisplay.tsx`)
-   - 集成 TPProgressBar 和 TakeProfitStats
-   - 新结构：标题 + 统计卡片 + TP 订单明细列表
-   - 支持 TP1-TP5 排序显示
-
-2. **SLOrderDisplay.tsx** (`web-front/src/components/v3/SLOrderDisplay.tsx`)
-   - 新增止损距离百分比计算
-   - 止损进度条可视化（安全区域→危险区域渐变）
-   - 标记价格支持（通过 `markPrice` prop 传入）
-   - 状态提示（安全/关注/危险三级颜色）
-     - 止损距离 > 5%: 绿色（安全）
-     - 止损距离 > 2%: 黄色（关注）
-     - 止损距离 ≤ 2%: 红色（危险）
-
-#### 类型定义更新
-
-**文件**: `web-front/src/types/order.ts`
-
-更新 `PositionInfo` 接口，新增字段：
-- `original_qty: string` - 原始数量
-- `signal_id: string | null` - 关联信号 ID
-- `take_profit_orders: OrderResponse[]` - 止盈订单链（TP1-TP5）
-- `stop_loss_order: OrderResponse | null` - 止损订单
-
-#### 组件集成
-
-**文件**: `web-front/src/components/v3/PositionDetailsDrawer.tsx`
-
-- 从 PositionInfo 中自动获取 `take_profit_orders` 和 `stop_loss_order`
-- 集成 `TPChainDisplay` 显示止盈订单链
-- 集成 `SLOrderDisplay` 显示止损订单
-- 支持 markPrice 传递到 SLOrderDisplay 计算止损距离
-
-#### 技术实现
-
-**止盈统计计算**:
-```typescript
-// 已实现止盈（已完成订单的盈亏）
-realizedProfit = Σ((orderPrice - entryPrice) * filledQty) // LONG
-realizedProfit = Σ((entryPrice - orderPrice) * filledQty) // SHORT
-
-// 未实现止盈（部分成交订单的未成交部分）
-unrealizedProfit = Σ((orderPrice - entryPrice) * remainingQty) // LONG
-unrealizedProfit = Σ((entryPrice - orderPrice) * remainingQty) // SHORT
-
-// 总目标止盈（所有订单完全成交的理论盈亏）
-totalTargetProfit = Σ((orderPrice - entryPrice) * qty) // LONG
-totalTargetProfit = Σ((entryPrice - orderPrice) * qty) // SHORT
-
-// 执行进度
-executionProgress = (totalFilledQty / totalQty) * 100%
-```
-
-**止损距离计算**:
-```typescript
-// 止损距离百分比
-if (direction === 'LONG'):
-  // 做多止损：止损价低于当前价
-  stopLossDistance = ((currentPrice - triggerPrice) / currentPrice) * 100
-else:
-  // 做空止损：止损价高于当前价
-  stopLossDistance = ((triggerPrice - currentPrice) / currentPrice) * 100
-
-// 止损进度（价格接近止损价的程度）
-if (direction === 'LONG'):
-  stopLossProgress = ((entryPrice - currentPrice) / (entryPrice - triggerPrice)) * 100
-else:
-  stopLossProgress = ((currentPrice - entryPrice) / (triggerPrice - entryPrice)) * 100
-```
-
-#### TypeScript 编译验证
-
-```bash
-npm run build
 # ✓ 3425 modules transformed.
 # ✓ built in 1.99s
 ```

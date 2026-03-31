@@ -5,6 +5,7 @@ import Signals from './pages/Signals';
 import SignalAttempts from './pages/SignalAttempts';
 import Account from './pages/Account';
 import Backtest from './pages/Backtest';
+import PMSBacktest from './pages/PMSBacktest';
 import StrategyWorkbench from './pages/StrategyWorkbench';
 import Snapshots from './pages/Snapshots';
 import Orders from './pages/Orders';
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="positions" element={<Positions />} />
           <Route path="orders" element={<Orders />} />
           <Route path="backtest" element={<Backtest />} />
+          <Route path="pms-backtest" element={<PMSBacktest />} />
           <Route path="attempts" element={<SignalAttempts />} />
           <Route path="account" element={<Account />} />
           <Route path="strategies" element={<StrategyWorkbench />} />

@@ -23,6 +23,7 @@ export default function Layout() {
     { to: '/positions', icon: TrendingUp, label: '仓位' },
     { to: '/orders', icon: FileText, label: '订单' },
     { to: '/backtest', icon: FlaskConical, label: '回测沙箱' },
+    { to: '/pms-backtest', icon: BarChart2, label: 'PMS 回测' },
     { to: '/attempts', icon: Bug, label: '尝试溯源' },
     { to: '/account', icon: Wallet, label: '账户' },
     { to: '/strategies', icon: Zap, label: '策略工作台' },
