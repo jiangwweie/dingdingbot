@@ -1,6 +1,26 @@
 # 进度日志
 
-## 2026-04-01 - Phase 6 开发完成，准备收工 🎉
+## 2026-04-01 - Docker 部署实施完成 + Phase 6 开发完成 🎉
+
+### Docker 部署实施 ✅
+
+在 `~/Documents/docker/monitor-dog/` 创建完整部署配置：
+- `docker-compose.yml` - 前后端分离编排，日志轮转，健康检查
+- `deploy.sh` - 一键部署脚本（up/down/logs/status/rebuild）
+- `config/core.yaml` - 系统核心配置（从项目复制）
+- `config/user.yaml` - 用户配置模板（需填入币安测试网 API 密钥）
+- `README.md` - 完整部署指南
+- `QUICKSTART.md` - 5 分钟快速开始
+- `.gitignore` - 防止敏感文件提交
+
+**部署配置摘要**:
+| 配置项 | 值 |
+|--------|-----|
+| 网络暴露 | 局域网可访问 (`0.0.0.0:80`, `0.0.0.0:8000`) |
+| 数据库 | SQLite (`data/v3.db`) |
+| 日志轮转 | 10MB × 3 文件 |
+| 重启策略 | `unless-stopped` |
+| API 密钥 | 挂载 `config/user.yaml` |
 
 ### Phase 6 最终状态
 
