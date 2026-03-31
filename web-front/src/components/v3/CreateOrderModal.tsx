@@ -174,9 +174,9 @@ export function CreateOrderModal({ isOpen, onClose, onSuccess }: CreateOrderModa
       const orderRequest: OrderRequest = {
         symbol: data.symbol,
         order_type: data.order_type,
-        role: data.order_role,
+        order_role: data.order_role,
         direction: data.direction,
-        amount: data.quantity,
+        quantity: data.quantity,
         price: data.price || undefined,
         trigger_price: data.trigger_price || undefined,
         reduce_only: data.reduce_only,

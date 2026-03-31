@@ -33,8 +33,8 @@ export function TPChainDisplay({ tpOrders, entryPrice, direction }: TPChainDispl
 
   // 按订单角色排序：TP1 -> TP2 -> TP3 -> TP4 -> TP5
   const sortedOrders = [...tpOrders].sort((a, b) => {
-    const orderA = a.role.replace('TP', '');
-    const orderB = b.role.replace('TP', '');
+    const orderA = a.order_role.replace('TP', '');
+    const orderB = b.order_role.replace('TP', '');
     return parseInt(orderA) - parseInt(orderB);
   });
 

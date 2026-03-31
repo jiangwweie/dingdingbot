@@ -128,7 +128,7 @@ export function SLOrderDisplay({ slOrder, entryPrice, direction, markPrice }: SL
             <div>
               <div className="text-gray-500 mb-1">订单数量</div>
               <div className="font-mono text-gray-900 font-medium">
-                <DecimalDisplay value={slOrder.amount} decimals={4} />
+                <DecimalDisplay value={slOrder.quantity} decimals={4} />
               </div>
             </div>
             <div>
@@ -137,7 +137,7 @@ export function SLOrderDisplay({ slOrder, entryPrice, direction, markPrice }: SL
                 "font-mono font-medium",
                 isTriggered ? "text-red-600" : "text-gray-400"
               )}>
-                <DecimalDisplay value={slOrder.filled_amount} decimals={4} />
+                <DecimalDisplay value={slOrder.filled_qty} decimals={4} />
               </div>
             </div>
             <div>

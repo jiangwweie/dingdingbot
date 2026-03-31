@@ -1,5 +1,43 @@
 # 进度日志
 
+## 2026-04-01 - Phase 6 所有 P1 问题修复完成 ✅
+
+### 完成工作
+
+**Phase 6 代码审查 MAJ P1 问题全部修复** ✅
+
+#### 修复的问题汇总
+
+| 编号 | 严重性 | 问题 | 修复 | 状态 |
+|------|--------|------|------|------|
+| MAJ-003 | P1 | 订单列表端点返回类型错误 | 改为 `OrdersResponse` | ✅ 已修复 |
+| MAJ-007 | P1 | PositionsResponse 缺少 `total_margin_used` | 添加字段 | ✅ 已修复 |
+| MAJ-009 | P1 | OrdersTable 价格显示逻辑 | 优先显示 `average_exec_price` | ✅ 已修复 |
+| MAJ-010 | P1 | PositionsTable 缺少原始数量列 | 添加 `original_qty` 列 | ✅ 已修复 |
+| MAJ-011 | P1 | Account 页面使用 mock 数据 | 替换为真实历史快照 API | ✅ 已修复 |
+
+#### Git 提交
+
+```
+bd8d85c fix(phase6): 完成 P1 问题修复 - 字段对齐与组件增强
+cc2ff3d fix: Phase 6 MAJ P1 问题修复（OrdersTable/PositionsTable/Account）
+24a91b6 fix: 修复 Phase 6 代码审查 MAJ-003 和 MIN-002 问题
+fb92c50 fix(phase6): 修复代码审查严重问题 (CRIT-001, CRIT-002)
+```
+
+#### 最终验证
+
+- ✅ 后端 Python 语法通过
+- ✅ 前端 TypeScript 编译通过
+- ✅ 前后端字段命名完全对齐契约表
+- ✅ 所有 P0 和 P1 问题已修复
+
+### 下一步
+
+- [ ] E2E 集成测试 (P6-008) - **等待用户确认**
+
+---
+
 ## 2026-03-31 - Phase 6 MAJ P1 问题修复
 
 ### 完成工作
