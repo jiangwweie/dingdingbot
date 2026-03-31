@@ -1,5 +1,98 @@
 # 进度日志
 
+## 2026-03-31 - Phase 5 E2E 集成测试完成
+
+### 完成工作
+
+**Phase 5 E2E 集成测试 - 三个窗口全部通过 (19/19)**
+
+### Window 1: 订单执行 + 资金保护 (6/6) ✅
+- 市价单下单并成交
+- 限价单挂出并取消
+- 止损市价单（触发后自动移除）
+- 订单状态查询
+- 账户余额查询（5000 USDT 测试网资金）
+- 持仓查询
+
+### Window 2: DCA + 持仓管理 (6/6) ✅
+- DCA 第一批市价单执行
+- DCA 限价单挂出并取消
+- 持仓状态追踪
+- 止盈订单链（TP1-TP2）
+- 止损订单创建
+- 完整平仓流程（开仓→平仓）
+
+### Window 3: 对账服务 + WebSocket 推送 (7/7) ✅
+- WebSocket 连接就绪
+- 订单状态变更推送（轮询方式）
+- 对账服务基础功能
+- 账户余额对账
+- 持仓对账
+- Grace Period 处理
+- 飞书告警通知
+
+### 技术成果
+1. **修复关键问题**:
+   - `cancel_order` 和 `fetch_order` 参数顺序修正为 `(order_id, symbol)`
+   - 使用 `exchange_order_id` 而非系统 `order_id`
+   - 止损单触发后自动移除的正常行为处理
+
+2. **新增测试文件**:
+   - `tests/e2e/test_phase5_window1_real.py` - Window 1 测试
+   - `tests/e2e/test_phase5_window2_real.py` - Window 2 测试
+   - `tests/e2e/test_phase5_window3_real.py` - Window 3 测试
+
+3. **验证功能**:
+   - Binance Testnet 连接稳定（demo-fapi.binance.com）
+   - 飞书告警推送正常
+   - 对账服务可正常运行
+
+**Git 提交**:
+```
+<待提交>
+```
+
+### 相关文件
+- `tests/e2e/test_phase5_window*_real.py` - E2E 测试文件
+- `src/infrastructure/exchange_gateway.py` - 交易所网关（已修复）
+
+---
+
+## 2026-03-31 - Agent Team 开工/收工规范实施
+
+### 完成工作
+
+**实施分层开工/收工检查清单（基于 v2 项目经验）**
+
+1. **创建项目级规范**
+   - `.claude/team/WORKFLOW.md` - 所有角色共同遵守的开工/收工规范
+
+2. **更新 5 个角色专属检查清单**
+   - `team-coordinator/SKILL.md` - 添加 Pre-Flight/Post-Flight 检查清单
+   - `backend-dev/SKILL.md` - 添加后端专属开工/收工规范
+   - `frontend-dev/SKILL.md` - 添加前端专属开工/收工规范
+   - `qa-tester/SKILL.md` - 添加 QA 专属开工/收工规范
+   - `code-reviewer/SKILL.md` - 添加 Reviewer 专属开工/收工规范
+
+3. **核心改进**
+   - 开工前强制规划（调用 planning-with-files-zh）
+   - 收工标准化验证（测试、文档、推送）
+   - 各角色专属验证命令（类型检查、构建、覆盖率）
+   - 文档更新纳入流程，确保知识沉淀
+
+**Git 提交**:
+```
+2ae1a87 feat: 为 Agent Team 所有角色添加开工/收工检查清单
+ - 6 files changed, 528 insertions(+)
+ - 创建 .claude/team/WORKFLOW.md
+```
+
+### 相关文件
+- `.claude/team/WORKFLOW.md` - 项目级规范
+- `.claude/team/*/SKILL.md` - 各角色专属规范
+
+---
+
 ## 2026-03-31 - 文件结构重组收尾（清理临时文件）
 
 ### 完成工作

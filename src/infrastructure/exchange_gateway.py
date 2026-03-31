@@ -103,37 +103,49 @@ class ExchangeGateway:
         self._order_local_state: Dict[str, Dict[str, Any]] = {}  # order_id -> {filled_qty, status, updated_at}
 
     def _create_rest_exchange(self, options: Dict[str, Any]):
-        """Create REST exchange instance"""
+        """Create REST exchange instance
+
+        CCXT 币安合约测试网连接指南:
+        - 旧方法 (已废弃): set_sandbox_mode(True) - 可能导致 Endpoint 路由错误
+        - 新方法 (CCXT v4.5.6+): enable_demo_trading(True) - 自动切换到 demo-fapi.binance.com
+        """
         config = {
             'apiKey': self.api_key,
             'secret': self.api_secret,
             'enableRateLimit': True,
             'options': {
-                'defaultType': 'swap',  # Force swap/futures mode
-                'warnOnFetchOpenOrdersWithoutSymbol': False,  # Suppress CCXT warnings
+                'defaultType': 'future',  # USDT-M Futures
+                'warnOnFetchOpenOrdersWithoutSymbol': False,
             }
         }
 
         # Merge user-provided options
         if options:
             config['options'].update(options)
-
-        if self.testnet:
-            config['sandboxMode'] = True
 
         # Create exchange by name
         exchange_class = getattr(ccxt_async, self.exchange_name)
-        return exchange_class(config)
+        exchange = exchange_class(config)
+
+        # 币安测试网：使用新的 enable_demo_trading 方法
+        if self.testnet and self.exchange_name.lower() == 'binance':
+            exchange.enable_demo_trading(True)
+
+        return exchange
 
     def _create_ws_exchange(self, options: Dict[str, Any]):
-        """Create WebSocket exchange instance"""
+        """Create WebSocket exchange instance
+
+        CCXT Pro 币安合约测试网 WebSocket:
+        - 自动路由到 wss://demo-stream.binancefuture.com
+        """
         config = {
             'apiKey': self.api_key,
             'secret': self.api_secret,
             'enableRateLimit': True,
             'options': {
-                'defaultType': 'swap',  # Force swap/futures mode
-                'warnOnFetchOpenOrdersWithoutSymbol': False,  # Suppress CCXT warnings
+                'defaultType': 'future',  # USDT-M Futures
+                'warnOnFetchOpenOrdersWithoutSymbol': False,
             }
         }
 
@@ -141,12 +153,15 @@ class ExchangeGateway:
         if options:
             config['options'].update(options)
 
-        if self.testnet:
-            config['sandboxMode'] = True
-
         # Create exchange by name
         exchange_class = getattr(ccxtpro, self.exchange_name)
-        return exchange_class(config)
+        exchange = exchange_class(config)
+
+        # 币安测试网：使用新的 enable_demo_trading 方法
+        if self.testnet and self.exchange_name.lower() == 'binance':
+            exchange.enable_demo_trading(True)
+
+        return exchange
 
     # ============================================================
     # Lifecycle Management
@@ -747,6 +762,14 @@ class ExchangeGateway:
                 'reduceOnly': reduce_only,
             }
 
+            # 止损单需要 triggerPrice 参数
+            if order_type == "stop_market" and trigger_price is not None:
+                params['triggerPrice'] = str(trigger_price)
+                # CCXT 要求 stop 订单必须有 price 参数，即使是 stop_market
+                # 使用 trigger_price 作为 price 传递
+                if price is None:
+                    price = trigger_price
+
             if client_order_id:
                 params['clientOrderId'] = client_order_id
 
@@ -830,7 +853,7 @@ class ExchangeGateway:
         import ccxt
 
         try:
-            # 调用 CCXT cancel_order 方法
+            # CCXT cancel_order 参数顺序：(id, symbol) - 注意 id 在前
             order = await self.rest_exchange.cancel_order(order_id, symbol)
 
             # 解析订单状态
@@ -885,7 +908,7 @@ class ExchangeGateway:
         import ccxt
 
         try:
-            # 调用 CCXT fetch_order 方法
+            # CCXT fetch_order 参数顺序：(id, symbol) - 注意 id 在前
             order = await self.rest_exchange.fetch_order(order_id, symbol)
 
             # 解析订单状态
