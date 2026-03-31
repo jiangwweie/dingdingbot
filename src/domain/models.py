@@ -1135,6 +1135,19 @@ class OrderResponseFull(FinancialModel):
     tags: List[dict] = Field(default_factory=list, description="动态标签列表")
 
 
+class OrdersResponse(FinancialModel):
+    """
+    订单列表分页响应模型
+
+    Phase 6: v3.0 API - GET /api/v3/orders 响应体
+    Reference: docs/designs/phase6-v3-api-contract.md Section 2.1.3
+    """
+    items: List[OrderResponseFull] = Field(..., description="订单列表")
+    total: int = Field(..., description="订单总数")
+    limit: int = Field(..., description="分页限制数量")
+    offset: int = Field(default=0, description="分页偏移量")
+
+
 class OrderCancelResponse(FinancialModel):
     """
     取消订单响应模型

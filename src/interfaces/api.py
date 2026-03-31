@@ -46,7 +46,7 @@ from src.domain.models import (
     AttemptQuery, AttemptDeleteRequest, AttemptDeleteResponse,
     BacktestRequest, BacktestReport, SignalStatus, SignalTrack,
     # Phase 6 v3 API Models
-    OrderRequest, OrderResponseFull, OrderCancelResponse,
+    OrderRequest, OrderResponseFull, OrderCancelResponse, OrdersResponse,
     PositionInfoV3, PositionResponse,
     AccountBalance, AccountResponse,
     ReconciliationRequest, ReconciliationReport,
@@ -1966,7 +1966,12 @@ async def create_order(request: OrderRequest) -> OrderResponseFull:
             client_order_id=request.client_order_id,
         )
 
-        # 7. 构建完整响应
+        # 7. 记录请求日志（client_order_id 脱敏）
+        client_order_id_display = mask_secret(request.client_order_id) if request.client_order_id else "N/A"
+        logger.info(f"创建订单请求：symbol={request.symbol}, side={side}, type={ccxt_order_type}, "
+                    f"quantity={request.quantity}, client_order_id={client_order_id_display}")
+
+        # 8. 构建完整响应
         now = int(datetime.now(timezone.utc).timestamp() * 1000)
         return OrderResponseFull(
             order_id=result.order_id,
@@ -2123,12 +2128,13 @@ async def get_order(order_id: str, symbol: str = Query(..., description="币种�
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v3/orders", response_model=List[OrderResponseFull])
+@app.get("/api/v3/orders", response_model=OrdersResponse)
 async def list_orders(
     symbol: Optional[str] = Query(None, description="币种对过滤"),
     status: Optional[OrderStatus] = Query(None, description="订单状态过滤"),
     limit: int = Query(default=50, ge=1, le=200, description="结果数量限制"),
-) -> List[OrderResponseFull]:
+    offset: int = Query(default=0, ge=0, description="分页偏移量"),
+) -> OrdersResponse:
     """
     查询订单列表（v3 API）
 
@@ -2139,9 +2145,10 @@ async def list_orders(
         symbol: 币种对过滤（可选）
         status: 订单状态过滤（可选）
         limit: 结果数量限制（1-200）
+        offset: 分页偏移量（默认 0）
 
     Returns:
-        List[OrderResponseFull]: 订单列表
+        OrdersResponse: 分页订单列表响应 {items, total, limit, offset}
 
     Raises:
         HTTPException:
@@ -2154,7 +2161,7 @@ async def list_orders(
         # 调用 ExchangeGateway 查询订单列表
         # 注意：CCXT 没有直接的 list_orders API，需要从订单存储或缓存中获取
         # 这里返回空列表，实际实现需要 OrderRepository
-        return []
+        return OrdersResponse(items=[], total=0, limit=limit, offset=offset)
 
     except HTTPException:
         raise
@@ -2355,7 +2362,120 @@ async def get_account_snapshot() -> AccountResponse:
 
 
 # ------------------------------------------------------------
-# 5. Order Check Endpoint (Capital Protection)
+# 6. Account Historical Snapshots Endpoint (Equity Curve)
+# ------------------------------------------------------------
+from pydantic import BaseModel
+
+
+class HistoricalSnapshot(BaseModel):
+    """历史账户快照数据点"""
+    timestamp: int              # 毫秒时间戳
+    total_equity: str           # 总权益 (Decimal string)
+
+
+class HistoricalSnapshotsResponse(BaseModel):
+    """历史快照响应"""
+    snapshots: List[HistoricalSnapshot]
+    days: int                   # 天数
+
+
+@app.get("/api/v3/account/snapshots/historical", response_model=HistoricalSnapshotsResponse)
+async def get_account_historical_snapshots(
+    days: int = Query(default=7, ge=1, le=90, description="获取最近 N 天的历史数据")
+) -> HistoricalSnapshotsResponse:
+    """
+    查询账户历史快照（权益曲线数据）
+
+    Phase 6: v3.0 账户管理 - GET /api/v3/account/snapshots/historical
+    从信号历史中计算每日账户权益，用于绘制权益曲线
+
+    Args:
+        days: 获取最近 N 天的数据 (1-90 天)
+
+    Returns:
+        HistoricalSnapshotsResponse: 历史快照列表
+
+    Raises:
+        HTTPException:
+            - 500: 计算失败
+    """
+    try:
+        repo = _get_repository()
+
+        # 计算时间范围
+        now = datetime.now(timezone.utc)
+        from datetime import timedelta
+        start_time = now - timedelta(days=days)
+
+        # 获取历史信号（用于计算 PnL）
+        signals_result = await repo.get_signals(
+            limit=1000,
+            offset=0,
+            start_time=start_time.isoformat(),
+            end_time=now.isoformat(),
+        )
+
+        signals = signals_result.get("data", [])
+
+        # 获取当前账户快照作为基准
+        current_snapshot = await get_account_balance()
+        current_equity = float(current_snapshot.total_equity)
+
+        # 按日期分组计算累计 PnL
+        daily_pnl: Dict[str, float] = {}
+        for signal in signals:
+            if signal.get("pnl_ratio"):
+                try:
+                    pnl = float(signal["pnl_ratio"])
+                    created_at = signal.get("created_at", "")
+                    if created_at:
+                        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        date_key = dt.strftime("%Y-%m-%d")
+                        daily_pnl[date_key] = daily_pnl.get(date_key, 0) + pnl
+                except (ValueError, TypeError):
+                    continue
+
+        # 生成历史快照数据
+        snapshots: List[HistoricalSnapshot] = []
+        cumulative_pnl = 0.0
+
+        # 生成每天的快照
+        for i in range(days):
+            date = (now - timedelta(days=days - 1 - i)).date()
+            date_key = date.strftime("%Y-%m-%d")
+
+            # 累加当天的 PnL
+            if date_key in daily_pnl:
+                cumulative_pnl += daily_pnl[date_key]
+
+            # 估算权益（当前权益 - 累计 PnL = 初始权益 + 累计 PnL）
+            estimated_equity = current_equity - cumulative_pnl
+
+            # 生成时间戳（当天结束时间）
+            timestamp = int(datetime(
+                date.year, date.month, date.day,
+                23, 59, 59, tzinfo=timezone.utc
+            ).timestamp() * 1000)
+
+            snapshots.append(HistoricalSnapshot(
+                timestamp=timestamp,
+                total_equity=str(round(estimated_equity, 2))
+            ))
+
+        return HistoricalSnapshotsResponse(
+            snapshots=snapshots,
+            days=days
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取历史快照失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------
+# 7. Order Check Endpoint (Capital Protection)
 # ------------------------------------------------------------
 from src.domain.models import OrderCheckRequest, CapitalProtectionCheckResult, SingleTradeCheck, PositionLimitCheck, DailyLossCheck, TradeCountCheck, MinBalanceCheck
 
