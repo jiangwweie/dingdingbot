@@ -191,6 +191,8 @@ export interface PositionInfo {
   direction: Direction;
   /** 当前持仓数量 (Decimal string) */
   current_qty: string;
+  /** 原始数量 (Decimal string) */
+  original_qty: string;
   /** 开仓均价 (Decimal string) */
   entry_price: string;
   /** 标记价格 (Decimal string 或 null) */
@@ -215,10 +217,16 @@ export interface PositionInfo {
   total_fees_paid: string;
   /** 关联策略名称 */
   strategy_name: string | null;
+  /** 关联信号 ID */
+  signal_id: string | null;
   /** 止损价格 (Decimal string 或 null) */
   stop_loss: string | null;
   /** 止盈价格 (Decimal string 或 null) */
   take_profit: string | null;
+  /** 止盈订单链 (TP1-TP5) */
+  take_profit_orders: OrderResponse[];
+  /** 止损订单 */
+  stop_loss_order: OrderResponse | null;
   /** 持仓标签列表 */
   tags: Tag[];
 }

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { Table, TrendingUp, TrendingDown, DollarSign, Percent, Activity, Award, ClipboardList } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import type { PMSBacktestReport } from '../../../lib/api';

@@ -1,5 +1,184 @@
 # 研究发现
 
+## P6-005: 账户净值曲线可视化 (2026-03-31)
+
+### 组件清单
+
+**新建组件**:
+| 组件 | 路径 | 功能 |
+|------|------|------|
+| `AccountOverviewCards` | `web-front/src/components/v3/AccountOverviewCards.tsx` | 账户概览卡片（总权益、可用余额、未实现盈亏、保证金占用） |
+| `EquityCurveChart` | `web-front/src/components/v3/EquityCurveChart.tsx` | 净值曲线图表（Recharts AreaChart） |
+| `PnLStatisticsCards` | `web-front/src/components/v3/PnLStatisticsCards.tsx` | 盈亏统计卡片（日/周/月/总盈亏） |
+| `PositionDistributionPie` | `web-front/src/components/v3/PositionDistributionPie.tsx` | 仓位分布饼图（Recharts PieChart） |
+| `DateRangeSelector` | `web-front/src/components/v3/DateRangeSelector.tsx` | 日期范围选择器（7 天/30 天/90 天） |
+
+**页面**:
+- `Account.tsx` - 主页面（/account）
+
+### 技术实现
+
+#### 1. AccountOverviewCards 组件
+
+**功能**:
+- 4 张账户概览卡片网格布局
+- 总权益（USDT）- Wallet 图标
+- 可用余额（USDT）- Lock 图标
+- 未实现盈亏（USDT）- TrendingUp/TrendingDown 图标（正绿负红）
+- 保证金占用（USDT）- Lock 图标（橙色）
+
+**设计特点**:
+- Apple 风格圆角卡片（rounded-2xl）
+- 悬停阴影效果（hover:shadow-md）
+- DecimalDisplay 组件统一格式化
+- 响应式布局（md:grid-cols-2, lg:grid-cols-4）
+
+#### 2. EquityCurveChart 组件
+
+**功能**:
+- 使用 Recharts AreaChart 绘制净值曲线
+- 支持 7 天/30 天/90 天时间范围切换
+- 渐变填充区域（blue-500 with opacity gradient）
+- 起始净值参考线（ReferenceLine）
+- 自适应 Y 轴 domain（min/max ± 10% padding）
+
+**数据处理**:
+```typescript
+// 按日期分组并计算日均值
+const equityMap = new Map<string, number[]>();
+snapshots.forEach((snapshot) => {
+  const dateStr = formatDate(snapshot.timestamp);
+  equityMap.get(dateStr).push(parseFloat(snapshot.total_equity));
+});
+// 计算每日平均净值
+return Array.from(equityMap.entries()).map(([date, equities]) => ({
+  date,
+  equity: equities.reduce((sum, e) => sum + e, 0) / equities.length,
+}));
+```
+
+**图表配置**:
+- 渐变定义：`<linearGradient id="equityGradient">`
+- 网格线：`<CartesianGrid strokeDasharray="3 3" />`
+- Tooltip：自定义样式（白底圆角阴影）
+- 参考线：起始净值水平虚线
+
+#### 3. PnLStatisticsCards 组件
+
+**功能**:
+- 4 张盈亏统计卡片（日/周/月/总）
+- 正盈亏绿色 TrendingUp 图标
+- 负盈亏红色 TrendingDown 图标
+- 零盈亏灰色显示
+- DecimalDisplay 支持 +/- 前缀
+
+**颜色语义**:
+```typescript
+const isPositive = value > 0;
+const isNegative = value < 0;
+// 正绿负红零灰
+className = isPositive ? 'text-apple-green' : isNegative ? 'text-apple-red' : 'text-gray-900';
+```
+
+#### 4. PositionDistributionPie 组件
+
+**功能**:
+- 使用 Recharts PieChart 绘制仓位分布饼图
+- 甜甜圈样式（innerRadius=60, outerRadius=80）
+- Apple 风格配色（blue/violet/cyan/lime/amber/pink/red/emerald）
+- Tooltip 显示价值和百分比
+- Legend 显示币种和占比
+
+**数据处理**:
+```typescript
+// 计算仓位价值分布
+const positionValues = positions.map((pos) => ({
+  symbol: pos.symbol.replace(':USDT', ''),
+  value: parseFloat(pos.quantity) * parseFloat(pos.entry_price),
+  direction: pos.direction,
+}));
+// 计算百分比
+const totalValue = positionValues.reduce((sum, p) => sum + p.value, 0);
+return positionValues.map((p, index) => ({
+  ...p,
+  percentage: totalValue > 0 ? (p.value / totalValue) * 100 : 0,
+  color: COLORS[index % COLORS.length],
+}));
+```
+
+#### 5. DateRangeSelector 组件
+
+**功能**:
+- 3 个选项按钮（7 天/30 天/90 天）
+- 选中状态白色背景 + 阴影
+- 未选中状态灰色文字 + hover 效果
+- 圆角分组背景（bg-gray-100 p-1）
+
+### API 集成
+
+**依赖 P6-002 API**:
+- `fetchAccountSnapshot()` - 获取账户快照
+- `fetchPositions()` - 获取持仓列表（用于饼图）
+- `fetchSignals()` - 获取历史信号（用于 PnL 计算）
+
+**数据更新策略**:
+```typescript
+// 账户快照 30 秒刷新
+useSWR('/api/v3/account/snapshot', fetcher, { refreshInterval: 30000 });
+
+// 持仓列表 30 秒刷新
+useSWR('/api/v3/positions?is_closed=false', fetcher, { refreshInterval: 30000 });
+
+// 信号数据 60 秒刷新
+useSWR('/api/signals?limit=1000', fetcher, { refreshInterval: 60000 });
+```
+
+### UI/UX 设计
+
+**Apple 风格设计元素**:
+- 大圆角卡片（rounded-2xl）
+- 细腻边框（border-gray-100）
+- 轻阴影（shadow-sm, hover:shadow-md）
+- 渐变背景（仅图表区域）
+- 平滑过渡动画（transition-all）
+
+**颜色语义**:
+| 场景 | 颜色 |
+|------|------|
+| 总权益/可用余额 | gray-900 |
+| 未实现盈亏（正） | apple-green |
+| 未实现盈亏（负） | apple-red |
+| 保证金占用 | apple-orange |
+| 图表主色 | blue-500 |
+| 饼图配色 | 8 色循环（blue/violet/cyan/lime/amber/pink/red/emerald） |
+
+### 验收状态
+
+| 验收项 | 状态 |
+|--------|------|
+| 账户概览卡片正确显示所有字段 | ✅ |
+| 净值曲线图表正确绘制（支持时间范围切换） | ✅ |
+| 盈亏统计卡片颜色正确（正绿负红） | ✅ |
+| 仓位分布饼图显示各币种占比 | ✅ |
+| TypeScript 类型检查通过 | ✅ |
+| 响应式布局正常 | ✅ |
+
+### TypeScript 编译验证
+
+```bash
+npm run build
+# ✓ 3425 modules transformed.
+# ✓ built in 2.31s
+```
+
+### 依赖关系
+
+- P6-002: `fetchAccountSnapshot()`, `fetchPositions()` API 函数
+- types/order.ts: `AccountSnapshot`, `AccountBalance`, `PositionInfo` 类型定义
+- Recharts: AreaChart, PieChart, Tooltip, Legend, ResponsiveContainer
+
+---
+
 ## P6-007: 多级别止盈可视化 (2026-03-31)
 
 ### 组件清单

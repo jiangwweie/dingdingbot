@@ -1,3 +1,137 @@
+# 任务计划 - P6-005 账户净值曲线可视化
+
+> **创建日期**: 2026-03-31
+> **负责人**: @frontend
+> **优先级**: P1
+> **预计工时**: 4 小时
+
+---
+
+## 任务目标
+
+实现 v3.0 账户页面，显示账户余额、权益曲线、盈亏统计。
+
+**相关文件**:
+- **契约表**: `docs/designs/phase6-v3-api-contract.md` Section 2.5-2.6
+- **类型定义**: `web-front/src/types/order.ts` - AccountBalance, AccountSnapshot
+- **API 调用**: 依赖 P6-002 的 `fetchAccountBalance()`, `fetchAccountSnapshot()` 函数
+- **现有页面**: `web-front/src/pages/Account.tsx` - 参考卡片布局模式
+
+---
+
+## 阶段分解
+
+### 阶段 1: 基础组件创建 ✅
+
+- [x] `AccountOverviewCards.tsx` - 账户概览卡片组件（4 张卡片）
+- [x] `DateRangeSelector.tsx` - 日期范围选择器（7 天/30 天/90 天）
+
+### 阶段 2: 图表组件创建 ✅
+
+- [x] `EquityCurveChart.tsx` - 净值曲线图表（Recharts AreaChart）
+- [x] `PositionDistributionPie.tsx` - 仓位分布饼图（Recharts PieChart）
+
+### 阶段 3: 统计组件创建 ✅
+
+- [x] `PnLStatisticsCards.tsx` - 盈亏统计卡片（日/周/月/总盈亏）
+
+### 阶段 4: 主页面开发 ✅
+
+- [x] `Account.tsx` - 主页面（/account）
+- [x] 账户概览功能
+- [x] 净值曲线图表（支持时间范围切换）
+- [x] 盈亏统计卡片
+- [x] 仓位分布饼图
+- [x] 账户明细表格
+
+### 阶段 5: 路由集成与测试 ✅
+
+- [x] 添加路由到 App.tsx
+- [x] TypeScript 编译验证
+- [x] 页面功能自测
+
+---
+
+## 组件结构
+
+```
+web-front/src/pages/Account.tsx
+web-front/src/components/v3/
+├── AccountOverviewCards.tsx      # 账户概览卡片（总权益、可用余额、未实现盈亏、保证金占用）
+├── EquityCurveChart.tsx          # 净值曲线图表（Recharts AreaChart）
+├── PnLStatisticsCards.tsx        # 盈亏统计卡片
+├── PositionDistributionPie.tsx   # 仓位分布饼图
+└── DateRangeSelector.tsx         # 日期范围选择器（7 天/30 天/90 天）
+```
+
+---
+
+## 技术栈
+
+- React 19 + TypeScript + Vite 6.x
+- TailwindCSS 4.x (Apple 风格设计)
+- Recharts (图表库)
+- SWR (数据获取)
+
+---
+
+## 验收标准
+
+1. ✅ 账户概览卡片正确显示所有字段（总权益、可用余额、未实现盈亏、保证金占用）
+2. ✅ 净值曲线图表正确绘制（支持时间范围切换）
+3. ✅ 盈亏统计卡片颜色正确（正绿负红）
+4. ✅ 仓位分布饼图显示各币种占比
+5. ✅ TypeScript 类型检查通过
+6. ✅ 响应式布局正常
+
+---
+
+## 进度记录
+
+| 日期 | 完成工作 | 状态 |
+|------|----------|------|
+| 2026-03-31 | 阶段 1-2: 基础组件和图表组件 | ✅ 已完成 |
+| 2026-03-31 | 阶段 3: 统计组件创建 | ✅ 已完成 |
+| 2026-03-31 | 阶段 4: 主页面开发 | ✅ 已完成 |
+| 2026-03-31 | 阶段 5: 路由集成与测试 | ✅ 已完成 |
+
+---
+
+## 交付清单
+
+### 已创建的组件
+
+| 组件 | 文件路径 | 说明 |
+|------|----------|------|
+| `AccountOverviewCards` | `web-front/src/components/v3/AccountOverviewCards.tsx` | 账户概览卡片（总权益、可用余额、未实现盈亏、保证金占用） |
+| `EquityCurveChart` | `web-front/src/components/v3/EquityCurveChart.tsx` | 净值曲线图表（Recharts AreaChart） |
+| `PnLStatisticsCards` | `web-front/src/components/v3/PnLStatisticsCards.tsx` | 盈亏统计卡片（日/周/月/总盈亏） |
+| `PositionDistributionPie` | `web-front/src/components/v3/PositionDistributionPie.tsx` | 仓位分布饼图 |
+| `DateRangeSelector` | `web-front/src/components/v3/DateRangeSelector.tsx` | 日期范围选择器 |
+| `Account` | `web-front/src/pages/Account.tsx` | 主页面 |
+
+### TypeScript 编译验证
+
+```bash
+npm run build
+# ✓ 3425 modules transformed.
+# ✓ built in 2.31s
+```
+
+**结果**: ✅ 编译通过，无错误
+
+---
+
+## 技术发现
+
+详见 `docs/planning/findings.md` - P6-005 条目
+
+---
+
+*最后更新：2026-03-31*
+
+---
+
 # 任务计划 - P6-003 仓位管理页面开发
 
 > **创建日期**: 2026-03-31
@@ -16,6 +150,120 @@
 - **类型定义**: `web-front/src/types/order.ts` - PositionInfo, PositionResponse
 - **API 调用**: P6-002 的 `fetchPositions()`, `closePosition()` 函数
 - **参考页面**: `web-front/src/pages/Signals.tsx` - 表格组件模式
+
+---
+
+# 任务计划 - P6-007 多级别止盈可视化
+
+> **创建日期**: 2026-03-31
+> **负责人**: @frontend
+> **优先级**: P1
+> **预计工时**: 2 小时
+
+---
+
+## 任务目标
+
+在仓位详情页实现多级别止盈（TP1-TP5）可视化展示和 SL 止损订单展示。
+
+**相关文件**:
+- **契约表**: `docs/designs/phase6-v3-api-contract.md` Section 2.4 PositionInfo
+- **类型定义**: `web-front/src/types/order.ts` - OrderInfo, Tag
+- **依赖组件**: P6-003 已创建的 `PositionDetailsDrawer.tsx`
+
+---
+
+## 阶段分解
+
+### 阶段 1: 基础组件创建 ✅
+
+- [x] `TPProgressBar.tsx` - 单个 TP 订单进度条组件（成交进度、盈亏比例）
+- [x] `TakeProfitStats.tsx` - 止盈统计卡片组件（已实现/未实现/总目标止盈）
+
+### 阶段 2: 详情组件增强 ✅
+
+- [x] `TPChainDisplay.tsx` - 集成 TPProgressBar 和 TakeProfitStats，支持 TP1-TP5 可视化
+- [x] `SLOrderDisplay.tsx` - 新增止损距离百分比、止损进度条可视化
+
+### 阶段 3: 与仓位详情页集成 ✅
+
+- [x] `PositionDetailsDrawer.tsx` - 已集成 TPChainDisplay 和 SLOrderDisplay 组件
+
+### 阶段 4: TypeScript 编译验证 ✅
+
+- [x] TypeScript 编译验证通过
+
+---
+
+## 组件结构
+
+```
+web-front/src/components/v3/
+├── TPChainDisplay.tsx          # 止盈订单链展示（TP1-TP5 列表 + 进度条）
+├── SLOrderDisplay.tsx          # 止损订单展示（触发价、距离、进度条）
+├── TPProgressBar.tsx           # 单个 TP 订单进度条
+├── TakeProfitStats.tsx         # 止盈统计卡片
+├── PositionDetailsDrawer.tsx   # 仓位详情抽屉（已集成上述组件）
+└── ...其他组件
+```
+
+---
+
+## 技术栈
+
+- React 19 + TypeScript + Vite 6.x
+- TailwindCSS 4.x (Apple 风格设计)
+- Lucide React (图标)
+
+---
+
+## 验收标准
+
+1. ✅ TP1-TP5 订单信息正确显示
+2. ✅ 止盈进度条可视化正确（0-100%）
+3. ✅ 止损距离百分比计算正确
+4. ✅ 止盈统计数据显示完整
+5. ✅ TypeScript 类型检查通过
+6. ✅ 与仓位详情页无缝集成
+
+---
+
+## 进度记录
+
+| 日期 | 完成工作 | 状态 |
+|------|----------|------|
+| 2026-03-31 | 阶段 1-2: 基础组件和详情组件增强 | ✅ 已完成 |
+| 2026-03-31 | 阶段 3: 与仓位详情页集成 | ✅ 已完成 |
+| 2026-03-31 | 阶段 4: TypeScript 编译验证 | ✅ 已完成 |
+
+---
+
+## 交付清单
+
+### 已创建/增强的组件
+
+| 组件 | 文件路径 | 说明 |
+|------|----------|------|
+| `TPProgressBar` | `web-front/src/components/v3/TPProgressBar.tsx` | 单个 TP 订单进度条（成交进度、盈亏比例） |
+| `TakeProfitStats` | `web-front/src/components/v3/TakeProfitStats.tsx` | 止盈统计卡片（已实现/未实现/总目标止盈） |
+| `TPChainDisplay` (增强) | `web-front/src/components/v3/TPChainDisplay.tsx` | 集成 TPProgressBar 和 TakeProfitStats |
+| `SLOrderDisplay` (增强) | `web-front/src/components/v3/SLOrderDisplay.tsx` | 新增止损距离百分比、止损进度条 |
+
+### TypeScript 编译验证
+
+```bash
+npm run build
+# ✓ 3425 modules transformed.
+# ✓ built in 2.36s
+```
+
+**结果**: ✅ 编译通过，无错误
+
+---
+
+## 技术发现
+
+详见 `docs/planning/findings.md` - P6-007 条目
 
 ---
 

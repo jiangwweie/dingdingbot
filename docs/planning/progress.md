@@ -1,53 +1,80 @@
 # 进度日志
 
-## 2026-03-31 - P6-007 多级别止盈可视化完成
+## 2026-03-31 - Phase 6 第二波并行开发完成（账户/回测/止盈）
 
 ### 完成工作
 
-**P6-007: 多级别止盈可视化** ✅
+**Phase 6 第二波并行 Agent 开发 - 全部完成** ✅
 
-实现仓位详情页的多级别止盈（TP1-TP5）可视化展示和止损订单展示。
+**任务状态**:
+| 任务 | Agent | 状态 | 交付物 |
+|------|-------|------|--------|
+| P6-005: 账户净值曲线可视化 | `afe3402fbe5b2e6a9` | ✅ 完成 | Account.tsx + 5 组件 |
+| P6-006: PMS 回测报告组件 | `a83da6640e9e6f19a` | ✅ 完成 | 5 个回测组件 |
+| P6-007: 多级别止盈可视化 | `a79c59da237614eb7` | ✅ 完成 | TP/SL 增强组件 |
 
-#### 新增组件
+### P6-005: 账户净值曲线可视化 ✅
 
-1. **TPProgressBar.tsx** (`web-front/src/components/v3/TPProgressBar.tsx`)
-   - 单个 TP 订单的成交进度条（0-100%）
-   - 盈亏比例计算（基于入场价和止盈价）
-   - 状态图标（待触发/执行中/已完成）
-   - 已成交数量 / 订单数量显示
+**新增组件 (6 个)**:
+- `Account.tsx` - 账户主页面（/v3/account）
+- `AccountOverviewCards.tsx` - 账户概览卡片（总权益/可用余额/未实现盈亏/保证金占用）
+- `EquityCurveChart.tsx` - 净值曲线图表（Recharts，支持 7 天/30 天/90 天）
+- `PnLStatisticsCards.tsx` - 盈亏统计卡片（日/周/月/总盈亏）
+- `PositionDistributionPie.tsx` - 仓位分布饼图
+- `DateRangeSelector.tsx` - 日期范围选择器
 
-2. **TakeProfitStats.tsx** (`web-front/src/components/v3/TakeProfitStats.tsx`)
-   - 4 个统计卡片网格：
-     - 已实现止盈（已完成订单的盈亏）
-     - 未实现止盈（部分成交订单的未成交部分盈亏）
-     - 总目标止盈（所有订单完全成交的理论盈亏）
-     - 执行进度（已成交数量 / 总数量百分比）
-   - 总体执行进度条可视化
+### P6-006: PMS 回测报告组件 ✅
 
-#### 增强组件
+**新增组件 (5 个)**:
+- `BacktestOverviewCards.tsx` - 回测概览卡片（收益率/最大回撤/夏普比率/胜率）
+- `EquityComparisonChart.tsx` - 权益曲线对比图（策略 vs 基准）
+- `TradeStatisticsTable.tsx` - 交易统计表格
+- `PnLDistributionHistogram.tsx` - 盈亏分布直方图
+- `MonthlyReturnHeatmap.tsx` - 月度收益热力图
 
-1. **TPChainDisplay.tsx** (`web-front/src/components/v3/TPChainDisplay.tsx`)
-   - 集成 TPProgressBar 和 TakeProfitStats
-   - 新结构：标题 + 统计卡片 + TP 订单明细列表
-   - 支持 TP1-TP5 排序显示
+### P6-007: 多级别止盈可视化 ✅
 
-2. **SLOrderDisplay.tsx** (`web-front/src/components/v3/SLOrderDisplay.tsx`)
-   - 新增止损距离百分比计算
-   - 止损进度条可视化（安全区域→危险区域渐变）
-   - 标记价格支持（通过 `markPrice` prop 传入）
-   - 状态提示（安全/关注/危险三级颜色）
-
-#### 技术实现
+**新增/增强组件 (4 个)**:
+- `TPProgressBar.tsx` - 止盈进度条（0-100%）
+- `TakeProfitStats.tsx` - 止盈统计卡片（已实现/未实现/总目标/执行进度）
+- `TPChainDisplay.tsx` - 增强（集成进度条和统计）
+- `SLOrderDisplay.tsx` - 增强（止损距离百分比、安全/危险区域渐变）
 
 **止盈统计计算**:
 ```typescript
 // 已实现止盈
 realizedProfit = Σ((orderPrice - entryPrice) * filledQty) // LONG
-realizedProfit = Σ((entryPrice - orderPrice) * filledQty) // SHORT
-
 // 未实现止盈
 unrealizedProfit = Σ((orderPrice - entryPrice) * remainingQty) // LONG
-unrealizedProfit = Σ((entryPrice - orderPrice) * remainingQty) // SHORT
+// 执行进度
+progressPercent = (totalFilledQty / totalQty) * 100%
+```
+
+### 整体进度
+
+```
+Phase 6 v3.0 前端适配：87.5% 完成 (7/8)
+
+✅ 后端 API 层        ████████████████████ 100%
+✅ 前端 API 层        ████████████████████ 100%
+✅ 订单管理页面       ████████████████████ 100%
+✅ 仓位管理页面       ████████████████████ 100%
+✅ 账户页面           ████████████████████ 100%
+✅ 回测报告组件       ████████████████████ 100%
+✅ 多级别止盈         ████████████████████ 100%
+⏳ E2E 测试           ░░░░░░░░░░░░░░░░░░░░   0%
+```
+
+### 下一步
+
+- [ ] 启动 P6-008: E2E 集成测试
+- [ ] 编写 E2E 测试用例（订单/仓位/账户完整流程）
+- [ ] 运行测试并修复问题
+- [ ] Phase 6 总结汇报
+
+---
+
+## 2026-03-31 - P6-007 多级别止盈可视化完成
 
 // 执行进度
 executionProgress = (totalFilledAmount / totalAmount) * 100

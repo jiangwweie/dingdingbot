@@ -212,6 +212,7 @@ function formatXAxisTick(date: string): string {
 /**
  * Format timestamp to date string
  */
-function formatDate(timestamp: number): string {
-  return new Date(timestamp).toISOString();
+function formatDate(timestamp: number | string): string {
+  const ts = typeof timestamp === 'string' ? parseInt(timestamp) : timestamp;
+  return new Date(ts).toISOString();
 }

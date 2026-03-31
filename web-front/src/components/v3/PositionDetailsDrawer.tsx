@@ -22,8 +22,6 @@ interface PositionDetailsDrawerProps {
   position: PositionInfo | null;
   isOpen: boolean;
   onClose: () => void;
-  tpOrders?: OrderResponse[];
-  slOrder?: OrderResponse | null;
   onQuickClose?: () => void;
 }
 
@@ -31,8 +29,6 @@ export function PositionDetailsDrawer({
   position,
   isOpen,
   onClose,
-  tpOrders = [],
-  slOrder = null,
   onQuickClose,
 }: PositionDetailsDrawerProps) {
   if (!isOpen || !position) return null;
@@ -45,6 +41,10 @@ export function PositionDetailsDrawer({
   const pnlPercent = markPrice && entryPrice
     ? ((markPrice - entryPrice) / entryPrice) * 100 * (position.direction === 'LONG' ? 1 : -1)
     : 0;
+
+  // 从 position 中获取止盈和止损订单
+  const tpOrders = position.take_profit_orders || [];
+  const slOrder = position.stop_loss_order;
 
   return (
     <>
@@ -168,6 +168,7 @@ export function PositionDetailsDrawer({
               slOrder={slOrder}
               entryPrice={position.entry_price}
               direction={position.direction}
+              markPrice={position.mark_price}
             />
           </div>
 
