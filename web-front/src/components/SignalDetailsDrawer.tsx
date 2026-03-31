@@ -122,6 +122,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
 
     console.log('[SignalDetailsModal] Signal candle found:', signalCandle ? 'YES' : 'NO');
 
+    // Mark the signal candle (where the signal appears)
     if (signalCandle) {
       const isLong = data.signal.direction === 'long';
 
@@ -131,7 +132,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
           position: isLong ? 'belowBar' : 'aboveBar',
           color: isLong ? APPLE_GREEN : APPLE_RED,
           shape: isLong ? 'arrowUp' : 'arrowDown',
-          text: isLong ? '多 (入场)' : '空 (入场)',
+          text: isLong ? '多 (信号)' : '空 (信号)',
           size: 2,
         },
       ]);
