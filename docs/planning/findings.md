@@ -1,5 +1,51 @@
 # 研究发现
 
+## Phase 1-5 完成技术总结 (2026-03-31)
+
+### 审查结果
+
+**系统性审查**: 57/57 项通过 (100%)
+**单元测试**: 241/241 通过 (100%)
+**审查报告**: `docs/reviews/phase1-5-comprehensive-review-report.md`
+
+### 核心发现
+
+1. **枚举定义一致性** ✅
+   - Direction: LONG/SHORT 在所有阶段使用一致
+   - OrderStatus: 7 状态 (PENDING/OPEN/FILLED/CANCELED/REJECTED/EXPIRED/PARTIALLY_FILLED)
+   - OrderType: 5 类型 (MARKET/LIMIT/STOP_MARKET/STOP_LIMIT/TRAILING_STOP)
+   - OrderRole: 7 角色 (ENTRY/TP1/TP2/TP3/TP4/TP5/SL)
+
+2. **Decimal 精度保护** ✅
+   - 所有金融计算使用 Decimal，无 float 污染
+   - FinancialModel 基类确保精度继承
+
+3. **领域层纯净性** ✅
+   - domain/目录无 I/O 依赖
+   - 符合 Clean Architecture 原则
+
+4. **Gemini 评审问题修复** ✅
+   - G-001: asyncio.Lock 释放后使用 → WeakValueDictionary
+   - G-002: 市价单价格缺失 → fetch_ticker_price
+   - G-003: DCA 限价单吃单陷阱 → place_all_orders_upfront
+   - G-004: 对账幽灵偏差 → 10 秒 Grace Period
+
+5. **并发安全设计** ✅
+   - Asyncio Lock (进程内) + SELECT FOR UPDATE (数据库行级锁)
+   - WeakValueDictionary 自动清理锁对象
+
+### 交付物清单
+
+| Phase | 核心文件 | 测试数 | 状态 |
+|-------|---------|--------|------|
+| Phase 1 | src/domain/models.py, src/infrastructure/v3_orm.py | 49 | ✅ |
+| Phase 2 | src/domain/matching_engine.py | 14 | ✅ |
+| Phase 3 | src/domain/risk_manager.py | 35 | ✅ |
+| Phase 4 | src/domain/order_manager.py | 33 | ✅ |
+| Phase 5 | exchange_gateway.py, position_manager.py, capital_protection.py, reconciliation.py, dca_strategy.py | 110 | ✅ |
+
+---
+
 ## 子任务 F - 递归逻辑树引擎
 
 ### 技术要点
