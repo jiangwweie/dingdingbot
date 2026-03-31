@@ -1,15 +1,19 @@
 # 进度日志
 
-## 2026-04-01 - Phase 6 所有 P1 问题修复完成 ✅
+## 2026-04-01 - Phase 6 所有 P0/P1 问题修复完成 ✅
 
 ### 完成工作
 
-**Phase 6 代码审查 MAJ P1 问题全部修复** ✅
+**Phase 6 代码审查 P0/P1 问题全部修复** ✅
 
 #### 修复的问题汇总
 
 | 编号 | 严重性 | 问题 | 修复 | 状态 |
 |------|--------|------|------|------|
+| CRIT-001 | P0 | 后端订单 API 使用 `amount` 而非 `quantity` | 统一改为 `quantity` | ✅ 已修复 |
+| CRIT-002 | P0 | 前端 TypeScript 类型使用 `amount` | 统一改为 `quantity` | ✅ 已修复 |
+| MAJ-001 | P1 | `get_order` 使用 `role` 而非 `order_role` | 统一改为 `order_role` | ✅ 已修复 |
+| MAJ-002 | P1 | `get_order` 缺少 `remaining_qty` 字段 | 添加该字段 | ✅ 已修复 |
 | MAJ-003 | P1 | 订单列表端点返回类型错误 | 改为 `OrdersResponse` | ✅ 已修复 |
 | MAJ-007 | P1 | PositionsResponse 缺少 `total_margin_used` | 添加字段 | ✅ 已修复 |
 | MAJ-009 | P1 | OrdersTable 价格显示逻辑 | 优先显示 `average_exec_price` | ✅ 已修复 |
@@ -19,6 +23,7 @@
 #### Git 提交
 
 ```
+a71508e fix(phase6): 修复剩余字段名错误 (CreateOrderModal/SLOrderDisplay/TPChainDisplay)
 bd8d85c fix(phase6): 完成 P1 问题修复 - 字段对齐与组件增强
 cc2ff3d fix: Phase 6 MAJ P1 问题修复（OrdersTable/PositionsTable/Account）
 24a91b6 fix: 修复 Phase 6 代码审查 MAJ-003 和 MIN-002 问题
