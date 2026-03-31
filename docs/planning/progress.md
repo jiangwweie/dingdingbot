@@ -1,5 +1,130 @@
 # 进度日志
 
+## 2026-03-31 - Phase 6 MAJ P1 问题修复
+
+### 完成工作
+
+**Phase 6 代码审查 MAJ P1 问题修复** ✅
+
+#### 修复的问题
+
+| 编号 | 严重性 | 问题 | 修复 | 状态 |
+|------|--------|------|------|------|
+| MAJ-009 | P1 | OrdersTable 价格显示逻辑问题 | 优先显示 `average_exec_price` | ✅ 已修复 |
+| MAJ-010 | P1 | PositionsTable 缺少原始数量列 | 添加 `original_qty` 列 | ✅ 已修复 |
+| MAJ-011 | P1 | Account 页面使用 mock 数据 | 替换为真实历史快照 API | ✅ 已修复 |
+
+#### 文件变更
+
+1. **web-front/src/components/v3/OrdersTable.tsx** (L110)
+   - 修复前：`order.price || order.trigger_price`
+   - 修复后：`order.average_exec_price || order.price || order.trigger_price`
+   - 优先显示平均成交价格
+
+2. **web-front/src/components/v3/PositionsTable.tsx**
+   - 在"当前数量"列后添加"原始数量"列
+   - 使用 `DecimalDisplay` 组件，精度 4 位
+   - 显示 `position.original_qty`
+
+3. **web-front/src/pages/Account.tsx** (L89-101)
+   - 移除 mock 的 snapshots 数据
+   - 使用 SWR 调用 `/api/v3/account/snapshots/historical` API
+   - 根据日期范围选择器动态获取 7/30/90 天数据
+
+4. **web-front/src/lib/api.ts**
+   - 添加 `fetchAccountHistoricalSnapshots` 函数
+
+5. **src/interfaces/api.py**
+   - 添加 `GET /api/v3/account/snapshots/historical` 端点
+   - 从信号历史中计算每日账户权益
+
+### 验证
+
+- ✅ TypeScript 编译通过
+- ✅ 前端构建成功
+
+---
+
+## 2026-04-01 - Phase 6 代码审查严重问题修复完成
+
+### 完成工作
+
+**Phase 6 代码审查问题修复 - P0 严重问题** ✅
+
+#### 修复的问题
+
+| 编号 | 严重性 | 问题 | 修复 | 状态 |
+|------|--------|------|------|------|
+| CRIT-001 | 严重 | 后端订单 API 使用 `amount` 而非 `quantity` | 统一改为 `quantity` | ✅ 已修复 |
+| CRIT-002 | 严重 | 前端 TypeScript 类型使用 `amount` | 统一改为 `quantity` | ✅ 已修复 |
+| MAJ-001 | 一般 | `role` 字段应改为 `order_role` | 统一改为 `order_role` | ✅ 已修复 |
+| MAJ-002 | 一般 | OrderResponseFull 缺少 `remaining_qty` 字段 | 添加该字段 | ✅ 已修复 |
+
+#### 字段变更汇总
+
+**后端模型** (`src/domain/models.py`):
+```python
+# OrderRequest
+- amount: Decimal → +quantity: Decimal
+- role: OrderRole → +order_role: OrderRole
++ signal_id: Optional[str]
+
+# OrderResponseFull
+- amount: Decimal → +quantity: Decimal
+- filled_amount: Decimal → +filled_qty: Decimal
++remaining_qty: Decimal
++filled_at: Optional[int]
++fee_currency: Optional[str]
++signal_id: Optional[str]
+```
+
+**前端类型** (`web-front/src/types/order.ts`):
+```typescript
+// OrderRequest
+- amount: string → +quantity: string
+- role: OrderRole → +order_role: OrderRole
++signal_id?: string
+
+// OrderResponse
+- amount: string → +quantity: string
+- filled_amount: string → +filled_qty: string
++remaining_qty: string
++filled_at?: number
++fee_currency: string | null
++signal_id: string | null
+```
+
+#### 验证结果
+
+**后端**:
+```
+✅ 后端模型导入测试通过
+```
+
+**前端**:
+```
+✓ 3432 modules transformed.
+✓ built in 2.16s
+```
+
+### 剩余待修复问题
+
+| 编号 | 严重性 | 问题 | 优先级 |
+|------|--------|------|--------|
+| MAJ-003 | 一般 | 订单列表端点返回类型错误 | P1 |
+| MAJ-007 | 一般 | PositionsResponse 缺少 `total_margin_used` 字段 | P1 |
+| MAJ-009 | 一般 | OrdersTable 组件 `price` 显示逻辑 | P1 |
+| MAJ-010 | 一般 | PositionsTable 缺少 `original_qty` 字段显示 | P1 |
+| MAJ-011 | 一般 | Account 页面使用 mock 数据 | P1 |
+
+### 下一步
+
+- [ ] 修复剩余一般问题 (MAJ-003, MAJ-007, MAJ-009, MAJ-010, MAJ-011)
+- [ ] 重新运行代码审查验证
+- [ ] 启动 E2E 集成测试（待用户确认）
+
+---
+
 ## 2026-03-31 - Phase 6 代码审查完成
 
 ### 代码审查报告

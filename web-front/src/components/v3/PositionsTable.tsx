@@ -24,6 +24,7 @@ export function PositionsTable({ positions, isLoading, onPositionClick }: Positi
               <th className="px-6 py-4 font-medium">方向</th>
               <th className="px-6 py-4 font-medium">入场价</th>
               <th className="px-6 py-4 font-medium">当前数量</th>
+              <th className="px-6 py-4 font-medium">原始数量</th>
               <th className="px-6 py-4 font-medium">未实现盈亏</th>
               <th className="px-6 py-4 font-medium">杠杆</th>
               <th className="px-6 py-4 font-medium">开仓时间</th>
@@ -33,7 +34,7 @@ export function PositionsTable({ positions, isLoading, onPositionClick }: Positi
           <tbody className="divide-y divide-gray-100">
             {[...Array(10)].map((_, i) => (
               <tr key={i} className="animate-pulse">
-                {[...Array(9)].map((_, j) => (
+                {[...Array(10)].map((_, j) => (
                   <td key={j} className="px-6 py-4">
                     <div className="h-4 bg-gray-100 rounded w-20" />
                   </td>
@@ -66,6 +67,7 @@ export function PositionsTable({ positions, isLoading, onPositionClick }: Positi
             <th className="px-6 py-4 font-medium">方向</th>
             <th className="px-6 py-4 font-medium">入场价</th>
             <th className="px-6 py-4 font-medium">当前数量</th>
+            <th className="px-6 py-4 font-medium">原始数量</th>
             <th className="px-6 py-4 font-medium">未实现盈亏</th>
             <th className="px-6 py-4 font-medium">杠杆</th>
             <th className="px-6 py-4 font-medium">开仓时间</th>
@@ -100,6 +102,9 @@ export function PositionsTable({ positions, isLoading, onPositionClick }: Positi
               </td>
               <td className="px-6 py-4 text-right">
                 <DecimalDisplay value={position.current_qty} decimals={4} />
+              </td>
+              <td className="px-6 py-4 text-right">
+                <DecimalDisplay value={position.original_qty} decimals={4} />
               </td>
               <td className="px-6 py-4">
                 <PnLBadge pnl={position.unrealized_pnl} />

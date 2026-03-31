@@ -1369,6 +1369,22 @@ export async function fetchAccountSnapshot(): Promise<AccountSnapshot> {
 }
 
 /**
+ * Fetch account historical snapshots for equity curve
+ */
+export async function fetchAccountHistoricalSnapshots(days: number = 7): Promise<{ snapshots: Array<{ timestamp: number; total_equity: string }>; days: number }> {
+  const res = await fetch(`/api/v3/account/snapshots/historical?days=${days}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch account historical snapshots');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
  * Run reconciliation for a specific symbol
  */
 export async function runReconciliation(symbol: string): Promise<ReconciliationReport> {

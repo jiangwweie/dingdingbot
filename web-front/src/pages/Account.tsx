@@ -39,6 +39,13 @@ export default function Account() {
     { refreshInterval: 60000 }
   );
 
+  // Fetch historical snapshots for equity curve
+  const { data: historicalData, error: historicalError } = useSWR(
+    `/api/v3/account/snapshots/historical?days=${dateRange === '7days' ? 7 : dateRange === '30days' ? 30 : 90}`,
+    fetcher,
+    { refreshInterval: 60000 }
+  );
+
   const isLoading = !accountData && !accountError;
 
   // Calculate PnL statistics from signals
@@ -86,19 +93,8 @@ export default function Account() {
     };
   })();
 
-  // Generate mock snapshots for equity curve (replace with real API when available)
-  const snapshots = accountData
-    ? [
-        { timestamp: Date.now() - 7 * 24 * 60 * 60 * 1000, total_equity: accountData.total_equity || '10000' },
-        { timestamp: Date.now() - 6 * 24 * 60 * 60 * 1000, total_equity: (parseFloat(accountData.total_equity || '10000') * 0.98).toString() },
-        { timestamp: Date.now() - 5 * 24 * 60 * 60 * 1000, total_equity: (parseFloat(accountData.total_equity || '10000') * 1.02).toString() },
-        { timestamp: Date.now() - 4 * 24 * 60 * 60 * 1000, total_equity: (parseFloat(accountData.total_equity || '10000') * 1.01).toString() },
-        { timestamp: Date.now() - 3 * 24 * 60 * 60 * 1000, total_equity: (parseFloat(accountData.total_equity || '10000') * 0.99).toString() },
-        { timestamp: Date.now() - 2 * 24 * 60 * 60 * 1000, total_equity: (parseFloat(accountData.total_equity || '10000') * 1.03).toString() },
-        { timestamp: Date.now() - 1 * 24 * 60 * 60 * 1000, total_equity: (parseFloat(accountData.total_equity || '10000') * 1.05).toString() },
-        { timestamp: Date.now(), total_equity: accountData.total_equity || '10000' },
-      ]
-    : [];
+  // Use real historical snapshots from API
+  const snapshots = historicalData?.snapshots || [];
 
   const positions = positionsData?.items || [];
 

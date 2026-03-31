@@ -107,7 +107,7 @@ export function OrdersTable({ orders, isLoading, onOrderClick }: OrdersTableProp
                 <DecimalDisplay value={order.amount} decimals={4} />
               </td>
               <td className="px-6 py-4 text-right">
-                <DecimalDisplay value={order.price || order.trigger_price} decimals={2} />
+                <DecimalDisplay value={order.average_exec_price || order.price || order.trigger_price} decimals={2} />
               </td>
               <td className="px-6 py-4">
                 <OrderStatusBadge status={order.status} />
