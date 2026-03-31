@@ -1051,34 +1051,60 @@ class OrderRequest(FinancialModel):
     """
     下单请求模型
 
-    Phase 5: 实盘集成 - POST /api/orders 请求体
-    Reference: docs/designs/phase5-contract.md Section 4.1
+    Phase 6: v3.0 API - POST /api/v3/orders 请求体
+    Reference: docs/designs/phase6-v3-api-contract.md Section 2.1.1
 
     约束条件:
     - order_type == LIMIT 时，price 必填
     - order_type == STOP_MARKET 时，trigger_price 必填
-    - role == CLOSE 时，reduce_only 必须为 True
+    - order_role IN (TP1, TP2, TP3, TP4, TP5, SL) 时，reduce_only 必须为 True
     """
-    symbol: str = Field(..., description="币种对，如 'BTC/USDT:USDT'")
+    symbol: str = Field(
+        ...,
+        pattern=r'^[A-Z]+/[A-Z]+:[A-Z]+$',
+        description="币种对，如 'BTC/USDT:USDT'"
+    )
     order_type: OrderType = Field(..., description="订单类型 (MARKET/LIMIT/STOP_MARKET/STOP_LIMIT)")
+    order_role: OrderRole = Field(..., description="订单角色 (ENTRY/TP1-5/SL)")
     direction: Direction = Field(..., description="方向 (LONG/SHORT)")
-    role: OrderRole = Field(..., description="角色 (OPEN/CLOSE)")
-    amount: Decimal = Field(..., gt=0, description="数量（正数）")
+    quantity: Decimal = Field(..., gt=0, description="数量（正数）")
     price: Optional[Decimal] = Field(None, gt=0, description="限价单价格（LIMIT 订单必填）")
     trigger_price: Optional[Decimal] = Field(None, gt=0, description="条件单触发价（STOP 订单必填）")
     reduce_only: bool = Field(default=False, description="是否仅减仓（平仓单必须为 True）")
-    client_order_id: Optional[str] = Field(None, max_length=64, description="客户端订单 ID")
+    client_order_id: Optional[str] = Field(None, max_length=36, description="客户端订单 ID (UUID)")
     strategy_name: Optional[str] = Field(None, max_length=64, description="策略名称")
+    signal_id: Optional[str] = Field(None, description="关联信号 ID (UUID)")
     stop_loss: Optional[Decimal] = Field(None, gt=0, description="止损价格")
     take_profit: Optional[Decimal] = Field(None, gt=0, description="止盈价格")
+
+    @model_validator(mode='after')
+    def validate_order_fields(self) -> 'OrderRequest':
+        """订单字段条件验证"""
+        # LIMIT 或 STOP_LIMIT 订单必须有价格
+        if self.order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT):
+            if self.price is None:
+                raise ValueError('LIMIT/STOP_LIMIT 订单必须指定价格')
+
+        # STOP_MARKET 或 STOP_LIMIT 订单必须有 trigger_price
+        if self.order_type in (OrderType.STOP_MARKET, OrderType.STOP_LIMIT):
+            if self.trigger_price is None:
+                raise ValueError('STOP_MARKET/STOP_LIMIT 订单必须指定触发价')
+
+        # TP/SL 订单必须设置 reduce_only=True
+        if self.order_role in (OrderRole.TP1, OrderRole.TP2, OrderRole.TP3,
+                                OrderRole.TP4, OrderRole.TP5, OrderRole.SL):
+            if not self.reduce_only:
+                raise ValueError('TP/SL 订单必须设置 reduce_only=True')
+
+        return self
 
 
 class OrderResponseFull(FinancialModel):
     """
     订单响应模型（完整版）
 
-    Phase 5: 实盘集成 - POST/GET /api/orders 响应体
-    Reference: docs/designs/phase5-contract.md Section 4.2
+    Phase 6: v3.0 API - POST/GET /api/v3/orders 响应体
+    Reference: docs/designs/phase6-v3-api-contract.md Section 2.1.2
 
     注意：此模型与 OrderResponse (简化版) 不同，此模型包含完整的 API 响应字段
     """
@@ -1086,22 +1112,26 @@ class OrderResponseFull(FinancialModel):
     exchange_order_id: Optional[str] = Field(None, description="交易所订单 ID")
     symbol: str = Field(..., description="币种对")
     order_type: OrderType = Field(..., description="订单类型")
+    order_role: OrderRole = Field(..., description="订单角色")
     direction: Direction = Field(..., description="方向")
-    role: OrderRole = Field(..., description="角色")
     status: OrderStatus = Field(..., description="订单状态")
-    amount: Decimal = Field(..., description="订单数量")
-    filled_amount: Decimal = Field(default=Decimal("0"), description="已成交数量")
+    quantity: Decimal = Field(..., description="订单数量")
+    filled_qty: Decimal = Field(default=Decimal("0"), description="已成交数量")
+    remaining_qty: Decimal = Field(default=Decimal("0"), description="剩余数量")
     price: Optional[Decimal] = Field(None, description="限价单价格")
     trigger_price: Optional[Decimal] = Field(None, description="条件单触发价")
     average_exec_price: Optional[Decimal] = Field(None, description="平均成交价")
     reduce_only: bool = Field(..., description="是否仅减仓")
     client_order_id: Optional[str] = Field(None, description="客户端订单 ID")
     strategy_name: Optional[str] = Field(None, description="策略名称")
+    signal_id: Optional[str] = Field(None, description="关联信号 ID")
     stop_loss: Optional[Decimal] = Field(None, description="止损价格")
     take_profit: Optional[Decimal] = Field(None, description="止盈价格")
     created_at: int = Field(..., description="创建时间戳（毫秒）")
     updated_at: int = Field(..., description="更新时间戳（毫秒）")
+    filled_at: Optional[int] = Field(None, description="成交时间戳（毫秒）")
     fee_paid: Decimal = Field(default=Decimal("0"), description="已支付手续费")
+    fee_currency: Optional[str] = Field(None, description="手续费币种")
     tags: List[dict] = Field(default_factory=list, description="动态标签列表")
 
 

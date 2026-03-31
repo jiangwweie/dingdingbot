@@ -1915,7 +1915,7 @@ async def create_order(request: OrderRequest) -> OrderResponseFull:
             )
 
         # 2. 角色约束验证（TP/SL 单必须 reduce_only=True）
-        if request.role in (OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5, OrderRole.SL):
+        if request.order_role in (OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5, OrderRole.SL):
             if not request.reduce_only:
                 raise HTTPException(
                     status_code=400,
@@ -1927,7 +1927,7 @@ async def create_order(request: OrderRequest) -> OrderResponseFull:
             protection_result = await _capital_protection.pre_order_check(
                 symbol=request.symbol,
                 order_type=request.order_type.value,
-                amount=request.amount,
+                quantity=request.quantity,
                 price=request.price,
                 trigger_price=request.trigger_price,
                 stop_loss=request.stop_loss or Decimal("0"),
@@ -1945,7 +1945,7 @@ async def create_order(request: OrderRequest) -> OrderResponseFull:
         # 4. 映射 direction 到 side（CCXT 格式）
         # LONG + ENTRY -> "buy", LONG + TP/SL -> "sell"
         # SHORT + ENTRY -> "sell", SHORT + TP/SL -> "buy"
-        is_entry = request.role == OrderRole.ENTRY
+        is_entry = request.order_role == OrderRole.ENTRY
         if request.direction == Direction.LONG:
             side = "buy" if is_entry else "sell"
         else:  # SHORT
@@ -1959,7 +1959,7 @@ async def create_order(request: OrderRequest) -> OrderResponseFull:
             symbol=request.symbol,
             order_type=ccxt_order_type,
             side=side,
-            amount=request.amount,
+            amount=request.quantity,
             price=request.price,
             trigger_price=request.trigger_price,
             reduce_only=request.reduce_only,
@@ -1973,22 +1973,26 @@ async def create_order(request: OrderRequest) -> OrderResponseFull:
             exchange_order_id=result.exchange_order_id,
             symbol=request.symbol,
             order_type=request.order_type,
+            order_role=request.order_role,
             direction=request.direction,
-            role=request.role,
             status=result.status,
-            amount=request.amount,
-            filled_amount=Decimal("0"),  # 初始为 0
+            quantity=request.quantity,
+            filled_qty=Decimal("0"),  # 初始为 0
+            remaining_qty=request.quantity,  # 初始为全部数量
             price=request.price,
             trigger_price=request.trigger_price,
             average_exec_price=None,
             reduce_only=request.reduce_only,
             client_order_id=result.client_order_id,
             strategy_name=request.strategy_name,
+            signal_id=request.signal_id,
             stop_loss=request.stop_loss,
             take_profit=request.take_profit,
             created_at=now,
             updated_at=now,
+            filled_at=None,
             fee_paid=Decimal("0"),
+            fee_currency=None,
             tags=[],
         )
 

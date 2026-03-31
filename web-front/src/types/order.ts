@@ -91,12 +91,12 @@ export interface OrderRequest {
   symbol: string;
   /** 订单类型 */
   order_type: OrderType;
+  /** 订单角色 (ENTRY/TP1-5/SL) */
+  order_role: OrderRole;
   /** 交易方向 */
   direction: Direction;
-  /** 订单角色 (开仓/平仓) */
-  role: OrderRole;
   /** 订单数量 (Decimal string) */
-  amount: string;
+  quantity: string;
   /** 订单价格 (限价单必填，Decimal string) */
   price?: string;
   /** 触发价格 (止损单必填，Decimal string) */
@@ -107,6 +107,8 @@ export interface OrderRequest {
   client_order_id?: string;
   /** 策略名称 (可选，用于追踪) */
   strategy_name?: string;
+  /** 关联信号 ID (可选) */
+  signal_id?: string;
   /** 止损价格 (Decimal string) */
   stop_loss?: string;
   /** 止盈价格 (Decimal string) */
@@ -125,16 +127,18 @@ export interface OrderResponse {
   symbol: string;
   /** 订单类型 */
   order_type: OrderType;
+  /** 订单角色 */
+  order_role: OrderRole;
   /** 交易方向 */
   direction: Direction;
-  /** 订单角色 */
-  role: OrderRole;
   /** 订单状态 */
   status: OrderStatus;
   /** 订单数量 (Decimal string) */
-  amount: string;
+  quantity: string;
   /** 已成交数量 (Decimal string) */
-  filled_amount: string;
+  filled_qty: string;
+  /** 剩余数量 (Decimal string) */
+  remaining_qty: string;
   /** 订单价格 (Decimal string 或 null) */
   price: string | null;
   /** 触发价格 (Decimal string 或 null) */
@@ -147,6 +151,8 @@ export interface OrderResponse {
   client_order_id: string | null;
   /** 策略名称 */
   strategy_name: string | null;
+  /** 关联信号 ID */
+  signal_id: string | null;
   /** 止损价格 (Decimal string 或 null) */
   stop_loss: string | null;
   /** 止盈价格 (Decimal string 或 null) */
@@ -155,8 +161,12 @@ export interface OrderResponse {
   created_at: number;
   /** 更新时间戳 (毫秒) */
   updated_at: number;
+  /** 成交时间戳 (毫秒) */
+  filled_at?: number;
   /** 已支付手续费 (Decimal string) */
   fee_paid: string;
+  /** 手续费币种 */
+  fee_currency: string | null;
   /** 订单标签列表 */
   tags: Tag[];
 }
