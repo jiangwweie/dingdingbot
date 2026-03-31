@@ -1,5 +1,83 @@
 # 研究发现
 
+## P6-003: 仓位管理页面开发 (2026-03-31)
+
+### 组件清单
+
+**新建组件**:
+| 组件 | 路径 | 功能 |
+|------|------|------|
+| `PositionsTable` | `web-front/src/components/v3/PositionsTable.tsx` | 仓位列表表格 |
+| `PositionDetailsDrawer` | `web-front/src/components/v3/PositionDetailsDrawer.tsx` | 仓位详情抽屉 |
+| `ClosePositionModal` | `web-front/src/components/v3/ClosePositionModal.tsx` | 平仓确认对话框 |
+| `TPChainDisplay` | `web-front/src/components/v3/TPChainDisplay.tsx` | 止盈订单链展示 |
+| `SLOrderDisplay` | `web-front/src/components/v3/SLOrderDisplay.tsx` | 止损订单展示 |
+
+**现有组件复用**:
+- `DirectionBadge` - 方向徽章（LONG/SHORT）
+- `PnLBadge` - 盈亏徽章
+- `DecimalDisplay` - Decimal 格式化显示
+- `OrderStatusBadge` - 订单状态徽章
+
+**页面**:
+- `Positions.tsx` - 主页面（/v3/positions）
+
+### 技术实现
+
+1. **API 集成**:
+   - `fetchPositions()` - 获取仓位列表
+   - `closePosition()` - 平仓操作
+
+2. **筛选功能**:
+   - 币种对筛选（BTC/ETH/SOL/BNB）
+   - 仓位状态筛选（持仓中/已平仓）
+
+3. **平仓功能**:
+   - 支持全部平仓和部分平仓（25%/50%/75%/100%）
+   - 订单类型选择（MARKET/LIMIT）
+   - 限价单价格输入
+   - 资金保护检查提示
+
+4. **账户概览**:
+   - 账户权益
+   - 未实现盈亏
+   - 保证金占用
+   - 已实现盈亏
+
+### 路由配置
+
+- App.tsx: 添加 `/positions` 路由
+- Layout.tsx: 添加导航菜单项（仓位）
+
+### TypeScript 编译验证
+
+```bash
+npm run build
+# ✓ 2781 modules transformed.
+# ✓ built in 1.44s
+```
+
+### 设计亮点
+
+1. **Apple 风格 UI**: 渐变卡片、圆角、阴影
+2. **响应式布局**: 适配桌面和移动端
+3. **交互优化**:
+   - 悬停效果
+   - 加载动画
+   - 空状态提示
+4. **信息层级**:
+   - 账户概览卡片（顶部）
+   - 筛选器（中部）
+   - 数据表格（主体）
+
+### 依赖 P6-002
+
+- `fetchPositions()` API 函数
+- `closePosition()` API 函数
+- `PositionInfo`, `PositionResponse` 类型定义
+
+---
+
 ## 🔴 关键 Bug 修复：MTF 过滤器 K 线闭合判断错误 (2026-03-31)
 
 ### 问题描述

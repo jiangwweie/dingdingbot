@@ -7,6 +7,8 @@ import Account from './pages/Account';
 import Backtest from './pages/Backtest';
 import StrategyWorkbench from './pages/StrategyWorkbench';
 import Snapshots from './pages/Snapshots';
+import Orders from './pages/Orders';
+import Positions from './pages/Positions';
 
 export default function App() {
   return (
@@ -16,6 +18,8 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="signals" element={<Signals />} />
+          <Route path="positions" element={<Positions />} />
+          <Route path="orders" element={<Orders />} />
           <Route path="backtest" element={<Backtest />} />
           <Route path="attempts" element={<SignalAttempts />} />
           <Route path="account" element={<Account />} />

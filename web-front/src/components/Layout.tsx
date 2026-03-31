@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save } from 'lucide-react';
+import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 import SettingsPanel from './SettingsPanel';
@@ -20,6 +20,8 @@ export default function Layout() {
   const navItems = [
     { to: '/dashboard', icon: Activity, label: '仪表盘' },
     { to: '/signals', icon: BarChart2, label: '信号' },
+    { to: '/positions', icon: TrendingUp, label: '仓位' },
+    { to: '/orders', icon: FileText, label: '订单' },
     { to: '/backtest', icon: FlaskConical, label: '回测沙箱' },
     { to: '/attempts', icon: Bug, label: '尝试溯源' },
     { to: '/account', icon: Wallet, label: '账户' },
