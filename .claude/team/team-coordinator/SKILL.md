@@ -16,21 +16,109 @@ license: Proprietary
 
 ---
 
-## 🚀 全自动复杂任务交付流水线 (Auto-Pipeline v1.0)
+## 🚀 全自动复杂任务交付流水线 (Auto-Pipeline v1.1)
 
 **适用范围**: 涉及前端 + 后端 + 测试的复杂功能开发
 
 **核心原则**: 契约先行、并行执行、自动审查、无人值守
 
+### 开工前准备 (Pre-Flight Checklist)
+
+**在开始任何复杂任务前，必须执行以下步骤**:
+
+1. **调用 `planning-with-files-zh` 创建任务计划**
+   ```python
+   Agent(subagent_type="planning-with-files-zh",
+         prompt="为任务 [任务名称] 创建执行计划，输出到 docs/planning/task_plan.md")
+   ```
+
+2. **任务计划文件结构**:
+   ```markdown
+   docs/planning/
+   ├── task_plan.md      # 任务阶段分解、关键里程碑
+   ├── findings.md       # 研究发现、技术决策记录
+   └── progress.md       # 会话日志、错误记录、下一步计划
+   ```
+
+3. **任务复杂度判断**:
+   | 类型 | 处理方式 |
+   |------|----------|
+   | **简单任务** (单文件修改) | 直接分配对应角色 |
+   | **中等任务** (2-3 文件) | 创建简易计划 + 直接执行 |
+   | **复杂任务** (前端 + 后端 + 测试) | 完整规划 + 全自动流水线 |
+
 ### 流水线总览
 
 ```
-【阶段 0】需求接收 ──→ 【阶段 1】契约设计 ──→ 【阶段 2】任务分解
-                                                  ↓
-【阶段 6】提交汇报 ←─【阶段 5】测试执行 ←─【阶段 4】审查验证 ←─【阶段 3】并行开发
+【阶段 -1】开工准备 ──→ 【阶段 0】需求接收 ──→ 【阶段 1】契约设计 ──→ 【阶段 2】任务分解
+                                                    ↓
+【阶段 7】收工总结 ←─【阶段 6】提交汇报 ←─【阶段 5】测试执行 ←─【阶段 4】审查验证 ←─【阶段 3】并行开发
 ```
 
 ### 各阶段执行步骤
+
+#### 【阶段 7】收工总结 (Post-Flight Checklist)
+
+**在任务完成后，必须执行以下步骤**:
+
+1. **运行最终验证**
+   ```bash
+   # 运行完整测试套件
+   pytest tests/unit/ tests/integration/ -v --tb=short
+
+   # 检查代码风格
+   git diff --stat HEAD
+   ```
+
+2. **调用 `verification-before-completion` 技能**
+   ```python
+   Agent(subagent_type="verification-before-completion",
+         prompt="验证任务 [任务名称] 已完成，所有测试通过，代码已提交")
+   ```
+
+3. **更新任务计划文件**
+   ```markdown
+   docs/planning/progress.md 中记录:
+   - 任务完成时间
+   - 遇到的问题及解决方案
+   - 后续优化建议
+   ```
+
+4. **生成交付报告**
+   ```markdown
+   ## 任务完成汇总
+
+   ### ✅ 已完成任务
+   | 角色 | 任务 | 状态 |
+   |------|------|------|
+   | ... | ... | ✅ |
+
+   ### 📦 交付物
+   - 代码文件：[...]
+   - 文档文件：[...]
+   - 测试文件：[...]
+
+   ### ✅ 验证结果
+   - 单元测试：通过 (X/X)
+   - 集成测试：通过 (X/X)
+   - 覆盖率：XX%
+
+   ### 📝 相关文档
+   - docs/planning/task_plan.md
+   - docs/designs/[task]-contract.md
+   - docs/ops/[task]-deployment-report.md
+   ```
+
+5. **提交代码并推送**
+   ```bash
+   git add <files>
+   git commit -m "<conventional commit message>"
+   git push origin <branch>
+   ```
+
+6. **创建/更新诊断报告**（如适用）
+   - 如果是 Bug 修复，更新 `docs/diagnostic-reports/` 中的对应报告
+   - 标记状态为"已修复"
 
 #### 【阶段 0】需求接收与澄清
 
@@ -453,11 +541,21 @@ def assign_task(role, file_path):
 
 **作为 Coordinator，你必须根据任务阶段调度对应的全局 skills：**
 
+### 开工前准备 (Pre-Flight)
+| 场景 | 调用 Skill | 命令 |
+|------|-----------|------|
+| 复杂任务需要规划 | `planning-with-files-zh` | `Agent(subagent_type="planning-with-files-zh", prompt="为任务创建执行计划")` |
+| 任务计划创建后 | 读取文件 | 从 `docs/planning/task_plan.md` 继续执行 |
+
+**开工检查清单**:
+- [ ] 已创建 `docs/planning/task_plan.md`
+- [ ] 已识别任务复杂度（简单/中等/复杂）
+- [ ] 已确定需要参与的角色
+
 ### 任务分解阶段
 | 场景 | 调用 Skill | 命令 |
 |------|-----------|------|
 | 需求模糊需要探索 | `brainstorming` | `Agent(subagent_type="brainstorming", prompt="...")` |
-| 复杂项目需要规划 | `planning-with-files-zh` | `/planning-with-files:planning-with-files` 或 `Agent(subagent_type="planning-with-files-zh")` |
 | 已有计划需要执行 | 从 `task_plan.md` 读取 | 直接读取文件继续执行（无需调用技能） |
 
 **注意**：`planning-with-files-zh` 比 `writing-plans`/`executing-plans` 更强大：
@@ -481,12 +579,20 @@ def assign_task(role, file_path):
 | 需要正式代码审查 | `code-review` | `/reviewer` 或 `Agent(subagent_type="code-reviewer")` |
 | 测试失败需要调试 | `systematic-debugging` | 通知对应角色调用 |
 
-### 完成阶段
+### 完成阶段 (收工检查)
 | 场景 | 调用 Skill | 命令 |
 |------|-----------|------|
+| 完成前最终验证 | `verification-before-completion` | `Agent(subagent_type="verification-before-completion")` |
 | 功能完成需要合并 | `finishing-a-development-branch` | `Agent(subagent_type="finishing-a-development-branch")` |
 | 请求正式审查 | `requesting-code-review` | `Agent(subagent_type="requesting-code-review")` |
-| 完成前最终验证 | `verification-before-completion` | `Agent(subagent_type="verification-before-completion")` |
+| 更新任务进度 | 读取/写入 `progress.md` | 记录完成状态和后续建议 |
+
+**收工检查清单**:
+- [ ] 所有测试通过（单元 + 集成）
+- [ ] 代码已提交并推送
+- [ ] `docs/planning/progress.md` 已更新
+- [ ] 交付报告已生成
+- [ ] 诊断报告已更新（如适用）
 
 ### 调度示例
 ```python
