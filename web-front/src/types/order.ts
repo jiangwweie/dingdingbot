@@ -486,3 +486,13 @@ export interface AccountSnapshot {
   /** 最后更新时间戳 (毫秒) */
   last_updated: number;
 }
+
+/**
+ * API 错误响应
+ */
+export interface ApiResponseError {
+  /** 错误代码 */
+  error_code: string;
+  /** 错误消息 */
+  message: string;
+}

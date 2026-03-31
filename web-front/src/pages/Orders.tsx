@@ -18,25 +18,45 @@ const symbolOptions = [
 
 const statusOptions = [
   { value: '', label: '全部状态' },
-  { value: 'PENDING', label: '待处理' },
-  { value: 'OPEN', label: '进行中' },
-  { value: 'FILLED', label: '已成交' },
-  { value: 'CANCELED', label: '已取消' },
-  { value: 'REJECTED', label: '已拒绝' },
-  { value: 'EXPIRED', label: '已过期' },
-  { value: 'PARTIALLY_FILLED', label: '部分成交' },
+  ...Object.values(OrderStatus).map((status) => ({
+    value: status,
+    label: getStatusLabel(status),
+  })),
 ];
+
+function getStatusLabel(status: OrderStatus): string {
+  const labels: Record<OrderStatus, string> = {
+    [OrderStatus.PENDING]: '待处理',
+    [OrderStatus.OPEN]: '进行中',
+    [OrderStatus.FILLED]: '已成交',
+    [OrderStatus.CANCELED]: '已取消',
+    [OrderStatus.REJECTED]: '已拒绝',
+    [OrderStatus.EXPIRED]: '已过期',
+    [OrderStatus.PARTIALLY_FILLED]: '部分成交',
+  };
+  return labels[status];
+}
 
 const roleOptions = [
   { value: '', label: '全部角色' },
-  { value: 'ENTRY', label: '开仓' },
-  { value: 'TP1', label: '止盈 1' },
-  { value: 'TP2', label: '止盈 2' },
-  { value: 'TP3', label: '止盈 3' },
-  { value: 'TP4', label: '止盈 4' },
-  { value: 'TP5', label: '止盈 5' },
-  { value: 'SL', label: '止损' },
+  ...Object.values(OrderRole).map((role) => ({
+    value: role,
+    label: getRoleLabel(role),
+  })),
 ];
+
+function getRoleLabel(role: OrderRole): string {
+  const labels: Record<OrderRole, string> = {
+    [OrderRole.ENTRY]: '开仓',
+    [OrderRole.TP1]: '止盈 1',
+    [OrderRole.TP2]: '止盈 2',
+    [OrderRole.TP3]: '止盈 3',
+    [OrderRole.TP4]: '止盈 4',
+    [OrderRole.TP5]: '止盈 5',
+    [OrderRole.SL]: '止损',
+  };
+  return labels[role];
+}
 
 export default function Orders() {
   const [page, setPage] = useState(1);
