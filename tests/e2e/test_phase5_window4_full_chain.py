@@ -37,7 +37,7 @@ from src.domain.risk_calculator import RiskCalculator, RiskConfig
 # API Key 配置
 API_KEY = "rmy4DPO0uydnQLRCKxql5oeqURfBlC36W7ijW0QwBjR9HxAXMEahc0KutHlHA8hI"
 API_SECRET = "mP7Hk5r3D8TeryzZKxipJ6aTfOJ6qbjqO3fzeG6VJtJB9DVxE4NXgMJZYXpqMFtR"
-FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/4d9badfa-7566-42e4-9c3c-15f6435aafb7"
+FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/14797747-0403-4455-a7fe-f6b69cf0ef04"
 
 SYMBOL = "BTC/USDT:USDT"
 
@@ -387,20 +387,25 @@ async def test_node_10_feishu_notification() -> NodeReport:
     report = NodeReport("节点 10: 飞书告警推送")
 
     try:
+        # 创建 notifier（不使用共享会话，确保请求立即发送）
         notifier = FeishuNotifier(webhook_url=FEISHU_WEBHOOK)
 
-        # 发送测试通知
+        # 发送测试通知（使用简单文本消息，确保兼容性）
         result = await notifier.send_alert(
             event_type="ORDER_FILLED",
             title="🐶 盯盘狗 - 全链路测试",
-            message="订单执行成功\n币种：BTC/USDT:USDT\n方向：LONG\n数量：0.002 BTC"
+            message="【测试消息】订单执行成功\n币种：BTC/USDT:USDT\n方向：LONG\n数量：0.002 BTC\n时间：" + str(asyncio.get_event_loop().time())
         )
+
+        # 确保会话关闭，请求完成
+        await notifier.close()
 
         report.expected = "飞书 Webhook 调用成功，返回 True"
         report.actual = f"发送结果：{result}"
         report.passed = result is True
         report.details = {
-            "send_result": result
+            "send_result": result,
+            "webhook_url": FEISHU_WEBHOOK[:50] + "..."  # 部分显示用于验证
         }
 
     except Exception as e:

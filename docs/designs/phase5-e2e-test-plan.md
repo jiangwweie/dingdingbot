@@ -31,7 +31,7 @@ EXCHANGE_API_SECRET=Hcm9pzHD5spZCwCYVBMm0VBsC3Ux6zR6kpN63dwyuzLsRYC4oqRKSy6P3twD
 
 DATABASE_URL=sqlite+aiosqlite:///./data/v3_dev.db
 
-FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/4d9badfa-7566-42e4-9c3c-15f6435aafb7
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/14797747-0403-4455-a7fe-f6b69cf0ef04
 
 CAPITAL_PROTECTION_ENABLED=true
 SINGLE_TRADE_MAX_LOSS_PERCENT=2.0

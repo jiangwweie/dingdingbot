@@ -21,7 +21,7 @@ API_KEY = "rmy4DPO0uydnQLRCKxql5oeqURfBlC36W7ijW0QwBjR9HxAXMEahc0KutHlHA8hI"
 API_SECRET = "mP7Hk5r3D8TeryzZKxipJ6aTfOJ6qbjqO3fzeG6VJtJB9DVxE4NXgMJZYXpqMFtR"
 
 # 飞书 Webhook
-FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/4d9badfa-7566-42e4-9c3c-15f6435aafb7"
+FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/14797747-0403-4455-a7fe-f6b69cf0ef04"
 
 MIN_AMOUNT = Decimal("0.002")  # 约 132 USDT
 
