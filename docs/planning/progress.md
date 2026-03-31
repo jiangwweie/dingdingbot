@@ -1,6 +1,6 @@
 # 进度日志
 
-## 2026-03-31 - Phase 5 E2E 集成测试完成
+## 2026-03-31 - Phase 5 E2E 集成测试完成 + Window 4 全链路测试通过
 
 ### 完成工作
 
@@ -31,6 +31,16 @@
 - Grace Period 处理
 - 飞书告警通知
 
+### Window 4: 全链路业务流程测试 (8/8) ✅
+- **节点 1**: 模拟 K 线数据输入 ✅
+- **节点 2-3**: SignalPipeline + 策略引擎 ✅
+- **节点 4**: 风控计算 ✅
+- **节点 5**: 资金保护检查 ✅
+- **节点 6-7**: 订单创建 + 执行 ✅
+- **节点 8-9**: 持仓管理 ✅
+- **节点 10**: 飞书告警推送 ✅
+- **节点 11**: 信号持久化 ✅
+
 ### 技术成果
 1. **修复关键问题**:
    - `cancel_order` 和 `fetch_order` 参数顺序修正为 `(order_id, symbol)`
@@ -41,11 +51,16 @@
    - `tests/e2e/test_phase5_window1_real.py` - Window 1 测试
    - `tests/e2e/test_phase5_window2_real.py` - Window 2 测试
    - `tests/e2e/test_phase5_window3_real.py` - Window 3 测试
+   - `tests/e2e/test_phase5_window4_full_chain.py` - Window 4 全链路测试
 
-3. **验证功能**:
+3. **新增实现**:
+   - `BinanceAccountService` - 真实账户服务实现（基于 ExchangeGateway 封装）
+
+4. **验证功能**:
    - Binance Testnet 连接稳定（demo-fapi.binance.com）
    - 飞书告警推送正常
    - 对账服务可正常运行
+   - **完整业务链路验证通过**（信号→策略→风控→资金→订单→持仓→告警→持久化）
 
 **Git 提交**:
 ```
@@ -55,6 +70,7 @@
 ### 相关文件
 - `tests/e2e/test_phase5_window*_real.py` - E2E 测试文件
 - `src/infrastructure/exchange_gateway.py` - 交易所网关（已修复）
+- `src/application/capital_protection.py` - 新增 BinanceAccountService
 
 ---
 

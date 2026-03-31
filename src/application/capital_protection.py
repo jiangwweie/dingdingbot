@@ -435,3 +435,32 @@ class AccountService:
             Decimal: 可用余额 (USDT)
         """
         raise NotImplementedError("Subclasses must implement get_balance")
+
+
+class BinanceAccountService(AccountService):
+    """
+    基于 ExchangeGateway 的真实账户服务实现
+
+    用于全链路集成测试和生产环境
+    """
+
+    def __init__(self, gateway: "ExchangeGateway"):
+        """
+        初始化账户服务
+
+        Args:
+            gateway: ExchangeGateway 实例
+        """
+        self._gateway = gateway
+
+    async def get_balance(self) -> Decimal:
+        """
+        获取 USDT 可用余额
+
+        Returns:
+            Decimal: USDT 可用余额
+        """
+        balance = await self._gateway.rest_exchange.fetch_balance()
+        usdt_balance = balance.get("USDT", {})
+        # 返回可用余额（free），而非总余额（total）
+        return Decimal(str(usdt_balance.get("free", 0)))
