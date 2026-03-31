@@ -123,6 +123,69 @@ services:
     restart: unless-stopped
 ```
 
+### 0. 环境初始化（首次部署）
+
+**仅在首次部署或环境缺失时执行**
+
+```bash
+# ============================================================
+# 步骤 1: 检查并安装系统依赖
+# ============================================================
+# 更新包索引
+apt-get update
+
+# 检查 Python 版本（需要 3.11+）
+python3 --version || apt-get install -y python3.11 python3.11-venv python3-pip
+
+# 检查 Node.js 版本（需要 18+）
+node --version || {
+    # 安装 Node.js 18
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+    apt-get install -y nodejs
+}
+
+# 检查 npm
+npm --version || apt-get install -y npm
+
+# 检查 Docker
+docker --version || {
+    # 安装 Docker
+    curl -fsSL https://get.docker.com | sh
+    usermod -aG docker $USER
+}
+
+# 检查 Docker Compose
+docker-compose --version || {
+    apt-get install -y docker-compose
+}
+
+# 检查 Git
+git --version || apt-get install -y git
+
+# ============================================================
+# 步骤 2: 验证环境
+# ============================================================
+echo "=== 环境检查 ==="
+python3 --version
+node --version
+npm --version
+docker --version
+docker-compose --version
+git --version
+
+# ============================================================
+# 步骤 3: 创建项目目录结构
+# ============================================================
+mkdir -p /usr/jiangwei/docker/dingdingBot/{code,config,data-prod,logs-prod,build}
+
+# ============================================================
+# 步骤 4: 克隆代码
+# ============================================================
+cd /usr/jiangwei/docker/dingdingBot/code
+git clone <repository-url> .
+git checkout v2
+```
+
 ### 1. 代码部署流程（完整版）
 
 ```bash
@@ -529,15 +592,58 @@ ls -lth config/backups/
 ### 从零开始部署盯盘狗
 
 ```bash
-# 1. 创建目录结构
+# ============================================================
+# 阶段 0: 环境初始化（首次部署）
+# ============================================================
+
+# 1. 检查并安装系统依赖
+apt-get update
+
+# 安装 Python 3.11+
+python3 --version || apt-get install -y python3.11 python3.11-venv python3-pip
+
+# 安装 Node.js 18+
+node --version || {
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+    apt-get install -y nodejs
+}
+
+# 安装 Docker
+docker --version || {
+    curl -fsSL https://get.docker.com | sh
+    usermod -aG docker $USER
+}
+
+# 安装 Docker Compose
+docker-compose --version || apt-get install -y docker-compose
+
+# 安装 Git
+git --version || apt-get install -y git
+
+# 2. 验证环境
+echo "=== 环境检查 ==="
+python3 --version
+node --version
+npm --version
+docker --version
+docker-compose --version
+git --version
+
+# ============================================================
+# 阶段 1: 创建目录结构
+# ============================================================
 mkdir -p /usr/jiangwei/docker/dingdingBot/{code,config,data-prod,logs-prod,build}
 
-# 2. 克隆代码
+# ============================================================
+# 阶段 2: 克隆代码
+# ============================================================
 cd /usr/jiangwei/docker/dingdingBot/code
-git clone https://github.com/your-repo/dingdingbot.git .
+git clone <repository-url> .
 git checkout v2
 
-# 3. 准备配置文件
+# ============================================================
+# 阶段 3: 准备配置文件
+# ============================================================
 cat > config/core-prod.yaml <<EOF
 # 核心配置
 core_symbols:
@@ -592,7 +698,9 @@ risk:
   max_leverage: 20
 EOF
 
-# 4. 创建 Dockerfile（如需要）
+# ============================================================
+# 阶段 4: 创建 Dockerfile（如需要）
+# ============================================================
 cat > code/Dockerfile <<EOF
 FROM python:3.11-slim
 
@@ -605,20 +713,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制代码
 COPY . .
 
-# 构建前端（可选，如使用多阶段构建）
-# FROM node:18-alpine AS frontend
-# WORKDIR /app/web-front
-# COPY web-front/package*.json ./
-# RUN npm ci
-# COPY web-front/ ./
-# RUN npm run build
-
 EXPOSE 8000
 
 CMD ["python", "src/main.py"]
 EOF
 
-# 5. 创建 docker-compose.yml
+# ============================================================
+# 阶段 5: 创建 docker-compose.yml
+# ============================================================
 cat > /usr/jiangwei/docker/dingdingBot/docker-compose.yml <<EOF
 version: '3.8'
 services:
@@ -643,16 +745,22 @@ services:
     restart: unless-stopped
 EOF
 
-# 6. 构建并启动容器
+# ============================================================
+# 阶段 6: 构建并启动容器
+# ============================================================
 cd /usr/jiangwei/docker/dingdingBot
 docker-compose build
 docker-compose up -d
 
-# 7. 验证启动
+# ============================================================
+# 阶段 7: 验证启动
+# ============================================================
 docker-compose ps
 docker-compose logs -f
 
-# 8. 测试 API
+# ============================================================
+# 阶段 8: 测试 API
+# ============================================================
 curl http://localhost:8000/api/health
 ```
 
