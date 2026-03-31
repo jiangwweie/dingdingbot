@@ -2637,3 +2637,53 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 - P6-006: PMS 回测报告组件
 - P6-007: 多级别止盈可视化
 - P6-008: E2E 集成测试
+
+## 2026-03-31 - Phase 6 P6-003 仓位管理页面完成
+
+### 完成工作
+
+**P6-003 仓位管理页面开发** ✅
+
+**交付成果**:
+
+1. **组件开发**:
+   - `PositionsTable.tsx` - 仓位列表表格
+   - `PositionDetailsDrawer.tsx` - 仓位详情抽屉
+   - `ClosePositionModal.tsx` - 平仓确认对话框
+   - `TPChainDisplay.tsx` - 止盈订单链展示
+   - `SLOrderDisplay.tsx` - 止损订单展示
+
+2. **页面功能**:
+   - 仓位列表显示（Symbol、Direction、Entry Price、Qty、PnL、Leverage）
+   - 方向徽章（LONG/SHORT 颜色区分）
+   - 盈亏徽章（正绿负红）
+   - 筛选器（币种对、已平仓/未平仓）
+   - 点击仓位 ID 查看详情
+   - 平仓功能（全部/部分平仓，MARKET/LIMIT 订单类型选择）
+
+3. **账户概览**:
+   - 账户权益卡片
+   - 未实现盈亏卡片
+   - 保证金占用卡片
+   - 已实现盈亏卡片
+
+4. **路由配置**:
+   - 添加 `/positions` 路由到 App.tsx
+   - 添加「仓位」导航菜单项到 Layout.tsx
+
+**验收结果**:
+- ✅ TypeScript 编译通过
+- ✅ 组件功能完整
+- ✅ UI 设计符合 Apple 风格
+- ✅ 响应式布局正常
+
+**Git 提交**:
+```
+03427e5 feat: Phase 6 P6-003 仓位管理页面开发完成
+```
+
+### 下一步
+
+- P6-004 订单管理页面开发（如需继续）
+- P6-005 账户净值曲线可视化
+- P6-006 PMS 回测报告组件
