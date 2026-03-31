@@ -1,6 +1,46 @@
 # 进度日志
 
-## 2026-03-31 - Phase 5 审查问题修复完成（测试 100% 通过）
+## 2026-03-31 - Phase 1-4 验证完成 & CHECK 约束修复
+
+### 完成工作
+
+1. **Phase 1-4 完整性验证**
+   - 单元测试 (v3 核心): 131/131 通过 (100%)
+   - 集成测试:
+     - Phase 1: 66/70 (94.3%) - 4 个 alembic 测试跳过
+     - Phase 3: 7/7 (100%)
+     - Phase 4: 6/6 (100%)
+
+2. **CHECK 约束修复**
+
+   **问题**: ORM 模型中的 CHECK 约束未包含演化的枚举值
+
+   | 约束 | 旧值 | 新值 |
+   |------|------|------|
+   | ORDER_STATUS_CHECK | 6 值 | 7 值 (+EXPIRED) |
+   | ORDER_TYPE_CHECK | 4 值 | 5 值 (+STOP_LIMIT) |
+   | ORDER_ROLE_CHECK | 3 值 | 7 值 (+TP2,TP3,TP4,TP5) |
+
+   **修复文件**:
+   - `src/infrastructure/v3_orm.py`
+   - `migrations/versions/2026-05-02-002_create_orders_positions_tables.py`
+
+3. **验证报告**
+   - 创建：`docs/v3/v3-phases-1-4-verification-report.md`
+
+### Git 提交
+
+```
+dc76346 fix(v3): 更新 CHECK 约束以匹配演化的枚举值
+```
+
+### 结论
+
+**Phase 1-4 全部完成**，核心功能通过测试验证。Phase 5 实盘集成已准备就绪。
+
+---
+
+## 2026-03-30 - Phase 5 审查问题修复完成（测试 100% 通过）
 
 **目标**: 修复 Phase 5 代码审查发现的 10 个问题，并完成测试验证
 
