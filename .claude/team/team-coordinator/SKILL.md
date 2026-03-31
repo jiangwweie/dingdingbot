@@ -28,6 +28,8 @@ license: Proprietary
 ### 🟢 开工前 (Pre-Flight)
 - [ ] **任务规划**: 已调用 `planning-with-files-zh` 创建计划
 - [ ] **文件创建**: `docs/planning/task_plan.md` 已生成
+- [ ] **方案输出**: 已输出任务规划和执行方案
+- [ ] **用户确认**: 已等待用户确认方案（⚠️ 必须）
 - [ ] **任务分解**: 已使用 `TaskCreate` 创建任务清单
 - [ ] **依赖标注**: 已识别任务依赖关系 (addBlockedBy)
 - [ ] **角色分配**: 已确定需要参与的角色
@@ -76,74 +78,80 @@ license: Proprietary
 
 ```
 【阶段 -1】开工准备 ──→ 【阶段 0】需求接收 ──→ 【阶段 1】契约设计 ──→ 【阶段 2】任务分解
-                                                    ↓
-【阶段 7】收工总结 ←─【阶段 6】提交汇报 ←─【阶段 5】测试执行 ←─【阶段 4】审查验证 ←─【阶段 3】并行开发
+       ↓
+   ⚠️ 用户确认
+       ↓
+【阶段 3】并行开发 ──→ 【阶段 4】审查验证 ──→ 【阶段 5】测试执行 ──→ 【阶段 6】提交汇报 ──→ 【阶段 7】收工总结
 ```
 
 ### 各阶段执行步骤
 
-#### 【阶段 7】收工总结 (Post-Flight Checklist)
+#### 【阶段 -1】开工准备 (Pre-Flight Checklist) - ⚠️ 需要用户确认
 
-**在任务完成后，必须执行以下步骤**:
+**在开始任何复杂任务前，必须执行以下步骤**:
 
-1. **运行最终验证**
-   ```bash
-   # 运行完整测试套件
-   pytest tests/unit/ tests/integration/ -v --tb=short
-
-   # 检查代码风格
-   git diff --stat HEAD
-   ```
-
-2. **调用 `verification-before-completion` 技能**
+1. **调用 `planning-with-files-zh` 创建任务计划**
    ```python
-   Agent(subagent_type="verification-before-completion",
-         prompt="验证任务 [任务名称] 已完成，所有测试通过，代码已提交")
+   Agent(subagent_type="planning-with-files-zh",
+         prompt="为任务 [任务名称] 创建执行计划，输出到 docs/planning/task_plan.md")
    ```
 
-3. **更新任务计划文件**
+2. **任务计划文件结构**:
    ```markdown
-   docs/planning/progress.md 中记录:
-   - 任务完成时间
-   - 遇到的问题及解决方案
-   - 后续优化建议
+   docs/planning/
+   ├── task_plan.md      # 任务阶段分解、关键里程碑
+   ├── findings.md       # 研究发现、技术决策记录
+   └── progress.md       # 会话日志、错误记录、下一步计划
    ```
 
-4. **生成交付报告**
+3. **任务复杂度判断**:
+   | 类型 | 处理方式 |
+   |------|----------|
+   | **简单任务** (单文件修改) | 直接分配对应角色 |
+   | **中等任务** (2-3 文件) | 创建简易计划 + 用户确认 + 执行 |
+   | **复杂任务** (前端 + 后端 + 测试) | 完整规划 + 用户确认 + 全自动流水线 |
+
+4. **⚠️ 输出任务规划和执行方案，等待用户确认**
+
+   在调用 `planning-with-files-zh` 生成计划后，必须输出以下内容并等待用户确认：
+
    ```markdown
-   ## 任务完成汇总
+   ## 任务规划与执行方案
 
-   ### ✅ 已完成任务
-   | 角色 | 任务 | 状态 |
-   |------|------|------|
-   | ... | ... | ✅ |
+   ### 任务分析
+   [分析任务需求、识别关键挑战]
 
-   ### 📦 交付物
-   - 代码文件：[...]
-   - 文档文件：[...]
-   - 测试文件：[...]
+   ### 执行计划
+   [从 task_plan.md 中提取关键阶段]
 
-   ### ✅ 验证结果
-   - 单元测试：通过 (X/X)
-   - 集成测试：通过 (X/X)
-   - 覆盖率：XX%
+   ### 任务分解
+   | 角色 | 任务 | 预计工时 |
+   |------|------|----------|
+   | ... | ... | ... |
 
-   ### 📝 相关文档
-   - docs/planning/task_plan.md
-   - docs/designs/[task]-contract.md
-   - docs/ops/[task]-deployment-report.md
+   ### 依赖关系
+   [任务依赖说明]
+
+   ### 风险点
+   [识别的风险及应对措施]
+
+   ---
+   **请确认以上方案是否可行？回复"确认"后开始执行。**
    ```
 
-5. **提交代码并推送**
-   ```bash
-   git add <files>
-   git commit -m "<conventional commit message>"
-   git push origin <branch>
+5. **用户确认后才能继续**
+   - 收到用户"确认"回复后，继续执行步骤 6
+   - 用户提出修改意见时，调整方案后重新确认
+
+6. **创建任务清单**
+   ```python
+   TaskCreate(subject="...", description="...")
    ```
 
-6. **创建/更新诊断报告**（如适用）
-   - 如果是 Bug 修复，更新 `docs/diagnostic-reports/` 中的对应报告
-   - 标记状态为"已修复"
+7. **标注依赖关系**
+   ```python
+   TaskUpdate(taskId="...", addBlockedBy=["..."])
+   ```
 
 #### 【阶段 0】需求接收与澄清
 
@@ -263,6 +271,69 @@ license: Proprietary
    - 契约对齐情况
 3. 通知用户验收
 ```
+
+#### 【阶段 7】收工总结 (Post-Flight Checklist)
+
+**在任务完成后，必须执行以下步骤**:
+
+1. **运行最终验证**
+   ```bash
+   # 运行完整测试套件
+   pytest tests/unit/ tests/integration/ -v --tb=short
+
+   # 检查代码风格
+   git diff --stat HEAD
+   ```
+
+2. **调用 `verification-before-completion` 技能**
+   ```python
+   Agent(subagent_type="verification-before-completion",
+         prompt="验证任务 [任务名称] 已完成，所有测试通过，代码已提交")
+   ```
+
+3. **更新任务计划文件**
+   ```markdown
+   docs/planning/progress.md 中记录:
+   - 任务完成时间
+   - 遇到的问题及解决方案
+   - 后续优化建议
+   ```
+
+4. **生成交付报告**
+   ```markdown
+   ## 任务完成汇总
+
+   ### ✅ 已完成任务
+   | 角色 | 任务 | 状态 |
+   |------|------|------|
+   | ... | ... | ✅ |
+
+   ### 📦 交付物
+   - 代码文件：[...]
+   - 文档文件：[...]
+   - 测试文件：[...]
+
+   ### ✅ 验证结果
+   - 单元测试：通过 (X/X)
+   - 集成测试：通过 (X/X)
+   - 覆盖率：XX%
+
+   ### 📝 相关文档
+   - docs/planning/task_plan.md
+   - docs/designs/[task]-contract.md
+   - docs/ops/[task]-deployment-report.md
+   ```
+
+5. **提交代码并推送**
+   ```bash
+   git add <files>
+   git commit -m "<conventional commit message>"
+   git push origin <branch>
+   ```
+
+6. **创建/更新诊断报告**（如适用）
+   - 如果是 Bug 修复，更新 `docs/diagnostic-reports/` 中的对应报告
+   - 标记状态为"已修复"
 
 ### 异常处理机制
 
@@ -570,12 +641,15 @@ def assign_task(role, file_path):
 | 场景 | 调用 Skill | 命令 |
 |------|-----------|------|
 | 复杂任务需要规划 | `planning-with-files-zh` | `Agent(subagent_type="planning-with-files-zh", prompt="为任务创建执行计划")` |
-| 任务计划创建后 | 读取文件 | 从 `docs/planning/task_plan.md` 继续执行 |
+| 任务计划创建后 | 输出方案 | 输出任务规划和执行方案，等待用户确认 |
+| 用户确认后 | 读取文件 | 从 `docs/planning/task_plan.md` 继续执行 |
 
 **开工检查清单**:
 - [ ] 已创建 `docs/planning/task_plan.md`
 - [ ] 已识别任务复杂度（简单/中等/复杂）
 - [ ] 已确定需要参与的角色
+- [ ] **已输出任务规划和执行方案**
+- [ ] **已等待用户确认**（⚠️ 必须）
 
 ### 任务分解阶段
 | 场景 | 调用 Skill | 命令 |
