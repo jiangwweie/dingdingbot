@@ -1,52 +1,63 @@
 # 进度日志
 
-## 2026-03-31 - Phase 6 P2 优化问题修复 (MIN-001, MIN-002) ✅
+## 2026-04-01 - Phase 6 所有问题修复完成（P0/P1/P2）✅
 
 ### 完成工作
 
-**Phase 6 代码审查 P2 优化问题修复** ✅
+**Phase 6 代码审查问题全部修复** ✅
 
-#### 修复的问题汇总
+#### P0 级别（阻断发布）- 2 个 ✅
+| 编号 | 问题 | 修复 | 状态 |
+|------|------|------|------|
+| CRIT-001 | 后端订单 API 使用 `amount` 而非 `quantity` | 统一改为 `quantity` | ✅ |
+| CRIT-002 | 前端 TypeScript 类型使用 `amount` | 统一改为 `quantity` | ✅ |
 
-| 编号 | 严重性 | 问题 | 修复 | 状态 |
-|------|--------|------|------|------|
-| MIN-001 | P2 | 统一错误响应格式 | 创建 `ErrorResponse` 模型 + 全局异常处理器 | ✅ 已修复 |
-| MIN-002 | P2 | 添加请求日志脱敏 | 取消/查询订单端点添加 `mask_secret()` 脱敏 | ✅ 已修复 |
+#### P1 级别（发布前修复）- 9 个 ✅
+| 编号 | 问题 | 修复 | 状态 |
+|------|------|------|------|
+| MAJ-001 | `get_order` 使用 `role` 而非 `order_role` | 统一改为 `order_role` | ✅ |
+| MAJ-002 | `get_order` 缺少 `remaining_qty` 字段 | 添加该字段 | ✅ |
+| MAJ-003 | 订单列表端点返回类型错误 | 改为 `OrdersResponse` | ✅ |
+| MAJ-007 | PositionsResponse 缺少 `total_margin_used` | 添加字段 | ✅ |
+| MAJ-009 | OrdersTable 价格显示逻辑 | 优先显示 `average_exec_price` | ✅ |
+| MAJ-010 | PositionsTable 缺少原始数量列 | 添加 `original_qty` 列 | ✅ |
+| MAJ-011 | Account 页面使用 mock 数据 | 替换为真实历史快照 API | ✅ |
+| 前端组件 | 7 个组件字段对齐 | CreateOrderModal/SLOrderDisplay/TPChainDisplay 等 | ✅ |
 
-#### 修复详情
+#### P2 级别（优化建议）- 6 个 ✅
+| 编号 | 问题 | 修复 | 状态 |
+|------|------|------|------|
+| MIN-001 | 错误响应格式不统一 | 创建 `ErrorResponse` 模型 + 全局异常处理器 | ✅ |
+| MIN-002 | 缺少请求日志脱敏 | 取消/查询订单端点添加 `mask_secret()` 脱敏 | ✅ |
+| MIN-003 | 订单状态过滤器重复定义 | 从 `OrderStatus` 枚举动态生成 | ✅ |
+| MIN-004 | 角色过滤器重复定义 | 从 `OrderRole` 枚举动态生成 | ✅ |
+| MIN-005 | DecimalDisplay 精度 hardcoded | 根据字段类型动态设置精度 | ✅ |
+| MIN-006 | 缺少 API 响应错误类型定义 | 添加 `ApiResponseError` 接口 | ✅ |
 
-**MIN-001: 统一错误响应格式**
-- 文件：`src/domain/models.py`
-  - 添加 `ErrorResponse` 模型：`{error_code: str, message: str}`
-- 文件：`src/interfaces/api.py`
-  - 导入 `ErrorResponse` 模型
-  - 添加全局异常处理器：
-    - `http_exception_handler` - 处理 HTTPException
-    - `validation_exception_handler` - 处理请求验证错误
-    - `general_exception_handler` - 处理未预料异常
+#### Git 提交记录
 
-**MIN-002: 添加请求日志脱敏**
-- 文件：`src/interfaces/api.py`
-  - `cancel_order` 端点：添加请求日志，`order_id` 使用 `mask_secret()` 脱敏
-  - `get_order` 端点：添加请求日志，`order_id` 使用 `mask_secret()` 脱敏
-  - `create_order` 端点：已有 `client_order_id` 脱敏（保持不变）
+```
+f7d467e fix(phase6): 修复 P2 优化问题 (MIN-001, MIN-002)
+66a5458 fix: 前端 Phase 6 P2 优化（MIN-003/004/005/006）
+a71508e fix(phase6): 修复剩余字段名错误 (CreateOrderModal/SLOrderDisplay/TPChainDisplay)
+bd8d85c fix(phase6): 完成 P1 问题修复 - 字段对齐与组件增强
+cc2ff3d fix: Phase 6 MAJ P1 问题修复（OrdersTable/PositionsTable/Account）
+24a91b6 fix: 修复 Phase 6 代码审查 MAJ-003 和 MIN-002 问题
+fb92c50 fix(phase6): 修复代码审查严重问题 (CRIT-001, CRIT-002)
+```
 
-#### Git 提交
+#### 最终验证
 
-待提交
+- ✅ 后端 Python 语法通过
+- ✅ 前端 TypeScript 编译通过
+- ✅ 前后端字段命名完全对齐契约表
+- ✅ 所有 P0/P1/P2 问题已修复
 
-#### 验证
+### 下一步
 
-- ✅ 后端 Python 语法检查通过
-- ✅ `ErrorResponse` 模型序列化正常
-- ✅ 全局异常处理器注册成功
-- ✅ `mask_secret` 脱敏功能正常
+- [ ] E2E 集成测试 (P6-008) - **等待用户确认**
 
 ---
-
-## 2026-04-01 - Phase 6 所有 P0/P1 问题修复完成 ✅
-
-### 完成工作
 
 **Phase 6 代码审查 P0/P1 问题全部修复** ✅
 
