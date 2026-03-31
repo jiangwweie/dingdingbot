@@ -5,6 +5,41 @@
 
 ---
 
+## 📋 开工/收工规范
+
+### 🟢 开工前 (Pre-Flight) - 运维专属
+- [ ] **环境确认**: 已确认服务器环境和 Docker 状态
+- [ ] **版本确认**: 已确认需要部署的分支/Commit Hash
+- [ ] **备份检查**: 已检查数据库和配置备份是否完整
+- [ ] **回滚方案**: 已准备回滚命令（如部署失败）
+
+### 🔴 收工时 (Post-Flight) - 运维专属
+- [ ] **容器状态**: Docker 容器运行正常
+- [ ] **健康检查**: API 和前端访问正常
+- [ ] **日志无异常**: 无 ERROR/CRITICAL 级别错误
+- [ ] **备份完成**: 已创建部署后备份
+- [ ] **文档更新**: 已更新部署报告或故障报告
+
+**提交前验证命令**:
+```bash
+# 检查容器状态
+docker-compose ps
+
+# 健康检查
+curl -f http://localhost:8000/api/health
+
+# 查看最新日志
+docker-compose logs --tail=50
+
+# 验证配置加载
+curl -s http://localhost:8000/api/config | grep -q "active_strategies"
+
+# 备份数据库
+cp data-prod/signals-prod.db data-prod/backups/signals-prod.$(date +%Y%m%d-%H%M%S).db
+```
+
+---
+
 ## 核心职责
 
 运维工程师负责**服务器端部署、配置管理和故障排查**，确保系统稳定运行。
