@@ -1,6 +1,6 @@
 # 进度日志
 
-## 2026-03-31 - Phase 1-4 验证完成 & CHECK 约束修复
+## 2026-03-31 - Phase 1-4 验证完成 & CHECK 约束修复 & Phase 5 契约表更新
 
 ### 完成工作
 
@@ -28,15 +28,33 @@
 3. **验证报告**
    - 创建：`docs/v3/v3-phases-1-4-verification-report.md`
 
+4. **Phase 5 审查报告状态更新**
+   - 更新 `docs/reviews/phase5-code-review.md` 状态为"全部修复，验证通过"
+   - 所有 10 个审查问题已修复 (10/10)
+   - 测试结果：72/72 (100%)
+
+5. **Phase 5 契约表更新 (v1.1)**
+   - 更新 `docs/designs/phase5-contract.md`:
+     - OrderRole 枚举从 OPEN/CLOSE (2 值) 更新为 ENTRY/TP1/TP2/TP3/TP4/TP5/SL (7 值)
+     - Section 4.1 OrderRequest.role 字段说明更新
+     - 约束条件更新（TP/SL 订单 reduce_only 必须为 true）
+   - 更新前端类型 `web-front/src/types/order.ts`:
+     - OrderRole 枚举对齐后端实现
+
 ### Git 提交
 
 ```
 dc76346 fix(v3): 更新 CHECK 约束以匹配演化的枚举值
+9b611d6 docs: 更新进度文档和验证报告
+38ae1a9 docs: 更新 Phase 5 审查报告状态为全部修复
+054e8b1 docs: 更新契约表 OrderRole 枚举为 v3.0 PMS 精细定义
 ```
 
 ### 结论
 
-**Phase 1-4 全部完成**，核心功能通过测试验证。Phase 5 实盘集成已准备就绪。
+**Phase 1-4 全部完成**，核心功能通过测试验证。
+**Phase 5 审查问题全部修复**，契约表已与代码实现对齐。
+下一步：Binance Testnet E2E 集成测试。
 
 ---
 
