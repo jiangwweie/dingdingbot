@@ -23,9 +23,9 @@ export function TakeProfitStats({ tpOrders, entryPrice, direction }: TakeProfitS
   // 计算已实现止盈（已成交订单的盈亏）
   let realizedProfit = 0;
   filledOrders.forEach(order => {
-    if (order.price && order.filled_amount) {
+    if (order.price && order.filled_qty) {
       const orderPrice = parseFloat(order.price);
-      const filledQty = parseFloat(order.filled_amount);
+      const filledQty = parseFloat(order.filled_qty);
       if (direction === 'LONG') {
         realizedProfit += (orderPrice - entryPriceNum) * filledQty;
       } else {
@@ -37,9 +37,9 @@ export function TakeProfitStats({ tpOrders, entryPrice, direction }: TakeProfitS
   // 计算未实现止盈（部分成交订单的未成交部分）
   let unrealizedProfit = 0;
   partiallyFilledOrders.forEach(order => {
-    if (order.price && order.amount && order.filled_amount) {
+    if (order.price && order.quantity && order.filled_qty) {
       const orderPrice = parseFloat(order.price);
-      const remainingQty = parseFloat(order.amount) - parseFloat(order.filled_amount);
+      const remainingQty = parseFloat(order.quantity) - parseFloat(order.filled_qty);
       if (direction === 'LONG') {
         unrealizedProfit += (orderPrice - entryPriceNum) * remainingQty;
       } else {
@@ -51,9 +51,9 @@ export function TakeProfitStats({ tpOrders, entryPrice, direction }: TakeProfitS
   // 计算总止盈目标（所有订单完全成交的理论盈亏）
   let totalTargetProfit = 0;
   tpOrders.forEach(order => {
-    if (order.price && order.amount) {
+    if (order.price && order.quantity) {
       const orderPrice = parseFloat(order.price);
-      const qty = parseFloat(order.amount);
+      const qty = parseFloat(order.quantity);
       if (direction === 'LONG') {
         totalTargetProfit += (orderPrice - entryPriceNum) * qty;
       } else {
@@ -63,8 +63,8 @@ export function TakeProfitStats({ tpOrders, entryPrice, direction }: TakeProfitS
   });
 
   // 计算执行进度
-  const totalAmount = tpOrders.reduce((sum, o) => sum + parseFloat(o.amount), 0);
-  const filledAmount = tpOrders.reduce((sum, o) => sum + parseFloat(o.filled_amount), 0);
+  const totalAmount = tpOrders.reduce((sum, o) => sum + parseFloat(o.quantity), 0);
+  const filledAmount = tpOrders.reduce((sum, o) => sum + parseFloat(o.filled_qty), 0);
   const executionProgress = totalAmount > 0 ? (filledAmount / totalAmount) * 100 : 0;
 
   const isProfit = realizedProfit >= 0;

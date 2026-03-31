@@ -98,13 +98,13 @@ export function OrdersTable({ orders, isLoading, onOrderClick }: OrdersTableProp
                 </span>
               </td>
               <td className="px-6 py-4">
-                <OrderRoleBadge role={order.role} />
+                <OrderRoleBadge role={order.order_role} />
               </td>
               <td className="px-6 py-4">
                 <DirectionBadge direction={order.direction} />
               </td>
               <td className="px-6 py-4 text-right">
-                <DecimalDisplay value={order.amount} decimals={4} />
+                <DecimalDisplay value={order.quantity} decimals={4} />
               </td>
               <td className="px-6 py-4 text-right">
                 <DecimalDisplay value={order.average_exec_price || order.price || order.trigger_price} decimals={2} />

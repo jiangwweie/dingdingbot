@@ -42,8 +42,8 @@ export function OrderDetailsDrawer({
   if (!isOpen || !order) return null;
 
   const isCancellable = order.status === 'OPEN' || order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED';
-  const filledPercent = order.amount !== '0'
-    ? (parseFloat(order.filled_amount || '0') / parseFloat(order.amount) * 100)
+  const filledPercent = order.quantity !== '0'
+    ? (parseFloat(order.filled_qty || '0') / parseFloat(order.quantity) * 100)
     : 0;
 
   return (
@@ -99,7 +99,7 @@ export function OrderDetailsDrawer({
 
           {/* Order Role & Direction */}
           <div className="flex items-center gap-3">
-            <OrderRoleBadge role={order.role} />
+            <OrderRoleBadge role={order.order_role} />
             <DirectionBadge direction={order.direction} />
           </div>
 
@@ -110,11 +110,11 @@ export function OrderDetailsDrawer({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <div className="text-xs text-gray-500">订单数量</div>
-                <DecimalDisplay value={order.amount} decimals={4} className="text-base" />
+                <DecimalDisplay value={order.quantity} decimals={4} className="text-base" />
               </div>
               <div className="space-y-1">
                 <div className="text-xs text-gray-500">已成交数量</div>
-                <DecimalDisplay value={order.filled_amount} decimals={4} className="text-base" />
+                <DecimalDisplay value={order.filled_qty} decimals={4} className="text-base" />
               </div>
               <div className="space-y-1">
                 <div className="text-xs text-gray-500">

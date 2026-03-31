@@ -14,8 +14,8 @@ interface TPProgressBarProps {
  */
 export function TPProgressBar({ order, direction, entryPrice }: TPProgressBarProps) {
   const orderPrice = order.price ? parseFloat(order.price) : null;
-  const orderAmount = parseFloat(order.amount);
-  const filledAmount = parseFloat(order.filled_amount);
+  const orderAmount = parseFloat(order.quantity);
+  const filledAmount = parseFloat(order.filled_qty);
 
   // 计算进度百分比
   const progressPercent = orderAmount > 0 ? (filledAmount / orderAmount) * 100 : 0;
@@ -57,7 +57,7 @@ export function TPProgressBar({ order, direction, entryPrice }: TPProgressBarPro
             )}
           </div>
           <span className="text-sm font-semibold text-gray-700">
-            {order.role}
+            {order.order_role}
           </span>
           {orderPrice && (
             <span className="text-xs text-gray-500">
