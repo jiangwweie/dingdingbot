@@ -11,8 +11,8 @@ core_symbols:
 
 # Pinbar 默认几何参数
 pinbar_defaults:
-  min_wick_ratio: 0.6          # 影线占全长的最低比例 (required, Decimal)
-  max_body_ratio: 0.3          # 实体占全长的最高比例 (required, Decimal)
+  min_wick_ratio: 0.5          # 影线占全长的最低比例 (required, Decimal)
+  max_body_ratio: 0.35         # 实体占全长的最高比例 (required, Decimal)
   body_position_tolerance: 0.3 # 实体位置偏差容许度 (required, Decimal)
 
 # EMA 指标配置

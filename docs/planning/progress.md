@@ -1,5 +1,61 @@
 # 进度日志
 
+## 2026-03-31 - 会话：K 线图时区显示修复 (待验证)
+
+**目标**: 修复信号详情页 K 线图时间轴显示 UTC 时间而非东京时间的问题
+
+**背景**:
+- 信号列表时间显示正确：22:15（东京时间）
+- K 线图时间轴显示错误：13:15（UTC+8 北京时间）→ 应为 22:15（东京时间）
+- K 线截止时间显示：16:00（UTC）→ 应为次日 01:00（东京时间）
+
+**根因分析**:
+- `lightweight-charts` 的 `timeZone: 'Asia/Tokyo'` 配置未生效
+- 图表库收到 `UTCTimestamp` 后，按 UTC 时间显示，时区配置被忽略
+- 可能原因：v5.1.0 版本 IANA 时区支持存在 bug，或 `UTCTimestamp` 类型强制使用 UTC 显示
+
+**修复方案**:
+```typescript
+// 手动转换 UTC 到东京时间（+9 小时）
+const TOKYO_OFFSET_SECONDS = 9 * 60 * 60;
+
+const klineData: CandlestickData[] = data.klines.map((k) => {
+  const utcSeconds = k[0] / 1000;
+  const tokyoSeconds = utcSeconds + TOKYO_OFFSET_SECONDS;
+  return {
+    time: tokyoSeconds as UTCTimestamp,
+    open: k[1],
+    high: k[2],
+    low: k[3],
+    close: k[4],
+  };
+});
+
+// 图表配置改为 'Etc/UTC' 避免二次转换
+timeScale: {
+  timeZone: 'Etc/UTC',
+}
+```
+
+**修改文件**:
+- `web-front/src/components/SignalDetailsDrawer.tsx` - K 线图渲染组件
+
+**Git 提交**: `89e0d3e`
+
+**部署状态**: 已部署到服务器 (`/usr/local/monitorDog/web-front/dist/`)
+
+**待验证**:
+- [ ] 用户强制刷新浏览器缓存 (Ctrl+Shift+R 或 Cmd+Shift+R)
+- [ ] K 线图时间轴应显示东京时间 (UTC+9)
+- [ ] 信号列表时间 vs K 线图时间一致
+
+**备用方案** (如当前修复无效):
+- 方案 C: 移除 `timeZone` 配置，依赖浏览器本地时区
+- 方案 D: 使用 `Time` 类型替代 `UTCTimestamp`
+- 方案 E: 降级 lightweight-charts 到 v4.x 版本
+
+---
+
 ## 2026-03-29 - 会话：MTF 过滤 `higher_tf_data_unavailable` 问题修复 (已完成)
 
 **目标**: 修复 ETH/USDT 1h 回测时 MTF 过滤器错误返回 `higher_tf_data_unavailable` 的问题

@@ -174,6 +174,9 @@ class PatternStrategy(Strategy):
 class PinbarStrategy(PatternStrategy):
     """Pinbar strategy implementation."""
 
+    # S6-4-4: 最小波幅检查（防止极小波幅 K 线产生异常信号）
+    MIN_CANDLE_RANGE = Decimal("0.0001")  # 最小波幅 0.0001
+
     def __init__(self, config: PinbarConfig):
         self._config = config
 
@@ -205,7 +208,13 @@ class PinbarStrategy(PatternStrategy):
 
         # Calculate candle range
         candle_range = high - low
+
+        # S6-4-4: 添加最小波幅检查（防止极小波幅 K 线产生异常信号）
         if candle_range == Decimal(0):
+            return None
+
+        if candle_range < self.MIN_CANDLE_RANGE:
+            # 波幅太小，跳过
             return None
 
         # Calculate body size

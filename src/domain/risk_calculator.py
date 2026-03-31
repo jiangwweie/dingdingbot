@@ -35,6 +35,9 @@ class RiskCalculator:
     - Stop_Loss_Distance: |Entry_Price - Stop_Loss| / Entry_Price (as percentage)
     """
 
+    # S6-4: 最小止损距离（防止止损距离过小导致仓位为 0）
+    MIN_STOP_LOSS_RATIO = Decimal("0.001")  # 0.1%
+
     def __init__(self, config: RiskConfig, take_profit_config: Optional[TakeProfitConfig] = None):
         """
         Initialize risk calculator.
@@ -75,7 +78,28 @@ class RiskCalculator:
             # Stop loss slightly above the Pinbar high
             stop_loss = kline.high
 
-        return self._quantize_price(stop_loss, kline.close)
+        stop_loss = self._quantize_price(stop_loss, kline.close)
+
+        # S6-4: 添加最小止损距离检查（≥ 0.1%），防止止损距离过小导致仓位为 0
+        entry_price = kline.close
+        min_stop_distance = entry_price * self.MIN_STOP_LOSS_RATIO
+
+        if direction == Direction.LONG:
+            # 对于 LONG，止损必须低于入场价至少 0.1%
+            min_stop_loss = entry_price - min_stop_distance
+            if stop_loss > min_stop_loss:
+                # 止损距离太小，调整到最小允许值
+                stop_loss = min_stop_loss
+                logger.warning(f"止损距离过小，已调整到最小允许值：entry={entry_price}, stop_loss={stop_loss}")
+        else:  # SHORT
+            # 对于 SHORT，止损必须高于入场价至少 0.1%
+            min_stop_loss = entry_price + min_stop_distance
+            if stop_loss < min_stop_loss:
+                # 止损距离太小，调整到最小允许值
+                stop_loss = min_stop_loss
+                logger.warning(f"止损距离过小，已调整到最小允许值：entry={entry_price}, stop_loss={stop_loss}")
+
+        return stop_loss
 
     def calculate_position_size(
         self,
