@@ -30,50 +30,69 @@
 
 **端点**: `POST /api/v3/orders`
 
-**请求体** (`OrderRequest`):
-```typescript
+#### 2.1.1 请求体 (`OrderRequest`) - 字段约束
+
+| 字段 | 类型 | 必填 | 默认值 | 约束/格式 | 说明 |
+|------|------|------|--------|-----------|------|
+| `symbol` | string | ✅ 必填 | - | 模式：`^[A-Z]+/[A-Z]+:[A-Z]+$` | 币种对，如 `BTC/USDT:USDT` |
+| `order_type` | OrderType | ✅ 必填 | - | 枚举：`MARKET`/`LIMIT`/`STOP_MARKET`/`STOP_LIMIT` | 订单类型 |
+| `order_role` | OrderRole | ✅ 必填 | - | 枚举：`ENTRY`/`TP1`/`TP2`/`TP3`/`TP4`/`TP5`/`SL` | 订单角色 |
+| `direction` | Direction | ✅ 必填 | - | 枚举：`LONG`/`SHORT` | 方向 |
+| `quantity` | string | ✅ 必填 | - | 正则：`^\d+(\.\d+)?$`, 最小值：`0.001` | 数量（Decimal 字符串） |
+| `price` | string | ⚠️ 条件必填 | - | 正则：`^\d+(\.\d+)?$` | 限价单价格（`order_type=LIMIT` 或 `STOP_LIMIT` 时必填） |
+| `trigger_price` | string | ⚠️ 条件必填 | - | 正则：`^\d+(\.\d+)?$` | 条件单触发价（`order_type=STOP_MARKET` 或 `STOP_LIMIT` 时必填） |
+| `reduce_only` | boolean | ❌ 可选 | `false` | - | 仅减仓（平仓单必须设为 `true`） |
+| `client_order_id` | string | ❌ 可选 | - | 最大长度：36 | 客户端订单 ID（UUID 格式） |
+| `strategy_name` | string | ❌ 可选 | - | 最大长度：64 | 关联策略名称 |
+| `signal_id` | string | ❌ 可选 | - | UUID 格式 | 关联信号 ID |
+
+**条件必填规则**:
+```
+IF order_type IN ("LIMIT", "STOP_LIMIT") THEN price 必填
+IF order_type IN ("STOP_MARKET", "STOP_LIMIT") THEN trigger_price 必填
+IF order_role IN ("TP1", "TP2", "TP3", "TP4", "TP5", "SL") THEN reduce_only 必须为 true
+```
+
+**请求体示例**:
+```json
 {
-  symbol: string;                    // "BTC/USDT:USDT"
-  order_type: OrderType;             // "MARKET" | "LIMIT" | "STOP_MARKET" | "STOP_LIMIT"
-  order_role: OrderRole;             // "ENTRY" | "TP1" | "TP2" | "TP3" | "TP4" | "TP5" | "SL"
-  direction: Direction;              // "LONG" | "SHORT"
-  quantity: string;                  // Decimal 字符串
-  price?: string;                    // 限价单价格（可选）
-  trigger_price?: string;            // 条件单触发价（可选）
-  reduce_only?: boolean;             // 默认 false
-  client_order_id?: string;          // 客户端订单 ID
-  strategy_name?: string;            // 关联策略名称
-  signal_id?: string;                // 关联信号 ID
+  "symbol": "BTC/USDT:USDT",
+  "order_type": "MARKET",
+  "order_role": "ENTRY",
+  "direction": "LONG",
+  "quantity": "0.01",
+  "reduce_only": false,
+  "strategy_name": "01pinbar-ema60",
+  "signal_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
-**响应** (`OrderResponse`):
-```typescript
-{
-  order_id: string;
-  exchange_order_id?: string;
-  symbol: string;
-  order_type: OrderType;
-  order_role: OrderRole;
-  direction: Direction;
-  quantity: string;
-  price?: string;
-  trigger_price?: string;
-  average_exec_price?: string;
-  filled_qty: string;
-  remaining_qty: string;
-  status: OrderStatus;
-  reduce_only: boolean;
-  client_order_id?: string;
-  strategy_name?: string;
-  signal_id?: string;
-  fee_paid?: string;
-  fee_currency?: string;
-  created_at: number;                // 毫秒时间戳
-  updated_at: number;
-  filled_at?: number;
-}
-```
+#### 2.1.2 响应体 (`OrderResponse`) - 字段约束
+
+| 字段 | 类型 | 必填 | 可为空 | 格式 | 说明 |
+|------|------|------|--------|------|------|
+| `order_id` | string | ✅ | ❌ | UUID | 系统订单 ID |
+| `exchange_order_id` | string | ❌ | ✅ | - | 交易所订单 ID（下单成功后返回） |
+| `symbol` | string | ✅ | ❌ | - | 币种对 |
+| `order_type` | OrderType | ✅ | ❌ | 枚举 | 订单类型 |
+| `order_role` | OrderRole | ✅ | ❌ | 枚举 | 订单角色 |
+| `direction` | Direction | ✅ | ❌ | 枚举 | 方向 |
+| `quantity` | string | ✅ | ❌ | Decimal | 订单数量 |
+| `price` | string | ❌ | ✅ | Decimal | 限价单价格 |
+| `trigger_price` | string | ❌ | ✅ | Decimal | 条件单触发价 |
+| `average_exec_price` | string | ❌ | ✅ | Decimal | 平均成交价（成交后返回） |
+| `filled_qty` | string | ✅ | ❌ | Decimal | 已成交数量（默认 `0`） |
+| `remaining_qty` | string | ✅ | ❌ | Decimal | 剩余数量 |
+| `status` | OrderStatus | ✅ | ❌ | 枚举 | 订单状态 |
+| `reduce_only` | boolean | ✅ | ❌ | - | 是否仅减仓 |
+| `client_order_id` | string | ❌ | ✅ | UUID | 客户端订单 ID |
+| `strategy_name` | string | ❌ | ✅ | - | 关联策略名称 |
+| `signal_id` | string | ❌ | ✅ | UUID | 关联信号 ID |
+| `fee_paid` | string | ❌ | ✅ | Decimal | 已支付手续费 |
+| `fee_currency` | string | ❌ | ✅ | - | 手续费币种 |
+| `created_at` | number | ✅ | ❌ | 毫秒时间戳 | 创建时间 |
+| `updated_at` | number | ✅ | ❌ | 毫秒时间戳 | 更新时间 |
+| `filled_at` | number | ❌ | ✅ | 毫秒时间戳 | 成交时间 |
 
 **错误响应**:
 | HTTP 状态码 | 错误码 | 说明 |
@@ -90,24 +109,35 @@
 
 **端点**: `DELETE /api/v3/orders/{order_id}`
 
-**路径参数**:
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| order_id | string | 系统订单 ID |
+#### 2.2.1 路径参数
 
-**查询参数**:
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| symbol | string | 是 | 币种对 |
+| 字段 | 类型 | 必填 | 格式 | 说明 |
+|------|------|------|------|------|
+| `order_id` | string | ✅ | UUID | 系统订单 ID |
 
-**响应** (`OrderCancelResponse`):
-```typescript
+#### 2.2.2 查询参数
+
+| 字段 | 类型 | 必填 | 格式 | 说明 |
+|------|------|------|------|------|
+| `symbol` | string | ✅ | - | 币种对（用于交易所路由） |
+
+#### 2.2.3 响应体 (`OrderCancelResponse`) - 字段约束
+
+| 字段 | 类型 | 必填 | 可为空 | 格式 | 说明 |
+|------|------|------|--------|------|------|
+| `order_id` | string | ✅ | ❌ | UUID | 系统订单 ID |
+| `exchange_order_id` | string | ❌ | ✅ | - | 交易所订单 ID（如已同步） |
+| `status` | string | ✅ | ❌ | 枚举：`CANCELED`/`REJECTED` | 取消结果状态 |
+| `message` | string | ❌ | ✅ | 最大长度：500 | 拒绝原因（当 `status=REJECTED` 时） |
+| `canceled_at` | number | ✅ | ❌ | 毫秒时间戳 | 取消时间 |
+
+**响应示例**:
+```json
 {
-  order_id: string;
-  exchange_order_id?: string;
-  status: "CANCELED" | "REJECTED";
-  message?: string;
-  canceled_at: number;
+  "order_id": "550e8400-e29b-41d4-a716-446655440000",
+  "exchange_order_id": "12345678",
+  "status": "CANCELED",
+  "canceled_at": 1743494400000
 }
 ```
 
@@ -117,25 +147,25 @@
 
 **端点**: `GET /api/v3/orders`
 
-**查询参数**:
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| symbol | string | - | 币种对过滤 |
-| status | OrderStatus | - | 状态过滤 |
-| order_role | OrderRole | - | 角色过滤 |
-| strategy_name | string | - | 策略名称过滤 |
-| limit | number | 100 | 返回数量限制 |
-| offset | number | 0 | 偏移量 |
+#### 2.3.1 查询参数
 
-**响应** (`OrdersResponse`):
-```typescript
-{
-  items: OrderResponse[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-```
+| 字段 | 类型 | 必填 | 默认值 | 约束 | 说明 |
+|------|------|------|--------|------|------|
+| `symbol` | string | ❌ | - | - | 币种对过滤 |
+| `status` | OrderStatus | ❌ | - | 枚举 | 状态过滤 |
+| `order_role` | OrderRole | ❌ | - | 枚举 | 角色过滤 |
+| `strategy_name` | string | ❌ | - | 最大 64 字符 | 策略名称过滤 |
+| `limit` | number | ❌ | `100` | `1-500` | 返回数量限制 |
+| `offset` | number | ❌ | `0` | `≥0` | 偏移量 |
+
+#### 2.3.2 响应体 (`OrdersResponse`) - 字段约束
+
+| 字段 | 类型 | 必填 | 格式 | 说明 |
+|------|------|------|------|------|
+| `items` | OrderResponse[] | ✅ | 数组 | 订单列表 |
+| `total` | number | ✅ | 整数 | 总记录数 |
+| `limit` | number | ✅ | 整数 | 当前限制数 |
+| `offset` | number | ✅ | 整数 | 当前偏移量 |
 
 ---
 
@@ -143,46 +173,46 @@
 
 **端点**: `GET /api/v3/positions`
 
-**查询参数**:
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| symbol | string | - | 币种对过滤 |
-| is_closed | boolean | false | 是否查询已平仓 |
-| limit | number | 100 | 返回数量限制 |
+#### 2.4.1 查询参数
 
-**响应** (`PositionsResponse`):
-```typescript
-{
-  items: PositionInfo[];
-  total: number;
-}
-```
+| 字段 | 类型 | 必填 | 默认值 | 约束 | 说明 |
+|------|------|------|--------|------|------|
+| `symbol` | string | ❌ | - | - | 币种对过滤 |
+| `is_closed` | boolean | ❌ | `false` | - | 是否查询已平仓 |
+| `limit` | number | ❌ | `100` | `1-500` | 返回数量限制 |
+| `offset` | number | ❌ | `0` | `≥0` | 偏移量 |
 
-**`PositionInfo`**:
-```typescript
-{
-  position_id: string;
-  symbol: string;
-  direction: Direction;
-  entry_price: string;
-  current_qty: string;
-  original_qty: string;
-  unrealized_pnl: string;
-  realized_pnl: string;
-  liquidation_price?: string;
-  leverage: number;
-  margin_mode: string;              // "cross" | "isolated"
-  total_fees_paid: string;
-  entry_time: number;
-  closed_at?: number;
-  is_closed: boolean;
-  strategy_name?: string;
-  signal_id?: string;
-  take_profit_orders: OrderInfo[];  // TP1-TP5 订单链
-  stop_loss_order?: OrderInfo;      // SL 订单
-  tags: Tag[];
-}
-```
+#### 2.4.2 响应体 (`PositionsResponse`) - 字段约束
+
+| 字段 | 类型 | 必填 | 格式 | 说明 |
+|------|------|------|------|------|
+| `items` | PositionInfo[] | ✅ | 数组 | 持仓列表 |
+| `total` | number | ✅ | 整数 | 总记录数 |
+
+**`PositionInfo` 字段约束**:
+
+| 字段 | 类型 | 必填 | 可为空 | 格式 | 说明 |
+|------|------|------|--------|------|------|
+| `position_id` | string | ✅ | ❌ | UUID | 仓位 ID |
+| `symbol` | string | ✅ | ❌ | - | 币种对 |
+| `direction` | Direction | ✅ | ❌ | 枚举 | 方向 |
+| `entry_price` | string | ✅ | ❌ | Decimal | 入场价 |
+| `current_qty` | string | ✅ | ❌ | Decimal | 当前数量 |
+| `original_qty` | string | ✅ | ❌ | Decimal | 原始数量 |
+| `unrealized_pnl` | string | ✅ | ❌ | Decimal | 未实现盈亏 |
+| `realized_pnl` | string | ✅ | ❌ | Decimal | 已实现盈亏 |
+| `liquidation_price` | string | ❌ | ✅ | Decimal | 强平价 |
+| `leverage` | number | ✅ | ❌ | 整数 | 杠杆倍数 |
+| `margin_mode` | string | ✅ | ❌ | `cross`/`isolated` | 保证金模式 |
+| `total_fees_paid` | string | ✅ | ❌ | Decimal | 累计手续费 |
+| `entry_time` | number | ✅ | ❌ | 毫秒时间戳 | 入场时间 |
+| `closed_at` | number | ❌ | ✅ | 毫秒时间戳 | 平仓时间 |
+| `is_closed` | boolean | ✅ | ❌ | - | 是否已平仓 |
+| `strategy_name` | string | ❌ | ✅ | - | 关联策略名称 |
+| `signal_id` | string | ❌ | ✅ | UUID | 关联信号 ID |
+| `take_profit_orders` | OrderInfo[] | ✅ | ❌ | 数组 | TP 订单链 |
+| `stop_loss_order` | OrderInfo | ❌ | ✅ | 对象 | SL 订单 |
+| `tags` | Tag[] | ✅ | ❌ | 数组 | 动态标签 |
 
 ---
 
@@ -190,71 +220,59 @@
 
 **端点**: `GET /api/v3/account/balance`
 
-**响应** (`AccountBalance`):
-```typescript
-{
-  total_balance: string;
-  available_balance: string;
-  unrealized_pnl: string;
-  total_equity: string;
-  currency: string;                 // "USDT"
-  timestamp: number;
-}
-```
+#### 2.5.1 响应体 (`AccountBalance`) - 字段约束
+
+| 字段 | 类型 | 必填 | 可为空 | 格式 | 说明 |
+|------|------|------|--------|------|------|
+| `total_balance` | string | ✅ | ❌ | Decimal | 总余额 |
+| `available_balance` | string | ✅ | ❌ | Decimal | 可用余额 |
+| `unrealized_pnl` | string | ✅ | ❌ | Decimal | 未实现盈亏 |
+| `total_equity` | string | ✅ | ❌ | Decimal | 总权益 |
+| `currency` | string | ✅ | ❌ | - | 币种（`USDT`） |
+| `timestamp` | number | ✅ | ❌ | 毫秒时间戳 | 快照时间 |
 
 ---
 
-### 2.6 账户快照
-
-**端点**: `GET /api/v3/account/snapshot`
-
-**响应** (`AccountSnapshot`):
-```typescript
-{
-  snapshot_id: string;
-  total_balance: string;
-  available_balance: string;
-  used_margin: string;
-  unrealized_pnl: string;
-  total_equity: string;
-  positions: PositionSummary[];
-  currency: string;
-  timestamp: number;
-}
-```
-
----
-
-### 2.7 资金保护检查
+### 2.6 资金保护检查
 
 **端点**: `POST /api/v3/orders/check`
 
-**请求体** (`OrderCheckRequest`):
-```typescript
-{
-  symbol: string;
-  order_type: OrderType;
-  quantity: string;
-  price?: string;
-  trigger_price?: string;
-  stop_loss?: string;               // 建议止损价
-}
-```
+#### 2.6.1 请求体 (`OrderCheckRequest`) - 字段约束
 
-**响应** (`CapitalProtectionCheckResult`):
-```typescript
-{
-  allowed: boolean;
-  reason?: string;
-  checks: {
-    single_trade_limit: { passed: boolean; max_loss: string; estimated_loss: string };
-    position_limit: { passed: boolean; max_position: string; position_value: string };
-    daily_loss_limit: { passed: boolean; daily_max_loss: string; daily_pnl: string };
-    daily_trade_count: { passed: boolean; max_count: number; current_count: number };
-    min_balance: { passed: boolean; min_balance: string; current_balance: string };
-  };
-}
-```
+| 字段 | 类型 | 必填 | 可为空 | 格式 | 说明 |
+|------|------|------|--------|------|------|
+| `symbol` | string | ✅ | ❌ | - | 币种对 |
+| `order_type` | OrderType | ✅ | ❌ | 枚举 | 订单类型 |
+| `quantity` | string | ✅ | ❌ | Decimal | 数量 |
+| `price` | string | ❌ | ✅ | Decimal | 限价单价格 |
+| `trigger_price` | string | ❌ | ✅ | Decimal | 条件单触发价 |
+| `stop_loss` | string | ❌ | ✅ | Decimal | 建议止损价 |
+
+#### 2.6.2 响应体 (`CapitalProtectionCheckResult`) - 字段约束
+
+| 字段 | 类型 | 必填 | 格式 | 说明 |
+|------|------|------|------|------|
+| `allowed` | boolean | ✅ | - | 是否允许下单 |
+| `reason` | string | ❌ | - | 拒绝原因（当 `allowed=false`） |
+| `checks` | CheckResults | ✅ | 对象 | 各项检查结果 |
+
+**`CheckResults` 字段约束**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `single_trade_limit` | SingleTradeCheck | ✅ | 单笔交易限制检查 |
+| `position_limit` | PositionLimitCheck | ✅ | 仓位限制检查 |
+| `daily_loss_limit` | DailyLossCheck | ✅ | 每日亏损限制检查 |
+| `daily_trade_count` | TradeCountCheck | ✅ | 每日交易次数检查 |
+| `min_balance` | MinBalanceCheck | ✅ | 最低余额检查 |
+
+**各检查项通用字段**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `passed` | boolean | ✅ | 是否通过 |
+| `max_allowed` | string | ❌ | 最大允许值 |
+| `current_value` | string | ❌ | 当前值 |
 
 ---
 
@@ -294,7 +312,93 @@
 
 ---
 
-## 3. 枚举定义（与后端对齐）
+## 3. Pydantic 模型验证规则
+
+### 3.1 OrderRequest 验证器
+
+```python
+# src/domain/models.py
+
+class OrderRequest(FinancialModel):
+    symbol: str = Field(
+        ...,
+        pattern=r'^[A-Z]+/[A-Z]+:[A-Z]+$',
+        description="币种对"
+    )
+    order_type: OrderType = Field(..., description="订单类型")
+    order_role: OrderRole = Field(..., description="订单角色")
+    direction: Direction = Field(..., description="方向")
+    quantity: Decimal = Field(
+        ...,
+        gt=0,
+        decimal_places=8,
+        description="数量"
+    )
+    price: Optional[Decimal] = Field(
+        None,
+        gt=0,
+        decimal_places=8,
+        description="限价单价格"
+    )
+    trigger_price: Optional[Decimal] = Field(
+        None,
+        gt=0,
+        decimal_places=8,
+        description="条件单触发价"
+    )
+    reduce_only: bool = Field(default=False, description="仅减仓")
+    client_order_id: Optional[str] = Field(
+        None,
+        max_length=36,
+        description="客户端订单 ID (UUID)"
+    )
+    strategy_name: Optional[str] = Field(
+        None,
+        max_length=64,
+        description="策略名称"
+    )
+    signal_id: Optional[str] = Field(
+        None,
+        description="关联信号 ID (UUID)"
+    )
+
+    @model_validator(mode='after')
+    def validate_order_fields(self) -> 'OrderRequest':
+        """订单字段条件验证"""
+        # LIMIT 或 STOP_LIMIT 订单必须有价格
+        if self.order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT):
+            if self.price is None:
+                raise ValueError('price 字段在 LIMIT/STOP_LIMIT 订单中必填')
+
+        # STOP_MARKET 或 STOP_LIMIT 订单必须有 trigger_price
+        if self.order_type in (OrderType.STOP_MARKET, OrderType.STOP_LIMIT):
+            if self.trigger_price is None:
+                raise ValueError('trigger_price 字段在 STOP_MARKET/STOP_LIMIT 订单中必填')
+
+        # 止盈止损订单必须设置 reduce_only=true
+        if self.order_role in (OrderRole.TP1, OrderRole.TP2, OrderRole.TP3,
+                                OrderRole.TP4, OrderRole.TP5, OrderRole.SL):
+            if not self.reduce_only:
+                raise ValueError('TP/SL 订单必须设置 reduce_only=true')
+
+        return self
+```
+
+### 3.2 字段约束汇总
+
+| 字段 | 验证规则 | 错误消息 |
+|------|----------|----------|
+| `symbol` | `pattern='^[A-Z]+/[A-Z]+:[A-Z]+$'` | "币种对格式不正确" |
+| `quantity` | `gt=0`, `decimal_places=8` | "数量必须为正数" |
+| `price` | `gt=0`, `decimal_places=8` (条件必填) | "LIMIT 订单必须有价格" |
+| `trigger_price` | `gt=0`, `decimal_places=8` (条件必填) | "STOP 订单必须有 trigger_price" |
+| `client_order_id` | `max_length=36` | "客户端订单 ID 超长" |
+| `strategy_name` | `max_length=64` | "策略名称超长" |
+| `reduce_only` | 必须为 `true` (当 `order_role=TP/SL`) | "TP/SL 订单必须设置 reduce_only=true" |
+
+---
+
+## 4. 枚举定义（与后端对齐）
 
 ### 3.1 Direction
 
