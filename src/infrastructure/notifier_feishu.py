@@ -20,7 +20,7 @@ from typing import Optional, Dict, Any, List
 import aiohttp
 
 from src.domain.models import Order, ReconciliationReport, Direction
-from src.infrastructure.logger import logger
+from src.infrastructure.logger import logger, register_secret
 
 
 # ============================================================
@@ -445,6 +445,9 @@ class FeishuNotifier:
         self._config = config or FeishuConfig()
         self._session = session
         self._pending_alerts: List[Dict[str, Any]] = []
+
+        # Register webhook URL for secret masking
+        register_secret(webhook_url)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp ClientSession"""

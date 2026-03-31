@@ -1042,8 +1042,177 @@ class OrderResponse(FinancialModel):
     updated_at: int
 
 
-# Forward reference rebuild
+# ============================================================
+# Phase 5: 实盘集成 - API 请求/响应模型
+# Reference: docs/designs/phase5-contract.md
+# ============================================================
+
+class OrderRequest(FinancialModel):
+    """
+    下单请求模型
+
+    Phase 5: 实盘集成 - POST /api/orders 请求体
+    Reference: docs/designs/phase5-contract.md Section 4.1
+
+    约束条件:
+    - order_type == LIMIT 时，price 必填
+    - order_type == STOP_MARKET 时，trigger_price 必填
+    - role == CLOSE 时，reduce_only 必须为 True
+    """
+    symbol: str = Field(..., description="币种对，如 'BTC/USDT:USDT'")
+    order_type: OrderType = Field(..., description="订单类型 (MARKET/LIMIT/STOP_MARKET/STOP_LIMIT)")
+    direction: Direction = Field(..., description="方向 (LONG/SHORT)")
+    role: OrderRole = Field(..., description="角色 (OPEN/CLOSE)")
+    amount: Decimal = Field(..., gt=0, description="数量（正数）")
+    price: Optional[Decimal] = Field(None, gt=0, description="限价单价格（LIMIT 订单必填）")
+    trigger_price: Optional[Decimal] = Field(None, gt=0, description="条件单触发价（STOP 订单必填）")
+    reduce_only: bool = Field(default=False, description="是否仅减仓（平仓单必须为 True）")
+    client_order_id: Optional[str] = Field(None, max_length=64, description="客户端订单 ID")
+    strategy_name: Optional[str] = Field(None, max_length=64, description="策略名称")
+    stop_loss: Optional[Decimal] = Field(None, gt=0, description="止损价格")
+    take_profit: Optional[Decimal] = Field(None, gt=0, description="止盈价格")
+
+
+class OrderResponseFull(FinancialModel):
+    """
+    订单响应模型（完整版）
+
+    Phase 5: 实盘集成 - POST/GET /api/orders 响应体
+    Reference: docs/designs/phase5-contract.md Section 4.2
+
+    注意：此模型与 OrderResponse (简化版) 不同，此模型包含完整的 API 响应字段
+    """
+    order_id: str = Field(..., description="系统订单 ID")
+    exchange_order_id: Optional[str] = Field(None, description="交易所订单 ID")
+    symbol: str = Field(..., description="币种对")
+    order_type: OrderType = Field(..., description="订单类型")
+    direction: Direction = Field(..., description="方向")
+    role: OrderRole = Field(..., description="角色")
+    status: OrderStatus = Field(..., description="订单状态")
+    amount: Decimal = Field(..., description="订单数量")
+    filled_amount: Decimal = Field(default=Decimal("0"), description="已成交数量")
+    price: Optional[Decimal] = Field(None, description="限价单价格")
+    trigger_price: Optional[Decimal] = Field(None, description="条件单触发价")
+    average_exec_price: Optional[Decimal] = Field(None, description="平均成交价")
+    reduce_only: bool = Field(..., description="是否仅减仓")
+    client_order_id: Optional[str] = Field(None, description="客户端订单 ID")
+    strategy_name: Optional[str] = Field(None, description="策略名称")
+    stop_loss: Optional[Decimal] = Field(None, description="止损价格")
+    take_profit: Optional[Decimal] = Field(None, description="止盈价格")
+    created_at: int = Field(..., description="创建时间戳（毫秒）")
+    updated_at: int = Field(..., description="更新时间戳（毫秒）")
+    fee_paid: Decimal = Field(default=Decimal("0"), description="已支付手续费")
+    tags: List[dict] = Field(default_factory=list, description="动态标签列表")
+
+
+class OrderCancelResponse(FinancialModel):
+    """
+    取消订单响应模型
+
+    Phase 5: 实盘集成 - DELETE /api/orders/{order_id} 响应体
+    Reference: docs/designs/phase5-contract.md Section 5.3
+    """
+    order_id: str = Field(..., description="系统订单 ID")
+    exchange_order_id: Optional[str] = Field(None, description="交易所订单 ID")
+    symbol: str = Field(..., description="币种对")
+    status: OrderStatus = Field(..., description="取消后状态")
+    canceled_at: int = Field(..., description="取消时间戳（毫秒）")
+    message: str = Field(..., description="取消结果说明")
+
+
+class PositionInfoV3(FinancialModel):
+    """
+    持仓信息模型 (v3 API 版本)
+
+    Phase 5: 实盘集成 - GET /api/positions 响应体
+    Reference: docs/designs/phase5-contract.md Section 7.2
+
+    注意：此模型与 domain 层的 Position 实体 (line 762) 和 PositionInfo (line 70, legacy) 不同，
+    此模型专用于 API 响应序列化，包含更多展示字段
+    """
+    position_id: str = Field(..., description="系统持仓 ID")
+    symbol: str = Field(..., description="币种对")
+    direction: Direction = Field(..., description="方向")
+    current_qty: Decimal = Field(..., description="当前数量")
+    entry_price: Decimal = Field(..., description="开仓均价")
+    mark_price: Optional[Decimal] = Field(None, description="标记价格")
+    unrealized_pnl: Decimal = Field(default=Decimal("0"), description="未实现盈亏")
+    realized_pnl: Decimal = Field(default=Decimal("0"), description="已实现盈亏")
+    liquidation_price: Optional[Decimal] = Field(None, description="强平价")
+    leverage: int = Field(..., description="杠杆倍数")
+    margin_mode: str = Field(default="CROSS", description="保证金模式（CROSS/ISOLATED）")
+    is_closed: bool = Field(default=False, description="是否已平仓")
+    opened_at: int = Field(..., description="开仓时间戳（毫秒）")
+    closed_at: Optional[int] = Field(None, description="平仓时间戳（毫秒）")
+    total_fees_paid: Decimal = Field(default=Decimal("0"), description="累计手续费")
+    strategy_name: Optional[str] = Field(None, description="策略名称")
+    stop_loss: Optional[Decimal] = Field(None, description="止损价格")
+    take_profit: Optional[Decimal] = Field(None, description="止盈价格")
+    tags: List[dict] = Field(default_factory=list, description="动态标签列表")
+
+
+class PositionResponse(FinancialModel):
+    """
+    持仓列表响应模型
+
+    Phase 5: 实盘集成 - GET /api/positions 响应体
+    Reference: docs/designs/phase5-contract.md Section 7.2
+    """
+    positions: List[PositionInfoV3] = Field(..., description="持仓列表")
+    total_unrealized_pnl: Decimal = Field(..., description="总未实现盈亏")
+    total_realized_pnl: Decimal = Field(..., description="总已实现盈亏")
+    total_margin_used: Decimal = Field(..., description="总占用保证金")
+    account_equity: Optional[Decimal] = Field(None, description="账户权益")
+
+
+class AccountBalance(FinancialModel):
+    """
+    账户余额信息模型
+
+    Phase 5: 实盘集成 - GET /api/account 响应体子模型
+    Reference: docs/designs/phase5-contract.md Section 8.2
+    """
+    currency: str = Field(..., description="币种，如 'USDT'")
+    total_balance: Decimal = Field(..., description="总余额")
+    available_balance: Decimal = Field(..., description="可用余额")
+    frozen_balance: Decimal = Field(..., description="冻结余额")
+    unrealized_pnl: Decimal = Field(default=Decimal("0"), description="未实现盈亏")
+
+
+class AccountResponse(FinancialModel):
+    """
+    账户信息响应模型
+
+    Phase 5: 实盘集成 - GET /api/account 响应体
+    Reference: docs/designs/phase5-contract.md Section 8.2
+    """
+    exchange: str = Field(..., description="交易所名称")
+    account_type: str = Field(..., description="账户类型（FUTURES/SPOT/MARGIN）")
+    balances: List[AccountBalance] = Field(..., description="各币种余额")
+    total_equity: Decimal = Field(..., description="总权益（USDT）")
+    total_margin_balance: Decimal = Field(..., description="总保证金余额")
+    total_wallet_balance: Decimal = Field(..., description="总钱包余额")
+    total_unrealized_pnl: Decimal = Field(..., description="总未实现盈亏")
+    available_balance: Decimal = Field(..., description="可用余额（开仓用）")
+    total_margin_used: Decimal = Field(..., description="已用保证金")
+    account_leverage: int = Field(..., description="账户最大杠杆")
+    last_updated: int = Field(..., description="最后更新时间戳（毫秒）")
+
+
+class ReconciliationRequest(FinancialModel):
+    """
+    对账请求模型
+
+    Phase 5: 实盘集成 - POST /api/reconciliation 请求体
+    Reference: docs/designs/phase5-contract.md Section 9.1
+    """
+    symbol: str = Field(..., description="币种对")
+    full_check: bool = Field(default=False, description="是否全量检查（包含宽限期二次校验）")
+
+
+# Forward reference rebuild for models with cross-references
 ReconciliationReport.model_rebuild()
+PositionResponse.model_rebuild()
 
 
 # ============================================================

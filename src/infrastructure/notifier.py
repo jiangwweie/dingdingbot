@@ -10,7 +10,7 @@ from decimal import Decimal
 import aiohttp
 
 from src.domain.models import SignalResult, Direction
-from src.infrastructure.logger import logger, mask_secret
+from src.infrastructure.logger import logger, mask_secret, register_secret
 
 
 # ============================================================
@@ -624,6 +624,9 @@ class NotificationService:
             if not channel_type or not webhook_url:
                 logger.warning(f"Invalid channel config: {channel_cfg}")
                 continue
+
+            # Register webhook URL for secret masking
+            register_secret(webhook_url)
 
             if channel_type == 'feishu':
                 self.add_channel(FeishuWebhook(webhook_url))
