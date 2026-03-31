@@ -2382,3 +2382,61 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 **Git 提交**: 待提交
 
 ---
+
+---
+
+## 2026-03-31 - Phase 6 P6-001 完成
+
+### 完成工作
+
+**Phase 6: 后端 REST API 端点实现** (P6-001) ✅
+
+**已实现端点**:
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v3/orders` | POST | 创建订单（支持 MARKET/LIMIT/STOP_MARKET/STOP_LIMIT） |
+| `/api/v3/orders/{order_id}` | DELETE | 取消订单 |
+| `/api/v3/orders/{order_id}` | GET | 查询订单详情 |
+| `/api/v3/orders` | GET | 查询订单列表 |
+| `/api/v3/positions` | GET | 查询持仓列表 |
+| `/api/v3/positions/{position_id}` | GET | 查询持仓详情 |
+| `/api/v3/account/balance` | GET | 查询账户余额 |
+| `/api/v3/account/snapshot` | GET | 查询账户快照 |
+| `/api/v3/reconciliation` | POST | 启动对账服务 |
+
+**技术实现**:
+- 添加 `set_v3_dependencies()` 依赖注入函数
+- 扩展 `ExchangeGateway` 添加 `fetch_account_balance()` 和 `fetch_positions()` 方法
+- 实现异常处理映射（`OrderNotFoundError` -> 404, `OrderAlreadyFilledError` -> 400）
+- 实现订单角色到 CCXT side 的映射逻辑
+- 集成资本保护检查（`CapitalProtectionManager.pre_order_check`）
+
+**测试**:
+- 创建 `tests/unit/test_v3_api_endpoints.py`
+- 12 个单元测试全部通过
+- 现有 225 个测试全部通过（无破坏性变更）
+
+**文档**:
+- 更新 `docs/planning/findings.md` 记录技术发现
+
+**Git 提交**:
+```
+2deb02c feat(phase6): 实现 v3.0 REST API 端点 (P6-001 完成)
+```
+
+### 待办事项
+
+1. **OrderRepository**: 实现订单持久化
+2. **PositionRepository**: 实现仓位持久化
+3. **完整对账逻辑**: 实现本地 vs 交易所完整对比
+4. **订单状态 WebSocket 推送**: 集成 watch_orders
+
+### 下一步计划
+
+- P6-002: 前端 API 调用层扩展（进行中）
+- P6-003: 仓位管理页面
+- P6-004: 订单管理页面
+- P6-005: 账户净值曲线可视化
+- P6-006: PMS 回测报告组件
+- P6-007: 多级别止盈可视化
+- P6-008: E2E 集成测试
