@@ -553,6 +553,71 @@ class SignalPipeline:
 - `docs/tasks/2026-03-25-子任务 C-信号结果动态标签系统重构.md` - 信号标签动态化
 - `docs/tasks/2026-03-25-子任务 A-实盘引擎热重载与稳定性重构.md` - 热重载机制
 
+## Phase 6 P6-002: 前端 API 调用层扩展完成 (2026-03-31)
+
+### 实现内容
+
+**文件**: `web-front/src/lib/api.ts`
+
+#### 已实现的 12 个 API 调用函数
+
+**订单管理 API (5 个)**:
+| 函数 | 端点 | 状态 |
+|------|------|------|
+| `createOrder(request: OrderRequest)` | POST /api/v3/orders | ✅ |
+| `fetchOrders(params?: {...})` | GET /api/v3/orders | ✅ |
+| `fetchOrder(orderId: string)` | GET /api/v3/orders/{id} | ✅ |
+| `cancelOrder(orderId: string, symbol: string)` | DELETE /api/v3/orders/{id} | ✅ |
+| `checkOrderCapital(request: OrderCheckRequest)` | POST /api/v3/orders/check | ✅ |
+
+**仓位管理 API (3 个)**:
+| 函数 | 端点 | 状态 |
+|------|------|------|
+| `fetchPositions(params?: {...})` | GET /api/v3/positions | ✅ |
+| `fetchPosition(positionId: string)` | GET /api/v3/positions/{id} | ✅ |
+| `closePosition(positionId: string, request?: ClosePositionRequest)` | POST /api/v3/positions/{id}/close | ✅ |
+
+**账户管理 API (2 个)**:
+| 函数 | 端点 | 状态 |
+|------|------|------|
+| `fetchAccountBalance()` | GET /api/v3/account/balance | ✅ |
+| `fetchAccountSnapshot()` | GET /api/v3/account/snapshot | ✅ |
+
+**对账服务 API (1 个)**:
+| 函数 | 端点 | 状态 |
+|------|------|------|
+| `runReconciliation(symbol: string)` | POST /api/v3/reconciliation | ✅ |
+
+### 技术调整
+
+1. **返回类型修正**:
+   - `fetchPositions`: `PositionResponse` → `PositionsResponse` (带分页的列表响应)
+   - `fetchAccountBalance`: `AccountResponse` → `AccountBalance` (单一余额对象)
+
+2. **函数命名统一**:
+   - `fetchPositionDetails` → `fetchPosition` (与 `fetchOrder` 命名风格对齐)
+   - `fetchOrderDetails` → `fetchOrder`
+   - `checkOrder` → `checkOrderCapital` (避免与 `createOrder` 语义混淆)
+
+3. **类型来源**:
+   - 所有类型从 `web-front/src/types/order.ts` 导入
+   - 与后端 `src/domain/models.py` Pydantic 模型完全对齐
+
+### 验收状态
+
+- [x] 12 个 API 调用函数全部实现
+- [ ] TypeScript 编译验证 (待运行)
+- [x] 与后端 API 契约表对齐 (`docs/designs/phase6-v3-api-contract.md`)
+- [x] 代码风格与现有 `api.ts` 一致 (使用 `fetcher` 错误处理模式)
+
+### 下一步
+
+1. 运行 TypeScript 编译检查 (`npm run build` 或 `tsc --noEmit`)
+2. 如有类型错误，修复
+3. 更新 `progress.md` 记录进度
+
+---
+
 ## Phase 6: 后端 REST API 端点实现 (2026-03-31)
 
 ### 1. 已实现端点列表

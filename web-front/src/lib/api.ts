@@ -3,6 +3,28 @@ import useSWR from 'swr';
 // Import recursive logic tree types from types/strategy.ts
 import type { LogicNode, LogicNodeChildren, LeafNode } from '../types/strategy';
 
+// Import v3 order/position/account types
+import type {
+  OrderRequest,
+  OrderResponse,
+  OrderCancelResponse,
+  OrderStatus,
+  OrderRole,
+  OrderType,
+  PositionInfo,
+  PositionResponse,
+  PositionsResponse,
+  AccountBalance,
+  AccountResponse,
+  AccountSnapshot,
+  ClosePositionRequest,
+  OrderCheckRequest,
+  CapitalProtectionCheckResult,
+  ReconciliationReport,
+  ReconciliationRequest,
+  OrdersResponse,
+} from '../types/order';
+
 export const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) {
@@ -1040,6 +1062,231 @@ export async function listSignalStatuses(
   if (!res.ok) {
     const error = new Error('Failed to fetch signal statuses');
     (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+// ============================================================================
+// V3 Positions & Orders API (Phase 6 - P6-002/P6-003)
+// ============================================================================
+
+// ============================================================================
+// V3 Orders, Positions & Account API (Phase 6 - P6-002)
+// ============================================================================
+
+/**
+ * Fetch positions list
+ */
+export async function fetchPositions(params?: {
+  symbol?: string;
+  is_closed?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<PositionsResponse> {
+  const queryParams = new URLSearchParams();
+  if (params?.symbol) queryParams.append('symbol', params.symbol);
+  if (params?.is_closed !== undefined) queryParams.append('is_closed', String(params.is_closed));
+  if (params?.limit) queryParams.append('limit', String(params.limit));
+  if (params?.offset) queryParams.append('offset', String(params.offset));
+
+  const res = await fetch(`/api/v3/positions?${queryParams}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch positions');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch position details by ID
+ */
+export async function fetchPosition(positionId: string): Promise<PositionInfo> {
+  const res = await fetch(`/api/v3/positions/${positionId}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch position details');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Close a position
+ */
+export async function closePosition(
+  positionId: string,
+  payload: ClosePositionRequest
+): Promise<OrderResponse> {
+  const res = await fetch(`/api/v3/positions/${positionId}/close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to close position');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch orders list
+ */
+export async function fetchOrders(params?: {
+  symbol?: string;
+  status?: OrderStatus;
+  order_role?: OrderRole;
+  strategy_name?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<OrdersResponse> {
+  const queryParams = new URLSearchParams();
+  if (params?.symbol) queryParams.append('symbol', params.symbol);
+  if (params?.status) queryParams.append('status', params.status);
+  if (params?.order_role) queryParams.append('order_role', params.order_role);
+  if (params?.strategy_name) queryParams.append('strategy_name', params.strategy_name);
+  if (params?.limit) queryParams.append('limit', String(params.limit));
+  if (params?.offset) queryParams.append('offset', String(params.offset));
+
+  const res = await fetch(`/api/v3/orders?${queryParams}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch orders');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch order details by ID
+ */
+export async function fetchOrder(orderId: string): Promise<OrderResponse> {
+  const res = await fetch(`/api/v3/orders/${orderId}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch order details');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Cancel an order
+ */
+export async function cancelOrder(
+  orderId: string,
+  symbol: string
+): Promise<OrderCancelResponse> {
+  const res = await fetch(`/api/v3/orders/${orderId}?symbol=${encodeURIComponent(symbol)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to cancel order');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Check order before submission (capital protection check)
+ */
+export async function checkOrderCapital(request: OrderCheckRequest): Promise<CapitalProtectionCheckResult> {
+  const res = await fetch('/api/v3/orders/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = new Error('Order check failed');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch account balance
+ */
+export async function fetchAccountBalance(): Promise<AccountBalance> {
+  const res = await fetch('/api/v3/account/balance', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch account balance');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Create a new order
+ */
+export async function createOrder(request: OrderRequest): Promise<OrderResponse> {
+  const res = await fetch('/api/v3/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to create order');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch account snapshot
+ */
+export async function fetchAccountSnapshot(): Promise<AccountSnapshot> {
+  const res = await fetch('/api/v3/account/snapshot', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch account snapshot');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Run reconciliation for a specific symbol
+ */
+export async function runReconciliation(symbol: string): Promise<ReconciliationReport> {
+  const res = await fetch('/api/v3/reconciliation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol } as ReconciliationRequest),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to run reconciliation');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
     throw error;
   }
   return res.json();

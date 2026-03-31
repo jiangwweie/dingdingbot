@@ -1,5 +1,63 @@
 # 进度日志
 
+## 2026-03-31 - Phase 6 P6-002 前端 API 调用层扩展完成
+
+### 完成工作
+
+**P6-002: 前端 API 调用层扩展** ✅
+
+实现 `web-front/src/lib/api.ts` 的 12 个 v3 API 调用函数：
+
+1. **订单管理 API (5 个)**:
+   - `createOrder(request: OrderRequest): Promise<OrderResponse>`
+   - `fetchOrders(params?: {...}): Promise<OrdersResponse>`
+   - `fetchOrder(orderId: string): Promise<OrderResponse>`
+   - `cancelOrder(orderId: string, symbol: string): Promise<OrderCancelResponse>`
+   - `checkOrderCapital(request: OrderCheckRequest): Promise<CapitalProtectionCheckResult>`
+
+2. **仓位管理 API (3 个)**:
+   - `fetchPositions(params?: {...}): Promise<PositionsResponse>`
+   - `fetchPosition(positionId: string): Promise<PositionInfo>`
+   - `closePosition(positionId: string, request?: ClosePositionRequest): Promise<OrderResponse>`
+
+3. **账户管理 API (2 个)**:
+   - `fetchAccountBalance(): Promise<AccountBalance>`
+   - `fetchAccountSnapshot(): Promise<AccountSnapshot>`
+
+4. **对账服务 API (1 个)**:
+   - `runReconciliation(symbol: string): Promise<ReconciliationReport>`
+
+### 技术调整
+
+1. **返回类型修正**:
+   - `fetchPositions`: `PositionResponse` → `PositionsResponse`
+   - `fetchAccountBalance`: `AccountResponse` → `AccountBalance`
+
+2. **函数命名统一**:
+   - `fetchPositionDetails` → `fetchPosition`
+   - `fetchOrderDetails` → `fetchOrder`
+   - `checkOrder` → `checkOrderCapital`
+
+### 验证结果
+
+- ✅ TypeScript 编译通过 (`npm run build`)
+- ✅ 与契约表 `docs/designs/phase6-v3-api-contract.md` 对齐
+- ✅ 代码风格与现有 `api.ts` 一致
+- ✅ 类型定义来源：`web-front/src/types/order.ts`
+
+### 相关文件更新
+
+- `web-front/src/lib/api.ts` - 实现 12 个 API 调用函数
+- `docs/planning/findings.md` - 记录技术发现
+- `docs/planning/progress.md` - 记录进度日志
+
+### 下一步
+
+- [ ] P6-003: 组件开发（订单管理/仓位管理/账户详情页面）
+- [ ] 后端 API 端点联调测试
+
+---
+
 ## 2026-03-31 - Phase 6 设计文档完成
 
 ### 完成工作

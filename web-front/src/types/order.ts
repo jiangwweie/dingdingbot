@@ -384,3 +384,87 @@ export interface CapitalProtectionCheckResult {
   /** 最小要求余额 (Decimal string) */
   min_required_balance: string | null;
 }
+
+/**
+ * 订单列表响应
+ */
+export interface OrdersResponse {
+  items: OrderResponse[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * 持仓列表响应（与 PositionResponse 对齐）
+ */
+export interface PositionsResponse {
+  items: PositionInfo[];
+  total: number;
+  total_unrealized_pnl: string;
+  total_realized_pnl: string;
+  total_margin_used: string;
+  account_equity: string | null;
+}
+
+/**
+ * 平仓请求
+ */
+export interface ClosePositionRequest {
+  /** 平仓比例 (0.0-1.0)，默认 1.0 表示全部平仓 */
+  close_ratio?: number;
+  /** 平仓价格（市价单留空） */
+  price?: string;
+  /** 订单类型，默认 MARKET */
+  order_type?: OrderType;
+}
+
+/**
+ * 下单前资金保护检查请求
+ */
+export interface OrderCheckRequest {
+  /** 交易对 */
+  symbol: string;
+  /** 订单类型 */
+  order_type: OrderType;
+  /** 订单角色 */
+  order_role: OrderRole;
+  /** 方向 */
+  direction: Direction;
+  /** 数量 (Decimal string) */
+  quantity: string;
+  /** 限价单价格 (可选) */
+  price?: string;
+  /** 触发价格 (可选) */
+  trigger_price?: string;
+  /** 止损价格 (可选) */
+  stop_loss?: string;
+}
+
+/**
+ * 账户快照（与后端 AccountResponse 对齐）
+ */
+export interface AccountSnapshot {
+  /** 交易所名称 */
+  exchange: string;
+  /** 账户类型 */
+  account_type: "FUTURES" | "SPOT" | "MARGIN";
+  /** 余额列表 */
+  balances: AccountBalance[];
+  /** 总权益 (Decimal string) */
+  total_equity: string;
+  /** 总保证金余额 (Decimal string) */
+  total_margin_balance: string;
+  /** 总钱包余额 (Decimal string) */
+  total_wallet_balance: string;
+  /** 总未实现盈亏 (Decimal string) */
+  total_unrealized_pnl: string;
+  /** 可用余额 (Decimal string) */
+  available_balance: string;
+  /** 总保证金占用 (Decimal string) */
+  total_margin_used: string;
+  /** 账户杠杆倍数 */
+  account_leverage: number;
+  /** 最后更新时间戳 (毫秒) */
+  last_updated: number;
+}
