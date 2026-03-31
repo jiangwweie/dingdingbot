@@ -111,19 +111,19 @@ DIRECTION_CHECK = CheckConstraint(
 
 # OrderStatus 枚举约束
 ORDER_STATUS_CHECK = CheckConstraint(
-    "status IN ('PENDING', 'OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED')",
+    "status IN ('PENDING', 'OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED')",
     name="check_order_status"
 )
 
 # OrderType 枚举约束
 ORDER_TYPE_CHECK = CheckConstraint(
-    "order_type IN ('MARKET', 'LIMIT', 'STOP_MARKET', 'TRAILING_STOP')",
+    "order_type IN ('MARKET', 'LIMIT', 'STOP_MARKET', 'STOP_LIMIT', 'TRAILING_STOP')",
     name="check_order_type"
 )
 
 # OrderRole 枚举约束
 ORDER_ROLE_CHECK = CheckConstraint(
-    "order_role IN ('ENTRY', 'TP1', 'SL')",
+    "order_role IN ('ENTRY', 'TP1', 'TP2', 'TP3', 'TP4', 'TP5', 'SL')",
     name="check_order_role"
 )
 

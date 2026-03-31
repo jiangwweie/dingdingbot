@@ -43,6 +43,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['signal_id'], ['signals.id'], ondelete='CASCADE'),
         sa.CheckConstraint("direction IN ('LONG', 'SHORT')", name='check_orders_direction'),
+        sa.CheckConstraint("status IN ('PENDING', 'OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED')", name='check_orders_status'),
+        sa.CheckConstraint("order_type IN ('MARKET', 'LIMIT', 'STOP_MARKET', 'STOP_LIMIT', 'TRAILING_STOP')", name='check_orders_order_type'),
+        sa.CheckConstraint("order_role IN ('ENTRY', 'TP1', 'TP2', 'TP3', 'TP4', 'TP5', 'SL')", name='check_orders_order_role'),
     )
 
     # orders 表索引
