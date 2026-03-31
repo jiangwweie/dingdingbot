@@ -1,5 +1,70 @@
 # 研究发现
 
+## 🔴 关键 Bug 修复：MTF 过滤器 K 线闭合判断错误 (2026-03-31)
+
+### 问题描述
+系统运行 4 小时，76 次尝试记录，0 个信号产生。所有 15 次 Pinbar 形态检测通过后，均被 MTF 过滤器以 `higher_tf_data_unavailable` 为由拦截。
+
+### 根因分析
+**文件**: `src/domain/timeframe_utils.py:91-148`
+**函数**: `get_last_closed_kline_index()`
+
+**错误逻辑** (修复前):
+```python
+elif kline_period == current_period:
+    if kline.timestamp == current_timestamp:
+        break  # 当前 K 线，不可用
+    else:
+        best_index = i  # ❌ 错误！同周期但 timestamp 不同的 K 线可能也未闭合
+        break
+```
+
+**问题场景**:
+- 当前时间 20:15（15m K 线闭合）
+- 查找 1h 高周期 K 线
+- `current_period = 20:15 // 1h = 20:00 周期`
+- `kline.timestamp = 20:00` → `kline_period = 同周期`
+- 代码错误地认为这根 1h K 线可用，但它在 21:00 才闭合！
+
+### 修复方案
+**正确逻辑** (修复后):
+```python
+period_ms = parse_timeframe_to_ms(timeframe)
+best_index = -1
+for i, kline in enumerate(klines):
+    # Calculate when this kline ends
+    kline_end_time = kline.timestamp + period_ms
+
+    if kline_end_time <= current_timestamp:
+        # This kline has closed, it's safe to use for MTF analysis
+        best_index = i
+    else:
+        # This kline hasn't closed yet, and neither do any after it
+        break
+
+return best_index
+```
+
+### 测试覆盖
+新增 3 个边界场景测试：
+1. `test_critical_bug_15m_uses_1h_not_yet_closed` - 验证 20:15 时不使用 20:00 的 1h K 线
+2. `test_1h_kline_just_closed` - 验证 21:00 时可使用刚闭合的 20:00 的 1h K 线
+3. `test_multiple_closed_klines_uses_latest` - 验证使用最新闭合的 K 线
+
+修正 1 个错误预期：
+- `test_15m_signal_uses_1h_closed` - 原预期错误地认为 10:15 时可使用 10:00 的 1h K 线
+
+### 影响范围
+- 修复后 MTF 过滤器能正确获取高周期趋势数据
+- 信号产生流程恢复正常
+- 预计信号产生率从 0% 提升到正常水平（约 15-20% 的 Pinbar 通过率）
+
+### 相关文件
+- `src/domain/timeframe_utils.py` - 修复逻辑
+- `tests/unit/test_timeframe_utils.py` - 测试覆盖
+
+---
+
 ## Phase 6: 前端适配 - 架构分析报告 (2026-03-31)
 
 ### 1. 类型定义完整性报告

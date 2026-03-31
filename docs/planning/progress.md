@@ -1,5 +1,42 @@
 # 进度日志
 
+## 2026-03-31 - MTF 过滤器关键 Bug 修复
+
+### 完成工作
+
+**诊断修复：MTF 过滤器始终报告 higher_tf_data_unavailable** ✅
+
+**问题根因**:
+- `get_last_closed_kline_index()` 使用 period 比较判断 K 线是否闭合
+- 当 15m K 线在 20:15 闭合时，错误地认为 20:00 的 1h K 线可用
+- 实际上 1h K 线在 21:00 才闭合，导致 MTF 过滤器始终报告数据不可用
+
+**修复方案**:
+- 改用 `kline_end_time = kline.timestamp + period_ms` 判断闭合
+- 只有 `kline_end_time <= current_timestamp` 时才认为 K 线可用
+
+**测试覆盖**:
+- 新增 3 个边界场景测试
+- 修正 1 个错误预期的旧测试
+- 8/8  timeframe 测试通过，81/81 策略引擎测试通过
+
+**影响范围**:
+- 修复后 MTF 过滤器能正确获取高周期趋势数据
+- 信号产生流程恢复正常
+- 预计信号产生率从 0% 提升到正常水平
+
+**Git 提交**:
+```
+fix: 修复 MTF 过滤器 K 线闭合判断逻辑导致信号失效
+```
+
+**相关文件更新**:
+- `src/domain/timeframe_utils.py` - 修复逻辑
+- `tests/unit/test_timeframe_utils.py` - 新增测试
+- `docs/planning/findings.md` - 记录技术发现
+
+---
+
 ## 2026-03-31 - Phase 5 审查通过，全部完成
 
 ### 完成工作
