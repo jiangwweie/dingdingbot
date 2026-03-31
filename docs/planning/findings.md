@@ -1,5 +1,53 @@
 # 研究发现
 
+## Phase 6: 前端适配 - 技术发现 (2026-03-31)
+
+### 前端架构分析
+
+**技术栈**:
+- React 19 + TypeScript + Vite 6.x
+- TailwindCSS 4.x (Apple 风格设计系统)
+- SWR (数据获取) + React Hooks (本地状态)
+- Lightweight Charts / Recharts (图表)
+
+**现有页面** (`web-front/src/pages/`):
+- `Dashboard.tsx` - 系统仪表盘
+- `Signals.tsx` - 信号历史列表（可配置表格列）
+- `StrategyWorkbench.tsx` - 策略工作台（递归逻辑树编辑）
+- `Backtest.tsx` - 回测沙箱
+- `Snapshots.tsx` - 配置快照管理
+
+**类型定义现状**:
+- `web-front/src/types/order.ts` - Phase 5 订单/持仓类型（完整）
+- `web-front/src/types/v3-models.ts` - v3.0 核心模型（Account/Signal/Order/Position）
+- `web-front/src/types/strategy.ts` - 递归逻辑树类型
+
+**API 调用层现状** (`web-front/src/lib/api.ts`):
+- 信号/策略/回测 API 已完整实现
+- **缺失**: v3 订单/仓位/账户 API 调用函数
+
+### 后端 API 状态
+
+**已实现** (Phase 5):
+- ExchangeGateway 订单接口（`place_order`, `cancel_order`, `fetch_order`）
+- WebSocket 订单推送监听（`watch_orders`）
+- PositionManager 并发保护
+- Reconciliation 对账服务
+- CapitalProtection 资金保护
+
+**缺失** (需 Phase 6 实现):
+- REST API 端点（`/api/v3/orders`, `/api/v3/positions`, `/api/v3/account/balance`）
+- PMS 回测报告端点
+
+### 技术债务
+
+| 问题 | 影响 | 解决方案 |
+|------|------|----------|
+| OrderRole 枚举前后端不一致 | 类型对齐问题 | 后端已实现精细定义 (ENTRY/TP1-5/SL)，前端 order.ts 已对齐 |
+| v3 API 端点缺失 | 前端无法获取数据 | 需实现后端 REST API 端点 + 前端 API 调用函数 |
+
+---
+
 ## Phase 1-5 完成技术总结 (2026-03-31)
 
 ### 审查结果

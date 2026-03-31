@@ -1,3 +1,39 @@
+# Phase 6: 前端适配（v3.0）
+
+**目标**: 实现 v3.0 前端管理页面（仓位/订单/账户/回测）
+
+**状态**: 🔄 进行中（计划已批准，待启动开发）
+
+**创建日期**: 2026-03-31
+
+**阶段概览**:
+| 阶段 | 任务 | 状态 | 负责人 | 预计工时 |
+|------|------|------|--------|----------|
+| P6-001 | 后端 REST API 端点实现 | ⏳ pending | backend-dev | 6-8h |
+| P6-002 | 前端 API 调用层扩展 | ⏳ pending | frontend-dev | 3-4h |
+| P6-003 | 仓位管理页面 | ⏳ pending | frontend-dev | 4-6h |
+| P6-004 | 订单管理页面 | ⏳ pending | frontend-dev | 4-6h |
+| P6-005 | 账户净值曲线可视化 | ⏳ pending | frontend-dev | 2-3h |
+| P6-006 | PMS 回测报告组件 | ⏳ pending | frontend-dev | 3-4h |
+| P6-007 | 多级别止盈可视化 | ⏳ pending | frontend-dev | 2-3h |
+| P6-008 | E2E 集成测试 | ⏳ pending | qa-tester | 4-6h |
+
+**依赖关系**:
+```
+P6-001 (后端 API) → P6-002 (前端 API 层) → P6-003/004 (核心页面) → P6-008 (E2E 测试)
+                                         ↓
+                                   P6-005/006/007 (增强功能)
+```
+
+**相关文件**:
+- 契约表：`docs/designs/phase5-contract.md`
+- 类型定义：`web-front/src/types/order.ts`, `web-front/src/types/v3-models.ts`
+- 后端模型：`src/domain/models.py`
+
+**详细计划**: `/Users/jiangwei/.claude/plans/phase6-frontend-adaptation.md` (待迁移到本项目)
+
+---
+
 # 子任务 F 和 E 实现计划
 
 **目标**: 将平铺式策略引擎升级为递归逻辑树引擎，并实现前端递归渲染组件
