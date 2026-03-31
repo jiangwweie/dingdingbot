@@ -2351,6 +2351,168 @@ async def get_account_snapshot() -> AccountResponse:
 
 
 # ------------------------------------------------------------
+# 5. Order Check Endpoint (Capital Protection)
+# ------------------------------------------------------------
+from src.domain.models import OrderCheckRequest, CapitalProtectionCheckResult, SingleTradeCheck, PositionLimitCheck, DailyLossCheck, TradeCountCheck, MinBalanceCheck
+
+
+@app.post("/api/v3/orders/check", response_model=CapitalProtectionCheckResult)
+async def check_order_capital(request: OrderCheckRequest) -> CapitalProtectionCheckResult:
+    """
+    下单前资金保护检查（v3 API）- Dry Run
+
+    Phase 6: v3.0 资金保护检查 - POST /api/v3/orders/check
+    Reference: docs/designs/phase6-v3-api-contract.md Section 2.6
+
+    Args:
+        request: 资金保护检查请求
+
+    Returns:
+        CapitalProtectionCheckResult: 资金保护检查结果
+
+    Raises:
+        HTTPException:
+            - 503 F-004: 交易所初始化失败
+    """
+    try:
+        capital_protection = _get_capital_protection()
+
+        # 执行资金保护检查
+        result = await capital_protection.pre_order_check(
+            symbol=request.symbol,
+            order_type=request.order_type.value,
+            amount=request.quantity,
+            price=request.price,
+            trigger_price=request.trigger_price,
+            stop_loss=request.stop_loss or Decimal("0"),
+        )
+
+        # 构建详细检查结果
+        return CapitalProtectionCheckResult(
+            allowed=result.allowed,
+            reason=result.reason,
+            single_trade_limit=SingleTradeCheck(
+                passed=result.single_trade_check or False,
+                max_loss=result.max_allowed_loss,
+                estimated_loss=result.estimated_loss,
+            ),
+            position_limit=PositionLimitCheck(
+                passed=result.position_limit_check or False,
+                max_position=result.max_allowed_position,
+                position_value=result.position_value,
+            ),
+            daily_loss_limit=DailyLossCheck(
+                passed=result.daily_loss_check or False,
+                daily_max_loss=None,  # 需要从 capital_protection 获取配置
+                daily_pnl=result.daily_pnl,
+            ),
+            daily_trade_count=TradeCountCheck(
+                passed=result.daily_count_check or False,
+                max_count=None,  # 需要从 capital_protection 获取配置
+                current_count=result.daily_trade_count,
+            ),
+            min_balance=MinBalanceCheck(
+                passed=result.balance_check or False,
+                min_balance=result.min_required_balance,
+                current_balance=result.available_balance,
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"资金保护检查失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------
+# 6. Close Position Endpoint
+# ------------------------------------------------------------
+from src.domain.models import ClosePositionRequest
+
+
+@app.post("/api/v3/positions/{position_id}/close", response_model=OrderResponseFull)
+async def close_position(
+    position_id: str,
+    request: ClosePositionRequest = Body(...),
+) -> OrderResponseFull:
+    """
+    平仓（v3 API）
+
+    Phase 6: v3.0 仓位管理 - POST /api/v3/positions/{position_id}/close
+    Reference: docs/designs/phase6-v3-api-contract.md Section 2.4
+
+    Args:
+        position_id: 仓位 ID
+        request: 平仓请求（可选指定平仓数量和订单类型）
+
+    Returns:
+        OrderResponseFull: 平仓订单响应
+
+    Raises:
+        HTTPException:
+            - 404 F-012: 仓位不存在
+            - 400 F-011: 平仓参数错误
+            - 503 F-004: 交易所初始化失败
+    """
+    try:
+        gateway = _get_exchange_gateway()
+
+        # 1. 查询仓位获取详情
+        # 注意：这里需要从 PositionManager 获取仓位信息
+        # 当前实现：直接查询交易所仓位
+        positions = await gateway.fetch_positions()
+        position = None
+        for p in positions:
+            if p.position_id == position_id:
+                position = p
+                break
+
+        if position is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "F-012", "message": "仓位不存在"}
+            )
+
+        # 2. 确定平仓数量
+        quantity = request.quantity if request.quantity else position.current_qty
+
+        # 3. 创建平仓订单
+        result = await gateway.place_order(
+            symbol=position.symbol,
+            order_type=request.order_type.value.lower(),
+            side="sell" if position.direction == Direction.LONG else "buy",
+            amount=quantity,
+            reduce_only=True,  # 平仓单必须设置 reduce_only
+        )
+
+        # 4. 构建响应
+        now = int(datetime.now(timezone.utc).timestamp() * 1000)
+        return OrderResponseFull(
+            order_id=result.order_id,
+            exchange_order_id=result.exchange_order_id,
+            symbol=position.symbol,
+            order_type=request.order_type,
+            direction=Direction.SHORT if position.direction == Direction.LONG else Direction.LONG,  # 平仓方向相反
+            role=OrderRole.SL,  # 平仓单角色
+            status=result.status,
+            amount=quantity,
+            filled_amount=Decimal("0"),
+            reduce_only=True,
+            created_at=now,
+            updated_at=now,
+            fee_paid=Decimal("0"),
+            tags=[],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"平仓失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------
 # 4. Reconciliation Endpoint
 # ------------------------------------------------------------
 @app.post("/api/v3/reconciliation", response_model=ReconciliationReport)

@@ -1,5 +1,61 @@
 # 进度日志
 
+## 2026-03-31 - Phase 6 并行开发完成（订单/仓位页面 + API 层）
+
+### 完成工作
+
+**Phase 6 并行 Agent 开发 - 全部完成** ✅
+
+**任务状态**:
+| 任务 | Agent | 状态 | 输出 |
+|------|-------|------|------|
+| P6-002: 前端 API 调用层 | `a4585451a488c89f3` | ✅ 完成 | 12 个 API 函数 |
+| P6-003: 仓位管理页面 | `a44ef8b5d0e5f5f79` | ✅ 完成 | Positions.tsx + 5 组件 |
+| P6-004: 订单管理页面 | `a852787e8c43b62cc` | ✅ 完成 | Orders.tsx + 7 组件 |
+| P6-001: 后端 REST API | - | ✅ 完成 | 9 个端点 + 2 补充 |
+| P6-010: 补充 API 端点 | - | ✅ 完成 | check/close 端点 |
+
+### 新增文件清单
+
+**页面 (2 个)**:
+- `web-front/src/pages/Orders.tsx` - 订单管理页面
+- `web-front/src/pages/Positions.tsx` - 仓位管理页面
+
+**通用组件 (10 个)**:
+- `web-front/src/components/v3/CreateOrderModal.tsx`
+- `web-front/src/components/v3/DecimalDisplay.tsx`
+- `web-front/src/components/v3/DirectionBadge.tsx` (2 个页面共用)
+- `web-front/src/components/v3/OrderDetailsDrawer.tsx`
+- `web-front/src/components/v3/OrderRoleBadge.tsx`
+- `web-front/src/components/v3/OrderStatusBadge.tsx`
+- `web-front/src/components/v3/OrdersTable.tsx`
+- `web-front/src/components/v3/PnLBadge.tsx` (2 个页面共用)
+- `web-front/src/components/v3/PositionDetailsDrawer.tsx`
+- `web-front/src/components/v3/PositionsTable.tsx`
+
+**API 调用层**:
+- 12 个 v3 API 函数已添加到 `web-front/src/lib/api.ts`
+
+### 后端 API 补充
+
+**新增 2 个端点** (`src/interfaces/api.py`):
+- `POST /api/v3/orders/check` - 资金保护检查
+- `POST /api/v3/positions/{id}/close` - 平仓功能
+
+**新增模型** (`src/domain/models.py`):
+- `OrderCheckRequest` - 检查请求
+- `ClosePositionRequest` - 平仓请求
+- `CapitalProtectionCheckResult` - 检查结果（含 5 个分项检查）
+
+### 下一步
+
+- [ ] 启动 P6-005: 账户净值曲线可视化
+- [ ] 启动 P6-006: PMS 回测报告组件
+- [ ] 启动 P6-007: 多级别止盈可视化（依赖仓位页面）
+- [ ] 启动 P6-008: E2E 集成测试（依赖所有页面）
+
+---
+
 ## 2026-03-31 - Phase 6 P6-004 订单管理页面开发完成
 
 ### 完成工作

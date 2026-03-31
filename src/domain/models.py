@@ -1294,3 +1294,87 @@ class OrderCheckResult(BaseModel):
     daily_trade_count: Optional[int] = Field(None, description="当日交易次数")
     available_balance: Optional[Decimal] = Field(None, description="可用余额（USDT）")
     min_required_balance: Optional[Decimal] = Field(None, description="最低保留余额（USDT）")
+
+
+# ============================================================
+# Phase 6: v3.0 API - Additional Models
+# ============================================================
+
+class OrderCheckRequest(FinancialModel):
+    """
+    下单前资金保护检查请求模型
+
+    Phase 6: v3.0 API - POST /api/v3/orders/check 请求体
+    Reference: docs/designs/phase6-v3-api-contract.md Section 2.6.1
+    """
+    symbol: str = Field(..., description="币种对")
+    order_type: OrderType = Field(..., description="订单类型")
+    quantity: Decimal = Field(..., gt=0, description="订单数量")
+    price: Optional[Decimal] = Field(None, gt=0, description="限价单价格")
+    trigger_price: Optional[Decimal] = Field(None, gt=0, description="条件单触发价")
+    stop_loss: Optional[Decimal] = Field(None, gt=0, description="建议止损价")
+
+
+class ClosePositionRequest(FinancialModel):
+    """
+    平仓请求模型
+
+    Phase 6: v3.0 API - POST /api/v3/positions/{id}/close 请求体
+    Reference: docs/designs/phase6-v3-api-contract.md Section 2.4
+    """
+    quantity: Optional[Decimal] = Field(None, gt=0, description="平仓数量（部分平仓时使用）")
+    order_type: OrderType = Field(default=OrderType.MARKET, description="平仓订单类型")
+
+
+# Forward declarations for CapitalProtectionCheckResult
+class SingleTradeCheck(BaseModel):
+    """单笔交易检查结果"""
+    passed: bool = Field(..., description="是否通过")
+    max_loss: Optional[Decimal] = Field(None, description="最大允许损失")
+    estimated_loss: Optional[Decimal] = Field(None, description="预计损失")
+
+
+class PositionLimitCheck(BaseModel):
+    """仓位限制检查结果"""
+    passed: bool = Field(..., description="是否通过")
+    max_position: Optional[Decimal] = Field(None, description="最大允许仓位")
+    position_value: Optional[Decimal] = Field(None, description="当前仓位价值")
+
+
+class DailyLossCheck(BaseModel):
+    """每日亏损限制检查结果"""
+    passed: bool = Field(..., description="是否通过")
+    daily_max_loss: Optional[Decimal] = Field(None, description="每日最大允许亏损")
+    daily_pnl: Optional[Decimal] = Field(None, description="当日已实现盈亏")
+
+
+class TradeCountCheck(BaseModel):
+    """每日交易次数检查结果"""
+    passed: bool = Field(..., description="是否通过")
+    max_count: Optional[int] = Field(None, description="每日最大交易次数")
+    current_count: Optional[int] = Field(None, description="当前交易次数")
+
+
+class MinBalanceCheck(BaseModel):
+    """最低余额检查结果"""
+    passed: bool = Field(..., description="是否通过")
+    min_balance: Optional[Decimal] = Field(None, description="最低保留余额")
+    current_balance: Optional[Decimal] = Field(None, description="当前可用余额")
+
+
+class CapitalProtectionCheckResult(BaseModel):
+    """
+    资金保护检查结果（Phase 6 详细版）
+
+    Phase 6: v3.0 API - POST /api/v3/orders/check 响应体
+    Reference: docs/designs/phase6-v3-api-contract.md Section 2.6.2
+    """
+    allowed: bool = Field(..., description="是否允许下单")
+    reason: Optional[str] = Field(None, description="拒绝原因（当 allowed=false）")
+
+    # 各分项检查结果
+    single_trade_limit: Optional[SingleTradeCheck] = Field(None, description="单笔交易限制检查")
+    position_limit: Optional[PositionLimitCheck] = Field(None, description="仓位限制检查")
+    daily_loss_limit: Optional[DailyLossCheck] = Field(None, description="每日亏损限制检查")
+    daily_trade_count: Optional[TradeCountCheck] = Field(None, description="每日交易次数检查")
+    min_balance: Optional[MinBalanceCheck] = Field(None, description="最低余额检查")
