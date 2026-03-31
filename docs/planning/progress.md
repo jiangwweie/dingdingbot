@@ -1,5 +1,68 @@
 # 进度日志
 
+## 2026-03-31 - Phase 6 P6-004 订单管理页面开发完成
+
+### 完成工作
+
+**P6-004: 订单管理页面开发** ✅
+
+实现 v3.0 订单管理页面，包括订单列表、详情、创建订单、取消订单功能。
+
+#### 组件开发
+
+1. **Orders.tsx** (`web-front/src/pages/Orders.tsx`)
+   - 订单列表主页面
+   - 筛选器（币种/状态/角色/日期）
+   - 分页功能（每页 20 条）
+   - 集成 OrdersTable、OrderDetailsDrawer、CreateOrderModal
+
+2. **OrderDetailsDrawer.tsx** (`web-front/src/components/v3/OrderDetailsDrawer.tsx`)
+   - 订单详情侧滑抽屉
+   - 显示完整订单信息（参数、成交进度、时间戳）
+   - 取消订单按钮（仅 OPEN/PENDING/PARTIALLY_FILLED 状态）
+   - 成交进度条可视化
+
+3. **CreateOrderModal.tsx** (`web-front/src/components/v3/CreateOrderModal.tsx`)
+   - 创建订单对话框
+   - 支持 MARKET/LIMIT/STOP_MARKET/STOP_LIMIT 订单类型
+   - 支持 ENTRY/TP1-5/SL 订单角色
+   - 条件必填验证（LIMIT 单价格必填、STOP 单 trigger_price 必填）
+   - TP/SL 订单自动设置 reduce_only=true
+   - 资金保护检查功能
+
+#### 路由配置
+
+- **App.tsx**: 添加 `/orders` 路由
+- **Layout.tsx**: 添加"订单"导航项（FileText 图标）
+
+#### TypeScript 验证
+
+```bash
+npm run lint
+# 订单管理相关组件无错误
+```
+
+### 技术亮点
+
+1. **表单验证**: 使用 react-hook-form 实现条件必填验证
+2. **资金保护**: 下单前调用 `/api/v3/orders/check` 接口，显示检查结果
+3. **状态管理**: 7 种订单状态徽章颜色区分
+4. **角色徽章**: ENTRY/TP1-5/SL 7 种订单角色颜色区分
+
+### 相关文件
+
+- `docs/designs/phase6-v3-api-contract.md` - API 契约表 Section 2.1-2.3
+- `web-front/src/types/order.ts` - 类型定义
+- `web-front/src/lib/api.ts` - API 调用函数
+
+### 下一步计划
+
+- [ ] P6-005: 账户页面开发（账户余额/权益曲线）
+- [ ] P6-006: 回测报告页面开发
+- [ ] Phase 6 后端 API 端点实现（订单/仓位持久化）
+
+---
+
 ## 2026-03-31 - Phase 6 P6-002 前端 API 调用层扩展完成
 
 ### 完成工作

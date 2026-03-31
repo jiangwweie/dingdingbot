@@ -78,6 +78,100 @@ npm run build
 
 ---
 
+## P6-004: 订单管理页面开发 (2026-03-31)
+
+### 组件清单
+
+**新建组件**:
+| 组件 | 路径 | 功能 |
+|------|------|------|
+| `Orders` | `web-front/src/pages/Orders.tsx` | 订单管理主页面（/orders） |
+| `OrderDetailsDrawer` | `web-front/src/components/v3/OrderDetailsDrawer.tsx` | 订单详情抽屉 |
+| `CreateOrderModal` | `web-front/src/components/v3/CreateOrderModal.tsx` | 创建订单对话框 |
+
+**现有组件复用**:
+- `OrdersTable` - 订单列表表格
+- `OrderStatusBadge` - 订单状态徽章（7 种状态）
+- `OrderRoleBadge` - 订单角色徽章（ENTRY/TP1-5/SL）
+- `DirectionBadge` - 方向徽章（LONG/SHORT）
+- `DecimalDisplay` - Decimal 格式化显示
+
+### 功能实现
+
+1. **订单列表**:
+   - 显示订单 ID、币种、类型、角色、方向、数量、价格、状态、创建时间
+   - 支持分页（每页 20 条）
+   - 点击订单 ID 查看详情
+
+2. **筛选功能**:
+   - 币种对筛选（BTC/ETH/SOL/BNB）
+   - 状态筛选（7 种状态）
+   - 订单角色筛选（ENTRY/TP1-5/SL）
+   - 日期范围筛选
+
+3. **创建订单**:
+   - 支持 MARKET/LIMIT/STOP_MARKET/STOP_LIMIT 订单类型
+   - 支持 ENTRY/TP1-5/SL 订单角色
+   - 条件必填验证（LIMIT 单价格必填、STOP 单 trigger_price 必填）
+   - TP/SL 订单自动设置 reduce_only=true
+   - 资金保护检查（调用 `/api/v3/orders/check`）
+
+4. **订单详情**:
+   - 完整订单信息展示
+   - 成交进度条显示
+   - 取消订单功能（仅 OPEN/PENDING/PARTIALLY_FILLED 状态）
+
+### 技术实现
+
+1. **表单验证**:
+   - 使用 `react-hook-form` 进行表单管理
+   - 条件必填逻辑：
+     ```typescript
+     IF order_type IN ("LIMIT", "STOP_LIMIT") THEN price 必填
+     IF order_type IN ("STOP_MARKET", "STOP_LIMIT") THEN trigger_price 必填
+     IF order_role IN ("TP1", "TP2", "TP3", "TP4", "TP5", "SL") THEN reduce_only=true
+     ```
+
+2. **资金保护检查**:
+   - 检查项目：单笔交易限制、仓位限制、每日亏损限制
+   - 检查结果可视化显示（绿色通过/红色拒绝）
+
+3. **API 集成**:
+   - `fetchOrders()` - 获取订单列表
+   - `cancelOrder()` - 取消订单
+   - `createOrder()` - 创建订单
+   - `checkOrderCapital()` - 资金保护检查
+
+### 路由配置
+
+- App.tsx: 添加 `/orders` 路由
+- Layout.tsx: 添加导航菜单项（订单）
+
+### TypeScript 编译验证
+
+```bash
+npm run lint
+# 订单管理相关组件无错误
+```
+
+### 验收状态
+
+| 验收项 | 状态 |
+|--------|------|
+| 订单列表正确显示所有字段 | ✅ |
+| 状态/方向/角色徽章颜色正确 | ✅ |
+| 创建订单表单验证正确 | ✅ |
+| 取消订单功能正常（仅允许取消 OPEN/PENDING 订单） | ✅ |
+| TypeScript 类型检查通过 | ✅ |
+| 响应式布局正常 | ✅ |
+
+### 依赖
+
+- P6-002: `fetchOrders()`, `createOrder()`, `cancelOrder()`, `checkOrderCapital()` API 函数
+- types/order.ts: OrderRequest, OrderResponse, OrderStatus, OrderRole 类型定义
+
+---
+
 ## 🔴 关键 Bug 修复：MTF 过滤器 K 线闭合判断错误 (2026-03-31)
 
 ### 问题描述
