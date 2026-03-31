@@ -2,8 +2,9 @@
 
 > **创建日期**: 2026-03-30
 > **任务 ID**: Phase-5
-> **版本**: v1.0
-> **状态**: 待开发
+> **版本**: v1.1
+> **状态**: ✅ 已完成（与代码实现对齐）
+> **最后更新**: 2026-03-31 - 更新 OrderRole 枚举为 v3.0 PMS 精细定义
 
 ---
 
@@ -76,7 +77,7 @@ class OrderType(str, Enum):
     STOP_LIMIT = "STOP_LIMIT"   # 条件限价单
 ```
 
-### 3.4 OrderRole 枚举
+### 3.4 OrderRole 枚举（与 v3.0 PMS 对齐）
 
 ```python
 # src/domain/models.py
@@ -84,9 +85,19 @@ class OrderType(str, Enum):
 from enum import Enum
 
 class OrderRole(str, Enum):
-    OPEN = "OPEN"   # 开仓
-    CLOSE = "CLOSE" # 平仓
+    ENTRY = "ENTRY"               # 入场开仓
+    TP1 = "TP1"                   # 第一目标位止盈（首笔止盈）
+    TP2 = "TP2"                   # 第二目标位止盈
+    TP3 = "TP3"                   # 第三目标位止盈
+    TP4 = "TP4"                   # 第四目标位止盈
+    TP5 = "TP5"                   # 第五目标位止盈
+    SL = "SL"                     # 止损单
 ```
+
+**说明**: v3.0 PMS 系统采用精细订单角色定义，支持多级别止盈订单链管理。与简化版 `OPEN/CLOSE` 分类不同，此设计允许：
+- 区分开仓订单 (`ENTRY`) 和各种平仓订单 (`TP1-5`, `SL`)
+- 支持多 TP 策略（最多 5 个止盈级别）
+- 精确追踪每个订单的仓位管理职责
 
 ---
 
@@ -106,7 +117,7 @@ class OrderRequest(BaseModel):
     symbol: str = Field(..., description="币种对，如 'BTC/USDT:USDT'")
     order_type: OrderType = Field(..., description="订单类型")
     direction: Direction = Field(..., description="方向（LONG/SHORT）")
-    role: OrderRole = Field(..., description="角色（OPEN/CLOSE）")
+    role: OrderRole = Field(..., description="角色（ENTRY/TP1/TP2/TP3/TP4/TP5/SL）")
     amount: Decimal = Field(..., gt=0, description="数量（正数）")
     price: Optional[Decimal] = Field(None, gt=0, description="限价单价格（LIMIT 订单必填）")
     trigger_price: Optional[Decimal] = Field(None, gt=0, description="条件单触发价（STOP 订单必填）")
@@ -120,9 +131,9 @@ class OrderRequest(BaseModel):
 | 字段 | 类型 | 必填 | 默认值 | 说明 | 前端对应字段 |
 |------|------|------|--------|------|--------------|
 | `symbol` | string | 是 | - | 币种对 | `symbol` |
-| `order_type` | string | 是 | - | 订单类型 (MARKET/LIMIT/STOP_MARKET) | `orderType` |
+| `order_type` | string | 是 | - | 订单类型 (MARKET/LIMIT/STOP_MARKET/STOP_LIMIT) | `orderType` |
 | `direction` | string | 是 | - | 方向 (LONG/SHORT) | `direction` |
-| `role` | string | 是 | - | 角色 (OPEN/CLOSE) | `role` |
+| `role` | string | 是 | - | 角色 (ENTRY/TP1/TP2/TP3/TP4/TP5/SL) | `role` |
 | `amount` | number | 是 | - | 数量（Decimal 精度） | `amount` |
 | `price` | number | 条件必填 | null | 限价单价格 | `price` |
 | `trigger_price` | number | 条件必填 | null | 条件单触发价 | `triggerPrice` |
@@ -133,9 +144,9 @@ class OrderRequest(BaseModel):
 | `take_profit` | number | 否 | null | 止盈价格 | `takeProfit` |
 
 **约束条件**:
-- `order_type == LIMIT` 时，`price` 必填
-- `order_type == STOP_MARKET` 时，`trigger_price` 必填
-- `role == CLOSE` 时，`reduce_only` 必须为 `true`
+- `order_type == LIMIT` 或 `order_type == STOP_LIMIT` 时，`price` 必填
+- `order_type == STOP_MARKET` 或 `order_type == STOP_LIMIT` 时，`trigger_price` 必填
+- `role` 为 `TP1/TP2/TP3/TP4/TP5/SL` 时，`reduce_only` 必须为 `true`（平仓单）
 
 ### 4.2 响应 Schema（POST /api/orders）
 
