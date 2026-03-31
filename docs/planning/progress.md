@@ -1,5 +1,156 @@
 # 进度日志
 
+## 2026-03-31 - P6-007 多级别止盈可视化完成
+
+### P6-007: 多级别止盈可视化 ✅
+
+实现仓位详情页的多级别止盈（TP1-TP5）可视化展示和止损订单展示。
+
+#### 新增组件
+
+1. **TPProgressBar.tsx** (`web-front/src/components/v3/TPProgressBar.tsx`)
+   - 单个 TP 订单的成交进度条（0-100%）
+   - 盈亏比例计算（基于入场价和止盈价）
+   - 状态图标（待触发/执行中/已完成）
+   - 已成交数量 / 订单数量显示
+
+2. **TakeProfitStats.tsx** (`web-front/src/components/v3/TakeProfitStats.tsx`)
+   - 4 个统计卡片网格：
+     - 已实现止盈（已完成订单的盈亏）
+     - 未实现止盈（部分成交订单的未成交部分盈亏）
+     - 总目标止盈（所有订单完全成交的理论盈亏）
+     - 执行进度（已成交数量 / 总数量百分比）
+   - 总体执行进度条可视化
+
+#### 增强组件
+
+1. **TPChainDisplay.tsx** (`web-front/src/components/v3/TPChainDisplay.tsx`)
+   - 集成 TPProgressBar 和 TakeProfitStats
+   - 新结构：标题 + 统计卡片 + TP 订单明细列表
+   - 支持 TP1-TP5 排序显示
+
+2. **SLOrderDisplay.tsx** (`web-front/src/components/v3/SLOrderDisplay.tsx`)
+   - 新增止损距离百分比计算
+   - 止损进度条可视化（安全区域→危险区域渐变）
+   - 标记价格支持（通过 `markPrice` prop 传入）
+   - 状态提示（安全/关注/危险三级颜色）
+     - 止损距离 > 5%: 绿色（安全）
+     - 止损距离 > 2%: 黄色（关注）
+     - 止损距离 ≤ 2%: 红色（危险）
+
+#### 类型定义更新
+
+**文件**: `web-front/src/types/order.ts`
+
+更新 `PositionInfo` 接口，新增字段：
+- `original_qty: string` - 原始数量
+- `signal_id: string | null` - 关联信号 ID
+- `take_profit_orders: OrderResponse[]` - 止盈订单链（TP1-TP5）
+- `stop_loss_order: OrderResponse | null` - 止损订单
+
+#### 组件集成
+
+**文件**: `web-front/src/components/v3/PositionDetailsDrawer.tsx`
+
+- 从 PositionInfo 中自动获取 `take_profit_orders` 和 `stop_loss_order`
+- 集成 `TPChainDisplay` 显示止盈订单链
+- 集成 `SLOrderDisplay` 显示止损订单
+- 支持 markPrice 传递到 SLOrderDisplay 计算止损距离
+
+#### 技术实现
+
+**止盈统计计算**:
+```typescript
+// 已实现止盈（已完成订单的盈亏）
+realizedProfit = Σ((orderPrice - entryPrice) * filledQty) // LONG
+realizedProfit = Σ((entryPrice - orderPrice) * filledQty) // SHORT
+
+// 未实现止盈（部分成交订单的未成交部分）
+unrealizedProfit = Σ((orderPrice - entryPrice) * remainingQty) // LONG
+unrealizedProfit = Σ((entryPrice - orderPrice) * remainingQty) // SHORT
+
+// 总目标止盈（所有订单完全成交的理论盈亏）
+totalTargetProfit = Σ((orderPrice - entryPrice) * qty) // LONG
+totalTargetProfit = Σ((entryPrice - orderPrice) * qty) // SHORT
+
+// 执行进度
+executionProgress = (totalFilledQty / totalQty) * 100%
+```
+
+**止损距离计算**:
+```typescript
+// 止损距离百分比
+if (direction === 'LONG'):
+  // 做多止损：止损价低于当前价
+  stopLossDistance = ((currentPrice - triggerPrice) / currentPrice) * 100
+else:
+  // 做空止损：止损价高于当前价
+  stopLossDistance = ((triggerPrice - currentPrice) / currentPrice) * 100
+
+// 止损进度（价格接近止损价的程度）
+if (direction === 'LONG'):
+  stopLossProgress = ((entryPrice - currentPrice) / (entryPrice - triggerPrice)) * 100
+else:
+  stopLossProgress = ((currentPrice - entryPrice) / (triggerPrice - entryPrice)) * 100
+```
+
+#### TypeScript 编译验证
+
+```bash
+npm run build
+# ✓ 3425 modules transformed.
+# ✓ built in 1.99s
+```
+
+**结果**: ✅ 编译通过，无错误
+
+---
+
+## 2026-03-31 - Phase 6 P6-005 账户净值曲线可视化完成
+
+### P6-005: 账户净值曲线可视化 ✅
+
+**新增组件 (6 个)**:
+- `Account.tsx` - 账户主页面（/account）
+- `AccountOverviewCards.tsx` - 账户概览卡片（总权益/可用余额/未实现盈亏/保证金占用）
+- `EquityCurveChart.tsx` - 净值曲线图表（Recharts AreaChart，支持 7 天/30 天/90 天）
+- `PnLStatisticsCards.tsx` - 盈亏统计卡片（日/周/月/总盈亏）
+- `PositionDistributionPie.tsx` - 仓位分布饼图（Recharts PieChart）
+- `DateRangeSelector.tsx` - 日期范围选择器
+
+**技术亮点**:
+1. **净值曲线图表**:
+   - 使用 Recharts AreaChart 绘制
+   - 渐变填充区域（blue-500 with opacity gradient）
+   - 起始净值参考线（ReferenceLine）
+   - 自适应 Y 轴 domain（min/max ± 10% padding）
+   - 按日期分组计算日均净值
+
+2. **仓位分布饼图**:
+   - 甜甜圈样式（innerRadius=60, outerRadius=80）
+   - Apple 风格 8 色配色方案
+   - Tooltip 显示价值和百分比
+   - Legend 显示币种和占比
+
+3. **盈亏统计**:
+   - 从历史信号计算日/周/月/总盈亏
+   - 正绿负红颜色语义
+   - DecimalDisplay 统一格式化
+
+**API 集成**:
+- `fetchAccountSnapshot()` - 账户快照（30 秒刷新）
+- `fetchPositions()` - 持仓列表（30 秒刷新，用于饼图）
+- `fetchSignals()` - 历史信号（60 秒刷新，用于 PnL 计算）
+
+**TypeScript 编译验证**:
+```bash
+npm run build
+# ✓ 3425 modules transformed.
+# ✓ built in 2.31s
+```
+
+---
+
 ## 2026-03-31 - Phase 6 第二波并行开发完成（账户/回测/止盈）
 
 ### 完成工作

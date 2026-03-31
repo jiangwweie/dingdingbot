@@ -591,6 +591,30 @@ export async function runBacktest(payload: BacktestRequest): Promise<BacktestRep
 }
 
 /**
+ * Run PMS backtest with given parameters (v3.0 PMS mode)
+ *
+ * This runs backtest in v3_pms mode with position-level tracking.
+ */
+export async function runPMSBacktest(payload: BacktestRequest): Promise<PMSBacktestReport> {
+  const res = await fetch('/api/backtest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...payload,
+      mode: 'v3_pms',
+    }),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to run PMS backtest');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  const data = await res.json();
+  return data.report || data;
+}
+
+/**
  * Save backtest signals to database
  */
 export async function saveBacktestSignals(payload: {
