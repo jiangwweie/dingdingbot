@@ -575,7 +575,7 @@ class FilterFactory:
         elif filter_type == "atr":
             return filter_class(
                 period=params.get('period', 14),
-                min_atr_ratio=params.get('min_atr_ratio', Decimal("0.001")),
+                min_atr_ratio=params.get('min_atr_ratio', Decimal("0.005")),  # 0.5%
                 min_absolute_range=params.get('min_absolute_range', Decimal("0.1")),
                 enabled=enabled
             )
