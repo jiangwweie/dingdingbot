@@ -96,10 +96,8 @@ def get_last_closed_kline_index(
     """
     Find the index of the last closed kline for MTF analysis.
 
-    For MTF analysis, we need the kline from the higher timeframe that
-    corresponds to the current period. If the current timestamp matches
-    a kline's timestamp exactly, that kline is considered "current" (not
-    yet started), so we return the previous one.
+    A kline is considered "closed" when its end time (timestamp + period_ms)
+    is less than or equal to the current timestamp.
 
     Args:
         klines: List of klines (sorted by timestamp ascending)
@@ -112,37 +110,27 @@ def get_last_closed_kline_index(
     Example:
         current_timestamp = 10:15 (15m kline)
         timeframe = "1h"
-        Returns index of 10:00 kline (10:00-11:00 period)
+        Returns index of 09:00 kline (closes at 10:00, already closed)
 
         current_timestamp = 11:00 (exactly matches 11:00 kline)
         timeframe = "1h"
-        Returns index of 10:00 kline (11:00 is current, not started)
+        Returns index of 10:00 kline (closes at 11:00, just closed)
     """
     period_ms = parse_timeframe_to_ms(timeframe)
-
-    # Calculate which period current_timestamp belongs to
-    current_period = current_timestamp // period_ms
-
-    # Find klines in the same period as current_timestamp
-    # If current_timestamp matches a kline exactly, that kline is "current"
     best_index = -1
-    for i, kline in enumerate(klines):
-        kline_period = kline.timestamp // period_ms
 
-        if kline_period < current_period:
-            # Previous period, definitely available
-            best_index = i
-        elif kline_period == current_period:
-            # Same period
-            if kline.timestamp == current_timestamp:
-                # This kline is "current" (just started), return previous
-                break
-            else:
-                # This kline is in the same period, use it
-                best_index = i
-                break
-        else:
-            # Future period
+    for i, kline in enumerate(klines):
+        kline_end_time = kline.timestamp + period_ms
+
+        if kline_end_time > current_timestamp:
+            # Kline hasn't closed yet, stop
             break
+
+        if kline.timestamp == current_timestamp:
+            # This kline is "current" (just started), return previous
+            break
+
+        # Kline has closed, use it
+        best_index = i
 
     return best_index
