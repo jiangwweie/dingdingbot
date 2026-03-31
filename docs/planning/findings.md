@@ -1,5 +1,127 @@
 # 研究发现
 
+## P6-006: PMS 回测报告组件 (2026-03-31)
+
+### 组件清单
+
+**已存在组件** (本次任务前已创建):
+| 组件 | 路径 | 功能 |
+|------|------|------|
+| `BacktestOverviewCards` | `web-front/src/components/v3/backtest/BacktestOverviewCards.tsx` | 回测概览卡片（总收益率、最大回撤、夏普比率、胜率） |
+| `EquityComparisonChart` | `web-front/src/components/v3/backtest/EquityComparisonChart.tsx` | 权益曲线对比图（Recharts LineChart） |
+| `TradeStatisticsTable` | `web-front/src/components/v3/backtest/TradeStatisticsTable.tsx` | 交易统计表格（总交易次数、盈利次数、亏损次数、平均盈亏等） |
+| `PnLDistributionHistogram` | `web-front/src/components/v3/backtest/PnLDistributionHistogram.tsx` | 盈亏分布直方图（Recharts BarChart） |
+| `MonthlyReturnHeatmap` | `web-front/src/components/v3/backtest/MonthlyReturnHeatmap.tsx` | 月度收益热力图（正绿负红） |
+
+**本次任务新增**:
+| 组件/页面 | 路径 | 功能 |
+|-----------|------|------|
+| `runPMSBacktest` API | `web-front/src/lib/api.ts` | PMS 模式回测 API 函数 |
+| `PMSBacktest` 页面 | `web-front/src/pages/PMSBacktest.tsx` | PMS 回测主页面（/pms-backtest） |
+
+### 技术实现
+
+#### 1. PMSBacktestReport 类型定义
+
+**位置**: `web-front/src/lib/api.ts`
+
+```typescript
+export interface PMSBacktestReport {
+  strategy_id: string;
+  strategy_name: string;
+  backtest_start: number;
+  backtest_end: number;
+  initial_balance: string;
+  final_balance: string;
+  total_return: string;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: string;
+  total_pnl: string;
+  total_fees_paid: string;
+  total_slippage_cost: string;
+  max_drawdown: string;
+  sharpe_ratio: string | null;
+  positions: PositionSummary[];
+}
+```
+
+#### 2. PMSBacktest 页面功能
+
+**核心功能**:
+- 时间序列与资产维度配置（交易对、时间周期、时间范围）
+- 初始资金配置（默认 10000 USDT）
+- 策略组装工作台集成
+- 风控参数覆写
+- PMS 回测执行（调用 `/api/backtest` with `mode: 'v3_pms'`）
+
+**报告展示**:
+- 回测概览卡片（4 张关键指标）
+- 权益曲线对比图（策略净值 vs 基准）
+- 交易统计表格（12 项统计数据）
+- 盈亏分布直方图（Recharts BarChart）
+- 月度收益热力图（正绿负红）
+
+#### 3. API 集成
+
+**新增 API 函数**:
+```typescript
+export async function runPMSBacktest(payload: BacktestRequest): Promise<PMSBacktestReport>
+```
+
+**请求参数**:
+- `mode: 'v3_pms'` - 自动设置 PMS 模式
+- `initial_balance` - 初始资金
+- `strategies` - 动态策略定义
+- `risk_overrides` - 风控参数覆写
+
+**响应数据**:
+- `PMSBacktestReport` - 包含仓位级详细统计
+
+### 设计特点
+
+#### 1. Apple 风格设计
+
+- 圆角卡片（rounded-xl, rounded-2xl）
+- 渐变背景（from-green-50 to-green-100/50）
+- 悬停阴影效果（hover:shadow-xl）
+- 响应式布局（grid-cols-1 md:grid-cols-2 lg:grid-cols-4）
+
+#### 2. 图表可视化
+
+- Recharts 图表库
+- 自适应响应式容器（ResponsiveContainer）
+- 自定义 Tooltip 组件
+- 颜色主题统一（green/red for PnL）
+
+#### 3. 交互体验
+
+- 策略模板导入
+- 回测历史查询
+- 信号详情抽屉
+- 错误提示优化
+
+### 路由配置
+
+**新增路由**:
+- `/pms-backtest` - PMS 回测页面
+
+**导航菜单**:
+- 已添加到 Layout.tsx 导航栏
+
+### TypeScript 编译验证
+
+```bash
+npm run build
+✓ 3432 modules transformed.
+✓ built in 2.02s
+```
+
+**结果**: ✅ 编译通过，无错误
+
+---
+
 ## P6-005: 账户净值曲线可视化 (2026-03-31)
 
 ### 组件清单

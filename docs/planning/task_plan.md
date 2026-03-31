@@ -128,11 +128,173 @@ npm run build
 
 ---
 
+# 任务计划 - P6-006: PMS 回测报告组件
+
+> **创建日期**: 2026-03-31
+> **负责人**: @frontend
+> **优先级**: P0
+> **预计工时**: 4 小时
+
+---
+
+## 任务目标
+
+实现 v3.0 PMS 回测报告组件，展示回测结果、交易统计、盈亏分布。
+
+**相关文件**:
+- **契约表**: `docs/designs/phase6-v3-api-contract.md` - 回测端点（待补充）
+- **类型定义**: `web-front/src/lib/api.ts` - PMSBacktestReport, PositionSummary
+- **API 调用**: `runPMSBacktest()` 函数
+- **现有组件**: `web-front/src/components/v3/backtest/` - 5 个回测报告组件
+
+---
+
+## 阶段分解
+
+### 阶段 1: API 函数创建 ✅
+
+- [x] `runPMSBacktest()` - PMS 模式回测 API 函数
+- [x] PMSBacktestReport 类型定义（已存在）
+- [x] PositionSummary 类型定义（已存在）
+
+### 阶段 2: 组件集成 ✅
+
+- [x] `BacktestOverviewCards` - 回测概览卡片（已存在）
+- [x] `EquityComparisonChart` - 权益曲线对比图（已存在）
+- [x] `TradeStatisticsTable` - 交易统计表格（已存在）
+- [x] `PnLDistributionHistogram` - 盈亏分布直方图（已存在）
+- [x] `MonthlyReturnHeatmap` - 月度收益热力图（已存在）
+
+### 阶段 3: 主页面开发 ✅
+
+- [x] `PMSBacktest.tsx` - 主页面（/pms-backtest）
+- [x] 时间序列与资产维度配置
+- [x] 初始资金配置
+- [x] 策略组装工作台集成
+- [x] 风控参数覆写
+- [x] PMS 回测执行功能
+
+### 阶段 4: 报告展示集成 ✅
+
+- [x] 回测概览卡片组件集成
+- [x] 权益曲线对比图集成
+- [x] 交易统计表格集成
+- [x] 盈亏分布直方图集成
+- [x] 月度收益热力图集成
+
+### 阶段 5: 路由集成与测试 ✅
+
+- [x] 添加路由到 App.tsx
+- [x] 添加导航菜单项到 Layout.tsx
+- [x] TypeScript 编译验证
+- [x] 页面功能自测
+
+---
+
+## 组件结构
+
+```
+web-front/src/pages/PMSBacktest.tsx
+web-front/src/components/v3/backtest/
+├── BacktestOverviewCards.tsx      # 回测概览卡片（4 张关键指标）
+├── EquityComparisonChart.tsx      # 权益曲线对比图（Recharts LineChart）
+├── TradeStatisticsTable.tsx       # 交易统计表格（12 项统计）
+├── PnLDistributionHistogram.tsx   # 盈亏分布直方图（Recharts BarChart）
+├── MonthlyReturnHeatmap.tsx       # 月度收益热力图（正绿负红）
+└── index.ts                       # 组件统一导出
+```
+
+---
+
+## 技术栈
+
+- React 19 + TypeScript + Vite 6.x
+- TailwindCSS 4.x (Apple 风格设计)
+- Recharts (图表库)
+- SWR (数据获取)
+
+---
+
+## 验收标准
+
+1. ✅ 回测概览卡片正确显示所有指标（总收益率、最大回撤、夏普比率、胜率）
+2. ✅ 权益曲线对比图正确绘制（策略净值 vs 基准）
+3. ✅ 交易统计表格数据完整（12 项统计数据）
+4. ✅ 盈亏分布直方图可视化正确
+5. ✅ 月度收益热力图颜色正确（正绿负红）
+6. ✅ TypeScript 类型检查通过
+7. ✅ 路由和导航菜单正确配置
+
+---
+
+## 进度记录
+
+| 日期 | 完成工作 | 状态 |
+|------|----------|------|
+| 2026-03-31 | 阶段 1: API 函数创建 | ✅ 已完成 |
+| 2026-03-31 | 阶段 2: 组件集成 | ✅ 已完成 |
+| 2026-03-31 | 阶段 3: 主页面开发 | ✅ 已完成 |
+| 2026-03-31 | 阶段 4: 报告展示集成 | ✅ 已完成 |
+| 2026-03-31 | 阶段 5: 路由集成与测试 | ✅ 已完成 |
+
+---
+
+## 交付清单
+
+### 已创建/更新的文件
+
+| 文件 | 修改内容 | 状态 |
+|------|----------|------|
+| `web-front/src/lib/api.ts` | 新增 `runPMSBacktest()` API 函数 | ✅ 已更新 |
+| `web-front/src/pages/PMSBacktest.tsx` | 新建 PMS 回测主页面 | ✅ 已创建 |
+| `web-front/src/App.tsx` | 添加 `/pms-backtest` 路由 | ✅ 已更新 |
+| `web-front/src/components/Layout.tsx` | 添加 PMS 回测导航菜单项 | ✅ 已更新 |
+| `docs/planning/findings.md` | 记录 P6-006 技术发现 | ✅ 已更新 |
+| `docs/planning/task_plan.md` | 更新任务进度状态 | ✅ 已更新 |
+
+### 已创建的组件
+
+**本次任务前已存在**:
+| 组件 | 文件路径 | 说明 |
+|------|----------|------|
+| `BacktestOverviewCards` | `web-front/src/components/v3/backtest/BacktestOverviewCards.tsx` | 回测概览卡片（总收益率、最大回撤、夏普比率、胜率） |
+| `EquityComparisonChart` | `web-front/src/components/v3/backtest/EquityComparisonChart.tsx` | 权益曲线对比图（Recharts LineChart） |
+| `TradeStatisticsTable` | `web-front/src/components/v3/backtest/TradeStatisticsTable.tsx` | 交易统计表格（12 项统计） |
+| `PnLDistributionHistogram` | `web-front/src/components/v3/backtest/PnLDistributionHistogram.tsx` | 盈亏分布直方图（Recharts BarChart） |
+| `MonthlyReturnHeatmap` | `web-front/src/components/v3/backtest/MonthlyReturnHeatmap.tsx` | 月度收益热力图（正绿负红） |
+
+**本次任务创建**:
+| 组件 | 文件路径 | 说明 |
+|------|----------|------|
+| `PMSBacktest` | `web-front/src/pages/PMSBacktest.tsx` | PMS 回测主页面 |
+
+### TypeScript 编译验证
+
+```bash
+cd web-front && npm run build
+
+> react-example@0.0.0 build
+> vite build
+
+✓ 3432 modules transformed.
+✓ built in 2.02s
+```
+
+**结果**: ✅ 编译通过，无错误
+
+---
+
+## 技术发现
+
+详见 `docs/planning/findings.md` - P6-006 条目
+
+---
+
 *最后更新：2026-03-31*
 
 ---
 
-# 任务计划 - P6-003 仓位管理页面开发
+# 任务计划 - P6-005 账户净值曲线可视化
 
 > **创建日期**: 2026-03-31
 > **负责人**: @frontend
