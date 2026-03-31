@@ -91,7 +91,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
 
     // Prepare data
     // lightweight-charts requires UTC timestamp in seconds
-    // The chart is configured with timeZone: 'Asia/Shanghai' to display Beijing Time
+    // K-line data from API: [timestamp_ms, open, high, low, close, volume]
     const klineData: CandlestickData[] = data.klines.map((k) => ({
       time: (k[0] / 1000) as UTCTimestamp,  // Convert milliseconds to seconds
       open: k[1],
@@ -103,13 +103,24 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
     candleSeries.setData(klineData);
 
     // Find the exact signal candle by timestamp
+    // kline_timestamp is in milliseconds (from backend)
     const signalTimestamp = data.signal.kline_timestamp
-      ? Math.floor(data.signal.kline_timestamp / 1000)
+      ? Math.floor(data.signal.kline_timestamp / 1000) // Convert to seconds for comparison
       : null;
 
+    // Debug: log timestamps for troubleshooting
+    console.log('[SignalDetailsModal] Signal timestamp (ms):', data.signal.kline_timestamp);
+    console.log('[SignalDetailsModal] Signal timestamp (s):', signalTimestamp);
+    console.log('[SignalDetailsModal] Kline data sample:', klineData.slice(0, 3));
+
     const signalCandle = signalTimestamp
-      ? klineData.find(k => Number(k.time) === signalTimestamp)
+      ? klineData.find(k => {
+          const klineTime = Number(k.time);
+          return klineTime === signalTimestamp;
+        })
       : null;
+
+    console.log('[SignalDetailsModal] Signal candle found:', signalCandle ? 'YES' : 'NO');
 
     if (signalCandle) {
       const isLong = data.signal.direction === 'long';
