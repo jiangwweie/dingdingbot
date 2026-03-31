@@ -14,6 +14,39 @@ license: Proprietary
 4. **数据持久化** - SQLite 操作、Repository 模式
 5. **系统集成** - 交易所网关、通知推送、配置管理
 
+---
+
+## 📋 开工/收工规范
+
+**项目级规范**: `.claude/team/WORKFLOW.md` - 所有角色共同遵守
+
+### 🟢 开工前 (Pre-Flight) - 后端专属
+- [ ] **契约阅读**: 已阅读 API 契约表 (如有)
+- [ ] **接口确认**: 明确请求/响应 Schema
+- [ ] **模型定位**: 确定需要修改的文件路径
+- [ ] **测试定位**: 确定需要编写的测试文件
+
+### 🔴 收工时 (Post-Flight) - 后端专属
+- [ ] **单元测试**: 新功能测试覆盖率 ≥ 80%
+- [ ] **类型验证**: Pydantic 模型验证通过
+- [ ] **代码简化**: 已调用 `code-simplifier` 优化 (如需要)
+- [ ] **异步检查**: 无同步阻塞调用 (async 中无 time.sleep)
+- [ ] **日志脱敏**: 敏感信息已脱敏
+
+**提交前验证命令**:
+```bash
+# 运行相关测试
+pytest tests/unit/test_xxx.py -v
+
+# 检查导入
+python -c "from src.domain.xxx import xxx"
+
+# 确认无循环导入
+pytest --import-mode=importlib tests/unit/
+```
+
+---
+
 ## 技术栈
 
 | 领域 | 技术 |

@@ -16,6 +16,44 @@ license: Proprietary
 
 ---
 
+## 📋 开工/收工规范
+
+**本项目采用分层开工/收工规范**：
+
+- **项目级规范**: `.claude/team/WORKFLOW.md` - 所有角色共同遵守
+- **角色专属规范**: 本文件中的 Coordinator 专属检查清单
+
+### 🟢 开工前 (Pre-Flight) - Coordinator 专属
+- [ ] **任务规划**: 已调用 `planning-with-files-zh` 创建计划
+- [ ] **文件创建**: `docs/planning/task_plan.md` 已生成
+- [ ] **任务分解**: 已使用 `TaskCreate` 创建任务清单
+- [ ] **依赖标注**: 已识别任务依赖关系 (addBlockedBy)
+- [ ] **角色分配**: 已确定需要参与的角色
+
+**调用示例**:
+```python
+Agent(subagent_type="planning-with-files-zh",
+      prompt="为策略预览功能创建执行计划，输出到 docs/planning/task_plan.md")
+```
+
+### 🔴 收工时 (Post-Flight) - Coordinator 专属
+- [ ] **集成验证**: 所有子任务测试通过
+- [ ] **交付报告**: 已生成交付报告
+- [ ] **进度更新**: `docs/planning/progress.md` 已更新
+- [ ] **代码推送**: 已提交并推送到远程分支
+- [ ] **诊断报告**: Bug 修复类任务已更新诊断报告状态
+
+**验证命令**:
+```bash
+# 运行完整测试套件
+pytest tests/unit/ tests/integration/ -v --tb=short
+
+# 检查变更统计
+git diff --stat HEAD
+```
+
+---
+
 ## 🚀 全自动复杂任务交付流水线 (Auto-Pipeline v1.0)
 
 **适用范围**: 涉及前端 + 后端 + 测试的复杂功能开发
