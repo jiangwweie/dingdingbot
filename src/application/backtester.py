@@ -5,14 +5,13 @@ Key Design Principles:
 1. **Sandbox Isolation**: Never calls global ConfigManager. Uses isolated config.
 2. **Stateless Execution**: Each backtest run is independent.
 3. **Diagnostic Output**: Returns detailed statistics, not just PnL.
-4. **Dynamic Rule Engine Support**: Supports both legacy and new dynamic strategy definitions.
+4. **Dynamic Rule Engine Support**: All backtests use DynamicStrategyRunner for consistent filter support (including ATR).
 """
 import asyncio
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
 
 from src.domain.models import (
     KlineData,
@@ -26,6 +25,8 @@ from src.domain.models import (
     BacktestReport,
     SignalStats,
     StrategyDefinition,
+    TriggerConfig,
+    FilterConfig,
 )
 from src.domain.strategy_engine import (
     StrategyEngine,
@@ -33,8 +34,6 @@ from src.domain.strategy_engine import (
     PinbarConfig,
     StrategyRunner,
     PinbarStrategy,
-    EmaTrendFilter,
-    MtfFilter,
     DynamicStrategyRunner,
     StrategyWithFilters,
     create_dynamic_runner,
@@ -44,58 +43,6 @@ from src.domain.risk_calculator import RiskCalculator, RiskConfig
 from src.domain.models import AccountSnapshot
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
-
-
-# ============================================================
-# Isolated Strategy Runner for Backtesting (Legacy Support)
-# ============================================================
-@dataclass
-class IsolatedStrategyConfig:
-    """Isolated configuration for backtest strategy runner (legacy)."""
-    pinbar_config: PinbarConfig
-    trend_filter_enabled: bool
-    mtf_validation_enabled: bool
-    ema_period: int
-    risk_config: RiskConfig
-
-
-class IsolatedStrategyRunner:
-    """
-    Private strategy runner for backtesting (legacy implementation).
-    Uses isolated config, never references global ConfigManager.
-
-    Note: For new dynamic rule engine, use DynamicStrategyRunner directly.
-    """
-
-    def __init__(self, config: IsolatedStrategyConfig):
-        self._config = config
-
-        # Build strategy and filters
-        self._pinbar_strategy = PinbarStrategy(config.pinbar_config)
-        self._ema_filter = EmaTrendFilter(period=config.ema_period, enabled=config.trend_filter_enabled)
-        self._mtf_filter = MtfFilter(enabled=config.mtf_validation_enabled)
-
-        self._runner = StrategyRunner(
-            strategies=[self._pinbar_strategy],
-            filters=[self._ema_filter],
-            mtf_filter=self._mtf_filter,
-        )
-
-    def update_state(self, kline: KlineData) -> None:
-        """Update internal state (EMA) for each kline."""
-        self._ema_filter.update(kline, kline.symbol, kline.timeframe)
-
-    def run(
-        self,
-        kline: KlineData,
-        higher_tf_trends: Dict[str, TrendDirection],
-    ) -> SignalAttempt:
-        """Run strategy on a single kline."""
-        # Get current trend
-        current_trend = self._ema_filter.get_trend(kline, kline.symbol, kline.timeframe)
-
-        # Run strategy
-        return self._runner.run(kline, higher_tf_trends, current_trend)
 
 
 # ============================================================
@@ -136,9 +83,7 @@ class Backtester:
         """
         Run backtest with isolated config sandbox.
 
-        Supports both:
-        1. Legacy mode: Simple pinbar + EMA + MTF config
-        2. Dynamic rule engine mode: Multiple strategies with custom filter chains
+        All backtests use DynamicStrategyRunner for consistent filter support (including ATR).
 
         Backtest signals are automatically saved to database with source='backtest'.
         Signals can be viewed in the Signals page with K-line chart visualization.
@@ -152,16 +97,9 @@ class Backtester:
         Returns:
             BacktestReport with detailed statistics
         """
-        # Determine mode: Dynamic rule engine or legacy
-        use_dynamic = request.strategies is not None and len(request.strategies) > 0
-
-        if use_dynamic:
-            # Step 1: Build dynamic strategy runner from strategy definitions
-            runner = self._build_dynamic_runner(request.strategies)
-        else:
-            # Step 1: Build isolated strategy config (legacy mode)
-            strategy_config = self._build_strategy_config(request)
-            runner = IsolatedStrategyRunner(strategy_config)
+        # Step 1: Build dynamic strategy runner from request
+        # Support both: 1) strategies field (new format)  2) legacy parameters
+        runner = self._build_runner_from_request(request)
 
         # Step 2: Fetch historical K-line data
         klines = await self._fetch_klines(request)
@@ -179,15 +117,10 @@ class Backtester:
                 timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
             )
 
-        # Step 4: Run backtest
-        if use_dynamic:
-            attempts, higher_tf_data = await self._run_dynamic_strategy_loop(
-                runner, klines, request
-            )
-        else:
-            attempts, higher_tf_data = await self._run_strategy_loop(
-                runner, klines, request
-            )
+        # Step 4: Run backtest with DynamicStrategyRunner
+        attempts, higher_tf_data = await self._run_strategy_loop(
+            runner, klines, request
+        )
 
         # Step 5: Calculate statistics
         signal_stats = self._calculate_signal_stats(attempts)
@@ -228,9 +161,95 @@ class Backtester:
 
         return report
 
-    def _build_dynamic_runner(self, strategy_definitions: List[StrategyDefinition]) -> DynamicStrategyRunner:
+    def _build_runner_from_request(self, request: BacktestRequest) -> DynamicStrategyRunner:
+        """
+        Build DynamicStrategyRunner from request.
+
+        Supports both:
+        1. strategies field (new format): Use strategy definitions directly
+        2. Legacy parameters: Convert to StrategyDefinition with filters
+
+        Args:
+            request: Backtest request parameters
+
+        Returns:
+            DynamicStrategyRunner ready for execution
+        """
+        # Case 1: strategies field provided (new format)
+        if request.strategies is not None and len(request.strategies) > 0:
+            return self._build_dynamic_runner(request.strategies)
+
+        # Case 2: Legacy parameters - convert to StrategyDefinition
+        strategy_def = self._convert_legacy_to_strategy_definition(request)
+        return create_dynamic_runner([strategy_def])
+
+    def _convert_legacy_to_strategy_definition(self, request: BacktestRequest) -> StrategyDefinition:
+        """
+        Convert legacy backtest parameters to StrategyDefinition.
+
+        Legacy parameters include:
+        - min_wick_ratio, max_body_ratio, body_position_tolerance (pinbar config)
+        - trend_filter_enabled (EMA trend filter)
+        - mtf_validation_enabled (MTF filter)
+
+        Args:
+            request: Backtest request with legacy parameters
+
+        Returns:
+            StrategyDefinition ready for create_dynamic_runner
+        """
+        from src.domain.logic_tree import LogicNode
+
+        # Build filters config from legacy parameters
+        filters_config = []
+
+        # EMA trend filter
+        if request.trend_filter_enabled is not False:  # Default to enabled if not specified
+            filters_config.append(FilterConfig(
+                type="ema_trend",
+                enabled=True,
+                params={"period": 60}
+            ))
+
+        # MTF filter
+        if request.mtf_validation_enabled is not False:  # Default to enabled if not specified
+            filters_config.append(FilterConfig(
+                type="mtf",
+                enabled=True
+            ))
+
+        # ATR volatility filter (always enabled for legacy mode to match production behavior)
+        filters_config.append(FilterConfig(
+            type="atr",
+            enabled=True,
+            params={
+                "period": 14,
+                "min_atr_ratio": "0.005",  # 0.5%
+                "min_absolute_range": "0.1"
+            }
+        ))
+
+        # Create StrategyDefinition with legacy pinbar config converted to trigger
+        return StrategyDefinition(
+            id="legacy_pinbar",
+            name="Pinbar",
+            triggers=[TriggerConfig(
+                type="pinbar",
+                enabled=True,
+                params={
+                    "min_wick_ratio": str(request.min_wick_ratio) if request.min_wick_ratio else "0.6",
+                    "max_body_ratio": str(request.max_body_ratio) if request.max_body_ratio else "0.3",
+                    "body_position_tolerance": str(request.body_position_tolerance) if request.body_position_tolerance else "0.1",
+                }
+            )],
+            filters=filters_config,
+            filter_logic="AND",
+            is_global=True,
+            apply_to=[],
+        )
+
+    def _build_dynamic_runner(self, strategy_definitions: List[Dict[str, Any]]) -> DynamicStrategyRunner:
         """Build DynamicStrategyRunner from strategy definitions."""
-        from src.domain.models import StrategyDefinition
 
         # 手动反序列化为 StrategyDefinition 对象
         # 因为 BacktestRequest.strategies 使用 List[Dict] 而非 List[StrategyDefinition]
@@ -248,43 +267,16 @@ class Backtester:
 
         return create_dynamic_runner(strategies)
 
-    def _build_strategy_config(self, request: BacktestRequest) -> IsolatedStrategyConfig:
-        """Build isolated strategy config from request."""
-        # Default pinbar config
-        pinbar_config = PinbarConfig(
-            min_wick_ratio=request.min_wick_ratio or Decimal("0.6"),
-            max_body_ratio=request.max_body_ratio or Decimal("0.3"),
-            body_position_tolerance=request.body_position_tolerance or Decimal("0.1"),
-        )
-
-        # Default strategy flags
-        trend_filter = request.trend_filter_enabled if request.trend_filter_enabled is not None else True
-        mtf_validation = request.mtf_validation_enabled if request.mtf_validation_enabled is not None else True
-
-        # Risk config for position sizing
-        risk_config = RiskConfig(
-            max_loss_percent=Decimal("0.01"),  # Default 1% risk per trade
-            max_leverage=20,  # Default max leverage
-        )
-
-        return IsolatedStrategyConfig(
-            pinbar_config=pinbar_config,
-            trend_filter_enabled=trend_filter,
-            mtf_validation_enabled=mtf_validation,
-            ema_period=60,  # EMA60
-            risk_config=risk_config,
-        )
-
     async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
         """Fetch historical K-line data."""
         try:
-            # 检查是否有时间范围参数
+            # Check if time range parameters are provided
             if request.start_time and request.end_time:
-                # 计算需要的 K 线数量
+                # Calculate number of candles needed
                 duration_ms = int(request.end_time) - int(request.start_time)
                 timeframe_minutes = self._parse_timeframe(request.timeframe)
                 expected_bars = duration_ms // (timeframe_minutes * 60 * 1000)
-                # 添加 20% 缓冲，并确保至少满足 limit 要求
+                # Add 20% buffer and ensure at least limit is met
                 limit = max(int(expected_bars * 1.2), request.limit, 1000)
                 logger.info(f"Time range specified: fetching ~{expected_bars} bars (limit: {limit})")
             else:
@@ -296,7 +288,7 @@ class Backtester:
                 limit=limit,
             )
 
-            # 按时间范围过滤
+            # Filter by time range
             if request.start_time and request.end_time:
                 start_ts = int(request.start_time)
                 end_ts = int(request.end_time)
@@ -311,114 +303,18 @@ class Backtester:
             raise
 
     def _parse_timeframe(self, timeframe: str) -> int:
-        """解析时间框架为分钟数"""
+        """Parse timeframe to minutes."""
         mapping = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080}
         return mapping.get(timeframe, 15)
 
     async def _run_strategy_loop(
-        self,
-        runner: IsolatedStrategyRunner,
-        klines: List[KlineData],
-        request: BacktestRequest,
-    ) -> Tuple[List[SignalAttempt], Dict[str, Dict[str, TrendDirection]]]:
-        """
-        Run strategy on all K-lines.
-
-        Returns:
-            Tuple of (attempts, higher_tf_data)
-        """
-        attempts = []
-        higher_tf_data = {}  # {timestamp: {timeframe: TrendDirection}}
-
-        # We need to simulate higher timeframe data
-        # For simplicity, we'll fetch it separately
-        higher_tf = self.MTF_MAPPING.get(request.timeframe)
-        higher_tf_klines = {}
-
-        if higher_tf:
-            try:
-                # Calculate limit for higher timeframe data
-                # Must ensure coverage of the klines time range
-                if klines:
-                    min_kline_ts = min(k.timestamp for k in klines)
-                    max_kline_ts = max(k.timestamp for k in klines)
-
-                    # Calculate how many higher TF candles are needed to cover from max_kline_ts back to min_kline_ts
-                    # But we also need to ensure the OLDEST 4h candle <= min_kline_ts
-                    # Since exchange returns from "now" backwards, we need to calculate:
-                    # limit = (max_kline_ts - min_kline_ts) / (higher_tf_interval) + buffer
-                    higher_tf_minutes = self._parse_timeframe(higher_tf)
-                    duration_ms = max_kline_ts - min_kline_ts
-                    expected_higher_tf_bars = max(
-                        int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,  # +5 for edge cases
-                        100  # minimum to ensure coverage
-                    )
-
-                    # Also consider request.start_time and request.end_time if provided
-                    # This is the ACTUAL time range we need to cover
-                    if request.start_time and request.end_time:
-                        start_ts = int(request.start_time)
-                        end_ts = int(request.end_time)
-                        full_duration_ms = end_ts - start_ts
-                        full_expected_bars = int(full_duration_ms / (higher_tf_minutes * 60 * 1000)) + 5
-                        expected_higher_tf_bars = max(expected_higher_tf_bars, full_expected_bars, 1000)
-
-                    # CRITICAL: Exchange returns candles from "latest available" backwards.
-                    # We need to ensure the oldest returned candle <= min_kline_ts.
-                    # Calculate bars needed from "now" back to min_kline_ts.
-                    current_ts = int(time.time() * 1000)
-                    time_from_now_ms = current_ts - min_kline_ts
-                    bars_from_now = int(time_from_now_ms / (higher_tf_minutes * 60 * 1000)) + 10  # +10 buffer
-
-                    # Use the larger of the two calculations
-                    limit = max(expected_higher_tf_bars, bars_from_now, 1000)
-
-                    logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, need {bars_from_now} bars from now)")
-                else:
-                    limit = max(request.limit, 1000)
-
-                higher_tf_klines_list = await self._gateway.fetch_historical_ohlcv(
-                    symbol=request.symbol,
-                    timeframe=higher_tf,
-                    limit=limit,
-                )
-
-                # Build a map of timestamp -> trend
-                for kline in higher_tf_klines_list:
-                    ts = kline.timestamp
-                    higher_tf_data[ts] = {
-                        higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
-                    }
-
-                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
-            except Exception as e:
-                logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
-
-        # Process each K-line
-        for kline in klines:
-            # Update internal state
-            runner.update_state(kline)
-
-            # Get higher TF trends for this timestamp
-            # Use the closest available higher TF data
-            higher_tf_trends = self._get_closest_higher_tf_trends(
-                kline.timestamp, higher_tf_data
-            )
-
-            # Run strategy
-            attempt = runner.run(kline, higher_tf_trends)
-            attempts.append(attempt)
-
-        return attempts, higher_tf_data
-
-    async def _run_dynamic_strategy_loop(
         self,
         runner: DynamicStrategyRunner,
         klines: List[KlineData],
         request: BacktestRequest,
     ) -> Tuple[List[SignalAttempt], Dict[str, Dict[str, TrendDirection]]]:
         """
-        Run dynamic strategy runner on all K-lines.
+        Run DynamicStrategyRunner on all K-lines.
 
         Returns:
             Tuple of (attempts, higher_tf_data)
@@ -428,29 +324,21 @@ class Backtester:
 
         # Fetch higher timeframe data for MTF
         higher_tf = self.MTF_MAPPING.get(request.timeframe)
-        higher_tf_klines = {}
 
         if higher_tf:
             try:
                 # Calculate limit for higher timeframe data
-                # Must ensure coverage of the klines time range
                 if klines:
                     min_kline_ts = min(k.timestamp for k in klines)
                     max_kline_ts = max(k.timestamp for k in klines)
 
-                    # Calculate how many higher TF candles are needed to cover from max_kline_ts back to min_kline_ts
-                    # But we also need to ensure the OLDEST 4h candle <= min_kline_ts
-                    # Since exchange returns from "now" backwards, we need to calculate:
-                    # limit = (max_kline_ts - min_kline_ts) / (higher_tf_interval) + buffer
                     higher_tf_minutes = self._parse_timeframe(higher_tf)
                     duration_ms = max_kline_ts - min_kline_ts
                     expected_higher_tf_bars = max(
-                        int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,  # +5 for edge cases
-                        100  # minimum to ensure coverage
+                        int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,
+                        100
                     )
 
-                    # Also consider request.start_time and request.end_time if provided
-                    # This is the ACTUAL time range we need to cover
                     if request.start_time and request.end_time:
                         start_ts = int(request.start_time)
                         end_ts = int(request.end_time)
@@ -458,14 +346,10 @@ class Backtester:
                         full_expected_bars = int(full_duration_ms / (higher_tf_minutes * 60 * 1000)) + 5
                         expected_higher_tf_bars = max(expected_higher_tf_bars, full_expected_bars, 1000)
 
-                    # CRITICAL: Exchange returns candles from "latest available" backwards.
-                    # We need to ensure the oldest returned candle <= min_kline_ts.
-                    # Calculate bars needed from "now" back to min_kline_ts.
                     current_ts = int(time.time() * 1000)
                     time_from_now_ms = current_ts - min_kline_ts
-                    bars_from_now = int(time_from_now_ms / (higher_tf_minutes * 60 * 1000)) + 10  # +10 buffer
+                    bars_from_now = int(time_from_now_ms / (higher_tf_minutes * 60 * 1000)) + 10
 
-                    # Use the larger of the two calculations
                     limit = max(expected_higher_tf_bars, bars_from_now, 1000)
 
                     logger.info(f"Fetching {limit} {higher_tf} candles for MTF (klines range: {min_kline_ts}-{max_kline_ts}, need {bars_from_now} bars from now)")
@@ -491,7 +375,7 @@ class Backtester:
 
         # Process each K-line
         for kline in klines:
-            # Update internal state (all stateful filters)
+            # Update internal state (all stateful filters including ATR)
             runner.update_state(kline)
 
             # Get higher TF trends for this timestamp
