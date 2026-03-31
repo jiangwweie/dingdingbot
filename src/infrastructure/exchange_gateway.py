@@ -704,6 +704,81 @@ class ExchangeGateway:
         """
         return self._account_snapshot
 
+    async def fetch_account_balance(self) -> Optional[AccountSnapshot]:
+        """
+        获取账户余额快照（调用交易所 API）
+
+        Phase 6: v3.0 账户管理 - GET /api/v3/account/balance
+
+        Returns:
+            AccountSnapshot 或 None（如果获取失败）
+
+        Raises:
+            F-004: 交易所初始化失败
+            C-010: API 频率限制
+        """
+        try:
+            return await self._poll_account()
+        except Exception as e:
+            logger.error(f"获取账户余额失败：{e}")
+            return None
+
+    async def fetch_positions(self, symbol: Optional[str] = None) -> List[PositionInfo]:
+        """
+        获取持仓列表（调用交易所 API）
+
+        Phase 6: v3.0 仓位管理 - GET /api/v3/positions
+
+        Args:
+            symbol: 币种对过滤（可选），如 "BTC/USDT:USDT"
+
+        Returns:
+            List[PositionInfo]: 持仓列表
+
+        Raises:
+            F-004: 交易所初始化失败
+            C-010: API 频率限制
+        """
+        import ccxt
+
+        try:
+            # 调用 CCXT fetch_positions
+            positions = await self.rest_exchange.fetch_positions()
+
+            # 解析持仓
+            position_list: List[PositionInfo] = []
+            for pos in positions:
+                # 过滤符号（如果需要）
+                if symbol and pos.get('symbol') != symbol:
+                    continue
+
+                # 跳过无持仓
+                if not pos.get('contracts') or pos['contracts'] <= 0:
+                    continue
+
+                leverage_val = pos.get('leverage', 1)
+                position = PositionInfo(
+                    symbol=pos['symbol'],
+                    side=pos['side'] if pos.get('side') else 'none',
+                    size=Decimal(str(pos['contracts'])),
+                    entry_price=Decimal(str(pos['entryPrice'])) if pos.get('entryPrice') else Decimal('0'),
+                    unrealized_pnl=Decimal(str(pos['unrealizedPnl'])) if pos.get('unrealizedPnl') else Decimal('0'),
+                    leverage=int(leverage_val),
+                )
+                position_list.append(position)
+
+            return position_list
+
+        except ccxt.NetworkError as e:
+            logger.error(f"网络错误，无法获取持仓：{e}")
+            raise
+        except ccxt.RateLimitExceeded as e:
+            logger.error(f"API 频率限制：{e}")
+            raise
+        except Exception as e:
+            logger.error(f"获取持仓失败：{e}")
+            raise
+
     # ============================================================
     # Phase 5: Order Management APIs
     # ============================================================
