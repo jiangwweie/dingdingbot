@@ -417,6 +417,76 @@ export interface BacktestReport {
   klines_analyzed: number;
 }
 
+// ============================================================================
+// PMS Backtest Types (v3.0 PMS 模式回测)
+// ============================================================================
+
+/**
+ * Position summary for PMS backtest report
+ */
+export interface PositionSummary {
+  /** 仓位 ID */
+  position_id: string;
+  /** 信号 ID */
+  signal_id: string;
+  /** 交易对 */
+  symbol: string;
+  /** 方向 */
+  direction: 'LONG' | 'SHORT';
+  /** 开仓价 (Decimal string) */
+  entry_price: string;
+  /** 平仓价 (Decimal string, 仅当仓位关闭时) */
+  exit_price: string | null;
+  /** 开仓时间戳 (ms) */
+  entry_time: number;
+  /** 平仓时间戳 (ms, 仅当仓位关闭时) */
+  exit_time: number | null;
+  /** 已实现盈亏 (Decimal string) */
+  realized_pnl: string;
+  /** 平仓原因 (TP1/SL/TRAILING 等) */
+  exit_reason: string | null;
+}
+
+/**
+ * PMS Backtest report response interface
+ */
+export interface PMSBacktestReport {
+  /** 策略 ID */
+  strategy_id: string;
+  /** 策略名称 */
+  strategy_name: string;
+  /** 回测开始时间戳 (ms) */
+  backtest_start: number;
+  /** 回测结束时间戳 (ms) */
+  backtest_end: number;
+  /** 初始资金 (Decimal string) */
+  initial_balance: string;
+  /** 最终余额 (Decimal string) */
+  final_balance: string;
+  /** 总收益率 (%) (Decimal string) */
+  total_return: string;
+  /** 总交易次数 */
+  total_trades: number;
+  /** 盈利交易次数 */
+  winning_trades: number;
+  /** 亏损交易次数 */
+  losing_trades: number;
+  /** 胜率 (%) (Decimal string) */
+  win_rate: string;
+  /** 总盈亏 (USDT) (Decimal string) */
+  total_pnl: string;
+  /** 总手续费 (Decimal string) */
+  total_fees_paid: string;
+  /** 总滑点成本 (Decimal string) */
+  total_slippage_cost: string;
+  /** 最大回撤 (%) (Decimal string) */
+  max_drawdown: string;
+  /** 夏普比率 (Decimal string, 可选) */
+  sharpe_ratio: string | null;
+  /** 仓位历史摘要列表 */
+  positions: PositionSummary[];
+}
+
 /**
  * Trace event for diagnostic tracking
  */

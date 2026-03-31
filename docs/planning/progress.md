@@ -1,5 +1,105 @@
 # 进度日志
 
+## 2026-03-31 - P6-007 多级别止盈可视化完成
+
+### 完成工作
+
+**P6-007: 多级别止盈可视化** ✅
+
+实现仓位详情页的多级别止盈（TP1-TP5）可视化展示和止损订单展示。
+
+#### 新增组件
+
+1. **TPProgressBar.tsx** (`web-front/src/components/v3/TPProgressBar.tsx`)
+   - 单个 TP 订单的成交进度条（0-100%）
+   - 盈亏比例计算（基于入场价和止盈价）
+   - 状态图标（待触发/执行中/已完成）
+   - 已成交数量 / 订单数量显示
+
+2. **TakeProfitStats.tsx** (`web-front/src/components/v3/TakeProfitStats.tsx`)
+   - 4 个统计卡片网格：
+     - 已实现止盈（已完成订单的盈亏）
+     - 未实现止盈（部分成交订单的未成交部分盈亏）
+     - 总目标止盈（所有订单完全成交的理论盈亏）
+     - 执行进度（已成交数量 / 总数量百分比）
+   - 总体执行进度条可视化
+
+#### 增强组件
+
+1. **TPChainDisplay.tsx** (`web-front/src/components/v3/TPChainDisplay.tsx`)
+   - 集成 TPProgressBar 和 TakeProfitStats
+   - 新结构：标题 + 统计卡片 + TP 订单明细列表
+   - 支持 TP1-TP5 排序显示
+
+2. **SLOrderDisplay.tsx** (`web-front/src/components/v3/SLOrderDisplay.tsx`)
+   - 新增止损距离百分比计算
+   - 止损进度条可视化（安全区域→危险区域渐变）
+   - 标记价格支持（通过 `markPrice` prop 传入）
+   - 状态提示（安全/关注/危险三级颜色）
+
+#### 技术实现
+
+**止盈统计计算**:
+```typescript
+// 已实现止盈
+realizedProfit = Σ((orderPrice - entryPrice) * filledQty) // LONG
+realizedProfit = Σ((entryPrice - orderPrice) * filledQty) // SHORT
+
+// 未实现止盈
+unrealizedProfit = Σ((orderPrice - entryPrice) * remainingQty) // LONG
+unrealizedProfit = Σ((entryPrice - orderPrice) * remainingQty) // SHORT
+
+// 执行进度
+executionProgress = (totalFilledAmount / totalAmount) * 100
+```
+
+**止损距离计算**:
+```typescript
+// 止损距离百分比
+stopLossDistance = ((currentPrice - triggerPrice) / currentPrice) * 100 // LONG
+stopLossDistance = ((triggerPrice - currentPrice) / currentPrice) * 100 // SHORT
+
+// 止损进度
+stopLossProgress = ((entryPrice - currentPrice) / (entryPrice - triggerPrice)) * 100 // LONG
+stopLossProgress = ((currentPrice - entryPrice) / (triggerPrice - entryPrice)) * 100 // SHORT
+```
+
+#### TypeScript 编译验证
+
+```bash
+npm run build
+# ✓ 3425 modules transformed.
+# ✓ built in 2.08s
+```
+
+### 验收状态
+
+| 验收项 | 状态 |
+|--------|------|
+| TP1-TP5 订单信息正确显示 | ✅ |
+| 止盈进度条可视化正确（0-100%） | ✅ |
+| 止损距离百分比计算正确 | ✅ |
+| 止盈统计数据显示完整 | ✅ |
+| TypeScript 类型检查通过 | ✅ |
+| 与仓位详情页无缝集成 | ✅ |
+
+### 新增文件清单
+
+**组件 (2 个新增)**:
+- `web-front/src/components/v3/TPProgressBar.tsx`
+- `web-front/src/components/v3/TakeProfitStats.tsx`
+
+**组件 (2 个增强)**:
+- `web-front/src/components/v3/TPChainDisplay.tsx`
+- `web-front/src/components/v3/SLOrderDisplay.tsx`
+
+### 下一步
+
+- [ ] P6-008: E2E 集成测试（依赖所有页面）
+- [ ] Phase 6 收尾：审查与文档整理
+
+---
+
 ## 2026-03-31 - Phase 6 并行开发完成（订单/仓位页面 + API 层）
 
 ### 完成工作

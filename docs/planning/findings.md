@@ -1,5 +1,164 @@
 # 研究发现
 
+## P6-007: 多级别止盈可视化 (2026-03-31)
+
+### 组件清单
+
+**新增组件**:
+| 组件 | 路径 | 功能 |
+|------|------|------|
+| `TPProgressBar` | `web-front/src/components/v3/TPProgressBar.tsx` | 单个 TP 订单进度条（成交进度、盈亏比例） |
+| `TakeProfitStats` | `web-front/src/components/v3/TakeProfitStats.tsx` | 止盈统计卡片（已实现/未实现/总目标止盈） |
+
+**增强组件**:
+| 组件 | 路径 | 增强内容 |
+|------|------|----------|
+| `TPChainDisplay` | `web-front/src/components/v3/TPChainDisplay.tsx` | 集成 TPProgressBar 和 TakeProfitStats，支持 TP1-TP5 可视化 |
+| `SLOrderDisplay` | `web-front/src/components/v3/SLOrderDisplay.tsx` | 新增止损距离百分比、止损进度条可视化 |
+
+**现有组件复用**:
+- `OrderStatusBadge` - 订单状态徽章（7 种状态）
+- `DecimalDisplay` - Decimal 格式化显示
+- `DirectionBadge` - 方向徽章（LONG/SHORT）
+
+### 技术实现
+
+#### 1. TPProgressBar 组件
+
+**功能**:
+- 单个 TP 订单的成交进度条（0-100%）
+- 盈亏比例计算（基于入场价和止盈价）
+- 状态图标（待触发/执行中/已完成）
+- 已成交数量 / 订单数量显示
+
+**计算逻辑**:
+```typescript
+// 进度百分比
+progressPercent = (filledAmount / orderAmount) * 100
+
+// 盈亏比例（基于方向）
+if (direction === 'LONG'):
+  pnlPercent = ((orderPrice - entryPrice) / entryPrice) * 100
+else:
+  pnlPercent = ((entryPrice - orderPrice) / entryPrice) * 100
+```
+
+#### 2. TakeProfitStats 组件
+
+**功能**:
+- 4 个统计卡片网格：
+  1. 已实现止盈（已完成订单的盈亏）
+  2. 未实现止盈（部分成交订单的未成交部分盈亏）
+  3. 总目标止盈（所有订单完全成交的理论盈亏）
+  4. 执行进度（已成交数量 / 总数量百分比）
+
+**计算逻辑**:
+```typescript
+// 已实现止盈
+filledOrders.forEach(order => {
+  if (direction === 'LONG'):
+    realizedProfit += (orderPrice - entryPrice) * filledQty
+  else:
+    realizedProfit += (entryPrice - orderPrice) * filledQty
+})
+
+// 未实现止盈
+partiallyFilledOrders.forEach(order => {
+  const remainingQty = order.amount - order.filled_amount
+  // 同上逻辑计算未成交部分的理论盈亏
+})
+
+// 总目标止盈
+tpOrders.forEach(order => {
+  // 假设全部成交的理论盈亏
+})
+
+// 执行进度
+executionProgress = (totalFilledAmount / totalAmount) * 100
+```
+
+#### 3. TPChainDisplay 增强
+
+**新结构**:
+```
+TPChainDisplay
+├── 标题（止盈订单链 + 数量）
+├── TakeProfitStats（统计卡片）
+└── TP 订单明细列表
+    └── TPProgressBar（每个 TP 订单一个进度条）
+```
+
+#### 4. SLOrderDisplay 增强
+
+**新增功能**:
+- 止损距离百分比计算（当前价到止损价的距离）
+- 止损进度条可视化（安全区域→危险区域渐变）
+- 标记价格支持（通过 `markPrice` prop 传入）
+
+**计算逻辑**:
+```typescript
+// 止损距离百分比
+if (direction === 'LONG'):
+  // 做多止损：止损价低于当前价
+  stopLossDistance = ((currentPrice - triggerPrice) / currentPrice) * 100
+else:
+  // 做空止损：止损价高于当前价
+  stopLossDistance = ((triggerPrice - currentPrice) / currentPrice) * 100
+
+// 止损进度（价格接近止损价的程度）
+if (direction === 'LONG'):
+  stopLossProgress = ((entryPrice - currentPrice) / (entryPrice - triggerPrice)) * 100
+else:
+  stopLossProgress = ((currentPrice - entryPrice) / (triggerPrice - entryPrice)) * 100
+```
+
+**状态提示**:
+- 止损距离 > 5%: 绿色（安全）
+- 止损距离 > 2%: 黄色（关注）
+- 止损距离 ≤ 2%: 红色（危险）
+
+### UI/UX 设计
+
+**Apple 风格设计**:
+- 渐变卡片背景（from-green-50 to-emerald-50 等）
+- 圆角边框（rounded-xl, rounded-2xl）
+- 细腻阴影（border-gray-100, shadow-sm）
+- 平滑过渡动画（transition-all duration-500）
+
+**颜色语义**:
+| 场景 | 颜色 |
+|------|------|
+| 已完成/安全 | apple-green, green-50/100 |
+| 执行中/关注 | yellow-500/600, yellow-50/100 |
+| 危险/止损 | red-500/600, red-50/100 |
+| 待触发 | gray-300/400, gray-50/100 |
+
+### 验收状态
+
+| 验收项 | 状态 |
+|--------|------|
+| TP1-TP5 订单信息正确显示 | ✅ |
+| 止盈进度条可视化正确（0-100%） | ✅ |
+| 止损距离百分比计算正确 | ✅ |
+| 止盈统计数据显示完整 | ✅ |
+| TypeScript 类型检查通过 | ✅ |
+| 与仓位详情页无缝集成 | ✅ |
+
+### TypeScript 编译验证
+
+```bash
+npm run build
+# ✓ 3425 modules transformed.
+# ✓ built in 2.08s
+```
+
+### 依赖关系
+
+- P6-003: `TPChainDisplay`, `SLOrderDisplay` 基础组件
+- types/order.ts: `OrderResponse`, `OrderStatus` 类型定义
+
+---
+
 ## P6-003: 仓位管理页面开发 (2026-03-31)
 
 ### 组件清单
