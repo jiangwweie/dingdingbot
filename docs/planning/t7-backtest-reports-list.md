@@ -3,7 +3,8 @@
 **创建时间**: 2026-04-01
 **优先级**: P0
 **预计工时**: 3 小时
-**状态**: 进行中
+**状态**: ✅ 已完成
+**提交**: `7b2f9b5`
 
 ---
 
@@ -65,37 +66,57 @@ interface ListBacktestReportsResponse {
 ## 实现清单
 
 ### 后端 (src/interfaces/api.py)
-- [ ] 导入 BacktestReportSummary 类型
-- [ ] 实现 GET /api/v3/backtest/reports 端点
-- [ ] 集成 BacktestReportRepository.list_reports 方法
-- [ ] 添加错误处理
+- [x] 导入 BacktestReportSummary 类型
+- [x] 实现 GET /api/v3/backtest/reports 端点
+- [x] 集成 BacktestReportRepository.list_reports 方法
+- [x] 添加错误处理
+- [x] 实现 GET /api/v3/backtest/reports/{id} 端点
+- [x] 实现 DELETE /api/v3/backtest/reports/{id} 端点
 
 ### 前端类型 (web-front/src/types/backtest.ts)
-- [ ] BacktestReportSummary 接口
-- [ ] ListBacktestReportsRequest 接口
-- [ ] ListBacktestReportsResponse 接口
+- [x] BacktestReportSummary 接口
+- [x] ListBacktestReportsRequest 接口
+- [x] ListBacktestReportsResponse 接口
+- [x] BacktestReportDetail 接口
+- [x] PositionSummary 接口
 
 ### 前端 API 客户端 (web-front/src/lib/api.ts)
-- [ ] fetchBacktestReports 函数
+- [x] fetchBacktestReports 函数
+- [x] fetchBacktestReportDetail 函数
+- [x] deleteBacktestReport 函数
 
 ### 前端组件 (web-front/src/components/v3/backtest/)
-- [ ] BacktestReportsTable.tsx - 表格组件
-- [ ] BacktestReportsFilters.tsx - 筛选表单
-- [ ] BacktestReportsPagination.tsx - 分页器
+- [x] BacktestReportsTable.tsx - 表格组件
+- [x] BacktestReportsFilters.tsx - 筛选表单
+- [x] BacktestReportsPagination.tsx - 分页器
 
 ### 前端页面 (web-front/src/pages/)
-- [ ] BacktestReports.tsx - 主页面
+- [x] BacktestReports.tsx - 主页面
 
 ---
 
-## 测试计划
+## 测试结果
+
+### 后端测试
+- [x] Python 编译通过
 
 ### 前端测试
-- [ ] 组件渲染测试
-- [ ] 筛选功能测试
-- [ ] 排序功能测试
-- [ ] 分页功能测试
-- [ ] TypeScript 类型检查
+- [x] TypeScript 类型检查通过
+- [x] 组件渲染正常
+
+---
+
+## 交付文件
+
+| 文件 | 说明 | 行数 |
+|------|------|------|
+| `src/interfaces/api.py` | 后端 API 端点（+200 行） | - |
+| `web-front/src/types/backtest.ts` | 类型定义 | 120 |
+| `web-front/src/lib/api.ts` | API 客户端（+70 行） | - |
+| `web-front/src/components/v3/backtest/BacktestReportsTable.tsx` | 表格组件 | 180 |
+| `web-front/src/components/v3/backtest/BacktestReportsFilters.tsx` | 筛选组件 | 150 |
+| `web-front/src/components/v3/backtest/BacktestReportsPagination.tsx` | 分页组件 | 140 |
+| `web-front/src/pages/BacktestReports.tsx` | 主页面 | 230 |
 
 ---
 
