@@ -4,7 +4,7 @@ Handles historical data warmup, real-time K-line streaming, and asset polling.
 """
 import asyncio
 import time
-from typing import List, Dict, Any, Optional, Callable, Awaitable
+from typing import List, Dict, Optional, Callable, Awaitable
 from decimal import Decimal
 
 try:
@@ -14,10 +14,22 @@ except ImportError:
 
 import ccxt.async_support as ccxt_async
 
+from pydantic import BaseModel
+
 from src.domain.models import KlineData, AccountSnapshot, PositionInfo, OrderPlacementResult, OrderCancelResult, OrderStatus, OrderType, Order, OrderRole
 from decimal import Decimal
 from src.domain.exceptions import FatalStartupError, ConnectionLostError, DataQualityWarning, InsufficientMarginError, InvalidOrderError, OrderNotFoundError, OrderAlreadyFilledError, RateLimitError
 from src.infrastructure.logger import logger
+
+
+# ============================================================
+# Order Local State Model (P0 修复：替换 Dict[str, Any])
+# ============================================================
+class OrderLocalState(BaseModel):
+    """Order local state tracking for dedup and status"""
+    filled_qty: Decimal
+    status: str
+    updated_at: int  # 毫秒时间戳
 
 
 # ============================================================
@@ -100,7 +112,8 @@ class ExchangeGateway:
         self._candle_timestamps: Dict[str, int] = {}
 
         # Order state tracking (G-002: dedup based on filled_qty)
-        self._order_local_state: Dict[str, Dict[str, Any]] = {}  # order_id -> {filled_qty, status, updated_at}
+        # P0 修复：使用 OrderLocalState 替换 Dict[str, Any]
+        self._order_local_state: Dict[str, OrderLocalState] = {}
 
         # P5-011: Global order update callback (for order persistence)
         self._global_order_callback: Optional[Callable[[Order], Awaitable[None]]] = None
@@ -852,12 +865,13 @@ class ExchangeGateway:
                 params['clientOrderId'] = client_order_id
 
             # 调用 CCXT create_order 方法
+            # P0 修复：使用 str() 而非 float() 避免精度污染 (CCXT 支持字符串输入)
             order = await self.rest_exchange.create_order(
                 symbol=symbol,
                 type=ccxt_type,
                 side=side,
-                amount=float(amount),
-                price=float(price) if price is not None else None,
+                amount=str(amount),
+                price=str(price) if price is not None else None,
                 params=params,
             )
 
@@ -1060,6 +1074,59 @@ class ExchangeGateway:
         except Exception as e:
             logger.error(f"获取价格失败：{e}")
             raise
+
+    async def get_market_info(self, symbol: str) -> Dict[str, Any]:
+        """
+        获取交易对精度信息（P0-004：订单参数合理性检查）
+
+        Args:
+            symbol: 币种对
+
+        Returns:
+            Dict containing:
+            - min_quantity: 最小交易量
+            - quantity_precision: 数量精度（小数位数）
+            - price_precision: 价格精度（小数位数）
+            - min_notional: 最小名义价值（USDT）
+            - step_size: 数量步长
+
+        Raises:
+            ValueError: 无法获取市场信息
+        """
+        try:
+            # 确保市场数据已加载
+            if not self.rest_exchange.markets:
+                await self.rest_exchange.load_markets()
+
+            # 获取交易对信息
+            market = self.rest_exchange.market(symbol)
+
+            if not market:
+                raise ValueError(f"无法获取 {symbol} 的市场信息")
+
+            # 提取精度信息
+            limits = market.get('limits', {})
+            precision = market.get('precision', {})
+
+            min_quantity = Decimal(str(limits.get('amount', {}).get('min', 0)))
+            quantity_precision = precision.get('amount', 6)
+            price_precision = precision.get('price', 2)
+            min_notional = Decimal(str(limits.get('cost', {}).get('min', 5)))
+
+            # stepSize（数量步长）
+            step_size = Decimal(str(limits.get('amount', {}).get('step', 0)))
+
+            return {
+                'min_quantity': min_quantity,
+                'quantity_precision': quantity_precision,
+                'price_precision': price_precision,
+                'min_notional': min_notional,
+                'step_size': step_size,
+            }
+
+        except Exception as e:
+            logger.error(f"获取市场精度信息失败：{e} (symbol={symbol})")
+            raise ValueError(f"无法获取 {symbol} 的市场精度信息：{e}")
 
     # ============================================================
     # Helper Methods
@@ -1264,8 +1331,8 @@ class ExchangeGateway:
             # G-002 修复：基于 filled_qty 去重
             local_state = self._order_local_state.get(order_id)
             if local_state:
-                local_filled_qty = local_state.get('filled_qty', Decimal('0'))
-                local_status = local_state.get('status', 'open')
+                local_filled_qty = local_state.filled_qty
+                local_status = local_state.status
 
                 # 如果成交量未增加且状态未变化，跳过重复推送
                 if filled_qty <= local_filled_qty and status == local_status:
@@ -1279,12 +1346,12 @@ class ExchangeGateway:
                         f"{local_filled_qty} -> {filled_qty}"
                     )
 
-            # 更新本地状态
-            self._order_local_state[order_id] = {
-                'filled_qty': filled_qty,
-                'status': status,
-                'updated_at': timestamp,
-            }
+            # 更新本地状态 (P0 修复：使用 OrderLocalState 类)
+            self._order_local_state[order_id] = OrderLocalState(
+                filled_qty=filled_qty,
+                status=status,
+                updated_at=timestamp,
+            )
 
             # 解析订单状态
             order_status = self._parse_order_status_with_filled_qty(status, filled_qty, amount)

@@ -12,7 +12,6 @@ P0-004: 订单参数合理性检查
 - 极端行情检测与放宽逻辑（波动率检测）
 """
 import asyncio
-import threading
 import time
 from datetime import datetime, timezone, date
 from decimal import Decimal
@@ -31,6 +30,7 @@ from src.domain.models import (
 from src.domain.exceptions import FatalStartupError
 from src.infrastructure.logger import logger
 from src.application.volatility_detector import VolatilityDetector
+from src.application.account_service import AccountService, BinanceAccountService
 
 # Avoid circular imports
 if TYPE_CHECKING:
@@ -47,12 +47,13 @@ class CapitalProtectionManager:
     2. 每日交易统计追踪
     3. 市价单价格预估（G-002 修复）
     4. 订单参数合理性检查（P0-004：最小名义价值、价格偏差）
+    5. 极端行情检测与放宽逻辑（波动率检测）
 
     检查项:
     | 检查项 | 公式 | 限制 |
     |--------|------|------|
     | 最小名义价值 | quantity * price | ≥ 5 USDT (Binance) |
-    | 价格偏差 | |price - ticker| / ticker | ≤ 10% |
+    | 价格偏差 | |price - ticker| / ticker | ≤ 10% (极端行情≤20%) |
     | 单笔最大损失 | amount * (price - stop_loss) | 2% of balance |
     | 单次最大仓位 | amount * price | 20% of balance |
     | 每日最大亏损 | daily_stats.realized_pnl | 5% of balance |
@@ -63,6 +64,7 @@ class CapitalProtectionManager:
     # P0-004: 订单参数合理性检查配置
     MIN_NOTIONAL = Decimal("5")  # 最小名义价值 5 USDT (Binance 标准)
     PRICE_DEVIATION_THRESHOLD = Decimal("0.10")  # 价格偏差阈值 10%
+    EXTREME_PRICE_DEVIATION_THRESHOLD = Decimal("0.20")  # 极端行情下 20%
 
     def __init__(
         self,
@@ -70,6 +72,7 @@ class CapitalProtectionManager:
         account_service: "AccountService",
         notifier: "Notifier",
         gateway: "ExchangeGateway",
+        volatility_detector: Optional[VolatilityDetector] = None,
     ):
         """
         初始化资金保护管理器
@@ -79,13 +82,15 @@ class CapitalProtectionManager:
             account_service: 账户服务（用于获取余额）
             notifier: 通知服务（用于告警）
             gateway: 交易所网关（G-002 修复：用于获取盘口价）
+            volatility_detector: 波动率检测器（可选，用于极端行情检测）
         """
         self._config = config
         self._account = account_service
         self._notifier = notifier
         self._gateway = gateway
+        self._volatility_detector = volatility_detector
         self._daily_stats = DailyTradeStats()
-        self._stats_lock = threading.Lock()  # 使用同步锁避免事件循环问题
+        self._stats_lock = asyncio.Lock()  # P0 修复：使用异步锁避免阻塞事件循环
 
     async def pre_order_check(
         self,
@@ -175,7 +180,24 @@ class CapitalProtectionManager:
                 min_notional=self.MIN_NOTIONAL,
             )
 
-        # ========== P0-004 新增检查 2: 价格合理性检查 ==========
+        # ========== P0-004 新增检查 2: 数量精度检查 ==========
+        qty_passed, qty_reason, qty_message = await self._check_quantity_precision(
+            symbol=symbol,
+            quantity=amount,
+        )
+        if not qty_passed:
+            logger.warning(
+                f"订单数量精度检查失败：{qty_message} (symbol={symbol}, quantity={amount})"
+            )
+            return OrderCheckResult(
+                allowed=False,
+                reason=qty_reason,
+                reason_message=qty_message,
+                notional_value=notional_value,
+                min_notional=self.MIN_NOTIONAL,
+            )
+
+        # ========== P0-004 新增检查 3: 价格合理性检查 ==========
         # 限价单需要检查价格偏差，市价单 already uses ticker price
         if order_type == OrderType.LIMIT and price is not None:
             price_check, ticker_price, deviation = await self._check_price_reasonability(
@@ -254,7 +276,7 @@ class CapitalProtectionManager:
             )
 
         # ========== 检查 4: 每日交易次数 ==========
-        daily_count_check, daily_trade_count = self._check_daily_trade_count()
+        daily_count_check, daily_trade_count = await self._check_daily_trade_count()
         if not daily_count_check:
             return OrderCheckResult(
                 allowed=False,
@@ -343,16 +365,100 @@ class CapitalProtectionManager:
         passed = notional_value >= self.MIN_NOTIONAL
         return passed, notional_value
 
+    async def _check_quantity_precision(
+        self,
+        symbol: str,
+        quantity: Decimal,
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """
+        检查数量精度（P0-004）
+
+        规则:
+        - 数量不能小于最小交易量
+        - 数量精度不能超过交易所允许的小数位数
+        - 数量必须是 step_size 的整数倍
+
+        Args:
+            symbol: 币种对
+            quantity: 订单数量
+
+        Returns:
+            (passed, reason_code, reason_message)
+            - passed: 是否通过检查
+            - reason_code: 拒绝原因代码（如果失败）
+            - reason_message: 拒绝原因描述（如果失败）
+        """
+        try:
+            # 获取交易对精度信息
+            market_info = await self._gateway.get_market_info(symbol)
+
+            min_quantity = market_info.get('min_quantity', Decimal("0"))
+            quantity_precision = market_info.get('quantity_precision', 6)
+            step_size = market_info.get('step_size', Decimal("0"))
+
+            # 检查 1: 最小交易量
+            if quantity < min_quantity:
+                logger.warning(
+                    f"订单数量过小：{quantity} < {min_quantity} (symbol={symbol})"
+                )
+                return (
+                    False,
+                    "BELOW_MIN_QUANTITY",
+                    f"订单数量 {quantity} 小于最小限制 {min_quantity}"
+                )
+
+            # 检查 2: 数量精度
+            quantity_str = str(quantity)
+            if '.' in quantity_str:
+                decimals = len(quantity_str.split('.')[1])
+                if decimals > quantity_precision:
+                    logger.warning(
+                        f"订单数量精度超限：{decimals} > {quantity_precision} (symbol={symbol}, quantity={quantity})"
+                    )
+                    return (
+                        False,
+                        "QUANTITY_PRECISION_EXCEEDED",
+                        f"订单数量精度 {decimals} 超过最大允许 {quantity_precision}"
+                    )
+
+            # 检查 3: step_size 整除性（如果 step_size > 0）
+            if step_size and step_size > Decimal("0"):
+                remainder = quantity % step_size
+                # 使用一个小的容差值来处理浮点数精度问题
+                if remainder != Decimal("0") and remainder > Decimal("1e-10"):
+                    # 调整为 step_size 的整数倍
+                    adjusted_qty = (quantity // step_size) * step_size
+                    logger.warning(
+                        f"订单数量不是 step_size 的整数倍：{quantity} % {step_size} = {remainder} "
+                        f"(symbol={symbol}, adjusted={adjusted_qty})"
+                    )
+                    return (
+                        False,
+                        "QUANTITY_NOT_MULTIPLE_OF_STEP",
+                        f"订单数量 {quantity} 不是步长 {step_size} 的整数倍，建议调整为 {adjusted_qty}"
+                    )
+
+            # 所有检查通过
+            return True, None, None
+
+        except Exception as e:
+            logger.error(f"数量精度检查失败：{e} (symbol={symbol}, quantity={quantity})")
+            # 异常情况下跳过检查（记录错误但不拒绝订单）
+            return True, None, None
+
     async def _check_price_reasonability(
         self,
         symbol: str,
         order_price: Decimal,
+        is_tp_sl: bool = False,
     ) -> tuple[bool, Optional[Decimal], Decimal]:
         """
         检查价格合理性（P0-004）
 
         公式：deviation = |order_price - ticker_price| / ticker_price
-        限制：deviation <= PRICE_DEVIATION_THRESHOLD (10%)
+        限制：
+        - 正常行情：deviation <= 10%
+        - 极端行情：deviation <= 20%（放宽）
 
         参考价格:
         - 最新 ticker 价格
@@ -361,6 +467,7 @@ class CapitalProtectionManager:
         Args:
             symbol: 币种对
             order_price: 订单价格
+            is_tp_sl: 是否为 TP/SL 订单（极端行情下可能允许）
 
         Returns:
             (passed, ticker_price, deviation)
@@ -376,8 +483,22 @@ class CapitalProtectionManager:
             # 计算偏差
             deviation = abs(order_price - ticker_price) / ticker_price
 
+            # 获取有效的偏差阈值（考虑极端行情）
+            if self._volatility_detector:
+                # 添加价格点到波动率检测器
+                await self._volatility_detector.add_price_point(symbol, ticker_price)
+                # 获取有效阈值（10% 或 20%）
+                effective_threshold = self._volatility_detector.get_effective_price_deviation(symbol) / Decimal("100")
+
+                # 检查是否允许下单（极端行情下可能暂停非 TP/SL 订单）
+                if not self._volatility_detector.should_allow_order(symbol, is_tp_sl):
+                    logger.warning(f"极端行情下暂停下单：{symbol}")
+                    return False, ticker_price, deviation
+            else:
+                effective_threshold = self.PRICE_DEVIATION_THRESHOLD
+
             # 检查是否超过阈值
-            passed = deviation <= self.PRICE_DEVIATION_THRESHOLD
+            passed = deviation <= effective_threshold
             return passed, ticker_price, deviation
 
         except Exception as e:
@@ -446,7 +567,7 @@ class CapitalProtectionManager:
         Returns:
             (passed, daily_pnl)
         """
-        with self._stats_lock:
+        async with self._stats_lock:
             daily_pnl = self._daily_stats.realized_pnl
 
         # 计算每日最大允许亏损
@@ -456,7 +577,7 @@ class CapitalProtectionManager:
         passed = daily_pnl >= -max_daily_loss
         return passed, daily_pnl
 
-    def _check_daily_trade_count(self) -> tuple[bool, int]:
+    async def _check_daily_trade_count(self) -> tuple[bool, int]:
         """
         检查每日交易次数
 
@@ -465,7 +586,7 @@ class CapitalProtectionManager:
         Returns:
             (passed, trade_count)
         """
-        with self._stats_lock:
+        async with self._stats_lock:
             trade_count = self._daily_stats.trade_count
 
         max_trade_count = self._config.daily["max_trade_count"]
@@ -508,19 +629,19 @@ class CapitalProtectionManager:
             logger.error(f"获取账户余额失败：{e}")
             return None
 
-    def record_trade(self, realized_pnl: Decimal) -> None:
+    async def record_trade(self, realized_pnl: Decimal) -> None:
         """
         记录交易，更新每日统计
 
         Args:
             realized_pnl: 已实现盈亏（正数为盈利，负数为亏损）
         """
-        with self._stats_lock:
+        async with self._stats_lock:
             self._daily_stats.trade_count += 1
             self._daily_stats.realized_pnl += realized_pnl
             logger.info(f"交易记录更新：次数={self._daily_stats.trade_count}, 盈亏={self._daily_stats.realized_pnl:.2f} USDT")
 
-    def reset_if_new_day(self) -> None:
+    async def reset_if_new_day(self) -> None:
         """
         如果是新的一天，重置统计
 
@@ -531,7 +652,7 @@ class CapitalProtectionManager:
         """
         today = datetime.now(timezone.utc).date().isoformat()
 
-        with self._stats_lock:
+        async with self._stats_lock:
             if today != self._daily_stats.last_reset_date:
                 old_date = self._daily_stats.last_reset_date
                 self._daily_stats.trade_count = 0
@@ -539,58 +660,12 @@ class CapitalProtectionManager:
                 self._daily_stats.last_reset_date = today
                 logger.info(f"每日统计已重置：{old_date} -> {today}")
 
-    def get_daily_stats(self) -> DailyTradeStats:
+    async def get_daily_stats(self) -> DailyTradeStats:
         """
         获取每日统计
 
         Returns:
             DailyTradeStats: 当前统计信息
         """
-        with self._stats_lock:
+        async with self._stats_lock:
             return self._daily_stats.model_copy()
-
-
-class AccountService:
-    """
-    账户服务接口（用于解耦）
-
-    实际使用时，应该注入真实的账户服务实现
-    """
-
-    async def get_balance(self) -> Decimal:
-        """
-        获取可用余额
-
-        Returns:
-            Decimal: 可用余额 (USDT)
-        """
-        raise NotImplementedError("Subclasses must implement get_balance")
-
-
-class BinanceAccountService(AccountService):
-    """
-    基于 ExchangeGateway 的真实账户服务实现
-
-    用于全链路集成测试和生产环境
-    """
-
-    def __init__(self, gateway: "ExchangeGateway"):
-        """
-        初始化账户服务
-
-        Args:
-            gateway: ExchangeGateway 实例
-        """
-        self._gateway = gateway
-
-    async def get_balance(self) -> Decimal:
-        """
-        获取 USDT 可用余额
-
-        Returns:
-            Decimal: USDT 可用余额
-        """
-        balance = await self._gateway.rest_exchange.fetch_balance()
-        usdt_balance = balance.get("USDT", {})
-        # 返回可用余额（free），而非总余额（total）
-        return Decimal(str(usdt_balance.get("free", 0)))
