@@ -925,12 +925,12 @@ class ExchangeGateway:
                 error_message=f"下单失败：{str(e)}",
             )
 
-    async def cancel_order(self, order_id: str, symbol: str) -> OrderCancelResult:
+    async def cancel_order(self, exchange_order_id: str, symbol: str) -> OrderCancelResult:
         """
         取消订单
 
         Args:
-            order_id: 交易所订单 ID
+            exchange_order_id: 交易所订单 ID（注意：不是系统内部的 order_id UUID）
             symbol: 币种对
 
         Returns:
@@ -945,16 +945,17 @@ class ExchangeGateway:
 
         try:
             # CCXT cancel_order 参数顺序：(id, symbol) - 注意 id 在前
-            order = await self.rest_exchange.cancel_order(order_id, symbol)
+            # 注意：这里的 id 必须是交易所返回的订单 ID（exchange_order_id），而非系统内部 UUID
+            order = await self.rest_exchange.cancel_order(exchange_order_id, symbol)
 
             # 解析订单状态
             order_status = self._parse_order_status(order.get('status', 'canceled'))
 
             if order_status == OrderStatus.FILLED:
-                raise OrderAlreadyFilledError(f"订单已成交，无法取消：{order_id}", "F-013")
+                raise OrderAlreadyFilledError(f"订单已成交，无法取消：{exchange_order_id}", "F-013")
 
             return OrderCancelResult(
-                order_id=order_id,
+                order_id=exchange_order_id,
                 exchange_order_id=order.get('id'),
                 symbol=symbol,
                 status=order_status,
@@ -963,11 +964,11 @@ class ExchangeGateway:
 
         except ccxt.OrderNotFound as e:
             logger.warning(f"订单不存在：{e}")
-            raise OrderNotFoundError(f"订单不存在：{order_id}", "F-012")
+            raise OrderNotFoundError(f"订单不存在：{exchange_order_id}", "F-012")
 
         except ccxt.OrderNotFillable as e:
             logger.warning(f"订单已成交：{e}")
-            raise OrderAlreadyFilledError(f"订单已成交，无法取消：{order_id}", "F-013")
+            raise OrderAlreadyFilledError(f"订单已成交，无法取消：{exchange_order_id}", "F-013")
 
         except ccxt.DDoSProtection as e:
             logger.warning(f"API 频率限制：{e}")
@@ -981,12 +982,12 @@ class ExchangeGateway:
             logger.error(f"取消订单失败：{e}")
             raise
 
-    async def fetch_order(self, order_id: str, symbol: str) -> OrderPlacementResult:
+    async def fetch_order(self, exchange_order_id: str, symbol: str) -> OrderPlacementResult:
         """
         查询订单状态
 
         Args:
-            order_id: 交易所订单 ID
+            exchange_order_id: 交易所订单 ID（注意：不是系统内部的 order_id UUID）
             symbol: 币种对
 
         Returns:
@@ -1000,7 +1001,8 @@ class ExchangeGateway:
 
         try:
             # CCXT fetch_order 参数顺序：(id, symbol) - 注意 id 在前
-            order = await self.rest_exchange.fetch_order(order_id, symbol)
+            # 注意：这里的 id 必须是交易所返回的订单 ID（exchange_order_id），而非系统内部 UUID
+            order = await self.rest_exchange.fetch_order(exchange_order_id, symbol)
 
             # 解析订单状态
             order_status = self._parse_order_status(order.get('status', 'open'))
@@ -1011,7 +1013,7 @@ class ExchangeGateway:
             average_exec_price = Decimal(str(order['average'])) if order.get('average') else None
 
             return OrderPlacementResult(
-                order_id=order_id,
+                order_id=exchange_order_id,
                 exchange_order_id=order.get('id'),
                 symbol=symbol,
                 order_type=self._parse_order_type(order.get('type', 'limit')),
@@ -1025,7 +1027,7 @@ class ExchangeGateway:
 
         except ccxt.OrderNotFound as e:
             logger.warning(f"订单不存在：{e}")
-            raise OrderNotFoundError(f"订单不存在：{order_id}", "F-012")
+            raise OrderNotFoundError(f"订单不存在：{exchange_order_id}", "F-012")
 
         except ccxt.DDoSProtection as e:
             logger.warning(f"API 频率限制：{e}")

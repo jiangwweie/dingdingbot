@@ -145,6 +145,8 @@ async def verify_binance_testnet():
     # ========== Step 5: 验证市价单下单 ==========
     print_header("Step 5: 验证市价单下单")
 
+    market_exchange_order_id = None
+
     try:
         symbol = "BTC/USDT:USDT"
         # Binance 最小名义价值 100 USDT，使用 0.002 BTC (≈140 USDT)
@@ -164,18 +166,17 @@ async def verify_binance_testnet():
 
         if result.is_success:
             print_success(f"市价单下单成功")
-            print(f"  - 订单 ID: {result.order_id}")
+            print(f"  - 订单 ID (系统): {result.order_id}")
+            print(f"  - 订单 ID (交易所): {result.exchange_order_id}")
             print(f"  - 状态：{result.status}")
-            print(f"  - 成交价：{result.price}")  # 使用 price 字段
+            print(f"  - 价格：{result.price}")
             results["market_order"] = True
 
-            # 保存订单 ID 用于后续查询测试
-            market_order_id = result.order_id
+            # 保存交易所订单 ID 用于后续查询测试
+            market_exchange_order_id = result.exchange_order_id
 
-            # 如果是市价单且已成交，不需要取消
-            if result.status.value != "closed":
-                await gateway.cancel_order(market_order_id, symbol)
-                print(f"  - 订单已取消")
+            # 市价单通常立即成交，不需要取消
+            print(f"  - 市价单已成交，无需取消")
         else:
             print_error(f"市价单下单失败：{result.error_message}")
             results["issues"].append(f"市价单下单失败：{result.error_message}")
@@ -184,8 +185,10 @@ async def verify_binance_testnet():
         print_error(f"市价单下单异常：{e}")
         results["issues"].append(f"市价单异常：{e}")
 
-    # ========== Step 6: 验证限价单下单 ==========
-    print_header("Step 6: 验证限价单下单")
+    # ========== Step 6: 验证限价单下单 + 取消 ==========
+    print_header("Step 6: 验证限价单下单 + 取消")
+
+    limit_exchange_order_id = None
 
     try:
         symbol = "BTC/USDT:USDT"
@@ -210,15 +213,18 @@ async def verify_binance_testnet():
 
         if result.is_success:
             print_success(f"限价单下单成功")
-            print(f"  - 订单 ID: {result.order_id}")
+            print(f"  - 订单 ID (系统): {result.order_id}")
+            print(f"  - 订单 ID (交易所): {result.exchange_order_id}")
             print(f"  - 状态：{result.status}")
             results["limit_order"] = True
 
-            # 保存订单 ID 用于后续测试
-            limit_order_id = result.order_id
+            # 保存交易所订单 ID 用于取消测试
+            limit_exchange_order_id = result.exchange_order_id
 
             # 取消限价单
-            cancel_result = await gateway.cancel_order(limit_order_id, symbol)
+            print("正在取消限价单...")
+            cancel_result = await gateway.cancel_order(limit_exchange_order_id, symbol)
+
             if cancel_result.is_success:
                 print_success(f"限价单已取消")
                 results["cancel_order"] = True
@@ -236,44 +242,33 @@ async def verify_binance_testnet():
     # ========== Step 7: 验证订单状态查询 ==========
     print_header("Step 7: 验证订单状态查询")
 
-    # 再下一个市价单用于测试订单状态查询
-    try:
-        symbol = "BTC/USDT:USDT"
-        amount = Decimal("0.002")  # 最小名义价值 100 USDT
+    # 使用市价单的交易所订单 ID 查询（如果存在）
+    if market_exchange_order_id:
+        try:
+            symbol = "BTC/USDT:USDT"
+            print(f"查询市价单状态：{market_exchange_order_id}")
 
-        print("下一个市价单用于测试订单状态查询...")
-
-        result = await gateway.place_order(
-            symbol=symbol,
-            order_type="market",
-            side="buy",
-            amount=amount,
-            reduce_only=False
-        )
-
-        if result.is_success:
-            order_id = result.order_id
-
-            # 查询订单状态
-            order = await gateway.fetch_order(order_id, symbol)
+            order = await gateway.fetch_order(market_exchange_order_id, symbol)
 
             if order:
                 print_success(f"订单状态查询成功")
-                print(f"  - 订单 ID: {order['id']}")
-                print(f"  - 状态：{order['status']}")
-                print(f"  - 类型：{order['type']}")
-                print(f"  - 数量：{order['amount']}")
+                print(f"  - 订单 ID: {order.order_id}")
+                print(f"  - 交易所订单 ID: {order.exchange_order_id}")
+                print(f"  - 状态：{order.status}")
+                print(f"  - 类型：{order.order_type}")
+                print(f"  - 数量：{order.amount}")
+                print(f"  - 价格：{order.price}")
                 results["order_status"] = True
             else:
                 print_error("订单状态查询返回空值")
                 results["issues"].append("订单状态查询返回空值")
-        else:
-            print_error(f"无法创建测试订单：{result.error_message}")
-            results["issues"].append(f"无法创建测试订单：{result.error_message}")
 
-    except Exception as e:
-        print_error(f"订单状态查询异常：{e}")
-        results["issues"].append(f"订单状态查询异常：{e}")
+        except Exception as e:
+            print_error(f"订单状态查询异常：{e}")
+            results["issues"].append(f"订单状态查询异常：{e}")
+    else:
+        print_warning("没有可用的订单 ID，跳过的订单状态查询测试")
+        results["issues"].append("没有可用的订单 ID 进行测试")
 
     # ========== 汇总报告 ==========
     print_header("验证报告汇总")
@@ -339,6 +334,13 @@ async def main():
     except Exception as e:
         print(f"\n{Colors.RED}执行异常：{e}{Colors.RESET}\n")
         sys.exit(1)
+    finally:
+        # 确保网关被关闭
+        if 'gateway' in locals():
+            try:
+                await gateway.close()
+            except:
+                pass
 
 
 if __name__ == "__main__":
