@@ -17,29 +17,34 @@
 |--------|------|------|
 | P0-005-1 | 测试网连接与基础接口验证 | ✅ 已完成 |
 | P0-005-2 | 完整交易流程验证 | ✅ 已完成 |
-| P0-005-3 | 对账服务验证 | ✅ 已完成 |
-| P0-005-4 | WebSocket 推送与告警验证 | ✅ 已完成 |
+| P0-005-3 | 对账服务验证 | ⚠️ 部分完成 |
+| P0-005-4 | WebSocket 推送与告警验证 | ⚠️ 部分完成 |
 
 **测试结果**:
 - **Window1** (订单执行): 7/7 通过
 - **Window2** (DCA + 持仓管理): 7/7 通过
-- **Window3** (对账 + WebSocket): 1/7 运行通过，6/7 跳过 (需环境配置)
+- **Window3** (对账 + WebSocket): 4/7 通过，1/7 部分通过，2/7 需修复
 - **Window4** (全链路): 9/9 通过
 
 **核心修改**:
-1. **`exchange_gateway.py`** - 修复订单 ID 混淆问题 (使用 `exchange_order_id`)
-2. **`exchange_gateway.py`** - 修复 `leverage` 字段 None 处理
-3. **`exchange_gateway.py`** - 修复 `cancel_order` 参数问题
+1. **`test_phase5_window3.py`** - 修复测试参数和方法名错误
+2. **`test_phase5_window3.py`** - 更新订单金额为 0.002 BTC（满足 100 USDT 最小要求）
+3. **`test_phase5_window3.py`** - 修复配置属性名错误（`notifications` → `notification`）
+4. **`test_phase5_window3.py`** - 修复 WebSocket 客户端属性名（`_ws_client` → `ws_exchange`）
 
-**对账服务验证发现**:
-- 发现 7 个孤儿订单 (交易所有 DB 无)
-- 对账服务正确处理：导入 orphan entry order，创建 missing signal
-- 发现 `order_repository.import_order()` 未实现 (REC-003 已修复)
+**对账服务验证发现 (P0-005-3)**:
+- ✅ Test-3.1: WebSocket 连接建立 - 通过
+- ⚠️ Test-3.2: 订单实时推送 - 阻塞（watch_orders 是阻塞调用）
+- ✅ Test-3.3: 启动对账服务 - 通过
+- ✅ Test-3.4: 持仓对账 - 通过
+- ✅ Test-3.5: 订单对账 - 通过
+- ⚠️ Test-3.6: Grace Period 处理 - 部分通过（取消订单参数问题）
+- ⚠️ Test-3.7: 飞书告警 - 待验证
 
-**WebSocket 验证发现**:
-- WebSocket 连接建立成功
-- 订单状态实时更新正常
-- WebSocket 重连机制工作正常 (指数退避)
+**发现的问题**:
+1. **watch_orders 阻塞问题** - 测试无法继续执行下单操作（需使用 asyncio.create_task）
+2. **持仓获取类型错误** - `int()` 参数为 None（`_get_exchange_positions` 方法）
+3. **孤儿订单取消失败** - `cancel_order` 参数类型问题（需转换为字符串）
 
 **Git 提交**:
 ```
