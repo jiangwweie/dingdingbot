@@ -712,7 +712,7 @@ class DynamicStrategyRunner:
                 import inspect
                 sig = inspect.signature(strat.strategy.detect)
                 if 'atr_value' in sig.parameters:
-                    pattern = strat.strategy.detect(kline, atr_value)
+                    pattern = strat.strategy.detect(kline, atr_value=atr_value)
                 else:
                     pattern = strat.strategy.detect(kline)
 

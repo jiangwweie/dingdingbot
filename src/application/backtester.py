@@ -374,6 +374,7 @@ class Backtester:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
         # Process each K-line
+        kline_history = []
         for kline in klines:
             # Update internal state (all stateful filters including ATR)
             runner.update_state(kline)
@@ -384,8 +385,16 @@ class Backtester:
             )
 
             # Run all strategies with their filter chains
-            strat_attempts = runner.run_all(kline, higher_tf_trends)
+            # Pass kline_history (excluding current kline) for strategies that need it
+            strat_attempts = runner.run_all(
+                kline,
+                higher_tf_trends,
+                kline_history=kline_history.copy()
+            )
             attempts.extend(strat_attempts)
+
+            # Update history after processing
+            kline_history.append(kline)
 
         return attempts, higher_tf_data
 
