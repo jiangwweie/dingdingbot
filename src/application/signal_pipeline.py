@@ -345,7 +345,9 @@ class SignalPipeline:
         # This ensures MTF filters have ready EMAs on first signal check
         # Note: key format is "symbol:timeframe" where symbol may contain ":" (e.g., "BTC/USDT:USDT:1h")
         mtf_warmup_count = 0
+        mtf_debug_keys = []
         for key, history in self._kline_history.items():
+            mtf_debug_keys.append(f"{key}:{len(history)}")
             # Timeframe is the last part after splitting by ":"
             parts = key.rsplit(":", 1)  # Split from right, max 1 split
             if len(parts) != 2:
@@ -365,6 +367,7 @@ class SignalPipeline:
                     mtf_warmup_count += 1
 
         # Log MTF EMA warmup completion
+        logger.debug(f"MTF EMA warmup: _kline_history keys = {', '.join(mtf_debug_keys)}")
         if mtf_warmup_count > 0:
             logger.info(f"MTF EMA warmup complete: {mtf_warmup_count} data points across {len(self._mtf_ema_indicators)} indicators ready")
         elif self._kline_history:
