@@ -26,6 +26,44 @@
 
 ---
 
+## 2026-04-02 - 前端部署修复：nginx 代理地址与健康检查 ✅
+
+**目标**: 修复前端容器 nginx 配置和健康检查，解决 502 错误和 unhealthy 状态
+
+**问题诊断**:
+1. **502 错误根因**: `web-front/nginx.conf` 使用 `proxy_pass http://localhost:8000`
+   - 在 Docker 容器内，`localhost` 指容器自己，不是后端容器
+   - 应该使用 Docker 服务名 `monitor-dog-backend:8000`
+
+2. **健康检查失败根因**: `Dockerfile.frontend` 使用 `wget http://localhost/`
+   - `localhost` 在容器内解析为 IPv6 `::1`
+   - nginx 只监听 IPv4 `0.0.0.0:80`
+   - 健康检查连接被拒绝
+
+**修复方案**（规范流程）:
+1. 本地修改 `web-front/nginx.conf`: `proxy_pass http://monitor-dog-backend:8000`
+2. 本地修改 `Dockerfile.frontend`: 健康检查使用 `http://127.0.0.1/`
+3. 提交代码并推送到 `v2` 分支
+4. 服务器上拉取最新代码
+5. 重新构建前端镜像
+6. 重启前端容器
+7. 验证服务健康
+
+**提交记录**:
+- `01c8b37` - fix: 修正 nginx 反向代理地址为 Docker 服务名 monitor-dog-backend
+- `3b62f9d` - fix: 修正健康检查使用 127.0.0.1 而非 localhost
+
+**验证结果**:
+```
+NAME                   STATUS
+monitor-dog-backend    Up (healthy)
+monitor-dog-frontend   Up (healthy)
+```
+
+**Git 提交**: 已推送到 `v2` 分支
+
+---
+
 ## 2026-04-01 - 吞没形态策略测试 + 回测修复 ✅
 
 **目标**: 创建吞没形态策略完整测试套件，修复回测沙箱 Decimal 错误
