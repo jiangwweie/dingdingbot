@@ -1,5 +1,31 @@
 # 进度日志
 
+## 2026-04-01 - MCP 工具集成配置 (已完成)
+
+**目标**: 为团队配置 MCP 工具，提升开发效率
+
+**已配置工具**:
+- ✅ `sqlite` - 数据库查询、信号分析
+- ✅ `filesystem` - 文件读写、目录浏览
+- ✅ `brave-search` - 外部信息检索
+- ✅ `sequential-thinking` - 复杂问题链式思考
+
+**创建文档**:
+- `docs/mcp-integration/量化开发 MCP 工具整合指南.md` - 完整使用指南
+- `.claude/team/MCP-INTEGRATION.md` - 角色调用规范
+- `.claude/commands/mcp.md` - 快速调用卡片 (`/mcp` 命令)
+- `docs/mcp-integration/CONFIG-SUMMARY.md` - 配置总结
+
+**Git 提交**:
+- `17c884f` - feat: 配置 MCP 工具集成
+- `1a92777` - docs: 更新进度日志
+- `291fa27` - feat: 添加工/收工技能配置
+
+**测试结果**: 469/471 通过 (99.6%)
+- 2 个失败测试为已有问题（非本次引入）
+
+---
+
 ## 2026-03-31 - 会话：K 线图时区显示修复 (待验证)
 
 **目标**: 修复信号详情页 K 线图时间轴显示 UTC 时间而非东京时间的问题
