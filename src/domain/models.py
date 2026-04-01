@@ -34,6 +34,33 @@ class TrendDirection(str, Enum):
 
 
 # ============================================================
+# P0-003: Reconciliation Enum Types
+# ============================================================
+class ReconciliationType(str, Enum):
+    """对账类型"""
+    STARTUP = "startup"     # 系统启动时对账
+    DAILY = "daily"         # 定期对账
+    MANUAL = "manual"       # 手动对账
+
+
+class DiscrepancyType(str, Enum):
+    """差异类型"""
+    GHOST_ORDER = "ghost_order"           # 幽灵订单（DB 有但交易所无）
+    ORPHAN_ORDER = "orphan_order"         # 孤儿订单（交易所有但 DB 无）
+    POSITION_MISMATCH = "position_mismatch"  # 仓位不匹配
+
+
+class ReconciliationAction(str, Enum):
+    """对账处理动作"""
+    CANCEL_ORDER = "cancel_order"         # 取消订单
+    CREATE_SIGNAL = "create_signal"       # 创建信号
+    SYNC_POSITION = "sync_position"       # 同步仓位
+    IGNORE = "ignore"                     # 忽略
+    MARK_CANCELLED = "mark_cancelled"     # 标记为已取消（幽灵订单）
+    IMPORTED_TO_DB = "imported_to_db"     # 导入到数据库（孤儿订单）
+
+
+# ============================================================
 # Signal Status Tracking Models (S5-2)
 # ============================================================
 class SignalStatus(str, Enum):
@@ -1502,6 +1529,12 @@ class OrderCheckResult(BaseModel):
     order_price: Optional[Decimal] = Field(None, description="订单价格")
     ticker_price: Optional[Decimal] = Field(None, description="参考价格")
     price_deviation: Optional[Decimal] = Field(None, description="价格偏差")
+
+    # P0-004: 数量精度检查
+    quantity_precision_check: Optional[bool] = Field(None, description="数量精度检查是否通过")
+    min_quantity: Optional[Decimal] = Field(None, description="最小交易量要求")
+    required_precision: Optional[int] = Field(None, description="要求的数量精度")
+    step_size: Optional[Decimal] = Field(None, description="数量步长")
 
 
 # ============================================================

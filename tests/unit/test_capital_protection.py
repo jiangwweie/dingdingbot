@@ -62,6 +62,13 @@ def mock_gateway():
     """创建模拟交易所网关"""
     gateway = AsyncMock()
     gateway.fetch_ticker_price = AsyncMock(return_value=Decimal("50000"))  # 默认 BTC 价格
+    gateway.get_market_info = AsyncMock(return_value={
+        'min_quantity': Decimal("0.00001"),
+        'quantity_precision': 5,
+        'price_precision': 2,
+        'min_notional': Decimal("5"),
+        'step_size': Decimal("0.00001"),
+    })
     return gateway
 
 
@@ -182,7 +189,7 @@ async def test_daily_loss_limit_check_pass(capital_protection, mock_gateway):
 
     # 先记录一些亏损（但未超限）
     # 限制：10000 * 5% = 500 USDT
-    capital_protection.record_trade(Decimal("-300"))  # 亏损 300 USDT
+    await capital_protection.record_trade(Decimal("-300"))  # 亏损 300 USDT
 
     result = await capital_protection.pre_order_check(
         symbol="BTC/USDT:USDT",
@@ -205,7 +212,7 @@ async def test_daily_loss_limit_check_fail(capital_protection, mock_gateway):
 
     # 记录亏损超限
     # 限制：10000 * 5% = 500 USDT
-    capital_protection.record_trade(Decimal("-600"))  # 亏损 600 USDT > 500 USDT
+    await capital_protection.record_trade(Decimal("-600"))  # 亏损 600 USDT > 500 USDT
 
     result = await capital_protection.pre_order_check(
         symbol="BTC/USDT:USDT",
@@ -229,7 +236,7 @@ async def test_daily_trade_count_limit_check_pass(capital_protection, mock_gatew
 
     # 记录 49 次交易（未超限）
     for _ in range(49):
-        capital_protection.record_trade(Decimal("10"))
+        await capital_protection.record_trade(Decimal("10"))
 
     result = await capital_protection.pre_order_check(
         symbol="BTC/USDT:USDT",
@@ -252,7 +259,7 @@ async def test_daily_trade_count_limit_check_fail(capital_protection, mock_gatew
 
     # 记录 50 次交易（超限）
     for _ in range(50):
-        capital_protection.record_trade(Decimal("10"))
+        await capital_protection.record_trade(Decimal("10"))
 
     result = await capital_protection.pre_order_check(
         symbol="BTC/USDT:USDT",
@@ -438,8 +445,8 @@ async def test_g002_limit_order_with_price(capital_protection, mock_gateway):
 async def test_reset_if_new_day(capital_protection):
     """测试每日统计重置"""
     # 先记录一些交易
-    capital_protection.record_trade(Decimal("100"))
-    stats_before = capital_protection.get_daily_stats()
+    await capital_protection.record_trade(Decimal("100"))
+    stats_before = await capital_protection.get_daily_stats()
     assert stats_before.trade_count == 1
     assert stats_before.realized_pnl == Decimal("100")
 
@@ -449,10 +456,10 @@ async def test_reset_if_new_day(capital_protection):
     capital_protection._daily_stats.last_reset_date = yesterday
 
     # 触发重置
-    capital_protection.reset_if_new_day()
+    await capital_protection.reset_if_new_day()
 
     # 验证已重置
-    stats_after = capital_protection.get_daily_stats()
+    stats_after = await capital_protection.get_daily_stats()
     assert stats_after.trade_count == 0
     assert stats_after.realized_pnl == Decimal("0")
     assert stats_after.last_reset_date == datetime.now(timezone.utc).date().isoformat()
@@ -462,14 +469,14 @@ async def test_reset_if_new_day(capital_protection):
 async def test_no_reset_if_same_day(capital_protection):
     """测试同一天内不重置"""
     # 先记录一些交易
-    capital_protection.record_trade(Decimal("100"))
-    stats_before = capital_protection.get_daily_stats()
+    await capital_protection.record_trade(Decimal("100"))
+    stats_before = await capital_protection.get_daily_stats()
 
     # 触发重置（但还在同一天）
-    capital_protection.reset_if_new_day()
+    await capital_protection.reset_if_new_day()
 
     # 验证没有变化
-    stats_after = capital_protection.get_daily_stats()
+    stats_after = await capital_protection.get_daily_stats()
     assert stats_after.trade_count == stats_before.trade_count
     assert stats_after.realized_pnl == stats_before.realized_pnl
 

@@ -21,6 +21,7 @@ P0-003: 完善重启对账流程
 - 幽灵订单处理：DB 有但交易所无 → 标记为 CANCELLED
 - 孤儿订单处理：交易所有但 DB 无 → 导入 DB 或撤销
 - 对账报告生成：记录差异订单和处理动作
+- 并发锁机制：防止多个对账任务同时运行
 """
 import asyncio
 import time
@@ -29,6 +30,7 @@ from decimal import Decimal
 
 from src.domain.models import (
     ReconciliationReport,
+    ReconciliationType,
     PositionMismatch,
     OrderMismatch,
     OrderResponse,
@@ -42,6 +44,8 @@ from src.domain.models import (
 )
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
+from src.infrastructure.reconciliation_repository import ReconciliationRepository
+from src.application.reconciliation_lock import ReconciliationLock, ReconciliationLockError
 
 
 class PendingPositionItem(Dict[str, Any]):
@@ -62,7 +66,7 @@ class ReconciliationService:
     1. 启动时比对本地数据库与交易所状态
     2. 使用 Grace Period 宽限期避免"幽灵偏差"
     3. 处理孤儿订单（无主 TP/SL 订单）
-    4. 生成对账报告
+    4. 生成对账报告并持久化
 
     G-004 修复:
     - REST API 和 WebSocket 之间存在时差
@@ -73,6 +77,10 @@ class ReconciliationService:
     - 孤儿订单立即撤销可能误删刚建好仓位的保护伞
     - TP/SL 孤儿单先放入 pending_orphan_orders 列表等待 10 秒
     - 10 秒后二次校验，确认仓位仍不存在再撤销
+
+    P0-003 增强:
+    - 并发锁机制防止多个对账任务同时运行
+    - 对账报告持久化到数据库
     """
 
     def __init__(
@@ -81,6 +89,8 @@ class ReconciliationService:
         position_mgr: Optional[Any] = None,  # PositionManager（可选）
         order_mgr: Optional[Any] = None,    # OrderManager（可选）
         order_repository: Optional[Any] = None,  # OrderRepository（可选，用于 P0-003）
+        reconciliation_repository: Optional[ReconciliationRepository] = None,  # ReconciliationRepository（可选）
+        lock: Optional[ReconciliationLock] = None,  # ReconciliationLock（可选）
         grace_period_seconds: int = 10,
     ):
         """
@@ -91,16 +101,25 @@ class ReconciliationService:
             position_mgr: PositionManager 实例（可选）
             order_mgr: OrderManager 实例（可选）
             order_repository: OrderRepository 实例（可选，用于 P0-003 订单持久化）
+            reconciliation_repository: ReconciliationRepository 实例（可选，用于对账报告持久化）
+            lock: ReconciliationLock 实例（可选，用于并发控制）
             grace_period_seconds: 宽限期秒数（默认 10 秒）
         """
         self._gateway = gateway
         self._position_mgr = position_mgr
         self._order_mgr = order_mgr
         self._order_repository = order_repository
+        self._reconciliation_repository = reconciliation_repository
+        self._lock = lock
         self._grace_period_seconds = grace_period_seconds
         self._pending_orphan_orders: Dict[str, Dict[str, Any]] = {}  # order_id -> {order, found_at, confirmed}
 
-    async def run_reconciliation(self, symbol: str) -> ReconciliationReport:
+    async def run_reconciliation(
+        self,
+        symbol: str,
+        reconciliation_type: ReconciliationType = ReconciliationType.STARTUP,
+        use_lock: bool = True,
+    ) -> ReconciliationReport:
         """
         启动对账服务
 
@@ -118,8 +137,50 @@ class ReconciliationService:
         6. 确认的差异 → 移动到正式列表
         7. 消失的差异 → 记录日志（WebSocket 延迟）
 
+        P0-003 增强:
+        - 使用并发锁防止多个对账任务同时运行
+        - 对账报告持久化到数据库
+
         Args:
             symbol: 币种对，如 "BTC/USDT:USDT"
+            reconciliation_type: 对账类型（startup/daily/manual）
+            use_lock: 是否使用锁机制（默认 True）
+
+        Returns:
+            ReconciliationReport: 对账报告
+
+        Raises:
+            ReconciliationLockError: 获取锁失败
+        """
+        logger.info(f"Starting reconciliation for {symbol} (type={reconciliation_type.value})")
+        start_time = int(time.time() * 1000)
+
+        # ===== 阶段 0: 获取锁（如果需要） =====
+        if use_lock and self._lock:
+            lock_name = f"reconciliation_{symbol.replace('/', '_').replace(':', '_')}"
+            async with self._lock.acquire(lock_name, f"reconciliation_{symbol}"):
+                logger.info(f"已获取对账锁 {lock_name}，开始执行对账...")
+                return await self._execute_reconciliation(
+                    symbol, reconciliation_type, start_time
+                )
+        else:
+            return await self._execute_reconciliation(
+                symbol, reconciliation_type, start_time
+            )
+
+    async def _execute_reconciliation(
+        self,
+        symbol: str,
+        reconciliation_type: ReconciliationType,
+        start_time: int,
+    ) -> ReconciliationReport:
+        """
+        执行对账逻辑（内部方法）
+
+        Args:
+            symbol: 币种对
+            reconciliation_type: 对账类型
+            start_time: 开始时间戳
 
         Returns:
             ReconciliationReport: 对账报告
@@ -315,7 +376,7 @@ class ReconciliationService:
                 f"{len(canceled_orphan_orders)} canceled orphan orders)"
             )
 
-        return ReconciliationReport(
+        report = ReconciliationReport(
             symbol=symbol,
             reconciliation_time=int(time.time() * 1000),
             grace_period_seconds=self._grace_period_seconds,
@@ -339,6 +400,16 @@ class ReconciliationService:
                 canceled_orphan_orders,
             ),
         )
+
+        # ===== 阶段 6: P0-003 对账报告持久化 =====
+        if self._reconciliation_repository:
+            try:
+                await self._reconciliation_repository.save_report(report, reconciliation_type)
+                logger.info(f"对账报告已持久化：report_id={report.reconciliation_time}")
+            except Exception as e:
+                logger.error(f"对账报告持久化失败：{e}")
+
+        return report
 
     async def _verify_pending_items(
         self,
