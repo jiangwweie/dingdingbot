@@ -10,7 +10,7 @@
 
 **执行日期**: 2026-04-01  
 **执行人**: AI Builder  
-**状态**: ✅ 已完成
+**状态**: ✅ 已完成 (git commit: d7dfbc8)
 
 **任务概述**:
 完成 PMS 回测修复阶段 C（前端展示）- T8 订单详情与 K 线图渲染。
@@ -20,8 +20,8 @@
 | 任务 | 状态 | 交付物 | 测试 |
 |------|------|--------|------|
 | T8-1: 后端 API 确认 | ✅ 已完成 | `/api/v3/orders/{order_id}/klines` 已存在 | - |
-| T8-2: 前端组件实现 | ✅ 已完成 | OrderDetailsDrawer.tsx 扩展 | 构建通过 |
-| T8-3: SST 测试 | ✅ 已完成 | OrderDetailsDrawer.test.tsx | 25+ 测试用例 |
+| T8-2: 前端组件实现 | ✅ 已完成 | OrderDetailsDrawer.tsx 扩展 (488 行) | 构建通过 |
+| T8-3: SST 测试 | ✅ 已完成 | OrderDetailsDrawer.test.tsx (25+ 用例) | - |
 
 **详细实现**:
 
@@ -50,6 +50,7 @@
 | `web-front/src/components/v3/OrderDetailsDrawer.tsx` | 扩展 K 线图展示功能（488 行） |
 | `web-front/src/components/v3/__tests__/OrderDetailsDrawer.test.tsx` | SST 测试（25+ 用例） |
 | `docs/planning/t8-order-details-task.md` | 任务计划文档 |
+| `docs/planning/progress.md` | 进度日志更新 |
 
 **设计亮点**:
 1. **订单标记可视化** - 使用不同颜色区分入场/止盈/止损点
@@ -65,6 +66,10 @@ dist/assets/index-DUPBd2Tf.css     55.80 kB
 dist/assets/index-Bm6lhK34.js   1,249.68 kB
 ✓ built in 2.34s
 ```
+
+**下一步计划**:
+- 继续完成 PMS 回测修复阶段 C 的其他任务
+- 集成订单详情组件到 PMSBacktest 页面
 
 ---
 
