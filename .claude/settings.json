@@ -25,6 +25,16 @@
         "name": "code-reviewer",
         "description": "代码审查员 - 负责独立代码审查、架构一致性检查、安全隐患识别。",
         "path": "./.claude/team/code-reviewer/SKILL.md"
+      },
+      {
+        "name": "tdd-self-heal",
+        "description": "TDD 闭环自愈 - 生成测试→运行 pytest→分析失败→自我修复，直到绿灯才提交。",
+        "path": "./.claude/skills/agentic-workflow/tdd-self-heal/SKILL.md"
+      },
+      {
+        "name": "type-precision-enforcer",
+        "description": "类型与精度宪兵 - 审查 float 污染、Decimal quantize、Pydantic 判别器。",
+        "path": "./.claude/skills/agentic-workflow/type-precision-enforcer/SKILL.md"
       }
     ]
   }
