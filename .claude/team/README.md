@@ -1,6 +1,17 @@
 # 盯盘狗 🐶 Agent Team 配置
 
-> **最后更新**: 2026-03-31
+> **最后更新**: 2026-04-01
+> **MCP 工具集成**: ✅ 已配置 (SQLite, Filesystem, Brave-Search, Sequential-Thinking)
+
+---
+
+## 📚 重要文档
+
+| 文档 | 路径 | 用途 |
+|------|------|------|
+| **MCP 工具调用指南** | `.claude/team/MCP-INTEGRATION.md` | 各角色如何调用 MCP 工具 |
+| **WORKFLOW.md** | `.claude/team/WORKFLOW.md` | 开工/收工规范 |
+| **QUICKSTART.md** | `.claude/team/QUICKSTART.md` | 快速入门 |
 
 ---
 

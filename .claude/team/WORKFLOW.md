@@ -1,7 +1,23 @@
 # 盯盘狗 🐶 Agent Team 开工/收工规范
 
-**版本**: v1.0
-**最后更新**: 2026-03-31
+**版本**: v1.1
+**最后更新**: 2026-04-01
+**MCP 工具集成**: ✅ 已配置
+
+---
+
+## 📚 MCP 工具调用指南
+
+**所有角色在开发过程中应主动调用 MCP 工具提升效率**:
+
+| 工具 | 用途 | 调用示例 |
+|------|------|----------|
+| `sqlite` | 数据库查询、信号分析 | `mcp__sqlite__read_query(query="SELECT ...")` |
+| `filesystem` | 文件读写、目录浏览 | `mcp__filesystem__read_text_file(path="...")` |
+| `sequential-thinking` | 复杂问题链式思考 | `Agent(subagent_type="sequential-thinking", prompt="...")` |
+| `brave-search` | 外部信息检索 | `WebSearch(query="...")` |
+
+**详细说明**: `.claude/team/MCP-INTEGRATION.md`
 
 ---
 
