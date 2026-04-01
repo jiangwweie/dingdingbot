@@ -778,7 +778,7 @@ class ExchangeGateway:
                     size=Decimal(str(pos['contracts'])),
                     entry_price=Decimal(str(pos['entryPrice'])) if pos.get('entryPrice') else Decimal('0'),
                     unrealized_pnl=Decimal(str(pos['unrealizedPnl'])) if pos.get('unrealizedPnl') else Decimal('0'),
-                    leverage=int(leverage_val),
+                    leverage=int(leverage_val) if leverage_val is not None else 1,
                 )
                 position_list.append(position)
 
