@@ -1034,7 +1034,7 @@ class Backtester:
             for order in list(active_orders):  # Use list() to avoid modification during iteration
                 if order.status == OrderStatus.FILLED and order.order_role == OrderRole.ENTRY:
                     # ENTRY filled: dynamically generate TP and SL orders based on actual_exec_price
-                    new_orders = order_manager.handle_order_filled(
+                    new_orders = await order_manager.handle_order_filled(
                         filled_order=order,
                         active_orders=active_orders,
                         positions_map=positions_map,
