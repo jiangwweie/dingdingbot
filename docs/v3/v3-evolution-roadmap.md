@@ -1,9 +1,9 @@
 # 盯盘狗系统 v3.0 演进路线图
 
-**文档版本**: 1.1
+**文档版本**: 1.2
 **创建日期**: 2026-03-30
-**更新日期**: 2026-03-31
-**状态**: Phase 1-5 已完成，系统性审查 100% 通过
+**更新日期**: 2026-04-01
+**状态**: Phase 1-6 已完成，系统性审查 100% 通过
 **最终目标**: 实盘自动化执行能力
 
 ---
@@ -658,5 +658,244 @@ Week 2:
 
 ---
 
+## 十一、远景规划：回测框架与数据策略 (2026 Q3-Q4)
+
+### 11.1 核心架构定调
+
+**技术定调**: 自研引擎 + 插件化调参 + 本地化数据
+
+| 层次 | 选型 | 理由 |
+|------|------|------|
+| **回测引擎** | 自研 MockMatchingEngine | 与 v3.0 实盘逻辑 100% 一致性，已包含止损优先和滑点模拟 |
+| **自动化调参** | Optuna | 贝叶斯搜索比网格搜索快 10-100 倍，支持参数依赖关系 |
+| **因子初筛** | Vectorbt (可选) | 海量数据快速预筛选，最终验证回到自研引擎 |
+| **K 线存储** | Parquet 文件 | 读取速度比 SQLite 快 10-50 倍，列式存储，Decimal 精度 |
+| **状态存储** | SQLite | 订单/仓位/账户频繁增删改查，事务支持 |
+
+---
+
+### 11.2 数据架构：一次抓取，永久本地化
+
+针对 1h/4h/1d 中长线交易场景，数据量极小（5 年 10 币种约 150MB），采用**本地持久化**策略。
+
+#### 11.2.1 存储结构
+
+```
+data/
+├── klines/                     # K 线数据 (Parquet)
+│   ├── BTC_USDT-USDT/
+│   │   ├── 15m.parquet
+│   │   ├── 1h.parquet
+│   │   ├── 4h.parquet
+│   │   └── 1d.parquet
+│   ├── ETH_USDT-USDT/
+│   │   └── ...
+│   └── ...
+│
+└── backtests/                  # 回测结果 (SQLite)
+    ├── orders.db               # 订单流水
+    ├── positions.db            # 仓位快照
+    └── reports.db              # 回测报告
+```
+
+#### 11.2.2 Parquet 优势
+
+| 特性 | 对比 CSV | 对比 SQLite |
+|------|---------|-------------|
+| 读取速度 | 快 5-10 倍 | 快 10-50 倍 |
+| 精度保持 | ✅ Decimal 无损 | ✅ Decimal 无损 | ❌ float 精度丢失 |
+| 列式查询 | ✅ 支持 | ⚠️ 需要索引 |
+| 压缩率 | ~80% | ~50% |
+| 生态兼容 | Pandas/Polars/VBt | 通用 SQL |
+
+#### 11.2.3 数据获取接口
+
+```python
+# src/infrastructure/data_repository.py
+
+class HistoricalDataRepository:
+    """历史数据仓库 - 本地 Parquet 文件管理"""
+    
+    async def fetch_and_store_klines(
+        self,
+        symbol: str,
+        timeframe: str,
+        start_time: int,
+        end_time: int,
+    ) -> int:
+        """
+        分页抓取历史 K 线并持久化到 Parquet
+        
+        避坑指南:
+        1. CCXT 开启 enableRateLimit: True
+        2. 时间戳严格对齐（防止回测未来函数）
+        3. 幂等性：已存在的数据段跳过
+        """
+        pass
+    
+    def load_klines(
+        self,
+        symbol: str,
+        timeframe: str,
+        start_time: int,
+        end_time: int,
+    ) -> List[KlineData]:
+        """从 Parquet 快速加载 K 线"""
+        pass
+```
+
+---
+
+### 11.3 自动化调参工作流 (Optuna)
+
+#### 11.3.1 目标函数设计
+
+```python
+# src/application/strategy_optimizer.py
+
+import optuna
+from optuna.trial import Trial
+
+class StrategyOptimizer:
+    """策略参数优化器 - Optuna 集成"""
+    
+    def __init__(self, backtester: Backtester):
+        self._backtester = backtester
+    
+    def create_objective(self, symbol: str, timeframe: str):
+        """创建 Optuna 目标函数"""
+        
+        def objective(trial: Trial) -> float:
+            # 1. 采样策略参数
+            params = {
+                "ema_period": trial.suggest_int("ema_period", 10, 200),
+                "min_wick_ratio": trial.suggest_float("min_wick_ratio", 0.4, 0.8),
+                "max_body_ratio": trial.suggest_float("max_body_ratio", 0.1, 0.4),
+                "trailing_stop_pct": trial.suggest_float("trailing_stop_pct", 0.5, 5.0),
+                "max_loss_percent": trial.suggest_float("max_loss_percent", 0.5, 3.0),
+            }
+            
+            # 2. 运行回测
+            report = await self._backtester.run(
+                symbol=symbol,
+                timeframe=timeframe,
+                strategy_params=params,
+                start_time=START_TIME,
+                end_time=END_TIME,
+            )
+            
+            # 3. 返回优化目标（夏普比率或 PnL/MaxDD）
+            if report.total_trades < 10:  # 惩罚交易过少
+                return -999.0
+            
+            sharpe = self._calculate_sharpe(report)
+            return float(sharpe)
+        
+        return objective
+    
+    async def optimize(
+        self,
+        symbol: str,
+        timeframe: str,
+        n_trials: int = 100,
+        timeout_seconds: int = 3600,
+    ) -> optuna.Trial:
+        """执行优化"""
+        study = optuna.create_study(
+            direction="maximize",
+            study_name=f"{symbol}_{timeframe}_optimization",
+            storage="sqlite:///data/backtests/optuna.db",  # 持久化研究历史
+            load_if_exists=True,
+        )
+        
+        await study.optimize(
+            self.create_objective(symbol, timeframe),
+            n_trials=n_trials,
+            timeout=timeout_seconds,
+        )
+        
+        return study.best_trial
+```
+
+#### 11.3.2 Optuna 优势
+
+| 特性 | Optuna | 网格搜索 | 随机搜索 |
+|------|--------|---------|---------|
+| 搜索效率 | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ |
+| 参数依赖 | ✅ 支持 | ❌ | ❌ |
+| 早剪枝 | ✅ 支持 | ❌ | ❌ |
+| 可视化 | ✅ 丰富 | ⚠️ 基础 | ⚠️ 基础 |
+| 分布式 | ✅ 支持 | ⚠️ 手动 | ⚠️ 手动 |
+
+---
+
+### 11.4 因子初筛流程 (Vectorbt)
+
+**使用场景**: 对海量历史数据进行初步因子挖掘
+
+```python
+# scripts/factor_screening.py
+
+import vectorbt as vbt
+
+def screen_pinbar_factors(
+    symbols: List[str],
+    years: int = 5,
+) -> pd.DataFrame:
+    """
+    使用 Vectorbt 快速筛选 Pinbar 形态参数
+    
+    注意：仅用于早期因子发现，最终验证必须回到自研引擎
+    """
+    results = []
+    
+    for symbol in symbols:
+        # 加载 Parquet 数据
+        klines = load_klines(symbol, "1d", years_ago(years), now())
+        
+        # 向量化计算 (VBt 优势)
+        close = vbt.GenericFactory(klines.close).wrapper()
+        
+        # 测试不同 wick_ratio 参数组合
+        for wick_ratio in [0.5, 0.6, 0.7, 0.8]:
+            signals = detect_pinbar_vectorized(klines, wick_ratio)
+            returns = vbt.Portfolio.from_signals(signals).returns()
+            
+            results.append({
+                "symbol": symbol,
+                "wick_ratio": wick_ratio,
+                "total_return": returns.total_return(),
+                "sharpe": returns.sharpe_ratio(),
+                "max_dd": returns.max_drawdown(),
+            })
+    
+    return pd.DataFrame(results).sort_values("sharpe", ascending=False)
+```
+
+---
+
+### 11.5 回测引擎完善计划
+
+| 阶段 | 任务 | 工期 | 依赖 | 交付物 |
+|------|------|------|------|--------|
+| **Phase 7-1** | 数据持久化层 | 1 周 | 无 | HistoricalDataRepository + Parquet 读写 |
+| **Phase 7-2** | Optuna 集成 | 2 周 | Phase 7-1 | StrategyOptimizer + 参数推荐 API |
+| **Phase 7-3** | 回测对比工具 | 1 周 | Phase 7-2 | v2 vs v3 回测差异分析报告 |
+| **Phase 7-4** | 前端回测管理 UI | 2 周 | Phase 7-3 | 回测列表/详情/参数调优页面 |
+
+**预计开始时间**: 2026-08-24 (Phase 6 完成后)
+
+---
+
+### 11.6 技术债务与避坑指南
+
+| 风险 | 缓解措施 | 负责人 |
+|------|----------|--------|
+| CCXT 频率限制 | 开启 enableRateLimit + 指数退避 | 后端 |
+| 时间戳对齐问题 | 严格 MTF 往前偏移 1 根 K 线 | 后端 |
+| Parquet 并发写入 | 单进程写入 + 文件锁 | 后端 |
+| Optuna 过拟合 |  Walk-Forward 验证 + 样本外测试 | QA |
+| 数据漂移检测 | 定期重新抓取最新数据验证 | QA |
+
 *盯盘狗 🐶 项目组*
-*2026-03-30*
+*2026-04-01 更新*
