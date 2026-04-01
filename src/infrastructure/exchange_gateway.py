@@ -118,12 +118,14 @@ class ExchangeGateway:
         # P5-011: Global order update callback (for order persistence)
         self._global_order_callback: Optional[Callable[[Order], Awaitable[None]]] = None
 
-    def _create_rest_exchange(self, options: Dict[str, Any]):
-        """Create REST exchange instance
+    def _build_exchange_config(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        构建通用交易所配置
 
-        CCXT 币安合约测试网连接指南:
-        - 旧方法 (已废弃): set_sandbox_mode(True) - 可能导致 Endpoint 路由错误
-        - 新方法 (CCXT v4.5.6+): enable_demo_trading(True) - 自动切换到 demo-fapi.binance.com
+        P2-3: 重复代码重构 - 提取 _create_rest_exchange 和 _create_ws_exchange 的公共配置逻辑
+
+        Returns:
+            Dict[str, Any]: CCXT 交易所配置字典
         """
         config = {
             'apiKey': self.api_key,
@@ -134,10 +136,19 @@ class ExchangeGateway:
                 'warnOnFetchOpenOrdersWithoutSymbol': False,
             }
         }
-
         # Merge user-provided options
         if options:
             config['options'].update(options)
+        return config
+
+    def _create_rest_exchange(self, options: Dict[str, Any]):
+        """Create REST exchange instance
+
+        CCXT 币安合约测试网连接指南:
+        - 旧方法 (已废弃): set_sandbox_mode(True) - 可能导致 Endpoint 路由错误
+        - 新方法 (CCXT v4.5.6+): enable_demo_trading(True) - 自动切换到 demo-fapi.binance.com
+        """
+        config = self._build_exchange_config(options)
 
         # Create exchange by name
         exchange_class = getattr(ccxt_async, self.exchange_name)
@@ -155,19 +166,7 @@ class ExchangeGateway:
         CCXT Pro 币安合约测试网 WebSocket:
         - 自动路由到 wss://demo-stream.binancefuture.com
         """
-        config = {
-            'apiKey': self.api_key,
-            'secret': self.api_secret,
-            'enableRateLimit': True,
-            'options': {
-                'defaultType': 'future',  # USDT-M Futures
-                'warnOnFetchOpenOrdersWithoutSymbol': False,
-            }
-        }
-
-        # Merge user-provided options
-        if options:
-            config['options'].update(options)
+        config = self._build_exchange_config(options)
 
         # Create exchange by name
         exchange_class = getattr(ccxtpro, self.exchange_name)
