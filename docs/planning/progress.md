@@ -17,14 +17,20 @@
 |--------|------|------|
 | P0-005-1 | 测试网连接与基础接口验证 | ✅ 已完成 |
 | P0-005-2 | 完整交易流程验证 | ✅ 已完成 |
-| P0-005-3 | 对账服务验证 | ⚠️ 部分完成 |
-| P0-005-4 | WebSocket 推送与告警验证 | ⚠️ 部分完成 |
+| P0-005-3 | 对账服务验证 | ✅ 已完成 |
+| P0-005-4 | WebSocket 推送与告警验证 | ✅ 已完成 |
 
 **测试结果**:
 - **Window1** (订单执行): 7/7 通过
 - **Window2** (DCA + 持仓管理): 7/7 通过
-- **Window3** (对账 + WebSocket): 4/7 通过，1/7 部分通过，2/7 需修复
+- **Window3** (对账 + WebSocket): 7/7 通过 ✅
 - **Window4** (全链路): 9/9 通过
+
+**Window3 测试修复**:
+1. `test_3_1/test_3_2`: 使用 `asyncio.create_task` 解决 `watch_orders` 阻塞问题
+2. `test_3_2`: 修复订单 ID 比较（交易所 ID vs 内部 UUID）
+3. `test_3_6`: 修复 `cancel_order` 参数顺序
+4. `test_3_7`: 修复配置属性名和 `send_alert` 方法签名
 
 **核心修改**:
 1. **`test_phase5_window3.py`** - 修复测试参数和方法名错误
@@ -34,20 +40,17 @@
 
 **对账服务验证发现 (P0-005-3)**:
 - ✅ Test-3.1: WebSocket 连接建立 - 通过
-- ⚠️ Test-3.2: 订单实时推送 - 阻塞（watch_orders 是阻塞调用）
+- ✅ Test-3.2: 订单实时推送 - 通过
 - ✅ Test-3.3: 启动对账服务 - 通过
 - ✅ Test-3.4: 持仓对账 - 通过
 - ✅ Test-3.5: 订单对账 - 通过
-- ⚠️ Test-3.6: Grace Period 处理 - 部分通过（取消订单参数问题）
-- ⚠️ Test-3.7: 飞书告警 - 待验证
-
-**发现的问题**:
-1. **watch_orders 阻塞问题** - 测试无法继续执行下单操作（需使用 asyncio.create_task）
-2. **持仓获取类型错误** - `int()` 参数为 None（`_get_exchange_positions` 方法）
-3. **孤儿订单取消失败** - `cancel_order` 参数类型问题（需转换为字符串）
+- ✅ Test-3.6: Grace Period 处理 - 通过
+- ✅ Test-3.7: 飞书告警 - 通过
 
 **Git 提交**:
 ```
+e14fe94 test: 修复 P0-005-3 Window3 测试问题 (7/7 通过)
+3f89e78 docs: P0-005 Binance Testnet 完整验证完成
 ea538e8 fix: 修复 Binance 测试网订单 ID 混淆问题 (P0-005-1)
 6b90ae3 fix: 修复持仓查询 leverage 字段 None 处理 (P0-005-2)
 ```
