@@ -30,14 +30,24 @@ class DynamicRiskManager:
     def __init__(
         self,
         config: Optional[RiskManagerConfig] = None,
+        trailing_percent: Optional[Decimal] = None,  # 向后兼容：如果提供，覆盖 config
+        step_threshold: Optional[Decimal] = None,     # 向后兼容：如果提供，覆盖 config
     ):
         """
         初始化动态风控管理器
 
         Args:
             config: 风控管理器配置（提供默认值）
+            trailing_percent: 移动止损回撤容忍度 (向后兼容参数)
+            step_threshold: 阶梯阈值 (向后兼容参数)
         """
         self._config = config or RiskManagerConfig()
+
+        # 向后兼容：如果提供旧参数，覆盖 config 中的值
+        if trailing_percent is not None:
+            self._config.trailing_percent = trailing_percent
+        if step_threshold is not None:
+            self._config.step_threshold = step_threshold
 
     def evaluate_and_mutate(
         self,
