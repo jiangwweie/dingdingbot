@@ -53,9 +53,9 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
       : totalWinPnl > 0 ? Infinity : 0;
 
     return {
-      totalTrades: report.total_trades,
-      winningTrades: report.winning_trades,
-      losingTrades: report.losing_trades,
+      totalTrades: report.total_trades ?? 0,
+      winningTrades: report.winning_trades ?? 0,
+      losingTrades: report.losing_trades ?? 0,
       winRate: parseFloat(report.win_rate || '0'),
       totalPnl,
       totalFees,
@@ -98,7 +98,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<Activity className="w-4 h-4" />}
           label="总交易次数"
-          value={stats.totalTrades.toString()}
+          value={String(stats.totalTrades ?? 0)}
           color="blue"
         />
 
@@ -106,7 +106,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<TrendingUp className="w-4 h-4" />}
           label="盈利次数"
-          value={stats.winningTrades.toString()}
+          value={String(stats.winningTrades ?? 0)}
           color="green"
         />
 
@@ -114,7 +114,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<TrendingDown className="w-4 h-4" />}
           label="亏损次数"
-          value={stats.losingTrades.toString()}
+          value={String(stats.losingTrades ?? 0)}
           color="red"
         />
 
@@ -122,7 +122,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<Percent className="w-4 h-4" />}
           label="胜率"
-          value={`${stats.winRate.toFixed(1)}%`}
+          value={`${(stats.winRate ?? 0).toFixed(1)}%`}
           color="purple"
         />
 
@@ -133,7 +133,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
           value={
             stats.profitFactor === Infinity
               ? '∞'
-              : stats.profitFactor.toFixed(2)
+              : stats.profitFactor != null ? stats.profitFactor.toFixed(2) : '0.00'
           }
           color="orange"
         />
@@ -142,23 +142,23 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<DollarSign className="w-4 h-4" />}
           label="总盈亏"
-          value={`${stats.totalPnl >= 0 ? '+' : ''}$${stats.totalPnl.toFixed(2)}`}
-          color={stats.totalPnl >= 0 ? 'green' : 'red'}
+          value={`${stats.totalPnl >= 0 ? '+' : ''}$${(stats.totalPnl ?? 0).toFixed(2)}`}
+          color={stats.totalPnl != null && stats.totalPnl >= 0 ? 'green' : 'red'}
         />
 
         {/* Average PnL per Trade */}
         <StatItem
           icon={<DollarSign className="w-4 h-4" />}
           label="场均盈亏"
-          value={`${stats.avgPnlPerTrade >= 0 ? '+' : ''}$${stats.avgPnlPerTrade.toFixed(2)}`}
-          color={stats.avgPnlPerTrade >= 0 ? 'green' : 'red'}
+          value={`${stats.avgPnlPerTrade != null && stats.avgPnlPerTrade >= 0 ? '+' : ''}$${(stats.avgPnlPerTrade ?? 0).toFixed(2)}`}
+          color={stats.avgPnlPerTrade != null && stats.avgPnlPerTrade >= 0 ? 'green' : 'red'}
         />
 
         {/* Average Win */}
         <StatItem
           icon={<TrendingUp className="w-4 h-4" />}
           label="平均盈利"
-          value={`+$${stats.avgWin.toFixed(2)}`}
+          value={`+$${(stats.avgWin ?? 0).toFixed(2)}`}
           color="green"
         />
 
@@ -166,7 +166,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<TrendingDown className="w-4 h-4" />}
           label="平均亏损"
-          value={`-$${stats.avgLoss.toFixed(2)}`}
+          value={`-$${(stats.avgLoss ?? 0).toFixed(2)}`}
           color="red"
         />
 
@@ -174,7 +174,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<DollarSign className="w-4 h-4" />}
           label="总手续费"
-          value={`-$${stats.totalFees.toFixed(2)}`}
+          value={`-$${(stats.totalFees ?? 0).toFixed(2)}`}
           color="gray"
         />
 
@@ -182,7 +182,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<DollarSign className="w-4 h-4" />}
           label="总滑点成本"
-          value={`-$${stats.totalSlippage.toFixed(2)}`}
+          value={`-$${(stats.totalSlippage ?? 0).toFixed(2)}`}
           color="gray"
         />
 
@@ -190,7 +190,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<Activity className="w-4 h-4" />}
           label="最大回撤"
-          value={`${stats.maxDrawdown.toFixed(2)}%`}
+          value={`${(stats.maxDrawdown ?? 0).toFixed(2)}%`}
           color="red"
         />
       </div>
