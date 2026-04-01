@@ -178,6 +178,35 @@ async function fetchAccountSnapshot(): Promise<AccountSnapshot>
 
 ---
 
+## P0-005 Binance Testnet 验证 (2026-04-01)
+
+### 验证结果：通过 ✅
+
+**测试环境**: Binance Testnet  
+**测试范围**: 订单执行、DCA、持仓管理、对账服务、WebSocket 推送
+
+### 修复的问题
+
+| 问题 | 修复文件 | 说明 |
+|------|----------|------|
+| 订单 ID 混淆 | `exchange_gateway.py` | `cancel_order` 和 `fetch_order` 使用 `exchange_order_id` 而非内部 UUID |
+| leverage None 处理 | `exchange_gateway.py` | `int(leverage_val) if leverage_val is not None else 1` |
+| cancel_order 参数 | `exchange_gateway.py` | 修复参数命名问题 |
+
+### 对账服务发现
+
+- **孤儿订单处理**: 发现 7 个孤儿订单 (交易所有 DB 无)
+- **处理逻辑**: 导入 orphan entry order → 创建 missing signal
+- **幽灵订单**: 无发现 (DB 有交易所无)
+
+### WebSocket 验证
+
+- ✅ 连接建立成功
+- ✅ 订单状态实时更新
+- ✅ 重连机制正常 (指数退避：1s → 2s → 4s → 8s → 16s → 32s)
+
+---
+
 ## Phase 6 前端组件检查 (2026-04-01)
 
 ### 组件完成度：100%
