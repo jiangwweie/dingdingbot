@@ -102,6 +102,9 @@ class ExchangeGateway:
         # Order state tracking (G-002: dedup based on filled_qty)
         self._order_local_state: Dict[str, Dict[str, Any]] = {}  # order_id -> {filled_qty, status, updated_at}
 
+        # P5-011: Global order update callback (for order persistence)
+        self._global_order_callback: Optional[Callable[[Order], Awaitable[None]]] = None
+
     def _create_rest_exchange(self, options: Dict[str, Any]):
         """Create REST exchange instance
 
@@ -1362,3 +1365,115 @@ class ExchangeGateway:
         if order_id in self._order_local_state:
             del self._order_local_state[order_id]
             logger.debug(f"已清除订单状态：{order_id}")
+
+    # ============================================================
+    # P5-011: Global Order Callback Registration
+    # ============================================================
+
+    def set_global_order_callback(
+        self,
+        callback: Callable[[Order], Awaitable[None]],
+    ) -> None:
+        """
+        设置全局订单更新回调（用于订单持久化）
+
+        P5-011: 订单清理机制 - 架构决策 3.a
+        启动时注册全局 WebSocket 回调，所有订单更新自动入库
+
+        Args:
+            callback: 异步回调函数，接收 Order 对象作为参数
+        """
+        self._global_order_callback = callback
+        logger.info("全局订单更新回调已注册")
+
+    async def _notify_global_order_callback(self, order: Order) -> None:
+        """
+        通知全局订单回调
+
+        Args:
+            order: 订单对象
+        """
+        if self._global_order_callback:
+            try:
+                await self._global_order_callback(order)
+            except Exception as e:
+                logger.error(f"全局订单回调执行失败：{e}")
+
+    async def watch_orders(
+        self,
+        symbol: str,
+        callback: Callable[[Order], Awaitable[None]],
+    ) -> None:
+        """
+        WebSocket 监听订单推送
+
+        G-002 修复：基于 filled_qty 去重，而非时间戳
+        避免同一毫秒多次 Partial Fill 导致重复处理
+
+        P5-011 增强：在调用用户 callback 前，先调用全局回调（订单入库）
+
+        Args:
+            symbol: 币种对，如 "BTC/USDT:USDT"
+            callback: 订单更新时的异步回调
+
+        Raises:
+            ConnectionLostError: WebSocket 重连超限
+        """
+        if ccxtpro is None:
+            logger.warning("CCXT Pro 未安装，无法使用 WebSocket 订单推送")
+            return
+
+        self._ws_running = True
+        reconnect_count = 0
+
+        # 创建 WebSocket 交换实例
+        self.ws_exchange = self._create_ws_exchange({
+            'defaultType': 'swap',
+        })
+
+        # 加载市场数据
+        await self.ws_exchange.load_markets()
+        logger.info(f"WebSocket 订单监听已启动：{symbol}")
+
+        try:
+            while self._ws_running:
+                try:
+                    # 使用 CCXT Pro watch_orders 方法
+                    orders = await self.ws_exchange.watch_orders(symbol)
+
+                    # 处理每个订单更新
+                    for raw_order in orders:
+                        order = await self._handle_order_update(raw_order)
+                        if order:
+                            # P5-011: 先调用全局回调（订单入库）
+                            await self._notify_global_order_callback(order)
+                            # 再调用业务回调
+                            await callback(order)
+
+                except asyncio.CancelledError:
+                    logger.info(f"WebSocket 订单监听被取消：{symbol}")
+                    break
+
+                except Exception as e:
+                    reconnect_count += 1
+                    if reconnect_count >= self._max_reconnect_attempts:
+                        raise ConnectionLostError(
+                            f"WebSocket 重连失败超过 {self._max_reconnect_attempts} 次：{symbol}",
+                            "C-001"
+                        )
+
+                    # 指数退避
+                    delay = min(
+                        self._initial_reconnect_delay * (2 ** (reconnect_count - 1)),
+                        self._max_reconnect_delay
+                    )
+                    logger.warning(
+                        f"WebSocket 重连中... {delay:.1f}s "
+                        f"(尝试 {reconnect_count}/{self._max_reconnect_attempts})"
+                    )
+                    await asyncio.sleep(delay)
+
+        finally:
+            self._ws_running = False
+            if self.ws_exchange:
+                await self.ws_exchange.close()

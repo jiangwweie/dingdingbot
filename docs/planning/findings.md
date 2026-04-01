@@ -1,5 +1,153 @@
 # 研究发现
 
+## P5-011: 订单清理机制实现 (2026-04-01)
+
+### 实现概述
+
+根据头脑风暴的架构决策 (1.a, 2.a, 3.a)，实现了完整的订单清理机制：
+
+1. **创建 OrderRepository 类** (选项 A) - SQLite 订单持久化
+2. **OrderManager 调用 OrderRepository.save()** (选项 A) - 集成订单入库
+3. **启动时注册全局 WebSocket 回调** (选项 A) - 订单更新自动入库
+
+### 核心文件
+
+| 文件 | 路径 | 功能 |
+|------|------|------|
+| `OrderRepository` | `src/infrastructure/order_repository.py` | SQLite 订单持久化，支持 CRUD 操作 |
+| `OrderManager` (增强) | `src/domain/order_manager.py` | 集成订单入库逻辑，所有订单变更自动保存 |
+| `ExchangeGateway` (增强) | `src/infrastructure/exchange_gateway.py` | 全局订单回调注册，WebSocket 订单推送自动入库 |
+| 单元测试 | `tests/unit/test_order_repository.py` | 13 个测试用例，覆盖 OrderRepository 和 OrderManager 集成 |
+
+### 技术实现细节
+
+#### 1. OrderRepository 数据模型
+
+**数据库表结构** (17 字段):
+```sql
+CREATE TABLE orders (
+    id TEXT PRIMARY KEY,
+    signal_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    order_type TEXT NOT NULL,
+    order_role TEXT NOT NULL,
+    price TEXT,
+    trigger_price TEXT,
+    requested_qty TEXT NOT NULL,
+    filled_qty TEXT NOT NULL DEFAULT '0',
+    average_exec_price TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    reduce_only INTEGER NOT NULL DEFAULT 0,
+    parent_order_id TEXT,
+    oco_group_id TEXT,
+    exit_reason TEXT,
+    exchange_order_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+)
+```
+
+**核心方法**:
+- `save(order: Order)` - 保存/更新订单
+- `save_batch(orders: List[Order])` - 批量保存（事务）
+- `update_status(order_id, status, filled_qty, average_exec_price)` - 更新订单状态
+- `get_orders_by_signal(signal_id)` - 按信号 ID 查询
+- `get_order_chain(signal_id)` - 获取订单链（ENTRY/TP/SL 分组）
+- `get_oco_group(oco_group_id)` - 获取 OCO 组订单
+
+#### 2. OrderManager 集成
+
+**新增方法**:
+```python
+def __init__(self, order_repository: Optional[Any] = None):
+    self._order_repository = order_repository
+    self._on_order_changed: Optional[Callable[[Order], Awaitable[None]]] = None
+
+async def _save_order(self, order: Order) -> None:
+    """保存订单到仓库 + 触发变更通知"""
+
+async def save_order_chain(self, orders: List[Order]) -> None:
+    """保存订单链"""
+
+async def handle_order_filled(...) -> List[Order]:
+    """ENTRY 成交时生成 TP/SL 订单并自动保存"""
+```
+
+**集成点**:
+- `handle_order_filled()` - ENTRY 成交生成 TP/SL 订单后自动保存
+- `_apply_oco_logic_for_tp()` - TP 成交后撤销订单时自动保存
+- `_cancel_all_tp_orders()` - SL 成交后撤销 TP 订单时自动保存
+- `apply_oco_logic()` - OCO 逻辑执行时自动保存
+
+#### 3. ExchangeGateway 全局回调
+
+**新增方法**:
+```python
+def set_global_order_callback(self, callback: Callable[[Order], Awaitable[None]]) -> None:
+    """设置全局订单更新回调（用于订单持久化）"""
+
+async def _notify_global_order_callback(self, order: Order) -> None:
+    """通知全局订单回调"""
+```
+
+**watch_orders 增强**:
+```python
+async def watch_orders(self, symbol: str, callback: Callable[[Order], Awaitable[None]]) -> None:
+    # 处理每个订单更新
+    for raw_order in orders:
+        order = await self._handle_order_update(raw_order)
+        if order:
+            # P5-011: 先调用全局回调（订单入库）
+            await self._notify_global_order_callback(order)
+            # 再调用业务回调
+            await callback(order)
+```
+
+### 测试结果
+
+**13/13 测试用例全部通过**:
+
+| 测试用例 | 状态 | 说明 |
+|---------|------|------|
+| `test_order_repository_initialization` | ✅ | OrderRepository 初始化 |
+| `test_order_repository_save` | ✅ | 保存单个订单 |
+| `test_order_repository_save_batch` | ✅ | 批量保存订单 |
+| `test_order_repository_update_status` | ✅ | 更新订单状态 |
+| `test_order_repository_get_orders_by_signal` | ✅ | 按信号 ID 查询 |
+| `test_order_repository_get_order_chain` | ✅ | 获取订单链 |
+| `test_order_repository_get_oco_group` | ✅ | 获取 OCO 组订单 |
+| `test_order_manager_save_order_chain` | ✅ | OrderManager 集成订单入库 |
+| `test_order_manager_handle_order_filled_saves_tp_sl` | ✅ | handle_order_filled 保存 TP/SL 订单 |
+| `test_order_manager_apply_oco_logic_saves_canceled_orders` | ✅ | apply_oco_logic 保存撤销订单 |
+| `test_exchange_gateway_set_global_order_callback` | ✅ | ExchangeGateway 全局回调注册 |
+| `test_order_manager_set_order_changed_callback` | ✅ | OrderManager 订单变更回调 |
+| `test_full_order_lifecycle_persistence` | ✅ | 完整订单生命周期持久化集成测试 |
+
+### 架构决策验证
+
+| 决策点 | 选项 | 实现 | 状态 |
+|--------|------|------|------|
+| 1. 订单持久化 | A. 创建 OrderRepository | `src/infrastructure/order_repository.py` | ✅ |
+| 2. 订单入库调用 | A. OrderManager 调用 save() | `OrderManager._save_order()` | ✅ |
+| 3. WebSocket 回调 | A. 启动时注册全局回调 | `ExchangeGateway.set_global_order_callback()` | ✅ |
+
+### 核心原则遵循
+
+| 原则 | 实现方式 | 状态 |
+|------|---------|------|
+| 所有订单都要有迹可循 | OrderManager 所有订单变更点都调用 `_save_order()` | ✅ |
+| 止盈止损单取决于原订单业务状态 | TP/SL 订单在 ENTRY 成交后动态生成并保存 | ✅ |
+| 生产环境账户 exclusive to program | 订单入库机制确保所有系统订单可追溯 | ✅ |
+
+### 下一步建议
+
+1. **集成到启动流程**: 在系统启动时，将 OrderRepository 注入到 OrderManager，并注册全局 WebSocket 回调
+2. **添加订单清理策略**: 实现定期清理已完成订单的策略（如保留最近 7 天）
+3. **添加订单查询 API**: 为前端提供订单列表查询接口
+
+---
+
 ## E2E 集成测试执行发现 (2026-04-01)
 
 ### 测试结果分析

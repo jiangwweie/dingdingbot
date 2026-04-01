@@ -14,9 +14,10 @@ v3.0 Phase 4: 订单编排核心组件
 - DynamicRiskManager: 负责 SL 订单的 trigger_price 调整 (Breakeven/Trailing)
 """
 from decimal import Decimal
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable, Awaitable, Any
 import uuid
 from datetime import datetime, timezone
+import logging
 
 from src.domain.models import (
     Order,
@@ -27,6 +28,8 @@ from src.domain.models import (
     Position,
     Direction,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OrderManager:
@@ -44,11 +47,48 @@ class OrderManager:
     - DynamicRiskManager: 负责 SL 订单的 trigger_price 调整 (Breakeven/Trailing)
     """
 
-    def __init__(self):
+    def __init__(self, order_repository: Optional[Any] = None):
         """
         初始化订单管理器
+
+        Args:
+            order_repository: OrderRepository 实例（可选，用于订单持久化）
         """
-        pass
+        self._order_repository = order_repository
+        self._on_order_changed: Optional[Callable[[Order], Awaitable[None]]] = None
+
+    def set_order_repository(self, order_repository: Any) -> None:
+        """设置订单仓库"""
+        self._order_repository = order_repository
+
+    def set_order_changed_callback(self, callback: Callable[[Order], Awaitable[None]]) -> None:
+        """
+        设置订单变更回调（用于 WebSocket 推送）
+
+        Args:
+            callback: 异步回调函数，接收 Order 对象作为参数
+        """
+        self._on_order_changed = callback
+
+    async def _notify_order_changed(self, order: Order) -> None:
+        """通知订单已变更"""
+        if self._on_order_changed:
+            try:
+                await self._on_order_changed(order)
+            except Exception as e:
+                # 回调失败不影响主逻辑
+                pass
+
+    async def _save_order(self, order: Order) -> None:
+        """保存订单到仓库"""
+        if self._order_repository:
+            try:
+                await self._order_repository.save(order)
+            except Exception as e:
+                # 保存失败不影响主逻辑，记录日志即可
+                pass
+        # 触发变更通知
+        await self._notify_order_changed(order)
 
     def create_order_chain(
         self,
@@ -102,6 +142,19 @@ class OrderManager:
 
         return [entry_order]
 
+    async def save_order_chain(self, orders: List[Order]) -> None:
+        """
+        保存订单链到仓库
+
+        P5-011: 订单清理机制 - 所有订单都要有迹可循
+
+        Args:
+            orders: 订单列表
+        """
+        for order in orders:
+            await self._save_order(order)
+        logger.info(f"订单链已保存：{len(orders)} 个订单")
+
     def _get_tp_role(self, level: int) -> OrderRole:
         """
         根据 TP 级别获取对应的 OrderRole
@@ -126,7 +179,7 @@ class OrderManager:
             raise ValueError(f"TP 级别 {level} 超出支持范围 (1-5)")
         return role_map[level]
 
-    def handle_order_filled(
+    async def handle_order_filled(
         self,
         filled_order: Order,
         active_orders: List[Order],
@@ -159,6 +212,9 @@ class OrderManager:
             new_orders = self._generate_tp_sl_orders(
                 filled_order, positions_map, strategy, tp_targets
             )
+            # P5-011: 保存新生成的 TP/SL 订单
+            for order in new_orders:
+                await self._save_order(order)
 
         elif filled_order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]:
             # TP 成交：更新 SL 数量，执行 OCO 逻辑
@@ -171,10 +227,14 @@ class OrderManager:
                         break
             if position:
                 self._apply_oco_logic_for_tp(filled_order, active_orders, position)
+            # P5-011: 保存已成交的 TP 订单
+            await self._save_order(filled_order)
 
         elif filled_order.order_role == OrderRole.SL:
             # SL 成交：撤销所有 TP 订单
             self._cancel_all_tp_orders(filled_order.signal_id, active_orders)
+            # P5-011: 保存已成交的 SL 订单
+            await self._save_order(filled_order)
 
         return new_orders
 
@@ -377,7 +437,7 @@ class OrderManager:
             price_diff = stop_loss_price - actual_entry_price
             return actual_entry_price - rr_multiple * price_diff
 
-    def _apply_oco_logic_for_tp(
+    async def _apply_oco_logic_for_tp(
         self,
         filled_tp: Order,
         active_orders: List[Order],
@@ -409,14 +469,18 @@ class OrderManager:
                 ):
                     order.status = OrderStatus.CANCELED
                     order.updated_at = current_time
+                    # P5-011: 保存被撤销的订单
+                    await self._save_order(order)
         else:
             # 部分平仓：更新 SL 数量与剩余仓位对齐
             sl_order = self._find_order_by_role(active_orders, OrderRole.SL, signal_id)
             if sl_order:
                 sl_order.requested_qty = position.current_qty
                 sl_order.updated_at = current_time
+                # P5-011: 保存更新后的 SL 订单
+                await self._save_order(sl_order)
 
-    def _cancel_all_tp_orders(
+    async def _cancel_all_tp_orders(
         self,
         signal_id: str,
         active_orders: List[Order],
@@ -439,6 +503,8 @@ class OrderManager:
             ):
                 order.status = OrderStatus.CANCELED
                 order.updated_at = current_time
+                # P5-011: 保存被撤销的 TP 订单
+                await self._save_order(order)
 
     def _find_order_by_role(
         self,
@@ -555,7 +621,7 @@ class OrderManager:
 
         return status
 
-    def apply_oco_logic(
+    async def apply_oco_logic(
         self,
         filled_order: Order,
         active_orders: List[Order],
@@ -593,11 +659,15 @@ class OrderManager:
                     order.status = OrderStatus.CANCELED
                     order.updated_at = current_time
                     canceled_orders.append(order)
+                    # P5-011: 保存被撤销的订单
+                    await self._save_order(order)
         else:
             # 部分平仓：更新 SL 数量与剩余仓位对齐
             sl_order = self._find_order_by_role(active_orders, OrderRole.SL, signal_id)
             if sl_order:
                 sl_order.requested_qty = position.current_qty
                 sl_order.updated_at = current_time
+                # P5-011: 保存更新后的 SL 订单
+                await self._save_order(sl_order)
 
         return canceled_orders

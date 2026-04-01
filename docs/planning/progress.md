@@ -1,5 +1,92 @@
 # 进度日志
 
+## 2026-04-01 - P5-011 订单清理机制实现完成 🎉
+
+### P5-011 订单清理机制实现 ✅
+
+**实现目标**: 建立完整的订单持久化机制，确保所有订单有迹可循
+
+**核心原则**:
+- ✅ 所有订单都要有迹可循，本地都要入库
+- ✅ 止盈止损单取决于原订单的业务状态
+- ✅ 生产环境账户 exclusive to program (无外部手动订单)
+
+**架构决策** (来自头脑风暴):
+
+| 决策点 | 选项 | 实现 | 状态 |
+|--------|------|------|------|
+| 1. 订单持久化 | A. 创建 OrderRepository 类 | `src/infrastructure/order_repository.py` | ✅ |
+| 2. 订单入库调用 | A. OrderManager 调用 save() | `OrderManager._save_order()` | ✅ |
+| 3. WebSocket 回调 | A. 启动时注册全局回调 | `ExchangeGateway.set_global_order_callback()` | ✅ |
+
+**交付成果**:
+
+| 文件 | 路径 | 功能 |
+|------|------|------|
+| `OrderRepository` | `src/infrastructure/order_repository.py` | SQLite 订单持久化 (新建) |
+| `OrderManager` (增强) | `src/domain/order_manager.py` | 集成订单入库逻辑 |
+| `ExchangeGateway` (增强) | `src/infrastructure/exchange_gateway.py` | 全局订单回调注册 |
+| 单元测试 | `tests/unit/test_order_repository.py` | 13 个测试用例 |
+
+**核心功能**:
+
+1. **OrderRepository** - 订单持久化仓库
+   - `save(order)` - 保存/更新订单
+   - `save_batch(orders)` - 批量保存（事务）
+   - `update_status(order_id, status, filled_qty, average_exec_price)` - 更新状态
+   - `get_orders_by_signal(signal_id)` - 按信号 ID 查询
+   - `get_order_chain(signal_id)` - 获取订单链（ENTRY/TP/SL 分组）
+   - `get_oco_group(oco_group_id)` - 获取 OCO 组订单
+
+2. **OrderManager 集成** - 订单变更自动入库
+   - `_save_order(order)` - 保存订单 + 触发变更通知
+   - `save_order_chain(orders)` - 保存订单链
+   - `handle_order_filled()` - ENTRY 成交生成 TP/SL 订单并自动保存
+   - `_apply_oco_logic_for_tp()` - TP 成交后撤销订单时自动保存
+   - `_cancel_all_tp_orders()` - SL 成交后撤销 TP 订单时自动保存
+
+3. **ExchangeGateway 全局回调** - WebSocket 订单推送自动入库
+   - `set_global_order_callback(callback)` - 注册全局回调
+   - `_notify_global_order_callback(order)` - 通知回调
+   - `watch_orders()` - 收到订单推送时先调用全局回调（入库）再调用业务回调
+
+**测试结果** (13/13 通过):
+
+```
+✅ test_order_repository_initialization
+✅ test_order_repository_save
+✅ test_order_repository_save_batch
+✅ test_order_repository_update_status
+✅ test_order_repository_get_orders_by_signal
+✅ test_order_repository_get_order_chain
+✅ test_order_repository_get_oco_group
+✅ test_order_manager_save_order_chain
+✅ test_order_manager_handle_order_filled_saves_tp_sl
+✅ test_order_manager_apply_oco_logic_saves_canceled_orders
+✅ test_exchange_gateway_set_global_order_callback
+✅ test_order_manager_set_order_changed_callback
+✅ test_full_order_lifecycle_persistence
+```
+
+**技术发现**:
+
+1. **Order 模型字段精简** - 初始实现使用了 28 列数据库表，后精简为 17 列，与 Order 领域模型对齐
+2. **aiosqlite 事务处理** - `in_transaction()` 是属性不是方法，改用 `BEGIN` 显式开启事务
+3. **回调链设计** - 全局回调在业务回调之前执行，确保订单先入库再通知业务逻辑
+
+**下一步建议**:
+
+1. **集成到启动流程** - 在系统启动时将 OrderRepository 注入 OrderManager，并注册全局 WebSocket 回调
+2. **添加订单查询 API** - 为前端提供订单列表查询接口（Phase 6 待实现）
+3. **订单清理策略** - 实现定期清理已完成订单的策略（如保留最近 7 天）
+
+**Git 提交记录**:
+```
+# 待提交
+```
+
+---
+
 ## 2026-04-01 - E2E 集成测试失败修复完成 🎉
 
 ### E2E 集成测试失败修复 ✅
