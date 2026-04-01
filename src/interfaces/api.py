@@ -836,6 +836,8 @@ async def run_backtest(
     Backtest signals are automatically saved to database with source='backtest'.
     You can view them in the Signals page with K-line chart visualization.
 
+    T4/T5/T6: Orders and backtest reports are automatically saved to database.
+
     Request body (BacktestRequest):
     {
         "symbol": "BTC/USDT:USDT",
@@ -859,6 +861,8 @@ async def run_backtest(
     """
     try:
         from src.application.backtester import Backtester
+        from src.infrastructure.backtest_repository import BacktestReportRepository
+        from src.infrastructure.order_repository import OrderRepository
 
         gateway = _get_exchange_gateway()
         backtester = Backtester(gateway)
@@ -869,13 +873,32 @@ async def run_backtest(
         # Get repository for saving signals (always save backtest signals)
         repository = _get_repository()
 
-        # Run backtest
-        report = await backtester.run_backtest(request, account_snapshot, repository=repository)
+        # T5/T6: Initialize backtest report repository for saving reports
+        backtest_repository = BacktestReportRepository()
+        await backtest_repository.initialize()
 
-        return {
-            "status": "success",
-            "report": report.model_dump(),
-        }
+        # T4: Initialize order repository for saving orders
+        order_repository = OrderRepository()
+        await order_repository.initialize()
+
+        try:
+            # Run backtest with repositories
+            report = await backtester.run_backtest(
+                request,
+                account_snapshot,
+                repository=repository,
+                backtest_repository=backtest_repository,
+                order_repository=order_repository
+            )
+
+            return {
+                "status": "success",
+                "report": report.model_dump(),
+            }
+        finally:
+            await backtest_repository.close()
+            await order_repository.close()
+
     except HTTPException:
         raise
     except Exception as e:

@@ -143,6 +143,7 @@ class Backtester:
         account_snapshot: Optional[AccountSnapshot] = None,
         repository = None,  # SignalRepository for saving signals (always saved if provided)
         backtest_repository = None,  # BacktestReportRepository for saving reports
+        order_repository = None,  # OrderRepository for saving orders (T4)
     ) -> Union[BacktestReport, PMSBacktestReport]:
         """
         Run backtest with isolated config sandbox.
@@ -155,11 +156,15 @@ class Backtester:
         Backtest signals are automatically saved to database with source='backtest'.
         Signals can be viewed in the Signals page with K-line chart visualization.
 
+        T4/T5/T6: Orders and backtest reports are automatically saved to database.
+
         Args:
             request: Backtest request parameters
             account_snapshot: Optional account snapshot for position sizing.
                               If not provided, uses a default snapshot.
             repository: SignalRepository instance for saving signals
+            backtest_repository: BacktestReportRepository for saving reports
+            order_repository: OrderRepository for saving orders
 
         Returns:
             BacktestReport (v2_classic mode) or PMSBacktestReport (v3_pms mode)
@@ -170,7 +175,7 @@ class Backtester:
 
         if use_v3_pms:
             # v3 PMS mode: Use MockMatchingEngine for position-level backtesting
-            return await self._run_v3_pms_backtest(request, repository, backtest_repository)
+            return await self._run_v3_pms_backtest(request, repository, backtest_repository, order_repository)
 
         if use_dynamic:
             # Step 1: Build dynamic strategy runner from strategy definitions
