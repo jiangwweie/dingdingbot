@@ -526,14 +526,38 @@ class Backtester:
         timestamp: int,
         higher_tf_data: Dict[int, Dict[str, TrendDirection]],
     ) -> Dict[str, TrendDirection]:
-        """Get the closest available higher timeframe trends."""
+        """
+        Get the closest available higher timeframe trends.
+
+        CRITICAL: A higher timeframe candle is considered "closed" only when:
+        higher_tf_timestamp + higher_tf_period <= current_timestamp
+
+        This prevents the "future function" problem where unreleased candles
+        are incorrectly used in MTF filtering.
+
+        Example:
+        - 1h candle at 10:00 closes at 11:00
+        - At 10:15, the 10:00-11:00 candle is NOT yet closed
+        - Should use 09:00 candle (closed at 10:00) instead
+        """
         if not higher_tf_data:
             return {}
 
-        # Find the closest timestamp <= current timestamp
+        # Get the higher timeframe from the first entry to calculate period
+        first_entry = next(iter(higher_tf_data.values()))
+        higher_tf = next(iter(first_entry.keys())) if first_entry else None
+
+        if higher_tf is None:
+            return {}
+
+        higher_tf_period_ms = self._parse_timeframe(higher_tf) * 60 * 1000
+
+        # Find the closest timestamp where the candle is already closed
+        # Candle closes at: timestamp + period
         closest_ts = None
-        for ts in higher_tf_data:
-            if ts <= timestamp:
+        for ts, trends in higher_tf_data.items():
+            candle_close_time = ts + higher_tf_period_ms
+            if candle_close_time <= timestamp:
                 if closest_ts is None or ts > closest_ts:
                     closest_ts = ts
 
@@ -873,9 +897,11 @@ class Backtester:
         import uuid
 
         # Step 1: Initialize MockMatchingEngine
+        # T2 fix: Add TP slippage rate (0.05% default)
         engine = MockMatchingEngine(
             slippage_rate=request.slippage_rate or Decimal('0.001'),
             fee_rate=request.fee_rate or Decimal('0.0004'),
+            tp_slippage_rate=Decimal('0.0005'),  # 0.05% TP slippage
         )
 
         # Step 2: Fetch historical K-line data

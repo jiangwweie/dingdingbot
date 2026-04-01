@@ -15,6 +15,10 @@ Tests cover:
 - UT-011: Cancel related orders after stop loss
 - UT-012: Decimal precision
 - UT-013: Boundary case (kline.low == trigger_price)
+- UT-014: TP1 slippage calculation (LONG) - T2 fix
+- UT-015: TP1 slippage calculation (SHORT) - T2 fix
+- UT-016: TP1 not triggered (price not reached) - T2 fix
+- UT-017: TP1 slippage default rate - T2 fix
 """
 import pytest
 from decimal import Decimal
@@ -200,14 +204,20 @@ def test_ut_002_stop_loss_trigger_short():
 
 
 # ============================================================
-# UT-003: TP1 limit order trigger (LONG)
+# UT-003: TP1 limit order trigger (LONG) - Updated with slippage
 # ============================================================
 def test_ut_003_tp1_limit_trigger_long():
     """
     UT-003: TP1 限价单触发 (LONG)
-    预期：按 high >= price 触发，执行价 = price (无限滑点)
+    预期：按 high >= price 触发，执行价 = price * (1 - tp_slippage)
+
+    T2 修复：止盈单添加滑点计算
     """
-    engine = MockMatchingEngine(slippage_rate=Decimal("0.001"), fee_rate=Decimal("0.0004"))
+    engine = MockMatchingEngine(
+        slippage_rate=Decimal("0.001"),
+        fee_rate=Decimal("0.0004"),
+        tp_slippage_rate=Decimal("0.0005")  # 0.05% TP slippage
+    )
 
     kline = create_kline(low=Decimal("69000"), high=Decimal("71000"))
 
@@ -231,18 +241,29 @@ def test_ut_003_tp1_limit_trigger_long():
     # Assertions
     assert len(executed) == 1
     assert executed[0].status == OrderStatus.FILLED
-    assert executed[0].average_exec_price == Decimal("70500")  # No slippage for limit orders
+    # T2 fix: Apply slippage to limit TP orders
+    # LONG TP: slippage downward (less money received)
+    # Expected price = 70500 * (1 - 0.0005) = 70464.75
+    expected_price = Decimal("70500") * (Decimal("1") - Decimal("0.0005"))
+    assert executed[0].average_exec_price == expected_price
+    assert executed[0].average_exec_price == Decimal("70464.75")
 
 
 # ============================================================
-# UT-004: TP1 limit order trigger (SHORT)
+# UT-004: TP1 limit order trigger (SHORT) - Updated with slippage
 # ============================================================
 def test_ut_004_tp1_limit_trigger_short():
     """
     UT-004: TP1 限价单触发 (SHORT)
-    预期：按 low <= price 触发，执行价 = price (无限滑点)
+    预期：按 low <= price 触发，执行价 = price * (1 + tp_slippage)
+
+    T2 修复：止盈单添加滑点计算
     """
-    engine = MockMatchingEngine(slippage_rate=Decimal("0.001"), fee_rate=Decimal("0.0004"))
+    engine = MockMatchingEngine(
+        slippage_rate=Decimal("0.001"),
+        fee_rate=Decimal("0.0004"),
+        tp_slippage_rate=Decimal("0.0005")  # 0.05% TP slippage
+    )
 
     kline = create_kline(low=Decimal("69000"), high=Decimal("71000"))
 
@@ -265,7 +286,12 @@ def test_ut_004_tp1_limit_trigger_short():
     # Assertions
     assert len(executed) == 1
     assert executed[0].status == OrderStatus.FILLED
-    assert executed[0].average_exec_price == Decimal("69500")
+    # T2 fix: Apply slippage to limit TP orders
+    # SHORT TP: slippage upward (pay more)
+    # Expected price = 69500 * (1 + 0.0005) = 69534.75
+    expected_price = Decimal("69500") * (Decimal("1") + Decimal("0.0005"))
+    assert executed[0].average_exec_price == expected_price
+    assert executed[0].average_exec_price == Decimal("69534.75")
 
 
 # ============================================================
@@ -537,6 +563,153 @@ def test_ut_013_boundary_trigger_price():
     # Assertions
     assert len(executed) == 1
     assert executed[0].status == OrderStatus.FILLED
+
+
+# ============================================================
+# UT-014: TP1 slippage calculation (LONG) - T2 fix
+# ============================================================
+def test_ut_014_tp1_slippage_long():
+    """
+    UT-014: TP1 止盈滑点计算 (LONG) - T2 修复验证
+    预期：多头止盈，滑点向下（少收钱）
+    公式：exec_price = price * (1 - tp_slippage_rate)
+    """
+    engine = MockMatchingEngine(tp_slippage_rate=Decimal("0.0005"))
+
+    signal_id = "sig_test_tp_slippage"
+    position = create_position(signal_id, direction=Direction.LONG, entry_price=Decimal("70000"))
+
+    tp1_order = create_order(
+        signal_id=signal_id,
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal("1000"),
+        requested_qty=Decimal("1"),
+    )
+
+    kline = create_kline(high=Decimal("1010"), low=Decimal("990"))
+    account = create_account()
+    positions_map = {signal_id: position}
+
+    executed = engine.match_orders_for_kline(kline, [tp1_order], positions_map, account)
+
+    # Assertions
+    assert len(executed) == 1
+    assert executed[0].status == OrderStatus.FILLED
+    # Expected: 1000 * (1 - 0.0005) = 999.5
+    expected_price = Decimal("1000") * (Decimal("1") - Decimal("0.0005"))
+    assert executed[0].average_exec_price == expected_price
+    assert executed[0].average_exec_price == Decimal("999.5")
+
+
+# ============================================================
+# UT-015: TP1 slippage calculation (SHORT) - T2 fix
+# ============================================================
+def test_ut_015_tp1_slippage_short():
+    """
+    UT-015: TP1 止盈滑点计算 (SHORT) - T2 修复验证
+    预期：空头止盈，滑点向上（多付钱）
+    公式：exec_price = price * (1 + tp_slippage_rate)
+    """
+    engine = MockMatchingEngine(tp_slippage_rate=Decimal("0.0005"))
+
+    signal_id = "sig_test_tp_slippage"
+    position = create_position(signal_id, direction=Direction.SHORT, entry_price=Decimal("70000"))
+
+    tp1_order = create_order(
+        signal_id=signal_id,
+        direction=Direction.SHORT,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal("1000"),
+        requested_qty=Decimal("1"),
+    )
+
+    kline = create_kline(high=Decimal("1010"), low=Decimal("990"))
+    account = create_account()
+    positions_map = {signal_id: position}
+
+    executed = engine.match_orders_for_kline(kline, [tp1_order], positions_map, account)
+
+    # Assertions
+    assert len(executed) == 1
+    assert executed[0].status == OrderStatus.FILLED
+    # Expected: 1000 * (1 + 0.0005) = 1000.5
+    expected_price = Decimal("1000") * (Decimal("1") + Decimal("0.0005"))
+    assert executed[0].average_exec_price == expected_price
+    assert executed[0].average_exec_price == Decimal("1000.5")
+
+
+# ============================================================
+# UT-016: TP1 not triggered (price not reached) - T2 fix
+# ============================================================
+def test_ut_016_tp1_not_triggered():
+    """
+    UT-016: TP1 止盈未触发场景 - T2 修复验证
+    预期：价格未触及止盈价，订单保持 OPEN
+    """
+    engine = MockMatchingEngine(tp_slippage_rate=Decimal("0.0005"))
+
+    signal_id = "sig_test_tp_slippage"
+    position = create_position(signal_id, direction=Direction.LONG, entry_price=Decimal("70000"))
+
+    tp1_order = create_order(
+        signal_id=signal_id,
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal("1000"),
+        requested_qty=Decimal("1"),
+    )
+
+    # K-line high is below TP price - should NOT trigger
+    kline = create_kline(high=Decimal("999"), low=Decimal("990"))
+    account = create_account()
+    positions_map = {signal_id: position}
+
+    executed = engine.match_orders_for_kline(kline, [tp1_order], positions_map, account)
+
+    # Assertions
+    assert len(executed) == 0  # No execution
+    assert tp1_order.status == OrderStatus.OPEN  # Order still pending
+
+
+# ============================================================
+# UT-017: TP1 slippage default rate - T2 fix
+# ============================================================
+def test_ut_017_tp1_slippage_default_rate():
+    """
+    UT-017: TP1 止盈滑点默认值 - T2 修复验证
+    预期：未指定 tp_slippage_rate 时，使用默认值 0.05%
+    """
+    # Default constructor should use 0.05% for TP slippage
+    engine = MockMatchingEngine()
+
+    signal_id = "sig_test_tp_slippage"
+    position = create_position(signal_id, direction=Direction.LONG, entry_price=Decimal("70000"))
+
+    tp1_order = create_order(
+        signal_id=signal_id,
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal("1000"),
+        requested_qty=Decimal("1"),
+    )
+
+    kline = create_kline(high=Decimal("1010"), low=Decimal("990"))
+    account = create_account()
+    positions_map = {signal_id: position}
+
+    executed = engine.match_orders_for_kline(kline, [tp1_order], positions_map, account)
+
+    # Assertions
+    assert len(executed) == 1
+    # Default TP slippage is 0.05% = 0.0005
+    # Expected: 1000 * (1 - 0.0005) = 999.5
+    expected_price = Decimal("1000") * (Decimal("1") - Decimal("0.0005"))
+    assert executed[0].average_exec_price == expected_price
 
 
 # ============================================================

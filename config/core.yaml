@@ -46,3 +46,11 @@ atr_filter:
   enabled: true                # 是否启用 ATR 过滤器
   period: 14                   # ATR 计算周期（业界标准）
   min_atr_ratio: 0.5           # 最小 ATR 倍数（K 线波幅/ATR，低于此值过滤）
+
+# 回测配置 (T2 修复)
+backtest:
+  take_profit_slippage_rate: 0.0005  # 止盈滑点率 (默认 0.05%)
+  # 说明：实际交易中，大单会吃掉多档订单，产生滑点
+  #       回测中添加保守滑点假设，使结果更贴近实盘
+  #       LONG TP: 成交价 = price * (1 - 0.0005) 少收钱
+  #       SHORT TP: 成交价 = price * (1 + 0.0005) 多付钱

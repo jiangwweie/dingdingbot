@@ -70,6 +70,7 @@ class MockMatchingEngine:
         self,
         slippage_rate: Decimal = Decimal('0.001'),
         fee_rate: Decimal = Decimal('0.0004'),
+        tp_slippage_rate: Optional[Decimal] = None,
     ):
         """
         初始化撮合引擎
@@ -77,9 +78,12 @@ class MockMatchingEngine:
         Args:
             slippage_rate: 滑点率 (默认 0.1%)
             fee_rate: 手续费率 (默认 0.04%)
+            tp_slippage_rate: 止盈滑点率 (默认 0.05%)
         """
         self.slippage_rate = slippage_rate
         self.fee_rate = fee_rate
+        # 止盈滑点率，默认 0.05%
+        self.tp_slippage_rate = tp_slippage_rate if tp_slippage_rate is not None else Decimal('0.0005')
 
     def match_orders_for_kline(
         self,
@@ -151,16 +155,20 @@ class MockMatchingEngine:
                     continue  # 该仓位在这根 K 线已死，跳过后续判定
 
             # =====================================================
-            # 2. 处理止盈单 (LIMIT + OrderRole.TP1)
+            # 2. 处理止盈单 (LIMIT + OrderRole.TP1) - T2 修复
             # =====================================================
             elif order.order_type == OrderType.LIMIT and order.order_role == OrderRole.TP1:
                 is_triggered = False
-                exec_price = order.price  # 限价单按挂单价成交
+                exec_price = Decimal('0')
 
                 if order.direction == Direction.LONG and k_high >= order.price:
                     is_triggered = True
+                    # 多头止盈：滑点向下 (少收钱)
+                    exec_price = order.price * (Decimal('1') - self.tp_slippage_rate)
                 elif order.direction == Direction.SHORT and k_low <= order.price:
                     is_triggered = True
+                    # 空头止盈：滑点向上 (多付钱)
+                    exec_price = order.price * (Decimal('1') + self.tp_slippage_rate)
 
                 if is_triggered:
                     self._execute_fill(order, exec_price, position, account, positions_map, kline.timestamp)
