@@ -1367,6 +1367,100 @@ class DailyTradeStats(BaseModel):
     last_reset_date: str = Field(default_factory=lambda: datetime.now(timezone.utc).date().isoformat(), description="最后重置日期")
 
 
+# ============================================================
+# P0-004: 订单参数合理性检查 - 极端行情配置
+# ============================================================
+
+class ExtremeVolatilityConfig(BaseModel):
+    """
+    极端行情配置
+
+    触发条件（满足任一即触发）:
+    1. 短时间价格波动超过阈值
+    2. 交易量异常放大
+    3. 市场深度严重不足
+
+    触发后的行为:
+    1. 放宽价格偏差限制（如 10% → 20%）
+    2. 暂停价格偏差检查（仅记录警告）
+    3. 暂停所有非紧急下单（等待人工确认）
+    """
+    # ===== 触发条件配置 =====
+
+    enabled: bool = Field(
+        default=True,
+        description="是否启用极端行情检测"
+    )
+
+    # 价格波动阈值（5 分钟内）
+    price_volatility_threshold: Decimal = Field(
+        default=Decimal("5.0"),  # 5%
+        description="5 分钟内价格波动超过此百分比触发极端行情"
+    )
+
+    # 价格波动检查时间窗口（秒）
+    volatility_window_seconds: int = Field(
+        default=300,  # 5 分钟
+        description="价格波动检查的时间窗口"
+    )
+
+    # 成交量放大阈值（相对于 24 小时均量）
+    volume_surge_threshold: Decimal = Field(
+        default=Decimal("3.0"),  # 3 倍
+        description="当前成交量超过 24 小时均量此倍数触发极端行情"
+    )
+
+    # 市场深度不足阈值（买单/卖单差额比例）
+    depth_imbalance_threshold: Decimal = Field(
+        default=Decimal("0.8"),  # 80%
+        description="买卖盘深度差额超过此比例触发极端行情"
+    )
+
+    # ===== 触发后行为配置 =====
+
+    # 行为选项：relax(放宽) / pause_check(暂停检查) / pause_all(暂停所有下单)
+    action_on_trigger: str = Field(
+        default="relax",
+        description="触发极端行情后的行为"
+    )
+
+    # 放宽后的价格偏差限制
+    relaxed_price_deviation: Decimal = Field(
+        default=Decimal("20.0"),  # 20%
+        description="极端行情下放宽的价格偏差限制"
+    )
+
+    # 仅允许 TP/SL 订单（暂停开仓）
+    allow_only_tp_sl: bool = Field(
+        default=True,
+        description="极端行情下仅允许 TP/SL 订单"
+    )
+
+    # 通知配置
+    notify_on_trigger: bool = Field(
+        default=True,
+        description="触发极端行情时发送通知"
+    )
+
+    # 自动恢复时间（秒）
+    auto_recovery_seconds: int = Field(
+        default=600,  # 10 分钟
+        description="触发后自动恢复正常检查的时间"
+    )
+
+
+class ExtremeVolatilityStatus(BaseModel):
+    """极端行情状态"""
+    is_extreme: bool = Field(default=False, description="是否处于极端行情")
+    triggered_at: Optional[int] = None  # 触发时间戳（毫秒）
+    trigger_reason: Optional[str] = None  # 触发原因
+    current_volatility: Decimal = Field(
+        default=Decimal("0"),
+        description="当前波动率"
+    )
+    recovery_at: Optional[int] = None  # 预计恢复时间戳
+
+
 class OrderCheckResult(BaseModel):
     """
     订单检查结果

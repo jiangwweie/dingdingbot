@@ -1,5 +1,128 @@
 # 进度日志
 
+## 2026-04-01 - P0-003 和 P0-004 资金安全加固 ✅
+
+### 任务概述
+
+执行 P0 事项的 P0-003 和 P0-004，包含完整的代码审查。
+
+---
+
+### P0-004: 添加订单参数合理性检查 ✅ (4h)
+
+**目标**: 添加订单参数合理性检查，防止粉尘订单和异常价格订单
+
+**修改文件**:
+| 文件 | 修改内容 |
+|------|----------|
+| `src/application/capital_protection.py` | 新增最小名义价值检查和价格合理性检查 |
+| `src/domain/models.py` | OrderCheckResult 添加新字段 |
+| `tests/unit/test_capital_protection.py` | 添加 8 个 P0-004 测试用例 |
+
+**功能详情**:
+
+1. **最小名义价值检查**:
+   - 阈值：5 USDT (Binance 标准)
+   - 公式：`notional_value = quantity * price`
+   - 拒绝原因：`BELOW_MIN_NOTIONAL`
+
+2. **价格合理性检查**:
+   - 阈值：10% 偏差
+   - 公式：`deviation = |order_price - ticker_price| / ticker_price`
+   - 拒绝原因：`PRICE_DEVIATION_TOO_HIGH`
+   - 仅对 LIMIT 订单生效（市价单已使用 ticker 价格）
+
+**测试结果**: 29/29 通过
+- 原有 21 个测试全部通过
+- 新增 8 个 P0-004 测试全部通过
+
+---
+
+### P0-003: 完善重启对账流程 ✅ (8h)
+
+**目标**: 完善重启对账流程，处理幽灵订单和孤儿订单，防止挂单状态丢失
+
+**修改文件**:
+| 文件 | 修改内容 |
+|------|----------|
+| `src/application/reconciliation.py` | 增强对账逻辑，添加幽灵订单和孤儿订单处理 |
+| `src/domain/models.py` | 添加 GhostOrder 和 ImportedOrder 模型 |
+| `tests/unit/test_reconciliation.py` | 添加 8 个 P0-003 测试用例 |
+
+**功能详情**:
+
+1. **幽灵订单处理** (DB 有但交易所无):
+   - 检测条件：订单在 DB 中状态为 PENDING/OPEN，但交易所查询不到
+   - 处理逻辑：标记为 CANCELLED，记录对账报告
+   - 报告字段：`ghost_orders`
+
+2. **孤儿订单处理** (交易所有但 DB 无):
+   - 入场订单 (ENTRY) → 导入 DB 并创建关联 Signal
+   - TP/SL 订单 (reduce_only=True) → 撤销并记录
+   - 报告字段：`imported_orders` 和 `canceled_orphan_orders`
+
+3. **对账报告增强**:
+   - 新增 `ghost_orders` 字段
+   - 新增 `imported_orders` 字段
+   - 新增 `canceled_orphan_orders` 字段
+   - 增强 `_generate_summary` 方法
+
+**测试结果**: 27/27 通过
+- 原有 19 个测试全部通过（1 个因逻辑变化更新断言）
+- 新增 8 个 P0-003 测试全部通过
+
+---
+
+### 代码审查 ✅
+
+**审查范围**:
+- `src/application/capital_protection.py` - P0-004 实现
+- `src/application/reconciliation.py` - P0-003 实现
+- `src/domain/models.py` - 数据模型扩展
+- `tests/unit/test_capital_protection.py` - P0-004 测试
+- `tests/unit/test_reconciliation.py` - P0-003 测试
+
+**审查结果**: ✅ 通过
+
+| 审查项 | 状态 | 说明 |
+|--------|------|------|
+| 类型安全 | ✅ | 所有字段使用 Decimal 类型，无 float |
+| 异常处理 | ✅ | 所有 I/O 操作都有 try-catch |
+| 日志记录 | ✅ | 关键操作都有日志记录 |
+| 测试覆盖 | ✅ | 新增 16 个测试用例，全部通过 |
+| 向后兼容 | ✅ | 原有 40 个测试全部通过 |
+| 代码规范 | ✅ | 遵循项目编码规范 |
+
+**发现的问题**:
+- 无严重问题
+- 注：原有测试 `test_reconciliation_orphan_order` 因逻辑变化更新了断言（预期行为）
+
+---
+
+### 交付清单
+
+#### 已修改的文件
+
+| 文件 | 修改内容 | 状态 |
+|------|----------|------|
+| `src/application/capital_protection.py` | 新增 `_check_min_notional` 和 `_check_price_reasonability` 方法 | ✅ |
+| `src/application/reconciliation.py` | 新增 `_detect_ghost_orders` 和 `_process_orphan_orders` 方法 | ✅ |
+| `src/domain/models.py` | 添加 GhostOrder、ImportedOrder、ReconciliationReport 扩展字段 | ✅ |
+| `tests/unit/test_capital_protection.py` | 新增 8 个 P0-004 测试 | ✅ |
+| `tests/unit/test_reconciliation.py` | 新增 8 个 P0-003 测试 | ✅ |
+| `docs/planning/p0-003-004-plan.md` | 任务计划文档 | ✅ |
+| `docs/planning/progress.md` | 进度日志更新 | ✅ |
+
+#### 测试结果
+
+```
+P0-004 (订单参数检查): 29/29 通过
+P0-003 (重启对账流程): 27/27 通过
+总计：56/56 通过，0 失败
+```
+
+---
+
 ## 2026-04-01 - P0-001 SQLite WAL 模式实施 ✅
 
 ### P0-001 执行结果

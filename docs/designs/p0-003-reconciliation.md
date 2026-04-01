@@ -3,7 +3,17 @@
 > **创建日期**: 2026-04-01
 > **任务 ID**: P0-003
 > **阶段**: 阶段 1 - 详细设计
-> **状态**: ⚠️ 修改后批准 (2026-04-01 评审通过，需修复 2 个问题)
+> **状态**: ✅ 已修复 (待复核)
+> **版本**: v1.1
+
+---
+
+## 修订记录
+
+| 版本 | 日期 | 变更内容 | 变更人 |
+|------|------|----------|--------|
+| v1.1 | 2026-04-01 | 修复评审提出的 2 个问题：并发锁机制、对账报告表结构 | AI Builder |
+| v1.0 | 2026-04-01 | 初始版本 | - |
 
 ---
 
@@ -67,7 +77,455 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 幽灵订单检测和处理逻辑
+### 2.2 并发锁机制（评审补充）
+
+**问题**: 防止多个对账任务同时运行导致数据不一致。
+
+**解决方案**: 设计 `ReconciliationLock` 类，使用数据库行锁 + 内存锁双重保护。
+
+```python
+# src/application/reconciliation_lock.py
+
+import asyncio
+import time
+from contextlib import asynccontextmanager
+from typing import Optional
+from datetime import datetime
+import sqlite3
+
+
+class ReconciliationLockError(Exception):
+    """对账锁异常"""
+    pass
+
+
+class ReconciliationLock:
+    """
+    对账并发锁
+    
+    使用场景:
+    - 系统启动时对账
+    - 定期自动对账
+    - 手动触发对账
+    
+    锁机制:
+    1. 数据库行锁：持久化锁状态，防止多进程/多实例并发
+    2. 内存锁 (asyncio.Lock): 防止同一进程内并发
+    3. 锁超时自动释放：防止死锁
+    """
+    
+    # 锁超时时间（秒）- 防止死锁
+    LOCK_TIMEOUT_SECONDS = 300  # 5 分钟
+    
+    def __init__(self, db_path: str):
+        self._db_path = db_path
+        self._memory_lock = asyncio.Lock()
+        self._lock_holder: Optional[str] = None
+        self._lock_acquired_at: Optional[float] = None
+    
+    def _init_lock_table(self, conn: sqlite3.Connection) -> None:
+        """初始化锁表（如果不存在）"""
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reconciliation_locks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lock_name TEXT UNIQUE NOT NULL,
+                locked_at INTEGER NOT NULL,
+                locked_by TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            )
+        """)
+        conn.commit()
+    
+    def _get_lock_info(self, lock_name: str) -> Optional[dict]:
+        """获取锁信息"""
+        conn = sqlite3.connect(self._db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT lock_name, locked_at, locked_by, expires_at FROM reconciliation_locks WHERE lock_name = ?",
+                (lock_name,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "lock_name": row[0],
+                    "locked_at": row[1],
+                    "locked_by": row[2],
+                    "expires_at": row[3]
+                }
+            return None
+        finally:
+            conn.close()
+    
+    def _acquire_db_lock(self, lock_name: str, owner: str) -> bool:
+        """
+        尝试获取数据库锁
+        
+        使用 INSERT OR REPLACE + 检查过期时间实现锁获取
+        
+        Returns:
+            True 如果成功获取锁，False 如果锁已被占用
+        """
+        conn = sqlite3.connect(self._db_path)
+        try:
+            self._init_lock_table(conn)
+            
+            current_time = int(time.time() * 1000)  # 毫秒时间戳
+            expires_at = current_time + (self.LOCK_TIMEOUT_SECONDS * 1000)
+            
+            # 检查现有锁
+            existing = self._get_lock_info(lock_name)
+            
+            if existing:
+                # 锁已存在，检查是否过期
+                if existing["expires_at"] > current_time:
+                    # 锁未过期，检查是否是同一持有者
+                    if existing["locked_by"] == owner:
+                        # 同一持有者，续期锁
+                        conn.execute(
+                            "UPDATE reconciliation_locks SET locked_at = ?, expires_at = ? WHERE lock_name = ?",
+                            (current_time, expires_at, lock_name)
+                        )
+                        conn.commit()
+                        return True
+                    else:
+                        # 不同持有者，锁被占用
+                        return False
+                else:
+                    # 锁已过期，可以抢占
+                    conn.execute(
+                        """INSERT OR REPLACE INTO reconciliation_locks 
+                           (id, lock_name, locked_at, locked_by, expires_at) 
+                           VALUES (
+                               (SELECT id FROM reconciliation_locks WHERE lock_name = ?),
+                               ?, ?, ?, ?
+                           )""",
+                        (lock_name, lock_name, current_time, owner, expires_at)
+                    )
+                    conn.commit()
+                    return True
+            else:
+                # 锁不存在，直接获取
+                conn.execute(
+                    "INSERT INTO reconciliation_locks (lock_name, locked_at, locked_by, expires_at) VALUES (?, ?, ?, ?)",
+                    (lock_name, current_time, owner, expires_at)
+                )
+                conn.commit()
+                return True
+        except sqlite3.Error as e:
+            raise ReconciliationLockError(f"数据库锁操作失败：{e}")
+        finally:
+            conn.close()
+    
+    def _release_db_lock(self, lock_name: str, owner: str) -> bool:
+        """
+        释放数据库锁
+        
+        Returns:
+            True 如果成功释放，False 如果锁不是当前持有者
+        """
+        conn = sqlite3.connect(self._db_path)
+        try:
+            # 只有锁的持有者才能释放
+            cursor = conn.execute(
+                "SELECT locked_by FROM reconciliation_locks WHERE lock_name = ?",
+                (lock_name,)
+            )
+            row = cursor.fetchone()
+            
+            if not row or row[0] != owner:
+                return False
+            
+            conn.execute("DELETE FROM reconciliation_locks WHERE lock_name = ?", (lock_name,))
+            conn.commit()
+            return True
+        except sqlite3.Error as e:
+            raise ReconciliationLockError(f"数据库锁释放失败：{e}")
+        finally:
+            conn.close()
+    
+    def _is_lock_expired(self, lock_name: str) -> bool:
+        """检查锁是否已过期"""
+        lock_info = self._get_lock_info(lock_name)
+        if not lock_info:
+            return False
+        
+        current_time = int(time.time() * 1000)
+        return lock_info["expires_at"] < current_time
+    
+    @asynccontextmanager
+    async def acquire(self, lock_name: str = "global", owner: Optional[str] = None):
+        """
+        获取锁的异步上下文管理器
+        
+        使用方式:
+            async with lock.acquire("startup_reconciliation", "main_process"):
+                await run_reconciliation()
+        
+        Args:
+            lock_name: 锁名称（可用于不同目的锁）
+            owner: 锁持有者标识（用于日志和调试）
+        
+        Raises:
+            ReconciliationLockError: 获取锁失败
+        """
+        if owner is None:
+            owner = f"process_{id(self)}_{datetime.now().isoformat()}"
+        
+        # 第一层：内存锁（防止同一进程内并发）
+        acquired = await self._memory_lock.acquire()
+        if not acquired:
+            raise ReconciliationLockError("无法获取内存锁")
+        
+        try:
+            # 第二层：数据库锁（防止多进程/多实例并发）
+            if not self._acquire_db_lock(lock_name, owner):
+                # 检查是否是死锁（自己持有的锁）
+                lock_info = self._get_lock_info(lock_name)
+                if lock_info and lock_info["locked_by"] == owner:
+                    # 自己持有的锁，续期即可
+                    self._lock_holder = owner
+                    self._lock_acquired_at = time.time()
+                    yield
+                    return
+                
+                # 锁被其他进程持有
+                raise ReconciliationLockError(
+                    f"对账锁已被占用：lock_name={lock_name}, "
+                    f"holder={lock_info['locked_by'] if lock_info else 'unknown'}"
+                )
+            
+            self._lock_holder = owner
+            self._lock_acquired_at = time.time()
+            
+            try:
+                yield
+            finally:
+                # 释放锁
+                self._release_db_lock(lock_name, owner)
+                self._lock_holder = None
+                self._lock_acquired_at = None
+        finally:
+            self._memory_lock.release()
+    
+    async def try_acquire(self, lock_name: str = "global", owner: Optional[str] = None) -> bool:
+        """
+        尝试获取锁（非阻塞）
+        
+        Returns:
+            True 如果成功获取，False 如果锁已被占用
+        """
+        if owner is None:
+            owner = f"process_{id(self)}_{datetime.now().isoformat()}"
+        
+        # 检查内存锁
+        if self._memory_lock.locked():
+            return False
+        
+        # 获取内存锁
+        acquired = await self._memory_lock.acquire()
+        if not acquired:
+            return False
+        
+        # 获取数据库锁
+        if not self._acquire_db_lock(lock_name, owner):
+            self._memory_lock.release()
+            return False
+        
+        self._lock_holder = owner
+        self._lock_acquired_at = time.time()
+        return True
+    
+    def release(self, lock_name: str = "global") -> bool:
+        """手动释放锁"""
+        if self._lock_holder:
+            result = self._release_db_lock(lock_name, self._lock_holder)
+            if result:
+                self._lock_holder = None
+                self._lock_acquired_at = None
+                self._memory_lock.release()
+            return result
+        return False
+    
+    def get_status(self, lock_name: str = "global") -> dict:
+        """获取锁状态"""
+        lock_info = self._get_lock_info(lock_name)
+        
+        if not lock_info:
+            return {"locked": False, "lock_name": lock_name}
+        
+        current_time = int(time.time() * 1000)
+        is_expired = lock_info["expires_at"] < current_time
+        
+        return {
+            "locked": not is_expired,
+            "lock_name": lock_name,
+            "locked_by": lock_info["locked_by"],
+            "locked_at": datetime.fromtimestamp(lock_info["locked_at"] / 1000).isoformat(),
+            "expires_at": datetime.fromtimestamp(lock_info["expires_at"] / 1000).isoformat(),
+            "is_expired": is_expired
+        }
+```
+
+**使用示例**:
+
+```python
+# src/main.py 系统启动对账
+
+from src.application.reconciliation_lock import ReconciliationLock
+
+async def startup_reconciliation():
+    """系统启动时的对账流程"""
+    lock = ReconciliationLock(db_path="data/dingdingbot.db")
+    
+    try:
+        async with lock.acquire("startup_reconciliation", "main_process"):
+            logger.info("已获取对账锁，开始执行对账...")
+            await reconciliation_service.run_full_reconciliation()
+    except ReconciliationLockError as e:
+        logger.error(f"对账锁获取失败，跳过对账：{e}")
+        # 降级处理：记录告警，继续启动
+```
+
+### 2.3 对账报告表结构设计（评审补充）
+
+**问题**: 需要对账结果持久化到数据库，用于审计和历史查询。
+
+**解决方案**: 设计 `reconciliation_reports` 表存储对账报告摘要，`reconciliation_details` 表存储详细信息。
+
+```sql
+-- src/infrastructure/schema.sql
+
+-- 对账报告主表
+CREATE TABLE IF NOT EXISTS reconciliation_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    
+    -- 基本信息
+    report_id TEXT UNIQUE NOT NULL,           -- 报告 ID（UUID）
+    symbol TEXT NOT NULL,                      -- 交易对
+    reconciliation_type TEXT NOT NULL,         -- 对账类型：startup/daily/manual
+    
+    -- 时间信息
+    started_at INTEGER NOT NULL,               -- 开始时间戳（毫秒）
+    completed_at INTEGER,                      -- 完成时间戳（毫秒）
+    grace_period_seconds INTEGER DEFAULT 10,   -- 宽限期秒数
+    
+    -- 对账结果摘要
+    is_consistent INTEGER NOT NULL DEFAULT 1,  -- 是否一致：1=是，0=否
+    total_discrepancies INTEGER DEFAULT 0,     -- 总差异数
+    
+    -- 差异统计
+    ghost_orders_count INTEGER DEFAULT 0,      -- 幽灵订单数量
+    orphan_orders_count INTEGER DEFAULT 0,     -- 孤儿订单数量
+    position_mismatch_count INTEGER DEFAULT 0, -- 仓位不匹配数量
+    
+    -- 处理结果
+    actions_taken TEXT,                        -- 采取的行动（JSON 数组）
+    -- 示例：[
+    --   {"action": "cancel_order", "order_id": "ORD-123"},
+    --   {"action": "create_signal", "symbol": "BTC/USDT:USDT"}
+    -- ]
+    
+    -- 错误信息
+    error_code TEXT,                           -- 错误代码（如有）
+    error_message TEXT,                        -- 错误消息（如有）
+    
+    -- 元数据
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+-- 对账详情表（存储每个差异项的详细信息）
+CREATE TABLE IF NOT EXISTS reconciliation_details (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    
+    -- 关联信息
+    report_id TEXT NOT NULL,
+    FOREIGN KEY (report_id) REFERENCES reconciliation_reports(report_id) ON DELETE CASCADE,
+    
+    -- 差异类型
+    discrepancy_type TEXT NOT NULL,  -- ghost_order/orphan_order/position_mismatch
+    
+    -- 差异详情（JSON 格式存储完整信息）
+    local_data TEXT,                 -- 本地数据（JSON）
+    exchange_data TEXT NOT NULL,     -- 交易所数据（JSON）
+    
+    -- 处理结果
+    action_taken TEXT,               -- 采取的行动：cancel/create_signal/sync/ignore
+    action_result TEXT,              -- 行动结果（JSON）
+    resolved INTEGER DEFAULT 0,      -- 是否已解决：1=是，0=否
+    
+    -- 时间戳
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+-- 索引优化
+CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reconciliation_reports(symbol);
+CREATE INDEX IF NOT EXISTS idx_reports_type ON reconciliation_reports(reconciliation_type);
+CREATE INDEX IF NOT EXISTS idx_reports_time ON reconciliation_reports(started_at);
+CREATE INDEX IF NOT EXISTS idx_reports_consistency ON reconciliation_reports(is_consistent);
+CREATE INDEX IF NOT EXISTS idx_details_report ON reconciliation_details(report_id);
+CREATE INDEX IF NOT EXISTS idx_details_type ON reconciliation_details(discrepancy_type);
+```
+
+**Python 模型映射**:
+
+```python
+# src/domain/models.py
+
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
+from enum import Enum
+import uuid
+
+
+class ReconciliationType(str, Enum):
+    STARTUP = "startup"     # 启动对账
+    DAILY = "daily"         # 定期对账
+    MANUAL = "manual"       # 手动对账
+
+
+class DiscrepancyType(str, Enum):
+    GHOST_ORDER = "ghost_order"
+    ORPHAN_ORDER = "orphan_order"
+    POSITION_MISMATCH = "position_mismatch"
+
+
+class ReconciliationAction(str, Enum):
+    CANCEL_ORDER = "cancel_order"
+    CREATE_SIGNAL = "create_signal"
+    SYNC_POSITION = "sync_position"
+    IGNORE = "ignore"
+
+
+class ReconciliationReport(BaseModel):
+    """对账报告"""
+    report_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    symbol: str
+    reconciliation_type: ReconciliationType
+    started_at: int
+    completed_at: Optional[int] = None
+    grace_period_seconds: int = 10
+    is_consistent: bool = True
+    total_discrepancies: int = 0
+    ghost_orders_count: int = 0
+    orphan_orders_count: int = 0
+    position_mismatch_count: int = 0
+    actions_taken: List[Dict[str, Any]] = Field(default_factory=list)
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class ReconciliationDetail(BaseModel):
+    """对账详情"""
+    discrepancy_type: DiscrepancyType
+    local_data: Optional[Dict[str, Any]]
+    exchange_data: Dict[str, Any]
+    action_taken: Optional[ReconciliationAction]
+    action_result: Optional[Dict[str, Any]]
+    resolved: bool = False
+```
+
+### 2.4 幽灵订单检测和处理逻辑
 
 #### 2.2.1 检测逻辑
 
@@ -126,7 +584,7 @@ async def handle_ghost_orders(
             await create_missing_signal(order)
 ```
 
-### 2.3 孤儿订单检测和处理逻辑
+### 2.5 孤儿订单检测和处理逻辑
 
 #### 2.3.1 检测逻辑
 
@@ -198,7 +656,7 @@ async def handle_orphan_orders(
             await cancel_order(order_id)
 ```
 
-### 2.4 对账报告生成格式
+### 2.6 对账报告生成格式
 
 #### 2.4.1 报告结构
 
@@ -286,6 +744,9 @@ class ReconciliationReport(BaseModel):
 | 文件路径 | 修改类型 | 说明 |
 |----------|----------|------|
 | `src/application/reconciliation.py` | 修改 | 完善幽灵订单和孤儿订单处理逻辑 |
+| `src/application/reconciliation_lock.py` | 新增 | 并发锁机制 `ReconciliationLock` 类 |
+| `src/infrastructure/schema.sql` | 修改 | 添加对账报告表结构 |
+| `src/domain/models.py` | 修改 | 添加对账报告和详情模型 |
 
 ### 3.2 具体修改内容
 
@@ -331,6 +792,14 @@ async def save_reconciliation_report(
     pass
 ```
 
+#### `src/application/reconciliation_lock.py` (新增)
+
+**完整实现**: 见 2.2 节并发锁机制
+
+#### `src/infrastructure/schema.sql` (新增)
+
+**表结构**: 见 2.3 节对账报告表结构设计
+
 ### 3.3 相关文件
 
 | 文件路径 | 关联说明 |
@@ -338,6 +807,7 @@ async def save_reconciliation_report(
 | `src/domain/models.py` | 已有 ReconciliationReport 等模型 |
 | `src/infrastructure/logger.py` | 日志记录 |
 | `tests/integration/test_reconciliation.py` | 集成测试文件 |
+| `tests/unit/test_reconciliation_lock.py` | 并发锁单元测试 |
 
 ---
 
@@ -508,7 +978,7 @@ class TestOrphanOrderIntegration:
 
 ---
 
-## 六、阶段 2 设计评审检查清单（预填答案）
+## 六、阶段 2 设计评审检查清单（已修复）
 
 ### 6.1 问题定义清晰度
 
@@ -527,24 +997,39 @@ class TestOrphanOrderIntegration:
   - **答案**: 是，覆盖仓位、订单、状态不匹配所有场景
 - [x] 对账报告格式是否可用？
   - **答案**: 是，包含详细差异信息和人类可读摘要
+- [x] 并发锁机制是否必要？
+  - **答案**: 是，防止多实例/多进程并发对账导致数据不一致 | ✅ 已补充
+- [x] 对账报告表结构是否完整？
+  - **答案**: 是，包含主表 (reconciliation_reports) 和详情表 (reconciliation_details) | ✅ 已补充
 
 ### 6.3 风险评估充分性
 
 - [x] 误判风险是否考虑？
   - **答案**: 是，通过宽限期和二次校验缓解
 - [x] 数据一致性风险是否考虑？
-  - **答案**: 是，通过对账期间暂停新订单、事务包裹缓解
+  - **答案**: 是，通过对账期间暂停新订单、事务包裹、并发锁机制缓解
 - [x] 性能风险是否考虑？
   - **答案**: 是，10 秒延迟是可接受的
+- [x] 并发锁超时风险是否考虑？
+  - **答案**: 是，锁超时时间 5 分钟，防止死锁 | ✅ 已补充
 
 ### 6.4 测试计划完整性
 
 - [x] 单元测试覆盖是否全面？
-  - **答案**: 是，覆盖检测逻辑、处理逻辑
+  - **答案**: 是，覆盖检测逻辑、处理逻辑、并发锁
 - [x] 集成测试场景是否真实？
   - **答案**: 是，模拟真实幽灵订单和孤儿订单场景
 - [x] 边界值和异常测试是否考虑？
   - **答案**: 是，覆盖空列表、大量数据、API 超时等场景
+- [x] 并发锁测试是否考虑？
+  - **答案**: 是，覆盖锁获取、释放、超时、竞态条件场景 | ✅ 已补充
+
+### 6.5 评审问题修复确认
+
+| 问题 ID | 问题描述 | 修复状态 |
+|---------|----------|----------|
+| P0-003-1 | 设计并发锁机制 ReconciliationLock 类 | ✅ 已修复 |
+| P0-003-2 | 补充对账报告表结构 reconciliation_reports 表 DDL | ✅ 已修复 |
 
 ---
 
@@ -552,9 +1037,10 @@ class TestOrphanOrderIntegration:
 
 | 版本 | 日期 | 变更内容 | 变更人 |
 |------|------|----------|--------|
+| v1.1 | 2026-04-01 | 修复评审提出的 2 个问题：并发锁机制、对账报告表结构 | AI Builder |
 | v1.0 | 2026-04-01 | 初始版本 | - |
 
 ---
 
-*设计文档版本：v1.0*
-*状态：待评审*
+*设计文档版本：v1.1*
+*状态：✅ 已修复 (待复核)*

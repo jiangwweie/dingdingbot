@@ -9,9 +9,11 @@ Reference: docs/designs/phase5-detailed-design.md Section 3.4
 P0-004: 订单参数合理性检查
 - 最小订单金额检查（防止粉尘订单）
 - 价格合理性检查（防止异常价格订单）
+- 极端行情检测与放宽逻辑（波动率检测）
 """
 import asyncio
 import threading
+import time
 from datetime import datetime, timezone, date
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
@@ -23,9 +25,12 @@ from src.domain.models import (
     OrderCheckResult,
     DailyTradeStats,
     CapitalProtectionConfig,
+    ExtremeVolatilityConfig,
+    ExtremeVolatilityStatus,
 )
 from src.domain.exceptions import FatalStartupError
 from src.infrastructure.logger import logger
+from src.application.volatility_detector import VolatilityDetector
 
 # Avoid circular imports
 if TYPE_CHECKING:

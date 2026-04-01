@@ -223,7 +223,12 @@ async def test_reconciliation_position_mismatch(reconciliation_service, mock_gat
 
 @pytest.mark.asyncio
 async def test_reconciliation_orphan_order(reconciliation_service, mock_gateway, mock_position_mgr):
-    """测试：孤儿订单（交易所有订单但本地没有）"""
+    """测试：孤儿订单（交易所有订单但本地没有）
+
+    P0-003 增强：
+    - 孤儿订单既计入 orphan_orders（检测）
+    - 又计入 imported_orders（处理后导入）
+    """
     mock_position_mgr.get_open_positions = AsyncMock(return_value=[])
     mock_gateway.rest_exchange.fetch_positions = AsyncMock(return_value=[])
     mock_gateway.rest_exchange.fetch_open_orders = AsyncMock(return_value=[
@@ -244,11 +249,13 @@ async def test_reconciliation_orphan_order(reconciliation_service, mock_gateway,
     reconciliation_service._grace_period_seconds = 0
     report = await reconciliation_service.run_reconciliation("BTC/USDT:USDT")
 
-    # 验证
+    # 验证：P0-003 增强后，孤儿订单会被检测并处理
     assert report.is_consistent is False
-    assert report.total_discrepancies == 1
+    assert report.total_discrepancies == 2  # 1 orphan_orders + 1 imported_orders
     assert len(report.orphan_orders) == 1
     assert report.orphan_orders[0].exchange_order_id == "ex_order_001"
+    assert len(report.imported_orders) == 1
+    assert report.imported_orders[0].order_id == "ex_order_001"
 
 
 @pytest.mark.asyncio

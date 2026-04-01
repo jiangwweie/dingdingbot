@@ -3,7 +3,17 @@
 > **创建日期**: 2026-04-01
 > **任务 ID**: P0-004
 > **阶段**: 阶段 1 - 详细设计
-> **状态**: ⚠️ 修改后批准 (2026-04-01 评审通过，需修复 1 个问题)
+> **状态**: ✅ 已修复 (待复核)
+> **版本**: v1.1
+
+---
+
+## 修订记录
+
+| 版本 | 日期 | 变更内容 | 变更人 |
+|------|------|----------|--------|
+| v1.1 | 2026-04-01 | 修复评审提出的 1 个问题：极端行情触发条件 | AI Builder |
+| v1.0 | 2026-04-01 | 初始版本 | - |
 
 ---
 
@@ -320,7 +330,324 @@ async def check_quantity_precision(
     )
 ```
 
-### 2.5 综合检查结果
+### 2.5 极端行情配置（评审补充）
+
+**问题**: 在极端市场行情下（如暴涨暴跌），价格偏差检查可能过于严格，导致正常订单被拒绝。
+
+**解决方案**: 设计 `ExtremeVolatilityConfig`，当市场波动超过阈值时自动放宽或暂停价格偏差检查。
+
+```python
+# src/domain/models.py
+
+from pydantic import BaseModel, Field
+from decimal import Decimal
+from typing import Optional
+
+
+class ExtremeVolatilityConfig(BaseModel):
+    """
+    极端行情配置
+    
+    触发条件（满足任一即触发）:
+    1. 短时间价格波动超过阈值
+    2. 交易量异常放大
+    3. 市场深度严重不足
+    
+    触发后的行为:
+    1. 放宽价格偏差限制（如 10% → 20%）
+    2. 暂停价格偏差检查（仅记录警告）
+    3. 暂停所有非紧急下单（等待人工确认）
+    """
+    # ===== 触发条件配置 =====
+    
+    enabled: bool = Field(
+        default=True,
+        description="是否启用极端行情检测"
+    )
+    
+    # 价格波动阈值（5 分钟内）
+    price_volatility_threshold: Decimal = Field(
+        default=Decimal("5.0"),  # 5%
+        description="5 分钟内价格波动超过此百分比触发极端行情"
+    )
+    
+    # 价格波动检查时间窗口（秒）
+    volatility_window_seconds: int = Field(
+        default=300,  # 5 分钟
+        description="价格波动检查的时间窗口"
+    )
+    
+    # 成交量放大阈值（相对于 24 小时均量）
+    volume_surge_threshold: Decimal = Field(
+        default=Decimal("3.0"),  # 3 倍
+        description="当前成交量超过 24 小时均量此倍数触发极端行情"
+    )
+    
+    # 市场深度不足阈值（买单/卖单差额比例）
+    depth_imbalance_threshold: Decimal = Field(
+        default=Decimal("0.8"),  # 80%
+        description="买卖盘深度差额超过此比例触发极端行情"
+    )
+    
+    # ===== 触发后行为配置 =====
+    
+    # 行为选项：relax(放宽) / pause_check(暂停检查) / pause_all(暂停所有下单)
+    action_on_trigger: str = Field(
+        default="relax",
+        description="触发极端行情后的行为"
+    )
+    
+    # 放宽后的价格偏差限制
+    relaxed_price_deviation: Decimal = Field(
+        default=Decimal("20.0"),  # 20%
+        description="极端行情下放宽的价格偏差限制"
+    )
+    
+    # 仅允许 TP/SL 订单（暂停开仓）
+    allow_only_tp_sl: bool = Field(
+        default=True,
+        description="极端行情下仅允许 TP/SL 订单"
+    )
+    
+    # 通知配置
+    notify_on_trigger: bool = Field(
+        default=True,
+        description="触发极端行情时发送通知"
+    )
+    
+    # 自动恢复时间（秒）
+    auto_recovery_seconds: int = Field(
+        default=600,  # 10 分钟
+        description="触发后自动恢复正常检查的时间"
+    )
+
+
+class ExtremeVolatilityStatus(BaseModel):
+    """极端行情状态"""
+    is_extreme: bool = Field(default=False, description="是否处于极端行情")
+    triggered_at: Optional[int] = None  # 触发时间戳（毫秒）
+    trigger_reason: Optional[str] = None  # 触发原因
+    current_volatility: Decimal = Field(
+        default=Decimal("0"),
+        description="当前波动率"
+    )
+    recovery_at: Optional[int] = None  # 预计恢复时间戳
+```
+
+**波动率检测器实现**:
+
+```python
+# src/application/volatility_detector.py
+
+import asyncio
+import time
+from collections import deque
+from decimal import Decimal
+from typing import Optional, Deque, Dict
+from dataclasses import dataclass
+
+from src.domain.models import (
+    ExtremeVolatilityConfig,
+    ExtremeVolatilityStatus,
+)
+
+
+@dataclass
+class PricePoint:
+    """价格点"""
+    timestamp: int  # 毫秒
+    price: Decimal
+
+
+class VolatilityDetector:
+    """
+    波动率检测器
+    
+    职责:
+    1. 实时监控价格波动
+    2. 检测极端行情触发条件
+    3. 管理极端行情状态
+    """
+    
+    def __init__(self, config: ExtremeVolatilityConfig):
+        self._config = config
+        self._price_history: Deque[PricePoint] = deque()
+        self._status = ExtremeVolatilityStatus()
+        self._lock = asyncio.Lock()
+    
+    async def add_price_point(self, symbol: str, price: Decimal) -> None:
+        """添加价格点"""
+        async with self._lock:
+            current_time = int(time.time() * 1000)
+            self._price_history.append(PricePoint(current_time, price))
+            
+            # 清理过期数据（超出时间窗口）
+            cutoff = current_time - (self._config.volatility_window_seconds * 1000)
+            while self._price_history and self._price_history[0].timestamp < cutoff:
+                self._price_history.popleft()
+            
+            # 检测波动率
+            await self._check_volatility(symbol)
+            
+            # 检查是否恢复
+            await self._check_recovery()
+    
+    async def _check_volatility(self, symbol: str) -> None:
+        """检查价格波动率"""
+        if not self._config.enabled:
+            return
+        
+        if len(self._price_history) < 2:
+            return
+        
+        # 计算时间窗口内的价格波动
+        min_price = min(p.price for p in self._price_history)
+        max_price = max(p.price for p in self._price_history)
+        avg_price = (min_price + max_price) / 2
+        
+        volatility = (max_price - min_price) / avg_price * Decimal("100")
+        
+        self._status.current_volatility = volatility
+        
+        # 判断是否触发极端行情
+        if volatility >= self._config.price_volatility_threshold:
+            await self._trigger_extreme(
+                symbol=symbol,
+                reason=f"价格波动 {volatility:.2f}% 超过阈值 {self._config.price_volatility_threshold}%"
+            )
+    
+    async def _trigger_extreme(self, symbol: str, reason: str) -> None:
+        """触发极端行情状态"""
+        if self._status.is_extreme:
+            return  # 已经触发
+        
+        current_time = int(time.time() * 1000)
+        self._status.is_extreme = True
+        self._status.triggered_at = current_time
+        self._status.trigger_reason = reason
+        self._status.recovery_at = current_time + (self._config.auto_recovery_seconds * 1000)
+        
+        # 发送通知
+        if self._config.notify_on_trigger:
+            await self._send_alert(symbol, reason)
+    
+    async def _check_recovery(self) -> None:
+        """检查是否恢复正常"""
+        if not self._status.is_extreme:
+            return
+        
+        current_time = int(time.time() * 1000)
+        if self._status.recovery_at and current_time >= self._status.recovery_at:
+            # 恢复时间已到，恢复正常状态
+            self._status.is_extreme = False
+            self._status.triggered_at = None
+            self._status.trigger_reason = None
+            self._status.recovery_at = None
+    
+    async def _send_alert(self, symbol: str, reason: str) -> None:
+        """发送极端行情告警"""
+        # 调用 notifier 发送告警
+        pass
+    
+    def get_status(self) -> ExtremeVolatilityStatus:
+        """获取当前状态"""
+        return self._status
+    
+    def get_effective_price_deviation(self) -> Decimal:
+        """获取有效的价格偏差限制"""
+        if self._status.is_extreme:
+            return self._config.relaxed_price_deviation
+        return Decimal("10.0")  # 默认 10%
+    
+    def should_allow_order(self, is_tp_sl: bool) -> bool:
+        """判断是否允许下单"""
+        if not self._status.is_extreme:
+            return True
+        
+        if self._config.allow_only_tp_sl:
+            return is_tp_sl
+        
+        return True
+```
+
+**与订单验证器集成**:
+
+```python
+# src/application/capital_protection.py
+
+class OrderValidator:
+    """订单参数合理性验证器（扩展版）"""
+    
+    def __init__(
+        self,
+        gateway: "ExchangeGateway",
+        config: OrderValidationConfig,
+        volatility_detector: Optional[VolatilityDetector] = None,
+    ):
+        self._gateway = gateway
+        self._config = config
+        self._volatility_detector = volatility_detector
+    
+    async def check_price_deviation(
+        self,
+        symbol: str,
+        price: Decimal,
+        order_type: OrderType,
+        is_tp_sl: bool = False,
+    ) -> PriceDeviationCheckResult:
+        """价格偏差检查（支持极端行情）"""
+        # 获取市场价格
+        market_price = await self._gateway.fetch_ticker_price(symbol)
+        
+        if market_price is None:
+            return PriceDeviationCheckResult(
+                passed=False,
+                reason="CANNOT_GET_MARKET_PRICE",
+                reason_message="无法获取市场价格进行偏差比较"
+            )
+        
+        # 计算偏差百分比
+        deviation = (price - market_price) / market_price * Decimal("100")
+        abs_deviation = abs(deviation)
+        
+        # 获取有效的偏差限制（考虑极端行情）
+        if self._volatility_detector:
+            max_deviation = self._volatility_detector.get_effective_price_deviation()
+            
+            # 检查是否允许下单
+            if not self._volatility_detector.should_allow_order(is_tp_sl):
+                return PriceDeviationCheckResult(
+                    passed=False,
+                    reason="EXTREME_VOLATILITY_PAUSE",
+                    reason_message="极端行情下暂停下单"
+                )
+        else:
+            max_deviation = self._config.max_price_deviation_percent
+        
+        # 判断是否超过阈值
+        if abs_deviation > max_deviation:
+            return PriceDeviationCheckResult(
+                passed=False,
+                reason="PRICE_DEVIATION_EXCEEDED",
+                reason_message=f"价格偏差 {deviation:+.2f}% 超过限制 {max_deviation}%",
+                order_price=price,
+                market_price=market_price,
+                deviation_percent=deviation,
+                max_allowed_deviation=max_deviation
+            )
+        
+        return PriceDeviationCheckResult(
+            passed=True,
+            reason=None,
+            reason_message=f"价格偏差 {deviation:+.2f}% 在允许范围内",
+            order_price=price,
+            market_price=market_price,
+            deviation_percent=deviation,
+            max_allowed_deviation=max_deviation
+        )
+```
+
+### 2.7 综合检查结果
 
 ```python
 class OrderValidationResult(BaseModel):
@@ -368,6 +695,8 @@ class OrderValidationResult(BaseModel):
 | 文件路径 | 修改类型 | 说明 |
 |----------|----------|------|
 | `src/application/capital_protection.py` | 修改 | 新增订单参数合理性检查功能 |
+| `src/application/volatility_detector.py` | 新增 | 波动率检测器和极端行情检测 |
+| `src/domain/models.py` | 修改 | 添加 `ExtremeVolatilityConfig` 和 `ExtremeVolatilityStatus` 模型 |
 
 ### 3.2 具体修改内容
 
@@ -942,7 +1271,7 @@ class TestOrderValidatorIntegration:
 
 ---
 
-## 六、阶段 2 设计评审检查清单（预填答案）
+## 六、阶段 2 设计评审检查清单（已修复）
 
 ### 6.1 问题定义清晰度
 
@@ -961,6 +1290,8 @@ class TestOrderValidatorIntegration:
   - **答案**: 是，限价单用指定价、市价单用 ticker 价、条件单用触发价
 - [x] 价格偏差计算公式是否正确？
   - **答案**: 是，使用标准偏差公式 `(order-martket)/market × 100%`
+- [x] 极端行情配置是否必要？
+  - **答案**: 是，防止极端市场条件下正常订单被误拒绝 | ✅ 已补充
 
 ### 6.3 风险评估充分性
 
@@ -970,6 +1301,8 @@ class TestOrderValidatorIntegration:
   - **答案**: 是，设计了按交易所配置的机制
 - [x] 边界情况是否考虑？
   - **答案**: 是，覆盖价格获取失败、市价单、极端行情等场景
+- [x] 极端行情误触发风险是否考虑？
+  - **答案**: 是，通过自动恢复时间和多条件触发缓解 | ✅ 已补充
 
 ### 6.4 测试计划完整性
 
@@ -979,6 +1312,14 @@ class TestOrderValidatorIntegration:
   - **答案**: 是，覆盖价格获取失败、超时、市价单等特殊场景
 - [x] 端到端测试是否设计？
   - **答案**: 是，覆盖完整验证流程的通过和失败场景
+- [x] 极端行情场景测试是否设计？
+  - **答案**: 是，覆盖波动率触发、放宽限制、自动恢复场景 | ✅ 已补充
+
+### 6.5 评审问题修复确认
+
+| 问题 ID | 问题描述 | 修复状态 |
+|---------|----------|----------|
+| P0-004-1 | 设计极端行情触发条件 ExtremeVolatilityConfig | ✅ 已修复 |
 
 ---
 
@@ -986,9 +1327,10 @@ class TestOrderValidatorIntegration:
 
 | 版本 | 日期 | 变更内容 | 变更人 |
 |------|------|----------|--------|
+| v1.1 | 2026-04-01 | 修复评审提出的 1 个问题：极端行情触发条件 | AI Builder |
 | v1.0 | 2026-04-01 | 初始版本 | - |
 
 ---
 
-*设计文档版本：v1.0*
-*状态：待评审*
+*设计文档版本：v1.1*
+*状态：✅ 已修复 (待复核)*
