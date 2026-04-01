@@ -161,6 +161,9 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 
+from fastapi.responses import JSONResponse
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
     """
@@ -170,23 +173,32 @@ async def http_exception_handler(request, exc: HTTPException):
     """
     # 如果 detail 已经是 dict 格式（包含 error_code 和 message），直接使用
     if isinstance(exc.detail, dict):
-        return ErrorResponse(
+        content = ErrorResponse(
             error_code=exc.detail.get("error_code", str(exc.status_code)),
             message=exc.detail.get("message", str(exc.detail))
-        )
-    # 否则使用默认格式
-    return ErrorResponse(
-        error_code=str(exc.status_code),
-        message=str(exc.detail)
+        ).model_dump()
+    else:
+        # 否则使用默认格式
+        content = ErrorResponse(
+            error_code=str(exc.status_code),
+            message=str(exc.detail)
+        ).model_dump()
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=content
     )
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
     """统一处理请求验证错误"""
-    return ErrorResponse(
-        error_code="VALIDATION_ERROR",
-        message=f"请求参数验证失败：{str(exc.errors())}"
+    return JSONResponse(
+        status_code=422,
+        content=ErrorResponse(
+            error_code="VALIDATION_ERROR",
+            message=f"请求参数验证失败：{str(exc.errors())}"
+        ).model_dump()
     )
 
 
@@ -194,9 +206,12 @@ async def validation_exception_handler(request, exc: RequestValidationError):
 async def general_exception_handler(request, exc: Exception):
     """统一处理未预料的异常"""
     logger.error(f"未处理的异常：{str(exc)}")
-    return ErrorResponse(
-        error_code="INTERNAL_ERROR",
-        message="服务器内部错误"
+    return JSONResponse(
+        status_code=500,
+        content=ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message="服务器内部错误"
+        ).model_dump()
     )
 
 

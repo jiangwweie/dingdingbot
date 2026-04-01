@@ -31,12 +31,12 @@ class TestPhase5Models:
         req = OrderRequest(
             symbol="BTC/USDT:USDT",
             order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
             direction=Direction.LONG,
-            role=OrderRole.ENTRY,
-            amount=Decimal("0.001")
+            quantity=Decimal("0.001")
         )
         assert req.symbol == "BTC/USDT:USDT"
-        assert req.amount == Decimal("0.001")
+        assert req.quantity == Decimal("0.001")
         assert req.reduce_only is False
 
     def test_order_request_limit(self):
@@ -44,9 +44,9 @@ class TestPhase5Models:
         req = OrderRequest(
             symbol="BTC/USDT:USDT",
             order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
             direction=Direction.LONG,
-            role=OrderRole.ENTRY,
-            amount=Decimal("0.001"),
+            quantity=Decimal("0.001"),
             price=Decimal("100000")
         )
         assert req.price == Decimal("100000")
@@ -57,8 +57,8 @@ class TestPhase5Models:
             symbol="BTC/USDT:USDT",
             order_type=OrderType.STOP_MARKET,
             direction=Direction.LONG,
-            role=OrderRole.SL,
-            amount=Decimal("0.001"),
+            order_role=OrderRole.SL,
+            quantity=Decimal("0.001"),
             trigger_price=Decimal("98000"),
             reduce_only=True
         )
@@ -71,12 +71,12 @@ class TestPhase5Models:
             symbol="BTC/USDT:USDT",
             order_type=OrderType.LIMIT,
             direction=Direction.SHORT,
-            role=OrderRole.TP1,
-            amount=Decimal("0.0003"),
+            order_role=OrderRole.TP1,
+            quantity=Decimal("0.0003"),
             price=Decimal("102000"),
             reduce_only=True  # TP 订单必须为 True
         )
-        assert req.role == OrderRole.TP1
+        assert req.order_role == OrderRole.TP1
         assert req.reduce_only is True
 
     def test_order_request_serialization(self):
@@ -85,8 +85,8 @@ class TestPhase5Models:
             symbol="BTC/USDT:USDT",
             order_type=OrderType.MARKET,
             direction=Direction.LONG,
-            role=OrderRole.ENTRY,
-            amount=Decimal("0.001"),
+            order_role=OrderRole.ENTRY,
+            quantity=Decimal("0.001"),
             stop_loss=Decimal("95000"),
             take_profit=Decimal("105000")
         )
@@ -94,6 +94,7 @@ class TestPhase5Models:
         data = req.model_dump()
         assert data["symbol"] == "BTC/USDT:USDT"
         assert data["order_type"] == "MARKET"
+        assert data["order_role"] == "ENTRY"
         assert data["direction"] == "LONG"
 
 
@@ -107,45 +108,40 @@ class TestDcaStrategy:
         """验证 DCA 配置"""
         config = DcaConfig(
             total_amount=Decimal("0.003"),
-            num_batches=3,
-            trigger_type="price",
-            price_drop_percent=Decimal("2.0")
+            entry_batches=3,
+            entry_ratios=[Decimal("0.5"), Decimal("0.3"), Decimal("0.2")]
         )
         assert config.total_amount == Decimal("0.003")
-        assert config.num_batches == 3
-        assert config.price_drop_percent == Decimal("2.0")
+        assert config.entry_batches == 3
+        assert config.entry_ratios == [Decimal("0.5"), Decimal("0.3"), Decimal("0.2")]
 
     def test_dca_batch_calculation(self):
         """验证 DCA 分批计算"""
         config = DcaConfig(
             total_amount=Decimal("0.003"),
-            num_batches=3,
-            trigger_type="price",
-            price_drop_percent=Decimal("2.0")
+            entry_batches=3,
+            entry_ratios=[Decimal("0.5"), Decimal("0.3"), Decimal("0.2")]
         )
-        strategy = DcaStrategy(config=config)
 
-        # 每批数量 = 总数量 / 批次数
-        batch_amount = config.total_amount / config.num_batches
-        assert batch_amount == Decimal("0.001")
+        # 第 1 批数量 = 总数量 * 0.5
+        first_batch_qty = config.total_amount * config.entry_ratios[0]
+        assert first_batch_qty == Decimal("0.0015")
 
     def test_dca_price_levels(self):
-        """验证 DCA 价格档位计算"""
+        """验证 DCA 价格档位计算（LIMIT 订单）"""
         config = DcaConfig(
             total_amount=Decimal("0.003"),
-            num_batches=3,
-            trigger_type="price",
-            price_drop_percent=Decimal("2.0")
+            entry_batches=3,
+            entry_ratios=[Decimal("0.5"), Decimal("0.3"), Decimal("0.2")]
         )
-        strategy = DcaStrategy(config=config)
 
         entry_price = Decimal("100000")
 
-        # 第 2 批价格 = 入场价 * (1 - 2%)
+        # 第 2 批限价单价格 = 入场价 * (1 - 2%)
         price_level_2 = entry_price * (Decimal("1") - Decimal("0.02"))
         assert price_level_2 == Decimal("98000")
 
-        # 第 3 批价格 = 入场价 * (1 - 4%)
+        # 第 3 批限价单价格 = 入场价 * (1 - 4%)
         price_level_3 = entry_price * (Decimal("1") - Decimal("0.04"))
         assert price_level_3 == Decimal("96000")
 
@@ -160,11 +156,11 @@ class TestCapitalProtectionLogic:
         """单笔损失计算"""
         entry_price = Decimal("100000")
         stop_loss = Decimal("98000")  # 2% 止损
-        amount = Decimal("0.001")
+        quantity = Decimal("0.001")
 
         # 损失 = 数量 * (入场价 - 止损价)
-        loss = amount * (entry_price - stop_loss)
-        assert loss == Decimal("20")  # 20 USDT
+        loss = quantity * (entry_price - stop_loss)
+        assert loss == Decimal("2.0")  # 2.0 USDT
 
     def test_single_trade_loss_percent(self):
         """单笔损失百分比"""

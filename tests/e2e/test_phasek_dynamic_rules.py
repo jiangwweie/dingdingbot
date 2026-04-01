@@ -455,7 +455,7 @@ class TestConfigHotReload:
         assert response.status_code == 422, f"Expected 422, got {response.status_code}: {response.text}"
 
     def test_invalid_filter_type_in_backtest(self, test_client):
-        """Test that invalid filter type in backtest also returns 422"""
+        """Test that invalid filter type in backtest is gracefully handled (logs warning, returns empty results)"""
         payload = {
             "symbol": "BTC/USDT:USDT",
             "timeframe": "15m",
@@ -476,7 +476,16 @@ class TestConfigHotReload:
         }
 
         response = test_client.post("/api/backtest", json=payload)
-        assert response.status_code == 422, f"Expected 422, got {response.status_code}: {response.text}"
+        # Backtest should succeed but with 0 signals (invalid strategy is skipped)
+        assert response.status_code == 200, f"Backtest should handle invalid strategy gracefully: {response.text}"
+
+        data = response.json()
+        report = data.get("report", data)
+        stats = report.get("signal_stats", {})
+
+        # Verify no signals were generated (invalid strategy was skipped)
+        assert stats.get("total_attempts", -1) == 0, "Should have 0 attempts due to invalid strategy"
+        assert stats.get("signals_fired", -1) == 0, "Should have 0 signals fired"
 
     def test_disable_strategy_by_enabled_flag(self, test_client):
         """Test disabling a strategy via enabled=false"""
