@@ -80,21 +80,23 @@ class EngulfingStrategy(PatternStrategy):
         prev_is_bullish = prev_close > prev_open  # 阳线
 
         # 检测看涨吞没 (Bullish Engulfing)
-        # 条件：前一根阴线，当前根阳线，且阳线实体包覆阴线实体
+        # 条件：前一根阴线，当前根阳线，且阳线实体完全包覆阴线实体
+        # 使用严格不等式确保真正的包覆（不仅仅是接触）
         is_bullish_engulfing = (
             not prev_is_bullish and  # 前一根阴线
             curr_is_bullish and      # 当前根阳线
-            curr_open <= prev_close and  # 阳线开盘 <= 阴线收盘 (开盘价)
-            curr_close >= prev_open      # 阳线收盘 >= 阴线开盘 (最高价)
+            curr_open < prev_close and  # 阳线开盘 < 阴线收盘 (开盘价)
+            curr_close > prev_open      # 阳线收盘 > 阴线开盘 (最高价)
         )
 
         # 检测看跌吞没 (Bearish Engulfing)
-        # 条件：前一根阳线，当前根阴线，且阴线实体包覆阳线实体
+        # 条件：前一根阳线，当前根阴线，且阴线实体完全包覆阳线实体
+        # 使用严格不等式确保真正的包覆（不仅仅是接触）
         is_bearish_engulfing = (
             prev_is_bullish and      # 前一根阳线
             not curr_is_bullish and  # 当前根阴线
-            curr_open >= prev_close and  # 阴线开盘 >= 阳线收盘 (开盘价)
-            curr_close <= prev_open      # 阴线收盘 <= 阳线开盘 (最低价)
+            curr_open > prev_close and  # 阴线开盘 > 阳线收盘 (开盘价)
+            curr_close < prev_open      # 阴线收盘 < 阳线开盘 (最低价)
         )
 
         if not is_bullish_engulfing and not is_bearish_engulfing:
