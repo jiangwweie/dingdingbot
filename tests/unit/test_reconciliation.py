@@ -396,6 +396,178 @@ async def test_handle_orphan_orders_keep_entry_order(reconciliation_service, moc
 
 
 # ============================================================
+# 测试：P5-011 孤儿订单宽限期处理
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_handle_orphan_orders_pending_tp_sl_with_grace_period(reconciliation_service, mock_gateway, mock_position_mgr):
+    """测试：P5-011 - TP/SL 孤儿订单进入待确认列表，等待宽限期后二次校验"""
+    orphan_orders = [
+        create_sample_order(
+            order_id="tp_001",
+            exchange_order_id="ex_tp_001",
+            order_role=OrderRole.TP1,
+            reduce_only=True,
+        )
+    ]
+    
+    # Mock 本地仓位列表 - 第一次为空，第二次返回仓位（模拟仓位出现）
+    reconciliation_service._get_local_positions = AsyncMock(return_value=[
+        create_sample_position(symbol="BTC/USDT:USDT")
+    ])
+    
+    # Mock cancel_order 返回成功
+    from src.domain.models import OrderCancelResult
+    mock_gateway.cancel_order = AsyncMock(return_value=OrderCancelResult(
+        order_id="tp_001",
+        exchange_order_id="ex_tp_001",
+        symbol="BTC/USDT:USDT",
+    ))
+    
+    # 执行
+    with patch('asyncio.sleep', new=AsyncMock()) as mock_sleep:
+        await reconciliation_service.handle_orphan_orders(orphan_orders)
+    
+    # 验证：订单应该从待确认列表中移除（因为仓位出现了，被保留）
+    assert "tp_001" not in reconciliation_service._pending_orphan_orders
+    
+    # 验证：等待了宽限期
+    mock_sleep.assert_called_once_with(10)
+    
+    # 验证：没有调用 cancel_order（因为仓位出现了）
+    mock_gateway.cancel_order.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_verify_pending_orphan_orders_position_appears(reconciliation_service, mock_gateway):
+    """测试：P5-011 - 宽限期后仓位出现，保留订单（WebSocket 延迟）"""
+    # 设置待确认订单
+    order = create_sample_order(
+        order_id="tp_001",
+        exchange_order_id="ex_tp_001",
+        order_role=OrderRole.TP1,
+        reduce_only=True,
+        symbol="BTC/USDT:USDT",
+    )
+    reconciliation_service._pending_orphan_orders["tp_001"] = {
+        "order": order,
+        "found_at": int(time.time() * 1000),
+        "confirmed": False,
+    }
+    
+    # Mock 本地仓位列表（仓位已存在）
+    reconciliation_service._get_local_positions = AsyncMock(return_value=[
+        create_sample_position(symbol="BTC/USDT:USDT")
+    ])
+    
+    # 执行
+    await reconciliation_service._verify_pending_orphan_orders()
+    
+    # 验证：订单应该从待确认列表中移除（因为仓位出现了）
+    assert "tp_001" not in reconciliation_service._pending_orphan_orders
+    
+    # 验证：没有调用 cancel_order
+    mock_gateway.cancel_order.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_verify_pending_orphan_orders_position_still_missing(reconciliation_service, mock_gateway):
+    """测试：P5-011 - 宽限期后仓位仍不存在，撤销订单"""
+    # 设置待确认订单
+    order = create_sample_order(
+        order_id="tp_001",
+        exchange_order_id="ex_tp_001",
+        order_role=OrderRole.TP1,
+        reduce_only=True,
+        symbol="BTC/USDT:USDT",
+    )
+    reconciliation_service._pending_orphan_orders["tp_001"] = {
+        "order": order,
+        "found_at": int(time.time() * 1000),
+        "confirmed": False,
+    }
+    
+    # Mock 本地仓位列表为空（仓位不存在）
+    reconciliation_service._get_local_positions = AsyncMock(return_value=[])
+    
+    # Mock cancel_order 返回成功
+    mock_gateway.cancel_order = AsyncMock(return_value=OrderCancelResult(
+        order_id="tp_001",
+        exchange_order_id="ex_tp_001",
+        symbol="BTC/USDT:USDT",
+    ))
+    
+    # 执行
+    await reconciliation_service._verify_pending_orphan_orders()
+    
+    # 验证：订单应该从待确认列表中移除
+    assert "tp_001" not in reconciliation_service._pending_orphan_orders
+    
+    # 验证：调用了 cancel_order
+    mock_gateway.cancel_order.assert_called_once_with(
+        order_id="ex_tp_001",
+        symbol="BTC/USDT:USDT",
+    )
+
+
+@pytest.mark.asyncio
+async def test_verify_pending_orphan_orders_multiple_orders(reconciliation_service, mock_gateway):
+    """测试：P5-011 - 处理多个待确认订单，部分撤销部分保留"""
+    # 设置多个待确认订单
+    order1 = create_sample_order(
+        order_id="tp_001",
+        exchange_order_id="ex_tp_001",
+        order_role=OrderRole.TP1,
+        reduce_only=True,
+        symbol="BTC/USDT:USDT",
+    )
+    order2 = create_sample_order(
+        order_id="tp_002",
+        exchange_order_id="ex_tp_002",
+        order_role=OrderRole.TP2,
+        reduce_only=True,
+        symbol="ETH/USDT:USDT",
+    )
+    reconciliation_service._pending_orphan_orders = {
+        "tp_001": {
+            "order": order1,
+            "found_at": int(time.time() * 1000),
+            "confirmed": False,
+        },
+        "tp_002": {
+            "order": order2,
+            "found_at": int(time.time() * 1000),
+            "confirmed": False,
+        },
+    }
+    
+    # Mock 本地仓位列表 - BTC 仓位存在，ETH 仓位不存在
+    reconciliation_service._get_local_positions = AsyncMock(return_value=[
+        create_sample_position(symbol="BTC/USDT:USDT"),
+    ])
+    
+    # Mock cancel_order 返回成功
+    mock_gateway.cancel_order = AsyncMock(return_value=OrderCancelResult(
+        order_id="tp_002",
+        exchange_order_id="ex_tp_002",
+        symbol="ETH/USDT:USDT",
+    ))
+    
+    # 执行
+    await reconciliation_service._verify_pending_orphan_orders()
+    
+    # 验证：BTC 订单应该保留（从待确认列表中移除），ETH 订单应该被撤销
+    assert "tp_001" not in reconciliation_service._pending_orphan_orders  # 保留了
+    assert "tp_002" not in reconciliation_service._pending_orphan_orders  # 撤销了
+    
+    # 验证：只调用了 ETH 订单的 cancel_order
+    mock_gateway.cancel_order.assert_called_once_with(
+        order_id="ex_tp_002",
+        symbol="ETH/USDT:USDT",
+    )
+
+
+# ============================================================
 # 测试：二次校验逻辑
 # ============================================================
 

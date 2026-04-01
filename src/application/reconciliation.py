@@ -61,6 +61,11 @@ class ReconciliationService:
     - REST API 和 WebSocket 之间存在时差
     - 对账差异不立即判定为异常，先加入宽限期
     - 宽限期后二次校验，确认是否为真实异常
+
+    P5-011 修复:
+    - 孤儿订单立即撤销可能误删刚建好仓位的保护伞
+    - TP/SL 孤儿单先放入 pending_orphan_orders 列表等待 10 秒
+    - 10 秒后二次校验，确认仓位仍不存在再撤销
     """
 
     def __init__(
@@ -83,6 +88,7 @@ class ReconciliationService:
         self._position_mgr = position_mgr
         self._order_mgr = order_mgr
         self._grace_period_seconds = grace_period_seconds
+        self._pending_orphan_orders: Dict[str, Dict[str, Any]] = {}  # order_id -> {order, found_at, confirmed}
 
     async def run_reconciliation(self, symbol: str) -> ReconciliationReport:
         """
@@ -403,8 +409,9 @@ class ReconciliationService:
         """
         处理孤儿订单
 
-        策略:
-        - 如果是 TP/SL 订单且仓位不存在 → 取消
+        策略 (P5-011 修复):
+        - 如果是 TP/SL 订单且仓位不存在 → 先放入 pending_orphan_orders 等待 10 秒
+        - 10 秒后二次校验，如果仓位仍不存在 → 取消订单
         - 如果是入场订单 → 保留并创建关联 Signal
 
         Args:
@@ -414,37 +421,111 @@ class ReconciliationService:
             logger.error("Gateway not available, cannot handle orphan orders")
             return
 
+        current_time = int(time.time() * 1000)
+
         for order in orphan_orders:
             logger.info(f"Handling orphan order: {order.order_id}, role={order.order_role}")
 
             try:
                 if order.reduce_only:
-                    # 平仓单但没有对应仓位 → 取消
+                    # TP/SL 平仓单但没有对应仓位 → 先放入待确认列表，等待 10 秒后二次校验
                     logger.info(
-                        f"Canceling orphan TP/SL order: {order.order_id}, "
-                        f"symbol={order.symbol}"
+                        f"Pending orphan TP/SL order: {order.order_id}, "
+                        f"symbol={order.symbol} - waiting {self._grace_period_seconds}s grace period"
                     )
-                    result = await self._gateway.cancel_order(
-                        order_id=order.exchange_order_id or order.order_id,
-                        symbol=order.symbol,
-                    )
-                    if result.is_success:
-                        logger.info(f"Successfully canceled orphan order: {order.order_id}")
-                    else:
-                        logger.error(
-                            f"Failed to cancel orphan order {order.order_id}: "
-                            f"{result.message}"
-                        )
+                    self._pending_orphan_orders[order.order_id] = {
+                        "order": order,
+                        "found_at": current_time,
+                        "confirmed": False,
+                    }
                 else:
                     # 入场订单 → 保留，创建关联 Signal
                     logger.info(
                         f"Keeping orphan entry order: {order.order_id}, "
-                        f"will create关联 Signal"
+                        f"will create 关联 Signal"
                     )
                     await self._create_missing_signal(order)
 
             except Exception as e:
                 logger.error(f"Error handling orphan order {order.order_id}: {e}")
+
+        # 如果有待确认的孤儿订单，等待宽限期后二次校验
+        if self._pending_orphan_orders:
+            logger.info(
+                f"Waiting {self._grace_period_seconds}s grace period for "
+                f"{len(self._pending_orphan_orders)} pending orphan orders..."
+            )
+            await self._verify_pending_orphan_orders()
+
+    async def _verify_pending_orphan_orders(self) -> None:
+        """
+        二次校验待确认孤儿订单
+
+        P5-011 修复核心逻辑:
+        1. 等待宽限期（10 秒）
+        2. 重新获取本地仓位列表
+        3. 如果仓位已存在 → 差异消失，保留订单（WebSocket 延迟）
+        4. 如果仓位仍不存在 → 确认真实异常，执行撤销
+        """
+        # 等待宽限期
+        await asyncio.sleep(self._grace_period_seconds)
+
+        # 二次校验每个待确认订单
+        orders_to_remove = []
+        for order_id, item in list(self._pending_orphan_orders.items()):
+            if item["confirmed"]:
+                # 已经确认过的，跳过
+                continue
+
+            order = item["order"]
+            # 检查仓位是否存在
+            local_positions = await self._get_local_positions(order.symbol)
+            position_exists = any(pos.symbol == order.symbol for pos in local_positions)
+
+            if position_exists:
+                # 仓位出现了 → 差异消失，保留订单
+                logger.info(
+                    f"Grace period resolved: position now exists for orphan order {order_id} "
+                    f"(was WebSocket delay) - keeping order"
+                )
+                orders_to_remove.append(order_id)
+            else:
+                # 仓位仍不存在 → 确认真实异常，执行撤销
+                logger.warning(
+                    f"Grace period expired: position still missing for orphan order {order_id} - canceling"
+                )
+                await self._cancel_orphan_order(order)
+                orders_to_remove.append(order_id)
+
+        # 移除已处理的订单
+        for order_id in orders_to_remove:
+            del self._pending_orphan_orders[order_id]
+
+    async def _cancel_orphan_order(self, order: OrderResponse) -> None:
+        """
+        撤销孤儿订单
+
+        Args:
+            order: 订单对象
+        """
+        try:
+            logger.info(
+                f"Canceling confirmed orphan TP/SL order: {order.order_id}, "
+                f"symbol={order.symbol}"
+            )
+            result = await self._gateway.cancel_order(
+                order_id=order.exchange_order_id or order.order_id,
+                symbol=order.symbol,
+            )
+            if result.is_success:
+                logger.info(f"Successfully canceled orphan order: {order.order_id}")
+            else:
+                logger.error(
+                    f"Failed to cancel orphan order {order.order_id}: "
+                    f"{result.message}"
+                )
+        except Exception as e:
+            logger.error(f"Error canceling orphan order {order.order_id}: {e}")
 
     async def _create_missing_signal(self, order: OrderResponse) -> None:
         """

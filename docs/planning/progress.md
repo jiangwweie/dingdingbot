@@ -1,5 +1,89 @@
 # 进度日志
 
+## 2026-04-01 - P5-011 评审问题修复 ✅
+
+### P5-011 评审问题修复
+
+**评审意见**: 两个致命问题需要修复
+
+| 问题 | 说明 | 修复方案 | 状态 |
+|------|------|----------|------|
+| 1. INSERT OR REPLACE 数据擦除 | SQLite 的 INSERT OR REPLACE 会用 NULL 覆盖已存在字段 | 改用 ON CONFLICT DO UPDATE 语法，使用 COALESCE 保留已有数据 | ✅ |
+| 2. 孤儿订单立即撤销 | 可能误删刚建好仓位的保护伞 | TP/SL 孤儿单先放入 pending 列表等待 10 秒，二次校验确认仓位仍不存在再撤销 | ✅ |
+
+**修复详情**:
+
+#### 问题 1: INSERT OR REPLACE 数据擦除陷阱
+
+**文件**: `src/infrastructure/order_repository.py`
+
+**修复前**:
+```sql
+INSERT OR REPLACE INTO orders (...) VALUES (...)
+```
+
+**修复后**:
+```sql
+INSERT INTO orders (...) VALUES (...)
+ON CONFLICT(id) DO UPDATE SET
+    status = excluded.status,
+    filled_qty = excluded.filled_qty,
+    average_exec_price = excluded.average_exec_price,
+    exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
+    exit_reason = COALESCE(excluded.exit_reason, orders.exit_reason),
+    parent_order_id = COALESCE(excluded.parent_order_id, orders.parent_order_id),
+    oco_group_id = COALESCE(excluded.oco_group_id, orders.oco_group_id),
+    updated_at = excluded.updated_at
+```
+
+**说明**:
+- `INSERT OR REPLACE` 底层逻辑是 "先 DELETE，再 INSERT"，如果 Order 对象中某些字段为 None，会覆盖已保存的数据
+- `ON CONFLICT DO UPDATE` 只更新指定字段，使用 `COALESCE` 确保已有数据不被 NULL 覆盖
+
+#### 问题 2: 孤儿订单 10 秒宽限期处理
+
+**文件**: `src/application/reconciliation.py`
+
+**修复前**: 发现 TP/SL 孤儿订单立即调用 `cancel_order()` 撤销
+
+**修复后**:
+```python
+# 步骤 1: 将 TP/SL 孤儿单放入待确认列表
+self._pending_orphan_orders[order_id] = {
+    "order": order,
+    "found_at": current_time,
+    "confirmed": False,
+}
+
+# 步骤 2: 等待 10 秒宽限期
+await asyncio.sleep(self._grace_period_seconds)
+
+# 步骤 3: 二次校验
+if position_exists:
+    # 仓位出现了 → 差异消失，保留订单（WebSocket 延迟）
+    logger.info("Grace period resolved: position now exists - keeping order")
+else:
+    # 仓位仍不存在 → 确认真实异常，执行撤销
+    await self._cancel_orphan_order(order)
+```
+
+**说明**:
+- 避免因 REST API 和 WebSocket 之间的时差误删订单
+- 如果仓位在宽限期内出现，说明是 WebSocket 延迟，保留订单
+- 如果宽限期后仓位仍不存在，确认是孤儿订单，执行撤销
+
+**测试新增**:
+| 测试用例 | 说明 | 状态 |
+|----------|------|------|
+| `test_handle_orphan_orders_pending_tp_sl_with_grace_period` | TP/SL 订单进入待确认列表 | ✅ |
+| `test_verify_pending_orphan_orders_position_appears` | 宽限期后仓位出现，保留订单 | ✅ |
+| `test_verify_pending_orphan_orders_position_still_missing` | 宽限期后仓位仍缺失，撤销订单 | ✅ |
+| `test_verify_pending_orphan_orders_multiple_orders` | 处理多个待确认订单 | ✅ |
+
+**测试结果**: 19/19 通过 (60 秒)
+
+---
+
 ## 2026-04-01 - 订单生命周期文档发布 📋
 
 ### 订单生命周期文档发布 ✅

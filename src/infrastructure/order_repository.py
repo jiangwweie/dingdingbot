@@ -129,19 +129,32 @@ class OrderRepository:
         """
         Save or update an order to the database.
 
+        使用 SQLite ON CONFLICT DO UPDATE 语法（真·UPSERT）避免 INSERT OR REPLACE 的数据擦除问题：
+        - INSERT OR REPLACE 会用 NULL 覆盖已存在的字段
+        - ON CONFLICT DO UPDATE 只更新指定的字段
+
         Args:
             order: Order object to save
         """
         async with self._lock:
             await self._db.execute(
                 """
-                INSERT OR REPLACE INTO orders (
+                INSERT INTO orders (
                     id, signal_id, symbol, direction, order_type, order_role,
                     price, trigger_price, requested_qty, filled_qty,
                     average_exec_price, status, reduce_only, parent_order_id,
                     oco_group_id, exit_reason, exchange_order_id,
                     created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    status = excluded.status,
+                    filled_qty = excluded.filled_qty,
+                    average_exec_price = excluded.average_exec_price,
+                    exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
+                    exit_reason = COALESCE(excluded.exit_reason, orders.exit_reason),
+                    parent_order_id = COALESCE(excluded.parent_order_id, orders.parent_order_id),
+                    oco_group_id = COALESCE(excluded.oco_group_id, orders.oco_group_id),
+                    updated_at = excluded.updated_at
                 """,
                 (
                     order.id,
@@ -182,13 +195,22 @@ class OrderRepository:
                 for order in orders:
                     await self._db.execute(
                         """
-                        INSERT OR REPLACE INTO orders (
+                        INSERT INTO orders (
                             id, signal_id, symbol, direction, order_type, order_role,
                             price, trigger_price, requested_qty, filled_qty,
                             average_exec_price, status, reduce_only, parent_order_id,
                             oco_group_id, exit_reason, exchange_order_id,
                             created_at, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            status = excluded.status,
+                            filled_qty = excluded.filled_qty,
+                            average_exec_price = excluded.average_exec_price,
+                            exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
+                            exit_reason = COALESCE(excluded.exit_reason, orders.exit_reason),
+                            parent_order_id = COALESCE(excluded.parent_order_id, orders.parent_order_id),
+                            oco_group_id = COALESCE(excluded.oco_group_id, orders.oco_group_id),
+                            updated_at = excluded.updated_at
                         """,
                         (
                             order.id,
