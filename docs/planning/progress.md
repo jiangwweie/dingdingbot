@@ -6,6 +6,35 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-02 - 修复回测 API 端点 - 订单和报告持久化 ✅
+
+**执行日期**: 2026-04-02  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成
+
+**问题描述**:
+用户执行回测后无法看到订单和回测报告，API 端点没有传递 repository 参数。
+
+**修复内容**:
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src/interfaces/api.py` | `/api/backtest` 端点初始化并传递 `backtest_repository` 和 `order_repository` |
+| `src/application/backtester.py` | `run_backtest` 方法添加 `order_repository` 参数并传递给 `_run_v3_pms_backtest` |
+
+**修复后功能**:
+- ✅ 回测订单自动保存到 `orders` 表
+- ✅ 回测报告自动保存到 `backtest_reports` 表
+- ✅ 可通过 `/api/v3/backtest/reports` 查询回测历史
+- ✅ 前端 `BacktestReports` 页面可展示回测记录
+
+**Git 提交**:
+```
+9b4dc61 fix: 修复回测 API 端点 - 添加 order_repository 和 backtest_repository 支持
+```
+
+---
+
 ### 2026-04-02 - Phase 7 回测数据本地化 - 方案设计与 BTC 数据导入 ✅
 
 **执行日期**: 2026-04-02  

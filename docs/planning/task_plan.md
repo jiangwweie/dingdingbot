@@ -86,19 +86,14 @@ Backtester → HistoricalDataRepository → SQLite (本地优先)
 | 任务 | 状态 | 提交 | 测试 |
 |------|------|------|------|
 | T7: 回测记录列表页面 | ✅ 已完成 | `7b2f9b5` | 类型检查通过 |
-| T8: 订单详情与 K 线图渲染 | ☐ 待开始 | - | - |
+| T8: 订单详情与 K 线图渲染 | ✅ 已完成 | 前端组件完成 | 构建通过 |
+| T9: 回测 API 持久化修复 | ✅ 已完成 | `9b4dc61` | - |
 
-**阶段 C 交付成果** (T7):
-- 后端 API: GET /api/v3/backtest/reports (列表), GET /api/v3/backtest/reports/{id} (详情), DELETE /api/v3/backtest/reports/{id} (删除)
+**阶段 C 交付成果**:
+- 后端 API: GET /api/v3/backtest/reports (列表), GET /api/v3/backtest/reports/{id} (详情), DELETE /api/v3/backtest/reports/{id} (删除), POST /api/backtest (执行回测 + 保存)
 - 前端组件：BacktestReportsTable, BacktestReportsFilters, BacktestReportsPagination
 - 前端页面：BacktestReports.tsx
 - 类型定义：web-front/src/types/backtest.ts
-
-**阶段 C 任务清单** (前端展示 - 进行中):
-| ID | 任务名称 | 优先级 | 预计工时 | 状态 |
-|----|----------|--------|----------|------|
-| T7 | 回测记录列表页面 | P0 | 3h | ✅ 已完成 |
-| T8 | 订单详情与 K 线图渲染 | P0 | 3h | ☐ 待开始 |
 
 **完整任务清单**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
@@ -110,11 +105,11 @@ Backtester → HistoricalDataRepository → SQLite (本地优先)
 | T5 | 创建 backtest_reports 表 | P0 | 1h | ✅ 已完成 |
 | T6 | 实现回测报告保存 | P0 | 2h | ✅ 已完成 |
 | T7 | 回测记录列表页面 | P0 | 3h | ✅ 已完成 |
-| T8 | 订单详情与 K 线图渲染 | P0 | 3h | ☐ |
-| T9 | 时间段分页获取 (CCXT) | P1 | 2h | ☐ |
-| T10 | 删除功能 (单条/批量) | P1 | 1h | ☐ |
-| T11 | 同时同向持仓限制 | P2 | 1h | ☐ |
-| T12 | 权益金检查修复 | P2 | 1h | ☐ |
+| T8 | 订单详情与 K 线图渲染 | P0 | 3h | ✅ 已完成 |
+| ~~T9~~ | ~~时间段分页获取 (CCXT)~~ | ~~P1~~ | ~~2h~~ | ☐ **可选** |
+| ~~T10~~ | ~~删除功能 (单条/批量)~~ | ~~P1~~ | ~~1h~~ | ☐ **可选** |
+| ~~T11~~ | ~~同时同向持仓限制~~ | ~~P2~~ | ~~1h~~ | ☐ **可选** |
+| ~~T12~~ | ~~权益金检查修复~~ | ~~P2~~ | ~~1h~~ | ☐ **可选** |
 
 **相关文档**:
 - [PMS 回测修复计划](pms-backtest-fix-plan.md)
