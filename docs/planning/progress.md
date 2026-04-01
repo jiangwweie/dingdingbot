@@ -1,5 +1,45 @@
 # 进度日志
 
+## 2026-04-01 - P2 级优化修复完成 ✅
+
+**执行日期**: 2026-04-01  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成
+
+### P2 修复完成情况
+
+| 修复项 | 状态 | 说明 |
+|--------|------|------|
+| P2-1: 魔法数字配置化 | ✅ 完成 | DynamicRiskManager 使用 RiskManagerConfig |
+| P2-2: 类常量配置化 | ✅ 完成 | CapitalProtectionManager 使用配置类字段 |
+| P2-3: 重复代码重构 | ✅ 完成 | ExchangeGateway 提取公共配置方法 |
+
+### 修改统计
+
+| 文件 | 修改内容 |
+|------|----------|
+| `domain/models.py` | 新增 RiskManagerConfig 类；CapitalProtectionConfig 新增 3 个字段 |
+| `domain/risk_manager.py` | 构造函数改为接收配置类，更新引用 |
+| `application/capital_protection.py` | 移除类常量，改为配置引用 |
+| `application/backtester.py` | 使用 RiskManagerConfig 创建实例 |
+| `infrastructure/exchange_gateway.py` | 新增 _build_exchange_config() 公共方法 |
+
+### Git 提交记录
+
+```
+ef5b67e refactor: P2-1 魔法数字配置化 (DynamicRiskManager)
+43c146a refactor: P2-2 类常量配置化 (CapitalProtectionManager)
+3a528f1 refactor: P2-3 重复代码重构 (ExchangeGateway)
+```
+
+### 验证结果
+
+- ✅ 导入验证通过（所有修改模块可正常导入）
+- ✅ 向后兼容（配置类提供默认值）
+- ✅ 类型注解正确
+
+---
+
 ## 2026-04-01 - P0 事项 1-4 全部完成 ✅
 
 ### 执行摘要

@@ -145,6 +145,159 @@ pytest tests/unit/ -v
 
 ---
 
+## P2 级优化修复（技术债清理）
+
+> **执行日期**: 2026-04-01
+> **负责人**: @backend
+> **优先级**: P2
+> **预计工时**: 1 小时
+
+### 任务目标
+执行 P2 级技术债清理，将硬编码的魔法数字和类常量提取到配置类中，提升系统可维护性。
+
+---
+
+### P2-1: 魔法数字配置化 (DynamicRiskManager)
+
+**问题**: `trailing_percent=0.02` 和 `step_threshold=0.005` 硬编码在 `risk_manager.py` 构造函数中
+
+**修复内容**:
+
+**`domain/models.py` 新增配置类**:
+```python
+class RiskManagerConfig(BaseModel):
+    """动态风控管理器配置"""
+    trailing_percent: Decimal = Field(
+        default=Decimal('0.02'),
+        description="移动止损回撤容忍度 (默认 2%)"
+    )
+    step_threshold: Decimal = Field(
+        default=Decimal('0.005'),
+        description="阶梯阈值 (默认 0.5%)"
+    )
+```
+
+**`domain/risk_manager.py` 修改**:
+```python
+def __init__(self, config: Optional[RiskManagerConfig] = None):
+    """初始化动态风控管理器"""
+    self._config = config or RiskManagerConfig()
+
+# 使用处修改
+theoretical_trigger = position.watermark_price * (Decimal('1') - self._config.trailing_percent)
+```
+
+**`application/backtester.py` 修改**:
+```python
+dynamic_risk_manager = DynamicRiskManager(
+    config=RiskManagerConfig(
+        trailing_percent=Decimal('0.02'),
+        step_threshold=Decimal('0.005'),
+    ),
+)
+```
+
+---
+
+### P2-2: 类常量配置化 (CapitalProtectionManager)
+
+**问题**: `MIN_NOTIONAL`, `PRICE_DEVIATION_THRESHOLD`, `EXTREME_PRICE_DEVIATION_THRESHOLD` 硬编码为类常量
+
+**修复内容**:
+
+**`domain/models.py CapitalProtectionConfig` 新增字段**:
+```python
+class CapitalProtectionConfig(BaseModel):
+    # P2-2: 订单参数合理性检查配置（原类常量）
+    min_notional: Decimal = Field(
+        default=Decimal("5"),
+        description="最小名义价值 (默认 5 USDT, Binance 标准)"
+    )
+    price_deviation_threshold: Decimal = Field(
+        default=Decimal("0.10"),
+        description="价格偏差阈值 (默认 10%)"
+    )
+    extreme_price_deviation_threshold: Decimal = Field(
+        default=Decimal("0.20"),
+        description="极端行情下价格偏差阈值 (默认 20%)"
+    )
+```
+
+**`application/capital_protection.py` 修改**:
+- 移除类常量定义
+- 所有引用处改为 `self._config.min_notional` / `self._config.price_deviation_threshold`
+
+---
+
+### P2-3: 重复代码重构 (ExchangeGateway)
+
+**问题**: `_create_rest_exchange` 和 `_create_ws_exchange` 配置构建逻辑重复
+
+**修复内容**:
+
+**新增公共方法**:
+```python
+def _build_exchange_config(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """构建通用交易所配置"""
+    config = {
+        'apiKey': self.api_key,
+        'secret': self.api_secret,
+        'enableRateLimit': True,
+        'options': {
+            'defaultType': 'future',
+            'warnOnFetchOpenOrdersWithoutSymbol': False,
+        }
+    }
+    if options:
+        config['options'].update(options)
+    return config
+```
+
+**简化原有方法**:
+```python
+def _create_rest_exchange(self, options: Dict[str, Any]):
+    config = self._build_exchange_config(options)
+    exchange_class = getattr(ccxt_async, self.exchange_name)
+    # ...
+```
+
+---
+
+### 测试结果
+
+```bash
+# 验证导入正常
+python3 -c "from src.domain.risk_manager import DynamicRiskManager; print('OK')"
+python3 -c "from src.application.capital_protection import CapitalProtectionManager; print('OK')"
+python3 -c "from src.infrastructure.exchange_gateway import ExchangeGateway; print('OK')"
+```
+
+**结果**: ✅ 所有导入验证通过
+
+---
+
+### Git 提交记录
+
+```
+ef5b67e refactor: P2-1 魔法数字配置化 (DynamicRiskManager)
+43c146a refactor: P2-2 类常量配置化 (CapitalProtectionManager)
+3a528f1 refactor: P2-3 重复代码重构 (ExchangeGateway)
+```
+
+---
+
+### 代码审查清单
+
+- [x] 配置类提供默认值，确保向后兼容
+- [x] 所有硬编码值已替换为配置引用
+- [x] 类型注解正确（使用 Optional 和明确类型）
+- [x] 导入验证通过
+- [x] 每个修复单独提交，提交消息清晰
+
+---
+
+---
+
 ## 总结
 
 **发现**: P0-001 和 P0-002 两项基础设施加固工作**已经完成**。
