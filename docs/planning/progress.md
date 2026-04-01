@@ -6,6 +6,51 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-01 - REC-001/002/003 对账 TODO 实现 + E2E 测试修复 ✅
+
+**执行日期**: 2026-04-01  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成
+
+**任务完成情况**:
+| 任务 | 说明 | 状态 |
+|------|------|------|
+| REC-001 | 实现 `_get_local_open_orders` 数据库订单获取 | ✅ 已完成 |
+| REC-002 | 实现 `_create_missing_signal` Signal 创建逻辑 | ✅ 已完成 |
+| REC-003 | 实现 `order_repository.import_order()` 导入方法 | ✅ 已完成 |
+
+**核心修改**:
+1. **`order_repository.py`** - 新增方法:
+   - `get_local_open_orders(symbol)` - 获取指定币种的本地未平订单
+   - `import_order(order)` - 导入外部订单到数据库
+   - `mark_order_cancelled(order_id)` - 标记订单为已取消
+
+2. **`reconciliation.py`** - TODO 实现:
+   - `_get_local_open_orders()` - 调用 order_repository 获取订单
+   - `_create_missing_signal()` - 为孤儿订单创建关联 Signal
+   - 新增 `signal_repository` 依赖注入
+
+3. **`signal_repository.py`** - 新增方法:
+   - `save_signal_v3(signal)` - 保存 v3 Signal 模型
+
+4. **`capital_protection.py`** - Bug 修复:
+   - 修复 `quantity_precision` 类型判断逻辑（CCXT 返回 Decimal 而非 int）
+   - 区分处理 step_size 和小数位数两种精度表示
+
+**E2E 测试结果**: 22/22 通过 (100%)
+```
+✅ test_phase5_window1_real.py: 6/6
+✅ test_phase5_window3_real.py: 7/7
+✅ test_phase5_window4_full_chain.py: 9/9 (含全链路测试)
+```
+
+**Git 提交**:
+```
+479e27e feat: REC-001/002/003 对账 TODO 实现 + E2E 测试修复
+```
+
+---
+
 ### 2026-04-01 - P1/P2 问题修复完成 ✅
 
 **执行日期**: 2026-04-01  
