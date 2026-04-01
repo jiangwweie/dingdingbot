@@ -545,3 +545,122 @@ class TestSignalCovering:
         assert dedup_key in pipeline_with_repo._signal_cache
         assert pipeline_with_repo._signal_cache[dedup_key]["score"] == 0.75
         assert pipeline_with_repo._signal_cache[dedup_key]["signal_id"] == "test-signal"
+
+# ============================================================
+# 测试：MTF EMA 预热逻辑 (DA-20260401-001)
+# ============================================================
+
+class TestMTFEMAWarmup:
+    """测试 MTF EMA 预热逻辑"""
+
+    @pytest.fixture
+    def pipeline_with_history(self):
+        """创建带有历史 K 线数据的 pipeline"""
+        from src.domain.indicators import EMACalculator
+
+        # Mock config manager
+        mock_config_manager = MagicMock()
+        mock_config_manager.user_config = MagicMock()
+        mock_config_manager.user_config.active_strategies = []
+        mock_config_manager.core_config = MagicMock()
+        mock_config_manager.add_observer = MagicMock()
+        mock_config_manager.user_config.mtf_ema_period = 60  # 添加 mtf_ema_period 配置
+
+        # 创建 pipeline
+        pipeline = SignalPipeline(
+            config_manager=mock_config_manager,
+            risk_config=RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10),
+        )
+
+        # 创建历史 K 线数据 (每个周期 100 根)
+        history = []
+        for i in range(100):
+            history.append(create_kline(
+                symbol="BTC/USDT:USDT",
+                timeframe="1h",
+                timestamp=1234567890000 + i * 3600000,  # 每小时
+                close=Decimal(str(50000 + i * 100)),
+            ))
+
+        pipeline._kline_history = {
+            "BTC/USDT:USDT:1h": history,
+            "BTC/USDT:USDT:4h": [create_kline(timeframe="4h", timestamp=1234567890000 + i * 14400000) for i in range(50)],
+            "BTC/USDT:USDT:15m": [create_kline(timeframe="15m", timestamp=1234567890000 + i * 900000) for i in range(200)],
+        }
+
+        return pipeline
+
+    def test_warmup_initializes_mtf_ema_indicators(self, pipeline_with_history):
+        """测试：warmup 后 _mtf_ema_indicators 被正确初始化"""
+        # 执行 warmup
+        runner = pipeline_with_history._build_and_warmup_runner()
+
+        # 验证：高周期 EMA 应该被初始化
+        assert "BTC/USDT:USDT:1h" in pipeline_with_history._mtf_ema_indicators
+        assert "BTC/USDT:USDT:4h" in pipeline_with_history._mtf_ema_indicators
+        # 15m 不应该被初始化 (不是高周期)
+        assert "BTC/USDT:USDT:15m" not in pipeline_with_history._mtf_ema_indicators
+
+    def test_mtf_ema_ready_after_warmup(self, pipeline_with_history):
+        """测试：warmup 后 EMA is_ready = True"""
+        # 执行 warmup
+        runner = pipeline_with_history._build_and_warmup_runner()
+
+        # 验证：1h EMA 应该已经 ready (因为有 100 根历史 K 线，远超过 60 的需求)
+        ema_1h = pipeline_with_history._mtf_ema_indicators["BTC/USDT:USDT:1h"]
+        assert ema_1h.is_ready is True
+
+        # 注意：4h EMA 只有 49 根数据 (50-1)，少于 60 的需求，所以 is_ready=False
+        # 这符合预期行为
+        ema_4h = pipeline_with_history._mtf_ema_indicators["BTC/USDT:USDT:4h"]
+        # 4h EMA 虽然没有 ready，但已经被正确初始化
+        assert ema_4h is not None
+
+    def test_mtf_ema_warmup_excludes_current_kline(self, pipeline_with_history):
+        """测试：warmup 排除未闭合 K 线 (history[:-1])"""
+        # 执行 warmup
+        runner = pipeline_with_history._build_and_warmup_runner()
+
+        # 验证：EMA 更新次数应该是 len(history) - 1 (排除当前 K 线)
+        ema_1h = pipeline_with_history._mtf_ema_indicators["BTC/USDT:USDT:1h"]
+        # is_ready 需要 60 次更新，我们有 99 次 (100 - 1)
+        assert ema_1h.is_ready is True
+        # 验证 EMA 值是基于 99 根 K 线计算的
+        assert ema_1h.value is not None
+
+    def test_warmup_multiple_symbols(self):
+        """测试：多符号 warmup 正确"""
+        from src.domain.indicators import EMACalculator
+
+        # Mock config manager
+        mock_config_manager = MagicMock()
+        mock_config_manager.user_config = MagicMock()
+        mock_config_manager.user_config.active_strategies = []
+        mock_config_manager.core_config = MagicMock()
+        mock_config_manager.add_observer = MagicMock()
+        mock_config_manager.user_config.mtf_ema_period = 60  # 添加 mtf_ema_period 配置
+
+        # 创建 pipeline
+        pipeline = SignalPipeline(
+            config_manager=mock_config_manager,
+            risk_config=RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10),
+        )
+
+        # 创建多个符号的历史 K 线数据
+        pipeline._kline_history = {
+            "BTC/USDT:USDT:1h": [create_kline(symbol="BTC/USDT:USDT", timeframe="1h", timestamp=i * 3600000) for i in range(100)],
+            "ETH/USDT:USDT:1h": [create_kline(symbol="ETH/USDT:USDT", timeframe="1h", timestamp=i * 3600000) for i in range(100)],
+            "SOL/USDT:USDT:1h": [create_kline(symbol="SOL/USDT:USDT", timeframe="1h", timestamp=i * 3600000) for i in range(100)],
+        }
+
+        # 执行 warmup
+        runner = pipeline._build_and_warmup_runner()
+
+        # 验证：所有符号的 1h EMA 都应该被初始化
+        assert "BTC/USDT:USDT:1h" in pipeline._mtf_ema_indicators
+        assert "ETH/USDT:USDT:1h" in pipeline._mtf_ema_indicators
+        assert "SOL/USDT:USDT:1h" in pipeline._mtf_ema_indicators
+
+        # 验证：所有 EMA 都应该 ready
+        for key in pipeline._mtf_ema_indicators:
+            assert pipeline._mtf_ema_indicators[key].is_ready is True

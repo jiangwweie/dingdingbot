@@ -1,5 +1,56 @@
 # 进度日志
 
+## 2026-04-01 - MTF EMA 预热缺失问题修复 ✅
+
+### MTF EMA 预热缺失问题修复 (DA-20260401-001)
+
+**问题描述**: 服务器持续出现 `higher_tf_data_unavailable` 错误，导致 MTF 过滤器拦截所有信号。
+
+**根因分析**:
+- `_build_and_warmup_runner` 方法只预热了 `StrategyRunner` 内部指标
+- `_mtf_ema_indicators` 字典采用懒创建模式，第一次调用时只能用当前 K 线更新 1 次
+- EMA 需要 60 个数据点才能 `is_ready=True`，但懒创建时只更新了 1 次
+
+**修复方案**: 在 `_build_and_warmup_runner` 中添加 MTF EMA 预热逻辑
+
+**修改文件**:
+| 文件 | 修改内容 |
+|------|----------|
+| `src/application/signal_pipeline.py` | 在 `_build_and_warmup_runner` 方法中添加 MTF EMA 预热逻辑 |
+| `tests/unit/test_signal_pipeline.py` | 添加 4 个 MTF EMA 预热测试用例 |
+
+**预热逻辑**:
+```python
+# MTF EMA warmup: pre-warm higher timeframe EMA indicators for MTF filters
+if self._kline_history:
+    for key, history in self._kline_history.items():
+        timeframe = parts[-1] if parts[-1] in ["1h", "4h", "1d", "1w"] else parts[-2]
+
+        if timeframe in ["1h", "4h", "1d"]:
+            ema_key = key
+            if ema_key not in self._mtf_ema_indicators:
+                self._mtf_ema_indicators[ema_key] = EMACalculator(period=self._mtf_ema_period)
+
+            ema = self._mtf_ema_indicators[ema_key]
+            # Warmup EMA with historical K-lines (exclude currently running kline)
+            for kline in history[:-1]:
+                ema.update(kline.close)
+```
+
+**测试结果**: 4/4 通过
+- ✅ `test_warmup_initializes_mtf_ema_indicators`
+- ✅ `test_mtf_ema_ready_after_warmup`
+- ✅ `test_mtf_ema_warmup_excludes_current_kline`
+- ✅ `test_warmup_multiple_symbols`
+
+**日志输出**:
+```
+MTF EMA warmup: checked X keys, warmed Y data points across Z indicators
+MTF EMA warmup complete: Y data points across Z indicators ready
+```
+
+---
+
 ## 2026-04-01 - P5-011 评审问题修复 ✅
 
 ### P5-011 评审问题修复
