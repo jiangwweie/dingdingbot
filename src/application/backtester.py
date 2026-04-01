@@ -37,6 +37,7 @@ from src.domain.models import (
 )
 from src.domain.matching_engine import MockMatchingEngine
 from src.domain.risk_manager import DynamicRiskManager
+from src.domain.models import RiskManagerConfig, AccountSnapshot, RiskConfig
 from src.domain.order_manager import OrderManager
 from src.domain.strategy_engine import (
     StrategyEngine,
@@ -51,8 +52,6 @@ from src.domain.strategy_engine import (
     create_dynamic_runner,
 )
 from src.domain.filter_factory import FilterFactory
-from src.domain.risk_calculator import RiskCalculator, RiskConfig
-from src.domain.models import AccountSnapshot
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
 
@@ -1098,8 +1097,10 @@ class Backtester:
             # 在撮合引擎撮合订单后，对每个活跃仓位执行风控状态评估
             # T+1 时序声明：TP1 引发的 SL 修改在下一根 K 线生效
             dynamic_risk_manager = DynamicRiskManager(
-                trailing_percent=Decimal('0.02'),      # 默认 2%
-                step_threshold=Decimal('0.005'),       # 默认 0.5%
+                config=RiskManagerConfig(
+                    trailing_percent=Decimal('0.02'),      # 默认 2%
+                    step_threshold=Decimal('0.005'),       # 默认 0.5%
+                ),
             )
             for position in positions_map.values():
                 if not position.is_closed and position.current_qty > 0:

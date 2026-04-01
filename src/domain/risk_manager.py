@@ -14,7 +14,7 @@ Dynamic Risk Manager - 动态风控状态机
 from decimal import Decimal
 from typing import List, Optional
 
-from src.domain.models import KlineData, Position, Order, OrderStatus, OrderType, OrderRole, Direction
+from src.domain.models import KlineData, Position, Order, OrderStatus, OrderType, OrderRole, Direction, RiskManagerConfig
 
 
 class DynamicRiskManager:
@@ -29,18 +29,15 @@ class DynamicRiskManager:
 
     def __init__(
         self,
-        trailing_percent: Decimal = Decimal('0.02'),     # 默认 2%
-        step_threshold: Decimal = Decimal('0.005'),      # 默认 0.5%
+        config: Optional[RiskManagerConfig] = None,
     ):
         """
         初始化动态风控管理器
 
         Args:
-            trailing_percent: 移动止损回撤容忍度 (默认 2%)
-            step_threshold: 阶梯阈值 (默认 0.5%)
+            config: 风控管理器配置（提供默认值）
         """
-        self.trailing_percent = trailing_percent
-        self.step_threshold = step_threshold
+        self._config = config or RiskManagerConfig()
 
     def evaluate_and_mutate(
         self,
@@ -177,10 +174,10 @@ class DynamicRiskManager:
         if position.direction == Direction.LONG:
             # LONG 仓位 Trailing Stop 计算
             # 理论止损价 = 水位线 * (1 - trailing_percent)
-            theoretical_trigger = position.watermark_price * (Decimal('1') - self.trailing_percent)
+            theoretical_trigger = position.watermark_price * (Decimal('1') - self._config.trailing_percent)
 
             # 阶梯判定：新止损价必须比当前价高出 step_threshold
-            min_required_price = current_trigger * (Decimal('1') + self.step_threshold)
+            min_required_price = current_trigger * (Decimal('1') + self._config.step_threshold)
 
             if theoretical_trigger >= min_required_price:
                 # 更新止损价，但不低于 entry_price (保护损底线)
@@ -190,10 +187,10 @@ class DynamicRiskManager:
         else:
             # SHORT 仓位 Trailing Stop 计算
             # 理论止损价 = 水位线 * (1 + trailing_percent)
-            theoretical_trigger = position.watermark_price * (Decimal('1') + self.trailing_percent)
+            theoretical_trigger = position.watermark_price * (Decimal('1') + self._config.trailing_percent)
 
             # 阶梯判定：新止损价必须比当前价低于 step_threshold
-            min_required_price = current_trigger * (Decimal('1') - self.step_threshold)
+            min_required_price = current_trigger * (Decimal('1') - self._config.step_threshold)
 
             if theoretical_trigger <= min_required_price:
                 # 更新止损价，但不高于 entry_price (保护损底线)

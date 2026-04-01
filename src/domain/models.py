@@ -1395,6 +1395,26 @@ class DailyTradeStats(BaseModel):
 
 
 # ============================================================
+# P2-1: Risk Manager Configuration
+# ============================================================
+
+class RiskManagerConfig(BaseModel):
+    """
+    动态风控管理器配置
+
+    P2-1: 魔法数字配置化 - 将硬编码的 trailing_percent 和 step_threshold 提取到配置类
+    """
+    trailing_percent: Decimal = Field(
+        default=Decimal('0.02'),
+        description="移动止损回撤容忍度 (默认 2%)"
+    )
+    step_threshold: Decimal = Field(
+        default=Decimal('0.005'),
+        description="阶梯阈值 (默认 0.5%)"
+    )
+
+
+# ============================================================
 # P0-004: 订单参数合理性检查 - 极端行情配置
 # ============================================================
 
