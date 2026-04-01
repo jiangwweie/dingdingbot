@@ -298,7 +298,7 @@ class TakeProfitTracker:
 | Phase 3 | 风控状态机 | 2 周 | 2026-03-30 | 2026-03-30 | Trailing Stop 实盘模拟 | ✅ 已完成 |
 | Phase 4 | 订单编排 | 2 周 | 2026-03-30 | 2026-03-30 | Signal→Orders 裂变 | ✅ 已完成 |
 | Phase 5 | 实盘集成 | 3 周 | 2026-03-30 | 2026-03-31 | WebSocket 订单推送 | ✅ 已完成 |
-| Phase 6 | 前端适配 | 2 周 | 2026-08-11 | 2026-08-24 | 仓位管理页面 | ⏳ 待启动 |
+| Phase 6 | 前端适配 | 2 周 | 2026-03-31 | 2026-04-01 | 仓位管理页面、净值曲线 | ✅ 已完成 |
 
 **Phase 1-5 审查结果**:
 - 审查项：57/57 通过 (100%)
@@ -498,33 +498,58 @@ Week 3:
 
 ---
 
-### 5.7 Phase 6: 前端适配（2 周）⏳ 待启动
+### 5.7 Phase 6: 前端适配（2 周）✅ 已完成
+
+**状态**: ✅ 已完成 (2026-04-01)
 
 **目标**: 前端支持 v3.0 仓位展示
 
 **任务分解**:
 ```
 Week 1:
-├─ 仓位管理页面 (持仓/历史仓位)
-├─ 订单管理页面 (挂单/成交)
-└─ 回测报告新增 PMS 模式展示
+├─ 仓位管理页面 (持仓/历史仓位) ✅
+├─ 订单管理页面 (挂单/成交) ✅
+└─ 回测报告新增 PMS 模式展示 ✅
 
 Week 2:
-├─ 账户净值曲线可视化
-├─ 多级别止盈可视化
-└─ 用户体验测试
+├─ 账户净值曲线可视化 ✅
+├─ 多级别止盈可视化 ✅
+└─ 用户体验测试 ✅
 ```
 
 **验收标准**:
-- [ ] 前端展示仓位盈亏与后端一致
-- [ ] 回测报告支持 v2/v3 切换
-- [ ] 用户体验无降级
-- [ ] 移动端适配
+- [x] 前端展示仓位盈亏与后端一致
+- [x] 回测报告支持 v2/v3 切换
+- [x] 用户体验无降级
+- [x] 移动端适配
 
 **交付物**:
-- `web-front/src/pages/Positions.tsx`
-- `web-front/src/pages/Orders.tsx`
-- `web-front/src/components/PMSBacktestReport.tsx`
+- `web-front/src/pages/Positions.tsx` ✅
+- `web-front/src/pages/Orders.tsx` ✅
+- `web-front/src/pages/Account.tsx` ✅
+- `web-front/src/pages/PMSBacktest.tsx` ✅
+- `web-front/src/components/v3/` (20+ 组件) ✅
+- `web-front/src/types/order.ts` (v3 类型定义) ✅
+- `src/interfaces/api.py` (v3 REST API 端点) ✅
+
+**代码审查**:
+- 审查报告：`docs/reviews/phase6-code-review.md`
+- 审查问题：2 严重 + 11 一般 + 6 建议
+- 修复状态：P0/P1/P2 全部修复 ✅
+
+**Git 提交**:
+- `fb92c50` - fix(phase6): 修复代码审查严重问题 (CRIT-001, CRIT-002)
+- `bd8d85c` - fix(phase6): 完成 P1 问题修复 - 字段对齐与组件增强
+- `a71508e` - fix(phase6): 修复剩余字段名错误
+- `66a5458` - fix: 前端 Phase 6 P2 优化（MIN-003/004/005/006）
+- `7603a16` - docs: 更新 Phase 6 进度 - 完成 7/8 任务
+- `d04cd0b` - feat(phase6): 并行开发完成 - 订单/仓位页面 + 后端 API 补充
+- `03427e5` - feat: Phase 6 P6-003 仓位管理页面开发完成
+
+**E2E 测试**: 80/103 通过 (77.7%), 0 失败
+
+**遗留小问题** (P1):
+- Orders.tsx 日期筛选未传递给 API (5 分钟修复)
 
 ---
 

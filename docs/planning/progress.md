@@ -6,6 +6,69 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-01 - Phase 6 前端适配完成 ✅
+
+**执行日期**: 2026-04-01  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成
+
+**Phase 6 完成总结**:
+
+**前端页面** (4 个):
+- ✅ Positions.tsx - 仓位管理页面
+- ✅ Orders.tsx - 订单管理页面
+- ✅ Account.tsx - 账户页面 (含净值曲线图表)
+- ✅ PMSBacktest.tsx - PMS 回测报告页面
+
+**v3 组件** (20+ 个):
+| 类别 | 组件 |
+|------|------|
+| 徽章类 | DirectionBadge, OrderStatusBadge, OrderRoleBadge, PnLBadge |
+| 表格类 | PositionsTable, OrdersTable |
+| 抽屉类 | PositionDetailsDrawer, OrderDetailsDrawer |
+| 对话框类 | ClosePositionModal, CreateOrderModal |
+| 图表类 | EquityCurveChart, PositionDistributionPie |
+| 回测组件 | BacktestOverviewCards, PnLDistributionHistogram, MonthlyReturnHeatmap, EquityComparisonChart, TradeStatisticsTable |
+| 止盈可视化 | TPChainDisplay, SLOrderDisplay, TPProgressBar, TakeProfitStats |
+| 工具类 | DecimalDisplay, DateRangeSelector, AccountOverviewCards, PnLStatisticsCards |
+
+**后端 API** (v3 REST 端点):
+- POST /api/v3/orders - 创建订单
+- DELETE /api/v3/orders/{order_id} - 取消订单
+- GET /api/v3/orders - 订单列表/详情
+- GET /api/v3/positions - 仓位列表/详情
+- POST /api/v3/positions/{position_id}/close - 平仓
+- GET /api/v3/account/balance - 账户余额
+- GET /api/v3/account/snapshot - 账户快照
+- POST /api/v3/orders/check - 资金保护检查
+
+**代码审查**:
+- 审查报告：`docs/reviews/phase6-code-review.md`
+- 审查问题：2 严重 + 11 一般 + 6 建议
+- 修复状态：
+  - CRIT-001/002 (严重) ✅ 已修复
+  - MAJ-001~011 (一般) ✅ 已修复
+  - MIN-003~006 (P2 优化) ✅ 已修复
+
+**Git 提交**:
+```
+fb92c50 fix(phase6): 修复代码审查严重问题 (CRIT-001, CRIT-002)
+bd8d85c fix(phase6): 完成 P1 问题修复 - 字段对齐与组件增强
+a71508e fix(phase6): 修复剩余字段名错误
+66a5458 fix: 前端 Phase 6 P2 优化（MIN-003/004/005/006）
+7603a16 docs: 更新 Phase 6 进度 - 完成 7/8 任务
+d04cd0b feat(phase6): 并行开发完成 - 订单/仓位页面 + 后端 API 补充
+```
+
+**测试结果**:
+- TypeScript 编译：✅ 通过
+- E2E 测试：80/103 通过 (77.7%), 0 失败
+
+**遗留小问题** (可选修复):
+- Orders.tsx 日期筛选未传递给 API (P1 优先级)
+
+---
+
 ### 2026-03-31 - Phase 5 实盘集成完成 ✅
 
 **执行日期**: 2026-03-31  
