@@ -403,21 +403,37 @@ class CapitalProtectionManager:
                 )
 
             # 检查 2: 数量精度
-            quantity_str = str(quantity)
-            if '.' in quantity_str:
-                decimals = len(quantity_str.split('.')[1])
-                if decimals > quantity_precision:
-                    logger.warning(
-                        f"订单数量精度超限：{decimals} > {quantity_precision} (symbol={symbol}, quantity={quantity})"
-                    )
-                    return (
-                        False,
-                        "QUANTITY_PRECISION_EXCEEDED",
-                        f"订单数量精度 {decimals} 超过最大允许 {quantity_precision}"
-                    )
+            # quantity_precision 可能是小数位数（int）或 step_size（Decimal），需要区分处理
+            if isinstance(quantity_precision, Decimal):
+                # 如果 quantity_precision 是 Decimal（如 0.0001），则是 step_size，使用 step_size 检查
+                if step_size and step_size > Decimal("0"):
+                    remainder = quantity % step_size
+                    if remainder != Decimal("0") and remainder > Decimal("1e-10"):
+                        logger.warning(
+                            f"订单数量不是 step_size 的整数倍：quantity={quantity}, step_size={step_size}, remainder={remainder}"
+                        )
+                        return (
+                            False,
+                            "QUANTITY_NOT_MULTIPLE_OF_STEP",
+                            f"订单数量 {quantity} 不是 step_size {step_size} 的整数倍"
+                        )
+            elif isinstance(quantity_precision, int):
+                # 如果 quantity_precision 是整数（如 4），则是小数位数
+                quantity_str = str(quantity)
+                if '.' in quantity_str:
+                    decimals = len(quantity_str.split('.')[1])
+                    if decimals > quantity_precision:
+                        logger.warning(
+                            f"订单数量精度超限：{decimals} > {quantity_precision} (symbol={symbol}, quantity={quantity})"
+                        )
+                        return (
+                            False,
+                            "QUANTITY_PRECISION_EXCEEDED",
+                            f"订单数量精度 {decimals} 超过最大允许 {quantity_precision}"
+                        )
 
-            # 检查 3: step_size 整除性（如果 step_size > 0）
-            if step_size and step_size > Decimal("0"):
+            # 检查 3: step_size 整除性（如果 step_size > 0 且未在上述检查）
+            if step_size and step_size > Decimal("0") and not isinstance(quantity_precision, Decimal):
                 remainder = quantity % step_size
                 # 使用一个小的容差值来处理浮点数精度问题
                 if remainder != Decimal("0") and remainder > Decimal("1e-10"):
