@@ -1672,3 +1672,55 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 **Git 提交**: 待提交
 
 ---
+
+## 2026-04-01 - MCP 工具集成配置 ✅
+
+**目标**: 配置 MCP 工具集成，提升量化开发效率
+
+**进展**:
+- [x] **MCP 服务器配置** ✅
+  - `.mcp.json` - 配置 4 个 MCP 服务器
+    - `filesystem`: 文件读写、目录浏览
+    - `sqlite`: 数据库查询、信号分析
+    - `brave-search`: 外部信息检索
+    - `sequential-thinking`: 复杂问题链式思考
+
+- [x] **团队文档创建** ✅
+  - `.claude/commands/mcp.md` - MCP 快速调用卡片
+  - `.claude/team/MCP-INTEGRATION.md` - 角色调用规范
+  - `docs/mcp-integration/量化开发 MCP 工具整合指南.md` - 完整使用指南
+  - `docs/mcp-integration/CONFIG-SUMMARY.md` - 配置总结
+
+- [x] **团队规范更新** ✅
+  - `.claude/team/README.md` - 更新团队结构说明 (v1.1)
+  - `.claude/team/WORKFLOW.md` - 更新开工/收工规范 (v1.1)
+
+- [x] **代码提交** ✅
+  - Git 提交：`17c884f`
+  - 提交信息：`feat: 配置 MCP 工具集成 (SQLite, Filesystem, Brave-Search, Sequential-Thinking)`
+
+**交付物**:
+- 4 个 MCP 服务器配置
+- 角色调用规范文档
+- 快速调用卡片（/mcp 命令）
+- 完整整合指南
+- 团队工作流规范更新
+
+**MCP 配置完成总结**:
+| 步骤 | 状态 | 文件 |
+|------|------|------|
+| MCP 服务器配置 | ✅ 完成 | `.mcp.json` |
+| 快速调用卡片 | ✅ 完成 | `.claude/commands/mcp.md` |
+| 角色调用规范 | ✅ 完成 | `.claude/team/MCP-INTEGRATION.md` |
+| 整合指南 | ✅ 完成 | `docs/mcp-integration/` |
+| 团队规范更新 | ✅ 完成 | `.claude/team/README.md`, `.claude/team/WORKFLOW.md` |
+
+**测试结果**:
+- 单元测试：469/471 通过 (99.6%)
+- 2 个失败测试为已有问题（与本次提交无关）：
+  - `test_create_atr_with_defaults`: ATR 默认值断言差异
+  - `test_signal_pipeline_warmup_kline_replay`: SignalPipeline 属性缺失
+
+**Git 提交**: `17c884f`
+
+---
