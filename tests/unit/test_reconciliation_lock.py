@@ -11,6 +11,7 @@
 """
 import asyncio
 import pytest
+import sqlite3
 import time
 import tempfile
 import os

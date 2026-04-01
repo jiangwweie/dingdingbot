@@ -2,9 +2,9 @@
 
 > **创建日期**: 2026-04-01
 > **任务 ID**: P0-004
-> **阶段**: 阶段 1 - 详细设计
-> **状态**: ✅ 已修复 (待复核)
-> **版本**: v1.1
+> **阶段**: 阶段 3 - 编码实施 ✅ 已完成
+> **状态**: ✅ 已完成
+> **版本**: v1.2
 
 ---
 
@@ -12,6 +12,7 @@
 
 | 版本 | 日期 | 变更内容 | 变更人 |
 |------|------|----------|--------|
+| v1.2 | 2026-04-01 | 阶段 3 完成：数量精度检查实现 + 29 个测试用例 | AI Builder |
 | v1.1 | 2026-04-01 | 修复评审提出的 1 个问题：极端行情触发条件 | AI Builder |
 | v1.0 | 2026-04-01 | 初始版本 | - |
 
@@ -1323,14 +1324,65 @@ class TestOrderValidatorIntegration:
 
 ---
 
-## 七、变更记录
+## 八、阶段 3 实施结果
+
+### 8.1 已完成功能
+
+**1. ExchangeGateway.get_market_info() 方法**
+- 获取交易对精度信息（min_quantity, quantity_precision, step_size 等）
+- 支持 CCXT 市场数据格式解析
+
+**2. CapitalProtectionManager._check_quantity_precision() 方法**
+- 最小交易量检查
+- 数量精度检查（小数位数）
+- step_size 整除性检查
+
+**3. OrderCheckResult 模型扩展**
+- `quantity_precision_check`: 数量精度检查是否通过
+- `min_quantity`: 最小交易量要求
+- `required_precision`: 要求的数量精度
+- `step_size`: 数量步长
+
+### 8.2 测试结果
+
+**测试文件**: `tests/unit/test_order_validator.py` (734 行，29 个测试用例)
+
+| 测试类别 | 测试数量 | 通过率 |
+|----------|---------|--------|
+| 最小订单金额检查 | 5 | ✅ 100% |
+| 数量精度检查 | 5 | ✅ 100% |
+| 价格合理性检查 | 5 | ✅ 100% |
+| 极端行情放宽逻辑 | 2 | ✅ 100% |
+| 综合场景测试 | 4 | ✅ 100% |
+| 边界值测试 | 4 | ✅ 100% |
+| 不同订单类型测试 | 4 | ✅ 100% |
+| **总计** | **29** | **✅ 100%** |
+
+**现有测试兼容性**:
+- `test_capital_protection.py`: 29/29 通过 ✅
+- `test_volatility_detector.py`: 23/24 通过（1 个现有边界值测试问题）
+
+### 8.3 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|------|----------|------|
+| `src/infrastructure/exchange_gateway.py` | 修改 | 新增 `get_market_info()` 方法 |
+| `src/application/capital_protection.py` | 修改 | 新增 `_check_quantity_precision()` 方法 |
+| `src/domain/models.py` | 修改 | OrderCheckResult 扩展字段 |
+| `tests/unit/test_order_validator.py` | 新增 | 29 个 P0-004 测试用例 |
+| `tests/unit/test_capital_protection.py` | 修改 | 添加 `get_market_info` mock |
+
+---
+
+## 九、变更记录
 
 | 版本 | 日期 | 变更内容 | 变更人 |
 |------|------|----------|--------|
+| v1.2 | 2026-04-01 | 阶段 3 完成：数量精度检查实现 + 29 个测试用例 | AI Builder |
 | v1.1 | 2026-04-01 | 修复评审提出的 1 个问题：极端行情触发条件 | AI Builder |
 | v1.0 | 2026-04-01 | 初始版本 | - |
 
 ---
 
-*设计文档版本：v1.1*
-*状态：✅ 已修复 (待复核)*
+*设计文档版本：v1.2*
+*状态：✅ 阶段 3 已完成*

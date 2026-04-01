@@ -1,5 +1,249 @@
 # 进度日志
 
+## 2026-04-01 - P0-004 订单参数合理性检查 ✅
+
+### 任务概述
+
+实施 P0-004 - 订单参数合理性检查，包括最小订单金额检查、数量精度检查和价格合理性检查。
+
+**设计文档**: `docs/designs/p0-004-order-validation.md` v1.2
+
+**任务 ID**: #15
+
+---
+
+### 实施内容
+
+#### 1. 最小订单金额检查 ✅
+
+**文件**: `src/application/capital_protection.py` - `_check_min_notional()` 方法
+
+**检查逻辑**:
+- 公式：`notional_value = quantity * price`
+- 限制：`notional_value >= 5 USDT` (Binance 标准)
+
+**测试结果**: 5/5 测试通过
+- 边界值测试（正好 5 USDT、略低于 5 USDT）
+- 市价单/条件单特殊处理
+
+#### 2. 数量精度检查 ✅
+
+**文件**: `src/infrastructure/exchange_gateway.py` - `get_market_info()` 方法
+**文件**: `src/application/capital_protection.py` - `_check_quantity_precision()` 方法
+
+**检查项**:
+1. 最小交易量检查：`quantity >= min_quantity`
+2. 数量精度检查：小数位数不超过 `quantity_precision`
+3. step_size 整除性：`quantity % step_size == 0`
+
+**测试结果**: 5/5 测试通过
+- 精度超限测试
+- 最小交易量测试
+- step_size 倍数测试
+- 市场信息获取失败容错
+
+#### 3. 价格合理性检查 ✅
+
+**文件**: `src/application/capital_protection.py` - `_check_price_reasonability()` 方法
+
+**检查逻辑**:
+- 公式：`deviation = |order_price - ticker_price| / ticker_price`
+- 限制：正常行情 ≤10%，极端行情 ≤20%
+
+**测试结果**: 5/5 测试通过
+- 偏差范围内测试
+- 边界值测试（10%、10.002%）
+- 市价单跳过检查
+- 获取 ticker 失败容错
+
+#### 4. 极端行情放宽逻辑 ✅
+
+**文件**: `src/application/volatility_detector.py` (已存在)
+
+**功能**:
+- 价格波动率检测（5 分钟窗口）
+- 极端行情触发（≥5% 波动）
+- 放宽价格偏差限制（10% → 20%）
+- 仅允许 TP/SL 订单模式
+
+**测试结果**: 2/2 测试通过
+- 极端行情下放宽偏差测试
+- 仍拒绝过大偏差测试
+
+---
+
+### 测试结果
+
+**新增测试文件**: `tests/unit/test_order_validator.py` (734 行，29 个测试用例)
+
+| 测试类别 | 测试数量 | 通过率 |
+|----------|---------|--------|
+| 最小订单金额检查 | 5 | ✅ 100% |
+| 数量精度检查 | 5 | ✅ 100% |
+| 价格合理性检查 | 5 | ✅ 100% |
+| 极端行情放宽逻辑 | 2 | ✅ 100% |
+| 综合场景测试 | 4 | ✅ 100% |
+| 边界值测试 | 4 | ✅ 100% |
+| 不同订单类型测试 | 4 | ✅ 100% |
+| **总计** | **29** | **✅ 100%** |
+
+**现有测试兼容性**:
+- `test_capital_protection.py`: 29/29 通过 ✅
+- `test_volatility_detector.py`: 23/24 通过（1 个现有边界值测试问题）
+
+---
+
+### 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|------|----------|------|
+| `src/infrastructure/exchange_gateway.py` | 修改 | 新增 `get_market_info()` 方法 |
+| `src/application/capital_protection.py` | 修改 | 新增 `_check_quantity_precision()` 方法，修复异步锁问题 |
+| `src/domain/models.py` | 修改 | OrderCheckResult 扩展字段 |
+| `tests/unit/test_order_validator.py` | 新增 | 29 个 P0-004 测试用例 |
+| `tests/unit/test_capital_protection.py` | 修改 | 添加 `get_market_info` mock，修复异步调用 |
+| `docs/designs/p0-004-order-validation.md` | 更新 | 更新状态为阶段 3 已完成 |
+
+---
+
+### 交付成果
+
+1. **代码实现**:
+   - ✅ 最小订单金额检查（防止粉尘订单）
+   - ✅ 数量精度检查（符合交易所要求）
+   - ✅ 价格合理性检查（防止异常价格）
+   - ✅ 极端行情放宽逻辑
+
+2. **测试覆盖**:
+   - ✅ 29 个专项测试用例
+   - ✅ 边界值测试覆盖
+   - ✅ 异常场景容错测试
+
+3. **文档更新**:
+   - ✅ 设计文档更新为 v1.2
+   - ✅ 实施结果记录
+
+---
+
+## 2026-04-01 - P0-003 重启对账流程完善 ✅
+
+### 任务概述
+
+实施 P0-003 - 完善重启对账流程，包括并发锁机制、幽灵订单处理、孤儿订单处理和对账报告持久化。
+
+**设计文档**: `docs/designs/p0-003-reconciliation.md` v1.1
+
+---
+
+### 实施内容
+
+#### 1. 并发锁机制 ✅
+
+**文件**: `src/application/reconciliation_lock.py` (已存在)
+
+**功能**:
+- 数据库行锁 + 内存锁双重保护
+- 锁超时自动释放（5 分钟）防止死锁
+- 支持上下文管理器 `async with lock.acquire()`
+- 支持非阻塞 `try_acquire()` 方法
+
+#### 2. 幽灵订单处理 ✅
+
+**文件**: `src/application/reconciliation.py`
+
+**检测逻辑**:
+- 订单在本地 DB 中状态为 OPEN/PENDING
+- 但交易所查询不到该订单
+
+**处理逻辑**:
+- 标记为 `CANCELLED` 并记录到对账报告
+- 如果有 `order_repository`，更新数据库状态
+
+#### 3. 孤儿订单处理 ✅
+
+**文件**: `src/application/reconciliation.py`
+
+**检测逻辑**:
+- 交易所有活跃挂单，但本地 DB 无记录
+
+**处理逻辑**:
+- **入场订单 (ENTRY)**: 导入 DB 并创建关联 Signal
+- **TP/SL 订单**: 撤销并记录（因为仓位不存在）
+
+#### 4. 对账报告生成 ✅
+
+**文件**: `src/domain/models.py`, `src/infrastructure/reconciliation_repository.py`
+
+**报告内容**:
+- 幽灵订单列表 (`ghost_orders`)
+- 导入订单列表 (`imported_orders`)
+- 撤销孤儿订单列表 (`canceled_orphan_orders`)
+- 对账摘要信息
+
+**持久化**:
+- `reconciliation_reports` 表：存储报告摘要
+- `reconciliation_details` 表：存储差异详情
+
+#### 5. 新增枚举类型 ✅
+
+**文件**: `src/domain/models.py`
+
+```python
+class ReconciliationAction(str, Enum):
+    """对账处理动作"""
+    CANCEL_ORDER = "cancel_order"
+    CREATE_SIGNAL = "create_signal"
+    SYNC_POSITION = "sync_position"
+    IGNORE = "ignore"
+    MARK_CANCELLED = "mark_cancelled"
+    IMPORTED_TO_DB = "imported_to_db"
+```
+
+---
+
+### 测试执行 ✅
+
+**测试文件**:
+- `tests/unit/test_reconciliation_lock.py` (新增，21 个测试)
+- `tests/unit/test_reconciliation.py` (已存在，27 个测试)
+
+**测试结果**:
+```
+48 passed in 62.87s (0:01:02)
+```
+
+**测试覆盖**:
+- 锁获取和释放
+- 锁超时机制
+- 并发锁竞争
+- 幽灵订单检测
+- 孤儿订单处理（入场订单导入，TP/SL 订单撤销）
+- 宽限期机制
+- 对账报告生成
+
+---
+
+### 修改文件清单
+
+| 文件路径 | 修改类型 | 说明 |
+|----------|----------|------|
+| `src/domain/models.py` | 修改 | 添加 `ReconciliationAction` 枚举 |
+| `src/application/reconciliation_lock.py` | 已存在 | 并发锁机制（无需修改） |
+| `src/application/reconciliation.py` | 已存在 | 对账服务（无需修改） |
+| `src/infrastructure/reconciliation_repository.py` | 已存在 | 对账报告持久化（无需修改） |
+| `tests/unit/test_reconciliation_lock.py` | 新增 | 并发锁单元测试 |
+| `tests/unit/test_reconciliation.py` | 已存在 | 对账服务单元测试 |
+
+---
+
+### 下一步计划
+
+1. 将锁机制集成到系统启动流程
+2. 创建对账报告查询 API 接口
+3. 飞书告警集成（对账差异通知）
+
+---
+
 ## 2026-04-01 - 核心模块代码审查与 P0 级问题修复 ✅
 
 ### 任务概述
