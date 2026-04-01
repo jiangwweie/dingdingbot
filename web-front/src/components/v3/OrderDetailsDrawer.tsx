@@ -1,6 +1,6 @@
-import { JSX } from 'react';
+import { useState, useEffect, JSX } from 'react';
 import { OrderResponse, OrderStatus, OrderType } from '../../types/order';
-import { X, Clock, CheckCircle, AlertCircle, XCircle, Timer } from 'lucide-react';
+import { X, Clock, CheckCircle, AlertCircle, XCircle, Timer, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { cn } from '../../lib/utils';
@@ -8,12 +8,43 @@ import { DecimalDisplay } from './DecimalDisplay';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { OrderRoleBadge } from './OrderRoleBadge';
 import { DirectionBadge } from './DirectionBadge';
+import { fetchOrderKlineContext } from '../../lib/api';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+  ReferenceDot,
+} from 'recharts';
 
 interface OrderDetailsDrawerProps {
   order: OrderResponse | null;
   isOpen: boolean;
   onClose: () => void;
   onCancelOrder?: (orderId: string, symbol: string) => Promise<void>;
+  showKlineChart?: boolean;  // 是否显示 K 线图
+}
+
+interface KlineDataPoint {
+  timestamp: number;
+  date: string;
+  price: number;
+  high: number;
+  low: number;
+  open: number;
+  close: number;
+  volume: number;
+}
+
+interface OrderMarker {
+  timestamp: number;
+  price: number;
+  type: 'entry' | 'tp' | 'sl' | 'exit';
+  label: string;
 }
 
 const statusIcon: Record<OrderStatus, JSX.Element> = {
@@ -33,12 +64,140 @@ const orderTypeLabels: Record<OrderType, string> = {
   STOP_LIMIT: '止损限价单',
 };
 
+/**
+ * Get marker color by type
+ */
+function getMarkerColor(type: 'entry' | 'tp' | 'sl' | 'exit'): string {
+  switch (type) {
+    case 'entry':
+      return '#000000'; // Black for entry
+    case 'tp':
+      return '#16a34a'; // Green for take profit
+    case 'sl':
+      return '#dc2626'; // Red for stop loss
+    case 'exit':
+      return '#6b7280'; // Gray for exit
+    default:
+      return '#9ca3af';
+  }
+}
+
+/**
+ * Custom tooltip for kline chart
+ */
+function KlineTooltip({ active, payload, label }: any) {
+  if (active && payload && payload.length) {
+    const price = payload[0]?.value;
+    const open = payload[0]?.payload.open;
+    const high = payload[0]?.payload.high;
+    const low = payload[0]?.payload.low;
+    const close = payload[0]?.payload.close;
+    const isUp = close >= open;
+
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs">
+        <p className="font-medium text-gray-700 mb-2">{label}</p>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+          <span className="text-gray-500">开：</span>
+          <span className="font-medium">{open?.toFixed(2)}</span>
+          <span className="text-gray-500">高：</span>
+          <span className="font-medium">{high?.toFixed(2)}</span>
+          <span className="text-gray-500">低：</span>
+          <span className="font-medium">{low?.toFixed(2)}</span>
+          <span className="text-gray-500">收：</span>
+          <span className={cn('font-medium', isUp ? 'text-green-600' : 'text-red-600')}>
+            {close?.toFixed(2)}
+          </span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+
 export function OrderDetailsDrawer({
   order,
   isOpen,
   onClose,
   onCancelOrder,
+  showKlineChart = true,
 }: OrderDetailsDrawerProps) {
+  const [klineData, setKlineData] = useState<KlineDataPoint[]>([]);
+  const [orderMarkers, setOrderMarkers] = useState<OrderMarker[]>([]);
+  const [isLoadingKline, setIsLoadingKline] = useState(false);
+  const [klineError, setKlineError] = useState<string | null>(null);
+
+  // Fetch kline data when order changes and drawer opens
+  useEffect(() => {
+    if (!isOpen || !order || !showKlineChart) return;
+
+    const fetchKlineData = async () => {
+      setIsLoadingKline(true);
+      setKlineError(null);
+      try {
+        const result = await fetchOrderKlineContext(order.order_id, order.symbol);
+
+        // Transform kline data
+        const klines: KlineDataPoint[] = result.klines.map((k: number[]) => ({
+          timestamp: k[0],
+          date: format(new Date(k[0]), 'MM-dd HH:mm'),
+          price: k[4], // close price
+          open: k[1],
+          high: k[2],
+          low: k[3],
+          close: k[4],
+          volume: k[5],
+        }));
+
+        setKlineData(klines);
+
+        // Build order markers
+        const markers: OrderMarker[] = [];
+
+        // Entry marker
+        if (result.order.average_exec_price || result.order.price) {
+          const entryPrice = parseFloat(result.order.average_exec_price || result.order.price || '0');
+          const entryTime = result.order.filled_at || result.order.created_at;
+          markers.push({
+            timestamp: entryTime,
+            price: entryPrice,
+            type: 'entry',
+            label: `入场 ${order.direction === 'LONG' ? '📈' : '📉'}`,
+          });
+        }
+
+        // Stop loss marker
+        if (order.stop_loss) {
+          markers.push({
+            timestamp: klines[klines.length - 1]?.timestamp || Date.now(),
+            price: parseFloat(order.stop_loss),
+            type: 'sl',
+            label: '止损',
+          });
+        }
+
+        // Take profit marker
+        if (order.take_profit) {
+          markers.push({
+            timestamp: klines[klines.length - 1]?.timestamp || Date.now(),
+            price: parseFloat(order.take_profit),
+            type: 'tp',
+            label: '止盈',
+          });
+        }
+
+        setOrderMarkers(markers);
+      } catch (err: any) {
+        console.error('Failed to fetch kline data:', err);
+        setKlineError(err.message || '加载 K 线数据失败');
+      } finally {
+        setIsLoadingKline(false);
+      }
+    };
+
+    fetchKlineData();
+  }, [order, isOpen, showKlineChart]);
+
   if (!isOpen || !order) return null;
 
   const isCancellable = order.status === 'OPEN' || order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED';
@@ -218,6 +377,91 @@ export function OrderDetailsDrawer({
               </span>
             </div>
           </div>
+
+          {/* K-line Chart */}
+          {showKlineChart && (
+            <div className="pt-4 border-t border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <Activity className="w-4 h-4" />
+                K 线走势图
+              </h3>
+
+              {isLoadingKline ? (
+                <div className="h-[300px] flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="w-6 h-6 border-2 border-gray-300 border-t-black rounded-full animate-spin mx-auto" />
+                    <p className="text-xs text-gray-500 mt-2">加载 K 线数据...</p>
+                  </div>
+                </div>
+              ) : klineError ? (
+                <div className="h-[300px] flex items-center justify-center">
+                  <div className="text-center text-red-500">
+                    <AlertCircle className="w-8 h-8 mx-auto mb-2" />
+                    <p className="text-sm">{klineError}</p>
+                  </div>
+                </div>
+              ) : klineData.length === 0 ? (
+                <div className="h-[300px] flex items-center justify-center">
+                  <div className="text-center text-gray-400">
+                    <Activity className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                    <p className="text-sm">暂无 K 线数据</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={klineData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 10, fill: '#6b7280' }}
+                        tickFormatter={(value) => value.slice(0, 5)}
+                        minTickGap={30}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 10, fill: '#6b7280' }}
+                        tickFormatter={(value) => value.toFixed(2)}
+                        domain={['dataMin', 'dataMax']}
+                        width={60}
+                      />
+                      <Tooltip
+                        content={<KlineTooltip />}
+                        labelFormatter={(label) => `时间：${label}`}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="price"
+                        name="价格"
+                        stroke="#000000"
+                        strokeWidth={1.5}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                      {/* Order markers */}
+                      {orderMarkers.map((marker, index) => (
+                        <ReferenceDot
+                          key={`${marker.type}-${index}`}
+                          x={marker.timestamp}
+                          y={marker.price}
+                          r={6}
+                          fill={getMarkerColor(marker.type)}
+                          stroke={getMarkerColor(marker.type)}
+                          strokeWidth={2}
+                          label={{
+                            value: marker.label,
+                            position: 'top',
+                            fill: getMarkerColor(marker.type),
+                            fontSize: 11,
+                            fontWeight: 500,
+                          }}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer Actions */}

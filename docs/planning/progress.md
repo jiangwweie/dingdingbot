@@ -6,6 +6,68 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-01 - T8 订单详情与 K 线图渲染 ✅
+
+**执行日期**: 2026-04-01  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成
+
+**任务概述**:
+完成 PMS 回测修复阶段 C（前端展示）- T8 订单详情与 K 线图渲染。
+
+**T8 任务完成情况**:
+
+| 任务 | 状态 | 交付物 | 测试 |
+|------|------|--------|------|
+| T8-1: 后端 API 确认 | ✅ 已完成 | `/api/v3/orders/{order_id}/klines` 已存在 | - |
+| T8-2: 前端组件实现 | ✅ 已完成 | OrderDetailsDrawer.tsx 扩展 | 构建通过 |
+| T8-3: SST 测试 | ✅ 已完成 | OrderDetailsDrawer.test.tsx | 25+ 测试用例 |
+
+**详细实现**:
+
+1. **OrderDetailsDrawer 组件扩展**:
+   - 添加 `showKlineChart` 属性（默认 true）
+   - 集成 Recharts LineChart 展示 K 线走势
+   - 实现订单标记（入场点/止盈点/止损点）使用 ReferenceDot
+   - 添加 KlineTooltip 显示 OHLC 数据
+   - 加载/错误/空状态处理
+
+2. **辅助函数**:
+   - `getMarkerColor(type)` - 根据标记类型返回颜色（黑色入场/绿色止盈/红色止损）
+   - `KlineTooltip` - 自定义 K 线数据提示组件
+
+3. **SST 测试覆盖**:
+   - 基本渲染测试（isOpen=false/null order）
+   - 订单参数显示测试（数量/价格/止损止盈）
+   - 进度条显示测试（0%/50%/100%）
+   - 取消订单功能测试（OPEN/PENDING/PARTIALLY_FILLED 状态）
+   - K 线图集成测试（加载/错误/成功状态）
+   - 关闭功能测试（按钮/ backdrop 点击）
+
+**交付文件**:
+| 文件 | 说明 |
+|------|------|
+| `web-front/src/components/v3/OrderDetailsDrawer.tsx` | 扩展 K 线图展示功能（488 行） |
+| `web-front/src/components/v3/__tests__/OrderDetailsDrawer.test.tsx` | SST 测试（25+ 用例） |
+| `docs/planning/t8-order-details-task.md` | 任务计划文档 |
+
+**设计亮点**:
+1. **订单标记可视化** - 使用不同颜色区分入场/止盈/止损点
+2. **K 线 Tooltip** - 显示完整的 OHLC 数据（开/高/低/收）
+3. **响应式设计** - 图表高度固定 300px，宽度自适应
+4. **状态处理完善** - 加载中/错误/空数据三种状态 UI
+
+**前端构建结果**:
+```
+✓ 3435 modules transformed.
+dist/index.html                     0.40 kB
+dist/assets/index-DUPBd2Tf.css     55.80 kB
+dist/assets/index-Bm6lhK34.js   1,249.68 kB
+✓ built in 2.34s
+```
+
+---
+
 ### 2026-04-01 - PMS 回测修复 - 阶段 B 数据持久化 ✅
 
 **执行日期**: 2026-04-01  
