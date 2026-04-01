@@ -217,6 +217,119 @@ class AccountORM(Base):
 
 
 # ============================================================
+# Kline ORM 模型 (Phase 7: 回测数据存储)
+# ============================================================
+
+class KlineORM(Base):
+    """
+    K 线数据 ORM 模型
+
+    用于存储本地历史 K 线数据，支持回测和策略验证。
+
+    字段映射:
+    - id: 主键 (自增)
+    - symbol: 交易对 (e.g., "BTC/USDT:USDT")
+    - timeframe: 时间周期 (e.g., "15m", "1h", "4h")
+    - timestamp: K 线收盘时间戳 (毫秒)
+    - open/high/low/close/volume: OHLCV 数据 (Decimal 精度)
+    - is_closed: K 线是否已收盘
+
+    使用示例:
+        >>> kline = KlineORM(
+        ...     symbol="BTC/USDT:USDT",
+        ...     timeframe="15m",
+        ...     timestamp=1704067200000,
+        ...     open=Decimal('42314.00'),
+        ...     high=Decimal('42535.00'),
+        ...     low=Decimal('42289.60'),
+        ...     close=Decimal('42532.50'),
+        ...     volume=Decimal('3617.988'),
+        ...     is_closed=True
+        ... )
+    """
+    __tablename__ = "klines"
+
+    # 主键
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+
+    # 交易对和时间周期
+    symbol: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False
+    )
+
+    timeframe: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False
+    )
+
+    # K 线时间戳 (毫秒)
+    timestamp: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
+    )
+
+    # OHLCV 数据 (Decimal 精度，使用 DecimalString 类型)
+    open: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    high: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    low: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    close: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    volume: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    # 收盘状态
+    is_closed: Mapped[bool] = mapped_column(
+        default=True,
+        nullable=False
+    )
+
+    # 审计字段
+    created_at: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
+    )
+
+    # 表约束和索引
+    __table_args__ = (
+        # 唯一约束：防止重复插入同一 K 线
+        Index("uq_klines_symbol_timeframe_timestamp", "symbol", "timeframe", "timestamp", unique=True),
+        # 复合索引：加速回测查询
+        Index("idx_klines_symbol_tf", "symbol", "timeframe"),
+        Index("idx_klines_symbol_tf_ts", "symbol", "timeframe", "timestamp"),
+        Index("idx_klines_timestamp", "timestamp"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<KlineORM(symbol={self.symbol!r}, timeframe={self.timeframe!r}, "
+            f"timestamp={self.timestamp}, close={self.close})>"
+        )
+
+
+# ============================================================
 # Signal ORM 模型
 # ============================================================
 

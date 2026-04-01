@@ -692,6 +692,79 @@ export async function fetchBacktestReport(reportId: string): Promise<BacktestRep
 }
 
 // ============================================================================
+// V3 Backtest Reports API (T7 - 回测记录列表页面)
+// ============================================================================
+
+import type {
+  BacktestReportSummary,
+  ListBacktestReportsRequest,
+  ListBacktestReportsResponse,
+  BacktestReportDetail,
+} from '../types/backtest';
+
+/**
+ * Fetch backtest reports list with filters, sorting, and pagination
+ */
+export async function fetchBacktestReports(params?: ListBacktestReportsRequest): Promise<ListBacktestReportsResponse> {
+  const queryParams = new URLSearchParams();
+  if (params?.strategyId) queryParams.append('strategy_id', params.strategyId);
+  if (params?.symbol) queryParams.append('symbol', params.symbol);
+  if (params?.startDate) queryParams.append('start_date', String(params.startDate));
+  if (params?.endDate) queryParams.append('end_date', String(params.endDate));
+  if (params?.page) queryParams.append('page', String(params.page));
+  if (params?.pageSize) queryParams.append('page_size', String(params.pageSize));
+  if (params?.sortBy) queryParams.append('sort_by', params.sortBy);
+  if (params?.sortOrder) queryParams.append('sort_order', params.sortOrder);
+
+  const res = await fetch(`/api/v3/backtest/reports?${queryParams}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch backtest reports');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch backtest report details by ID
+ */
+export async function fetchBacktestReportDetail(reportId: string): Promise<BacktestReportDetail> {
+  const res = await fetch(`/api/v3/backtest/reports/${reportId}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch backtest report details');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  const data = await res.json();
+  return data.report;
+}
+
+/**
+ * Delete backtest report by ID
+ */
+export async function deleteBacktestReport(reportId: string): Promise<{ status: string; message: string }> {
+  const res = await fetch(`/api/v3/backtest/reports/${reportId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to delete backtest report');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+// ============================================================================
 // Filter Utility Functions
 // ============================================================================
 
@@ -1397,6 +1470,26 @@ export async function runReconciliation(symbol: string): Promise<ReconciliationR
     const error = new Error('Failed to run reconciliation');
     (error as any).status = res.status;
     (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch order kline context for charting
+ * Returns order details plus ~50 K-lines surrounding the order timestamp
+ */
+export async function fetchOrderKlineContext(orderId: string, symbol: string): Promise<{
+  order: OrderResponse;
+  klines: number[][]; // [timestamp_ms, open, high, low, close, volume]
+}> {
+  const res = await fetch(`/api/v3/orders/${orderId}/klines?symbol=${encodeURIComponent(symbol)}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch order kline context');
+    (error as any).status = res.status;
     throw error;
   }
   return res.json();

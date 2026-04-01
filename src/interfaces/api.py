@@ -14,6 +14,9 @@ Endpoints:
     GET /api/config - Get current config (masked)
     PUT /api/config - Update user config (hot-reload)
     POST /api/backtest - Run backtest
+    GET /api/v3/backtest/reports - List backtest reports (with filters, sorting, pagination)
+    GET /api/v3/backtest/reports/{id} - Get backtest report details
+    DELETE /api/v3/backtest/reports/{id} - Delete backtest report
     GET /api/strategies - Get all custom strategy templates
     GET /api/strategies/{id} - Get single strategy details
     GET /api/strategies/meta - Get supported triggers and filters metadata
@@ -53,6 +56,10 @@ from src.domain.models import (
     OrderType, OrderStatus, OrderRole, Direction,
     ErrorResponse,  # MIN-001: 统一错误响应格式
 )
+
+# Backtest Reports API Models
+from pydantic import BaseModel, Field
+from typing import Literal
 
 
 # ============================================================
@@ -873,6 +880,216 @@ async def run_backtest(
         raise
     except Exception as e:
         return {"error": str(e)}
+
+
+# ============================================================
+# Backtest Reports Management Endpoints (v3)
+# ============================================================
+
+class BacktestReportSummary(BaseModel):
+    """回测报告摘要信息"""
+    id: str
+    strategy_id: str
+    strategy_name: str
+    strategy_version: str
+    symbol: str
+    timeframe: str
+    backtest_start: int
+    backtest_end: int
+    created_at: int
+    total_return: str
+    total_trades: int
+    win_rate: str
+    total_pnl: str
+    max_drawdown: str
+
+
+class ListBacktestReportsResponse(BaseModel):
+    """回测报告列表响应"""
+    reports: List[BacktestReportSummary]
+    total: int
+    page: int
+    pageSize: int
+
+
+@app.get("/api/v3/backtest/reports", response_model=ListBacktestReportsResponse)
+async def list_backtest_reports(
+    strategy_id: Optional[str] = Query(None, description="策略 ID 筛选"),
+    symbol: Optional[str] = Query(None, description="交易对筛选"),
+    start_date: Optional[int] = Query(None, description="开始时间戳（毫秒）"),
+    end_date: Optional[int] = Query(None, description="结束时间戳（毫秒）"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    sort_by: Literal['total_return', 'win_rate', 'created_at'] = Query('created_at', description="排序字段"),
+    sort_order: Literal['asc', 'desc'] = Query('desc', description="排序方向"),
+) -> ListBacktestReportsResponse:
+    """
+    获取回测报告列表（支持筛选、排序、分页）
+
+    Phase 6: v3.0 回测报告管理 - GET /api/v3/backtest/reports
+
+    功能:
+    - 按策略 ID、交易对、时间范围筛选
+    - 按收益率、胜率、创建时间排序
+    - 分页支持
+
+    Args:
+        strategy_id: 策略 ID 筛选
+        symbol: 交易对筛选
+        start_date: 开始时间戳（毫秒）
+        end_date: 结束时间戳（毫秒）
+        page: 页码（从 1 开始）
+        page_size: 每页数量（1-100）
+        sort_by: 排序字段 ('total_return' | 'win_rate' | 'created_at')
+        sort_order: 排序方向 ('asc' | 'desc')
+
+    Returns:
+        ListBacktestReportsResponse: 回测报告列表响应
+
+    Raises:
+        HTTPException:
+            - 500: 数据库查询失败
+    """
+    try:
+        # 获取数据库连接（与 signals 共享）
+        from src.infrastructure.backtest_repository import BacktestReportRepository
+
+        repository = BacktestReportRepository()
+        await repository.initialize()
+
+        try:
+            # 调用 repository 的 list_reports 方法
+            result = await repository.list_reports(
+                strategy_id=strategy_id,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                page=page,
+                page_size=page_size,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
+
+            # 转换为响应模型
+            reports = [
+                BacktestReportSummary(
+                    id=r["id"],
+                    strategy_id=r["strategy_id"],
+                    strategy_name=r["strategy_name"],
+                    strategy_version=r["strategy_version"],
+                    symbol=r["symbol"],
+                    timeframe=r["timeframe"],
+                    backtest_start=r["backtest_start"],
+                    backtest_end=r["backtest_end"],
+                    created_at=r["created_at"],
+                    total_return=r["total_return"],
+                    total_trades=r["total_trades"],
+                    win_rate=r["win_rate"],
+                    total_pnl=r["total_pnl"],
+                    max_drawdown=r["max_drawdown"],
+                )
+                for r in result["reports"]
+            ]
+
+            return ListBacktestReportsResponse(
+                reports=reports,
+                total=result["total"],
+                page=result["page"],
+                pageSize=result["pageSize"],
+            )
+        finally:
+            await repository.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取回测报告列表失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v3/backtest/reports/{report_id}")
+async def get_backtest_report(report_id: str):
+    """
+    获取回测报告详情
+
+    Phase 6: v3.0 回测报告管理 - GET /api/v3/backtest/reports/{report_id}
+
+    Args:
+        report_id: 报告 ID
+
+    Returns:
+        回测报告详情（包含完整的 positions 列表）
+
+    Raises:
+        HTTPException:
+            - 404: 报告不存在
+            - 500: 数据库查询失败
+    """
+    try:
+        from src.infrastructure.backtest_repository import BacktestReportRepository
+        from src.domain.models import PMSBacktestReport
+
+        repository = BacktestReportRepository()
+        await repository.initialize()
+
+        try:
+            report = await repository.get_report(report_id)
+
+            if not report:
+                raise HTTPException(status_code=404, detail="回测报告不存在")
+
+            return {
+                "status": "success",
+                "report": report.model_dump(),
+            }
+        finally:
+            await repository.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取回测报告详情失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v3/backtest/reports/{report_id}")
+async def delete_backtest_report(report_id: str):
+    """
+    删除回测报告
+
+    Phase 6: v3.0 回测报告管理 - DELETE /api/v3/backtest/reports/{report_id}
+
+    Args:
+        report_id: 报告 ID
+
+    Returns:
+        删除结果
+
+    Raises:
+        HTTPException:
+            - 500: 数据库删除失败
+    """
+    try:
+        from src.infrastructure.backtest_repository import BacktestReportRepository
+
+        repository = BacktestReportRepository()
+        await repository.initialize()
+
+        try:
+            await repository.delete_report(report_id)
+
+            return {
+                "status": "success",
+                "message": f"已删除回测报告：{report_id}",
+            }
+        finally:
+            await repository.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除回测报告失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================
@@ -2199,6 +2416,128 @@ async def get_order(order_id: str, symbol: str = Query(..., description="币种�
         raise
     except Exception as e:
         logger.error(f"查询订单失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v3/orders/{order_id}/klines")
+async def get_order_klines(
+    order_id: str,
+    symbol: str = Query(..., description="币种对"),
+) -> Dict[str, Any]:
+    """
+    获取订单相关的 K 线数据（用于图表展示）
+
+    Phase 6: v3.0 订单管理 - GET /api/v3/orders/{order_id}/klines
+    返回订单详情 plus ~50 K-lines surrounding the order timestamp for charting
+
+    Args:
+        order_id: 系统订单 ID
+        symbol: 币种对（查询参数）
+
+    Returns:
+        {
+            "order": { ... order info ... },
+            "klines": [[timestamp, open, high, low, close, volume], ...]
+        }
+
+    Raises:
+        HTTPException:
+            - 404 F-012: 订单不存在
+            - 500: 获取 K 线数据失败
+    """
+    try:
+        from src.infrastructure.order_repository import OrderRepository
+        from sqlalchemy.orm import Session
+        from src.infrastructure.database import get_db_session
+
+        # Get DB session
+        db = get_db_session()
+
+        # Fetch order from database
+        repo = OrderRepository(db)
+        order_orm = repo.get_by_id(order_id)
+
+        if not order_orm:
+            # Fallback: try to fetch from exchange
+            gateway = _get_exchange_gateway()
+            order_data = await gateway.fetch_order(order_id=order_id, symbol=symbol)
+            # Create mock order response
+            order_response = {
+                "order_id": order_id,
+                "exchange_order_id": order_data.exchange_order_id,
+                "symbol": symbol,
+                "order_type": order_data.order_type,
+                "order_role": "ENTRY",
+                "direction": order_data.direction,
+                "status": order_data.status,
+                "quantity": str(order_data.quantity),
+                "filled_qty": "0",
+                "price": str(order_data.price) if order_data.price else None,
+                "trigger_price": str(order_data.trigger_price) if order_data.trigger_price else None,
+                "created_at": order_data.created_at,
+            }
+            # Use current timeframe for klines
+            timeframe = "15m"  # Default
+        else:
+            # Build order response from ORM
+            order_response = {
+                "order_id": order_orm.id,
+                "exchange_order_id": order_orm.exchange_order_id,
+                "symbol": order_orm.symbol,
+                "order_type": order_orm.order_type,
+                "order_role": order_orm.order_role,
+                "direction": order_orm.direction,
+                "status": order_orm.status,
+                "quantity": str(order_orm.requested_qty),
+                "filled_qty": str(order_orm.filled_qty),
+                "price": str(order_orm.price) if order_orm.price else None,
+                "trigger_price": str(order_orm.trigger_price) if order_orm.trigger_price else None,
+                "average_exec_price": str(order_orm.average_exec_price) if order_orm.average_exec_price else None,
+                "created_at": order_orm.created_at,
+                "filled_at": order_orm.filled_at,
+            }
+            # Extract timeframe from order or use default
+            timeframe = getattr(order_orm, 'timeframe', '15m') or '15m'
+
+        # Get kline_timestamp from order (filled_at or created_at)
+        kline_timestamp = order_orm.filled_at if order_orm and order_orm.filled_at else order_orm.created_at if order_orm else int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # Parse timeframe to milliseconds
+        timeframe_map = {
+            "1m": 1 * 60 * 1000,
+            "5m": 5 * 60 * 1000,
+            "15m": 15 * 60 * 1000,
+            "30m": 30 * 60 * 1000,
+            "1h": 60 * 60 * 1000,
+            "2h": 2 * 60 * 60 * 1000,
+            "4h": 4 * 60 * 60 * 1000,
+            "6h": 6 * 60 * 60 * 1000,
+            "12h": 12 * 60 * 60 * 1000,
+            "1d": 24 * 60 * 60 * 1000,
+            "1w": 7 * 24 * 60 * 60 * 1000,
+        }
+        timeframe_ms = timeframe_map.get(timeframe, 15 * 60 * 1000)  # Default 15m
+
+        # Calculate since timestamp (go back 25 candles to ensure target is in middle-rear)
+        since = kline_timestamp - (25 * timeframe_ms)
+
+        # Fetch K-line data from CCXT
+        import ccxt.async_support as ccxt
+        exchange = ccxt.binanceusdm({'options': {'defaultType': 'swap'}})
+        try:
+            ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=50)
+        finally:
+            await exchange.close()
+
+        return {
+            "order": order_response,
+            "klines": ohlcv,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取订单 K 线数据失败：{str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

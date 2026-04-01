@@ -6,6 +6,98 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-01 - T7 回测记录列表页面 ✅
+
+**执行日期**: 2026-04-01  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成
+
+**任务概述**:
+完成 PMS 回测修复阶段 C（前端展示）- T7 回测记录列表页面。
+
+**T7 任务完成情况**:
+
+| 任务 | 状态 | 交付物 | 测试 |
+|------|------|--------|------|
+| T7-1: 后端 API 实现 | ✅ 已完成 | GET/DELETE /api/v3/backtest/reports | Python 编译通过 |
+| T7-2: 前端类型定义 | ✅ 已完成 | web-front/src/types/backtest.ts | 类型检查通过 |
+| T7-3: API 客户端函数 | ✅ 已完成 | fetchBacktestReports, deleteBacktestReport | - |
+| T7-4: 表格组件 | ✅ 已完成 | BacktestReportsTable.tsx | - |
+| T7-5: 筛选表单组件 | ✅ 已完成 | BacktestReportsFilters.tsx | - |
+| T7-6: 分页器组件 | ✅ 已完成 | BacktestReportsPagination.tsx | - |
+| T7-7: 主页面组件 | ✅ 已完成 | BacktestReports.tsx | - |
+
+**详细实现**:
+
+1. **后端 API** (`src/interfaces/api.py`):
+   - `GET /api/v3/backtest/reports` - 列表查询（支持筛选、排序、分页）
+     - 查询参数：strategy_id, symbol, start_date, end_date, page, page_size, sort_by, sort_order
+     - 集成 BacktestReportRepository.list_reports 方法
+   - `GET /api/v3/backtest/reports/{report_id}` - 详情查询
+   - `DELETE /api/v3/backtest/reports/{report_id}` - 删除报告
+
+2. **前端类型定义** (`web-front/src/types/backtest.ts`):
+   - BacktestReportSummary - 回测报告摘要
+   - ListBacktestReportsRequest - 列表请求参数
+   - ListBacktestReportsResponse - 列表响应
+   - BacktestReportDetail - 完整报告详情
+   - PositionSummary - 仓位摘要
+
+3. **API 客户端函数** (`web-front/src/lib/api.ts`):
+   - `fetchBacktestReports(params)` - 获取回测报告列表
+   - `fetchBacktestReportDetail(reportId)` - 获取报告详情
+   - `deleteBacktestReport(reportId)` - 删除报告
+
+4. **BacktestReportsTable 组件** (`web-front/src/components/v3/backtest/`):
+   - 表格展示回测报告列表
+   - 显示：策略名称、交易对、周期、回测时间、收益率、胜率、总盈亏、最大回撤、交易次数
+   - 操作：查看详情、删除报告
+   - 收益率/胜率颜色标记（绿色盈利/红色亏损）
+   - 加载/空状态处理
+
+5. **BacktestReportsFilters 组件**:
+   - 策略 ID 文本输入
+   - 交易对下拉选择
+   - 时间范围选择（QuickDateRangePicker）
+   - 筛选条件展开/收起
+   - 重置功能
+
+6. **BacktestReportsPagination 组件**:
+   - 页码显示（智能省略号）
+   - 首页/末页/上一页/下一页按钮
+   - 每页数量选择（10/20/50/100）
+   - 总记录数显示
+
+7. **BacktestReports 页面** (`web-front/src/pages/`):
+   - 整合所有组件
+   - 状态管理：数据、加载、错误、筛选、分页、排序
+   - 删除确认对话框
+   - 信息提示 Banner
+
+**交付文件**:
+| 文件 | 说明 |
+|------|------|
+| `src/interfaces/api.py` | 添加 3 个回测报告管理端点 |
+| `web-front/src/types/backtest.ts` | 回测报告类型定义 |
+| `web-front/src/lib/api.ts` | API 客户端函数 |
+| `web-front/src/components/v3/backtest/BacktestReportsTable.tsx` | 表格组件 |
+| `web-front/src/components/v3/backtest/BacktestReportsFilters.tsx` | 筛选组件 |
+| `web-front/src/components/v3/backtest/BacktestReportsPagination.tsx` | 分页组件 |
+| `web-front/src/pages/BacktestReports.tsx` | 主页面 |
+| `docs/planning/t7-backtest-reports-list.md` | T7 任务文档 |
+| `docs/planning/task_plan.md` | 任务计划更新 |
+
+**技术亮点**:
+- 后端集成现有 BacktestReportRepository，复用 list_reports 方法
+- 前端组件化设计，表格/筛选/分页独立可复用
+- 类型安全：完整的 TypeScript 类型定义
+- 用户体验：加载状态、空状态、错误处理完善
+
+**下一步计划**:
+- T8: 订单详情与 K 线图渲染（已完成，见下）
+
+---
+
 ### 2026-04-01 - T8 订单详情与 K 线图渲染 ✅
 
 **执行日期**: 2026-04-01  
