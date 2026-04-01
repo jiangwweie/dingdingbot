@@ -6,9 +6,10 @@ v3.0 数据库基础设施
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import StaticPool
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional, Union
 import os
 
 
@@ -26,7 +27,7 @@ DATABASE_URL = os.getenv(
 )
 
 
-def create_engine(db_url: str | None = None):
+def create_engine(db_url: Optional[str] = None):
     """
     创建异步数据库引擎
 
@@ -60,7 +61,7 @@ def create_engine(db_url: str | None = None):
 
 
 # 全局引擎实例（延迟初始化）
-_engine: create_async_engine | None = None
+_engine: Optional[create_async_engine] = None
 
 
 def get_engine() -> create_async_engine:
