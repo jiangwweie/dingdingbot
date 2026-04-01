@@ -62,9 +62,11 @@ class OrderRepository:
             self._db = await aiosqlite.connect(self.db_path)
             self._db.row_factory = aiosqlite.Row
 
-            # Enable WAL mode for high concurrency write support
+            # Enable WAL mode for high concurrency write support (P0-001)
             await self._db.execute("PRAGMA journal_mode=WAL")
             await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
 
             # Create orders table
             await self._db.execute("""
