@@ -155,6 +155,130 @@ pytest tests/unit/ -v
 
 ---
 
+# 任务计划 - P0-004 订单参数合理性检查 ✅ 已完成
+
+> **创建日期**: 2026-04-01
+> **负责人**: @backend
+> **优先级**: P0
+> **阶段**: 阶段 3 - 编码实施 ✅ 已完成
+
+---
+
+## 任务目标
+
+实施 P0-004 - 订单参数合理性检查，防止粉尘订单、异常价格订单和精度不符订单。
+
+**设计文档**: `docs/designs/p0-004-order-validation.md` v1.2
+
+---
+
+## 验收标准
+
+- [x] 最小订单金额检查（Binance ≥5 USDT）
+- [x] 数量精度检查（最小交易量、精度限制、step_size 整除性）
+- [x] 价格合理性检查（偏差≤10%，极端行情≤20%）
+- [x] 极端行情放宽逻辑集成
+- [x] 单元测试覆盖率≥95%
+
+---
+
+## 实施结果
+
+### 1. 最小订单金额检查 ✅
+
+**文件**: `src/application/capital_protection.py` - `_check_min_notional()` 方法
+
+**检查逻辑**:
+```python
+notional_value = quantity * price
+passed = notional_value >= Decimal("5")  # 5 USDT 最小限制
+```
+
+### 2. 数量精度检查 ✅
+
+**文件**: `src/infrastructure/exchange_gateway.py` - `get_market_info()` 方法
+**文件**: `src/application/capital_protection.py` - `_check_quantity_precision()` 方法
+
+**检查项**:
+1. 最小交易量：`quantity >= min_quantity`
+2. 数量精度：小数位数 ≤ `quantity_precision`
+3. step_size 整除性：`quantity % step_size == 0`
+
+### 3. 价格合理性检查 ✅
+
+**文件**: `src/application/capital_protection.py` - `_check_price_reasonability()` 方法
+
+**检查逻辑**:
+```python
+deviation = abs(order_price - ticker_price) / ticker_price
+# 正常行情：deviation <= 10%
+# 极端行情：deviation <= 20% (通过 VolatilityDetector)
+```
+
+### 4. 极端行情放宽逻辑 ✅
+
+**文件**: `src/application/volatility_detector.py` (已存在)
+
+**功能**:
+- 5 分钟价格波动率检测
+- ≥5% 波动触发极端行情
+- 放宽偏差限制 10% → 20%
+- 仅允许 TP/SL 订单模式
+
+---
+
+## 测试结果
+
+**测试文件**: `tests/unit/test_order_validator.py` (734 行，29 个测试用例)
+
+| 测试类别 | 测试数量 | 通过率 |
+|----------|---------|--------|
+| 最小订单金额检查 | 5 | ✅ 100% |
+| 数量精度检查 | 5 | ✅ 100% |
+| 价格合理性检查 | 5 | ✅ 100% |
+| 极端行情放宽逻辑 | 2 | ✅ 100% |
+| 综合场景测试 | 4 | ✅ 100% |
+| 边界值测试 | 4 | ✅ 100% |
+| 不同订单类型测试 | 4 | ✅ 100% |
+| **总计** | **29** | **✅ 100%** |
+
+**测试命令**:
+```bash
+pytest tests/unit/test_order_validator.py -v
+# 29 passed in 0.20s
+```
+
+**现有测试兼容性**:
+- `test_capital_protection.py`: 29/29 通过 ✅
+- `test_volatility_detector.py`: 23/24 通过（1 个现有边界值测试问题）
+
+---
+
+## 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|------|----------|------|
+| `src/infrastructure/exchange_gateway.py` | 修改 | 新增 `get_market_info()` 方法 |
+| `src/application/capital_protection.py` | 修改 | 新增 `_check_quantity_precision()` 方法 |
+| `src/domain/models.py` | 修改 | OrderCheckResult 扩展字段 |
+| `tests/unit/test_order_validator.py` | 新增 | 29 个 P0-004 测试用例 |
+| `docs/designs/p0-004-order-validation.md` | 更新 | v1.2 阶段 3 完成 |
+| `docs/planning/progress.md` | 更新 | 添加 P0-004 进度日志 |
+
+---
+
+## 总结
+
+P0-004 订单参数合理性检查功能已完全实现，包括：
+- ✅ 粉尘订单防护（最小名义价值 5 USDT）
+- ✅ 精度合规检查（数量精度、step_size 整除性）
+- ✅ 异常价格防护（10% 偏差限制，极端行情 20%）
+- ✅ 完整的测试覆盖（29 个测试用例 100% 通过）
+
+**下一步**: 继续 P0-003 重启对账流程的测试验证。
+
+---
+
 # 任务计划 - P6-005 账户净值曲线可视化
 
 > **创建日期**: 2026-03-31
