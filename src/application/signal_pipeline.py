@@ -293,6 +293,11 @@ class SignalPipeline:
             self._signal_cooldown_cache.clear()
             logger.info("Signal cooldown cache cleared (stale cache prevention)")
 
+            # Step 3: Warmup MTF EMA for new symbols (defensive repair for hot-reload edge case)
+            # This handles the case where new symbols are added via hot-reload but their
+            # MTF EMA indicators haven't been warmed up yet
+            self._warmup_mtf_ema_for_new_symbols()
+
             logger.info("Strategy runner rebuilt and warmup complete")
 
     def _get_runner_lock(self) -> asyncio.Lock:
@@ -374,6 +379,61 @@ class SignalPipeline:
             logger.info("MTF EMA warmup skipped: no higher timeframe data available yet")
 
         return runner
+
+    def _warmup_mtf_ema_for_new_symbols(self) -> None:
+        """
+        Warmup MTF EMA indicators for new symbols added via hot-reload.
+
+        This is a defensive repair to handle the edge case where:
+        1. System starts with initial symbols (MTF EMA warmed up correctly)
+        2. User adds new symbols via config hot-reload
+        3. New symbols' MTF EMA indicators are created lazily but NOT warmed up
+
+        Unlike _build_and_warmup_runner which warms up ALL symbols at startup,
+        this method only warms up NEW symbols that weren't previously initialized.
+        """
+        if not self._kline_history:
+            logger.debug("MTF EMA warmup for new symbols skipped: no K-line history available")
+            return
+
+        newly_warmed_count = 0
+        newly_warmed_keys = []
+
+        for key, history in self._kline_history.items():
+            # Parse timeframe from key (format: "symbol:timeframe", e.g., "BTC/USDT:USDT:1h")
+            parts = key.rsplit(":", 1)
+            if len(parts) != 2:
+                continue  # Invalid key format
+
+            symbol_part, timeframe = parts
+
+            # Only warmup higher timeframe EMAs (1h, 4h, 1d) used for MTF filtering
+            if timeframe not in ["1h", "4h", "1d"]:
+                continue
+
+            ema_key = key
+
+            # Skip if already initialized (warmed up at startup or previous hot-reload)
+            if ema_key in self._mtf_ema_indicators:
+                continue
+
+            # Create and warmup new EMA indicator
+            self._mtf_ema_indicators[ema_key] = EMACalculator(period=self._mtf_ema_period)
+            ema = self._mtf_ema_indicators[ema_key]
+
+            # Warmup with historical data (exclude currently running kline)
+            for kline in history[:-1]:
+                ema.update(kline.close)
+                newly_warmed_count += 1
+
+            newly_warmed_keys.append(f"{key} ({len(history)} bars)")
+
+        # Log warmup results
+        if newly_warmed_count > 0:
+            logger.info(f"MTF EMA warmup for new symbols: warmed {newly_warmed_count} data points across {len(newly_warmed_keys)} new indicators")
+            logger.debug(f"Newly warmed keys: {', '.join(newly_warmed_keys)}")
+        elif self._kline_history:
+            logger.debug("MTF EMA warmup for new symbols: no new symbols detected (all indicators already initialized)")
 
     def update_account_snapshot(self, snapshot: AccountSnapshot) -> None:
         """
