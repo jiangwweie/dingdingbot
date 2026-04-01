@@ -88,6 +88,7 @@ class OrderRepository:
                     oco_group_id        TEXT,
                     exit_reason         TEXT,
                     exchange_order_id   TEXT,
+                    filled_at           INTEGER,
                     created_at          INTEGER NOT NULL,
                     updated_at          INTEGER NOT NULL
                 )
@@ -114,6 +115,9 @@ class OrderRepository:
             """)
             await self._db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)
+            """)
+            await self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_orders_filled_at ON orders(filled_at)
             """)
 
             await self._db.commit()
@@ -149,13 +153,14 @@ class OrderRepository:
                     id, signal_id, symbol, direction, order_type, order_role,
                     price, trigger_price, requested_qty, filled_qty,
                     average_exec_price, status, reduce_only, parent_order_id,
-                    oco_group_id, exit_reason, exchange_order_id,
+                    oco_group_id, exit_reason, exchange_order_id, filled_at,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     status = excluded.status,
                     filled_qty = excluded.filled_qty,
                     average_exec_price = excluded.average_exec_price,
+                    filled_at = COALESCE(excluded.filled_at, orders.filled_at),
                     exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
                     exit_reason = COALESCE(excluded.exit_reason, orders.exit_reason),
                     parent_order_id = COALESCE(excluded.parent_order_id, orders.parent_order_id),
@@ -180,6 +185,7 @@ class OrderRepository:
                     order.oco_group_id,
                     order.exit_reason,
                     order.exchange_order_id,
+                    order.filled_at,
                     order.created_at,
                     order.updated_at,
                 )
@@ -205,13 +211,14 @@ class OrderRepository:
                             id, signal_id, symbol, direction, order_type, order_role,
                             price, trigger_price, requested_qty, filled_qty,
                             average_exec_price, status, reduce_only, parent_order_id,
-                            oco_group_id, exit_reason, exchange_order_id,
+                            oco_group_id, exit_reason, exchange_order_id, filled_at,
                             created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             status = excluded.status,
                             filled_qty = excluded.filled_qty,
                             average_exec_price = excluded.average_exec_price,
+                            filled_at = COALESCE(excluded.filled_at, orders.filled_at),
                             exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
                             exit_reason = COALESCE(excluded.exit_reason, orders.exit_reason),
                             parent_order_id = COALESCE(excluded.parent_order_id, orders.parent_order_id),
@@ -236,6 +243,7 @@ class OrderRepository:
                             order.oco_group_id,
                             order.exit_reason,
                             order.exchange_order_id,
+                            order.filled_at,
                             order.created_at,
                             order.updated_at,
                         )
@@ -300,6 +308,53 @@ class OrderRepository:
             )
             await self._db.commit()
             logger.debug(f"订单状态已更新：{order_id}, status={status.value}")
+
+    async def mark_order_filled(self, order_id: str, filled_at: int) -> None:
+        """
+        标记订单已成交（T4 专用接口）。
+
+        Args:
+            order_id: Order ID to update
+            filled_at: Filled timestamp in milliseconds
+        """
+        async with self._lock:
+            await self._db.execute(
+                """
+                UPDATE orders
+                SET status = 'FILLED',
+                    filled_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    filled_at,
+                    int(datetime.now(timezone.utc).timestamp() * 1000),
+                    order_id
+                )
+            )
+            await self._db.commit()
+            logger.debug(f"订单已标记为成交：{order_id}, filled_at={filled_at}")
+
+    async def save_order(self, order: Order) -> None:
+        """
+        保存订单（创建或更新）- T4 标准接口别名。
+
+        Args:
+            order: Order object to save
+        """
+        await self.save(order)
+
+    async def get_order_detail(self, order_id: str) -> Optional[Order]:
+        """
+        获取订单详情 - T4 标准接口别名。
+
+        Args:
+            order_id: Order ID to query
+
+        Returns:
+            Order object or None if not found
+        """
+        return await self.get_order(order_id)
 
     # ============================================================
     # Read Operations
@@ -561,6 +616,7 @@ class OrderRepository:
             oco_group_id=row["oco_group_id"],
             exit_reason=row["exit_reason"],
             exchange_order_id=row["exchange_order_id"],
+            filled_at=row["filled_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

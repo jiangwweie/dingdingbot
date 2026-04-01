@@ -142,6 +142,7 @@ class Backtester:
         request: BacktestRequest,
         account_snapshot: Optional[AccountSnapshot] = None,
         repository = None,  # SignalRepository for saving signals (always saved if provided)
+        backtest_repository = None,  # BacktestReportRepository for saving reports
     ) -> Union[BacktestReport, PMSBacktestReport]:
         """
         Run backtest with isolated config sandbox.
@@ -169,7 +170,7 @@ class Backtester:
 
         if use_v3_pms:
             # v3 PMS mode: Use MockMatchingEngine for position-level backtesting
-            return await self._run_v3_pms_backtest(request, repository)
+            return await self._run_v3_pms_backtest(request, repository, backtest_repository)
 
         if use_dynamic:
             # Step 1: Build dynamic strategy runner from strategy definitions
@@ -243,6 +244,87 @@ class Backtester:
         )
 
         return report
+
+    async def _serialize_strategy_snapshot_for_report(
+        self,
+        request: BacktestRequest,
+        strategy_id: str,
+        strategy_name: str,
+    ) -> str:
+        """
+        Serialize strategy configuration to JSON snapshot for storage.
+
+        Args:
+            request: Backtest request
+            strategy_id: Strategy ID
+            strategy_name: Strategy name
+
+        Returns:
+            JSON string of strategy snapshot
+        """
+        import json
+        from src.domain.logic_tree import LogicNode, TriggerLeaf, FilterLeaf
+
+        def serialize_logic_tree(node) -> Dict[str, Any]:
+            """Recursively serialize logic tree node."""
+            if isinstance(node, LogicNode):
+                return {
+                    "type": "node",
+                    "gate": node.gate,
+                    "children": [serialize_logic_tree(child) for child in node.children]
+                }
+            elif isinstance(node, TriggerLeaf):
+                return {
+                    "type": "trigger",
+                    "id": node.id,
+                    "config": node.config.model_dump(mode="json")
+                }
+            elif isinstance(node, FilterLeaf):
+                return {
+                    "type": "filter",
+                    "id": node.id,
+                    "config": node.config.model_dump(mode="json")
+                }
+            else:
+                return {}
+
+        # Build strategy snapshot
+        snapshot = {
+            "id": strategy_id,
+            "name": strategy_name,
+            "logic_tree": None,
+            "triggers": [],
+            "filters": [],
+        }
+
+        # Serialize strategy definitions if provided
+        if request.strategies:
+            for strat_def_dict in request.strategies:
+                try:
+                    strat_def = StrategyDefinition(**strat_def_dict)
+                    if strat_def.logic_tree:
+                        snapshot["logic_tree"] = serialize_logic_tree(strat_def.logic_tree)
+                    snapshot["triggers"] = [t.model_dump(mode="json") for t in strat_def.get_triggers_from_logic_tree()]
+                    snapshot["filters"] = [f.model_dump(mode="json") for f in strat_def.get_filters_from_logic_tree()]
+                except Exception as e:
+                    logger.warning(f"Failed to serialize strategy: {e}")
+        else:
+            # Legacy mode: use default pinbar config
+            pinbar_config = PinbarConfig(
+                min_wick_ratio=request.min_wick_ratio or Decimal("0.6"),
+                max_body_ratio=request.max_body_ratio or Decimal("0.3"),
+                body_position_tolerance=request.body_position_tolerance or Decimal("0.1"),
+            )
+            snapshot["triggers"] = [{
+                "type": "pinbar",
+                "params": pinbar_config.model_dump(mode="json")
+            }]
+            snapshot["filters"] = [
+                {"type": "ema_trend", "params": {"enabled": request.trend_filter_enabled if request.trend_filter_enabled is not None else True}},
+                {"type": "mtf", "params": {"enabled": request.mtf_validation_enabled if request.mtf_validation_enabled is not None else True}},
+            ]
+
+        return json.dumps(snapshot, ensure_ascii=False)
 
     def _build_dynamic_runner(self, strategy_definitions: List[StrategyDefinition]) -> DynamicStrategyRunner:
         """Build DynamicStrategyRunner from strategy definitions."""
@@ -872,6 +954,8 @@ class Backtester:
         self,
         request: BacktestRequest,
         repository = None,
+        backtest_repository = None,
+        order_repository = None,  # T4: OrderRepository for persisting orders
     ) -> PMSBacktestReport:
         """
         Run v3 PMS mode backtest with MockMatchingEngine.
@@ -881,11 +965,13 @@ class Backtester:
         2. Create Orders from signals
         3. Use MockMatchingEngine to simulate order execution
         4. Track Position and Account state changes
-        5. Generate PMSBacktestReport with position-level statistics
+        5. Generate PMSBacktestReport with detailed position-level statistics
+        6. T4: Persist all orders to database if order_repository is provided
 
         Args:
             request: Backtest request with v3_pms mode
             repository: Optional SignalRepository for saving signals
+            order_repository: Optional OrderRepository for saving orders
 
         Returns:
             PMSBacktestReport with detailed position-level statistics
@@ -1046,6 +1132,11 @@ class Backtester:
                     )
                     active_orders.extend(entry_orders)
 
+                    # T4: Save ENTRY orders to database
+                    if order_repository is not None:
+                        await order_repository.save_batch(entry_orders)
+                        logger.debug(f"已保存 {len(entry_orders)} 个入场订单到数据库")
+
             # Step 7: Run MockMatchingEngine
             executed = engine.match_orders_for_kline(
                 kline=kline,
@@ -1068,6 +1159,11 @@ class Backtester:
                         tp_targets=strategy.tp_targets,  # 使用 strategy 配置的 tp_targets
                     )
                     active_orders.extend(new_orders)
+
+                    # T4: Save TP/SL orders to database
+                    if order_repository is not None and new_orders:
+                        await order_repository.save_batch(new_orders)
+                        logger.debug(f"已保存 {len(new_orders)} 个 TP/SL 订单到数据库")
 
             # Track executed orders
             for order in executed:
@@ -1172,6 +1268,18 @@ class Backtester:
             positions=position_summaries,
         )
 
+        # Step 10: Save report to database (if backtest_repository is provided)
+        if backtest_repository is not None:
+            try:
+                # Serialize strategy snapshot
+                strategy_snapshot = await self._serialize_strategy_snapshot_for_report(
+                    request, strategy_id, strategy_name
+                )
+                await backtest_repository.save_report(report, strategy_snapshot)
+                logger.info(f"Saved backtest report to database: {report.strategy_id}")
+            except Exception as e:
+                logger.warning(f"Failed to save backtest report: {e}")
+
         logger.info(
             f"v3 PMS backtest completed: {request.symbol} {request.timeframe}, "
             f"{total_trades} trades, win_rate={win_rate:.2f}%, pnl={total_pnl:.2f} USDT"
@@ -1188,20 +1296,28 @@ async def run_backtest(
     request: BacktestRequest,
     account_snapshot: Optional[AccountSnapshot] = None,
     repository = None,  # Optional SignalRepository for saving signals
+    backtest_repository = None,  # Optional BacktestReportRepository for saving reports
 ) -> BacktestReport:
     """
     Run a backtest with isolated sandbox.
 
     Backtest signals are automatically saved to database if repository is provided.
+    Backtest report is automatically saved if backtest_repository is provided.
 
     Args:
         gateway: Exchange gateway for fetching data
         request: Backtest request parameters
         account_snapshot: Optional account snapshot
         repository: Optional SignalRepository for saving signals
+        backtest_repository: Optional BacktestReportRepository for saving reports
 
     Returns:
         BacktestReport with detailed statistics
     """
     backtester = Backtester(gateway)
-    return await backtester.run_backtest(request, account_snapshot, repository=repository)
+    return await backtester.run_backtest(
+        request,
+        account_snapshot,
+        repository=repository,
+        backtest_repository=backtest_repository
+    )

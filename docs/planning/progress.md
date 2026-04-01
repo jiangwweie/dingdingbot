@@ -6,6 +6,69 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-01 - PMS 回测修复 - 阶段 B 数据持久化启动
+
+**执行日期**: 2026-04-01  
+**执行人**: AI Builder + 团队工作流  
+**状态**: 🔄 进行中
+
+**任务概述**:
+启动 PMS 回测修复阶段 B（数据持久化），实现订单和回测报告的数据库持久化。
+
+**阶段 A 完成情况**:
+| 任务 | 状态 | 测试 |
+|------|------|------|
+| T1: 修复 MTF 未来函数 | ✅ 已完成 | 10/10 通过 |
+| T2: 修复止盈撮合滑点 | ✅ 已完成 | 18/18 通过 |
+
+**阶段 B 任务分解** (已启动团队并行执行):
+
+| 子任务 | 负责人 | 状态 | 说明 |
+|--------|--------|------|------|
+| T3-A: orders 表补充字段迁移 | backend-t3 | 🔄 进行中 | 添加 filled_at, parent_order_id |
+| T3-B: backtest_reports 表创建 | backend-t3 | 🔄 进行中 | 符合 3NF 设计，含 strategy_snapshot |
+| T4: 订单保存逻辑 | backend-t4 | ✅ 已完成 | OrderRepository 实现，17 测试通过 |
+| T5/T6: 回测报告保存 | backend-t5-t6 | 🔄 进行中 | BacktestReportORM + Repository |
+
+**T4 完成情况详情**:
+
+实现订单保存逻辑，包括：
+1. 扩展 `Order` 领域模型添加 `filled_at` 字段
+2. 更新 `order_orm_to_domain`/`order_domain_to_orm` 转换函数
+3. 扩展 `OrderRepository` 支持 `filled_at` 字段的保存和查询
+4. 添加标准接口方法：
+   - `save_order(order)` - 保存订单（创建或更新）
+   - `get_order_detail(order_id)` - 获取订单详情
+   - `get_orders_by_signal(signal_id)` - 获取信号关联的所有订单
+   - `get_open_orders(symbol?)` - 获取未平订单列表
+   - `mark_order_filled(order_id, filled_at)` - 标记订单已成交
+5. 在 `_run_v3_pms_backtest` 中集成订单保存逻辑：
+   - ENTRY 订单创建后自动保存
+   - TP/SL 订单生成后自动保存
+6. 编写 5 个 SST 测试用例（全部通过，总计 17/17 测试通过）
+
+**设计更新** (符合 3NF 原则):
+
+针对回测列表需要关联策略快照的需求，已更新表设计：
+
+| 新增字段 | 类型 | 用途 |
+|----------|------|------|
+| `strategy_snapshot` | Text (JSON) | 记录回测时的完整参数组合 |
+| `parameters_hash` | String (indexed) | SHA256 参数哈希，用于自动调参聚类分析 |
+| `strategy_version` | String | 策略版本号 |
+
+**团队工作流状态**:
+- ✅ 启动 3 个并行 Agent 执行阶段 B 任务
+- ✅ 需求文档已更新 (pms-backtest-fix-plan.md, pms-backtest-requirements.md)
+- ✅ 任务计划已更新 (task_plan.md)
+
+**下一步**:
+1. 等待 T3/T4/T5-T6 Agent 完成
+2. 代码审查 (reviewer 角色)
+3. 测试验证 (QA 角色)
+
+---
+
 ### 2026-04-01 - PMS 回测修复 - T1 MTF 未来函数修复 ✅
 
 **执行日期**: 2026-04-01  

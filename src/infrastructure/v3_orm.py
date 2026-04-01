@@ -30,7 +30,9 @@ from sqlalchemy import (
     Index,
     CheckConstraint,
     event,
+    Text,
 )
+import sqlalchemy as sa
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -492,6 +494,17 @@ class OrderORM(Base):
         nullable=True
     )
 
+    # 回测相关字段
+    filled_at: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
+    parent_order_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True
+    )
+
     # 表约束
     __table_args__ = (
         DIRECTION_CHECK,
@@ -514,6 +527,7 @@ class OrderORM(Base):
         Index("idx_orders_status", "status"),
         Index("idx_orders_symbol", "symbol"),
         Index("idx_orders_exchange_id", "exchange_order_id"),
+        Index("idx_orders_parent_order_id", "parent_order_id"),
     )
 
     # 关系
@@ -746,6 +760,7 @@ def order_orm_to_domain(orm: OrderORM) -> "src.domain.models.Order":
         created_at=orm.created_at,
         updated_at=orm.updated_at,
         exit_reason=orm.exit_reason,
+        filled_at=orm.filled_at,
     )
 
 
@@ -770,6 +785,7 @@ def order_domain_to_orm(domain: "src.domain.models.Order") -> OrderORM:
         created_at=domain.created_at,
         updated_at=domain.updated_at,
         exit_reason=domain.exit_reason,
+        filled_at=domain.filled_at,
     )
 
 
@@ -840,6 +856,231 @@ def account_domain_to_orm(domain: "src.domain.models.Account") -> AccountORM:
     )
 
 
+# ============================================================
+# BacktestReport ORM 模型
+# ============================================================
+
+class BacktestReportORM(Base):
+    """
+    回测报告 ORM 模型
+
+    存储回测执行结果和性能指标。
+    符合 3NF 设计：策略快照与参数分离存储。
+
+    字段映射:
+    - id: 回测报告 ID（主键）
+    - strategy_id: 策略 ID（外键 -> signals.id）
+    - strategy_name: 策略名称
+    - strategy_version: 策略版本
+    - strategy_snapshot: 策略配置快照（JSON）
+    - parameters_hash: 参数哈希（用于去重）
+    - symbol: 交易对
+    - timeframe: K 线周期
+    - backtest_start: 回测开始时间戳
+    - backtest_end: 回测结束时间戳
+    - created_at: 报告创建时间戳
+
+    核心指标:
+    - initial_balance: 初始余额
+    - final_balance: 最终余额
+    - total_return: 总收益率
+    - total_trades: 总交易次数
+    - winning_trades: 盈利交易次数
+    - losing_trades: 亏损交易次数
+    - win_rate: 胜率
+    - total_pnl: 总盈亏
+    - total_fees_paid: 总手续费
+    - total_slippage_cost: 总滑点成本
+    - max_drawdown: 最大回撤
+
+    详细数据 (JSON):
+    - positions_summary: 仓位汇总
+    - monthly_returns: 月度收益
+
+    使用示例:
+        >>> report = BacktestReportORM(
+        ...     id="bt_report_001",
+        ...     strategy_id="pinbar",
+        ...     strategy_name="Pinbar 策略",
+        ...     symbol="BTC/USDT:USDT",
+        ...     timeframe="15m",
+        ...     initial_balance=Decimal('10000'),
+        ...     final_balance=Decimal('12000'),
+        ...     total_trades=50,
+        ...     winning_trades=30,
+        ...     losing_trades=20,
+        ...     win_rate=Decimal('0.6'),
+        ...     total_pnl=Decimal('2000'),
+        ...     max_drawdown=Decimal('0.15')
+        ... )
+    """
+    __tablename__ = "backtest_reports"
+
+    # 主键
+    id: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True
+    )
+
+    # 策略标识
+    strategy_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("signals.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    strategy_name: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False
+    )
+
+    strategy_version: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="1.0.0"
+    )
+
+    # 策略快照字段 (符合 3NF 设计)
+    strategy_snapshot: Mapped[str] = mapped_column(
+        sa.Text(),
+        nullable=False
+    )
+
+    parameters_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False
+    )
+
+    # 基础信息
+    symbol: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False
+    )
+
+    timeframe: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False
+    )
+
+    # 时间范围
+    backtest_start: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
+    )
+
+    backtest_end: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
+    )
+
+    created_at: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
+    )
+
+    # 核心指标 (使用 String 存储 Decimal)
+    initial_balance: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    final_balance: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    total_return: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    total_trades: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
+    )
+
+    winning_trades: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
+    )
+
+    losing_trades: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
+    )
+
+    win_rate: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    total_pnl: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    total_fees_paid: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False,
+        default=Decimal('0')
+    )
+
+    total_slippage_cost: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False,
+        default=Decimal('0')
+    )
+
+    max_drawdown: Mapped[Decimal] = mapped_column(
+        DecimalField(32),
+        nullable=False
+    )
+
+    # 详细数据 (JSON 存储)
+    positions_summary: Mapped[Optional[str]] = mapped_column(
+        sa.Text(),
+        nullable=True
+    )
+
+    monthly_returns: Mapped[Optional[str]] = mapped_column(
+        sa.Text(),
+        nullable=True
+    )
+
+    # 表约束
+    __table_args__ = (
+        CheckConstraint(
+            "total_return >= -1.0 AND total_return <= 10.0",
+            name="check_total_return_range"
+        ),
+        CheckConstraint(
+            "win_rate >= 0.0 AND win_rate <= 1.0",
+            name="check_win_rate_range"
+        ),
+        CheckConstraint(
+            "max_drawdown >= 0.0 AND max_drawdown <= 1.0",
+            name="check_max_drawdown_range"
+        ),
+        Index("idx_backtest_reports_strategy_id", "strategy_id"),
+        Index("idx_backtest_reports_symbol", "symbol"),
+        Index("idx_backtest_reports_parameters_hash", "parameters_hash"),
+        Index("idx_backtest_reports_created_at", "created_at"),
+    )
+
+    # 关系
+    if TYPE_CHECKING:
+        # 注意：这里不定义反向关系，因为 backtest_reports 是只读的报告数据
+        pass
+
+    def __repr__(self) -> str:
+        return (
+            f"<BacktestReportORM(id={self.id!r}, strategy={self.strategy_name!r}, "
+            f"symbol={self.symbol!r}, return={self.total_return}, "
+            f"trades={self.total_trades})>"
+        )
+
+# ============================================================
 # 模块级文档：使用示例
 """
 ============================================================

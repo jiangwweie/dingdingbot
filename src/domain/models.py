@@ -729,6 +729,9 @@ class Order(FinancialModel):
     parent_order_id: Optional[str] = None  # 父订单 ID (用于订单链)
     oco_group_id: Optional[str] = None     # OCO 组 ID (同一组的订单互斥)
 
+    # T4 - 订单持久化扩展
+    filled_at: Optional[int] = None  # 成交时间戳（毫秒），用于回测记录订单实际成交时间
+
 
 # ============================================================
 # Phase 5: 订单操作结果模型

@@ -552,3 +552,215 @@ async def test_full_order_lifecycle_persistence(order_repository):
     assert len(chain["entry"]) >= 1
     assert len(chain["tps"]) >= 1
     assert len(chain["sl"]) >= 1
+
+
+# ============================================================
+# T4 - 订单持久化扩展测试
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_order_repository_save_order_with_filled_at(order_repository):
+    """T4-001: 保存带有 filled_at 字段的订单"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建已成交订单
+    order = Order(
+        id="ord_filled_001",
+        signal_id="sig_filled_001",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('1.0'),
+        average_exec_price=Decimal('65000'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        filled_at=current_time,
+        reduce_only=False,
+    )
+
+    # 执行：保存订单
+    await order_repository.save_order(order)
+
+    # 验证：订单已保存且 filled_at 字段正确
+    saved_order = await order_repository.get_order_detail("ord_filled_001")
+    assert saved_order is not None
+    assert saved_order.status == OrderStatus.FILLED
+    assert saved_order.filled_at == current_time
+    assert saved_order.filled_qty == Decimal('1.0')
+
+
+@pytest.mark.asyncio
+async def test_order_repository_mark_order_filled(order_repository):
+    """T4-002: 标记订单已成交"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建待成交订单
+    order = Order(
+        id="ord_pending_001",
+        signal_id="sig_pending_001",
+        symbol="ETH/USDT:USDT",
+        direction=Direction.SHORT,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('3500'),
+        requested_qty=Decimal('10.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=True,
+    )
+
+    # 执行：先保存订单
+    await order_repository.save_order(order)
+
+    # 执行：标记为已成交
+    filled_at = current_time + 1000  # 模拟 1 秒后成交
+    await order_repository.mark_order_filled("ord_pending_001", filled_at)
+
+    # 验证：订单状态已更新
+    updated_order = await order_repository.get_order("ord_pending_001")
+    assert updated_order.status == OrderStatus.FILLED
+    assert updated_order.filled_at == filled_at
+
+
+@pytest.mark.asyncio
+async def test_order_repository_get_orders_by_signal(order_repository):
+    """T4-003: 获取信号关联的所有订单"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建信号关联的多个订单
+    orders = [
+        Order(
+            id=f"ord_signal_{i}",
+            signal_id="sig_test_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY if i == 0 else OrderRole.TP1,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('1.0'),
+            status=OrderStatus.FILLED,
+            created_at=current_time,
+            updated_at=current_time,
+            filled_at=current_time,
+            reduce_only=False,
+        )
+        for i in range(3)
+    ]
+
+    # 执行：保存订单
+    await order_repository.save_batch(orders)
+
+    # 执行：获取信号关联的所有订单
+    saved_orders = await order_repository.get_orders_by_signal("sig_test_001")
+
+    # 验证：返回所有关联订单
+    assert len(saved_orders) == 3
+    assert all(o.signal_id == "sig_test_001" for o in saved_orders)
+
+
+@pytest.mark.asyncio
+async def test_order_repository_get_open_orders(order_repository):
+    """T4-004: 获取未平订单列表"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建不同状态的订单
+    orders = [
+        Order(
+            id="ord_open_001",
+            signal_id="sig_open_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            price=Decimal('70000'),
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            reduce_only=True,
+        ),
+        Order(
+            id="ord_filled_001",
+            signal_id="sig_filled_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('1.0'),
+            status=OrderStatus.FILLED,
+            created_at=current_time,
+            updated_at=current_time,
+            filled_at=current_time,
+            reduce_only=False,
+        ),
+    ]
+
+    # 执行：保存订单
+    await order_repository.save_batch(orders)
+
+    # 执行：获取未平订单
+    open_orders = await order_repository.get_open_orders()
+
+    # 验证：只返回 OPEN 状态的订单
+    assert len(open_orders) == 1
+    assert open_orders[0].id == "ord_open_001"
+    assert open_orders[0].status == OrderStatus.OPEN
+
+
+@pytest.mark.asyncio
+async def test_order_repository_parent_order_id_tracking(order_repository):
+    """T4-005: 父订单 ID 追踪"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建 ENTRY 订单和关联的 TP/SL 订单
+    entry_order = Order(
+        id="ord_entry_parent",
+        signal_id="sig_parent_001",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('1.0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        filled_at=current_time,
+        reduce_only=False,
+    )
+
+    tp_order = Order(
+        id="ord_tp_child",
+        signal_id="sig_parent_001",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('70000'),
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        created_at=current_time,
+        updated_at=current_time,
+        parent_order_id="ord_entry_parent",  # 关联父订单
+        reduce_only=True,
+    )
+
+    # 执行：保存订单
+    await order_repository.save_order(entry_order)
+    await order_repository.save_order(tp_order)
+
+    # 执行：查询订单链
+    chain = await order_repository.get_order_chain("sig_parent_001")
+
+    # 验证：订单链结构正确
+    assert len(chain["entry"]) == 1
+    assert len(chain["tps"]) == 1
+    assert chain["tps"][0].parent_order_id == "ord_entry_parent"
