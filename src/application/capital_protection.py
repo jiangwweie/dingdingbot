@@ -61,11 +61,6 @@ class CapitalProtectionManager:
     | 最低余额 | balance | 100 USDT |
     """
 
-    # P0-004: 订单参数合理性检查配置
-    MIN_NOTIONAL = Decimal("5")  # 最小名义价值 5 USDT (Binance 标准)
-    PRICE_DEVIATION_THRESHOLD = Decimal("0.10")  # 价格偏差阈值 10%
-    EXTREME_PRICE_DEVIATION_THRESHOLD = Decimal("0.20")  # 极端行情下 20%
-
     def __init__(
         self,
         config: CapitalProtectionConfig,
@@ -169,15 +164,15 @@ class CapitalProtectionManager:
         )
         if not notional_check:
             logger.warning(
-                f"订单名义价值过低：{notional_value:.2f} USDT < {self.MIN_NOTIONAL} USDT "
+                f"订单名义价值过低：{notional_value:.2f} USDT < {self._config.min_notional} USDT "
                 f"(symbol={symbol}, amount={amount}, price={effective_price})"
             )
             return OrderCheckResult(
                 allowed=False,
                 reason="BELOW_MIN_NOTIONAL",
-                reason_message=f"订单名义价值 {notional_value:.2f} USDT 低于最小要求 {self.MIN_NOTIONAL} USDT",
+                reason_message=f"订单名义价值 {notional_value:.2f} USDT 低于最小要求 {self._config.min_notional} USDT",
                 notional_value=notional_value,
-                min_notional=self.MIN_NOTIONAL,
+                min_notional=self._config.min_notional,
             )
 
         # ========== P0-004 新增检查 2: 数量精度检查 ==========
@@ -194,7 +189,7 @@ class CapitalProtectionManager:
                 reason=qty_reason,
                 reason_message=qty_message,
                 notional_value=notional_value,
-                min_notional=self.MIN_NOTIONAL,
+                min_notional=self._config.min_notional,
             )
 
         # ========== P0-004 新增检查 3: 价格合理性检查 ==========
@@ -206,13 +201,13 @@ class CapitalProtectionManager:
             )
             if not price_check:
                 logger.warning(
-                    f"订单价格偏差过大：{deviation*100:.2f}% > {self.PRICE_DEVIATION_THRESHOLD*100:.0f}% "
+                    f"订单价格偏差过大：{deviation*100:.2f}% > {self._config.price_deviation_threshold*100:.0f}% "
                     f"(symbol={symbol}, order_price={price}, ticker_price={ticker_price})"
                 )
                 return OrderCheckResult(
                     allowed=False,
                     reason="PRICE_DEVIATION_TOO_HIGH",
-                    reason_message=f"订单价格偏差 {deviation*100:.2f}% 超过阈值 {self.PRICE_DEVIATION_THRESHOLD*100:.0f}%",
+                    reason_message=f"订单价格偏差 {deviation*100:.2f}% 超过阈值 {self._config.price_deviation_threshold*100:.0f}%",
                     order_price=price,
                     ticker_price=ticker_price,
                     price_deviation=deviation,
@@ -335,7 +330,7 @@ class CapitalProtectionManager:
             available_balance=available_balance,
             min_required_balance=min_required_balance,
             notional_value=notional_value,
-            min_notional=self.MIN_NOTIONAL,
+            min_notional=self._config.min_notional,
         )
 
     def _check_min_notional(
@@ -362,7 +357,7 @@ class CapitalProtectionManager:
             (passed, notional_value)
         """
         notional_value = quantity * price
-        passed = notional_value >= self.MIN_NOTIONAL
+        passed = notional_value >= self._config.min_notional
         return passed, notional_value
 
     async def _check_quantity_precision(
@@ -495,7 +490,7 @@ class CapitalProtectionManager:
                     logger.warning(f"极端行情下暂停下单：{symbol}")
                     return False, ticker_price, deviation
             else:
-                effective_threshold = self.PRICE_DEVIATION_THRESHOLD
+                effective_threshold = self._config.price_deviation_threshold
 
             # 检查是否超过阈值
             passed = deviation <= effective_threshold

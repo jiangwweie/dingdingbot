@@ -1352,8 +1352,24 @@ class CapitalProtectionConfig(BaseModel):
 
     Phase 5: 实盘集成 - 资金保护管理器
     Reference: docs/designs/phase5-detailed-design.md Section 3.4
+
+    P2-2: 类常量配置化 - 将硬编码的 MIN_NOTIONAL, PRICE_DEVIATION_THRESHOLD 提取到配置类
     """
     enabled: bool = Field(default=True, description="是否启用资金保护")
+
+    # P2-2: 订单参数合理性检查配置（原类常量）
+    min_notional: Decimal = Field(
+        default=Decimal("5"),
+        description="最小名义价值 (默认 5 USDT, Binance 标准)"
+    )
+    price_deviation_threshold: Decimal = Field(
+        default=Decimal("0.10"),
+        description="价格偏差阈值 (默认 10%)"
+    )
+    extreme_price_deviation_threshold: Decimal = Field(
+        default=Decimal("0.20"),
+        description="极端行情下价格偏差阈值 (默认 20%)"
+    )
 
     # 单笔交易限制
     single_trade: Dict[str, Any] = Field(
