@@ -50,6 +50,10 @@ class SignalRepository:
         self._db = await aiosqlite.connect(self.db_path)
         self._db.row_factory = aiosqlite.Row
 
+        # Enable WAL mode for high concurrency write support
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA synchronous=NORMAL")
+
         # Create signals table
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS signals (
