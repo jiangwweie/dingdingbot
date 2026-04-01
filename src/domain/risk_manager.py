@@ -171,7 +171,8 @@ class DynamicRiskManager:
         if position.watermark_price is None:
             return
 
-        current_trigger = sl_order.trigger_price or position.entry_price
+        # P1-1 修复：使用 is not None 判断，避免 trigger_price=0 时错误使用 entry_price
+        current_trigger = sl_order.trigger_price if sl_order.trigger_price is not None else position.entry_price
 
         if position.direction == Direction.LONG:
             # LONG 仓位 Trailing Stop 计算

@@ -711,3 +711,65 @@ async def test_p004_price_deviation_just_over_10_percent(capital_protection, moc
     # 超过 10%，应该拒绝
     assert result.allowed is False
     assert result.reason == "PRICE_DEVIATION_TOO_HIGH"
+
+
+# ============================================================
+# P1-2 修复测试：STOP_LIMIT 订单价格偏差检查
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_p1_2_stop_limit_price_deviation_check_fail(capital_protection, mock_gateway):
+    """P1-2 修复测试：STOP_LIMIT 订单价格偏差超过阈值时被拒绝"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # STOP_LIMIT 订单，限价部分价格 60000，ticker 价格 50000，偏差 = 20% > 10%
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.STOP_LIMIT,
+        amount=Decimal("0.01"),
+        price=Decimal("60000"),  # 比 ticker 高 20%
+        trigger_price=Decimal("59000"),  # 触发价
+        stop_loss=Decimal("58000"),
+    )
+
+    # STOP_LIMIT 订单应该被价格偏差检查拒绝
+    assert result.allowed is False
+    assert result.reason == "PRICE_DEVIATION_TOO_HIGH"
+    assert result.order_price == Decimal("60000")
+    assert result.ticker_price == Decimal("50000")
+
+
+@pytest.mark.asyncio
+async def test_p1_2_stop_limit_price_deviation_check_pass(capital_protection, mock_gateway):
+    """P1-2 修复测试：STOP_LIMIT 订单价格偏差在阈值内时通过"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # STOP_LIMIT 订单，限价部分价格 51000，ticker 价格 50000，偏差 = 2% < 10%
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.STOP_LIMIT,
+        amount=Decimal("0.01"),
+        price=Decimal("51000"),  # 比 ticker 高 2%
+        trigger_price=Decimal("52000"),  # 触发价
+        stop_loss=Decimal("50000"),
+    )
+
+    # 价格偏差在阈值内，应该通过
+    assert result.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_p1_2_stop_limit_missing_price(capital_protection):
+    """P1-2 修复测试：STOP_LIMIT 订单缺少价格时被拒绝"""
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.STOP_LIMIT,
+        amount=Decimal("0.01"),
+        price=None,  # STOP_LIMIT 必须有限价
+        trigger_price=Decimal("52000"),
+        stop_loss=Decimal("50000"),
+    )
+
+    # 缺少价格应该被拒绝
+    assert result.allowed is False
+    assert result.reason == "MISSING_PRICE"

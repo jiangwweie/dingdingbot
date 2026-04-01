@@ -198,8 +198,8 @@ class CapitalProtectionManager:
             )
 
         # ========== P0-004 新增检查 3: 价格合理性检查 ==========
-        # 限价单需要检查价格偏差，市价单 already uses ticker price
-        if order_type == OrderType.LIMIT and price is not None:
+        # 限价单 (LIMIT 或 STOP_LIMIT) 需要检查价格偏差，市价单 already uses ticker price
+        if order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and price is not None:
             price_check, ticker_price, deviation = await self._check_price_reasonability(
                 symbol=symbol,
                 order_price=price,

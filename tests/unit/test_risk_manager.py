@@ -518,3 +518,64 @@ class TestReduceOnlyConstraint:
         manager.evaluate_and_mutate(kline, position, orders)
 
         assert sl_order.order_type == OrderType.TRAILING_STOP
+
+
+# ============================================================
+# P1-1 修复测试：trigger_price 零值风险
+# ============================================================
+class TestP1Fix_TriggerPriceZeroValue:
+    """P1-1 修复测试：trigger_price=0 时不错误使用 entry_price"""
+
+    def test_trailing_stop_with_zero_trigger_price(self):
+        """P1-1: trigger_price=0 时使用 0 作为当前触发价（而非 entry_price）"""
+        manager = DynamicRiskManager(
+            trailing_percent=Decimal("0.02"),
+            step_threshold=Decimal("0.005"),
+        )
+        position = create_position(
+            direction=Direction.LONG,
+            entry_price=Decimal("65000"),
+            watermark_price=Decimal("70000"),
+        )
+        # SL 订单 trigger_price=0（异常情况，但需要正确处理）
+        sl_order = create_order(
+            order_type=OrderType.TRAILING_STOP,
+            trigger_price=Decimal("0"),  # 零值触发价
+        )
+        kline = create_kline(high=Decimal("70000"))
+
+        # 不应抛出异常，且应正确处理
+        manager.evaluate_and_mutate(kline, position, [sl_order])
+
+        # theoretical_trigger = 70000 * 0.98 = 68600
+        # min_required_price = 0 * 1.005 = 0
+        # 68600 > 0，应该更新
+        # 但由于保护损底线，trigger_price >= entry_price = 65000
+        assert sl_order.trigger_price >= Decimal("65000")
+        assert sl_order.exit_reason == "TRAILING_PROFIT"
+
+    def test_trailing_stop_with_none_trigger_price(self):
+        """P1-1: trigger_price=None 时使用 entry_price 作为当前触发价"""
+        manager = DynamicRiskManager(
+            trailing_percent=Decimal("0.02"),
+            step_threshold=Decimal("0.005"),
+        )
+        position = create_position(
+            direction=Direction.LONG,
+            entry_price=Decimal("65000"),
+            watermark_price=Decimal("70000"),
+        )
+        # SL 订单 trigger_price=None
+        sl_order = create_order(
+            order_type=OrderType.TRAILING_STOP,
+            trigger_price=None,  # None 触发价
+        )
+        kline = create_kline(high=Decimal("70000"))
+
+        # 不应抛出异常
+        manager.evaluate_and_mutate(kline, position, [sl_order])
+
+        # theoretical_trigger = 70000 * 0.98 = 68600
+        # min_required_price = 65000 * 1.005 = 65325
+        # 68600 > 65325，应该更新
+        assert sl_order.trigger_price >= Decimal("65000")

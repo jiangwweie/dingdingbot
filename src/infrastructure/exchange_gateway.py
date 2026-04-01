@@ -1356,6 +1356,16 @@ class ExchangeGateway:
             # 解析订单状态
             order_status = self._parse_order_status_with_filled_qty(status, filled_qty, amount)
 
+            # P1-3 修复：尝试从多个可能的字段提取 trigger_price
+            # CCXT 在 info.triggerPrice 或 info.stopPrice 中返回触发价
+            trigger_price_raw = (
+                raw_order.get('info', {}).get('triggerPrice')
+                or raw_order.get('info', {}).get('stopPrice')
+                or raw_order.get('stopPrice')
+                or raw_order.get('triggerPrice')
+            )
+            trigger_price = Decimal(str(trigger_price_raw)) if trigger_price_raw else None
+
             # 构建 Order 对象
             order = Order(
                 id=order_id,
@@ -1366,7 +1376,7 @@ class ExchangeGateway:
                 order_type=self._parse_order_type(order_type),
                 order_role=OrderRole.ENTRY,  # 默认设为 ENTRY，具体角色由上层业务逻辑判断
                 price=price,
-                trigger_price=None,  # CCXT 不直接返回 trigger_price
+                trigger_price=trigger_price,  # P1-3 修复：使用提取的 trigger_price
                 requested_qty=amount,
                 filled_qty=filled_qty,
                 average_exec_price=average_exec_price,
