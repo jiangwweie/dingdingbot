@@ -175,17 +175,22 @@ class TestConcurrentPositionModification:
 
         # 记录执行顺序
         execution_order = []
+        execution_lock = asyncio.Lock()  # 保护 execution_order 列表
 
-        # Mock _fetch_position_locked
-        async def mock_fetch(position_id):
+        # Mock _fetch_position_locked - 使用普通 async 函数，不用 AsyncMock
+        async def mock_fetch_impl(position_id):
             # 记录进入临界区
-            execution_order.append(f"enter_{asyncio.current_task().name}")
+            task = asyncio.current_task()
+            task_name = getattr(task, 'name', str(id(task)))
+            async with execution_lock:
+                execution_order.append(f"enter_{task_name}")
             await asyncio.sleep(0.01)  # 模拟数据库操作延迟
-            execution_order.append(f"exit_{asyncio.current_task().name}")
+            async with execution_lock:
+                execution_order.append(f"exit_{task_name}")
             return position
 
-        with patch.object(position_manager, '_fetch_position_locked', new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.side_effect = mock_fetch
+        # 使用直接 patch async 函数，避免 AsyncMock 的 side_effect 递归问题
+        with patch.object(position_manager, '_fetch_position_locked', mock_fetch_impl):
 
             # 创建 10 个并发减仓任务
             async def reduce_task(task_id):
