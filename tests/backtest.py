@@ -197,6 +197,31 @@ async def run_backtest(args):
     core = config_manager.core_config
     user = config_manager.user_config
 
+    # Support both legacy and new active_strategies format
+    if user.active_strategies and len(user.active_strategies) > 0:
+        # New format: extract EMA and MTF settings from active_strategies
+        # For simplicity, use the first active strategy
+        first_strategy = user.active_strategies[0]
+
+        # Check if EMA filter is enabled
+        trend_filter_enabled = False
+        mtf_validation_enabled = False
+
+        if hasattr(first_strategy, 'filters') and first_strategy.filters:
+            for f in first_strategy.filters:
+                if f.type == 'ema' and f.enabled:
+                    trend_filter_enabled = True
+                if f.type == 'mtf' and f.enabled:
+                    mtf_validation_enabled = True
+    elif user.strategy:
+        # Legacy format
+        trend_filter_enabled = user.strategy.trend_filter_enabled
+        mtf_validation_enabled = user.strategy.mtf_validation_enabled
+    else:
+        # Default to enabled
+        trend_filter_enabled = True
+        mtf_validation_enabled = True
+
     pinbar_config = PinbarConfig(
         min_wick_ratio=core.pinbar_defaults.min_wick_ratio,
         max_body_ratio=core.pinbar_defaults.max_body_ratio,
@@ -206,13 +231,13 @@ async def run_backtest(args):
     strategy_config = StrategyConfig(
         pinbar_config=pinbar_config,
         ema_period=core.ema.period,
-        trend_filter_enabled=user.strategy.trend_filter_enabled,
-        mtf_validation_enabled=user.strategy.mtf_validation_enabled,
+        trend_filter_enabled=trend_filter_enabled,
+        mtf_validation_enabled=mtf_validation_enabled,
     )
 
     print(f"  EMA 周期：{core.ema.period}")
-    print(f"  趋势过滤：{'启用' if user.strategy.trend_filter_enabled else '禁用'}")
-    print(f"  MTF 验证：{'启用' if user.strategy.mtf_validation_enabled else '禁用'}")
+    print(f"  趋势过滤：{'启用' if trend_filter_enabled else '禁用'}")
+    print(f"  MTF 验证：{'启用' if mtf_validation_enabled else '禁用'}")
 
     # Initialize exchange
     print("\n初始化交易所连接...")

@@ -4,7 +4,7 @@ Handles historical data warmup, real-time K-line streaming, and asset polling.
 """
 import asyncio
 import time
-from typing import List, Dict, Optional, Callable, Awaitable
+from typing import List, Dict, Optional, Callable, Awaitable, Any
 from decimal import Decimal
 
 try:
