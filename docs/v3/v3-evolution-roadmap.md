@@ -662,59 +662,103 @@ Week 2:
 
 ### 11.1 核心架构定调
 
-**技术定调**: 自研引擎 + 插件化调参 + 本地化数据
+**技术定调**: 自研引擎 + 插件化调参 + SQLite 统一存储
 
 | 层次 | 选型 | 理由 |
 |------|------|------|
 | **回测引擎** | 自研 MockMatchingEngine | 与 v3.0 实盘逻辑 100% 一致性，已包含止损优先和滑点模拟 |
 | **自动化调参** | Optuna | 贝叶斯搜索比网格搜索快 10-100 倍，支持参数依赖关系 |
 | **因子初筛** | Vectorbt (可选) | 海量数据快速预筛选，最终验证回到自研引擎 |
-| **K 线存储** | Parquet 文件 | 读取速度比 SQLite 快 10-50 倍，列式存储，Decimal 精度 |
+| **K 线存储** | SQLite | 统一技术栈、事务支持、简单可靠、数据量小无需列式存储 |
 | **状态存储** | SQLite | 订单/仓位/账户频繁增删改查，事务支持 |
 
 ---
 
-### 11.2 数据架构：一次抓取，永久本地化
+### 11.2 数据架构：SQLite 统一存储
 
-针对 1h/4h/1d 中长线交易场景，数据量极小（5 年 10 币种约 150MB），采用**本地持久化**策略。
+针对 1h/4h/1d 中长线交易场景，数据量极小（5 年 10 币种约 150MB），采用**SQLite 统一存储**策略。
 
 #### 11.2.1 存储结构
 
 ```
 data/
-├── klines/                     # K 线数据 (Parquet)
-│   ├── BTC_USDT-USDT/
-│   │   ├── 15m.parquet
-│   │   ├── 1h.parquet
-│   │   ├── 4h.parquet
-│   │   └── 1d.parquet
-│   ├── ETH_USDT-USDT/
-│   │   └── ...
-│   └── ...
-│
-└── backtests/                  # 回测结果 (SQLite)
+└── backtests/                  # 全部数据 (SQLite)
+    ├── market_data.db          # K 线历史数据
     ├── orders.db               # 订单流水
     ├── positions.db            # 仓位快照
-    └── reports.db              # 回测报告
+    ├── reports.db              # 回测报告
+    └── optuna.db               # 调参历史
 ```
 
-#### 11.2.2 Parquet 优势
+#### 11.2.2 K 线表设计
 
-| 特性 | 对比 CSV | 对比 SQLite |
-|------|---------|-------------|
-| 读取速度 | 快 5-10 倍 | 快 10-50 倍 |
-| 精度保持 | ✅ Decimal 无损 | ✅ Decimal 无损 | ❌ float 精度丢失 |
-| 列式查询 | ✅ 支持 | ⚠️ 需要索引 |
-| 压缩率 | ~80% | ~50% |
-| 生态兼容 | Pandas/Polars/VBt | 通用 SQL |
+```sql
+CREATE TABLE klines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol VARCHAR(32) NOT NULL,
+    timeframe VARCHAR(16) NOT NULL,
+    timestamp BIGINT NOT NULL,
+    
+    -- OHLCV (DECIMAL 精度)
+    open DECIMAL(32, 18) NOT NULL,
+    high DECIMAL(32, 18) NOT NULL,
+    low DECIMAL(32, 18) NOT NULL,
+    close DECIMAL(32, 18) NOT NULL,
+    volume DECIMAL(32, 18) NOT NULL,
+    
+    -- 元数据
+    is_closed BOOLEAN NOT NULL DEFAULT 1,
+    created_at BIGINT NOT NULL,
+    
+    -- 唯一约束：防止重复插入
+    UNIQUE(symbol, timeframe, timestamp)
+);
 
-#### 11.2.3 数据获取接口
+-- 索引优化
+CREATE INDEX idx_klines_symbol_tf ON klines(symbol, timeframe);
+CREATE INDEX idx_klines_symbol_tf_ts ON klines(symbol, timeframe, timestamp);
+CREATE INDEX idx_klines_timestamp ON klines(timestamp);
+```
+
+#### 11.2.3 SQLite 优势（针对本场景）
+
+| 特性 | 对比 Parquet | 本场景适用性 |
+|------|-------------|-------------|
+| 技术栈统一 | ✅ 无需引入新依赖 | ✅ 与现有 ORM 一致 |
+| 事务支持 | ✅ ACID 完整支持 | ✅ 幂等写入/更新 |
+| 查询灵活性 | ✅ SQL 灵活查询 | ✅ 时间范围/币种筛选 |
+| 读取速度 | ⚠️ 略慢于 Parquet | ✅ 150MB 数据量无瓶颈 |
+| 并发写入 | ⚠️ 需 WAL 模式 | ✅ 单进程写入无竞争 |
+| 运维复杂度 | ✅ 单文件管理 | ✅ 备份/迁移简单 |
+
+**设计权衡**: 
+- 数据量小（150MB）→ 无需列式存储的性能优势
+- 回测读取模式 → 顺序读取 + 索引优化足够高效
+- 技术栈统一 → 降低维护成本，无需学习 Parquet 生态
+
+#### 11.2.4 数据获取接口
 
 ```python
 # src/infrastructure/data_repository.py
 
 class HistoricalDataRepository:
-    """历史数据仓库 - 本地 Parquet 文件管理"""
+    """历史数据仓库 - SQLite 统一管理"""
+    
+    def __init__(self, db_path: str = "data/backtests/market_data.db"):
+        self._db_path = db_path
+        self._local = threading.local()  # 每个线程独立连接
+    
+    def _get_connection(self) -> sqlite3.Connection:
+        """获取线程独立的数据库连接"""
+        if not hasattr(self._local, 'conn'):
+            self._local.conn = sqlite3.connect(
+                self._db_path,
+                detect_types=sqlite3.PARSE_DECLTYPES,
+                timeout=30.0,
+            )
+            self._local.conn.execute("PRAGMA journal_mode=WAL")
+            self._local.conn.execute("PRAGMA busy_timeout=30000")
+        return self._local.conn
     
     async def fetch_and_store_klines(
         self,
@@ -724,14 +768,46 @@ class HistoricalDataRepository:
         end_time: int,
     ) -> int:
         """
-        分页抓取历史 K 线并持久化到 Parquet
+        分页抓取历史 K 线并持久化到 SQLite
         
         避坑指南:
         1. CCXT 开启 enableRateLimit: True
         2. 时间戳严格对齐（防止回测未来函数）
-        3. 幂等性：已存在的数据段跳过
+        3. 幂等性：UNIQUE 约束 + INSERT OR IGNORE
         """
-        pass
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        klines = await self._gateway.fetch_historical_ohlcv_paginated(
+            symbol=symbol,
+            timeframe=timeframe,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        
+        # 批量插入（幂等）
+        cursor.executemany("""
+            INSERT OR IGNORE INTO klines 
+            (symbol, timeframe, timestamp, open, high, low, close, volume, is_closed, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                symbol,
+                timeframe,
+                k.timestamp,
+                str(k.open),
+                str(k.high),
+                str(k.low),
+                str(k.close),
+                str(k.volume),
+                1 if k.is_closed else 0,
+                int(time.time() * 1000),
+            )
+            for k in klines
+        ])
+        
+        conn.commit()
+        return len(klines)
     
     def load_klines(
         self,
@@ -740,8 +816,32 @@ class HistoricalDataRepository:
         start_time: int,
         end_time: int,
     ) -> List[KlineData]:
-        """从 Parquet 快速加载 K 线"""
-        pass
+        """从 SQLite 加载 K 线"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT timestamp, open, high, low, close, volume, is_closed
+            FROM klines
+            WHERE symbol = ? AND timeframe = ? 
+              AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC
+        """, (symbol, timeframe, start_time, end_time))
+        
+        return [
+            KlineData(
+                symbol=symbol,
+                timeframe=timeframe,
+                timestamp=row[0],
+                open=Decimal(row[1]),
+                high=Decimal(row[2]),
+                low=Decimal(row[3]),
+                close=Decimal(row[4]),
+                volume=Decimal(row[5]),
+                is_closed=bool(row[6]),
+            )
+            for row in cursor.fetchall()
+        ]
 ```
 
 ---
@@ -837,6 +937,7 @@ class StrategyOptimizer:
 # scripts/factor_screening.py
 
 import vectorbt as vbt
+from src.infrastructure.data_repository import HistoricalDataRepository
 
 def screen_pinbar_factors(
     symbols: List[str],
@@ -847,18 +948,30 @@ def screen_pinbar_factors(
     
     注意：仅用于早期因子发现，最终验证必须回到自研引擎
     """
+    repo = HistoricalDataRepository()
     results = []
     
     for symbol in symbols:
-        # 加载 Parquet 数据
-        klines = load_klines(symbol, "1d", years_ago(years), now())
+        # 从 SQLite 加载数据
+        klines = repo.load_klines(symbol, "1d", years_ago(years), now())
         
-        # 向量化计算 (VBt 优势)
-        close = vbt.GenericFactory(klines.close).wrapper()
+        # 转换为 DataFrame 供 Vectorbt 使用
+        df = pd.DataFrame([
+            {
+                'timestamp': k.timestamp,
+                'open': float(k.open),
+                'high': float(k.high),
+                'low': float(k.low),
+                'close': float(k.close),
+                'volume': float(k.volume),
+            }
+            for k in klines
+        ])
+        df.set_index('timestamp', inplace=True)
         
         # 测试不同 wick_ratio 参数组合
         for wick_ratio in [0.5, 0.6, 0.7, 0.8]:
-            signals = detect_pinbar_vectorized(klines, wick_ratio)
+            signals = detect_pinbar_vectorized(df, wick_ratio)
             returns = vbt.Portfolio.from_signals(signals).returns()
             
             results.append({
@@ -878,7 +991,7 @@ def screen_pinbar_factors(
 
 | 阶段 | 任务 | 工期 | 依赖 | 交付物 |
 |------|------|------|------|--------|
-| **Phase 7-1** | 数据持久化层 | 1 周 | 无 | HistoricalDataRepository + Parquet 读写 |
+| **Phase 7-1** | 数据持久化层 | 1 周 | 无 | HistoricalDataRepository + klines 表 |
 | **Phase 7-2** | Optuna 集成 | 2 周 | Phase 7-1 | StrategyOptimizer + 参数推荐 API |
 | **Phase 7-3** | 回测对比工具 | 1 周 | Phase 7-2 | v2 vs v3 回测差异分析报告 |
 | **Phase 7-4** | 前端回测管理 UI | 2 周 | Phase 7-3 | 回测列表/详情/参数调优页面 |
@@ -893,8 +1006,8 @@ def screen_pinbar_factors(
 |------|----------|--------|
 | CCXT 频率限制 | 开启 enableRateLimit + 指数退避 | 后端 |
 | 时间戳对齐问题 | 严格 MTF 往前偏移 1 根 K 线 | 后端 |
-| Parquet 并发写入 | 单进程写入 + 文件锁 | 后端 |
-| Optuna 过拟合 |  Walk-Forward 验证 + 样本外测试 | QA |
+| SQLite 并发写入 | WAL 模式 + 单进程写入 + busy_timeout | 后端 |
+| Optuna 过拟合 | Walk-Forward 验证 + 样本外测试 | QA |
 | 数据漂移检测 | 定期重新抓取最新数据验证 | QA |
 
 *盯盘狗 🐶 项目组*
