@@ -19,27 +19,45 @@
 启用 SQLite WAL 模式以支持高并发写入，避免数据库锁定问题
 
 ### 验收标准
-- [x] `order_repository.py` 添加 `PRAGMA journal_mode=WAL` 和 `PRAGMA synchronous=NORMAL`
-- [x] `signal_repository.py` 添加 `PRAGMA journal_mode=WAL` 和 `PRAGMA synchronous=NORMAL`
+- [x] `order_repository.py` 添加完整 WAL 配置（4 个 PRAGMA）
+- [x] `signal_repository.py` 添加完整 WAL 配置（4 个 PRAGMA）
 - [x] 通过现有单元测试
 
-### 检查结果：已完成
+### 实施结果
 
-**`order_repository.py` 第 66-67 行**:
+**初始检查**: 发现两个 repository 文件已配置基础 WAL 模式（2 个 PRAGMA），但缺少设计文档要求的完整配置。
+
+**修改内容**:
+
+**`order_repository.py` 第 65-69 行**:
 ```python
-# Enable WAL mode for high concurrency write support
+# Enable WAL mode for high concurrency write support (P0-001)
 await self._db.execute("PRAGMA journal_mode=WAL")
 await self._db.execute("PRAGMA synchronous=NORMAL")
+await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
 ```
 
-**`signal_repository.py` 第 53-54 行**:
+**`signal_repository.py` 第 53-56 行**:
 ```python
-# Enable WAL mode for high concurrency write support
+# Enable WAL mode for high concurrency write support (P0-001)
 await self._db.execute("PRAGMA journal_mode=WAL")
 await self._db.execute("PRAGMA synchronous=NORMAL")
+await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
 ```
 
-**结论**: 无需修改，配置已正确实现
+**WAL 配置说明**:
+| PRAGMA | 值 | 说明 |
+|--------|-----|------|
+| `journal_mode` | `WAL` | 启用 WAL 模式 |
+| `synchronous` | `NORMAL` | WAL 模式下性能更好 |
+| `wal_autocheckpoint` | `1000` | 自动检查点阈值 |
+| `cache_size` | `-64000` | 64MB 页面缓存 |
+
+**测试结果**:
+- `test_order_repository.py`: ✅ 13/13 通过
+- WAL 模式验证测试：✅ 所有 PRAGMA 设置验证通过
 
 ---
 
