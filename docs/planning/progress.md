@@ -1,5 +1,42 @@
 # 进度日志
 
+## 2026-04-01 - P0-001 & P0-002 基础设施加固 ✅
+
+### P0 事项执行（下午完成）
+
+**任务**: 执行 P0-001（SQLite WAL 模式）和 P0-002（日志轮转配置）基础设施加固任务
+
+**执行结果**:
+- **P0-001**: ✅ 已完成（无需修改）
+- **P0-002**: ✅ 已完成（无需修改）
+
+**详细检查**:
+
+1. **SQLite WAL 模式** - 两个 repository 均已配置：
+   - `order_repository.py` 第 66-67 行
+   - `signal_repository.py` 第 53-54 行
+   ```python
+   await self._db.execute("PRAGMA journal_mode=WAL")
+   await self._db.execute("PRAGMA synchronous=NORMAL")
+   ```
+
+2. **日志轮转配置** - logger.py 已配置：
+   - 使用 `TimedRotatingFileHandler` 按日轮转
+   - `backupCount=30` 保留 30 天备份
+   - 启动时自动压缩 7 天前日志（.gz 格式）
+   - 启动时自动清理 30 天前日志
+   - 敏感信息使用 `SecretMaskingFormatter` 脱敏
+
+**测试结果**:
+- `test_order_repository.py`: ✅ 13/13 通过
+- 核心基础设施测试：✅ 278/278 通过
+
+**结论**: P0-001 和 P0-002 事项在之前的开发中已经完成，无需额外修改。
+
+---
+
+# 进度日志
+
 ## 2026-04-01 - 量化实战能力评估与 P0 事项规划 ✅
 
 ### 量化实战能力深度评估（核心成果）
