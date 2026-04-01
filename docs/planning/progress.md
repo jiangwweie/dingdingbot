@@ -1,5 +1,91 @@
 # 进度日志
 
+## 2026-04-01 - P1/P2 问题修复执行计划 📋
+
+### 任务概述
+
+完成代码审查后，规划 P1 和 P2 级别问题的修复执行计划。
+
+**审查报告**: `docs/code-review/p0-fix-report-2026-04-01.md`  
+**执行计划**: `docs/planning/p1-p2-fix-plan.md` (新建)
+
+---
+
+### 问题清单
+
+#### P1 级问题 (必须修复，本迭代完成)
+
+| # | 问题描述 | 文件 | 行号 |
+|---|----------|------|------|
+| P1-1 | trigger_price 零值风险 | risk_manager.py | 174 |
+| P1-2 | STOP_LIMIT 订单缺少价格偏差检查 | capital_protection.py | 184-202 |
+| P1-3 | trigger_price 字段应从 CCXT 响应提取 | exchange_gateway.py | 1369 |
+
+#### P2 级问题 (优化改进，视时间完成)
+
+| # | 问题描述 | 文件 | 行号 |
+|---|----------|------|------|
+| P2-1 | 魔法数字配置化 | risk_manager.py | 30-43 |
+| P2-2 | 类常量移到配置文件 | capital_protection.py | 65-67 |
+| P2-3 | 重复代码重构 | exchange_gateway.py | 多处 |
+
+---
+
+### 任务分解
+
+已创建 8 个任务，依赖关系如下:
+
+```
+Task 8 (P1-1) ─┐
+Task 6 (P1-2) ─┼─→ Task 4 (测试) ─→ Task 11 (审查)
+Task 7 (P1-3) ─┤
+Task 5 (P2-1) ─┤
+Task 10 (P2-2) ─┤
+Task 9 (P2-3) ─┘
+```
+
+**任务列表**:
+| 任务 ID | 任务描述 | 负责人 | 预计工时 |
+|---------|----------|--------|----------|
+| Task 8 | P1-1 修复 - trigger_price 零值风险 | @backend | 0.5h |
+| Task 6 | P1-2 修复 - STOP_LIMIT 价格偏差检查 | @backend | 1h |
+| Task 7 | P1-3 修复 - trigger_price 字段提取 | @backend | 1h |
+| Task 5 | P2-1 修复 - 魔法数字配置化 | @backend | 1.5h |
+| Task 10 | P2-2 修复 - 类常量配置化 | @backend | 1.5h |
+| Task 9 | P2-3 修复 - 重复代码重构 | @backend | 1.5h |
+| Task 4 | 测试验证 - P1/P2 修复测试 | @qa | 1.5h |
+| Task 11 | 代码审查 - P1/P2 修复质量把关 | @reviewer | 1h |
+
+---
+
+### 时间安排
+
+- **Day 1 上午**: P1 问题修复 (Task 8, 6, 7)
+- **Day 1 下午**: P2 问题修复 (Task 5, 10, 9)
+- **Day 2 上午**: 测试验证 (Task 4)
+- **Day 2 下午**: 代码审查 + 回归测试 (Task 11)
+
+---
+
+### 交付文件
+
+| 文件 | 说明 |
+|------|------|
+| `docs/planning/p1-p2-fix-plan.md` | P1/P2 修复执行计划 (新建) |
+| `docs/planning/task_plan.md` | 任务分解更新 |
+| `docs/planning/progress.md` | 进度日志更新 (本文档) |
+
+---
+
+### 下一步
+
+1. 开始执行 P1 问题修复 (Task 8, 6, 7)
+2. 完成后执行 P2 问题修复 (Task 5, 10, 9)
+3. 测试验证 (Task 4)
+4. 代码审查 (Task 11)
+
+---
+
 ## 2026-04-01 - P0-004 订单参数合理性检查 ✅
 
 ### 任务概述

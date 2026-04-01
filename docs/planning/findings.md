@@ -1,5 +1,158 @@
 # 研究发现
 
+## P1/P2 问题修复规划发现 (2026-04-01)
+
+### 任务概述
+
+**任务**: P1/P2 问题修复执行规划  
+**执行日期**: 2026-04-01  
+**审查报告**: `docs/code-review/p0-fix-report-2026-04-01.md`  
+**执行计划**: `docs/planning/p1-p2-fix-plan.md` (新建)
+
+---
+
+### 审查背景
+
+P0 级问题修复完成后，代码审查识别出 31 个问题，其中:
+- **P0 级 (严重)**: 4 个 - ✅ 已修复
+- **P1 级 (中等)**: 3 个 - 📋 本迭代计划修复
+- **P2 级 (优化)**: 3 个 - 📋 本迭代视时间完成
+
+---
+
+### P1 级问题技术细节
+
+#### P1-1: trigger_price 零值风险
+
+**根本原因**: Python 的 falsy 判断陷阱
+
+```python
+# 问题代码
+current_trigger = sl_order.trigger_price or position.entry_price
+
+# 问题场景
+sl_order.trigger_price = Decimal("0")  # 假设为 0
+# current_trigger 会错误地使用 position.entry_price
+```
+
+**修复要点**:
+- 显式 `is not None` 判断，避免 falsy 陷阱
+- Decimal("0") 是合法的 trigger_price 值（虽然业务上不应该）
+
+---
+
+#### P1-2: STOP_LIMIT 订单缺少价格偏差检查
+
+**根本原因**: 订单类型判断不完整
+
+```python
+# 问题代码 (仅检查 LIMIT)
+if order_type == OrderType.LIMIT and price is not None:
+    price_check, ticker_price, deviation = await self._check_price_reasonability(...)
+
+# 遗漏场景
+OrderType.STOP_LIMIT  # 也需要价格偏差检查
+```
+
+**修复要点**:
+- STOP_LIMIT 订单的限价单部分同样需要价格合理性检查
+- 使用 `in (OrderType.LIMIT, OrderType.STOP_LIMIT)` 判断
+
+---
+
+#### P1-3: trigger_price 字段应从 CCXT 响应提取
+
+**根本原因**: CCXT 字段映射不完整
+
+```python
+# 问题代码
+trigger_price=None,  # CCXT 不直接返回 trigger_price
+
+# 实际情况 - CCXT 在以下字段可能返回 trigger_price:
+# - order['info']['triggerPrice'] (Binance)
+# - order['info']['stopPrice'] (Bybit)
+# - order['stopPrice'] (OKX)
+# - order['triggerPrice'] (标准字段)
+```
+
+**修复要点**:
+- 多字段回退解析，适配不同交易所
+- 使用 Decimal 精度转换
+
+---
+
+### P2 级问题技术细节
+
+#### P2-1: 魔法数字配置化
+
+**现状**:
+```python
+class DynamicRiskManager:
+    def __init__(
+        self,
+        trailing_percent: Decimal = Decimal('0.02'),     # 2%
+        step_threshold: Decimal = Decimal('0.005'),      # 0.5%
+    ):
+```
+
+**优化方案**:
+```python
+class RiskManagerConfig(BaseModel):
+    trailing_percent: Decimal = Decimal("0.02")
+    step_threshold: Decimal = Decimal("0.005")
+    breakeven_threshold: Decimal = Decimal("0.01")
+```
+
+**收益**: 支持配置管理、回测调优
+
+---
+
+#### P2-2: 类常量移到配置文件
+
+**现状**:
+```python
+class CapitalProtectionManager:
+    MIN_NOTIONAL = Decimal("5")  # Binance 标准
+    PRICE_DEVIATION_THRESHOLD = Decimal("0.10")  # 10%
+```
+
+**优化方案**:
+```yaml
+# config/core.yaml
+capital_protection:
+  min_notional:
+    binance: 5
+    bybit: 2
+    okx: 5
+  price_deviation_threshold: "0.10"
+  extreme_price_deviation_threshold: "0.20"
+```
+
+**收益**: 多交易所适配性提升
+
+---
+
+#### P2-3: 重复代码重构
+
+**现状**: 多处重复的 Decimal 转换和时间戳解析逻辑
+
+**优化方案**:
+```python
+def _parse_decimal(self, value: Any, default: Decimal = Decimal("0")) -> Decimal:
+    """安全解析 Decimal 值"""
+    if value is None:
+        return default
+    try:
+        return Decimal(str(value))
+    except (TypeError, ValueError):
+        logger.warning(f"无法解析 Decimal 值：{value}")
+        return default
+```
+
+**收益**: 代码复用率提升，可维护性增强
+
+---
+
 ## P0-003 和 P0-004 实施发现 (2026-04-01)
 
 ### 任务概述
