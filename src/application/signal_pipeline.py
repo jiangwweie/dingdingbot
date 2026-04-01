@@ -341,6 +341,35 @@ class SignalPipeline:
             logger.info(f"Runner warmup complete: {warmup_count} K-lines replayed from {len(warmup_details)} streams")
             logger.debug(f"Warmup details: {', '.join(warmup_details)}")
 
+        # MTF EMA warmup: pre-warm higher timeframe EMA indicators
+        # This ensures MTF filters have ready EMAs on first signal check
+        # Note: key format is "symbol:timeframe" where symbol may contain ":" (e.g., "BTC/USDT:USDT:1h")
+        mtf_warmup_count = 0
+        for key, history in self._kline_history.items():
+            # Timeframe is the last part after splitting by ":"
+            parts = key.rsplit(":", 1)  # Split from right, max 1 split
+            if len(parts) != 2:
+                continue  # Invalid key format
+            symbol_part, timeframe = parts
+
+            # Only warmup higher timeframe EMAs (1h, 4h, 1d) used for MTF filtering
+            if timeframe in ["1h", "4h", "1d"]:
+                ema_key = key
+                if ema_key not in self._mtf_ema_indicators:
+                    self._mtf_ema_indicators[ema_key] = EMACalculator(period=self._mtf_ema_period)
+
+                ema = self._mtf_ema_indicators[ema_key]
+                # Warmup EMA with historical K-lines (exclude currently running kline)
+                for kline in history[:-1]:
+                    ema.update(kline.close)
+                    mtf_warmup_count += 1
+
+        # Log MTF EMA warmup completion
+        if mtf_warmup_count > 0:
+            logger.info(f"MTF EMA warmup complete: {mtf_warmup_count} data points across {len(self._mtf_ema_indicators)} indicators ready")
+        elif self._kline_history:
+            logger.debug("MTF EMA warmup skipped: no higher timeframe data available yet")
+
         return runner
 
     def update_account_snapshot(self, snapshot: AccountSnapshot) -> None:
