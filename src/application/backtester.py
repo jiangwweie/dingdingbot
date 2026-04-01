@@ -317,7 +317,11 @@ class Backtester:
             )
             snapshot["triggers"] = [{
                 "type": "pinbar",
-                "params": pinbar_config.model_dump(mode="json")
+                "params": {
+                    "min_wick_ratio": float(pinbar_config.min_wick_ratio),
+                    "max_body_ratio": float(pinbar_config.max_body_ratio),
+                    "body_position_tolerance": float(pinbar_config.body_position_tolerance),
+                }
             }]
             snapshot["filters"] = [
                 {"type": "ema_trend", "params": {"enabled": request.trend_filter_enabled if request.trend_filter_enabled is not None else True}},
@@ -1275,7 +1279,12 @@ class Backtester:
                 strategy_snapshot = await self._serialize_strategy_snapshot_for_report(
                     request, strategy_id, strategy_name
                 )
-                await backtest_repository.save_report(report, strategy_snapshot)
+                await backtest_repository.save_report(
+                    report,
+                    strategy_snapshot,
+                    request.symbol,
+                    request.timeframe
+                )
                 logger.info(f"Saved backtest report to database: {report.strategy_id}")
             except Exception as e:
                 logger.warning(f"Failed to save backtest report: {e}")

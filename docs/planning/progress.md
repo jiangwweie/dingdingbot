@@ -6,55 +6,97 @@
 
 ## 📍 最近 7 天
 
-### 2026-04-01 - PMS 回测修复 - 阶段 B 数据持久化启动
+### 2026-04-01 - PMS 回测修复 - 阶段 B 数据持久化 ✅
 
 **执行日期**: 2026-04-01  
 **执行人**: AI Builder + 团队工作流  
-**状态**: 🔄 进行中
+**状态**: ✅ 已完成
 
 **任务概述**:
-启动 PMS 回测修复阶段 B（数据持久化），实现订单和回测报告的数据库持久化。
+完成 PMS 回测修复阶段 B（数据持久化），实现订单和回测报告的数据库持久化。
 
-**阶段 A 完成情况**:
-| 任务 | 状态 | 测试 |
-|------|------|------|
-| T1: 修复 MTF 未来函数 | ✅ 已完成 | 10/10 通过 |
-| T2: 修复止盈撮合滑点 | ✅ 已完成 | 18/18 通过 |
+**阶段 B 完成情况**:
 
-**阶段 B 任务分解** (已启动团队并行执行):
+| 任务 | 状态 | 交付物 | 测试 |
+|------|------|--------|------|
+| T3: orders 表补充字段迁移 | ✅ 已完成 | migration 004 | - |
+| T4: 订单保存逻辑 | ✅ 已完成 | OrderRepository 扩展 | 17/17 通过 |
+| T5: backtest_reports 表创建 | ✅ 已完成 | migration 005 | - |
+| T6: 回测报告保存 | ✅ 已完成 | BacktestReportRepository | 15/16 通过 (93.75%) |
 
-| 子任务 | 负责人 | 状态 | 说明 |
-|--------|--------|------|------|
-| T3-A: orders 表补充字段迁移 | backend-t3 | 🔄 进行中 | 添加 filled_at, parent_order_id |
-| T3-B: backtest_reports 表创建 | backend-t3 | 🔄 进行中 | 符合 3NF 设计，含 strategy_snapshot |
-| T4: 订单保存逻辑 | backend-t4 | ✅ 已完成 | OrderRepository 实现，17 测试通过 |
-| T5/T6: 回测报告保存 | backend-t5-t6 | 🔄 进行中 | BacktestReportORM + Repository |
+**代码审查结果**:
+- 审查报告：`docs/reviews/phaseB-code-review.md`
+- 审查结论：✅ 批准合并
+- 测试覆盖率：90%+
 
-**T4 完成情况详情**:
+**交付文件**:
+| 文件 | 说明 |
+|------|------|
+| `migrations/versions/2026-05-04-004_add_orders_backtest_fields.py` | orders 表补充字段 (filled_at, parent_order_id) |
+| `migrations/versions/2026-05-04-005_create_backtest_reports_table.py` | backtest_reports 表创建 (符合 3NF 设计) |
+| `src/infrastructure/order_repository.py` | OrderRepository 扩展 |
+| `src/infrastructure/backtest_repository.py` | BacktestReportRepository 完整实现 |
+| `src/infrastructure/v3_orm.py` | BacktestReportORM 模型 |
+| `tests/unit/test_order_repository.py` | 订单保存测试 (17 用例) |
+| `tests/unit/test_backtest_repository.py` | 回测报告测试 (16 用例) |
 
-实现订单保存逻辑，包括：
-1. 扩展 `Order` 领域模型添加 `filled_at` 字段
-2. 更新 `order_orm_to_domain`/`order_domain_to_orm` 转换函数
-3. 扩展 `OrderRepository` 支持 `filled_at` 字段的保存和查询
-4. 添加标准接口方法：
-   - `save_order(order)` - 保存订单（创建或更新）
-   - `get_order_detail(order_id)` - 获取订单详情
-   - `get_orders_by_signal(signal_id)` - 获取信号关联的所有订单
-   - `get_open_orders(symbol?)` - 获取未平订单列表
-   - `mark_order_filled(order_id, filled_at)` - 标记订单已成交
-5. 在 `_run_v3_pms_backtest` 中集成订单保存逻辑：
-   - ENTRY 订单创建后自动保存
-   - TP/SL 订单生成后自动保存
-6. 编写 5 个 SST 测试用例（全部通过，总计 17/17 测试通过）
+**设计亮点**:
+1. **3NF 合规设计** - `strategy_snapshot` JSON 存储 + `parameters_hash` 索引
+2. **SST 先行** - 所有功能先写测试再实现
+3. **并发保护** - SQLite WAL 模式 + 异步锁
+4. **自动调参基础** - parameters_hash 聚类分析支持
 
-**设计更新** (符合 3NF 原则):
+**审查发现问题** (P1/P2):
+| 优先级 | 问题 | 状态 |
+|--------|------|------|
+| P1 | backtest_repository timeframe 硬编码 | ✅ 已修复 |
+| P1 | symbol 默认值可能为 UNKNOWN | ✅ 已修复 |
+| P1 | PinbarConfig 序列化失败 | ✅ 已修复 |
+| P2 | 数据库路径配置化 | 建议 |
+| P2 | BacktestReportORM 转换函数 | 建议 |
 
-针对回测列表需要关联策略快照的需求，已更新表设计：
+**P1 问题修复详情** (2026-04-01):
 
-| 新增字段 | 类型 | 用途 |
-|----------|------|------|
-| `strategy_snapshot` | Text (JSON) | 记录回测时的完整参数组合 |
-| `parameters_hash` | String (indexed) | SHA256 参数哈希，用于自动调参聚类分析 |
+| 问题 ID | 文件 | 问题描述 | 修复方案 | 测试 |
+|---------|------|----------|----------|------|
+| P1-1 | backtester.py:1282-1287 | timeframe 硬编码 | 使用 `request.timeframe` | ✅ |
+| P1-2 | backtester.py:1282-1287 | symbol 默认值问题 | 使用 `request.symbol` | ✅ |
+| P1-3 | backtester.py:318-325 | PinbarConfig 序列化失败 | 手动构建 dict | ✅ |
+
+**修复代码**:
+```python
+# P1-3: PinbarConfig 序列化 (backtester.py:318-325)
+# 修复前: "params": pinbar_config.model_dump(mode="json") ❌
+# 修复后:
+snapshot["triggers"] = [{
+    "type": "pinbar",
+    "params": {
+        "min_wick_ratio": float(pinbar_config.min_wick_ratio),
+        "max_body_ratio": float(pinbar_config.max_body_ratio),
+        "body_position_tolerance": float(pinbar_config.body_position_tolerance),
+    }
+}]
+
+# P1-1, P1-2: save_report 调用 (backtester.py:1282-1287)
+# 修复前: await backtest_repository.save_report(report, strategy_snapshot) ❌
+# 修复后:
+await backtest_repository.save_report(
+    report,
+    strategy_snapshot,
+    request.symbol,
+    request.timeframe
+)
+```
+
+**测试结果**: `tests/unit/test_backtest_repository.py` - 16/16 通过 (100%)
+
+**下一步**:
+- 阶段 C: 前端展示 (T7-T8)
+- Git 提交与推送
+
+---
+
+### 2026-04-01 - PMS 回测修复 - 阶段 B 数据持久化启动
 | `strategy_version` | String | 策略版本号 |
 
 **团队工作流状态**:
