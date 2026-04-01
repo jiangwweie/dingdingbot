@@ -144,7 +144,7 @@ class TestReconciliation:
             reduce_only=False
         )
 
-        if result.success:
+        if result.is_success:
             await asyncio.sleep(2)  # 等待成交
 
             # Act - 执行持仓对账
@@ -168,7 +168,7 @@ class TestReconciliation:
             reduce_only=False
         )
 
-        if result.success:
+        if result.is_success:
             # Act - 执行订单对账
             orders_match, order_report = await reconciliation_service.reconcile_orders(
                 symbol=symbol,
@@ -184,8 +184,7 @@ class TestReconciliation:
         symbol = "BTC/USDT:USDT"
 
         # 下一个限价单（不会立即成交）
-        ticker = await reconciliation_service._gateway.fetch_ticker(symbol)
-        current_price = Decimal(str(ticker["last"]))
+        current_price = await reconciliation_service._gateway.fetch_ticker_price(symbol)
         limit_price = current_price * Decimal("0.90")
 
         result = await reconciliation_service._gateway.place_order(
@@ -233,7 +232,7 @@ class TestFeishuNotification:
         )
 
         # Assert
-        assert result.success is True, f"发送失败：{result.error_message}"
+        assert result.is_success is True, f"发送失败：{result.error_message}"
 
 
 if __name__ == "__main__":

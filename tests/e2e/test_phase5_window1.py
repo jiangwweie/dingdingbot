@@ -23,11 +23,12 @@ from src.application.capital_protection import CapitalProtectionManager
 from src.application.config_manager import load_all_configs
 
 
-# 移除 skipif 装饰器，因为我们运行的是本地验证测试
-# pytestmark = pytest.mark.skipif(
-#     not os.getenv("EXCHANGE_API_KEY"),
-#     reason="需要配置 EXCHANGE_API_KEY 环境变量"
-# )
+# 对于需要真实 API 权限的测试，使用 pytest.mark.skip
+# 原因：Binance 测试网 API 权限限制，某些操作可能失败
+pytestmark = pytest.mark.skipif(
+    not os.getenv("EXCHANGE_API_KEY"),
+    reason="需要配置 EXCHANGE_API_KEY 环境变量"
+)
 
 
 @pytest.fixture
@@ -81,7 +82,7 @@ class TestOrderExecution:
         )
 
         # Assert
-        assert result.success is True, f"下单失败：{result.error_message}"
+        assert result.is_success is True, f"下单失败：{result.error_message}"
         assert result.order_id is not None
         assert result.status in [OrderStatus.FILLED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]
 
@@ -96,8 +97,7 @@ class TestOrderExecution:
         amount = Decimal("0.001")
 
         # 获取当前价格
-        ticker = await gateway.fetch_ticker(symbol)
-        current_price = Decimal(str(ticker["last"]))
+        current_price = await gateway.fetch_ticker_price(symbol)
         limit_price = current_price * Decimal("0.95")  # 低于市价 5%
 
         # Act
@@ -111,7 +111,7 @@ class TestOrderExecution:
         )
 
         # Assert
-        assert result.success is True, f"下单失败：{result.error_message}"
+        assert result.is_success is True, f"下单失败：{result.error_message}"
         assert result.order_id is not None
 
         # 清理：取消限价单
@@ -123,8 +123,7 @@ class TestOrderExecution:
         symbol = "BTC/USDT:USDT"
         amount = Decimal("0.001")
 
-        ticker = await gateway.fetch_ticker(symbol)
-        current_price = Decimal(str(ticker["last"]))
+        current_price = await gateway.fetch_ticker_price(symbol)
         limit_price = current_price * Decimal("0.90")  # 低于市价 10%
 
         place_result = await gateway.place_order(
@@ -135,14 +134,14 @@ class TestOrderExecution:
             price=limit_price,
             reduce_only=False
         )
-        assert place_result.success is True
+        assert place_result.is_success is True
         order_id = place_result.order_id
 
         # Act - 取消订单
         cancel_result = await gateway.cancel_order(order_id, symbol)
 
         # Assert
-        assert cancel_result.success is True, f"取消失败：{cancel_result.error_message}"
+        assert cancel_result.is_success is True, f"取消失败：{cancel_result.error_message}"
 
     async def test_1_4_fetch_order_status(self, gateway):
         """Test-1.4: 查询订单状态"""
@@ -157,7 +156,7 @@ class TestOrderExecution:
             amount=amount,
             reduce_only=False
         )
-        assert place_result.success is True
+        assert place_result.is_success is True
         order_id = place_result.order_id
 
         # Act - 查询订单
@@ -187,12 +186,14 @@ class TestCapitalProtection:
         balance = Decimal("10000")  # 1 万 USDT
 
         # Act - 计算损失
-        loss = amount * (entry_price - stop_loss)  # 20 USDT
-        loss_percent = loss / balance * 100  # 0.2%
+        # 价格变动：100000 - 98000 = 2000 USDT
+        # 损失：0.001 * 2000 = 2 USDT
+        loss = amount * (entry_price - stop_loss)
+        loss_percent = loss / balance * 100  # 0.02%
 
         # Assert - 验证逻辑正确
-        assert loss == Decimal("20")
-        assert loss_percent == Decimal("0.2")
+        assert loss == Decimal("2.000")
+        assert loss_percent == Decimal("0.02")
         assert loss_percent < Decimal("2.0")  # 小于单笔最大损失 2%
 
     def test_1_6_daily_loss_tracking(self):
@@ -231,22 +232,24 @@ class TestCapitalProtection:
 class TestHelperFunctions:
     """辅助功能测试"""
 
-    async def test_fetch_ticker(self, gateway):
+    async def test_fetch_ticker_price(self, gateway):
         """测试获取行情数据"""
         symbol = "BTC/USDT:USDT"
 
-        ticker = await gateway.fetch_ticker(symbol)
+        price = await gateway.fetch_ticker_price(symbol)
 
-        assert ticker is not None
-        assert "last" in ticker or "close" in ticker
-        assert Decimal(str(ticker.get("last", ticker.get("close")))) > 0
+        assert price is not None
+        assert price > 0
 
-    async def test_fetch_balance(self, gateway):
+    async def test_fetch_account_balance(self, gateway):
         """测试获取余额"""
-        balance = await gateway.fetch_balance()
+        from src.domain.models import AccountSnapshot
 
-        assert balance is not None
-        assert "USDT" in balance or "total" in balance
+        snapshot = await gateway.fetch_account_balance()
+
+        assert snapshot is not None
+        assert isinstance(snapshot, AccountSnapshot)
+        assert snapshot.total_balance > 0
 
 
 if __name__ == "__main__":

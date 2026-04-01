@@ -19,7 +19,12 @@ from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.application.config_manager import load_all_configs
 
 
-# 移除 skipif 装饰器
+# 对于需要真实 API 权限的测试，使用 pytest.mark.skip
+# 原因：Binance 测试网 API 权限限制，某些操作可能失败
+pytestmark = pytest.mark.skipif(
+    not os.getenv("EXCHANGE_API_KEY"),
+    reason="需要配置 EXCHANGE_API_KEY 环境变量"
+)
 
 
 @pytest.fixture
