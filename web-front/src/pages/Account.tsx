@@ -34,7 +34,7 @@ export default function Account() {
 
   // Fetch historical signals for PnL calculation
   const { data: signalsData, error: signalsError } = useSWR(
-    '/api/signals?limit=1000',
+    '/api/signals?limit=200',
     fetcher,
     { refreshInterval: 60000 }
   );

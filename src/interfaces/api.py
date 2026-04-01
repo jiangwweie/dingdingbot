@@ -2276,6 +2276,9 @@ async def list_positions(
         # 从交易所获取持仓信息
         positions = await gateway.fetch_positions(symbol=symbol)
 
+        # 同时获取账户余额用于计算权益
+        account_balance = await gateway.fetch_account_balance()
+
         # 转换为 API 响应格式
         position_infos = []
         total_unrealized_pnl = Decimal("0")
@@ -2310,12 +2313,17 @@ async def list_positions(
             position_infos.append(position_info)
             total_unrealized_pnl += pos.unrealized_pnl
 
+        # 计算账户权益 = 总余额 + 未实现盈亏
+        account_equity = None
+        if account_balance:
+            account_equity = account_balance.total_balance + account_balance.unrealized_pnl
+
         return PositionResponse(
             positions=position_infos,
             total_unrealized_pnl=total_unrealized_pnl,
             total_realized_pnl=total_realized_pnl,
             total_margin_used=total_margin_used,
-            account_equity=None,
+            account_equity=account_equity,
         )
 
     except HTTPException:
