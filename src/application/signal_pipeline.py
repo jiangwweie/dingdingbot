@@ -367,11 +367,11 @@ class SignalPipeline:
                     mtf_warmup_count += 1
 
         # Log MTF EMA warmup completion
-        logger.debug(f"MTF EMA warmup: _kline_history keys = {', '.join(mtf_debug_keys)}")
+        logger.info(f"MTF EMA warmup: checked {len(mtf_debug_keys)} keys, warmed {mtf_warmup_count} data points across {len(self._mtf_ema_indicators)} indicators")
         if mtf_warmup_count > 0:
             logger.info(f"MTF EMA warmup complete: {mtf_warmup_count} data points across {len(self._mtf_ema_indicators)} indicators ready")
         elif self._kline_history:
-            logger.debug("MTF EMA warmup skipped: no higher timeframe data available yet")
+            logger.info("MTF EMA warmup skipped: no higher timeframe data available yet")
 
         return runner
 
