@@ -79,6 +79,25 @@ class OrderAlreadyFilledError(FatalStartupError):
     pass
 
 
+# ============================================================
+# Order Validation Errors (P0-004)
+# ============================================================
+class InvalidOrderAmountError(InvalidOrderError):
+    """
+    Invalid order amount.
+    Order rejected due to minimum notional value violation.
+    """
+    pass
+
+
+class InvalidOrderPriceError(InvalidOrderError):
+    """
+    Invalid order price.
+    Order rejected due to price deviation from market price.
+    """
+    pass
+
+
 class RateLimitError(ConnectionLostError):
     """
     Rate limit exceeded.

@@ -1,37 +1,53 @@
 # 进度日志
 
-## 2026-04-01 - P0-001 & P0-002 基础设施加固 ✅
+## 2026-04-01 - P0-001 SQLite WAL 模式实施 ✅
 
-### P0 事项执行（下午完成）
+### P0-001 执行结果
 
-**任务**: 执行 P0-001（SQLite WAL 模式）和 P0-002（日志轮转配置）基础设施加固任务
+**任务**: P0-001 - SQLite WAL 模式配置（设计文档：`docs/designs/p0-001-wal-mode.md`）
 
-**执行结果**:
-- **P0-001**: ✅ 已完成（无需修改）
-- **P0-002**: ✅ 已完成（无需修改）
+**执行状态**: ✅ 已完成（部分修改）
 
-**详细检查**:
+**检查结果**:
+- 发现两个 repository 文件已配置基础 WAL 模式（`journal_mode=WAL` 和 `synchronous=NORMAL`）
+- 但缺少设计文档中要求的完整配置：`wal_autocheckpoint=1000` 和 `cache_size=-64000`
 
-1. **SQLite WAL 模式** - 两个 repository 均已配置：
-   - `order_repository.py` 第 66-67 行
-   - `signal_repository.py` 第 53-54 行
-   ```python
-   await self._db.execute("PRAGMA journal_mode=WAL")
-   await self._db.execute("PRAGMA synchronous=NORMAL")
-   ```
+**修改内容**:
 
-2. **日志轮转配置** - logger.py 已配置：
-   - 使用 `TimedRotatingFileHandler` 按日轮转
-   - `backupCount=30` 保留 30 天备份
-   - 启动时自动压缩 7 天前日志（.gz 格式）
-   - 启动时自动清理 30 天前日志
-   - 敏感信息使用 `SecretMaskingFormatter` 脱敏
+1. **`order_repository.py`** (第 65-68 行):
+```python
+# Enable WAL mode for high concurrency write support (P0-001)
+await self._db.execute("PRAGMA journal_mode=WAL")
+await self._db.execute("PRAGMA synchronous=NORMAL")
+await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
+```
+
+2. **`signal_repository.py`** (第 53-56 行):
+```python
+# Enable WAL mode for high concurrency write support (P0-001)
+await self._db.execute("PRAGMA journal_mode=WAL")
+await self._db.execute("PRAGMA synchronous=NORMAL")
+await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
+```
+
+**WAL 配置说明**:
+| PRAGMA | 值 | 说明 |
+|--------|-----|------|
+| `journal_mode` | `WAL` | 启用 WAL 模式，创建 `.db-wal` 和 `.db-shm` 文件 |
+| `synchronous` | `NORMAL` | WAL 模式下安全且性能更好（相比 FULL） |
+| `wal_autocheckpoint` | `1000` | WAL 文件达到 1000 页时自动检查点 |
+| `cache_size` | `-64000` | 64MB 页面缓存，减少磁盘 I/O |
 
 **测试结果**:
 - `test_order_repository.py`: ✅ 13/13 通过
-- 核心基础设施测试：✅ 278/278 通过
+- WAL 模式验证测试：✅ 所有 PRAGMA 设置验证通过
 
-**结论**: P0-001 和 P0-002 事项在之前的开发中已经完成，无需额外修改。
+**预期收益**:
+- 并发写入吞吐量提升约 10x（~100 ops/s → ~1000 ops/s）
+- 读写并发性：从互斥 → 可同时读写
+- 崩溃恢复时间：从秒级 → 毫秒级
 
 ---
 

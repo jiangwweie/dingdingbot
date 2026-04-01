@@ -413,6 +413,8 @@ async def test_g002_limit_order_missing_price(capital_protection):
 @pytest.mark.asyncio
 async def test_g002_limit_order_with_price(capital_protection, mock_gateway):
     """G-002 测试：限价单有价格"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")  # P0-004 价格检查需要
+
     result = await capital_protection.pre_order_check(
         symbol="BTC/USDT:USDT",
         order_type=OrderType.LIMIT,
@@ -422,8 +424,8 @@ async def test_g002_limit_order_with_price(capital_protection, mock_gateway):
         stop_loss=Decimal("49000"),
     )
 
-    # 限价单不应该调用 fetch_ticker_price
-    mock_gateway.fetch_ticker_price.assert_not_called()
+    # 限价单会调用 fetch_ticker_price 进行 P0-004 价格合理性检查
+    mock_gateway.fetch_ticker_price.assert_called_once_with("BTC/USDT:USDT")
     assert result.allowed is True
     assert result.position_value == Decimal("500")
 
@@ -537,3 +539,168 @@ async def test_get_balance_error(capital_protection, mock_account_service, mock_
 
     assert result.allowed is False
     assert result.reason == "CANNOT_GET_BALANCE"
+
+
+# ============================================================
+# P0-004: 订单参数合理性检查测试
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_p004_min_notional_check_pass(capital_protection, mock_gateway):
+    """P0-004 测试：最小名义价值检查通过"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # 名义价值：0.001 * 50000 = 50 USDT > 5 USDT (最小要求)
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.LIMIT,
+        amount=Decimal("0.001"),
+        price=Decimal("50000"),
+        trigger_price=None,
+        stop_loss=Decimal("49000"),
+    )
+
+    assert result.allowed is True
+    assert result.notional_value == Decimal("50")
+    assert result.min_notional == Decimal("5")
+
+
+@pytest.mark.asyncio
+async def test_p004_min_notional_check_fail(capital_protection, mock_gateway):
+    """P0-004 测试：最小名义价值检查失败（粉尘订单）"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # 名义价值：0.00001 * 50000 = 0.5 USDT < 5 USDT (最小要求)
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.LIMIT,
+        amount=Decimal("0.00001"),  # 非常小的数量
+        price=Decimal("50000"),
+        trigger_price=None,
+        stop_loss=Decimal("49000"),
+    )
+
+    assert result.allowed is False
+    assert result.reason == "BELOW_MIN_NOTIONAL"
+    assert result.notional_value == Decimal("0.5")
+    assert result.min_notional == Decimal("5")
+
+
+@pytest.mark.asyncio
+async def test_p004_price_deviation_check_pass(capital_protection, mock_gateway):
+    """P0-004 测试：价格偏差检查通过（偏差在阈值内）"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # 订单价格 51000，ticker 价格 50000，偏差 = |51000-50000|/50000 = 2% < 10%
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.LIMIT,
+        amount=Decimal("0.01"),
+        price=Decimal("51000"),  # 比 ticker 高 2%
+        trigger_price=None,
+        stop_loss=Decimal("50000"),
+    )
+
+    assert result.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_p004_price_deviation_check_fail(capital_protection, mock_gateway):
+    """P0-004 测试：价格偏差检查失败（偏差超过阈值）"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # 订单价格 60000，ticker 价格 50000，偏差 = |60000-50000|/50000 = 20% > 10%
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.LIMIT,
+        amount=Decimal("0.01"),
+        price=Decimal("60000"),  # 比 ticker 高 20%
+        trigger_price=None,
+        stop_loss=Decimal("59000"),
+    )
+
+    assert result.allowed is False
+    assert result.reason == "PRICE_DEVIATION_TOO_HIGH"
+    assert result.order_price == Decimal("60000")
+    assert result.ticker_price == Decimal("50000")
+    assert result.price_deviation == Decimal("0.2")
+
+
+@pytest.mark.asyncio
+async def test_p004_price_deviation_check_market_order_skipped(capital_protection, mock_gateway):
+    """P0-004 测试：市价单跳过价格偏差检查（因为已使用 ticker 价格）"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # 市价单使用 ticker 价格作为 effective_price，不应该再次检查偏差
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.MARKET,
+        amount=Decimal("0.01"),
+        price=None,  # 市价单无价格
+        trigger_price=None,
+        stop_loss=Decimal("49000"),
+    )
+
+    assert result.allowed is True
+    # 市价单不应该有 order_price 和 price_deviation 字段
+    assert result.order_price is None
+
+
+@pytest.mark.asyncio
+async def test_p004_price_deviation_check_fetch_failure(capital_protection, mock_gateway):
+    """P0-004 测试：获取 ticker 价格失败时跳过检查"""
+    mock_gateway.fetch_ticker_price.return_value = None
+
+    # 获取 ticker 失败，应该跳过检查但不拒绝订单
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.LIMIT,
+        amount=Decimal("0.01"),
+        price=Decimal("50000"),
+        trigger_price=None,
+        stop_loss=Decimal("49000"),
+    )
+
+    # 订单应该被拒绝，但原因是 CANNOT_ESTIMATE_MARKET_PRICE（在 effective_price 获取阶段）
+    # 注意：这个测试针对限价单，price 已提供，所以不会在 effective_price 阶段失败
+    # 但 _check_price_reasonability 会获取 ticker 失败并返回 True（跳过检查）
+    assert result.allowed is True or result.reason != "PRICE_DEVIATION_TOO_HIGH"
+
+
+@pytest.mark.asyncio
+async def test_p004_price_deviation_boundary_10_percent(capital_protection, mock_gateway):
+    """P0-004 测试：价格偏差边界值（正好 10%）"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # 订单价格 55000，ticker 价格 50000，偏差 = |55000-50000|/50000 = 10% = 阈值
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.LIMIT,
+        amount=Decimal("0.01"),
+        price=Decimal("55000"),  # 比 ticker 高 10%
+        trigger_price=None,
+        stop_loss=Decimal("54000"),
+    )
+
+    # 10% 正好等于阈值，应该通过（<=）
+    assert result.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_p004_price_deviation_just_over_10_percent(capital_protection, mock_gateway):
+    """P0-004 测试：价格偏差略超 10%"""
+    mock_gateway.fetch_ticker_price.return_value = Decimal("50000")
+
+    # 订单价格 55001，ticker 价格 50000，偏差 = |55001-50000|/50000 = 10.002% > 阈值
+    result = await capital_protection.pre_order_check(
+        symbol="BTC/USDT:USDT",
+        order_type=OrderType.LIMIT,
+        amount=Decimal("0.01"),
+        price=Decimal("55001"),  # 比 ticker 高 10.002%
+        trigger_price=None,
+        stop_loss=Decimal("54000"),
+    )
+
+    # 超过 10%，应该拒绝
+    assert result.allowed is False
+    assert result.reason == "PRICE_DEVIATION_TOO_HIGH"

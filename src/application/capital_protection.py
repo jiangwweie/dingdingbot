@@ -5,6 +5,10 @@ Phase 5: 实盘集成 - 资金保护管理器
 负责下单前检查资金限制，确保交易安全。
 
 Reference: docs/designs/phase5-detailed-design.md Section 3.4
+
+P0-004: 订单参数合理性检查
+- 最小订单金额检查（防止粉尘订单）
+- 价格合理性检查（防止异常价格订单）
 """
 import asyncio
 import threading
@@ -37,16 +41,23 @@ class CapitalProtectionManager:
     1. 下单前资金检查（单笔损失、仓位占比、每日亏损、交易次数、最低余额）
     2. 每日交易统计追踪
     3. 市价单价格预估（G-002 修复）
+    4. 订单参数合理性检查（P0-004：最小名义价值、价格偏差）
 
     检查项:
     | 检查项 | 公式 | 限制 |
     |--------|------|------|
+    | 最小名义价值 | quantity * price | ≥ 5 USDT (Binance) |
+    | 价格偏差 | |price - ticker| / ticker | ≤ 10% |
     | 单笔最大损失 | amount * (price - stop_loss) | 2% of balance |
     | 单次最大仓位 | amount * price | 20% of balance |
     | 每日最大亏损 | daily_stats.realized_pnl | 5% of balance |
     | 每日交易次数 | daily_stats.trade_count | 50 次 |
     | 最低余额 | balance | 100 USDT |
     """
+
+    # P0-004: 订单参数合理性检查配置
+    MIN_NOTIONAL = Decimal("5")  # 最小名义价值 5 USDT (Binance 标准)
+    PRICE_DEVIATION_THRESHOLD = Decimal("0.10")  # 价格偏差阈值 10%
 
     def __init__(
         self,
@@ -87,6 +98,10 @@ class CapitalProtectionManager:
         - 市价单价格获取逻辑
         - MARKET: 调用 fetch_ticker_price
         - STOP_MARKET: 使用 trigger_price
+
+        P0-004 新增:
+        - 最小名义价值检查（防止粉尘订单）
+        - 价格合理性检查（防止异常价格订单）
 
         Args:
             symbol: 币种对
@@ -135,6 +150,45 @@ class CapitalProtectionManager:
                     allowed=False,
                     reason="MISSING_PRICE",
                     reason_message="LIMIT 订单必须指定价格"
+                )
+
+        # ========== P0-004 新增检查 1: 最小名义价值检查 ==========
+        notional_check, notional_value = self._check_min_notional(
+            quantity=amount,
+            price=effective_price,
+        )
+        if not notional_check:
+            logger.warning(
+                f"订单名义价值过低：{notional_value:.2f} USDT < {self.MIN_NOTIONAL} USDT "
+                f"(symbol={symbol}, amount={amount}, price={effective_price})"
+            )
+            return OrderCheckResult(
+                allowed=False,
+                reason="BELOW_MIN_NOTIONAL",
+                reason_message=f"订单名义价值 {notional_value:.2f} USDT 低于最小要求 {self.MIN_NOTIONAL} USDT",
+                notional_value=notional_value,
+                min_notional=self.MIN_NOTIONAL,
+            )
+
+        # ========== P0-004 新增检查 2: 价格合理性检查 ==========
+        # 限价单需要检查价格偏差，市价单 already uses ticker price
+        if order_type == OrderType.LIMIT and price is not None:
+            price_check, ticker_price, deviation = await self._check_price_reasonability(
+                symbol=symbol,
+                order_price=price,
+            )
+            if not price_check:
+                logger.warning(
+                    f"订单价格偏差过大：{deviation*100:.2f}% > {self.PRICE_DEVIATION_THRESHOLD*100:.0f}% "
+                    f"(symbol={symbol}, order_price={price}, ticker_price={ticker_price})"
+                )
+                return OrderCheckResult(
+                    allowed=False,
+                    reason="PRICE_DEVIATION_TOO_HIGH",
+                    reason_message=f"订单价格偏差 {deviation*100:.2f}% 超过阈值 {self.PRICE_DEVIATION_THRESHOLD*100:.0f}%",
+                    order_price=price,
+                    ticker_price=ticker_price,
+                    price_deviation=deviation,
                 )
 
         # ========== 检查 1: 单笔最大损失 ==========
@@ -253,7 +307,78 @@ class CapitalProtectionManager:
             daily_trade_count=daily_trade_count,
             available_balance=available_balance,
             min_required_balance=min_required_balance,
+            notional_value=notional_value,
+            min_notional=self.MIN_NOTIONAL,
         )
+
+    def _check_min_notional(
+        self,
+        quantity: Decimal,
+        price: Decimal,
+    ) -> tuple[bool, Decimal]:
+        """
+        检查最小名义价值（P0-004）
+
+        公式：notional_value = quantity * price
+        限制：notional_value >= MIN_NOTIONAL (5 USDT)
+
+        Binance 规则:
+        - NOTIONAL: 名义价值 ≥ 5 USDT (部分币种 100 USDT)
+        - LOT_SIZE: 数量精度限制
+        - PRICE_FILTER: 价格精度限制
+
+        Args:
+            quantity: 订单数量
+            price: 订单价格
+
+        Returns:
+            (passed, notional_value)
+        """
+        notional_value = quantity * price
+        passed = notional_value >= self.MIN_NOTIONAL
+        return passed, notional_value
+
+    async def _check_price_reasonability(
+        self,
+        symbol: str,
+        order_price: Decimal,
+    ) -> tuple[bool, Optional[Decimal], Decimal]:
+        """
+        检查价格合理性（P0-004）
+
+        公式：deviation = |order_price - ticker_price| / ticker_price
+        限制：deviation <= PRICE_DEVIATION_THRESHOLD (10%)
+
+        参考价格:
+        - 最新 ticker 价格
+        - 盘口中间价 (bid + ask) / 2
+
+        Args:
+            symbol: 币种对
+            order_price: 订单价格
+
+        Returns:
+            (passed, ticker_price, deviation)
+        """
+        try:
+            # 获取 ticker 价格
+            ticker_price = await self._gateway.fetch_ticker_price(symbol)
+            if ticker_price is None or ticker_price == Decimal("0"):
+                # 无法获取 ticker 价格，跳过检查（记录警告但不拒绝订单）
+                logger.warning(f"无法获取 ticker 价格，跳过价格合理性检查 (symbol={symbol})")
+                return True, None, Decimal("0")
+
+            # 计算偏差
+            deviation = abs(order_price - ticker_price) / ticker_price
+
+            # 检查是否超过阈值
+            passed = deviation <= self.PRICE_DEVIATION_THRESHOLD
+            return passed, ticker_price, deviation
+
+        except Exception as e:
+            logger.error(f"价格合理性检查失败：{e} (symbol={symbol}, order_price={order_price})")
+            # 异常情况下跳过检查（记录错误但不拒绝订单）
+            return True, None, Decimal("0")
 
     async def _check_single_trade_loss(
         self,

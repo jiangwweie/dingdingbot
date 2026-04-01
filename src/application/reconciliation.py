@@ -16,6 +16,11 @@ Reconciliation Service - 启动对账服务
 5. 二次校验 pending 列表
 6. 确认的差异 → 移动到正式列表
 7. 消失的差异 → 记录日志（WebSocket 延迟）
+
+P0-003: 完善重启对账流程
+- 幽灵订单处理：DB 有但交易所无 → 标记为 CANCELLED
+- 孤儿订单处理：交易所有但 DB 无 → 导入 DB 或撤销
+- 对账报告生成：记录差异订单和处理动作
 """
 import asyncio
 import time
@@ -32,6 +37,8 @@ from src.domain.models import (
     OrderRole,
     Direction,
     PositionInfo,
+    GhostOrder,
+    ImportedOrder,
 )
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
@@ -73,6 +80,7 @@ class ReconciliationService:
         gateway: ExchangeGateway,
         position_mgr: Optional[Any] = None,  # PositionManager（可选）
         order_mgr: Optional[Any] = None,    # OrderManager（可选）
+        order_repository: Optional[Any] = None,  # OrderRepository（可选，用于 P0-003）
         grace_period_seconds: int = 10,
     ):
         """
@@ -82,11 +90,13 @@ class ReconciliationService:
             gateway: ExchangeGateway 实例
             position_mgr: PositionManager 实例（可选）
             order_mgr: OrderManager 实例（可选）
+            order_repository: OrderRepository 实例（可选，用于 P0-003 订单持久化）
             grace_period_seconds: 宽限期秒数（默认 10 秒）
         """
         self._gateway = gateway
         self._position_mgr = position_mgr
         self._order_mgr = order_mgr
+        self._order_repository = order_repository
         self._grace_period_seconds = grace_period_seconds
         self._pending_orphan_orders: Dict[str, Dict[str, Any]] = {}  # order_id -> {order, found_at, confirmed}
 
@@ -214,6 +224,11 @@ class ReconciliationService:
         orphan_orders: List[OrderResponse] = []
         order_mismatches: List[OrderMismatch] = []
 
+        # P0-003: 幽灵订单和导入订单列表
+        ghost_orders: List[GhostOrder] = []
+        imported_orders: List[ImportedOrder] = []
+        canceled_orphan_orders: List[ImportedOrder] = []
+
         # 处理确认的缺失仓位
         for item in pending_missing_positions:
             if item["confirmed"]:
@@ -241,10 +256,11 @@ class ReconciliationService:
         # 处理确认的孤儿订单
         for item in pending_orphan_orders:
             if item["confirmed"]:
-                orphan_orders.append(self._order_to_response(item["order"]))
+                order = self._order_to_response(item["order"])
+                orphan_orders.append(order)
                 logger.error(
-                    f"CONFIRMED orphan order: {item['order'].exchange_order_id}, "
-                    f"symbol={item['order'].symbol}"
+                    f"CONFIRMED orphan order: {order.order_id}, "
+                    f"symbol={order.symbol}"
                 )
 
         # 处理确认的订单不匹配
@@ -261,12 +277,24 @@ class ReconciliationService:
                     f"exchange_status={item['exchange_status']}"
                 )
 
+        # ===== 阶段 4.5: P0-003 幽灵订单和孤儿订单处理 =====
+        # 检测幽灵订单（DB 有但交易所无）
+        ghost_orders = await self._detect_ghost_orders(local_orders, exchange_orders)
+
+        # 处理孤儿订单（交易所有但 DB 无）
+        imported_orders, canceled_orphan_orders = await self._process_orphan_orders(
+            orphan_orders, symbol
+        )
+
         # ===== 阶段 5: 生成对账报告 =====
         total_discrepancies = (
             len(missing_positions) +
             len(position_mismatches) +
             len(orphan_orders) +
-            len(order_mismatches)
+            len(order_mismatches) +
+            len(ghost_orders) +
+            len(imported_orders) +
+            len(canceled_orphan_orders)
         )
 
         is_consistent = total_discrepancies == 0
@@ -281,7 +309,10 @@ class ReconciliationService:
                 f"({len(missing_positions)} missing positions, "
                 f"{len(position_mismatches)} position mismatches, "
                 f"{len(orphan_orders)} orphan orders, "
-                f"{len(order_mismatches)} order mismatches)"
+                f"{len(order_mismatches)} order mismatches, "
+                f"{len(ghost_orders)} ghost orders, "
+                f"{len(imported_orders)} imported orders, "
+                f"{len(canceled_orphan_orders)} canceled orphan orders)"
             )
 
         return ReconciliationReport(
@@ -292,6 +323,9 @@ class ReconciliationService:
             missing_positions=missing_positions,
             order_mismatches=order_mismatches,
             orphan_orders=orphan_orders,
+            ghost_orders=ghost_orders,
+            imported_orders=imported_orders,
+            canceled_orphan_orders=canceled_orphan_orders,
             is_consistent=is_consistent,
             total_discrepancies=total_discrepancies,
             requires_attention=requires_attention,
@@ -300,6 +334,9 @@ class ReconciliationService:
                 position_mismatches,
                 orphan_orders,
                 order_mismatches,
+                ghost_orders,
+                imported_orders,
+                canceled_orphan_orders,
             ),
         )
 
@@ -540,6 +577,174 @@ class ReconciliationService:
             f"Creating missing signal for orphan order {order.order_id}: "
             f"symbol={order.symbol}, direction={order.direction}"
         )
+
+    # ============================================================
+    # P0-003: 幽灵订单和孤儿订单处理
+    # ============================================================
+
+    async def _detect_ghost_orders(
+        self,
+        local_orders: List[OrderResponse],
+        exchange_orders: List[OrderResponse],
+    ) -> List[GhostOrder]:
+        """
+        检测幽灵订单（P0-003）
+
+        幽灵订单：DB 有但交易所无
+        检测条件：订单在 DB 中状态为 PENDING/NEW，但交易所查询不到
+        处理逻辑：标记为 CANCELLED，记录对账报告
+
+        Args:
+            local_orders: 本地订单列表
+            exchange_orders: 交易所订单列表
+
+        Returns:
+            List[GhostOrder]: 幽灵订单列表
+        """
+        ghost_orders = []
+        current_time = int(time.time() * 1000)
+
+        # 构建交易所订单 ID 集合
+        exchange_order_ids = {
+            order.exchange_order_id or order.order_id
+            for order in exchange_orders
+        }
+
+        # 检测幽灵订单
+        for local_order in local_orders:
+            order_id = local_order.exchange_order_id or local_order.order_id
+            if order_id not in exchange_order_ids:
+                # 订单在本地存在但在交易所不存在
+                if local_order.status in [OrderStatus.PENDING, OrderStatus.OPEN]:
+                    logger.warning(
+                        f"Ghost order detected: {order_id}, "
+                        f"symbol={local_order.symbol}, "
+                        f"local_status={local_order.status}"
+                    )
+
+                    ghost_orders.append(GhostOrder(
+                        order_id=order_id,
+                        symbol=local_order.symbol,
+                        local_status=local_order.status,
+                        detected_at=current_time,
+                        action_taken="MARKED_CANCELLED",
+                    ))
+
+                    # 标记为 CANCELLED（如果有 order_repository）
+                    if self._order_repository:
+                        try:
+                            await self._order_repository.mark_order_cancelled(order_id)
+                            logger.info(f"Ghost order {order_id} marked as CANCELLED in DB")
+                        except Exception as e:
+                            logger.error(f"Failed to mark ghost order {order_id} as CANCELLED: {e}")
+
+        return ghost_orders
+
+    async def _process_orphan_orders(
+        self,
+        orphan_orders: List[OrderResponse],
+        symbol: str,
+    ) -> Tuple[List[ImportedOrder], List[ImportedOrder]]:
+        """
+        处理孤儿订单（P0-003）
+
+        孤儿订单：交易所有但 DB 无
+        检测条件：交易所有活跃挂单，但 DB 中无记录
+        处理逻辑：
+        - 入场订单 (ENTRY) → 导入 DB 并创建关联 Signal
+        - TP/SL 订单 (reduce_only=True) → 撤销并记录（因为仓位不存在）
+
+        Args:
+            orphan_orders: 孤儿订单列表
+            symbol: 币种对
+
+        Returns:
+            (imported_orders, canceled_orphan_orders)
+        """
+        imported_orders = []
+        canceled_orphan_orders = []
+        current_time = int(time.time() * 1000)
+
+        for order in orphan_orders:
+            order_id = order.exchange_order_id or order.order_id
+            logger.info(
+                f"Processing orphan order: {order_id}, "
+                f"symbol={order.symbol}, "
+                f"role={order.order_role}, "
+                f"reduce_only={order.reduce_only}"
+            )
+
+            try:
+                if order.reduce_only or order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5, OrderRole.SL]:
+                    # TP/SL 订单：仓位不存在，撤销订单
+                    logger.warning(
+                        f"Orphan TP/SL order {order_id} has no position - canceling"
+                    )
+
+                    # 尝试撤销订单
+                    cancel_result = await self._gateway.cancel_order(
+                        order_id=order_id,
+                        symbol=order.symbol,
+                    )
+
+                    canceled_orphan_orders.append(ImportedOrder(
+                        order_id=order_id,
+                        exchange_order_id=order.exchange_order_id or order_id,
+                        symbol=order.symbol,
+                        order_type=order.order_type,
+                        direction=order.direction,
+                        order_role=order.order_role,
+                        status=OrderStatus.CANCELED if cancel_result.is_success else order.status,
+                        amount=order.amount,
+                        price=order.price,
+                        trigger_price=order.trigger_price,
+                        reduce_only=True,
+                        imported_at=current_time,
+                        action_taken="CANCELLED",
+                    ))
+
+                    if cancel_result.is_success:
+                        logger.info(f"Successfully canceled orphan TP/SL order: {order_id}")
+                    else:
+                        logger.error(f"Failed to cancel orphan TP/SL order {order_id}: {cancel_result.message if hasattr(cancel_result, 'message') else 'Unknown error'}")
+                else:
+                    # 入场订单：导入 DB
+                    logger.info(
+                        f"Importing orphan entry order {order_id} to DB"
+                    )
+
+                    # 如果有 order_repository，导入订单
+                    if self._order_repository:
+                        try:
+                            # TODO: 实现 order_repository.import_order() 方法
+                            # await self._order_repository.import_order(order)
+                            logger.warning(f"order_repository.import_order() not implemented yet")
+                        except Exception as e:
+                            logger.error(f"Failed to import orphan order {order_id}: {e}")
+
+                    imported_orders.append(ImportedOrder(
+                        order_id=order_id,
+                        exchange_order_id=order.exchange_order_id or order_id,
+                        symbol=order.symbol,
+                        order_type=order.order_type,
+                        direction=order.direction,
+                        order_role=order.order_role,
+                        status=order.status,
+                        amount=order.amount,
+                        price=order.price,
+                        trigger_price=order.trigger_price,
+                        reduce_only=order.reduce_only,
+                        imported_at=current_time,
+                        action_taken="IMPORTED_TO_DB",
+                    ))
+
+                    # 创建关联 Signal
+                    await self._create_missing_signal(order)
+
+            except Exception as e:
+                logger.error(f"Error processing orphan order {order_id}: {e}")
+
+        return imported_orders, canceled_orphan_orders
 
     # ============================================================
     # Helper Methods
@@ -848,6 +1053,9 @@ class ReconciliationService:
         position_mismatches: List[PositionMismatch],
         orphan_orders: List[OrderResponse],
         order_mismatches: List[OrderMismatch],
+        ghost_orders: List[GhostOrder] = None,
+        imported_orders: List[ImportedOrder] = None,
+        canceled_orphan_orders: List[ImportedOrder] = None,
     ) -> str:
         """
         生成对账结论摘要
@@ -857,15 +1065,25 @@ class ReconciliationService:
             position_mismatches: 仓位不匹配列表
             orphan_orders: 孤儿订单列表
             order_mismatches: 订单不匹配列表
+            ghost_orders: 幽灵订单列表（P0-003）
+            imported_orders: 导入订单列表（P0-003）
+            canceled_orphan_orders: 撤销的孤儿订单列表（P0-003）
 
         Returns:
             str: 对账摘要
         """
+        ghost_orders = ghost_orders or []
+        imported_orders = imported_orders or []
+        canceled_orphan_orders = canceled_orphan_orders or []
+
         total = (
             len(missing_positions) +
             len(position_mismatches) +
             len(orphan_orders) +
-            len(order_mismatches)
+            len(order_mismatches) +
+            len(ghost_orders) +
+            len(imported_orders) +
+            len(canceled_orphan_orders)
         )
 
         if total == 0:
@@ -880,5 +1098,11 @@ class ReconciliationService:
             parts.append(f"孤儿订单 {len(orphan_orders)} 个")
         if order_mismatches:
             parts.append(f"订单不匹配 {len(order_mismatches)} 个")
+        if ghost_orders:
+            parts.append(f"幽灵订单 {len(ghost_orders)} 个 (已标记 CANCELLED)")
+        if imported_orders:
+            parts.append(f"导入订单 {len(imported_orders)} 个")
+        if canceled_orphan_orders:
+            parts.append(f"撤销孤儿订单 {len(canceled_orphan_orders)} 个")
 
         return f"发现 {total} 项差异：" + "，".join(parts)

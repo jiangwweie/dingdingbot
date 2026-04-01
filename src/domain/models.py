@@ -981,12 +981,55 @@ class OrderMismatch(FinancialModel):
     exchange_status: str = Field(..., description="交易所状态")
 
 
+class GhostOrder(FinancialModel):
+    """
+    幽灵订单：DB 有但交易所无
+
+    P0-003: 完善重启对账流程
+    检测条件：订单在 DB 中状态为 PENDING/NEW，但交易所查询不到
+    处理逻辑：标记为 CANCELLED，记录对账报告
+    """
+    order_id: str = Field(..., description="订单 ID")
+    symbol: str = Field(..., description="币种对")
+    local_status: OrderStatus = Field(..., description="本地记录状态")
+    detected_at: int = Field(..., description="检测时间戳（毫秒）")
+    action_taken: str = Field(..., description="处理动作：'MARKED_CANCELLED'")
+
+
+class ImportedOrder(FinancialModel):
+    """
+    导入订单：交易所有但 DB 无（孤儿订单导入）
+
+    P0-003: 完善重启对账流程
+    检测条件：交易所有活跃挂单，但 DB 中无记录
+    处理逻辑：导入 DB 并创建关联 Signal
+    """
+    order_id: str = Field(..., description="订单 ID")
+    exchange_order_id: str = Field(..., description="交易所订单 ID")
+    symbol: str = Field(..., description="币种对")
+    order_type: OrderType
+    direction: Direction
+    order_role: OrderRole
+    status: OrderStatus
+    amount: Decimal
+    price: Optional[Decimal] = None
+    trigger_price: Optional[Decimal] = None
+    reduce_only: bool = False
+    imported_at: int = Field(..., description="导入时间戳（毫秒）")
+    action_taken: str = Field(..., description="处理动作：'IMPORTED_TO_DB' 或 'CANCELLED'")
+
+
 class ReconciliationReport(FinancialModel):
     """
     对账报告响应
 
     Phase 5: 实盘集成 - 对账服务
     Reference: docs/designs/phase5-contract.md Section 9
+
+    P0-003 新增:
+    - ghost_orders: 幽灵订单列表（DB 有但交易所无）
+    - imported_orders: 导入订单列表（孤儿订单导入 DB）
+    - canceled_orphan_orders: 撤销的孤儿订单列表
     """
     symbol: str = Field(..., description="币种对")
     reconciliation_time: int = Field(..., description="对账时间戳（毫秒）")
@@ -1009,7 +1052,21 @@ class ReconciliationReport(FinancialModel):
     )
     orphan_orders: List["OrderResponse"] = Field(
         default_factory=list,
-        description="孤儿订单列表"
+        description="孤儿订单列表（交易所有但 DB 无）"
+    )
+
+    # P0-003: 对账处理结果
+    ghost_orders: List[GhostOrder] = Field(
+        default_factory=list,
+        description="幽灵订单列表（DB 有但交易所无，已标记为 CANCELLED）"
+    )
+    imported_orders: List[ImportedOrder] = Field(
+        default_factory=list,
+        description="导入订单列表（孤儿订单导入 DB）"
+    )
+    canceled_orphan_orders: List[ImportedOrder] = Field(
+        default_factory=list,
+        description="撤销的孤儿订单列表（TP/SL 订单因仓位不存在被撤销）"
     )
 
     # 对账结论
@@ -1316,6 +1373,13 @@ class OrderCheckResult(BaseModel):
 
     Phase 5: 资金保护检查结果
     Reference: docs/designs/phase5-contract.md Section 10
+
+    P0-004 新增字段:
+    - notional_value: 订单名义价值
+    - min_notional: 最小名义价值要求
+    - order_price: 订单价格
+    - ticker_price: 参考价格
+    - price_deviation: 价格偏差
     """
     allowed: bool = Field(..., description="是否允许下单")
     reason: Optional[str] = Field(None, description="拒绝原因代码")
@@ -1337,6 +1401,13 @@ class OrderCheckResult(BaseModel):
     daily_trade_count: Optional[int] = Field(None, description="当日交易次数")
     available_balance: Optional[Decimal] = Field(None, description="可用余额（USDT）")
     min_required_balance: Optional[Decimal] = Field(None, description="最低保留余额（USDT）")
+
+    # P0-004: 订单参数合理性检查
+    notional_value: Optional[Decimal] = Field(None, description="订单名义价值（USDT）")
+    min_notional: Optional[Decimal] = Field(None, description="最小名义价值要求（USDT）")
+    order_price: Optional[Decimal] = Field(None, description="订单价格")
+    ticker_price: Optional[Decimal] = Field(None, description="参考价格")
+    price_deviation: Optional[Decimal] = Field(None, description="价格偏差")
 
 
 # ============================================================

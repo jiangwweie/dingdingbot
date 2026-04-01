@@ -740,3 +740,239 @@ async def test_reconciliation_multiple_symbols(reconciliation_service, mock_gate
     # 验证
     assert report.is_consistent is True
     assert report.total_discrepancies == 0
+
+
+# ============================================================
+# P0-003: 幽灵订单和孤儿订单处理测试
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_p003_detect_ghost_orders(reconciliation_service, mock_gateway):
+    """P0-003 测试：检测幽灵订单（DB 有但交易所无）"""
+    # 准备数据：本地有订单，交易所无订单
+    local_orders = [
+        create_sample_order(
+            order_id="local_001",
+            exchange_order_id="ex_local_001",
+            status=OrderStatus.OPEN,
+        )
+    ]
+    exchange_orders = []  # 交易所无订单
+
+    # 执行幽灵订单检测
+    ghost_orders = await reconciliation_service._detect_ghost_orders(local_orders, exchange_orders)
+
+    # 验证
+    assert len(ghost_orders) == 1
+    assert ghost_orders[0].order_id == "ex_local_001"
+    assert ghost_orders[0].symbol == "BTC/USDT:USDT"
+    assert ghost_orders[0].action_taken == "MARKED_CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_p003_ghost_orders_excludes_non_pending(reconciliation_service, mock_gateway):
+    """P0-003 测试：非 PENDING/OPEN 状态的订单不视为幽灵订单"""
+    # 准备数据：本地订单已 CANCELLED
+    local_orders = [
+        create_sample_order(
+            order_id="local_001",
+            exchange_order_id="ex_local_001",
+            status=OrderStatus.CANCELED,  # 已取消
+        )
+    ]
+    exchange_orders = []
+
+    # 执行检测
+    ghost_orders = await reconciliation_service._detect_ghost_orders(local_orders, exchange_orders)
+
+    # 验证：已取消的订单不应被视为幽灵订单
+    assert len(ghost_orders) == 0
+
+
+@pytest.mark.asyncio
+async def test_p003_process_orphan_orders_import_entry_order(reconciliation_service, mock_gateway):
+    """P0-003 测试：处理孤儿订单 - 导入入场订单"""
+    orphan_orders = [
+        create_sample_order(
+            order_id="orphan_entry_001",
+            exchange_order_id="ex_orphan_001",
+            order_role=OrderRole.ENTRY,
+            reduce_only=False,
+        )
+    ]
+
+    # 执行处理
+    imported, canceled = await reconciliation_service._process_orphan_orders(orphan_orders, "BTC/USDT:USDT")
+
+    # 验证：入场订单应该被导入
+    assert len(imported) == 1
+    assert len(canceled) == 0
+    assert imported[0].order_id == "ex_orphan_001"
+    assert imported[0].action_taken == "IMPORTED_TO_DB"
+
+
+@pytest.mark.asyncio
+async def test_p003_process_orphan_orders_cancel_tp_order(reconciliation_service, mock_gateway):
+    """P0-003 测试：处理孤儿订单 - 撤销 TP 订单"""
+    # Mock cancel_order 返回成功
+    from src.domain.models import OrderCancelResult
+    mock_gateway.cancel_order = AsyncMock(return_value=OrderCancelResult(
+        order_id="ex_tp_001",
+        exchange_order_id="ex_tp_001",
+        symbol="BTC/USDT:USDT",
+    ))
+
+    orphan_orders = [
+        create_sample_order(
+            order_id="orphan_tp_001",
+            exchange_order_id="ex_tp_001",
+            order_role=OrderRole.TP1,
+            reduce_only=True,
+        )
+    ]
+
+    # 执行处理
+    imported, canceled = await reconciliation_service._process_orphan_orders(orphan_orders, "BTC/USDT:USDT")
+
+    # 验证：TP 订单应该被撤销
+    assert len(imported) == 0
+    assert len(canceled) == 1
+    assert canceled[0].order_id == "ex_tp_001"
+    assert canceled[0].action_taken == "CANCELLED"
+    mock_gateway.cancel_order.assert_called_once_with(
+        order_id="ex_tp_001",
+        symbol="BTC/USDT:USDT",
+    )
+
+
+@pytest.mark.asyncio
+async def test_p003_process_orphan_orders_cancel_sl_order(reconciliation_service, mock_gateway):
+    """P0-003 测试：处理孤儿订单 - 撤销 SL 订单"""
+    from src.domain.models import OrderCancelResult
+    mock_gateway.cancel_order = AsyncMock(return_value=OrderCancelResult(
+        order_id="ex_sl_001",
+        exchange_order_id="ex_sl_001",
+        symbol="BTC/USDT:USDT",
+    ))
+
+    orphan_orders = [
+        create_sample_order(
+            order_id="orphan_sl_001",
+            exchange_order_id="ex_sl_001",
+            order_role=OrderRole.SL,
+            reduce_only=True,
+        )
+    ]
+
+    # 执行处理
+    imported, canceled = await reconciliation_service._process_orphan_orders(orphan_orders, "BTC/USDT:USDT")
+
+    # 验证：SL 订单应该被撤销
+    assert len(imported) == 0
+    assert len(canceled) == 1
+    assert canceled[0].order_id == "ex_sl_001"
+    assert canceled[0].action_taken == "CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_p003_process_orphan_orders_mixed(reconciliation_service, mock_gateway):
+    """P0-003 测试：处理混合孤儿订单（部分导入，部分撤销）"""
+    from src.domain.models import OrderCancelResult
+    mock_gateway.cancel_order = AsyncMock(return_value=OrderCancelResult(
+        order_id="ex_tp_001",
+        symbol="BTC/USDT:USDT",
+    ))
+
+    orphan_orders = [
+        create_sample_order(
+            order_id="orphan_entry_001",
+            exchange_order_id="ex_entry_001",
+            order_role=OrderRole.ENTRY,
+            reduce_only=False,
+        ),
+        create_sample_order(
+            order_id="orphan_tp_001",
+            exchange_order_id="ex_tp_001",
+            order_role=OrderRole.TP1,
+            reduce_only=True,
+        ),
+    ]
+
+    # 执行处理
+    imported, canceled = await reconciliation_service._process_orphan_orders(orphan_orders, "BTC/USDT:USDT")
+
+    # 验证：入场订单导入，TP 订单撤销
+    assert len(imported) == 1
+    assert len(canceled) == 1
+    assert imported[0].order_id == "ex_entry_001"
+    assert imported[0].action_taken == "IMPORTED_TO_DB"
+    assert canceled[0].order_id == "ex_tp_001"
+    assert canceled[0].action_taken == "CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_p003_reconciliation_report_includes_ghost_orders(reconciliation_service, mock_gateway, mock_position_mgr):
+    """P0-003 测试：对账报告包含幽灵订单"""
+    # 准备数据
+    local_orders = [
+        create_sample_order(
+            order_id="local_001",
+            exchange_order_id="ex_local_001",
+            status=OrderStatus.OPEN,
+        )
+    ]
+    mock_position_mgr.get_open_positions = AsyncMock(return_value=[])
+    mock_gateway.rest_exchange.fetch_positions = AsyncMock(return_value=[])
+    mock_gateway.rest_exchange.fetch_open_orders = AsyncMock(return_value=[])
+
+    # Mock _get_local_open_orders 返回本地订单
+    reconciliation_service._get_local_open_orders = AsyncMock(return_value=local_orders)
+
+    # 执行（跳过宽限期）
+    reconciliation_service._grace_period_seconds = 0
+    report = await reconciliation_service.run_reconciliation("BTC/USDT:USDT")
+
+    # 验证
+    assert len(report.ghost_orders) == 1
+    assert report.ghost_orders[0].order_id == "ex_local_001"
+    assert "幽灵订单" in report.summary
+
+
+@pytest.mark.asyncio
+async def test_p003_reconciliation_report_includes_canceled_orphans(reconciliation_service, mock_gateway, mock_position_mgr):
+    """P0-003 测试：对账报告包含撤销的孤儿订单"""
+    from src.domain.models import OrderCancelResult
+
+    # 准备数据：交易所有 TP 订单，本地无
+    mock_position_mgr.get_open_positions = AsyncMock(return_value=[])
+    mock_gateway.rest_exchange.fetch_positions = AsyncMock(return_value=[])
+    mock_gateway.rest_exchange.fetch_open_orders = AsyncMock(return_value=[
+        {
+            'id': 'ex_tp_001',
+            'symbol': 'BTC/USDT:USDT',
+            'type': 'stop',
+            'side': 'sell',
+            'amount': 0.1,
+            'price': 75000,
+            'filled': 0,
+            'status': 'open',
+            'reduceOnly': True,
+            'timestamp': int(time.time() * 1000),
+        }
+    ])
+    mock_gateway.cancel_order = AsyncMock(return_value=OrderCancelResult(
+        order_id="ex_tp_001",
+        symbol="BTC/USDT:USDT",
+    ))
+
+    # Mock _get_local_open_orders 返回空列表
+    reconciliation_service._get_local_open_orders = AsyncMock(return_value=[])
+
+    # 执行（跳过宽限期）
+    reconciliation_service._grace_period_seconds = 0
+    report = await reconciliation_service.run_reconciliation("BTC/USDT:USDT")
+
+    # 验证
+    assert len(report.canceled_orphan_orders) == 1
+    assert report.canceled_orphan_orders[0].order_id == "ex_tp_001"
+    assert "撤销孤儿订单" in report.summary
