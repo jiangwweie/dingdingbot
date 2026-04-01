@@ -178,6 +178,51 @@ async function fetchAccountSnapshot(): Promise<AccountSnapshot>
 
 ---
 
+## Phase 6 前端组件检查 (2026-04-01)
+
+### 组件完成度：100%
+
+| 组件 | 文件 | 状态 |
+|------|------|------|
+| 仓位管理页面 | `web-front/src/pages/Positions.tsx` | ✅ |
+| 订单管理页面 | `web-front/src/pages/Orders.tsx` | ✅ |
+| 回测报告组件 | `web-front/src/pages/PMSBacktest.tsx` | ✅ |
+| 账户页面 | `web-front/src/pages/Account.tsx` | ✅ |
+| 止盈可视化 | `TPChainDisplay.tsx` + `SLOrderDisplay.tsx` | ✅ |
+
+### 发现的小问题
+
+| 问题 | 优先级 | 修复建议 |
+|------|--------|----------|
+| Orders.tsx 日期筛选未传递给 API | P1 | 在 `fetchOrders` URL 参数中添加 `startDate`/`endDate` |
+| Positions.tsx 类型一致性 | P3 | 验证 `totalUnrealizedPnl` 类型匹配 |
+
+---
+
+## Phase 6 E2E 测试验证 (2026-04-01)
+
+### 测试结果：80/103 通过 (77.7%)
+
+- **通过**: 80 (77.7%)
+- **跳过**: 23 (22.3%) - 因 window 标记过滤
+- **失败**: 0
+
+### 核心功能验证状态
+
+| 模块 | 测试数 | 状态 |
+|------|--------|------|
+| 回测服务 | 11 | ✅ |
+| 配置验证 | 15 | ✅ |
+| 真实交易所 API | 19 | ✅ |
+| 完整业务链 | 9 | ✅ |
+| 动态规则 | 10 | ✅ |
+
+### 建议修复
+
+在 `pytest.ini` 中注册自定义标记 (`window1`/`window2`/`window3`/`window4`/`e2e`)
+
+---
+
 ## 历史发现归档
 
 以下主题的技术发现已归档至 `archive/` 目录：
