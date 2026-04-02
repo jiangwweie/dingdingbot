@@ -15,7 +15,7 @@
 | **P1** | Phase 7 收尾验证 | 3 项 | 5h | ✅ 已完成 |
 | **P1** | 配置管理功能 - 版本化快照 | 7 项 | 8h | ✅ 已完成 |
 | **P2** | 配置管理功能 | 2 项 | 4h | ☐ 搁置 |
-| **P0** | Phase 8 自动化调参 | 待分解 | 40h | ☐ 待启动 |
+| **P0** | Phase 8 自动化调参 | 已分解 | 40h | ⏳ 进行中 |
 
 ---
 
@@ -57,13 +57,15 @@ Repository 初始化 | ✅ 通过 | 正确初始化和关闭资源
 
 ## 🎯 当前进行中的任务
 
-### Phase 8: 自动化调参 (Optuna 集成) ⭐ **推荐启动**
+### Phase 8: 自动化调参 (Optuna 集成) ⭐
 
 **项目概述**: 集成 Optuna 参数优化框架，实现自动化策略参数寻优，支持夏普比率、收益回撤比等多目标优化。
 
-**设计文档**: `docs/designs/strategy-optimizer-optuna.md` (待创建)
+**设计文档**: 
+- `docs/designs/phase8-optimizer-contract.md` - API 契约与设计
+- `docs/designs/phase8-test-plan.md` - 测试计划
 
-**状态**: ☐ 待启动
+**状态**: 🔄 进行中 (文档已创建，待实现)
 
 **预计工期**: 2 周
 
@@ -75,15 +77,35 @@ Repository 初始化 | ✅ 通过 | 正确初始化和关闭资源
 | 持久化研究历史 | SQLite 存储试验历史，支持断点续研 | P0 |
 | 可视化分析 | 参数重要性、优化路径、平行坐标图 | P1 |
 
-**预计分解任务**:
-- B1: Optuna 集成与目标函数实现
-- B2: 参数空间定义与验证
-- B3: 研究历史持久化 (SQLite)
-- B4: 优化结果 API 端点
-- F1: 参数配置 UI 组件
-- F2: 优化进度监控页面
-- F3: 可视化图表 (参数重要性、优化路径)
-- T1: 单元测试与集成测试
+**任务分解**:
+| ID | 任务名称 | 优先级 | 预计工时 | 状态 |
+|----|----------|--------|----------|------|
+| B1 | Optuna 集成与目标函数实现 | P0 | 4h | ☐ 待启动 |
+| B2 | 参数空间定义与验证 | P0 | 3h | ☐ 待启动 |
+| B3 | 研究历史持久化 (SQLite) | P0 | 3h | ☐ 待启动 |
+| B4 | 优化结果 API 端点 | P0 | 4h | ☐ 待启动 |
+| F1 | API 函数封装 | P0 | 1h | ✅ 已完成 |
+| F2 | 参数配置 UI 组件 | P0 | 3h | ✅ 已完成 |
+| F3 | 优化进度监控页面 | P0 | 3h | ✅ 已完成 |
+| F4 | 可视化图表组件 | P1 | 4h | ✅ 已完成 |
+| T1 | Optuna 目标函数单元测试 | P0 | 2h | ☐ 待启动 |
+| T2 | 参数空间验证测试 | P0 | 2h | ☐ 待启动 |
+| T3 | API 集成测试 | P0 | 2h | ☐ 待启动 |
+| T4 | E2E 测试 | P1 | 4h | ☐ 待启动 |
+
+**今日完成 (2026-04-02)**:
+- ✅ 创建 API 契约文档 `docs/designs/phase8-optimizer-contract.md`
+- ✅ 实现 F1: API 函数封装 (web-front/src/lib/api.ts)
+- ✅ 实现 F2: 参数配置 UI 组件 (ParameterSpaceConfig.tsx)
+- ✅ 实现 F3: 优化进度监控页面 (OptimizationProgress.tsx)
+- ✅ 实现 F4: 可视化图表组件 (OptimizationResults.tsx)
+- ✅ 创建优化页面 (Optimization.tsx)
+- ⏳ 等待后端 API 实现完成后开始联调
+
+**今日完成 (2026-04-02)**:
+- ✅ 创建 API 契约文档 `docs/designs/phase8-optimizer-contract.md`
+- ✅ 创建测试计划文档 `docs/designs/phase8-test-plan.md`
+- ⏳ 等待后端和前端实现完成后开始测试
 
 ---
 

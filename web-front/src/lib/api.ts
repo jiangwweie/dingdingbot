@@ -1702,3 +1702,312 @@ export async function deleteSnapshot(id: number): Promise<DeleteResponse> {
   }
   return res.json();
 }
+
+// ============================================================================
+// Phase 8: 策略优化器 (Optuna) API
+// ============================================================================
+
+/**
+ * 参数类型定义
+ */
+export type ParameterType = 'int' | 'float' | 'categorical';
+
+/**
+ * 整数参数范围定义
+ */
+export interface IntParameter {
+  type: 'int';
+  low: number;
+  high: number;
+  step?: number;
+}
+
+/**
+ * 浮点参数范围定义
+ */
+export interface FloatParameter {
+  type: 'float';
+  low: number;
+  high: number;
+  step?: number;
+  log?: boolean;
+}
+
+/**
+ * 离散选择参数定义
+ */
+export interface CategoricalParameter {
+  type: 'categorical';
+  choices: any[];
+}
+
+/**
+ * 参数定义联合类型
+ */
+export type ParameterDefinition = IntParameter | FloatParameter | CategoricalParameter;
+
+/**
+ * 参数空间定义
+ */
+export interface ParameterSpace {
+  // Trigger 参数
+  pinbar_min_wick_ratio?: FloatParameter;
+  pinbar_max_body_ratio?: FloatParameter;
+  pinbar_body_position_tolerance?: FloatParameter;
+
+  engulfing_min_body_ratio?: FloatParameter;
+  engulfing_require_full_engulf?: CategoricalParameter;
+
+  // Filter 参数
+  ema_period?: IntParameter;
+  mtf_require_confirmation?: CategoricalParameter;
+  volume_surge_multiplier?: FloatParameter;
+  volume_surge_lookback_periods?: IntParameter;
+  volatility_min_atr_ratio?: FloatParameter;
+  volatility_max_atr_ratio?: FloatParameter;
+  atr_period?: IntParameter;
+  atr_min_atr_ratio?: FloatParameter;
+
+  // Risk 参数
+  max_loss_percent?: FloatParameter;
+  default_leverage?: IntParameter;
+
+  // 自定义参数
+  [key: string]: ParameterDefinition | undefined;
+}
+
+/**
+ * 优化目标类型
+ */
+export type OptimizationObjective =
+  | 'sharpe'         // 夏普比率最大化
+  | 'sortino'        // 索提诺比率最大化
+  | 'pnl_maxdd'      // 收益回撤比最大化
+  | 'total_return'   // 总收益最大化
+  | 'win_rate';      // 胜率最大化
+
+/**
+ * 优化请求参数
+ */
+export interface OptimizationRequest {
+  symbol: string;
+  timeframe: string;
+  start_time: number;
+  end_time: number;
+  objective: OptimizationObjective;
+  parameter_space: ParameterSpace;
+  n_trials: number;
+  timeout_seconds?: number;
+  seed?: number;
+}
+
+/**
+ * 优化启动响应
+ */
+export interface OptimizationStartResponse {
+  optimization_id: string;
+  status: 'running';
+  created_at: string;
+  estimated_duration_seconds?: number;
+}
+
+/**
+ * 优化进度状态
+ */
+export interface OptimizationStatus {
+  optimization_id: string;
+  status: 'running' | 'completed' | 'failed' | 'stopped';
+  progress: {
+    current_trial: number;
+    total_trials: number;
+    elapsed_seconds: number;
+    estimated_remaining_seconds?: number;
+  };
+  current_best: {
+    trial_number: number;
+    objective_value: number;
+    params: Record<string, any>;
+  } | null;
+  error_message?: string;
+}
+
+/**
+ * 优化停止响应
+ */
+export interface OptimizationStopResponse {
+  optimization_id: string;
+  status: 'stopped';
+  stopped_at: string;
+  final_trial_count: number;
+}
+
+/**
+ * 最佳试验结果
+ */
+export interface BestTrial {
+  trial_number: number;
+  objective_value: number;
+  params: Record<string, any>;
+  metrics: {
+    total_return: number;
+    sharpe_ratio: number;
+    sortino_ratio: number;
+    max_drawdown: number;
+    win_rate: number;
+    total_trades: number;
+  };
+}
+
+/**
+ * 试验历史记录
+ */
+export interface TrialHistory {
+  trial_number: number;
+  objective_value: number | null;
+  params: Record<string, any>;
+  datetime_start: string;
+  datetime_complete: string | null;
+  state: 'COMPLETE' | 'FAIL' | 'RUNNING' | 'PRUNED';
+}
+
+/**
+ * 优化结果响应
+ */
+export interface OptimizationResults {
+  optimization_id: string;
+  status: 'completed' | 'stopped' | 'failed';
+  study_name: string;
+  total_trials: number;
+  best_trial: BestTrial;
+  top_trials: Array<{
+    trial_number: number;
+    objective_value: number;
+    params: Record<string, any>;
+  }>;
+  trials: TrialHistory[];
+  importance?: Record<string, number>;
+  optimization_history?: Array<{
+    trial_number: number;
+    objective_value: number | null;
+  }>;
+}
+
+/**
+ * 参数重要性数据
+ */
+export interface ParameterImportance {
+  param_name: string;
+  importance: number;
+}
+
+/**
+ * 优化历史点数据
+ */
+export interface OptimizationHistoryPoint {
+  trial_number: number;
+  objective_value: number | null;
+  best_so_far: number | null;
+}
+
+/**
+ * 平行坐标图数据点
+ */
+export interface ParallelCoordinatePoint {
+  trial_number: number;
+  objective_value: number;
+  params: Record<string, number | string>;
+}
+
+// ============================================================================
+// Phase 8 API 函数
+// ============================================================================
+
+/**
+ * 启动参数优化任务
+ */
+export async function runOptimization(payload: OptimizationRequest): Promise<OptimizationStartResponse> {
+  const res = await fetch('/api/optimization/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to start optimization');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 获取优化任务状态
+ */
+export async function fetchOptimizationStatus(id: string): Promise<OptimizationStatus> {
+  const res = await fetch(`/api/optimization/${id}/status`);
+  if (!res.ok) {
+    const error = new Error('Failed to fetch optimization status');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 获取优化结果
+ */
+export async function fetchOptimizationResults(id: string): Promise<OptimizationResults> {
+  const res = await fetch(`/api/optimization/${id}/results`);
+  if (!res.ok) {
+    const error = new Error('Failed to fetch optimization results');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 停止优化任务
+ */
+export async function stopOptimization(id: string): Promise<OptimizationStopResponse> {
+  const res = await fetch(`/api/optimization/${id}/stop`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to stop optimization');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 获取优化列表
+ */
+export async function fetchOptimizations(params?: {
+  limit?: number;
+  offset?: number;
+  status?: string;
+}): Promise<{ optimizations: Array<{
+  optimization_id: string;
+  status: string;
+  created_at: string;
+  objective: string;
+  symbol: string;
+  timeframe: string;
+  total_trials: number;
+}>; total: number }> {
+  const queryParams = new URLSearchParams();
+  if (params?.limit) queryParams.append('limit', String(params.limit));
+  if (params?.offset) queryParams.append('offset', String(params.offset));
+  if (params?.status) queryParams.append('status', params.status);
+
+  const res = await fetch(`/api/optimization?${queryParams}`);
+  if (!res.ok) {
+    const error = new Error('Failed to fetch optimizations');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
