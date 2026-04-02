@@ -11,15 +11,16 @@
 3. [策略参数数据库存储实现](#策略参数数据库存储实现)
 4. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
 5. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
-6. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
-7. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
-8. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-9. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-10. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-11. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-12. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-13. [Phase 6 前端架构](#phase-6-前端架构)
-14. [API 契约与端点](#api-契约与端点)
+6. [Phase 8 Optuna 自动化调参集成要点](#phase-8-optuna-自动化调参集成要点)
+7. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
+8. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
+9. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
+10. [BTC 历史数据导入记录](#btc-历史数据导入记录)
+11. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+12. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+13. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+14. [Phase 6 前端架构](#phase-6-前端架构)
+15. [API 契约与端点](#api-契约与端点)
 
 ---
 
@@ -967,6 +968,191 @@ risk.max_loss_percent                  →  风控参数
 3. 不依赖其他功能，可独立快速交付
 
 ---
+
+---
+
+## Phase 8 Optuna 自动化调参集成要点
+
+**日期**: 2026-04-02  
+**任务类型**: 技术输入 / 架构适配  
+**相关任务**: Phase 8 自动化调参 (P0)
+
+---
+
+### 核心设计理念
+
+**Optuna 的角色**: "外部调度大脑" - 不是替代 MockMatchingEngine 或 SignalPipeline，而是作为上层调度器。
+
+**工作流程**: 不断地猜参数 → 运行回测引擎 → 看结果 → 猜下一组更优参数。
+
+---
+
+### Optuna 标准工作流程
+
+#### 1. 定义试验 (Trial) 抽取参数
+
+每次 Optuna 决定尝试一组新参数时，会生成一个 `trial` 对象，用于定义参数的搜索空间。
+
+```python
+# 让 Optuna 在 0.5 到 0.8 之间寻找最佳的影线比例
+min_wick_ratio = trial.suggest_float("min_wick_ratio", 0.5, 0.8)
+```
+
+#### 2. 注入参数并运行回测
+
+把抽取到的参数组装成 `StrategyConfig` 和 `RiskConfig`，然后丢给 Backtester 跑完整的历史数据。
+
+#### 3. 返回评分 (Metric)
+
+回测结束后，从 `PMSBacktestReport` 中提取核心指标（夏普比率、净利润/最大回撤等），return 给 Optuna。
+
+#### 4. 贝叶斯寻优 (Study)
+
+Optuna 的 Study 会根据之前几百次回测的得分，利用 TPE（树状结构帕尔森估计器）算法，推测下一组最有可能创出新高的参数，避免低效的网格搜索。
+
+---
+
+### v3.0 系统适配方案 (4 个关键点)
+
+#### 适配点 1: 数据预加载 ⭐ 极度关键
+
+**问题**: 如果在目标函数内部读取数据，跑 2000 次调参意味着解析 2000 次 Parquet 文件。
+
+**适配方法**:
+```python
+# ❌ 错误示范：在目标函数内部加载数据
+def objective(trial):
+    klines = load_klines_from_parquet("BTC_USDT", "1h")  # 每次调用都重新加载！
+    ...
+
+# ✅ 正确示范：在外部一次性加载
+historical_klines = load_klines_from_parquet("BTC_USDT", "1h")  # 只加载一次
+
+def objective(trial):
+    # 使用已加载的数据
+    report = run_backtest_pipeline(historical_klines, strategy_config, engine)
+    ...
+```
+
+**关键要点**:
+- 在启动 Optuna 之前，一次性将 1h/4h 历史 K 线加载到内存
+- 转化为极速的 Pandas DataFrame 或 List
+- 以引用方式传递给目标函数
+
+---
+
+#### 适配点 2: 配置的动态注入 (Config Injection)
+
+**要求**: `StrategyConfig` 和 `RiskConfig` 模型需要支持实例化时的动态赋值。
+
+**伪代码示例**:
+```python
+import optuna
+
+# 1. 提前在外部加载好历史 K 线（只加载一次！）
+historical_klines = load_klines_from_parquet("BTC_USDT", "1h")
+
+def objective(trial: optuna.Trial) -> float:
+    # 2. 让 Optuna 动态生成策略参数
+    ema_period = trial.suggest_int("ema_period", 20, 100, step=10)
+    min_wick_ratio = trial.suggest_float("min_wick_ratio", 0.5, 0.8)
+    atr_threshold = trial.suggest_float("atr_threshold", 0.5, 2.0)
+    
+    # 3. 组装成 v3.0 系统的配置对象
+    strategy_config = StrategyConfig(
+        pinbar_config=PinbarConfig(min_wick_ratio=min_wick_ratio),
+        ema_period=ema_period,
+        atr_min_ratio=atr_threshold
+    )
+    risk_config = RiskConfig(
+        max_loss_percent=trial.suggest_float("max_loss_percent", 0.01, 0.05)
+    )
+    
+    # 4. 初始化组件并运行回测
+    # 注意：每次 trial 都要创建全新的 Engine 和 Account 实例，防止状态污染
+    account = Account(initial_balance=Decimal("10000"))
+    engine = MockMatchingEngine(account, risk_config)
+    
+    # 运行核心逻辑
+    report = run_backtest_pipeline(historical_klines, strategy_config, engine)
+    
+    # 5. 计算并返回核心指标 (最大化 收益回撤比)
+    if report.max_drawdown == 0:
+        return 0.0
+    
+    calmar_ratio = float(report.total_net_pnl / abs(report.max_drawdown))
+    return calmar_ratio
+
+# 6. 启动调参大脑
+study = optuna.create_study(direction="maximize")
+study.optimize(objective, n_trials=500)  # 跑 500 种参数组合
+
+print("最佳参数组合:", study.best_params)
+```
+
+---
+
+#### 适配点 3: 日志静默机制 (Performance Tuning)
+
+**问题**: 实盘和开发阶段的 `logger.info("订单已生成...")` 会导致 Optuna 运行时性能断崖式下跌。
+
+**适配方法**:
+```python
+# 增加 is_backtest_tuning 配置标志
+@dataclass
+class BacktestRequest:
+    is_backtest_tuning: bool = False  # 新增字段
+
+# 在目标函数中设置日志级别
+def objective(trial: optuna.Trial) -> float:
+    # 强制将系统日志级别设为 WARNING 或 ERROR
+    if is_backtest_tuning:
+        logging.getLogger().setLevel(logging.WARNING)
+    
+    # 运行回测...
+```
+
+**关键要点**:
+- Optuna 每秒可能跑几十次回测，大量终端 I/O 会导致性能问题
+- 在 Optuna 运行时，强制日志级别为 WARNING 或 ERROR
+- 仅在最终输出时打印详细报告
+
+---
+
+#### 适配点 4: 状态隔离 (防脏数据)
+
+**问题**: 复用上一次 Trial 遗留的单子或仓位会导致数据污染。
+
+**适配方法**:
+```python
+def objective(trial: optuna.Trial) -> float:
+    # ✅ 每次 trial 创建全新的实例
+    account = Account(initial_balance=Decimal("10000"))
+    engine = MockMatchingEngine(account, risk_config)
+    
+    # 确保 PositionManager、active_orders 列表完全隔离
+    # 不允许复用全局单例
+    ...
+```
+
+**关键要点**:
+- 每次 `objective` 函数被调用时，必须全新初始化 MockMatchingEngine
+- PositionManager、active_orders 列表必须重置
+- 绝对不能复用上一次 Trial 遗留的状态
+
+---
+
+### 总结
+
+**架构优势**: v3.0 领域模型解耦良好，底层撮合引擎无需修改即可直接集成 Optuna。
+
+**核心适配**: 只需要在最外层套一个 `objective` 包装器，利用 Pydantic 模型的强类型初始化能力接收 Optuna 输出的参数即可。
+
+**待办事项**:
+- [ ] 数据预加载机制实现
+- [ ] Config 动态注入支持
+- [ ] 日志静默标志 `is_backtest_tuning`
+- [ ] 状态隔离验证测试
 
 ---
 
