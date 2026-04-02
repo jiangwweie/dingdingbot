@@ -1,12 +1,12 @@
-import { useState, useCallback } from 'react';
-import { useApi } from '../lib/api';
-import { OrderResponse, OrderStatus, OrderRole } from '../types/order';
-import { Filter, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import { cn } from '../lib/utils';
-import { OrdersTable } from '../components/v3/OrdersTable';
-import { OrderDetailsDrawer } from '../components/v3/OrderDetailsDrawer';
+import { useState, useCallback, useMemo } from 'react';
+import { Plus, Filter, X } from 'lucide-react';
+import { OrderTreeNode, OrderStatus, OrderRole, OrderBatchDeleteRequest } from '../types/order';
+import { OrderChainTreeTable } from '../components/v3/OrderChainTreeTable';
+import { DeleteChainConfirmModal } from '../components/v3/DeleteChainConfirmModal';
 import { CreateOrderModal } from '../components/v3/CreateOrderModal';
-import { cancelOrder } from '../lib/api';
+import { OrderDetailsDrawer } from '../components/v3/OrderDetailsDrawer';
+import { fetchOrderTree, deleteOrderChain, cancelOrder } from '../lib/api';
+import { useApi } from '../lib/api';
 
 const symbolOptions = [
   { value: '', label: '全部币种' },
@@ -16,113 +16,185 @@ const symbolOptions = [
   { value: 'BNB/USDT:USDT', label: 'BNB' },
 ];
 
-const statusOptions = [
-  { value: '', label: '全部状态' },
-  ...Object.values(OrderStatus).map((status) => ({
-    value: status,
-    label: getStatusLabel(status),
-  })),
+const timeframeOptions = [
+  { value: '', label: '全部周期' },
+  { value: '5m', label: '5 分钟' },
+  { value: '15m', label: '15 分钟' },
+  { value: '1h', label: '1 小时' },
+  { value: '4h', label: '4 小时' },
+  { value: '1d', label: '1 天' },
 ];
-
-function getStatusLabel(status: OrderStatus): string {
-  const labels: Record<OrderStatus, string> = {
-    [OrderStatus.PENDING]: '待处理',
-    [OrderStatus.OPEN]: '进行中',
-    [OrderStatus.FILLED]: '已成交',
-    [OrderStatus.CANCELED]: '已取消',
-    [OrderStatus.REJECTED]: '已拒绝',
-    [OrderStatus.EXPIRED]: '已过期',
-    [OrderStatus.PARTIALLY_FILLED]: '部分成交',
-  };
-  return labels[status];
-}
-
-const roleOptions = [
-  { value: '', label: '全部角色' },
-  ...Object.values(OrderRole).map((role) => ({
-    value: role,
-    label: getRoleLabel(role),
-  })),
-];
-
-function getRoleLabel(role: OrderRole): string {
-  const labels: Record<OrderRole, string> = {
-    [OrderRole.ENTRY]: '开仓',
-    [OrderRole.TP1]: '止盈 1',
-    [OrderRole.TP2]: '止盈 2',
-    [OrderRole.TP3]: '止盈 3',
-    [OrderRole.TP4]: '止盈 4',
-    [OrderRole.TP5]: '止盈 5',
-    [OrderRole.SL]: '止损',
-  };
-  return labels[role];
-}
 
 export default function Orders() {
-  const [page, setPage] = useState(1);
-  const limit = 20;
-
   // Filters
   const [symbolFilter, setSymbolFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | ''>('');
-  const [roleFilter, setRoleFilter] = useState<OrderRole | ''>('');
+  const [timeframeFilter, setTimeframeFilter] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Modal & Drawer
+  // Tree data state
+  const [treeData, setTreeData] = useState<OrderTreeNode[]>([]);
+  const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Modal & Drawer state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  const offset = (page - 1) * limit;
+  // Delete confirm modal state
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [pendingDeleteOrderIds, setPendingDeleteOrderIds] = useState<string[]>([]);
 
-  // Build URL with all filters
-  let url = `/api/v3/orders?limit=${limit}&offset=${offset}`;
-  if (symbolFilter) url += `&symbol=${symbolFilter}`;
-  if (statusFilter) url += `&status=${statusFilter}`;
-  if (roleFilter) url += `&order_role=${roleFilter}`;
-  if (startDate) url += `&start_date=${startDate}`;
-  if (endDate) url += `&end_date=${endDate}`;
+  // Build URL for filter count display
+  const filterCount = [symbolFilter, timeframeFilter, startDate, endDate].filter(Boolean).length;
 
-  const { data, error, mutate } = useApi<{ items: OrderResponse[]; total: number }>(url);
+  // Load order tree data
+  const loadOrderTree = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const params: Record<string, string> = {};
+      if (symbolFilter) params.symbol = symbolFilter;
+      if (timeframeFilter) params.timeframe = timeframeFilter;
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
 
-  const isLoading = !data && !error;
-  const orders = data?.items || [];
-  const total = data?.total || 0;
-  const totalPages = Math.ceil(total / limit);
+      const response = await fetchOrderTree(params);
+      setTreeData(response.items || []);
+
+      // Auto-expand all root nodes on load
+      const rootIds = (response.items || []).map((item: OrderTreeNode) => item.order.order_id);
+      setExpandedRowKeys(rootIds);
+    } catch (error) {
+      console.error('Failed to load order tree:', error);
+      setTreeData([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [symbolFilter, timeframeFilter, startDate, endDate]);
+
+  // Load data on mount and filter changes
+  useState(() => {
+    loadOrderTree();
+  });
+
+  // Refresh on filter change (debounced)
+  useState(() => {
+    const timer = setTimeout(() => {
+      loadOrderTree();
+    }, 300);
+    return () => clearTimeout(timer);
+  });
 
   // Clear all filters
   const clearFilters = () => {
     setSymbolFilter('');
-    setStatusFilter('');
-    setRoleFilter('');
+    setTimeframeFilter('');
     setStartDate('');
     setEndDate('');
-    setPage(1);
+    setExpandedRowKeys([]);
+    setSelectedRowKeys([]);
   };
 
-  // Handle order click
-  const handleOrderClick = useCallback((orderId: string) => {
-    setSelectedOrderId(orderId);
-    setIsDrawerOpen(true);
+  // Handle expand/collapse
+  const handleExpand = useCallback((keys: string[]) => {
+    setExpandedRowKeys(keys);
+  }, []);
+
+  // Handle row selection
+  const handleSelectChange = useCallback((keys: string[]) => {
+    setSelectedRowKeys(keys);
   }, []);
 
   // Handle cancel order
   const handleCancelOrder = useCallback(async (orderId: string, symbol: string) => {
     try {
       await cancelOrder(orderId, symbol);
-      await mutate();
+      await loadOrderTree();
     } catch (error) {
       console.error('Failed to cancel order:', error);
       alert('取消订单失败，请重试');
       throw error;
     }
-  }, [mutate]);
+  }, [loadOrderTree]);
+
+  // Handle delete chain click
+  const handleDeleteChainClick = useCallback((orderIds: string[]) => {
+    setPendingDeleteOrderIds(orderIds);
+    setIsDeleteModalOpen(true);
+  }, []);
+
+  // Handle delete confirm
+  const handleDeleteConfirm = useCallback(async () => {
+    try {
+      const request: OrderBatchDeleteRequest = {
+        order_ids: pendingDeleteOrderIds,
+        cancel_on_exchange: true,
+      };
+
+      await deleteOrderChain(request);
+      setIsDeleteModalOpen(false);
+      setPendingDeleteOrderIds([]);
+      setSelectedRowKeys([]);
+      await loadOrderTree();
+    } catch (error) {
+      console.error('Failed to delete order chain:', error);
+      alert('删除订单链失败，请重试');
+      throw error;
+    }
+  }, [pendingDeleteOrderIds, loadOrderTree]);
+
+  // Handle delete cancel
+  const handleDeleteCancel = useCallback(() => {
+    setIsDeleteModalOpen(false);
+    setPendingDeleteOrderIds([]);
+  }, []);
 
   // Handle create order success
   const handleCreateOrderSuccess = useCallback(async () => {
-    await mutate();
-  }, [mutate]);
+    await loadOrderTree();
+  }, [loadOrderTree]);
+
+  // Handle order click for details drawer
+  const handleOrderClick = useCallback((orderId: string) => {
+    // Find the order from tree data
+    const findOrder = (nodes: OrderTreeNode[]): OrderTreeNode | null => {
+      for (const node of nodes) {
+        if (node.order.order_id === orderId) {
+          return node;
+        }
+        const found = findOrder(node.children);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    const node = findOrder(treeData);
+    if (node) {
+      setSelectedOrderId(orderId);
+      setIsDrawerOpen(true);
+    }
+  }, [treeData]);
+
+  // Get flat order list for drawer
+  const selectedOrder = useMemo(() => {
+    if (!selectedOrderId) return null;
+
+    const findOrder = (nodes: OrderTreeNode[]): OrderTreeNode | null => {
+      for (const node of nodes) {
+        if (node.order.order_id === selectedOrderId) {
+          return node;
+        }
+        const found = findOrder(node.children);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    const node = findOrder(treeData);
+    return node ? node.order : null;
+  }, [selectedOrderId, treeData]);
 
   return (
     <div className="space-y-6">
@@ -130,7 +202,12 @@ export default function Orders() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-gray-900">订单管理</h1>
-          <p className="text-sm text-gray-500 mt-1">查看和管理所有交易订单</p>
+          <p className="text-sm text-gray-500 mt-1">
+            查看和管理所有交易订单链
+            {filterCount > 0 && (
+              <span className="ml-2 text-xs text-blue-600">（{filterCount} 个筛选条件生效）</span>
+            )}
+          </p>
         </div>
 
         <button
@@ -153,7 +230,7 @@ export default function Orders() {
           {/* Symbol Filter */}
           <select
             value={symbolFilter}
-            onChange={(e) => { setSymbolFilter(e.target.value); setPage(1); }}
+            onChange={(e) => { setSymbolFilter(e.target.value); }}
             className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
           >
             {symbolOptions.map((opt) => (
@@ -161,24 +238,13 @@ export default function Orders() {
             ))}
           </select>
 
-          {/* Status Filter */}
+          {/* Timeframe Filter */}
           <select
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value as OrderStatus | ''); setPage(1); }}
+            value={timeframeFilter}
+            onChange={(e) => { setTimeframeFilter(e.target.value); }}
             className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
           >
-            {statusOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-
-          {/* Role Filter */}
-          <select
-            value={roleFilter}
-            onChange={(e) => { setRoleFilter(e.target.value as OrderRole | ''); setPage(1); }}
-            className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
-          >
-            {roleOptions.map((opt) => (
+            {timeframeOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
@@ -188,7 +254,7 @@ export default function Orders() {
             <input
               type="date"
               value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
+              onChange={(e) => { setStartDate(e.target.value); }}
               className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
               placeholder="开始日期"
             />
@@ -196,14 +262,14 @@ export default function Orders() {
             <input
               type="date"
               value={endDate}
-              onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
+              onChange={(e) => { setEndDate(e.target.value); }}
               className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
               placeholder="结束日期"
             />
           </div>
 
           {/* Clear Filters */}
-          {(symbolFilter || statusFilter || roleFilter || startDate || endDate) && (
+          {(symbolFilter || timeframeFilter || startDate || endDate) && (
             <button
               onClick={clearFilters}
               className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
@@ -215,42 +281,22 @@ export default function Orders() {
         </div>
       </div>
 
-      {/* Orders Table */}
-      <OrdersTable
-        orders={orders}
+      {/* Order Tree Table */}
+      <OrderChainTreeTable
+        data={treeData}
+        expandedRowKeys={expandedRowKeys}
+        selectedRowKeys={selectedRowKeys}
+        onExpand={handleExpand}
+        onSelectChange={handleSelectChange}
+        onCancelOrder={handleCancelOrder}
+        onDeleteChain={handleDeleteChainClick}
         isLoading={isLoading}
-        onOrderClick={handleOrderClick}
       />
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1 || isLoading}
-            className="p-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          <span className="text-sm text-gray-600">
-            第 <span className="font-medium">{page}</span> 页 / 共 <span className="font-medium">{totalPages}</span> 页
-          </span>
-
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || isLoading}
-            className="p-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
       {/* Order Details Drawer */}
-      {selectedOrderId && (
+      {selectedOrder && (
         <OrderDetailsDrawer
-          order={orders.find((o) => o.order_id === selectedOrderId) || null}
+          order={selectedOrder}
           isOpen={isDrawerOpen}
           onClose={() => {
             setIsDrawerOpen(false);
@@ -265,6 +311,15 @@ export default function Orders() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={handleCreateOrderSuccess}
+      />
+
+      {/* Delete Chain Confirm Modal */}
+      <DeleteChainConfirmModal
+        selectedOrderIds={pendingDeleteOrderIds}
+        treeData={treeData}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+        isOpen={isDeleteModalOpen}
       />
     </div>
   );

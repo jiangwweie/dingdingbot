@@ -2239,3 +2239,57 @@ export async function fetchOptimizations(params?: {
   }
   return res.json();
 }
+
+// ============================================================================
+// Order Tree API (F2 - Orders 页面树形表格集成)
+// ============================================================================
+
+/**
+ * Fetch order tree data
+ */
+export async function fetchOrderTree(params?: {
+  symbol?: string;
+  timeframe?: string;
+  start_date?: string;
+  end_date?: string;
+  days?: number;
+}): Promise<OrderTreeResponse> {
+  const queryParams = new URLSearchParams();
+  if (params?.symbol) queryParams.append('symbol', params.symbol);
+  if (params?.timeframe) queryParams.append('timeframe', params.timeframe);
+  if (params?.start_date) queryParams.append('start_date', params.start_date);
+  if (params?.end_date) queryParams.append('end_date', params.end_date);
+  if (params?.days) queryParams.append('days', String(params.days));
+
+  const res = await fetch(`/api/v3/orders/tree?${queryParams}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch order tree');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Delete order chain batch
+ */
+export async function deleteOrderChain(
+  request: OrderBatchDeleteRequest
+): Promise<OrderBatchDeleteResponse> {
+  const res = await fetch('/api/v3/orders/batch', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to delete order chain');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}

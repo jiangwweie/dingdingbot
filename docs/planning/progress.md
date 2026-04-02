@@ -6,6 +6,37 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-03 - 前端 F2: Orders 页面树形表格集成完成
+
+**执行日期**: 2026-04-03  
+**执行人**: AI Builder  
+**状态**: ✅ 编码完成，构建通过
+
+**今日完成**:
+1. ✅ API 函数封装：在 `web-front/src/lib/api.ts` 中添加 `fetchOrderTree` 和 `deleteOrderChain` 函数
+2. ✅ Orders 页面改造：将原有的列表表格替换为 `OrderChainTreeTable` 树形表格组件
+3. ✅ 删除确认弹窗集成：集成 `DeleteChainConfirmModal` 组件处理批量删除确认
+4. ✅ 筛选功能保留：保留币种、周期、日期范围筛选功能
+5. ✅ 加载状态和错误处理：完善加载状态和错误提示
+6. ✅ 构建验证：运行 `npm run build` 确认编译通过
+
+**技术细节**:
+- 使用 `react-window` 虚拟滚动优化性能（OrderChainTreeTable 组件内置）
+- 筛选条件变化时自动重新加载订单树数据（300ms 防抖）
+- 删除操作支持批量选择，自动选中整个订单链
+- 取消订单后自动刷新树形数据
+
+**修改文件**:
+| 文件 | 修改内容 |
+|------|----------|
+| `web-front/src/lib/api.ts` | 新增 `fetchOrderTree` 和 `deleteOrderChain` 函数 |
+| `web-front/src/pages/Orders.tsx` | 完全重构，集成树形表格和删除确认弹窗 |
+
+**下一步计划**:
+- 测试 T1: 订单链功能测试（待执行）
+
+---
+
 ### 2026-04-02 - 订单管理级联展示功能架构审查通过
 
 **执行日期**: 2026-04-02  
