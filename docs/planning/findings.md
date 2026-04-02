@@ -23,6 +23,7 @@
 15. [API 契约与端点](#api-契约与端点)
 16. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
 17. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
+18. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
 
 ---
 
@@ -2173,6 +2174,73 @@ for path, methods in routes:
 
 ---
 
+## 订单管理级联展示功能 - 路由顺序修复
+
+**日期**: 2026-04-03  
+**修复人**: AI Builder  
+**问题级别**: P0 (路由匹配冲突)
+
+### 问题描述
+
+在测试订单树 API 端点时，发现 `GET /api/v3/orders/tree` 请求被 `/api/v3/orders/{order_id:path}` 路由拦截，导致返回 404 错误。
+
+### 根本原因
+
+**FastAPI 路由注册规则**:
+1. FastAPI 按照代码执行顺序（从上到下）注册路由
+2. 路由匹配时，先注册的路由优先匹配
+3. 参数化路由（如 `/{order_id}`）会匹配任何非精确匹配的路径
+4. **具体路由必须放在参数化路由之前**
+
+**错误代码顺序**:
+```python
+# ❌ 错误：参数化路由在前
+@app.get("/api/v3/orders/{order_id:path}")  # 注册于 4067 行
+async def get_order(order_id: str): ...
+
+@app.get("/api/v3/orders/tree")  # 注册于 4423 行，永远不会被匹配
+async def get_order_tree(): ...
+```
+
+**问题**: `tree` 和 `batch` 被误识别为 `order_id` 参数值
+
+### 修复方案
+
+将具体路由移到参数化路由之前：
+
+```python
+# ✅ 正确：具体路由在前
+@app.get("/api/v3/orders/tree")      # 移到 4067 行
+async def get_order_tree(): ...
+
+@app.delete("/api/v3/orders/batch")  # 移到 4067 行
+async def delete_orders_batch(): ...
+
+@app.get("/api/v3/orders/{order_id:path}")  # 保持在后
+async def get_order(order_id: str): ...
+```
+
+### 最佳实践
+
+**FastAPI 路由注册顺序**:
+```python
+# 1. 具体路由优先
+@app.get("/api/v3/orders/tree")
+@app.get("/api/v3/orders/batch")
+
+# 2. 参数化路由在后
+@app.get("/api/v3/orders/{order_id:path}")
+@app.get("/api/v3/positions/{symbol}")
+```
+
+### 相关文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src/interfaces/api.py` | 路由顺序修复，将 /tree 和 /batch 移到 /{order_id:path} 之前 |
+
+---
+
 ## 历史发现归档
 
 以下主题的技术发现已归档至 `archive/` 目录：
@@ -2183,4 +2251,4 @@ for path, methods in routes:
 
 ---
 
-*最后更新：2026-04-02*
+*最后更新：2026-04-03 - 订单管理级联展示功能完成*
