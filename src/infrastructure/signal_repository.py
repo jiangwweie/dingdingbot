@@ -1877,6 +1877,10 @@ class SignalRepository:
         numeric_signal_id = row[0]
 
         await self._db.execute(
+            "UPDATE signals SET take_profit_status = ?, take_profit pnl_ratio = ? WHERE id = ?",
+            (status, str(pnl_ratio) if pnl_ratio else None, numeric_signal_id),
+        )
+        await self._db.commit()
 
     async def get_signal_ids_by_backtest_report(
         self,
@@ -1915,18 +1919,5 @@ class SignalRepository:
             await cursor.close()
 
             return [row[0] for row in rows if row[0]]
-            """
-            UPDATE signal_take_profits
-            SET status = ?, pnl_ratio = ?, filled_at = ?
-            WHERE signal_id = ? AND tp_id = ?
-            """,
-            (
-                status,
-                str(pnl_ratio) if pnl_ratio else None,
-                filled_at,
-                numeric_signal_id,
-                tp_id,
-            ),
-        )
         await self._db.commit()
         logger.debug(f"Updated take-profit status: signal_id={signal_id}, tp_id={tp_id}, status={status}")

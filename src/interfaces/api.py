@@ -57,6 +57,15 @@ from src.domain.models import (
     ErrorResponse,  # MIN-001: 统一错误响应格式
 )
 
+# 回测订单错误码
+class BacktestErrorCode:
+    """回测相关错误码"""
+    REPORT_NOT_FOUND = "BACKTEST-001"
+    ORDER_NOT_FOUND = "BACKTEST-002"
+    ORDER_BELONGS_MISMATCH = "BACKTEST-003"
+    DATA_FETCH_ERROR = "BACKTEST-004"
+    DATABASE_ERROR = "BACKTEST-005"
+
 # Backtest Reports API Models
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -1119,10 +1128,14 @@ async def delete_backtest_report(report_id: str):
 # Backtest Orders Management Endpoints
 # ============================================================
 
+from pydantic import BaseModel, Field, ConfigDict
+
+
 class BacktestOrderSummary(BaseModel):
     """回测订单摘要信息"""
     id: str
     signal_id: str
+    symbol: str = Field(..., description="交易对")
     order_role: str
     order_type: str
     direction: str
@@ -1137,10 +1150,12 @@ class BacktestOrderSummary(BaseModel):
 
 class ListBacktestOrdersResponse(BaseModel):
     """回测订单列表响应"""
+    model_config = ConfigDict(populate_by_name=True)
+
     orders: List[BacktestOrderSummary]
     total: int
     page: int
-    pageSize: int
+    page_size: int = Field(..., alias="pageSize", description="每页数量")
 
 
 @app.get("/api/v3/backtest/reports/{report_id}/orders", response_model=ListBacktestOrdersResponse)
@@ -1217,6 +1232,7 @@ async def list_backtest_orders(
                 BacktestOrderSummary(
                     id=o.id,
                     signal_id=o.signal_id,
+                    symbol=o.symbol,
                     order_role=o.order_role.value,
                     order_type=o.order_type.value,
                     direction=o.direction.value,
@@ -1235,7 +1251,7 @@ async def list_backtest_orders(
                 orders=orders,
                 total=result['total'],
                 page=result['page'],
-                pageSize=result['page_size'],
+                page_size=result['page_size'],
             )
         finally:
             await order_repo.close()
@@ -1244,7 +1260,13 @@ async def list_backtest_orders(
         raise
     except Exception as e:
         logger.error(f"获取回测订单列表失败：{str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=500,
+            content=ErrorResponse(
+                error_code=BacktestErrorCode.DATABASE_ERROR,
+                message=f"获取回测订单列表失败：{str(e)}"
+            ).model_dump()
+        )
 
 
 @app.get("/api/v3/backtest/reports/{report_id}/orders/{order_id}")
@@ -1362,7 +1384,13 @@ async def get_backtest_order(report_id: str, order_id: str):
         raise
     except Exception as e:
         logger.error(f"获取回测订单详情失败：{str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=500,
+            content=ErrorResponse(
+                error_code=BacktestErrorCode.DATABASE_ERROR,
+                message=f"获取回测订单详情失败：{str(e)}"
+            ).model_dump()
+        )
 
 
 @app.delete("/api/v3/backtest/reports/{report_id}/orders/{order_id}")
@@ -1433,7 +1461,13 @@ async def delete_backtest_order(report_id: str, order_id: str):
         raise
     except Exception as e:
         logger.error(f"删除回测订单失败：{str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=500,
+            content=ErrorResponse(
+                error_code=BacktestErrorCode.DATABASE_ERROR,
+                message=f"删除回测订单失败：{str(e)}"
+            ).model_dump()
+        )
 
 
 # ============================================================

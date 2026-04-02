@@ -310,10 +310,12 @@ class HistoricalDataRepository:
         if not klines:
             return
 
+        from sqlalchemy.dialects.sqlite import insert
+
         async with self._async_session_factory() as session:
-            # 批量插入
+            # 批量插入数据
             for kline in klines:
-                orm = KlineORM(
+                stmt = insert(KlineORM).values(
                     symbol=kline.symbol,
                     timeframe=kline.timeframe,
                     timestamp=kline.timestamp,
@@ -323,10 +325,10 @@ class HistoricalDataRepository:
                     close=kline.close,
                     volume=kline.volume,
                     is_closed=kline.is_closed,
+                ).on_conflict_do_nothing(
+                    index_elements=['symbol', 'timeframe', 'timestamp']
                 )
-
-                # 使用 INSERT OR IGNORE 实现幂等性
-                session.merge(orm)  # merge 会覆盖已存在的记录
+                await session.execute(stmt)
 
             await session.commit()
 
