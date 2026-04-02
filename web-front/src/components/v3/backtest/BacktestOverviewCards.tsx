@@ -59,7 +59,7 @@ export function BacktestOverviewCards({ report, className }: BacktestOverviewCar
             'text-3xl font-bold',
             metrics.totalReturn >= 0 ? 'text-green-900' : 'text-red-900'
           )}>
-            {metrics.totalReturn >= 0 ? '+' : ''}{metrics.totalReturn.toFixed(2)}%
+            {metrics.totalReturn >= 0 ? '+' : ''}{(metrics.totalReturn * 100).toFixed(2)}%
           </p>
           <p className="text-xs text-green-600">
             {metrics.totalPnl >= 0 ? '盈利' : '亏损'} ${Math.abs(metrics.totalPnl).toFixed(2)}
@@ -80,7 +80,7 @@ export function BacktestOverviewCards({ report, className }: BacktestOverviewCar
         </div>
         <div className="space-y-1">
           <p className="text-3xl font-bold text-red-900">
-            {metrics.maxDrawdown.toFixed(2)}%
+            {(metrics.maxDrawdown * 100).toFixed(2)}%
           </p>
           <p className="text-xs text-red-600">
             历史最大账户跌幅
@@ -126,9 +126,9 @@ export function BacktestOverviewCards({ report, className }: BacktestOverviewCar
         <div className="space-y-1">
           <p className={cn(
             'text-3xl font-bold',
-            metrics.winRate >= 50 ? 'text-purple-900' : 'text-purple-600'
+            (metrics.winRate * 100) >= 50 ? 'text-purple-900' : 'text-purple-600'
           )}>
-            {metrics.winRate.toFixed(1)}%
+            {(metrics.winRate * 100).toFixed(1)}%
           </p>
           <p className="text-xs text-purple-600">
             {metrics.winningTrades} 胜 / {metrics.losingTrades} 败 / 共 {metrics.totalTrades} 场

@@ -122,7 +122,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<Percent className="w-4 h-4" />}
           label="胜率"
-          value={`${(stats.winRate ?? 0).toFixed(1)}%`}
+          value={`${((stats.winRate ?? 0) * 100).toFixed(1)}%`}
           color="purple"
         />
 
@@ -190,7 +190,7 @@ export function TradeStatisticsTable({ report, className }: TradeStatisticsTable
         <StatItem
           icon={<Activity className="w-4 h-4" />}
           label="最大回撤"
-          value={`${(stats.maxDrawdown ?? 0).toFixed(2)}%`}
+          value={`${((stats.maxDrawdown ?? 0) * 100).toFixed(2)}%`}
           color="red"
         />
       </div>

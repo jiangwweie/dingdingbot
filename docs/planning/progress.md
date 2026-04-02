@@ -63,6 +63,45 @@
 
 **效果**: 回测功能现在优先使用本地 SQLite 数据源，降级到交易所
 
+**五、T2/T3 确认完成** (2026-04-02 执行):
+
+**任务**: 回测记录列表和订单详情 K 线图确认
+
+**T2 确认结果** ✅:
+- 后端 API: `/api/v3/backtest/reports` 已实现（支持筛选、排序、分页）
+- 前端页面：`BacktestReports.tsx` 已实现
+- 修复：添加 `fetchBacktestOrder()` API 函数到 `web-front/src/lib/api.ts`
+
+**T3 确认结果** ✅:
+- 后端 API: `/api/v3/backtest/reports/{report_id}/orders/{order_id}` 已实现
+- 包含 K 线数据：从 `HistoricalDataRepository` 获取订单前后各 10 根 K 线
+- 前端组件：`OrderDetailsDrawer.tsx` 已集成 K 线图组件
+- 数据流：`fetchBacktestOrder()` → API → 订单详情 + K 线数据
+
+**修改文件**:
+- `web-front/src/lib/api.ts`: 添加 `fetchBacktestOrder()` 函数
+
+**六、T4 回测指标显示错误修复** (2026-04-02 执行):
+
+**问题根因**: 后端返回的百分比字段为小数形式 (0.0523 表示 5.23%)，前端展示时未乘以 100 转换
+
+**修复内容**:
+| 组件 | 修复字段 | 修改内容 |
+|------|----------|----------|
+| `BacktestOverviewCards.tsx` | 总收益率 | `totalReturn.toFixed(2)` → `(totalReturn * 100).toFixed(2)` |
+| `BacktestOverviewCards.tsx` | 胜率 | `winRate.toFixed(1)` → `(winRate * 100).toFixed(1)` |
+| `BacktestOverviewCards.tsx` | 最大回撤 | `maxDrawdown.toFixed(2)` → `(maxDrawdown * 100).toFixed(2)` |
+| `TradeStatisticsTable.tsx` | 胜率 | `winRate.toFixed(1)` → `(winRate * 100).toFixed(1)` |
+| `TradeStatisticsTable.tsx` | 最大回撤 | `maxDrawdown.toFixed(2)` → `(maxDrawdown * 100).toFixed(2)` |
+| `EquityComparisonChart.tsx` | 总收益率 | `totalReturn.toFixed(2)` → `(totalReturn * 100).toFixed(2)` |
+
+**修改文件**:
+- `web-front/src/components/v3/backtest/BacktestOverviewCards.tsx`
+- `web-front/src/components/v3/backtest/TradeStatisticsTable.tsx`
+- `web-front/src/components/v3/backtest/EquityComparisonChart.tsx`
+
+**验证**: 前端编译通过 ✅
+
 **T5 确认结果**: ✅ 代码已实现本地数据库优先逻辑
 - 位置：`backtester.py` L393-419
 - 逻辑：`_fetch_klines()` 优先使用 `HistoricalDataRepository` 查询本地 SQLite

@@ -107,7 +107,7 @@ export function EquityComparisonChart({ report, className, title }: EquityCompar
             'ml-2 font-medium',
             totalReturn >= 0 ? 'text-green-600' : 'text-red-600'
           )}>
-            ({totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%)
+            ({totalReturn >= 0 ? '+' : ''}{(totalReturn * 100).toFixed(2)}%)
           </span>
         </div>
       </div>
