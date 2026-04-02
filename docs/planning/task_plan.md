@@ -17,6 +17,7 @@
 | **P2** | 配置管理功能 | 2 项 | 4h | ☐ 搁置 |
 | **P0** | Phase 8 自动化调参 | 已分解 | 40h | ⏳ 进行中 |
 | **P0** | 用户需求 Bug 修复 (2026-04-02) | 7 项 | 8h | ✅ 已完成 |
+| **P1** | 后续问题追踪 | 2 项 | 1h | ☐ 待修复 |
 
 ---
 
@@ -40,6 +41,91 @@
 - `src/infrastructure/backtest_repository.py` - 添加 sharpe_ratio 字段到数据库和查询
 - `web-front/src/types/order.ts` - 修复 PositionsResponse 字段名
 - `web-front/src/pages/Positions.tsx` - 修复字段名引用
+
+---
+
+## 后续问题追踪 (2026-04-02 新增)
+
+| ID | 任务 | 优先级 | 状态 | 说明 |
+|----|------|--------|------|------|
+| 8 | 回测数据源降级逻辑修复 | P1 | ☐ 待修复 | DB 无数据时明确降级到 Exchange Gateway |
+| 9 | 前端快照 version 格式修复 | P1 | ☐ 待修复 | 前端传参从 `"1"` 改为 `"v1.0.0"` 格式 |
+| 10 | 回测页面日期选择组件优化 | P2 | ☐ 待产品确认 | 添加快捷日期范围选择功能 |
+
+**详细说明**:
+
+### 任务 8: 回测数据源降级逻辑修复
+
+**修改位置**: `src/application/backtester.py:418-419`
+
+**当前代码**:
+```python
+logger.info(f"Fetched {len(klines)} candles from local DB for {request.symbol} {request.timeframe}")
+return klines
+```
+
+**修改为**:
+```python
+logger.info(f"Fetched {len(klines)} candles from local DB for {request.symbol} {request.timeframe}")
+if klines:
+    return klines
+# DB 无数据时，继续降级到 Exchange Gateway
+logger.info("DB has no data, falling back to Exchange Gateway...")
+```
+
+**优点**: 充分利用降级逻辑，提高数据获取成功率  
+**缺点**: 增加 Exchange API 调用频率  
+**预估工时**: 0.5h
+
+### 任务 9: 前端快照 version 格式修复
+
+**修改位置**: 前端配置管理页面/回测报告页面
+
+**当前代码**:
+```javascript
+{"version": "1", "description": ""}
+```
+
+**修改为**:
+```javascript
+{"version": "v1.0.0", "description": ""}
+// 或使用时间戳格式
+{"version": `v${new Date().toISOString().replace(/[-:]/g, '').slice(0, 8)}.${...}`, "description": ""}
+```
+
+**优点**: 符合后端 API 要求，无需修改后端代码  
+**缺点**: 需要前端修改代码  
+**预估工时**: 0.5h
+
+**后续优化（技术债）**:
+- 版本格式验证统一化为工具函数，前后端共用
+- 添加 K 线数据可用性检查接口，前端在回测前可先检查数据范围
+
+**预防措施**:
+- 添加回测集成测试，覆盖不同时间范围场景
+- 前端表单添加 version 格式验证，与后端保持一致
+
+---
+
+### 任务 10: 回测页面日期选择组件优化
+
+**问题描述**:
+- 当前日期选择组件非常不好用
+- 回测过程常用的日期范围通常是以天计，甚至几周、几月
+- 缺少快捷选择功能
+
+**优化需求**:
+- 添加快捷日期范围选择按钮：
+  - 最近 7 天 | 最近 30 天 | 最近 3 个月 | 最近 6 个月 | 今年至今
+- 支持自定义日期范围快速输入
+- 优化日期选择器的交互体验
+
+**涉及页面**:
+- `web-front/src/pages/Backtest.tsx` - 信号回测页面
+- `web-front/src/pages/PMSBacktest.tsx` - PMS 回测页面
+
+**优先级**: P2  
+**预估工时**: 2h (待产品确认方案)
 
 ---
 
