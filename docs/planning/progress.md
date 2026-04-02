@@ -6,7 +6,7 @@
 
 ## 📍 最近 7 天
 
-### 2026-04-02 - 配置管理决策 + 前端导航重构启动 + PMS 回测问题新增 🔄
+### 2026-04-02 - 配置管理决策 + 前端导航重构启动 + PMS 回测问题新增 + T5 修复 🔄
 
 **执行日期**: 2026-04-02  
 **执行人**: AI Builder  
@@ -47,6 +47,21 @@
 | T3 | 订单详情 K 线图渲染确认 | P0 | 0.5h |
 | T4 | 回测指标显示错误排查 | P0 | 3h |
 | T5 | 回测 K 线数据源确认 | P0 | 0.5h ✅ 已确认 |
+
+**四、T5 任务完成** (2026-04-02 执行):
+
+**任务**: 回测 API 接入本地数据源
+
+**问题**: `/api/backtest` 端点创建 `Backtester` 时未传入 `HistoricalDataRepository`
+
+**修改内容**:
+- 文件：`src/interfaces/api.py`
+- L890: 添加 `HistoricalDataRepository` 导入
+- L896-897: 创建并初始化 `data_repo`
+- L899: 传入 `Backtester(gateway, data_repository=data_repo)`
+- L932: finally 块中添加 `await data_repo.close()`
+
+**效果**: 回测功能现在优先使用本地 SQLite 数据源，降级到交易所
 
 **T5 确认结果**: ✅ 代码已实现本地数据库优先逻辑
 - 位置：`backtester.py` L393-419

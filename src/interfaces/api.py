@@ -887,10 +887,16 @@ async def run_backtest(
     try:
         from src.application.backtester import Backtester
         from src.infrastructure.backtest_repository import BacktestReportRepository
+        from src.infrastructure.historical_data_repository import HistoricalDataRepository
         from src.infrastructure.order_repository import OrderRepository
 
         gateway = _get_exchange_gateway()
-        backtester = Backtester(gateway)
+
+        # Initialize historical data repository for local-first data access
+        data_repo = HistoricalDataRepository()
+        await data_repo.initialize()
+
+        backtester = Backtester(gateway, data_repository=data_repo)
 
         # Get current account snapshot for position sizing
         account_snapshot = _account_getter() if _account_getter else None
@@ -923,6 +929,7 @@ async def run_backtest(
         finally:
             await backtest_repository.close()
             await order_repository.close()
+            await data_repo.close()
 
     except HTTPException:
         raise
