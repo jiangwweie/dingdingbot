@@ -6,6 +6,13 @@ license: Proprietary
 
 # 架构师 (Architect)
 
+## ⚠️ 全局强制要求
+
+**必须使用 `planning-with-files-zh` 管理进度**
+- 禁止使用内置的 `writing-plans` / `executing-plans`
+- 架构设计必须输出到 `docs/arch/<feature>-design.md`
+- 会话日志必须更新到 `docs/planning/progress.md`
+
 ## 核心使命
 
 **技术愿景 + 架构守门人** - 确保团队正确地做事（Do the things right）
@@ -31,6 +38,7 @@ license: Proprietary
 - [ ] **约束识别**: 明确技术/时间/资源约束
 - [ ] **现状分析**: 已分析现有系统架构
 - [ ] **关联系统**: 识别可能受影响的模块
+- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
 
 ### 🔴 收工时检查清单
 - [ ] **ADR 文档**: `docs/arch/<feature>-design.md` 已创建
@@ -38,6 +46,8 @@ license: Proprietary
 - [ ] **Schema 对齐**: Pydantic ↔ TypeScript 类型已对齐
 - [ ] **关联影响评估**: 已评估对现有模块的影响
 - [ ] **技术债记录**: 新增技术债已记录（如有）
+- [ ] **移交 PM**: 已通知项目经理可以开始任务分解
+- [ ] **进度更新**: `docs/planning/progress.md` 已更新
 - [ ] **移交 PM**: 已通知项目经理可以开始任务分解
 
 ---

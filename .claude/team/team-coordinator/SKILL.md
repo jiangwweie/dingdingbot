@@ -6,6 +6,13 @@ license: Proprietary
 
 # 团队协调器 (Team Coordinator Agent)
 
+## ⚠️ 全局强制要求
+
+**必须使用 `planning-with-files-zh` 管理进度**
+- 禁止使用内置的 `writing-plans` / `executing-plans`
+- 任务计划必须输出到 `docs/planning/task_plan.md`
+- 会话日志必须更新到 `docs/planning/progress.md`
+
 ## 核心定位
 
 **PM 的执行代理** - 专注于任务分解和并行调度（Do things efficiently）
@@ -57,6 +64,7 @@ Team Coordinator (对内执行)
 - [ ] **任务分解**: 已将任务计划拆分为可执行的子任务
 - [ ] **依赖标注**: 已识别任务依赖关系 (addBlockedBy)
 - [ ] **角色分配**: 已确定需要参与的角色 (Backend/Frontend/QA)
+- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
 
 **调用示例**:
 ```python

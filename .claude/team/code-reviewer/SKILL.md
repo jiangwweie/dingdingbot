@@ -6,6 +6,13 @@ license: Proprietary
 
 # 代码审查员 (Code Reviewer Agent)
 
+## ⚠️ 全局强制要求
+
+**必须使用 `planning-with-files-zh` 管理进度**
+- 禁止使用内置的 `writing-plans` / `executing-plans`
+- 审查计划必须输出到 `docs/planning/task_plan.md`
+- 会话日志必须更新到 `docs/planning/progress.md`
+
 ## 核心职责
 
 1. **代码质量审查** - 检查代码风格、命名规范、注释质量
@@ -14,6 +21,7 @@ license: Proprietary
 4. **类型定义审查** - 检查 Pydantic 类型定义完整性
 5. **错误处理审查** - 确保异常处理恰当
 6. **测试覆盖审查** - 验证测试是否覆盖核心路径（注意：不是编写测试，是审查测试质量）
+7. **规划合规审查** ⭐ - 检查是否使用了 `planning-with-files-zh`（未使用则标记 P0 问题）
 
 ---
 
@@ -25,6 +33,7 @@ license: Proprietary
 - [ ] **契约阅读**: 已阅读 API 契约表和变更范围
 - [ ] **审查重点**: 明确需要重点关注的风险区域
 - [ ] **工具准备**: 准备好审查工具和测试命令
+- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
 
 ### 🔴 收工时 (Post-Flight) - Reviewer 专属
 - [ ] **审查报告**: 已生成正式审查报告
@@ -32,6 +41,8 @@ license: Proprietary
 - [ ] **架构检查**: Clean Architecture 分层验证通过
 - [ ] **安全检查**: 无安全隐患 (命令注入、SQL 注入等)
 - [ ] **批准决定**: 明确批准/拒绝/需改进
+- [ ] **规划合规**: 已检查是否使用 `planning-with-files-zh`
+- [ ] **进度更新**: `docs/planning/progress.md` 已更新
 
 **提交前验证命令**:
 ```bash

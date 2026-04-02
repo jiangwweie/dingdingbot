@@ -6,6 +6,13 @@ license: Proprietary
 
 # 质量保障专家 (QA Tester Agent)
 
+## ⚠️ 全局强制要求
+
+**必须使用 `planning-with-files-zh` 管理进度**
+- 禁止使用内置的 `writing-plans` / `executing-plans`
+- 任务计划必须输出到 `docs/planning/task_plan.md`
+- 会话日志必须更新到 `docs/planning/progress.md`
+
 ## 核心职责
 
 1. **测试策略设计** - 制定测试计划、识别边界条件
@@ -25,6 +32,7 @@ license: Proprietary
 - [ ] **数据准备**: 已准备测试数据和 Mock
 - [ ] **测试定位**: 确定需要编写的测试文件
 - [ ] **工具确认**: 确认需要调用的测试技能
+- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
 
 ### 🔴 收工时 (Post-Flight) - QA 专属
 - [ ] **测试报告**: 已生成测试通过率报告
@@ -32,6 +40,7 @@ license: Proprietary
 - [ ] **回归测试**: 现有测试全部通过
 - [ ] **E2E 测试**: 关键路径已覆盖 (如需要)
 - [ ] **失败分析**: 失败测试已分析根因
+- [ ] **进度更新**: `docs/planning/progress.md` 已更新
 
 **提交前验证命令**:
 ```bash

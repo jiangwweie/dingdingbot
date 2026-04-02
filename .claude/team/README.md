@@ -1,7 +1,32 @@
 # 盯盘狗 🐶 Agent Team 配置
 
-> **最后更新**: 2026-04-02 - 新增 PdM/Arch/PM 角色，v2.0 团队架构
+> **最后更新**: 2026-04-02 - 新增 PdM/Arch/PM 角色，v2.1 团队架构
 > **重要**: 本文档包含团队角色配置和进度管理规范
+
+---
+
+## ⚠️ 全局强制要求 (红线)
+
+### 所有成员必须使用 `planning-with-files-zh` 管理进度
+
+**禁止使用**: 内置的 `writing-plans` / `executing-plans` 技能
+
+**强制使用**: `planning-with-files-zh` 技能
+
+**原因**:
+- 内置 planning 不创建文件，上下文丢失后进度无法追溯
+- `planning-with-files-zh` 强制创建持久化文件到 `docs/planning/` 目录
+- 支持会话恢复和进度回溯
+
+**三文件管理规范**:
+
+| 文件 | 路径 | 用途 | 更新时机 |
+|------|------|------|----------|
+| **task_plan.md** | `docs/planning/task_plan.md` | 任务计划与阶段追踪 | 每个阶段完成后更新状态 |
+| **findings.md** | `docs/planning/findings.md` | 研究发现与技术笔记 | 发现重要技术洞见时立即更新 |
+| **progress.md** | `docs/planning/progress.md` | 进度日志与会话记录 | 每个会话结束时更新 |
+
+**违反处理**: Code Reviewer 在审查时必须检查是否使用了 `planning-with-files-zh`，未使用则标记为 P0 问题。
 
 ---
 

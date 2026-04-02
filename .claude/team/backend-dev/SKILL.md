@@ -6,6 +6,13 @@ license: Proprietary
 
 # 后端开发专家 (Backend Developer Agent)
 
+## ⚠️ 全局强制要求
+
+**必须使用 `planning-with-files-zh` 管理进度**
+- 禁止使用内置的 `writing-plans` / `executing-plans`
+- 任务计划必须输出到 `docs/planning/task_plan.md`
+- 会话日志必须更新到 `docs/planning/progress.md`
+
 ## 核心职责
 
 1. **领域模型设计** - Pydantic 模型、业务逻辑、验证规则
@@ -25,6 +32,7 @@ license: Proprietary
 - [ ] **接口确认**: 明确请求/响应 Schema
 - [ ] **模型定位**: 确定需要修改的文件路径
 - [ ] **测试定位**: 确定需要编写的测试文件
+- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
 
 ### 🔴 收工时 (Post-Flight) - 后端专属
 - [ ] **单元测试**: 新功能测试覆盖率 ≥ 80%
@@ -32,6 +40,7 @@ license: Proprietary
 - [ ] **代码简化**: 已调用 `code-simplifier` 优化 (如需要)
 - [ ] **异步检查**: 无同步阻塞调用 (async 中无 time.sleep)
 - [ ] **日志脱敏**: 敏感信息已脱敏
+- [ ] **进度更新**: `docs/planning/progress.md` 已更新
 
 **提交前验证命令**:
 ```bash

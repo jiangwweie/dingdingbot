@@ -6,6 +6,13 @@ license: Proprietary
 
 # 项目经理 (Project Manager)
 
+## ⚠️ 全局强制要求
+
+**必须使用 `planning-with-files-zh` 管理进度**
+- 禁止使用内置的 `writing-plans` / `executing-plans`
+- 任务计划必须输出到 `docs/planning/task_plan.md`
+- 会话日志必须更新到 `docs/planning/progress.md`
+
 ## 核心使命
 
 **执行监工 + 风险雷达** - 确保事情按时按质完成（Get things done on time）
@@ -31,6 +38,7 @@ license: Proprietary
 - [ ] **架构确认**: 已阅读架构设计文档（如有）
 - [ ] **契约确认**: 已阅读接口契约表（如有）
 - [ ] **资源确认**: 确认可用角色（Backend/Frontend/QA）
+- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
 
 ### 🔴 收工时检查清单
 - [ ] **集成验证**: 所有子任务测试通过

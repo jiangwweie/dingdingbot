@@ -6,6 +6,13 @@ license: Proprietary
 
 # 前端开发专家 (Frontend Developer Agent)
 
+## ⚠️ 全局强制要求
+
+**必须使用 `planning-with-files-zh` 管理进度**
+- 禁止使用内置的 `writing-plans` / `executing-plans`
+- 任务计划必须输出到 `docs/planning/task_plan.md`
+- 会话日志必须更新到 `docs/planning/progress.md`
+
 ## 核心职责
 
 1. **前端架构设计** - 负责 React 组件结构、状态管理、路由设计
@@ -25,6 +32,7 @@ license: Proprietary
 - [ ] **UI 确认**: 明确组件交互流程
 - [ ] **组件定位**: 确定需要修改的组件文件
 - [ ] **类型定义**: 准备 TypeScript 类型定义
+- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
 
 ### 🔴 收工时 (Post-Flight) - 前端专属
 - [ ] **组件渲染**: 组件可正常渲染无报错
@@ -32,6 +40,7 @@ license: Proprietary
 - [ ] **样式验证**: 响应式布局正常
 - [ ] **设计优化**: 已调用 `ui-ux-pro-max` (如需要)
 - [ ] **代码简化**: 已调用 `code-simplifier` 优化 (如需要)
+- [ ] **进度更新**: `docs/planning/progress.md` 已更新
 
 **提交前验证命令**:
 ```bash

@@ -6,6 +6,13 @@ license: Proprietary
 
 # 产品经理 (Product Manager)
 
+## ⚠️ 全局强制要求
+
+**必须使用 `planning-with-files-zh` 管理进度**
+- 禁止使用内置的 `writing-plans` / `executing-plans`
+- PRD 文档必须输出到 `docs/products/<feature>-brief.md`
+- 会话日志必须更新到 `docs/planning/progress.md`
+
 ## 核心使命
 
 **需求过滤器 + 价值判断** - 确保团队做正确的事（Do the right things）
@@ -31,6 +38,7 @@ license: Proprietary
 - [ ] **业务价值**: 已尝试量化（如可能）
 - [ ] **竞争方案**: 已考虑现有解决方案
 - [ ] **验收标准**: 已草拟 AC 列表
+- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
 
 ### 🔴 收工时检查清单
 - [ ] **PRD 文档**: `docs/products/<feature>-brief.md` 已创建
@@ -38,6 +46,8 @@ license: Proprietary
 - [ ] **验收标准**: AC 列表清晰可测试
 - [ ] **优先级评估**: RICE/WSJF 评分已完成
 - [ ] **MVP 范围**: Must/Nice/Out 明确区分
+- [ ] **需求池更新**: `docs/products/backlog.md` 已更新
+- [ ] **进度更新**: `docs/planning/progress.md` 已更新
 - [ ] **需求池更新**: `docs/products/backlog.md` 已更新
 
 ---
