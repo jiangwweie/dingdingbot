@@ -764,3 +764,196 @@ async def test_order_repository_parent_order_id_tracking(order_repository):
     assert len(chain["entry"]) == 1
     assert len(chain["tps"]) == 1
     assert chain["tps"][0].parent_order_id == "ord_entry_parent"
+
+
+# ============================================================
+# get_order_chain_by_order_id 测试 - 订单详情页 K 线渲染升级
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_get_order_chain_by_order_id_entry_order(order_repository):
+    """T4-006: 查询 ENTRY 订单的订单链（有子订单）"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建 ENTRY 订单和关联的 TP/SL 订单
+    entry_order = Order(
+        id="ord_entry_chain_test",
+        signal_id="sig_chain_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('1.0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        filled_at=current_time,
+        reduce_only=False,
+    )
+
+    tp_order = Order(
+        id="ord_tp_chain_test",
+        signal_id="sig_chain_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('70000'),
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0.5'),
+        status=OrderStatus.FILLED,
+        created_at=current_time + 1000,
+        updated_at=current_time + 1000,
+        filled_at=current_time + 1000,
+        parent_order_id="ord_entry_chain_test",
+        reduce_only=True,
+    )
+
+    sl_order = Order(
+        id="ord_sl_chain_test",
+        signal_id="sig_chain_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        trigger_price=Decimal('60000'),
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.CANCELED,
+        created_at=current_time + 1000,
+        updated_at=current_time + 5000,
+        parent_order_id="ord_entry_chain_test",
+        reduce_only=True,
+    )
+
+    # 执行：保存订单
+    await order_repository.save_order(entry_order)
+    await order_repository.save_order(tp_order)
+    await order_repository.save_order(sl_order)
+
+    # 执行：查询 ENTRY 订单的订单链
+    chain = await order_repository.get_order_chain_by_order_id("ord_entry_chain_test")
+
+    # 验证：返回完整订单链（父订单 + 子订单）
+    assert len(chain) == 3
+    order_ids = [o.id for o in chain]
+    assert "ord_entry_chain_test" in order_ids
+    assert "ord_tp_chain_test" in order_ids
+    assert "ord_sl_chain_test" in order_ids
+
+
+@pytest.mark.asyncio
+async def test_get_order_chain_by_order_id_child_order(order_repository):
+    """T4-007: 查询 TP 子订单的订单链（返回父订单 + 兄弟订单）"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建订单链
+    entry_order = Order(
+        id="ord_entry_parent_test",
+        signal_id="sig_chain_test_2",
+        symbol="ETH/USDT:USDT",
+        direction=Direction.SHORT,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('10.0'),
+        filled_qty=Decimal('10.0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        filled_at=current_time,
+        reduce_only=False,
+    )
+
+    tp1_order = Order(
+        id="ord_tp1_child_test",
+        signal_id="sig_chain_test_2",
+        symbol="ETH/USDT:USDT",
+        direction=Direction.SHORT,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('3000'),
+        requested_qty=Decimal('5.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        created_at=current_time + 1000,
+        updated_at=current_time + 1000,
+        parent_order_id="ord_entry_parent_test",
+        reduce_only=True,
+    )
+
+    tp2_order = Order(
+        id="ord_tp2_child_test",
+        signal_id="sig_chain_test_2",
+        symbol="ETH/USDT:USDT",
+        direction=Direction.SHORT,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP2,
+        price=Decimal('2800'),
+        requested_qty=Decimal('5.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        created_at=current_time + 1000,
+        updated_at=current_time + 1000,
+        parent_order_id="ord_entry_parent_test",
+        reduce_only=True,
+    )
+
+    # 执行：保存订单
+    await order_repository.save_order(entry_order)
+    await order_repository.save_order(tp1_order)
+    await order_repository.save_order(tp2_order)
+
+    # 执行：查询 TP1 子订单的订单链
+    chain = await order_repository.get_order_chain_by_order_id("ord_tp1_child_test")
+
+    # 验证：返回完整订单链（父订单 + 所有子订单）
+    assert len(chain) == 3
+    order_ids = [o.id for o in chain]
+    assert "ord_entry_parent_test" in order_ids  # 父订单
+    assert "ord_tp1_child_test" in order_ids    # 自身
+    assert "ord_tp2_child_test" in order_ids    # 兄弟订单
+
+
+@pytest.mark.asyncio
+async def test_get_order_chain_by_order_id_no_children(order_repository):
+    """T4-008: 查询无子订单的 ENTRY 订单"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建无子订单的 ENTRY 订单
+    entry_order = Order(
+        id="ord_entry_lonely",
+        signal_id="sig_lonely",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('1.0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        filled_at=current_time,
+        reduce_only=False,
+    )
+
+    # 执行：保存订单
+    await order_repository.save_order(entry_order)
+
+    # 执行：查询订单链
+    chain = await order_repository.get_order_chain_by_order_id("ord_entry_lonely")
+
+    # 验证：只返回 ENTRY 订单本身
+    assert len(chain) == 1
+    assert chain[0].id == "ord_entry_lonely"
+    assert chain[0].order_role == OrderRole.ENTRY
+
+
+@pytest.mark.asyncio
+async def test_get_order_chain_by_order_id_not_found(order_repository):
+    """T4-009: 查询不存在的订单链"""
+    # 执行：查询不存在的订单
+    chain = await order_repository.get_order_chain_by_order_id("ord_not_exists")
+
+    # 验证：返回空列表
+    assert len(chain) == 0

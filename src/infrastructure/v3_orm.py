@@ -1270,7 +1270,7 @@ class ConfigEntryORM(Base):
             name="check_value_type"
         ),
         Index("idx_config_entries_key", "config_key", unique=True),
-        Index("idx_config_entries_updated_at", "updated_at DESC"),
+        Index("idx_config_entries_updated_at", "updated_at"),
     )
 
     def __repr__(self) -> str:

@@ -33,8 +33,9 @@ from typing import Optional, Callable, Any, List, Dict
 import logging
 
 from fastapi import FastAPI, Query, HTTPException, Body, File, UploadFile, Form, Response
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -3068,6 +3069,353 @@ async def preview_strategy_params(request: StrategyParamsPreviewRequest):
 
 
 # ============================================================
+# Strategy Parameters YAML Import/Export Endpoints (Phase K)
+# ============================================================
+
+class StrategyParamsExportResponse(BaseModel):
+    """Response model for strategy parameters export."""
+    yaml_content: str = Field(..., description="YAML formatted strategy parameters")
+    download_url: Optional[str] = Field(None, description="Download URL for YAML file (if saved)")
+
+
+class StrategyParamsImportRequest(BaseModel):
+    """Request model for importing strategy parameters from YAML."""
+    yaml_content: str = Field(..., description="YAML formatted strategy parameters")
+    overwrite: bool = Field(default=True, description="Whether to overwrite existing config")
+
+
+class StrategyParamsImportResponse(BaseModel):
+    """Response model for strategy parameters import result."""
+    status: str = Field(..., description="Import status: 'success' or 'error'")
+    message: str = Field(..., description="Import result message")
+    imported_params: StrategyParamsResponse = Field(None, description="Imported strategy parameters")
+    errors: List[str] = Field(default_factory=list, description="Validation errors if any")
+
+
+@app.get("/api/strategy/params/export", response_model=StrategyParamsExportResponse)
+async def export_strategy_params():
+    """
+    Export current strategy parameters as YAML.
+
+    This endpoint:
+    1. Reads all strategy.* config entries from database
+    2. Converts to nested dictionary structure
+    3. Generates YAML formatted content
+    4. Returns YAML content for download
+
+    Response:
+    {
+        "yaml_content": "strategy:\\n  pinbar:\\n    min_wick_ratio: 0.6\\n  ...",
+        "download_url": null
+    }
+    """
+    try:
+        config_manager = _get_config_manager()
+        repo = _get_config_entry_repo()
+
+        # Get all strategy parameters from database
+        strategy_params = await repo.get_entries_by_prefix("strategy")
+
+        # Build nested dict structure
+        result = {
+            "pinbar": {},
+            "engulfing": {},
+            "ema": {},
+            "mtf": {},
+            "atr": {},
+            "filters": [],
+        }
+
+        for key, value in strategy_params.items():
+            # Extract sub-key (e.g., "strategy.pinbar.min_wick_ratio" -> "pinbar.min_wick_ratio")
+            sub_key = key.replace("strategy.", "", 1)
+            parts = sub_key.split(".", 1)
+            if len(parts) == 2:
+                category, param_key = parts
+                if category in result and category != "filters":
+                    result[category][param_key] = value
+
+        # Filter out empty categories
+        result = {k: v for k, v in result.items() if v or k == "filters"}
+
+        # If no params in DB, use defaults from ConfigManager
+        if not strategy_params:
+            params = StrategyParams.from_config_manager(config_manager)
+            result = params.to_dict()
+
+        # Build YAML structure
+        yaml_data = {"strategy": result}
+
+        # Generate YAML content
+        yaml_content = yaml.safe_dump(
+            yaml_data,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+            indent=2
+        )
+
+        logger.info(f"Strategy parameters exported: {len(result)} categories")
+
+        return StrategyParamsExportResponse(
+            yaml_content=yaml_content,
+            download_url=None,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export strategy params: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/strategy/params/export", response_model=StrategyParamsExportResponse)
+async def export_strategy_params_to_file():
+    """
+    Export current strategy parameters to a YAML file.
+
+    This endpoint:
+    1. Reads all strategy.* config entries from database
+    2. Converts to nested dictionary structure
+    3. Saves to data/strategy_params_backup_{timestamp}.yaml
+    4. Returns YAML content and file path
+
+    Response:
+    {
+        "yaml_content": "...",
+        "download_url": "/api/strategy/params/export/file/strategy_params_backup_20260402_153045.yaml"
+    }
+    """
+    try:
+        config_manager = _get_config_manager()
+        repo = _get_config_entry_repo()
+
+        # Get all strategy parameters from database
+        strategy_params = await repo.get_entries_by_prefix("strategy")
+
+        # Build nested dict structure
+        result = {
+            "pinbar": {},
+            "engulfing": {},
+            "ema": {},
+            "mtf": {},
+            "atr": {},
+            "filters": [],
+        }
+
+        for key, value in strategy_params.items():
+            sub_key = key.replace("strategy.", "", 1)
+            parts = sub_key.split(".", 1)
+            if len(parts) == 2:
+                category, param_key = parts
+                if category in result and category != "filters":
+                    result[category][param_key] = value
+
+        # Filter out empty categories
+        result = {k: v for k, v in result.items() if v or k == "filters"}
+
+        # If no params in DB, use defaults from ConfigManager
+        if not strategy_params:
+            params = StrategyParams.from_config_manager(config_manager)
+            result = params.to_dict()
+
+        # Build YAML structure
+        yaml_data = {"strategy": result}
+
+        # Generate YAML content
+        yaml_content = yaml.safe_dump(
+            yaml_data,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+            indent=2
+        )
+
+        # Save to file
+        from pathlib import Path
+        from datetime import datetime, timezone
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"strategy_params_backup_{timestamp}.yaml"
+        data_dir = Path(__file__).parent.parent.parent / "data"
+        data_dir.mkdir(exist_ok=True)
+        file_path = data_dir / filename
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(yaml_content)
+
+        logger.info(f"Strategy parameters exported to {file_path}")
+
+        return StrategyParamsExportResponse(
+            yaml_content=yaml_content,
+            download_url=f"/data/{filename}",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export strategy params to file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/strategy/params/import", response_model=StrategyParamsImportResponse)
+async def import_strategy_params(request: StrategyParamsImportRequest):
+    """
+    Import strategy parameters from YAML.
+
+    This endpoint:
+    1. Parses YAML content
+    2. Validates the configuration
+    3. Saves to database
+    4. Creates an auto-snapshot of the old config
+    5. Returns import result
+
+    Request body:
+    {
+        "yaml_content": "strategy:\\n  pinbar:\\n    min_wick_ratio: 0.6\\n  ...",
+        "overwrite": true
+    }
+
+    Response:
+    {
+        "status": "success",
+        "message": "Successfully imported 5 strategy parameters",
+        "imported_params": {...},
+        "errors": []
+    }
+    """
+    try:
+        config_manager = _get_config_manager()
+        repo = _get_config_entry_repo()
+        snapshot_service = _get_snapshot_service()
+
+        # Parse YAML content
+        try:
+            yaml_data = yaml.safe_load(request.yaml_content)
+        except yaml.YAMLError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid YAML format: {str(e)}"
+            )
+
+        # Validate structure
+        if not isinstance(yaml_data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="YAML content must be a dictionary"
+            )
+
+        # Extract strategy config (support both with and without 'strategy' root key)
+        if "strategy" in yaml_data:
+            strategy_config = yaml_data["strategy"]
+        else:
+            strategy_config = yaml_data
+
+        if not isinstance(strategy_config, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Strategy config must be a dictionary"
+            )
+
+        # Build full params dict for validation
+        full_params = {
+            "pinbar": strategy_config.get("pinbar", {}),
+            "engulfing": strategy_config.get("engulfing", {}),
+            "ema": strategy_config.get("ema", {}),
+            "mtf": strategy_config.get("mtf", {}),
+            "atr": strategy_config.get("atr", {}),
+            "filters": strategy_config.get("filters", []),
+        }
+
+        # Validate parameters
+        errors = []
+        try:
+            validated_params = StrategyParams(**full_params)
+        except Exception as validation_error:
+            errors.append(str(validation_error))
+            return StrategyParamsImportResponse(
+                status="error",
+                message="Validation failed",
+                errors=errors,
+            )
+
+        # Get current params for response
+        current_params_flat = await repo.get_entries_by_prefix("strategy")
+        current_params = {
+            "pinbar": {},
+            "engulfing": {},
+            "ema": {},
+            "mtf": {},
+            "atr": {},
+            "filters": [],
+        }
+        for key, value in current_params_flat.items():
+            sub_key = key.replace("strategy.", "", 1)
+            parts = sub_key.split(".", 1)
+            if len(parts) == 2:
+                category, param_key = parts
+                if category in current_params and category != "filters":
+                    current_params[category][param_key] = value
+        current_params = {k: v for k, v in current_params.items() if v or k == "filters"}
+
+        if not current_params_flat:
+            params = StrategyParams.from_config_manager(config_manager)
+            current_params = params.to_dict()
+
+        # Create auto-snapshot before update
+        if snapshot_service and request.overwrite:
+            try:
+                await snapshot_service.create_auto_snapshot(
+                    config=config_manager.user_config,
+                    description="策略参数导入前自动快照"
+                )
+                logger.info("Auto-snapshot created before strategy params import")
+            except Exception as e:
+                logger.warning(f"Auto-snapshot creation failed: {e}")
+
+        # Save to database if overwrite is True
+        if request.overwrite:
+            from datetime import datetime, timezone
+            version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d.%H%M%S')}"
+
+            for category, values in full_params.items():
+                if category == "filters":
+                    if values:
+                        await repo.upsert_entry("strategy.filters", values, version)
+                    continue
+                if isinstance(values, dict):
+                    for param_key, value in values.items():
+                        await repo.upsert_entry(f"strategy.{category}.{param_key}", value, version)
+                elif values:
+                    await repo.upsert_entry(f"strategy.{category}", values, version)
+
+            logger.info(f"Strategy parameters imported: {len(full_params)} categories")
+
+        # Build response
+        imported_params = StrategyParamsResponse(
+            pinbar=full_params.get("pinbar", {}),
+            engulfing=full_params.get("engulfing", {}),
+            ema=full_params.get("ema", {}),
+            mtf=full_params.get("mtf", {}),
+            atr=full_params.get("atr", {}),
+            filters=full_params.get("filters", []),
+        )
+
+        return StrategyParamsImportResponse(
+            status="success",
+            message=f"Successfully validated {len(full_params)} strategy parameter categories",
+            imported_params=imported_params,
+            errors=[],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to import strategy params: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
 # Config Snapshots Management Endpoints
 # ============================================================
 
@@ -3787,6 +4135,7 @@ async def get_order(order_id: str, symbol: str = Query(..., description="币种�
 async def get_order_klines(
     order_id: str,
     symbol: str = Query(..., description="币种对"),
+    include_chain: bool = Query(default=True, description="是否返回关联订单链（TP/SL 子订单）"),
 ) -> Dict[str, Any]:
     """
     获取订单相关的 K 线数据（用于图表展示）
@@ -3794,13 +4143,35 @@ async def get_order_klines(
     Phase 6: v3.0 订单管理 - GET /api/v3/orders/{order_id}/klines
     返回订单详情 plus ~50 K-lines surrounding the order timestamp for charting
 
+    Phase K (订单详情页 K 线渲染升级):
+    - 新增 include_chain 参数，支持返回完整订单链
+    - K 线范围动态计算，覆盖完整交易生命周期
+    - 时间戳精确对齐到 filled_at
+
     Args:
         order_id: 系统订单 ID
         symbol: 币种对（查询参数）
+        include_chain: 是否返回订单链（默认 True）
 
     Returns:
         {
             "order": { ... order info ... },
+            "timeframe": "15m",
+            "order_chain": [  # 仅当 include_chain=True 时返回
+                {
+                    "order_id": "...",
+                    "order_role": "ENTRY" | "TP1" | "TP2" | "SL",
+                    "direction": "LONG" | "SHORT",
+                    "price": "...",
+                    "average_exec_price": "...",
+                    "filled_qty": "...",
+                    "status": "FILLED" | "PENDING" | "CANCELED",
+                    "filled_at": 1711785660000,
+                    "created_at": 1711785600000,
+                    "exit_reason": "..."
+                },
+                ...
+            ],
             "klines": [[timestamp, open, high, low, close, volume], ...]
         }
 
@@ -3839,6 +4210,7 @@ async def get_order_klines(
             }
             # Use current timeframe for klines
             timeframe = "15m"  # Default
+            order_chain = []
         else:
             # Build order response from ORM
             order_response = {
@@ -3860,27 +4232,79 @@ async def get_order_klines(
             # Extract timeframe from order or use default
             timeframe = getattr(order_orm, 'timeframe', '15m') or '15m'
 
+            # Fetch order chain if requested
+            order_chain = []
+            if include_chain:
+                # Re-initialize repository for order chain query
+                repo = OrderRepository(db_path="data/v3_dev.db")
+                await repo.initialize()
+                chain_orders = await repo.get_order_chain_by_order_id(order_id)
+                await repo.close()
+
+                for order in chain_orders:
+                    order_chain.append({
+                        "order_id": order.id,
+                        "order_role": order.order_role.value,
+                        "direction": order.direction.value,
+                        "price": str(order.price) if order.price else None,
+                        "average_exec_price": str(order.average_exec_price) if order.average_exec_price else None,
+                        "filled_qty": str(order.filled_qty),
+                        "status": order.status.value,
+                        "filled_at": order.filled_at,
+                        "created_at": order.created_at,
+                        "exit_reason": order.exit_reason,
+                    })
+
         # Get kline_timestamp from order (filled_at or created_at)
         kline_timestamp = order_orm.filled_at if order_orm and order_orm.filled_at else order_orm.created_at if order_orm else int(datetime.now(timezone.utc).timestamp() * 1000)
 
         # Parse timeframe to milliseconds (P1-004: 使用统一工具函数)
         timeframe_ms = BacktestConfig.get_timeframe_ms(timeframe)
 
-        # Calculate since timestamp (go back DEFAULT_KLINE_WINDOW candles to ensure target is in middle-rear)
-        since = kline_timestamp - (BacktestConfig.DEFAULT_KLINE_WINDOW * timeframe_ms)
+        # Calculate K-line range dynamically (cover full order chain lifecycle)
+        if include_chain and order_chain:
+            # Collect all filled_at timestamps from order chain
+            timestamps = [
+                oc["filled_at"] for oc in order_chain
+                if oc.get("filled_at")
+            ]
+            if not timestamps and order_orm:
+                # Fallback to order timestamps if chain has no filled_at
+                timestamps = [order_orm.filled_at or order_orm.created_at]
+
+            if timestamps:
+                min_time = min(timestamps)
+                max_time = max(timestamps)
+                # Extend range: 20 candles before and after
+                since = min_time - (20 * timeframe_ms)
+                limit = int((max_time - since) / timeframe_ms) + 40
+            else:
+                # No timestamps, use default window
+                since = kline_timestamp - (BacktestConfig.DEFAULT_KLINE_WINDOW * timeframe_ms)
+                limit = 50
+        else:
+            # Default window for single order
+            since = kline_timestamp - (BacktestConfig.DEFAULT_KLINE_WINDOW * timeframe_ms)
+            limit = 50
 
         # Fetch K-line data from CCXT
         import ccxt.async_support as ccxt
         exchange = ccxt.binanceusdm({'options': {'defaultType': 'swap'}})
         try:
-            ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=50)
+            ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
         finally:
             await exchange.close()
 
-        return {
+        result = {
             "order": order_response,
+            "timeframe": timeframe,
             "klines": ohlcv,
         }
+
+        if include_chain:
+            result["order_chain"] = order_chain
+
+        return result
 
     except HTTPException:
         raise

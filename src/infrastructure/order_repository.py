@@ -686,6 +686,87 @@ class OrderRepository:
             "sl": sl_orders,
         }
 
+    async def get_order_chain_by_order_id(self, order_id: str) -> List[Order]:
+        """
+        Get the complete order chain by order ID (ENTRY or child order).
+
+        This method retrieves:
+        - If order_id is an ENTRY order: all child orders (TP/SL) with this parent_order_id
+        - If order_id is a child order: the parent ENTRY order + all sibling orders
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            List of Order objects in the chain (ENTRY first, then TP/SL orders)
+        """
+        async with self._lock:
+            # First, get the target order
+            cursor = await self._db.execute(
+                "SELECT * FROM orders WHERE id = ? ORDER BY created_at ASC",
+                (order_id,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+
+            if not row:
+                return []
+
+            target_order = self._row_to_order(row)
+
+            # Determine the parent_order_id and oco_group_id
+            if target_order.order_role == OrderRole.ENTRY:
+                # This is an ENTRY order, get all children
+                parent_id = target_order.id
+                oco_group_id = target_order.oco_group_id
+            else:
+                # This is a child order, get the parent and siblings
+                parent_id = target_order.parent_order_id
+                oco_group_id = target_order.oco_group_id
+
+            orders = []
+
+            # Get parent ENTRY order if exists
+            if parent_id:
+                cursor = await self._db.execute(
+                    "SELECT * FROM orders WHERE id = ? ORDER BY created_at ASC",
+                    (parent_id,)
+                )
+                parent_row = await cursor.fetchone()
+                await cursor.close()
+
+                if parent_row:
+                    orders.append(self._row_to_order(parent_row))
+
+            # Get all child orders (TP/SL)
+            if parent_id or target_order.order_role == OrderRole.ENTRY:
+                search_parent_id = parent_id if parent_id else target_order.id
+                cursor = await self._db.execute(
+                    """
+                    SELECT * FROM orders
+                    WHERE parent_order_id = ?
+                    ORDER BY
+                        CASE order_role
+                            WHEN 'TP1' THEN 1
+                            WHEN 'TP2' THEN 2
+                            WHEN 'TP3' THEN 3
+                            WHEN 'TP4' THEN 4
+                            WHEN 'TP5' THEN 5
+                            WHEN 'SL' THEN 6
+                            ELSE 7
+                        END,
+                        created_at ASC
+                    """,
+                    (search_parent_id,)
+                )
+                child_rows = await cursor.fetchall()
+                await cursor.close()
+
+                for child_row in child_rows:
+                    orders.append(self._row_to_order(child_row))
+
+            return orders
+
     async def get_oco_group(self, oco_group_id: str) -> List[Order]:
         """
         Get all orders in an OCO group.
