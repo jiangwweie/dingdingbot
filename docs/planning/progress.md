@@ -6,40 +6,49 @@
 
 ## 📍 最近 7 天
 
-### 2026-04-02 - 策略参数可配置化完成 + Phase 8 集成测试通过
+### 2026-04-02 - 订单详情页 K 线渲染升级完成
 
 **执行日期**: 2026-04-02  
 **执行人**: AI Builder  
-**状态**: ✅ 策略参数功能 100% 完成 + Phase 8 测试 100% 通过
+**状态**: ✅ 后端 + 前端 + 测试 100% 完成
 
 ---
 
-## ✅ 策略参数可配置化 - 完成报告
+## ✅ 订单详情页 K 线渲染升级 - 完成报告
 
-**任务概述**: 实现策略参数数据库存储方案，SQLite 持久化，YAML 仅用于导入导出备份。
+**任务概述**: 订单详情页 K 线渲染从 Recharts 升级为 TradingView Lightweight Charts，实现订单时间戳与 K 线精确对齐。
 
 **完成时间**: 2026-04-02
 
 **交付物汇总**:
 | 分类 | 任务 | 状态 | 详情 |
 |------|------|------|------|
-| 后端 | B1-B7 | ✅ 已完成 | 数据库表 + Repository + API + YAML 导入导出 |
-| 前端 | F1-F6 | ✅ 已完成 | 6 个组件 + ConfigManagement 集成 |
-| 测试 | T1-T4 | ✅ 已完成 | 99 个测试用例 100% 通过 |
+| 后端 | B1-B5 | ✅ 已完成 | API 扩展 + 订单链查询 + K 线范围计算 |
+| 前端 | F1-F4 | ✅ 已完成 | TradingView 蜡烛图 + 订单标记 + 水平价格线 |
+| 测试 | T1-T2 | ✅ 已完成 | 14 个测试用例 100% 通过 |
 
 **测试报告**:
 | 测试文件 | 通过数 | 状态 |
 |----------|--------|------|
-| test_config_entry_repository.py | 34/34 | ✅ |
-| test_strategy_params_api.py | 22/22 | ✅ |
-| test_migrate_config_to_db.py | 22/22 | ✅ |
-| test_strategy_params_ui.py | 21/21 | ✅ |
-| **总计** | **99/99** | **✅** |
+| test_order_klines_api.py (单元) | 7/7 | ✅ |
+| test_order_kline_timealignment.py (集成) | 7/7 | ✅ |
+| **总计** | **14/14** | **✅** |
+
+**核心功能**:
+1. **订单链查询**: 支持从 ENTRY 或子订单查询完整订单链
+2. **K 线范围计算**: 动态计算覆盖完整交易生命周期的 K 线范围
+3. **时间对齐**: 订单 `filled_at` 时间戳与 K 线时间精确对齐
+4. **TradingView 渲染**: 蜡烛图 + 订单标记 + 水平价格线
 
 **Git 提交**:
-- 后端：ConfigEntryORM, ConfigEntryRepository, 策略参数 API
-- 前端：StrategyParamPanel, PinbarParamForm, EmaParamForm, FilterParamList, ParamPreviewModal, TemplateManager
-- 测试：4 个测试文件，99 个测试用例
+- `feat(api)`: 订单详情页 K 线渲染升级 - 后端实现
+- `feat(frontend)`: OrderDetailsDrawer 升级为 TradingView 蜡烛图
+- `test(order-klines)`: 订单详情页 K 线渲染测试完成
+- `test(order-klines)`: 集成测试全部通过 + 测试报告更新
+
+**相关文档**:
+- `docs/designs/order-kline-upgrade-contract.md` - 接口契约表
+- `docs/testing/order-klines-test-report.md` - 测试报告
 
 ---
 
