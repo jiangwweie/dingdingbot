@@ -35,11 +35,11 @@
 **任务分解**:
 | 任务 ID | 任务名称 | 状态 | 说明 |
 |--------|----------|------|------|
-| #12 | 后端 B1: OrderRepository 树形查询实现 | 🔄 进行中 | get_order_tree(), get_order_chain() |
-| #16 | 后端 B2: 订单树 API 端点实现 | ☐ 待开始 | GET /api/v3/orders/tree, DELETE /api/v3/orders/batch |
-| #14 | 前端 F1: 订单链树形表格组件开发 | ☐ 待开始 | OrderChainTreeTable 组件 |
-| #15 | 前端 F2: Orders 页面集成树形表格 | ☐ 待开始 | 集成树形表格 + API 调用 |
-| #13 | 测试 T1: 订单链功能测试 | ☐ 待开始 | 单元 + 集成 + E2E 测试 |
+| #12 | 后端 B1: OrderRepository 树形查询实现 | ✅ 已完成 | get_order_tree(), get_order_chain() |
+| #16 | 后端 B2: 订单树 API 端点实现 | ✅ 已完成 | GET /api/v3/orders/tree, DELETE /api/v3/orders/batch |
+| #14 | 前端 F1: 订单链树形表格组件开发 | ✅ 已完成 | OrderChainTreeTable 组件 (3/3 测试通过) |
+| #15 | 前端 F2: Orders 页面集成树形表格 | ✅ 已完成 | 集成树形表格 + API 调用 |
+| #13 | 测试 T1: 订单链功能测试 | ✅ 已完成 | 单元 + 集成测试 (路由修复完成) |
 
 **说明**: 订单详情页 K 线渲染任务已完成，后续仅需执行订单管理级联展示功能。
 
