@@ -77,7 +77,7 @@
 **待办事项**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
 |----|----------|--------|----------|------|
-| T1 | 信号回测与订单回测接口拆分 | P0 | 2h | ☐ 待确认 |
+| ~~T1~~ | ~~信号回测与订单回测接口拆分~~ | P0 | ~~2h~~ | ✅ **已完成** |
 | ~~T2~~ | ~~回测记录列表展示确认~~ | P0 | ~~0.5h~~ | ✅ **已完成** |
 | ~~T3~~ | ~~订单详情 K 线图渲染确认~~ | P0 | ~~0.5h~~ | ✅ **已完成** |
 | ~~T4~~ | ~~回测指标显示错误排查~~ | P0 | ~~3h~~ | ✅ **已完成** |
@@ -85,10 +85,20 @@
 
 **详细说明**:
 
-**T1: 信号回测与订单回测接口拆分**
-- 现状：信号回测和订单回测逻辑混在一起
-- 目标：拆分为两个独立接口，逻辑分离
-- 待确认：当前接口位置和耦合程度
+**T1: 信号回测与订单回测接口拆分** ✅ 已完成
+- 状态：信号回测和订单回测逻辑已拆分到两个独立接口
+- 新接口:
+  - `POST /api/backtest/signals` - 信号回测（v2_classic 模式）
+  - `POST /api/backtest/orders` - PMS 订单回测（v3_pms 模式）
+- 原 `/api/backtest` 端点标记为 deprecated
+- 前端更新:
+  - `runSignalBacktest()` - 信号回测 API 调用
+  - `runPMSBacktest()` - PMS 回测 API 调用
+  - `runBacktest()` - 标记为 deprecated
+- 修改文件:
+  - `src/interfaces/api.py` - 新增两个端点，原端点标记为 deprecated
+  - `web-front/src/lib/api.ts` - 更新 API 调用
+  - `web-front/src/pages/Backtest.tsx` - 使用 runSignalBacktest
 
 **T2: 回测记录列表展示确认** ✅ 已完成
 - 后端：`/api/v3/backtest/reports` 已实现（支持筛选、排序、分页）

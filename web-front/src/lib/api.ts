@@ -656,18 +656,22 @@ export async function updateSystemConfig(
 }
 
 /**
- * Run backtest with given parameters
+ * Run signal-level backtest (v2_classic mode)
  *
+ * 信号回测 - 仅统计信号触发和过滤器拦截情况，不涉及订单执行模拟。
  * Backtest signals are automatically saved to database.
  */
-export async function runBacktest(payload: BacktestRequest): Promise<BacktestReport> {
-  const res = await fetch('/api/backtest', {
+export async function runSignalBacktest(payload: BacktestRequest): Promise<BacktestReport> {
+  const res = await fetch('/api/backtest/signals', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      mode: 'v2_classic',
+    }),
   });
   if (!res.ok) {
-    const error = new Error('Failed to run backtest');
+    const error = new Error('Failed to run signal backtest');
     (error as any).status = res.status;
     (error as any).info = await res.json().catch(() => ({}));
     throw error;
@@ -677,12 +681,13 @@ export async function runBacktest(payload: BacktestRequest): Promise<BacktestRep
 }
 
 /**
- * Run PMS backtest with given parameters (v3.0 PMS mode)
+ * Run position-level PMS backtest (v3_pms mode)
  *
- * This runs backtest in v3_pms mode with position-level tracking.
+ * PMS 订单回测 - 包含订单执行、滑点、手续费、止盈止损等完整交易流程模拟。
+ * Positions and orders are automatically saved to database.
  */
 export async function runPMSBacktest(payload: BacktestRequest): Promise<PMSBacktestReport> {
-  const res = await fetch('/api/backtest', {
+  const res = await fetch('/api/backtest/orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -692,6 +697,29 @@ export async function runPMSBacktest(payload: BacktestRequest): Promise<PMSBackt
   });
   if (!res.ok) {
     const error = new Error('Failed to run PMS backtest');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  const data = await res.json();
+  return data.report || data;
+}
+
+/**
+ * [DEPRECATED] Run backtest with given parameters
+ *
+ * @deprecated Use runSignalBacktest() or runPMSBacktest() instead
+ * This endpoint will be removed in a future version.
+ */
+export async function runBacktest(payload: BacktestRequest): Promise<BacktestReport | PMSBacktestReport> {
+  console.warn('runBacktest() is deprecated. Use runSignalBacktest() or runPMSBacktest() instead.');
+  const res = await fetch('/api/backtest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to run backtest');
     (error as any).status = res.status;
     (error as any).info = await res.json().catch(() => ({}));
     throw error;

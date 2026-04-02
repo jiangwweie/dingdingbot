@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
-  runBacktest,
+  runSignalBacktest,
   BacktestRequest,
   BacktestReport,
   StrategyDefinition,
@@ -149,7 +149,7 @@ export default function Backtest() {
         risk_overrides: riskOverrides,
       };
 
-      const result = await runBacktest(payload);
+      const result = await runSignalBacktest(payload);
       setReport(result);
     } catch (err: any) {
       // Handle 422 validation errors - detail might be an array of objects

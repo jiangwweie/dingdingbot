@@ -1063,14 +1063,17 @@ async def update_config(
 
 
 # ============================================================
-# Backtest Endpoint
+# Backtest Endpoints
 # ============================================================
-@app.post("/api/backtest")
-async def run_backtest(
+
+@app.post("/api/backtest/signals")
+async def run_signal_backtest(
     request: BacktestRequest,
 ):
     """
-    Run strategy backtest on historical data.
+    Run signal-level backtest on historical data (v2_classic mode).
+
+    信号回测 - 仅统计信号触发和过滤器拦截情况，不涉及订单执行模拟。
 
     Backtest signals are automatically saved to database with source='backtest'.
     You can view them in the Signals page with K-line chart visualization.
@@ -1088,7 +1091,8 @@ async def run_backtest(
         "max_body_ratio": 0.3,
         "body_position_tolerance": 0.1,
         "trend_filter_enabled": true,
-        "mtf_validation_enabled": true
+        "mtf_validation_enabled": true,
+        "mode": "v2_classic"
     }
 
     Returns:
@@ -1098,6 +1102,210 @@ async def run_backtest(
         - simulated_win_rate: Simulated win rate
         - attempts: Detailed attempt records
     """
+    try:
+        from src.application.backtester import Backtester
+        from src.infrastructure.backtest_repository import BacktestReportRepository
+        from src.infrastructure.historical_data_repository import HistoricalDataRepository
+        from src.infrastructure.order_repository import OrderRepository
+
+        # Validate mode
+        if request.mode != "v2_classic":
+            logger.warning(f"Signal backtest called with mode={request.mode}, forcing v2_classic")
+
+        gateway = _get_exchange_gateway()
+
+        # Initialize historical data repository for local-first data access
+        data_repo = HistoricalDataRepository()
+        await data_repo.initialize()
+
+        backtester = Backtester(gateway, data_repository=data_repo)
+
+        # Get current account snapshot for position sizing
+        account_snapshot = _account_getter() if _account_getter else None
+
+        # Get repository for saving signals (always save backtest signals)
+        repository = _get_repository()
+
+        # T5/T6: Initialize backtest report repository for saving reports
+        backtest_repository = BacktestReportRepository()
+        await backtest_repository.initialize()
+
+        # T4: Initialize order repository for saving orders
+        order_repository = OrderRepository()
+        await order_repository.initialize()
+
+        try:
+            # Run backtest with repositories (force v2_classic mode)
+            request_copy = BacktestRequest(**request.model_dump())
+            request_copy.mode = "v2_classic"
+
+            report = await backtester.run_backtest(
+                request_copy,
+                account_snapshot,
+                repository=repository,
+                backtest_repository=backtest_repository,
+                order_repository=order_repository
+            )
+
+            return {
+                "status": "success",
+                "report": report.model_dump(),
+            }
+        finally:
+            await backtest_repository.close()
+            await order_repository.close()
+            await data_repo.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/backtest/orders")
+async def run_pms_backtest(
+    request: BacktestRequest,
+):
+    """
+    Run position-level PMS backtest with MockMatchingEngine (v3_pms mode).
+
+    PMS 订单回测 - 包含订单执行、滑点、手续费、止盈止损等完整交易流程模拟。
+
+    Features:
+    - Position-level tracking with detailed PnL analysis
+    - Mock matching engine with configurable slippage and fees
+    - Multi-level take-profit support
+    - Trailing stop loss support
+    - Complete order lifecycle simulation
+
+    T4/T5/T6: Orders and backtest reports are automatically saved to database.
+
+    Request body (BacktestRequest):
+    {
+        "symbol": "BTC/USDT:USDT",
+        "timeframe": "15m",
+        "start_time": null,
+        "end_time": null,
+        "limit": 100,
+        "mode": "v3_pms",
+        "initial_balance": 10000,
+        "slippage_rate": 0.001,
+        "fee_rate": 0.0004,
+        "strategies": [...],  # Optional: custom strategy definitions
+        "risk_overrides": {...},  # Optional: risk config overrides
+        "order_strategy": {...}  # Optional: multi-level TP strategy
+    }
+
+    Returns:
+        PMSBacktestReport with:
+        - positions: Position-level trade records with PnL
+        - orders: All executed orders
+        - equity_curve: Account balance over time
+        - statistics: Win rate, avg PnL, max drawdown, etc.
+        - monthly_returns: Monthly return heatmap data
+    """
+    try:
+        from src.application.backtester import Backtester
+        from src.infrastructure.backtest_repository import BacktestReportRepository
+        from src.infrastructure.historical_data_repository import HistoricalDataRepository
+        from src.infrastructure.order_repository import OrderRepository
+
+        # Validate mode
+        if request.mode != "v3_pms":
+            logger.warning(f"PMS backtest called with mode={request.mode}, forcing v3_pms")
+
+        gateway = _get_exchange_gateway()
+
+        # Initialize historical data repository for local-first data access
+        data_repo = HistoricalDataRepository()
+        await data_repo.initialize()
+
+        backtester = Backtester(gateway, data_repository=data_repo)
+
+        # T5/T6: Initialize backtest report repository for saving reports
+        backtest_repository = BacktestReportRepository()
+        await backtest_repository.initialize()
+
+        # T4: Initialize order repository for saving orders
+        order_repository = OrderRepository()
+        await order_repository.initialize()
+
+        try:
+            # Run backtest with repositories (force v3_pms mode)
+            request_copy = BacktestRequest(**request.model_dump())
+            request_copy.mode = "v3_pms"
+
+            report = await backtester.run_backtest(
+                request_copy,
+                account_snapshot=None,  # Not needed for PMS mode
+                repository=None,  # Signals are tracked internally
+                backtest_repository=backtest_repository,
+                order_repository=order_repository
+            )
+
+            return {
+                "status": "success",
+                "report": report.model_dump(),
+            }
+        finally:
+            await backtest_repository.close()
+            await order_repository.close()
+            await data_repo.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================
+# Deprecated: Use /api/backtest/signals or /api/backtest/orders instead
+# ============================================================
+@app.post("/api/backtest")
+async def run_backtest_deprecated(
+    request: BacktestRequest,
+):
+    """
+    [DEPRECATED] Run strategy backtest on historical data.
+
+    已弃用：请使用以下新接口替代：
+    - POST /api/backtest/signals - 信号回测（v2_classic 模式）
+    - POST /api/backtest/orders - PMS 订单回测（v3_pms 模式）
+
+    This endpoint will be removed in a future version.
+
+    Backtest signals are automatically saved to database with source='backtest'.
+    You can view them in the Signals page with K-line chart visualization.
+
+    T4/T5/T6: Orders and backtest reports are automatically saved to database.
+
+    Request body (BacktestRequest):
+    {
+        "symbol": "BTC/USDT:USDT",
+        "timeframe": "15m",
+        "start_time": null,
+        "end_time": null,
+        "limit": 100,
+        "min_wick_ratio": 0.6,
+        "max_body_ratio": 0.3,
+        "body_position_tolerance": 0.1,
+        "trend_filter_enabled": true,
+        "mtf_validation_enabled": true,
+        "mode": "v2_classic" | "v3_pms"  # 通过 mode 参数区分
+    }
+
+    Returns:
+        BacktestReport (v2_classic) or PMSBacktestReport (v3_pms)
+    """
+    import warnings
+    warnings.warn(
+        "The /api/backtest endpoint is deprecated. "
+        "Please use /api/backtest/signals for signal-level backtest "
+        "or /api/backtest/orders for PMS backtest.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+
     try:
         from src.application.backtester import Backtester
         from src.infrastructure.backtest_repository import BacktestReportRepository
