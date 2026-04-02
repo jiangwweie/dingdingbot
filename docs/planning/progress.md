@@ -6,6 +6,54 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-03 - 订单管理级联展示功能完成
+
+**执行日期**: 2026-04-03  
+**状态**: ✅ 前端 F2 + 测试 T1 完成，功能开发完成
+
+**今日完成**:
+1. ✅ 前端 F2: Orders 页面集成树形表格
+   - API 函数封装：`fetchOrderTree()` 和 `deleteOrderChain()`
+   - Orders.tsx 完全重构，集成 `OrderChainTreeTable` 和 `DeleteChainConfirmModal`
+   - 保留筛选功能（币种、周期、日期范围）
+   - 使用 `react-window` 虚拟滚动优化性能
+   - 构建验证：`npm run build` 编译通过
+
+2. ✅ 测试 T1: 订单链功能测试
+   - 创建集成测试文件 `tests/integration/test_order_chain_api.py` (19 个测试用例)
+   - 更新单元测试 `tests/unit/test_order_tree_api.py`
+   - 修复 P0 路由顺序问题：将 `/tree` 和 `/batch` 移到 `/{order_id:path}` 之前
+
+3. ✅ 文档更新
+   - `docs/planning/restart-handoff.md` - 更新为完成状态
+   - `docs/planning/task_plan.md` - 更新任务分解状态
+   - `docs/planning/progress.md` - 添加今日进度日志
+
+**修改文件**:
+| 文件 | 修改内容 |
+|------|----------|
+| `web-front/src/lib/api.ts` | 新增 `fetchOrderTree` 和 `deleteOrderChain` 函数 |
+| `web-front/src/pages/Orders.tsx` | 完全重构，集成树形表格和删除确认弹窗 |
+| `src/interfaces/api.py` | 路由顺序修复，将 /tree 和 /batch 移到 /{order_id} 之前 |
+| `tests/integration/test_order_chain_api.py` | 新建完整集成测试覆盖 |
+| `tests/unit/test_order_tree_api.py` | 更新单元测试修复 Mock 问题 |
+
+**功能验收**:
+- ✅ Orders 页面能正确展示订单树形结构（ENTRY→TP1/TP2/SL）
+- ✅ 点击删除按钮弹出确认对话框
+- ✅ 确认后调用后端 API 执行批量删除
+- ✅ 删除成功后刷新订单列表
+- ✅ 保留现有筛选功能（symbol、timeframe、日期范围）
+
+**遗留问题** (技术债):
+1. `order_audit_logs` 表尚未创建，审计日志持久化待实现
+2. `delete_orders_batch()` 中交易所 API 调用逻辑待集成
+
+**Git 提交**:
+- `3fc69eb` - docs: 订单管理级联展示功能完成 - 前端 F2 + 测试 T1
+
+---
+
 ### 2026-04-03 - 测试 T1: 订单链功能测试完成
 
 **执行日期**: 2026-04-03  
