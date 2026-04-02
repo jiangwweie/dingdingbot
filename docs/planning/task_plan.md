@@ -30,7 +30,7 @@
 | 1 | 配置快照创建验证失败 - version 格式问题 | P0 | ✅ 已完成 | 修复 API 和 Service 的 VERSION_PATTERN 不一致问题 |
 | 2 | 持仓数据不一致问题排查 | P0 | ✅ 已完成 | 修复前后端字段名不一致 (items vs positions) |
 | 3 | 策略参数可配置化分析与梳理 | P0 | ✅ 分析完成 | 技术任务已分解，待开发 |
-| 4 | 订单详情页 K 线渲染 - 集成 TradingView 组件 | P1 | ☐ 待启动 | 待开发 |
+| 4 | 订单详情页 K 线渲染 - TradingView 升级 (方案 C) | P1 | 🔄 进行中 | 时间线对齐为核心需求 |
 | 5 | 回测列表盈亏计算和夏普比率修复 | P0 | ✅ 已完成 | 添加 sharpe_ratio 字段到数据库和 API |
 | 6 | 订单管理级联展示功能 | P1 | ☐ 待启动 | 待开发 |
 | 7 | 修复信号详情接口报错 (Legacy signal data) | P0 | ✅ 已完成 | 将错误返回改为 HTTPException |
@@ -63,31 +63,33 @@
 - `docs/products/p1-tasks-analysis-brief.md` - 产品需求文档
 - `docs/planning/findings.md` - 存储方案决策
 
-**状态**: ✅ 阶段 1 完成（后端核心 API 实现）
+**状态**: ✅ 阶段 1&2 完成（数据库表 + ORM + Repository + API + 迁移脚本）
 
 **架构决策** (2026-04-02):
-- **配置存储**: SQLite 数据库 (`config_entries` 表) 替代 YAML 文件
+- **配置存储**: SQLite 数据库 (`config_entries_v2` 表) 替代 YAML 文件
 - **YAML 角色**: 仅用于导入导出备份，不作为运行态存储
 - **优势**: 启动无需加载外部文件、事务支持、与快照系统无缝集成
 
 **今日完成 (2026-04-02)**:
-- ✅ B1: config_entries 表结构创建（config_snapshot_repository.py）
-- ✅ B2: StrategyParams 等 Pydantic 模型创建（models.py）
-- ✅ B3: GET /api/strategy/params 实现
-- ✅ B4: PUT /api/strategy/params + 热重载集成
-- ✅ B5: POST /api/strategy/params/preview 实现
+- ✅ B1: ConfigEntryORM 模型创建 (src/infrastructure/v3_orm.py)
+- ✅ B2: ConfigEntryRepository 实现 (src/infrastructure/config_entry_repository.py)
+- ✅ B3: GET /api/strategy/params API 端点实现
+- ✅ B4: PUT /api/strategy/params API 端点实现
+- ✅ B5: POST /api/strategy/params/preview API 端点实现
+- ✅ B6: 配置迁移脚本创建 (scripts/migrate_config_to_db.py)
 
 **任务清单**:
 
 **后端任务 (10h)**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
 |----|----------|--------|----------|------|
-| B1 | 调整 config_entries 表结构为新设计 | P0 | 1h | ✅ 已完成 |
-| B2 | 创建 StrategyParams Pydantic 模型 | P0 | 1h | ✅ 已完成 |
-| B3 | 实现 GET /api/strategy/params | P0 | 1h | ✅ 已完成 |
-| B4 | 实现 PUT /api/strategy/params + 热重载集成 | P0 | 2h | ✅ 已完成 |
-| B5 | 实现 POST /api/strategy/params/preview | P0 | 1h | ✅ 已完成 |
-| B6 | 实现 YAML 导入导出 API | P1 | 2h | ☐ 待启动 |
+| B1 | ConfigEntryORM 模型创建 | P0 | 1h | ✅ 已完成 |
+| B2 | ConfigEntryRepository 实现 | P0 | 2h | ✅ 已完成 |
+| B3 | GET /api/strategy/params API 端点 | P0 | 1h | ✅ 已完成 |
+| B4 | PUT /api/strategy/params API 端点 | P0 | 2h | ✅ 已完成 |
+| B5 | POST /api/strategy/params/preview API 端点 | P0 | 1h | ✅ 已完成 |
+| B6 | 配置迁移脚本 (YAML → DB) | P0 | 2h | ✅ 已完成 |
+| B7 | YAML 导入导出 API | P1 | 2h | ☐ 待启动 |
 
 **前端任务 (11h)**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
@@ -102,17 +104,17 @@
 **测试任务 (6h)**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
 |----|----------|--------|----------|------|
-| T1 | StrategyParams 模型单元测试 | P0 | 1h | ☐ 待启动 |
+| T1 | ConfigEntryRepository 单元测试 | P0 | 2h | ☐ 待启动 |
 | T2 | 策略参数 API 集成测试 | P0 | 2h | ☐ 待启动 |
-| T3 | 参数验证边界测试 | P0 | 1h | ☐ 待启动 |
+| T3 | 配置迁移脚本测试 | P0 | 1h | ☐ 待启动 |
 | T4 | 前端 E2E 测试 | P1 | 2h | ☐ 待启动 |
 
 **执行阶段**:
-- **阶段 1**: B1-B3（数据库表 + ORM+Repository） - 预计 4h
-- **阶段 2**: B4-B5（ConfigManager 集成 + 迁移脚本） - 预计 4h
-- **阶段 3**: B6（导入导出 API） - 预计 2h
-- **阶段 4**: F1-F6（前端核心） - 预计 11h
-- **阶段 5**: T1-T4（测试验证） - 预计 6h
+- **阶段 1**: B1-B2（数据库表 + ORM+Repository） - ✅ 已完成
+- **阶段 2**: B3-B6（API 端点 + 迁移脚本） - ✅ 已完成
+- **阶段 3**: B7（YAML 导入导出 API） - 待启动
+- **阶段 4**: F1-F6（前端核心） - 待启动
+- **阶段 5**: T1-T4（测试验证） - 待启动
 **详细说明**:
 
 ### 任务 8: 回测数据源降级逻辑修复
@@ -165,6 +167,153 @@ logger.info("DB has no data, falling back to Exchange Gateway...")
 **预防措施**:
 - 添加回测集成测试，覆盖不同时间范围场景
 - 前端表单添加 version 格式验证，与后端保持一致
+
+---
+
+---
+
+## 订单详情页 K 线渲染 - TradingView 升级 (方案 C) ⭐
+
+**任务来源**: `docs/products/p1-tasks-analysis-brief.md` - 任务二
+**优先级**: P1 (RICE 评分：4.8)
+**状态**: 🚀 阶段 1 已完成 - 契约设计完成
+**核心需求**: **订单的入场、出场、止盈、止损必须与实际 K 线时间精确对齐，复原交易场景**
+**契约文档**: `docs/designs/order-kline-upgrade-contract.md`
+
+### 需求分析
+
+**当前实现**:
+- 图表库：Recharts LineChart
+- 图表类型：收盘价折线图
+- 订单标记：ReferenceDot 点标记
+- 问题：无法展示 K 线高低点，交易员无法复盘订单执行质量
+
+**目标实现**:
+- 图表库：TradingView Lightweight Charts (与信号详情页一致)
+- 图表类型：K 线蜡烛图
+- 订单标记：箭头 + 水平线，时间精确对齐
+- 核心功能：
+  - ✅ ENTRY 入场时间点标记（箭头）
+  - ✅ TP1/TP2/SL 子订单成交时间标记（水平线）
+  - ✅ 订单链时间线可视化
+  - ✅ 十字光标交互 + 时间轴缩放
+  - ✅ 悬停显示订单详情 Tooltip
+
+### 技术方案
+
+#### 后端 API 扩展
+
+**当前 API**: `GET /api/v3/orders/{order_id}/klines`
+- ✅ 已返回订单详情 + 50 根 K 线数据
+- ⚠️ 需扩展：支持订单链查询（父订单 + 子订单列表）
+
+**扩展后端 API**:
+```python
+@app.get("/api/v3/orders/{order_id}/klines")
+async def get_order_klines(order_id: str, symbol: str, include_chain: bool = True):
+    """
+    获取订单 K 线数据（支持订单链时间线对齐）
+    
+    返回:
+    {
+        "order": { ... 订单详情 ... },
+        "order_chain": [  # 订单链（可选）
+            {
+                "order_id": "...",
+                "order_role": "ENTRY" | "TP1" | "TP2" | "SL",
+                "parent_order_id": "...",
+                "filled_at": 1711785660000,  # 成交时间戳（关键）
+                "price": "...",
+                "status": "FILLED" | "PENDING" | "CANCELED"
+            },
+            ...
+        ],
+        "klines": [[timestamp, open, high, low, close, volume], ...]
+    }
+    """
+```
+
+**关键数据点**:
+| 订单类型 | 时间戳字段 | 用途 |
+|----------|-----------|------|
+| ENTRY | `filled_at` | 入场时间点 |
+| TP1/TP2/... | `filled_at` | 止盈成交时间点 |
+| SL | `filled_at` | 止损成交时间点 |
+
+#### 前端图表升级
+
+**复用 SignalDetailsDrawer 组件逻辑**:
+```typescript
+// web-front/src/components/v3/OrderDetailsDrawer.tsx
+
+// 1. 导入 TradingView
+import { createChart, IChartApi, ISeriesApi, CandlestickSeries } from 'lightweight-charts';
+
+// 2. 创建图表
+const chart = createChart(container, {
+  layout: { background: { color: '#FFFFFF' } },
+  crosshair: { vertLine: { color: '#D0D0D0' }, horzLine: { color: '#D0D0D0' } },
+});
+
+// 3. K 线蜡烛图
+const candleSeries = chart.addSeries(CandlestickSeries, {
+  upColor: '#34C759',    // Apple Green
+  downColor: '#FF3B30',  // Apple Red
+});
+
+// 4. 订单标记（时间对齐）
+const markers = orderChain.map(order => ({
+  time: (order.filled_at / 1000) as UTCTimestamp,  // 关键：精确时间戳
+  position: order.order_role === 'ENTRY' ? 'belowBar' : 'aboveBar',
+  color: getRoleColor(order.order_role),
+  shape: order.order_role === 'ENTRY' ? 'arrowUp' : 'circle',
+  text: getOrderRoleLabel(order.order_role),
+}));
+
+// 5. 止盈/止损水平线
+if (entryOrder.average_exec_price) {
+  candleSeries.createPriceLine({
+    price: Number(entryOrder.average_exec_price),
+    color: APPLE_BLUE,
+    lineStyle: 3,  // Dotted
+    title: '入场价',
+  });
+}
+
+// 6. TP/SL 水平线（基于实际成交价）
+orderChain.filter(o => o.order_role.startsWith('TP') && o.status === 'FILLED').forEach(tp => {
+  candleSeries.createPriceLine({
+    price: Number(tp.price),
+    color: APPLE_GREEN,
+    lineStyle: 2,  // Dashed
+    title: `${tp.order_role} (已成交)`,
+  });
+});
+```
+
+### 任务分解
+
+**后端任务**:
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| B1 | 扩展 OrderRepository 支持订单链查询 | 1h | ☐ 待启动 |
+| B2 | 扩展 GET /api/v3/orders/{order_id}/klines 支持 include_chain 参数 | 1h | ☐ 待启动 |
+| B3 | 单元测试：订单链时间线对齐验证 | 1h | ☐ 待启动 |
+
+**前端任务**:
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| F1 | OrderDetailsDrawer 升级为 TradingView 蜡烛图 | 2h | ☐ 待启动 |
+| F2 | 订单链时间线可视化（箭头 + 水平线） | 2h | ☐ 待启动 |
+| F3 | 订单详情 Tooltip（悬停显示） | 1h | ☐ 待启动 |
+
+**测试任务**:
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| T1 | 集成测试：订单时间线对齐验证 | 1h | ☐ 待启动 |
+| T2 | E2E 测试：完整交易场景复原 | 1h | ☐ 待启动 |
+
+**总工时**: 9 小时
 
 ---
 

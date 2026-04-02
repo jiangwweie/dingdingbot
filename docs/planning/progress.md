@@ -6,48 +6,126 @@
 
 ## 📍 最近 7 天
 
-### 2026-04-02 - 策略参数可配置化开发（后端核心实现）
+### 2026-04-02 - 策略参数可配置化数据库存储方案（后端核心完成）
 
 **执行日期**: 2026-04-02  
 **执行人**: AI Builder  
-**状态**: 🔄 进行中（后端核心完成）
+**状态**: ✅ 阶段 1&2 完成（数据库表 + ORM + Repository + API + 迁移脚本）
 
 ---
 
-## ✅ 策略参数可配置化开发 - 后端核心实现
+## ✅ 策略参数可配置化 - 数据库存储方案
 
-**任务概述**: 实现策略参数可视化配置的后端 API 和数据库支持。
+**任务概述**: 实现策略参数数据库存储方案，SQLite 持久化，YAML 仅用于导入导出备份。
 
-**修改文件**:
-- `src/infrastructure/config_snapshot_repository.py` - 添加 config_entries 表支持
-- `src/domain/models.py` - 添加 StrategyParams 等 Pydantic 模型
-- `src/interfaces/api.py` - 添加策略参数 API 端点
-- `docs/planning/strategy-param-config-plan.md` - 创建任务计划文档
+**修改/新增文件**:
+- `src/infrastructure/v3_orm.py` - 添加 ConfigEntryORM 模型
+- `src/infrastructure/config_entry_repository.py` - 新建配置条目 Repository
+- `src/interfaces/api.py` - 更新策略参数 API 端点
+- `scripts/migrate_config_to_db.py` - 新建配置迁移脚本
 - `docs/planning/task_plan.md` - 更新任务清单
-- `docs/planning/findings.md` - 添加技术发现记录
+- `docs/planning/progress.md` - 更新进度日志
 
 **实现功能**:
-- ✅ B1: 创建 config_entries 数据库表 + ORM 模型
-  - 新增 `config_entries` 表用于存储策略参数
-  - 添加 `get_config_entry`, `upsert_config_entry`, `get_strategy_params`, `save_strategy_params` 方法
-  
-- ✅ B2: 创建 StrategyParams Pydantic 模型
-  - `PinbarParams` - Pinbar 形态参数（min_wick_ratio, max_body_ratio, body_position_tolerance）
-  - `EngulfingParams` - 吞没形态参数（max_wick_ratio）
-  - `EmaParams` - EMA 趋势过滤参数（period）
-  - `MtfParams` - MTF 多周期验证参数（enabled, ema_period）
-  - `AtrParams` - ATR 过滤器参数（enabled, period, min_atr_ratio）
-  - `StrategyParams` - 完整的策略参数配置模型
-  - `StrategyParamsUpdate` - 更新请求模型
-  - `StrategyParamsPreview` - 预览请求/响应模型
 
-- ✅ B3: 实现 GET /api/strategy/params
-  - 从数据库获取策略参数
-  - 支持回退到 ConfigManager 默认值
+### 阶段 1: 数据库层 ✅
 
-- ✅ B4: 实现 PUT /api/strategy/params + 热重载集成
-  - 支持部分更新（只更新提供的字段）
-  - 参数验证（Pydantic 验证）
+**B1: ConfigEntryORM 模型创建**
+```python
+# src/infrastructure/v3_orm.py
+class ConfigEntryORM(Base):
+    """配置条目 ORM 模型 - 点号分隔的层级命名规范"""
+    __tablename__ = "config_entries_v2"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    config_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    config_value: Mapped[str] = mapped_column(Text, nullable=False)
+    value_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1.0.0")
+    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+```
+
+**配置键命名规范**:
+- `strategy.pinbar.min_wick_ratio` - Pinbar 最小影线占比
+- `strategy.pinbar.max_body_ratio` - Pinbar 最大实体占比
+- `strategy.ema.period` - EMA 周期
+- `strategy.mtf.enabled` - MTF 使能状态
+- `strategy.mtf.ema_period` - MTF EMA 周期
+- `strategy.atr.period` - ATR 周期
+- `risk.max_loss_percent` - 风控最大亏损比例
+
+**B2: ConfigEntryRepository 实现**
+```python
+# src/infrastructure/config_entry_repository.py
+class ConfigEntryRepository:
+    """SQLite repository for persisting strategy parameters"""
+    
+    # 核心方法:
+    - get_entry(config_key: str) -> Optional[Dict]
+    - upsert_entry(config_key, config_value, version) -> int
+    - get_all_entries() -> Dict[str, Any]
+    - get_entries_by_prefix(prefix: str) -> Dict[str, Any]
+    - delete_entry(config_key: str) -> bool
+    - save_strategy_params(params: Dict, version: str) -> int
+```
+
+**值类型支持**:
+- `decimal` - Decimal 精度数值
+- `number` - int/float 数值
+- `boolean` - 布尔值
+- `json` - JSON 对象/数组
+- `string` - 字符串
+
+### 阶段 2: API 层 ✅
+
+**B3: GET /api/strategy/params**
+- 从数据库获取策略参数
+- 自动将扁平结构转换为嵌套结构
+- 支持回退到 ConfigManager 默认值
+
+**B4: PUT /api/strategy/params**
+- 支持部分更新（只更新提供的字段）
+- 参数验证（Pydantic 验证）
+- 创建自动快照（备份旧配置）
+- 扁平化保存到数据库
+
+**B5: POST /api/strategy/params/preview**
+- Dry Run 预览功能
+- 显示变更对比
+- 参数边界警告（如 EMA period < 10 或 > 100）
+
+### 阶段 3: 迁移工具 ✅
+
+**B6: 配置迁移脚本**
+```bash
+# 从 YAML 迁移配置到数据库
+python scripts/migrate_config_to_db.py
+```
+
+**功能**:
+1. 读取 `core.yaml` 和 `user.yaml`
+2. 提取策略参数和风控参数
+3. 迁移到 `config_entries_v2` 表
+4. 生成迁移报告
+5. 导出验证 YAML 文件
+
+**迁移的 parameter**:
+- `core.yaml`: pinbar_defaults, ema, mtf_mapping, mtf_ema_period, atr_filter
+- `user.yaml`: risk.max_loss_percent, risk.max_leverage
+
+---
+
+## 📋 待完成事项
+
+| 任务 | 优先级 | 预计工时 | 状态 |
+|------|--------|----------|------|
+| B7: YAML 导入导出 API | P1 | 2h | ☐ 待启动 |
+| F1-F6: 前端组件开发 | P0 | 11h | ☐ 待启动 |
+| T1-T4: 测试验证 | P0 | 6h | ☐ 待启动 |
+
+---
+
+### 2026-04-01 - Phase 8 E2E 测试验证
   - 自动创建配置快照
 
 - ✅ B5: 实现 POST /api/strategy/params/preview

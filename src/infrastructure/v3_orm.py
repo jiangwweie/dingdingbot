@@ -1193,6 +1193,93 @@ class BacktestReportORM(Base):
             f"trades={self.total_trades})>"
         )
 
+
+# ============================================================
+# ConfigEntry ORM 模型 (Phase K: 策略参数配置化)
+# ============================================================
+
+class ConfigEntryORM(Base):
+    """
+    配置条目 ORM 模型
+
+    用于存储策略参数配置，替代 YAML 文件存储。
+    配置键采用点号分隔的层级命名规范。
+
+    字段映射:
+    - id: 主键 (自增)
+    - config_key: 配置键 (唯一)，如 'strategy.pinbar.min_wick_ratio'
+    - config_value: JSON 格式配置值
+    - value_type: 值类型 ('string' | 'number' | 'boolean' | 'json' | 'decimal')
+    - version: 配置版本号
+    - updated_at: 更新时间戳 (毫秒)
+
+    使用示例:
+        >>> entry = ConfigEntryORM(
+        ...     config_key="strategy.pinbar.min_wick_ratio",
+        ...     config_value="0.6",
+        ...     value_type="decimal",
+        ...     version="v1.0.0"
+        ... )
+    """
+    __tablename__ = "config_entries_v2"
+
+    # 主键
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+
+    # 配置键 (唯一)
+    config_key: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        unique=True
+    )
+
+    # 配置值 (JSON 格式)
+    config_value: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    # 值类型
+    value_type: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False
+    )
+
+    # 版本号
+    version: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="v1.0.0"
+    )
+
+    # 审计字段
+    updated_at: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
+    )
+
+    # 表约束和索引
+    __table_args__ = (
+        CheckConstraint(
+            "value_type IN ('string', 'number', 'boolean', 'json', 'decimal')",
+            name="check_value_type"
+        ),
+        Index("idx_config_entries_key", "config_key", unique=True),
+        Index("idx_config_entries_updated_at", "updated_at DESC"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ConfigEntryORM(config_key={self.config_key!r}, "
+            f"value={self.config_value!r}, type={self.value_type!r})>"
+        )
+
+
 # ============================================================
 # 模块级文档：使用示例
 """

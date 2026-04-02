@@ -8,15 +8,400 @@
 
 1. [P1 任务产品分析](#p1-任务产品分析)
 2. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
-3. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
-3. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
-4. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-5. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-6. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-7. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-8. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-9. [Phase 6 前端架构](#phase-6-前端架构)
-10. [API 契约与端点](#api-契约与端点)
+3. [策略参数数据库存储实现](#策略参数数据库存储实现)
+4. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
+5. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
+6. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
+7. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
+8. [BTC 历史数据导入记录](#btc-历史数据导入记录)
+9. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+10. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+11. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+12. [Phase 6 前端架构](#phase-6-前端架构)
+13. [API 契约与端点](#api-契约与端点)
+
+---
+
+## 策略参数数据库存储实现
+
+**日期**: 2026-04-02  
+**决策类型**: 架构实现  
+**相关任务**: 策略参数可配置化
+
+### 实现概述
+
+采用 SQLite 数据库存储策略参数，替代 YAML 文件存储。YAML 仅用于导入导出备份。
+
+### 数据库表设计
+
+**表名**: `config_entries_v2`
+
+```sql
+CREATE TABLE config_entries_v2 (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_key    VARCHAR(128) NOT NULL UNIQUE,
+    config_value  TEXT NOT NULL,
+    value_type    VARCHAR(16) NOT NULL,  -- 'string' | 'number' | 'boolean' | 'json' | 'decimal'
+    version       VARCHAR(32) NOT NULL DEFAULT 'v1.0.0',
+    updated_at    BIGINT NOT NULL,
+    UNIQUE(config_key)
+);
+```
+
+### 配置键命名规范
+
+采用点号分隔的层级命名：
+
+```
+strategy.pinbar.min_wick_ratio      →  Pinbar 最小影线占比
+strategy.pinbar.max_body_ratio      →  Pinbar 最大实体占比
+strategy.pinbar.body_position_tolerance →  Pinbar 实体位置容差
+strategy.ema.period                 →  EMA 周期
+strategy.mtf.enabled                →  MTF 使能状态
+strategy.mtf.ema_period             →  MTF EMA 周期
+strategy.atr.enabled                →  ATR 使能状态
+strategy.atr.period                 →  ATR 周期
+strategy.atr.min_atr_ratio          →  ATR 最小比率
+risk.max_loss_percent               →  风控最大亏损比例
+risk.max_leverage                   →  风控最大杠杆倍数
+```
+
+### 值类型序列化
+
+| 类型 | 存储格式 | 反序列化 |
+|------|----------|----------|
+| `decimal` | String (e.g., "0.6") | `Decimal(value_str)` |
+| `number` | String (e.g., "60") | `int(value_str)` 或 `float(value_str)` |
+| `boolean` | "true" / "false" | `value_str == "true"` |
+| `json` | JSON string | `json.loads(value_str)` |
+| `string` | String | Direct return |
+
+### Repository 层实现
+
+**核心方法**:
+
+```python
+class ConfigEntryRepository:
+    # 读取
+    get_entry(config_key: str) -> Optional[Dict]
+    get_all_entries() -> Dict[str, Any]
+    get_entries_by_prefix(prefix: str) -> Dict[str, Any]
+    
+    # 写入
+    upsert_entry(config_key, config_value, version) -> int
+    save_strategy_params(params: Dict, version: str) -> int
+    
+    # 删除
+    delete_entry(config_key: str) -> bool
+    delete_entries_by_prefix(prefix: str) -> int
+```
+
+### API 端点
+
+| 端点 | 方法 | 用途 |
+|------|------|------|
+| `/api/strategy/params` | GET | 获取当前策略参数 |
+| `/api/strategy/params` | PUT | 更新策略参数 |
+| `/api/strategy/params/preview` | POST | 预览参数变更 (Dry Run) |
+
+### 配置迁移工具
+
+```bash
+# 从 YAML 迁移到数据库
+python scripts/migrate_config_to_db.py
+```
+
+**迁移流程**:
+1. 读取 `core.yaml` 和 `user.yaml`
+2. 提取策略参数和风控参数
+3. 迁移到 `config_entries_v2` 表
+4. 生成迁移报告
+5. 导出验证 YAML 文件
+
+### 技术优势
+
+| 优势 | 说明 |
+|------|------|
+| 启动速度 | 无需解析外部 YAML 文件 |
+| 事务支持 | SQLite 事务保证原子性 |
+| 与快照集成 | 天然与 ConfigSnapshotService 集成 |
+| 类型安全 | 值类型明确标识，自动序列化/反序列化 |
+| 版本追踪 | 支持配置版本号 |
+
+### 遗留问题
+
+1. **ConfigManager 集成**: 需要修改 `ConfigManager` 从 DB 加载配置
+2. **YAML 导入导出**: 需要实现导入导出 API 端点
+3. **前端组件**: 需要开发策略参数配置 UI
+
+---
+
+## P1 任务产品分析
+
+**日期**: 2026-04-02  
+**任务来源**: `docs/products/p1-tasks-analysis-brief.md` - 任务二  
+**优先级**: P1 (方案 C - 完整功能)  
+**核心需求**: **订单的入场、出场、止盈、止损必须与实际 K 线时间精确对齐，复原交易场景**
+
+### 需求背景
+
+**当前实现**:
+- 图表库：Recharts LineChart
+- 图表类型：收盘价折线图（仅显示 close 价）
+- 订单标记：ReferenceDot 点标记（无时间对齐）
+- 问题：无法展示 K 线高低点，交易员无法复盘订单执行质量
+
+**目标实现**:
+- 图表库：TradingView Lightweight Charts (与信号详情页一致)
+- 图表类型：K 线蜡烛图（完整 OHLCV）
+- 订单标记：箭头 + 水平线，时间精确对齐到 K 线
+- 核心功能：
+  - ENTRY 入场时间点标记（箭头，基于 `filled_at`）
+  - TP1/TP2/SL 子订单成交时间标记（水平线，基于 `filled_at`）
+  - 订单链时间线可视化
+  - 十字光标交互 + 时间轴缩放
+  - 悬停显示订单详情 Tooltip
+
+### 技术方案
+
+#### 数据模型分析
+
+**Order 模型时间戳字段**:
+```python
+class Order(FinancialModel):
+    created_at: int        # 创建时间戳（毫秒）
+    updated_at: int        # 更新时间戳（毫秒）
+    filled_at: Optional[int]  # 成交时间戳（毫秒）⭐ 关键字段
+```
+
+**订单链结构**:
+```
+Order Chain
+├── ENTRY (parent_order_id=null)
+│   ├── filled_at: 1711785600000  ← 入场时间点
+│   └── average_exec_price: 50000
+├── TP1 (parent_order_id=ENTRY.id)
+│   ├── filled_at: 1711789200000  ← TP1 成交时间点
+│   └── price: 52000
+├── TP2 (parent_order_id=ENTRY.id)
+│   ├── filled_at: 1711792800000  ← TP2 成交时间点
+│   └── price: 54000
+└── SL (parent_order_id=ENTRY.id)
+    ├── filled_at: null  ← 未成交（挂单中）
+    └── price: 48000
+```
+
+#### 后端 API 扩展
+
+**现有 API**: `GET /api/v3/orders/{order_id}/klines`
+- 返回：订单详情 + 50 根 K 线数据
+- 局限：仅返回单个订单，不支持订单链
+
+**扩展后 API**:
+```python
+@app.get("/api/v3/orders/{order_id}/klines")
+async def get_order_klines(
+    order_id: str,
+    symbol: str = Query(...),
+    include_chain: bool = True,  # 新增参数
+) -> Dict[str, Any]:
+    """
+    获取订单 K 线数据（支持订单链时间线对齐）
+    
+    返回:
+    {
+        "order": { ... 订单详情 ... },
+        "order_chain": [  # 订单链列表
+            {
+                "order_id": "...",
+                "order_role": "ENTRY" | "TP1" | "TP2" | "SL",
+                "parent_order_id": "...",
+                "filled_at": 1711785660000,  # 成交时间戳（关键）
+                "price": "...",
+                "average_exec_price": "...",
+                "status": "FILLED" | "PENDING" | "CANCELED"
+            },
+            ...
+        ],
+        "klines": [[timestamp, open, high, low, close, volume], ...]
+    }
+    """
+```
+
+**时间线对齐关键逻辑**:
+```python
+# 1. 查询订单链
+order_chain = await repo.get_order_chain(order_id)  # 返回 ENTRY + TP + SL
+
+# 2. 计算 K 线范围（覆盖完整交易生命周期）
+timestamps = [o.filled_at for o in order_chain if o.filled_at]
+if not timestamps:
+    return {"order": order_data, "order_chain": [], "klines": []}
+
+min_time = min(timestamps)
+max_time = max(timestamps)
+
+# 3. 获取 K 线数据（覆盖完整时间范围）
+timeframe_ms = get_timeframe_ms(timeframe)  # 如 15m = 900000ms
+since = min_time - (20 * timeframe_ms)  # 向前扩展 20 根 K 线
+limit = int((max_time - since) / timeframe_ms) + 40  # 向后扩展 20 根
+
+ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+
+# 4. 返回数据（前端负责时间对齐渲染）
+return {
+    "order": order_data,
+    "order_chain": [o.model_dump() for o in order_chain],
+    "klines": ohlcv,
+}
+```
+
+#### 前端图表实现
+
+**复用 SignalDetailsDrawer 组件逻辑**:
+```typescript
+// web-front/src/components/v3/OrderDetailsDrawer.tsx
+
+// 1. 导入 TradingView
+import { 
+  createChart, 
+  IChartApi, 
+  ISeriesApi, 
+  CandlestickSeries,
+  UTCTimestamp,
+  SeriesMarker,
+} from 'lightweight-charts';
+
+// 2. 创建图表
+const chart = createChart(container, {
+  layout: { 
+    background: { color: '#FFFFFF' },
+    textColor: '#86868B',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif',
+  },
+  grid: {
+    vertLines: { color: '#F0F0F0' },
+    horzLines: { color: '#F0F0F0' },
+  },
+  crosshair: {
+    vertLine: { width: 1, color: '#D0D0D0', style: 3 },
+    horzLine: { width: 1, color: '#D0D0D0', style: 3 },
+  },
+  timeScale: {
+    timeVisible: true,
+    secondsVisible: false,
+  },
+});
+
+// 3. K 线蜡烛图
+const candleSeries = chart.addSeries(CandlestickSeries, {
+  upColor: APPLE_GREEN,      // #34C759
+  downColor: APPLE_RED,      // #FF3B30
+  borderUpColor: APPLE_GREEN,
+  borderDownColor: APPLE_RED,
+  wickUpColor: APPLE_GREEN,
+  wickDownColor: APPLE_RED,
+});
+
+// 4. 时间对齐关键：UTC 时间戳转换
+const tzOffsetMs = new Date().getTimezoneOffset() * 60 * 1000;
+
+// K 线数据
+const klineData: CandlestickData[] = klines.map((k) => ({
+  time: ((k[0] - tzOffsetMs) / 1000) as UTCTimestamp,
+  open: k[1],
+  high: k[2],
+  low: k[3],
+  close: k[4],
+}));
+candleSeries.setData(klineData);
+
+// 5. 订单链标记（时间对齐）
+const markers: SeriesMarker<UTCTimestamp>[] = orderChain
+  .filter(o => o.filled_at)  // 只标记已成交订单
+  .map(order => {
+    const isEntry = order.order_role === 'ENTRY';
+    const isLong = order.direction === 'LONG';
+    
+    return {
+      time: ((order.filled_at - tzOffsetMs) / 1000) as UTCTimestamp,  // ⭐ 关键
+      position: isEntry ? 'belowBar' : 'aboveBar',
+      color: isEntry ? APPLE_BLUE : (isLong ? APPLE_GREEN : APPLE_RED),
+      shape: isEntry ? 'arrowUp' : 'circle',
+      text: getOrderRoleLabel(order.order_role),
+      size: isEntry ? 2 : 1,
+    };
+  });
+
+// 6. 止盈/止损水平线（基于实际成交价）
+orderChain.forEach(order => {
+  if (!order.price && !order.average_exec_price) return;
+  
+  const price = Number(order.average_exec_price || order.price);
+  const isFilled = order.status === 'FILLED';
+  
+  let color: string;
+  let lineStyle: number;
+  let title: string;
+  
+  switch (order.order_role) {
+    case 'ENTRY':
+      color = APPLE_BLUE;
+      lineStyle = 3;  // Dotted
+      title = isFilled ? '入场价 (已成交)' : '入场价';
+      break;
+    case 'TP1':
+    case 'TP2':
+    case 'TP3':
+      color = APPLE_GREEN;
+      lineStyle = isFilled ? 2 : 0;  // Dashed or Solid
+      title = `${order.order_role} (${isFilled ? '已成交' : '挂单中'})`;
+      break;
+    case 'SL':
+      color = APPLE_RED;
+      lineStyle = isFilled ? 2 : 0;
+      title = `止损 (${isFilled ? '已触发' : '挂单中'})`;
+      break;
+    default:
+      color = APPLE_GRAY;
+      lineStyle = 0;
+      title = order.order_role;
+  }
+  
+  candleSeries.createPriceLine({
+    price,
+    color,
+    lineWidth: isFilled ? 2 : 1,
+    lineStyle,
+    axisLabelVisible: true,
+    title,
+  });
+});
+
+// 7. 自适应缩放
+chart.timeScale().fitContent();
+```
+
+### 核心需求验证清单
+
+| 需求 | 验证方法 | 状态 |
+|------|----------|------|
+| ENTRY 入场时间对齐 | `filled_at` 映射到 K 线时间轴 | ☐ 待验证 |
+| TP/SL 成交时间对齐 | `filled_at` 映射到 K 线时间轴 | ☐ 待验证 |
+| 订单链完整展示 | 查询 parent_order_id 获取完整订单链 | ☐ 待验证 |
+| 水平线价格对齐 | 基于 actual_exec_price 创建 PriceLine | ☐ 待验证 |
+| 十字光标交互 | TradingView Crosshair 启用 | ☐ 待验证 |
+| 悬停 Tooltip | 自定义 Tooltip 组件 | ☐ 待验证 |
+
+### 技术决策
+
+| 决策点 | 方案 | 理由 |
+|--------|------|------|
+| 图表库 | TradingView Lightweight Charts | 与信号详情页一致，专业级图表 |
+| 时间对齐 | 基于 `filled_at` 字段 | 唯一真实成交时间戳 |
+| 订单链查询 | 通过 `parent_order_id` 递归查询 | 支持 1-N 子订单 |
+| K 线范围 | 动态计算（覆盖 min~max filled_at） | 确保完整交易生命周期 |
+| 水平线样式 | 实线=挂单中，虚线=已成交 | 视觉区分订单状态 |
 
 ---
 

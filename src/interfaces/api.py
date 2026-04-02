@@ -111,6 +111,7 @@ _config_manager: Optional[Any] = None  # ConfigManager instance
 _exchange_gateway: Optional[Any] = None  # ExchangeGateway instance
 _signal_tracker: Optional[Any] = None  # SignalStatusTracker instance
 _snapshot_service: Optional[Any] = None  # ConfigSnapshotService instance
+_config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
 
 
 def set_dependencies(
@@ -120,6 +121,7 @@ def set_dependencies(
     exchange_gateway: Optional[Any] = None,
     signal_tracker: Optional[Any] = None,
     snapshot_service: Optional[Any] = None,
+    config_entry_repo: Optional[Any] = None,
 ) -> None:
     """
     Inject dependencies for API endpoints.
@@ -131,14 +133,16 @@ def set_dependencies(
         exchange_gateway: Optional ExchangeGateway instance
         signal_tracker: Optional SignalStatusTracker instance
         snapshot_service: Optional ConfigSnapshotService instance
+        config_entry_repo: Optional ConfigEntryRepository instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
     _exchange_gateway = exchange_gateway
     _signal_tracker = signal_tracker
     _snapshot_service = snapshot_service
+    _config_entry_repo = config_entry_repo
 
 
 def _get_repository() -> SignalRepository:
@@ -172,6 +176,15 @@ def _get_signal_tracker() -> Any:
 def _get_snapshot_service() -> Any:
     """Get snapshot service or return None if not initialized."""
     return _snapshot_service
+
+
+def _get_config_entry_repo() -> Any:
+    """Get config entry repository or create a new instance if not initialized."""
+    if _config_entry_repo is None:
+        # Fallback: create a new instance
+        from src.infrastructure.config_entry_repository import ConfigEntryRepository
+        return ConfigEntryRepository()
+    return _config_entry_repo
 
 
 # ============================================================
@@ -2769,13 +2782,35 @@ async def get_strategy_params():
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_repository()
+        repo = _get_config_entry_repo()
 
-        # Try to get from database first
-        strategy_params = await repo.get_strategy_params()
+        # Get all strategy parameters from database
+        strategy_params = await repo.get_entries_by_prefix("strategy")
 
         if strategy_params:
-            return StrategyParamsResponse(**strategy_params)
+            # Flatten to nested dict structure
+            result = {
+                "pinbar": {},
+                "engulfing": {},
+                "ema": {},
+                "mtf": {},
+                "atr": {},
+                "filters": [],
+            }
+
+            for key, value in strategy_params.items():
+                # Extract sub-key (e.g., "strategy.pinbar.min_wick_ratio" -> "pinbar.min_wick_ratio")
+                sub_key = key.replace("strategy.", "", 1)
+                parts = sub_key.split(".", 1)
+                if len(parts) == 2:
+                    category, param_key = parts
+                    if category in result and category != "filters":
+                        result[category][param_key] = value
+
+            # Filter out empty categories
+            result = {k: v for k, v in result.items() if v or k == "filters"}
+
+            return StrategyParamsResponse(**result)
 
         # Fallback to ConfigManager defaults
         params = StrategyParams.from_config_manager(config_manager)
@@ -2810,12 +2845,33 @@ async def update_strategy_params(request: StrategyParamsUpdateRequest):
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_repository()
+        repo = _get_config_entry_repo()
         snapshot_service = _get_snapshot_service()
 
-        # Get current params
-        current_params = await repo.get_strategy_params()
-        if not current_params:
+        # Get current params from database
+        current_params_flat = await repo.get_entries_by_prefix("strategy")
+
+        # Build current params nested dict
+        current_params = {
+            "pinbar": {},
+            "engulfing": {},
+            "ema": {},
+            "mtf": {},
+            "atr": {},
+            "filters": [],
+        }
+        for key, value in current_params_flat.items():
+            sub_key = key.replace("strategy.", "", 1)
+            parts = sub_key.split(".", 1)
+            if len(parts) == 2:
+                category, param_key = parts
+                if category in current_params and category != "filters":
+                    current_params[category][param_key] = value
+
+        # Filter out empty categories
+        current_params = {k: v for k, v in current_params.items() if v or k == "filters"}
+
+        if not current_params_flat:
             params = StrategyParams.from_config_manager(config_manager)
             current_params = params.to_dict()
 
@@ -2856,12 +2912,22 @@ async def update_strategy_params(request: StrategyParamsUpdateRequest):
             except Exception as e:
                 logger.warning(f"Auto-snapshot creation failed: {e}")
 
-        # Save to database
-        await repo.save_strategy_params(
-            params=new_params,
-            description="Strategy parameters updated via API",
-            updated_by="user"
-        )
+        # Save to database - flatten nested dict to dot-notation keys
+        from datetime import datetime, timezone
+        version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d.%H%M%S')}"
+
+        for category, values in new_params.items():
+            if category == "filters":
+                continue
+            if isinstance(values, dict):
+                for param_key, value in values.items():
+                    await repo.upsert_entry(f"strategy.{category}.{param_key}", value, version)
+            elif values:  # Non-dict values (shouldn't happen but handle anyway)
+                await repo.upsert_entry(f"strategy.{category}", values, version)
+
+        # Save filters as JSON
+        if new_params.get('filters'):
+            await repo.upsert_entry("strategy.filters", new_params['filters'], version)
 
         logger.info(f"Strategy parameters updated: {new_params}")
 
@@ -2905,11 +2971,32 @@ async def preview_strategy_params(request: StrategyParamsPreviewRequest):
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_repository()
+        repo = _get_config_entry_repo()
 
-        # Get current params
-        current_params = await repo.get_strategy_params()
-        if not current_params:
+        # Get current params from database
+        current_params_flat = await repo.get_entries_by_prefix("strategy")
+
+        # Build current params nested dict
+        current_params = {
+            "pinbar": {},
+            "engulfing": {},
+            "ema": {},
+            "mtf": {},
+            "atr": {},
+            "filters": [],
+        }
+        for key, value in current_params_flat.items():
+            sub_key = key.replace("strategy.", "", 1)
+            parts = sub_key.split(".", 1)
+            if len(parts) == 2:
+                category, param_key = parts
+                if category in current_params and category != "filters":
+                    current_params[category][param_key] = value
+
+        # Filter out empty categories
+        current_params = {k: v for k, v in current_params.items() if v or k == "filters"}
+
+        if not current_params_flat:
             params = StrategyParams.from_config_manager(config_manager)
             current_params = params.to_dict()
 
