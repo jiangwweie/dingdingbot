@@ -495,3 +495,73 @@ export interface ApiResponseError {
   /** 错误消息 */
   message: string;
 }
+
+/**
+ * 订单树节点 - 用于树形表格展示
+ */
+export interface OrderTreeNode {
+  /** 订单详情 */
+  order: OrderResponse;
+  /** 子订单列表（TP1-5, SL） */
+  children: OrderTreeNode[];
+  /** 层级深度（0=根节点，1=子订单） */
+  level: number;
+  /** 是否有子订单（用于 UI 展示展开图标） */
+  has_children: boolean;
+}
+
+/**
+ * 订单树 API 响应
+ */
+export interface OrderTreeResponse {
+  /** 树形节点列表 */
+  items: OrderTreeNode[];
+  /** 总根订单数 */
+  total: number;
+  /** 元数据 */
+  metadata?: {
+    /** 币种过滤 */
+    symbol_filter?: string;
+    /** 天数过滤 */
+    days_filter?: number;
+    /** 加载时间戳 */
+    loaded_at?: number;
+  };
+}
+
+/**
+ * 批量删除请求
+ */
+export interface OrderBatchDeleteRequest {
+  /** 订单 ID 列表 */
+  order_ids: string[];
+  /** 是否调用交易所取消接口 */
+  cancel_on_exchange?: boolean;
+  /** 审计信息 */
+  audit_info?: {
+    /** 操作人 ID */
+    operator_id?: string;
+    /** 操作 IP */
+    ip_address?: string;
+    /** 用户代理 */
+    user_agent?: string;
+  };
+}
+
+/**
+ * 批量删除响应
+ */
+export interface OrderBatchDeleteResponse {
+  /** 删除总数 */
+  deleted_count: number;
+  /** 交易所取消成功的订单 ID 列表 */
+  cancelled_on_exchange: string[];
+  /** 取消失败的订单列表 */
+  failed_to_cancel: Array<{ order_id: string; reason: string }>;
+  /** 数据库删除的订单 ID 列表 */
+  deleted_from_db: string[];
+  /** 删除失败的订单列表 */
+  failed_to_delete: Array<{ order_id: string; reason: string }>;
+  /** 审计日志 ID */
+  audit_log_id?: string;
+}

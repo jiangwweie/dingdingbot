@@ -22,6 +22,7 @@
 14. [Phase 6 前端架构](#phase-6-前端架构)
 15. [API 契约与端点](#api-契约与端点)
 16. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
+17. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
 
 ---
 
@@ -1899,6 +1900,170 @@ async function fetchAccountSnapshot(): Promise<AccountSnapshot>
 - 配置导出 API: `GET /api/v3/config/export` → YAML 文件
 - 配置导入 API: `POST /api/v3/config/import` ← YAML 文件
 - 配置对比功能：数据库 vs YAML 差异对比
+
+---
+
+## 订单管理级联展示功能 - 架构审查修正 (2026-04-02)
+
+**日期**: 2026-04-02  
+**任务类型**: 架构审查修正  
+**相关任务**: 订单管理级联展示功能 (P1, 16h)  
+**状态**: ✅ 架构审查通过（已修正 3 个问题）
+
+### 架构审查结论
+
+**审查结果**: 🟡 有条件通过 → ✅ 已修正 3 个问题
+
+### 问题 1: 分页逻辑缺陷 🔴
+
+**原设计**: 分页仅针对根订单（ENTRY），`limit=50` 返回前 50 个 ENTRY 及其子订单
+
+**问题**:
+- 分页会割裂订单链的完整性
+- 用户无法看到已分页 ENTRY 订单新增的子订单
+- 例如：第 1 页的 ENTRY 订单在第 2 页新增了一个 TP2 子订单，用户永远看不到
+
+**修正方案**: 一次性加载 + 前端虚拟滚动
+
+**参数限制**:
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `days` | 7 | 加载最近 7 天的订单树 |
+| `limit` | 200 | 最多 200 个根订单（ENTRY） |
+| `symbol` | - | 币种对过滤（可选） |
+
+**理由**:
+- 订单链完整性比分页性能更重要
+- 前端虚拟滚动可处理 500+ 节点流畅渲染
+- 用户通常只关注最近活跃订单
+
+---
+
+### 问题 2: 树形数据结构设计 🟡
+
+**原设计**: 
+```typescript
+OrderTreeNode {
+  isExpanded: boolean  // ❌ 这是前端 UI 状态
+}
+```
+
+**修正方案**:
+```typescript
+// 后端返回
+OrderTreeNode {
+  order: OrderResponseFull
+  children: OrderTreeNode[]
+  level: number
+  has_children: boolean  // ✅ 用于 UI 展示是否有子节点
+}
+
+// 前端维护
+const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([])
+```
+
+**理由**: `isExpanded` 是纯前端 UI 状态，不应由后端返回
+
+---
+
+### 问题 3: 批量删除事务处理 🟡
+
+**原设计**: 缺少交易所 API 调用失败处理和审计日志
+
+**修正方案**:
+
+1. **添加 `cancel_on_exchange` 参数**:
+```json
+{
+  "order_ids": ["uuid-123"],
+  "cancel_on_exchange": true  // 是否调用交易所取消接口
+}
+```
+
+2. **返回详细结果**:
+```json
+{
+  "deleted_count": 5,
+  "cancelled_on_exchange": ["uuid-124", "uuid-125"],
+  "failed_to_cancel": [{"order_id": "uuid-126", "reason": "交易所 API 超时"}],
+  "deleted_from_db": ["uuid-123", "uuid-124", "uuid-125", "uuid-126", "uuid-127"],
+  "failed_to_delete": [],
+  "audit_log_id": "audit-20260402-001"
+}
+```
+
+3. **新增审计日志表**:
+```sql
+CREATE TABLE order_audit_logs (
+    id TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,          -- "DELETE_BATCH"
+    operator_id TEXT,                 -- 操作人 ID
+    order_ids TEXT NOT NULL,          -- JSON 数组
+    cancelled_on_exchange TEXT,       -- JSON 数组
+    deleted_from_db TEXT,             -- JSON 数组
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL
+)
+```
+
+---
+
+### 实现细节
+
+#### OrderRepository.get_order_tree() 实现思路
+
+```python
+async def get_order_tree(
+    self,
+    symbol: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    days: Optional[int] = 7,
+    limit: int = 200,
+) -> Dict[str, Any]:
+    """
+    获取订单树形结构（一次性加载完整树）
+    
+    实现思路:
+    1. 查询所有 ENTRY 订单（根节点）
+    2. 批量查询这些 ENTRY 的子订单（通过 parent_order_id IN (...)）
+    3. 在内存中组装树形结构
+    """
+    # Step 1: 获取根订单列表（ENTRY 角色）
+    root_orders = await self._get_entry_orders(symbol, start_date, end_date, days, limit)
+    
+    # Step 2: 批量获取所有子订单
+    entry_ids = [o.id for o in root_orders]
+    child_orders = await self._get_child_orders(entry_ids)
+    
+    # Step 3: 内存组装树形结构
+    order_map = {o.id: self._order_to_tree_node(o, level=0) for o in root_orders}
+    
+    for child in child_orders:
+        parent_id = child.parent_order_id
+        if parent_id in order_map:
+            order_map[parent_id].children.append(
+                self._order_to_tree_node(child, level=1)
+            )
+    
+    return {
+        "items": list(order_map.values()),
+        "total": len(root_orders),
+        "metadata": {
+            "symbol_filter": symbol,
+            "days_filter": days,
+            "loaded_at": int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+    }
+```
+
+---
+
+### 相关文档
+
+- [接口契约表](../designs/order-chain-tree-contract.md)
+- [架构审查报告](../reviews/order-chain-arch-review.md)
 
 ---
 

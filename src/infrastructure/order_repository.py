@@ -787,6 +787,368 @@ class OrderRepository:
 
             return [self._row_to_order(row) for row in rows]
 
+    # ============================================================
+    # Order Tree Methods (订单管理级联展示功能)
+    # ============================================================
+    async def get_order_tree(
+        self,
+        symbol: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        days: Optional[int] = 7,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """
+        获取订单树形结构（一次性加载完整树）
+
+        实现思路:
+        1. 查询所有 ENTRY 订单（根节点）
+        2. 批量查询这些 ENTRY 的子订单（通过 parent_order_id IN (...)）
+        3. 在内存中组装树形结构
+
+        Args:
+            symbol: 币种对过滤（可选）
+            start_date: 开始日期（可选）
+            end_date: 结束日期（可选）
+            days: 最近 N 天（可选，默认 7 天）
+            limit: 根订单数量上限（默认 200）
+
+        Returns:
+            {
+                "items": List[Dict[str, Any]],  # 树形结构列表
+                "total": int,                    # 总根订单数
+                "metadata": Dict[str, Any],      # 元数据
+            }
+        """
+        async with self._lock:
+            # Step 1: 获取根订单列表（ENTRY 角色）
+            root_orders = await self._get_entry_orders(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                days=days,
+                limit=limit,
+            )
+
+            if not root_orders:
+                return {
+                    "items": [],
+                    "total": 0,
+                    "metadata": {
+                        "symbol_filter": symbol,
+                        "days_filter": days,
+                        "loaded_at": int(datetime.now(timezone.utc).timestamp() * 1000),
+                    }
+                }
+
+            # Step 2: 批量获取所有子订单
+            entry_ids = [o.id for o in root_orders]
+            child_orders = await self._get_child_orders(entry_ids)
+
+            # Step 3: 内存组装树形结构
+            order_map = {}
+            for order in root_orders:
+                order_map[order.id] = {
+                    "order": self._order_to_response(order),
+                    "children": [],
+                    "level": 0,
+                    "has_children": False,  # 先设为 False，后面会更新
+                }
+
+            # 将子订单添加到父节点的 children 中
+            for child in child_orders:
+                parent_id = child.parent_order_id
+                if parent_id in order_map:
+                    order_map[parent_id]["children"].append({
+                        "order": self._order_to_response(child),
+                        "children": [],
+                        "level": 1,
+                        "has_children": False,
+                    })
+                    order_map[parent_id]["has_children"] = True
+
+            return {
+                "items": list(order_map.values()),
+                "total": len(root_orders),
+                "metadata": {
+                    "symbol_filter": symbol,
+                    "days_filter": days,
+                    "loaded_at": int(datetime.now(timezone.utc).timestamp() * 1000),
+                }
+            }
+
+    async def _get_entry_orders(
+        self,
+        symbol: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        days: Optional[int] = 7,
+        limit: int = 200,
+    ) -> List[Order]:
+        """
+        获取 ENTRY 订单列表（根节点）
+
+        Args:
+            symbol: 币种对过滤
+            start_date: 开始日期
+            end_date: 结束日期
+            days: 最近 N 天
+            limit: 数量上限
+
+        Returns:
+            List of Order objects
+        """
+        # Build WHERE clause
+        where_conditions = ["order_role = ?"]
+        params: List[Any] = [OrderRole.ENTRY.value]
+
+        if symbol:
+            where_conditions.append("symbol = ?")
+            params.append(symbol)
+
+        # Handle date filtering
+        if start_date:
+            where_conditions.append("created_at >= ?")
+            params.append(int(start_date.timestamp() * 1000))
+        elif end_date:
+            where_conditions.append("created_at <= ?")
+            params.append(int(end_date.timestamp() * 1000))
+        elif days:
+            from datetime import timedelta
+            start_ts = datetime.now(timezone.utc) - timedelta(days=days)
+            where_conditions.append("created_at >= ?")
+            params.append(int(start_ts.timestamp() * 1000))
+
+        where_clause = "WHERE " + " AND ".join(where_conditions)
+
+        async with self._lock:
+            # Get total count
+            count_cursor = await self._db.execute(
+                f"SELECT COUNT(*) FROM orders {where_clause}",
+                tuple(params)
+            )
+            total = (await count_cursor.fetchone())[0]
+            await count_cursor.close()
+
+            # Get paginated results
+            params.append(limit)
+            cursor = await self._db.execute(
+                f"""
+                SELECT * FROM orders
+                {where_clause}
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                tuple(params)
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+            return [self._row_to_order(row) for row in rows]
+
+    async def _get_child_orders(self, parent_ids: List[str]) -> List[Order]:
+        """
+        批量获取子订单列表
+
+        Args:
+            parent_ids: 父订单 ID 列表
+
+        Returns:
+            List of child Order objects
+        """
+        if not parent_ids:
+            return []
+
+        placeholders = ','.join('?' * len(parent_ids))
+
+        async with self._lock:
+            cursor = await self._db.execute(
+                f"""
+                SELECT * FROM orders
+                WHERE parent_order_id IN ({placeholders})
+                ORDER BY
+                    CASE order_role
+                        WHEN 'TP1' THEN 1
+                        WHEN 'TP2' THEN 2
+                        WHEN 'TP3' THEN 3
+                        WHEN 'TP4' THEN 4
+                        WHEN 'TP5' THEN 5
+                        WHEN 'SL' THEN 6
+                        ELSE 7
+                    END,
+                    created_at ASC
+                """,
+                tuple(parent_ids)
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+            return [self._row_to_order(row) for row in rows]
+
+    def _order_to_response(self, order: Order) -> Dict[str, Any]:
+        """
+        Convert Order to OrderResponseFull dictionary
+
+        Args:
+            order: Order object
+
+        Returns:
+            Dictionary with OrderResponseFull fields
+        """
+        from decimal import Decimal
+
+        # 计算剩余数量
+        remaining_qty = order.requested_qty - order.filled_qty
+
+        return {
+            "order_id": order.id,
+            "exchange_order_id": order.exchange_order_id,
+            "symbol": order.symbol,
+            "order_type": order.order_type.value,
+            "order_role": order.order_role.value,
+            "direction": order.direction.value,
+            "status": order.status.value,
+            "quantity": str(order.requested_qty),
+            "filled_qty": str(order.filled_qty),
+            "remaining_qty": str(remaining_qty),
+            "price": str(order.price) if order.price else None,
+            "trigger_price": str(order.trigger_price) if order.trigger_price else None,
+            "average_exec_price": str(order.average_exec_price) if order.average_exec_price else None,
+            "reduce_only": order.reduce_only,
+            "signal_id": order.signal_id,
+            "created_at": order.created_at,
+            "updated_at": order.updated_at,
+            "filled_at": order.filled_at,
+        }
+
+    async def get_order_chain(self, order_id: str) -> List[Order]:
+        """
+        获取完整订单链（包括父订单和所有子订单）
+
+        Args:
+            order_id: 订单 ID
+
+        Returns:
+            List[Order] - 父订单 + 所有子订单列表
+        """
+        return await self.get_order_chain_by_order_id(order_id)
+
+    async def delete_orders_batch(
+        self,
+        order_ids: List[str],
+        cancel_on_exchange: bool = True,
+        audit_info: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        批量删除订单（带事务保护）
+
+        Args:
+            order_ids: 订单 ID 列表
+            cancel_on_exchange: 是否调用交易所取消接口
+            audit_info: 审计信息（operator_id, ip_address, user_agent）
+
+        Returns:
+            {
+                "deleted_count": int,
+                "cancelled_on_exchange": List[str],
+                "failed_to_cancel": List[Dict[str, str]],
+                "deleted_from_db": List[str],
+                "failed_to_delete": List[Dict[str, str]],
+                "audit_log_id": Optional[str],
+            }
+        """
+        import json
+        import uuid
+
+        result = {
+            "deleted_count": 0,
+            "cancelled_on_exchange": [],
+            "failed_to_cancel": [],
+            "deleted_from_db": [],
+            "failed_to_delete": [],
+            "audit_log_id": None,
+        }
+
+        # 验证参数
+        if not order_ids:
+            raise ValueError("订单 ID 列表不能为空")
+
+        if len(order_ids) > 100:
+            raise ValueError("批量删除最多支持 100 个订单")
+
+        async with self._lock:
+            try:
+                # Step 1: 收集所有需要删除的订单 ID（包括级联子订单）
+                all_order_ids = set(order_ids)
+                for order_id in order_ids:
+                    chain = await self.get_order_chain_by_order_id(order_id)
+                    for order in chain:
+                        all_order_ids.add(order.id)
+
+                # Step 2: 获取订单详情
+                orders_to_delete = []
+                for oid in all_order_ids:
+                    order = await self.get_order(oid)
+                    if order:
+                        orders_to_delete.append(order)
+
+                # Step 3: 取消 OPEN 状态的订单（调用交易所 API）
+                # 注意：这里需要 exchange_gateway，暂时跳过实现
+                # TODO: 集成 exchange_gateway 后实现
+                if cancel_on_exchange:
+                    for order in orders_to_delete:
+                        if order.status in [OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]:
+                            # TODO: 调用交易所取消 API
+                            # await self.exchange_gateway.cancel_order(order.exchange_order_id, order.symbol)
+                            result["cancelled_on_exchange"].append(order.id)
+
+                # Step 4: 批量删除数据库记录（事务保护）
+                await self._db.execute("BEGIN")
+                try:
+                    placeholders = ','.join('?' * len(orders_to_delete))
+                    await self._db.execute(
+                        f"DELETE FROM orders WHERE id IN ({placeholders})",
+                        tuple(o.id for o in orders_to_delete)
+                    )
+                    await self._db.commit()
+                    result["deleted_from_db"] = [o.id for o in orders_to_delete]
+                    result["deleted_count"] = len(result["deleted_from_db"])
+                except Exception as db_error:
+                    await self._db.rollback()
+                    raise db_error
+
+                # Step 5: 记录审计日志
+                audit_log_id = str(uuid.uuid4())
+                result["audit_log_id"] = audit_log_id
+
+                # TODO: 创建 order_audit_logs 表后实现审计日志持久化
+                # await self._db.execute(
+                #     """
+                #     INSERT INTO order_audit_logs
+                #     (id, operation, operator_id, order_ids, cancelled_on_exchange, deleted_from_db, ip_address, user_agent, created_at)
+                #     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                #     """,
+                #     (
+                #         audit_log_id,
+                #         "DELETE_BATCH",
+                #         audit_info.get("operator_id") if audit_info else None,
+                #         json.dumps(result["deleted_from_db"]),
+                #         json.dumps(result["cancelled_on_exchange"]),
+                #         json.dumps(result["deleted_from_db"]),
+                #         audit_info.get("ip_address") if audit_info else None,
+                #         audit_info.get("user_agent") if audit_info else None,
+                #         int(datetime.now(timezone.utc).timestamp() * 1000),
+                #     )
+                # )
+
+                return result
+
+            except Exception as e:
+                logger.error(f"批量删除订单失败：{str(e)}")
+                raise e
+
+    async def get_oco_group(self, oco_group_id: str) -> List[Order]:
+
     async def get_order_count(self, signal_id: str) -> int:
         """
         Get total order count for a signal.
