@@ -188,6 +188,195 @@ class RiskConfig(BaseModel):
 
 
 # ============================================================
+# Strategy Parameter Models (Phase K - Strategy Parameter Configuration)
+# ============================================================
+class PinbarParams(BaseModel):
+    """Pinbar pattern detection parameters."""
+    min_wick_ratio: Decimal = Field(
+        default=Decimal("0.6"),
+        ge=Decimal("0"),
+        le=Decimal("1"),
+        description="Minimum wick ratio (影线占全长的最低比例)"
+    )
+    max_body_ratio: Decimal = Field(
+        default=Decimal("0.3"),
+        ge=Decimal("0"),
+        lt=Decimal("1"),
+        description="Maximum body ratio (实体占全长的最高比例)"
+    )
+    body_position_tolerance: Decimal = Field(
+        default=Decimal("0.1"),
+        ge=Decimal("0"),
+        lt=Decimal("0.5"),
+        description="Body position tolerance (实体位置偏差容许度)"
+    )
+
+    @field_validator('min_wick_ratio')
+    @classmethod
+    def validate_min_wick_ratio(cls, v):
+        if v <= Decimal("0"):
+            raise ValueError("min_wick_ratio must be greater than 0")
+        return v
+
+    @field_validator('max_body_ratio')
+    @classmethod
+    def validate_max_body_ratio(cls, v):
+        if v < Decimal("0") or v >= Decimal("1"):
+            raise ValueError("max_body_ratio must be in [0, 1)")
+        return v
+
+    @field_validator('body_position_tolerance')
+    @classmethod
+    def validate_body_position_tolerance(cls, v):
+        if v < Decimal("0") or v >= Decimal("0.5"):
+            raise ValueError("body_position_tolerance must be in [0, 0.5)")
+        return v
+
+
+class EngulfingParams(BaseModel):
+    """Engulfing pattern detection parameters."""
+    max_wick_ratio: Decimal = Field(
+        default=Decimal("0.6"),
+        ge=Decimal("0"),
+        le=Decimal("1"),
+        description="Maximum wick ratio for filtering (最大影线比例)"
+    )
+
+
+class EmaParams(BaseModel):
+    """EMA trend filter parameters."""
+    period: int = Field(
+        default=60,
+        ge=5,
+        le=200,
+        description="EMA period (EMA 周期)"
+    )
+
+
+class MtfParams(BaseModel):
+    """MTF (Multi-Timeframe) validation parameters."""
+    enabled: bool = Field(
+        default=True,
+        description="Enable MTF validation (是否启用 MTF 校验)"
+    )
+    ema_period: int = Field(
+        default=60,
+        ge=5,
+        le=200,
+        description="EMA period for MTF trend calculation (MTF 趋势计算 EMA 周期)"
+    )
+
+
+class AtrParams(BaseModel):
+    """ATR (Average True Range) filter parameters."""
+    enabled: bool = Field(
+        default=True,
+        description="Enable ATR filter (是否启用 ATR 过滤器)"
+    )
+    period: int = Field(
+        default=14,
+        ge=5,
+        le=50,
+        description="ATR calculation period (ATR 计算周期)"
+    )
+    min_atr_ratio: Decimal = Field(
+        default=Decimal("0.5"),
+        ge=Decimal("0"),
+        le=Decimal("5"),
+        description="Minimum ATR ratio (K 线波幅/ATR，低于此值过滤)"
+    )
+
+
+class FilterParams(BaseModel):
+    """Generic filter parameters with type discriminator."""
+    type: Literal["ema", "ema_trend", "mtf", "atr", "volume_surge", "volatility_filter", "time_filter", "price_action"]
+    enabled: bool = Field(default=True, description="Whether this filter is active")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Filter-specific parameters")
+
+
+class StrategyParams(BaseModel):
+    """
+    Complete strategy parameters configuration.
+
+    This is the main model for strategy parameter configuration API.
+    """
+    pinbar: PinbarParams = Field(default_factory=PinbarParams, description="Pinbar pattern parameters")
+    engulfing: EngulfingParams = Field(default_factory=EngulfingParams, description="Engulfing pattern parameters")
+    ema: EmaParams = Field(default_factory=EmaParams, description="EMA trend filter parameters")
+    mtf: MtfParams = Field(default_factory=MtfParams, description="MTF validation parameters")
+    atr: AtrParams = Field(default_factory=AtrParams, description="ATR filter parameters")
+    filters: List[FilterParams] = Field(default_factory=list, description="Additional custom filters")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return self.model_dump(mode='json')
+
+    @classmethod
+    def from_config_manager(cls, config_manager: Any) -> "StrategyParams":
+        """
+        Build StrategyParams from ConfigManager.
+
+        Args:
+            config_manager: ConfigManager instance
+
+        Returns:
+            StrategyParams instance populated from config
+        """
+        # Extract from core config
+        core = config_manager.core_config
+
+        # Extract from user config
+        user = config_manager.user_config
+
+        # Build pinbar params from core config
+        pinbar = PinbarParams(
+            min_wick_ratio=core.pinbar_defaults.min_wick_ratio,
+            max_body_ratio=core.pinbar_defaults.max_body_ratio,
+            body_position_tolerance=core.pinbar_defaults.body_position_tolerance,
+        )
+
+        # Build ema params from core config
+        ema = EmaParams(period=core.ema.period)
+
+        # Build mtf params from user config
+        mtf = MtfParams(
+            enabled=user.mtf_ema_period > 0,
+            ema_period=user.mtf_ema_period,
+        )
+
+        # Default values for others
+        engulfing = EngulfingParams()
+        atr = AtrParams()
+
+        return cls(
+            pinbar=pinbar,
+            engulfing=engulfing,
+            ema=ema,
+            mtf=mtf,
+            atr=atr,
+            filters=[],
+        )
+
+
+class StrategyParamsUpdate(BaseModel):
+    """Request model for updating strategy parameters."""
+    pinbar: Optional[PinbarParams] = None
+    engulfing: Optional[EngulfingParams] = None
+    ema: Optional[EmaParams] = None
+    mtf: Optional[MtfParams] = None
+    atr: Optional[AtrParams] = None
+    filters: Optional[List[FilterParams]] = None
+
+
+class StrategyParamsPreview(BaseModel):
+    """Request/Response model for strategy parameters preview (Dry Run)."""
+    old_config: StrategyParams = Field(..., description="Current configuration")
+    new_config: StrategyParams = Field(..., description="Proposed configuration")
+    changes: List[str] = Field(default_factory=list, description="List of changed fields")
+    warnings: List[str] = Field(default_factory=list, description="Validation warnings")
+
+
+# ============================================================
 # Multi-Level Take Profit Models (S6-3)
 # ============================================================
 class TakeProfitLevel(BaseModel):

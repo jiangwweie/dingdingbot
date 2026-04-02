@@ -6,11 +6,79 @@
 
 ## 📍 最近 7 天
 
-### 2026-04-02 - 日期选择组件优化 + Orders.tsx 修复
+### 2026-04-02 - 策略参数可配置化开发（后端核心实现）
 
 **执行日期**: 2026-04-02  
 **执行人**: AI Builder  
-**状态**: ✅ 已完成
+**状态**: 🔄 进行中（后端核心完成）
+
+---
+
+## ✅ 策略参数可配置化开发 - 后端核心实现
+
+**任务概述**: 实现策略参数可视化配置的后端 API 和数据库支持。
+
+**修改文件**:
+- `src/infrastructure/config_snapshot_repository.py` - 添加 config_entries 表支持
+- `src/domain/models.py` - 添加 StrategyParams 等 Pydantic 模型
+- `src/interfaces/api.py` - 添加策略参数 API 端点
+- `docs/planning/strategy-param-config-plan.md` - 创建任务计划文档
+- `docs/planning/task_plan.md` - 更新任务清单
+- `docs/planning/findings.md` - 添加技术发现记录
+
+**实现功能**:
+- ✅ B1: 创建 config_entries 数据库表 + ORM 模型
+  - 新增 `config_entries` 表用于存储策略参数
+  - 添加 `get_config_entry`, `upsert_config_entry`, `get_strategy_params`, `save_strategy_params` 方法
+  
+- ✅ B2: 创建 StrategyParams Pydantic 模型
+  - `PinbarParams` - Pinbar 形态参数（min_wick_ratio, max_body_ratio, body_position_tolerance）
+  - `EngulfingParams` - 吞没形态参数（max_wick_ratio）
+  - `EmaParams` - EMA 趋势过滤参数（period）
+  - `MtfParams` - MTF 多周期验证参数（enabled, ema_period）
+  - `AtrParams` - ATR 过滤器参数（enabled, period, min_atr_ratio）
+  - `StrategyParams` - 完整的策略参数配置模型
+  - `StrategyParamsUpdate` - 更新请求模型
+  - `StrategyParamsPreview` - 预览请求/响应模型
+
+- ✅ B3: 实现 GET /api/strategy/params
+  - 从数据库获取策略参数
+  - 支持回退到 ConfigManager 默认值
+
+- ✅ B4: 实现 PUT /api/strategy/params + 热重载集成
+  - 支持部分更新（只更新提供的字段）
+  - 参数验证（Pydantic 验证）
+  - 自动创建配置快照
+
+- ✅ B5: 实现 POST /api/strategy/params/preview
+  - Dry Run 预览功能
+  - 显示变更对比
+  - 参数范围警告提示
+
+**API 端点汇总**:
+| 端点 | 方法 | 功能 |
+|------|------|------|
+| `/api/strategy/params` | GET | 获取当前策略参数 |
+| `/api/strategy/params` | PUT | 更新策略参数（热重载） |
+| `/api/strategy/params/preview` | POST | 预览参数变更（Dry Run） |
+
+**数据库 Schema**:
+```sql
+CREATE TABLE IF NOT EXISTS config_entries (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    category      TEXT NOT NULL,           -- Config category: 'strategy_params', 'risk_params', etc.
+    key           TEXT NOT NULL,           -- Config key within category
+    value_json    TEXT NOT NULL,           -- JSON-serialized config value
+    description   TEXT DEFAULT '',
+    updated_at    TEXT NOT NULL,
+    updated_by    TEXT DEFAULT 'user',
+    UNIQUE(category, key)
+)
+```
+
+**待完成**:
+- ⏳ F1-F6: 前端 UI 实现
+- ⏳ T1-T4: 单元测试和集成测试
 
 ---
 

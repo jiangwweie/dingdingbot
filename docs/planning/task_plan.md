@@ -29,7 +29,7 @@
 |----|------|--------|------|----------|
 | 1 | 配置快照创建验证失败 - version 格式问题 | P0 | ✅ 已完成 | 修复 API 和 Service 的 VERSION_PATTERN 不一致问题 |
 | 2 | 持仓数据不一致问题排查 | P0 | ✅ 已完成 | 修复前后端字段名不一致 (items vs positions) |
-| 3 | 策略参数可配置化分析与梳理 | P1 | ☐ 待启动 | 待分析 |
+| 3 | 策略参数可配置化分析与梳理 | P0 | ✅ 分析完成 | 技术任务已分解，待开发 |
 | 4 | 订单详情页 K 线渲染 - 集成 TradingView 组件 | P1 | ☐ 待启动 | 待开发 |
 | 5 | 回测列表盈亏计算和夏普比率修复 | P0 | ✅ 已完成 | 添加 sharpe_ratio 字段到数据库和 API |
 | 6 | 订单管理级联展示功能 | P1 | ☐ 待启动 | 待开发 |
@@ -53,6 +53,66 @@
 | 10 | 回测页面日期选择组件优化 | P2 | ✅ 已完成 | 添加快捷日期范围选择功能 |
 | 11 | Orders.tsx 日期筛选未传递给 API | P1 | ✅ 已完成 | 添加 start_date/end_date 参数到 URL |
 
+---
+
+## 策略参数可配置化 - 数据库存储方案 (2026-04-02 启动) ⭐
+
+**项目概述**: 实现策略参数数据库存储方案，SQLite 持久化，YAML 仅用于导入导出备份。
+
+**设计文档**: 
+- `docs/products/p1-tasks-analysis-brief.md` - 产品需求文档
+- `docs/planning/findings.md` - 存储方案决策
+
+**状态**: ✅ 阶段 1 完成（后端核心 API 实现）
+
+**架构决策** (2026-04-02):
+- **配置存储**: SQLite 数据库 (`config_entries` 表) 替代 YAML 文件
+- **YAML 角色**: 仅用于导入导出备份，不作为运行态存储
+- **优势**: 启动无需加载外部文件、事务支持、与快照系统无缝集成
+
+**今日完成 (2026-04-02)**:
+- ✅ B1: config_entries 表结构创建（config_snapshot_repository.py）
+- ✅ B2: StrategyParams 等 Pydantic 模型创建（models.py）
+- ✅ B3: GET /api/strategy/params 实现
+- ✅ B4: PUT /api/strategy/params + 热重载集成
+- ✅ B5: POST /api/strategy/params/preview 实现
+
+**任务清单**:
+
+**后端任务 (10h)**:
+| ID | 任务名称 | 优先级 | 预计工时 | 状态 |
+|----|----------|--------|----------|------|
+| B1 | 调整 config_entries 表结构为新设计 | P0 | 1h | ✅ 已完成 |
+| B2 | 创建 StrategyParams Pydantic 模型 | P0 | 1h | ✅ 已完成 |
+| B3 | 实现 GET /api/strategy/params | P0 | 1h | ✅ 已完成 |
+| B4 | 实现 PUT /api/strategy/params + 热重载集成 | P0 | 2h | ✅ 已完成 |
+| B5 | 实现 POST /api/strategy/params/preview | P0 | 1h | ✅ 已完成 |
+| B6 | 实现 YAML 导入导出 API | P1 | 2h | ☐ 待启动 |
+
+**前端任务 (11h)**:
+| ID | 任务名称 | 优先级 | 预计工时 | 状态 |
+|----|----------|--------|----------|------|
+| F1 | 创建 API 函数封装（api.ts） | P0 | 1h | ☐ 待启动 |
+| F2 | 实现 StrategyParamPanel 主容器 | P0 | 2h | ☐ 待启动 |
+| F3 | 实现 PinbarParamForm 组件 | P0 | 2h | ☐ 待启动 |
+| F4 | 实现 EmaParamForm / FilterParamList | P0 | 2h | ☐ 待启动 |
+| F5 | 实现 ParamPreviewModal 预览对话框 | P1 | 2h | ☐ 待启动 |
+| F6 | 实现 TemplateManager 模板管理 | P1 | 3h | ☐ 待启动 |
+
+**测试任务 (6h)**:
+| ID | 任务名称 | 优先级 | 预计工时 | 状态 |
+|----|----------|--------|----------|------|
+| T1 | StrategyParams 模型单元测试 | P0 | 1h | ☐ 待启动 |
+| T2 | 策略参数 API 集成测试 | P0 | 2h | ☐ 待启动 |
+| T3 | 参数验证边界测试 | P0 | 1h | ☐ 待启动 |
+| T4 | 前端 E2E 测试 | P1 | 2h | ☐ 待启动 |
+
+**执行阶段**:
+- **阶段 1**: B1-B3（数据库表 + ORM+Repository） - 预计 4h
+- **阶段 2**: B4-B5（ConfigManager 集成 + 迁移脚本） - 预计 4h
+- **阶段 3**: B6（导入导出 API） - 预计 2h
+- **阶段 4**: F1-F6（前端核心） - 预计 11h
+- **阶段 5**: T1-T4（测试验证） - 预计 6h
 **详细说明**:
 
 ### 任务 8: 回测数据源降级逻辑修复

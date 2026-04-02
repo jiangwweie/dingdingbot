@@ -7,7 +7,8 @@
 ## 📑 目录
 
 1. [P1 任务产品分析](#p1-任务产品分析)
-2. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
+2. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
+3. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
 3. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
 4. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
 5. [BTC 历史数据导入记录](#btc-历史数据导入记录)
@@ -16,6 +17,77 @@
 8. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
 9. [Phase 6 前端架构](#phase-6-前端架构)
 10. [API 契约与端点](#api-契约与端点)
+
+---
+
+## 策略参数配置存储方案决策
+
+**日期**: 2026-04-02  
+**决策类型**: 架构定调  
+**相关任务**: 策略参数可配置化
+
+### 决策背景
+
+原 PRD 方案将配置持久化到 `user.yaml` 文件，用户提出优化建议：**改用 SQLite 数据库存储，YAML 仅用于导入导出备份**。
+
+### 方案对比
+
+| 维度 | 方案 A: YAML 存储 | 方案 B: 数据库存储 ✅ |
+|------|------------------|----------------------|
+| 启动加载 | 需解析外部文件 | 直接读 DB，无需解析 |
+| 配置同步 | 需文件锁，复杂 | 事务支持，自动同步 |
+| 并发安全 | ⚠️ 需额外处理 | ✅ SQLite WAL 模式 |
+| 与快照集成 | ⚠️ 需额外逻辑 | ✅ 天然集成 |
+| 版本控制 | ✅ Git 友好 | ⚠️ 需迁移脚本 |
+| 可读性 | ✅ 人类可读 | ⚠️ 需工具查询 |
+
+### 决策结果
+
+采用 **方案 B: 数据库存储**
+
+### 数据库表设计
+
+```sql
+CREATE TABLE config_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_key VARCHAR(128) NOT NULL,      -- 配置键，如 'strategy.pinbar.min_wick_ratio'
+    config_value TEXT NOT NULL,            -- JSON 格式存储值
+    value_type VARCHAR(16) NOT NULL,       -- 'string' | 'number' | 'boolean' | 'json'
+    version VARCHAR(32) NOT NULL,          -- 配置版本号
+    updated_at BIGINT NOT NULL,            -- 更新时间戳 (毫秒)
+    UNIQUE(config_key)
+);
+
+-- 索引优化
+CREATE INDEX idx_config_key ON config_entries(config_key);
+CREATE INDEX idx_config_updated_at ON config_entries(updated_at);
+```
+
+### 配置层级设计
+
+```
+配置键命名规范：分层点号分隔
+
+strategy.trigger.pinbar.min_wick_ratio  →  Pinbar 触发器参数
+strategy.filter.ema.period             →  EMA 过滤器参数
+risk.max_loss_percent                  →  风控参数
+```
+
+### 迁移策略
+
+1. **创建配置表** - SQLAlchemy ORM 模型 + 迁移脚本
+2. **从 YAML 导入** - 启动时检测 YAML，自动迁移到 DB
+3. **双写过渡期** - 可选：同时写入 YAML 和 DB，保证向后兼容
+4. **清理 YAML** - 迁移验证后，YAML 仅保留导入导出功能
+
+### 影响范围
+
+| 模块 | 变更 |
+|------|------|
+| `ConfigManager` | 从 DB 加载配置，而非 YAML |
+| `ConfigSnapshotService` | 快照存储/读取从 DB |
+| 配置导入导出 API | 导出时生成 YAML，导入时写入 DB |
+| 启动流程 | 无需等待 YAML 加载，直接读 DB |
 
 ---
 

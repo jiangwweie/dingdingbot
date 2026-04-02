@@ -70,6 +70,28 @@ class ConfigSnapshotRepository:
             CREATE INDEX IF NOT EXISTS idx_snapshots_created_at ON config_snapshots(created_at DESC)
         """)
 
+        # Create config_entries table for strategy parameters (Phase K - Strategy Parameter Configuration)
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS config_entries (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                category      TEXT NOT NULL,           -- Config category: 'strategy_params', 'risk_params', etc.
+                key           TEXT NOT NULL,           -- Config key within category
+                value_json    TEXT NOT NULL,           -- JSON-serialized config value
+                description   TEXT DEFAULT '',
+                updated_at    TEXT NOT NULL,
+                updated_by    TEXT DEFAULT 'user',
+                UNIQUE(category, key)
+            )
+        """)
+
+        # Create indexes for config_entries
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_config_entries_category ON config_entries(category)
+        """)
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_config_entries_key ON config_entries(key)
+        """)
+
         await self._db.commit()
 
     async def close(self) -> None:
@@ -301,3 +323,151 @@ class ConfigSnapshotRepository:
         ) as cursor:
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
+
+    # ============================================================
+    # Config Entries Management (Strategy Parameters)
+    # ============================================================
+
+    async def get_config_entry(self, category: str, key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a single config entry by category and key.
+
+        Args:
+            category: Config category (e.g., 'strategy_params')
+            key: Config key within category
+
+        Returns:
+            Config entry dict with keys: id, category, key, value_json, description, updated_at, updated_by
+            or None if not found
+        """
+        async with self._db.execute(
+            "SELECT * FROM config_entries WHERE category = ? AND key = ?",
+            (category, key)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_config_entries(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get all config entries, optionally filtered by category.
+
+        Args:
+            category: Optional category filter
+
+        Returns:
+            List of config entry dicts
+        """
+        if category:
+            async with self._db.execute(
+                "SELECT * FROM config_entries WHERE category = ? ORDER BY key",
+                (category,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        else:
+            async with self._db.execute(
+                "SELECT * FROM config_entries ORDER BY category, key"
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def upsert_config_entry(
+        self,
+        category: str,
+        key: str,
+        value_json: str,
+        description: str = "",
+        updated_by: str = "user"
+    ) -> int:
+        """
+        Insert or update a config entry.
+
+        Args:
+            category: Config category
+            key: Config key within category
+            value_json: JSON-serialized config value
+            description: Optional description
+            updated_by: User identifier
+
+        Returns:
+            Config entry ID
+        """
+        now = datetime.now(timezone.utc).isoformat()
+
+        async with self._lock:
+            # Try update first
+            cursor = await self._db.execute("""
+                UPDATE config_entries
+                SET value_json = ?, description = ?, updated_at = ?, updated_by = ?
+                WHERE category = ? AND key = ?
+            """, (value_json, description, now, updated_by, category, key))
+
+            if cursor.rowcount == 0:
+                # Insert new entry
+                cursor = await self._db.execute("""
+                    INSERT INTO config_entries (category, key, value_json, description, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (category, key, value_json, description, now, updated_by))
+                await self._db.commit()
+                return cursor.lastrowid
+
+            await self._db.commit()
+            return cursor.lastrowid
+
+    async def delete_config_entry(self, category: str, key: str) -> bool:
+        """
+        Delete a config entry.
+
+        Args:
+            category: Config category
+            key: Config key within category
+
+        Returns:
+            True if deleted successfully, False if not found
+        """
+        async with self._lock:
+            cursor = await self._db.execute(
+                "DELETE FROM config_entries WHERE category = ? AND key = ?",
+                (category, key)
+            )
+            await self._db.commit()
+            return cursor.rowcount > 0
+
+    async def get_strategy_params(self) -> Optional[Dict[str, Any]]:
+        """
+        Get strategy parameters config entry.
+
+        Returns:
+            Strategy params dict or None if not configured
+        """
+        entry = await self.get_config_entry('strategy_params', 'default')
+        if entry:
+            import json
+            return json.loads(entry['value_json'])
+        return None
+
+    async def save_strategy_params(
+        self,
+        params: Dict[str, Any],
+        description: str = "Strategy parameters",
+        updated_by: str = "user"
+    ) -> int:
+        """
+        Save strategy parameters.
+
+        Args:
+            params: Strategy params dict
+            description: Optional description
+            updated_by: User identifier
+
+        Returns:
+            Config entry ID
+        """
+        import json
+        return await self.upsert_config_entry(
+            category='strategy_params',
+            key='default',
+            value_json=json.dumps(params),
+            description=description,
+            updated_by=updated_by
+        )

@@ -58,6 +58,9 @@ from src.domain.models import (
     ReconciliationRequest, ReconciliationReport,
     OrderType, OrderStatus, OrderRole, Direction, Order,
     ErrorResponse,  # MIN-001: 统一错误响应格式
+    # Strategy Parameter Models (Phase K)
+    StrategyParams, StrategyParamsUpdate, StrategyParamsPreview,
+    PinbarParams, EngulfingParams, EmaParams, MtfParams, AtrParams,
 )
 
 # 回测订单错误码
@@ -2707,6 +2710,274 @@ async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None)
     except Exception as e:
         logger.error(f"Failed to apply strategy template {strategy_id}: {e}")
         return {"error": str(e)}
+
+
+# ============================================================
+# Strategy Parameters Management Endpoints (Phase K)
+# ============================================================
+
+class StrategyParamsResponse(BaseModel):
+    """Response model for strategy parameters."""
+    pinbar: Dict[str, Any] = Field(..., description="Pinbar pattern parameters")
+    engulfing: Dict[str, Any] = Field(..., description="Engulfing pattern parameters")
+    ema: Dict[str, Any] = Field(..., description="EMA trend filter parameters")
+    mtf: Dict[str, Any] = Field(..., description="MTF validation parameters")
+    atr: Dict[str, Any] = Field(..., description="ATR filter parameters")
+    filters: List[Dict[str, Any]] = Field(default_factory=list, description="Additional custom filters")
+
+
+class StrategyParamsUpdateRequest(BaseModel):
+    """Request model for updating strategy parameters."""
+    pinbar: Optional[Dict[str, Any]] = None
+    engulfing: Optional[Dict[str, Any]] = None
+    ema: Optional[Dict[str, Any]] = None
+    mtf: Optional[Dict[str, Any]] = None
+    atr: Optional[Dict[str, Any]] = None
+    filters: Optional[List[Dict[str, Any]]] = None
+
+
+class StrategyParamsPreviewRequest(BaseModel):
+    """Request model for strategy parameters preview."""
+    new_config: StrategyParamsUpdateRequest = Field(..., description="Proposed configuration")
+
+
+class StrategyParamsPreviewResponse(BaseModel):
+    """Response model for strategy parameters preview."""
+    old_config: StrategyParamsResponse = Field(..., description="Current configuration")
+    new_config: StrategyParamsResponse = Field(..., description="Proposed configuration")
+    changes: List[str] = Field(default_factory=list, description="List of changed fields")
+    warnings: List[str] = Field(default_factory=list, description="Validation warnings")
+
+
+@app.get("/api/strategy/params", response_model=StrategyParamsResponse)
+async def get_strategy_params():
+    """
+    Get current strategy parameters.
+
+    Returns the active strategy parameter configuration from the database.
+    If not configured, returns default values.
+
+    Response:
+    {
+        "pinbar": {"min_wick_ratio": 0.6, "max_body_ratio": 0.3, ...},
+        "engulfing": {"max_wick_ratio": 0.6},
+        "ema": {"period": 60},
+        "mtf": {"enabled": true, "ema_period": 60},
+        "atr": {"enabled": true, "period": 14, "min_atr_ratio": 0.5},
+        "filters": []
+    }
+    """
+    try:
+        config_manager = _get_config_manager()
+        repo = _get_repository()
+
+        # Try to get from database first
+        strategy_params = await repo.get_strategy_params()
+
+        if strategy_params:
+            return StrategyParamsResponse(**strategy_params)
+
+        # Fallback to ConfigManager defaults
+        params = StrategyParams.from_config_manager(config_manager)
+        return StrategyParamsResponse(**params.to_dict())
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get strategy params: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/strategy/params", response_model=StrategyParamsResponse)
+async def update_strategy_params(request: StrategyParamsUpdateRequest):
+    """
+    Update strategy parameters with hot-reload.
+
+    This endpoint:
+    1. Validates the new configuration
+    2. Saves to database
+    3. Creates an auto-snapshot of the old config
+    4. Returns the new configuration
+
+    Request body (all fields optional, only provided fields will be updated):
+    {
+        "pinbar": {"min_wick_ratio": 0.65, "max_body_ratio": 0.25},
+        "ema": {"period": 50},
+        ...
+    }
+
+    Response: Updated strategy parameters
+    """
+    try:
+        config_manager = _get_config_manager()
+        repo = _get_repository()
+        snapshot_service = _get_snapshot_service()
+
+        # Get current params
+        current_params = await repo.get_strategy_params()
+        if not current_params:
+            params = StrategyParams.from_config_manager(config_manager)
+            current_params = params.to_dict()
+
+        # Merge with new values
+        import copy
+        new_params = copy.deepcopy(current_params)
+
+        if request.pinbar:
+            new_params['pinbar'].update(request.pinbar)
+        if request.engulfing:
+            new_params['engulfing'].update(request.engulfing)
+        if request.ema:
+            new_params['ema'].update(request.ema)
+        if request.mtf:
+            new_params['mtf'].update(request.mtf)
+        if request.atr:
+            new_params['atr'].update(request.atr)
+        if request.filters is not None:
+            new_params['filters'] = request.filters
+
+        # Validate new params
+        try:
+            validated_params = StrategyParams(**new_params)
+        except Exception as validation_error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid parameters: {str(validation_error)}"
+            )
+
+        # Create auto-snapshot before update
+        if snapshot_service:
+            try:
+                await snapshot_service.create_auto_snapshot(
+                    config=config_manager.user_config,
+                    description="策略参数变更自动快照"
+                )
+                logger.info("Auto-snapshot created before strategy params update")
+            except Exception as e:
+                logger.warning(f"Auto-snapshot creation failed: {e}")
+
+        # Save to database
+        await repo.save_strategy_params(
+            params=new_params,
+            description="Strategy parameters updated via API",
+            updated_by="user"
+        )
+
+        logger.info(f"Strategy parameters updated: {new_params}")
+
+        return StrategyParamsResponse(**new_params)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update strategy params: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/strategy/params/preview", response_model=StrategyParamsPreviewResponse)
+async def preview_strategy_params(request: StrategyParamsPreviewRequest):
+    """
+    Preview strategy parameters before applying (Dry Run).
+
+    This endpoint validates the proposed configuration and shows:
+    - Current configuration
+    - Proposed configuration
+    - List of changed fields
+    - Validation warnings (if any)
+
+    No changes are persisted.
+
+    Request body:
+    {
+        "new_config": {
+            "pinbar": {"min_wick_ratio": 0.65},
+            "ema": {"period": 50}
+        }
+    }
+
+    Response:
+    {
+        "old_config": {...},
+        "new_config": {...},
+        "changes": ["pinbar.min_wick_ratio: 0.6 → 0.65", "ema.period: 60 → 50"],
+        "warnings": []
+    }
+    """
+    try:
+        config_manager = _get_config_manager()
+        repo = _get_repository()
+
+        # Get current params
+        current_params = await repo.get_strategy_params()
+        if not current_params:
+            params = StrategyParams.from_config_manager(config_manager)
+            current_params = params.to_dict()
+
+        # Build proposed config
+        import copy
+        new_params = copy.deepcopy(current_params)
+
+        if request.new_config.pinbar:
+            new_params['pinbar'].update(request.new_config.pinbar)
+        if request.new_config.engulfing:
+            new_params['engulfing'].update(request.new_config.engulfing)
+        if request.new_config.ema:
+            new_params['ema'].update(request.new_config.ema)
+        if request.new_config.mtf:
+            new_params['mtf'].update(request.new_config.mtf)
+        if request.new_config.atr:
+            new_params['atr'].update(request.new_config.atr)
+        if request.new_config.filters is not None:
+            new_params['filters'] = request.new_config.filters
+
+        # Validate proposed config
+        warnings = []
+        try:
+            validated_params = StrategyParams(**new_params)
+        except Exception as validation_error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid parameters: {str(validation_error)}"
+            )
+
+        # Check for warning conditions
+        if new_params.get('ema', {}).get('period', 60) < 10:
+            warnings.append("EMA period < 10 may cause excessive false signals")
+        if new_params.get('ema', {}).get('period', 60) > 100:
+            warnings.append("EMA period > 100 may cause significant lag")
+        if new_params.get('pinbar', {}).get('min_wick_ratio', 0.6) < 0.4:
+            warnings.append("Pinbar min_wick_ratio < 0.4 may allow weak patterns")
+        if new_params.get('atr', {}).get('min_atr_ratio', 0.5) < 0.3:
+            warnings.append("ATR min_atr_ratio < 0.3 may allow low volatility candles")
+
+        # Detect changes
+        changes = []
+
+        def compare_dicts(old: dict, new: dict, prefix: str = ""):
+            for key in new:
+                old_val = old.get(key)
+                new_val = new.get(key)
+                path = f"{prefix}.{key}" if prefix else key
+
+                if isinstance(old_val, dict) and isinstance(new_val, dict):
+                    compare_dicts(old_val, new_val, path)
+                elif old_val != new_val:
+                    changes.append(f"{path}: {old_val} → {new_val}")
+
+        compare_dicts(current_params, new_params)
+
+        return StrategyParamsPreviewResponse(
+            old_config=StrategyParamsResponse(**current_params),
+            new_config=StrategyParamsResponse(**new_params),
+            changes=changes,
+            warnings=warnings,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to preview strategy params: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================
