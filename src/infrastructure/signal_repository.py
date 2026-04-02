@@ -205,7 +205,7 @@ class SignalRepository:
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS config_snapshots (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                version       TEXT NOT NULL,
+                version       TEXT NOT NULL UNIQUE,
                 config_json   TEXT NOT NULL,
                 description   TEXT DEFAULT '',
                 created_at    TEXT NOT NULL,
