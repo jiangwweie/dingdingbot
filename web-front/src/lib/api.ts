@@ -1481,6 +1481,214 @@ export async function fetchAccountHistoricalSnapshots(days: number = 7): Promise
   return res.json();
 }
 
+// ============================================================================
+// Strategy Parameters Management API (Phase K - 策略参数配置)
+// ============================================================================
+
+/**
+ * Strategy parameters response interface
+ */
+export interface StrategyParamsResponse {
+  pinbar: Record<string, any>;
+  engulfing: Record<string, any>;
+  ema: Record<string, any>;
+  mtf: Record<string, any>;
+  atr: Record<string, any>;
+  filters: Array<Record<string, any>>;
+}
+
+/**
+ * Strategy parameters update request interface
+ */
+export interface StrategyParamsUpdateRequest {
+  pinbar?: Record<string, any>;
+  engulfing?: Record<string, any>;
+  ema?: Record<string, any>;
+  mtf?: Record<string, any>;
+  atr?: Record<string, any>;
+  filters?: Array<Record<string, any>>;
+}
+
+/**
+ * Strategy parameters preview response interface
+ */
+export interface StrategyParamsPreviewResponse {
+  old_config: StrategyParamsResponse;
+  new_config: StrategyParamsResponse;
+  changes: string[];
+  warnings: string[];
+}
+
+/**
+ * Get current strategy parameters
+ */
+export async function getStrategyParams(): Promise<StrategyParamsResponse> {
+  const res = await fetch('/api/strategy/params', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch strategy parameters');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Update strategy parameters with hot-reload
+ */
+export async function updateStrategyParams(params: StrategyParamsUpdateRequest): Promise<StrategyParamsResponse> {
+  const res = await fetch('/api/strategy/params', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to update strategy parameters');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Preview strategy parameter changes before applying
+ */
+export async function previewStrategyParams(newConfig: StrategyParamsUpdateRequest): Promise<StrategyParamsPreviewResponse> {
+  const res = await fetch('/api/strategy/params/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_config: newConfig }),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to preview strategy parameters');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Export strategy parameters to YAML file
+ */
+export async function exportStrategyParams(): Promise<Blob> {
+  const res = await fetch('/api/strategy/params/export');
+  if (!res.ok) {
+    const error = new Error('Failed to export strategy parameters');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.blob();
+}
+
+/**
+ * Import strategy parameters from YAML file
+ */
+export async function importStrategyParams(file: File, description?: string): Promise<StrategyParamsResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (description) formData.append('description', description);
+
+  const res = await fetch('/api/strategy/params/import', {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to import strategy parameters');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Strategy parameter template interface
+ */
+export interface StrategyParamTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  params: StrategyParamsResponse;
+  created_at: string;
+  created_by: string;
+}
+
+/**
+ * Fetch strategy parameter templates list
+ */
+export async function fetchStrategyParamTemplates(): Promise<StrategyParamTemplate[]> {
+  const res = await fetch('/api/strategy/params/templates', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch strategy parameter templates');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Save current parameters as a template
+ */
+export async function saveStrategyParamTemplate(
+  name: string,
+  description?: string
+): Promise<StrategyParamTemplate> {
+  const res = await fetch('/api/strategy/params/templates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description }),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to save strategy parameter template');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Load a strategy parameter template
+ */
+export async function loadStrategyParamTemplate(templateId: number): Promise<StrategyParamsResponse> {
+  const res = await fetch(`/api/strategy/params/templates/${templateId}/load`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to load strategy parameter template');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Delete a strategy parameter template
+ */
+export async function deleteStrategyParamTemplate(templateId: number): Promise<{ status: string; message: string }> {
+  const res = await fetch(`/api/strategy/params/templates/${templateId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to delete strategy parameter template');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
 /**
  * Run reconciliation for a specific symbol
  */
@@ -1501,16 +1709,36 @@ export async function runReconciliation(symbol: string): Promise<ReconciliationR
 
 /**
  * Fetch order kline context for charting
- * Returns order details plus ~50 K-lines surrounding the order timestamp
+ * Returns order details plus K-lines surrounding the order timestamp
+ *
+ * @param orderId - Order ID
+ * @param symbol - Symbol (e.g., "BTC/USDT:USDT")
+ * @param includeChain - Whether to include order chain (TP/SL child orders)
  */
-export async function fetchOrderKlineContext(orderId: string, symbol: string): Promise<{
+export async function fetchOrderKlineContext(orderId: string, symbol: string, includeChain: boolean = true): Promise<{
   order: OrderResponse;
+  timeframe: string;
   klines: number[][]; // [timestamp_ms, open, high, low, close, volume]
+  order_chain?: Array<{
+    order_id: string;
+    order_role: 'ENTRY' | 'TP1' | 'TP2' | 'TP3' | 'TP4' | 'TP5' | 'SL';
+    direction: 'LONG' | 'SHORT';
+    price: string | null;
+    average_exec_price: string | null;
+    filled_qty: string;
+    status: 'PENDING' | 'OPEN' | 'FILLED' | 'CANCELED' | 'REJECTED' | 'EXPIRED' | 'PARTIALLY_FILLED';
+    filled_at: number | null;
+    created_at: number;
+    exit_reason?: string | null;
+  }>;
 }> {
-  const res = await fetch(`/api/v3/orders/${orderId}/klines?symbol=${encodeURIComponent(symbol)}`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
+  const res = await fetch(
+    `/api/v3/orders/${orderId}/klines?symbol=${encodeURIComponent(symbol)}&include_chain=${includeChain}`,
+    {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    },
+  );
   if (!res.ok) {
     const error = new Error('Failed to fetch order kline context');
     (error as any).status = res.status;

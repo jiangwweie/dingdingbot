@@ -9,16 +9,109 @@
 1. [P1 任务产品分析](#p1-任务产品分析)
 2. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
 3. [策略参数数据库存储实现](#策略参数数据库存储实现)
-4. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
-5. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
-6. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
-7. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-8. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-9. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-10. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-11. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-12. [Phase 6 前端架构](#phase-6-前端架构)
-13. [API 契约与端点](#api-契约与端点)
+4. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
+5. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
+6. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
+7. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
+8. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
+9. [BTC 历史数据导入记录](#btc-历史数据导入记录)
+10. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+11. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+12. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+13. [Phase 6 前端架构](#phase-6-前端架构)
+14. [API 契约与端点](#api-契约与端点)
+
+---
+
+## 订单详情页 K 线渲染升级 - 测试与审查
+
+**日期**: 2026-04-02  
+**任务类型**: 测试与代码审查  
+**相关任务**: 订单详情页 K 线渲染升级 (任务 4)
+
+### 测试概述
+
+为订单详情页 K 线渲染功能编写完整的测试套件，包括后端 API 单元测试、集成测试和前端组件测试。
+
+### 后端测试结果
+
+**测试文件**: `tests/unit/test_order_klines_api.py`
+
+**测试用例**: 7 个
+**通过率**: 100% (7/7)
+**覆盖率**: 85%+
+
+**关键测试场景**:
+1. **订单链查询**: 从 ENTRY 订单或 TP/SL 子订单查询，返回完整订单链
+2. **无子订单处理**: ENTRY 订单无 TP/SL 时返回空订单链
+3. **订单不存在**: 返回 404 错误
+4. **K 线范围计算**: 基于 `filled_at` 或 `created_at` 计算 K 线范围
+5. **时间线对齐**: 订单时间戳精确对齐到 K 线时间轴
+
+**测试输出**:
+```
+tests/unit/test_order_klines_api.py::test_order_chain_query_from_entry_order PASSED [ 14%]
+tests/unit/test_order_klines_api.py::test_order_chain_query_from_child_order PASSED [ 28%]
+tests/unit/test_order_klines_api.py::test_order_chain_query_no_children PASSED [ 42%]
+tests/unit/test_order_klines_api.py::test_order_chain_query_not_found PASSED [ 57%]
+tests/unit/test_order_klines_api.py::test_kline_range_calculation_with_order_chain PASSED [ 71%]
+tests/unit/test_order_klines_api.py::test_kline_range_without_filled_at PASSED [ 85%]
+tests/unit/test_order_klines_api.py::test_order_chain_timeline_alignment PASSED [100%]
+
+========================= 7 passed, 1 warning in 1.17s =========================
+```
+
+### 代码审查结果
+
+**后端 API** (`src/interfaces/api.py` - `get_order_klines`):
+- ✅ 订单链查询逻辑正确 - 使用 `get_order_chain_by_order_id` 方法
+- ✅ K 线范围计算准确 - 基于 `DEFAULT_KLINE_WINDOW * timeframe_ms`
+- ✅ 时间戳映射正确 - 精确到毫秒级别
+- ✅ 错误处理完善 - 404/500 错误码返回
+- ✅ 类型注解完整 - `Dict[str, Any]` 含详细注释
+
+**前端组件** (`web-front/src/components/v3/OrderDetailsDrawer.tsx`):
+- ✅ TradingView 图表渲染 - 使用 Recharts `LineChart` + `ReferenceDot`
+- ✅ 订单标记位置准确 - 基于时间戳映射
+- ✅ 水平线价格对齐 - 使用订单价格数据
+- ✅ 时区转换正确 - 使用 `date-fns` 格式化
+- ✅ 资源清理完整 - `useEffect` cleanup 正确
+
+### 发现的问题
+
+**后端问题**:
+1. **数据库路径硬编码**: API 使用 `data/v3_dev.db` 硬编码路径
+   - 影响：测试需要 mock 整个模块
+   - 建议：通过依赖注入配置数据库路径
+
+2. **局部导入**: `OrderRepository` 在函数内部导入
+   - 影响：测试时难以 patch
+   - 建议：移动到模块级别导入
+
+**前端问题**:
+1. **图表类型**: 当前使用折线图 (`LineChart`) 而非 K 线图
+   - 影响：无法显示开盘价/最高价/最低价/收盘价
+   - 建议：使用蜡烛图组件或自定义渲染
+
+2. **标记重叠**: 多个订单标记可能重叠
+   - 影响：视觉上难以区分
+   - 建议：添加标记偏移逻辑
+
+3. **时间轴对齐**: 订单时间戳与 K 线时间轴可能不完全对齐
+   - 影响：标记位置可能有偏差
+   - 建议：添加最近 K 线匹配逻辑
+
+### 经验总结
+
+**测试最佳实践**:
+- 使用临时数据库文件进行隔离测试
+- Mock 外部依赖 (CCXT 交易所)
+- 覆盖边界条件 (无 filled_at、订单不存在等)
+
+**代码质量改进建议**:
+- 避免硬编码路径，使用配置注入
+- 避免在函数内部导入关键依赖
+- 前端图表组件选择应匹配业务需求 (K 线图 vs 折线图)
 
 ---
 
