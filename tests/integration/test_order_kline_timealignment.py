@@ -16,7 +16,7 @@ import tempfile
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, Any, List
+from typing import List
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from src.domain.models import Order, OrderStatus, OrderType, OrderRole, Direction
@@ -32,19 +32,46 @@ def temp_db_path():
     fd, path = tempfile.mkstemp(suffix='.db')
     os.close(fd)
     yield path
-    # 清理
     if os.path.exists(path):
         os.remove(path)
 
 
-@pytest.fixture
-async def order_repository(temp_db_path):
-    """创建 OrderRepository 实例"""
-    from src.infrastructure.order_repository import OrderRepository
-    repo = OrderRepository(db_path=temp_db_path)
-    await repo.initialize()
-    yield repo
-    await repo.close()
+# ============================================================
+# 通用 Mock 设置
+# ============================================================
+
+def setup_mocks(entry_order, order_chain=None, mock_ohlcv=None):
+    """设置通用的 mock 配置"""
+    if order_chain is None:
+        order_chain = [entry_order]
+    if mock_ohlcv is None:
+        mock_ohlcv = []
+
+    # Mock OrderRepository
+    repo_patch = patch('src.infrastructure.order_repository.OrderRepository')
+    mock_repo_cls = repo_patch.start()
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.get_order = AsyncMock(return_value=entry_order)
+    mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=order_chain)
+    mock_repo_instance.initialize = AsyncMock()
+    mock_repo_instance.close = AsyncMock()
+    mock_repo_cls.return_value = mock_repo_instance
+
+    # Mock CCXT
+    ccxt_patch = patch('ccxt.async_support.binanceusdm')
+    mock_ccxt_cls = ccxt_patch.start()
+    mock_exchange = MagicMock()
+    mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
+    mock_exchange.close = AsyncMock()
+    mock_ccxt_cls.return_value = mock_exchange
+
+    return repo_patch, ccxt_patch
+
+
+def teardown_mocks(repo_patch, ccxt_patch):
+    """清理 mock"""
+    repo_patch.stop()
+    ccxt_patch.stop()
 
 
 # ============================================================
@@ -123,56 +150,43 @@ async def test_order_chain_timeline_alignment(temp_db_path):
     await repo.save_order(sl)
     await repo.close()
 
+    # 计算预期的 K 线范围
+    timeframe_ms = 900000  # 15m
+    min_time = entry_time
+    max_time = tp1_time
+    since = min_time - (20 * timeframe_ms)
+    limit = int((max_time - since) / timeframe_ms) + 40
+
     # Mock CCXT - 返回覆盖整个订单周期的 K 线
     mock_ohlcv = [
-        [entry_time - 900000, 49800, 49900, 49700, 49850, 100],
-        [entry_time - 300000, 49850, 50100, 49800, 50000, 150],
-        [entry_time, 49950, 50100, 49900, 50000, 200],  # Entry 成交
-        [entry_time + 900000, 50000, 50300, 49950, 50200, 180],
-        [entry_time + 1800000, 50200, 50500, 50100, 50400, 220],
-        [tp1_time, 50400, 50600, 50300, 50500, 250],     # TP1 成交
+        [since + i * timeframe_ms, 49800 + i * 10, 49900 + i * 10, 49700 + i * 10, 49850 + i * 10, 100]
+        for i in range(limit + 10)
     ]
 
-    # Mock OrderRepository 和 CCXT
-    # 注意：API 在函数内部创建 OrderRepository 实例，使用 db_path="data/v3_dev.db"
-    # 我们需要 mock OrderRepository 类，使其返回预设的订单对象
-    with patch('src.interfaces.api.OrderRepository') as MockRepo:
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.get_order = AsyncMock(return_value=entry)
-        mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=[entry, tp1, sl])
-        mock_repo_instance.initialize = AsyncMock()
-        mock_repo_instance.close = AsyncMock()
-        MockRepo.return_value = mock_repo_instance
-
-        with patch('ccxt.async_support.binanceusdm') as mock_ccxt_class:
-            mock_exchange = AsyncMock()
-            mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
-            mock_exchange.close = AsyncMock()
-            mock_ccxt_class.return_value = mock_exchange
-
-            # 直接调用 API 函数
-            from src.interfaces.api import get_order_klines
-            result = await get_order_klines(
-                order_id=entry.id,
-                symbol="BTC/USDT:USDT",
-                include_chain=True
-            )
+    # 设置 mock
+    repo_patch, ccxt_patch = setup_mocks(entry, [entry, tp1, sl], mock_ohlcv)
+    try:
+        from src.interfaces.api import get_order_klines
+        result = await get_order_klines(
+            order_id=entry.id,
+            symbol="BTC/USDT:USDT",
+            include_chain=True
+        )
+    finally:
+        teardown_mocks(repo_patch, ccxt_patch)
 
     # 验证
     assert result is not None
     assert "klines" in result
     assert "order" in result
 
-    # 3. 验证订单时间戳在 K 线范围内
+    # 验证订单时间戳在 K 线范围内
     kline_timestamps = [k[0] for k in result["klines"]]
     min_kline_time = min(kline_timestamps)
     max_kline_time = max(kline_timestamps)
 
-    # Entry 时间应该在 K 线范围内
     assert min_kline_time <= entry_time <= max_kline_time, \
         f"Entry time {entry_time} not in K-line range [{min_kline_time}, {max_kline_time}]"
-
-    # TP1 时间应该在 K 线范围内
     assert min_kline_time <= tp1_time <= max_kline_time, \
         f"TP1 time {tp1_time} not in K-line range [{min_kline_time}, {max_kline_time}]"
 
@@ -181,11 +195,10 @@ async def test_order_chain_timeline_alignment(temp_db_path):
 async def test_partial_filled_order_chain(temp_db_path):
     """IT-OKA-002: 测试部分成交的订单链"""
     from src.infrastructure.order_repository import OrderRepository
-    from src.interfaces.api import get_order_klines
 
     current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    # 创建部分成交的订单链：ENTRY 已成交，TP1 已成交，TP2/SL 挂单中
+    # 创建部分成交的订单链
     entry = Order(
         id="ord_partial_entry",
         signal_id="sig_partial",
@@ -266,38 +279,32 @@ async def test_partial_filled_order_chain(temp_db_path):
     await repo.close()
 
     # Mock CCXT
+    timeframe_ms = 900000
+    min_time = current_time - 7200000
+    max_time = current_time - 1800000
+    since = min_time - (20 * timeframe_ms)
+    limit = int((max_time - since) / timeframe_ms) + 40
+
     mock_ohlcv = [
-        [current_time - 7200000, 3480, 3490, 3470, 3485, 1000],
-        [current_time - 3600000, 3485, 3510, 3480, 3500, 1500],
-        [current_time - 1800000, 3500, 3550, 3495, 3540, 1200],
-        [current_time, 3540, 3560, 3530, 3550, 1100],
+        [min_time + i * timeframe_ms, 3480 + i * 5, 3490 + i * 5, 3470 + i * 5, 3485 + i * 5, 1000]
+        for i in range(limit + 10)
     ]
 
-    with patch('src.interfaces.api.OrderRepository') as MockRepo:
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.get_order = AsyncMock(return_value=entry)
-        mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=[entry, tp1, tp2, sl])
-        mock_repo_instance.close = AsyncMock()
-        MockRepo.return_value = mock_repo_instance
-
-        with patch('ccxt.async_support.binanceusdm') as mock_ccxt_class:
-            mock_exchange = AsyncMock()
-            mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
-            mock_exchange.close = AsyncMock()
-            mock_ccxt_class.return_value = mock_exchange
-
-            # 调用 API
-            result = await get_order_klines(
-                order_id=entry.id,
-                symbol="ETH/USDT:USDT",
-                include_chain=True
-            )
+    repo_patch, ccxt_patch = setup_mocks(entry, [entry, tp1, tp2, sl], mock_ohlcv)
+    try:
+        from src.interfaces.api import get_order_klines
+        result = await get_order_klines(
+            order_id=entry.id,
+            symbol="ETH/USDT:USDT",
+            include_chain=True
+        )
+    finally:
+        teardown_mocks(repo_patch, ccxt_patch)
 
     # 验证
     assert result is not None
     assert "klines" in result
 
-    # 验证 K 线覆盖所有成交时间
     kline_timestamps = [k[0] for k in result["klines"]]
     assert min(kline_timestamps) <= entry.filled_at
     assert max(kline_timestamps) >= tp1.filled_at
@@ -307,9 +314,7 @@ async def test_partial_filled_order_chain(temp_db_path):
 async def test_no_filled_at_fallback(temp_db_path):
     """IT-OKA-003: 测试无 filled_at 时使用 created_at 备选"""
     from src.infrastructure.order_repository import OrderRepository
-    from src.interfaces.api import get_order_klines
 
-    # 创建无 filled_at 的订单（OPEN 状态）
     current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     order = Order(
@@ -325,7 +330,6 @@ async def test_no_filled_at_fallback(temp_db_path):
         status=OrderStatus.OPEN,
         created_at=current_time,
         updated_at=current_time,
-        # 注意：没有 filled_at 字段
         reduce_only=True,
     )
 
@@ -335,37 +339,30 @@ async def test_no_filled_at_fallback(temp_db_path):
     await repo.close()
 
     # Mock CCXT
+    timeframe_ms = 900000
+    since = current_time - (20 * timeframe_ms)
+    limit = 50
+
     mock_ohlcv = [
-        [current_time - 900000, 49800, 49900, 49700, 49850, 100],
-        [current_time, 49850, 50100, 49800, 50000, 150],
-        [current_time + 900000, 49950, 50200, 49900, 50150, 200],
+        [current_time + i * timeframe_ms, 49800 + i * 10, 49900 + i * 10, 49700 + i * 10, 49850 + i * 10, 100]
+        for i in range(limit)
     ]
 
-    with patch('src.interfaces.api.OrderRepository') as MockRepo:
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.get_order = AsyncMock(return_value=order)
-        mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=[order])
-        mock_repo_instance.close = AsyncMock()
-        MockRepo.return_value = mock_repo_instance
-
-        with patch('ccxt.async_support.binanceusdm') as mock_ccxt_class:
-            mock_exchange = AsyncMock()
-            mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
-            mock_exchange.close = AsyncMock()
-            mock_ccxt_class.return_value = mock_exchange
-
-            # 调用 API
-            result = await get_order_klines(
-                order_id=order.id,
-                symbol="BTC/USDT:USDT",
-                include_chain=True
-            )
+    repo_patch, ccxt_patch = setup_mocks(order, [order], mock_ohlcv)
+    try:
+        from src.interfaces.api import get_order_klines
+        result = await get_order_klines(
+            order_id=order.id,
+            symbol="BTC/USDT:USDT",
+            include_chain=True
+        )
+    finally:
+        teardown_mocks(repo_patch, ccxt_patch)
 
     # 验证
     assert result is not None
     assert "klines" in result
 
-    # 验证 K 线围绕 created_at
     kline_timestamps = [k[0] for k in result["klines"]]
     assert current_time in kline_timestamps or \
            any(abs(ts - current_time) < 900000 for ts in kline_timestamps)
@@ -393,52 +390,51 @@ async def test_multi_order_timeline_alignment(temp_db_path):
             filled_qty=Decimal('1.0'),
             average_exec_price=Decimal('50000') + Decimal('100') * i,
             status=OrderStatus.FILLED,
-            created_at=base_time + i * 3600000,  # 每小时一个订单
+            created_at=base_time + i * 3600000,
             updated_at=base_time + i * 3600000,
             filled_at=base_time + i * 3600000,
             reduce_only=False,
         )
         orders.append(order)
-        repo = OrderRepository(db_path=temp_db_path)
-        await repo.initialize()
+
+    repo = OrderRepository(db_path=temp_db_path)
+    await repo.initialize()
+    for order in orders:
         await repo.save_order(order)
-        await repo.close()
+    await repo.close()
 
     # Mock CCXT - 返回覆盖所有订单时间的 K 线
+    timeframe_ms = 900000
+    all_timestamps = [o.filled_at for o in orders]
+    min_time = min(all_timestamps)
+    max_time = max(all_timestamps)
+    since = min_time - (20 * timeframe_ms)
+    limit = int((max_time - since) / timeframe_ms) + 40
+
     mock_ohlcv = [
-        [base_time + i * 3600000, 50000 + i * 100, 50200 + i * 100, 49900 + i * 100, 50100 + i * 100, 100]
-        for i in range(5)
+        [min_time + i * timeframe_ms, 50000 + i * 10, 50200 + i * 10, 49900 + i * 10, 50100 + i * 10, 100]
+        for i in range(limit + 10)
     ]
 
-    with patch('src.interfaces.api.OrderRepository') as MockRepo:
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.get_order = AsyncMock(side_effect=lambda oid: next((o for o in orders if o.id == oid), None))
-        mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=orders[:1])
-        mock_repo_instance.close = AsyncMock()
-        MockRepo.return_value = mock_repo_instance
+    # 测试每个订单
+    for order in orders:
+        repo_patch, ccxt_patch = setup_mocks(order, [order], mock_ohlcv)
+        try:
+            result = await get_order_klines(
+                order_id=order.id,
+                symbol="BTC/USDT:USDT",
+                include_chain=True
+            )
+        finally:
+            teardown_mocks(repo_patch, ccxt_patch)
 
-        with patch('ccxt.async_support.binanceusdm') as mock_ccxt_class:
-            mock_exchange = AsyncMock()
-            mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
-            mock_exchange.close = AsyncMock()
-            mock_ccxt_class.return_value = mock_exchange
+        assert result is not None
+        assert "klines" in result
 
-            # 测试每个订单
-            for order in orders:
-                result = await get_order_klines(
-                    order_id=order.id,
-                    symbol="BTC/USDT:USDT",
-                    include_chain=True
-                )
-
-                assert result is not None
-                assert "klines" in result
-
-                # 验证 K 线包含订单时间
-                kline_timestamps = [k[0] for k in result["klines"]]
-                assert order.filled_at in kline_timestamps or \
-                       any(abs(ts - order.filled_at) < 1800000 for ts in kline_timestamps), \
-                    f"Order {order.id} time {order.filled_at} not aligned with K-lines"
+        kline_timestamps = [k[0] for k in result["klines"]]
+        assert order.filled_at in kline_timestamps or \
+               any(abs(ts - order.filled_at) < 1800000 for ts in kline_timestamps), \
+            f"Order {order.id} time {order.filled_at} not aligned with K-lines"
 
 
 @pytest.mark.asyncio
@@ -448,7 +444,7 @@ async def test_kline_range_covers_full_order_cycle(temp_db_path):
     from src.interfaces.api import get_order_klines
 
     # 创建长周期订单链
-    entry_time = 1711785660000  # 起始时间
+    entry_time = 1711785660000
     tp4_time = entry_time + 86400000  # 24 小时后
 
     entry = Order(
@@ -492,42 +488,34 @@ async def test_kline_range_covers_full_order_cycle(temp_db_path):
     await repo.save_order(tp4)
     await repo.close()
 
-    # Mock CCXT - 返回覆盖 24 小时的 K 线（15 分钟周期 = 96 根 K 线）
+    # Mock CCXT - 返回覆盖 24 小时的 K 线
+    timeframe_ms = 900000
+    since = entry_time - (20 * timeframe_ms)
+    limit = int((tp4_time - since) / timeframe_ms) + 40
+
     mock_ohlcv = [
-        [entry_time + i * 900000, 50000 + i * 10, 50100 + i * 10, 49900 + i * 10, 50050 + i * 10, 100]
-        for i in range(100)  # 100 根 15 分钟 K 线
+        [entry_time + i * timeframe_ms, 50000 + i * 10, 50100 + i * 10, 49900 + i * 10, 50050 + i * 10, 100]
+        for i in range(limit + 10)
     ]
 
-    with patch('src.interfaces.api.OrderRepository') as MockRepo:
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.get_order = AsyncMock(return_value=entry)
-        mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=[entry, tp4])
-        mock_repo_instance.close = AsyncMock()
-        MockRepo.return_value = mock_repo_instance
-
-        with patch('ccxt.async_support.binanceusdm') as mock_ccxt_class:
-            mock_exchange = AsyncMock()
-            mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
-            mock_exchange.close = AsyncMock()
-            mock_ccxt_class.return_value = mock_exchange
-
-            # 调用 API
-            result = await get_order_klines(
-                order_id=entry.id,
-                symbol="BTC/USDT:USDT",
-                include_chain=True
-            )
+    repo_patch, ccxt_patch = setup_mocks(entry, [entry, tp4], mock_ohlcv)
+    try:
+        result = await get_order_klines(
+            order_id=entry.id,
+            symbol="BTC/USDT:USDT",
+            include_chain=True
+        )
+    finally:
+        teardown_mocks(repo_patch, ccxt_patch)
 
     # 验证
     assert result is not None
     assert "klines" in result
 
-    # 验证 K 线范围覆盖完整订单周期
     kline_timestamps = [k[0] for k in result["klines"]]
     min_kline = min(kline_timestamps)
     max_kline = max(kline_timestamps)
 
-    # K 线范围应该覆盖从 entry 到 tp4 的整个周期
     assert min_kline <= entry_time, "K-line range should start before or at entry time"
     assert max_kline >= tp4_time, "K-line range should end after or at last TP time"
 
@@ -582,10 +570,6 @@ async def test_order_chain_with_multiple_tp_levels(temp_db_path):
             parent_order_id="ord_mt_entry",
         )
         tp_orders.append(tp)
-        repo = OrderRepository(db_path=temp_db_path)
-        await repo.initialize()
-        await repo.save_order(tp)
-        await repo.close()
 
     sl = Order(
         id="ord_mt_sl",
@@ -595,7 +579,7 @@ async def test_order_chain_with_multiple_tp_levels(temp_db_path):
         order_type=OrderType.STOP_MARKET,
         order_role=OrderRole.SL,
         trigger_price=Decimal('49000'),
-        requested_qty=Decimal('0.01'),  # 剩余仓位
+        requested_qty=Decimal('0.01'),
         filled_qty=Decimal('0'),
         status=OrderStatus.OPEN,
         created_at=base_time,
@@ -608,40 +592,38 @@ async def test_order_chain_with_multiple_tp_levels(temp_db_path):
     repo = OrderRepository(db_path=temp_db_path)
     await repo.initialize()
     await repo.save_order(entry)
+    for tp in tp_orders:
+        await repo.save_order(tp)
     await repo.save_order(sl)
     await repo.close()
 
     # Mock CCXT
+    timeframe_ms = 900000
+    min_time = base_time
+    max_time = base_time + 10800000
+    since = min_time - (20 * timeframe_ms)
+    limit = int((max_time - since) / timeframe_ms) + 40
+
     mock_ohlcv = [
-        [base_time + i * 900000, 50000 + i * 50, 50200 + i * 50, 49900 + i * 50, 50100 + i * 50, 100]
-        for i in range(15)
+        [base_time + i * timeframe_ms, 50000 + i * 50, 50200 + i * 50, 49900 + i * 50, 50100 + i * 50, 100]
+        for i in range(limit + 10)
     ]
 
-    with patch('src.interfaces.api.OrderRepository') as MockRepo:
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.get_order = AsyncMock(return_value=entry)
-        mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=[entry] + tp_orders + [sl])
-        mock_repo_instance.close = AsyncMock()
-        MockRepo.return_value = mock_repo_instance
-
-        with patch('ccxt.async_support.binanceusdm') as mock_ccxt_class:
-            mock_exchange = AsyncMock()
-            mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
-            mock_exchange.close = AsyncMock()
-            mock_ccxt_class.return_value = mock_exchange
-
-            # 调用 API
-            result = await get_order_klines(
-                order_id=entry.id,
-                symbol="BTC/USDT:USDT",
-                include_chain=True
-            )
+    all_orders = [entry] + tp_orders + [sl]
+    repo_patch, ccxt_patch = setup_mocks(entry, all_orders, mock_ohlcv)
+    try:
+        result = await get_order_klines(
+            order_id=entry.id,
+            symbol="BTC/USDT:USDT",
+            include_chain=True
+        )
+    finally:
+        teardown_mocks(repo_patch, ccxt_patch)
 
     # 验证
     assert result is not None
     assert "klines" in result
 
-    # 验证 K 线覆盖所有 TP 时间
     kline_timestamps = [k[0] for k in result["klines"]]
     for tp in tp_orders:
         assert any(abs(ts - tp.filled_at) < 1800000 for ts in kline_timestamps), \
@@ -684,37 +666,29 @@ async def test_very_old_order_kline_fetch(temp_db_path):
     await repo.close()
 
     # Mock CCXT - 模拟历史 K 线
+    timeframe_ms = 900000
+    since = old_time - (20 * timeframe_ms)
+    limit = 50
+
     mock_ohlcv = [
-        [old_time - 900000, 44800, 44900, 44700, 44850, 100],
-        [old_time, 44850, 45100, 44800, 45000, 150],
-        [old_time + 900000, 44950, 45200, 44900, 45150, 200],
+        [old_time + i * timeframe_ms, 44800 + i * 10, 44900 + i * 10, 44700 + i * 10, 44850 + i * 10, 100]
+        for i in range(limit)
     ]
 
-    with patch('src.interfaces.api.OrderRepository') as MockRepo:
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.get_order = AsyncMock(return_value=order)
-        mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=[order])
-        mock_repo_instance.close = AsyncMock()
-        MockRepo.return_value = mock_repo_instance
-
-        with patch('ccxt.async_support.binanceusdm') as mock_ccxt_class:
-            mock_exchange = AsyncMock()
-            mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
-            mock_exchange.close = AsyncMock()
-            mock_ccxt_class.return_value = mock_exchange
-
-            # 调用 API
-            result = await get_order_klines(
-                order_id=order.id,
-                symbol="BTC/USDT:USDT",
-                include_chain=True
-            )
+    repo_patch, ccxt_patch = setup_mocks(order, [order], mock_ohlcv)
+    try:
+        result = await get_order_klines(
+            order_id=order.id,
+            symbol="BTC/USDT:USDT",
+            include_chain=True
+        )
+    finally:
+        teardown_mocks(repo_patch, ccxt_patch)
 
     # 验证
     assert result is not None
     assert "klines" in result
 
-    # 验证 K 线数据包含历史时间点
     kline_timestamps = [k[0] for k in result["klines"]]
     assert old_time in kline_timestamps or \
            any(abs(ts - old_time) < 900000 for ts in kline_timestamps)
