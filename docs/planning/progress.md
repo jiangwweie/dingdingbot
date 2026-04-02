@@ -6,6 +6,55 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-02 - 回测数据入库修复 + 前端容错 ✅
+
+**执行日期**: 2026-04-02  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成
+
+**任务概述**:
+修复 PMS 回测执行后数据未入库问题，并修复前端信号列表页崩溃问题。
+
+**问题根因**:
+1. **数据库路径不一致**: BacktestReportRepository 使用 `signals.db`，OrderRepository 使用 `orders.db`，但主程序使用 `v3_dev.db`
+2. **SQLite CHECK 约束失败**: `win_rate`、`total_return`、`max_drawdown` 字段约束为 0.0-1.0，但代码计算使用百分比（如 60.0 表示 60%）
+3. **Decimal 转字符串问题**: `str(Decimal('0'))` 返回 `'0'` 而非 `'0.0'`，导致 SQLite 字符串比较失败
+4. **前端状态枚举不匹配**: 后端返回 `"triggered"` 状态不在前端 SignalStatus 枚举中
+
+**修复详情**:
+
+| 问题 | 修复方案 | 修改文件 |
+|------|----------|----------|
+| 数据库路径不一致 | 统一改为 `data/v3_dev.db` | `backtest_repository.py`, `order_repository.py`, `signal_repository.py` |
+| win_rate 计算超出范围 | 移除 `* 100`，使用小数而非百分比 | `backtester.py` |
+| Decimal 转字符串问题 | 确保 0 转为 '0.0' 格式 | `backtest_repository.py` |
+| API 响应类型错误 | Decimal 转 string 以匹配 Pydantic 模型 | `backtest_repository.py` |
+| SignalRepository 缺少_lock | 添加 asyncio.Lock() | `signal_repository.py` |
+| 前端未知状态崩溃 | 添加防御性降级处理 | `SignalStatusBadge.tsx` |
+| orders 表缺少字段 | 添加 reduce_only/oco_group_id | 数据库迁移 |
+
+**技术改进**:
+
+1. **数据持久化统一**: 所有回测相关数据现在统一存储到 `v3_dev.db`
+2. **数值精度处理**: `_decimal_to_str()` 增强确保与 SQLite CHECK 约束兼容
+3. **前后端状态对齐**: 前端组件容错处理未知状态，避免页面崩溃
+4. **API 契约完善**: 回测报告列表/详情/订单 API 全部正常返回
+
+**验证结果**:
+```
+✅ 回测报告入库：1 条
+✅ 订单数据入库：189 条
+✅ 回测报告列表 API：正常返回
+✅ 回测报告详情 API：正常返回
+✅ 回测订单列表 API：正常返回
+✅ 后端服务：运行中 (port 8000)
+✅ 前端服务：运行中 (port 3000)
+```
+
+**提交记录**: `57347c8 fix: 修复回测数据入库问题 + 前端信号状态容错`
+
+---
+
 ### 2026-04-02 - P1 问题系统性修复 ✅
 
 **执行日期**: 2026-04-02  
