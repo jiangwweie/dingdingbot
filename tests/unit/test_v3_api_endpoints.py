@@ -55,6 +55,16 @@ def mock_repository():
 
 
 @pytest.fixture
+def mock_order_repository():
+    """Mock order repository"""
+    repo = MagicMock()
+    repo.initialize = AsyncMock()
+    repo.get_order = AsyncMock(return_value=None)
+    repo.close = AsyncMock()
+    return repo
+
+
+@pytest.fixture
 def mock_account_getter():
     """Mock account getter function"""
     def getter():
@@ -333,7 +343,7 @@ class TestGetOrder:
     """Test GET /api/v3/orders/{order_id}"""
 
     def test_get_order_success(
-        self, client, mock_repository, mock_account_getter, mock_exchange_gateway
+        self, client, mock_repository, mock_account_getter, mock_exchange_gateway, mock_order_repository
     ):
         """Test successful order retrieval"""
         set_dependencies(
@@ -342,28 +352,70 @@ class TestGetOrder:
             exchange_gateway=mock_exchange_gateway,
         )
 
-        # Mock fetch_order response
-        mock_exchange_gateway.fetch_order.return_value = OrderPlacementResult(
-            order_id="order_123",
+        # Mock Order entity from database
+        from src.domain.models import Order
+        mock_order = Order(
+            id="order_123",
+            signal_id="signal_001",
             exchange_order_id="binance_456",
             symbol="BTC/USDT:USDT",
-            order_type=OrderType.LIMIT,
             direction=Direction.LONG,
-            side="buy",
-            amount=Decimal("0.001"),
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
             price=Decimal("45000"),
+            trigger_price=None,
+            requested_qty=Decimal("0.001"),
+            filled_qty=Decimal("0"),
+            average_exec_price=None,
             status=OrderStatus.OPEN,
+            reduce_only=False,
+            parent_order_id=None,
+            oco_group_id=None,
+            exit_reason=None,
+            created_at=1712000000000,
+            updated_at=1712000000000,
+            filled_at=None,
         )
+        mock_order_repository.get_order = AsyncMock(return_value=mock_order)
 
-        response = client.get(
-            "/api/v3/orders/order_123",
-            params={"symbol": "BTC/USDT:USDT"}
-        )
+        # Patch OrderRepository to use mock
+        with patch('src.interfaces.api.OrderRepository', return_value=mock_order_repository):
+            response = client.get(
+                "/api/v3/orders/order_123",
+                params={"symbol": "BTC/USDT:USDT"}
+            )
 
         assert response.status_code == 200
         data = response.json()
         assert data["order_id"] == "order_123"
         assert data["symbol"] == "BTC/USDT:USDT"
+        assert data["exchange_order_id"] == "binance_456"
+        assert data["filled_qty"] == "0"  # Decimal serialized as string
+
+    def test_get_order_not_found(
+        self, client, mock_repository, mock_account_getter, mock_exchange_gateway, mock_order_repository
+    ):
+        """Test order not found returns 404"""
+        set_dependencies(
+            repository=mock_repository,
+            account_getter=mock_account_getter,
+            exchange_gateway=mock_exchange_gateway,
+        )
+
+        # Mock order not found
+        mock_order_repository.get_order = AsyncMock(return_value=None)
+
+        # Patch OrderRepository to use mock
+        with patch('src.interfaces.api.OrderRepository', return_value=mock_order_repository):
+            response = client.get(
+                "/api/v3/orders/non_existent_order",
+                params={"symbol": "BTC/USDT:USDT"}
+            )
+
+        assert response.status_code == 404
+        # Check detail field exists and contains error message
+        data = response.json()
+        assert "detail" in data or "F-012" in str(data)
 
 
 # ============================================================
