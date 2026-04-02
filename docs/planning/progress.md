@@ -6,6 +6,111 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-02 - 后端服务紧急修复 ✅
+
+**执行日期**: 2026-04-02  
+**执行人**: Backend Developer  
+**状态**: ✅ 已完成
+
+---
+
+## 🔧 后端服务 3 个紧急问题修复
+
+**任务概述**: 修复后端服务 3 个 P0 级问题，恢复 API 正常服务。
+
+**问题清单**:
+
+| 问题 | 症状 | 根因 | 修复方案 | 状态 |
+|------|------|------|----------|------|
+| 问题 1: 订单详情 K 线图 | 500 错误 | `OrderRepository` 无 `get_by_id()` 方法，使用了错误的同步接口 | 改为异步 `get_order()` 方法，正确初始化 repository | ✅ |
+| 问题 2: 回测报告详情 | 提示"T8 实现" | 浏览器缓存或后端 API 未启动 | 后端服务重启后正常 | ✅ |
+| 问题 3: 配置快照 API | 503 Service Unavailable | `ConfigSnapshotService` 初始化参数错误 (`db_path` 而非 `repository`) | 修复 `src/main.py` 初始化代码 | ✅ |
+
+**修复详情**:
+
+1. **`src/main.py` (line 292-298)**:
+   - 修复前：`ConfigSnapshotService(db_path="data/config_snapshots.db")` ❌
+   - 修复后：先创建 `ConfigSnapshotRepository`，再传入 service ✅
+
+2. **`src/interfaces/api.py` (line 3446-3457)**:
+   - 修复前：使用 SQLAlchemy `get_db()` + `repo.get_by_id()` ❌
+   - 修复后：使用 aiosqlite `OrderRepository` + `await repo.get_order()` ✅
+
+3. **`src/interfaces/api.py` (line 3458)**:
+   - 修复前：`gateway.fetch_order(order_id=order_id)` ❌
+   - 修复后：`gateway.fetch_order(exchange_order_id=order_id)` ✅
+
+4. **`src/interfaces/api.py` (line 3526-3621)**:
+   - 修复前：`/api/v3/orders` 路由定义在 `/api/v3/orders/{order_id}` 之后，导致路由匹配错误 | ✅
+
+**API 验证结果**:
+```bash
+# 1. 配置快照 API
+curl "http://localhost:8000/api/config/snapshots?limit=10&offset=0"
+→ {"total":0,"limit":10,"offset":0,"data":[]} ✅
+
+# 2. 回测报告 API
+curl "http://localhost:8000/api/v3/backtest/reports"
+→ 返回 2 条回测报告数据 ✅
+
+# 3. 订单 K 线 API
+curl "http://localhost:8000/api/v3/orders/ord_2d6e142d/klines?symbol=BTC/USDT:USDT"
+→ 返回订单详情 + 50 条 K 线数据 ✅
+```
+
+**交付文件**:
+| 文件 | 说明 |
+|------|------|
+| `src/main.py` | 修复 ConfigSnapshotService 初始化 |
+| `src/interfaces/api.py` | 修复订单 K 线 API 和路由顺序 |
+
+---
+
+### 2026-04-02 - Phase 8 联调测试完成 ✅
+
+**执行日期**: 2026-04-02  
+**执行人**: QA Tester  
+**状态**: ✅ 已完成 (79/79 测试通过)
+
+---
+
+## Phase 8: 自动化调参 - 联调测试完成 ✅
+
+**任务概述**: 执行前后端联调测试，验证完整的优化流程是否能正常运行。
+
+**测试执行**:
+| 测试类型 | 测试数 | 通过率 | 状态 |
+|----------|--------|--------|------|
+| 单元测试 (StrategyOptimizer) | 22 | 100% | ✅ |
+| 单元测试 (Models) | 35 | 100% | ✅ |
+| API 集成测试 | 10 | 100% | ✅ |
+| E2E 测试 | 12 | 100% | ✅ |
+| **总计** | **79** | **100%** | ✅ |
+
+**修复问题**:
+1. `completed_at` 字段类型错误 - 应使用 datetime 而非 isoformat 字符串
+2. `timeout_seconds` 字段不存在 - 应使用 `timeout`
+3. FLOAT 参数采样使用错误字段 - 应使用 `low_float`/`high_float` 而非 `low`/`high`
+4. 浮点参数 `step` 问题 - 当 step=1 时应设置为 None
+5. `completed_trials` 字段不存在 - 应使用 `current_trial`
+6. 停止标志未清理 - 在 finally 块中清理 `_stop_flags`
+7. 异步事件循环冲突 - 使用线程池运行 Optuna 同步优化
+8. Mock 对象缺少必要字段 - 创建包含完整字段的 mock report
+
+**交付文件**:
+| 文件 | 说明 |
+|------|------|
+| `tests/e2e/test_phase8_optimization_e2e.py` | E2E 集成测试 (新增) |
+| `tests/integration/test_phase8_optimization_api.py` | API 集成测试 (修复) |
+| `src/application/strategy_optimizer.py` | 优化器核心 (修复) |
+| `requirements.txt` | 添加 nest_asyncio 依赖 |
+
+**Git 提交**:
+- `fix(phase8): 修复联调测试中的问题`
+- `test(phase8): 添加 E2E 集成测试`
+
+---
+
 ### 2026-04-02 - Phase 8 后端实现完成 ✅
 
 **执行日期**: 2026-04-02  

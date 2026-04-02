@@ -290,7 +290,16 @@ async def run_application():
 
         # Set API dependencies (shared with main process)
         from src.application.signal_tracker import SignalStatusTracker
+        from src.application.config_snapshot_service import ConfigSnapshotService
+        from src.infrastructure.config_snapshot_repository import ConfigSnapshotRepository
+
         _status_tracker = SignalStatusTracker(repository=signal_repository)
+
+        # Initialize ConfigSnapshotService with repository
+        snapshot_repo = ConfigSnapshotRepository(db_path="data/config_snapshots.db")
+        await snapshot_repo.initialize()
+        _snapshot_service = ConfigSnapshotService(repository=snapshot_repo)
+        config_manager.set_snapshot_service(_snapshot_service)
 
         set_dependencies(
             repository=signal_repository,
@@ -298,6 +307,7 @@ async def run_application():
             config_manager=config_manager,
             exchange_gateway=_exchange_gateway,
             signal_tracker=_status_tracker,
+            snapshot_service=_snapshot_service,
         )
         logger.info("API dependencies initialized")
 

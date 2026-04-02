@@ -3445,20 +3445,17 @@ async def get_order_klines(
     """
     try:
         from src.infrastructure.order_repository import OrderRepository
-        from sqlalchemy.orm import Session
-        from src.infrastructure.database import get_db_session
 
-        # Get DB session
-        db = get_db_session()
-
-        # Fetch order from database
-        repo = OrderRepository(db)
-        order_orm = repo.get_by_id(order_id)
+        # Fetch order from database (async)
+        repo = OrderRepository(db_path="data/v3_dev.db")
+        await repo.initialize()
+        order_orm = await repo.get_order(order_id)
+        await repo.close()
 
         if not order_orm:
             # Fallback: try to fetch from exchange
             gateway = _get_exchange_gateway()
-            order_data = await gateway.fetch_order(order_id=order_id, symbol=symbol)
+            order_data = await gateway.fetch_order(exchange_order_id=order_id, symbol=symbol)
             # Create mock order response
             order_response = {
                 "order_id": order_id,
@@ -4151,4 +4148,335 @@ async def start_reconciliation(request: ReconciliationRequest) -> Reconciliation
         raise
     except Exception as e:
         logger.error(f"对账失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Phase 8: 自动化调参 (Optuna 集成) API Endpoints
+# Reference: docs/designs/phase8-optimizer-contract.md
+# ============================================================
+
+from src.domain.models import (
+    OptimizationRequest,
+    OptimizationJob,
+    OptimizationJobStatus,
+    OptimizationTrialResult,
+)
+from src.application.strategy_optimizer import StrategyOptimizer
+
+
+# 全局 optimizer 实例
+_optimizer: Optional[StrategyOptimizer] = None
+
+
+def set_optimizer(optimizer: StrategyOptimizer) -> None:
+    """注入 Phase 8 优化器依赖"""
+    global _optimizer
+    _optimizer = optimizer
+
+
+def _get_optimizer() -> StrategyOptimizer:
+    """获取优化器实例"""
+    if _optimizer is None:
+        raise HTTPException(status_code=503, detail="优化器未初始化")
+    return _optimizer
+
+
+# ------------------------------------------------------------
+# Phase 8 API Responses
+# ------------------------------------------------------------
+class OptimizationJobSummary(BaseModel):
+    """优化任务摘要"""
+    job_id: str
+    status: str
+    symbol: str
+    timeframe: str
+    objective: str
+    current_trial: int
+    total_trials: int
+    best_value: Optional[float]
+    created_at: str
+
+
+class OptimizationJobList(BaseModel):
+    """优化任务列表响应"""
+    jobs: List[OptimizationJobSummary]
+    total: int
+
+
+class OptimizationStatusResponse(BaseModel):
+    """优化状态响应"""
+    job_id: str
+    status: str
+    current_trial: int
+    total_trials: int
+    best_trial: Optional[Dict[str, Any]]
+    best_value: Optional[float]
+    started_at: Optional[str]
+    estimated_remaining_seconds: Optional[int]
+
+
+class OptimizationResultsResponse(BaseModel):
+    """优化结果响应"""
+    job_id: str
+    status: str
+    best_trial: Optional[Dict[str, Any]]
+    best_value: Optional[float]
+    total_trials: int
+    trials: List[Dict[str, Any]]
+
+
+# ------------------------------------------------------------
+# Phase 8 API Endpoints
+# ------------------------------------------------------------
+@app.post("/api/optimize", response_model=OptimizationJobSummary)
+async def start_optimization(request: OptimizationRequest):
+    """
+    启动优化任务
+
+    Phase 8: 自动化调参 - POST /api/optimize
+    Reference: docs/designs/phase8-optimizer-contract.md Section 2.1
+
+    Args:
+        request: 优化请求
+
+    Returns:
+        OptimizationJobSummary: 优化任务摘要
+
+    Raises:
+        HTTPException:
+            - 503: 优化器未初始化
+            - 400: 参数空间无效
+    """
+    try:
+        optimizer = _get_optimizer()
+
+        # 验证参数空间
+        if not request.parameter_space.parameters:
+            raise HTTPException(status_code=400, detail="参数空间不能为空")
+
+        # 启动优化
+        job = await optimizer.start_optimization(request)
+
+        return OptimizationJobSummary(
+            job_id=job.job_id,
+            status=job.status.value,
+            symbol=job.request.symbol,
+            timeframe=job.request.timeframe,
+            objective=job.request.objective.value,
+            current_trial=job.current_trial,
+            total_trials=job.total_trials,
+            best_value=job.best_value,
+            created_at=job.started_at.isoformat() if job.started_at else None,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"启动优化失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/optimize", response_model=OptimizationJobList)
+async def list_optimizations(
+    status: Optional[str] = Query(None, description="状态筛选"),
+    limit: int = Query(50, ge=1, le=200, description="返回数量限制"),
+):
+    """
+    列出所有优化任务
+
+    Phase 8: 自动化调参 - GET /api/optimize
+
+    Args:
+        status: 状态筛选 (running/completed/stopped/failed)
+        limit: 返回数量限制
+
+    Returns:
+        OptimizationJobList: 优化任务列表
+    """
+    try:
+        optimizer = _get_optimizer()
+        jobs = optimizer._jobs.values()
+
+        # 筛选
+        if status:
+            jobs = [j for j in jobs if j.status.value == status]
+
+        # 排序（最新的在前）
+        jobs = sorted(jobs, key=lambda j: j.started_at or datetime(1970, 1, 1, tzinfo=timezone.utc), reverse=True)[:limit]
+
+        return OptimizationJobList(
+            jobs=[
+                OptimizationJobSummary(
+                    job_id=j.job_id,
+                    status=j.status.value,
+                    symbol=j.request.symbol,
+                    timeframe=j.request.timeframe,
+                    objective=j.request.objective.value,
+                    current_trial=j.current_trial,
+                    total_trials=j.total_trials,
+                    best_value=j.best_value,
+                    created_at=j.started_at.isoformat() if j.started_at else None,
+                )
+                for j in jobs
+            ],
+            total=len(jobs),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"列出优化任务失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/optimize/{job_id}", response_model=OptimizationStatusResponse)
+async def get_optimization_status(job_id: str):
+    """
+    获取优化任务状态
+
+    Phase 8: 自动化调参 - GET /api/optimize/{job_id}
+
+    Args:
+        job_id: 任务 ID
+
+    Returns:
+        OptimizationStatusResponse: 优化状态
+
+    Raises:
+        HTTPException:
+            - 404: 任务不存在
+    """
+    try:
+        optimizer = _get_optimizer()
+
+        if job_id not in optimizer._jobs:
+            raise HTTPException(status_code=404, detail=f"任务 {job_id} 不存在")
+
+        job = optimizer._jobs[job_id]
+
+        # 计算预计剩余时间
+        estimated_remaining = None
+        if job.status == OptimizationJobStatus.RUNNING and job.started_at:
+            elapsed = (datetime.now(timezone.utc) - job.started_at).total_seconds()
+            if job.current_trial > 0:
+                avg_time_per_trial = elapsed / job.current_trial
+                remaining_trials = job.total_trials - job.current_trial
+                estimated_remaining = int(avg_time_per_trial * remaining_trials)
+
+        return OptimizationStatusResponse(
+            job_id=job.job_id,
+            status=job.status.value,
+            current_trial=job.current_trial,
+            total_trials=job.total_trials,
+            best_trial=job.best_trial.model_dump() if job.best_trial else None,
+            best_value=job.best_value,
+            started_at=job.started_at.isoformat() if job.started_at else None,
+            estimated_remaining_seconds=estimated_remaining,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取优化状态失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/optimize/{job_id}/results", response_model=OptimizationResultsResponse)
+async def get_optimization_results(job_id: str):
+    """
+    获取优化结果
+
+    Phase 8: 自动化调参 - GET /api/optimize/{job_id}/results
+
+    Args:
+        job_id: 任务 ID
+
+    Returns:
+        OptimizationResultsResponse: 优化结果
+
+    Raises:
+        HTTPException:
+            - 404: 任务不存在
+    """
+    try:
+        optimizer = _get_optimizer()
+
+        if job_id not in optimizer._jobs:
+            raise HTTPException(status_code=404, detail=f"任务 {job_id} 不存在")
+
+        job = optimizer._jobs[job_id]
+
+        # 获取试验历史
+        trials = []
+        # TODO: 从数据库加载试验历史
+        # 这里简化处理，返回空列表
+
+        return OptimizationResultsResponse(
+            job_id=job.job_id,
+            status=job.status.value,
+            best_trial=job.best_trial.model_dump() if job.best_trial else None,
+            best_value=job.best_value,
+            total_trials=job.current_trial,
+            trials=trials,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取优化结果失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/optimize/{job_id}/stop", response_model=OptimizationJobSummary)
+async def stop_optimization(job_id: str):
+    """
+    停止优化任务
+
+    Phase 8: 自动化调参 - POST /api/optimize/{job_id}/stop
+
+    Args:
+        job_id: 任务 ID
+
+    Returns:
+        OptimizationJobSummary: 优化任务摘要
+
+    Raises:
+        HTTPException:
+            - 404: 任务不存在
+            - 400: 任务已完成或已停止
+    """
+    try:
+        optimizer = _get_optimizer()
+
+        if job_id not in optimizer._jobs:
+            raise HTTPException(status_code=404, detail=f"任务 {job_id} 不存在")
+
+        job = optimizer._jobs[job_id]
+
+        if job.status in [OptimizationJobStatus.COMPLETED, OptimizationJobStatus.STOPPED]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"任务已{job.status.value}，无法停止"
+            )
+
+        # 停止优化
+        await optimizer.stop_optimization(job_id)
+
+        return OptimizationJobSummary(
+            job_id=job.job_id,
+            status=job.status.value,
+            symbol=job.request.symbol,
+            timeframe=job.request.timeframe,
+            objective=job.request.objective.value,
+            current_trial=job.current_trial,
+            total_trials=job.total_trials,
+            best_value=job.best_value,
+            created_at=job.started_at.isoformat() if job.started_at else None,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"停止优化失败：{str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
