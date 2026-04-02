@@ -1,7 +1,7 @@
 # 任务计划
 
 > **当前迭代**: 2026-04-02 起  
-> **最后更新**: 2026-04-02 (回测测试验证完成，Phase 8 待启动)
+> **最后更新**: 2026-04-02 (Phase 8 单元测试完成，86/86 通过)
 
 ---
 
@@ -65,23 +65,23 @@ Repository 初始化 | ✅ 通过 | 正确初始化和关闭资源
 - `docs/designs/phase8-optimizer-contract.md` - API 契约与设计
 - `docs/designs/phase8-test-plan.md` - 测试计划
 
-**状态**: 🔄 进行中 (文档已创建，待实现)
+**状态**: 🔄 进行中 (后端 + 前端完成，单元测试通过)
 
 **预计工期**: 2 周
 
 **核心功能**:
 | 功能 | 说明 | 优先级 |
 |------|------|--------|
-| Optuna 目标函数 | 支持夏普比率、PnL/MaxDD、索提诺比率等优化目标 | P0 |
-| 参数空间定义 | EMA 周期、Pinbar 阈值、止损比例等参数范围配置 | P0 |
-| 持久化研究历史 | SQLite 存储试验历史，支持断点续研 | P0 |
-| 可视化分析 | 参数重要性、优化路径、平行坐标图 | P1 |
+| Optuna 目标函数 | 支持夏普比率、PnL/MaxDD、索提诺比率等优化目标 | P0 ✅ |
+| 参数空间定义 | EMA 周期、Pinbar 阈值、止损比例等参数范围配置 | P0 ✅ |
+| 持久化研究历史 | SQLite 存储试验历史，支持断点续研 | P0 ✅ |
+| 可视化分析 | 参数重要性、优化路径、平行坐标图 | P1 ✅ |
 
 **任务分解**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
 |----|----------|--------|----------|------|
-| B1 | Optuna 集成与目标函数实现 | P0 | 4h | ☐ 待启动 |
-| B2 | 参数空间定义与验证 | P0 | 3h | ☐ 待启动 |
+| B1 | Optuna 集成与目标函数实现 | P0 | 4h | ✅ 已完成 |
+| B2 | 参数空间定义与验证 | P0 | 3h | ✅ 已完成 |
 | B3 | 研究历史持久化 (SQLite) | P0 | 3h | ✅ 已完成 |
 | B4 | 优化结果 API 端点 | P0 | 4h | ✅ 已完成 |
 | B5 | PerformanceCalculator 实现 | P0 | 2h | ✅ 已完成 |
@@ -93,23 +93,28 @@ Repository 初始化 | ✅ 通过 | 正确初始化和关闭资源
 | T1 | Optuna 目标函数单元测试 | P0 | 2h | ✅ 已完成 (29 用例) |
 | T2 | 参数空间验证测试 | P0 | 2h | ✅ 已完成 (34 用例) |
 | T3 | StrategyOptimizer 单元测试 | P0 | 2h | ✅ 已完成 (22 用例) |
-| T4 | API 集成测试 | P0 | 2h | ⏳ 待后端 API 端点 |
+| T4 | API 集成测试 | P0 | 2h | ⏳ 待前后端联调 |
 | T5 | E2E 测试 | P1 | 4h | ⏳ 待前后端联调 |
 
 **今日完成 (2026-04-02)**:
-- ✅ 创建 API 契约文档 `docs/designs/phase8-optimizer-contract.md`
-- ✅ 创建测试计划文档 `docs/designs/phase8-test-plan.md`
-- ✅ 创建测试报告文档 `docs/reports/phase8-test-report.md`
-- ✅ T1: Optuna 目标函数单元测试 - 29 用例，100% 通过
-- ✅ T2: 参数空间验证测试 - 34 用例，100% 通过
-- ✅ T3: StrategyOptimizer 单元测试 - 22 用例，100% 通过
-- ✅ 总计：85 个测试用例，全部通过 (100%)
-- ⏳ T4: API 集成测试 - 待后端 API 端点实现
-- ⏳ T5: E2E 测试 - 待前后端联调
+- ✅ 后端：StrategyOptimizer + PerformanceCalculator 实现
+- ✅ 后端：Optuna 集成（optuna>=3.5.0 已安装）
+- ✅ 后端：5 个优化 API 端点
+- ✅ 前端：参数配置 UI + 进度监控 + 结果可视化
+- ✅ 前端：API 函数封装（runOptimization 等）
+- ✅ 测试：86 个单元测试，100% 通过
+  - test_strategy_optimizer.py: 22/22 ✅
+  - test_optimization_models.py: 35/35 ✅
+  - test_performance_calculator.py: 29/29 ✅
 
 **Git 提交**:
-- `0ca5229` - test: Phase 8 自动化调参单元测试 (T1-T2)
-- `2a5c231` - docs: Phase 8 测试报告
+- `06677a2` - fix(phase8): 修复 Phase 8 测试和数据模型
+- `91085ca` - feat(phase8): 集成 Optuna 自动化调参框架 (后端实现)
+- `eb3f4bd` - feat(phase8): 前端实现 - 自动化调参 UI
+
+**待完成**:
+- ⏳ T4: API 集成测试 - 待前后端联调
+- ⏳ T5: E2E 测试 - 待前后端联调
 
 ---
 
