@@ -46,6 +46,7 @@ from src.domain.exceptions import (
 
 from src.infrastructure.signal_repository import SignalRepository
 from src.infrastructure.order_repository import OrderRepository
+from src.application.config_manager import UserConfig
 from src.domain.models import (
     SignalQuery, SignalDeleteRequest, SignalDeleteResponse,
     AttemptQuery, AttemptDeleteRequest, AttemptDeleteResponse,
