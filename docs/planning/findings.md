@@ -6,17 +6,141 @@
 
 ## 📑 目录
 
-1. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-2. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-3. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-4. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-5. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-6. [Phase 6 前端架构](#phase-6-前端架构)
-7. [API 契约与端点](#api-契约与端点)
+1. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
+2. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
+3. [BTC 历史数据导入记录](#btc-历史数据导入记录)
+4. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+5. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+6. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+7. [Phase 6 前端架构](#phase-6-前端架构)
+8. [API 契约与端点](#api-契约与端点)
 
 ---
 
-## P1 问题系统性修复技术细节
+## Phase 8 前端实现技术细节
+
+**日期**: 2026-04-02  
+**实现人**: Frontend Developer
+
+### 架构决策
+
+#### 1. 图表库选择：Recharts vs Plotly.js
+
+**决策**: 使用 Recharts（已安装）而非 Plotly.js
+
+**原因**:
+- 项目已安装 Recharts，无需新增依赖
+- Recharts 与 React 集成更紧密
+- 包体积更小（Plotly.js ~3MB，Recharts ~200KB）
+- 功能满足需求（折线图、柱状图、散点图）
+
+**妥协**:
+- 平行坐标图使用简化的散点图矩阵替代
+- 待后续有需要时可引入 Plotly.js
+
+#### 2. 参数空间设计
+
+**预定义参数模板**: 15+ 个参数模板，分为 4 类：
+- **Trigger - Pinbar**: 最小影线占比、最大实体占比、实体位置容差
+- **Trigger - Engulfing**: 最小实体占比、要求完全吞没
+- **Filter - EMA**: EMA 周期
+- **Filter - MTF**: MTF 要求确认
+- **Filter - Volume**: 成交量激增倍数、回看周期
+- **Filter - Volatility**: 波动率最小/最大 ATR 比率
+- **Filter - ATR**: ATR 周期、最小比率
+- **Risk**: 最大亏损比例、默认杠杆倍数
+
+**参数类型**:
+- `int`: 整数范围（如 EMA 周期 9-50）
+- `float`: 浮点范围（如 Pinbar 最小影线占比 0.5-0.8）
+- `categorical`: 离散选择（如 MTF 要求确认 [true, false]）
+
+#### 3. 优化目标设计
+
+支持 5 种优化目标：
+1. **sharpe** - 夏普比率（收益风险比，越高越好）
+2. **sortino** - 索提诺比率（仅考虑下行风险）
+3. **pnl_maxdd** - 收益/最大回撤比
+4. **total_return** - 总收益率
+5. **win_rate** - 胜率
+
+### 组件设计
+
+#### ParameterSpaceConfig
+
+**职责**: 参数空间配置表单
+
+**子组件**:
+- `IntRangeInput` - 整数范围输入
+- `FloatRangeInput` - 浮点范围输入（支持对数刻度）
+- `CategoricalInput` - 离散选择输入（支持 JSON 解析）
+- `ObjectiveSelector` - 优化目标选择器
+
+**交互**:
+- 分类筛选（全部、Trigger、Filter、Risk）
+- 一键添加预定义参数
+- 实时删除已配置参数
+
+#### OptimizationProgress
+
+**职责**: 优化进度监控
+
+**特性**:
+- 3 秒自动轮询状态
+- 实时进度条显示
+- 当前最优参数展示
+- 已用时间/预计剩余时间
+- 停止优化按钮
+
+#### OptimizationResults
+
+**职责**: 优化结果可视化
+
+**子组件**:
+- `BestParamsCard` - 最佳参数卡片（含指标网格）
+- `OptimizationPathChart` - 优化路径图（Recharts LineChart）
+- `ParameterImportanceChart` - 参数重要性图（Recharts BarChart）
+- `ParallelCoordinatesChart` - 参数 - 性能散点图（Recharts ScatterChart）
+- `TopTrialsTable` - Top N 试验表格
+
+**交互**:
+- 复制/下载最佳参数
+- 应用参数到策略（预留接口）
+- 参数选择器（选择展示的平行坐标参数）
+
+### API 设计
+
+**端点**:
+- `POST /api/optimization/run` - 启动优化
+- `GET /api/optimization/:id/status` - 获取状态
+- `GET /api/optimization/:id/results` - 获取结果
+- `POST /api/optimization/:id/stop` - 停止优化
+- `GET /api/optimization` - 获取历史列表
+
+**类型定义**:
+```typescript
+interface OptimizationRequest {
+  symbol: string;
+  timeframe: string;
+  start_time: number;
+  end_time: number;
+  objective: OptimizationObjective;
+  parameter_space: ParameterSpace;
+  n_trials: number;
+  timeout_seconds?: number;
+  seed?: number;
+}
+```
+
+### 技术债
+
+1. **平行坐标图简化**: 当前使用散点图矩阵替代，功能受限
+2. **历史记录未实现**: 需要后端 API 支持
+3. **参数应用接口**: 预留 `onApplyParams` 回调，需后端支持
+
+---
+
+## Phase 7 回测数据本地化架构
 
 ### 修复概览 (2026-04-02)
 
