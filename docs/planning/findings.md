@@ -28,10 +28,11 @@
 **日期**: 2026-04-02  
 **任务类型**: 测试与代码审查  
 **相关任务**: 订单详情页 K 线渲染升级 (任务 4)
+**状态**: ✅ 已完成 - 14/14 测试通过
 
 ### 测试概述
 
-为订单详情页 K 线渲染功能编写完整的测试套件，包括后端 API 单元测试、集成测试和前端组件测试。
+为订单详情页 K 线渲染功能编写完整的测试套件，包括后端 API 单元测试、集成测试。
 
 ### 后端测试结果
 
@@ -47,6 +48,152 @@
 3. **订单不存在**: 返回 404 错误
 4. **K 线范围计算**: 基于 `filled_at` 或 `created_at` 计算 K 线范围
 5. **时间线对齐**: 订单时间戳精确对齐到 K 线时间轴
+
+### 集成测试结果
+
+**测试文件**: `tests/integration/test_order_kline_timealignment.py`
+
+**测试用例**: 7 个
+**通过率**: 100% (7/7)
+
+**关键测试场景**:
+1. **E2E 时间线对齐**: 完整订单链 (ENTRY -> TP1 -> SL) 时间线验证
+2. **部分成交订单链**: TP1 成交，TP2/SL 挂单场景
+3. **无 filled_at 备选**: OPEN 状态订单使用 `created_at`
+4. **多订单时间线**: 5 个独立订单时间对齐验证
+5. **完整周期覆盖**: 24 小时长周期订单链 K 线范围验证
+6. **多止盈层级**: TP1/TP2/TP3 多层级订单链
+7. **历史订单 K 线**: 30 天前订单 K 线获取
+
+### 技术发现
+
+#### 1. 订单链查询逻辑
+
+**核心方法**: `OrderRepository.get_order_chain_by_order_id(order_id)`
+
+```python
+# 查询逻辑
+if order.order_role == ENTRY:
+    # 查询所有子订单（TP1-5, SL）
+    children = SELECT * FROM v3_orders WHERE parent_order_id = order_id
+    return [order] + children
+else:
+    # 从子订单查询父订单 + 兄弟订单
+    parent = SELECT * FROM v3_orders WHERE id = parent_order_id
+    siblings = SELECT * FROM v3_orders WHERE parent_order_id = parent.id
+    return [parent] + siblings
+```
+
+#### 2. K 线范围计算
+
+**动态范围公式**:
+```python
+timeframe_ms = BacktestConfig.get_timeframe_ms(timeframe)  # 15m = 900000ms
+
+# 收集所有 filled_at 时间戳
+timestamps = [oc["filled_at"] for oc in order_chain if oc.get("filled_at")]
+min_time = min(timestamps)
+max_time = max(timestamps)
+
+# 扩展范围：前后各 20 根 K 线
+since = min_time - (20 * timeframe_ms)
+limit = int((max_time - since) / timeframe_ms) + 40
+```
+
+#### 3. 时间戳对齐
+
+**前端时区转换**:
+```typescript
+const tzOffsetMs = new Date().getTimezoneOffset() * 60 * 1000;
+
+// K 线数据转换
+const candleData: CandlestickData[] = klines.map((k) => ({
+  time: ((k[0] - tzOffsetMs) / 1000) as UTCTimestamp,
+  open: k[1], high: k[2], low: k[3], close: k[4],
+}));
+
+// 订单标记时间转换
+const markers: SeriesMarker[] = orderChain
+  .filter(o => o.filled_at)
+  .map(order => ({
+    time: ((order.filled_at! - tzOffsetMs) / 1000) as UTCTimestamp,
+    position: getMarkerPosition(order.order_role, order.direction),
+    color: getOrderRoleColor(order.order_role, order.direction),
+    shape: getMarkerShape(order.order_role),
+  }));
+```
+
+### Mock 测试技巧
+
+**局部导入的 Mock**:
+API 在函数内部使用 `from src.infrastructure.order_repository import OrderRepository`，
+需要 mock `src.infrastructure.order_repository.OrderRepository` 而非 `src.interfaces.api.OrderRepository`。
+
+```python
+with patch('src.infrastructure.order_repository.OrderRepository') as MockRepo:
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.get_order = AsyncMock(return_value=entry_order)
+    mock_repo_instance.get_order_chain_by_order_id = AsyncMock(return_value=order_chain)
+    mock_repo_instance.initialize = AsyncMock()
+    mock_repo_instance.close = AsyncMock()
+    MockRepo.return_value = mock_repo_instance
+
+    with patch('ccxt.async_support.binanceusdm') as MockExchange:
+        mock_exchange = MagicMock()
+        mock_exchange.fetch_ohlcv = AsyncMock(return_value=mock_ohlcv)
+        mock_exchange.close = AsyncMock()
+        MockExchange.return_value = mock_exchange
+
+        from src.interfaces.api import get_order_klines
+        result = await get_order_klines(...)
+```
+
+### 踩坑记录
+
+#### 问题 1: SQLite 索引 DESC 关键字
+
+**错误**:
+```sql
+CREATE INDEX IF NOT EXISTS idx_config_entries_updated_at ON config_entries_v2(updated_at DESC);
+```
+
+**错误信息**: `sqlite3.OperationalError: near "DESC": syntax error`
+
+**原因**: SQLite 不支持在 `CREATE INDEX` 语句中使用 `DESC` 关键字
+
+**修复**:
+```sql
+CREATE INDEX IF NOT EXISTS idx_config_entries_updated_at ON config_entries_v2(updated_at);
+```
+
+#### 问题 2: 数据库路径硬编码
+
+**问题**: API 端点使用 `data/v3_dev.db` 硬编码路径，测试难以 mock
+
+**解决方案**: 在测试中 mock `OrderRepository` 类，使其返回预设数据
+
+```python
+with patch('src.infrastructure.order_repository.OrderRepository') as MockRepo:
+    # Mock 返回预设订单对象
+    mock_repo_instance.get_order = AsyncMock(return_value=test_order)
+```
+
+### 验收标准
+
+- [x] 订单链查询逻辑正确
+- [x] K 线范围计算准确
+- [x] 时间戳精确对齐
+- [x] 错误处理完善
+- [x] 14 个测试用例 100% 通过
+
+### 相关文档
+
+- `docs/designs/order-kline-upgrade-contract.md` - 接口契约表
+- `docs/testing/order-klines-test-report.md` - 测试报告
+- `tests/unit/test_order_klines_api.py` - 单元测试
+- `tests/integration/test_order_kline_timealignment.py` - 集成测试
+
+---
 
 **测试输出**:
 ```

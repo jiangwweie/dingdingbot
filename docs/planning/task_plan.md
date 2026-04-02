@@ -176,9 +176,25 @@ logger.info("DB has no data, falling back to Exchange Gateway...")
 
 **任务来源**: `docs/products/p1-tasks-analysis-brief.md` - 任务二
 **优先级**: P1 (RICE 评分：4.8)
-**状态**: 🚀 阶段 1 已完成 - 契约设计完成
+**状态**: ✅ 已完成 - 后端 + 前端 + 测试 100% 交付
 **核心需求**: **订单的入场、出场、止盈、止损必须与实际 K 线时间精确对齐，复原交易场景**
 **契约文档**: `docs/designs/order-kline-upgrade-contract.md`
+
+### 交付成果汇总
+
+**后端实现**:
+- ✅ `GET /api/v3/orders/{order_id}/klines` API 扩展
+- ✅ `include_chain` 参数支持返回完整订单链
+- ✅ 订单链查询方法 `get_order_chain_by_order_id()`
+- ✅ K 线范围动态计算（前后各 20 根 K 线）
+
+**前端实现**:
+- ✅ TradingView Lightweight Charts 蜡烛图
+- ✅ 订单标记（箭头/圆形）+ 水平价格线
+- ✅ 时区转换与时间对齐
+
+**测试覆盖**:
+- ✅ 7 个单元测试 + 7 个集成测试 = 14/14 通过
 
 ### 需求分析
 
@@ -205,9 +221,9 @@ logger.info("DB has no data, falling back to Exchange Gateway...")
 
 **当前 API**: `GET /api/v3/orders/{order_id}/klines`
 - ✅ 已返回订单详情 + 50 根 K 线数据
-- ⚠️ 需扩展：支持订单链查询（父订单 + 子订单列表）
+- ✅ 已扩展：支持订单链查询（父订单 + 子订单列表）
 
-**扩展后端 API** (契约设计完成，待实现):
+**扩展后端 API** (✅ 已完成):
 ```python
 @app.get("/api/v3/orders/{order_id}/klines")
 async def get_order_klines(order_id: str, symbol: str, include_chain: bool = True):
@@ -254,19 +270,61 @@ async def get_order_klines(order_id: str, symbol: str, include_chain: bool = Tru
 | D3 | 设计订单链时间线对齐方案 | 1h | ✅ 已完成 |
 | D4 | 输出接口契约表 | 0.5h | ✅ 已完成 |
 
-**阶段 2: 任务分解** 🚀
+**阶段 2: 任务分解** ✅
 | ID | 任务 | 工时 | 状态 |
 |----|------|------|------|
-| P1 | 创建任务清单 | 0.25h | 🔄 进行中 |
-| P2 | 更新 task_plan.md 和 findings.md | 0.25h | 🔄 进行中 |
+| P1 | 创建任务清单 | 0.25h | ✅ 已完成 |
+| P2 | 更新 task_plan.md 和 findings.md | 0.25h | ✅ 已完成 |
 
-**阶段 3: 并行开发** (待启动)
+**阶段 3: 并行开发** ✅
 | ID | 任务 | 工时 | 状态 |
 |----|------|------|------|
-| B1 | 扩展 OrderRepository 支持订单链查询 | 1h | ☐ 待启动 |
-| B2 | 扩展 GET /api/v3/orders/{order_id}/klines 支持 include_chain 参数 | 1h | ☐ 待启动 |
-| B3 | 单元测试：订单链时间线对齐验证 | 1h | ☐ 待启动 |
-| F1 | OrderDetailsDrawer 升级为 TradingView 蜡烛图 | 2h | ☐ 待启动 |
+| B1 | 扩展 OrderRepository 支持订单链查询 | 1h | ✅ 已完成 |
+| B2 | 扩展 GET /api/v3/orders/{order_id}/klines 支持 include_chain 参数 | 1h | ✅ 已完成 |
+| B3 | 单元测试：订单链时间线对齐验证 | 1h | ✅ 已完成 |
+| F1 | OrderDetailsDrawer 升级为 TradingView 蜡烛图 | 2h | ✅ 已完成 |
+| F2 | 实现订单链时间线可视化（箭头 + 水平线） | 1.5h | ✅ 已完成 |
+| F3 | 悬停 Tooltip + 时区转换 | 0.5h | ✅ 已完成 |
+
+**阶段 4: 测试验证** ✅
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| T1 | 后端单元测试 (7 个用例) | 1h | ✅ 已完成 |
+| T2 | 集成测试 (7 个用例) | 1.5h | ✅ 已完成 |
+| T3 | 测试报告编写 | 0.5h | ✅ 已完成 |
+
+**阶段 5: 代码审查** ✅
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| R1 | 后端 API 审查 | 0.5h | ✅ 已完成 |
+| R2 | 前端组件审查 | 0.5h | ✅ 已完成 |
+
+**阶段 6: 验收交付** ✅
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| A1 | 提交汇报 | 0.25h | ✅ 已完成 |
+
+### 测试结果
+
+```
+============================== 14 passed in 1.09s ===============================
+- 单元测试：7 个 (UT-OKA-001 ~ UT-OKA-007)
+- 集成测试：7 个 (IT-OKA-001 ~ IT-OKA-007)
+```
+
+### Git 提交
+
+```
+57977e5 docs: 更新进度日志 - 订单详情页 K 线渲染升级完成
+c8dde57 test(order-klines): 集成测试全部通过 + 测试报告更新
+628dfe1 test(order-klines): 订单详情页 K 线渲染测试完成
+d32b6d0 feat(frontend): OrderDetailsDrawer 升级为 TradingView 蜡烛图
+6708705 feat(api): 订单详情页 K 线渲染升级 - 后端实现
+```
+
+---
+
+---
 | F2 | 订单链时间线可视化（箭头 + 水平线） | 2h | ☐ 待启动 |
 | F3 | 订单详情 Tooltip（悬停显示） | 1h | ☐ 待启动 |
 
