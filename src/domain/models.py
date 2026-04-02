@@ -1678,3 +1678,187 @@ class ErrorResponse(BaseModel):
     message: str = Field(..., description="错误描述")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+# ============================================================
+# Phase 8: 自动化调参 (Optuna 集成) 相关模型
+# ============================================================
+
+class ParameterType(str, Enum):
+    """参数类型枚举"""
+    INT = "int"
+    FLOAT = "float"
+    CATEGORICAL = "categorical"
+
+
+class OptunaDirection(str, Enum):
+    """Optuna 优化方向"""
+    MINIMIZE = "minimize"
+    MAXIMIZE = "maximize"
+
+
+class OptimizationObjective(str, Enum):
+    """优化目标"""
+    SHARPE = "sharpe"  # 夏普比率
+    SORTINO = "sortino"  # 索提诺比率
+    PNL_DD = "pnl_dd"  # 收益/回撤比
+    TOTAL_RETURN = "total_return"  # 总收益
+    WIN_RATE = "win_rate"  # 胜率
+    MAX_PROFIT = "max_profit"  # 最大单笔盈利
+
+
+class ParameterDefinition(BaseModel):
+    """
+    参数定义
+
+    Phase 8: 自动化调参 - 参数空间定义
+    Reference: docs/designs/phase8-optimizer-contract.md
+    """
+    name: str = Field(..., description="参数名称")
+    type: ParameterType = Field(..., description="参数类型")
+
+    # 整数参数
+    low: Optional[int] = Field(None, description="最小值（整数参数）")
+    high: Optional[int] = Field(None, description="最大值（整数参数）")
+    step: Optional[int] = Field(1, description="步长（整数参数）")
+
+    # 浮点参数
+    low_float: Optional[float] = Field(None, description="最小值（浮点参数）")
+    high_float: Optional[float] = Field(None, description="最大值（浮点参数）")
+
+    # 离散参数
+    choices: Optional[List[Any]] = Field(None, description="可选值列表（离散参数）")
+
+    # 默认值
+    default: Optional[Any] = Field(None, description="默认值")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class ParameterSpace(BaseModel):
+    """
+    参数空间 - 多个参数定义的聚合
+
+    Phase 8: 自动化调参 - 参数空间定义
+    """
+    parameters: List[ParameterDefinition] = Field(default_factory=list, description="参数列表")
+
+    def add_parameter(self, param: ParameterDefinition) -> "ParameterSpace":
+        """添加参数到参数空间"""
+        self.parameters.append(param)
+        return self
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class OptimizationRequest(BaseModel):
+    """
+    优化请求
+
+    Phase 8: 自动化调参 - POST /api/optimize 请求体
+    Reference: docs/designs/phase8-optimizer-contract.md Section 2.1
+    """
+    symbol: str = Field(..., description="交易对")
+    timeframe: str = Field(..., description="时间周期")
+    start_time: Optional[int] = Field(None, description="开始时间戳（毫秒）")
+    end_time: Optional[int] = Field(None, description="结束时间戳（毫秒）")
+    limit: int = Field(default=100, ge=10, le=1000, description="K 线数量")
+
+    # 优化配置
+    objective: OptimizationObjective = Field(default=OptimizationObjective.SHARPE, description="优化目标")
+    n_trials: int = Field(default=100, ge=10, le=1000, description="试验次数")
+    timeout: Optional[int] = Field(None, ge=60, description="超时时间（秒）")
+
+    # 参数空间
+    parameter_space: ParameterSpace = Field(..., description="参数空间定义")
+
+    # 回测配置
+    initial_balance: Decimal = Field(default=Decimal("10000"), description="初始资金")
+    slippage_rate: Decimal = Field(default=Decimal("0.001"), description="滑点率")
+    fee_rate: Decimal = Field(default=Decimal("0.0004"), description="手续费率")
+
+    # 高级模式
+    continue_from_last: bool = Field(default=False, description="是否从上次进度继续")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class OptimizationJobStatus(str, Enum):
+    """优化任务状态"""
+    RUNNING = "running"
+    COMPLETED = "completed"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
+class OptimizationTrialResult(BaseModel):
+    """
+    单次试验结果
+
+    Phase 8: 自动化调参 - 试验历史记录
+    """
+    trial_number: int = Field(..., description="试验编号")
+    params: Dict[str, Any] = Field(..., description="参数组合")
+    objective_value: float = Field(..., description="目标函数值")
+
+    # 详细指标
+    total_return: Optional[Decimal] = Field(None, description="总收益")
+    win_rate: Optional[float] = Field(None, description="胜率")
+    max_drawdown: Optional[Decimal] = Field(None, description="最大回撤")
+    sharpe_ratio: Optional[float] = Field(None, description="夏普比率")
+    sortino_ratio: Optional[float] = Field(None, description="索提诺比率")
+    pnl_dd_ratio: Optional[float] = Field(None, description="收益/回撤比")
+
+    # 回测统计
+    total_trades: int = Field(default=0, description="总交易次数")
+    winning_trades: int = Field(default=0, description="盈利交易次数")
+
+    # 时间戳
+    completed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="完成时间")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class OptimizationHistory(BaseModel):
+    """
+    优化历史记录
+
+    Phase 8: 自动化调参 - SQLite 持久化模型
+    """
+    job_id: str = Field(..., description="任务 ID")
+    trial_number: int = Field(..., description="试验编号")
+    params_json: str = Field(..., description="参数组合（JSON 字符串）")
+    objective_value: float = Field(..., description="目标函数值")
+    metrics_json: str = Field(..., description="详细指标（JSON 字符串）")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="创建时间")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class OptimizationJob(BaseModel):
+    """
+    优化任务
+
+    Phase 8: 自动化调参 - 任务管理
+    """
+    job_id: str = Field(..., description="任务 ID")
+    request: OptimizationRequest = Field(..., description="优化请求")
+    status: OptimizationJobStatus = Field(default=OptimizationJobStatus.RUNNING, description="任务状态")
+
+    # 进度追踪
+    current_trial: int = Field(default=0, description="当前试验次数")
+    total_trials: int = Field(..., description="总试验次数")
+    best_trial: Optional[OptimizationTrialResult] = Field(None, description="当前最佳试验")
+    best_value: Optional[float] = Field(None, description="当前最佳目标函数值")
+
+    # 时间追踪
+    started_at: Optional[datetime] = Field(None, description="开始时间")
+    completed_at: Optional[datetime] = Field(None, description="完成时间")
+
+    # 错误信息
+    error_message: Optional[str] = Field(None, description="错误信息（失败时）")
+
+    # Optuna Study ID（用于断点续研）
+    study_id: Optional[str] = Field(None, description="Optuna Study ID")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)

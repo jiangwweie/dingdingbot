@@ -532,8 +532,8 @@ class StrategyOptimizer:
         return BacktestRequest(
             symbol=opt_request.symbol,
             timeframe=opt_request.timeframe,
-            start_time=opt_request.backtest_start,
-            end_time=opt_request.backtest_end,
+            start_time=opt_request.start_time,
+            end_time=opt_request.end_time,
             mode="v3_pms",
             initial_balance=opt_request.initial_balance,
             slippage_rate=opt_request.slippage_rate,
@@ -576,22 +576,24 @@ class StrategyOptimizer:
 
         elif objective == OptimizationObjective.SORTINO:
             # 计算索提诺比率（如果需要可以从报告中计算）
-            return float(report.sharpe_ratio) if report.sharpe_ratio else 0.0
+            return float(report.sortino_ratio) if report.sortino_ratio else 0.0
 
         elif objective == OptimizationObjective.PNL_DD:
             # 收益回撤比
-            total_pnl = float(report.total_pnl)
-            max_dd = float(report.max_drawdown)
-            return self._perf_calculator.calculate_pnl_dd_ratio(total_pnl, max_dd)
+            total_pnl = float(report.total_pnl) if report.total_pnl else 0.0
+            max_dd = float(report.max_drawdown) if report.max_drawdown else 0.0
+            if max_dd == 0:
+                return 0.0
+            return total_pnl / max_dd
 
         elif objective == OptimizationObjective.TOTAL_RETURN:
-            return float(report.total_return)
+            return float(report.total_return) if report.total_return else 0.0
 
         elif objective == OptimizationObjective.WIN_RATE:
-            return float(report.win_rate)
+            return float(report.win_rate) if report.win_rate else 0.0
 
         elif objective == OptimizationObjective.MAX_PROFIT:
-            return float(report.total_pnl)
+            return float(report.total_pnl) if report.total_pnl else 0.0
 
         else:
             return 0.0
