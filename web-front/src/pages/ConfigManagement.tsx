@@ -1,13 +1,13 @@
 import { useState, useCallback } from 'react';
 import { Settings, Download, Upload, Clock, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useApi, exportConfig, rollbackToSnapshot, updateConfig } from '../../lib/api';
+import { useApi, exportConfig, rollbackToSnapshot, updateConfig } from '../lib/api';
 import ExportButton from '../components/config/ExportButton';
 import ImportDialog from '../components/config/ImportDialog';
 import SnapshotList from '../components/config/SnapshotList';
 import SnapshotDetailDrawer from '../components/config/SnapshotDetailDrawer';
-import { cn } from '../../lib/utils';
-import type { ConfigSnapshotListItem, SystemConfig, ConfigResponse } from '../../lib/api';
+import { cn } from '../lib/utils';
+import type { ConfigSnapshotListItem, SystemConfig, ConfigResponse } from '../lib/api';
 
 interface ConfigManagementProps {
   onConfigChange?: () => void;

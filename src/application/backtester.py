@@ -416,7 +416,10 @@ class Backtester:
                 )
 
                 logger.info(f"Fetched {len(klines)} candles from local DB for {request.symbol} {request.timeframe}")
-                return klines
+                if klines:
+                    return klines
+                # DB 无数据时，降级到 Exchange Gateway
+                logger.info("DB has no data, falling back to Exchange Gateway...")
 
             # 降级：直接使用 exchange gateway (旧版行为)
             if request.start_time and request.end_time:

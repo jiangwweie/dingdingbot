@@ -81,6 +81,8 @@ export default function Orders() {
   if (symbolFilter) url += `&symbol=${symbolFilter}`;
   if (statusFilter) url += `&status=${statusFilter}`;
   if (roleFilter) url += `&order_role=${roleFilter}`;
+  if (startDate) url += `&start_date=${startDate}`;
+  if (endDate) url += `&end_date=${endDate}`;
 
   const { data, error, mutate } = useApi<{ items: OrderResponse[]; total: number }>(url);
 

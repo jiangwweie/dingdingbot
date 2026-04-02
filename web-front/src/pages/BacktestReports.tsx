@@ -109,10 +109,16 @@ export default function BacktestReports() {
   }, [sortField, sortOrder]);
 
   // Handle view details
-  const handleViewDetails = useCallback((reportId: string) => {
-    // TODO: Navigate to report details page or open details modal
-    console.log('View details for report:', reportId);
-    alert(`查看报告详情：${reportId}\n(此功能将在 T8 实现)`);
+  const handleViewDetails = useCallback(async (reportId: string) => {
+    try {
+      const { fetchBacktestReportDetail } = await import('../lib/api');
+      const report = await fetchBacktestReportDetail(reportId);
+      // Show report details in an alert for now (can be enhanced with a modal)
+      alert(`回测报告详情：${reportId}\n\n策略：${report.strategy_name || 'N/A'}\n总收益：${report.total_return}%\n夏普比率：${report.sharpe_ratio || 'N/A'}\n最大回撤：${report.max_drawdown}%\n胜率：${report.win_rate}%`);
+    } catch (err: any) {
+      console.error('Failed to fetch report details:', err);
+      alert(`获取报告详情失败：${err.message || '未知错误'}`);
+    }
   }, []);
 
   // Handle delete

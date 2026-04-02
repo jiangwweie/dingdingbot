@@ -34,11 +34,33 @@ export default function Snapshots() {
       return;
     }
 
+    // Format version to match backend requirement: vX.Y.Z or vYYYYMMDD.HHMMSS
+    let formattedVersion = newVersion.trim();
+    if (!formattedVersion.startsWith('v')) {
+      formattedVersion = 'v' + formattedVersion;
+    }
+
+    // If version doesn't match semantic format, auto-generate timestamp version
+    const semanticVersionPattern = /^v\d+\.\d+\.\d+$/;
+    const timestampVersionPattern = /^v\d{8}\.\d{2,6}$/;
+
+    if (!semanticVersionPattern.test(formattedVersion) && !timestampVersionPattern.test(formattedVersion)) {
+      // Auto-generate timestamp version: vYYYYMMDD.HHMMSS
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      formattedVersion = `v${year}${month}${day}.${hours}${minutes}${seconds}`;
+    }
+
     setIsSaving(true);
     setErrorMessage('');
 
     try {
-      await createSnapshot(newVersion, newDescription);
+      await createSnapshot(formattedVersion, newDescription);
       await mutate();
       setIsCreating(false);
       setNewVersion('');

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, Callable, Awaitable
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from src.domain.models import (
     OptimizationRequest,
@@ -195,6 +196,9 @@ class StrategyOptimizer:
     集成 Optuna 框架，支持多目标参数优化
     """
 
+    # 线程池用于运行 Optuna 同步优化
+    _executor = ThreadPoolExecutor(max_workers=4)
+
     def __init__(
         self,
         exchange_gateway: ExchangeGateway,
@@ -260,15 +264,10 @@ class StrategyOptimizer:
         # 创建任务对象
         job = OptimizationJob(
             job_id=job_id,
-            strategy_id=request.strategy_id,
-            symbol=request.symbol,
-            timeframe=request.timeframe,
-            objective=request.objective,
-            direction=request.direction,
-            n_trials=request.n_trials,
-            timeout_seconds=request.timeout_seconds,
-            status=OptimizationJobStatus.PENDING,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            request=request,
+            status=OptimizationJobStatus.RUNNING,
+            total_trials=request.n_trials,
+            started_at=datetime.now(timezone.utc),
         )
 
         # 保存任务
@@ -283,6 +282,35 @@ class StrategyOptimizer:
         self._running_tasks[job_id] = task
 
         return job
+
+    async def stop_optimization(self, job_id: str) -> None:
+        """
+        停止优化任务
+
+        Args:
+            job_id: 任务 ID
+
+        Raises:
+            ValueError: 任务不存在
+        """
+        if job_id not in self._jobs:
+            raise ValueError(f"任务 {job_id} 不存在")
+
+        # 设置停止标志
+        self._stop_flags[job_id] = True
+
+        # 取消正在运行的任务
+        if job_id in self._running_tasks:
+            task = self._running_tasks[job_id]
+            if not task.done():
+                task.cancel()
+                logger.info(f"任务 {job_id}: 已取消")
+
+        # 更新任务状态
+        job = self._jobs[job_id]
+        job.status = OptimizationJobStatus.STOPPED
+
+        logger.info(f"任务 {job_id}: 已停止")
 
     async def _run_optimization(
         self,
@@ -301,34 +329,41 @@ class StrategyOptimizer:
         try:
             # 更新状态为运行中
             job.status = OptimizationJobStatus.RUNNING
-            job.started_at = datetime.now(timezone.utc).isoformat()
+            job.started_at = datetime.now(timezone.utc)
 
             # 创建 Optuna Study
             study = self._create_study(request)
 
             # 断点续研：加载历史试验
-            if request.resume_from_trial is not None and self._history_repo:
-                await self._resume_study(study, job_id, request.resume_from_trial)
+            # 简化版本，暂不实现
+            # if request.resume_from_trial is not None and self._history_repo:
+            #     await self._resume_study(study, job_id, request.resume_from_trial)
 
             # 定义目标函数
             objective_func = self._create_objective_function(request, job_id)
 
-            # 运行优化
+            # 运行优化（在线程中运行，避免与异步事件循环冲突）
             logger.info(f"任务 {job_id}: 开始优化，共 {request.n_trials} 次试验")
 
             callbacks = [self._create_trial_callback(job_id)]
 
-            study.optimize(
-                objective_func,
-                n_trials=request.n_trials,
-                timeout=request.timeout_seconds,
-                callbacks=callbacks,
-                show_progress_bar=True,
-            )
+            # 在线程池中运行 Optuna 的同步 optimize 方法
+            loop = asyncio.get_event_loop()
+
+            def _run_optimize():
+                study.optimize(
+                    objective_func,
+                    n_trials=request.n_trials,
+                    timeout=request.timeout,
+                    callbacks=callbacks,
+                    show_progress_bar=False,  # 在线程中禁用进度条
+                )
+
+            await loop.run_in_executor(self._executor, _run_optimize)
 
             # 更新任务状态为完成
             job.status = OptimizationJobStatus.COMPLETED
-            job.completed_at = datetime.now(timezone.utc).isoformat()
+            job.completed_at = datetime.now(timezone.utc)
 
             # 保存最佳结果
             if study.best_trial:
@@ -340,7 +375,7 @@ class StrategyOptimizer:
         except asyncio.CancelledError:
             # 任务被停止
             job.status = OptimizationJobStatus.STOPPED
-            job.completed_at = datetime.now(timezone.utc).isoformat()
+            job.completed_at = datetime.now(timezone.utc)
             logger.info(f"任务 {job_id}: 被用户停止")
             self._stop_flags[job_id] = False  # 清除停止标志
 
@@ -348,13 +383,16 @@ class StrategyOptimizer:
             # 任务失败
             job.status = OptimizationJobStatus.FAILED
             job.error_message = str(e)
-            job.completed_at = datetime.now(timezone.utc).isoformat()
+            job.completed_at = datetime.now(timezone.utc)
             logger.error(f"任务 {job_id}: 失败 - {e}", exc_info=True)
 
         finally:
             # 清理运行中的任务
             if job_id in self._running_tasks:
                 del self._running_tasks[job_id]
+            # 清理停止标志
+            if job_id in self._stop_flags:
+                del self._stop_flags[job_id]
 
     def _create_study(
         self,
@@ -369,15 +407,12 @@ class StrategyOptimizer:
         Returns:
             Optuna Study 对象
         """
-        direction = (
-            StudyDirection.MAXIMIZE
-            if request.direction == OptunaDirection.MAXIMIZE
-            else StudyDirection.MINIMIZE
-        )
+        # 默认最大化所有目标
+        direction = StudyDirection.MAXIMIZE
 
         study = optuna.create_study(
             direction=direction,
-            study_name=f"{request.strategy_id}_{request.symbol}_{request.timeframe}",
+            study_name=f"optimization_{request.symbol}_{request.timeframe}",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=10),
         )
 
@@ -459,7 +494,6 @@ class StrategyOptimizer:
             # 更新任务进度
             if job_id in self._jobs:
                 self._jobs[job_id].current_trial = trial.number + 1
-                self._jobs[job_id].completed_trials = trial.number + 1
 
             return objective_value
 
@@ -469,9 +503,8 @@ class StrategyOptimizer:
                 raise optuna.TrialPruned("任务被停止")
 
             # 运行异步目标函数
-            return asyncio.get_event_loop().run_until_complete(
-                objective_async(trial)
-            )
+            # 由于 optimize 在线程中运行，这里可以安全地使用 asyncio.run
+            return asyncio.run(objective_async(trial))
 
         return objective
 
@@ -500,11 +533,13 @@ class StrategyOptimizer:
                     int(param_def.high),
                 )
             elif param_def.type == ParameterType.FLOAT:
+                # 浮点参数的 step 处理
+                step = param_def.step if param_def.step is not None and param_def.step != 1 else None
                 params[param_def.name] = trial.suggest_float(
                     param_def.name,
-                    param_def.low,
-                    param_def.high,
-                    step=param_def.step,
+                    param_def.low_float,
+                    param_def.high_float,
+                    step=step,
                 )
             elif param_def.type == ParameterType.CATEGORICAL:
                 params[param_def.name] = trial.suggest_categorical(
