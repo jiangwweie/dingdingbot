@@ -401,6 +401,81 @@ class OrderRepository:
 
             return [self._row_to_order(row) for row in rows]
 
+    async def get_orders(
+        self,
+        symbol: Optional[str] = None,
+        status: Optional[OrderStatus] = None,
+        order_role: Optional[OrderRole] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        Get orders with pagination and optional filters.
+
+        Args:
+            symbol: Optional symbol to filter
+            status: Optional status to filter
+            order_role: Optional order role to filter
+            limit: Maximum number of orders to return (1-200)
+            offset: Pagination offset (default 0)
+
+        Returns:
+            Dict with:
+                - items: List of Order objects
+                - total: Total count matching filters
+                - limit: Requested limit
+                - offset: Requested offset
+        """
+        async with self._lock:
+            # Build WHERE clause
+            where_conditions = []
+            params: List[Any] = []
+
+            if symbol:
+                where_conditions.append("symbol = ?")
+                params.append(symbol)
+
+            if status:
+                where_conditions.append("status = ?")
+                params.append(status.value)
+
+            if order_role:
+                where_conditions.append("order_role = ?")
+                params.append(order_role.value)
+
+            # Build final WHERE clause
+            if where_conditions:
+                where_clause = "WHERE " + " AND ".join(where_conditions)
+            else:
+                where_clause = ""
+
+            # Get total count
+            count_query = f"SELECT COUNT(*) FROM orders {where_clause}" if where_clause else "SELECT COUNT(*) FROM orders"
+            count_cursor = await self._db.execute(count_query, tuple(params))
+            total = (await count_cursor.fetchone())[0]
+            await count_cursor.close()
+
+            # Get paginated results
+            params.append(limit)
+            params.append(offset)
+
+            query = f"""
+                SELECT * FROM orders
+                {where_clause}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """
+            cursor = await self._db.execute(query, tuple(params))
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+            return {
+                'items': [self._row_to_order(row) for row in rows],
+                'total': total,
+                'limit': limit,
+                'offset': offset,
+            }
+
     async def get_orders_by_signal_ids(
         self,
         signal_ids: List[str],
