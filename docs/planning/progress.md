@@ -10,7 +10,7 @@
 
 **执行日期**: 2026-04-02  
 **执行人**: AI Builder  
-**状态**: ✅ 阶段 1&2 完成（数据库表 + ORM + Repository + API + 迁移脚本）
+**状态**: ✅ 阶段 1&2&3 完成（数据库表 + ORM + Repository + API + 迁移脚本 + YAML 导入导出）
 
 ---
 
@@ -119,11 +119,60 @@ python scripts/migrate_config_to_db.py
 
 | 任务 | 优先级 | 预计工时 | 状态 |
 |------|--------|----------|------|
-| B7: YAML 导入导出 API | P1 | 2h | ☐ 待启动 |
+| B7: YAML 导入导出 API | P1 | 2h | ✅ 已完成 |
 | F1-F6: 前端组件开发 | P0 | 11h | ☐ 待启动 |
 | T1-T4: 测试验证 | P0 | 6h | ☐ 待启动 |
 
 ---
+
+### B7: YAML 导入导出 API ✅
+
+**实现功能**:
+
+**GET /api/strategy/params/export** - 导出 YAML 内容
+```python
+@app.get("/api/strategy/params/export")
+async def export_strategy_params():
+    """导出当前策略参数为 YAML 格式"""
+    # 1. 从数据库读取 strategy.* 配置
+    # 2. 转换为嵌套字典结构
+    # 3. 生成 YAML 内容
+    # 4. 返回 yaml_content 和可选 download_url
+```
+
+**POST /api/strategy/params/export** - 导出 YAML 文件
+```python
+@app.post("/api/strategy/params/export")
+async def export_strategy_params_to_file():
+    """导出策略参数到 YAML 文件（data/ 目录下）"""
+    # 保存到 data/strategy_params_backup_{timestamp}.yaml
+    # 返回文件下载路径
+```
+
+**POST /api/strategy/params/import** - 导入 YAML 配置
+```python
+@app.post("/api/strategy/params/import")
+async def import_strategy_params(request: StrategyParamsImportRequest):
+    """从 YAML 导入策略参数"""
+    # 1. 解析 YAML 内容
+    # 2. 验证参数有效性（Pydantic 验证）
+    # 3. 创建自动快照（备份旧配置）
+    # 4. 保存到数据库
+    # 5. 返回导入结果
+```
+
+**Pydantic 模型**:
+- `StrategyParamsExportResponse` - 导出响应
+- `StrategyParamsImportRequest` - 导入请求
+- `StrategyParamsImportResponse` - 导入响应
+
+**单元测试**: 25/25 通过
+- 模型验证测试：5 个
+- YAML 导出测试：3 个
+- YAML 导入测试：6 个
+- Repository 集成测试：4 个
+- 参数验证测试：5 个
+- 往返测试：2 个
 
 ### 2026-04-01 - Phase 8 E2E 测试验证
   - 自动创建配置快照

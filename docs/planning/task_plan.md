@@ -89,7 +89,7 @@
 | B4 | PUT /api/strategy/params API 端点 | P0 | 2h | ✅ 已完成 |
 | B5 | POST /api/strategy/params/preview API 端点 | P0 | 1h | ✅ 已完成 |
 | B6 | 配置迁移脚本 (YAML → DB) | P0 | 2h | ✅ 已完成 |
-| B7 | YAML 导入导出 API | P1 | 2h | ☐ 待启动 |
+| B7 | YAML 导入导出 API | P1 | 2h | ✅ 已完成 |
 
 **前端任务 (11h)**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
