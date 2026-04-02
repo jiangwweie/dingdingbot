@@ -94,20 +94,20 @@
 **前端任务 (11h)**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
 |----|----------|--------|----------|------|
-| F1 | 创建 API 函数封装（api.ts） | P0 | 1h | ☐ 待启动 |
-| F2 | 实现 StrategyParamPanel 主容器 | P0 | 2h | ☐ 待启动 |
-| F3 | 实现 PinbarParamForm 组件 | P0 | 2h | ☐ 待启动 |
-| F4 | 实现 EmaParamForm / FilterParamList | P0 | 2h | ☐ 待启动 |
-| F5 | 实现 ParamPreviewModal 预览对话框 | P1 | 2h | ☐ 待启动 |
-| F6 | 实现 TemplateManager 模板管理 | P1 | 3h | ☐ 待启动 |
+| F1 | 创建 API 函数封装（api.ts） | P0 | 1h | ✅ 已完成 |
+| F2 | 实现 StrategyParamPanel 主容器 | P0 | 2h | ✅ 已完成 |
+| F3 | 实现 PinbarParamForm 组件 | P0 | 2h | ✅ 已完成 |
+| F4 | 实现 EmaParamForm / FilterParamList | P0 | 2h | ✅ 已完成 |
+| F5 | 实现 ParamPreviewModal 预览对话框 | P1 | 2h | ✅ 已完成 |
+| F6 | 实现 TemplateManager 模板管理 | P1 | 3h | ✅ 已完成 |
 
 **测试任务 (6h)**:
 | ID | 任务名称 | 优先级 | 预计工时 | 状态 |
 |----|----------|--------|----------|------|
-| T1 | ConfigEntryRepository 单元测试 | P0 | 2h | ☐ 待启动 |
-| T2 | 策略参数 API 集成测试 | P0 | 2h | ☐ 待启动 |
-| T3 | 配置迁移脚本测试 | P0 | 1h | ☐ 待启动 |
-| T4 | 前端 E2E 测试 | P1 | 2h | ☐ 待启动 |
+| T1 | ConfigEntryRepository 单元测试 | P0 | 2h | ✅ 已完成 (34/34) |
+| T2 | 策略参数 API 集成测试 | P0 | 2h | ✅ 已完成 (22/22) |
+| T3 | 配置迁移脚本测试 | P0 | 1h | ✅ 已完成 (22/22) |
+| T4 | 前端 E2E 测试 | P1 | 2h | ✅ 已完成 (21/21) |
 
 **执行阶段**:
 - **阶段 1**: B1-B2（数据库表 + ORM+Repository） - ✅ 已完成
@@ -401,8 +401,8 @@ Repository 初始化 | ✅ 通过 | 正确初始化和关闭资源
 | T1 | Optuna 目标函数单元测试 | P0 | 2h | ✅ 已完成 (29 用例) |
 | T2 | 参数空间验证测试 | P0 | 2h | ✅ 已完成 (34 用例) |
 | T3 | StrategyOptimizer 单元测试 | P0 | 2h | ✅ 已完成 (22 用例) |
-| T4 | API 集成测试 | P0 | 2h | ⏳ 待前后端联调 |
-| T5 | E2E 测试 | P1 | 4h | ⏳ 待前后端联调 |
+| T4 | API 集成测试 | P0 | 2h | ✅ 已完成 (10/10) |
+| T5 | E2E 测试 | P1 | 4h | ✅ 已完成 (12/13, 1 跳过) |
 
 **今日完成 (2026-04-02)**:
 - ✅ 后端：StrategyOptimizer + PerformanceCalculator 实现
