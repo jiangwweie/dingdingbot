@@ -6,6 +6,59 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-02 - 回测优化：历史 K 线本地化 + 回测订单管理 API ✅
+
+**执行日期**: 2026-04-02  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成（待单元测试）
+
+**任务概述**:
+优化回测系统，将历史 K 线数据源从 CCXT 切换到本地 SQLite，并新增回测订单管理 API。
+
+**一、核心功能实现**:
+
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| HistoricalDataRepository | `src/infrastructure/historical_data_repository.py` | 新建数据仓库，本地 SQLite 优先 + CCXT 自动补充 |
+| Backtester 修改 | `src/application/backtester.py` | `_fetch_klines()` 切换到数据仓库 |
+| 回测订单 API | `src/interfaces/api.py` | 新增 3 个订单管理端点 |
+| OrderRepository | `src/infrastructure/order_repository.py` | `get_orders_by_signal_ids()` 批量查询 |
+| SignalRepository | `src/infrastructure/signal_repository.py` | `get_signal_ids_by_backtest_report()` 关联查询 |
+
+**二、新增 API 端点**:
+
+```
+GET    /api/v3/backtest/reports/{report_id}/orders       # 回测订单列表（分页/筛选）
+GET    /api/v3/backtest/reports/{report_id}/orders/{id}  # 订单详情（含前后 10 根 K 线）
+DELETE /api/v3/backtest/reports/{report_id}/orders/{id}  # 删除订单
+```
+
+**三、文档交付**:
+
+| 文档 | 位置 |
+|------|------|
+| 回测数据本地化设计 | `docs/superpowers/specs/2026-04-02-backtest-data-localization-design.md` |
+| 订单生命周期流程图 | `docs/arch/backtest-order-lifecycle.md` |
+
+**四、预期性能提升**:
+
+| 场景 | 当前 | 预期 | 提升 |
+|------|------|------|------|
+| 单次回测 (15m, 1 个月) | ~5s (网络) | ~0.1s (本地) | 50x |
+| 参数扫描 (100 次) | ~500s | ~10s | 50x |
+
+**Git 提交**:
+```
+a32fdb5 feat(回测优化): 历史 K 线本地化 + 回测订单管理 API
+```
+
+**待办事项**:
+- [ ] 单元测试（T8 pending）
+- [ ] 性能基准测试
+- [ ] 前端页面集成
+
+---
+
 ### 2026-04-02 - 修复回测 API 端点 - 订单和报告持久化 ✅
 
 **执行日期**: 2026-04-02  
