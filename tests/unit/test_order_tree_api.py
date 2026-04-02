@@ -19,7 +19,7 @@ from src.domain.models import (
     OrderTreeResponse, OrderTreeNode, OrderDeleteRequest, OrderDeleteResponse,
     OrderStatus, OrderRole, OrderType, Direction,
 )
-from src.interfaces.api import app, set_dependencies, set_v3_dependencies
+from src.interfaces.api import app
 
 
 # ============================================================
@@ -40,12 +40,11 @@ def mock_order_repository():
     repo.close = AsyncMock()
     repo.get_order_tree = AsyncMock()
     repo.delete_orders_batch = AsyncMock()
-    repo.get_order_chain_by_order_id = AsyncMock(return_value=[])
     return repo
 
 
 # ============================================================
-# Fixtures
+# Sample Data Fixtures
 # ============================================================
 
 @pytest.fixture
@@ -66,6 +65,14 @@ def sample_order_tree_data():
                     "average_exec_price": "50000",
                     "created_at": 1711785660000,
                     "filled_at": 1711785660000,
+                    "order_type": "MARKET",
+                    "remaining_qty": "0",
+                    "reduce_only": False,
+                    "signal_id": "sig-001",
+                    "updated_at": 1711785660000,
+                    "trigger_price": None,
+                    "exchange_order_id": "binance-001",
+                    "client_order_id": "binance-001",
                 },
                 "children": [
                     {
@@ -79,6 +86,16 @@ def sample_order_tree_data():
                             "filled_qty": "0.05",
                             "price": "52000",
                             "average_exec_price": "52000",
+                            "order_type": "LIMIT",
+                            "remaining_qty": "0",
+                            "reduce_only": True,
+                            "signal_id": "sig-001",
+                            "created_at": 1711785660000,
+                            "updated_at": 1711785660000,
+                            "filled_at": 1711785660000,
+                            "trigger_price": None,
+                            "exchange_order_id": "binance-tp1-001",
+                            "client_order_id": "binance-tp1-001",
                         },
                         "children": [],
                         "level": 1,
@@ -94,6 +111,16 @@ def sample_order_tree_data():
                             "quantity": "0.1",
                             "filled_qty": "0",
                             "price": "48000",
+                            "order_type": "STOP_MARKET",
+                            "remaining_qty": "0.1",
+                            "reduce_only": True,
+                            "signal_id": "sig-001",
+                            "created_at": 1711785660000,
+                            "updated_at": 1711785660000,
+                            "filled_at": None,
+                            "trigger_price": None,
+                            "exchange_order_id": "binance-sl-001",
+                            "client_order_id": "binance-sl-001",
                         },
                         "children": [],
                         "level": 1,
@@ -136,13 +163,16 @@ class TestGetOrderTree:
     @pytest.mark.asyncio
     async def test_get_order_tree_success(self, client, sample_order_tree_data):
         """测试：成功获取订单树"""
-        # Mock OrderRepository
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
+        # Mock OrderRepository class - patch in the module where it's used
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo_instance = MagicMock()
+            mock_repo_instance.initialize = AsyncMock()
+            mock_repo_instance.close = AsyncMock()
+            mock_repo_instance.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
+            MockRepo.return_value = mock_repo_instance
+            MockRepo.return_value.__aenter__ = AsyncMock(return_value=mock_repo_instance)
+            MockRepo.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
             response = client.get("/api/v3/orders/tree")
 
         assert response.status_code == 200
@@ -168,12 +198,13 @@ class TestGetOrderTree:
     @pytest.mark.asyncio
     async def test_get_order_tree_with_symbol_filter(self, client, sample_order_tree_data):
         """测试：带币种对过滤的订单树查询"""
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
+            MockRepo.return_value = mock_repo
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
             response = client.get("/api/v3/orders/tree?symbol=BTC/USDT:USDT")
 
         assert response.status_code == 200
@@ -185,12 +216,13 @@ class TestGetOrderTree:
     @pytest.mark.asyncio
     async def test_get_order_tree_with_days_filter(self, client, sample_order_tree_data):
         """测试：带天数过滤的订单树查询"""
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
+            MockRepo.return_value = mock_repo
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
             response = client.get("/api/v3/orders/tree?days=14")
 
         assert response.status_code == 200
@@ -200,12 +232,13 @@ class TestGetOrderTree:
     @pytest.mark.asyncio
     async def test_get_order_tree_with_limit(self, client, sample_order_tree_data):
         """测试：带数量限制的订单树查询"""
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
+            MockRepo.return_value = mock_repo
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
             response = client.get("/api/v3/orders/tree?limit=50")
 
         assert response.status_code == 200
@@ -249,12 +282,13 @@ class TestGetOrderTree:
             },
         }
 
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.get_order_tree = AsyncMock(return_value=empty_result)
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.get_order_tree = AsyncMock(return_value=empty_result)
+            MockRepo.return_value = mock_repo
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
             response = client.get("/api/v3/orders/tree")
 
         assert response.status_code == 200
@@ -265,12 +299,13 @@ class TestGetOrderTree:
     @pytest.mark.asyncio
     async def test_get_order_tree_repository_error(self, client):
         """测试：Repository 错误返回 500"""
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.get_order_tree = AsyncMock(side_effect=Exception("Database error"))
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.get_order_tree = AsyncMock(side_effect=Exception("Database error"))
+            MockRepo.return_value = mock_repo
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
             response = client.get("/api/v3/orders/tree")
 
         assert response.status_code == 500
@@ -286,22 +321,23 @@ class TestDeleteOrdersBatch:
     @pytest.mark.asyncio
     async def test_delete_orders_batch_success(self, client, sample_delete_result):
         """测试：成功批量删除订单"""
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.delete_orders_batch = AsyncMock(return_value=sample_delete_result)
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.delete_orders_batch = AsyncMock(return_value=sample_delete_result)
+            MockRepo.return_value = mock_repo
 
-        request_body = {
-            "order_ids": ["entry-001"],
-            "cancel_on_exchange": True,
-            "audit_info": {
-                "operator_id": "user-001",
-                "ip_address": "192.168.1.1",
-            },
-        }
+            request_body = {
+                "order_ids": ["entry-001"],
+                "cancel_on_exchange": True,
+                "audit_info": {
+                    "operator_id": "user-001",
+                    "ip_address": "192.168.1.1",
+                },
+            }
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
-            response = client.delete("/api/v3/orders/batch", json=request_body)
+            response = client.request("DELETE", "/api/v3/orders/batch", json=request_body)
 
         assert response.status_code == 200
         data = response.json()
@@ -318,18 +354,19 @@ class TestDeleteOrdersBatch:
     @pytest.mark.asyncio
     async def test_delete_orders_batch_without_cancel_on_exchange(self, client, sample_delete_result):
         """测试：不调用交易所取消的批量删除"""
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.delete_orders_batch = AsyncMock(return_value=sample_delete_result)
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.delete_orders_batch = AsyncMock(return_value=sample_delete_result)
+            MockRepo.return_value = mock_repo
 
-        request_body = {
-            "order_ids": ["entry-001"],
-            "cancel_on_exchange": False,
-        }
+            request_body = {
+                "order_ids": ["entry-001"],
+                "cancel_on_exchange": False,
+            }
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
-            response = client.delete("/api/v3/orders/batch", json=request_body)
+            response = client.request("DELETE", "/api/v3/orders/batch", json=request_body)
 
         assert response.status_code == 200
         # 验证 cancel_on_exchange 参数传递
@@ -338,12 +375,12 @@ class TestDeleteOrdersBatch:
 
     @pytest.mark.asyncio
     async def test_delete_orders_batch_empty_order_ids(self, client):
-        """测试：空订单 ID 列表返回 400"""
+        """测试：空订单 ID 列表返回 422"""
         request_body = {
             "order_ids": [],
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = client.request("DELETE", "/api/v3/orders/batch", json=request_body)
 
         assert response.status_code == 422  # Pydantic 验证错误
 
@@ -354,7 +391,7 @@ class TestDeleteOrdersBatch:
             "order_ids": [f"order-{i}" for i in range(101)],  # 101 个订单 ID
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = client.request("DELETE", "/api/v3/orders/batch", json=request_body)
 
         assert response.status_code == 422  # Pydantic 验证错误
 
@@ -372,18 +409,19 @@ class TestDeleteOrdersBatch:
             "audit_log_id": "audit-20260402-002",
         }
 
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.delete_orders_batch = AsyncMock(return_value=partial_result)
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.delete_orders_batch = AsyncMock(return_value=partial_result)
+            MockRepo.return_value = mock_repo
 
-        request_body = {
-            "order_ids": ["entry-001"],
-            "cancel_on_exchange": True,
-        }
+            request_body = {
+                "order_ids": ["entry-001"],
+                "cancel_on_exchange": True,
+            }
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
-            response = client.delete("/api/v3/orders/batch", json=request_body)
+            response = client.request("DELETE", "/api/v3/orders/batch", json=request_body)
 
         assert response.status_code == 200
         data = response.json()
@@ -393,17 +431,18 @@ class TestDeleteOrdersBatch:
     @pytest.mark.asyncio
     async def test_delete_orders_batch_repository_error(self, client):
         """测试：Repository 错误返回 500"""
-        mock_repo = AsyncMock()
-        mock_repo.initialize = AsyncMock()
-        mock_repo.close = AsyncMock()
-        mock_repo.delete_orders_batch = AsyncMock(side_effect=Exception("Database error"))
+        with patch('src.interfaces.api.OrderRepository') as MockRepo:
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            mock_repo.delete_orders_batch = AsyncMock(side_effect=Exception("Database error"))
+            MockRepo.return_value = mock_repo
 
-        request_body = {
-            "order_ids": ["entry-001"],
-        }
+            request_body = {
+                "order_ids": ["entry-001"],
+            }
 
-        with patch('src.interfaces.api.OrderRepository', return_value=mock_repo):
-            response = client.delete("/api/v3/orders/batch", json=request_body)
+            response = client.request("DELETE", "/api/v3/orders/batch", json=request_body)
 
         assert response.status_code == 500
 

@@ -2067,6 +2067,112 @@ async def get_order_tree(
 
 ---
 
+## 订单链 API 路由顺序问题与修复 (2026-04-03)
+
+**日期**: 2026-04-03  
+**问题级别**: P0 (阻塞性问题)  
+**状态**: ✅ 已修复
+
+### 问题描述
+
+在测试订单链 API 端点 `/api/v3/orders/tree` 时，发现请求总是返回 422 错误：
+```json
+{
+  "error_code": "VALIDATION_ERROR",
+  "message": "请求参数验证失败：[{'type': 'missing', 'loc': ('query', 'symbol'), 'msg': 'Field required', 'input': None}]"
+}
+```
+
+### 问题根因
+
+FastAPI 按照路由注册顺序进行路由匹配。文件中原有的路由顺序如下：
+
+```python
+@app.get("/api/v3/orders/{order_id}", response_model=OrderResponseFull)  # 第 4060 行
+async def get_order(order_id: str, symbol: str = Query(...)):
+    ...
+
+@app.get("/api/v3/orders/tree", response_model=OrderTreeResponse)  # 第 4423 行
+async def get_order_tree(...):
+    ...
+```
+
+当请求 `/api/v3/orders/tree` 时，FastAPI 先匹配到 `/api/v3/orders/{order_id}` 路由，将 `tree` 作为 `order_id` 参数传递，导致：
+1. 路由匹配到 `get_order` 端点
+2. `get_order` 端点要求必填 `symbol` 参数
+3. 返回 422 验证错误
+
+### 修复方案
+
+将具体路由（`/tree`, `/batch`）移到参数化路由（`/{order_id}`）之前：
+
+```python
+# 1. 具体路由优先
+@app.get("/api/v3/orders/tree", response_model=OrderTreeResponse)  # 移至第 4067 行
+async def get_order_tree(...):
+    ...
+
+@app.delete("/api/v3/orders/batch", response_model=OrderDeleteResponse)  # 移至第 4183 行
+async def delete_orders_batch(...):
+    ...
+
+# 2. 参数化路由在后
+@app.get("/api/v3/orders/{order_id:path}", response_model=OrderResponseFull)  # 第 4262 行
+async def get_order(order_id: str, symbol: str = Query(...)):
+    ...
+```
+
+### 修复后验证
+
+```bash
+python3 -c "
+from src.interfaces.api import app
+routes = [(route.path, route.methods) for route in app.routes if '/api/v3/orders' in route.path]
+for path, methods in routes:
+    print(f'{path} - {methods}')
+"
+```
+
+输出：
+```
+1. /api/v3/orders - {'POST'}
+2. /api/v3/orders/{order_id} - {'DELETE'}
+3. /api/v3/orders/tree - {'GET'}          ✅ 在 /{order_id:path} 之前
+4. /api/v3/orders/batch - {'DELETE'}       ✅ 在 /{order_id:path} 之前
+5. /api/v3/orders/{order_id:path} - {'GET'}
+6. /api/v3/orders/{order_id}/klines - {'GET'}
+7. /api/v3/orders - {'GET'}
+8. /api/v3/orders/check - {'POST'}
+```
+
+### 经验教训
+
+**FastAPI 路由注册规则**:
+1. FastAPI 按照代码执行顺序（从上到下）注册路由
+2. 路由匹配时，先注册的路由优先匹配
+3. 参数化路由（如 `/{order_id}`）会匹配任何非精确匹配的路径
+4. **具体路由必须放在参数化路由之前**
+
+**最佳实践**:
+```python
+# ✅ 正确：具体路由在前
+@app.get("/api/v3/orders/tree")
+@app.get("/api/v3/orders/batch")
+@app.get("/api/v3/orders/{order_id}")
+
+# ❌ 错误：参数化路由在前，会拦截具体路由
+@app.get("/api/v3/orders/{order_id}")
+@app.get("/api/v3/orders/tree")  # 永远不会被匹配到
+```
+
+### 相关文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src/interfaces/api.py` | 路由顺序修复，将 /tree 和 /batch 移到 /{order_id} 之前 |
+
+---
+
 ## 历史发现归档
 
 以下主题的技术发现已归档至 `archive/` 目录：
