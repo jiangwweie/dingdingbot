@@ -59,6 +59,8 @@ from src.domain.models import (
     ReconciliationRequest, ReconciliationReport,
     OrderType, OrderStatus, OrderRole, Direction, Order,
     ErrorResponse,  # MIN-001: 统一错误响应格式
+    # Order Chain Tree Models (订单管理级联展示功能)
+    OrderTreeResponse, OrderTreeNode, OrderDeleteRequest, OrderDeleteResponse,
     # Strategy Parameter Models (Phase K)
     StrategyParams, StrategyParamsUpdate, StrategyParamsPreview,
     PinbarParams, EngulfingParams, EmaParams, MtfParams, AtrParams,
@@ -4408,6 +4410,207 @@ async def list_orders(
         raise
     except Exception as e:
         logger.error(f"查询订单列表失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------
+# 1.5 Order Tree & Batch Delete Endpoints (订单管理级联展示功能)
+# Reference: docs/designs/order-chain-tree-contract.md
+# ------------------------------------------------------------
+
+@app.get("/api/v3/orders/tree", response_model=OrderTreeResponse)
+async def get_order_tree(
+    symbol: Optional[str] = Query(default=None, description="币种对过滤"),
+    start_date: Optional[str] = Query(default=None, description="开始日期 (ISO 8601)"),
+    end_date: Optional[str] = Query(default=None, description="结束日期 (ISO 8601)"),
+    days: Optional[int] = Query(default=7, ge=1, le=90, description="最近 N 天"),
+    limit: int = Query(default=200, ge=1, le=500, description="根订单数量上限"),
+) -> OrderTreeResponse:
+    """
+    获取订单树形结构（订单管理级联展示功能）
+
+    Phase 6 v3.0: 订单管理级联展示功能 - GET /api/v3/orders/tree
+    Reference: docs/designs/order-chain-tree-contract.md Section
+
+    一次性加载完整订单树，前端使用虚拟滚动优化渲染性能
+
+    Args:
+        symbol: 币种对过滤（可选），如 "BTC/USDT:USDT"
+        start_date: 开始日期（可选，ISO 8601 格式），与 days 参数互斥
+        end_date: 结束日期（可选，ISO 8601 格式）
+        days: 最近 N 天（可选，默认 7 天，与 start_date 互斥）
+        limit: 根订单数量上限（默认 200，最多 500）
+
+    Returns:
+        OrderTreeResponse: 订单树响应
+        {
+            "items": [
+                {
+                    "order": {...},  // OrderResponseFull 字典
+                    "children": [...],  // 子订单列表（TP1-TP5, SL）
+                    "level": 0,  // 层级深度
+                    "has_children": true  // 是否有子订单
+                },
+                ...
+            ],
+            "total": 50,  // 根订单总数
+            "metadata": {
+                "symbol_filter": "BTC/USDT:USDT",
+                "days_filter": 7,
+                "loaded_at": 1711785660000
+            }
+        }
+
+    Raises:
+        HTTPException:
+            - 400: 参数错误（start_date 与 days 同时指定）
+            - 500: 数据库查询失败
+    """
+    from src.infrastructure.order_repository import OrderRepository
+    from datetime import datetime
+
+    try:
+        # 参数验证：start_date 与 days 互斥
+        if start_date and days is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="start_date 与 days 参数互斥，只能指定一个"
+            )
+
+        # 解析日期参数
+        start_dt: Optional[datetime] = None
+        end_dt: Optional[datetime] = None
+
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"start_date 格式错误，应为 ISO 8601 格式：{str(e)}"
+                )
+
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"end_date 格式错误，应为 ISO 8601 格式：{str(e)}"
+                )
+
+        # 创建 OrderRepository 实例并查询
+        repo = OrderRepository()
+        await repo.initialize()
+
+        try:
+            # 调用 OrderRepository 获取订单树
+            result = await repo.get_order_tree(
+                symbol=symbol,
+                start_date=start_dt,
+                end_date=end_dt,
+                days=days if not start_date else None,
+                limit=limit,
+            )
+
+            # 将字典结果转换为 Pydantic 模型
+            from pydantic import TypeAdapter
+            items_adapter = TypeAdapter(List[OrderTreeNode])
+            items = items_adapter.validate_python(result['items'])
+
+            return OrderTreeResponse(
+                items=items,
+                total=result['total'],
+                metadata=result['metadata'],
+            )
+        finally:
+            # 确保数据库连接关闭
+            await repo.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取订单树失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v3/orders/batch", response_model=OrderDeleteResponse)
+async def delete_orders_batch(request: OrderDeleteRequest) -> OrderDeleteResponse:
+    """
+    批量删除订单链（订单管理级联展示功能）
+
+    Phase 6 v3.0: 订单管理级联展示功能 - DELETE /api/v3/orders/batch
+    Reference: docs/designs/order-chain-tree-contract.md Section
+
+    支持级联删除子订单（TP/SL），可选择是否调用交易所取消接口
+
+    Args:
+        request: 批量删除请求
+        {
+            "order_ids": ["uuid-123"],  // 要删除的订单 ID 列表（上限 100）
+            "cancel_on_exchange": true,  // 是否调用交易所取消接口（默认 true）
+            "audit_info": {  // 审计信息（可选）
+                "operator_id": "user-001",
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0..."
+            }
+        }
+
+    Returns:
+        OrderDeleteResponse: 批量删除响应
+        {
+            "deleted_count": 5,  // 删除的订单总数
+            "cancelled_on_exchange": ["uuid-124"],  // 在交易所成功取消的订单 ID 列表
+            "failed_to_cancel": [],  // 在交易所取消失败的订单列表
+            "deleted_from_db": ["uuid-123", "uuid-124"],  // 从数据库成功删除的订单 ID 列表
+            "failed_to_delete": [],  // 数据库删除失败的订单列表
+            "audit_log_id": "audit-20260402-001"  // 审计日志 ID
+        }
+
+    Raises:
+        HTTPException:
+            - 400 ORDER-001: 订单 ID 列表为空
+            - 400 ORDER-002: 订单 ID 数量超限（>100）
+            - 500 ORDER-005: 删除失败（数据库错误）
+    """
+    from src.infrastructure.order_repository import OrderRepository
+
+    try:
+        # 创建 OrderRepository 实例
+        repo = OrderRepository()
+        await repo.initialize()
+
+        try:
+            # 调用 OrderRepository 批量删除
+            result = await repo.delete_orders_batch(
+                order_ids=request.order_ids,
+                cancel_on_exchange=request.cancel_on_exchange,
+                audit_info=request.audit_info,
+            )
+
+            return OrderDeleteResponse(
+                deleted_count=result['deleted_count'],
+                cancelled_on_exchange=result['cancelled_on_exchange'],
+                failed_to_cancel=result['failed_to_cancel'],
+                deleted_from_db=result['deleted_from_db'],
+                failed_to_delete=result['failed_to_delete'],
+                audit_log_id=result.get('audit_log_id'),
+            )
+        finally:
+            # 确保数据库连接关闭
+            await repo.close()
+
+    except ValueError as e:
+        # 参数验证错误
+        logger.warning(f"批量删除参数验证失败：{str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量删除订单失败：{str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

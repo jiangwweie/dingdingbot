@@ -1439,6 +1439,90 @@ class OrderCancelResponse(FinancialModel):
     message: str = Field(..., description="取消结果说明")
 
 
+# ============================================================
+# Phase 6 v3.0: 订单管理级联展示功能
+# Reference: docs/designs/order-chain-tree-contract.md
+# ============================================================
+
+class OrderTreeNode(BaseModel):
+    """
+    订单树节点模型
+
+    订单管理级联展示功能 - GET /api/v3/orders/tree 响应体
+    Reference: docs/designs/order-chain-tree-contract.md Section
+
+    字段说明:
+    - order: 订单详情
+    - children: 子订单列表（TP1-TP5, SL）
+    - level: 层级深度（0=根节点 ENTRY，1=子订单）
+    - has_children: 是否有子订单（用于 UI 展示展开图标）
+    """
+    order: Dict[str, Any] = Field(..., description="订单详情（OrderResponseFull 字典）")
+    children: List['OrderTreeNode'] = Field(default_factory=list, description="子订单列表")
+    level: int = Field(default=0, description="层级深度")
+    has_children: bool = Field(default=False, description="是否有子订单")
+
+
+class OrderTreeResponse(FinancialModel):
+    """
+    订单树响应模型
+
+    订单管理级联展示功能 - GET /api/v3/orders/tree 响应体
+    Reference: docs/designs/order-chain-tree-contract.md Section
+
+    一次性加载完整订单树，前端使用虚拟滚动优化渲染性能
+    """
+    items: List[OrderTreeNode] = Field(..., description="订单树节点列表")
+    total: int = Field(..., description="根订单总数")
+    metadata: Dict[str, Any] = Field(..., description="元数据（过滤条件、加载时间等）")
+
+
+class OrderDeleteRequest(BaseModel):
+    """
+    批量删除订单请求模型
+
+    订单管理级联展示功能 - DELETE /api/v3/orders/batch 请求体
+    Reference: docs/designs/order-chain-tree-contract.md Section
+
+    约束条件:
+    - order_ids 不能为空
+    - order_ids 数量不能超过 100
+    """
+    order_ids: List[str] = Field(..., max_length=100, description="要删除的订单 ID 列表")
+    cancel_on_exchange: bool = Field(default=True, description="是否调用交易所取消接口")
+    audit_info: Optional[Dict[str, str]] = Field(None, description="审计信息（operator_id, ip_address, user_agent）")
+
+    @field_validator('order_ids')
+    @classmethod
+    def validate_order_ids(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError('订单 ID 列表不能为空')
+        return v
+
+
+class OrderDeleteResponse(FinancialModel):
+    """
+    批量删除订单响应模型
+
+    订单管理级联展示功能 - DELETE /api/v3/orders/batch 响应体
+    Reference: docs/designs/order-chain-tree-contract.md Section
+
+    字段说明:
+    - deleted_count: 删除的订单总数
+    - cancelled_on_exchange: 在交易所成功取消的订单 ID 列表
+    - failed_to_cancel: 在交易所取消失败的订单列表（包括原因）
+    - deleted_from_db: 从数据库成功删除的订单 ID 列表
+    - failed_to_delete: 数据库删除失败的订单列表（包括原因）
+    - audit_log_id: 审计日志 ID
+    """
+    deleted_count: int = Field(..., description="删除的订单总数")
+    cancelled_on_exchange: List[str] = Field(default_factory=list, description="在交易所成功取消的订单 ID 列表")
+    failed_to_cancel: List[Dict[str, str]] = Field(default_factory=list, description="在交易所取消失败的订单列表")
+    deleted_from_db: List[str] = Field(default_factory=list, description="从数据库成功删除的订单 ID 列表")
+    failed_to_delete: List[Dict[str, str]] = Field(default_factory=list, description="数据库删除失败的订单列表")
+    audit_log_id: Optional[str] = Field(None, description="审计日志 ID")
+
+
 class PositionInfoV3(FinancialModel):
     """
     持仓信息模型 (v3 API 版本)

@@ -1147,8 +1147,6 @@ class OrderRepository:
                 logger.error(f"批量删除订单失败：{str(e)}")
                 raise e
 
-    async def get_oco_group(self, oco_group_id: str) -> List[Order]:
-
     async def get_order_count(self, signal_id: str) -> int:
         """
         Get total order count for a signal.

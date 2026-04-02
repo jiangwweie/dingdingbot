@@ -1,0 +1,11 @@
+# 开发依赖
+black>=24.0.0
+mypy>=1.8.0
+flake8>=7.0.0
+pre-commit>=3.6.0
+pytest-xdist>=3.5.0
+coverage>=7.0.0
+
+# 类型_stub
+types-PyYAML>=6.0.0
+types-requests>=2.31.0
