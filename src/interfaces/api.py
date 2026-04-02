@@ -1116,6 +1116,327 @@ async def delete_backtest_report(report_id: str):
 
 
 # ============================================================
+# Backtest Orders Management Endpoints
+# ============================================================
+
+class BacktestOrderSummary(BaseModel):
+    """回测订单摘要信息"""
+    id: str
+    signal_id: str
+    order_role: str
+    order_type: str
+    direction: str
+    requested_qty: str
+    filled_qty: str
+    average_exec_price: Optional[str]
+    status: str
+    created_at: int
+    updated_at: int
+    exit_reason: Optional[str]
+
+
+class ListBacktestOrdersResponse(BaseModel):
+    """回测订单列表响应"""
+    orders: List[BacktestOrderSummary]
+    total: int
+    page: int
+    pageSize: int
+
+
+@app.get("/api/v3/backtest/reports/{report_id}/orders", response_model=ListBacktestOrdersResponse)
+async def list_backtest_orders(
+    report_id: str,
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    order_role: Optional[str] = Query(None, description="订单角色筛选 (ENTRY/TP1/SL/etc)"),
+):
+    """
+    获取回测报告关联的订单列表
+
+    Args:
+        report_id: 回测报告 ID
+        page: 页码（从 1 开始）
+        page_size: 每页数量（1-100）
+        order_role: 订单角色筛选 (ENTRY/TP1/SL/etc)
+
+    Returns:
+        回测订单列表
+
+    Raises:
+        HTTPException:
+            - 404: 回测报告不存在
+            - 500: 数据库查询失败
+    """
+    try:
+        from src.infrastructure.backtest_repository import BacktestReportRepository
+        from src.infrastructure.signal_repository import SignalRepository
+        from src.infrastructure.order_repository import OrderRepository
+
+        # Step 1: 获取回测报告
+        backtest_repo = BacktestReportRepository()
+        await backtest_repo.initialize()
+        try:
+            report = await backtest_repo.get_report(report_id)
+            if not report:
+                raise HTTPException(status_code=404, detail=f"回测报告不存在：{report_id}")
+
+            strategy_id = report.strategy_id
+            start_time = report.backtest_start
+            end_time = report.backtest_end
+        finally:
+            await backtest_repo.close()
+
+        # Step 2: 获取关联的信号 ID 列表
+        signal_repo = SignalRepository()
+        await signal_repo.initialize()
+        try:
+            signal_ids = await signal_repo.get_signal_ids_by_backtest_report(
+                strategy_id=strategy_id,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+            if not signal_ids:
+                # 没有信号，返回空列表
+                return ListBacktestOrdersResponse(orders=[], total=0, page=page, pageSize=page_size)
+        finally:
+            await signal_repo.close()
+
+        # Step 3: 获取订单列表
+        order_repo = OrderRepository()
+        await order_repo.initialize()
+        try:
+            result = await order_repo.get_orders_by_signal_ids(
+                signal_ids=signal_ids,
+                page=page,
+                page_size=page_size,
+                order_role=order_role,
+            )
+
+            orders = [
+                BacktestOrderSummary(
+                    id=o.id,
+                    signal_id=o.signal_id,
+                    order_role=o.order_role.value,
+                    order_type=o.order_type.value,
+                    direction=o.direction.value,
+                    requested_qty=str(o.requested_qty),
+                    filled_qty=str(o.filled_qty),
+                    average_exec_price=str(o.average_exec_price) if o.average_exec_price else None,
+                    status=o.status.value,
+                    created_at=o.created_at,
+                    updated_at=o.updated_at,
+                    exit_reason=o.exit_reason,
+                )
+                for o in result['orders']
+            ]
+
+            return ListBacktestOrdersResponse(
+                orders=orders,
+                total=result['total'],
+                page=result['page'],
+                pageSize=result['page_size'],
+            )
+        finally:
+            await order_repo.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取回测订单列表失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v3/backtest/reports/{report_id}/orders/{order_id}")
+async def get_backtest_order(report_id: str, order_id: str):
+    """
+    获取回测订单详情（包含关联的 K 线数据）
+
+    Args:
+        report_id: 回测报告 ID
+        order_id: 订单 ID
+
+    Returns:
+        订单详情及关联的 K 线数据（前后各 10 根）
+
+    Raises:
+        HTTPException:
+            - 404: 订单不存在或不属于该回测报告
+            - 500: 数据库查询失败
+    """
+    try:
+        from src.infrastructure.order_repository import OrderRepository
+        from src.infrastructure.historical_data_repository import HistoricalDataRepository
+
+        # Step 1: 获取订单详情
+        order_repo = OrderRepository()
+        await order_repo.initialize()
+        try:
+            order = await order_repo.get_order(order_id)
+            if not order:
+                raise HTTPException(status_code=404, detail=f"订单不存在：{order_id}")
+        finally:
+            await order_repo.close()
+
+        # Step 2: 验证订单属于该回测报告
+        backtest_repo = BacktestReportRepository()
+        await backtest_repo.initialize()
+        try:
+            report = await backtest_repo.get_report(report_id)
+            if not report:
+                raise HTTPException(status_code=404, detail=f"回测报告不存在：{report_id}")
+
+            # 验证订单的 signal_id 是否属于该回测报告
+            signal_repo = SignalRepository()
+            await signal_repo.initialize()
+            try:
+                signal_ids = await signal_repo.get_signal_ids_by_backtest_report(
+                    strategy_id=report.strategy_id,
+                    start_time=report.backtest_start,
+                    end_time=report.backtest_end,
+                )
+                if order.signal_id not in signal_ids:
+                    raise HTTPException(status_code=404, detail=f"订单不属于该回测报告")
+            finally:
+                await signal_repo.close()
+        finally:
+            await backtest_repo.close()
+
+        # Step 3: 获取关联的 K 线数据（前后各 10 根）
+        data_repo = HistoricalDataRepository()
+        await data_repo.initialize()
+        try:
+            # 计算时间范围
+            tf_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}.get(report.timeframe, 15)
+            kline_interval_ms = tf_minutes * 60 * 1000
+
+            # 以订单创建时间为中心，前后各取 10 根 K 线
+            center_time = order.created_at
+            start_time = center_time - (10 * kline_interval_ms)
+            end_time = center_time + (10 * kline_interval_ms)
+
+            klines = await data_repo.get_klines(
+                symbol=order.symbol,
+                timeframe=report.timeframe,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+            kline_data = [
+                {
+                    "timestamp": k.timestamp,
+                    "open": str(k.open),
+                    "high": str(k.high),
+                    "low": str(k.low),
+                    "close": str(k.close),
+                    "volume": str(k.volume),
+                }
+                for k in klines
+            ]
+        finally:
+            await data_repo.close()
+
+        return {
+            "order": {
+                "id": order.id,
+                "signal_id": order.signal_id,
+                "symbol": order.symbol,
+                "order_role": order.order_role.value,
+                "order_type": order.order_type.value,
+                "direction": order.direction.value,
+                "price": str(order.price) if order.price else None,
+                "trigger_price": str(order.trigger_price) if order.trigger_price else None,
+                "requested_qty": str(order.requested_qty),
+                "filled_qty": str(order.filled_qty),
+                "average_exec_price": str(order.average_exec_price) if order.average_exec_price else None,
+                "status": order.status.value,
+                "exit_reason": order.exit_reason,
+                "created_at": order.created_at,
+                "updated_at": order.updated_at,
+                "filled_at": order.filled_at,
+            },
+            "klines": kline_data,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取回测订单详情失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v3/backtest/reports/{report_id}/orders/{order_id}")
+async def delete_backtest_order(report_id: str, order_id: str):
+    """
+    删除回测订单
+
+    Args:
+        report_id: 回测报告 ID
+        order_id: 订单 ID
+
+    Returns:
+        删除结果
+
+    Raises:
+        HTTPException:
+            - 404: 订单不存在或不属于该回测报告
+            - 500: 数据库删除失败
+    """
+    try:
+        from src.infrastructure.order_repository import OrderRepository
+        from src.infrastructure.backtest_repository import BacktestReportRepository
+        from src.infrastructure.signal_repository import SignalRepository
+
+        # Step 1: 验证订单属于该回测报告
+        backtest_repo = BacktestReportRepository()
+        await backtest_repo.initialize()
+        try:
+            report = await backtest_repo.get_report(report_id)
+            if not report:
+                raise HTTPException(status_code=404, detail=f"回测报告不存在：{report_id}")
+
+            signal_repo = SignalRepository()
+            await signal_repo.initialize()
+            try:
+                signal_ids = await signal_repo.get_signal_ids_by_backtest_report(
+                    strategy_id=report.strategy_id,
+                    start_time=report.backtest_start,
+                    end_time=report.backtest_end,
+                )
+            finally:
+                await signal_repo.close()
+        finally:
+            await backtest_repo.close()
+
+        # Step 2: 获取订单并验证
+        order_repo = OrderRepository()
+        await order_repo.initialize()
+        try:
+            order = await order_repo.get_order(order_id)
+            if not order:
+                raise HTTPException(status_code=404, detail=f"订单不存在：{order_id}")
+
+            if order.signal_id not in signal_ids:
+                raise HTTPException(status_code=404, detail=f"订单不属于该回测报告")
+
+            # Step 3: 删除订单
+            await order_repo.delete_order(order_id)
+
+            return {
+                "status": "success",
+                "message": f"已删除订单：{order_id}",
+            }
+        finally:
+            await order_repo.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除回测订单失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
 # Custom Strategies Management Endpoints
 # ============================================================
 

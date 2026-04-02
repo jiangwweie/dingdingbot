@@ -53,6 +53,7 @@ from src.domain.strategy_engine import (
 )
 from src.domain.filter_factory import FilterFactory
 from src.infrastructure.exchange_gateway import ExchangeGateway
+from src.infrastructure.historical_data_repository import HistoricalDataRepository
 from src.infrastructure.logger import logger
 
 
@@ -128,14 +129,21 @@ class Backtester:
         "1d": "1w",
     }
 
-    def __init__(self, exchange_gateway: ExchangeGateway):
+    def __init__(
+        self,
+        exchange_gateway: ExchangeGateway,
+        data_repository: Optional[HistoricalDataRepository] = None,
+    ):
         """
         Initialize backtester.
 
         Args:
             exchange_gateway: Exchange gateway for fetching historical data
+            data_repository: Optional historical data repository for local data access.
+                            If not provided, will fetch directly from exchange gateway.
         """
         self._gateway = exchange_gateway
+        self._data_repo = data_repository
 
     async def run_backtest(
         self,
@@ -383,15 +391,38 @@ class Backtester:
         )
 
     async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
-        """Fetch historical K-line data."""
+        """Fetch historical K-line data using HistoricalDataRepository (local-first with fallback)."""
         try:
-            # 检查是否有时间范围参数
+            # 优先使用 HistoricalDataRepository (本地 SQLite 优先)
+            if self._data_repo is not None:
+                # 检查是否有时间范围参数
+                if request.start_time and request.end_time:
+                    # 计算需要的 K 线数量
+                    duration_ms = int(request.end_time) - int(request.start_time)
+                    timeframe_minutes = self._parse_timeframe(request.timeframe)
+                    expected_bars = duration_ms // (timeframe_minutes * 60 * 1000)
+                    # 添加 20% 缓冲，并确保至少满足 limit 要求
+                    limit = max(int(expected_bars * 1.2), request.limit, 1000)
+                    logger.info(f"Time range specified: fetching ~{expected_bars} bars (limit: {limit})")
+                else:
+                    limit = request.limit
+
+                klines = await self._data_repo.get_klines(
+                    symbol=request.symbol,
+                    timeframe=request.timeframe,
+                    start_time=request.start_time,
+                    end_time=request.end_time,
+                    limit=limit,
+                )
+
+                logger.info(f"Fetched {len(klines)} candles from local DB for {request.symbol} {request.timeframe}")
+                return klines
+
+            # 降级：直接使用 exchange gateway (旧版行为)
             if request.start_time and request.end_time:
-                # 计算需要的 K 线数量
                 duration_ms = int(request.end_time) - int(request.start_time)
                 timeframe_minutes = self._parse_timeframe(request.timeframe)
                 expected_bars = duration_ms // (timeframe_minutes * 60 * 1000)
-                # 添加 20% 缓冲，并确保至少满足 limit 要求
                 limit = max(int(expected_bars * 1.2), request.limit, 1000)
                 logger.info(f"Time range specified: fetching ~{expected_bars} bars (limit: {limit})")
             else:

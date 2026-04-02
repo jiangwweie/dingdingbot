@@ -1877,6 +1877,44 @@ class SignalRepository:
         numeric_signal_id = row[0]
 
         await self._db.execute(
+
+    async def get_signal_ids_by_backtest_report(
+        self,
+        strategy_id: str,
+        start_time: int,
+        end_time: int,
+    ) -> List[str]:
+        """
+        Get signal IDs for a specific backtest report.
+
+        通过 strategy_id 和时间范围查询回测信号 ID 列表。
+
+        Args:
+            strategy_id: Strategy ID to filter
+            start_time: Backtest start timestamp (milliseconds)
+            end_time: Backtest end timestamp (milliseconds)
+
+        Returns:
+            List of signal IDs
+        """
+        async with self._lock:
+            # Convert timestamps to ISO format for comparison
+            start_iso = datetime.fromtimestamp(start_time / 1000, tz=timezone.utc).isoformat()
+            end_iso = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc).isoformat()
+
+            cursor = await self._db.execute("""
+                SELECT signal_id FROM signals
+                WHERE source = 'backtest'
+                  AND strategy_name = ?
+                  AND created_at >= ?
+                  AND created_at <= ?
+                ORDER BY created_at ASC
+            """, (strategy_id, start_iso, end_iso))
+
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+            return [row[0] for row in rows if row[0]]
             """
             UPDATE signal_take_profits
             SET status = ?, pnl_ratio = ?, filled_at = ?

@@ -401,6 +401,72 @@ class OrderRepository:
 
             return [self._row_to_order(row) for row in rows]
 
+    async def get_orders_by_signal_ids(
+        self,
+        signal_ids: List[str],
+        page: int = 1,
+        page_size: int = 20,
+        order_role: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get orders by multiple signal IDs (for backtest report orders).
+
+        Args:
+            signal_ids: List of signal IDs to query
+            page: Page number (1-based)
+            page_size: Page size (1-100)
+            order_role: Optional order role filter (ENTRY/TP1/SL/etc)
+
+        Returns:
+            Dict with:
+                - orders: List of Order objects
+                - total: Total count
+                - page: Current page
+                - page_size: Page size
+        """
+        async with self._lock:
+            # Build WHERE clause
+            placeholders = ','.join('?' * len(signal_ids))
+            where_clause = f"signal_id IN ({placeholders})"
+            params = list(signal_ids)
+
+            # Add order_role filter if provided
+            if order_role:
+                where_clause += " AND order_role = ?"
+                params.append(order_role)
+
+            # Get total count
+            count_cursor = await self._db.execute(
+                f"SELECT COUNT(*) FROM orders WHERE {where_clause}",
+                tuple(params)
+            )
+            total = (await count_cursor.fetchone())[0]
+            await count_cursor.close()
+
+            # Get paginated results
+            offset = (page - 1) * page_size
+            params.append(page_size)
+            params.append(offset)
+
+            cursor = await self._db.execute(
+                f"""
+                SELECT * FROM orders
+                WHERE {where_clause}
+                ORDER BY created_at ASC
+                LIMIT ? OFFSET ?
+                """,
+                tuple(params)
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+            return {
+                'orders': [self._row_to_order(row) for row in rows],
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+            }
+
     async def get_orders_by_symbol(self, symbol: str, limit: int = 100) -> List[Order]:
         """
         Get orders for a specific symbol.
