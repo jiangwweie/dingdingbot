@@ -404,7 +404,7 @@ class BacktestReportRepository:
             total_fees_paid=self._str_to_decimal(row["total_fees_paid"]),
             total_slippage_cost=self._str_to_decimal(row["total_slippage_cost"]),
             max_drawdown=self._str_to_decimal(row["max_drawdown"]),
-            sharpe_ratio=self._str_to_decimal(row["sharpe_ratio"]) if row.get("sharpe_ratio") else None,
+            sharpe_ratio=self._str_to_decimal(row["sharpe_ratio"]) if row["sharpe_ratio"] else None,
             positions=self._deserialize_positions_summary(row["positions_summary"]),
         )
 
