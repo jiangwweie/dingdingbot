@@ -30,7 +30,7 @@ export default function Positions() {
   const { data, error, mutate } = useApi<PositionResponse>(url, 10000); // 10 秒刷新
 
   const isLoading = !data && !error;
-  const positions = data?.items || [];
+  const positions = data?.positions || [];
   const totalUnrealizedPnl = data?.total_unrealized_pnl || '0';
   const totalRealizedPnl = data?.total_realized_pnl || '0';
   const totalMarginUsed = data?.total_margin_used || '0';

@@ -91,6 +91,7 @@ class BacktestReportRepository:
                 total_fees_paid     TEXT NOT NULL DEFAULT '0',
                 total_slippage_cost TEXT NOT NULL DEFAULT '0',
                 max_drawdown        TEXT NOT NULL DEFAULT '0',
+                sharpe_ratio        TEXT,
                 positions_summary   TEXT,
                 monthly_returns     TEXT
             )
@@ -336,8 +337,8 @@ class BacktestReportRepository:
                 initial_balance, final_balance, total_return,
                 total_trades, winning_trades, losing_trades, win_rate,
                 total_pnl, total_fees_paid, total_slippage_cost, max_drawdown,
-                positions_summary, monthly_returns
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sharpe_ratio, positions_summary, monthly_returns
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             report_id,
             report.strategy_id,
@@ -361,6 +362,7 @@ class BacktestReportRepository:
             self._decimal_to_str(report.total_fees_paid),
             self._decimal_to_str(report.total_slippage_cost),
             self._decimal_to_str(report.max_drawdown),
+            self._decimal_to_str(report.sharpe_ratio) if report.sharpe_ratio else None,
             positions_summary,
             None,  # monthly_returns (暂不使用)
         ))
@@ -402,6 +404,7 @@ class BacktestReportRepository:
             total_fees_paid=self._str_to_decimal(row["total_fees_paid"]),
             total_slippage_cost=self._str_to_decimal(row["total_slippage_cost"]),
             max_drawdown=self._str_to_decimal(row["max_drawdown"]),
+            sharpe_ratio=self._str_to_decimal(row["sharpe_ratio"]) if row.get("sharpe_ratio") else None,
             positions=self._deserialize_positions_summary(row["positions_summary"]),
         )
 
@@ -611,7 +614,7 @@ class BacktestReportRepository:
             SELECT id, strategy_id, strategy_name, strategy_version,
                    symbol, timeframe, backtest_start, backtest_end,
                    created_at, total_return, total_trades, win_rate,
-                   total_pnl, max_drawdown
+                   total_pnl, max_drawdown, sharpe_ratio
             FROM backtest_reports
             {where_clause}
             ORDER BY {sort_column} {sort_direction}
@@ -638,6 +641,7 @@ class BacktestReportRepository:
                 "win_rate": str(self._str_to_decimal(row["win_rate"])),
                 "total_pnl": str(self._str_to_decimal(row["total_pnl"])),
                 "max_drawdown": str(self._str_to_decimal(row["max_drawdown"])),
+                "sharpe_ratio": str(self._str_to_decimal(row["sharpe_ratio"])) if row.get("sharpe_ratio") else None,
             }
             for row in rows
         ]

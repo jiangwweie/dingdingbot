@@ -48,7 +48,8 @@ class ConfigSnapshotService:
 
     # Semantic version pattern: v1.0.0, v2.3.14, etc.
     # Also supports timestamp-based versions: v20260402.153045 (vYYYYMMDD.HHMMSS)
-    VERSION_PATTERN = re.compile(r"^v\d+\.\d+\.\d+$|^v\d{6,8}\.\d{2,6}$")
+    # Date part: exactly 8 digits (YYYYMMDD), Time part: 2-6 digits (H to HHMMSS)
+    VERSION_PATTERN = re.compile(r"^v\d+\.\d+\.\d+$|^v\d{8}\.\d{2,6}$")
 
     def __init__(
         self,
@@ -116,7 +117,7 @@ class ConfigSnapshotService:
         Create an automatic configuration snapshot (before config change).
 
         Auto-generates version based on timestamp.
-        Version format: vYYYYMMDD.HH (e.g., v20260402.15)
+        Version format: vYYYYMMDD.HHMMSS (e.g., v20260402.153045)
 
         Args:
             config: UserConfig model to snapshot
@@ -126,9 +127,9 @@ class ConfigSnapshotService:
             Created snapshot ID, or None if snapshot creation failed
         """
         try:
-            # Generate version from timestamp: vYYYYMMDD.HH (semantic version compatible)
+            # Generate version from timestamp: vYYYYMMDD.HHMMSS (semantic version compatible)
             now = datetime.now(timezone.utc)
-            version = now.strftime("v%Y%m%d.%H")
+            version = now.strftime("v%Y%m%d.%H%M%S")
 
             # Append description with timestamp
             full_description = f"{description} - {now.isoformat()}"

@@ -16,6 +16,30 @@
 | **P1** | 配置管理功能 - 版本化快照 | 7 项 | 8h | ✅ 已完成 |
 | **P2** | 配置管理功能 | 2 项 | 4h | ☐ 搁置 |
 | **P0** | Phase 8 自动化调参 | 已分解 | 40h | ⏳ 进行中 |
+| **P0** | 用户需求 Bug 修复 (2026-04-02) | 7 项 | 8h | ✅ 已完成 |
+
+---
+
+## 用户需求 Bug 修复 (2026-04-02) ✅
+
+**任务来源**: 用户提出的 7 个需求/问题
+
+| ID | 任务 | 优先级 | 状态 | 修复说明 |
+|----|------|--------|------|----------|
+| 1 | 配置快照创建验证失败 - version 格式问题 | P0 | ✅ 已完成 | 修复 API 和 Service 的 VERSION_PATTERN 不一致问题 |
+| 2 | 持仓数据不一致问题排查 | P0 | ✅ 已完成 | 修复前后端字段名不一致 (items vs positions) |
+| 3 | 策略参数可配置化分析与梳理 | P1 | ☐ 待启动 | 待分析 |
+| 4 | 订单详情页 K 线渲染 - 集成 TradingView 组件 | P1 | ☐ 待启动 | 待开发 |
+| 5 | 回测列表盈亏计算和夏普比率修复 | P0 | ✅ 已完成 | 添加 sharpe_ratio 字段到数据库和 API |
+| 6 | 订单管理级联展示功能 | P1 | ☐ 待启动 | 待开发 |
+| 7 | 修复信号详情接口报错 (Legacy signal data) | P0 | ✅ 已完成 | 将错误返回改为 HTTPException |
+
+**修改文件汇总**:
+- `src/application/config_snapshot_service.py` - 修复版本验证模式
+- `src/interfaces/api.py` - 修复配置快照 API 验证、信号详情接口错误处理、回测列表 sharpe_ratio 字段
+- `src/infrastructure/backtest_repository.py` - 添加 sharpe_ratio 字段到数据库和查询
+- `web-front/src/types/order.ts` - 修复 PositionsResponse 字段名
+- `web-front/src/pages/Positions.tsx` - 修复字段名引用
 
 ---
 

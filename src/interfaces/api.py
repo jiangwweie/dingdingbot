@@ -573,7 +573,10 @@ async def get_signal_context(signal_id: int):
 
         # Validate kline_timestamp exists
         if not kline_timestamp or kline_timestamp == 0:
-            return {"error": "Legacy signal data without kline_timestamp"}
+            raise HTTPException(
+                status_code=400,
+                detail="Legacy signal data without kline_timestamp. This signal was created before v3.0 and does not support context view."
+            )
 
         # Parse timeframe to milliseconds (P1-004: 使用统一工具函数)
         timeframe_ms = BacktestConfig.get_timeframe_ms(timeframe)
@@ -604,7 +607,8 @@ async def get_signal_context(signal_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to fetch signal context for {signal_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/attempts")
@@ -1379,6 +1383,7 @@ class BacktestReportSummary(BaseModel):
     win_rate: str
     total_pnl: str
     max_drawdown: str
+    sharpe_ratio: Optional[str] = None
 
 
 class ListBacktestReportsResponse(BaseModel):
@@ -1464,6 +1469,7 @@ async def list_backtest_reports(
                     win_rate=r["win_rate"],
                     total_pnl=r["total_pnl"],
                     max_drawdown=r["max_drawdown"],
+                    sharpe_ratio=r.get("sharpe_ratio"),
                 )
                 for r in result["reports"]
             ]
@@ -2709,7 +2715,9 @@ async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None)
 
 class ConfigSnapshotCreate(BaseModel):
     """Request model for creating a config snapshot."""
-    version: str = Field(..., pattern=r"^v\d+\.\d+\.\d+$", description="Semantic version tag, e.g., 'v1.0.0'")
+    # Support both semantic version (v1.0.0) and timestamp version (v20260402.153045)
+    # Pattern: vX.Y.Z or vYYYYMMDD.HHMMSS (8 digits for date, 2-6 digits for time)
+    version: str = Field(..., pattern=r"^v\d+\.\d+\.\d+$|^v\d{8}\.\d{2,6}$", description="Semantic version tag (e.g., 'v1.0.0') or timestamp version (e.g., 'v20260402.153045')")
     description: str = Field(default="", max_length=200, description="Snapshot description")
 
 
@@ -3627,7 +3635,9 @@ async def list_orders(
 @app.get("/api/v3/positions", response_model=PositionResponse)
 async def list_positions(
     symbol: Optional[str] = Query(None, description="币种对过滤"),
-    include_closed: bool = Query(default=False, description="是否包含已平仓位"),
+    is_closed: bool = Query(default=False, description="是否查询已平仓位"),
+    limit: int = Query(default=100, ge=1, le=500, description="每页数量"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
 ) -> PositionResponse:
     """
     查询持仓列表（v3 API）
@@ -3637,7 +3647,9 @@ async def list_positions(
 
     Args:
         symbol: 币种对过滤（可选）
-        include_closed: 是否包含已平仓位（默认 false）
+        is_closed: 是否查询已平仓位（默认 false，即查询未平仓位）
+        limit: 每页数量（1-500）
+        offset: 偏移量
 
     Returns:
         PositionResponse: 持仓列表响应

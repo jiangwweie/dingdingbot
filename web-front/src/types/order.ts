@@ -417,8 +417,7 @@ export interface OrdersResponse {
  * 持仓列表响应（与 PositionResponse 对齐）
  */
 export interface PositionsResponse {
-  items: PositionInfo[];
-  total: number;
+  positions: PositionInfo[];
   total_unrealized_pnl: string;
   total_realized_pnl: string;
   total_margin_used: string;
