@@ -1494,3 +1494,23 @@ export async function fetchOrderKlineContext(orderId: string, symbol: string): P
   }
   return res.json();
 }
+
+/**
+ * Fetch backtest order details with kline data
+ * Returns order details plus K-lines for chart visualization
+ */
+export async function fetchBacktestOrder(reportId: string, orderId: string): Promise<{
+  order: OrderResponse;
+  klines: Array<{ timestamp: number; open: string; high: string; low: string; close: string; volume: string }>;
+}> {
+  const res = await fetch(`/api/v3/backtest/reports/${reportId}/orders/${orderId}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch backtest order');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
