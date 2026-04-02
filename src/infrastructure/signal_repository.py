@@ -1748,6 +1748,36 @@ class SignalRepository:
         await self._db.commit()
         return cursor.rowcount > 0
 
+    async def get_recent_config_snapshots(self, count: int = 5) -> List[int]:
+        """
+        Get IDs of the most recent N snapshots.
+
+        Args:
+            count: Number of recent snapshots to get
+
+        Returns:
+            List of snapshot IDs (newest first)
+        """
+        async with self._db.execute(
+            "SELECT id FROM config_snapshots ORDER BY created_at DESC LIMIT ?",
+            (count,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+    async def get_active_config_version(self) -> Optional[str]:
+        """
+        Get the version of the currently active snapshot.
+
+        Returns:
+            Version string or None if no active snapshot
+        """
+        async with self._db.execute(
+            "SELECT version FROM config_snapshots WHERE is_active = 1 LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
     async def get_all_attempts(self) -> List[dict]:
         """
         Get all signal attempts from database.

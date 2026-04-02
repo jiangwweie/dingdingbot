@@ -2,6 +2,21 @@
   "skills": {
     "local": [
       {
+        "name": "pm",
+        "description": "项目经理 - 执行监工 + 风险雷达。作为统一入口接收用户需求，负责任务分解、进度追踪、资源调度、代码提交。日常对话首选联系人。",
+        "path": "./.claude/team/project-manager/SKILL.md"
+      },
+      {
+        "name": "product-manager",
+        "description": "产品经理 - 需求过滤器 + 价值判断。负责需求收集、优先级排序、用户故事编写、MVP 范围定义。",
+        "path": "./.claude/team/product-manager/SKILL.md"
+      },
+      {
+        "name": "architect",
+        "description": "架构师 - 技术愿景 + 架构守门人。负责架构设计、契约设计、技术选型、关联影响评估。",
+        "path": "./.claude/team/architect/SKILL.md"
+      },
+      {
         "name": "team-coordinator",
         "description": "团队协调器 - 负责任务分解、分配给前端/后端/测试角色、协调并行执行。",
         "path": "./.claude/team/team-coordinator/SKILL.md"

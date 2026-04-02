@@ -32,7 +32,8 @@ from decimal import Decimal
 from typing import Optional, Callable, Any, List, Dict
 import logging
 
-from fastapi import FastAPI, Query, HTTPException, Body
+from fastapi import FastAPI, Query, HTTPException, Body, File, UploadFile, Form, Response
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ _account_getter: Optional[Callable[[], Any]] = None
 _config_manager: Optional[Any] = None  # ConfigManager instance
 _exchange_gateway: Optional[Any] = None  # ExchangeGateway instance
 _signal_tracker: Optional[Any] = None  # SignalStatusTracker instance
+_snapshot_service: Optional[Any] = None  # ConfigSnapshotService instance
 
 
 def set_dependencies(
@@ -113,6 +115,7 @@ def set_dependencies(
     config_manager: Optional[Any] = None,
     exchange_gateway: Optional[Any] = None,
     signal_tracker: Optional[Any] = None,
+    snapshot_service: Optional[Any] = None,
 ) -> None:
     """
     Inject dependencies for API endpoints.
@@ -123,13 +126,15 @@ def set_dependencies(
         config_manager: Optional ConfigManager instance
         exchange_gateway: Optional ExchangeGateway instance
         signal_tracker: Optional SignalStatusTracker instance
+        snapshot_service: Optional ConfigSnapshotService instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
     _exchange_gateway = exchange_gateway
     _signal_tracker = signal_tracker
+    _snapshot_service = snapshot_service
 
 
 def _get_repository() -> SignalRepository:
@@ -158,6 +163,11 @@ def _get_signal_tracker() -> Any:
     if _signal_tracker is None:
         raise HTTPException(status_code=503, detail="Signal tracker not initialized")
     return _signal_tracker
+
+
+def _get_snapshot_service() -> Any:
+    """Get snapshot service or return None if not initialized."""
+    return _snapshot_service
 
 
 # ============================================================
@@ -824,6 +834,209 @@ async def update_config(
 
         # Call hot-reload method (validates + atomic swap + persist)
         new_config = await config_manager.update_user_config(config_update)
+
+        # Return masked config
+        config_dict = new_config.model_dump()
+        masked_config = _deep_mask_config(config_dict)
+
+        return {
+            "status": "success",
+            "message": "Configuration updated",
+            "config": masked_config,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Pydantic ValidationError returns 422
+        error_str = str(e)
+        if "ValidationError" in type(e).__name__:
+            from fastapi import status
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Config validation failed: {error_str}",
+            )
+        return {"error": str(e)}
+
+
+# ============================================================
+# Config Export/Import Endpoints
+# ============================================================
+@app.get("/api/config/export")
+async def export_config():
+    """
+    Export current configuration as YAML file.
+
+    Sensitive information (api_key, api_secret, webhook_url) is masked.
+
+    Returns:
+        YAML file download response
+    """
+    try:
+        import yaml
+        from src.infrastructure.logger import mask_secret
+
+        config_manager = _get_config_manager()
+        user_config = config_manager.user_config
+
+        # Convert Pydantic model to dict (with masking)
+        config_dict = user_config.model_dump(mode='json')
+        masked_config = _deep_mask_config(config_dict)
+
+        # Generate YAML content
+        yaml_content = yaml.safe_dump(
+            masked_config,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False
+        )
+
+        # Generate filename with timestamp
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"user_config_{timestamp}.yaml"
+
+        return Response(
+            content=yaml_content,
+            media_type="application/x-yaml",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/config/import")
+async def import_config(
+    file: UploadFile = File(..., description="YAML configuration file"),
+    description: str = Form(default="配置导入", description="Snapshot description")
+):
+    """
+    Import configuration from YAML file.
+
+    Flow:
+    1. Parse and validate YAML content
+    2. Validate against UserConfig schema
+    3. Create auto-snapshot of current config (backup)
+    4. Apply new configuration (hot-reload)
+
+    Args:
+        file: YAML configuration file
+        description: Description for the backup snapshot
+
+    Returns:
+        Updated config (masked) or error details
+    """
+    try:
+        import yaml
+        from pydantic import ValidationError
+
+        # Read and parse YAML
+        content = await file.read()
+        try:
+            config_data = yaml.safe_load(content.decode('utf-8'))
+        except yaml.YAMLError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"YAML parse error: {e}",
+                headers={"X-Error-Code": "CONFIG-002"}
+            )
+
+        if not isinstance(config_data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid YAML: root must be an object",
+                headers={"X-Error-Code": "CONFIG-002"}
+            )
+
+        # Validate against UserConfig schema
+        config_manager = _get_config_manager()
+
+        # Merge with existing config for partial updates
+        existing_dict = config_manager.user_config.model_dump(mode='json')
+        merged_dict = config_manager._deep_merge(existing_dict, config_data)
+
+        try:
+            # Validate merged config
+            UserConfig(**merged_dict)
+        except ValidationError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Config validation failed: {e}",
+                headers={"X-Error-Code": "CONFIG-003"}
+            )
+
+        # Apply new configuration
+        # Note: update_user_config will create auto-snapshot automatically
+        new_config = await config_manager.update_user_config(
+            config_data,
+            auto_snapshot=True,
+            snapshot_description=description
+        )
+
+        # Return masked config
+        config_dict = new_config.model_dump()
+        masked_config = _deep_mask_config(config_dict)
+
+        return {
+            "status": "success",
+            "message": "Configuration imported successfully",
+            "config": masked_config,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_str = str(e)
+        if "ValidationError" in type(e).__name__:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Config validation failed: {error_str}",
+                headers={"X-Error-Code": "CONFIG-003"}
+            )
+        return {"error": str(e)}
+
+
+@app.put("/api/config")
+async def update_config(
+    config_update: Dict[str, Any] = Body(..., description="Partial user config update"),
+    auto_snapshot: bool = Query(default=True, description="Whether to create auto-snapshot"),
+    snapshot_description: str = Query(default="", description="Snapshot description"),
+):
+    """
+    Update user configuration with hot-reload.
+
+    Accepts partial config update. Validates against Pydantic UserConfig model.
+    On success, atomically replaces in-memory config and persists to disk.
+
+    Request body example:
+    {
+        "strategy": {
+            "trend_filter_enabled": false
+        },
+        "risk": {
+            "max_loss_percent": 0.02
+        }
+    }
+
+    Args:
+        config_update: Partial config update
+        auto_snapshot: Whether to create snapshot before update (default True)
+        snapshot_description: Description for the auto-snapshot
+
+    Returns:
+        Updated config (masked) or 422 on validation error
+    """
+    try:
+        config_manager = _get_config_manager()
+
+        # Call hot-reload method (validates + atomic swap + persist)
+        new_config = await config_manager.update_user_config(
+            config_update,
+            auto_snapshot=auto_snapshot,
+            snapshot_description=snapshot_description
+        )
 
         # Return masked config
         config_dict = new_config.model_dump()
@@ -2287,86 +2500,165 @@ async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None)
 
 class ConfigSnapshotCreate(BaseModel):
     """Request model for creating a config snapshot."""
-    version: str = Field(..., description="Version tag, e.g., 'v1.0.0'")
-    config_json: str = Field(..., description="Serialized UserConfig JSON")
-    description: str = Field(default="", description="Snapshot description")
-    created_by: str = Field(default="user", description="Creator identifier")
+    version: str = Field(..., pattern=r"^v\d+\.\d+\.\d+$", description="Semantic version tag, e.g., 'v1.0.0'")
+    description: str = Field(default="", max_length=200, description="Snapshot description")
+
+
+class ConfigSnapshotImport(BaseModel):
+    """Request model for importing a config snapshot."""
+    config: Dict[str, Any] = Field(..., description="Full user config object")
+    version: Optional[str] = Field(None, pattern=r"^v\d+\.\d+\.\d+$", description="Optional version tag")
+    description: str = Field(default="手动创建快照", max_length=200)
 
 
 class ConfigSnapshotResponse(BaseModel):
     """Response model for config snapshot."""
     id: int
     version: str
-    config_json: str
     description: str
     created_at: str
     created_by: str
     is_active: bool
 
 
+class ConfigSnapshotDetailResponse(ConfigSnapshotResponse):
+    """Response model for config snapshot detail with config."""
+    config: Dict[str, Any]  # Parsed config (masked)
+
+
 class ConfigSnapshotListResponse(BaseModel):
     """Response model for config snapshot list."""
     total: int
+    limit: int
+    offset: int
     data: List[ConfigSnapshotResponse]
+
+
+class ConfigRollbackResponse(BaseModel):
+    """Response model for config rollback."""
+    status: Literal["success"]
+    message: str
+    snapshot: ConfigSnapshotDetailResponse
+
+
+class ConfigDeleteResponse(BaseModel):
+    """Response model for config delete."""
+    status: Literal["success"]
+    message: str
 
 
 @app.post("/api/config/snapshots", response_model=ConfigSnapshotResponse)
 async def create_snapshot(request: ConfigSnapshotCreate):
     """
-    Create a new config snapshot.
+    Create a new config snapshot manually.
 
     Request body:
     {
         "version": "v1.0.0",
-        "config_json": "{...}",
-        "description": "Initial config",
-        "created_by": "user"
+        "description": "Initial config"
     }
 
     Returns:
         Created snapshot with is_active=true
     """
     try:
-        repo = _get_repository()
-        snapshot_id = await repo.create_config_snapshot(
+        snapshot_service = _get_snapshot_service()
+        config_manager = _get_config_manager()
+
+        if not snapshot_service:
+            # Fallback to repository if service not available
+            repo = _get_repository()
+            config_manager = _get_config_manager()
+            config_dict = config_manager.user_config.model_dump(mode='json')
+            config_json = json.dumps(config_dict)
+
+            snapshot_id = await repo.create_config_snapshot(
+                version=request.version,
+                config_json=config_json,
+                description=request.description,
+                created_by="user",
+            )
+            return ConfigSnapshotResponse(
+                id=snapshot_id,
+                version=request.version,
+                description=request.description,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                created_by="user",
+                is_active=True,
+            )
+
+        # Use service layer
+        snapshot_id = await snapshot_service.create_manual_snapshot(
             version=request.version,
-            config_json=request.config_json,
+            config=config_manager.user_config,
             description=request.description,
-            created_by=request.created_by,
+            created_by="user",
         )
+
+        snapshot = await snapshot_service.get_snapshot_detail(snapshot_id)
         return ConfigSnapshotResponse(
-            id=snapshot_id,
-            version=request.version,
-            config_json=request.config_json,
-            description=request.description,
-            created_at=datetime.now(timezone.utc).isoformat(),
-            created_by=request.created_by,
-            is_active=True,
+            id=snapshot["id"],
+            version=snapshot["version"],
+            description=snapshot["description"],
+            created_at=snapshot["created_at"],
+            created_by=snapshot["created_by"],
+            is_active=snapshot["is_active"],
         )
     except HTTPException:
         raise
     except Exception as e:
+        error_code = getattr(e, 'error_code', None)
+        if error_code:
+            raise HTTPException(status_code=400, detail=str(e), headers={"X-Error-Code": error_code})
         return {"error": str(e)}
 
 
 @app.get("/api/config/snapshots", response_model=ConfigSnapshotListResponse)
-async def list_snapshots(limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)):
+async def list_snapshots(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    created_by: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+):
     """
     List all config snapshots with pagination.
 
     Args:
-        limit: Maximum number of results (1-200)
+        limit: Maximum number of results (1-100)
         offset: Number of results to skip
+        created_by: Filter by creator (optional)
+        is_active: Filter by active status (optional)
 
     Returns:
         Paginated list of snapshots
     """
     try:
-        repo = _get_repository()
-        result = await repo.get_config_snapshots(limit=limit, offset=offset)
+        snapshot_service = _get_snapshot_service()
+
+        if not snapshot_service:
+            # Fallback to repository
+            repo = _get_repository()
+            result = await repo.get_config_snapshots(limit=limit, offset=offset)
+            return ConfigSnapshotListResponse(
+                total=result["total"],
+                limit=limit,
+                offset=offset,
+                data=[ConfigSnapshotResponse(**item) for item in result["data"]],
+            )
+
+        # Use service layer
+        data, total = await snapshot_service.get_snapshot_list(
+            limit=limit,
+            offset=offset,
+            created_by=created_by,
+            is_active=is_active,
+        )
+
         return ConfigSnapshotListResponse(
-            total=result["total"],
-            data=[ConfigSnapshotResponse(**item) for item in result["data"]],
+            total=total,
+            limit=limit,
+            offset=offset,
+            data=[ConfigSnapshotResponse(**item) for item in data],
         )
     except HTTPException:
         raise
@@ -2374,33 +2666,97 @@ async def list_snapshots(limit: int = Query(default=50, ge=1, le=200), offset: i
         return {"error": str(e)}
 
 
-@app.get("/api/config/snapshots/{snapshot_id}", response_model=ConfigSnapshotResponse)
+@app.get("/api/config/snapshots/{snapshot_id}", response_model=ConfigSnapshotDetailResponse)
 async def get_snapshot(snapshot_id: int):
     """
-    Get a single snapshot by ID.
+    Get a single snapshot by ID with full config.
 
     Args:
         snapshot_id: Snapshot record ID
 
     Returns:
-        Snapshot details
+        Snapshot details with parsed config
     """
     try:
-        repo = _get_repository()
-        snapshot = await repo.get_config_snapshot_by_id(snapshot_id)
-        if not snapshot:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
-        return ConfigSnapshotResponse(**snapshot)
+        snapshot_service = _get_snapshot_service()
+
+        if not snapshot_service:
+            repo = _get_repository()
+            snapshot = await repo.get_config_snapshot_by_id(snapshot_id)
+            if not snapshot:
+                raise HTTPException(status_code=404, detail="Snapshot not found")
+            return ConfigSnapshotDetailResponse(**snapshot)
+
+        # Use service layer
+        snapshot = await snapshot_service.get_snapshot_detail(snapshot_id)
+        return ConfigSnapshotDetailResponse(**snapshot)
     except HTTPException:
         raise
     except Exception as e:
+        error_code = getattr(e, 'error_code', None)
+        if error_code == "CONFIG-004":
+            raise HTTPException(status_code=404, detail=str(e))
+        return {"error": str(e)}
+
+
+@app.post("/api/config/snapshots/{snapshot_id}/rollback", response_model=ConfigRollbackResponse)
+async def rollback_snapshot(snapshot_id: int):
+    """
+    Rollback to a config snapshot (activate it).
+
+    This will:
+    1. Validate the snapshot config
+    2. Activate the snapshot
+    3. Apply the config to the running system
+
+    Args:
+        snapshot_id: Snapshot record ID
+
+    Returns:
+        Success message with activated snapshot details
+    """
+    try:
+        snapshot_service = _get_snapshot_service()
+        config_manager = _get_config_manager()
+
+        if not snapshot_service:
+            raise HTTPException(status_code=503, detail="Snapshot service not initialized")
+
+        # Rollback to snapshot
+        snapshot = await snapshot_service.rollback_to_snapshot(snapshot_id)
+
+        # Apply the config from snapshot
+        # Parse config from snapshot
+        import json
+        config_data = snapshot.get("config", {})
+
+        # Update running config
+        await config_manager.update_user_config(
+            config_data,
+            auto_snapshot=True,
+            snapshot_description=f"回滚到快照 v{snapshot.get('version', 'unknown')}"
+        )
+
+        return ConfigRollbackResponse(
+            status="success",
+            message=f"Successfully rolled back to {snapshot['version']}",
+            snapshot=ConfigSnapshotDetailResponse(**snapshot),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_code = getattr(e, 'error_code', None)
+        if error_code == "CONFIG-004":
+            raise HTTPException(status_code=404, detail=str(e))
+        elif error_code == "CONFIG-003":
+            raise HTTPException(status_code=422, detail=str(e))
         return {"error": str(e)}
 
 
 @app.post("/api/config/snapshots/{snapshot_id}/activate")
 async def activate_snapshot(snapshot_id: int):
     """
-    Activate a config snapshot (rollback to this version).
+    Activate a config snapshot (alias for rollback, kept for backward compatibility).
 
     Args:
         snapshot_id: Snapshot record ID
@@ -2409,28 +2765,39 @@ async def activate_snapshot(snapshot_id: int):
         Success message
     """
     try:
-        repo = _get_repository()
-        snapshot = await repo.get_config_snapshot_by_id(snapshot_id)
-        if not snapshot:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
+        snapshot_service = _get_snapshot_service()
 
-        success = await repo.activate_config_snapshot(snapshot_id)
-        if success:
-            # TODO: Trigger config reload with snapshot config
-            return {"message": f"Activated snapshot {snapshot_id}"}
-        else:
-            raise HTTPException(status_code=500, detail="Failed to activate snapshot")
+        if not snapshot_service:
+            repo = _get_repository()
+            snapshot = await repo.get_config_snapshot_by_id(snapshot_id)
+            if not snapshot:
+                raise HTTPException(status_code=404, detail="Snapshot not found")
+
+            success = await repo.activate_config_snapshot(snapshot_id)
+            if success:
+                return {"message": f"Activated snapshot {snapshot_id}"}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to activate snapshot")
+
+        # Use service layer
+        snapshot = await snapshot_service.rollback_to_snapshot(snapshot_id)
+        return {"message": f"Activated snapshot {snapshot_id} ({snapshot['version']})"}
     except HTTPException:
         raise
     except Exception as e:
+        error_code = getattr(e, 'error_code', None)
+        if error_code == "CONFIG-004":
+            raise HTTPException(status_code=404, detail=str(e))
         return {"error": str(e)}
 
 
-@app.delete("/api/config/snapshots/{snapshot_id}")
+@app.delete("/api/config/snapshots/{snapshot_id}", response_model=ConfigDeleteResponse)
 async def delete_snapshot(snapshot_id: int):
     """
     Delete a config snapshot.
 
+    Note: The most recent 5 snapshots are protected from deletion.
+
     Args:
         snapshot_id: Snapshot record ID
 
@@ -2438,14 +2805,26 @@ async def delete_snapshot(snapshot_id: int):
         Success message
     """
     try:
-        repo = _get_repository()
-        success = await repo.delete_config_snapshot(snapshot_id)
-        if not success:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
-        return {"message": f"Deleted snapshot {snapshot_id}"}
+        snapshot_service = _get_snapshot_service()
+
+        if not snapshot_service:
+            repo = _get_repository()
+            success = await repo.delete_config_snapshot(snapshot_id)
+            if not success:
+                raise HTTPException(status_code=404, detail="Snapshot not found")
+            return ConfigDeleteResponse(status="success", message=f"Deleted snapshot {snapshot_id}")
+
+        # Use service layer with protection
+        await snapshot_service.delete_snapshot(snapshot_id)
+        return ConfigDeleteResponse(status="success", message=f"Deleted snapshot {snapshot_id}")
     except HTTPException:
         raise
     except Exception as e:
+        error_code = getattr(e, 'error_code', None)
+        if error_code == "CONFIG-004":
+            raise HTTPException(status_code=404, detail=str(e))
+        elif error_code == "CONFIG-006":
+            raise HTTPException(status_code=400, detail=str(e))
         return {"error": str(e)}
 
 

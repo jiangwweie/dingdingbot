@@ -63,6 +63,7 @@ const navCategories: NavCategory[] = [
     items: [
       { to: '/account', icon: Wallet, label: '账户' },
       { to: '/snapshots', icon: Save, label: '配置快照' },
+      { to: '/config', icon: Settings, label: '配置管理' },
     ],
   },
 ];

@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field, field_validator, ValidationError
 from src.domain.exceptions import FatalStartupError
 from src.infrastructure.logger import logger, register_secret, mask_secret
 from src.domain.models import FilterConfig, StrategyDefinition, TriggerConfig, RiskConfig
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.application.config_snapshot_service import ConfigSnapshotService
 
 
 # ============================================================
@@ -213,6 +217,9 @@ class ConfigManager:
         # Hot-reload state
         self._observers: Set[Callable[[], Awaitable[None]]] = set()
         self._update_lock: Optional[asyncio.Lock] = None  # Lazily initialized
+
+        # Snapshot service (for auto-snapshot hook)
+        self._snapshot_service: Optional["ConfigSnapshotService"] = None
 
     def load_core_config(self) -> CoreConfig:
         """Load and validate core.yaml"""
@@ -477,19 +484,27 @@ class ConfigManager:
         """Remove an observer callback."""
         self._observers.discard(callback)
 
-    async def update_user_config(self, new_config_dict: Dict[str, Any]) -> UserConfig:
+    async def update_user_config(
+        self,
+        new_config_dict: Dict[str, Any],
+        auto_snapshot: bool = True,
+        snapshot_description: str = ""
+    ) -> UserConfig:
         """
         Hot-reload user configuration with atomic pointer swap.
 
         Flow:
-        1. Validate incoming dict against Pydantic UserConfig model
-        2. Deep copy to create new immutable model instance
-        3. Atomically replace in-memory reference
-        4. Notify all observers asynchronously
-        5. Persist to user.yaml (background write)
+        1. Create auto-snapshot (if enabled and snapshot service available)
+        2. Validate incoming dict against Pydantic UserConfig model
+        3. Deep copy to create new immutable model instance
+        4. Atomically replace in-memory reference
+        5. Notify all observers asynchronously
+        6. Persist to user.yaml (background write)
 
         Args:
             new_config_dict: Partial or full user config dictionary
+            auto_snapshot: Whether to create snapshot before update (default True)
+            snapshot_description: Description for the auto-snapshot
 
         Returns:
             The new validated UserConfig instance
@@ -502,18 +517,29 @@ class ConfigManager:
             raise FatalStartupError("Core config not loaded", "F-003")
 
         async with self._get_update_lock():
-            # Step 1: Merge with existing config for partial updates
+            # Step 1: Create auto-snapshot (if enabled)
+            if auto_snapshot and self._snapshot_service:
+                try:
+                    await self._snapshot_service.create_auto_snapshot(
+                        config=self._user_config,
+                        description=snapshot_description or "配置变更自动快照"
+                    )
+                    logger.info("Auto-snapshot created before config update")
+                except Exception as e:
+                    logger.warning(f"Auto-snapshot creation failed: {e}. Continuing with config update.")
+
+            # Step 2: Merge with existing config for partial updates
             existing_dict = self._user_config.model_dump() if self._user_config else {}
             merged_dict = self._deep_merge(existing_dict, new_config_dict)
 
-            # Step 2: Validate against Pydantic model
+            # Step 3: Validate against Pydantic model
             try:
                 new_user_config = UserConfig(**merged_dict)
             except ValidationError as e:
                 logger.error(f"Config validation failed: {e}")
                 raise
 
-            # Step 3: Atomic pointer swap (replace in-memory reference)
+            # Step 4: Atomic pointer swap (replace in-memory reference)
             old_config = self._user_config
             self._user_config = new_user_config
 
@@ -523,10 +549,10 @@ class ConfigManager:
             for channel in new_user_config.notification.channels:
                 register_secret(channel.webhook_url)
 
-            # Step 4: Notify observers (async, non-blocking)
+            # Step 5: Notify observers (async, non-blocking)
             await self._notify_observers()
 
-            # Step 5: Persist to disk (fire-and-forget in production, but we await here for safety)
+            # Step 6: Persist to disk (fire-and-forget in production, but we await here for safety)
             await self._persist_user_config()
 
             logger.info("User configuration updated and persisted")
@@ -577,6 +603,16 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"Observer callback raised: {e}")
             raise
+
+    def set_snapshot_service(self, snapshot_service: "ConfigSnapshotService") -> None:
+        """
+        Inject snapshot service dependency for auto-snapshot hooks.
+
+        Args:
+            snapshot_service: ConfigSnapshotService instance
+        """
+        self._snapshot_service = snapshot_service
+        logger.info("Snapshot service injected for auto-snapshot hooks")
 
     async def _persist_user_config(self) -> None:
         """Persist current user_config to user.yaml with yaml error handling."""

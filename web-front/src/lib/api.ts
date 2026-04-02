@@ -357,6 +357,92 @@ export interface SystemConfig {
   user_symbols: string[];
 }
 
+// ============================================================================
+// Config Snapshot Types (版本化快照方案 B)
+// ============================================================================
+
+/**
+ * 配置快照列表项
+ */
+export interface ConfigSnapshotListItem {
+  id: number;
+  version: string;
+  description: string;
+  created_at: string;
+  created_by: string;
+  is_active: boolean;
+}
+
+/**
+ * 配置快照详情
+ */
+export interface ConfigSnapshotDetail {
+  id: number;
+  version: string;
+  config: Record<string, any>;
+  description: string;
+  created_at: string;
+  created_by: string;
+  is_active: boolean;
+}
+
+/**
+ * 配置快照列表响应
+ */
+export interface SnapshotListResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  data: ConfigSnapshotListItem[];
+}
+
+/**
+ * 配置快照创建请求
+ */
+export interface CreateSnapshotRequest {
+  version: string;
+  description?: string;
+}
+
+/**
+ * 配置快照创建响应
+ */
+export interface CreateSnapshotResponse {
+  id: number;
+  version: string;
+  description: string;
+  created_at: string;
+  created_by: string;
+  is_active: boolean;
+}
+
+/**
+ * 配置快照查询参数
+ */
+export interface SnapshotQueryParams {
+  limit?: number;
+  offset?: number;
+  created_by?: string;
+  is_active?: boolean;
+}
+
+/**
+ * 配置响应
+ */
+export interface ConfigResponse {
+  status: 'success';
+  config: Record<string, any>;
+  created_at: string;
+}
+
+/**
+ * 删除响应
+ */
+export interface DeleteResponse {
+  status: 'success';
+  message: string;
+}
+
 /**
  * Legacy strategy config for backward compatibility (deprecated)
  */
@@ -1072,96 +1158,6 @@ export function convertLogicNodeToStrategy(
 }
 
 // ============================================================================
-// Config Snapshot API (配置快照版本化 - S5-3)
-// ============================================================================
-
-/**
- * Config snapshot interface
- */
-export interface ConfigSnapshot {
-  id: number;
-  version: string;
-  config_json: string;
-  description: string;
-  created_at: string;
-  created_by: string;
-  is_active: boolean;
-}
-
-/**
- * Create snapshot request
- */
-export interface CreateSnapshotRequest {
-  version: string;
-  description: string;
-  config_json?: string;
-}
-
-/**
- * Fetch all config snapshots
- */
-export async function fetchSnapshots(): Promise<{ total: number; data: ConfigSnapshot[] }> {
-  const res = await fetch('/api/config/snapshots', {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to fetch snapshots');
-    (error as any).status = res.status;
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Create a new config snapshot
- */
-export async function createSnapshot(payload: CreateSnapshotRequest): Promise<ConfigSnapshot> {
-  const res = await fetch('/api/config/snapshots', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to create snapshot');
-    (error as any).info = await res.json().catch(() => ({}));
-    (error as any).status = res.status;
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Delete a config snapshot
- */
-export async function deleteSnapshot(id: number): Promise<void> {
-  const res = await fetch(`/api/config/snapshots/${id}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to delete snapshot');
-    (error as any).status = res.status;
-    throw error;
-  }
-}
-
-/**
- * Activate a config snapshot (rollback)
- */
-export async function applySnapshot(id: number): Promise<void> {
-  const res = await fetch(`/api/config/snapshots/${id}/activate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to activate snapshot');
-    (error as any).info = await res.json().catch(() => ({}));
-    (error as any).status = res.status;
-    throw error;
-  }
-}
-
-// ============================================================================
 // Signal Status Tracking API (S5-2 - 信号状态跟踪)
 // ============================================================================
 
@@ -1510,6 +1506,170 @@ export async function fetchBacktestOrder(reportId: string, orderId: string): Pro
   if (!res.ok) {
     const error = new Error('Failed to fetch backtest order');
     (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+// ============================================================================
+// Config Snapshot Management API (版本化快照方案 B)
+// ============================================================================
+
+/**
+ * 获取当前配置（脱敏后）
+ */
+export async function fetchConfig(): Promise<ConfigResponse> {
+  const res = await fetch('/api/config', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch configuration');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 更新配置（会自动创建快照）
+ */
+export async function updateConfig(config: Partial<SystemConfig>): Promise<ConfigResponse> {
+  const res = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to update configuration');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 导出配置为 YAML 文件
+ */
+export async function exportConfig(): Promise<Blob> {
+  const res = await fetch('/api/config/export');
+  if (!res.ok) {
+    const error = new Error('Failed to export configuration');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.blob();
+}
+
+/**
+ * 导入 YAML 配置
+ * @param file YAML 配置文件
+ * @param description 快照描述
+ */
+export async function importConfig(
+  file: File,
+  description?: string
+): Promise<ConfigResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (description) formData.append('description', description);
+
+  const res = await fetch('/api/config/import', {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to import configuration');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 获取快照列表（分页）
+ */
+export async function fetchSnapshots(
+  params: SnapshotQueryParams = {}
+): Promise<SnapshotListResponse> {
+  const qs = new URLSearchParams();
+  if (params.limit !== undefined) qs.append('limit', String(params.limit));
+  if (params.offset !== undefined) qs.append('offset', String(params.offset));
+  if (params.created_by !== undefined) qs.append('created_by', params.created_by);
+  if (params.is_active !== undefined) qs.append('is_active', String(params.is_active));
+
+  const res = await fetch(`/api/config/snapshots?${qs}`);
+  if (!res.ok) {
+    const error = new Error('Failed to fetch snapshots');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 创建手动快照
+ */
+export async function createSnapshot(
+  version: string,
+  description: string
+): Promise<CreateSnapshotResponse> {
+  const res = await fetch('/api/config/snapshots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version, description }),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to create snapshot');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 获取快照详情
+ */
+export async function fetchSnapshotDetail(id: number): Promise<ConfigSnapshotDetail> {
+  const res = await fetch(`/api/config/snapshots/${id}`);
+  if (!res.ok) {
+    const error = new Error('Failed to fetch snapshot detail');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 回滚到指定快照
+ */
+export async function rollbackToSnapshot(id: number): Promise<ConfigResponse> {
+  const res = await fetch(`/api/config/snapshots/${id}/rollback`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to rollback to snapshot');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * 删除快照
+ */
+export async function deleteSnapshot(id: number): Promise<DeleteResponse> {
+  const res = await fetch(`/api/config/snapshots/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to delete snapshot');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
     throw error;
   }
   return res.json();

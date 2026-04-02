@@ -5,11 +5,11 @@ import { zhCN } from 'date-fns/locale';
 import { Plus, Trash2, RotateCcw, CheckCircle, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
-  ConfigSnapshot,
   fetchSnapshots,
   createSnapshot,
   deleteSnapshot,
-  applySnapshot,
+  rollbackToSnapshot,
+  type ConfigSnapshotListItem,
 } from '../lib/api';
 
 export default function Snapshots() {
@@ -20,7 +20,7 @@ export default function Snapshots() {
   const [errorMessage, setErrorMessage] = useState('');
 
   // Fetch snapshots with SWR
-  const { data, error, mutate } = useApi<{ total: number; data: ConfigSnapshot[] }>(
+  const { data, error, mutate } = useApi<{ total: number; data: ConfigSnapshotListItem[] }>(
     '/api/config/snapshots'
   );
 
@@ -38,37 +38,29 @@ export default function Snapshots() {
     setErrorMessage('');
 
     try {
-      // 先获取当前配置
-      const res = await fetch('/api/config');
-      const currentConfig = await res.json();
-
-      await createSnapshot({
-        version: newVersion,
-        description: newDescription,
-        config_json: JSON.stringify(currentConfig),
-      });
+      await createSnapshot(newVersion, newDescription);
       await mutate();
       setIsCreating(false);
       setNewVersion('');
       setNewDescription('');
     } catch (err: any) {
-      setErrorMessage(err.info?.detail || '创建失败，请重试');
+      setErrorMessage(err.message || '创建失败，请重试');
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Activate snapshot
+  // Activate snapshot (rollback)
   const handleActivate = async (id: number, version: string) => {
-    if (!confirm(`确定要回滚到版本 ${version} 吗？此操作将停用当前活跃快照。`)) {
+    if (!confirm(`确定要回滚到版本 ${version} 吗？此操作将替换当前配置。`)) {
       return;
     }
 
     try {
-      await applySnapshot(id);
+      await rollbackToSnapshot(id);
       await mutate();
     } catch (err: any) {
-      alert(err.info?.detail || '回滚失败，请重试');
+      alert(err.message || '回滚失败，请重试');
     }
   };
 
