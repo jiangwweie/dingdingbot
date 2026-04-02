@@ -153,9 +153,10 @@ class TestRepositoryUtilityMethods:
         assert len(data) == 1
         assert data[0]["position_id"] == "pos_001"
         assert data[0]["direction"] == "LONG"
-        assert data[0]["entry_price"] == "50000"
-        assert data[0]["exit_price"] == "52000"
-        assert data[0]["realized_pnl"] == "200"
+        # Note: Decimal.normalize() may produce scientific notation (e.g., '5E+4' == 50000)
+        assert Decimal(data[0]["entry_price"]) == Decimal("50000")
+        assert Decimal(data[0]["exit_price"]) == Decimal("52000")
+        assert Decimal(data[0]["realized_pnl"]) == Decimal("200")
         assert data[0]["exit_reason"] == "TP1"
 
     def test_deserialize_positions_summary(self, sample_position_summary):
