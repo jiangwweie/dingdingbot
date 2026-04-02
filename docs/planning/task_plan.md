@@ -1,7 +1,7 @@
 # 任务计划
 
 > **当前迭代**: 2026-04-02 起  
-> **最后更新**: 2026-04-02 (代码审查通过，58 个测试全部通过)
+> **最后更新**: 2026-04-02 (P1 问题系统性修复完成，84 个测试全部通过)
 
 ---
 
@@ -63,19 +63,22 @@ Backtester → HistoricalDataRepository → SQLite (本地优先)
 | T12 | 订单生命周期流程图 | P1 | 1h | ✅ 已完成 |
 | T13 | 代码审查问题修复 | P0 | 1h | ✅ 已完成 |
 
-**交付物**:
-- ✅ `src/infrastructure/historical_data_repository.py`
-- ✅ `docs/arch/backtest-order-lifecycle.md`
-- ✅ API 端点 3 个（列表/详情/删除）
-- ✅ 测试文件 4 个（58 个测试用例）
-| T10 | 回测订单详情 API | P0 | 1h | ✅ 已完成 |
-| T11 | 回测订单删除 API | P1 | 1h | ✅ 已完成 |
-| T12 | 订单生命周期流程图 | P1 | 1h | ✅ 已完成 |
+**P1 问题系统性修复** (2026-04-02):
+| ID | 问题描述 | 修复方案 | 状态 |
+|----|----------|----------|------|
+| P1-001 | BacktestOrderSummary.direction 类型注解不完整 | 从 str 改为 Direction 枚举 | ✅ 已完成 |
+| P1-002 | historical_data_repository 日志级别不当 | INFO 改为 DEBUG + 上下文 | ✅ 已完成 |
+| P1-003 | 魔法数字 (10, 25) 硬编码 | 新增 BacktestConfig 常量类 | ✅ 已完成 |
+| P1-004 | 时间框架映射不完整且多处定义 | 统一从 domain.timeframe_utils 获取 | ✅ 已完成 |
+| P1-005 | 删除订单后未级联清理 | 支持 cascade 参数删除子订单 | ✅ 已完成 |
+| P1-006 | ORM 风格不一致 (技术债) | 记录到技术债清单，待迁移 | 📝 已记录 |
 
 **交付物**:
 - ✅ `src/infrastructure/historical_data_repository.py`
 - ✅ `docs/arch/backtest-order-lifecycle.md`
 - ✅ API 端点 3 个（列表/详情/删除）
+- ✅ 测试文件 4 个（58 个测试用例）
+- ✅ 4 个文件修改，144 行新增，48 行删除
 
 ---
 

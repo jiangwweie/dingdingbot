@@ -8,10 +8,142 @@
 
 1. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
 2. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-3. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-4. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-5. [Phase 6 前端架构](#phase-6-前端架构)
-6. [API 契约与端点](#api-契约与端点)
+3. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+4. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+5. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+6. [Phase 6 前端架构](#phase-6-前端架构)
+7. [API 契约与端点](#api-契约与端点)
+
+---
+
+## P1 问题系统性修复技术细节
+
+### 修复概览 (2026-04-02)
+
+**修复原则**:
+- 有长远考虑 - 设计可扩展、可维护的解决方案
+- 系统性修复 - 不是补丁式修复，而是架构级改进
+- 保持一致性 - 与现有代码风格和规范保持一致
+
+### P1-001: 类型注解不完整
+
+**问题**: `BacktestOrderSummary.direction` 使用 `str`，无法享受类型检查好处。
+
+**修复方案**:
+```python
+# 修复前
+direction: str
+
+# 修复后
+from src.domain.models import Direction
+direction: Direction  # Pydantic 自动序列化/反序列化
+```
+
+**影响**:
+- 前后端类型定义统一
+- IDE 自动补全和类型检查
+- 运行时验证增强
+
+### P1-002: 日志级别不当
+
+**问题**: 降级逻辑使用 INFO 日志，高频操作可能导致日志刷屏。
+
+**修复方案**:
+```python
+# 修复前
+logger.info(f"Local data insufficient...")
+
+# 修复后
+logger.debug(f"Local data insufficient ({len(klines)} < {limit}), "
+             f"fetching from exchange for {symbol} {timeframe}...")
+```
+
+**影响**:
+- 生产环境日志更清晰
+- 调试时仍可查看详细流程
+- 添加了 symbol/timeframe 上下文
+
+### P1-003: 魔法数字
+
+**问题**: K 线前后取 10 根、默认 25 根等硬编码。
+
+**修复方案**:
+```python
+class BacktestConfig:
+    """回测相关配置常量"""
+    KLINE_WINDOW_BEFORE = 10  # 前取 10 根
+    KLINE_WINDOW_AFTER = 10   # 后取 10 根
+    DEFAULT_KLINE_WINDOW = 25  # 默认获取 25 根 K 线用于预览
+```
+
+**影响**:
+- 配置集中管理
+- 支持未来通过配置文件调整
+- 代码可读性提升
+
+### P1-004: 时间框架映射不完整
+
+**问题**: 仅支持 6 种时间框架，多处定义导致不一致。
+
+**修复方案**:
+1. 扩展 `domain/timeframe_utils.py` 的 `TIMEFRAME_TO_MS`:
+```python
+TIMEFRAME_TO_MS = {
+    "1m": 60 * 1000,
+    "3m": 3 * 60 * 1000,
+    ...
+    "1M": 30 * 24 * 60 * 60 * 1000,  # 月度 K 线
+}
+```
+
+2. api.py 统一使用工具函数:
+```python
+from src.domain.timeframe_utils import parse_timeframe_to_ms
+kline_interval_ms = parse_timeframe_to_ms(timeframe)
+```
+
+**支持的时间框架** (16 种):
+1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d, 2d, 3d, 1w, 2w, 1M
+
+### P1-005: 删除订单后未级联清理
+
+**问题**: 删除 ENTRY 订单可能留下孤立的 TP/SL 订单。
+
+**修复方案**:
+```python
+async def delete_order(self, order_id: str, cascade: bool = True) -> None:
+    # 获取订单判断角色
+    order = await self.get_order(order_id)
+    
+    if cascade and order.order_role == OrderRole.ENTRY:
+        # 删除子订单（通过 parent_order_id）
+        await self._db.execute(
+            "DELETE FROM orders WHERE parent_order_id = ?", (order_id,)
+        )
+        # 删除 OCO 组订单
+        if order.oco_group_id:
+            await self._db.execute(
+                "DELETE FROM orders WHERE oco_group_id = ? AND id != ?",
+                (order.oco_group_id, order_id)
+            )
+    
+    # 删除主订单
+    await self._db.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+```
+
+**影响**:
+- 数据完整性保证
+- 默认 cascade=True 确保安全
+- 支持关闭级联删除（特殊场景）
+
+### P1-006: ORM 风格不一致 (技术债)
+
+**问题**: OrderRepository 使用 aiosqlite 而非 SQLAlchemy 2.0。
+
+**处理方案**:
+- 记录到技术债清单
+- 待后续渐进式迁移
+- 当前先统一接口风格
 
 ---
 

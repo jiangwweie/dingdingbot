@@ -6,6 +6,48 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-02 - P1 问题系统性修复 ✅
+
+**执行日期**: 2026-04-02  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成（84 个单元测试全部通过）
+
+**任务概述**:
+系统性修复代码审查中发现的所有 P1 问题，采用架构级改进而非补丁式修复。
+
+**修复详情**:
+
+| 问题编号 | 问题描述 | 修复方案 | 修改文件 |
+|----------|----------|----------|----------|
+| P1-001 | BacktestOrderSummary.direction 类型注解不完整 | 从 str 改为 Direction 枚举 | `src/interfaces/api.py` |
+| P1-002 | historical_data_repository 日志级别不当 | INFO 改为 DEBUG + 上下文 | `src/infrastructure/historical_data_repository.py` |
+| P1-003 | 魔法数字 (10, 25) 硬编码 | 新增 BacktestConfig 常量类 | `src/interfaces/api.py` |
+| P1-004 | 时间框架映射不完整且多处定义 | 统一从 domain.timeframe_utils 获取 | `src/domain/timeframe_utils.py`, `src/interfaces/api.py` |
+| P1-005 | 删除订单后未级联清理 | 支持 cascade 参数删除子订单 | `src/infrastructure/order_repository.py` |
+| P1-006 | ORM 风格不一致 (技术债) | 记录到技术债清单，待渐进式迁移 | - |
+
+**技术改进**:
+
+1. **类型安全提升**: BacktestOrderSummary.direction 使用 Direction 枚举，与 domain 模型保持一致
+2. **日志规范化**: 降级高频操作日志到 DEBUG 级别，添加 symbol/timeframe 上下文
+3. **配置常量集中管理**: BacktestConfig 类集中管理回测相关配置
+4. **时间框架统一**: TIMEFRAME_TO_MS 扩展支持 16 种 CCXT 标准时间框架，统一从 domain 获取
+5. **级联清理机制**: 删除 ENTRY 订单时自动清理关联的 TP/SL 子订单
+
+**测试验证**:
+```
+84 passed, 5 warnings in 0.88s
+```
+
+**代码统计**:
+- 修改文件：4 个
+- 新增代码：144 行
+- 删除代码：48 行
+
+**提交记录**: `e8b68be fix: 系统性修复所有 P1 问题`
+
+---
+
 ### 2026-04-02 - 回测优化：历史 K 线本地化 + 回测订单管理 API ✅
 
 **执行日期**: 2026-04-02  
