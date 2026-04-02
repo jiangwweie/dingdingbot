@@ -35,7 +35,7 @@ class OrderRepository:
     4. 查询服务 - 支持按信号、币种、状态、角色等多维度查询
     """
 
-    def __init__(self, db_path: str = "data/orders.db"):
+    def __init__(self, db_path: str = "data/v3_dev.db"):
         """
         Initialize OrderRepository.
 

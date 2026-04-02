@@ -56,6 +56,7 @@ fi
 
 # 导出环境变量
 export BACKEND_PORT=$BACKEND_PORT
+export PYTHONPATH="$ROOT_DIR:$PYTHONPATH"
 
 # 启动后端
 nohup python3 -m src.main > "$ROOT_DIR/backend.log" 2>&1 &

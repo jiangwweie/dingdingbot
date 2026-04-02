@@ -21,6 +21,25 @@ const statusConfig: Record<SignalStatus, { label: string; color: string }> = {
 export function SignalStatusBadge({ status }: SignalStatusBadgeProps) {
   const config = statusConfig[status];
 
+  // 未知状态或配置缺失时的降级处理
+  if (!config) {
+    return (
+      <span
+        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+        style={{
+          backgroundColor: '#6b728020',
+          color: '#6b7280',
+        }}
+      >
+        <span
+          className="w-1.5 h-1.5 rounded-full mr-1.5"
+          style={{ backgroundColor: '#6b7280' }}
+        />
+        {status || '未知'}
+      </span>
+    );
+  }
+
   // SUPERSEDED 状态需要视觉降级
   const isSuperseded = status === SignalStatus.SUPERSEDED;
 

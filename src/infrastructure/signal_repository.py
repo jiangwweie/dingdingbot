@@ -25,7 +25,7 @@ class SignalRepository:
     SQLite repository for persisting trading signals.
     """
 
-    def __init__(self, db_path: str = "data/signals.db"):
+    def __init__(self, db_path: str = "data/v3_dev.db"):
         """
         Initialize SignalRepository.
 
@@ -34,6 +34,7 @@ class SignalRepository:
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
+        self._lock = asyncio.Lock()
         logger.info(f"数据库初始化完成：{db_path}")
 
     async def initialize(self) -> None:

@@ -35,7 +35,7 @@ class BacktestReportRepository:
     - 策略快照序列化存储
     """
 
-    def __init__(self, db_path: str = "data/signals.db"):
+    def __init__(self, db_path: str = "data/v3_dev.db"):
         """
         Initialize BacktestReportRepository.
 
@@ -214,8 +214,17 @@ class BacktestReportRepository:
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
     def _decimal_to_str(self, value: Decimal) -> str:
-        """将 Decimal 转换为字符串用于存储"""
-        return str(value)
+        """将 Decimal 转换为字符串用于存储
+
+        使用 normalize() 确保 0 显示为 '0.0' 而不是 '0'，
+        以避免 SQLite CHECK 约束比较问题。
+        """
+        normalized = value.normalize()
+        # 确保小数点存在，避免 SQLite 字符串比较问题
+        result = str(normalized)
+        if '.' not in result and 'E' not in result.upper():
+            result += '.0'
+        return result
 
     def _str_to_decimal(self, value: Optional[str]) -> Optional[Decimal]:
         """将字符串转换为 Decimal"""
@@ -624,11 +633,11 @@ class BacktestReportRepository:
                 "backtest_start": row["backtest_start"],
                 "backtest_end": row["backtest_end"],
                 "created_at": row["created_at"],
-                "total_return": self._str_to_decimal(row["total_return"]),
+                "total_return": str(self._str_to_decimal(row["total_return"])),
                 "total_trades": row["total_trades"],
-                "win_rate": self._str_to_decimal(row["win_rate"]),
-                "total_pnl": self._str_to_decimal(row["total_pnl"]),
-                "max_drawdown": self._str_to_decimal(row["max_drawdown"]),
+                "win_rate": str(self._str_to_decimal(row["win_rate"])),
+                "total_pnl": str(self._str_to_decimal(row["total_pnl"])),
+                "max_drawdown": str(self._str_to_decimal(row["max_drawdown"])),
             }
             for row in rows
         ]

@@ -1273,8 +1273,8 @@ class Backtester:
 
         # Step 9: Build PMSBacktestReport
         final_balance = account.total_balance
-        total_return = ((final_balance - initial_balance) / initial_balance) * Decimal('100')
-        win_rate = (Decimal(winning_trades) / Decimal(total_trades) * Decimal('100')) if total_trades > 0 else Decimal('0')
+        total_return = ((final_balance - initial_balance) / initial_balance)
+        win_rate = (Decimal(winning_trades) / Decimal(total_trades)) if total_trades > 0 else Decimal('0')
 
         # Calculate max drawdown (simplified)
         max_drawdown = Decimal('0')
@@ -1284,7 +1284,7 @@ class Backtester:
                 current_balance = initial_balance + summary.realized_pnl
                 if current_balance > peak:
                     peak = current_balance
-                drawdown = (peak - current_balance) / peak * Decimal('100')
+                drawdown = (peak - current_balance) / peak
                 if drawdown > max_drawdown:
                     max_drawdown = drawdown
 
