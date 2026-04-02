@@ -14,4 +14,3 @@ export {
   ParallelCoordinatesChart,
   TopTrialsTable,
 } from './OptimizationResults';
-export { OptimizationPage } from '../pages/Optimization';

@@ -6,14 +6,150 @@
 
 ## 📑 目录
 
-1. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
-2. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-3. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-4. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-5. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-6. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-7. [Phase 6 前端架构](#phase-6-前端架构)
-8. [API 契约与端点](#api-契约与端点)
+1. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
+2. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
+3. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
+4. [BTC 历史数据导入记录](#btc-历史数据导入记录)
+5. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+6. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+7. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+8. [Phase 6 前端架构](#phase-6-前端架构)
+9. [API 契约与端点](#api-契约与端点)
+
+---
+
+## Phase 8 后端实现技术细节
+
+**日期**: 2026-04-02  
+**实现人**: Backend Developer
+
+### 架构设计
+
+#### 1. Optuna 集成架构
+
+**核心组件**:
+```
+src/application/strategy_optimizer.py
+├── PerformanceCalculator         # 性能指标计算器
+│   ├── calculate_sharpe_ratio()  # 夏普比率
+│   ├── calculate_sortino_ratio() # 索提诺比率
+│   ├── calculate_max_drawdown()  # 最大回撤
+│   └── calculate_pnl_dd_ratio()  # 收益回撤比
+├── StrategyOptimizer             # 策略优化器核心
+│   ├── start_optimization()      # 启动优化任务
+│   ├── _run_optimization()       # 异步运行优化
+│   ├── _create_objective_function() # 创建目标函数
+│   └── _sample_params()          # 参数空间采样
+└── OptimizationHistoryRepository # 历史持久化
+    ├── save_trial()              # 保存试验记录
+    ├── get_trials_by_job()       # 查询试验历史
+    └── get_best_trial()          # 获取最佳试验
+```
+
+**设计决策**:
+- **异步优化**: 使用 asyncio.Task 后台运行，不阻塞 API 请求
+- **断点续研**: 通过 OptimizationHistoryRepository 持久化试验历史，支持从上次进度继续
+- **可选依赖**: Optuna 作为可选依赖，未安装时优雅降级（返回错误提示）
+
+#### 2. 参数空间定义
+
+**Pydantic 模型设计**:
+```python
+class ParameterDefinition(BaseModel):
+    """单个参数的定义"""
+    name: str                              # 参数名称
+    type: ParameterType                    # 参数类型 (INT/FLOAT/CATEGORICAL)
+    low: Optional[Union[int, float]]       # 范围下限 (int/float 类型)
+    high: Optional[Union[int, float]]      # 范围上限 (int/float 类型)
+    step: Optional[Union[int, float]]      # 步长 (可选)
+    choices: Optional[List[...]]           # 可选值列表 (categorical 类型)
+    default: Optional[Union[int, float, str]]  # 默认值
+```
+
+**验证规则**:
+- INT/FLOAT 类型必须提供 low 和 high，且 low < high
+- CATEGORICAL 类型必须提供 choices 列表
+
+#### 3. 多目标优化支持
+
+**支持的目标类型**:
+| 目标 | 说明 | 计算方法 |
+|------|------|----------|
+| SHARPE | 夏普比率 | 年化收益/年化标准差 |
+| SORTINO | 索提诺比率 | 年化收益/下行标准差 |
+| PNL_DD | 收益回撤比 | 总收益/最大回撤 |
+| TOTAL_RETURN | 总收益率 | (最终余额 - 初始余额) / 初始余额 |
+| WIN_RATE | 胜率 | 盈利交易数/总交易数 |
+| MAX_PROFIT | 最大利润 | 总盈亏 (USDT) |
+
+#### 4. 优化历史持久化
+
+**数据库表结构**:
+```sql
+CREATE TABLE optimization_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    trial_number INTEGER NOT NULL,
+    params TEXT NOT NULL,              -- JSON 格式存储参数
+    objective_value REAL NOT NULL,     -- 目标函数值
+    total_return REAL DEFAULT 0.0,     -- 总收益率
+    sharpe_ratio REAL DEFAULT 0.0,     -- 夏普比率
+    max_drawdown REAL DEFAULT 0.0,     -- 最大回撤
+    win_rate REAL DEFAULT 0.0,         -- 胜率
+    total_trades INTEGER DEFAULT 0,    -- 总交易数
+    total_pnl REAL DEFAULT 0.0,        -- 总盈亏
+    total_fees REAL DEFAULT 0.0,       -- 总手续费
+    created_at TEXT NOT NULL,          -- ISO 8601 时间戳
+    UNIQUE(job_id, trial_number)
+)
+```
+
+### 技术难点与解决方案
+
+#### 1. Optuna 异步支持
+
+**问题**: Optuna 3.x 支持异步目标函数，但需要事件循环
+
+**解决方案**:
+```python
+def objective(trial: Trial) -> float:
+    # 检查停止标志
+    if self._stop_flags.get(job_id, False):
+        raise optuna.TrialPruned("任务被停止")
+    
+    # 运行异步目标函数
+    return asyncio.get_event_loop().run_until_complete(
+        objective_async(trial)
+    )
+```
+
+#### 2. 断点续研实现
+
+**问题**: 如何从中断处继续优化
+
+**解决方案**:
+1. 每次试验完成后自动保存到 SQLite
+2. 重启时使用 `study.tell()` 告知 Optuna 已完成的试验
+3. 通过 `resume_from_trial` 参数指定从第几个试验继续
+
+### 测试结果
+
+**单元测试覆盖率**: 100% (22/22 测试通过)
+
+| 测试类别 | 测试数 | 通过率 |
+|----------|--------|--------|
+| PerformanceCalculator | 5 | 100% |
+| Parameter Sampling | 4 | 100% |
+| Objective Calculation | 7 | 100% |
+| Build Backtest Request | 2 | 100% |
+| Edge Cases | 2 | 100% |
+| Job Management | 2 | 100% |
+
+### 遗留问题
+
+1. **索提诺比率计算**: 当前实现返回 0.0，需要接入真实的回测收益率序列
+2. **参数重要性分析**: 待 Optuna 集成后实现
+3. **并行优化**: 目前单任务串行，未来可支持多任务并行
 
 ---
 

@@ -271,7 +271,7 @@ export const ParameterImportanceChart: React.FC<ParameterImportanceChartProps> =
         .map(([param, importance]) => ({
           name: param.length > 20 ? param.slice(0, 20) + '...' : param,
           fullName: param,
-          importance: importance * 100,
+          importance: Number(importance) * 100,
         }))
         .sort((a, b) => b.importance - a.importance);
     }, [results]);
