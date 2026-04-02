@@ -1,6 +1,18 @@
-import { useState, useEffect, JSX } from 'react';
-import { OrderResponse, OrderStatus, OrderType } from '../../types/order';
-import { X, Clock, CheckCircle, AlertCircle, XCircle, Timer, TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import { useState, useEffect, useRef, JSX } from 'react';
+import {
+  createChart,
+  createSeriesMarkers,
+  IChartApi,
+  ISeriesApi,
+  CandlestickData,
+  UTCTimestamp,
+  CandlestickSeries,
+  SeriesMarker,
+  ColorType,
+  SeriesMarkerPosition,
+} from 'lightweight-charts';
+import { OrderResponse, OrderStatus, OrderType, OrderRole } from '../../types/order';
+import { X, Clock, CheckCircle, AlertCircle, XCircle, Timer, Activity } from 'lucide-react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { cn } from '../../lib/utils';
@@ -9,42 +21,19 @@ import { OrderStatusBadge } from './OrderStatusBadge';
 import { OrderRoleBadge } from './OrderRoleBadge';
 import { DirectionBadge } from './DirectionBadge';
 import { fetchOrderKlineContext } from '../../lib/api';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-  ReferenceDot,
-} from 'recharts';
+
+// Apple Design colors
+const APPLE_GREEN = '#34C759';
+const APPLE_RED = '#FF3B30';
+const APPLE_GRAY = '#86868B';
+const APPLE_BLUE = '#007AFF';
 
 interface OrderDetailsDrawerProps {
   order: OrderResponse | null;
   isOpen: boolean;
   onClose: () => void;
   onCancelOrder?: (orderId: string, symbol: string) => Promise<void>;
-  showKlineChart?: boolean;  // 是否显示 K 线图
-}
-
-interface KlineDataPoint {
-  timestamp: number;
-  date: string;
-  price: number;
-  high: number;
-  low: number;
-  open: number;
-  close: number;
-  volume: number;
-}
-
-interface OrderMarker {
-  timestamp: number;
-  price: number;
-  type: 'entry' | 'tp' | 'sl' | 'exit';
-  label: string;
+  showKlineChart?: boolean;
 }
 
 const statusIcon: Record<OrderStatus, JSX.Element> = {
@@ -65,54 +54,57 @@ const orderTypeLabels: Record<OrderType, string> = {
 };
 
 /**
- * Get marker color by type
+ * Get marker label by order role
  */
-function getMarkerColor(type: 'entry' | 'tp' | 'sl' | 'exit'): string {
-  switch (type) {
-    case 'entry':
-      return '#000000'; // Black for entry
-    case 'tp':
-      return '#16a34a'; // Green for take profit
-    case 'sl':
-      return '#dc2626'; // Red for stop loss
-    case 'exit':
-      return '#6b7280'; // Gray for exit
-    default:
-      return '#9ca3af';
-  }
+function getOrderRoleLabel(role: string): string {
+  const labels: Record<string, string> = {
+    ENTRY: '入场',
+    TP1: 'TP1',
+    TP2: 'TP2',
+    TP3: 'TP3',
+    TP4: 'TP4',
+    TP5: 'TP5',
+    SL: '止损',
+  };
+  return labels[role] || role;
 }
 
 /**
- * Custom tooltip for kline chart
+ * Get color by order role and direction
  */
-function KlineTooltip({ active, payload, label }: any) {
-  if (active && payload && payload.length) {
-    const price = payload[0]?.value;
-    const open = payload[0]?.payload.open;
-    const high = payload[0]?.payload.high;
-    const low = payload[0]?.payload.low;
-    const close = payload[0]?.payload.close;
-    const isUp = close >= open;
-
-    return (
-      <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs">
-        <p className="font-medium text-gray-700 mb-2">{label}</p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-          <span className="text-gray-500">开：</span>
-          <span className="font-medium">{open?.toFixed(2)}</span>
-          <span className="text-gray-500">高：</span>
-          <span className="font-medium">{high?.toFixed(2)}</span>
-          <span className="text-gray-500">低：</span>
-          <span className="font-medium">{low?.toFixed(2)}</span>
-          <span className="text-gray-500">收：</span>
-          <span className={cn('font-medium', isUp ? 'text-green-600' : 'text-red-600')}>
-            {close?.toFixed(2)}
-          </span>
-        </div>
-      </div>
-    );
+function getOrderRoleColor(role: string, direction: 'LONG' | 'SHORT'): string {
+  if (role === 'ENTRY') {
+    return direction === 'LONG' ? APPLE_GREEN : APPLE_RED;
   }
-  return null;
+  if (role.startsWith('TP')) {
+    return APPLE_GREEN;
+  }
+  if (role === 'SL') {
+    return APPLE_RED;
+  }
+  return APPLE_GRAY;
+}
+
+/**
+ * Get marker shape by order role
+ */
+function getMarkerShape(role: string): 'arrowUp' | 'circle' {
+  return role === 'ENTRY' ? 'arrowUp' : 'circle';
+}
+
+/**
+ * Get marker position by order role and direction
+ */
+function getMarkerPosition(role: string, direction: 'LONG' | 'SHORT'): SeriesMarkerPosition {
+  if (role === 'ENTRY') {
+    return direction === 'LONG' ? 'belowBar' : 'aboveBar';
+  }
+  return direction === 'LONG' ? 'aboveBar' : 'belowBar';
+}
+
+interface OrderKlineData {
+  order: OrderResponse;
+  klines: number[][]; // [timestamp_ms, open, high, low, close, volume]
 }
 
 export function OrderDetailsDrawer({
@@ -122,12 +114,14 @@ export function OrderDetailsDrawer({
   onCancelOrder,
   showKlineChart = true,
 }: OrderDetailsDrawerProps) {
-  const [klineData, setKlineData] = useState<KlineDataPoint[]>([]);
-  const [orderMarkers, setOrderMarkers] = useState<OrderMarker[]>([]);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const [klineData, setKlineData] = useState<OrderKlineData | null>(null);
   const [isLoadingKline, setIsLoadingKline] = useState(false);
   const [klineError, setKlineError] = useState<string | null>(null);
 
-  // Fetch kline data when order changes and drawer opens
+  // Fetch kline data when drawer opens
   useEffect(() => {
     if (!isOpen || !order || !showKlineChart) return;
 
@@ -136,57 +130,7 @@ export function OrderDetailsDrawer({
       setKlineError(null);
       try {
         const result = await fetchOrderKlineContext(order.order_id, order.symbol);
-
-        // Transform kline data
-        const klines: KlineDataPoint[] = result.klines.map((k: number[]) => ({
-          timestamp: k[0],
-          date: format(new Date(k[0]), 'MM-dd HH:mm'),
-          price: k[4], // close price
-          open: k[1],
-          high: k[2],
-          low: k[3],
-          close: k[4],
-          volume: k[5],
-        }));
-
-        setKlineData(klines);
-
-        // Build order markers
-        const markers: OrderMarker[] = [];
-
-        // Entry marker
-        if (result.order.average_exec_price || result.order.price) {
-          const entryPrice = parseFloat(result.order.average_exec_price || result.order.price || '0');
-          const entryTime = result.order.filled_at || result.order.created_at;
-          markers.push({
-            timestamp: entryTime,
-            price: entryPrice,
-            type: 'entry',
-            label: `入场 ${order.direction === 'LONG' ? '📈' : '📉'}`,
-          });
-        }
-
-        // Stop loss marker
-        if (order.stop_loss) {
-          markers.push({
-            timestamp: klines[klines.length - 1]?.timestamp || Date.now(),
-            price: parseFloat(order.stop_loss),
-            type: 'sl',
-            label: '止损',
-          });
-        }
-
-        // Take profit marker
-        if (order.take_profit) {
-          markers.push({
-            timestamp: klines[klines.length - 1]?.timestamp || Date.now(),
-            price: parseFloat(order.take_profit),
-            type: 'tp',
-            label: '止盈',
-          });
-        }
-
-        setOrderMarkers(markers);
+        setKlineData(result);
       } catch (err: any) {
         console.error('Failed to fetch kline data:', err);
         setKlineError(err.message || '加载 K 线数据失败');
@@ -197,6 +141,155 @@ export function OrderDetailsDrawer({
 
     fetchKlineData();
   }, [order, isOpen, showKlineChart]);
+
+  // Initialize chart when data is loaded
+  useEffect(() => {
+    if (!isOpen || !klineData || !chartContainerRef.current) return;
+
+    // Create chart
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#FFFFFF' },
+        textColor: APPLE_GRAY,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif',
+      },
+      grid: {
+        vertLines: { color: '#F0F0F0' },
+        horzLines: { color: '#F0F0F0' },
+      },
+      width: chartContainerRef.current.clientWidth,
+      height: 300,
+      rightPriceScale: {
+        borderVisible: false,
+      },
+      timeScale: {
+        borderVisible: false,
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      crosshair: {
+        vertLine: {
+          width: 1,
+          color: '#D0D0D0',
+          style: 3,
+        },
+        horzLine: {
+          width: 1,
+          color: '#D0D0D0',
+          style: 3,
+        },
+      },
+    });
+
+    chartRef.current = chart;
+
+    // Create candlestick series
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: APPLE_GREEN,
+      downColor: APPLE_RED,
+      borderUpColor: APPLE_GREEN,
+      borderDownColor: APPLE_RED,
+      wickUpColor: APPLE_GREEN,
+      wickDownColor: APPLE_RED,
+    });
+
+    candleSeriesRef.current = candleSeries;
+
+    // Prepare K-line data - convert to local browser time
+    const tzOffsetMs = new Date().getTimezoneOffset() * 60 * 1000;
+
+    const candleData: CandlestickData[] = klineData.klines.map((k) => ({
+      time: ((k[0] - tzOffsetMs) / 1000) as UTCTimestamp,
+      open: k[1],
+      high: k[2],
+      low: k[3],
+      close: k[4],
+    }));
+
+    candleSeries.setData(candleData);
+
+    // Find the order candle by filled_at or created_at timestamp
+    const orderTimestamp = klineData.order.filled_at || klineData.order.created_at;
+    const shiftedOrderTimestamp = Math.floor((orderTimestamp - tzOffsetMs) / 1000);
+    const orderCandle = candleData.find(k => Number(k.time) === shiftedOrderTimestamp);
+
+    if (orderCandle) {
+      const direction = klineData.order.direction as 'LONG' | 'SHORT';
+      const orderRole = klineData.order.order_role as string;
+
+      // Create order markers using TradingView SeriesMarker API
+      const markers: SeriesMarker<UTCTimestamp>[] = [
+        {
+          time: orderCandle.time as UTCTimestamp,
+          position: getMarkerPosition('ENTRY', direction),
+          color: getOrderRoleColor('ENTRY', direction),
+          shape: getMarkerShape('ENTRY'),
+          text: '入场',
+          size: 2,
+        },
+      ];
+
+      const markersApi = createSeriesMarkers(candleSeries, markers);
+
+      // Add entry price horizontal line
+      const entryPrice = parseFloat(
+        klineData.order.average_exec_price || klineData.order.price || '0'
+      );
+      if (entryPrice > 0) {
+        candleSeries.createPriceLine({
+          price: entryPrice,
+          color: APPLE_BLUE,
+          lineWidth: 2,
+          lineStyle: 3, // Dotted
+          axisLabelVisible: true,
+          title: '入场价',
+        });
+      }
+
+      // Add stop loss horizontal line
+      if (klineData.order.stop_loss) {
+        candleSeries.createPriceLine({
+          price: parseFloat(klineData.order.stop_loss),
+          color: APPLE_RED,
+          lineWidth: 1,
+          lineStyle: 2, // Dashed
+          axisLabelVisible: true,
+          title: '止损价',
+        });
+      }
+
+      // Add take profit horizontal line
+      if (klineData.order.take_profit) {
+        candleSeries.createPriceLine({
+          price: parseFloat(klineData.order.take_profit),
+          color: APPLE_GREEN,
+          lineWidth: 1,
+          lineStyle: 2, // Dashed
+          axisLabelVisible: true,
+          title: '止盈价',
+        });
+      }
+    }
+
+    // Fit content to show all candles
+    chart.timeScale().fitContent();
+
+    // Handle window resize
+    const handleResize = () => {
+      if (chartContainerRef.current && chart) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+    };
+  }, [klineData, isOpen]);
 
   if (!isOpen || !order) return null;
 
@@ -400,7 +493,7 @@ export function OrderDetailsDrawer({
                     <p className="text-sm">{klineError}</p>
                   </div>
                 </div>
-              ) : klineData.length === 0 ? (
+              ) : !klineData || klineData.klines.length === 0 ? (
                 <div className="h-[300px] flex items-center justify-center">
                   <div className="text-center text-gray-400">
                     <Activity className="w-8 h-8 mx-auto mb-2 opacity-20" />
@@ -409,55 +502,10 @@ export function OrderDetailsDrawer({
                 </div>
               ) : (
                 <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={klineData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 10, fill: '#6b7280' }}
-                        tickFormatter={(value) => value.slice(0, 5)}
-                        minTickGap={30}
-                      />
-                      <YAxis
-                        tick={{ fontSize: 10, fill: '#6b7280' }}
-                        tickFormatter={(value) => value.toFixed(2)}
-                        domain={['dataMin', 'dataMax']}
-                        width={60}
-                      />
-                      <Tooltip
-                        content={<KlineTooltip />}
-                        labelFormatter={(label) => `时间：${label}`}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="price"
-                        name="价格"
-                        stroke="#000000"
-                        strokeWidth={1.5}
-                        dot={false}
-                        isAnimationActive={false}
-                      />
-                      {/* Order markers */}
-                      {orderMarkers.map((marker, index) => (
-                        <ReferenceDot
-                          key={`${marker.type}-${index}`}
-                          x={marker.timestamp}
-                          y={marker.price}
-                          r={6}
-                          fill={getMarkerColor(marker.type)}
-                          stroke={getMarkerColor(marker.type)}
-                          strokeWidth={2}
-                          label={{
-                            value: marker.label,
-                            position: 'top',
-                            fill: getMarkerColor(marker.type),
-                            fontSize: 11,
-                            fontWeight: 500,
-                          }}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <div
+                    ref={chartContainerRef}
+                    className="w-full h-full rounded-lg overflow-hidden border border-gray-100"
+                  />
                 </div>
               )}
             </div>

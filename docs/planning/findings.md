@@ -136,6 +136,77 @@ python scripts/migrate_config_to_db.py
 
 ---
 
+## 订单详情页 K 线渲染升级 - TradingView 实现 (2026-04-02)
+
+**日期**: 2026-04-02  
+**任务**: 订单详情页 K 线渲染 - TradingView 升级 (方案 C)  
+**状态**: 🚀 前端组件升级完成（F1 完成）
+
+### 前端组件升级实现
+
+**组件**: `web-front/src/components/v3/OrderDetailsDrawer.tsx`
+
+**核心修改**:
+1. ✅ 移除 Recharts 依赖（`ResponsiveContainer`, `LineChart`, `ReferenceDot` 等）
+2. ✅ 导入 TradingView Lightweight Charts (`createChart`, `createSeriesMarkers`, `CandlestickSeries`)
+3. ✅ 实现 K 线数据转换（时间戳时区转换，本地浏览器时间显示）
+4. ✅ 实现蜡烛图系列（Apple Design 配色：绿涨红跌）
+5. ✅ 实现订单标记（箭头/圆形，基于订单角色和方向）
+6. ✅ 实现水平价格线（入场价/止损价/止盈价）
+7. ✅ 实现资源清理（useEffect cleanup）
+
+**颜色规范**:
+```typescript
+const APPLE_GREEN = '#34C759';   // 做多入场 / 止盈
+const APPLE_RED = '#FF3B30';     // 做空入场 / 止损
+const APPLE_GRAY = '#86868B';    // 中性
+const APPLE_BLUE = '#007AFF';    // 入场价水平线
+```
+
+**标记逻辑**:
+```typescript
+// ENTRY 标记 - 箭头
+position: direction === 'LONG' ? 'belowBar' : 'aboveBar'
+color: direction === 'LONG' ? APPLE_GREEN : APPLE_RED
+shape: 'arrowUp' | 'arrowDown'
+
+// TP/SL 标记 - 圆形
+position: direction === 'LONG' ? 'aboveBar' : 'belowBar'
+color: APPLE_GREEN (TP) | APPLE_RED (SL)
+shape: 'circle'
+```
+
+**水平线样式**:
+| 价格类型 | 颜色 | 线型 | 宽度 |
+|----------|------|------|------|
+| 入场价 | APPLE_BLUE | Dotted (3) | 2px |
+| 止盈价 | APPLE_GREEN | Dashed (2) | 1px |
+| 止损价 | APPLE_RED | Dashed (2) | 1px |
+
+**时区转换**:
+```typescript
+const tzOffsetMs = new Date().getTimezoneOffset() * 60 * 1000;
+const candleData: CandlestickData[] = klines.map((k) => ({
+  time: ((k[0] - tzOffsetMs) / 1000) as UTCTimestamp,
+  open: k[1],
+  high: k[2],
+  low: k[3],
+  close: k[4],
+}));
+```
+
+**修改文件**:
+- `web-front/src/components/v3/OrderDetailsDrawer.tsx` - 完整重写（约 500 行）
+
+**TypeScript 类型检查**: ✅ 通过
+
+**待完成**:
+- ⏳ 后端 API 扩展 `include_chain` 参数
+- ⏳ 订单链时间线可视化（TP1/TP2/SL 子订单标记）
+- ⏳ 悬停 Tooltip 自定义订单详情显示
+
+---
+
 ## P1 任务产品分析
 
 **日期**: 2026-04-02  
@@ -402,6 +473,137 @@ chart.timeScale().fitContent();
 | 订单链查询 | 通过 `parent_order_id` 递归查询 | 支持 1-N 子订单 |
 | K 线范围 | 动态计算（覆盖 min~max filled_at） | 确保完整交易生命周期 |
 | 水平线样式 | 实线=挂单中，虚线=已成交 | 视觉区分订单状态 |
+
+---
+
+## 订单详情页 K 线渲染 - TradingView 升级 (方案 C)
+
+**日期**: 2026-04-02  
+**状态**: ✅ 阶段 1 完成 - 契约设计完成
+**契约文档**: `docs/designs/order-kline-upgrade-contract.md`
+
+### 核心需求
+
+**订单的入场、出场、止盈、止损的时间必须与实际 K 线时间精确对齐，复原交易场景**
+
+### 当前状态分析
+
+**信号详情页**: ✅ 已使用 TradingView Lightweight Charts
+**订单详情页**: ❌ 使用 Recharts 折线图（待升级）
+
+### 技术要点
+
+#### 1. 订单链数据结构
+
+```
+Order Chain
+├── ENTRY (parent_order_id=null)
+│   ├── filled_at: 1711785600000  ← 入场时间点
+│   └── average_exec_price: 50000
+├── TP1 (parent_order_id=ENTRY.id)
+│   ├── filled_at: 1711789200000  ← TP1 成交时间点
+│   └── price: 52000
+├── TP2 (parent_order_id=ENTRY.id)
+│   ├── filled_at: 1711792800000  ← TP2 成交时间点
+│   └── price: 54000
+└── SL (parent_order_id=ENTRY.id)
+    ├── filled_at: null  ← 未成交（挂单中）
+    └── price: 48000
+```
+
+#### 2. 时间对齐核心逻辑
+
+**后端** (K 线范围计算):
+```python
+# 收集订单链中所有时间戳
+timestamps = [o.filled_at for o in order_chain if o.filled_at]
+min_time = min(timestamps)
+max_time = max(timestamps)
+
+# 扩展范围：前后各多取 20 根 K 线
+timeframe_ms = BacktestConfig.get_timeframe_ms(timeframe)
+since = min_time - (20 * timeframe_ms)
+limit = int((max_time - since) / timeframe_ms) + 40
+
+# 获取 K 线数据
+ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+```
+
+**前端** (时间戳转换):
+```typescript
+// 时区转换
+const tzOffsetMs = new Date().getTimezoneOffset() * 60 * 1000;
+
+// K 线数据
+const klineData: CandlestickData[] = klines.map((k) => ({
+  time: ((k[0] - tzOffsetMs) / 1000) as UTCTimestamp,
+  open: k[1],
+  high: k[2],
+  low: k[3],
+  close: k[4],
+}));
+
+// 订单标记
+const markers: SeriesMarker[] = orderChain
+  .filter(o => o.filled_at)
+  .map(order => ({
+    time: ((order.filled_at! - tzOffsetMs) / 1000) as UTCTimestamp,
+    position: order.order_role === 'ENTRY' 
+      ? (order.direction === 'LONG' ? 'belowBar' : 'aboveBar')
+      : (order.direction === 'LONG' ? 'aboveBar' : 'belowBar'),
+    color: getOrderRoleColor(order.order_role),
+    shape: order.order_role === 'ENTRY' ? 'arrowUp' : 'circle',
+    text: getOrderRoleLabel(order.order_role),
+  }));
+```
+
+#### 3. Apple Design 颜色规范
+
+```typescript
+const APPLE_GREEN = '#34C759';   // 涨/做多/止盈
+const APPLE_RED = '#FF3B30';     // 跌/做空/止损
+const APPLE_GRAY = '#86868B';    // 中性/文本
+const APPLE_BLUE = '#007AFF';    // 入场价/高亮
+```
+
+#### 4. 水平价格线样式
+
+| 价格类型 | 颜色 | 线型 | 说明 |
+|----------|------|------|------|
+| 入场价 | APPLE_BLUE | 点线 (style: 3) | 2px 宽度 |
+| 止盈价 | APPLE_GREEN | 虚线 (style: 2) | 1px 宽度 |
+| 止损价 | APPLE_RED | 虚线 (style: 2) | 1px 宽度 |
+
+### 参考实现
+
+**文件**: `web-front/src/components/SignalDetailsDrawer.tsx`
+
+**关键代码**:
+- 图表初始化：L45-77
+- K 线数据转换：L95-105
+- 订单标记创建：L119-146
+- 水平价格线创建：L149-183
+
+### 技术决策
+
+| 决策点 | 方案 | 理由 |
+|--------|------|------|
+| 图表库 | TradingView Lightweight Charts | 与信号详情页一致，专业级图表 |
+| 时间对齐 | 基于 `filled_at` 字段 | 唯一真实成交时间戳 |
+| 订单链查询 | 通过 `parent_order_id` 递归查询 | 支持 1-N 子订单 |
+| K 线范围 | 动态计算（覆盖 min~max filled_at） | 确保完整交易生命周期 |
+| 水平线样式 | 实线=挂单中，虚线=已成交 | 视觉区分订单状态 |
+
+### 验收标准
+
+| 需求 | 验证方法 | 状态 |
+|------|----------|------|
+| ENTRY 入场时间对齐 | `filled_at` 映射到 K 线时间轴 | ☐ 待验证 |
+| TP/SL 成交时间对齐 | `filled_at` 映射到 K 线时间轴 | ☐ 待验证 |
+| 订单链完整展示 | 查询 parent_order_id 获取完整订单链 | ☐ 待验证 |
+| 水平线价格对齐 | 基于 actual_exec_price 创建 PriceLine | ☐ 待验证 |
+| 十字光标交互 | TradingView Crosshair 启用 | ☐ 待验证 |
+| 悬停 Tooltip | 自定义 Tooltip 组件 | ☐ 待验证 |
 
 ---
 

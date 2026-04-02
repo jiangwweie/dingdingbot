@@ -207,7 +207,7 @@ logger.info("DB has no data, falling back to Exchange Gateway...")
 - ✅ 已返回订单详情 + 50 根 K 线数据
 - ⚠️ 需扩展：支持订单链查询（父订单 + 子订单列表）
 
-**扩展后端 API**:
+**扩展后端 API** (契约设计完成，待实现):
 ```python
 @app.get("/api/v3/orders/{order_id}/klines")
 async def get_order_klines(order_id: str, symbol: str, include_chain: bool = True):
@@ -242,78 +242,56 @@ async def get_order_klines(order_id: str, symbol: str, include_chain: bool = Tru
 
 #### 前端图表升级
 
-**复用 SignalDetailsDrawer 组件逻辑**:
-```typescript
-// web-front/src/components/v3/OrderDetailsDrawer.tsx
-
-// 1. 导入 TradingView
-import { createChart, IChartApi, ISeriesApi, CandlestickSeries } from 'lightweight-charts';
-
-// 2. 创建图表
-const chart = createChart(container, {
-  layout: { background: { color: '#FFFFFF' } },
-  crosshair: { vertLine: { color: '#D0D0D0' }, horzLine: { color: '#D0D0D0' } },
-});
-
-// 3. K 线蜡烛图
-const candleSeries = chart.addSeries(CandlestickSeries, {
-  upColor: '#34C759',    // Apple Green
-  downColor: '#FF3B30',  // Apple Red
-});
-
-// 4. 订单标记（时间对齐）
-const markers = orderChain.map(order => ({
-  time: (order.filled_at / 1000) as UTCTimestamp,  // 关键：精确时间戳
-  position: order.order_role === 'ENTRY' ? 'belowBar' : 'aboveBar',
-  color: getRoleColor(order.order_role),
-  shape: order.order_role === 'ENTRY' ? 'arrowUp' : 'circle',
-  text: getOrderRoleLabel(order.order_role),
-}));
-
-// 5. 止盈/止损水平线
-if (entryOrder.average_exec_price) {
-  candleSeries.createPriceLine({
-    price: Number(entryOrder.average_exec_price),
-    color: APPLE_BLUE,
-    lineStyle: 3,  // Dotted
-    title: '入场价',
-  });
-}
-
-// 6. TP/SL 水平线（基于实际成交价）
-orderChain.filter(o => o.order_role.startsWith('TP') && o.status === 'FILLED').forEach(tp => {
-  candleSeries.createPriceLine({
-    price: Number(tp.price),
-    color: APPLE_GREEN,
-    lineStyle: 2,  // Dashed
-    title: `${tp.order_role} (已成交)`,
-  });
-});
-```
+**复用 SignalDetailsDrawer 组件逻辑**: 参考契约文档 `docs/designs/order-kline-upgrade-contract.md`
 
 ### 任务分解
 
-**后端任务**:
+**阶段 1: 契约设计** ✅
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| D1 | 阅读现有订单详情页实现 | 0.5h | ✅ 已完成 |
+| D2 | 阅读后端 K 线 API | 0.5h | ✅ 已完成 |
+| D3 | 设计订单链时间线对齐方案 | 1h | ✅ 已完成 |
+| D4 | 输出接口契约表 | 0.5h | ✅ 已完成 |
+
+**阶段 2: 任务分解** 🚀
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| P1 | 创建任务清单 | 0.25h | 🔄 进行中 |
+| P2 | 更新 task_plan.md 和 findings.md | 0.25h | 🔄 进行中 |
+
+**阶段 3: 并行开发** (待启动)
 | ID | 任务 | 工时 | 状态 |
 |----|------|------|------|
 | B1 | 扩展 OrderRepository 支持订单链查询 | 1h | ☐ 待启动 |
 | B2 | 扩展 GET /api/v3/orders/{order_id}/klines 支持 include_chain 参数 | 1h | ☐ 待启动 |
 | B3 | 单元测试：订单链时间线对齐验证 | 1h | ☐ 待启动 |
-
-**前端任务**:
-| ID | 任务 | 工时 | 状态 |
-|----|------|------|------|
 | F1 | OrderDetailsDrawer 升级为 TradingView 蜡烛图 | 2h | ☐ 待启动 |
 | F2 | 订单链时间线可视化（箭头 + 水平线） | 2h | ☐ 待启动 |
 | F3 | 订单详情 Tooltip（悬停显示） | 1h | ☐ 待启动 |
 
-**测试任务**:
+**阶段 4: 审查验证** (待启动)
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| R1 | 对照契约表检查实现 | 0.5h | ☐ 待启动 |
+| R2 | 验证 filled_at 时间戳精确映射 | 0.5h | ☐ 待启动 |
+| R3 | 验证订单链完整展示 | 0.5h | ☐ 待启动 |
+| R4 | 验证水平线价格对齐 | 0.5h | ☐ 待启动 |
+
+**阶段 5: 测试执行** (待启动)
 | ID | 任务 | 工时 | 状态 |
 |----|------|------|------|
 | T1 | 集成测试：订单时间线对齐验证 | 1h | ☐ 待启动 |
 | T2 | E2E 测试：完整交易场景复原 | 1h | ☐ 待启动 |
 
-**总工时**: 9 小时
+**阶段 6: 提交汇报** (待启动)
+| ID | 任务 | 工时 | 状态 |
+|----|------|------|------|
+| S1 | 生成验收报告 | 0.25h | ☐ 待启动 |
+| S2 | 更新 progress.md | 0.25h | ☐ 待启动 |
+| S3 | Git 提交 | 0.25h | ☐ 待启动 |
+
+**总工时**: 约 11.5 小时
 
 ---
 
