@@ -1,7 +1,51 @@
 # 盯盘狗 Agent Team 开工/收工规范
 
-**版本**: v1.0
-**最后更新**: 2026-03-31
+**版本**: v2.0
+**最后更新**: 2026-04-02 - 新增 PdM/Arch/PM 角色
+
+---
+
+## 团队架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Project Manager (统一入口)                    │
+│              (用户沟通 / 进度追踪 / 代码提交)                    │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+         ┌───────────────┼───────────────┐
+         │               │               │
+         ▼               ▼               ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────────┐
+│  Product Mgr    │ │   Architect     │ │     Team                │
+│  (产品经理)     │ │   (架构师)      │ │     Coordinator         │
+│ - 需求收集      │ │ - 架构设计      │ │     (PM 执行代理)        │
+│ - 优先级排序    │ │ - 契约设计      │ │ - 任务分解              │
+│ - 用户故事      │ │ - 影响评估      │ │ - 并行调度              │
+└─────────────────┘ └─────────────────┘ └─────────────────────────┘
+                                               │
+                    ┌──────────────────────────┼──────────────────┐
+                    │                          │                  │
+                    ▼                          ▼                  ▼
+           ┌───────────────┐        ┌───────────────┐   ┌──────────────────┐
+           │  Backend Dev  │        │  Frontend Dev │   │   QA Tester      │
+           │   (后端)      │        │    (前端)     │   │    (测试)        │
+           └───────────────┘        └───────────────┘   └──────────────────┘
+                    │                          │                  │
+                    └──────────────────────────┼──────────────────┘
+                                               ▼
+                                      ┌─────────────────┐
+                                      │  Code Reviewer  │
+                                      │    (审查员)     │
+                                      └─────────────────┘
+                                               │
+                                               ▼
+                                      ┌─────────────────┐
+                                      │ Diagnostic      │
+                                      │ Analyst         │
+                                      │ (诊断分析师)     │
+                                      └─────────────────┘
+```
 
 ---
 
@@ -84,41 +128,113 @@ npm run lint  # 如已配置
 
 ## 角色专属规范
 
-### Coordinator 专属
+### Product Manager (PdM) 专属
 
-**文件位置**: `.claude/team/team-coordinator/SKILL.md`
+**文件位置**: `.claude/team/product-manager/SKILL.md`
 
 #### 🟢 开工前检查清单
 ```markdown
-- [ ] **任务规划**: 已调用 `planning-with-files-zh` 创建计划
-- [ ] **文件创建**: `docs/planning/task_plan.md` 已生成
-- [ ] **任务分解**: 已使用 `TaskCreate` 创建任务清单
-- [ ] **依赖标注**: 已识别任务依赖关系 (addBlockedBy)
-- [ ] **角色分配**: 已确定需要参与的角色
+- [ ] **需求背景**: 已理解 Who/What/Why
+- [ ] **目标用户**: 已识别使用场景和人群
+- [ ] **业务价值**: 已尝试量化（如可能）
+- [ ] **竞争方案**: 已考虑现有解决方案
+- [ ] **验收标准**: 已草拟 AC 列表
 ```
 
-**调用示例**:
-```python
-Agent(subagent_type="planning-with-files-zh",
-      prompt="为策略预览功能创建执行计划，输出到 docs/planning/task_plan.md")
+#### 🔴 收工时检查清单
+```markdown
+- [ ] **PRD 文档**: `docs/products/<feature>-brief.md` 已创建
+- [ ] **用户故事**: 格式完整（As a... I want... So that...）
+- [ ] **验收标准**: AC 列表清晰可测试
+- [ ] **优先级评估**: RICE/WSJF 评分已完成
+- [ ] **MVP 范围**: Must/Nice/Out 明确区分
+- [ ] **需求池更新**: `docs/products/backlog.md` 已更新
+```
+
+---
+
+### Architect (Arch) 专属
+
+**文件位置**: `.claude/team/architect/SKILL.md`
+
+#### 🟢 开工前检查清单
+```markdown
+- [ ] **PRD 阅读**: 已阅读产品需求 brief
+- [ ] **约束识别**: 明确技术/时间/资源约束
+- [ ] **现状分析**: 已分析现有系统架构
+- [ ] **关联系统**: 识别可能受影响的模块
+```
+
+#### 🔴 收工时检查清单
+```markdown
+- [ ] **ADR 文档**: `docs/arch/<feature>-design.md` 已创建
+- [ ] **契约表**: 接口契约表已完成（`docs/designs/<feature>-contract.md`）
+- [ ] **Schema 对齐**: Pydantic ↔ TypeScript 类型已对齐
+- [ ] **关联影响评估**: 已评估对现有模块的影响
+- [ ] **技术债记录**: 新增技术债已记录（如有）
+- [ ] **移交 PM**: 已通知项目经理可以开始任务分解
+```
+
+---
+
+### Project Manager (PM) 专属
+
+**文件位置**: `.claude/team/project-manager/SKILL.md`
+
+#### 🟢 开工前检查清单
+```markdown
+- [ ] **需求确认**: 已确认需求来源（PdM PRD 或用户直接输入）
+- [ ] **架构确认**: 已阅读架构设计文档（如有）
+- [ ] **契约确认**: 已阅读接口契约表（如有）
+- [ ] **资源确认**: 确认可用角色（Backend/Frontend/QA）
 ```
 
 #### 🔴 收工时检查清单
 ```markdown
 - [ ] **集成验证**: 所有子任务测试通过
-- [ ] **交付报告**: 已生成交付报告
+- [ ] **交付报告**: `docs/delivery/<feature>-report.md` 已生成
 - [ ] **进度更新**: `docs/planning/progress.md` 已更新
-- [ ] **代码推送**: 已提交并推送到远程分支
-- [ ] **诊断报告**: Bug 修复类任务已更新诊断报告状态
+- [ ] **代码推送**: 已 git add/commit/push
+- [ ] **用户验收**: 已通知用户验收
+```
+
+#### ⚠️ 用户确认环节
+在任务分解完成后，必须请求用户确认：
+1. 产品范围是否合理
+2. 技术方案是否接受
+3. 任务计划（工时、排期）是否批准
+
+用户确认后，才能进入执行阶段。
+
+---
+
+### Team Coordinator 专属
+
+**文件位置**: `.claude/team/team-coordinator/SKILL.md`
+
+**定位**: PM 的执行代理，专注于任务分解和并行调度
+
+#### 🟢 开工前检查清单
+```markdown
+- [ ] **接收任务计划**: 已从 PM 接收任务计划 (`docs/planning/<feature>-task-plan.md`)
+- [ ] **契约阅读**: 已阅读接口契约表 (`docs/designs/<feature>-contract.md`)
+- [ ] **任务分解**: 已将任务计划拆分为可执行的子任务
+- [ ] **依赖标注**: 已识别任务依赖关系 (addBlockedBy)
+- [ ] **角色分配**: 已确定需要参与的角色 (Backend/Frontend/QA)
+```
+
+#### 🔴 收工时检查清单
+```markdown
+- [ ] **集成验证**: 所有子任务测试通过
+- [ ] **结果汇总**: 已生成交付结果给 PM
+- [ ] **代码审查**: Reviewer 审查通过 (如有)
+- [ ] **测试报告**: QA 测试报告已生成
 ```
 
 **验证命令**:
 ```bash
 # 运行完整测试套件
 pytest tests/unit/ tests/integration/ -v --tb=short
-
-# 检查变更统计
-git diff --stat HEAD
 ```
 
 ---
@@ -264,48 +380,72 @@ flake8 src/ tests/
 
 ---
 
-## 完整工作流程示例
+## 完整工作流程示例 (v2.0)
 
 ### 场景：开发"策略预览功能"（复杂任务）
 
 ```
-【阶段 -1】开工准备 (Coordinator)
-   ↓ 调用 planning-with-files-zh 创建计划
-   ↓ 生成 docs/planning/task_plan.md
-   ↓ 创建任务清单 (TaskCreate)
+【阶段 -2】需求收集 (PdM)
+   ↓ 与用户对话澄清需求
+   ↓ 输出：docs/products/backlog.md
 
-【阶段 0】需求接收
-   ↓ Coordinator 分析需求
+【阶段 -1】产品定义 (PdM)
+   ↓ 编写 PRD 文档
+   ↓ 输出：docs/products/preview-brief.md
 
-【阶段 1】契约设计
-   ↓ 编写 API 契约表 (docs/designs/preview-contract.md)
+【阶段 0】架构设计 (Arch)
+   ↓ 阅读 PRD，进行技术设计
+   ↓ 输出：docs/arch/preview-design.md + 契约表
+   ↓ 关联影响评估：docs/arch/preview-impact-analysis.md
 
-【阶段 2】任务分解
-   ↓ Backend: 实现 API 接口
-   ↓ Frontend: 实现预览组件
-   ↓ QA: 编写测试用例
+【阶段 1】任务分解 (PM)
+   ↓ 阅读架构设计，分解任务
+   ↓ 输出：docs/planning/preview-task-plan.md
+   ↓ ⚠️ 请求用户确认（产品范围、技术方案、任务计划）
 
-【阶段 3】并行开发 (各角色按专属规范执行)
+【阶段 2】并行开发 (Coordinator + Dev Team)
+   ↓ PM 调用 Coordinator 执行
+   ↓ Coordinator 调度 Backend/Frontend/QA
    ↓ Backend Dev → 调用 code-simplifier 优化 → 运行 pytest
    ↓ Frontend Dev → 调用 ui-ux-pro-max 设计 → 运行 npm run build
    ↓ QA Tester → 编写测试 → 运行覆盖率检查
 
-【阶段 4】审查验证
+【阶段 3】审查验证 (Reviewer)
    ↓ Reviewer 审查代码
    ↓ 发现问题 → 返回对应角色修复
 
-【阶段 5】测试执行
+【阶段 4】测试执行 (QA)
    ↓ QA 运行完整测试套件
    ↓ 生成测试报告
 
-【阶段 6】提交汇报
-   ↓ Coordinator 生成交付报告
+【阶段 5】交付汇报 (PM)
+   ↓ PM 生成交付报告
    ↓ git commit & push
+   ↓ 通知用户验收
 
-【阶段 7】收工总结 (Coordinator)
+【阶段 6】收工总结 (PM)
    ↓ 更新 docs/planning/progress.md
-   ↓ 更新诊断报告（如适用）
+   ↓ 更新 docs/delivery/preview-report.md
 ```
+
+---
+
+## 角色职责速查表
+
+| 事项类型 | 负责人 | 说明 |
+|---------|--------|------|
+| **需求收集** | PdM | 新功能、改进建议 |
+| **需求优先级** | PdM | 决定先做哪个 |
+| **任务安排** | PM | 已确认需求的执行计划 |
+| **进度查询** | PM | 现在做到哪了 |
+| **技术方案** | Arch | 架构设计、技术选型 |
+| **关联影响评估** | Arch | 变更对现有系统的影响 |
+| **文档归档** | 各角色 | 各自负责对应文档 |
+| **会话日志** | PM | progress.md 更新 |
+| **代码提交** | PM | git commit/push |
+| **交付验收** | PM | 生成交付报告 |
+| **Bug 报告** | PdM(体验) / Arch(技术) | 影响评估 |
+| **Bug 修复** | PM | 分配给 Dev 执行 |
 
 ---
 

@@ -1,6 +1,6 @@
 # 盯盘狗 🐶 Agent Team 配置
 
-> **最后更新**: 2026-04-02 - 诊断分析师新增五维分析法
+> **最后更新**: 2026-04-02 - 新增 PdM/Arch/PM 角色，v2.0 团队架构
 > **重要**: 本文档包含团队角色配置和进度管理规范
 
 ---
@@ -55,28 +55,79 @@
 ## Team 结构
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Team Coordinator                    │
-│         (任务分解 + 协调 + 结果整合)              │
-└─────────────────────────────────────────────────┘
-                      │
-        ┌─────────────┼─────────────┬─────────────┬─────────────┐
-        ▼             ▼             ▼             ▼             ▼
-┌───────────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌──────────────┐
-│ Frontend Dev  │ │ Backend   │ │   QA      │ │  Code     ││  Diagnostic  │
-│    (前端)     │ │  (后端)   │ │  Tester   │ │ Reviewer  ││   Analyst    │
-│               │ │           │ │  (测试)   │ │  (审查)   ││  (诊断分析师)│
-└───────────────┘ └───────────┘ └───────────┘ └───────────┘ └──────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    Project Manager (统一入口)                    │
+│              (用户沟通 / 进度追踪 / 代码提交)                    │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+         ┌───────────────┼───────────────┐
+         │               │               │
+         ▼               ▼               ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────────┐
+│  Product Mgr    │ │   Architect     │ │     Team                │
+│  (产品经理)     │ │   (架构师)      │ │     Coordinator         │
+│ - 需求收集      │ │ - 架构设计      │ │     (PM 执行代理)        │
+│ - 优先级排序    │ │ - 契约设计      │ │ - 任务分解              │
+│ - 用户故事      │ │ - 影响评估      │ │ - 并行调度              │
+└─────────────────┘ └─────────────────┘ └─────────────────────────┘
+                                               │
+                    ┌──────────────────────────┼──────────────────┐
+                    │                          │                  │
+                    ▼                          ▼                  ▼
+           ┌───────────────┐        ┌───────────────┐   ┌──────────────────┐
+           │  Backend Dev  │        │  Frontend Dev │   │   QA Tester      │
+           │   (后端)      │        │    (前端)     │   │    (测试)        │
+           └───────────────┘        └───────────────┘   └──────────────────┘
+                    │                          │                  │
+                    └──────────────────────────┼──────────────────┘
+                                               │
+                                               ▼
+                                      ┌─────────────────┐
+                                      │  Code Reviewer  │
+                                      │    (审查员)     │
+                                      └─────────────────┘
+                                               │
+                                               ▼
+                                      ┌─────────────────┐
+                                      │ Diagnostic      │
+                                      │ Analyst         │
+                                      │ (诊断分析师)     │
+                                      └─────────────────┘
 ```
+
+**角色总数**: 10 人（4 个决策角色 + 3 个执行角色 + 3 个支持角色）
+
+### 角色分类
+
+| 分类 | 角色 | 职责 |
+|------|------|------|
+| **决策层** | PM, PdM, Arch | 需求决策、技术决策、优先级决策 |
+| **执行层** | Coordinator, Backend, Frontend | 任务执行、代码实现 |
+| **支持层** | QA, Reviewer, Diagnostic | 测试、审查、诊断 |
 
 ---
 
 ## 角色技能说明
 
-### Team Coordinator (`/coordinator`)
-- **职责**: 任务分解、角色调度、进度追踪、结果整合
-- **触发场景**: 完整功能开发、跨模块任务
-- **使用方式**: 输入 `/coordinator` 或直接描述需求
+### Project Manager (`/pm`) - 统一入口 ⭐
+- **职责**: 用户沟通、进度追踪、任务计划、代码提交、交付验收
+- **触发场景**: **日常对话首选入口**、进度查询、任务安排
+- **使用方式**: 输入 `/pm` 或直接描述需求
+
+### Product Manager (`/product-manager`) - 产品经理
+- **职责**: 需求收集、优先级排序、用户故事编写、MVP 范围定义
+- **触发场景**: 新功能需求评估、需求优先级讨论
+- **使用方式**: PM 自动路由，或手动输入 `/product-manager`
+
+### Architect (`/architect`) - 架构师
+- **职责**: 架构设计、契约设计、技术选型、**关联影响评估**
+- **触发场景**: 技术方案评审、架构审查、技术选型讨论
+- **使用方式**: PM 自动路由，或手动输入 `/architect`
+
+### Team Coordinator (`/coordinator`) - 团队协调器
+- **职责**: PM 的执行代理，专注于任务分解、并行调度、结果整合
+- **触发场景**: PM 分配任务后，由 Coordinator 执行具体调度
+- **使用方式**: 由 PM 调用，用户无需直接使用
 
 ### Frontend Developer (`/frontend`)
 - **职责**: React + TypeScript + TailwindCSS 前端实现
@@ -110,28 +161,43 @@
 ## 使用方式
 
 ### 方式 1: 角色切换命令
+
 ```bash
-# 切换到协调器角色
-/coordinator
+# 决策层角色
+/pm                    # 项目经理（统一入口，日常首选）
+/product-manager         # 产品经理（需求评估）
+/architect              # 架构师（技术方案）
 
-# 切换到前端角色
-/frontend
+# 执行层角色
+/coordinator            # 团队协调器（PM 调用，用户无需直接使用）
+/backend                # 后端开发
+/frontend               # 前端开发
 
-# 切换到后端角色
-/backend
-
-# 切换到测试角色
-/qa
+# 支持层角色
+/qa                     # 质量保障
+/reviewer               # 代码审查
+/diagnostic             # 诊断分析师
 ```
 
-### 方式 2: 直接描述需求（自动分解）
-```
-用户：我想添加一个策略预览功能，用户可以点击按钮测试当前策略
+**日常对话推荐**: 直接与 PM 对话，无需使用命令
 
-→ Team Coordinator 自动分解：
-   - 后端：实现 /api/strategies/preview 接口
-   - 前端：实现预览按钮和结果展示
-   - 测试：编写对应测试用例
+```
+用户："我想加个止损功能"        → PM 自动路由到 PdM
+用户："进度怎么样了"            → PM 直接回答
+用户："记录待办：下周安排..."    → PM 记录并安排
+```
+
+### 方式 2: 直接描述需求（PM 自动路由）
+
+```
+用户：我想添加一个策略预览功能
+
+→ PM 自动分析并路由:
+   1. PdM: 评估需求优先级和 MVP 范围
+   2. Arch: 设计技术方案和契约表
+   3. PM: 分解任务并请求用户确认
+   4. Coordinator: 执行并行开发
+   5. PM: 代码提交和交付汇报
 ```
 
 ### 方式 3: 并行调度（使用 Agent 工具）
@@ -178,15 +244,18 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 ### 文件所有权矩阵
 
-| 文件路径 | Frontend | Backend | QA | Coordinator | Reviewer | Diagnostic |
-|----------|----------|---------|----|-------------|----------|------------|
-| `web-front/**` | ✅ 全权 | ❌ 禁止 | ⚠️ 仅测试 | ⚠️ 仅配置 | 🔍 审查 | 🔍 审查 |
-| `src/**` | ❌ 禁止 | ✅ 全权 | ⚠️ 仅测试 | ⚠️ 仅协调 | ✅ 修改测试 | 🔍 审查 |
-| `tests/**` | ⚠️ 协助 | ⚠️ 协助 | ✅ 全权 | ⚠️ 仅协调 | ✅ 修改测试 | ⚠️ 运行验证 |
-| `config/**` | ❌ 禁止 | ✅ 全权 | ❌ 禁止 | ⚠️ 仅协调 | 🔍 审查 | 🔍 审查 |
-| `CLAUDE.md` | ❌ 禁止 | ❌ 禁止 | ❌ 禁止 | ✅ 全权 | 🔍 审查 | ❌ 禁止 |
-| `.claude/team/**` | ⚠️ 建议 | ⚠️ 建议 | ⚠️ 建议 | ✅ 全权 | 🔍 审查 | ❌ 禁止 |
-| `docs/**` | ⚠️ 建议 | ⚠️ 建议 | ⚠️ 建议 | ✅ 全权 | ⚠️ 建议 | ✅ 全权 |
+| 文件路径 | PdM | Arch | PM | Coord | Frontend | Backend | QA | Reviewer | Diagnostic |
+|---------|-----|------|-----|-------|----------|---------|----|---------|------------|
+| `docs/products/**` | ✅ 全权 | ⚠️ 只读 | ⚠️ 只读 | ❌ | ❌ | ❌ | ❌ | 🔍 审查 | 🔍 审查 |
+| `docs/arch/**` | ⚠️ 只读 | ✅ 全权 | ⚠️ 只读 | ⚠️ 只读 | ❌ | ❌ | ❌ | 🔍 审查 | 🔍 审查 |
+| `docs/planning/**` | ⚠️ 只读 | ⚠️ 只读 | ✅ 全权 | ⚠️ 执行 | ❌ | ❌ | ❌ | 🔍 审查 | ✅ 全权 |
+| `docs/designs/**` | ⚠️ 只读 | ✅ 全权 | ⚠️ 只读 | ⚠️ 执行 | ⚠️ 只读 | ⚠️ 只读 | ⚠️ 只读 | 🔍 审查 | 🔍 审查 |
+| `web-front/**` | ❌ | ❌ | ❌ | ❌ | ✅ 全权 | ❌ | ⚠️ 测试 | 🔍 审查 | 🔍 审查 |
+| `src/**` | ❌ | 🔍 审查 | ❌ | ❌ | ❌ | ✅ 全权 | ⚠️ 测试 | ✅ 修改测试 | 🔍 审查 |
+| `tests/**` | ❌ | 🔍 审查 | ⚠️ 协调 | ⚠️ 协调 | ⚠️ 协助 | ⚠️ 协助 | ✅ 全权 | ✅ 修改测试 | ⚠️ 运行 |
+| `config/**` | ❌ | 🔍 审查 | ❌ | ❌ | ❌ | ✅ 全权 | ❌ | 🔍 审查 | 🔍 审查 |
+| `CLAUDE.md` | ❌ | ❌ | ⚠️ 建议 | ✅ 全权 | ❌ | ❌ | ❌ | 🔍 审查 | ❌ |
+| `.claude/team/**` | ⚠️ 建议 | ⚠️ 建议 | ⚠️ 建议 | ✅ 全权 | ⚠️ 建议 | ⚠️ 建议 | ⚠️ 建议 | 🔍 审查 | ❌ |
 
 **图例**: ✅ 全权负责 | ❌ 禁止修改 | ⚠️ 有限权限 | 🔍 仅审查
 
@@ -233,8 +302,8 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 ```
 1. 发现冲突 → 立即停止修改
-2. 通知 Coordinator → 说明冲突情况
-3. Coordinator 分析 → 重新分配任务
+2. 通知 PM → 说明冲突情况
+3. PM 调用 Coordinator 分析 → 重新分配任务
 4. 按新分配执行 → 验证无冲突后继续
 ```
 
@@ -243,21 +312,25 @@ Agent(subagent_type="qa-tester", prompt="...")
 | 场景 | 原因 | 解决方案 |
 |------|------|----------|
 | API 字段不匹配 | 后端改了返回结构，前端未更新 | Coordinator 同步分配两个任务 |
-| 测试失败需改业务代码 | QA 发现 Bug | QA 报告 → Coordinator 分配给对应 Dev |
-| 多人改同一文件 | 任务分解不清 | Coordinator 重新分配，使用 git 分支 |
+| 测试失败需改业务代码 | QA 发现 Bug | QA 报告 → PM 分配给对应 Dev |
+| 多人改同一文件 | 任务分解不清 | PM 调用 Coordinator 重新分配 |
+| 需求变更 | PdM 调整优先级 | PM 重新评估任务计划 |
 
 ---
 
 ## 最佳实践
 
 ### ✅ 推荐做法
-- 完整功能开发优先使用 Team Coordinator 模式
+- 日常对话首选 PM 作为统一入口
+- 完整功能开发走完整工作流（PdM → Arch → PM → Coordinator）
 - 独立任务直接调用对应角色
 - 测试先行：先写测试再实现功能
 - 并行执行：前端和后端任务同时进行
 
 ### ❌ 避免做法
-- 单一角色处理全栈任务（效率低）
+- 跳过产品评估直接开发
+- 跳过架构设计直接编码
+- 跳过用户确认直接执行
 - 跳过测试直接交付
 - 接口未对齐就合并代码
 - 缺少任务追踪（使用 TaskCreate）
@@ -269,12 +342,15 @@ Agent(subagent_type="qa-tester", prompt="...")
 ### 技能文件位置
 ```
 .claude/team/
+├── product-manager/SKILL.md    # 产品经理（需求评估）
+├── architect/SKILL.md          # 架构师（技术设计）
+├── project-manager/SKILL.md    # 项目经理（统一入口）
+├── team-coordinator/SKILL.md   # 团队协调器（PM 执行代理）
 ├── frontend-dev/SKILL.md       # 前端开发专家
 ├── backend-dev/SKILL.md        # 后端开发专家
 ├── qa-tester/SKILL.md          # 质量保障专家
 ├── code-reviewer/SKILL.md      # 代码审查员
-├── diagnostic-analyst/SKILL.md # 诊断分析师
-└── team-coordinator/SKILL.md   # 团队协调器
+└── diagnostic-analyst/SKILL.md # 诊断分析师
 ```
 
 ### 如何扩展团队
@@ -293,30 +369,30 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 | Agent 角色 | 应调用的全局 Skills | 使用场景 |
 |-----------|---------------------|----------|
-| **Frontend Dev** | `ui-ux-pro-max` | UI 设计、配色方案、组件样式优化 |
-| | `frontend-design` | 高设计质量的前端实现 |
-| | `web-artifacts-builder` | 复杂多组件 Web 工件 |
-| | `code-simplifier` | 代码完成后优化简化 |
-| | `banner-design` | Banner/视觉设计 |
-| | `slides` | 幻灯片设计 |
-| | `brand-guidelines` | 品牌规范指导 |
-| **Backend Dev** | `code-simplifier` | 代码完成后优化简化 |
+| **Product Manager** | `brainstorming` | 需求探索、竞品分析 |
+| | `planning-with-files-zh` | 需求文档编写 |
+| | `web-search` | 竞品调研 |
+| **Architect** | `brainstorming` | 技术方案探索 |
+| | `planning-with-files-zh` | 架构文档编写 |
+| | `web-search` | 技术调研、最佳实践 |
+| **Project Manager** | `planning-with-files-zh` | 任务计划制定 |
+| | `dispatching-parallel-agents` | 并行任务调度 |
+| | `verification-before-completion` | 完成前验证 |
+| **Frontend Dev** | `ui-ux-pro-max` | UI 设计、配色方案 |
+| | `frontend-design` | 高设计质量实现 |
+| | `web-artifacts-builder` | 复杂多组件工件 |
+| | `code-simplifier` | 代码优化简化 |
+| **Backend Dev** | `code-simplifier` | 代码优化简化 |
 | | `brainstorming` | 复杂需求分析 |
-| | `systematic-debugging` | 遇到 Bug 时调试 |
-| **QA Tester** | `webapp-testing` | 前端 Playwright E2E 测试 |
+| | `systematic-debugging` | Bug 调试 |
+| **QA Tester** | `webapp-testing` | Playwright E2E 测试 |
 | | `code-simplifier` | 测试代码简化 |
 | | `systematic-debugging` | 测试失败分析 |
-| **Coordinator** | `brainstorming` | 需求分解前探索 |
-| | `planning-with-files-zh` | 制定执行计划（替代 writing-plans/executing-plans） |
-| | `dispatching-parallel-agents` | 并行任务调度 |
-| | `finishing-a-development-branch` | 完成分支合并 |
-| | `verification-before-completion` | 完成前验证 |
-| | `requesting-code-review` | 请求正式审查 |
-| **Code Reviewer** | `code-review` | 正式代码审查流程 |
-| | `code-simplifier` | 识别代码复杂度问题 |
-| **Diagnostic Analyst** | `systematic-debugging` | 系统性 Bug 排查 |
-| | `brainstorming` | 复杂问题根因分析 |
-| | `planning-with-files-zh` | 制定诊断计划 |
+| **Code Reviewer** | `code-review` | 正式审查流程 |
+| | `code-simplifier` | 识别复杂度问题 |
+| **Diagnostic Analyst** | `systematic-debugging` | 系统性排查 |
+| | `brainstorming` | 5 Why 根因分析 |
+| | `planning-with-files-zh` | 诊断计划 | |
 
 ### 调用方式
 
@@ -335,24 +411,47 @@ Agent(subagent_type="frontend-dev",
 ### 各角色技能调用时机
 
 ```
-Frontend Dev 工作流:
+Product Manager 工作流:
   1. 接收需求
+  2. 需求模糊 → 调用 brainstorming 探索
+  3. 编写 PRD → 调用 planning-with-files-zh
+  4. 优先级评估 → RICE/WSJF 评分
+  5. 移交 Arch → 输出 PRD 文档
+
+Architect 工作流:
+  1. 阅读 PRD
+  2. 技术调研 → 调用 web-search
+  3. 复杂方案 → 调用 brainstorming 探索
+  4. 编写架构设计 → 调用 planning-with-files-zh
+  5. 关联影响评估 → 输出 ADR + 契约表
+
+Project Manager 工作流:
+  1. 接收用户需求
+  2. 需求类 → 转 PdM
+  3. 技术类 → 转 Arch
+  4. 任务类 → 调用 planning-with-files-zh 制定计划
+  5. 请求用户确认 → 调用 Coordinator 执行
+  6. 完成前 → 调用 verification-before-completion
+
+Frontend Dev 工作流:
+  1. 阅读契约表
   2. 需要 UI 设计 → 调用 ui-ux-pro-max
   3. 实现组件
   4. 完成后 → 调用 code-simplifier 优化
 
 Backend Dev 工作流:
-  1. 接收需求
+  1. 阅读契约表
   2. 复杂需求 → 调用 brainstorming 分析
   3. 实现功能
   4. 完成后 → 调用 code-simplifier 优化
   5. 遇到 Bug → 调用 systematic-debugging
 
 QA Tester 工作流:
-  1. 编写测试
-  2. E2E 测试 → 调用 webapp-testing
-  3. 测试失败 → 调用 systematic-debugging 分析
-  4. 完成后 → 调用 code-simplifier 简化测试代码
+  1. 阅读契约表
+  2. 编写测试
+  3. E2E 测试 → 调用 webapp-testing
+  4. 测试失败 → 调用 systematic-debugging 分析
+  5. 完成后 → 调用 code-simplifier 简化
 
 Diagnostic Analyst 工作流:
   1. 接收问题报告
@@ -363,13 +462,11 @@ Diagnostic Analyst 工作流:
   6. 输出报告 → 调用 planning-with-files-zh 整理诊断报告
 
 Coordinator 工作流:
-  1. 接收需求
-  2. 需求模糊 → 调用 brainstorming 探索
-  3. 复杂项目 → 调用 planning-with-files-zh 制定计划
-     → 文件创建在 docs/planning/ 目录
-  4. 执行阶段 → 读取 docs/planning/task_plan.md 继续执行
-     → 或调用 dispatching-parallel-agents 并行调度
-  5. 完成前 → 调用 verification-before-completion 验证
+  1. 接收 PM 任务计划
+  2. 阅读契约表
+  3. 分解任务 → TaskCreate
+  4. 并行调度 → dispatching-parallel-agents
+  5. 汇总结果 → 汇报给 PM
 ```
 
 ---
