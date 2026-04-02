@@ -6,6 +6,39 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-02 - T1 信号回测与订单回测接口拆分完成 🎉
+
+**执行日期**: 2026-04-02  
+**执行人**: AI Builder  
+**状态**: ✅ 已完成
+
+---
+
+## T1: 信号回测与订单回测接口拆分 ✅
+
+**任务概述**: 将当前 `/api/backtest` 端点拆分为两个独立接口，明确区分信号回测和 PMS 订单回测两种模式。
+
+**修改文件**:
+| 文件 | 变更内容 |
+|------|----------|
+| `src/interfaces/api.py` | 新增 `/api/backtest/signals` 和 `/api/backtest/orders` 端点，原端点标记为 deprecated |
+| `web-front/src/lib/api.ts` | 新增 `runSignalBacktest()`，更新 `runPMSBacktest()` 调用新端点 |
+| `web-front/src/pages/Backtest.tsx` | 使用 `runSignalBacktest()` 替代 `runBacktest()` |
+
+**技术细节**:
+- `POST /api/backtest/signals` - 信号回测（v2_classic 模式），仅统计信号触发和过滤器拦截情况
+- `POST /api/backtest/orders` - PMS 订单回测（v3_pms 模式），包含订单执行、滑点、手续费、止盈止损模拟
+- 原 `/api/backtest` 端点保留向后兼容性，添加 `DeprecationWarning`
+- 两个新端点强制设置 `mode` 参数，避免混用
+
+**验证结果**:
+- ✅ 后端 API 模块导入成功
+- ✅ 三个回测端点正确注册 (`/api/backtest`, `/api/backtest/signals`, `/api/backtest/orders`)
+- ✅ BacktestRequest 模型验证通过
+- ✅ Git 提交成功：`02b6068`
+
+---
+
 ### 2026-04-02 - 配置管理功能（版本化快照方案 B）完成 🎉
 
 **执行日期**: 2026-04-02  
