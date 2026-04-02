@@ -66,6 +66,31 @@ class BacktestErrorCode:
     DATA_FETCH_ERROR = "BACKTEST-004"
     DATABASE_ERROR = "BACKTEST-005"
 
+
+# ============================================================
+# Configuration Constants (P1-003: 移除魔法数字)
+# ============================================================
+class BacktestConfig:
+    """回测相关配置常量"""
+    # K 线窗口大小：以订单创建时间为中心，前后各取的 K 线数量
+    KLINE_WINDOW_BEFORE = 10  # 前取 10 根
+    KLINE_WINDOW_AFTER = 10   # 后取 10 根
+    DEFAULT_KLINE_WINDOW = 25  # 默认获取 25 根 K 线用于预览
+
+    # P1-004: 时间框架映射统一从 domain.timeframe_utils 获取
+    # 避免多处定义导致不一致，完整定义见 domain.timeframe_utils.TIMEFRAME_TO_MS
+    @staticmethod
+    def get_timeframe_ms(timeframe: str) -> int:
+        """获取时间框架的毫秒数（统一从 domain 获取）"""
+        from src.domain.timeframe_utils import parse_timeframe_to_ms
+        return parse_timeframe_to_ms(timeframe)
+
+    @staticmethod
+    def get_timeframe_minutes(timeframe: str) -> int:
+        """获取时间框架的分钟数（用于快速计算）"""
+        return BacktestConfig.get_timeframe_ms(timeframe) // (60 * 1000)
+
+
 # Backtest Reports API Models
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -538,21 +563,11 @@ async def get_signal_context(signal_id: int):
         if not kline_timestamp or kline_timestamp == 0:
             return {"error": "Legacy signal data without kline_timestamp"}
 
-        # Parse timeframe to milliseconds
-        timeframe_map = {
-            "1m": 1 * 60 * 1000,
-            "5m": 5 * 60 * 1000,
-            "15m": 15 * 60 * 1000,
-            "30m": 30 * 60 * 1000,
-            "1h": 60 * 60 * 1000,
-            "4h": 4 * 60 * 60 * 1000,
-            "1d": 24 * 60 * 60 * 1000,
-            "1w": 7 * 24 * 60 * 60 * 1000,
-        }
-        timeframe_ms = timeframe_map.get(timeframe, 60 * 60 * 1000)  # Default 1h
+        # Parse timeframe to milliseconds (P1-004: 使用统一工具函数)
+        timeframe_ms = BacktestConfig.get_timeframe_ms(timeframe)
 
         # Calculate since timestamp (go back 25 candles to ensure target is in middle-rear)
-        since = kline_timestamp - (25 * timeframe_ms)
+        since = kline_timestamp - (BacktestConfig.DEFAULT_KLINE_WINDOW * timeframe_ms)
 
         # Fetch K-line data from CCXT
         import ccxt.async_support as ccxt
@@ -1138,14 +1153,14 @@ class BacktestOrderSummary(BaseModel):
     symbol: str = Field(..., description="交易对")
     order_role: str
     order_type: str
-    direction: str
+    direction: Direction  # P1-001: 使用 Direction 枚举而非 str
     requested_qty: str
     filled_qty: str
-    average_exec_price: Optional[str]
+    average_exec_price: Optional[str] = None
     status: str
     created_at: int
     updated_at: int
-    exit_reason: Optional[str]
+    exit_reason: Optional[str] = None
 
 
 class ListBacktestOrdersResponse(BaseModel):
@@ -1235,7 +1250,7 @@ async def list_backtest_orders(
                     symbol=o.symbol,
                     order_role=o.order_role.value,
                     order_type=o.order_type.value,
-                    direction=o.direction.value,
+                    direction=o.direction,  # P1-001: Pydantic 自动序列化 Direction 枚举
                     requested_qty=str(o.requested_qty),
                     filled_qty=str(o.filled_qty),
                     average_exec_price=str(o.average_exec_price) if o.average_exec_price else None,
@@ -1328,14 +1343,13 @@ async def get_backtest_order(report_id: str, order_id: str):
         data_repo = HistoricalDataRepository()
         await data_repo.initialize()
         try:
-            # 计算时间范围
-            tf_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}.get(report.timeframe, 15)
-            kline_interval_ms = tf_minutes * 60 * 1000
+            # 计算时间范围（P1-004: 使用统一工具函数）
+            kline_interval_ms = BacktestConfig.get_timeframe_ms(report.timeframe)
 
-            # 以订单创建时间为中心，前后各取 10 根 K 线
+            # 以订单创建时间为中心，前后各取 KLINE_WINDOW_BEFORE/AFTER 根 K 线 (P1-003)
             center_time = order.created_at
-            start_time = center_time - (10 * kline_interval_ms)
-            end_time = center_time + (10 * kline_interval_ms)
+            start_time = center_time - (BacktestConfig.KLINE_WINDOW_BEFORE * kline_interval_ms)
+            end_time = center_time + (BacktestConfig.KLINE_WINDOW_AFTER * kline_interval_ms)
 
             klines = await data_repo.get_klines(
                 symbol=order.symbol,
@@ -2880,24 +2894,11 @@ async def get_order_klines(
         # Get kline_timestamp from order (filled_at or created_at)
         kline_timestamp = order_orm.filled_at if order_orm and order_orm.filled_at else order_orm.created_at if order_orm else int(datetime.now(timezone.utc).timestamp() * 1000)
 
-        # Parse timeframe to milliseconds
-        timeframe_map = {
-            "1m": 1 * 60 * 1000,
-            "5m": 5 * 60 * 1000,
-            "15m": 15 * 60 * 1000,
-            "30m": 30 * 60 * 1000,
-            "1h": 60 * 60 * 1000,
-            "2h": 2 * 60 * 60 * 1000,
-            "4h": 4 * 60 * 60 * 1000,
-            "6h": 6 * 60 * 60 * 1000,
-            "12h": 12 * 60 * 60 * 1000,
-            "1d": 24 * 60 * 60 * 1000,
-            "1w": 7 * 24 * 60 * 60 * 1000,
-        }
-        timeframe_ms = timeframe_map.get(timeframe, 15 * 60 * 1000)  # Default 15m
+        # Parse timeframe to milliseconds (P1-004: 使用统一工具函数)
+        timeframe_ms = BacktestConfig.get_timeframe_ms(timeframe)
 
-        # Calculate since timestamp (go back 25 candles to ensure target is in middle-rear)
-        since = kline_timestamp - (25 * timeframe_ms)
+        # Calculate since timestamp (go back DEFAULT_KLINE_WINDOW candles to ensure target is in middle-rear)
+        since = kline_timestamp - (BacktestConfig.DEFAULT_KLINE_WINDOW * timeframe_ms)
 
         # Fetch K-line data from CCXT
         import ccxt.async_support as ccxt

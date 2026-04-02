@@ -707,20 +707,49 @@ class OrderRepository:
 
             return [self._row_to_order(row) for row in rows]
 
-    async def delete_order(self, order_id: str) -> None:
+    async def delete_order(self, order_id: str, cascade: bool = True) -> None:
         """
         Delete an order from the database.
 
+        P1-005: 支持级联清理
+        - 如果删除的是 ENTRY 订单，默认级联删除关联的 TP/SL 订单
+        - 删除子订单（TP/SL）时，不级联删除父订单
+
         Args:
             order_id: Order ID to delete
+            cascade: If True and order is ENTRY, cascade delete child TP/SL orders
         """
         async with self._lock:
+            # 获取订单信息以判断是否需要级联删除
+            order = await self.get_order(order_id)
+            if not order:
+                logger.warning(f"尝试删除不存在的订单：{order_id}")
+                return
+
+            # 如果是 ENTRY 订单且启用级联删除，先删除关联的 TP/SL 订单
+            if cascade and order.order_role == OrderRole.ENTRY:
+                # 删除子订单（通过 parent_order_id 关联）
+                await self._db.execute(
+                    "DELETE FROM orders WHERE parent_order_id = ?",
+                    (order_id,)
+                )
+                logger.debug(f"级联删除子订单 (parent={order_id})")
+
+                # 删除 OCO 组中的订单（通过 oco_group_id 关联）
+                if order.oco_group_id:
+                    await self._db.execute(
+                        "DELETE FROM orders WHERE oco_group_id = ? AND id != ?",
+                        (order.oco_group_id, order_id)
+                    )
+                    logger.debug(f"级联删除 OCO 组订单 (group={order.oco_group_id})")
+
+            # 删除主订单
             await self._db.execute(
                 "DELETE FROM orders WHERE id = ?",
                 (order_id,)
             )
             await self._db.commit()
-            logger.debug(f"订单已删除：{order_id}")
+            logger.info(f"订单已删除：{order_id} (cascade={cascade})")
 
     async def clear_orders(self, signal_id: Optional[str] = None, symbol: Optional[str] = None) -> int:
         """
@@ -752,4 +781,62 @@ class OrderRepository:
             await cursor.close()
 
             logger.info(f"订单已清理：{deleted_count} 个")
+            return deleted_count
+
+    async def delete_orders_by_signal_id(self, signal_id: str, cascade: bool = True) -> int:
+        """
+        Delete all orders for a signal (P1-005: 级联清理).
+
+        Args:
+            signal_id: Signal ID to delete orders for
+            cascade: If True, also delete related child orders
+
+        Returns:
+            Number of orders deleted
+        """
+        async with self._lock:
+            # 先获取所有关联订单
+            orders = await self.get_orders_by_signal(signal_id)
+            order_ids = [o.id for o in orders]
+
+            # 收集所有需要删除的订单 ID（包括级联的）
+            all_to_delete = set(order_ids)
+
+            if cascade:
+                # 找到所有 ENTRY 订单
+                entry_ids = [o.id for o in orders if o.order_role == OrderRole.ENTRY]
+
+                # 找到所有 ENTRY 的子订单 ID
+                for entry_id in entry_ids:
+                    # 通过 parent_order_id 查找子订单
+                    cursor = await self._db.execute(
+                        "SELECT id FROM orders WHERE parent_order_id = ?",
+                        (entry_id,)
+                    )
+                    child_rows = await cursor.fetchall()
+                    await cursor.close()
+                    all_to_delete.update(row[0] for row in child_rows)
+
+                    # 通过 oco_group_id 查找 OCO 组订单
+                    entry_order = next((o for o in orders if o.id == entry_id), None)
+                    if entry_order and entry_order.oco_group_id:
+                        cursor = await self._db.execute(
+                            "SELECT id FROM orders WHERE oco_group_id = ?",
+                            (entry_order.oco_group_id,)
+                        )
+                        oco_rows = await cursor.fetchall()
+                        await cursor.close()
+                        all_to_delete.update(row[0] for row in oco_rows)
+
+            # 批量删除
+            placeholders = ','.join('?' * len(all_to_delete))
+            cursor = await self._db.execute(
+                f"DELETE FROM orders WHERE id IN ({placeholders})",
+                tuple(all_to_delete)
+            )
+            deleted_count = cursor.rowcount
+            await self._db.commit()
+            await cursor.close()
+
+            logger.info(f"信号 {signal_id} 的订单已清理：{deleted_count} 个 (cascade={cascade})")
             return deleted_count

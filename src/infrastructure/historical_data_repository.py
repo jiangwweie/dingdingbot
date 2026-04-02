@@ -177,9 +177,9 @@ class HistoricalDataRepository:
                 )
 
                 if need_fallback:
-                    logger.info(
+                    logger.debug(
                         f"Local data insufficient ({len(klines)} < {limit}), "
-                        f"fetching from exchange..."
+                        f"fetching from exchange for {symbol} {timeframe}..."
                     )
 
                     # 计算需要从交易所获取的时间范围
@@ -201,7 +201,7 @@ class HistoricalDataRepository:
                             )
                             klines = partial_klines + klines
                             klines = klines[:limit]  # 保持 limit 限制
-                            logger.info(f"Supplemented {len(partial_klines)} klines from exchange (before)")
+                            logger.debug(f"Supplemented {len(partial_klines)} klines from exchange (before) for {symbol} {timeframe}")
 
                         if existing_max_ts < end_time and len(klines) < limit:
                             # 补充后半部分
@@ -211,7 +211,7 @@ class HistoricalDataRepository:
                             )
                             klines = klines + partial_klines
                             klines = klines[:limit]  # 保持 limit 限制
-                            logger.info(f"Supplemented {len(partial_klines)} klines from exchange (after)")
+                            logger.debug(f"Supplemented {len(partial_klines)} klines from exchange (after) for {symbol} {timeframe}")
                     else:
                         # 没有本地数据，直接获取
                         klines = await self._fetch_from_exchange(
@@ -296,7 +296,7 @@ class HistoricalDataRepository:
         # 保存到本地
         if klines:
             await self._save_klines(klines)
-            logger.info(f"Saved {len(klines)} klines to local DB for {symbol} {timeframe}")
+            logger.debug(f"Saved {len(klines)} klines to local DB for {symbol} {timeframe}")
 
         return klines
 
