@@ -1,12 +1,107 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp } from 'lucide-react';
+import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp, ChevronDown, Monitor, Briefcase, Beaker, Settings2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 import SettingsPanel from './SettingsPanel';
 
+// Navigation item type
+interface NavItem {
+  to: string;
+  icon: React.ElementType;
+  label: string;
+}
+
+// Navigation category type
+interface NavCategory {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  color: string;
+  items: NavItem[];
+}
+
+// Navigation data with categories
+const navCategories: NavCategory[] = [
+  {
+    id: 'monitoring',
+    label: '监控中心',
+    icon: Monitor,
+    color: 'blue',
+    items: [
+      { to: '/dashboard', icon: Activity, label: '仪表盘' },
+      { to: '/signals', icon: BarChart2, label: '信号' },
+      { to: '/attempts', icon: Bug, label: '尝试溯源' },
+    ],
+  },
+  {
+    id: 'trading',
+    label: '交易管理',
+    icon: Briefcase,
+    color: 'green',
+    items: [
+      { to: '/positions', icon: TrendingUp, label: '仓位' },
+      { to: '/orders', icon: FileText, label: '订单' },
+    ],
+  },
+  {
+    id: 'backtest',
+    label: '策略回测',
+    icon: Beaker,
+    color: 'purple',
+    items: [
+      { to: '/strategies', icon: Zap, label: '策略工作台' },
+      { to: '/backtest', icon: FlaskConical, label: '回测沙箱' },
+      { to: '/pms-backtest', icon: BarChart2, label: 'PMS 回测' },
+    ],
+  },
+  {
+    id: 'settings',
+    label: '系统设置',
+    icon: Settings2,
+    color: 'gray',
+    items: [
+      { to: '/account', icon: Wallet, label: '账户' },
+      { to: '/snapshots', icon: Save, label: '配置快照' },
+    ],
+  },
+];
+
+// Color mapping for categories
+const colorClasses = {
+  blue: {
+    bg: 'bg-blue-50',
+    bgHover: 'hover:bg-blue-50',
+    text: 'text-blue-700',
+    border: 'border-blue-200',
+    active: 'bg-blue-100',
+  },
+  green: {
+    bg: 'bg-green-50',
+    bgHover: 'hover:bg-green-50',
+    text: 'text-green-700',
+    border: 'border-green-200',
+    active: 'bg-green-100',
+  },
+  purple: {
+    bg: 'bg-purple-50',
+    bgHover: 'hover:bg-purple-50',
+    text: 'text-purple-700',
+    border: 'border-purple-200',
+    active: 'bg-purple-100',
+  },
+  gray: {
+    bg: 'bg-gray-50',
+    bgHover: 'hover:bg-gray-50',
+    text: 'text-gray-700',
+    border: 'border-gray-200',
+    active: 'bg-gray-100',
+  },
+};
+
 export default function Layout() {
   const [countdown, setCountdown] = useState(30);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [expandedCategory, setExpandedCategory] = useState<string | null>('monitoring');
   const navigate = useNavigate();
 
   // Global 30s countdown timer for UI display
@@ -17,18 +112,10 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, []);
 
-  const navItems = [
-    { to: '/dashboard', icon: Activity, label: '仪表盘' },
-    { to: '/signals', icon: BarChart2, label: '信号' },
-    { to: '/positions', icon: TrendingUp, label: '仓位' },
-    { to: '/orders', icon: FileText, label: '订单' },
-    { to: '/backtest', icon: FlaskConical, label: '回测沙箱' },
-    { to: '/pms-backtest', icon: BarChart2, label: 'PMS 回测' },
-    { to: '/attempts', icon: Bug, label: '尝试溯源' },
-    { to: '/account', icon: Wallet, label: '账户' },
-    { to: '/strategies', icon: Zap, label: '策略工作台' },
-    { to: '/snapshots', icon: Save, label: '配置快照' },
-  ];
+  // Toggle category expansion
+  const toggleCategory = (categoryId: string) => {
+    setExpandedCategory(expandedCategory === categoryId ? null : categoryId);
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -43,25 +130,71 @@ export default function Layout() {
                 </div>
                 <span className="font-semibold text-lg tracking-tight">盯盘狗🐶</span>
               </div>
-              
-              <nav className="hidden md:flex space-x-1">
-                {navItems.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={({ isActive }) =>
-                      cn(
-                        'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                        isActive
-                          ? 'bg-black/5 text-black'
-                          : 'text-gray-500 hover:text-black hover:bg-black/5'
-                      )
-                    }
-                  >
-                    <item.icon className="w-4 h-4" />
-                    {item.label}
-                  </NavLink>
-                ))}
+
+              {/* Desktop Navigation with Categories */}
+              <nav className="hidden md:flex items-center gap-1">
+                {navCategories.map((category) => {
+                  const CategoryIcon = category.icon;
+                  const colors = colorClasses[category.color as keyof typeof colorClasses];
+                  const isExpanded = expandedCategory === category.id;
+                  const hasActiveItem = category.items.some(
+                    (item) => window.location.pathname === item.to
+                  );
+
+                  return (
+                    <div key={category.id} className="relative">
+                      {/* Category Button */}
+                      <button
+                        onClick={() => toggleCategory(category.id)}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all',
+                          isExpanded || hasActiveItem
+                            ? `${colors.bg} ${colors.text}`
+                            : 'text-gray-500 hover:bg-gray-50'
+                        )}
+                      >
+                        <CategoryIcon className="w-4 h-4" />
+                        <span>{category.label}</span>
+                        <ChevronDown
+                          className={cn(
+                            'w-3.5 h-3.5 transition-transform',
+                            isExpanded ? 'rotate-180' : ''
+                          )}
+                        />
+                      </button>
+
+                      {/* Dropdown Menu */}
+                      {isExpanded && (
+                        <div className={cn(
+                          'absolute top-full left-0 mt-1 min-w-[160px] rounded-xl shadow-lg border p-1 z-50 bg-white/95 backdrop-blur-xl',
+                          colors.border
+                        )}>
+                          {category.items.map((item) => {
+                            const ItemIcon = item.icon;
+                            return (
+                              <NavLink
+                                key={item.to}
+                                to={item.to}
+                                onClick={() => setExpandedCategory(null)}
+                                className={({ isActive }) =>
+                                  cn(
+                                    'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                                    isActive
+                                      ? `${colors.active} ${colors.text}`
+                                      : 'text-gray-600 hover:bg-gray-50'
+                                  )
+                                }
+                              >
+                                <ItemIcon className="w-3.5 h-3.5" />
+                                {item.label}
+                              </NavLink>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </nav>
             </div>
 
