@@ -2270,7 +2270,7 @@ async def get_strategy_metadata():
     }
 
 
-@app.get("/api/strategies/templates", response_model=StrategyTemplateListResponse)
+@app.get("/api/strategies/templates", response_model="StrategyTemplateListResponse")
 async def list_strategy_templates(
     limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
     offset: int = Query(default=0, ge=0, description="分页偏移量"),
@@ -2313,7 +2313,7 @@ async def list_strategy_templates(
         ).model_dump()
 
 
-@app.get("/api/strategies", response_model=StrategyListResponse)
+@app.get("/api/strategies", response_model="StrategyListResponse")
 async def get_custom_strategies(
     limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
     offset: int = Query(default=0, ge=0, description="分页偏移量"),
@@ -2563,7 +2563,7 @@ class StrategyApplyResponse(BaseModel):
     strategy_name: str = Field(..., description="Applied strategy name")
 
 
-@app.post("/api/strategies/preview", response_model=StrategyPreviewResponse)
+@app.post("/api/strategies/preview", response_model="StrategyPreviewResponse")
 async def preview_strategy(request: StrategyPreviewRequest):
     """
     Preview a strategy configuration against recent kline data.
@@ -3026,7 +3026,7 @@ class StrategyParamsPreviewResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list, description="Validation warnings")
 
 
-@app.get("/api/strategy/params", response_model=StrategyParamsResponse)
+@app.get("/api/strategy/params", response_model="StrategyParamsResponse")
 async def get_strategy_params():
     """
     Get current strategy parameters.
@@ -3109,7 +3109,7 @@ async def get_strategy_params():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/strategy/params", response_model=StrategyParamsResponse)
+@app.put("/api/strategy/params", response_model="StrategyParamsResponse")
 async def update_strategy_params(request: StrategyParamsUpdateRequest):
     """
     Update strategy parameters with hot-reload.
