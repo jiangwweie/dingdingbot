@@ -6,6 +6,146 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-03 20:00 - DEBT-3 API 依赖注入方案实现 ✅
+
+**开始时间**: 2026-04-03 20:00
+**会话阶段**: 开发会话
+**参与者**: 后端开发 + 测试专家
+
+#### 任务概述
+
+实现订单管理 API 端点的依赖注入支持，解决测试 fixture 无法注入临时数据库的问题。
+
+#### 架构决策
+
+依据架构评审报告 (`docs/reviews/DEBT-3-architecture-review-result.md`):
+- ✅ 采纳方案 A - 添加 `_get_order_repo()` 辅助函数
+- ✅ 采纳方案 A - 参数命名改为 `config_entry_repo`
+- ⚠️ 取消订单端点不需要修改（使用 ExchangeGateway，非 OrderRepository）
+
+#### 完成工作
+
+**后端开发 (1h)**:
+1. ✅ 添加 `_order_repo` 全局变量声明
+2. ✅ 添加 `_get_order_repo()` 辅助函数（懒加载模式）
+3. ✅ 扩展 `set_dependencies()` 添加 `order_repo` 参数
+4. ✅ 修改 5 个 API 端点使用依赖注入:
+   - GET /api/v3/orders/tree
+   - DELETE /api/v3/orders/batch
+   - GET /api/v3/orders/{order_id}
+   - GET /api/v3/orders/{order_id}/klines
+   - GET /api/v3/orders
+
+**资源管理**:
+- 添加 `if not _order_repo: await repo.close()` 逻辑
+- 注入实例不提前关闭，非注入实例正常关闭
+
+**测试修改**:
+- 保留 monkey-patching 方式（发现 asyncio.Lock 事件循环冲突问题）
+
+#### 发现问题
+
+在测试验证过程中发现 `asyncio.Lock()` 事件循环冲突:
+- `OrderRepository` 在 `__init__` 中创建 `asyncio.Lock()`
+- 当 `TestClient` 使用不同事件循环时，lock 无法正常工作导致死锁
+- 需要后续修复：将 lock 创建延迟到 `initialize()` 方法
+
+#### 验证结果
+
+```
+Test 1: Verify _get_order_repo() function
+  _get_order_repo function exists: True
+  Injected repo matches returned repo: True
+  Fallback creates new instance: True
+All dependency injection tests passed!
+```
+
+#### Git 提交
+
+```
+d7240f8 feat(api): DEBT-3 API 依赖注入方案实现
+```
+
+---
+
+### 2026-04-03 15:00 - OpenClaw 集成需求规划完成 ✅
+
+**开始时间**: 2026-04-03 15:00
+**会话阶段**: 需求规划会话
+**参与者**: 产品经理 + 用户
+
+#### 需求澄清对话
+
+**用户需求**: 将 openclaw、盯盘狗、Claude Code 三者结合使用
+
+**初步方案（被否决）**:
+1. ❌ 查看持仓 - 币安 app 已有
+2. ❌ 信号推送 - webhook 已有
+3. ❌ 异常诊断 - 价值不够高
+
+**关键洞察**: 用户明确指出"看中了 openclaw 集成了飞书，交互能力很强"，这才是真正的差异化价值
+
+#### 深度头脑风暴（基于飞书强交互能力）
+
+**差异化价值公式**:
+```
+差异化价值 = (系统 A + 系统 B) - 已有解决方案价值
+```
+
+**核心能力拆解**:
+- OpenClaw: 飞书卡片消息 + 多模型对比 + Node.js 技能
+- 盯盘狗: 信号引擎 + 风控预检查 + 回测系统
+- Claude Code: 代码修改 + Agent Team + 测试验证
+
+**最终方案（用户确认）**:
+1. ✅ MVP-1: 交互式风险问答（RICE 11.3，6-8h）
+   - 飞书对话查询风险 + 卡片展示 + 一键操作
+   - 差异化：币安 app 无风险分析能力
+2. ✅ MVP-2: 交互式订单确认（RICE 5.6，12-16h）
+   - 信号触发卡片推送 + 一键确认/拒绝 + AI 对话追问
+   - 差异化：webhook 推送无交互能力
+
+#### 交付成果
+
+**需求文档**: `docs/products/openclaw-integration-brief.md` ✅
+- 包含背景、痛点、差异化价值、MVP 定义、技术方案、验收标准
+- RICE 评分明细
+- 风险与依赖分析
+
+**任务计划**: 已更新 `docs/planning/task_plan.md` ✅
+- 新增 P0 级优先任务（OpenClaw 集成）
+- 2 个 MVP，总计 18-24h
+- 13 个子任务（OC-1-1 ~ OC-2-7）
+
+**状态看板**: 已更新 `docs/planning/board.md` ✅
+
+#### 待用户确认事项
+
+1. 实现顺序：先 MVP-1（风险问答）还是 MVP-2（订单确认）？
+2. 时间约束：本周能投入多少时间？
+3. 技术方案偏好：OpenClaw 技能开发方式？
+
+#### 技术验证：飞书 @机器人测试
+
+**测试时间**: 2026-04-03 12:43
+**测试目的**: 验证 webhook 推送消息 @机器人能否触发事件订阅
+
+**测试结果**:
+- ✅ 消息发送成功
+- ✅ @机器人成功（名字变蓝色）
+- ❌ **OpenClaw 未响应**（机器人无法接收自己的消息事件）
+
+**结论**: 飞书安全机制限制，机器人无法接收自己通过 webhook 发送的消息。
+
+**最终方案**: **飞书机器人 API 方案**
+- 盯盘狗调用飞书机器人 API 发送卡片消息
+- 用户点击按钮 → OpenClaw WebSocket 接收回调
+- 预计工时：3.5h（MVP-1）
+
+**架构文档**: `docs/designs/openclaw-integration-architecture.md` ✅
+
+---
+
 ### 2026-04-03 14:30 - 开工会话
 
 **开始时间**: 2026-04-03 14:30
