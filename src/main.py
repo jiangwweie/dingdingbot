@@ -16,7 +16,7 @@ import sys
 import signal as sys_signal
 from typing import Optional
 
-from src.application.config_manager import ConfigManager, load_all_configs
+from src.application.config_manager import ConfigManager, load_all_from_db
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.notifier import NotificationService, get_notification_service
 from src.application.signal_pipeline import SignalPipeline
@@ -104,13 +104,8 @@ def create_signal_pipeline(config_manager: ConfigManager, signal_repository=None
     """
     global _signal_pipeline
 
-    # Get risk config from user config
-    user = config_manager.user_config
-
-    risk_config = RiskConfig(
-        max_loss_percent=user.risk.max_loss_percent,
-        max_leverage=user.risk.max_leverage,
-    )
+    # Get risk config from config_manager
+    risk_config = config_manager.risk_config
 
     # Create pipeline with new dynamic config
     _signal_pipeline = SignalPipeline(
@@ -118,7 +113,7 @@ def create_signal_pipeline(config_manager: ConfigManager, signal_repository=None
         risk_config=risk_config,
         notification_service=get_notification_service(),
         signal_repository=signal_repository,
-        cooldown_seconds=config_manager.core_config.signal_pipeline.cooldown_seconds,
+        cooldown_seconds=config_manager.system_config.cooldown_seconds,
     )
 
     return _signal_pipeline
@@ -155,7 +150,7 @@ async def run_application():
         # Phase 1: Load Configuration
         # =============================================
         logger.info("Phase 1: Loading configuration...")
-        config_manager = load_all_configs()
+        config_manager = await load_all_from_db()
         logger.info("Configuration loaded successfully")
 
         # =============================================
@@ -173,8 +168,8 @@ async def run_application():
         logger.info("Phase 2: Setting up notification channels...")
         _notification_service = get_notification_service()
         _notification_service.setup_channels(
-            [{"type": ch.type, "webhook_url": ch.webhook_url}
-             for ch in config_manager.user_config.notification.channels]
+            [{"type": ch.get('channel', 'feishu'), "webhook_url": ch.get('webhook_url', '')}
+             for ch in config_manager.notifications]
         )
         logger.info(f"Notification channels ready: {len(_notification_service._channels)}")
 
@@ -182,7 +177,7 @@ async def run_application():
         # Phase 3: Initialize Exchange Gateway
         # =============================================
         logger.info("Phase 3: Initializing exchange gateway...")
-        exchange_cfg = config_manager.user_config.exchange
+        exchange_cfg = config_manager.exchange_config
 
         _exchange_gateway = ExchangeGateway(
             exchange_name=exchange_cfg.name,
@@ -212,9 +207,9 @@ async def run_application():
         # Phase 5: REST API Warmup
         # =============================================
         logger.info("Phase 5: Warming up historical data...")
-        warmup_bars = config_manager.core_config.warmup.history_bars
-        symbols = config_manager.merged_symbols
-        timeframes = config_manager.user_config.timeframes
+        warmup_bars = config_manager.system_config.history_bars
+        symbols = config_manager.symbols
+        timeframes = ["15m", "1h", "4h", "1d"]  # Default timeframes or from config
 
         warmup_tasks = []
         for symbol in symbols:
@@ -245,7 +240,7 @@ async def run_application():
         # Phase 6: Start Asset Polling
         # =============================================
         logger.info("Phase 6: Starting asset polling...")
-        polling_interval = config_manager.user_config.asset_polling.interval_seconds
+        polling_interval = config_manager.asset_polling_config.interval_seconds
         await _exchange_gateway.start_asset_polling(polling_interval)
 
         # Periodically update pipeline with latest snapshot

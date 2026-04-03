@@ -37,14 +37,10 @@ class TrendDirection(str, Enum):
 # ============================================================
 class SignalStatus(str, Enum):
     """信号状态枚举"""
-    GENERATED = "generated"      # 已生成
-    PENDING = "pending"          # 等待成交
-    FILLED = "filled"            # 已成交
-    CANCELLED = "cancelled"      # 已取消
-    REJECTED = "rejected"        # 被拒绝
-    # S6-2: Signal covering status
-    ACTIVE = "active"            # 当前有效信号
-    SUPERSEDED = "superseded"    # 已被更优信号替代
+    PENDING = "pending"           # 待发送
+    SENT = "sent"                 # 已发送
+    SUPERSEDED = "superseded"     # 被高质量信号覆盖
+    COOLDOWN_SKIPPED = "cooldown_skipped"  # 冷却跳过
 
 
 # Note: SignalTrack is defined after SignalResult to avoid forward reference issues
@@ -99,7 +95,7 @@ class SignalResult(BaseModel):
     current_leverage: int        # Actual leverage used
     tags: List[Dict[str, str]] = Field(default_factory=list)  # Dynamic filter tags e.g., [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
     risk_reward_info: str        # Risk summary (e.g., "Risk 1% = 200 USDT")
-    status: str = "PENDING"      # Signal status: PENDING (monitoring), WON (profit), LOST (loss)
+    status: SignalStatus = Field(default=SignalStatus.PENDING)  # 信号状态
     pnl_ratio: float = 0.0       # Profit/Loss ratio (positive for win e.g. 1.5, negative for loss e.g. -1.0)
     kline_timestamp: int = 0     # K-line close timestamp in milliseconds (default 0 for legacy compatibility)
     strategy_name: str = "unknown"  # Strategy name that generated this signal (e.g., "pinbar", "engulfing")

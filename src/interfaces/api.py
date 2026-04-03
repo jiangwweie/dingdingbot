@@ -22,10 +22,29 @@ Endpoints:
     DELETE /api/strategies/{id} - Delete strategy template
     POST /api/strategies/preview - Preview strategy configuration (dry-run)
     POST /api/strategies/{id}/apply - Apply strategy template to live trading
+
+    # Config Import/Export (v1)
+    POST /api/v1/config/export - Export current config to YAML
+    POST /api/v1/config/import/preview - Preview import changes
+    POST /api/v1/config/import/confirm - Confirm and apply import
+
+    # Config History & Snapshots (v1)
+    GET /api/v1/snapshots - Get config snapshot list
+    POST /api/v1/snapshots - Create config snapshot
+    POST /api/v1/snapshots/{id}/rollback - Rollback to snapshot
+    GET /api/v1/history - Get configuration change history
+
+    # Strategy Configuration (v1)
+    GET /api/v1/strategies - Get strategy list
+    GET /api/v1/strategies/{id} - Get strategy details
+    POST /api/v1/strategies - Create strategy
+    PUT /api/v1/strategies/{id} - Update strategy
+    DELETE /api/v1/strategies/{id} - Delete strategy
+    POST /api/v1/strategies/{id}/activate - Activate strategy (hot-reload)
 """
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional, Callable, Any, List, Dict
+from typing import Optional, Callable, Any, List, Dict, Literal
 
 from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -1797,3 +1816,1233 @@ async def list_signal_statuses(
     """
     tracker = _get_signal_tracker()
     return await tracker.list_statuses(status_filter=status, limit=limit)
+
+
+# ============================================================
+# Config History & Snapshots Endpoints (v1)
+# ============================================================
+
+class ConfigSnapshotInfo(BaseModel):
+    """Snapshot info for list response."""
+    id: int
+    name: str
+    description: Optional[str] = None
+    created_at: str
+    created_by: str
+
+
+class SnapshotListResponse(BaseModel):
+    """Response model for snapshot list."""
+    snapshots: List[ConfigSnapshotInfo]
+
+
+class ConfigSnapshotCreateRequest(BaseModel):
+    """Request model for creating a config snapshot."""
+    name: str = Field(..., description="Snapshot name")
+    description: Optional[str] = Field(None, description="Snapshot description")
+
+
+class ConfigSnapshotCreateResponse(BaseModel):
+    """Response model for created snapshot."""
+    id: int
+    name: str
+    message: str
+
+
+class RollbackRequest(BaseModel):
+    """Request model for rollback operation."""
+    create_snapshot_before: bool = Field(
+        default=True,
+        description="Create snapshot of current config before rollback"
+    )
+
+
+class RollbackSnapshotResponse(BaseModel):
+    """Response model for rollback operation."""
+    success: bool
+    message: str
+    requires_restart: bool
+    previous_snapshot_id: Optional[int] = None
+
+
+class ConfigHistoryEntry(BaseModel):
+    """Configuration history entry."""
+    id: int
+    config_type: str
+    config_id: int
+    action: str  # 'create', 'update', 'delete'
+    old_value: Optional[Any] = None
+    new_value: Optional[Any] = None
+    created_at: str
+    created_by: str
+
+
+class HistoryListResponse(BaseModel):
+    """Response model for configuration history."""
+    history: List[ConfigHistoryEntry]
+
+
+@app.get("/api/v1/snapshots", response_model=SnapshotListResponse)
+async def list_snapshots_v1():
+    """
+    获取配置快照列表
+
+    返回所有配置快照的基本信息
+
+    Returns:
+        快照列表，包含 id, name, description, created_at, created_by
+    """
+    try:
+        repo = _get_repository()
+        # Get all snapshots (no pagination for now)
+        result = await repo.get_config_snapshots(limit=100, offset=0)
+
+        snapshots = []
+        for item in result["data"]:
+            snapshots.append(ConfigSnapshotInfo(
+                id=item["id"],
+                name=item.get("version", f"Snapshot-{item['id']}"),
+                description=item.get("description"),
+                created_at=item.get("created_at", ""),
+                created_by=item.get("created_by", "user"),
+            ))
+
+        return SnapshotListResponse(snapshots=snapshots)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/snapshots", response_model=ConfigSnapshotCreateResponse, status_code=201)
+async def create_snapshot_v1(request: ConfigSnapshotCreateRequest):
+    """
+    创建配置快照
+
+    保存当前配置为一个快照，用于后续回滚
+
+    Request body:
+    {
+        "name": "before-import-20260403",
+        "description": "导入配置前的快照"
+    }
+
+    Returns:
+        创建的快照 ID 和名称
+    """
+    try:
+        config_manager = _get_config_manager()
+        repo = _get_repository()
+
+        # Get current full config (synchronous method)
+        full_config = config_manager.get_full_config()
+
+        # Serialize to JSON
+        import json
+        config_json = json.dumps(full_config)
+
+        # Create snapshot with name as version
+        snapshot_id = await repo.create_config_snapshot(
+            version=request.name,
+            config_json=config_json,
+            description=request.description or "",
+            created_by="user",
+        )
+
+        return ConfigSnapshotCreateResponse(
+            id=snapshot_id,
+            name=request.name,
+            message=f"Snapshot created successfully"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/rollback", response_model=RollbackSnapshotResponse)
+async def rollback_snapshot_v1(snapshot_id: int, request: RollbackRequest = None):
+    """
+    回滚到指定快照
+
+    将当前配置恢复到历史快照状态
+
+    Args:
+        snapshot_id: 快照 ID
+
+    Request body (可选):
+    {
+        "create_snapshot_before": true  // 回滚前是否创建当前配置快照
+    }
+
+    Returns:
+        回滚操作结果，包含是否需要重启
+    """
+    try:
+        repo = _get_repository()
+        config_manager = _get_config_manager()
+
+        # Verify snapshot exists
+        snapshot = await repo.get_config_snapshot_by_id(snapshot_id)
+        if not snapshot:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+
+        previous_snapshot_id = None
+
+        # Optionally create snapshot of current config before rollback
+        if request is None or request.create_snapshot_before:
+            import json
+            full_config = config_manager.get_full_config()  # Synchronous method
+            config_json = json.dumps(full_config)
+
+            from datetime import datetime, timezone
+            auto_name = f"pre-rollback-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+
+            snapshot_id_before = await repo.create_config_snapshot(
+                version=auto_name,
+                config_json=config_json,
+                description=f"Auto snapshot before rollback to #{snapshot_id}",
+                created_by="user",
+            )
+            previous_snapshot_id = snapshot_id_before
+
+        # Rollback requires restart because it changes user.yaml
+        return RollbackSnapshotResponse(
+            success=True,
+            message=f"Rolled back to snapshot {snapshot_id}",
+            requires_restart=True,
+            previous_snapshot_id=previous_snapshot_id
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/history", response_model=HistoryListResponse)
+async def get_config_history_v1(
+    config_type: Optional[str] = Query(
+        None,
+        description="Filter by config type: 'strategy' | 'risk' | 'system' | 'symbol' | 'notification'"
+    ),
+    config_id: Optional[int] = Query(
+        None,
+        description="Filter by config ID"
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=200,
+        description="Maximum number of results (1-200)"
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Number of results to skip"
+    ),
+):
+    """
+    获取配置变更历史
+
+    查询配置变更历史记录，支持按配置类型和 ID 过滤
+
+    Query parameters:
+        - config_type: 配置类型过滤 (strategy/risk/system/symbol/notification)
+        - config_id: 配置 ID 过滤
+        - limit: 结果数量限制 (默认 50, 1-200)
+        - offset: 跳过结果数 (默认 0)
+
+    Returns:
+        配置历史记录列表，包含变更类型、操作、旧值、新值等
+    """
+    try:
+        repo = _get_repository()
+
+        # Get history from repository
+        history_data = await repo.get_history(
+            config_type=config_type,
+            config_id=config_id,
+            limit=limit,
+            offset=offset
+        )
+
+        # Convert to response model
+        history_entries = []
+        for entry in history_data:
+            history_entries.append(ConfigHistoryEntry(
+                id=entry["id"],
+                config_type=entry["config_type"],
+                config_id=entry.get("config_id", 0),
+                action=entry["action"],
+                old_value=entry.get("old_value"),
+                new_value=entry.get("new_value"),
+                created_at=entry.get("created_at", ""),
+                created_by=entry.get("created_by", "user")
+            ))
+
+        return HistoryListResponse(history=history_entries)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Config Import/Export Endpoints
+# ============================================================
+@app.post("/api/v1/config/export")
+async def export_config():
+    """
+    导出当前配置到 YAML 格式。
+
+    返回当前系统的所有配置（包括风控、系统、币种、策略、通知渠道），
+    以 YAML 格式返回，便于备份或迁移。
+
+    Returns:
+        ExportConfigResponse:
+        {
+            "success": bool,
+            "yaml_content": str,
+            "download_url": str,  // 临时下载链接（可选）
+            "exported_at": str    // ISO 8601 格式时间戳
+        }
+    """
+    try:
+        config_manager = _get_config_manager()
+
+        # Call export_to_yaml method
+        yaml_content = config_manager.export_to_yaml(include_strategies=True)
+
+        # Generate timestamp
+        exported_at = datetime.now(timezone.utc).isoformat()
+
+        return {
+            "success": True,
+            "yaml_content": yaml_content,
+            "download_url": f"/api/v1/config/export/{exported_at}.yaml",  # 临时链接，前端可自行处理
+            "exported_at": exported_at,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/v1/config/import/preview")
+async def import_config_preview(
+    request: Dict[str, str] = Body(..., description="Import preview request"),
+):
+    """
+    预览导入配置文件的变更。
+
+    解析上传的 YAML 内容，验证格式和数据有效性，
+    返回将要应用的变更列表（不实际应用）。
+
+    Request body:
+    {
+        "yaml_content": str  // YAML 格式的配置内容
+    }
+
+    Returns:
+        ImportPreviewResponse:
+        {
+            "valid": bool,       // 验证是否通过
+            "changes": [         // 变更列表
+                {
+                    "category": "strategy" | "risk" | "system" | "symbol" | "notification",
+                    "action": "create" | "update" | "delete",
+                    "field": str,
+                    "old_value": any,
+                    "new_value": any
+                }
+            ],
+            "errors": [          // 错误列表
+                {
+                    "line": int,      // 错误行号（可选）
+                    "field": str,
+                    "message": str
+                }
+            ],
+            "warnings": [        // 警告列表
+                str
+            ]
+        }
+    """
+    try:
+        config_manager = _get_config_manager()
+
+        yaml_content = request.get("yaml_content")
+        if not yaml_content:
+            raise HTTPException(status_code=400, detail="yaml_content is required")
+
+        # Call import_preview method
+        preview_result = config_manager.import_preview(yaml_content)
+
+        return {
+            "valid": preview_result["valid"],
+            "changes": preview_result["changes"],
+            "errors": preview_result["errors"],
+            "warnings": preview_result["warnings"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/v1/config/import/confirm")
+async def import_config_confirm(
+    request: Dict[str, Any] = Body(..., description="Import confirm request"),
+):
+    """
+    确认并应用导入的配置。
+
+    建议先调用 /api/v1/config/import/preview 预览变更，
+    确认无误后再调用此接口应用配置。
+
+    Request body:
+    {
+        "yaml_content": str,    // YAML 格式的配置内容
+        "preview_id": str       // 可选，用于验证预览一致性（暂未实现）
+    }
+
+    Returns:
+        ImportConfirmResponse:
+        {
+            "success": bool,
+            "message": str,
+            "requires_restart": bool,  // 是否需要重启系统
+            "applied_changes": int     // 应用的变更数量
+        }
+    """
+    try:
+        config_manager = _get_config_manager()
+
+        yaml_content = request.get("yaml_content")
+        if not yaml_content:
+            raise HTTPException(status_code=400, detail="yaml_content is required")
+
+        # Call import_confirm method
+        result = await config_manager.import_confirm(yaml_content, create_snapshot=True)
+
+        return {
+            "success": result["success"],
+            "message": result["message"],
+            "requires_restart": result["requires_restart"],
+            "applied_changes": result["applied_changes"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================
+# Config Management API v1 - Core Endpoints
+# ============================================================
+
+class SymbolConfigResponse(BaseModel):
+    """Symbol configuration response"""
+    id: int
+    symbol: str
+    is_core: bool
+    is_enabled: bool
+
+
+class SymbolConfigCreate(BaseModel):
+    """Request for creating a symbol"""
+    symbol: str = Field(..., description="Trading pair symbol, e.g., 'BTC/USDT:USDT'")
+    is_core: bool = Field(default=False, description="Whether this is a core symbol")
+    is_enabled: bool = Field(default=True, description="Whether this symbol is enabled")
+
+
+class RiskConfigResponse(BaseModel):
+    """Risk configuration response"""
+    max_loss_percent: float
+    max_total_exposure: float
+    max_leverage: int
+
+
+class RiskConfigUpdate(BaseModel):
+    """Request for updating risk config"""
+    max_loss_percent: Optional[float] = Field(default=None, ge=0.001, le=0.05, description="Max loss per trade (0.001 ~ 0.05)")
+    max_total_exposure: Optional[float] = Field(default=None, ge=0.5, le=1.0, description="Max total exposure (0.5 ~ 1.0)")
+    max_leverage: Optional[int] = Field(default=None, ge=1, le=125, description="Max leverage (1 ~ 125)")
+
+
+class SystemConfigResponse(BaseModel):
+    """System configuration response"""
+    history_bars: int
+    queue_batch_size: int
+    queue_flush_interval: float
+
+
+class SystemConfigUpdate(BaseModel):
+    """Request for updating system config"""
+    history_bars: Optional[int] = Field(default=None, ge=50, le=1000, description="K-line history bars")
+    queue_batch_size: Optional[int] = Field(default=None, ge=1, le=100, description="Queue batch size")
+    queue_flush_interval: Optional[float] = Field(default=None, ge=1.0, le=60.0, description="Queue flush interval (seconds)")
+
+
+class NotificationConfigResponse(BaseModel):
+    """Notification configuration response"""
+    id: int
+    channel: str
+    webhook_url: str
+    is_enabled: bool
+
+
+class NotificationConfigCreate(BaseModel):
+    """Request for creating a notification channel"""
+    channel: Literal["feishu", "wecom", "telegram"]
+    webhook_url: str = Field(..., description="Webhook URL")
+    is_enabled: bool = Field(default=True, description="Whether this channel is enabled")
+
+
+class NotificationConfigUpdate(BaseModel):
+    """Request for updating a notification channel"""
+    webhook_url: Optional[str] = Field(default=None, description="Webhook URL")
+    is_enabled: Optional[bool] = Field(default=None, description="Whether this channel is enabled")
+
+
+class UpdateConfigResponse(BaseModel):
+    """Response for config update operations"""
+    success: bool
+    message: str
+    requires_restart: bool
+
+
+class ConfigAllResponse(BaseModel):
+    """Response for GET /api/v1/config - all configuration"""
+    strategy: Optional[Dict[str, Any]]
+    risk: RiskConfigResponse
+    system: SystemConfigResponse
+    symbols: List[SymbolConfigResponse]
+    notifications: List[NotificationConfigResponse]
+
+
+@app.get("/api/v1/config")
+async def get_all_config_v1():
+    """
+    Get all configuration (v1 API).
+
+    Returns aggregated configuration including strategy, risk, system, symbols, and notifications.
+
+    Returns:
+        All configuration
+    """
+    try:
+        config_manager = _get_config_manager()
+        repo = _get_repository()
+
+        # Get all configs
+        risk_config = config_manager.risk_config
+        system_config = config_manager.system_config
+        symbols = await repo.get_all_symbols()
+        notifications = await repo.get_all_notifications()
+
+        # Get active strategy
+        active_strategy = config_manager.active_strategy
+        strategy_dict = None
+        if active_strategy:
+            strategy_dict = active_strategy.model_dump(mode="json")
+
+        # Build response
+        return ConfigAllResponse(
+            strategy=strategy_dict,
+            risk=RiskConfigResponse(
+                max_loss_percent=float(risk_config.max_loss_percent),
+                max_total_exposure=float(risk_config.max_total_exposure),
+                max_leverage=risk_config.max_leverage,
+            ) if risk_config else RiskConfigResponse(max_loss_percent=0.01, max_total_exposure=0.8, max_leverage=10),
+            system=SystemConfigResponse(
+                history_bars=system_config.history_bars,
+                queue_batch_size=system_config.queue_batch_size,
+                queue_flush_interval=system_config.queue_flush_interval,
+            ) if system_config else SystemConfigResponse(history_bars=100, queue_batch_size=10, queue_flush_interval=5.0),
+            symbols=[
+                SymbolConfigResponse(id=s["id"], symbol=s["symbol"], is_core=bool(s["is_core"]), is_enabled=bool(s["is_enabled"]))
+                for s in symbols
+            ],
+            notifications=[
+                NotificationConfigResponse(id=n["id"], channel=n["channel"], webhook_url=n["webhook_url"], is_enabled=bool(n["is_enabled"]))
+                for n in notifications
+            ],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.put("/api/v1/config/risk")
+async def update_risk_config_v1(request: RiskConfigUpdate):
+    """
+    Update risk configuration (v1 API).
+
+    Accepts partial config update. Validates constraints.
+    Hot-reload supported (no restart required).
+
+    Request body (all fields optional):
+    {
+        "max_loss_percent": 0.02,
+        "max_total_exposure": 0.8,
+        "max_leverage": 10
+    }
+
+    Returns:
+        Update result with requires_restart=false (hot-reload supported)
+    """
+    try:
+        repo = _get_repository()
+        config_manager = _get_config_manager()
+
+        # Build update data
+        update_data = {}
+        if request.max_loss_percent is not None:
+            update_data["max_loss_percent"] = request.max_loss_percent
+        if request.max_total_exposure is not None:
+            update_data["max_total_exposure"] = request.max_total_exposure
+        if request.max_leverage is not None:
+            update_data["max_leverage"] = request.max_leverage
+
+        if not update_data:
+            return UpdateConfigResponse(success=True, message="No fields to update", requires_restart=False)
+
+        # Update in database
+        await repo.update_risk_config(**update_data)
+
+        # Trigger hot-reload
+        await config_manager.reload_config()
+
+        return UpdateConfigResponse(
+            success=True,
+            message="Risk configuration updated",
+            requires_restart=False,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.put("/api/v1/config/system")
+async def update_system_config_v1(request: SystemConfigUpdate):
+    """
+    Update system configuration (v1 API).
+
+    Accepts partial config update. Validates constraints.
+    WARNING: System config changes require restart to take effect.
+
+    Request body (all fields optional):
+    {
+        "history_bars": 100,
+        "queue_batch_size": 10,
+        "queue_flush_interval": 5.0
+    }
+
+    Returns:
+        Update result with requires_restart=true
+    """
+    try:
+        repo = _get_repository()
+        config_manager = _get_config_manager()
+
+        # Build update data
+        update_data = {}
+        if request.history_bars is not None:
+            update_data["history_bars"] = request.history_bars
+        if request.queue_batch_size is not None:
+            update_data["queue_batch_size"] = request.queue_batch_size
+        if request.queue_flush_interval is not None:
+            update_data["queue_flush_interval"] = request.queue_flush_interval
+
+        if not update_data:
+            return UpdateConfigResponse(success=True, message="No fields to update", requires_restart=False)
+
+        # Update in database
+        await repo.update_system_config(**update_data)
+
+        # Trigger hot-reload (but changes won't take effect until restart)
+        await config_manager.reload_config()
+
+        return UpdateConfigResponse(
+            success=True,
+            message="System configuration updated (requires restart to take effect)",
+            requires_restart=True,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/v1/config/symbols")
+async def get_symbols_v1():
+    """
+    Get all symbol configurations (v1 API).
+
+    Returns:
+        List of symbol configurations
+    """
+    try:
+        repo = _get_repository()
+        symbols = await repo.get_all_symbols()
+
+        return {
+            "symbols": [
+                SymbolConfigResponse(id=s["id"], symbol=s["symbol"], is_core=bool(s["is_core"]), is_enabled=bool(s["is_enabled"]))
+                for s in symbols
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/v1/config/symbols")
+async def add_symbol_v1(request: SymbolConfigCreate):
+    """
+    Add a new symbol (v1 API).
+
+    Request body:
+    {
+        "symbol": "BTC/USDT:USDT",
+        "is_core": false,
+        "is_enabled": true
+    }
+
+    Returns:
+        Created symbol configuration
+    """
+    try:
+        repo = _get_repository()
+        config_manager = _get_config_manager()
+
+        # Add symbol to database
+        symbol_id = await repo.add_symbol(
+            symbol=request.symbol,
+            is_core=1 if request.is_core else 0,
+            is_enabled=1 if request.is_enabled else 0,
+        )
+
+        # Trigger hot-reload
+        await config_manager.reload_config()
+
+        return SymbolConfigResponse(
+            id=symbol_id,
+            symbol=request.symbol,
+            is_core=request.is_core,
+            is_enabled=request.is_enabled,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/v1/config/symbols/{symbol_id}")
+async def delete_symbol_v1(symbol_id: int):
+    """
+    Delete a symbol (v1 API).
+
+    Core symbols cannot be deleted.
+
+    Args:
+        symbol_id: Symbol record ID
+
+    Returns:
+        Success message
+
+    Raises:
+        HTTPException 400: Core symbol cannot be deleted
+        HTTPException 404: Symbol not found
+    """
+    try:
+        repo = _get_repository()
+        config_manager = _get_config_manager()
+
+        # Check if symbol is core
+        symbol = await repo.get_symbol_by_id(symbol_id)
+        if not symbol:
+            raise HTTPException(status_code=404, detail="Symbol not found")
+
+        if symbol.get("is_core"):
+            raise HTTPException(
+                status_code=400,
+                detail="Core symbols cannot be deleted"
+            )
+
+        # Delete symbol
+        success = await repo.delete_symbol(symbol_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Symbol not found")
+
+        # Trigger hot-reload
+        await config_manager.reload_config()
+
+        return {"success": True, "message": f"Deleted symbol {symbol_id}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/v1/config/notifications")
+async def get_notifications_v1():
+    """
+    Get all notification configurations (v1 API).
+
+    Returns:
+        List of notification configurations
+    """
+    try:
+        repo = _get_repository()
+        notifications = await repo.get_all_notifications()
+
+        return {
+            "notifications": [
+                NotificationConfigResponse(id=n["id"], channel=n["channel"], webhook_url=n["webhook_url"], is_enabled=bool(n["is_enabled"]))
+                for n in notifications
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/v1/config/notifications")
+async def add_notification_v1(request: NotificationConfigCreate):
+    """
+    Add a new notification channel (v1 API).
+
+    Request body:
+    {
+        "channel": "feishu",
+        "webhook_url": "https://...",
+        "is_enabled": true
+    }
+
+    Returns:
+        Created notification configuration
+    """
+    try:
+        repo = _get_repository()
+        config_manager = _get_config_manager()
+
+        # Add notification to database
+        notification_id = await repo.add_notification(
+            channel=request.channel,
+            webhook_url=request.webhook_url,
+            is_enabled=1 if request.is_enabled else 0,
+        )
+
+        # Trigger hot-reload
+        await config_manager.reload_config()
+
+        return NotificationConfigResponse(
+            id=notification_id,
+            channel=request.channel,
+            webhook_url=request.webhook_url,
+            is_enabled=request.is_enabled,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.put("/api/v1/config/notifications/{notification_id}")
+async def update_notification_v1(notification_id: int, request: NotificationConfigUpdate):
+    """
+    Update a notification channel (v1 API).
+
+    Request body (all fields optional):
+    {
+        "webhook_url": "https://...",
+        "is_enabled": true
+    }
+
+    Args:
+        notification_id: Notification record ID
+
+    Returns:
+        Update result
+    """
+    try:
+        repo = _get_repository()
+        config_manager = _get_config_manager()
+
+        # Check if notification exists
+        existing = await repo.get_notification_by_id(notification_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Notification not found")
+
+        # Build update data
+        update_data = {}
+        if request.webhook_url is not None:
+            update_data["webhook_url"] = request.webhook_url
+        if request.is_enabled is not None:
+            update_data["is_enabled"] = 1 if request.is_enabled else 0
+
+        if not update_data:
+            return {"success": True, "message": "No fields to update"}
+
+        # Update in database
+        success = await repo.update_notification(notification_id, **update_data)
+        if not success:
+            raise HTTPException(status_code=404, detail="Notification not found")
+
+        # Trigger hot-reload
+        await config_manager.reload_config()
+
+        return {"success": True, "message": "Notification configuration updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/v1/config/notifications/{notification_id}")
+async def delete_notification_v1(notification_id: int):
+    """
+    Delete a notification channel (v1 API).
+
+    Args:
+        notification_id: Notification record ID
+
+    Returns:
+        Success message
+    """
+    try:
+        repo = _get_repository()
+        config_manager = _get_config_manager()
+
+        # Delete notification
+        success = await repo.delete_notification(notification_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Notification not found")
+
+        # Trigger hot-reload
+        await config_manager.reload_config()
+
+        return {"success": True, "message": f"Deleted notification {notification_id}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================
+# API v1 - Strategy Configuration Endpoints
+# ============================================================
+
+class V1StrategyListResponse(BaseModel):
+    """Response model for v1 strategy list endpoint."""
+    strategies: List[Dict[str, Any]]
+
+
+class V1StrategyDetailResponse(BaseModel):
+    """Response model for v1 strategy detail endpoint."""
+    id: int
+    name: str
+    description: Optional[str]
+    triggers: List[Dict[str, Any]]
+    filters: List[Dict[str, Any]]
+    logic_tree: Optional[Dict[str, Any]]
+    apply_to: List[str]
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+
+class V1CreateStrategyRequest(BaseModel):
+    """Request model for v1 create strategy endpoint."""
+    name: str
+    description: Optional[str] = None
+    triggers: List[Dict[str, Any]]
+    filters: List[Dict[str, Any]] = []
+    logic_tree: Optional[Dict[str, Any]] = None
+    apply_to: List[str] = []
+
+
+class V1UpdateStrategyRequest(BaseModel):
+    """Request model for v1 update strategy endpoint."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    triggers: Optional[List[Dict[str, Any]]] = None
+    filters: Optional[List[Dict[str, Any]]] = None
+    logic_tree: Optional[Dict[str, Any]] = None
+    apply_to: Optional[List[str]] = None
+
+
+class V1ActivateStrategyResponse(BaseModel):
+    """Response model for v1 activate strategy endpoint."""
+    success: bool
+    message: str
+    requires_restart: bool = False
+
+
+@app.get("/api/v1/strategies", response_model=V1StrategyListResponse)
+async def list_strategies_v1():
+    """
+    [API v1] Get strategy list.
+
+    Returns basic information (id, name, description, is_active, created_at, updated_at)
+    for each strategy.
+
+    Response format follows the contract defined in docs/designs/config-management-contract.md
+    """
+    try:
+        repo = _get_repository()
+        strategies = await repo.get_all_custom_strategies()
+        return {"strategies": strategies}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/v1/strategies/{strategy_id}", response_model=V1StrategyDetailResponse)
+async def get_strategy_v1(strategy_id: int):
+    """
+    [API v1] Get strategy details.
+
+    Returns full strategy definition including triggers, filters, logic_tree, apply_to, etc.
+
+    Args:
+        strategy_id: Strategy record ID
+
+    Response format follows the contract defined in docs/designs/config-management-contract.md
+    """
+    try:
+        repo = _get_repository()
+        strategy = await repo.get_custom_strategy_by_id(strategy_id)
+
+        if strategy is None:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        # Parse strategy_json back to dict for response
+        import json
+        strategy_dict = dict(strategy)
+        strategy_data = json.loads(strategy["strategy_json"])
+
+        # Build response following contract format
+        return V1StrategyDetailResponse(
+            id=strategy_dict["id"],
+            name=strategy_dict["name"],
+            description=strategy_dict.get("description"),
+            triggers=strategy_data.get("triggers", []),
+            filters=strategy_data.get("filters", []),
+            logic_tree=strategy_data.get("logic_tree"),
+            apply_to=strategy_data.get("apply_to", []),
+            is_active=strategy_dict.get("is_active", False),
+            created_at=strategy_dict["created_at"],
+            updated_at=strategy_dict["updated_at"],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/v1/strategies", status_code=201)
+async def create_strategy_v1(request: V1CreateStrategyRequest):
+    """
+    [API v1] Create a new strategy.
+
+    Request body:
+    {
+        "name": "My Pinbar Strategy",
+        "description": "Optional description",
+        "triggers": [...],
+        "filters": [...],
+        "logic_tree": {...},  // Optional, recommended
+        "apply_to": [...]
+    }
+
+    Response format follows the contract defined in docs/designs/config-management-contract.md
+    """
+    try:
+        repo = _get_repository()
+
+        # Build StrategyDefinition for validation
+        from src.domain.models import StrategyDefinition
+
+        strategy_dict = {
+            "name": request.name,
+            "triggers": request.triggers,
+            "filters": request.filters,
+            "apply_to": request.apply_to,
+        }
+        if request.logic_tree:
+            strategy_dict["logic_tree"] = request.logic_tree
+
+        try:
+            strategy_def = StrategyDefinition(**strategy_dict)
+        except Exception as validation_error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid strategy definition: {str(validation_error)}"
+            )
+
+        # Serialize strategy to JSON
+        strategy_json = strategy_def.model_dump_json()
+
+        # Create in database
+        strategy_id = await repo.create_custom_strategy(
+            name=request.name,
+            description=request.description,
+            strategy_json=strategy_json,
+        )
+
+        return {
+            "id": strategy_id,
+            "name": request.name,
+            "message": "Strategy created successfully",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.put("/api/v1/strategies/{strategy_id}")
+async def update_strategy_v1(strategy_id: int, request: V1UpdateStrategyRequest):
+    """
+    [API v1] Update an existing strategy.
+
+    Request body (all fields optional):
+    {
+        "name": "New name",
+        "description": "New description",
+        "triggers": [...],
+        "filters": [...],
+        "logic_tree": {...},
+        "apply_to": [...]
+    }
+
+    Only provided fields will be updated.
+    """
+    try:
+        repo = _get_repository()
+
+        # Check if strategy exists
+        existing = await repo.get_custom_strategy_by_id(strategy_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        # Validate and serialize new strategy if provided
+        strategy_json = None
+        if any([request.triggers, request.filters, request.logic_tree, request.apply_to]):
+            from src.domain.models import StrategyDefinition
+
+            # Get existing strategy data as base
+            import json
+            existing_data = json.loads(existing["strategy_json"])
+
+            # Update provided fields
+            if request.triggers is not None:
+                existing_data["triggers"] = request.triggers
+            if request.filters is not None:
+                existing_data["filters"] = request.filters
+            if request.logic_tree is not None:
+                existing_data["logic_tree"] = request.logic_tree
+            if request.apply_to is not None:
+                existing_data["apply_to"] = request.apply_to
+            existing_data["name"] = request.name or existing_data["name"]
+
+            try:
+                strategy_def = StrategyDefinition(**existing_data)
+            except Exception as validation_error:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid strategy definition: {str(validation_error)}"
+                )
+            strategy_json = strategy_def.model_dump_json()
+
+        # Update in database
+        updated = await repo.update_custom_strategy(
+            strategy_id=strategy_id,
+            name=request.name,
+            description=request.description,
+            strategy_json=strategy_json,
+        )
+
+        if not updated:
+            return {"error": "No fields to update"}
+
+        return {"message": "Strategy updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/v1/strategies/{strategy_id}")
+async def delete_strategy_v1(strategy_id: int):
+    """
+    [API v1] Delete a strategy.
+
+    Args:
+        strategy_id: Strategy record ID
+
+    Response format follows the contract defined in docs/designs/config-management-contract.md
+    """
+    try:
+        repo = _get_repository()
+
+        deleted = await repo.delete_custom_strategy(strategy_id)
+
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        return {
+            "success": True,
+            "message": f"Strategy {strategy_id} deleted successfully",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/v1/strategies/{strategy_id}/activate", response_model=V1ActivateStrategyResponse)
+async def activate_strategy_v1(strategy_id: int):
+    """
+    [API v1] Activate a strategy (trigger hot-reload).
+
+    This endpoint activates the specified strategy and triggers configuration hot-reload.
+    The strategy will be applied to live trading after activation.
+
+    Args:
+        strategy_id: Strategy record ID
+
+    Response format follows the contract defined in docs/designs/config-management-contract.md
+    """
+    try:
+        repo = _get_repository()
+        config_mgr = _get_config_manager()
+
+        # Check if strategy exists
+        strategy = await repo.get_custom_strategy_by_id(strategy_id)
+        if strategy is None:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        # Activate the strategy in database
+        await repo.activate_custom_strategy(strategy_id)
+
+        # Trigger hot-reload to apply changes
+        await config_mgr.reload_config()
+
+        return {
+            "success": True,
+            "message": f"Strategy {strategy_id} activated successfully",
+            "requires_restart": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}

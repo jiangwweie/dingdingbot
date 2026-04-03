@@ -45,7 +45,7 @@ class SignalStatusTracker:
         track = SignalTrack(
             signal_id=signal_id,
             original_signal=signal,
-            status=SignalStatus.GENERATED,
+            status=SignalStatus.PENDING,
             created_at=now,
             updated_at=now,
         )
@@ -81,13 +81,9 @@ class SignalStatusTracker:
             track.status = status
             track.updated_at = int(time.time() * 1000)
 
-            if status == SignalStatus.FILLED:
+            if status == SignalStatus.SENT:
                 track.filled_price = filled_price
                 track.filled_at = track.updated_at
-            elif status == SignalStatus.REJECTED:
-                track.reject_reason = reason
-            elif status == SignalStatus.CANCELLED:
-                track.cancel_reason = reason
 
             logger.info(f"信号状态更新：{signal_id} -> {status.value}")
 

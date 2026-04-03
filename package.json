@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "@modelcontextprotocol/server-filesystem": "^2026.1.14"
+  }
+}

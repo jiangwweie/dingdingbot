@@ -1,69 +1,32 @@
 """
-Configuration Manager - Load, validate, and merge core.yaml and user.yaml.
-Handles API key permission validation at startup.
+Configuration Manager - Load configuration from SQLite database.
+Handles API key validation from environment variables.
 Supports hot-reload with atomic pointer swap and observer pattern.
 """
 import asyncio
 import os
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Callable, Awaitable, Set
+from typing import List, Dict, Any, Optional, Callable, Awaitable, Set, Tuple
 from decimal import Decimal
-from enum import Enum
-
+from datetime import datetime, timezone
 import yaml
-from pydantic import BaseModel, Field, field_validator, ValidationError
+
+from pydantic import BaseModel, Field
 
 from src.domain.exceptions import FatalStartupError
 from src.infrastructure.logger import logger, register_secret, mask_secret
-from src.domain.models import FilterConfig, StrategyDefinition, TriggerConfig, RiskConfig
+from src.domain.models import RiskConfig, StrategyDefinition, TriggerConfig, FilterConfig
+from src.infrastructure.config_repository import ConfigRepository
 
 
 # ============================================================
-# Pydantic Config Models
+# Pydantic Config Models (for in-memory representation)
 # ============================================================
-class PinbarDefaults(BaseModel):
-    min_wick_ratio: Decimal = Field(..., description="Minimum wick ratio")
-    max_body_ratio: Decimal = Field(..., description="Maximum body ratio")
-    body_position_tolerance: Decimal = Field(..., description="Body position tolerance")
 
-    @field_validator('min_wick_ratio', 'max_body_ratio', 'body_position_tolerance')
-    @classmethod
-    def validate_decimal_range(cls, v):
-        if v < 0 or v > 1:
-            raise ValueError("Value must be between 0 and 1")
-        return v
-
-
-class EmaConfig(BaseModel):
-    period: int = Field(..., ge=1, description="EMA period")
-
-
-class MtfMapping(BaseModel):
-    model_config = {'extra': 'allow'}
-
-
-class WarmupConfig(BaseModel):
-    history_bars: int = Field(..., ge=10, description="Number of historical bars to fetch")
-
-
-class SignalQueueConfig(BaseModel):
-    """Queue configuration for async I/O."""
-    batch_size: int = Field(default=10, ge=1, description="批量落盘大小")
-    flush_interval: float = Field(default=5.0, ge=0.1, description="最大等待时间 (秒)")
-    max_queue_size: int = Field(default=1000, ge=100, description="队列最大容量")
-
-
-class SignalPipelineConfig(BaseModel):
-    cooldown_seconds: int = Field(default=14400, ge=60, description="Signal deduplication cooldown in seconds")
-    queue: SignalQueueConfig = Field(default_factory=SignalQueueConfig)
-
-
-class CoreConfig(BaseModel):
-    """Core system configuration (read-only)"""
-    core_symbols: List[str] = Field(..., min_length=1, description="Core trading symbols")
-    pinbar_defaults: PinbarDefaults
-    ema: EmaConfig
-    mtf_mapping: MtfMapping
+class SystemConfig(BaseModel):
+    """System configuration (read-only after startup)"""
+    history_bars: int = Field(default=100, ge=50, le=1000, description="K 线预热数量")
+    queue_batch_size: int = Field(default=10, ge=1, le=100, description="队列批大小")
+    queue_flush_interval: float = Field(default=5.0, ge=1.0, le=60.0, description="队列刷新间隔 (秒)")
 
     # S3-1: Add MTF EMA period config
     mtf_ema_period: int = Field(
@@ -73,116 +36,20 @@ class CoreConfig(BaseModel):
         le=200
     )
 
-    warmup: WarmupConfig
-    signal_pipeline: SignalPipelineConfig = Field(default_factory=SignalPipelineConfig)
+    # Signal pipeline config
+    cooldown_seconds: int = Field(default=14400, ge=60, description="Signal deduplication cooldown in seconds")
 
 
 class ExchangeConfig(BaseModel):
-    name: str = Field(..., description="Exchange name (ccxt id)")
-    api_key: str = Field(..., description="API Key (read-only permission required)")
-    api_secret: str = Field(..., description="API Secret")
+    """Exchange configuration (from environment variables)"""
+    name: str = Field(default="binance", description="Exchange name (ccxt id)")
+    api_key: str = Field(..., description="API Key from environment variable")
+    api_secret: str = Field(..., description="API Secret from environment variable")
     testnet: bool = Field(default=False, description="Use testnet")
-
-
-class StrategyConfig(BaseModel):
-    """
-    Legacy strategy config (for backward compatibility).
-    New systems should use active_strategies instead.
-    """
-    trend_filter_enabled: bool = Field(default=True, description="Enable EMA60 trend filter")
-    mtf_validation_enabled: bool = Field(default=True, description="Enable MTF validation")
 
 
 class AssetPollingConfig(BaseModel):
     interval_seconds: int = Field(default=60, ge=10, description="Asset polling interval")
-
-
-class NotificationChannel(BaseModel):
-    type: str = Field(..., description="Channel type: feishu or wecom")
-    webhook_url: str = Field(..., description="Webhook URL")
-
-    @field_validator('type')
-    @classmethod
-    def validate_channel_type(cls, v):
-        if v not in ('feishu', 'wecom'):
-            raise ValueError("Channel type must be 'feishu' or 'wecom'")
-        return v
-
-
-class NotificationConfig(BaseModel):
-    channels: List[NotificationChannel] = Field(..., min_length=1, description="Notification channels")
-
-
-class UserConfig(BaseModel):
-    """User configuration (modifiable)"""
-    exchange: ExchangeConfig
-    user_symbols: List[str] = Field(default_factory=list, description="User-defined symbols")
-    timeframes: List[str] = Field(..., min_length=1, description="Timeframes to monitor")
-    # New dynamic rule engine config (Phase K)
-    active_strategies: List[StrategyDefinition] = Field(
-        default_factory=list,
-        description="Active strategy definitions with attached filters"
-    )
-    # Legacy support - if active_strategies is empty, migrate from old strategy config
-    strategy: Optional[StrategyConfig] = Field(default=None, description="Legacy strategy config (deprecated)")
-    risk: RiskConfig
-    asset_polling: AssetPollingConfig = Field(default_factory=AssetPollingConfig)
-    notification: NotificationConfig
-
-    # MTF Configuration (S3-1)
-    mtf_ema_period: int = Field(
-        default=60,
-        description="EMA period for MTF trend calculation",
-        ge=5,
-        le=200
-    )
-    mtf_mapping: Dict[str, str] = Field(
-        default_factory=lambda: {
-            "15m": "1h",
-            "1h": "4h",
-            "4h": "1d",
-            "1d": "1w",
-        },
-        description="MTF timeframe mapping: lower -> higher"
-    )
-
-    model_config = {'protected_namespaces': ()}
-
-    @field_validator('mtf_ema_period')
-    @classmethod
-    def validate_mtf_ema_period(cls, v):
-        if v < 5 or v > 200:
-            raise ValueError("mtf_ema_period must be between 5 and 200")
-        return v
-
-    @field_validator('active_strategies', mode='after')
-    @classmethod
-    def migrate_legacy_strategy(cls, v: List[StrategyDefinition], info) -> List[StrategyDefinition]:
-        """
-        Migrate legacy strategy config to active_strategies if empty.
-        This ensures backward compatibility with existing user.yaml files.
-        """
-        # Only migrate if active_strategies is empty and legacy strategy exists
-        if len(v) == 0:
-            ctx = info.context
-            if ctx and 'strategy' in ctx:
-                legacy = ctx['strategy']
-                if legacy:
-                    # Migrate to default pinbar strategy with EMA+MTF filters
-                    filters = []
-                    if legacy.trend_filter_enabled:
-                        filters.append({"type": "ema", "period": 60, "enabled": True})
-                    if legacy.mtf_validation_enabled:
-                        filters.append({"type": "mtf", "enabled": True})
-
-                    return [StrategyDefinition(
-                        name="pinbar",
-                        enabled=True,
-                        trigger=TriggerConfig(type="pinbar", enabled=True, params={}),
-                        filters=filters,
-                        filter_logic="AND"
-                    )]
-        return v
 
 
 # ============================================================
@@ -190,157 +57,227 @@ class UserConfig(BaseModel):
 # ============================================================
 class ConfigManager:
     """
-    Manages configuration loading, validation, and merging.
+    Manages configuration loading from SQLite database.
     Supports hot-reload with atomic pointer swap and observer pattern.
+    API Key is read from environment variables, not stored in DB.
     """
 
-    def __init__(self, config_dir: Optional[str] = None):
+    def __init__(self, db_path: str = "data/config.db"):
         """
         Initialize ConfigManager.
 
         Args:
-            config_dir: Directory containing config files. Defaults to ./config
+            db_path: Path to SQLite database file
         """
-        if config_dir:
-            self.config_dir = Path(config_dir)
-        else:
-            self.config_dir = Path(__file__).parent.parent.parent / 'config'
+        self.db_path = db_path
+        self._repo: Optional[ConfigRepository] = None
 
-        self._core_config: Optional[CoreConfig] = None
-        self._user_config: Optional[UserConfig] = None
-        self._merged_symbols: List[str] = []
+        # In-memory configuration (atomic pointer swap for hot-reload)
+        self._active_strategy: Optional[StrategyDefinition] = None
+        self._risk_config: Optional[RiskConfig] = None
+        self._system_config: Optional[SystemConfig] = None
+        self._symbols: List[str] = []
+        self._notifications: List[Dict[str, Any]] = []
+        self._exchange_config: Optional[ExchangeConfig] = None
+        self._asset_polling_config: AssetPollingConfig = AssetPollingConfig()
 
         # Hot-reload state
         self._observers: Set[Callable[[], Awaitable[None]]] = set()
         self._update_lock: Optional[asyncio.Lock] = None  # Lazily initialized
 
-    def load_core_config(self) -> CoreConfig:
-        """Load and validate core.yaml"""
-        core_path = self.config_dir / 'core.yaml'
-
-        if not core_path.exists():
-            raise FatalStartupError(
-                f"Core config file not found: {core_path}",
-                "F-003"
-            )
-
-        try:
-            with open(core_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-
-            self._core_config = CoreConfig(**data)
-            logger.info(f"Core configuration loaded from {core_path}")
-            return self._core_config
-
-        except ValidationError as e:
-            raise FatalStartupError(
-                f"Core config validation failed: {e}",
-                "F-003"
-            )
-        except yaml.YAMLError as e:
-            raise FatalStartupError(
-                f"Core config YAML parse error: {e}",
-                "F-003"
-            )
-
-    def load_user_config(self) -> UserConfig:
-        """Load and validate user.yaml"""
-        user_path = self.config_dir / 'user.yaml'
-
-        if not user_path.exists():
-            raise FatalStartupError(
-                f"User config file not found: {user_path}",
-                "F-003"
-            )
-
-        try:
-            with open(user_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-
-            # Extract legacy strategy config before validation
-            legacy_strategy = data.get('strategy')
-
-            self._user_config = UserConfig(**data)
-
-            # Manual migration: if active_strategies is empty but legacy strategy exists
-            if not self._user_config.active_strategies and legacy_strategy:
-                self._user_config = self._migrate_legacy_strategy(legacy_strategy)
-
-            # Register secrets for masking
-            register_secret(self._user_config.exchange.api_key)
-            register_secret(self._user_config.exchange.api_secret)
-            for channel in self._user_config.notification.channels:
-                register_secret(channel.webhook_url)
-
-            logger.info(f"User configuration loaded from {user_path}")
-            return self._user_config
-
-        except ValidationError as e:
-            raise FatalStartupError(
-                f"User config validation failed: {e}",
-                "F-003"
-            )
-        except yaml.YAMLError as e:
-            raise FatalStartupError(
-                f"User config YAML parse error: {e}",
-                "F-003"
-            )
-
-    def _migrate_legacy_strategy(self, legacy_strategy: dict) -> UserConfig:
+    async def initialize(self) -> None:
         """
-        Migrate legacy strategy config to active_strategies format.
+        Initialize the configuration repository and load all configurations.
+        Must be called during application startup.
+        """
+        self._repo = ConfigRepository(self.db_path)
+        await self._repo.initialize()
+        await self.load_all_from_db()
+
+    async def load_all_from_db(self) -> None:
+        """
+        Load all configurations from SQLite database.
+
+        This is the main entry point for loading configuration.
+        All config accessors will be populated after this method completes.
+        """
+        if not self._repo:
+            raise FatalStartupError("ConfigRepository not initialized. Call initialize() first.", "F-003")
+
+        # Load active strategy
+        active_strategy_data = await self._repo.get_active_strategy()
+        if active_strategy_data:
+            self._active_strategy = self._convert_db_strategy_to_model(active_strategy_data)
+        else:
+            # Create default strategy if none exists
+            default_strategy = StrategyDefinition(
+                id="default",
+                name="pinbar",
+                trigger=TriggerConfig(type="pinbar", enabled=True, params={}),
+                filters=[
+                    FilterConfig(type="ema", period=60, enabled=True),
+                    FilterConfig(type="mtf", enabled=True)
+                ],
+                filter_logic="AND",
+                is_global=True
+            )
+            self._active_strategy = default_strategy
+            logger.warning("使用默认策略配置（数据库中无激活策略）")
+
+        # Load risk config
+        risk_data = await self._repo.get_risk_config()
+        if risk_data:
+            self._risk_config = RiskConfig(
+                max_loss_percent=Decimal(str(risk_data.get('max_loss_percent', 1.0))),
+                max_leverage=risk_data.get('max_leverage', 10),
+                max_total_exposure=Decimal(str(risk_data.get('max_total_exposure', 0.8)))
+            )
+        else:
+            # Create default risk config if none exists
+            self._risk_config = RiskConfig(
+                max_loss_percent=Decimal('1.0'),
+                max_leverage=10,
+                max_total_exposure=Decimal('0.8')
+            )
+            logger.warning("使用默认风控配置（数据库中无风控配置）")
+
+        # Load system config
+        system_data = await self._repo.get_system_config()
+        if system_data:
+            self._system_config = SystemConfig(
+                history_bars=system_data.get('history_bars', 100),
+                queue_batch_size=system_data.get('queue_batch_size', 10),
+                queue_flush_interval=system_data.get('queue_flush_interval', 5.0),
+                mtf_ema_period=60,
+                cooldown_seconds=14400
+            )
+        else:
+            # Create default system config if none exists
+            self._system_config = SystemConfig(
+                history_bars=100,
+                queue_batch_size=10,
+                queue_flush_interval=5.0,
+                mtf_ema_period=60,
+                cooldown_seconds=14400
+            )
+            logger.warning("使用默认系统配置（数据库中无系统配置）")
+
+        # Load symbols (enabled only)
+        symbols_data = await self._repo.get_enabled_symbols()
+        if symbols_data:
+            self._symbols = symbols_data
+        else:
+            # Default core symbols if none exist
+            self._symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]
+            logger.warning("使用默认币池配置（数据库中无币池配置）")
+
+        # Load notification channels (enabled only)
+        notifications_data = await self._repo.get_enabled_notifications()
+        if notifications_data:
+            self._notifications = notifications_data
+        else:
+            # Empty notifications if none exist
+            self._notifications = []
+            logger.warning("未配置通知渠道（数据库中无通知配置）")
+
+        # Load exchange config from environment variables
+        self._exchange_config = self._load_exchange_config_from_env()
+
+        logger.info(f"配置加载完成：{len(self._symbols)} 个交易对，{len(self._notifications)} 个通知渠道")
+
+    def _convert_db_strategy_to_model(self, strategy_data: Dict[str, Any]) -> StrategyDefinition:
+        """
+        Convert database strategy record to StrategyDefinition model.
 
         Args:
-            legacy_strategy: Dictionary with trend_filter_enabled and mtf_validation_enabled
-        """
-        # Build filter chain from legacy config
-        filters = []
-        if legacy_strategy.get('trend_filter_enabled', True):
-            filters.append({"type": "ema", "period": 60, "enabled": True})
-        if legacy_strategy.get('mtf_validation_enabled', True):
-            filters.append({"type": "mtf", "enabled": True})
-
-        # Create new active_strategies list
-        active_strategies = [
-            StrategyDefinition(
-                name="pinbar",
-                enabled=True,
-                trigger=TriggerConfig(type="pinbar", enabled=True, params={}),
-                filters=filters,
-                filter_logic="AND"
-            )
-        ]
-
-        # Update config with migrated strategies
-        return self._user_config.model_copy(update={"active_strategies": active_strategies})
-
-    def merge_symbols(self) -> List[str]:
-        """
-        Merge core_symbols and user_symbols with deduplication.
-        core_symbols cannot be overridden or removed.
+            strategy_data: Dictionary from database query
 
         Returns:
-            Merged and deduplicated list of symbols
+            StrategyDefinition model instance
         """
-        if not self._core_config:
-            raise FatalStartupError("Core config not loaded", "F-003")
-        if not self._user_config:
-            raise FatalStartupError("User config not loaded", "F-003")
+        triggers = strategy_data.get('triggers', [])
+        filters = strategy_data.get('filters', [])
+        apply_to = strategy_data.get('apply_to', [])
 
-        # Use dict to maintain order while deduplicating
-        # core_symbols come first (protected), then user_symbols
-        merged = {}
+        # Parse triggers
+        trigger_configs = []
+        for t in triggers:
+            if isinstance(t, dict):
+                trigger_configs.append(TriggerConfig(
+                    type=t.get('type', 'pinbar'),
+                    enabled=t.get('enabled', True),
+                    params=t.get('params', {})
+                ))
 
-        for symbol in self._core_config.core_symbols:
-            merged[symbol] = True
+        # Parse filters
+        filter_configs = []
+        for f in filters:
+            if isinstance(f, dict):
+                filter_configs.append(FilterConfig(
+                    type=f.get('type', 'ema'),
+                    enabled=f.get('enabled', True),
+                    params={k: v for k, v in f.items() if k not in ('type', 'enabled')}
+                ))
 
-        for symbol in self._user_config.user_symbols:
-            if symbol not in merged:
-                merged[symbol] = True
+        # Build StrategyDefinition
+        return StrategyDefinition(
+            id=str(strategy_data.get('id', '')),
+            name=strategy_data.get('name', 'unknown'),
+            triggers=trigger_configs,
+            trigger_logic="OR",
+            filters=filter_configs,
+            filter_logic="AND",
+            is_global=len(apply_to) == 0,
+            apply_to=apply_to
+        )
 
-        self._merged_symbols = list(merged.keys())
-        logger.info(f"Merged symbol list: {len(self._merged_symbols)} symbols")
-        return self._merged_symbols
+    def _load_exchange_config_from_env(self) -> ExchangeConfig:
+        """
+        Load exchange configuration from environment variables.
+
+        Required environment variables:
+        - EXCHANGE_API_KEY: API key for exchange
+        - EXCHANGE_API_SECRET: API secret for exchange
+
+        Optional environment variables:
+        - EXCHANGE_NAME: Exchange name (default: "binance")
+        - EXCHANGE_TESTNET: Use testnet (default: "false")
+
+        Returns:
+            ExchangeConfig instance
+
+        Raises:
+            FatalStartupError: If required environment variables are missing
+        """
+        api_key = os.getenv('EXCHANGE_API_KEY')
+        api_secret = os.getenv('EXCHANGE_API_SECRET')
+
+        if not api_key:
+            raise FatalStartupError(
+                "环境变量 EXCHANGE_API_KEY 未设置。请在 .env 文件或系统环境变量中配置 API 密钥。",
+                "F-003"
+            )
+
+        if not api_secret:
+            raise FatalStartupError(
+                "环境变量 EXCHANGE_API_SECRET 未设置。请在 .env 文件或系统环境变量中配置 API 密钥。",
+                "F-003"
+            )
+
+        name = os.getenv('EXCHANGE_NAME', 'binance')
+        testnet_str = os.getenv('EXCHANGE_TESTNET', 'false').lower()
+        testnet = testnet_str in ('true', '1', 'yes')
+
+        # Register secrets for masking
+        register_secret(api_key)
+        register_secret(api_secret)
+
+        return ExchangeConfig(
+            name=name,
+            api_key=api_key,
+            api_secret=api_secret,
+            testnet=testnet
+        )
 
     async def check_api_key_permissions(self, exchange: Any) -> None:
         """
@@ -360,96 +297,100 @@ class ConfigManager:
         """
         Print all effective configuration parameters to console (with secrets masked).
         """
-        if not self._core_config or not self._user_config:
-            raise FatalStartupError("Configuration not fully loaded", "F-003")
-
         logger.info("=" * 60)
         logger.info("EFFECTIVE CONFIGURATION (Startup)")
         logger.info("=" * 60)
 
         # Exchange info (masked)
-        exchange = self._user_config.exchange
-        logger.info(f"Exchange: {exchange.name}")
-        logger.info(f"API Key: {mask_secret(exchange.api_key)}")
-        logger.info(f"Testnet: {exchange.testnet}")
+        if self._exchange_config:
+            logger.info(f"Exchange: {self._exchange_config.name}")
+            logger.info(f"API Key: {mask_secret(self._exchange_config.api_key)}")
+            logger.info(f"Testnet: {self._exchange_config.testnet}")
 
         # Symbols
-        logger.info(f"Monitoring {len(self._merged_symbols)} symbols:")
-        for symbol in self._merged_symbols:
+        logger.info(f"Monitoring {len(self._symbols)} symbols:")
+        for symbol in self._symbols[:10]:  # Show first 10
             logger.info(f"  - {symbol}")
+        if len(self._symbols) > 10:
+            logger.info(f"  ... and {len(self._symbols) - 10} more")
 
-        # Timeframes
-        logger.info(f"Timeframes: {', '.join(self._user_config.timeframes)}")
-
-        # Strategy settings - new dynamic rule engine
-        active_strategies = self._user_config.active_strategies
-        if active_strategies:
-            logger.info(f"Active Strategies ({len(active_strategies)}):")
-            for strat in active_strategies:
-                status = "ENABLED" if getattr(strat, "trigger", None) and strat.trigger.enabled else "DISABLED"
-                filter_names = ", ".join([f.type for f in strat.filters])
-                logger.info(f"  - {strat.name}: {status} (filters: {filter_names or 'none'})")
-        else:
-            # Fallback to legacy display
-            strategy = self._user_config.strategy
-            if strategy:
-                logger.info(f"Strategy Settings (legacy):")
-                logger.info(f"  - Trend Filter (EMA60): {'ENABLED' if strategy.trend_filter_enabled else 'DISABLED'}")
-                logger.info(f"  - MTF Validation: {'ENABLED' if strategy.mtf_validation_enabled else 'DISABLED'}")
+        # Active strategy
+        if self._active_strategy:
+            status = "ENABLED" if self._active_strategy.trigger and self._active_strategy.trigger.enabled else "DISABLED"
+            filter_names = ", ".join([f.type for f in self._active_strategy.filters]) if self._active_strategy.filters else "none"
+            logger.info(f"Active Strategy: {self._active_strategy.name} ({status})")
+            logger.info(f"  Filters: {filter_names or 'none'}")
 
         # Risk settings
-        risk = self._user_config.risk
-        logger.info(f"Risk Settings:")
-        logger.info(f"  - Max Loss per Trade: {float(risk.max_loss_percent) * 100}%")
-        logger.info(f"  - Max Leverage: {risk.max_leverage}x")
+        if self._risk_config:
+            logger.info(f"Risk Settings:")
+            logger.info(f"  - Max Loss per Trade: {float(self._risk_config.max_loss_percent) * 100}%")
+            logger.info(f"  - Max Leverage: {self._risk_config.max_leverage}x")
+            logger.info(f"  - Max Total Exposure: {float(self._risk_config.max_total_exposure) * 100}%")
+
+        # System settings
+        if self._system_config:
+            logger.info(f"System Settings:")
+            logger.info(f"  - History Bars: {self._system_config.history_bars}")
+            logger.info(f"  - Queue Batch Size: {self._system_config.queue_batch_size}")
+            logger.info(f"  - Queue Flush Interval: {self._system_config.queue_flush_interval}s")
+            logger.info(f"  - Signal Cooldown: {self._system_config.cooldown_seconds}s")
 
         # Notification channels
-        logger.info(f"Notification Channels:")
-        for channel in self._user_config.notification.channels:
-            logger.info(f"  - {channel.type}: {mask_secret(channel.webhook_url)}")
-
-        # Core settings
-        ema = self._core_config.ema
-        logger.info(f"Core Settings:")
-        logger.info(f"  - EMA Period: {ema.period}")
-
-        warmup = self._core_config.warmup
-        logger.info(f"  - Warmup Bars: {warmup.history_bars}")
-
-        signal_pipeline = self._core_config.signal_pipeline
-        logger.info(f"  - Signal Cooldown: {signal_pipeline.cooldown_seconds}s")
-
-        pinbar = self._core_config.pinbar_defaults
-        logger.info(f"  - Pinbar Min Wick: {float(pinbar.min_wick_ratio)}")
-        logger.info(f"  - Pinbar Max Body: {float(pinbar.max_body_ratio)}")
-        logger.info(f"  - Pinbar Body Tolerance: {float(pinbar.body_position_tolerance)}")
+        logger.info(f"Notification Channels ({len(self._notifications)}):")
+        if self._notifications:
+            for channel in self._notifications:
+                webhook = channel.get('webhook_url', '')
+                channel_type = channel.get('channel', 'unknown')
+                logger.info(f"  - {channel_type}: {mask_secret(webhook)}")
+        else:
+            logger.info("  (none configured)")
 
         logger.info("=" * 60)
 
-    @property
-    def core_config(self) -> CoreConfig:
-        """Get loaded core configuration"""
-        if not self._core_config:
-            raise FatalStartupError("Core config not loaded", "F-003")
-        return self._core_config
+    # ============================================================
+    # Config Accessor Properties
+    # ============================================================
 
     @property
-    def user_config(self) -> UserConfig:
-        """Get loaded user configuration"""
-        if not self._user_config:
-            raise FatalStartupError("User config not loaded", "F-003")
-        return self._user_config
+    def active_strategy(self) -> Optional[StrategyDefinition]:
+        """Get the currently active strategy definition."""
+        return self._active_strategy
 
     @property
-    def merged_symbols(self) -> List[str]:
-        """Get merged symbol list"""
-        if not self._merged_symbols:
-            raise FatalStartupError("Symbols not merged", "F-003")
-        return self._merged_symbols
+    def risk_config(self) -> Optional[RiskConfig]:
+        """Get the risk management configuration."""
+        return self._risk_config
+
+    @property
+    def system_config(self) -> Optional[SystemConfig]:
+        """Get the system configuration."""
+        return self._system_config
+
+    @property
+    def symbols(self) -> List[str]:
+        """Get the list of enabled trading symbols."""
+        return self._symbols
+
+    @property
+    def notifications(self) -> List[Dict[str, Any]]:
+        """Get the list of enabled notification channels."""
+        return self._notifications
+
+    @property
+    def exchange_config(self) -> Optional[ExchangeConfig]:
+        """Get the exchange configuration (from environment variables)."""
+        return self._exchange_config
+
+    @property
+    def asset_polling_config(self) -> AssetPollingConfig:
+        """Get the asset polling configuration."""
+        return self._asset_polling_config
 
     # ============================================================
     # Hot-Reload & Observer Pattern
     # ============================================================
+
     def _get_update_lock(self) -> asyncio.Lock:
         """Get or create the update lock for thread-safe config updates."""
         if self._update_lock is None:
@@ -477,83 +418,26 @@ class ConfigManager:
         """Remove an observer callback."""
         self._observers.discard(callback)
 
-    async def update_user_config(self, new_config_dict: Dict[str, Any]) -> UserConfig:
+    async def reload_config(self) -> None:
         """
-        Hot-reload user configuration with atomic pointer swap.
+        Hot-reload configuration from database.
 
-        Flow:
-        1. Validate incoming dict against Pydantic UserConfig model
-        2. Deep copy to create new immutable model instance
-        3. Atomically replace in-memory reference
-        4. Notify all observers asynchronously
-        5. Persist to user.yaml (background write)
+        This method reloads all configurations from the database and
+        notifies all observers asynchronously.
 
-        Args:
-            new_config_dict: Partial or full user config dictionary
-
-        Returns:
-            The new validated UserConfig instance
-
-        Raises:
-            ValidationError: If config fails Pydantic validation
-            FatalStartupError: If core config not loaded
+        Use this for hot-reloading after configuration changes via API.
         """
-        if not self._core_config:
-            raise FatalStartupError("Core config not loaded", "F-003")
+        if not self._repo:
+            raise FatalStartupError("ConfigRepository not initialized", "F-003")
 
         async with self._get_update_lock():
-            # Step 1: Merge with existing config for partial updates
-            existing_dict = self._user_config.model_dump() if self._user_config else {}
-            merged_dict = self._deep_merge(existing_dict, new_config_dict)
+            # Reload all configs from DB
+            await self.load_all_from_db()
 
-            # Step 2: Validate against Pydantic model
-            try:
-                new_user_config = UserConfig(**merged_dict)
-            except ValidationError as e:
-                logger.error(f"Config validation failed: {e}")
-                raise
-
-            # Step 3: Atomic pointer swap (replace in-memory reference)
-            old_config = self._user_config
-            self._user_config = new_user_config
-
-            # Register any new secrets for masking
-            register_secret(new_user_config.exchange.api_key)
-            register_secret(new_user_config.exchange.api_secret)
-            for channel in new_user_config.notification.channels:
-                register_secret(channel.webhook_url)
-
-            # Step 4: Notify observers (async, non-blocking)
+            # Notify observers
             await self._notify_observers()
 
-            # Step 5: Persist to disk (fire-and-forget in production, but we await here for safety)
-            await self._persist_user_config()
-
-            logger.info("User configuration updated and persisted")
-            return new_user_config
-
-    def _deep_merge(self, base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Deep merge two dictionaries. Update values override base values.
-
-        Args:
-            base: Base dictionary
-            update: Update dictionary (takes precedence)
-
-        Returns:
-            Merged dictionary
-        """
-        result = base.copy()
-        for key, value in update.items():
-            if (
-                key in result
-                and isinstance(result[key], dict)
-                and isinstance(value, dict)
-            ):
-                result[key] = self._deep_merge(result[key], value)
-            else:
-                result[key] = value
-        return result
+            logger.info("Configuration reloaded from database")
 
     async def _notify_observers(self) -> None:
         """Notify all observers of config update (non-blocking)."""
@@ -578,56 +462,565 @@ class ConfigManager:
             logger.error(f"Observer callback raised: {e}")
             raise
 
-    async def _persist_user_config(self) -> None:
-        """Persist current user_config to user.yaml with yaml error handling."""
-        user_path = self.config_dir / 'user.yaml'
+
+    # ============================================================
+    # Import/Export Methods
+    # ============================================================
+
+    def get_full_config(self) -> Dict[str, Any]:
+        """
+        Get complete configuration as a dictionary.
+
+        Returns:
+            Dictionary containing all configuration sections:
+            - strategy: Active strategy definition
+            - risk: Risk management config
+            - system: System config
+            - symbols: List of symbol configs
+            - notifications: List of notification configs
+        """
+        from decimal import Decimal
+
+        result = {}
+
+        # Strategy
+        if self._active_strategy:
+            strat = self._active_strategy
+            strat_dict = {
+                'name': strat.name,
+                'is_active': strat.trigger.enabled if strat.trigger else True,
+            }
+            if strat.triggers:
+                strat_dict['triggers'] = [
+                    {'type': t.type, 'params': t.params or {}}
+                    for t in strat.triggers
+                ]
+            if strat.filters:
+                strat_dict['filters'] = [
+                    {'type': f.type, 'params': f.params or {}}
+                    for f in strat.filters
+                ]
+            if strat.apply_to:
+                strat_dict['apply_to'] = strat.apply_to
+            result['strategy'] = strat_dict
+
+        # Risk config
+        if self._risk_config:
+            result['risk'] = {
+                'max_loss_percent': float(self._risk_config.max_loss_percent),
+                'max_total_exposure': float(self._risk_config.max_total_exposure),
+                'max_leverage': self._risk_config.max_leverage,
+            }
+
+        # System config
+        if self._system_config:
+            result['system'] = {
+                'history_bars': self._system_config.history_bars,
+                'queue_batch_size': self._system_config.queue_batch_size,
+                'queue_flush_interval': self._system_config.queue_flush_interval,
+            }
+
+        # Symbols
+        core_symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]
+        result['symbols'] = [
+            {
+                'symbol': symbol,
+                'is_core': symbol in core_symbols,
+                'is_enabled': True,
+            }
+            for symbol in self._symbols
+        ]
+
+        # Notifications
+        result['notifications'] = [
+            {
+                'channel': channel.get('channel', 'feishu'),
+                'webhook_url': channel.get('webhook_url', ''),
+                'is_enabled': True,
+            }
+            for channel in self._notifications
+        ]
+
+        return result
+
+    def export_to_yaml(self, include_strategies: bool = True) -> str:
+        """
+        Export current configuration to YAML format.
+
+        Args:
+            include_strategies: Whether to include strategy definitions
+
+        Returns:
+            YAML string containing the configuration
+        """
+        export_data = {
+            'exported_at': datetime.now(timezone.utc).isoformat(),
+            'version': '1.0',
+        }
+
+        # Risk config
+        if self._risk_config:
+            export_data['risk_config'] = {
+                'max_loss_percent': float(self._risk_config.max_loss_percent),
+                'max_total_exposure': float(self._risk_config.max_total_exposure),
+                'max_leverage': self._risk_config.max_leverage,
+            }
+
+        # System config
+        if self._system_config:
+            export_data['system_config'] = {
+                'history_bars': self._system_config.history_bars,
+                'queue_batch_size': self._system_config.queue_batch_size,
+                'queue_flush_interval': self._system_config.queue_flush_interval,
+            }
+
+        # Symbols with their status
+        core_symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]
+        symbols_list = []
+        for symbol in self._symbols:
+            symbols_list.append({
+                'symbol': symbol,
+                'is_core': symbol in core_symbols,
+                'is_enabled': True,
+            })
+        export_data['symbols'] = symbols_list
+
+        # Strategies (optional)
+        if include_strategies and self._active_strategy:
+            strat = self._active_strategy
+            strat_dict = {
+                'name': strat.name,
+                'is_active': strat.trigger.enabled if strat.trigger else True,
+            }
+            if strat.triggers:
+                strat_dict['triggers'] = [
+                    {'type': t.type, 'params': t.params or {}}
+                    for t in strat.triggers
+                ]
+            if strat.filters:
+                strat_dict['filters'] = [
+                    {'type': f.type, 'params': f.params or {}}
+                    for f in strat.filters
+                ]
+            if strat.apply_to:
+                strat_dict['apply_to'] = strat.apply_to
+            export_data['strategies'] = [strat_dict]
+
+        # Notification channels
+        channels = []
+        for channel in self._notifications:
+            channels.append({
+                'type': channel.get('channel', 'feishu'),
+                'webhook_url': channel.get('webhook_url', ''),
+                'is_enabled': True,
+            })
+        export_data['notifications'] = channels
+
+        # Custom representer for Decimal
+        def decimal_representer(dumper, data):
+            return dumper.represent_float(float(data), '')
+        
+        yaml.add_representer(Decimal, decimal_representer)
+        
+        return yaml.safe_dump(
+            export_data,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False
+        )
+
+    def import_preview(self, yaml_content: str) -> Dict[str, Any]:
+        """
+        Preview import changes without applying them.
+        """
+        result = {
+            'valid': True,
+            'changes': [],
+            'errors': [],
+            'warnings': [],
+        }
 
         try:
-            if not self._user_config:
-                raise FatalStartupError("User config not loaded", "F-003")
-
-            # Convert Pydantic model to dict
-            # Use mode='json' to handle Decimal serialization properly
-            config_dict = self._user_config.model_dump(mode='json')
-
-            # Write to YAML file
-            with open(user_path, 'w', encoding='utf-8') as f:
-                yaml.safe_dump(
-                    config_dict,
-                    f,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                    sort_keys=False
-                )
-
-            logger.info(f"User configuration persisted to {user_path}")
-
+            import_data = yaml.safe_load(yaml_content)
         except yaml.YAMLError as e:
-            logger.error(f"YAML write error: {e}")
-            # Revert to old config on write failure
-            # In production, you might want a rollback strategy
-            raise
-        except Exception as e:
-            logger.error(f"Config persist error: {e}")
-            raise
+            result['valid'] = False
+            result['errors'].append({
+                'field': 'yaml',
+                'message': f'YAML parse error: {str(e)}',
+            })
+            return result
+
+        if not isinstance(import_data, dict):
+            result['valid'] = False
+            result['errors'].append({
+                'field': 'yaml',
+                'message': 'YAML content must be a dictionary',
+            })
+            return result
+
+        if 'risk_config' in import_data:
+            changes, errors = self._validate_risk_config(import_data['risk_config'])
+            result['changes'].extend(changes)
+            result['errors'].extend(errors)
+
+        if 'system_config' in import_data:
+            changes, errors = self._validate_system_config(import_data['system_config'])
+            result['changes'].extend(changes)
+            result['errors'].extend(errors)
+
+        if 'symbols' in import_data:
+            changes, errors, warnings = self._validate_symbols(import_data['symbols'])
+            result['changes'].extend(changes)
+            result['errors'].extend(errors)
+            result['warnings'].extend(warnings)
+
+        if 'strategies' in import_data:
+            changes, errors, warnings = self._validate_strategies(import_data['strategies'])
+            result['changes'].extend(changes)
+            result['errors'].extend(errors)
+            result['warnings'].extend(warnings)
+
+        if 'notifications' in import_data:
+            changes, errors = self._validate_notifications(import_data['notifications'])
+            result['changes'].extend(changes)
+            result['errors'].extend(errors)
+
+        if result['errors']:
+            result['valid'] = False
+
+        return result
+
+    def _validate_risk_config(self, risk_data: Dict[str, Any]) -> Tuple[List[Dict], List[Dict]]:
+        """Validate risk config changes."""
+        changes = []
+        errors = []
+
+        if not self._risk_config:
+            return changes, errors
+
+        if 'max_loss_percent' in risk_data:
+            try:
+                value = Decimal(str(risk_data['max_loss_percent']))
+                if value <= 0 or value > Decimal('1'):
+                    errors.append({'field': 'risk_config.max_loss_percent', 'message': 'Value must be between 0 and 1 (exclusive)'})
+                else:
+                    changes.append({
+                        'category': 'risk', 'action': 'update', 'field': 'max_loss_percent',
+                        'old_value': float(self._risk_config.max_loss_percent), 'new_value': float(value),
+                    })
+            except Exception as e:
+                errors.append({'field': 'risk_config.max_loss_percent', 'message': f'Invalid value: {str(e)}'})
+
+        if 'max_leverage' in risk_data:
+            try:
+                value = int(risk_data['max_leverage'])
+                if value < 1 or value > 125:
+                    errors.append({'field': 'risk_config.max_leverage', 'message': 'Value must be between 1 and 125'})
+                else:
+                    changes.append({
+                        'category': 'risk', 'action': 'update', 'field': 'max_leverage',
+                        'old_value': self._risk_config.max_leverage, 'new_value': value,
+                    })
+            except Exception as e:
+                errors.append({'field': 'risk_config.max_leverage', 'message': f'Invalid value: {str(e)}'})
+
+        if 'max_total_exposure' in risk_data:
+            try:
+                value = Decimal(str(risk_data['max_total_exposure']))
+                if value < 0 or value > Decimal('1'):
+                    errors.append({'field': 'risk_config.max_total_exposure', 'message': 'Value must be between 0 and 1'})
+                else:
+                    changes.append({
+                        'category': 'risk', 'action': 'update', 'field': 'max_total_exposure',
+                        'old_value': float(self._risk_config.max_total_exposure), 'new_value': float(value),
+                    })
+            except Exception as e:
+                errors.append({'field': 'risk_config.max_total_exposure', 'message': f'Invalid value: {str(e)}'})
+
+        return changes, errors
+
+    def _validate_system_config(self, system_data: Dict[str, Any]) -> Tuple[List[Dict], List[Dict]]:
+        """Validate system config changes."""
+        changes = []
+        errors = []
+
+        if not self._system_config:
+            return changes, errors
+
+        current = {
+            'history_bars': self._system_config.history_bars,
+            'queue_batch_size': self._system_config.queue_batch_size,
+            'queue_flush_interval': self._system_config.queue_flush_interval,
+        }
+
+        for field in ['history_bars', 'queue_batch_size', 'queue_flush_interval']:
+            if field in system_data:
+                value = system_data[field]
+                valid = True
+                if field == 'history_bars' and (not isinstance(value, int) or value < 10):
+                    errors.append({'field': f'system_config.{field}', 'message': 'Value must be an integer >= 10'})
+                    valid = False
+                elif field == 'queue_batch_size' and (not isinstance(value, int) or value < 1):
+                    errors.append({'field': f'system_config.{field}', 'message': 'Value must be an integer >= 1'})
+                    valid = False
+                elif field == 'queue_flush_interval' and (not isinstance(value, (int, float)) or value < 0.1):
+                    errors.append({'field': f'system_config.{field}', 'message': 'Value must be a number >= 0.1'})
+                    valid = False
+
+                if valid:
+                    changes.append({
+                        'category': 'system', 'action': 'update', 'field': field,
+                        'old_value': current[field], 'new_value': value,
+                    })
+
+        return changes, errors
+
+    def _validate_symbols(self, symbols_data: List[Dict]) -> Tuple[List[Dict], List[Dict], List[str]]:
+        """Validate symbols changes."""
+        changes, errors, warnings = [], [], []
+
+        if not isinstance(symbols_data, list):
+            return [{'field': 'symbols', 'message': 'Symbols must be a list'}], [], []
+
+        core_symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]
+        current_symbols = set(self._symbols) if self._symbols else set()
+
+        for idx, sym_data in enumerate(symbols_data):
+            if not isinstance(sym_data, dict):
+                errors.append({'field': f'symbols[{idx}]', 'message': 'Each symbol entry must be a dictionary'})
+                continue
+
+            symbol = sym_data.get('symbol')
+            if not symbol:
+                errors.append({'field': f'symbols[{idx}]', 'message': 'Missing required field: symbol'})
+                continue
+
+            if '/' not in symbol or ':' not in symbol:
+                errors.append({'field': f'symbols[{idx}].symbol', 'message': f'Invalid symbol format: {symbol}'})
+                continue
+
+            is_core = sym_data.get('is_core', False)
+            is_enabled = sym_data.get('is_enabled', True)
+
+            if symbol in core_symbols and not is_core:
+                warnings.append(f'Core symbol {symbol} marked as non-core in import (will be ignored)')
+
+            action = 'update' if symbol in current_symbols else 'create'
+            changes.append({
+                'category': 'symbol', 'action': action, 'field': symbol,
+                'new_value': {'is_core': is_core, 'is_enabled': is_enabled},
+            })
+
+        return changes, errors, warnings
+
+    def _validate_strategies(self, strategies_data: List[Dict]) -> Tuple[List[Dict], List[Dict], List[str]]:
+        """Validate strategies changes."""
+        changes, errors, warnings = [], [], []
+
+        if not isinstance(strategies_data, list):
+            return [{'field': 'strategies', 'message': 'Strategies must be a list'}], [], []
+
+        for idx, strat_data in enumerate(strategies_data):
+            if not isinstance(strat_data, dict):
+                errors.append({'field': f'strategies[{idx}]', 'message': 'Each strategy entry must be a dictionary'})
+                continue
+
+            name = strat_data.get('name')
+            if not name:
+                errors.append({'field': f'strategies[{idx}]', 'message': 'Missing required field: name'})
+                continue
+
+            triggers = strat_data.get('triggers', [])
+            if not isinstance(triggers, list):
+                errors.append({'field': f'strategies[{idx}].triggers', 'message': 'Triggers must be a list'})
+            else:
+                for t_idx, t in enumerate(triggers):
+                    if not isinstance(t, dict) or 'type' not in t:
+                        errors.append({'field': f'strategies[{idx}].triggers[{t_idx}]', 'message': 'Invalid trigger'})
+
+            filters = strat_data.get('filters', [])
+            if not isinstance(filters, list):
+                errors.append({'field': f'strategies[{idx}].filters', 'message': 'Filters must be a list'})
+            else:
+                for f_idx, f in enumerate(filters):
+                    if not isinstance(f, dict) or 'type' not in f:
+                        errors.append({'field': f'strategies[{idx}].filters[{f_idx}]', 'message': 'Invalid filter'})
+
+            if 'apply_to' in strat_data:
+                warnings.append(f'Strategy {name} scope changes may require restart')
+
+            changes.append({
+                'category': 'strategy', 'action': 'update' if self._active_strategy else 'create',
+                'field': name, 'new_value': strat_data,
+            })
+
+        return changes, errors, warnings
+
+    def _validate_notifications(self, notifications_data: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+        """Validate notifications changes."""
+        changes, errors = [], []
+
+        if not isinstance(notifications_data, list):
+            return [{'field': 'notifications', 'message': 'Notifications must be a list'}], []
+
+        for idx, notif_data in enumerate(notifications_data):
+            if not isinstance(notif_data, dict):
+                errors.append({'field': f'notifications[{idx}]', 'message': 'Must be a dictionary'})
+                continue
+
+            channel_type = notif_data.get('type')
+            if not channel_type or channel_type not in ('feishu', 'wecom', 'telegram'):
+                errors.append({'field': f'notifications[{idx}].type', 'message': 'Invalid channel type'})
+                continue
+
+            webhook_url = notif_data.get('webhook_url')
+            if not webhook_url:
+                errors.append({'field': f'notifications[{idx}].webhook_url', 'message': 'Missing webhook_url'})
+                continue
+
+            changes.append({
+                'category': 'notification', 'action': 'update' if idx < len(self._notifications) else 'create',
+                'field': f'{channel_type}:{webhook_url[:20]}...', 'new_value': notif_data,
+            })
+
+        return changes, errors
+
+    async def import_confirm(self, yaml_content: str, create_snapshot: bool = True) -> Dict[str, Any]:
+        """
+        Confirm and apply import changes.
+
+        Args:
+            yaml_content: YAML string to import
+            create_snapshot: Whether to create a snapshot before applying changes (not yet implemented)
+
+        Returns:
+            Dictionary containing:
+            - success: bool - Whether the import was successful
+            - message: str - Result message
+            - requires_restart: bool - Whether restart is required
+            - applied_changes: int - Number of changes applied
+        """
+        preview = self.import_preview(yaml_content)
+
+        if not preview['valid']:
+            return {
+                'success': False,
+                'message': f'Import validation failed: {len(preview["errors"])} errors',
+                'requires_restart': False,
+                'applied_changes': 0,
+                'errors': preview['errors'],
+            }
+
+        try:
+            import_data = yaml.safe_load(yaml_content)
+        except yaml.YAMLError as e:
+            return {'success': False, 'message': f'YAML parse error: {str(e)}', 'requires_restart': False, 'applied_changes': 0}
+
+        applied_changes = 0
+        requires_restart = False
+
+        # Apply risk config changes
+        if 'risk_config' in import_data and self._repo:
+            risk_data = import_data['risk_config']
+            if 'max_loss_percent' in risk_data:
+                await self._repo.update_risk_config(max_loss_percent=float(risk_data['max_loss_percent']))
+                applied_changes += 1
+            if 'max_leverage' in risk_data:
+                await self._repo.update_risk_config(max_leverage=risk_data['max_leverage'])
+                applied_changes += 1
+            if 'max_total_exposure' in risk_data:
+                await self._repo.update_risk_config(max_total_exposure=float(risk_data['max_total_exposure']))
+                applied_changes += 1
+
+        # Apply system config changes (requires restart)
+        if 'system_config' in import_data and self._repo:
+            system_data = import_data['system_config']
+            if 'history_bars' in system_data:
+                await self._repo.update_system_config(history_bars=system_data['history_bars'])
+                applied_changes += 1
+            if 'queue_batch_size' in system_data:
+                await self._repo.update_system_config(queue_batch_size=system_data['queue_batch_size'])
+                applied_changes += 1
+            if 'queue_flush_interval' in system_data:
+                await self._repo.update_system_config(queue_flush_interval=system_data['queue_flush_interval'])
+                applied_changes += 1
+            if any(k in system_data for k in ['history_bars', 'queue_batch_size', 'queue_flush_interval']):
+                requires_restart = True
+                logger.warning("System config changes detected. Restart required.")
+
+        # Apply symbol changes
+        if 'symbols' in import_data and self._repo:
+            for sym_data in import_data['symbols']:
+                symbol = sym_data.get('symbol')
+                is_core = sym_data.get('is_core', False)
+                is_enabled = sym_data.get('is_enabled', True)
+                if symbol:
+                    await self._repo.add_symbol(symbol, 1 if is_core else 0, 1 if is_enabled else 0)
+                    applied_changes += 1
+
+        # Apply strategy changes
+        if 'strategies' in import_data and self._repo:
+            for strat_data in import_data['strategies']:
+                await self._update_strategy_from_import(strat_data)
+                applied_changes += 1
+
+        # Apply notification changes
+        if 'notifications' in import_data and self._repo:
+            for notif_data in import_data['notifications']:
+                channel_type = notif_data.get('type', 'feishu')
+                webhook_url = notif_data.get('webhook_url', '')
+                is_enabled = notif_data.get('is_enabled', True)
+                await self._repo.add_notification(channel_type, webhook_url, 1 if is_enabled else 0)
+                applied_changes += 1
+
+        # Reload config from database to apply changes
+        if applied_changes > 0:
+            await self.reload_config()
+
+        return {
+            'success': True,
+            'message': f'Successfully applied {applied_changes} changes' + (' (restart required)' if requires_restart else ''),
+            'requires_restart': requires_restart,
+            'applied_changes': applied_changes,
+        }
+
+    async def _update_strategy_from_import(self, strat_data: Dict[str, Any]) -> None:
+        """Update or create a strategy from import data."""
+        if not self._repo:
+            return
+
+        name = strat_data.get('name', 'unknown')
+        is_active = strat_data.get('is_active', True)
+
+        triggers = [{'type': t.get('type', 'pinbar'), 'enabled': t.get('enabled', True), 'params': t.get('params', {})} for t in strat_data.get('triggers', [])]
+        filters = [{'type': f.get('type', 'ema'), 'enabled': f.get('enabled', True), **f.get('params', {})} for f in strat_data.get('filters', [])]
+        apply_to = strat_data.get('apply_to', [])
+
+        await self._repo.update_strategy(name=name, triggers=triggers, filters=filters, apply_to=apply_to, is_active=is_active)
+
+
+
+    async def close(self) -> None:
+        """Close the configuration repository connection."""
+        if self._repo:
+            await self._repo.close()
+            logger.info("Configuration repository connection closed")
 
 
 # ============================================================
 # Convenience function
 # ============================================================
-def load_all_configs(config_dir: Optional[str] = None) -> ConfigManager:
+async def load_all_from_db(db_path: str = "data/config.db") -> ConfigManager:
     """
-    Load all configurations and return ConfigManager instance.
+    Load all configurations from database and return ConfigManager instance.
 
     Args:
-        config_dir: Optional config directory path
+        db_path: Path to SQLite database file
 
     Returns:
-        ConfigManager with all configs loaded and merged
+        ConfigManager with all configs loaded
     """
-    manager = ConfigManager(config_dir)
-    manager.load_core_config()
-    manager.load_user_config()
-    manager.merge_symbols()
+    manager = ConfigManager(db_path)
+    await manager.initialize()
     manager.print_startup_info()
     return manager

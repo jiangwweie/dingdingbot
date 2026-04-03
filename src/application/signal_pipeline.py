@@ -67,10 +67,10 @@ class SignalPipeline:
         self._cooldown_seconds = cooldown_seconds
         self._status_tracker = SignalStatusTracker(signal_repository)
 
-        # Queue configuration from core.yaml (S4-2)
-        self._queue_batch_size = config_manager.core_config.signal_pipeline.queue.batch_size
-        self._queue_flush_interval = config_manager.core_config.signal_pipeline.queue.flush_interval
-        self._queue_max_size = config_manager.core_config.signal_pipeline.queue.max_queue_size
+        # Queue configuration from system_config (S4-2)
+        self._queue_batch_size = config_manager.system_config.queue_batch_size
+        self._queue_flush_interval = config_manager.system_config.queue_flush_interval
+        self._queue_max_size = 1000  # Default max queue size
 
         # Store K-line history per symbol/timeframe (for warmup on reload)
         self._kline_history: Dict[str, List[KlineData]] = {}
@@ -92,7 +92,7 @@ class SignalPipeline:
 
         # S3-1: MTF EMA indicators (one per symbol:timeframe combination)
         self._mtf_ema_indicators: Dict[str, EMACalculator] = {}
-        self._mtf_ema_period = config_manager.user_config.mtf_ema_period or 60
+        self._mtf_ema_period = config_manager.system_config.mtf_ema_period or 60
 
         # Build dynamic strategy runner from config (uses _kline_history for warmup)
         self._runner = self._build_and_warmup_runner()

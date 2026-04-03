@@ -184,6 +184,7 @@ class SignalRepository:
                 name          TEXT NOT NULL,
                 description   TEXT,
                 strategy_json TEXT NOT NULL,
+                is_active     INTEGER DEFAULT 0,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL
             )
@@ -1484,11 +1485,11 @@ class SignalRepository:
         Get all custom strategy templates (list view with basic info only).
 
         Returns:
-            List of strategies with id, name, description, created_at, updated_at
+            List of strategies with id, name, description, is_active, created_at, updated_at
         """
         async with self._db.execute(
             """
-            SELECT id, name, description, created_at, updated_at
+            SELECT id, name, description, is_active, created_at, updated_at
             FROM custom_strategies
             ORDER BY created_at DESC
             """
@@ -1604,6 +1605,31 @@ class SignalRepository:
         """
         cursor = await self._db.execute(
             "DELETE FROM custom_strategies WHERE id = ?", (strategy_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def activate_custom_strategy(self, strategy_id: int) -> bool:
+        """
+        Activate a custom strategy template by ID.
+        Deactivates all other strategies first to ensure only one active strategy.
+
+        Args:
+            strategy_id: Strategy record ID
+
+        Returns:
+            True if activated successfully, False if strategy not found
+        """
+        # Deactivate all strategies first
+        await self._db.execute(
+            "UPDATE custom_strategies SET is_active = 0, updated_at = ? WHERE is_active = 1",
+            (datetime.now(timezone.utc).isoformat(),)
+        )
+
+        # Activate the specified strategy
+        cursor = await self._db.execute(
+            "UPDATE custom_strategies SET is_active = 1, updated_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), strategy_id)
         )
         await self._db.commit()
         return cursor.rowcount > 0
