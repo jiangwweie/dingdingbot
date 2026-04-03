@@ -20,7 +20,7 @@ export function OrdersTable({ orders, isLoading, onOrderClick }: OrdersTableProp
         <table className="w-full text-sm text-left">
           <thead className="text-xs text-gray-500 bg-gray-50/50 uppercase border-b border-gray-100">
             <tr>
-              <th className="px-6 py-4 font-medium">订单 ID</th>
+              <th className="px-6 py-4 font-medium">序号</th>
               <th className="px-6 py-4 font-medium">币种</th>
               <th className="px-6 py-4 font-medium">类型</th>
               <th className="px-6 py-4 font-medium">角色</th>
@@ -63,7 +63,7 @@ export function OrdersTable({ orders, isLoading, onOrderClick }: OrdersTableProp
       <table className="w-full text-sm text-left whitespace-nowrap">
         <thead className="text-xs text-gray-500 bg-gray-50/50 uppercase border-b border-gray-100">
           <tr>
-            <th className="px-6 py-4 font-medium">订单 ID</th>
+            <th className="px-6 py-4 font-medium">序号</th>
             <th className="px-6 py-4 font-medium">币种</th>
             <th className="px-6 py-4 font-medium">类型</th>
             <th className="px-6 py-4 font-medium">角色</th>
@@ -76,15 +76,15 @@ export function OrdersTable({ orders, isLoading, onOrderClick }: OrdersTableProp
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {orders.map((order) => (
+          {orders.map((order, index) => (
             <tr
               key={order.order_id}
               onClick={() => onOrderClick?.(order.order_id)}
               className="hover:bg-gray-50/50 transition-colors cursor-pointer group"
             >
               <td className="px-6 py-4">
-                <span className="font-mono text-xs text-gray-600">
-                  {order.order_id.slice(0, 8)}...{order.order_id.slice(-4)}
+                <span className="text-gray-500 font-mono text-xs">
+                  {index + 1}
                 </span>
               </td>
               <td className="px-6 py-4">

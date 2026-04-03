@@ -1640,7 +1640,7 @@ export interface StrategyParamTemplate {
  * Fetch strategy parameter templates list
  */
 export async function fetchStrategyParamTemplates(): Promise<StrategyParamTemplate[]> {
-  const res = await fetch('/api/strategy/params/templates', {
+  const res = await fetch('/api/strategies/templates', {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -1659,7 +1659,7 @@ export async function saveStrategyParamTemplate(
   name: string,
   description?: string
 ): Promise<StrategyParamTemplate> {
-  const res = await fetch('/api/strategy/params/templates', {
+  const res = await fetch('/api/strategies/templates', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, description }),
@@ -1677,7 +1677,7 @@ export async function saveStrategyParamTemplate(
  * Load a strategy parameter template
  */
 export async function loadStrategyParamTemplate(templateId: number): Promise<StrategyParamsResponse> {
-  const res = await fetch(`/api/strategy/params/templates/${templateId}/load`, {
+  const res = await fetch(`/api/strategies/templates/${templateId}/load`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -1694,7 +1694,7 @@ export async function loadStrategyParamTemplate(templateId: number): Promise<Str
  * Delete a strategy parameter template
  */
 export async function deleteStrategyParamTemplate(templateId: number): Promise<{ status: string; message: string }> {
-  const res = await fetch(`/api/strategy/params/templates/${templateId}`, {
+  const res = await fetch(`/api/strategies/templates/${templateId}`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
   });
