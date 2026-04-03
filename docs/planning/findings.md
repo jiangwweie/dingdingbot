@@ -2333,6 +2333,98 @@ for path, methods in routes:
 
 ## 订单管理级联展示功能 - 路由顺序修复
 
+## 配置 Profile 管理功能
+
+**日期**: 2026-04-03
+
+### 功能概述
+
+配置 Profile 管理功能允许用户创建多套配置档案，根据交易风格快速切换。
+
+### 核心功能
+
+| 功能 | 说明 | API 端点 |
+|------|------|----------|
+| 创建 Profile | 从 default 或现有 Profile 复制配置 | `POST /api/config/profiles` |
+| 复制 Profile | 从现有 Profile 复制配置创建新 Profile | `POST /api/config/profiles` (copy_from) |
+| 重命名 Profile | 修改 Profile 名称和描述 | `PUT /api/config/profiles/{name}` |
+| 切换 Profile | 激活指定 Profile | `POST /api/config/profiles/{name}/activate` |
+| 删除 Profile | 删除非 default、非激活状态的 Profile | `DELETE /api/config/profiles/{name}` |
+| 导出 YAML | 将 Profile 配置导出为 YAML 文件 | `GET /api/config/profiles/{name}/export` |
+| 导入 YAML | 从 YAML 文件导入配置 | `POST /api/config/profiles/import` |
+| Profile 对比 | 对比两个 Profile 的差异 | `GET /api/config/profiles/compare` |
+
+### 数据库设计
+
+**config_profiles 表**:
+```sql
+CREATE TABLE IF NOT EXISTS config_profiles (
+    name TEXT PRIMARY KEY,
+    description TEXT,
+    is_active BOOLEAN DEFAULT FALSE,
+    created_from TEXT,  -- 复制自哪个 Profile
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+**config_entries_v2 表** (扩展):
+```sql
+-- 添加 profile_name 字段
+ALTER TABLE config_entries_v2 ADD COLUMN profile_name TEXT NOT NULL DEFAULT 'default'
+
+-- 创建复合唯一索引
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_profile_config 
+ON config_entries_v2(profile_name, config_key)
+```
+
+### 边界条件处理
+
+1. **禁止删除 default Profile**: default 是系统默认配置，不可删除
+2. **禁止删除激活中的 Profile**: 必须先切换再删除
+3. **禁止重命名为 default**: 防止名称冲突
+4. **Profile 名称唯一性验证**: 1-32 字符，不允许重复
+5. **复制 Profile 时配置项完整复制**: 所有配置项都要复制
+
+### 技术实现要点
+
+**Repository 层**:
+- `rename_profile()`: 更新 profile 名称，同时更新 config_entries_v2 中的 profile_name 字段
+- 事务处理：确保 profile 表和 config_entries_v2 表的原子性
+
+**Service 层**:
+- `ProfileDiff`: 对比两个 Profile 的差异，按模块分类（strategy/risk/exchange/other）
+- `rename_profile()`: 验证 + 事务处理
+
+**前端组件**:
+- `CreateProfileModal`: 支持 sourceProfile 参数，实现复制功能
+- `RenameProfileModal`: 独立的编辑对话框
+- `SwitchPreviewModal`: 切换前展示差异
+- `DeleteConfirmModal`: 删除二次确认
+- `ImportProfileModal`: YAML 文件上传和导入
+
+### 修改文件清单
+
+| 文件 | 说明 |
+|------|------|
+| `scripts/migrate_to_profiles.py` | 数据库迁移脚本 |
+| `src/infrastructure/config_profile_repository.py` | Repository 层 |
+| `src/application/config_profile_service.py` | Service 层 |
+| `src/interfaces/api.py` | API 端点 |
+| `web-front/src/types/config-profile.ts` | 类型定义 |
+| `web-front/src/lib/api.ts` | API 函数封装 |
+| `web-front/src/pages/ConfigProfiles.tsx` | 管理页面 |
+| `web-front/src/components/profiles/` | 5 个对话框组件 |
+
+### 测试结果
+
+- 单元测试：23/23 通过
+- 构建验证：npm run build 成功
+
+---
+
+## 订单管理级联展示功能 - 路由顺序修复
+
 **日期**: 2026-04-03  
 **修复人**: AI Builder  
 **问题级别**: P0 (路由匹配冲突)
