@@ -4141,7 +4141,8 @@ async def get_order_tree(
     start_date: Optional[str] = Query(None, description="开始日期 (ISO 8601)"),
     end_date: Optional[str] = Query(None, description="结束日期 (ISO 8601)"),
     days: Optional[int] = Query(None, ge=1, le=90, description="最近 N 天（默认 7 天，与 start_date 互斥）"),
-    limit: int = Query(default=200, ge=1, le=500, description="根订单数量上限"),
+    page: int = Query(default=1, ge=1, description="页码（从 1 开始）"),
+    page_size: int = Query(default=50, ge=1, le=200, description="每页数量（默认 50，最大 200）"),
 ) -> OrderTreeResponse:
     """
     获取订单树形结构（订单管理级联展示功能）
@@ -4149,14 +4150,15 @@ async def get_order_tree(
     Phase 6 v3.0: 订单管理级联展示功能 - GET /api/v3/orders/tree
     Reference: docs/designs/order-chain-tree-contract.md Section
 
-    一次性加载完整订单树，前端使用虚拟滚动优化渲染性能
+    分页加载订单树，前端使用虚拟滚动优化渲染性能
 
     Args:
         symbol: 币种对过滤（可选），如 "BTC/USDT:USDT"
         start_date: 开始日期（可选，ISO 8601 格式），与 days 参数互斥
         end_date: 结束日期（可选，ISO 8601 格式）
         days: 最近 N 天（可选，默认 7 天，与 start_date 互斥）
-        limit: 根订单数量上限（默认 200，最多 500）
+        page: 页码（从 1 开始，默认 1）
+        page_size: 每页数量（默认 50，最大 200）
 
     Returns:
         OrderTreeResponse: 订单树响应
@@ -4170,7 +4172,10 @@ async def get_order_tree(
                 },
                 ...
             ],
-            "total": 50,  // 根订单总数
+            "total": 50,  // 当前页根订单数
+            "total_count": 150,  // 符合条件的总根订单数
+            "page": 1,  // 当前页码
+            "page_size": 50,  // 每页数量
             "metadata": {
                 "symbol_filter": "BTC/USDT:USDT",
                 "days_filter": 7,
@@ -4232,7 +4237,8 @@ async def get_order_tree(
                 start_date=start_dt,
                 end_date=end_dt,
                 days=effective_days if not start_date else None,
-                limit=limit,
+                page=page,
+                page_size=page_size,
             )
 
             # 将字典结果转换为 Pydantic 模型
@@ -4243,6 +4249,9 @@ async def get_order_tree(
             return OrderTreeResponse(
                 items=items,
                 total=result['total'],
+                total_count=result['total_count'],
+                page=result['page'],
+                page_size=result['page_size'],
                 metadata=result['metadata'],
             )
         finally:

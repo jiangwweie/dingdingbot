@@ -132,6 +132,9 @@ def sample_order_tree_data():
             },
         ],
         "total": 1,
+        "total_count": 150,
+        "page": 1,
+        "page_size": 50,
         "metadata": {
             "symbol_filter": "BTC/USDT:USDT",
             "days_filter": 7,
@@ -180,8 +183,14 @@ class TestGetOrderTree:
 
         assert "items" in data
         assert "total" in data
+        assert "total_count" in data
+        assert "page" in data
+        assert "page_size" in data
         assert "metadata" in data
         assert data["total"] == 1
+        assert data["total_count"] == 150
+        assert data["page"] == 1
+        assert data["page_size"] == 50
         assert len(data["items"]) == 1
 
         # 验证根节点
@@ -230,8 +239,8 @@ class TestGetOrderTree:
         assert call_kwargs["days"] == 14
 
     @pytest.mark.asyncio
-    async def test_get_order_tree_with_limit(self, client, sample_order_tree_data):
-        """测试：带数量限制的订单树查询"""
+    async def test_get_order_tree_with_pagination(self, client, sample_order_tree_data):
+        """测试：带分页参数的订单树查询"""
         with patch('src.interfaces.api.OrderRepository') as MockRepo:
             mock_repo = MagicMock()
             mock_repo.initialize = AsyncMock()
@@ -239,11 +248,12 @@ class TestGetOrderTree:
             mock_repo.get_order_tree = AsyncMock(return_value=sample_order_tree_data)
             MockRepo.return_value = mock_repo
 
-            response = client.get("/api/v3/orders/tree?limit=50")
+            response = client.get("/api/v3/orders/tree?page=2&page_size=100")
 
         assert response.status_code == 200
         call_kwargs = mock_repo.get_order_tree.call_args.kwargs
-        assert call_kwargs["limit"] == 50
+        assert call_kwargs["page"] == 2
+        assert call_kwargs["page_size"] == 100
 
     @pytest.mark.asyncio
     async def test_get_order_tree_invalid_start_date_format(self, client):
@@ -275,6 +285,9 @@ class TestGetOrderTree:
         empty_result = {
             "items": [],
             "total": 0,
+            "total_count": 0,
+            "page": 1,
+            "page_size": 50,
             "metadata": {
                 "symbol_filter": None,
                 "days_filter": 7,
@@ -294,6 +307,7 @@ class TestGetOrderTree:
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 0
+        assert data["total_count"] == 0
         assert data["items"] == []
 
     @pytest.mark.asyncio
@@ -465,10 +479,16 @@ class TestOrderTreeResponseModel:
         response = OrderTreeResponse(
             items=items,
             total=sample_order_tree_data["total"],
+            total_count=sample_order_tree_data["total_count"],
+            page=sample_order_tree_data["page"],
+            page_size=sample_order_tree_data["page_size"],
             metadata=sample_order_tree_data["metadata"],
         )
 
         assert response.total == 1
+        assert response.total_count == 150
+        assert response.page == 1
+        assert response.page_size == 50
         assert len(response.items) == 1
         assert response.items[0].level == 0
         assert response.items[0].has_children is True

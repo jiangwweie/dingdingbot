@@ -823,13 +823,14 @@ class OrderRepository:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         days: Optional[int] = 7,
-        limit: int = 200,
+        page: int = 1,
+        page_size: int = 50,
     ) -> Dict[str, Any]:
         """
-        获取订单树形结构（一次性加载完整树）
+        获取订单树形结构（分页加载）
 
         实现思路:
-        1. 查询所有 ENTRY 订单（根节点）
+        1. 查询所有 ENTRY 订单（根节点）- 分页
         2. 批量查询这些 ENTRY 的子订单（通过 parent_order_id IN (...)）
         3. 在内存中组装树形结构
 
@@ -838,30 +839,38 @@ class OrderRepository:
             start_date: 开始日期（可选）
             end_date: 结束日期（可选）
             days: 最近 N 天（可选，默认 7 天）
-            limit: 根订单数量上限（默认 200）
+            page: 页码（从 1 开始）
+            page_size: 每页数量（默认 50，最大 200）
 
         Returns:
             {
                 "items": List[Dict[str, Any]],  # 树形结构列表
-                "total": int,                    # 总根订单数
+                "total": int,                    # 当前页根订单数
+                "total_count": int,              # 总根订单数（用于分页）
+                "page": int,                     # 当前页码
+                "page_size": int,                # 每页数量
                 "metadata": Dict[str, Any],      # 元数据
             }
         """
         lock = self._ensure_lock()
         async with lock:
-            # Step 1: 获取根订单列表（ENTRY 角色）
-            root_orders = await self._get_entry_orders(
+            # Step 1: 获取根订单列表（ENTRY 角色）- 分页
+            root_orders, total_count = await self._get_entry_orders(
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
                 days=days,
-                limit=limit,
+                page=page,
+                page_size=page_size,
             )
 
             if not root_orders:
                 return {
                     "items": [],
                     "total": 0,
+                    "total_count": total_count,
+                    "page": page,
+                    "page_size": page_size,
                     "metadata": {
                         "symbol_filter": symbol,
                         "days_filter": days,
@@ -898,6 +907,9 @@ class OrderRepository:
             return {
                 "items": list(order_map.values()),
                 "total": len(root_orders),
+                "total_count": total_count,
+                "page": page,
+                "page_size": page_size,
                 "metadata": {
                     "symbol_filter": symbol,
                     "days_filter": days,
@@ -911,20 +923,22 @@ class OrderRepository:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         days: Optional[int] = 7,
-        limit: int = 200,
-    ) -> List[Order]:
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Tuple[List[Order], int]:
         """
-        获取 ENTRY 订单列表（根节点）
+        获取 ENTRY 订单列表（根节点）- 分页
 
         Args:
             symbol: 币种对过滤
             start_date: 开始日期
             end_date: 结束日期
             days: 最近 N 天
-            limit: 数量上限
+            page: 页码（从 1 开始）
+            page_size: 每页数量
 
         Returns:
-            List of Order objects
+            Tuple of (List of Order objects, total_count)
         """
         # Build WHERE clause
         where_conditions = ["order_role = ?"]
@@ -955,24 +969,26 @@ class OrderRepository:
             f"SELECT COUNT(*) FROM orders {where_clause}",
             tuple(params)
         )
-        total = (await count_cursor.fetchone())[0]
+        total_count = (await count_cursor.fetchone())[0]
         await count_cursor.close()
 
-        # Get paginated results
-        params.append(limit)
+        # Get paginated results with LIMIT and OFFSET
+        offset = (page - 1) * page_size
+        params.append(page_size)
+        params.append(offset)
         cursor = await self._db.execute(
             f"""
             SELECT * FROM orders
             {where_clause}
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
             tuple(params)
         )
         rows = await cursor.fetchall()
         await cursor.close()
 
-        return [self._row_to_order(row) for row in rows]
+        return [self._row_to_order(row) for row in rows], total_count
 
     async def _get_child_orders(self, parent_ids: List[str]) -> List[Order]:
         """

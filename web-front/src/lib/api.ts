@@ -23,6 +23,9 @@ import type {
   ReconciliationReport,
   ReconciliationRequest,
   OrdersResponse,
+  OrderTreeResponse,
+  OrderBatchDeleteRequest,
+  OrderBatchDeleteResponse,
 } from '../types/order';
 
 // Import config profile types
@@ -2268,6 +2271,8 @@ export async function fetchOrderTree(params?: {
   start_date?: string;
   end_date?: string;
   days?: number;
+  page?: number;
+  page_size?: number;
 }): Promise<OrderTreeResponse> {
   const queryParams = new URLSearchParams();
   if (params?.symbol) queryParams.append('symbol', params.symbol);
@@ -2275,6 +2280,8 @@ export async function fetchOrderTree(params?: {
   if (params?.start_date) queryParams.append('start_date', params.start_date);
   if (params?.end_date) queryParams.append('end_date', params.end_date);
   if (params?.days) queryParams.append('days', String(params.days));
+  if (params?.page) queryParams.append('page', String(params.page));
+  if (params?.page_size) queryParams.append('page_size', String(params.page_size));
 
   const res = await fetch(`/api/v3/orders/tree?${queryParams}`, {
     method: 'GET',

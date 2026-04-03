@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from 'react';
-import { Plus, Filter, X } from 'lucide-react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { Plus, Filter, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { OrderTreeNode, OrderStatus, OrderRole, OrderBatchDeleteRequest } from '../types/order';
 import { OrderChainTreeTable } from '../components/v3/OrderChainTreeTable';
 import { DeleteChainConfirmModal } from '../components/v3/DeleteChainConfirmModal';
@@ -38,6 +38,11 @@ export default function Orders() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalCount, setTotalCount] = useState(0);
+
   // Modal & Drawer state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -54,14 +59,18 @@ export default function Orders() {
   const loadOrderTree = useCallback(async () => {
     setIsLoading(true);
     try {
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = {
+        page,
+        page_size: pageSize,
+      };
       if (symbolFilter) params.symbol = symbolFilter;
       if (timeframeFilter) params.timeframe = timeframeFilter;
       if (startDate) params.start_date = startDate;
       if (endDate) params.end_date = endDate;
 
-      const response = await fetchOrderTree(params);
+      const response = await fetchOrderTree(params as any);
       setTreeData(response.items || []);
+      setTotalCount(response.total_count || 0);
 
       // Auto-expand all root nodes on load
       const rootIds = (response.items || []).map((item: OrderTreeNode) => item.order.order_id);
@@ -69,23 +78,24 @@ export default function Orders() {
     } catch (error) {
       console.error('Failed to load order tree:', error);
       setTreeData([]);
+      setTotalCount(0);
     } finally {
       setIsLoading(false);
     }
+  }, [symbolFilter, timeframeFilter, startDate, endDate, page, pageSize]);
+
+  // Reset page to 1 when filters change
+  useEffect(() => {
+    setPage(1);
   }, [symbolFilter, timeframeFilter, startDate, endDate]);
 
-  // Load data on mount and filter changes
-  useState(() => {
-    loadOrderTree();
-  });
-
-  // Refresh on filter change (debounced)
-  useState(() => {
+  // Load data on mount and when page/pageSize/filters change
+  useEffect(() => {
     const timer = setTimeout(() => {
       loadOrderTree();
     }, 300);
     return () => clearTimeout(timer);
-  });
+  }, [loadOrderTree]);
 
   // Clear all filters
   const clearFilters = () => {
@@ -95,6 +105,7 @@ export default function Orders() {
     setEndDate('');
     setExpandedRowKeys([]);
     setSelectedRowKeys([]);
+    setPage(1); // Reset to first page when clearing filters
   };
 
   // Handle expand/collapse
@@ -292,6 +303,44 @@ export default function Orders() {
         onDeleteChain={handleDeleteChainClick}
         isLoading={isLoading}
       />
+
+      {/* Pagination */}
+      {totalCount > 0 && (
+        <div className="flex items-center justify-between bg-white rounded-xl shadow-sm border border-gray-100 px-4 py-3">
+          <div className="text-sm text-gray-500">
+            第 {page} / {Math.ceil(totalCount / pageSize)} 页，共 {totalCount} 条
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1); // Reset to first page when page size changes
+              }}
+              className="bg-gray-50 border-none text-sm rounded-lg focus:ring-0 py-1.5 px-3 outline-none"
+            >
+              <option value={20}>20 条/页</option>
+              <option value={50}>50 条/页</option>
+              <option value={100}>100 条/页</option>
+              <option value={200}>200 条/页</option>
+            </select>
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(Math.ceil(totalCount / pageSize), p + 1))}
+              disabled={page >= Math.ceil(totalCount / pageSize)}
+              className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Order Details Drawer */}
       {selectedOrder && (

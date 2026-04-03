@@ -167,8 +167,12 @@ export const OrderChainTreeTable: FC<OrderChainTreeTableProps> = ({
   };
 
   // 行组件
-  const Row: FC<{ index: number; style: React.CSSProperties }> = ({ index, style }) => {
-    const item = flatData[index];
+  const Row: FC<{ index: number; style: React.CSSProperties; data: FlatOrderTreeNode[] }> = ({
+    index,
+    style,
+    data,
+  }) => {
+    const item = data[index];
     if (!item) return null;
 
     const { node, orderId, level } = item;
@@ -366,7 +370,7 @@ export const OrderChainTreeTable: FC<OrderChainTreeTableProps> = ({
           height={Math.min(flatData.length * 52, 600)}
           itemCount={flatData.length}
           itemSize={52}
-          itemData={flatData}
+          data={flatData}
           ref={listRef}
         >
           {Row}

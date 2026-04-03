@@ -1470,10 +1470,13 @@ class OrderTreeResponse(FinancialModel):
     订单管理级联展示功能 - GET /api/v3/orders/tree 响应体
     Reference: docs/designs/order-chain-tree-contract.md Section
 
-    一次性加载完整订单树，前端使用虚拟滚动优化渲染性能
+    支持分页加载订单树，前端使用虚拟滚动优化渲染性能
     """
     items: List[OrderTreeNode] = Field(..., description="订单树节点列表")
-    total: int = Field(..., description="根订单总数")
+    total: int = Field(..., description="当前页根订单数")
+    total_count: int = Field(..., description="符合条件的总根订单数（用于分页）")
+    page: int = Field(..., description="当前页码（从 1 开始）")
+    page_size: int = Field(..., description="每页数量")
     metadata: Dict[str, Any] = Field(..., description="元数据（过滤条件、加载时间等）")
 
 

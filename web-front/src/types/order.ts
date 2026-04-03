@@ -516,8 +516,14 @@ export interface OrderTreeNode {
 export interface OrderTreeResponse {
   /** 树形节点列表 */
   items: OrderTreeNode[];
-  /** 总根订单数 */
+  /** 总根订单数（当前页） */
   total: number;
+  /** 总记录数（用于分页） */
+  total_count: number;
+  /** 当前页码 */
+  page: number;
+  /** 每页数量 */
+  page_size: number;
   /** 元数据 */
   metadata?: {
     /** 币种过滤 */
