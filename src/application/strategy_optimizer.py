@@ -49,6 +49,10 @@ try:
     OPTUNA_AVAILABLE = True
 except ImportError:
     OPTUNA_AVAILABLE = False
+    # 定义占位类型用于类型注解
+    Study = Any
+    Trial = Any
+    StudyDirection = Any
     logger.warning("Optuna 未安装，请运行：pip install optuna>=3.5.0")
 
 

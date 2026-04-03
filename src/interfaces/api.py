@@ -2270,7 +2270,7 @@ async def get_strategy_metadata():
     }
 
 
-@app.get("/api/strategies/templates", response_model="StrategyTemplateListResponse")
+@app.get("/api/strategies/templates")
 async def list_strategy_templates(
     limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
     offset: int = Query(default=0, ge=0, description="分页偏移量"),
@@ -2313,7 +2313,7 @@ async def list_strategy_templates(
         ).model_dump()
 
 
-@app.get("/api/strategies", response_model="StrategyListResponse")
+@app.get("/api/strategies")
 async def get_custom_strategies(
     limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
     offset: int = Query(default=0, ge=0, description="分页偏移量"),
@@ -2563,7 +2563,7 @@ class StrategyApplyResponse(BaseModel):
     strategy_name: str = Field(..., description="Applied strategy name")
 
 
-@app.post("/api/strategies/preview", response_model="StrategyPreviewResponse")
+@app.post("/api/strategies/preview")
 async def preview_strategy(request: StrategyPreviewRequest):
     """
     Preview a strategy configuration against recent kline data.
@@ -3026,7 +3026,7 @@ class StrategyParamsPreviewResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list, description="Validation warnings")
 
 
-@app.get("/api/strategy/params", response_model="StrategyParamsResponse")
+@app.get("/api/strategy/params", response_model=StrategyParamsResponse)
 async def get_strategy_params():
     """
     Get current strategy parameters.
@@ -3046,7 +3046,7 @@ async def get_strategy_params():
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_config_entry_repo()
+        repo = await _get_config_entry_repo()
 
         # Get all strategy parameters from database
         strategy_params = await repo.get_entries_by_prefix("strategy")
@@ -3109,7 +3109,7 @@ async def get_strategy_params():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/strategy/params", response_model="StrategyParamsResponse")
+@app.put("/api/strategy/params", response_model=StrategyParamsResponse)
 async def update_strategy_params(request: StrategyParamsUpdateRequest):
     """
     Update strategy parameters with hot-reload.
@@ -3131,7 +3131,7 @@ async def update_strategy_params(request: StrategyParamsUpdateRequest):
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_config_entry_repo()
+        repo = await _get_config_entry_repo()
         snapshot_service = _get_snapshot_service()
 
         # Get current params from database
@@ -3257,7 +3257,7 @@ async def preview_strategy_params(request: StrategyParamsPreviewRequest):
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_config_entry_repo()
+        repo = await _get_config_entry_repo()
 
         # Get current params from database
         current_params_flat = await repo.get_entries_by_prefix("strategy")
@@ -3396,7 +3396,7 @@ async def export_strategy_params():
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_config_entry_repo()
+        repo = await _get_config_entry_repo()
 
         # Get all strategy parameters from database
         strategy_params = await repo.get_entries_by_prefix("strategy")
@@ -3473,7 +3473,7 @@ async def export_strategy_params_to_file():
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_config_entry_repo()
+        repo = await _get_config_entry_repo()
 
         # Get all strategy parameters from database
         strategy_params = await repo.get_entries_by_prefix("strategy")
@@ -3571,7 +3571,7 @@ async def import_strategy_params(request: StrategyParamsImportRequest):
     """
     try:
         config_manager = _get_config_manager()
-        repo = _get_config_entry_repo()
+        repo = await _get_config_entry_repo()
         snapshot_service = _get_snapshot_service()
 
         # Parse YAML content
