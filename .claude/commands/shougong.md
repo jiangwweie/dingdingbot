@@ -1,14 +1,66 @@
-# 收工技能 - 全套收工 (v3.0 适配版)
+# 收工技能 - 全套收工 (v3.0 适配版 + 自动归档)
 
 **触发词**: 收工、结束工作、结束、下班、shougong
 
-**版本**: v3.0 (适配工作流重构)
+**版本**: v3.0 (适配工作流重构) + v3.1 (自动归档交接文档)
 
 **核心原则**: 全自动执行，无需用户确认，仅在异常时介入
+
+**v3.1 新增功能** ⭐:
+- ✅ 自动归档超过 7 天的交接文档（防止文档膨胀）
+- ✅ 统一交接文档命名规范（强制 `<YYYYMMDD>-<序号>-handoff.md`）
+- ✅ 限制每日交接文档数量（最多 2 个）
 
 ---
 
 ## 执行流程 (全自动)
+
+### 阶段 0: 自动归档旧交接文档 ⭐ (v3.1 新增)
+
+```python
+from datetime import datetime, timedelta
+from pathlib import Path
+import shutil
+
+# 1. 创建归档目录
+archive_dir = Path("docs/planning/archive")
+archive_dir.mkdir(exist_ok=True)
+
+# 2. 找出超过 7 天的交接文档
+cutoff_date = datetime.now() - timedelta(days=7)
+old_handoffs = [
+    f for f in Path("docs/planning").glob("*-handoff.md")
+    if datetime.fromtimestamp(f.stat().st_mtime) < cutoff_date
+]
+
+# 3. 移动到归档目录
+archived_count = 0
+for handoff in old_handoffs:
+    shutil.move(str(handoff), str(archive_dir / handoff.name))
+    archived_count += 1
+
+# 4. 创建归档说明
+if archived_count > 0:
+    readme = archive_dir / "README.md"
+    readme.write_text(f"""# 归档交接文档
+
+归档时间: {datetime.now().strftime('%Y-%m-%d')}
+归档数量: {archived_count}
+
+说明：这些交接文档已超过 7 天，已归档以减少上下文占用。
+如需查看，请直接打开对应文件。
+""")
+```
+
+**输出**:
+```
+📦 归档交接文档：
+  - 2026-03-25-001-handoff.md (已归档)
+  - 2026-03-26-001-handoff.md (已归档)
+  归档数量: 2
+```
+
+---
 
 ### 阶段 1: 状态检查
 
@@ -218,6 +270,10 @@ git push
 
 ```
 🐶 收工完成 - {{YYYY-MM-DD}}
+
+📦 归档交接文档：
+  - {{archived_files}} (已归档)
+  归档数量: {{count}}
 
 📝 变更统计:
    M docs/planning/progress.md
