@@ -847,11 +847,8 @@ class OrderRepository:
                 "metadata": Dict[str, Any],      # 元数据
             }
         """
-        logger.info(f"[DEBUG] get_order_tree() 开始执行，参数：symbol={symbol}, days={days}, limit={limit}")
         lock = self._ensure_lock()
-        logger.info(f"[DEBUG] 获取到 Lock 对象：{lock}, locked={lock.locked()}")
         async with lock:
-            logger.info("[DEBUG] 成功获取 Lock（外层）")
             # Step 1: 获取根订单列表（ENTRY 角色）
             root_orders = await self._get_entry_orders(
                 symbol=symbol,
@@ -860,7 +857,6 @@ class OrderRepository:
                 days=days,
                 limit=limit,
             )
-            logger.info(f"[DEBUG] 查询到 {len(root_orders)} 个根订单")
 
             if not root_orders:
                 return {
@@ -953,7 +949,6 @@ class OrderRepository:
 
         where_clause = "WHERE " + " AND ".join(where_conditions)
 
-        logger.info(f"[DEBUG] _get_entry_orders() 开始查询，WHERE: {where_clause}, params: {params}")
         # 注意：不使用锁，因为调用方（get_order_tree）已经持有锁
         # Get total count
         count_cursor = await self._db.execute(
@@ -962,7 +957,6 @@ class OrderRepository:
         )
         total = (await count_cursor.fetchone())[0]
         await count_cursor.close()
-        logger.info(f"[DEBUG] 查询到总数：{total}")
 
         # Get paginated results
         params.append(limit)
@@ -1098,21 +1092,65 @@ class OrderRepository:
         if len(order_ids) > 100:
             raise ValueError("批量删除最多支持 100 个订单")
 
-        async with self._ensure_lock():
-            try:
-                # Step 1: 收集所有需要删除的订单 ID（包括级联子订单）
+        # 注意：移除外层锁，避免锁嵌套死锁
+        # 调用的方法（get_order_chain_by_order_id, get_order）已有锁保护
+        # 数据库事务操作在单独的锁上下文中执行
+        try:
+            # Step 1: 收集所有需要删除的订单 ID（包括级联子订单）
+            # 使用锁保护数据库操作部分
+            async with self._ensure_lock():
                 all_order_ids = set(order_ids)
                 for order_id in order_ids:
-                    chain = await self.get_order_chain_by_order_id(order_id)
-                    for order in chain:
-                        all_order_ids.add(order.id)
+                    # 直接查询数据库，避免调用带锁的方法
+                    cursor = await self._db.execute(
+                        "SELECT * FROM orders WHERE id = ? ORDER BY created_at ASC",
+                        (order_id,)
+                    )
+                    row = await cursor.fetchone()
+                    await cursor.close()
+
+                    if row:
+                        target_order = self._row_to_order(row)
+                        all_order_ids.add(target_order.id)
+
+                        # 如果是子订单，获取父订单
+                        if target_order.parent_order_id:
+                            all_order_ids.add(target_order.parent_order_id)
+
+                        # 获取所有同 parent_order_id 或 oco_group_id 的订单
+                        if target_order.order_role == OrderRole.ENTRY:
+                            # ENTRY订单，获取所有子订单
+                            cursor = await self._db.execute(
+                                "SELECT id FROM orders WHERE parent_order_id = ?",
+                                (target_order.id,)
+                            )
+                            child_rows = await cursor.fetchall()
+                            await cursor.close()
+                            for child_row in child_rows:
+                                all_order_ids.add(child_row[0])
+                        else:
+                            # 子订单，获取父订单和所有兄弟订单
+                            if target_order.parent_order_id:
+                                cursor = await self._db.execute(
+                                    "SELECT id FROM orders WHERE parent_order_id = ?",
+                                    (target_order.parent_order_id,)
+                                )
+                                sibling_rows = await cursor.fetchall()
+                                await cursor.close()
+                                for sibling_row in sibling_rows:
+                                    all_order_ids.add(sibling_row[0])
 
                 # Step 2: 获取订单详情
                 orders_to_delete = []
                 for oid in all_order_ids:
-                    order = await self.get_order(oid)
-                    if order:
-                        orders_to_delete.append(order)
+                    cursor = await self._db.execute(
+                        "SELECT * FROM orders WHERE id = ?",
+                        (oid,)
+                    )
+                    row = await cursor.fetchone()
+                    await cursor.close()
+                    if row:
+                        orders_to_delete.append(self._row_to_order(row))
 
                 # Step 3: 取消 OPEN 状态的订单（调用交易所 API）
                 # 注意：这里需要 exchange_gateway，暂时跳过实现
@@ -1165,9 +1203,9 @@ class OrderRepository:
 
                 return result
 
-            except Exception as e:
-                logger.error(f"批量删除订单失败：{str(e)}")
-                raise e
+        except Exception as e:
+            logger.error(f"批量删除订单失败：{str(e)}")
+            raise e
 
     async def get_order_count(self, signal_id: str) -> int:
         """

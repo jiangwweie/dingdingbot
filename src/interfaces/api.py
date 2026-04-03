@@ -4128,76 +4128,10 @@ async def create_order(request: OrderRequest) -> OrderResponseFull:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/v3/orders/{order_id}", response_model=OrderCancelResponse)
-async def cancel_order(order_id: str, symbol: str = Query(..., description="币种对")) -> OrderCancelResponse:
-    """
-    取消订单（v3 API）
-
-    Phase 6: v3.0 订单管理 - DELETE /api/v3/orders/{order_id}
-    Reference: docs/designs/phase5-contract.md Section 5
-
-    Args:
-        order_id: 系统订单 ID
-        symbol: 币种对（查询参数）
-
-    Returns:
-        OrderCancelResponse: 取消订单响应
-
-    Raises:
-        HTTPException:
-            - 404 F-012: 订单不存在
-            - 400 F-013: 订单已成交（无法取消）
-            - 429 C-010: API 频率限制
-    """
-    try:
-        gateway = _get_exchange_gateway()
-
-        # 记录请求日志（order_id 脱敏）
-        order_id_display = mask_secret(order_id, visible_chars=8)
-        logger.info(f"取消订单请求：order_id={order_id_display}, symbol={symbol}")
-
-        # 调用 ExchangeGateway 取消订单
-        result = await gateway.cancel_order(order_id=order_id, symbol=symbol)
-
-        now = int(datetime.now(timezone.utc).timestamp() * 1000)
-        return OrderCancelResponse(
-            order_id=result.order_id,
-            exchange_order_id=result.exchange_order_id,
-            symbol=symbol,
-            status=result.status,
-            canceled_at=now,
-            message=result.message,
-        )
-
-    except OrderNotFoundError as e:
-        logger.warning(f"订单不存在：{order_id}")
-        raise HTTPException(
-            status_code=404,
-            detail={"error_code": e.error_code, "message": str(e)}
-        )
-    except OrderAlreadyFilledError as e:
-        logger.warning(f"订单已成交，无法取消：{order_id}")
-        raise HTTPException(
-            status_code=400,
-            detail={"error_code": e.error_code, "message": str(e)}
-        )
-    except RateLimitError as e:
-        logger.warning(f"API 频率限制：{e}")
-        raise HTTPException(
-            status_code=429,
-            detail={"error_code": e.error_code, "message": str(e)}
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"取消订单失败：{str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # ------------------------------------------------------------
 # 1.5 Order Tree & Batch Delete Endpoints (订单管理级联展示功能)
 # IMPORTANT: Must be defined BEFORE /api/v3/orders/{order_id}
-#            to avoid route matching conflicts
+#            to avoid route matching conflicts (batch vs {order_id})
 # Reference: docs/designs/order-chain-tree-contract.md
 # ------------------------------------------------------------
 
@@ -4206,7 +4140,7 @@ async def get_order_tree(
     symbol: Optional[str] = Query(None, description="币种对过滤"),
     start_date: Optional[str] = Query(None, description="开始日期 (ISO 8601)"),
     end_date: Optional[str] = Query(None, description="结束日期 (ISO 8601)"),
-    days: Optional[int] = Query(default=7, ge=1, le=90, description="最近 N 天"),
+    days: Optional[int] = Query(None, ge=1, le=90, description="最近 N 天（默认 7 天，与 start_date 互斥）"),
     limit: int = Query(default=200, ge=1, le=500, description="根订单数量上限"),
 ) -> OrderTreeResponse:
     """
@@ -4252,7 +4186,7 @@ async def get_order_tree(
     from datetime import datetime
 
     try:
-        # 参数验证：start_date 与 days 互斥
+        # 参数验证：start_date 与 days 互斥（只有用户显式传入 days 时才检查）
         if start_date and days is not None:
             raise HTTPException(
                 status_code=400,
@@ -4281,28 +4215,25 @@ async def get_order_tree(
                     detail=f"end_date 格式错误，应为 ISO 8601 格式：{str(e)}"
                 )
 
+        # 处理 days 默认值
+        effective_days = days if days is not None else 7
+
         # 使用依赖注入获取 OrderRepository 实例
-        logger.info(f"[DEBUG] 获取 OrderRepository 实例，_order_repo={_order_repo}")
         repo = _get_order_repo()
-        logger.info(f"[DEBUG] OrderRepository 实例获取成功，repo={repo}")
 
         # 仅在非注入实例时初始化
         if not _order_repo:
-            logger.info("[DEBUG] 非注入实例，开始初始化...")
             await repo.initialize()
-            logger.info("[DEBUG] 初始化完成")
 
         try:
             # 调用 OrderRepository 获取订单树
-            logger.info(f"[DEBUG] 开始调用 repo.get_order_tree()，参数：symbol={symbol}, days={days}, limit={limit}")
             result = await repo.get_order_tree(
                 symbol=symbol,
                 start_date=start_dt,
                 end_date=end_dt,
-                days=days if not start_date else None,
+                days=effective_days if not start_date else None,
                 limit=limit,
             )
-            logger.info(f"[DEBUG] repo.get_order_tree() 调用成功，返回 {len(result.get('items', []))} 个订单")
 
             # 将字典结果转换为 Pydantic 模型
             from pydantic import TypeAdapter
@@ -4403,7 +4334,78 @@ async def delete_orders_batch(request: OrderDeleteRequest) -> OrderDeleteRespons
 
 
 # ------------------------------------------------------------
-# 1.6 Order Detail Endpoint (must be after /tree and /batch)
+# 1.6 Order Cancel Endpoint (DELETE /api/v3/orders/{order_id})
+# IMPORTANT: Must be AFTER /api/v3/orders/batch to avoid route conflicts
+# ------------------------------------------------------------
+
+@app.delete("/api/v3/orders/{order_id}", response_model=OrderCancelResponse)
+async def cancel_order(order_id: str, symbol: str = Query(..., description="币种对")) -> OrderCancelResponse:
+    """
+    取消订单（v3 API）
+
+    Phase 6: v3.0 订单管理 - DELETE /api/v3/orders/{order_id}
+    Reference: docs/designs/phase5-contract.md Section 5
+
+    Args:
+        order_id: 系统订单 ID
+        symbol: 币种对（查询参数）
+
+    Returns:
+        OrderCancelResponse: 取消订单响应
+
+    Raises:
+        HTTPException:
+            - 404 F-012: 订单不存在
+            - 400 F-013: 订单已成交（无法取消）
+            - 429 C-010: API 频率限制
+    """
+    try:
+        gateway = _get_exchange_gateway()
+
+        # 记录请求日志（order_id 脱敏）
+        order_id_display = mask_secret(order_id, visible_chars=8)
+        logger.info(f"取消订单请求：order_id={order_id_display}, symbol={symbol}")
+
+        # 调用 ExchangeGateway 取消订单
+        result = await gateway.cancel_order(order_id=order_id, symbol=symbol)
+
+        now = int(datetime.now(timezone.utc).timestamp() * 1000)
+        return OrderCancelResponse(
+            order_id=result.order_id,
+            exchange_order_id=result.exchange_order_id,
+            symbol=symbol,
+            status=result.status,
+            canceled_at=now,
+            message=result.message,
+        )
+
+    except OrderNotFoundError as e:
+        logger.warning(f"订单不存在：{order_id}")
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": e.error_code, "message": str(e)}
+        )
+    except OrderAlreadyFilledError as e:
+        logger.warning(f"订单已成交，无法取消：{order_id}")
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": e.error_code, "message": str(e)}
+        )
+    except RateLimitError as e:
+        logger.warning(f"API 频率限制：{e}")
+        raise HTTPException(
+            status_code=429,
+            detail={"error_code": e.error_code, "message": str(e)}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"取消订单失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------
+# 1.7 Order Detail Endpoint (must be after /tree, /batch and /{order_id})
 # ------------------------------------------------------------
 
 @app.get("/api/v3/orders/{order_id:path}", response_model=OrderResponseFull)

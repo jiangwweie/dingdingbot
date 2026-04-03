@@ -384,16 +384,18 @@ class TestOrderTreeIntegration:
 
         # start_date 和 days 同时指定应该返回 400
         assert response.status_code == 400
-        error_detail = response.json().get("detail", "")
-        assert "互斥" in error_detail
+        # API使用统一异常处理器，返回message字段
+        error_detail = response.json().get("message", "")
+        assert "互斥" in str(error_detail), f"Expected '互斥' in message, got: {error_detail}"
 
     def test_get_order_tree_invalid_date_format(self, api_client, order_repo):
         """集成测试：无效日期格式"""
         response = api_client.get("/api/v3/orders/tree?start_date=invalid-date")
 
         assert response.status_code == 400
-        error_detail = response.json().get("detail", "")
-        assert "格式错误" in error_detail
+        # API使用统一异常处理器，返回message字段
+        error_detail = response.json().get("message", "")
+        assert "格式错误" in str(error_detail), f"Expected '格式错误' in message, got: {error_detail}"
 
 
 # ============================================================
