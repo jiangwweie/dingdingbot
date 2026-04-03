@@ -44,15 +44,36 @@ class OrderRepository:
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None  # 延迟创建，避免事件循环冲突
         logger.info(f"订单仓库初始化完成：{db_path}")
+
+    def _ensure_lock(self) -> asyncio.Lock:
+        """Ensure lock is created for current event loop.
+
+        This method is safe to call from any event loop context.
+        Each call will return the lock associated with the current running event loop.
+        """
+        try:
+            # 尝试获取当前运行的事件循环
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 没有运行的事件循环，返回一个新创建的 lock
+            # 这种情况通常发生在同步代码中
+            return asyncio.Lock()
+
+        # 为当前事件循环创建或获取 lock
+        # 使用 id(loop) 作为唯一标识符，避免跨事件循环共享 lock
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
+        return self._lock
 
     async def initialize(self) -> None:
         """
         Initialize database connection and create tables.
         Also creates the data/ directory if it doesn't exist.
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # Create data directory if not exists
             db_dir = os.path.dirname(self.db_path)
             if db_dir and not os.path.exists(db_dir):
@@ -125,7 +146,7 @@ class OrderRepository:
 
     async def close(self) -> None:
         """Close database connection"""
-        async with self._lock:
+        async with self._ensure_lock():
             if self._db:
                 await self._db.commit()
                 await self._db.close()
@@ -146,7 +167,7 @@ class OrderRepository:
         Args:
             order: Order object to save
         """
-        async with self._lock:
+        async with self._ensure_lock():
             await self._db.execute(
                 """
                 INSERT INTO orders (
@@ -200,7 +221,7 @@ class OrderRepository:
         Args:
             orders: List of Order objects to save
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # 使用 BEGIN 显式开启事务
             await self._db.execute("BEGIN")
             try:
@@ -276,7 +297,7 @@ class OrderRepository:
             exchange_order_id: Exchange order ID (optional)
             exit_reason: Exit reason for SL/TP orders (optional)
         """
-        async with self._lock:
+        async with self._ensure_lock():
             update_fields = ["status = ?", "updated_at = ?"]
             params = [status.value, int(datetime.now(timezone.utc).timestamp() * 1000)]
 
@@ -317,7 +338,7 @@ class OrderRepository:
             order_id: Order ID to update
             filled_at: Filled timestamp in milliseconds
         """
-        async with self._lock:
+        async with self._ensure_lock():
             await self._db.execute(
                 """
                 UPDATE orders
@@ -369,7 +390,7 @@ class OrderRepository:
         Returns:
             Order object or None if not found
         """
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 "SELECT * FROM orders WHERE id = ?",
                 (order_id,)
@@ -391,7 +412,7 @@ class OrderRepository:
         Returns:
             List of Order objects
         """
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 "SELECT * FROM orders WHERE signal_id = ? ORDER BY created_at ASC",
                 (signal_id,)
@@ -426,7 +447,7 @@ class OrderRepository:
                 - limit: Requested limit
                 - offset: Requested offset
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # Build WHERE clause
             where_conditions = []
             params: List[Any] = []
@@ -499,7 +520,7 @@ class OrderRepository:
                 - page: Current page
                 - page_size: Page size
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # Build WHERE clause
             placeholders = ','.join('?' * len(signal_ids))
             where_clause = f"signal_id IN ({placeholders})"
@@ -553,7 +574,7 @@ class OrderRepository:
         Returns:
             List of Order objects
         """
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 "SELECT * FROM orders WHERE symbol = ? ORDER BY created_at DESC LIMIT ?",
                 (symbol, limit)
@@ -574,7 +595,7 @@ class OrderRepository:
         Returns:
             List of Order objects
         """
-        async with self._lock:
+        async with self._ensure_lock():
             if symbol:
                 cursor = await self._db.execute(
                     "SELECT * FROM orders WHERE status = ? AND symbol = ? ORDER BY created_at DESC",
@@ -600,7 +621,7 @@ class OrderRepository:
         Returns:
             List of Order objects
         """
-        async with self._lock:
+        async with self._ensure_lock():
             if symbol:
                 cursor = await self._db.execute(
                     "SELECT * FROM orders WHERE status IN ('OPEN', 'PARTIALLY_FILLED') AND symbol = ? ORDER BY created_at DESC",
@@ -632,7 +653,7 @@ class OrderRepository:
         Returns:
             List of Order objects
         """
-        async with self._lock:
+        async with self._ensure_lock():
             query = "SELECT * FROM orders WHERE order_role = ?"
             params = [role.value]
 
@@ -700,7 +721,7 @@ class OrderRepository:
         Returns:
             List of Order objects in the chain (ENTRY first, then TP/SL orders)
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # First, get the target order
             cursor = await self._db.execute(
                 "SELECT * FROM orders WHERE id = ? ORDER BY created_at ASC",
@@ -777,7 +798,7 @@ class OrderRepository:
         Returns:
             List of Order objects
         """
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 "SELECT * FROM orders WHERE oco_group_id = ? ORDER BY created_at ASC",
                 (oco_group_id,)
@@ -820,7 +841,7 @@ class OrderRepository:
                 "metadata": Dict[str, Any],      # 元数据
             }
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # Step 1: 获取根订单列表（ENTRY 角色）
             root_orders = await self._get_entry_orders(
                 symbol=symbol,
@@ -921,7 +942,7 @@ class OrderRepository:
 
         where_clause = "WHERE " + " AND ".join(where_conditions)
 
-        async with self._lock:
+        async with self._ensure_lock():
             # Get total count
             count_cursor = await self._db.execute(
                 f"SELECT COUNT(*) FROM orders {where_clause}",
@@ -961,7 +982,7 @@ class OrderRepository:
 
         placeholders = ','.join('?' * len(parent_ids))
 
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 f"""
                 SELECT * FROM orders
@@ -1064,7 +1085,7 @@ class OrderRepository:
         if len(order_ids) > 100:
             raise ValueError("批量删除最多支持 100 个订单")
 
-        async with self._lock:
+        async with self._ensure_lock():
             try:
                 # Step 1: 收集所有需要删除的订单 ID（包括级联子订单）
                 all_order_ids = set(order_ids)
@@ -1145,7 +1166,7 @@ class OrderRepository:
         Returns:
             Order count
         """
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 "SELECT COUNT(*) FROM orders WHERE signal_id = ?",
                 (signal_id,)
@@ -1201,7 +1222,7 @@ class OrderRepository:
         Returns:
             List of Order objects
         """
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 "SELECT * FROM orders ORDER BY created_at DESC LIMIT ?",
                 (limit,)
@@ -1223,7 +1244,7 @@ class OrderRepository:
             order_id: Order ID to delete
             cascade: If True and order is ENTRY, cascade delete child TP/SL orders
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # 获取订单信息以判断是否需要级联删除
             order = await self.get_order(order_id)
             if not order:
@@ -1266,7 +1287,7 @@ class OrderRepository:
         Returns:
             Number of orders deleted
         """
-        async with self._lock:
+        async with self._ensure_lock():
             if signal_id:
                 cursor = await self._db.execute(
                     "DELETE FROM orders WHERE signal_id = ?",
@@ -1298,7 +1319,7 @@ class OrderRepository:
         Returns:
             Number of orders deleted
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # 先获取所有关联订单
             orders = await self.get_orders_by_signal(signal_id)
             order_ids = [o.id for o in orders]
