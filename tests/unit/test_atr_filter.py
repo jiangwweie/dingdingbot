@@ -259,7 +259,7 @@ class TestFilterFactoryIntegration:
         filter = FilterFactory.create(config)
         assert isinstance(filter, AtrFilterDynamic)
         assert filter._period == 14  # Default
-        assert filter._min_atr_ratio == Decimal("0.001")  # Default
+        assert filter._min_atr_ratio == Decimal("0.005")  # Default (0.5%)
 
     def test_create_atr_chain(self):
         """Test creating filter chain with ATR."""

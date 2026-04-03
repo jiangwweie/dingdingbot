@@ -2,29 +2,64 @@
   "skills": {
     "local": [
       {
+        "name": "team-project-manager",
+        "description": "项目经理 - 统一入口，负责用户沟通、进度追踪、任务计划、代码提交、交付验收。",
+        "path": "./.claude/team/project-manager/SKILL.md"
+      },
+      {
+        "name": "team-product-manager",
+        "description": "产品经理 - 负责需求收集、优先级排序、用户故事编写、MVP 范围定义。",
+        "path": "./.claude/team/product-manager/SKILL.md"
+      },
+      {
+        "name": "team-architect",
+        "description": "架构师 - 负责架构设计、契约设计、技术选型、关联影响评估。",
+        "path": "./.claude/team/architect/SKILL.md"
+      },
+      {
         "name": "team-coordinator",
-        "description": "团队协调器 - 负责任务分解、分配给前端/后端/测试角色、协调并行执行。",
+        "description": "团队协调器 - PM 的执行代理，专注于任务分解、并行调度、结果整合。",
         "path": "./.claude/team/team-coordinator/SKILL.md"
       },
       {
-        "name": "backend-dev",
+        "name": "team-backend-dev",
         "description": "后端开发专家 - 负责 Python + FastAPI + asyncio 后端实现。",
         "path": "./.claude/team/backend-dev/SKILL.md"
       },
       {
-        "name": "frontend-dev",
+        "name": "team-frontend-dev",
         "description": "前端开发专家 - 负责 React + TypeScript + TailwindCSS 前端实现。",
         "path": "./.claude/team/frontend-dev/SKILL.md"
       },
       {
-        "name": "qa-tester",
+        "name": "team-qa-tester",
         "description": "质量保障专家 - 负责测试策略设计、单元测试、集成测试。",
         "path": "./.claude/team/qa-tester/SKILL.md"
       },
       {
-        "name": "code-reviewer",
+        "name": "team-code-reviewer",
         "description": "代码审查员 - 负责独立代码审查、架构一致性检查、安全隐患识别。",
         "path": "./.claude/team/code-reviewer/SKILL.md"
+      },
+      {
+        "name": "team-diagnostic-analyst",
+        "description": "诊断分析师 - 负责问题根因分析、共性问题排查、技术债识别（只分析不修改代码）。",
+        "path": "./.claude/team/diagnostic-analyst/SKILL.md"
+      },
+      {
+        "name": "team-devops-engineer",
+        "description": "运维工程师 - 负责服务器运维、Docker 部署、配置管理、故障排查（只改配置不改代码）。",
+        "path": "./.claude/team/devops-engineer/SKILL.md"
+      },
+      {
+        "name": "tdd-self-heal",
+        "description": "TDD 闭环自愈 - 生成测试→运行 pytest→分析失败→自我修复，直到绿灯才提交。",
+        "path": "./.claude/skills/agentic-workflow/tdd-self-heal/SKILL.md"
+      },
+      {
+        "name": "type-precision-enforcer",
+        "description": "类型与精度宪兵 - 审查 float 污染、Decimal quantize、Pydantic 判别器。",
+        "path": "./.claude/skills/agentic-workflow/type-precision-enforcer/SKILL.md"
       }
     ]
   }
