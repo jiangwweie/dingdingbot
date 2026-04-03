@@ -301,6 +301,10 @@ export default function Orders() {
         onSelectChange={handleSelectChange}
         onCancelOrder={handleCancelOrder}
         onDeleteChain={handleDeleteChainClick}
+        onViewDetails={(orderId: string) => {
+          setSelectedOrderId(orderId);
+          setIsDrawerOpen(true);
+        }}
         isLoading={isLoading}
       />
 
@@ -352,6 +356,7 @@ export default function Orders() {
             setTimeout(() => setSelectedOrderId(null), 300);
           }}
           onCancelOrder={handleCancelOrder}
+          showKlineChart={true}
         />
       )}
 

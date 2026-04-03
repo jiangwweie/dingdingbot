@@ -1,7 +1,7 @@
 # 任务计划
 
 > **当前迭代**: 2026-04-03 起
-> **最后更新**: 2026-04-03 (新增 OpenClaw 集成需求)
+> **最后更新**: 2026-04-04 (更新 P1/P2 完成状态 + OpenClaw 纳入远端规划)
 
 ---
 
@@ -9,24 +9,48 @@
 
 | 优先级 | 任务分类 | 任务数 | 预计工时 | 状态 |
 |--------|----------|--------|----------|------|
-| **P0** | OpenClaw + 盯盘狗 + Claude Code 集成 | 2 项 MVP | 18-24h | ☐ 待启动 |
-| **P0** | 技术债修复 | 3 项 | 4h | ☐ 待启动 |
-| **P1** | 测试修复 | 1 项 | 1h | ☐ 待启动 |
+| **P0** | 订单生命周期可视化 + 对账机制 | 6 项 | 38h | ☐ 待沟通 |
+| **P1** | 测试修复 | 1 项 | 1h | ☐ 搁置 |
 | **P0** | PMS 回测问题修复 | 3 项 | 5h | ✅ 已完成 |
 | **P0** | 前端导航重构 | 1 项 | 2h | ✅ 已完成 |
 | **P0** | T1 接口拆分 | 1 项 | 2h | ✅ 已完成 |
 | **P1** | Phase 7 收尾验证 | 3 项 | 5h | ✅ 已完成 |
 | **P1** | 配置管理功能 - 版本化快照 | 7 项 | 8h | ✅ 已完成 |
 | **P1** | 配置 Profile 管理功能 | 11 项 | 12h | ✅ 已完成 |
-| **P2** | 配置管理功能 | 2 项 | 4h | ☐ 搁置 |
 | **P0** | Phase 8 自动化调参 | 已分解 | 40h | ✅ 已完成 |
 | **P0** | 用户需求 Bug 修复 (2026-04-02) | 7 项 | 8h | ✅ 已完成 |
 | **P1** | 后续问题追踪 | 4 项 | 2h | ✅ 已完成 |
 | **P1** | 订单管理级联展示功能 | 1 项 | 16h | ✅ 已完成 |
 
+**待办总计**: 2 个项目，约 **38h** 工作量（测试修复已搁置）
+
 ---
 
-## 🔥 P0 级 - OpenClaw 集成需求 (2026-04-03 新增) ⭐
+## 📌 远端规划 (不紧急)
+
+### 配置审计与治理 ⭐
+
+**状态**: ☐ 远端规划 (不紧急)
+
+**预计工时**: 2h
+
+**功能说明**:
+记录每次配置变更的时间、操作人、变更内容，用于审计和追溯。
+
+**任务分解**:
+| 任务 | 说明 | 预计工时 |
+|------|------|----------|
+| 配置变更日志 | 记录每次配置变更的时间、操作人、变更内容 | 2h |
+
+**注**: 
+- 配置导入导出 API 已完成 (`GET /api/config/export`, `POST /api/config/import`)
+- 配置 Profile 管理已完成 (P1 已交付)
+
+---
+
+### OpenClaw + 盯盘狗 + Claude Code 集成 ⭐
+
+**状态**: ☐ 远端规划 (不紧急)
 
 **需求文档**: `docs/products/openclaw-integration-brief.md`
 
@@ -119,184 +143,164 @@
 
 ---
 
-## 🔧 待修复技术债 (2026-04-03 更新)
-
-### P0 级 - 订单管理技术债
-
-| ID | 任务 | 预计工时 | 状态 | 说明 |
-|----|------|----------|------|------|
-| DEBT-1 | 创建 `order_audit_logs` 表 | 1.5h | ☐ 待启动 | 批量删除订单审计日志持久化 |
-| DEBT-2 | 集成交易所 API 到批量删除 | 2h | ☐ 待启动 | `delete_orders_batch()` 调用交易所取消订单 |
-| DEBT-3 | API 依赖注入方案实现 | 1.5h | ✅ 已完成 | 订单管理 API 端点支持 OrderRepository 依赖注入 |
-| DEBT-4 | 修复方法重名冲突 get_order_chain() | 0.5h | ✅ 已完成 | 删除重复定义，21/21 测试通过 |
-| DEBT-5 | asyncio.Lock 事件循环冲突修复 (OrderRepository) | 1h | ✅ 已完成 | 延迟创建 lock，单元测试通过 |
-| DEBT-6 | asyncio.Lock 事件循环冲突修复 (SignalRepository + ConfigEntryRepository) | 1.5h | ✅ 已完成 | PR-1: _ensure_lock() + 幂等性，34+21 测试通过 |
-| DEBT-7 | FastAPI lifespan Repository 初始化 | 0.5h | ✅ 已完成 | PR-2: lifespan startup 初始化，解决 503 错误 |
-
-### P1 级 - 策略参数测试修复
-
-| ID | 任务 | 预计工时 | 状态 | 说明 |
-|----|------|----------|------|------|
-| TEST-1 | 修复策略参数 API 集成测试 | 1h | ✅ 已完成 | 22/22 测试通过 |
-| TEST-2 | 集成测试 fixture 重构 | 3h | ☐ 待启动 | test_order_chain_api.py 超时问题（混合同步/异步） |
-
-**已完成修复** (TEST-1):
-- `set_dependencies()` 函数参数改为可选
-- `save_strategy_params()` 异步 bug 修复
-- 测试 fixture 正确初始化 `config_entry_repo`
-
-**已完成修复** (DEBT-3 - 2026-04-03):
-- ✅ 添加 `_get_order_repo()` 辅助函数（懒加载模式）
-- ✅ 扩展 `set_dependencies()` 添加 `order_repo` 参数
-- ✅ 修改 5 个订单管理 API 端点使用依赖注入：
-  - GET /api/v3/orders/tree
-  - DELETE /api/v3/orders/batch
-  - GET /api/v3/orders/{order_id}
-  - GET /api/v3/orders/{order_id}/klines
-  - GET /api/v3/orders
-- ✅ 添加资源清理逻辑（仅关闭非注入实例）
-
-**已完成修复** (DEBT-4 - 2026-04-03):
-- ✅ 删除重复定义的 `get_order_chain()` 方法（1024行）
-- ✅ 保留第一个方法：`get_order_chain(signal_id) -> Dict[str, List[Order]]`
-- ✅ 按订单ID查询应使用：`get_order_chain_by_order_id(order_id)`
-- ✅ 修复 3 个失败测试，21/21 全部通过
-
-**技术发现**: Python 方法重名覆盖机制 - 同名方法后定义覆盖前定义，导致测试失败
-
-**已完成修复** (DEBT-5 - 2026-04-03):
-- ✅ 将 `_lock` 类型改为 `Optional[asyncio.Lock]`，初始化为 `None`
-- ✅ 添加 `_ensure_lock()` 方法，延迟创建 lock
-- ✅ 所有 `async with self._lock` 改为 `async with self._ensure_lock()`
-- ✅ 单元测试 21/21 通过
-- ⚠️ 集成测试仍然超时（fixture 设计问题）
-
-**技术发现**: asyncio.Lock 事件循环绑定机制 - lock 创建时绑定到当前事件循环，不同事件循环不能共享
-
-**已完成修复** (DEBT-5 - 2026-04-03):
-- ✅ 将 `_lock` 类型改为 `Optional[asyncio.Lock]`，初始化为 `None`
-- ✅ 添加 `_ensure_lock()` 方法，延迟创建 lock
-- ✅ 所有 `async with self._lock` 改为 `async with self._ensure_lock()`
-- ✅ 单元测试 21/21 通过
-- ⚠️ 集成测试仍然超时（fixture 设计问题）
-
-**遗留问题** (TEST-2):
-- 集成测试 `test_order_chain_api.py` 超时
-- 原因：fixture 混合同步 TestClient 和异步 order_repository
-- 解决方案：重构测试 fixture，使用异步 HTTP 客户端（httpx.AsyncClient）
-- 优先级：P1（不影响核心功能，仅影响测试）
+**需求文档**: `docs/products/openclaw-integration-brief.md`
 
 ---
 
-### 待修复任务详情 (DEBT-6/DEBT-7)
+## 📌 订单生命周期可视化 + 对账机制 (2026-04-04 新增) ⭐
 
-**架构评审报告**: `docs/reviews/AR-20260403-001-lifespan-init-review.md`
-**诊断报告**: `docs/diagnostic-reports/DA-20260403-001-order-api-503.md`
+**需求文档**: `docs/planning/order-lifecycle-viz-task.md`
 
-**DEBT-6: asyncio.Lock 事件循环冲突修复 (SignalRepository + ConfigEntryRepository)**
+**问题背景**:
+用户反馈订单状态显示异常（系统显示"进行中"但币安 APP 已无活跃订单），且 K 线图只展示 ENTRY 订单，缺少完整的交易生命周期可视化。
 
-**问题根因**:
-- SignalRepository 和 ConfigEntryRepository 在 `__init__` 中创建 `asyncio.Lock()`
-- lock 创建时绑定到当前事件循环，uvicorn --reload 热重载会创建新事件循环
-- 新事件循环无法使用旧循环的 lock → 死锁
+**核心需求**:
+1. **自动对账**: 系统启动时比较本地订单与交易所订单
+2. **手动对账**: 用户可手动触发对账，立即同步交易所真实状态
+3. **K 线图完整展示**: 在 K 线图上展示 ENTRY/TP/SL 所有成交订单
+4. **外部订单手动关联**: ⭐核心功能 - 用户主动将外部订单关联到系统信号
+5. **订单审计日志**: 记录订单删除等操作的审计日志
+6. **批量删除集成交易所 API**: 删除订单时同步取消交易所订单
 
-**修复方案** (参考 OrderRepository DEBT-5):
-```python
-# 修改前：
-def __init__(self, db_path: str = "data/v3_dev.db"):
-    self._lock = asyncio.Lock()  # ❌ 在 __init__ 中创建 lock
+**任务分解**:
+| 子任务 | 说明 | 预计工时 |
+|--------|------|----------|
+| A1-A4 | 自动对账机制（启动/WebSocket/轮询/报告） | 16h |
+| A5-A6 | 手动对账功能（API+ 前端 UI） | 4h |
+| **D1-D4** | **外部订单手动关联**（数据模型 +API+ 前端 UI） | **10h** |
+| B1-B3 | K 线图完整展示（数据验证/标记渲染/颜色区分） | 4h |
+| C1 | 创建 `order_audit_logs` 表（原 DEBT-1） | 1.5h |
+| C2 | 批量删除集成交易所 API（原 DEBT-2） | 2h |
 
-# 修改后：
-def __init__(self, db_path: str = "data/v3_dev.db"):
-    self._lock: Optional[asyncio.Lock] = None  # ✅ 延迟创建
-
-def _ensure_lock(self) -> asyncio.Lock:
-    """Ensure lock is created for current event loop."""
-    if self._lock is None:
-        self._lock = asyncio.Lock()
-    return self._lock
-
-async def initialize(self) -> None:
-    if self._db is not None:  # ✅ 幂等性检查
-        return
-    async with self._ensure_lock():
-        # ... 初始化逻辑 ...
-```
-
-**修改文件**:
-- `src/infrastructure/signal_repository.py` (第 36 行)
-- `src/infrastructure/config_entry_repository.py` (第 36 行)
+**预计工时总计**: 38h
 
 **验收标准**:
-- [ ] SignalRepository 单元测试通过
-- [ ] ConfigEntryRepository 单元测试通过
-- [ ] uvicorn --reload 热重载不死锁
-- [ ] 多事件循环切换测试通过
+- [ ] 系统启动时自动执行对账
+- [ ] 手动对账按钮可触发对账并显示结果
+- [ ] K 线图展示所有成交订单（ENTRY/TP/SL）
+- [ ] 不同角色使用不同颜色和形状标记
+- [ ] 外部订单有橙色"外部"标签
+- [ ] 用户可手动关联订单到信号（选择信号 + 角色 + 父订单）
+- [ ] 支持取消关联
+- [ ] 关联后的订单可在 K 线图展示完整生命周期
+- [ ] 批量删除订单时同步取消交易所订单
+- [ ] 订单删除操作记录审计日志
 
 ---
 
-**DEBT-7: FastAPI lifespan Repository 初始化**
+**项目背景**:
+用户拥有三个独立系统（OpenClaw、盯盘狗、Claude Code），缺少协同。核心痛点：
+1. 缺少移动端交互能力（盯盘狗 Web 移动端体验差）
+2. 单人决策易疲劳（信号自动执行无人工确认）
+3. 风险信息分散（持仓/订单/账户数据分散）
+4. 已有功能重复（币安 app 查持仓、webhook 推送）
 
-**问题根因**:
-- FastAPI lifespan 函数只有 shutdown 清理逻辑，没有 startup 初始化逻辑
-- 导致 `_repository` (SignalRepository) 和 `_config_entry_repo` 为 None
-- API 端点访问时返回 503 "Repository not initialized"
+**核心洞察**: 飞书的强交互能力（卡片消息 + 一键操作 + 移动端）才是真正的差异化价值。
 
-**修复方案** (PR-2):
-```python
-# 文件：src/interfaces/api.py
-# 位置：第 284-295 行
+### MVP-1: 交互式风险问答 ⭐⭐⭐⭐⭐
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage application lifespan events.
-    Initialize repositories on startup, close on shutdown.
-    """
-    # Startup - 初始化所有 Repository
-    from src.infrastructure.signal_repository import SignalRepository
-    from src.infrastructure.config_entry_repository import ConfigEntryRepository
+**用户故事**: 作为交易员，我希望在手机飞书随时查询当前风险状况，以便快速做出风险控制决策。
 
-    global _repository, _config_entry_repo
-
-    try:
-        # 初始化 SignalRepository（幂等）
-        if _repository is None:
-            _repository = SignalRepository()
-            await _repository.initialize()
-            logger.info("✅ SignalRepository initialized in lifespan")
-
-        # 初始化 ConfigEntryRepository（幂等）
-        if _config_entry_repo is None:
-            _config_entry_repo = ConfigEntryRepository()
-            await _config_entry_repo.initialize()
-            logger.info("✅ ConfigEntryRepository initialized in lifespan")
-
-        # OrderRepository 按需创建（DEBT-3 方案）
-
-        yield
-
-    finally:
-        # Shutdown - 清理所有 Repository
-        if _repository is not None:
-            await _repository.close()
-            logger.info("✅ SignalRepository closed")
-
-        if _config_entry_repo is not None:
-            await _config_entry_repo.close()
-            logger.info("✅ ConfigEntryRepository closed")
+**核心流程**:
+```
+飞书对话"当前风险如何？"
+  → OpenClaw AI 调用盯盘狗 API
+  → 风险综合分析（持仓风险 + 市场风险）
+  → 飞书卡片消息（风险评级 + AI 建议）
+  → 用户点击按钮"一键降低杠杆"
+  → Claude Code 执行修改
 ```
 
-**前置条件**: DEBT-6 (PR-1) 必须完成
+**RICE 评分**: 11.3 ⭐⭐⭐⭐⭐（最高优先级）
+**预计工时**: 6-8h
+
+**任务分解**:
+| ID | 任务 | 角色 | 预计工时 | 状态 |
+|----|------|------|----------|------|
+| OC-1-1 | OpenClaw 技能开发（Node.js） | backend | 2h | ☐ 待启动 |
+| OC-1-2 | 盯盘狗 API 扩展（持仓/账户端点） | backend | 2h | ☐ 待启动 |
+| OC-1-3 | 飞书卡片消息设计 | frontend | 1h | ☐ 待启动 |
+| OC-1-4 | 风险综合分析算法实现 | backend | 2h | ☐ 待启动 |
+| OC-1-5 | 卡片按钮回调处理 | backend | 1h | ☐ 待启动 |
+| OC-1-6 | 移动端测试验证 | qa | 1h | ☐ 待启动 |
 
 **验收标准**:
-- [ ] 启动 uvicorn 后访问 `/api/health` 正常
-- [ ] 访问 `/api/v3/orders/tree` 正常（不再 503）
-- [ ] 访问 `/api/signals/stats` 正常
-- [ ] 热重载后 API 正常工作
+- [ ] 飞书对话触发风险查询（"当前风险如何？"）
+- [ ] OpenClaw 调用盯盘狗 API 获取持仓/账户数据
+- [ ] 风险综合分析（持仓风险 + 市场风险）
+- [ ] OpenClaw 调用飞书 API 发送风险卡片（带按钮）
+- [ ] 用户点击按钮触发 WebSocket 回调
+- [ ] OpenClaw 调用盯盘狗 API 执行操作
+- [ ] 移动端测试（手机飞书操作）
+
+**技术方案**: 飞书机器人 API 桥接（已验证 webhook @方案失败）
+**架构文档**: `docs/designs/openclaw-integration-architecture.md`
 
 ---
 
-**总计**: 5 项待办任务（DEBT-1/DEBT-2/TEST-2/DEBT-6/DEBT-7），预计 8h
+### MVP-2: 交互式订单确认 ⭐⭐⭐⭐⭐
+
+**用户故事**: 作为交易员，我希望盯盘狗信号触发后通过飞书卡片确认执行，以便快速把关避免误判。
+
+**核心流程**:
+```
+盯盘狗信号触发
+  → 风控预检查
+  → 飞书卡片推送（信号详情 + AI 分析）
+  → 用户点击"确认执行"
+  → 订单创建
+  → 飞书推送执行结果
+```
+
+**RICE 评分**: 5.6 ⭐⭐⭐
+**预计工时**: 12-16h
+
+**任务分解**:
+| ID | 任务 | 角色 | 预计工时 | 状态 |
+|----|------|------|----------|------|
+| OC-2-1 | 盯盘狗信号推送飞书卡片 | backend | 3h | ☐ 待启动 |
+| OC-2-2 | 风控预检查集成 | backend | 2h | ☐ 待启动 |
+| OC-2-3 | OpenClaw 回调处理 | backend | 2h | ☐ 待启动 |
+| OC-2-4 | 订单创建 API 扩展 | backend | 2h | ☐ 待启动 |
+| OC-2-5 | 飞书卡片设计（信号详情） | frontend | 2h | ☐ 待启动 |
+| OC-2-6 | 拒绝原因记录功能 | backend | 1h | ☐ 待启动 |
+| OC-2-7 | 移动端测试验证 | qa | 2h | ☐ 待启动 |
+
+**验收标准**:
+- [ ] 盯盘狗信号触发飞书卡片推送
+- [ ] 卡片消息包含信号详情 + 风控预检查 + AI 分析
+- [ ] 卡片按钮"确认执行"触发订单创建
+- [ ] 卡片按钮"拒绝"记录拒绝原因
+- [ ] 卡片按钮"AI详情"触发对话追问
+- [ ] OpenClaw 接收飞书回调并调用盯盘狗 API
+- [ ] 移动端测试（手机飞书确认）
+
+---
+
+## 📝 技术债说明
+
+以下技术债已合并到**订单生命周期可视化 + 对账机制**需求中统一实现：
+
+| 原任务 | 说明 | 工时 | 状态 |
+|--------|------|------|------|
+| DEBT-1 | 创建 `order_audit_logs` 表 | 1.5h | 已合并 |
+| DEBT-2 | 集成交易所 API 到批量删除 | 2h | 已合并 |
+
+---
+
+## 📝 测试修复说明
+
+### TEST-2: 集成测试 fixture 重构 (1h)
+
+**问题**: `test_order_chain_api.py` 集成测试超时
+
+**原因**: fixture 混合同步 TestClient 和异步 order_repository
+
+**解决方案**: 重构测试 fixture，使用异步 HTTP 客户端（httpx.AsyncClient）
+
+**影响**: 不影响核心功能，仅影响测试
+
+**状态**: ☐ 搁置（不影响交付，可延后处理）
 
 ---
 
@@ -1025,26 +1029,23 @@ Repository 初始化 | ✅ 通过 | 正确初始化和关闭资源
 | T8: MTF 数据对齐验证 | 2h | ✅ 已完成 |
 | **小计** | **5h** | 3 个子任务 |
 
-#### 2.2 配置管理功能 (搁置)
-| 任务 | 工时 | 说明 |
-|------|------|------|
-| 配置导入导出 API | 2h | YAML 备份/恢复 |
-| **小计** | **2h** | 用户决策：产品成熟前不迁移 |
-
-**P1 级总计**: 7h (3 个核心 +1 个搁置)
+**P1 级总计**: 5h (已完成)
 
 ---
 
 ### 三、P2 级 - 次要 (时间允许)
 
-#### 3.1 配置管理功能 (搁置)
+#### 3.1 配置审计与治理 (搁置)
 | 任务 | 工时 | 说明 |
 |------|------|------|
-| 配置 Profile 管理 | 2h | 多环境配置切换 |
-| 配置审计与治理 | 2h | 配置变更日志 |
-| **小计** | **4h** | 用户决策：产品成熟前不迁移 |
+| 配置变更日志 | 2h | 记录每次配置变更的时间、操作人、变更内容 |
+| **小计** | **2h** | 用户决策：产品成熟前不迁移 |
 
-**P2 级总计**: 4h (2 个子任务)
+**P2 级总计**: 2h (1 个子任务)
+
+**注**: 
+- 配置导入导出 API 已完成 (`GET /api/config/export`, `POST /api/config/import`)
+- 配置 Profile 管理已完成 (P1 已交付)
 
 ---
 
@@ -1057,7 +1058,8 @@ Repository 初始化 | ✅ 通过 | 正确初始化和关闭资源
 - Phase 5-7 完成记录
 - P0-P2 问题修复记录
 - 回测功能完成记录
+- 配置管理功能（版本化快照 + Profile 管理）完成记录
 
 ---
 
-*最后更新：2026-04-03* | *归档时间：2026-04-03*
+*最后更新：2026-04-04* | *归档时间：2026-04-03*

@@ -24,6 +24,8 @@ interface OrderChainTreeTableProps {
   onCancelOrder?: (orderId: string, symbol: string) => Promise<void>;
   /** 删除订单链回调 */
   onDeleteChain?: (orderIds: string[]) => Promise<void>;
+  /** 查看详情回调 */
+  onViewDetails?: (orderId: string) => void;
   /** 加载状态 */
   isLoading?: boolean;
 }
@@ -84,6 +86,7 @@ export const OrderChainTreeTable = ({
   onSelectChange,
   onCancelOrder,
   onDeleteChain,
+  onViewDetails,  // 新增：查看详情回调
   isLoading = false,
 }: OrderChainTreeTableProps) => {
   const listRef = useRef<ListImperativeAPI>(null);
@@ -177,11 +180,19 @@ export const OrderChainTreeTable = ({
     const isExpanded = expandedRowKeys.includes(orderId);
     const isSelected = selectedRowKeys.includes(orderId);
 
+    // 处理行点击 - 打开详情
+    const handleRowClick = () => {
+      if (onViewDetails) {
+        onViewDetails(orderId);
+      }
+    };
+
     return (
       <div
         style={style}
+        onClick={handleRowClick}
         className={cn(
-          'flex items-center gap-2 px-4 py-3 border-b border-gray-100 hover:bg-gray-50/50 transition-colors',
+          'flex items-center gap-2 px-4 py-3 border-b border-gray-100 hover:bg-gray-50/50 transition-colors cursor-pointer',
           isSelected && 'bg-blue-50/50'
         )}
       >
