@@ -1,6 +1,8 @@
-# 收工技能 - 全套收工 (自动化增强版)
+# 收工技能 - 全套收工 (v3.0 适配版)
 
 **触发词**: 收工、结束工作、结束、下班、shougong
+
+**版本**: v3.0 (适配工作流重构)
 
 **核心原则**: 全自动执行，无需用户确认，仅在异常时介入
 
@@ -20,7 +22,7 @@ git log --since="00:00" --oneline
 - 识别所有变更文件
 - 统计变更行数
 - 获取今日提交历史
-- 读取三件套规划文件当前状态
+- 读取 tasks.json 当前状态
 
 ---
 
@@ -64,6 +66,84 @@ git log --since="00:00" --oneline
 | [匹配任务] | ✅ 已完成 - {{日期}} |
 ```
 
+#### 2.4 更新 tasks.json (必须) ⭐
+
+根据 git 提交和变更文件推断任务完成状态：
+
+```python
+import json
+
+# 读取当前 tasks.json
+with open("docs/planning/tasks.json") as f:
+    tasks = json.load(f)
+
+# 推断规则:
+# 1. 新增测试文件 → 对应测试任务 completed
+# 2. 新增前端组件 (.tsx/.ts) → 对应前端任务 completed
+# 3. 新增后端文件 (.py in src/) → 对应后端任务 completed
+# 4. 提交信息包含任务 ID → 标记对应任务 completed
+
+# 示例匹配逻辑:
+for commit in today_commits:
+    if "T1" in commit or "后端" in commit:
+        mark_task_completed("T1")
+    if "F1" in commit or "前端" in commit:
+        mark_task_completed("F1")
+
+# 写回 tasks.json
+with open("docs/planning/tasks.json", "w") as f:
+    json.dump(tasks, f, indent=2, ensure_ascii=False)
+```
+
+**更新字段**:
+- `tasks[].status`: "pending" → "in_progress" → "completed"
+- `session`: 根据进度更新阶段
+- `last_updated`: 当前时间戳
+
+#### 2.5 更新 board.md (必须) ⭐
+
+根据 tasks.json 中的任务状态更新状态看板：
+
+```python
+import json
+
+# 读取 tasks.json
+with open("docs/planning/tasks.json") as f:
+    tasks = json.load(f)
+
+# 生成 board.md 内容
+board = f"""# 状态看板
+
+**功能**: {tasks.get('feature', '未知')}
+**最后更新**: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+**当前阶段**: {tasks.get('session', 'unknown')}
+
+---
+
+## 📊 任务状态
+
+| 任务 ID | 任务名称 | 角色 | 状态 | 阻塞依赖 |
+|---------|----------|------|------|----------|
+"""
+
+status_icon = {
+    "pending": "☐ 待开始",
+    "in_progress": "🔄 进行中",
+    "completed": "✅ 已完成",
+    "blocked": "🔴 阻塞"
+}
+
+for task in tasks.get("tasks", []):
+    icon = status_icon.get(task.get("status", "pending"), "☐")
+    blocked_by = task.get("blocked_by", [])
+    dep = ", ".join(blocked_by) if blocked_by else "无"
+    board += f"| {task['id']} | {task['subject']} | {task['role']} | {icon} | {dep} |\n"
+
+# 写入 board.md
+with open("docs/planning/board.md", "w") as f:
+    f.write(board)
+```
+
 ---
 
 ### 阶段 3: 交接文档生成
@@ -79,8 +159,28 @@ git log --since="00:00" --oneline
 ## 修改文件清单
 [按类型分组：后端/前端/测试/文档]
 
+### 后端 (src/)
+- `src/xxx.py` - 功能说明
+
+### 前端 (web-front/)
+- `web-front/src/xxx.tsx` - 功能说明
+
+### 测试 (tests/)
+- `tests/test_xxx.py` - 测试说明
+
+### 文档 (docs/)
+- `docs/planning/tasks.json` - 任务状态更新
+- `docs/planning/board.md` - 看板更新
+
+## 任务状态
+
+| 任务 ID | 任务名称 | 状态变更 |
+|---------|----------|----------|
+| T1 | xxx | pending → completed |
+| T2 | xxx | in_progress → completed |
+
 ## 待完成任务
-[从 task_plan.md 读取 P0/P1 级任务]
+[从 tasks.json 读取 pending 状态的任务]
 
 ## 相关文件索引
 [本次修改涉及的文件路径]
@@ -123,6 +223,8 @@ git push
    M docs/planning/progress.md
    M docs/planning/findings.md (如有)
    M docs/planning/task_plan.md (如有)
+   U docs/planning/tasks.json (任务状态更新)
+   U docs/planning/board.md (看板更新)
    A docs/planning/{{YYYY-MM-DD}}-handoff.md
    [其他业务文件变更...]
 
@@ -134,9 +236,9 @@ git push
 🎉 辛苦了！明天继续。
 
 📌 明日优先事项:
-   - [P0] [任务 1]
-   - [P0] [任务 2]
-   - [P1] [任务 3]
+   - [P0] [从 tasks.json 读取 pending 任务 1]
+   - [P0] [从 tasks.json 读取 pending 任务 2]
+   - [P1] [从 tasks.json 读取 pending 任务 3]
 ```
 
 ---
@@ -148,6 +250,7 @@ git push
 | git 冲突 | 停止提交，列出冲突文件，请用户手动解决 |
 | push 拒绝 | 自动 `git pull --rebase` 后重试，失败则求助 |
 | 文档格式异常 | 尝试修复，失败则跳过并警告 |
+| tasks.json 不存在 | 警告"未检测到任务清单"，跳过更新 |
 | 无变更 | 仅更新 progress.md 日志后提交 |
 
 ---
@@ -174,9 +277,9 @@ git push
 
 ```python
 检测规则:
-- 新增测试文件 → 对应测试任务标记完成
-- 新增前端组件 → 对应前端任务标记完成
-- 提交信息含关键词 → 匹配 task_plan.md 任务
+- 新增测试文件 → 对应测试任务标记 completed
+- 新增前端组件 → 对应前端任务标记 completed
+- 提交信息含任务 ID → 匹配并标记任务 completed
 
 示例:
 test_strategy_optimizer.py 新增
@@ -188,23 +291,37 @@ test_strategy_optimizer.py 新增
 
 ```python
 推荐规则:
-1. 优先 P0 级进行中任务
-2. 按 task_plan.md 顺序取 TOP 3
-3. 显示任务名称 + 状态
+1. 优先 P0 级 pending 任务
+2. 从 tasks.json 按顺序取 TOP 3
+3. 显示任务名称 + 当前状态
 ```
+
+---
+
+## v3.0 适配要点
+
+| 变更点 | 旧行为 | 新行为 |
+|--------|--------|--------|
+| 任务状态来源 | 人工推断 | tasks.json 机器可读 ✅ |
+| 看板更新 | 无 | board.md 实时更新 ✅ |
+| 交接文档 | 固定格式 | 包含任务状态变更表 ✅ |
+| 规划文件 | 单一文件 | planning-with-files 三件套 ✅ |
 
 ---
 
 ## 输出示例
 
 ```
-🐶 收工完成 - 2026-04-02
+🐶 收工完成 - 2026-04-03
 
 📝 变更统计:
    M docs/planning/progress.md
-   M docs/planning/task_plan.md
-   A docs/planning/2026-04-02-handoff.md
+   M docs/planning/findings.md
+   U docs/planning/tasks.json
+   U docs/planning/board.md
+   A docs/planning/2026-04-03-handoff.md
    M src/domain/strategy_optimizer.py
+   M web-front/src/pages/Strategy.tsx
 
 💾 Git 提交：91085ca feat(phase8): 集成 Optuna 自动化调参框架
 
@@ -214,7 +331,11 @@ test_strategy_optimizer.py 新增
 🎉 辛苦了！明天继续。
 
 📌 明日优先事项:
-   - [P0] Phase 8 集成测试执行
-   - [P0] Phase 8 E2E 测试验证
-   - [P1] 订单管理级联展示功能
+   - [P0] T3: 单元测试编写 (pending)
+   - [P0] T4: 集成测试验证 (pending)
+   - [P1] F2: UI 组件优化 (pending)
 ```
+
+---
+
+*版本：v3.0 | 最后更新：2026-04-03*
