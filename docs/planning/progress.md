@@ -6,6 +6,69 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-03 21:30 - DEBT-4 方法重名冲突修复 ✅
+
+**开始时间**: 2026-04-03 21:30
+**会话阶段**: 修复会话
+**参与者**: 后端开发
+
+#### 问题发现
+
+用户提示检查 git 提交记录，发现遗留测试问题：
+- test_order_repository_get_order_chain: FAILED ❌
+- test_full_order_lifecycle_persistence: FAILED ❌
+- test_order_repository_parent_order_id_tracking: FAILED ❌
+
+#### 根因分析
+
+运行测试发现 `get_order_chain()` 返回空列表 `[]`，查看代码发现**方法重名冲突**：
+
+**OrderRepository 中两个同名方法**：
+1. **654 行**: `get_order_chain(signal_id)` → 返回 `Dict[str, List[Order]]`
+2. **1024 行**: `get_order_chain(order_id)` → 返回 `List[Order]` (重复定义)
+
+**Python 方法覆盖机制**：第二个方法覆盖第一个，导致测试失败！
+
+测试期望：
+```python
+chain = await order_repository.get_order_chain("sig_001")  # 传入 signal_id
+assert "entry" in chain  # 期望返回字典格式 {"entry": [...], "tps": [...], "sl": [...]}
+```
+
+实际执行：
+- 调用第二个方法（期望 order_id）
+- 返回空列表 `[]`（查询不到订单）
+- 断言失败：`assert "entry" in []`
+
+#### 修复方案
+
+删除第二个重复定义（1024 行），保留第一个方法：
+- 按 signal_id 查询：使用 `get_order_chain(signal_id)`
+- 按 order_id 查询：使用 `get_order_chain_by_order_id(order_id)`
+
+#### 验证结果
+
+```
+✅ test_order_repository_get_order_chain: PASSED
+✅ test_full_order_lifecycle_persistence: PASSED
+✅ test_order_repository_parent_order_id_tracking: PASSED
+✅ 21/21 测试全部通过
+```
+
+#### Git 提交
+
+```
+efd675a fix(test): DEBT-4 修复方法重名冲突 - get_order_chain() 覆盖问题
+```
+
+#### 影响范围
+
+- 仅删除重复代码，不影响现有功能
+- API 端点使用 `get_order_chain_by_order_id()`，未受影响
+- 测试代码有 3 处使用 `get_order_chain(signal_id)`，修复后正常工作
+
+---
+
 ### 2026-04-03 20:00 - DEBT-3 API 依赖注入方案实现 ✅
 
 **开始时间**: 2026-04-03 20:00

@@ -28,6 +28,57 @@
 
 ---
 
+## 📌 2026-04-03 技术发现
+
+### DEBT-4: Python 方法重名覆盖机制 ⭐⭐⭐
+
+**发现时间**: 2026-04-03 21:30
+
+**问题场景**:
+```python
+# OrderRepository 中两个同名方法（不同参数和返回类型）
+async def get_order_chain(self, signal_id: str) -> Dict[str, List[Order]]:
+    # 654 行：按信号ID查询，返回字典格式
+    ...
+
+async def get_order_chain(self, order_id: str) -> List[Order]:
+    # 1024 行：按订单ID查询，返回列表格式（重复定义）
+    return await self.get_order_chain_by_order_id(order_id)
+```
+
+**Python 行为**:
+- **方法重名覆盖机制**：后定义的方法覆盖前定义的方法
+- **不像 C++/Java**：Python 不支持方法重载（overload）
+- **类型签名无关**：Python 仅根据方法名判断，不考虑参数类型
+
+**实际影响**:
+- 测试调用 `get_order_chain("sig_001")`（期望第一个方法）
+- 实际执行第二个方法（期望 `order_id`，返回列表）
+- 查询失败返回空列表 `[]`
+- 断言失败：`assert "entry" in []`
+
+**修复方案**:
+- 删除重复定义（保留第一个方法）
+- 不同功能应使用不同方法名：
+  - `get_order_chain(signal_id)` - 按信号ID查询
+  - `get_order_chain_by_order_id(order_id)` - 按订单ID查询
+
+**教训总结**:
+1. **避免方法重名**：Python 不支持方法重载，同名方法会覆盖
+2. **命名要明确**：不同功能使用不同方法名，即使参数类型不同
+3. **单元测试覆盖**：测试能及时发现方法覆盖问题
+4. **代码审查重点**：检查是否有同名方法定义（尤其是重构后）
+
+**影响范围**:
+- OrderRepository: 删除 1 个重复定义
+- 测试修复: 3 个失败测试全部通过（21/21）
+
+**参考文档**:
+- Python 方法重载讨论：https://stackoverflow.com/questions/10202938/python-method-overloading
+- Clean Architecture 方法命名规范：方法名应明确表达意图
+
+---
+
 ## 工作流重构 v3.0
 
 **日期**: 2026-04-03

@@ -128,6 +128,7 @@
 | DEBT-1 | 创建 `order_audit_logs` 表 | 1.5h | ☐ 待启动 | 批量删除订单审计日志持久化 |
 | DEBT-2 | 集成交易所 API 到批量删除 | 2h | ☐ 待启动 | `delete_orders_batch()` 调用交易所取消订单 |
 | DEBT-3 | API 依赖注入方案实现 | 1.5h | ✅ 已完成 | 订单管理 API 端点支持 OrderRepository 依赖注入 |
+| DEBT-4 | 修复方法重名冲突 get_order_chain() | 0.5h | ✅ 已完成 | 删除重复定义，21/21 测试通过 |
 
 ### P1 级 - 策略参数测试修复
 
@@ -156,7 +157,15 @@
 - 当 TestClient 使用不同事件循环时，lock 无法正常工作
 - 需要后续修复：将 lock 创建延迟到 `initialize()` 方法
 
-**总计**: 2 项待办任务，预计 3.5h
+**已完成修复** (DEBT-4 - 2026-04-03):
+- ✅ 删除重复定义的 `get_order_chain()` 方法（1024行）
+- ✅ 保留第一个方法：`get_order_chain(signal_id) -> Dict[str, List[Order]]`
+- ✅ 按订单ID查询应使用：`get_order_chain_by_order_id(order_id)`
+- ✅ 修复 3 个失败测试，21/21 全部通过
+
+**技术发现**: Python 方法重名覆盖机制 - 同名方法后定义覆盖前定义，导致测试失败
+
+**总计**: 2 项待办任务（DEBT-1/DEBT-2），预计 3.5h
 
 ---
 
