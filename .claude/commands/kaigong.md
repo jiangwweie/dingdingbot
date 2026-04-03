@@ -12,7 +12,118 @@
 
 ---
 
-## 执行流程（4 阶段智能精简）
+## 执行流程（5 阶段智能精简）
+
+### 阶段 0: 接手交接文档 ⭐ (v4.0 新增)
+
+```python
+def check_and_receive_handoffs():
+    """检查并接手交接文档（用户确认）"""
+
+    # 1. 查找所有未接手的交接文档
+    handoffs = list(Path("docs/planning").glob("*-handoff.md"))
+    unreceived = []
+
+    for handoff in handoffs:
+        # 检查是否存在 .received 标记文件
+        received_marker = handoff.parent / f".{handoff.name}.received"
+        if not received_marker.exists():
+            unreceived.append(handoff)
+
+    if not unreceived:
+        print("📌 无未接手的交接文档")
+        return None
+
+    # 2. 按文件名排序（最新的在前）
+    unreceived_sorted = sorted(unreceived, reverse=True)
+
+    # 3. 列出所有未接手的交接文档
+    print(f"📌 发现 {len(unreceived_sorted)} 个未接手的交接文档：\n")
+
+    for i, handoff in enumerate(unreceived_sorted, 1):
+        # 读取交接文档的前 10 行（获取摘要）
+        with open(handoff) as f:
+            lines = [f.readline() for _ in range(10)]
+
+        # 提取日期和标题
+        # 示例：### 2026-04-03 21:30 - DEBT-4 方法重名冲突修复 ✅
+        title = "未知"
+        for line in lines:
+            if line.startswith("###") and " - " in line:
+                title = line.split(" - ")[1].strip()
+                break
+
+        print(f"  [{i}] {handoff.name} - {title}")
+
+    # 4. 让用户选择接手哪个
+    print("\n请选择要接手的交接文档：")
+    print("[序号] 接手指定的交接文档")
+    print("[L] 接手最新的交接文档（推荐）")
+    print("[S] 跳过接手")
+
+    choice = input("\n请输入选择：").strip().upper()
+
+    if choice == "S":
+        print("⏭️ 跳过接手交接文档")
+        return None
+    elif choice == "L":
+        # 接手最新的
+        selected = unreceived_sorted[0]
+    elif choice.isdigit() and 1 <= int(choice) <= len(unreceived_sorted):
+        # 接手指定的
+        selected = unreceived_sorted[int(choice) - 1]
+    else:
+        print("⚠️ 无效选择，默认接手最新的")
+        selected = unreceived_sorted[0]
+
+    # 5. 读取交接文档内容
+    with open(selected) as f:
+        handoff_content = f.read()
+
+    print(f"\n---\n")
+    print(f"📌 接手交接文档：{selected.name}\n")
+    print(handoff_content)
+    print("\n---\n")
+
+    # 6. 标记为已接手
+    received_marker = selected.parent / f".{selected.name}.received"
+    received_marker.touch()
+
+    print(f"✅ 已标记为已接手\n")
+
+    return selected
+```
+
+**输出示例**：
+```
+📌 发现 2 个未接手的交接文档：
+
+  [1] 20260403-002-handoff.md - DEBT-4 方法重名冲突修复 ✅
+  [2] 20260403-001-handoff.md - DEBT-3 API 依赖注入实现 ✅
+
+请选择要接手的交接文档：
+[序号] 接手指定的交接文档
+[L] 接手最新的交接文档（推荐）
+[S] 跳过接手
+
+请输入选择：L
+
+---
+
+📌 接手交接文档：20260403-002-handoff.md
+
+## 💡 技术决策记录
+...
+
+## 🔍 问题分析
+...
+
+---
+
+✅ 已标记为已接手
+```
+
+---
 
 ### 阶段 1: 核心文档读取（5K）
 
@@ -205,8 +316,9 @@ def extract_current_tasks():
 | 异常场景 | 处理策略 |
 |---------|---------|
 | tasks.json 不存在 | 提示"未检测到任务清单，建议先运行规划会话" |
-| handoff 文档不存在 | 跳过，提示"首次会话，无交接文档" |
-| progress.md 无"今日待办"章节 | 回退：读取最近 1 天日志 |
+| 无交接文档 | 跳过接手，提示"首次会话，无交接文档" |
+| 所有交接文档已接手 | 提示"最新交接文档已接手"，不重复读取 |
+| 用户无效输入 | 默认接手最新的交接文档 |
 | findings.md 无标签匹配 | 回退：读取"按主题分类"目录 |
 | task_plan.md 无"当前阶段"章节 | 回退：读取"待办事项总览" |
 | board.md 不存在 | 从模板创建 |

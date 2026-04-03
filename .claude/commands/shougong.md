@@ -445,6 +445,46 @@ def archive_old_progress_logs(days: int = 3):
 
 ---
 
+### 阶段 7: 清理已接手标记文件 ⭐ (v4.0 新增)
+
+```python
+from datetime import datetime, timedelta
+from pathlib import Path
+
+def cleanup_old_received_markers(days: int = 7):
+    """清理超过 N 天的已接手标记文件"""
+
+    planning_dir = Path("docs/planning")
+    cutoff_date = datetime.now() - timedelta(days=days)
+
+    # 找出所有 .received 标记文件
+    received_markers = list(planning_dir.glob(".*.received"))
+
+    old_markers = [
+        f for f in received_markers
+        if datetime.fromtimestamp(f.stat().st_mtime) < cutoff_date
+    ]
+
+    # 删除旧的标记文件
+    for marker in old_markers:
+        marker.unlink()
+
+    if old_markers:
+        print(f"🧹 已清理 {len(old_markers)} 个旧的已接手标记文件")
+```
+
+**输出**:
+```
+🧹 已清理 3 个旧的已接手标记文件
+```
+
+**效果**：
+- 防止标记文件累积
+- 保留最近 7 天的接手记录（可追溯）
+- 自动清理旧的标记文件
+
+---
+
 ---
 
 ## 异常处理
