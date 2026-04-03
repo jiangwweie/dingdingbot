@@ -34,22 +34,49 @@ class SignalRepository:
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None  # 延迟创建，避免事件循环冲突
         logger.info(f"数据库初始化完成：{db_path}")
+
+    def _ensure_lock(self) -> asyncio.Lock:
+        """Ensure lock is created for current event loop.
+
+        This method is safe to call from any event loop context.
+        Each call will return the lock associated with the current running event loop.
+        """
+        try:
+            # 尝试获取当前运行的事件循环
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 没有运行的事件循环，返回一个新创建的 lock
+            # 这种情况通常发生在同步代码中
+            return asyncio.Lock()
+
+        # 为当前事件循环创建或获取 lock
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
+        return self._lock
 
     async def initialize(self) -> None:
         """
         Initialize database connection and create tables.
         Also creates the data/ directory if it doesn't exist.
-        """
-        # Create data directory if not exists
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
 
-        # Open database connection
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+        This method is idempotent - calling it multiple times has no effect after first initialization.
+        """
+        # 幂等性检查：如果已经初始化，直接返回
+        if self._db is not None:
+            return
+
+        async with self._ensure_lock():
+            # Create data directory if not exists
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
+
+            # Open database connection
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
         # Enable WAL mode for high concurrency write support (P0-001)
         await self._db.execute("PRAGMA journal_mode=WAL")
@@ -1932,7 +1959,7 @@ class SignalRepository:
         Returns:
             List of signal IDs
         """
-        async with self._lock:
+        async with self._ensure_lock():
             # Convert timestamps to ISO format for comparison
             start_iso = datetime.fromtimestamp(start_time / 1000, tz=timezone.utc).isoformat()
             end_iso = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc).isoformat()

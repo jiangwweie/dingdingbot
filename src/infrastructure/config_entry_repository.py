@@ -34,7 +34,27 @@ class ConfigEntryRepository:
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None  # 延迟创建，避免事件循环冲突
+
+    def _ensure_lock(self) -> asyncio.Lock:
+        """Ensure lock is created for current event loop.
+
+        This method is safe to call from any event loop context.
+        Each call will return the lock associated with the current running event loop.
+        """
+        try:
+            # 尝试获取当前运行的事件循环
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 没有运行的事件循环，返回一个新创建的 lock
+            # 这种情况通常发生在同步代码中
+            return asyncio.Lock()
+
+        # 为当前事件循环创建或获取 lock
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
+        return self._lock
 
     async def initialize(self) -> None:
         """
@@ -42,41 +62,65 @@ class ConfigEntryRepository:
 
         Note: For Profile support, the unique constraint is on (profile_name, config_key),
         not just config_key alone.
+
+        This method is idempotent - calling it multiple times has no effect after first initialization.
         """
-        # Open database connection
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+        # 幂等性检查：如果已经初始化，直接返回
+        if self._db is not None:
+            return
 
-        # Enable WAL mode for high concurrency write support
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
+        async with self._ensure_lock():
+            # Open database connection
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        # Create config_entries_v2 table (Phase K design with Profile support)
-        await self._db.execute("""
-            CREATE TABLE IF NOT EXISTS config_entries_v2 (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                config_key    VARCHAR(128) NOT NULL,
-                config_value  TEXT NOT NULL,
-                value_type    VARCHAR(16) NOT NULL,
-                version       VARCHAR(32) NOT NULL DEFAULT 'v1.0.0',
-                updated_at    BIGINT NOT NULL,
-                profile_name  TEXT NOT NULL DEFAULT 'default'
-            )
-        """)
+            # Enable WAL mode for high concurrency write support
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
 
-        # Create composite unique index for Profile support
-        await self._db.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_config_entries_v2_key
-            ON config_entries_v2(profile_name, config_key)
-        """)
-        await self._db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_config_entries_v2_updated_at
-            ON config_entries_v2(updated_at DESC)
-        """)
-        await self._db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_config_entries_v2_profile
-            ON config_entries_v2(profile_name)
-        """)
+            # Create config_entries_v2 table (Phase K design with Profile support)
+            await self._db.execute("""
+                CREATE TABLE IF NOT EXISTS config_entries_v2 (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    config_key    VARCHAR(128) NOT NULL,
+                    config_value  TEXT NOT NULL,
+                    value_type    VARCHAR(16) NOT NULL,
+                    version       VARCHAR(32) NOT NULL DEFAULT 'v1.0.0',
+                    updated_at    BIGINT NOT NULL,
+                    profile_name  TEXT NOT NULL DEFAULT 'default'
+                )
+            """)
+
+            # Migration: Add profile_name column if not exists (for legacy tables)
+            try:
+                await self._db.execute("""
+                    ALTER TABLE config_entries_v2 ADD COLUMN profile_name TEXT NOT NULL DEFAULT 'default'
+                """)
+            except aiosqlite.OperationalError as e:
+                if "duplicate column name" not in str(e).lower():
+                    raise
+
+            # Migration: Drop old unique index and create new composite index
+            try:
+                await self._db.execute("""
+                    DROP INDEX IF EXISTS idx_config_entries_v2_key
+                """)
+            except aiosqlite.OperationalError:
+                pass
+
+            # Create indexes (after migration)
+            await self._db.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_config_entries_v2_key
+                ON config_entries_v2(profile_name, config_key)
+            """)
+            await self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_config_entries_v2_updated_at
+                ON config_entries_v2(updated_at DESC)
+            """)
+            await self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_config_entries_v2_profile
+                ON config_entries_v2(profile_name)
+            """)
 
         await self._db.commit()
 
@@ -201,7 +245,7 @@ class ConfigEntryRepository:
         value_str = self._serialize_value(config_value, value_type)
         now = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-        async with self._lock:
+        async with self._ensure_lock():
             # Try update first
             cursor = await self._db.execute("""
                 UPDATE config_entries_v2
@@ -276,7 +320,7 @@ class ConfigEntryRepository:
         Returns:
             True if deleted successfully, False if not found
         """
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 "DELETE FROM config_entries_v2 WHERE config_key = ?",
                 (config_key,)
@@ -297,7 +341,7 @@ class ConfigEntryRepository:
         if not prefix.endswith("."):
             prefix = prefix + "."
 
-        async with self._lock:
+        async with self._ensure_lock():
             cursor = await self._db.execute(
                 "DELETE FROM config_entries_v2 WHERE config_key LIKE ?",
                 (f"{prefix}%",)

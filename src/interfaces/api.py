@@ -285,13 +285,40 @@ def _get_order_repo() -> Any:
 async def lifespan(app: FastAPI):
     """
     Manage application lifespan events.
-    Initialize and close repository on startup/shutdown.
+    Initialize repositories on startup, close on shutdown.
     """
-    # Startup
-    yield
-    # Shutdown
-    if _repository is not None:
-        await _repository.close()
+    from src.infrastructure.signal_repository import SignalRepository
+    from src.infrastructure.config_entry_repository import ConfigEntryRepository
+
+    global _repository, _config_entry_repo
+
+    # Startup - 初始化所有 Repository
+    try:
+        # 初始化 SignalRepository（幂等）
+        if _repository is None:
+            _repository = SignalRepository()
+            await _repository.initialize()
+            logger.info("SignalRepository initialized in lifespan")
+
+        # 初始化 ConfigEntryRepository（幂等）
+        if _config_entry_repo is None:
+            _config_entry_repo = ConfigEntryRepository()
+            await _config_entry_repo.initialize()
+            logger.info("ConfigEntryRepository initialized in lifespan")
+
+        # OrderRepository 按需创建（DEBT-3 方案）
+
+        yield
+
+    finally:
+        # Shutdown - 清理所有 Repository
+        if _repository is not None:
+            await _repository.close()
+            logger.info("SignalRepository closed")
+
+        if _config_entry_repo is not None:
+            await _config_entry_repo.close()
+            logger.info("ConfigEntryRepository closed")
 
 
 # ============================================================
