@@ -26,6 +26,7 @@ Endpoints:
     POST /api/strategies/preview - Preview strategy configuration (dry-run)
     POST /api/strategies/{id}/apply - Apply strategy template to live trading
 """
+from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -262,21 +263,25 @@ def _get_snapshot_service() -> Any:
     return _snapshot_service
 
 
-def _get_config_entry_repo() -> Any:
+async def _get_config_entry_repo() -> Any:
     """Get config entry repository or create a new instance if not initialized."""
+    global _config_entry_repo
     if _config_entry_repo is None:
-        # Fallback: create a new instance
+        # Fallback: create and initialize a new instance
         from src.infrastructure.config_entry_repository import ConfigEntryRepository
-        return ConfigEntryRepository()
+        _config_entry_repo = ConfigEntryRepository()
+        await _config_entry_repo.initialize()
     return _config_entry_repo
 
 
-def _get_order_repo() -> Any:
+async def _get_order_repo() -> Any:
     """Get order repository or create a new instance if not initialized."""
+    global _order_repo
     if _order_repo is None:
-        # Fallback: create a new instance
+        # Fallback: create and initialize a new instance
         from src.infrastructure.order_repository import OrderRepository
-        return OrderRepository()
+        _order_repo = OrderRepository()
+        await _order_repo.initialize()
     return _order_repo
 
 
@@ -419,7 +424,11 @@ async def health_check():
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Health check failed: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"健康检查失败：{str(e)}"
+        ).model_dump()
 
 
 @app.get("/api/signals")
@@ -480,7 +489,11 @@ async def get_signals(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get signals: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取信号列表失败：{str(e)}"
+        ).model_dump()
 
 
 @app.delete("/api/signals")
@@ -518,7 +531,11 @@ async def delete_signals(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to delete signals: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"删除信号失败：{str(e)}"
+        ).model_dump()
 
 
 @app.delete("/api/signals/clear_all")
@@ -542,7 +559,11 @@ async def clear_all_signals():
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to clear all signals: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"清空信号失败：{str(e)}"
+        ).model_dump()
 
 
 @app.get("/api/signals/stats")
@@ -566,7 +587,11 @@ async def get_signal_stats():
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get signal stats: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取信号统计失败：{str(e)}"
+        ).model_dump()
 
 
 @app.get("/api/backtest/signals")
@@ -613,7 +638,11 @@ async def get_backtest_signals(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get backtest signals: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取回测信号失败：{str(e)}"
+        ).model_dump()
 
 
 @app.get("/api/account")
@@ -652,7 +681,11 @@ async def get_account():
             "timestamp": datetime.fromtimestamp(snapshot.timestamp / 1000, tz=timezone.utc).isoformat(),
         }
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get account snapshot: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取账户快照失败：{str(e)}"
+        ).model_dump()
 
 
 @app.get("/api/diagnostics")
@@ -674,7 +707,11 @@ async def get_diagnostics(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get diagnostics: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取诊断信息失败：{str(e)}"
+        ).model_dump()
 
 
 @app.get("/api/signals/{signal_id}/context")
@@ -796,7 +833,11 @@ async def get_attempts(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get attempts: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取尝试记录失败：{str(e)}"
+        ).model_dump()
 
 
 @app.delete("/api/attempts")
@@ -835,7 +876,11 @@ async def delete_attempts(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to delete attempts: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"删除尝试记录失败：{str(e)}"
+        ).model_dump()
 
 
 @app.delete("/api/attempts/clear_all")
@@ -859,7 +904,11 @@ async def clear_all_attempts():
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to clear all attempts: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"清空尝试记录失败：{str(e)}"
+        ).model_dump()
 
 
 # ============================================================
@@ -944,7 +993,11 @@ async def get_config():
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get config: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取配置失败：{str(e)}"
+        ).model_dump()
 
 
 @app.put("/api/config")
@@ -988,7 +1041,7 @@ async def update_config(
     except HTTPException:
         raise
     except Exception as e:
-        # Pydantic ValidationError returns 422
+        logger.error(f"Failed to update config (export/import endpoint): {e}")
         error_str = str(e)
         if "ValidationError" in type(e).__name__:
             from fastapi import status
@@ -996,7 +1049,10 @@ async def update_config(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Config validation failed: {error_str}",
             )
-        return {"error": str(e)}
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"更新配置失败：{error_str}"
+        ).model_dump()
 
 
 # ============================================================
@@ -1045,7 +1101,11 @@ async def export_config():
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to export config: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"导出配置失败：{str(e)}"
+        ).model_dump()
 
 
 @app.post("/api/config/import")
@@ -1136,7 +1196,11 @@ async def import_config(
                 detail=f"Config validation failed: {error_str}",
                 headers={"X-Error-Code": "CONFIG-003"}
             )
-        return {"error": str(e)}
+        logger.error(f"Failed to update config: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"更新配置失败：{str(e)}"
+        ).model_dump()
 
 
 @app.put("/api/config")
@@ -1199,7 +1263,11 @@ async def update_config(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Config validation failed: {error_str}",
             )
-        return {"error": str(e)}
+        logger.error(f"Failed to update config: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"更新配置失败：{str(e)}"
+        ).model_dump()
 
 
 # ============================================================
@@ -1299,7 +1367,11 @@ async def run_signal_backtest(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to run signal backtest: {e}")
+        return ErrorResponse(
+            error_code="BACKTEST_ERROR",
+            message=f"信号回测失败：{str(e)}"
+        ).model_dump()
 
 
 @app.post("/api/backtest/orders")
@@ -1395,7 +1467,11 @@ async def run_pms_backtest(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to run PMS backtest: {e}")
+        return ErrorResponse(
+            error_code="BACKTEST_ERROR",
+            message=f"订单回测失败：{str(e)}"
+        ).model_dump()
 
 
 # ============================================================
@@ -1496,7 +1572,11 @@ async def run_backtest_deprecated(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to run backtest (deprecated): {e}")
+        return ErrorResponse(
+            error_code="BACKTEST_ERROR",
+            message=f"回测失败：{str(e)}"
+        ).model_dump()
 
 
 # ============================================================
@@ -2226,7 +2306,11 @@ async def list_strategy_templates(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to list strategy templates: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取策略模板列表失败：{str(e)}"
+        ).model_dump()
 
 
 @app.get("/api/strategies", response_model=StrategyListResponse)
@@ -2261,7 +2345,11 @@ async def get_custom_strategies(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get custom strategies: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取策略列表失败：{str(e)}"
+        )
 
 
 @app.get("/api/strategies/{strategy_id}")
@@ -2292,7 +2380,11 @@ async def get_custom_strategy(strategy_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to get custom strategy: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取策略详情失败：{str(e)}"
+        ).model_dump()
 
 
 @app.post("/api/strategies")
@@ -2341,7 +2433,11 @@ async def create_custom_strategy(request: StrategyCreateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to create custom strategy: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"创建策略失败：{str(e)}"
+        ).model_dump()
 
 
 @app.put("/api/strategies/{strategy_id}")
@@ -2389,13 +2485,20 @@ async def update_custom_strategy(strategy_id: int, request: StrategyUpdateReques
         )
 
         if not updated:
-            return {"error": "No fields to update"}
+            return ErrorResponse(
+                error_code="INTERNAL_ERROR",
+                message="没有可更新的字段"
+            ).model_dump()
 
         return {"message": "Strategy updated successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to update custom strategy: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"更新策略失败：{str(e)}"
+        ).model_dump()
 
 
 @app.delete("/api/strategies/{strategy_id}")
@@ -2421,7 +2524,11 @@ async def delete_custom_strategy(strategy_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to delete custom strategy: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"删除策略失败：{str(e)}"
+        ).model_dump()
 
 
 # ============================================================
@@ -2876,7 +2983,10 @@ async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None)
         raise
     except Exception as e:
         logger.error(f"Failed to apply strategy template {strategy_id}: {e}")
-        return {"error": str(e)}
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"应用策略失败：{str(e)}"
+        ).model_dump()
 
 
 # ============================================================
@@ -3721,10 +3831,14 @@ async def create_snapshot(request: ConfigSnapshotCreate):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to create config snapshot: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code:
             raise HTTPException(status_code=400, detail=str(e), headers={"X-Error-Code": error_code})
-        return {"error": str(e)}
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"创建配置快照失败：{str(e)}"
+        ).model_dump()
 
 
 @app.get("/api/config/snapshots", response_model=ConfigSnapshotListResponse)
@@ -3777,7 +3891,11 @@ async def list_snapshots(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to list config snapshots: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取配置快照列表失败：{str(e)}"
+        )
 
 
 @app.get("/api/config/snapshots/{snapshot_id}", response_model=ConfigSnapshotDetailResponse)
@@ -3807,10 +3925,14 @@ async def get_snapshot(snapshot_id: int):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to get snapshot detail: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code == "CONFIG-004":
             raise HTTPException(status_code=404, detail=str(e))
-        return {"error": str(e)}
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"获取配置快照详情失败：{str(e)}"
+        ).model_dump()
 
 
 @app.post("/api/config/snapshots/{snapshot_id}/rollback", response_model=ConfigRollbackResponse)
@@ -3859,12 +3981,16 @@ async def rollback_snapshot(snapshot_id: int):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to rollback config snapshot: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code == "CONFIG-004":
             raise HTTPException(status_code=404, detail=str(e))
         elif error_code == "CONFIG-003":
             raise HTTPException(status_code=422, detail=str(e))
-        return {"error": str(e)}
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"回滚配置快照失败：{str(e)}"
+        ).model_dump()
 
 
 @app.post("/api/config/snapshots/{snapshot_id}/activate")
@@ -3899,10 +4025,14 @@ async def activate_snapshot(snapshot_id: int):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to activate config snapshot: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code == "CONFIG-004":
             raise HTTPException(status_code=404, detail=str(e))
-        return {"error": str(e)}
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"激活配置快照失败：{str(e)}"
+        ).model_dump()
 
 
 @app.delete("/api/config/snapshots/{snapshot_id}", response_model=ConfigDeleteResponse)
@@ -3934,12 +4064,16 @@ async def delete_snapshot(snapshot_id: int):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to delete config snapshot: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code == "CONFIG-004":
             raise HTTPException(status_code=404, detail=str(e))
         elif error_code == "CONFIG-006":
             raise HTTPException(status_code=400, detail=str(e))
-        return {"error": str(e)}
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"删除配置快照失败：{str(e)}"
+        ).model_dump()
 
 
 # ============================================================
@@ -5712,8 +5846,8 @@ async def stop_optimization(job_id: str):
 # ============================================================
 
 # Profile Repository 和 Service 初始化
-_profile_repository: Optional[ConfigProfileRepository] = None
-_profile_service: Optional[ConfigProfileService] = None
+_profile_repository: Optional["ConfigProfileRepository"] = None
+_profile_service: Optional["ConfigProfileService"] = None
 
 
 def _get_profile_repository() -> "ConfigProfileRepository":
