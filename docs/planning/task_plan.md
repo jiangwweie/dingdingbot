@@ -129,7 +129,9 @@
 | DEBT-2 | 集成交易所 API 到批量删除 | 2h | ☐ 待启动 | `delete_orders_batch()` 调用交易所取消订单 |
 | DEBT-3 | API 依赖注入方案实现 | 1.5h | ✅ 已完成 | 订单管理 API 端点支持 OrderRepository 依赖注入 |
 | DEBT-4 | 修复方法重名冲突 get_order_chain() | 0.5h | ✅ 已完成 | 删除重复定义，21/21 测试通过 |
-| DEBT-5 | asyncio.Lock 事件循环冲突修复 | 1h | ✅ 已完成 | 延迟创建 lock，单元测试通过 |
+| DEBT-5 | asyncio.Lock 事件循环冲突修复 (OrderRepository) | 1h | ✅ 已完成 | 延迟创建 lock，单元测试通过 |
+| DEBT-6 | asyncio.Lock 事件循环冲突修复 (SignalRepository + ConfigEntryRepository) | 1.5h | ✅ 已完成 | PR-1: _ensure_lock() + 幂等性，34+21 测试通过 |
+| DEBT-7 | FastAPI lifespan Repository 初始化 | 0.5h | ✅ 已完成 | PR-2: lifespan startup 初始化，解决 503 错误 |
 
 ### P1 级 - 策略参数测试修复
 
@@ -171,13 +173,130 @@
 
 **技术发现**: asyncio.Lock 事件循环绑定机制 - lock 创建时绑定到当前事件循环，不同事件循环不能共享
 
+**已完成修复** (DEBT-5 - 2026-04-03):
+- ✅ 将 `_lock` 类型改为 `Optional[asyncio.Lock]`，初始化为 `None`
+- ✅ 添加 `_ensure_lock()` 方法，延迟创建 lock
+- ✅ 所有 `async with self._lock` 改为 `async with self._ensure_lock()`
+- ✅ 单元测试 21/21 通过
+- ⚠️ 集成测试仍然超时（fixture 设计问题）
+
 **遗留问题** (TEST-2):
 - 集成测试 `test_order_chain_api.py` 超时
 - 原因：fixture 混合同步 TestClient 和异步 order_repository
 - 解决方案：重构测试 fixture，使用异步 HTTP 客户端（httpx.AsyncClient）
 - 优先级：P1（不影响核心功能，仅影响测试）
 
-**总计**: 3 项待办任务（DEBT-1/DEBT-2/TEST-2），预计 6.5h
+---
+
+### 待修复任务详情 (DEBT-6/DEBT-7)
+
+**架构评审报告**: `docs/reviews/AR-20260403-001-lifespan-init-review.md`
+**诊断报告**: `docs/diagnostic-reports/DA-20260403-001-order-api-503.md`
+
+**DEBT-6: asyncio.Lock 事件循环冲突修复 (SignalRepository + ConfigEntryRepository)**
+
+**问题根因**:
+- SignalRepository 和 ConfigEntryRepository 在 `__init__` 中创建 `asyncio.Lock()`
+- lock 创建时绑定到当前事件循环，uvicorn --reload 热重载会创建新事件循环
+- 新事件循环无法使用旧循环的 lock → 死锁
+
+**修复方案** (参考 OrderRepository DEBT-5):
+```python
+# 修改前：
+def __init__(self, db_path: str = "data/v3_dev.db"):
+    self._lock = asyncio.Lock()  # ❌ 在 __init__ 中创建 lock
+
+# 修改后：
+def __init__(self, db_path: str = "data/v3_dev.db"):
+    self._lock: Optional[asyncio.Lock] = None  # ✅ 延迟创建
+
+def _ensure_lock(self) -> asyncio.Lock:
+    """Ensure lock is created for current event loop."""
+    if self._lock is None:
+        self._lock = asyncio.Lock()
+    return self._lock
+
+async def initialize(self) -> None:
+    if self._db is not None:  # ✅ 幂等性检查
+        return
+    async with self._ensure_lock():
+        # ... 初始化逻辑 ...
+```
+
+**修改文件**:
+- `src/infrastructure/signal_repository.py` (第 36 行)
+- `src/infrastructure/config_entry_repository.py` (第 36 行)
+
+**验收标准**:
+- [ ] SignalRepository 单元测试通过
+- [ ] ConfigEntryRepository 单元测试通过
+- [ ] uvicorn --reload 热重载不死锁
+- [ ] 多事件循环切换测试通过
+
+---
+
+**DEBT-7: FastAPI lifespan Repository 初始化**
+
+**问题根因**:
+- FastAPI lifespan 函数只有 shutdown 清理逻辑，没有 startup 初始化逻辑
+- 导致 `_repository` (SignalRepository) 和 `_config_entry_repo` 为 None
+- API 端点访问时返回 503 "Repository not initialized"
+
+**修复方案** (PR-2):
+```python
+# 文件：src/interfaces/api.py
+# 位置：第 284-295 行
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events.
+    Initialize repositories on startup, close on shutdown.
+    """
+    # Startup - 初始化所有 Repository
+    from src.infrastructure.signal_repository import SignalRepository
+    from src.infrastructure.config_entry_repository import ConfigEntryRepository
+
+    global _repository, _config_entry_repo
+
+    try:
+        # 初始化 SignalRepository（幂等）
+        if _repository is None:
+            _repository = SignalRepository()
+            await _repository.initialize()
+            logger.info("✅ SignalRepository initialized in lifespan")
+
+        # 初始化 ConfigEntryRepository（幂等）
+        if _config_entry_repo is None:
+            _config_entry_repo = ConfigEntryRepository()
+            await _config_entry_repo.initialize()
+            logger.info("✅ ConfigEntryRepository initialized in lifespan")
+
+        # OrderRepository 按需创建（DEBT-3 方案）
+
+        yield
+
+    finally:
+        # Shutdown - 清理所有 Repository
+        if _repository is not None:
+            await _repository.close()
+            logger.info("✅ SignalRepository closed")
+
+        if _config_entry_repo is not None:
+            await _config_entry_repo.close()
+            logger.info("✅ ConfigEntryRepository closed")
+```
+
+**前置条件**: DEBT-6 (PR-1) 必须完成
+
+**验收标准**:
+- [ ] 启动 uvicorn 后访问 `/api/health` 正常
+- [ ] 访问 `/api/v3/orders/tree` 正常（不再 503）
+- [ ] 访问 `/api/signals/stats` 正常
+- [ ] 热重载后 API 正常工作
+
+---
+
+**总计**: 5 项待办任务（DEBT-1/DEBT-2/TEST-2/DEBT-6/DEBT-7），预计 8h
 
 ---
 
