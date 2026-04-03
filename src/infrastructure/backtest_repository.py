@@ -609,12 +609,13 @@ class BacktestReportRepository:
         # 计算分页
         offset = (page - 1) * page_size
 
-        # 获取数据
+        # 获取数据 - 使用 COALESCE 确保 sharpe_ratio 列不存在时返回 NULL
         query = f"""
             SELECT id, strategy_id, strategy_name, strategy_version,
                    symbol, timeframe, backtest_start, backtest_end,
                    created_at, total_return, total_trades, win_rate,
-                   total_pnl, max_drawdown, sharpe_ratio
+                   total_pnl, max_drawdown,
+                   COALESCE(sharpe_ratio, NULL) as sharpe_ratio
             FROM backtest_reports
             {where_clause}
             ORDER BY {sort_column} {sort_direction}

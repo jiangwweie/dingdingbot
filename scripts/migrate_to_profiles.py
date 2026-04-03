@@ -93,6 +93,43 @@ def rollback_database(backup_path: Path) -> bool:
         return False
 
 
+async def add_sharpe_ratio_column(conn: sqlite3.Connection) -> bool:
+    """
+    添加 sharpe_ratio 列到 backtest_reports 表
+
+    Returns:
+        是否成功
+    """
+    cursor = conn.cursor()
+
+    try:
+        # 检查列是否已存在
+        cursor.execute("""
+            PRAGMA table_info(backtest_reports)
+        """)
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "sharpe_ratio" in columns:
+            print("ℹ️  backtest_reports.sharpe_ratio 列已存在，跳过")
+            return True
+
+        # 添加 sharpe_ratio 列
+        cursor.execute("""
+            ALTER TABLE backtest_reports
+            ADD COLUMN sharpe_ratio REAL
+        """)
+
+        print("✅ backtest_reports 表已添加 sharpe_ratio 列")
+
+        conn.commit()
+        return True
+
+    except Exception as e:
+        print(f"❌ 添加 sharpe_ratio 列失败：{e}")
+        conn.rollback()
+        return False
+
+
 async def migrate_config_entries_add_profile_name(conn: sqlite3.Connection) -> bool:
     """
     扩展 config_entries_v2 表，添加 profile_name 字段
@@ -269,6 +306,10 @@ async def main():
 
     # 2. 扩展 config_entries_v2 表
     if not await migrate_config_entries_add_profile_name(conn):
+        success = False
+
+    # 3. 添加 sharpe_ratio 列到 backtest_reports 表
+    if not await add_sharpe_ratio_column(conn):
         success = False
 
     print("-" * 60)
