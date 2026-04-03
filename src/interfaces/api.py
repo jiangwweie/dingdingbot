@@ -2538,6 +2538,105 @@ async def delete_custom_strategy(strategy_id: int):
 
 
 # ============================================================
+# Strategy Parameter Template Endpoints (/api/strategies/templates/*)
+# ============================================================
+
+@app.post("/api/strategies/templates/{strategy_id}/load")
+async def load_strategy_param_template(strategy_id: int):
+    """
+    Load a strategy parameter template by ID.
+
+    This endpoint returns the strategy parameters from a template
+    for editing in the frontend.
+
+    Args:
+        strategy_id: Strategy template ID
+
+    Returns:
+        Strategy parameters in StrategyParamsResponse format
+    """
+    try:
+        repo = _get_repository()
+
+        # Get strategy from database
+        strategy = await repo.get_custom_strategy_by_id(strategy_id)
+        if strategy is None:
+            raise HTTPException(status_code=404, detail="Strategy template not found")
+
+        # Parse strategy_json back to dict
+        import json
+        strategy_def = json.loads(strategy["strategy_json"])
+
+        # Extract parameters from strategy definition
+        # The strategy definition contains triggers and filters with their params
+        params = {
+            "pinbar": {},
+            "engulfing": {},
+            "ema": {},
+            "mtf": {},
+            "atr": {},
+            "filters": [],
+        }
+
+        # Extract trigger params
+        for trigger in strategy_def.get("triggers", []):
+            trigger_type = trigger.get("type")
+            if trigger_type in params:
+                params[trigger_type] = trigger.get("params", {})
+
+        # Extract filter params
+        for filter_config in strategy_def.get("filters", []):
+            params["filters"].append({
+                "type": filter_config.get("type"),
+                "enabled": filter_config.get("enabled", True),
+                "params": filter_config.get("params", {}),
+            })
+
+        return params
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to load strategy param template: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"加载策略参数模板失败：{str(e)}"
+        ).model_dump()
+
+
+@app.delete("/api/strategies/templates/{strategy_id}")
+async def delete_strategy_param_template(strategy_id: int):
+    """
+    Delete a strategy parameter template by ID.
+
+    This is an alias for /api/strategies/{strategy_id} to support
+    frontend API conventions.
+
+    Args:
+        strategy_id: Strategy template ID
+
+    Returns:
+        Success message or 404 if not found.
+    """
+    try:
+        repo = _get_repository()
+
+        deleted = await repo.delete_custom_strategy(strategy_id)
+
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Strategy template not found")
+
+        return {"message": f"Strategy template {strategy_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete strategy param template: {e}")
+        return ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message=f"删除策略参数模板失败：{str(e)}"
+        ).model_dump()
+
+
+# ============================================================
 # F-4: Strategy Preview Endpoint (热预览接口)
 # ============================================================
 class StrategyPreviewRequest(BaseModel):
@@ -3289,12 +3388,23 @@ async def preview_strategy_params(request: StrategyParamsPreviewRequest):
                 if category in current_params and category != "filters":
                     current_params[category][param_key] = value
 
-        # Filter out empty categories
-        current_params = {k: v for k, v in current_params.items() if v or k == "filters"}
+        # Use StrategyParams.from_config_manager() to fill default values
+        # This ensures all required fields are present even if database is empty
+        params = StrategyParams.from_config_manager(config_manager)
+        default_params = params.to_dict()
 
-        if not current_params_flat:
-            params = StrategyParams.from_config_manager(config_manager)
-            current_params = params.to_dict()
+        # Merge database values over defaults
+        for category in default_params:
+            if category in current_params and isinstance(current_params[category], dict):
+                if category == "filters":
+                    # Keep filters from DB if present
+                    if current_params["filters"]:
+                        default_params["filters"] = current_params["filters"]
+                else:
+                    # Merge DB values over defaults for other categories
+                    default_params[category].update(current_params[category])
+
+        current_params = default_params
 
         # Build proposed config
         import copy

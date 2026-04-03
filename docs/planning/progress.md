@@ -8,6 +8,96 @@
 
 ## 📍 最近 3 天（2026-04-01 ~ 2026-04-04）
 
+### 2026-04-04 02:00 - P0/P1 问题修复（预览验证 500 + 模板端点）
+
+**会话 ID**: 20260404-002
+**开始时间**: 2026-04-04 01:00
+**结束时间**: 2026-04-04 02:00
+**持续时间**: 约 60 分钟
+
+#### 完成工作摘要
+
+**修复问题**:
+- ✅ P0 - 预览验证 500 错误修复
+- ✅ P1 - 模板加载端点实现
+- ✅ P1 - 模板删除端点实现
+
+#### 修复详情
+
+**1. P0 - 预览验证 500 错误修复**
+
+**症状**: `POST /api/strategy/params/preview` 返回 500，Pydantic 验证失败"engulfing Field required"
+
+**根因**: `current_params` 构建时如果数据库没有 engulfing 记录，则为空 dict {}，但 `StrategyParamsResponse` 要求 engulfing 必须是非空 dict
+
+**修复方案**: 使用 `StrategyParams.from_config_manager()` 填充默认值，然后合并数据库值
+
+**修改位置**: `src/interfaces/api.py:3292-3304`
+
+**代码变更**:
+```python
+# 修改前：仅当数据库完全为空时才填充默认值
+if not current_params_flat:
+    params = StrategyParams.from_config_manager(config_manager)
+    current_params = params.to_dict()
+
+# 修改后：始终使用默认值填充，然后合并数据库值
+params = StrategyParams.from_config_manager(config_manager)
+default_params = params.to_dict()
+
+# Merge database values over defaults
+for category in default_params:
+    if category in current_params and isinstance(current_params[category], dict):
+        if category == "filters":
+            if current_params["filters"]:
+                default_params["filters"] = current_params["filters"]
+        else:
+            default_params[category].update(current_params[category])
+
+current_params = default_params
+```
+
+**2. P1 - 模板加载端点实现**
+
+**症状**: `POST /api/strategies/templates/{id}/load` 返回 404
+
+**修复方案**: 实现新端点，从策略模板中提取参数
+
+**新增端点**: `src/interfaces/api.py:2542-2594`
+
+```python
+@app.post("/api/strategies/templates/{strategy_id}/load")
+async def load_strategy_param_template(strategy_id: int):
+    """Load a strategy parameter template by ID."""
+    # 从策略 definition 中提取 triggers 和 filters 参数
+```
+
+**3. P1 - 模板删除端点实现**
+
+**症状**: `DELETE /api/strategies/templates/{id}` 返回 404
+
+**修复方案**: 实现新端点，复用 `delete_custom_strategy()` 方法
+
+**新增端点**: `src/interfaces/api.py:2597-2621`
+
+```python
+@app.delete("/api/strategies/templates/{strategy_id}")
+async def delete_strategy_param_template(strategy_id: int):
+    """Delete a strategy parameter template by ID."""
+    # 复用 repo.delete_custom_strategy()
+```
+
+#### 测试结果
+
+- ✅ API 模块加载验证通过：`python3 -c "from src.interfaces.api import app"`
+- ✅ 代码无语法错误
+
+#### Git 提交
+
+待提交
+
+---
+
 ### 2026-04-04 00:30 - 配置页模板管理 404 错误诊断 + 架构评审
 
 **会话 ID**: 20260404-001
