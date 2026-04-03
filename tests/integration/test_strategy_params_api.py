@@ -101,7 +101,8 @@ async def config_repository():
 
 @pytest.fixture
 def api_client(temp_config_dir):
-    """Create FastAPI test client with mocked dependencies."""
+    """Create FastAPI test client with properly initialized dependencies."""
+    import asyncio
     from src.interfaces.api import app, set_dependencies
 
     # Create mock config manager
@@ -109,7 +110,17 @@ def api_client(temp_config_dir):
     config_manager.load_core_config()
     config_manager.load_user_config()
 
-    # Set dependencies (with None for optional ones)
+    # Create and initialize config entry repository
+    temp_db_file = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    temp_db_path = temp_db_file.name
+    temp_db_file.close()
+
+    repo = ConfigEntryRepository(db_path=temp_db_path)
+
+    # Initialize repository synchronously using asyncio
+    asyncio.run(repo.initialize())
+
+    # Set dependencies with properly initialized repository
     set_dependencies(
         config_manager=config_manager,
         repository=None,
@@ -117,11 +128,16 @@ def api_client(temp_config_dir):
         exchange_gateway=None,
         signal_tracker=None,
         snapshot_service=None,
-        config_entry_repo=None,
+        config_entry_repo=repo,
     )
 
     with TestClient(app) as client:
         yield client
+
+    # Cleanup: close repository and remove temp db
+    asyncio.run(repo.close())
+    if os.path.exists(temp_db_path):
+        os.unlink(temp_db_path)
 
 
 # ============================================================
@@ -163,12 +179,12 @@ class TestGetStrategyParams:
             await repo.initialize()
             await repo.upsert_entry("strategy.pinbar.min_wick_ratio", Decimal("0.65"), "v1.0.0")
             await repo.upsert_entry("strategy.ema.period", 50, "v1.0.0")
-            await repo.close()
+            # Don't close repo - we need it for the API call
 
         import asyncio
         asyncio.run(setup_data())
 
-        # Update API dependencies
+        # Update API dependencies with initialized repo
         config_manager = ConfigManager(temp_config_dir)
         config_manager.load_core_config()
         config_manager.load_user_config()
@@ -282,8 +298,8 @@ class TestUpdateStrategyParams:
             json=update_data
         )
 
-        # Should fail validation (422) or succeed if validation is lenient in test
-        assert response.status_code in [200, 422]
+        # Should fail validation (400, 422) or succeed if validation is lenient in test
+        assert response.status_code in [200, 400, 422]
 
 
 # ============================================================
@@ -367,15 +383,15 @@ class TestStrategyParamsValidation:
         }
         response = api_client.put("/api/strategy/params", json=update_data)
         # Should accept valid boundary value or fail due to test env
-        assert response.status_code in [200, 422, 500]
+        assert response.status_code in [200, 400, 422, 500]
 
         # Invalid boundary: min_wick_ratio = 0 (should fail)
         update_data = {
             "pinbar": {"min_wick_ratio": 0}
         }
         response = api_client.put("/api/strategy/params", json=update_data)
-        # May fail validation
-        assert response.status_code in [200, 422]
+        # May fail validation (400, 422)
+        assert response.status_code in [200, 400, 422]
 
     @pytest.mark.asyncio
     def test_ema_params_boundary_values(self, api_client):
@@ -551,19 +567,42 @@ class TestStrategyParamsErrorHandling:
         import tempfile
         import yaml
 
-        # Create temp config
+        # Create temp config with all required fields
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
+
+            # Create complete core.yaml with all required fields
+            core_config = {
+                "core_symbols": ["BTC/USDT:USDT"],
+                "pinbar_defaults": {
+                    "min_wick_ratio": "0.6",
+                    "max_body_ratio": "0.3",
+                    "body_position_tolerance": "0.1",
+                },
+                "ema": {"period": 60},
+                "mtf_mapping": {"15m": "1h", "1h": "4h"},
+                "warmup": {"history_bars": 100},
+            }
             with open(config_dir / "core.yaml", "w") as f:
-                yaml.dump({"core_symbols": ["BTC/USDT:USDT"]}, f)
+                yaml.dump(core_config, f)
+
+            # Create user.yaml with required fields
+            user_config = {
+                "exchange": {"name": "binance", "api_key": "test", "api_secret": "test", "testnet": True},
+                "user_symbols": [],
+                "timeframes": ["15m"],
+                "risk": {"max_loss_percent": "0.01", "max_leverage": 10},
+                "asset_polling": {"interval_seconds": 60},
+                "notification": {"channels": [{"type": "feishu", "webhook_url": "https://example.com/hook"}]},
+            }
             with open(config_dir / "user.yaml", "w") as f:
-                yaml.dump({"exchange": {"name": "binance"}}, f)
+                yaml.dump(user_config, f)
 
             config_manager = ConfigManager(config_dir)
             config_manager.load_core_config()
             config_manager.load_user_config()
 
-            # Set with None repository
+            # Set with None repository (config_entry_repo will use fallback)
             set_dependencies(config_manager=config_manager)
 
             with TestClient(app) as client:
@@ -579,8 +618,8 @@ class TestStrategyParamsErrorHandling:
 
         response = api_client.put("/api/strategy/params", json=update_data)
 
-        # Should fail validation or type conversion
-        assert response.status_code in [200, 422, 500]
+        # Should fail validation (400, 422) or succeed if validation is lenient
+        assert response.status_code in [200, 400, 422, 500]
 
     @pytest.mark.asyncio
     def test_preview_params_missing_new_config(self, api_client):

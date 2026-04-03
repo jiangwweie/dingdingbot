@@ -193,8 +193,8 @@ _config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
 
 
 def set_dependencies(
-    repository: SignalRepository,
-    account_getter: Callable[[], Any],
+    repository: Optional[SignalRepository] = None,
+    account_getter: Optional[Callable[[], Any]] = None,
     config_manager: Optional[Any] = None,
     exchange_gateway: Optional[Any] = None,
     signal_tracker: Optional[Any] = None,
@@ -205,8 +205,8 @@ def set_dependencies(
     Inject dependencies for API endpoints.
 
     Args:
-        repository: SignalRepository instance
-        account_getter: Function that returns AccountSnapshot or None
+        repository: Optional SignalRepository instance
+        account_getter: Optional function that returns AccountSnapshot or None
         config_manager: Optional ConfigManager instance
         exchange_gateway: Optional ExchangeGateway instance
         signal_tracker: Optional SignalStatusTracker instance

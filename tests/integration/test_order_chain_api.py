@@ -33,12 +33,6 @@ from src.interfaces.api import app, set_dependencies, set_v3_dependencies
 # ============================================================
 
 @pytest.fixture
-def client():
-    """创建测试用 FastAPI 客户端"""
-    return TestClient(app)
-
-
-@pytest.fixture
 def temp_db_path():
     """创建临时数据库文件"""
     fd, path = tempfile.mkstemp(suffix='.db')
@@ -50,8 +44,30 @@ def temp_db_path():
 
 
 @pytest.fixture
+def client(temp_db_path):
+    """创建测试用 FastAPI 客户端，通过 monkey-patching 让 API 使用临时数据库"""
+    # 保存原始 __init__ 方法
+    original_init = OrderRepository.__init__
+
+    # 创建一个闭包来捕获 temp_db_path
+    def patched_init(self, db_path=None, *args, **kwargs):
+        # 强制使用临时数据库路径
+        original_init(self, db_path=temp_db_path, *args, **kwargs)
+
+    # 应用 patch
+    OrderRepository.__init__ = patched_init
+
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        # 恢复原始方法
+        OrderRepository.__init__ = original_init
+
+
+@pytest.fixture
 async def order_repository(temp_db_path):
-    """创建并初始化 OrderRepository 实例"""
+    """创建并初始化 OrderRepository 实例 - 用于测试数据设置"""
     repo = OrderRepository(db_path=temp_db_path)
     await repo.initialize()
     yield repo

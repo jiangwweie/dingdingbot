@@ -323,20 +323,24 @@ class ConfigEntryRepository:
         Returns:
             Number of entries saved
         """
-        count = 0
+        # Collect all key-value pairs to save
+        entries_to_save: list = []
 
         def flatten(d: Dict[str, Any], parent_key: str = ""):
-            nonlocal count
             for k, v in d.items():
                 new_key = f"{parent_key}.{k}" if parent_key else k
                 if isinstance(v, dict):
                     flatten(v, new_key)
                 else:
-                    asyncio.create_task(self.upsert_entry(f"{prefix}.{new_key}", v, version))
-                    count += 1
+                    entries_to_save.append((f"{prefix}.{new_key}", v))
 
         flatten(params)
-        return count
+
+        # Save all entries and wait for completion
+        for key, value in entries_to_save:
+            await self.upsert_entry(key, value, version)
+
+        return len(entries_to_save)
 
     async def import_from_dict(self, config_dict: Dict[str, Any], version: str = "v1.0.0") -> int:
         """
