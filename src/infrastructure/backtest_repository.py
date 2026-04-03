@@ -641,7 +641,7 @@ class BacktestReportRepository:
                 "win_rate": str(self._str_to_decimal(row["win_rate"])),
                 "total_pnl": str(self._str_to_decimal(row["total_pnl"])),
                 "max_drawdown": str(self._str_to_decimal(row["max_drawdown"])),
-                "sharpe_ratio": str(self._str_to_decimal(row["sharpe_ratio"])) if row.get("sharpe_ratio") else None,
+                "sharpe_ratio": str(self._str_to_decimal(row["sharpe_ratio"])) if row["sharpe_ratio"] else None,
             }
             for row in rows
         ]

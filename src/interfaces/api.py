@@ -296,11 +296,17 @@ async def lifespan(app: FastAPI):
     """
     from src.infrastructure.signal_repository import SignalRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
+    from src.application.config_manager import load_all_configs
 
-    global _repository, _config_entry_repo
+    global _repository, _config_entry_repo, _config_manager
 
     # Startup - 初始化所有 Repository
     try:
+        # 初始化 ConfigManager（必须在 Repository 之前）
+        if _config_manager is None:
+            _config_manager = load_all_configs()
+            logger.info("ConfigManager initialized in lifespan")
+
         # 初始化 SignalRepository（幂等）
         if _repository is None:
             _repository = SignalRepository()
@@ -1685,7 +1691,7 @@ async def list_backtest_reports(
                     win_rate=r["win_rate"],
                     total_pnl=r["total_pnl"],
                     max_drawdown=r["max_drawdown"],
-                    sharpe_ratio=r.get("sharpe_ratio"),
+                    sharpe_ratio=r["sharpe_ratio"] if "sharpe_ratio" in r else None,
                 )
                 for r in result["reports"]
             ]
@@ -3051,16 +3057,16 @@ async def get_strategy_params():
         # Get all strategy parameters from database
         strategy_params = await repo.get_entries_by_prefix("strategy")
 
-        # Default values for all required fields
+        # Default values for all required fields (convert Decimal to float for JSON serialization)
         default_values = {
             "pinbar": {
-                "min_wick_ratio": str(config_manager.core_config.pinbar_defaults.min_wick_ratio),
-                "max_body_ratio": str(config_manager.core_config.pinbar_defaults.max_body_ratio),
-                "body_position_tolerance": str(config_manager.core_config.pinbar_defaults.body_position_tolerance),
+                "min_wick_ratio": float(config_manager.core_config.pinbar_defaults.min_wick_ratio),
+                "max_body_ratio": float(config_manager.core_config.pinbar_defaults.max_body_ratio),
+                "body_position_tolerance": float(config_manager.core_config.pinbar_defaults.body_position_tolerance),
             },
             "engulfing": {
-                "min_wick_ratio": "0.6",
-                "max_body_ratio": "0.3",
+                "min_wick_ratio": 0.6,
+                "max_body_ratio": 0.3,
             },
             "ema": {
                 "period": config_manager.core_config.ema.period,
@@ -3072,7 +3078,7 @@ async def get_strategy_params():
             "atr": {
                 "enabled": True,
                 "period": 14,
-                "min_atr_ratio": "0.5",
+                "min_atr_ratio": 0.5,
             },
             "filters": [],
         }
@@ -3094,7 +3100,11 @@ async def get_strategy_params():
                 if len(parts) == 2:
                     category, param_key = parts
                     if category in result and category != "filters":
-                        result[category][param_key] = value
+                        # Convert Decimal/string values to float for JSON serialization
+                        try:
+                            result[category][param_key] = float(value)
+                        except (ValueError, TypeError):
+                            result[category][param_key] = value
 
             return StrategyParamsResponse(**result)
 
@@ -4410,7 +4420,7 @@ async def get_order_tree(
         effective_days = days if days is not None else 7
 
         # 使用依赖注入获取 OrderRepository 实例
-        repo = _get_order_repo()
+        repo = await _get_order_repo()
 
         # 仅在非注入实例时初始化
         if not _order_repo:
@@ -4493,7 +4503,7 @@ async def delete_orders_batch(request: OrderDeleteRequest) -> OrderDeleteRespons
     """
     try:
         # 使用依赖注入获取 OrderRepository 实例
-        repo = _get_order_repo()
+        repo = await _get_order_repo()
         # 仅在非注入实例时初始化
         if not _order_repo:
             await repo.initialize()
@@ -4628,7 +4638,7 @@ async def get_order(order_id: str, symbol: str = Query(..., description="币种�
     logger.info(f"查询订单请求：order_id={order_id_display}, symbol={symbol}")
 
     # 使用依赖注入获取 OrderRepository 实例
-    order_repo = _get_order_repo()
+    order_repo = await _get_order_repo()
     await order_repo.initialize()
     try:
         order = await order_repo.get_order(order_id)
@@ -4732,7 +4742,7 @@ async def get_order_klines(
     """
     try:
         # 使用依赖注入获取 OrderRepository 实例
-        repo = _get_order_repo()
+        repo = await _get_order_repo()
         # 仅在非注入实例时初始化
         if not _order_repo:
             await repo.initialize()
@@ -4898,7 +4908,7 @@ async def list_orders(
 
     try:
         # 使用依赖注入获取 OrderRepository 实例
-        repo = _get_order_repo()
+        repo = await _get_order_repo()
         # 仅在非注入实例时初始化
         if not _order_repo:
             await repo.initialize()
