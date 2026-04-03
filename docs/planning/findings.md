@@ -2626,3 +2626,128 @@ async def get_order(order_id: str): ...
 ---
 
 *最后更新：2026-04-03 - 订单管理级联展示功能完成*
+
+---
+
+## TEST-2: asyncio.Lock 事件循环绑定 Bug ⭐⭐⭐⭐⭐
+
+**发现时间**: 2026-04-03
+**发现者**: QA Tester
+**问题级别**: P0 (业务代码 Bug)
+
+### 问题现象
+
+集成测试 `test_order_chain_api.py` 运行时卡住，无法完成测试验证。
+
+### 根因分析
+
+**完整根因链**:
+```
+SignalRepository._ensure_lock() 创建 asyncio.Lock
+    ↓ Lock 绑定到创建时的事件循环
+TestClient(app) 触发 lifespan startup
+    ↓ lifespan 在 TestClient 内部事件循环中初始化 Repository
+Repository.initialize() 调用 _ensure_lock()
+    ↓ 创建 Lock，绑定到 TestClient 的事件循环 A
+pytest-asyncio 在另一个事件循环 B 中运行测试
+    ↓ 测试调用 Repository 方法
+方法内部尝试获取 Lock
+    ↓ Lock 绑定到事件循环 A，但测试运行在事件循环 B
+跨事件循环获取 Lock → 死锁
+```
+
+**问题代码位置**: `src/infrastructure/signal_repository.py` 第 40-58 行
+
+```python
+def _ensure_lock(self) -> asyncio.Lock:
+    """Ensure lock is created for current event loop."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.Lock()
+
+    # ❌ Bug: 只检查 self._lock 是否为 None
+    # 没有检查当前事件循环是否与创建 Lock 时的事件循环相同
+    if self._lock is None:
+        self._lock = asyncio.Lock()
+
+    return self._lock
+```
+
+**问题分析**:
+- `_lock` 实例变量存储在对象中，跨事件循环共享
+- asyncio.Lock 绑定到创建时的事件循环
+- 在不同事件循环中使用同一个 Lock 导致 RuntimeError 或死锁
+- pytest-asyncio AUTO 模式为每个测试创建新的事件循环
+
+### 影响范围
+
+| 影域 | 影响评估 |
+|------|----------|
+| SignalRepository | 所有使用 `_ensure_lock()` 的方法 |
+| ConfigEntryRepository | 同样存在 `_ensure_lock()` 方法 |
+| 集成测试 | 所有使用 TestClient 的测试可能受影响 |
+| 生产环境 | 暂无影响（单一事件循环） |
+
+### 修复建议
+
+**方案 1: 为每个事件循环创建独立 Lock（推荐）**
+```python
+def _ensure_lock(self) -> asyncio.Lock:
+    """Ensure lock is created for current event loop."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.Lock()
+
+    # ✅ 修复: 使用字典存储每个事件循环的 Lock
+    if not hasattr(self, '_locks'):
+        self._locks = {}
+
+    if loop not in self._locks:
+        self._locks[loop] = asyncio.Lock()
+
+    return self._locks[loop]
+```
+
+**方案 2: 在 shutdown 时清理 Lock**
+```python
+async def close(self) -> None:
+    """Close database connection and cleanup locks."""
+    if self._db is not None:
+        await self._db.close()
+        self._db = None
+
+    # 清理所有事件循环的 Lock
+    if hasattr(self, '_locks'):
+        self._locks.clear()
+```
+
+### 测试验证 workaround
+
+由于这是业务代码 Bug，QA Tester 不应直接修改。当前采用 mock Repository 方式绕过问题:
+
+```python
+@pytest.fixture
+def client(order_repo):
+    """使用 mock SignalRepository 避免 Lock 问题"""
+    from unittest.mock import MagicMock
+
+    # 创建 mock SignalRepository（不需要真实初始化）
+    mock_signal_repo = MagicMock()
+    mock_signal_repo._db = MagicMock()
+    set_dependencies(repository=mock_signal_repo)
+
+    # 订单管理 API 不依赖 SignalRepository，所以可以用 mock
+    ...
+```
+
+### 待办事项
+
+1. **通知 Coordinator**: 分配给 Backend Developer 修复 `_ensure_lock()` Bug
+2. **创建 Bug Ticket**: 记录 P0 问题，阻塞集成测试运行
+3. **验收标准**: 修复后运行完整集成测试套件验证
+
+---
+
+*最后更新: 2026-04-03 - TEST-2 asyncio.Lock Bug 发现*
