@@ -847,7 +847,11 @@ class OrderRepository:
                 "metadata": Dict[str, Any],      # 元数据
             }
         """
-        async with self._ensure_lock():
+        logger.info(f"[DEBUG] get_order_tree() 开始执行，参数：symbol={symbol}, days={days}, limit={limit}")
+        lock = self._ensure_lock()
+        logger.info(f"[DEBUG] 获取到 Lock 对象：{lock}, locked={lock.locked()}")
+        async with lock:
+            logger.info("[DEBUG] 成功获取 Lock（外层）")
             # Step 1: 获取根订单列表（ENTRY 角色）
             root_orders = await self._get_entry_orders(
                 symbol=symbol,
@@ -856,6 +860,7 @@ class OrderRepository:
                 days=days,
                 limit=limit,
             )
+            logger.info(f"[DEBUG] 查询到 {len(root_orders)} 个根订单")
 
             if not root_orders:
                 return {
@@ -948,30 +953,32 @@ class OrderRepository:
 
         where_clause = "WHERE " + " AND ".join(where_conditions)
 
-        async with self._ensure_lock():
-            # Get total count
-            count_cursor = await self._db.execute(
-                f"SELECT COUNT(*) FROM orders {where_clause}",
-                tuple(params)
-            )
-            total = (await count_cursor.fetchone())[0]
-            await count_cursor.close()
+        logger.info(f"[DEBUG] _get_entry_orders() 开始查询，WHERE: {where_clause}, params: {params}")
+        # 注意：不使用锁，因为调用方（get_order_tree）已经持有锁
+        # Get total count
+        count_cursor = await self._db.execute(
+            f"SELECT COUNT(*) FROM orders {where_clause}",
+            tuple(params)
+        )
+        total = (await count_cursor.fetchone())[0]
+        await count_cursor.close()
+        logger.info(f"[DEBUG] 查询到总数：{total}")
 
-            # Get paginated results
-            params.append(limit)
-            cursor = await self._db.execute(
-                f"""
-                SELECT * FROM orders
-                {where_clause}
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                tuple(params)
-            )
-            rows = await cursor.fetchall()
-            await cursor.close()
+        # Get paginated results
+        params.append(limit)
+        cursor = await self._db.execute(
+            f"""
+            SELECT * FROM orders
+            {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            tuple(params)
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
 
-            return [self._row_to_order(row) for row in rows]
+        return [self._row_to_order(row) for row in rows]
 
     async def _get_child_orders(self, parent_ids: List[str]) -> List[Order]:
         """
@@ -988,29 +995,29 @@ class OrderRepository:
 
         placeholders = ','.join('?' * len(parent_ids))
 
-        async with self._ensure_lock():
-            cursor = await self._db.execute(
-                f"""
-                SELECT * FROM orders
-                WHERE parent_order_id IN ({placeholders})
-                ORDER BY
-                    CASE order_role
-                        WHEN 'TP1' THEN 1
-                        WHEN 'TP2' THEN 2
-                        WHEN 'TP3' THEN 3
-                        WHEN 'TP4' THEN 4
-                        WHEN 'TP5' THEN 5
-                        WHEN 'SL' THEN 6
-                        ELSE 7
-                    END,
-                    created_at ASC
-                """,
-                tuple(parent_ids)
-            )
-            rows = await cursor.fetchall()
-            await cursor.close()
+        # 注意：不使用锁，因为调用方（get_order_tree）已经持有锁
+        cursor = await self._db.execute(
+            f"""
+            SELECT * FROM orders
+            WHERE parent_order_id IN ({placeholders})
+            ORDER BY
+                CASE order_role
+                    WHEN 'TP1' THEN 1
+                    WHEN 'TP2' THEN 2
+                    WHEN 'TP3' THEN 3
+                    WHEN 'TP4' THEN 4
+                    WHEN 'TP5' THEN 5
+                    WHEN 'SL' THEN 6
+                    ELSE 7
+                END,
+                created_at ASC
+            """,
+            tuple(parent_ids)
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
 
-            return [self._row_to_order(row) for row in rows]
+        return [self._row_to_order(row) for row in rows]
 
     def _order_to_response(self, order: Order) -> Dict[str, Any]:
         """

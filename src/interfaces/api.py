@@ -4282,13 +4282,19 @@ async def get_order_tree(
                 )
 
         # 使用依赖注入获取 OrderRepository 实例
+        logger.info(f"[DEBUG] 获取 OrderRepository 实例，_order_repo={_order_repo}")
         repo = _get_order_repo()
+        logger.info(f"[DEBUG] OrderRepository 实例获取成功，repo={repo}")
+
         # 仅在非注入实例时初始化
         if not _order_repo:
+            logger.info("[DEBUG] 非注入实例，开始初始化...")
             await repo.initialize()
+            logger.info("[DEBUG] 初始化完成")
 
         try:
             # 调用 OrderRepository 获取订单树
+            logger.info(f"[DEBUG] 开始调用 repo.get_order_tree()，参数：symbol={symbol}, days={days}, limit={limit}")
             result = await repo.get_order_tree(
                 symbol=symbol,
                 start_date=start_dt,
@@ -4296,6 +4302,7 @@ async def get_order_tree(
                 days=days if not start_date else None,
                 limit=limit,
             )
+            logger.info(f"[DEBUG] repo.get_order_tree() 调用成功，返回 {len(result.get('items', []))} 个订单")
 
             # 将字典结果转换为 Pydantic 模型
             from pydantic import TypeAdapter
