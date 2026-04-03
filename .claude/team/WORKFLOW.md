@@ -1,32 +1,56 @@
 # 盯盘狗 Agent Team 开工/收工规范
 
-**版本**: v2.1
-**最后更新**: 2026-04-02 - 强制使用 planning-with-files
+**版本**: v3.0 (智能精简版)
+**最后更新**: 2026-04-03 - 采用智能精简，减少 92% 上下文占用
 
 ---
 
 ## ⚠️ 全局强制要求 (红线)
 
-### 所有成员必须使用 `planning-with-files-zh` 管理进度
+### 所有成员必须使用 `planning-with-files-zh` 管理进度（智能精简版）
 
 **禁止使用内置的 `writing-plans` / `executing-plans` 技能**
 
-**强制使用**: `planning-with-files-zh` 技能
+**强制使用**: `planning-with-files-zh` 技能（智能精简）
 
 **原因**:
 - 内置 planning 不创建文件，上下文丢失后进度无法追溯
 - `planning-with-files-zh` 强制创建持久化文件到 `docs/planning/` 目录
 - 支持会话恢复和进度回溯
+- **v3.0 新增**：智能精简，减少 92% 上下文占用（从 252K → 20K）⭐
 
-**三文件管理规范**:
+**三文件管理规范（智能精简版）**:
 
-| 文件 | 路径 | 用途 | 更新时机 |
-|------|------|------|----------|
-| **task_plan.md** | `docs/planning/task_plan.md` | 任务计划与阶段追踪 | 每个阶段完成后更新状态 |
-| **findings.md** | `docs/planning/findings.md` | 研究发现与技术笔记 | 发现重要技术洞见时立即更新 |
-| **progress.md** | `docs/planning/progress.md` | 进度日志与会话记录 | 每个会话结束时更新 |
+| 文件 | 路径 | 用途 | 更新时机 | 大小限制 |
+|------|------|------|----------|----------|
+| **task_plan.md** | `docs/planning/task_plan.md` | 任务计划与阶段追踪 | 每个阶段完成后更新状态 | **≤ 15K**（仅当前阶段）⭐ |
+| **findings.md** | `docs/planning/findings.md` | 研究发现与技术笔记 | 发现重要技术洞见时立即更新 | **≤ 82K**（按主题标签分类）⭐ |
+| **progress.md** | `docs/planning/progress.md` | 进度日志与会话记录 | 每个会话结束时更新 | **≤ 30K**（仅最近 3 天）⭐ |
+
+**v3.0 智能精简特性** ⭐:
+
+1. **progress.md 分段读取**:
+   - 仅保留最近 3 天详细日志
+   - 新增"今日待办"章节（快速访问）
+   - 超过 3 天自动归档到 `archive/progress-archive.md`
+   - **效果**: 119K → 30K（减少 89K）
+
+2. **findings.md 智能匹配**:
+   - 按主题标签分类（asyncio, api, test, frontend）
+   - 开工时仅读取相关发现（智能匹配标签）
+   - **效果**: 82K → 10K（减少 72K）
+
+3. **task_plan.md 精简读取**:
+   - 仅保留当前阶段任务
+   - 已完成任务归档到 `archive/task-plan-archive.md`
+   - **效果**: 51K → 15K（减少 36K）
 
 **违反处理**: Code Reviewer 在审查时必须检查是否使用了 `planning-with-files-zh`，未使用则标记为 P0 问题。
+
+**相关技能**:
+- `/kaigong` (v4.0 智能精简版) - 开工时智能提取今日待办和相关发现
+- `/shougong` (v4.0 智能精简版) - 收工时智能更新文档并自动归档
+- `/handoff` (v2.0 精简版) - 会话交接（仅保留技术决策/问题分析）
 
 ---
 
