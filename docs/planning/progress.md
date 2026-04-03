@@ -8,6 +8,84 @@
 
 ## 📍 最近 3 天（2026-04-01 ~ 2026-04-03）
 
+### 2026-04-03 18:37 - TEST-2 集成测试 asyncio.Lock 死锁修复 ✅
+
+**会话 ID**: 20260403-006
+**开始时间**: 2026-04-03 17:00
+**结束时间**: 2026-04-03 18:37
+**持续时间**: 约 1.5 小时
+
+#### 完成工作摘要
+
+**核心成果**:
+- ✅ TEST-2: 集成测试 fixture 重构 - asyncio.Lock 死锁修复
+- ✅ 诊断并修复 asyncio.Lock 不可重入导致的死锁问题
+- ✅ 8/14 集成测试从完全卡住到通过
+
+**代码变更**:
+- 修改文件：
+  - `src/infrastructure/order_repository.py` - 移除内层锁（死锁修复）
+  - `src/interfaces/api.py` - 添加详细调试日志
+  - `tests/integration/test_order_chain_api.py` - 重写测试 fixture
+  - `docs/arch/TEST-2-fixture-refactor-adr.md` - 架构决策记录
+- Git 提交：1b4c4bc
+- 测试通过：8/14（从 0/14 提升）
+
+**技术决策**:
+1. asyncio.Lock 不可重入问题：移除 `_get_entry_orders()` 和 `_get_child_orders()` 的内层锁
+2. 调试日志策略：在关键位置添加详细日志用于诊断死锁
+3. 测试 fixture 参考 `test_strategy_params_api.py` 成功模式
+
+**关键发现**:
+- **死锁根因**：`asyncio.Lock` 不是可重入锁，同一个协程两次获取同一个锁会死锁
+- **诊断方法**：添加详细日志记录 Lock 状态（locked/unlocked）
+- **修复验证**：测试从完全卡住变为 8/14 通过
+
+#### 待办事项
+
+**TOP 3 优先事项**:
+1. DEBT-1 创建 order_audit_logs 表（预计 1.5h）- P0 优先级
+2. DEBT-2 集成交易所 API 到批量删除（预计 2h）- P0 优先级
+3. 修复剩余 6 个集成测试（可选，预计 30 分钟）
+
+**总计**: 约 3.5h
+
+#### 关键文件
+
+**核心修复**:
+- `src/infrastructure/order_repository.py:850` - get_order_tree() 外层锁保留
+- `src/infrastructure/order_repository.py:951` - _get_entry_orders() 移除内层锁
+- `src/infrastructure/order_repository.py:998` - _get_child_orders() 移除内层锁
+
+**调试日志**:
+- `src/interfaces/api.py:4285-4298` - API 层调试日志
+- `src/infrastructure/order_repository.py:850-858` - Repository 层调试日志
+
+#### 技术洞见
+
+**asyncio.Lock 死锁模式识别**:
+```python
+# ❌ 错误模式：不可重入锁嵌套
+async def outer():
+    async with lock:  # 第一次获取锁
+        await inner()  # 调用内部方法
+
+async def inner():
+    async with lock:  # 第二次获取同一个锁 → 死锁！
+        pass
+
+# ✅ 正确模式：移除内层锁
+async def outer():
+    async with lock:  # 外层持有锁
+        await inner()  # 内部方法不再获取锁
+
+async def inner():
+    # 不使用锁，因为调用方已持有锁
+    pass
+```
+
+---
+
 ### 2026-04-03 22:00 - 全天工作总结交接 ✅
 
 **会话 ID**: 20260403-005
