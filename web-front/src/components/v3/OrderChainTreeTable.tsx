@@ -1,5 +1,5 @@
-import { FC, useRef } from 'react';
-import { List } from 'react-window';
+import { useRef, ReactNode, CSSProperties } from 'react';
+import { List, ListProps, ListImperativeAPI } from 'react-window';
 import { ChevronRight, ChevronDown, Trash2, AlertCircle } from 'lucide-react';
 import { OrderTreeNode, OrderResponse, OrderStatus, OrderRole } from '../../types/order';
 import { OrderStatusBadge } from './OrderStatusBadge';
@@ -76,7 +76,7 @@ function getOrderChainIds(node: OrderTreeNode): string[] {
 /**
  * 订单链树形表格组件
  */
-export const OrderChainTreeTable: FC<OrderChainTreeTableProps> = ({
+export const OrderChainTreeTable = ({
   data,
   expandedRowKeys,
   selectedRowKeys,
@@ -85,8 +85,8 @@ export const OrderChainTreeTable: FC<OrderChainTreeTableProps> = ({
   onCancelOrder,
   onDeleteChain,
   isLoading = false,
-}) => {
-  const listRef = useRef<List>(null);
+}: OrderChainTreeTableProps) => {
+  const listRef = useRef<ListImperativeAPI>(null);
 
   // 扁平化树形数据
   const flatData = flattenTreeData(data, expandedRowKeys);
@@ -167,11 +167,7 @@ export const OrderChainTreeTable: FC<OrderChainTreeTableProps> = ({
   };
 
   // 行组件
-  const Row: FC<{ index: number; style: React.CSSProperties; data: FlatOrderTreeNode[] }> = ({
-    index,
-    style,
-    data,
-  }) => {
+  const Row = ({ index, style, data }: { index: number; style: CSSProperties; data: FlatOrderTreeNode[]; "aria-posinset": number; "aria-setsize": number; role: "listitem" }): ReactNode => {
     const item = data[index];
     if (!item) return null;
 
@@ -367,13 +363,13 @@ export const OrderChainTreeTable: FC<OrderChainTreeTableProps> = ({
       {renderHeader()}
       <div className="max-h-[600px] overflow-auto">
         <List
-          height={Math.min(flatData.length * 52, 600)}
-          itemCount={flatData.length}
-          itemSize={52}
-          data={flatData}
-          ref={listRef}
+          rowComponent={Row}
+          rowProps={{ data: flatData }}
+          rowCount={flatData.length}
+          rowHeight={52}
+          listRef={listRef}
         >
-          {Row}
+          {null}
         </List>
       </div>
     </div>
