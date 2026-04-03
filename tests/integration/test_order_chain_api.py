@@ -45,7 +45,11 @@ def temp_db_path():
 
 @pytest.fixture
 def client(temp_db_path):
-    """创建测试用 FastAPI 客户端，通过 monkey-patching 让 API 使用临时数据库"""
+    """创建测试用 FastAPI 客户端
+
+    使用 monkey-patching 让 OrderRepository 使用临时数据库路径。
+    这是为了兼容现有的测试结构，避免 async/sync fixture 冲突。
+    """
     # 保存原始 __init__ 方法
     original_init = OrderRepository.__init__
 
@@ -63,11 +67,17 @@ def client(temp_db_path):
     finally:
         # 恢复原始方法
         OrderRepository.__init__ = original_init
+        # 重置依赖注入（如果有设置的话）
+        set_dependencies(order_repo=None)
 
 
 @pytest.fixture
 async def order_repository(temp_db_path):
-    """创建并初始化 OrderRepository 实例 - 用于测试数据设置"""
+    """创建并初始化 OrderRepository 实例 - 用于测试数据设置
+
+    注意：此 fixture 与 client fixture 使用相同的 temp_db_path，
+    因此它们操作同一个数据库文件。
+    """
     repo = OrderRepository(db_path=temp_db_path)
     await repo.initialize()
     yield repo

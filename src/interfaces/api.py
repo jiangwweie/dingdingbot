@@ -190,6 +190,7 @@ _exchange_gateway: Optional[Any] = None  # ExchangeGateway instance
 _signal_tracker: Optional[Any] = None  # SignalStatusTracker instance
 _snapshot_service: Optional[Any] = None  # ConfigSnapshotService instance
 _config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
+_order_repo: Optional[Any] = None  # OrderRepository instance
 
 
 def set_dependencies(
@@ -200,6 +201,7 @@ def set_dependencies(
     signal_tracker: Optional[Any] = None,
     snapshot_service: Optional[Any] = None,
     config_entry_repo: Optional[Any] = None,
+    order_repo: Optional[Any] = None,
 ) -> None:
     """
     Inject dependencies for API endpoints.
@@ -212,8 +214,9 @@ def set_dependencies(
         signal_tracker: Optional SignalStatusTracker instance
         snapshot_service: Optional ConfigSnapshotService instance
         config_entry_repo: Optional ConfigEntryRepository instance
+        order_repo: Optional OrderRepository instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
@@ -221,6 +224,7 @@ def set_dependencies(
     _signal_tracker = signal_tracker
     _snapshot_service = snapshot_service
     _config_entry_repo = config_entry_repo
+    _order_repo = order_repo
 
 
 def _get_repository() -> SignalRepository:
@@ -263,6 +267,15 @@ def _get_config_entry_repo() -> Any:
         from src.infrastructure.config_entry_repository import ConfigEntryRepository
         return ConfigEntryRepository()
     return _config_entry_repo
+
+
+def _get_order_repo() -> Any:
+    """Get order repository or create a new instance if not initialized."""
+    if _order_repo is None:
+        # Fallback: create a new instance
+        from src.infrastructure.order_repository import OrderRepository
+        return OrderRepository()
+    return _order_repo
 
 
 # ============================================================
@@ -4209,7 +4222,6 @@ async def get_order_tree(
             - 400: 参数错误（start_date 与 days 同时指定）
             - 500: 数据库查询失败
     """
-    from src.infrastructure.order_repository import OrderRepository
     from datetime import datetime
 
     try:
@@ -4242,8 +4254,8 @@ async def get_order_tree(
                     detail=f"end_date 格式错误，应为 ISO 8601 格式：{str(e)}"
                 )
 
-        # 创建 OrderRepository 实例并查询
-        repo = OrderRepository()
+        # 使用依赖注入获取 OrderRepository 实例
+        repo = _get_order_repo()
         await repo.initialize()
 
         try:
@@ -4267,8 +4279,9 @@ async def get_order_tree(
                 metadata=result['metadata'],
             )
         finally:
-            # 确保数据库连接关闭
-            await repo.close()
+            # 仅关闭非注入实例
+            if not _order_repo:
+                await repo.close()
 
     except HTTPException:
         raise
@@ -4316,11 +4329,9 @@ async def delete_orders_batch(request: OrderDeleteRequest) -> OrderDeleteRespons
             - 400 ORDER-002: 订单 ID 数量超限（>100）
             - 500 ORDER-005: 删除失败（数据库错误）
     """
-    from src.infrastructure.order_repository import OrderRepository
-
     try:
-        # 创建 OrderRepository 实例
-        repo = OrderRepository()
+        # 使用依赖注入获取 OrderRepository 实例
+        repo = _get_order_repo()
         await repo.initialize()
 
         try:
@@ -4340,8 +4351,9 @@ async def delete_orders_batch(request: OrderDeleteRequest) -> OrderDeleteRespons
                 audit_log_id=result.get('audit_log_id'),
             )
         finally:
-            # 确保数据库连接关闭
-            await repo.close()
+            # 仅关闭非注入实例
+            if not _order_repo:
+                await repo.close()
 
     except ValueError as e:
         # 参数验证错误
@@ -4380,8 +4392,8 @@ async def get_order(order_id: str, symbol: str = Query(..., description="币种�
     order_id_display = mask_secret(order_id, visible_chars=8)
     logger.info(f"查询订单请求：order_id={order_id_display}, symbol={symbol}")
 
-    # 从订单仓库获取订单数据
-    order_repo = OrderRepository()
+    # 使用依赖注入获取 OrderRepository 实例
+    order_repo = _get_order_repo()
     await order_repo.initialize()
     try:
         order = await order_repo.get_order(order_id)
@@ -4429,7 +4441,9 @@ async def get_order(order_id: str, symbol: str = Query(..., description="币种�
         logger.error(f"查询订单失败：{str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        await order_repo.close()
+        # 仅关闭非注入实例
+        if not _order_repo:
+            await order_repo.close()
 
 
 @app.get("/api/v3/orders/{order_id}/klines")
@@ -4482,79 +4496,79 @@ async def get_order_klines(
             - 500: 获取 K 线数据失败
     """
     try:
-        from src.infrastructure.order_repository import OrderRepository
-
-        # Fetch order from database (async)
-        repo = OrderRepository(db_path="data/v3_dev.db")
+        # 使用依赖注入获取 OrderRepository 实例
+        repo = _get_order_repo()
         await repo.initialize()
-        order_orm = await repo.get_order(order_id)
-        await repo.close()
 
-        if not order_orm:
-            # Fallback: try to fetch from exchange
-            gateway = _get_exchange_gateway()
-            order_data = await gateway.fetch_order(exchange_order_id=order_id, symbol=symbol)
-            # Create mock order response
-            order_response = {
-                "order_id": order_id,
-                "exchange_order_id": order_data.exchange_order_id,
-                "symbol": symbol,
-                "order_type": order_data.order_type,
-                "order_role": "ENTRY",
-                "direction": order_data.direction,
-                "status": order_data.status,
-                "quantity": str(order_data.quantity),
-                "filled_qty": "0",
-                "price": str(order_data.price) if order_data.price else None,
-                "trigger_price": str(order_data.trigger_price) if order_data.trigger_price else None,
-                "created_at": order_data.created_at,
-            }
-            # Use current timeframe for klines
-            timeframe = "15m"  # Default
-            order_chain = []
-        else:
-            # Build order response from ORM
-            order_response = {
-                "order_id": order_orm.id,
-                "exchange_order_id": order_orm.exchange_order_id,
-                "symbol": order_orm.symbol,
-                "order_type": order_orm.order_type,
-                "order_role": order_orm.order_role,
-                "direction": order_orm.direction,
-                "status": order_orm.status,
-                "quantity": str(order_orm.requested_qty),
-                "filled_qty": str(order_orm.filled_qty),
-                "price": str(order_orm.price) if order_orm.price else None,
-                "trigger_price": str(order_orm.trigger_price) if order_orm.trigger_price else None,
-                "average_exec_price": str(order_orm.average_exec_price) if order_orm.average_exec_price else None,
-                "created_at": order_orm.created_at,
-                "filled_at": order_orm.filled_at,
-            }
-            # Extract timeframe from order or use default
-            timeframe = getattr(order_orm, 'timeframe', '15m') or '15m'
+        try:
+            # Fetch order from database (async)
+            order_orm = await repo.get_order(order_id)
 
-            # Fetch order chain if requested
-            order_chain = []
-            if include_chain:
-                # Re-initialize repository for order chain query
-                repo = OrderRepository(db_path="data/v3_dev.db")
-                await repo.initialize()
-                chain_orders = await repo.get_order_chain_by_order_id(order_id)
+            if not order_orm:
+                # Fallback: try to fetch from exchange
+                gateway = _get_exchange_gateway()
+                order_data = await gateway.fetch_order(exchange_order_id=order_id, symbol=symbol)
+                # Create mock order response
+                order_response = {
+                    "order_id": order_id,
+                    "exchange_order_id": order_data.exchange_order_id,
+                    "symbol": symbol,
+                    "order_type": order_data.order_type,
+                    "order_role": "ENTRY",
+                    "direction": order_data.direction,
+                    "status": order_data.status,
+                    "quantity": str(order_data.quantity),
+                    "filled_qty": "0",
+                    "price": str(order_data.price) if order_data.price else None,
+                    "trigger_price": str(order_data.trigger_price) if order_data.trigger_price else None,
+                    "created_at": order_data.created_at,
+                }
+                # Use current timeframe for klines
+                timeframe = "15m"  # Default
+                order_chain = []
+            else:
+                # Build order response from ORM
+                order_response = {
+                    "order_id": order_orm.id,
+                    "exchange_order_id": order_orm.exchange_order_id,
+                    "symbol": order_orm.symbol,
+                    "order_type": order_orm.order_type,
+                    "order_role": order_orm.order_role,
+                    "direction": order_orm.direction,
+                    "status": order_orm.status,
+                    "quantity": str(order_orm.requested_qty),
+                    "filled_qty": str(order_orm.filled_qty),
+                    "price": str(order_orm.price) if order_orm.price else None,
+                    "trigger_price": str(order_orm.trigger_price) if order_orm.trigger_price else None,
+                    "average_exec_price": str(order_orm.average_exec_price) if order_orm.average_exec_price else None,
+                    "created_at": order_orm.created_at,
+                    "filled_at": order_orm.filled_at,
+                }
+                # Extract timeframe from order or use default
+                timeframe = getattr(order_orm, 'timeframe', '15m') or '15m'
+
+                # Fetch order chain if requested
+                order_chain = []
+                if include_chain:
+                    chain_orders = await repo.get_order_chain_by_order_id(order_id)
+
+                    for order in chain_orders:
+                        order_chain.append({
+                            "order_id": order.id,
+                            "order_role": order.order_role.value,
+                            "direction": order.direction.value,
+                            "price": str(order.price) if order.price else None,
+                            "average_exec_price": str(order.average_exec_price) if order.average_exec_price else None,
+                            "filled_qty": str(order.filled_qty),
+                            "status": order.status.value,
+                            "filled_at": order.filled_at,
+                            "created_at": order.created_at,
+                            "exit_reason": order.exit_reason,
+                        })
+        finally:
+            # 仅关闭非注入实例
+            if not _order_repo:
                 await repo.close()
-
-                for order in chain_orders:
-                    order_chain.append({
-                        "order_id": order.id,
-                        "order_role": order.order_role.value,
-                        "direction": order.direction.value,
-                        "price": str(order.price) if order.price else None,
-                        "average_exec_price": str(order.average_exec_price) if order.average_exec_price else None,
-                        "filled_qty": str(order.filled_qty),
-                        "status": order.status.value,
-                        "filled_at": order.filled_at,
-                        "created_at": order.created_at,
-                        "exit_reason": order.exit_reason,
-                    })
 
         # Get kline_timestamp from order (filled_at or created_at)
         kline_timestamp = order_orm.filled_at if order_orm and order_orm.filled_at else order_orm.created_at if order_orm else int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -4643,12 +4657,11 @@ async def list_orders(
             - 503 F-004: 交易所初始化失败
             - 429 C-010: API 频率限制
     """
-    from src.infrastructure.order_repository import OrderRepository
     from decimal import Decimal
 
     try:
-        # 创建 OrderRepository 实例并查询
-        repo = OrderRepository()
+        # 使用依赖注入获取 OrderRepository 实例
+        repo = _get_order_repo()
         await repo.initialize()
 
         try:
@@ -4702,8 +4715,9 @@ async def list_orders(
                 offset=result['offset'],
             )
         finally:
-            # 确保数据库连接关闭
-            await repo.close()
+            # 仅关闭非注入实例
+            if not _order_repo:
+                await repo.close()
 
     except HTTPException:
         raise
