@@ -1021,18 +1021,6 @@ class OrderRepository:
             "filled_at": order.filled_at,
         }
 
-    async def get_order_chain(self, order_id: str) -> List[Order]:
-        """
-        获取完整订单链（包括父订单和所有子订单）
-
-        Args:
-            order_id: 订单 ID
-
-        Returns:
-            List[Order] - 父订单 + 所有子订单列表
-        """
-        return await self.get_order_chain_by_order_id(order_id)
-
     async def delete_orders_batch(
         self,
         order_ids: List[str],
