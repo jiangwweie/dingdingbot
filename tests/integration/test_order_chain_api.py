@@ -17,7 +17,8 @@ from decimal import Decimal
 from typing import List, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi.testclient import TestClient
+import httpx
+from httpx import ASGITransport
 from fastapi import FastAPI
 
 from src.domain.models import (
@@ -44,44 +45,40 @@ def temp_db_path():
 
 
 @pytest.fixture
-def client(temp_db_path):
-    """创建测试用 FastAPI 客户端
+async def order_repo(temp_db_path):
+    """创建并初始化 OrderRepository 实例 - 单一实例
 
-    使用 monkey-patching 让 OrderRepository 使用临时数据库路径。
-    这是为了兼容现有的测试结构，避免 async/sync fixture 冲突。
-    """
-    # 保存原始 __init__ 方法
-    original_init = OrderRepository.__init__
-
-    # 创建一个闭包来捕获 temp_db_path
-    def patched_init(self, db_path=None, *args, **kwargs):
-        # 强制使用临时数据库路径
-        original_init(self, db_path=temp_db_path, *args, **kwargs)
-
-    # 应用 patch
-    OrderRepository.__init__ = patched_init
-
-    try:
-        with TestClient(app) as test_client:
-            yield test_client
-    finally:
-        # 恢复原始方法
-        OrderRepository.__init__ = original_init
-        # 重置依赖注入（如果有设置的话）
-        set_dependencies(order_repo=None)
-
-
-@pytest.fixture
-async def order_repository(temp_db_path):
-    """创建并初始化 OrderRepository 实例 - 用于测试数据设置
-
-    注意：此 fixture 与 client fixture 使用相同的 temp_db_path，
-    因此它们操作同一个数据库文件。
+    这是唯一的 Repository 实例，被测试数据和 API 共享
     """
     repo = OrderRepository(db_path=temp_db_path)
     await repo.initialize()
     yield repo
     await repo.close()
+
+
+@pytest.fixture
+async def client(order_repo):
+    """创建异步 HTTP 客户端 - 使用已存在的 Repository
+
+    使用依赖注入方式，避免重复创建 Repository
+    """
+    # 注入依赖
+    set_dependencies(order_repo=order_repo)
+
+    try:
+        # 使用 httpx.AsyncClient 进行异步 HTTP 请求
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as async_client:
+            yield async_client
+    finally:
+        # 重置依赖注入
+        set_dependencies(order_repo=None)
+
+
+@pytest.fixture
+async def order_repository(order_repo):
+    """向后兼容的 fixture - 返回 Repository 实例"""
+    return order_repo
 
 
 @pytest.fixture
@@ -271,7 +268,7 @@ class TestOrderTreeIntegration:
     async def test_get_order_tree_full_data(self, client, order_repository, setup_test_order_tree):
         """集成测试：获取完整订单树数据"""
         # 调用 API
-        response = client.get("/api/v3/orders/tree?days=7")
+        response = await client.get("/api/v3/orders/tree?days=7")
 
         # 验证响应
         assert response.status_code == 200
@@ -294,7 +291,7 @@ class TestOrderTreeIntegration:
     async def test_get_order_tree_with_symbol_filter(self, client, order_repository, setup_test_order_tree):
         """集成测试：带币种对过滤的订单树查询"""
         # 测试 BTC 过滤
-        response = client.get("/api/v3/orders/tree?symbol=BTC/USDT:USDT&days=7")
+        response = await client.get("/api/v3/orders/tree?symbol=BTC/USDT:USDT&days=7")
         assert response.status_code == 200
         data = response.json()
 
@@ -309,7 +306,7 @@ class TestOrderTreeIntegration:
     @pytest.mark.asyncio
     async def test_get_order_tree_with_eth_symbol(self, client, order_repository, setup_test_order_tree):
         """集成测试：ETH 币种对过滤"""
-        response = client.get("/api/v3/orders/tree?symbol=ETH/USDT:USDT&days=7")
+        response = await client.get("/api/v3/orders/tree?symbol=ETH/USDT:USDT&days=7")
         assert response.status_code == 200
         data = response.json()
 
@@ -319,7 +316,7 @@ class TestOrderTreeIntegration:
     @pytest.mark.asyncio
     async def test_get_order_tree_child_orders_structure(self, client, order_repository, setup_test_order_tree):
         """集成测试：验证子订单结构"""
-        response = client.get("/api/v3/orders/tree?days=7")
+        response = await client.get("/api/v3/orders/tree?days=7")
         assert response.status_code == 200
         data = response.json()
 
@@ -349,7 +346,7 @@ class TestOrderTreeIntegration:
     async def test_get_order_tree_empty_result(self, client, order_repository):
         """集成测试：空结果（无数据）"""
         # 查询不存在的币种
-        response = client.get("/api/v3/orders/tree?symbol=NONEXISTENT/USDT:USDT&days=7")
+        response = await client.get("/api/v3/orders/tree?symbol=NONEXISTENT/USDT:USDT&days=7")
         assert response.status_code == 200
         data = response.json()
 
@@ -359,7 +356,7 @@ class TestOrderTreeIntegration:
     @pytest.mark.asyncio
     async def test_get_order_tree_with_limit(self, client, order_repository, setup_test_order_tree):
         """集成测试：带数量限制"""
-        response = client.get("/api/v3/orders/tree?days=7&limit=2")
+        response = await client.get("/api/v3/orders/tree?days=7&limit=2")
         assert response.status_code == 200
         data = response.json()
 
@@ -373,7 +370,7 @@ class TestOrderTreeIntegration:
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=1)
 
-        response = client.get(
+        response = await client.get(
             f"/api/v3/orders/tree?start_date={start_date.isoformat().replace('+00:00', 'Z')}&days=7"
         )
 
@@ -384,7 +381,7 @@ class TestOrderTreeIntegration:
     @pytest.mark.asyncio
     async def test_get_order_tree_invalid_date_format(self, client, order_repository):
         """集成测试：无效日期格式"""
-        response = client.get("/api/v3/orders/tree?start_date=invalid-date")
+        response = await client.get("/api/v3/orders/tree?start_date=invalid-date")
 
         assert response.status_code == 400
         assert "格式错误" in response.json()["detail"]
@@ -407,7 +404,7 @@ class TestDeleteOrdersBatchIntegration:
             "cancel_on_exchange": False,  # 测试环境不调用交易所
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = await client.delete("/api/v3/orders/batch", json=request_body)
         assert response.status_code == 200
         data = response.json()
 
@@ -430,7 +427,7 @@ class TestDeleteOrdersBatchIntegration:
             "cancel_on_exchange": False,
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = await client.delete("/api/v3/orders/batch", json=request_body)
         assert response.status_code == 200
         data = response.json()
 
@@ -443,7 +440,7 @@ class TestDeleteOrdersBatchIntegration:
     async def test_delete_order_chain_with_cascade(self, client, order_repository, setup_test_order_tree):
         """集成测试：级联删除子订单"""
         # 先获取删除前的订单树
-        tree_response = client.get("/api/v3/orders/tree?days=7")
+        tree_response = await client.get("/api/v3/orders/tree?days=7")
         assert tree_response.status_code == 200
 
         # 删除 entry-002
@@ -452,7 +449,7 @@ class TestDeleteOrdersBatchIntegration:
             "cancel_on_exchange": False,
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = await client.delete("/api/v3/orders/batch", json=request_body)
         assert response.status_code == 200
         data = response.json()
 
@@ -460,7 +457,7 @@ class TestDeleteOrdersBatchIntegration:
         deleted_ids = data["deleted_from_db"]
 
         # 验证订单已从数据库删除
-        remaining_tree = client.get("/api/v3/orders/tree?days=7")
+        remaining_tree = await client.get("/api/v3/orders/tree?days=7")
         remaining_data = remaining_tree.json()
 
         # entry-002 应该不在结果中
@@ -475,7 +472,7 @@ class TestDeleteOrdersBatchIntegration:
             "cancel_on_exchange": False,
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = await client.delete("/api/v3/orders/batch", json=request_body)
 
         # Pydantic 验证错误
         assert response.status_code == 422
@@ -488,7 +485,7 @@ class TestDeleteOrdersBatchIntegration:
             "cancel_on_exchange": False,
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = await client.delete("/api/v3/orders/batch", json=request_body)
 
         # Pydantic 验证错误
         assert response.status_code == 422
@@ -506,7 +503,7 @@ class TestDeleteOrdersBatchIntegration:
             },
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = await client.delete("/api/v3/orders/batch", json=request_body)
         assert response.status_code == 200
         data = response.json()
 
@@ -549,7 +546,7 @@ class TestOrderChainEdgeCases:
         await order_repository.save(order)
 
         # 查询订单树
-        response = client.get("/api/v3/orders/tree?symbol=BTC/USDT:USDT&days=7")
+        response = await client.get("/api/v3/orders/tree?symbol=BTC/USDT:USDT&days=7")
         assert response.status_code == 200
         data = response.json()
 
@@ -615,7 +612,7 @@ class TestOrderChainEdgeCases:
         await order_repository.save_batch(orders)
 
         # 查询订单树
-        response = client.get("/api/v3/orders/tree?symbol=TEST/USDT:USDT&days=7")
+        response = await client.get("/api/v3/orders/tree?symbol=TEST/USDT:USDT&days=7")
         assert response.status_code == 200
         data = response.json()
 
@@ -631,7 +628,7 @@ class TestOrderChainEdgeCases:
             "cancel_on_exchange": False,
         }
 
-        response = client.delete("/api/v3/orders/batch", json=request_body)
+        response = await client.delete("/api/v3/orders/batch", json=request_body)
         assert response.status_code == 200
         data = response.json()
 
@@ -661,7 +658,7 @@ class TestOrderChainEdgeCases:
         )
         await order_repository.save(order)
 
-        response = client.get("/api/v3/orders/tree?symbol=BTC/USDT:USDT&days=7")
+        response = await client.get("/api/v3/orders/tree?symbol=BTC/USDT:USDT&days=7")
         assert response.status_code == 200
         data = response.json()
 
@@ -727,7 +724,7 @@ class TestOrderTreePerformance:
         import time
         start = time.time()
 
-        response = client.get("/api/v3/orders/tree?symbol=PERF/USDT:USDT&days=30")
+        response = await client.get("/api/v3/orders/tree?symbol=PERF/USDT:USDT&days=30")
 
         elapsed = time.time() - start
 

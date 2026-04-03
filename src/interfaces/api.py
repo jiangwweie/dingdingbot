@@ -4256,7 +4256,9 @@ async def get_order_tree(
 
         # 使用依赖注入获取 OrderRepository 实例
         repo = _get_order_repo()
-        await repo.initialize()
+        # 仅在非注入实例时初始化
+        if not _order_repo:
+            await repo.initialize()
 
         try:
             # 调用 OrderRepository 获取订单树
@@ -4332,7 +4334,9 @@ async def delete_orders_batch(request: OrderDeleteRequest) -> OrderDeleteRespons
     try:
         # 使用依赖注入获取 OrderRepository 实例
         repo = _get_order_repo()
-        await repo.initialize()
+        # 仅在非注入实例时初始化
+        if not _order_repo:
+            await repo.initialize()
 
         try:
             # 调用 OrderRepository 批量删除
@@ -4498,7 +4502,9 @@ async def get_order_klines(
     try:
         # 使用依赖注入获取 OrderRepository 实例
         repo = _get_order_repo()
-        await repo.initialize()
+        # 仅在非注入实例时初始化
+        if not _order_repo:
+            await repo.initialize()
 
         try:
             # Fetch order from database (async)
@@ -4662,7 +4668,9 @@ async def list_orders(
     try:
         # 使用依赖注入获取 OrderRepository 实例
         repo = _get_order_repo()
-        await repo.initialize()
+        # 仅在非注入实例时初始化
+        if not _order_repo:
+            await repo.initialize()
 
         try:
             # 调用 OrderRepository 查询订单列表

@@ -72,7 +72,13 @@ class OrderRepository:
         """
         Initialize database connection and create tables.
         Also creates the data/ directory if it doesn't exist.
+
+        This method is idempotent - calling it multiple times has no effect after first initialization.
         """
+        # 幂等性检查：如果已经初始化，直接返回
+        if self._db is not None:
+            return
+
         async with self._ensure_lock():
             # Create data directory if not exists
             db_dir = os.path.dirname(self.db_path)
