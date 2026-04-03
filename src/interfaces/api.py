@@ -90,6 +90,8 @@ class ProfileListResponse(BaseModel):
     """Profile 列表响应"""
     profiles: list
     total: int
+    limit: int = 50
+    offset: int = 0
     active_profile: Optional[str] = None
 
 
@@ -2188,40 +2190,74 @@ async def get_strategy_metadata():
     }
 
 
-@app.get("/api/strategies/templates")
-async def list_strategy_templates():
+@app.get("/api/strategies/templates", response_model=StrategyTemplateListResponse)
+async def list_strategy_templates(
+    limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
+    offset: int = Query(default=0, ge=0, description="分页偏移量"),
+):
     """
     Get simplified strategy template list for backtest sandbox.
 
     Returns only basic info (id, name, description) for quick selection.
     Use GET /api/strategies/{id} to fetch full strategy details.
+
+    Args:
+        limit: Maximum number of results (1-200)
+        offset: Number of results to skip
     """
     try:
         repo = _get_repository()
-        strategies = await repo.get_all_custom_strategies()
+        all_strategies = await repo.get_all_custom_strategies()
+
+        # Apply pagination
+        total = len(all_strategies)
+        paginated_strategies = all_strategies[offset:offset + limit]
+
         templates = [
             {"id": s["id"], "name": s["name"], "description": s["description"]}
-            for s in strategies
+            for s in paginated_strategies
         ]
-        return {"templates": templates}
+        return StrategyTemplateListResponse(
+            templates=templates,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
     except HTTPException:
         raise
     except Exception as e:
         return {"error": str(e)}
 
 
-@app.get("/api/strategies")
-async def get_custom_strategies():
+@app.get("/api/strategies", response_model=StrategyListResponse)
+async def get_custom_strategies(
+    limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
+    offset: int = Query(default=0, ge=0, description="分页偏移量"),
+):
     """
     Get all custom strategy templates (list view).
 
     Returns basic information (id, name, description) for each strategy.
     Use GET /api/strategies/{id} to fetch full strategy details.
+
+    Args:
+        limit: Maximum number of results (1-200)
+        offset: Number of results to skip
     """
     try:
         repo = _get_repository()
-        strategies = await repo.get_all_custom_strategies()
-        return {"strategies": strategies}
+        all_strategies = await repo.get_all_custom_strategies()
+
+        # Apply pagination
+        total = len(all_strategies)
+        paginated_strategies = all_strategies[offset:offset + limit]
+
+        return StrategyListResponse(
+            strategies=paginated_strategies,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -3594,6 +3630,22 @@ class ConfigSnapshotListResponse(BaseModel):
     limit: int
     offset: int
     data: List[ConfigSnapshotResponse]
+
+
+class StrategyListResponse(BaseModel):
+    """Response model for strategy template list with pagination."""
+    strategies: List[Dict[str, Any]]
+    total: int
+    limit: int
+    offset: int
+
+
+class StrategyTemplateListResponse(BaseModel):
+    """Response model for strategy template simplified list with pagination."""
+    templates: List[Dict[str, Any]]
+    total: int
+    limit: int
+    offset: int
 
 
 class ConfigRollbackResponse(BaseModel):
@@ -5686,9 +5738,16 @@ def _get_profile_service() -> "ConfigProfileService":
 
 
 @app.get("/api/config/profiles", response_model=ProfileListResponse)
-async def list_profiles():
+async def list_profiles(
+    limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
+    offset: int = Query(default=0, ge=0, description="分页偏移量"),
+):
     """
     获取所有配置 Profile 列表
+
+    Args:
+        limit: 最大返回数量 (1-200)
+        offset: 分页偏移量
 
     Returns:
         Profile 列表，包含激活状态标识
@@ -5703,12 +5762,18 @@ async def list_profiles():
         config_repo = _get_repository()
         service = ConfigProfileService(profile_repo, config_repo.config_entry_repo)
 
-        profiles = await service.list_profiles()
+        all_profiles = await service.list_profiles()
         active = await service.get_active_profile()
 
+        # Apply pagination
+        total = len(all_profiles)
+        paginated_profiles = all_profiles[offset:offset + limit]
+
         return ProfileListResponse(
-            profiles=[p.to_dict() for p in profiles],
-            total=len(profiles),
+            profiles=[p.to_dict() for p in paginated_profiles],
+            total=total,
+            limit=limit,
+            offset=offset,
             active_profile=active.name if active else None,
         )
     except Exception as e:
