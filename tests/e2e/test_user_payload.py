@@ -23,7 +23,7 @@ def temp_config_dir():
         with open(config_dir / "core.yaml", "w") as f: yaml.dump(core_config, f)
         
         user_config = {
-            "exchange": {"name": "binance", "api_key": "test_api_key", "api_secret": "test_secret", "testnet": True},
+            "exchange": {"name": "binance", "api_key": "test_api_key", "api_secret": "test_secret"},
             "user_symbols": [],
             "timeframes": ["15m", "1h"],
             "active_strategies": [],

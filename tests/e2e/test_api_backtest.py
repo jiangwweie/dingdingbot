@@ -91,7 +91,6 @@ def temp_config_dir():
                 "name": "binance",
                 "api_key": "test_api_key_conservative",
                 "api_secret": "test_secret_conservative",
-                "testnet": True,
             },
             "user_symbols": [],
             "timeframes": ["15m", "1h"],

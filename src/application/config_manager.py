@@ -45,7 +45,7 @@ class ExchangeConfig(BaseModel):
     name: str = Field(default="binance", description="Exchange name (ccxt id)")
     api_key: str = Field(..., description="API Key from environment variable")
     api_secret: str = Field(..., description="API Secret from environment variable")
-    testnet: bool = Field(default=False, description="Use testnet")
+    # 仅支持实盘，禁用测试网
 
 
 class AssetPollingConfig(BaseModel):
@@ -241,7 +241,6 @@ class ConfigManager:
 
         Optional environment variables:
         - EXCHANGE_NAME: Exchange name (default: "binance")
-        - EXCHANGE_TESTNET: Use testnet (default: "false")
 
         Returns:
             ExchangeConfig instance
@@ -265,8 +264,6 @@ class ConfigManager:
             )
 
         name = os.getenv('EXCHANGE_NAME', 'binance')
-        testnet_str = os.getenv('EXCHANGE_TESTNET', 'false').lower()
-        testnet = testnet_str in ('true', '1', 'yes')
 
         # Register secrets for masking
         register_secret(api_key)
@@ -275,8 +272,7 @@ class ConfigManager:
         return ExchangeConfig(
             name=name,
             api_key=api_key,
-            api_secret=api_secret,
-            testnet=testnet
+            api_secret=api_secret
         )
 
     async def check_api_key_permissions(self, exchange: Any) -> None:
@@ -305,7 +301,7 @@ class ConfigManager:
         if self._exchange_config:
             logger.info(f"Exchange: {self._exchange_config.name}")
             logger.info(f"API Key: {mask_secret(self._exchange_config.api_key)}")
-            logger.info(f"Testnet: {self._exchange_config.testnet}")
+            logger.info("Mode: LIVE (实盘模式，禁用测试网)")
 
         # Symbols
         logger.info(f"Monitoring {len(self._symbols)} symbols:")

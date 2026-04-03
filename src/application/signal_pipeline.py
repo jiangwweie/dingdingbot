@@ -321,12 +321,12 @@ class SignalPipeline:
         Returns:
             DynamicStrategyRunner instance
         """
-        # Get active strategies from config
-        active_strategies = self._config_manager.user_config.active_strategies
-        core_config = self._config_manager.core_config
+        # Get active strategy from config manager
+        active_strategy = self._config_manager.active_strategy
+        active_strategies = [active_strategy] if active_strategy else []
 
-        # Build runner using factory function
-        runner = create_dynamic_runner(active_strategies, core_config)
+        # Build runner using factory function (core_config is no longer used)
+        runner = create_dynamic_runner(active_strategies)
 
         # Warmup: replay cached K-lines to restore EMA and other stateful indicators
         if self._kline_history:
@@ -636,11 +636,8 @@ class SignalPipeline:
         result: Dict[str, TrendDirection] = {}
         current_tf = kline.timeframe
 
-        # Get higher timeframe from config
-        higher_tf = get_higher_timeframe(
-            current_tf,
-            self._config_manager.user_config.mtf_mapping
-        )
+        # Get higher timeframe using default mapping (no config needed)
+        higher_tf = get_higher_timeframe(current_tf, None)
 
         if higher_tf is None:
             return result  # No higher timeframe (e.g., 1w)

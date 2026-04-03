@@ -183,7 +183,6 @@ async def run_application():
             exchange_name=exchange_cfg.name,
             api_key=exchange_cfg.api_key,
             api_secret=exchange_cfg.api_secret,
-            testnet=exchange_cfg.testnet,
         )
 
         await _exchange_gateway.initialize()

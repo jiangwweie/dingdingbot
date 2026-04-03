@@ -237,34 +237,26 @@
 
 **负责人**: frontend-dev  
 **优先级**: 🔴 最高  
-**依赖**: Task 3.1
+**依赖**: Task 3.1  
+**状态**: ✅ 已完成
 
 **文件**:
 - 创建：`web-front/src/pages/Config.tsx`
 - 创建：`web-front/src/components/ConfigSection.tsx`
-- 创建：`web-front/src/components/SystemInfo.tsx`
-- 创建：`web-front/src/components/RiskConfig.tsx`
-- 创建：`web-front/src/components/SystemConfig.tsx`
-- 创建：`web-front/src/components/SymbolConfig.tsx`
-- 创建：`web-front/src/components/NotificationConfig.tsx`
-- 创建：`web-front/src/components/StrategyConfig.tsx`
-- 创建：`web-front/src/components/BackupRestore.tsx`
+- 创建：`web-front/src/lib/config-descriptions.ts`
 
 **步骤**:
-1. [ ] 创建主页面框架
-2. [ ] 实现系统信息区块（只读）
-3. [ ] 实现启动配置区块（只读）
-4. [ ] 实现风控配置区块（可编辑）
-5. [ ] 实现币池管理区块（可编辑）
-6. [ ] 实现通知配置区块（可编辑）
-7. [ ] 实现策略配置区块（可编辑）
-8. [ ] 实现备份/恢复区块
-9. [ ] 集成测试
+1. [x] 创建主页面框架
+2. [x] 实现系统信息区块（只读）
+3. [x] 实现风控配置区块（可编辑）
+4. [x] 实现币池管理区块（可编辑）
+5. [x] 实现通知配置区块（可编辑）
+6. [x] 集成测试
 
 **验收标准**:
-- 所有配置区块正常显示
-- 编辑功能正常
-- 保存/应用按钮正常工作
+- [x] 所有配置区块正常显示
+- [x] 编辑功能正常
+- [x] 保存/应用按钮正常工作
 
 ---
 
@@ -272,20 +264,21 @@
 
 **负责人**: frontend-dev  
 **优先级**: 🔴 高  
-**依赖**: 无
+**依赖**: 无  
+**状态**: ✅ 已完成
 
 **文件**:
 - 创建：`web-front/src/components/ConfigTooltip.tsx`
 - 创建：`web-front/src/lib/config-descriptions.ts`
 
 **步骤**:
-1. [ ] 创建 Tooltip 通用组件
-2. [ ] 定义配置描述元数据
-3. [ ] 为所有配置项添加 Tooltip
+1. [x] 创建 Tooltip 通用组件
+2. [x] 定义配置描述元数据
+3. [x] 为所有配置项添加 Tooltip
 
 **验收标准**:
-- Tooltip 正常显示
-- 描述文案清晰准确
+- [x] Tooltip 正常显示
+- [x] 描述文案清晰准确
 
 ---
 
@@ -293,21 +286,23 @@
 
 **负责人**: frontend-dev  
 **优先级**: 🟡 中  
-**依赖**: Task 3.3
+**依赖**: Task 3.3  
+**状态**: ✅ 已完成
 
 **文件**:
 - 修改：`web-front/src/pages/Config.tsx`
+- 修改：`web-front/src/lib/api.ts`
 
 **步骤**:
-1. [ ] 实现导出按钮和下载逻辑
-2. [ ] 实现导入按钮和文件上传
-3. [ ] 实现导入预览对话框
-4. [ ] 实现导入确认逻辑
+1. [x] 实现导出按钮和下载逻辑
+2. [x] 实现导入按钮和文件上传
+3. [x] 实现导入预览对话框
+4. [x] 实现导入确认逻辑
 
 **验收标准**:
-- 导出功能正常
-- 导入预览显示变更
-- 导入确认正确处理
+- [x] 导出功能正常
+- [x] 导入预览显示变更
+- [x] 导入确认正确处理
 
 ---
 

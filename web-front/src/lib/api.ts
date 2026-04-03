@@ -1045,3 +1045,384 @@ export async function listSignalStatuses(
   }
   return res.json();
 }
+
+// ============================================================================
+// Config Management API v1 (配置管理 API)
+// ============================================================================
+
+/**
+ * Risk config interface (v1 API)
+ */
+export interface RiskConfigV1 {
+  max_loss_percent: number;
+  max_total_exposure?: number;
+  max_leverage: number;
+}
+
+/**
+ * System config interface (v1 API)
+ */
+export interface SystemConfigV1 {
+  history_bars: number;
+  queue_batch_size: number;
+  queue_flush_interval: number;
+}
+
+/**
+ * Symbol config interface (v1 API)
+ */
+export interface SymbolConfigV1 {
+  id: number;
+  symbol: string;
+  is_core: boolean;
+  is_enabled: boolean;
+}
+
+/**
+ * Notification config interface (v1 API)
+ */
+export interface NotificationConfigV1 {
+  id: number;
+  channel: 'feishu' | 'wecom' | 'telegram';
+  webhook_url: string;
+  is_enabled: boolean;
+}
+
+/**
+ * Strategy config interface (v1 API)
+ */
+export interface StrategyConfigV1 {
+  id: number;
+  name: string;
+  description: string | null;
+  triggers: TriggerConfig[];
+  filters: FilterConfig[];
+  logic_tree?: any;
+  apply_to: string[];
+  is_active: boolean;
+}
+
+/**
+ * All config response (GET /api/v1/config)
+ */
+export interface AllConfigResponse {
+  strategy: StrategyConfigV1 | null;
+  risk: RiskConfigV1;
+  system: SystemConfigV1;
+  symbols: SymbolConfigV1[];
+  notifications: NotificationConfigV1[];
+}
+
+/**
+ * Update config response
+ */
+export interface UpdateConfigResponse {
+  success: boolean;
+  message: string;
+  requires_restart: boolean;
+}
+
+/**
+ * Add symbol request
+ */
+export interface AddSymbolRequest {
+  symbol: string;
+  is_core?: boolean;
+  is_enabled?: boolean;
+}
+
+/**
+ * Add notification request
+ */
+export interface AddNotificationRequest {
+  channel: 'feishu' | 'wecom' | 'telegram';
+  webhook_url: string;
+  is_enabled?: boolean;
+}
+
+/**
+ * Update notification request
+ */
+export interface UpdateNotificationRequest {
+  webhook_url?: string;
+  is_enabled?: boolean;
+}
+
+/**
+ * Fetch all configuration (v1 API)
+ */
+export async function fetchAllConfig(): Promise<AllConfigResponse> {
+  const res = await fetch('/api/v1/config', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch configuration');
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Update risk config
+ */
+export async function updateRiskConfig(
+  config: Partial<RiskConfigV1>
+): Promise<UpdateConfigResponse> {
+  const res = await fetch('/api/v1/config/risk', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to update risk config');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Update system config
+ */
+export async function updateSystemConfigV1(
+  config: Partial<SystemConfigV1>
+): Promise<UpdateConfigResponse> {
+  const res = await fetch('/api/v1/config/system', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to update system config');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Add a new symbol
+ */
+export async function addSymbol(
+  payload: AddSymbolRequest
+): Promise<SymbolConfigV1> {
+  const res = await fetch('/api/v1/config/symbols', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to add symbol');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Delete a symbol by ID
+ */
+export async function deleteSymbol(id: number): Promise<void> {
+  const res = await fetch(`/api/v1/config/symbols/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to delete symbol');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+}
+
+/**
+ * Update symbol enabled status
+ */
+export async function updateSymbol(
+  id: number,
+  is_enabled: boolean
+): Promise<SymbolConfigV1> {
+  const res = await fetch(`/api/v1/config/symbols/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_enabled }),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to update symbol');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Add a new notification channel
+ */
+export async function addNotification(
+  payload: AddNotificationRequest
+): Promise<NotificationConfigV1> {
+  const res = await fetch('/api/v1/config/notifications', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to add notification');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Update notification config
+ */
+export async function updateNotification(
+  id: number,
+  payload: UpdateNotificationRequest
+): Promise<NotificationConfigV1> {
+  const res = await fetch(`/api/v1/config/notifications/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to update notification');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Delete notification by ID
+ */
+export async function deleteNotification(id: number): Promise<void> {
+  const res = await fetch(`/api/v1/config/notifications/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to delete notification');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+}
+
+// ============================================================================
+// Config Import/Export API
+// ============================================================================
+
+/**
+ * Import preview change item
+ */
+export interface ImportChange {
+  category: 'strategy' | 'risk' | 'system' | 'symbol' | 'notification';
+  action: 'create' | 'update' | 'delete';
+  field?: string;
+  old_value?: any;
+  new_value?: any;
+}
+
+/**
+ * Import preview error item
+ */
+export interface ImportPreviewError {
+  line?: number;
+  field: string;
+  message: string;
+}
+
+/**
+ * Import preview response
+ */
+export interface ImportPreviewResponse {
+  valid: boolean;
+  changes: ImportChange[];
+  errors: ImportPreviewError[];
+  warnings: string[];
+}
+
+/**
+ * Export config response
+ */
+export interface ExportConfigResponse {
+  success: boolean;
+  yaml_content: string;
+  download_url: string;
+  exported_at: string;
+}
+
+/**
+ * Import confirm response
+ */
+export interface ImportConfirmResponse {
+  success: boolean;
+  message: string;
+  requires_restart: boolean;
+  applied_changes: number;
+}
+
+/**
+ * Export configuration to YAML
+ */
+export async function exportConfig(): Promise<ExportConfigResponse> {
+  const res = await fetch('/api/v1/config/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to export config');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Preview config import
+ */
+export async function previewConfigImport(
+  yamlContent: string
+): Promise<ImportPreviewResponse> {
+  const res = await fetch('/api/v1/config/import/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ yaml_content: yamlContent }),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to preview import');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Confirm config import
+ */
+export async function confirmConfigImport(
+  yamlContent: string
+): Promise<ImportConfirmResponse> {
+  const res = await fetch('/api/v1/config/import/confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ yaml_content: yamlContent }),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to import config');
+    (error as any).info = await res.json().catch(() => ({}));
+    (error as any).status = res.status;
+    throw error;
+  }
+  return res.json();
+}

@@ -58,7 +58,6 @@ class TestConfigManager:
                     "name": "binance",
                     "api_key": "test_api_key_12345",
                     "api_secret": "test_api_secret_67890",
-                    "testnet": True,
                 },
                 "user_symbols": [
                     "XRP/USDT:USDT",
@@ -112,7 +111,6 @@ class TestConfigManager:
         user = manager.load_user_config()
 
         assert user.exchange.name == "binance"
-        assert user.exchange.testnet is True
         assert user.timeframes == ["15m", "1h", "4h"]
         assert user.risk.max_loss_percent == Decimal("0.01")
         assert user.risk.max_leverage == 10
@@ -249,7 +247,6 @@ class TestSecretMasking:
                         "name": "binance",
                         "api_key": "sk_test_abcdefghijklmnop",
                         "api_secret": "secret_1234567890abcdef",
-                        "testnet": True,
                     },
                     "user_symbols": [],
                     "timeframes": ["1h"],

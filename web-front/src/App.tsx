@@ -7,6 +7,7 @@ import Account from './pages/Account';
 import Backtest from './pages/Backtest';
 import StrategyWorkbench from './pages/StrategyWorkbench';
 import Snapshots from './pages/Snapshots';
+import Config from './pages/Config';
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="account" element={<Account />} />
           <Route path="strategies" element={<StrategyWorkbench />} />
           <Route path="snapshots" element={<Snapshots />} />
+          <Route path="config" element={<Config />} />
         </Route>
       </Routes>
     </BrowserRouter>

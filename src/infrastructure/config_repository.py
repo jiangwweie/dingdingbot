@@ -123,7 +123,7 @@ class ConfigRepository:
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS symbol_configs (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol        TEXT NOT NULL UNIQUE CHECK (symbol MATCH '^[A-Z]+/[A-Z]+(:[A-Z]+)?$'),
+                symbol        TEXT NOT NULL UNIQUE,
                 is_core       INTEGER NOT NULL DEFAULT 1 CHECK (is_core IN (0, 1)),
                 is_enabled    INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
                 updated_at    DATETIME NOT NULL DEFAULT (datetime('now'))
@@ -136,7 +136,7 @@ class ConfigRepository:
             CREATE TABLE IF NOT EXISTS notification_configs (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel       TEXT NOT NULL CHECK (channel IN ('feishu', 'wecom', 'telegram')),
-                webhook_url   TEXT NOT NULL CHECK (webhook_url MATCH '^https?://.+'),
+                webhook_url   TEXT NOT NULL,
                 is_enabled    INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
                 description   TEXT,
                 updated_at    DATETIME NOT NULL DEFAULT (datetime('now'))
@@ -385,16 +385,18 @@ class ConfigRepository:
 
     async def _initialize_default_configs(self) -> None:
         """Initialize default singleton records if they don't exist."""
-        # Initialize risk_configs with default values
+        # Initialize risk_configs with default values (use INSERT OR REPLACE to avoid trigger conflicts)
         await self._db.execute("""
-            INSERT OR IGNORE INTO risk_configs (id, max_loss_percent, max_total_exposure, max_leverage)
-            VALUES (1, 1.0, 0.8, 10)
+            INSERT OR REPLACE INTO risk_configs (id, max_loss_percent, max_total_exposure, max_leverage, description, updated_at)
+            SELECT 1, 1.0, 0.8, 10, '默认风控配置', datetime('now')
+            WHERE NOT EXISTS (SELECT 1 FROM risk_configs WHERE id = 1)
         """)
 
         # Initialize system_configs with default values
         await self._db.execute("""
-            INSERT OR IGNORE INTO system_configs (id, history_bars, queue_batch_size, queue_flush_interval)
-            VALUES (1, 100, 10, 5.0)
+            INSERT OR REPLACE INTO system_configs (id, history_bars, queue_batch_size, queue_flush_interval, description, updated_at)
+            SELECT 1, 100, 10, 5.0, '默认系统配置', datetime('now')
+            WHERE NOT EXISTS (SELECT 1 FROM system_configs WHERE id = 1)
         """)
 
         await self._db.commit()

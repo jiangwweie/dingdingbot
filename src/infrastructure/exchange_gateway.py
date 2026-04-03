@@ -49,7 +49,6 @@ class ExchangeGateway:
         exchange_name: str,
         api_key: str,
         api_secret: str,
-        testnet: bool = False,
         options: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -59,13 +58,11 @@ class ExchangeGateway:
             exchange_name: Exchange name (ccxt id, e.g., 'binance')
             api_key: API key (read-only permission required)
             api_secret: API secret
-            testnet: Use testnet endpoint
             options: Additional exchange options
         """
         self.exchange_name = exchange_name
         self.api_key = api_key
         self.api_secret = api_secret
-        self.testnet = testnet
 
         # Build exchange options
         exchange_options = {
@@ -114,8 +111,8 @@ class ExchangeGateway:
         if options:
             config['options'].update(options)
 
-        if self.testnet:
-            config['sandboxMode'] = True
+        # 仅支持实盘，禁用沙盒模式
+        config['sandboxMode'] = False
 
         # Create exchange by name
         exchange_class = getattr(ccxt_async, self.exchange_name)
@@ -137,8 +134,8 @@ class ExchangeGateway:
         if options:
             config['options'].update(options)
 
-        if self.testnet:
-            config['sandboxMode'] = True
+        # 仅支持实盘，禁用沙盒模式
+        config['sandboxMode'] = False
 
         # Create exchange by name
         exchange_class = getattr(ccxtpro, self.exchange_name)

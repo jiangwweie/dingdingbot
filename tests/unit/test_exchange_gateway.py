@@ -21,12 +21,10 @@ class TestExchangeGatewayInit:
             exchange_name="binance",
             api_key="test_key",
             api_secret="test_secret",
-            testnet=True,
         )
 
         assert gateway.exchange_name == "binance"
         assert gateway.api_key == "test_key"
-        assert gateway.testnet is True
         assert gateway._max_reconnect_attempts == 10
 
     def test_init_default_options(self):
@@ -51,7 +49,6 @@ class TestParseOhlcv:
             exchange_name="binance",
             api_key="test_key",
             api_secret="test_secret",
-            testnet=True,
         )
 
     def test_parse_valid_ohlcv(self, gateway):
@@ -165,7 +162,6 @@ class TestFetchHistoricalOhlcv:
                 exchange_name="binance",
                 api_key="test_key",
                 api_secret="test_secret",
-                testnet=True,
             )
             yield gateway
 
@@ -224,7 +220,6 @@ class TestAssetPolling:
             exchange_name="binance",
             api_key="test_key",
             api_secret="test_secret",
-            testnet=True,
         )
 
     @pytest.mark.asyncio
