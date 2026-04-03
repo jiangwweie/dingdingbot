@@ -1,6 +1,6 @@
 ---
-name: frontend-dev
-description: 前端开发专家角色 - 负责 React + TypeScript + TailwindCSS 前端实现。当需要开发 UI 组件、页面、样式或任何前端代码时使用此技能。
+name: team-frontend-dev
+description: 前端开发专家 - 负责 React + TypeScript + TailwindCSS 前端实现。
 license: Proprietary
 ---
 

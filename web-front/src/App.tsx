@@ -12,6 +12,7 @@ import Snapshots from './pages/Snapshots';
 import Orders from './pages/Orders';
 import Positions from './pages/Positions';
 import ConfigManagement from './pages/ConfigManagement';
+import ConfigProfiles from './pages/ConfigProfiles';
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="strategies" element={<StrategyWorkbench />} />
           <Route path="snapshots" element={<Snapshots />} />
           <Route path="config" element={<ConfigManagement />} />
+          <Route path="profiles" element={<ConfigProfiles />} />
         </Route>
       </Routes>
     </BrowserRouter>

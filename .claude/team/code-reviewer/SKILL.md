@@ -1,6 +1,6 @@
 ---
-name: code-reviewer
-description: 代码审查员角色 - 负责独立代码审查、架构一致性检查、安全隐患识别、Clean Architecture 分层把关。当代码实现完成后需要审查时使用此技能。与 QA Tester 互补但不重叠：QA 编写测试代码，Reviewer 审查测试质量。
+name: team-code-reviewer
+description: 代码审查员 - 负责独立代码审查、架构一致性检查、安全隐患识别。
 license: Proprietary
 ---
 

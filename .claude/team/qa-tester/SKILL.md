@@ -1,6 +1,6 @@
 ---
-name: qa-tester
-description: 质量保障专家角色 - 负责测试策略设计、单元测试、集成测试、端到端测试。当需要编写测试用例、验证功能正确性时使用此技能。与 Code Reviewer 互补但不重叠：QA 编写测试代码，Reviewer 审查测试质量。
+name: team-qa-tester
+description: 质量保障专家 - 负责测试策略设计、单元测试、集成测试。
 license: Proprietary
 ---
 

@@ -2,42 +2,27 @@
   "skills": {
     "local": [
       {
-        "name": "pm",
-        "description": "项目经理 - 执行监工 + 风险雷达。作为统一入口接收用户需求，负责任务分解、进度追踪、资源调度、代码提交。日常对话首选联系人。",
-        "path": "./.claude/team/project-manager/SKILL.md"
-      },
-      {
-        "name": "product-manager",
-        "description": "产品经理 - 需求过滤器 + 价值判断。负责需求收集、优先级排序、用户故事编写、MVP 范围定义。",
-        "path": "./.claude/team/product-manager/SKILL.md"
-      },
-      {
-        "name": "architect",
-        "description": "架构师 - 技术愿景 + 架构守门人。负责架构设计、契约设计、技术选型、关联影响评估。",
-        "path": "./.claude/team/architect/SKILL.md"
-      },
-      {
         "name": "team-coordinator",
-        "description": "团队协调器 - 负责任务分解、分配给前端/后端/测试角色、协调并行执行。",
+        "description": "团队协调器 - 兼任 PdM/Arch/PM，负责需求头脑风暴、架构设计、任务分解、并行调度、进度追踪。",
         "path": "./.claude/team/team-coordinator/SKILL.md"
       },
       {
-        "name": "backend-dev",
+        "name": "team-backend-dev",
         "description": "后端开发专家 - 负责 Python + FastAPI + asyncio 后端实现。",
         "path": "./.claude/team/backend-dev/SKILL.md"
       },
       {
-        "name": "frontend-dev",
+        "name": "team-frontend-dev",
         "description": "前端开发专家 - 负责 React + TypeScript + TailwindCSS 前端实现。",
         "path": "./.claude/team/frontend-dev/SKILL.md"
       },
       {
-        "name": "qa-tester",
+        "name": "team-qa-tester",
         "description": "质量保障专家 - 负责测试策略设计、单元测试、集成测试。",
         "path": "./.claude/team/qa-tester/SKILL.md"
       },
       {
-        "name": "code-reviewer",
+        "name": "team-code-reviewer",
         "description": "代码审查员 - 负责独立代码审查、架构一致性检查、安全隐患识别。",
         "path": "./.claude/team/code-reviewer/SKILL.md"
       },

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp, ChevronDown, Monitor, Briefcase, Beaker, Settings2, History } from 'lucide-react';
+import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp, ChevronDown, Monitor, Briefcase, Beaker, Settings2, History, Database } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 import SettingsPanel from './SettingsPanel';
@@ -63,6 +63,7 @@ const navCategories: NavCategory[] = [
     items: [
       { to: '/account', icon: Wallet, label: '账户' },
       { to: '/snapshots', icon: Save, label: '配置快照' },
+      { to: '/profiles', icon: Database, label: '配置 Profile' },
       { to: '/config', icon: Settings, label: '配置管理' },
     ],
   },

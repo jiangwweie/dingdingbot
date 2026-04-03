@@ -1,7 +1,7 @@
 # 任务计划
 
 > **当前迭代**: 2026-04-02 起  
-> **最后更新**: 2026-04-02 (订单管理级联展示功能 - 契约设计完成)
+> **最后更新**: 2026-04-03 (配置 Profile 管理功能完成 + 第二阶段功能完成)
 
 ---
 
@@ -14,6 +14,7 @@
 | **P0** | T1 接口拆分 | 1 项 | 2h | ✅ 已完成 |
 | **P1** | Phase 7 收尾验证 | 3 项 | 5h | ✅ 已完成 |
 | **P1** | 配置管理功能 - 版本化快照 | 7 项 | 8h | ✅ 已完成 |
+| **P1** | 配置 Profile 管理功能 | 11 项 | 12h | ✅ 已完成 |
 | **P2** | 配置管理功能 | 2 项 | 4h | ☐ 搁置 |
 | **P0** | Phase 8 自动化调参 | 已分解 | 40h | ⏳ 进行中 |
 | **P0** | 用户需求 Bug 修复 (2026-04-02) | 7 项 | 8h | ✅ 已完成 |
@@ -52,6 +53,27 @@
 ## 用户需求 Bug 修复 (2026-04-02) ✅
 
 **任务来源**: 用户提出的 7 个需求/问题
+
+**新增任务** (2026-04-03):
+| ID | 任务 | 优先级 | 状态 | 修复说明 |
+|----|------|--------|------|----------|
+| P2-1 | Profile 复制功能 | P1 | ✅ 已完成 | 从现有 Profile 复制配置创建新 Profile |
+| P2-2 | Profile 重命名功能 | P1 | ✅ 已完成 | 修改 Profile 名称和描述 |
+| P2-3 | Profile 导出 YAML | P1 | ✅ 已完成 | 将 Profile 配置导出为 YAML 文件下载 |
+
+**修改文件**:
+- `src/infrastructure/config_profile_repository.py` - 新增 `rename_profile()` 方法
+- `src/application/config_profile_service.py` - 新增 `rename_profile()` 方法
+- `src/interfaces/api.py` - 新增 `PUT /api/config/profiles/{name}` 端点
+- `web-front/src/types/config-profile.ts` - 新增 ProfileRenameRequest 类型
+- `web-front/src/lib/api.ts` - 新增 `renameProfile()` API 函数
+- `web-front/src/pages/ConfigProfiles.tsx` - 添加复制/重命名按钮
+- `web-front/src/components/profiles/RenameProfileModal.tsx` - 新增重命名对话框
+- `web-front/src/components/profiles/CreateProfileModal.tsx` - 支持 sourceProfile 参数
+
+**测试结果**: 待执行 (预计 23 个单元测试)
+
+**Git 提交**: 待提交
 
 | ID | 任务 | 优先级 | 状态 | 修复说明 |
 |----|------|--------|------|----------|

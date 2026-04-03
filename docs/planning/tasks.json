@@ -1,0 +1,21 @@
+{
+  "feature": "<功能名称>",
+  "created_at": "2026-04-03T00:00:00Z",
+  "session": "planning",
+  "status": "planning",
+  "tasks": [
+    {
+      "id": "T1",
+      "subject": "<任务描述>",
+      "role": "backend-dev",
+      "estimated_hours": 1,
+      "status": "pending",
+      "blocks": [],
+      "blocked_by": []
+    }
+  ],
+  "parallel_clusters": [
+    ["T1"]
+  ],
+  "notes": "任务说明和特殊约束"
+}

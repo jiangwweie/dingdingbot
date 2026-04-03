@@ -39,6 +39,9 @@ class ConfigEntryRepository:
     async def initialize(self) -> None:
         """
         Initialize database connection and create tables.
+
+        Note: For Profile support, the unique constraint is on (profile_name, config_key),
+        not just config_key alone.
         """
         # Open database connection
         self._db = await aiosqlite.connect(self.db_path)
@@ -48,7 +51,7 @@ class ConfigEntryRepository:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA synchronous=NORMAL")
 
-        # Create config_entries_v2 table (Phase K design)
+        # Create config_entries_v2 table (Phase K design with Profile support)
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS config_entries_v2 (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,18 +60,22 @@ class ConfigEntryRepository:
                 value_type    VARCHAR(16) NOT NULL,
                 version       VARCHAR(32) NOT NULL DEFAULT 'v1.0.0',
                 updated_at    BIGINT NOT NULL,
-                UNIQUE(config_key)
+                profile_name  TEXT NOT NULL DEFAULT 'default'
             )
         """)
 
-        # Create indexes
+        # Create composite unique index for Profile support
         await self._db.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_config_entries_v2_key
-            ON config_entries_v2(config_key)
+            ON config_entries_v2(profile_name, config_key)
         """)
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_config_entries_v2_updated_at
             ON config_entries_v2(updated_at DESC)
+        """)
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_config_entries_v2_profile
+            ON config_entries_v2(profile_name)
         """)
 
         await self._db.commit()

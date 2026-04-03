@@ -1,6 +1,6 @@
 ---
-name: backend-dev
-description: 后端开发专家角色 - 负责 Python + FastAPI + asyncio 后端实现。当需要开发 API、领域模型、基础设施层代码时使用此技能。
+name: team-backend-dev
+description: 后端开发专家 - 负责 Python + FastAPI + asyncio 后端实现。
 license: Proprietary
 ---
 
