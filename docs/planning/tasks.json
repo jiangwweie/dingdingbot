@@ -1,12 +1,50 @@
 {
-  "feature": "<功能名称>",
-  "created_at": "2026-04-03T00:00:00Z",
-  "session": "planning",
-  "status": "planning",
+  "feature": "订单管理技术债修复 + OpenClaw 集成规划",
+  "created_at": "2026-04-03T08:00:00Z",
+  "session": "development",
+  "status": "partial_completed",
   "tasks": [
     {
-      "id": "T1",
-      "subject": "<任务描述>",
+      "id": "TEST-1",
+      "subject": "修复策略参数 API 集成测试",
+      "role": "qa-tester",
+      "estimated_hours": 1,
+      "status": "completed",
+      "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-03T14:00:00Z"
+    },
+    {
+      "id": "DEBT-3",
+      "subject": "API 依赖注入方案实现",
+      "role": "backend-dev",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "blocks": ["DEBT-4"],
+      "blocked_by": [],
+      "completed_at": "2026-04-03T20:00:00Z"
+    },
+    {
+      "id": "DEBT-1",
+      "subject": "创建 order_audit_logs 表",
+      "role": "backend-dev",
+      "estimated_hours": 1.5,
+      "status": "pending",
+      "blocks": [],
+      "blocked_by": []
+    },
+    {
+      "id": "DEBT-2",
+      "subject": "集成交易所 API 到批量删除",
+      "role": "backend-dev",
+      "estimated_hours": 2,
+      "status": "pending",
+      "blocks": [],
+      "blocked_by": ["DEBT-1"]
+    },
+    {
+      "id": "DEBT-4",
+      "subject": "asyncio.Lock 事件循环修复",
       "role": "backend-dev",
       "estimated_hours": 1,
       "status": "pending",
@@ -15,7 +53,11 @@
     }
   ],
   "parallel_clusters": [
-    ["T1"]
+    ["TEST-1"],
+    ["DEBT-3"],
+    ["DEBT-1", "DEBT-4"],
+    ["DEBT-2"]
   ],
-  "notes": "任务说明和特殊约束"
+  "notes": "TEST-1 和 DEBT-3 已完成，DEBT-4 为新发现的 asyncio.Lock 事件循环冲突问题",
+  "last_updated": "2026-04-03T20:00:00Z"
 }
