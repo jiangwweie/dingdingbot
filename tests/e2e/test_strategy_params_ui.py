@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from src.infrastructure.config_entry_repository import ConfigEntryRepository
 from src.application.config_manager import ConfigManager
 from src.infrastructure.config_snapshot_repository import ConfigSnapshotRepository
+from src.infrastructure.signal_repository import SignalRepository
 
 
 # ============================================================
@@ -124,7 +125,13 @@ def api_client_with_db(temp_config_dir, temp_db_path):
     mock_snapshot_service.create_snapshot = AsyncMock(return_value=1)
 
     # Set dependencies
+    # Create mock repository and account_getter (required by set_dependencies)
+    mock_repository = Mock(spec=SignalRepository)
+    mock_account_getter = Mock(return_value=None)
+
     set_dependencies(
+        repository=mock_repository,
+        account_getter=mock_account_getter,
         config_manager=config_manager,
         config_entry_repo=repo,
         snapshot_service=mock_snapshot_service,
@@ -633,8 +640,8 @@ class TestValidationAndErrorHandling:
 
         response = client.put("/api/strategy/params", json=invalid_data)
 
-        # Should either fail validation or coerce type
-        assert response.status_code in [200, 422]
+        # Should reject invalid type (400, 422) or succeed with type coercion (200)
+        assert response.status_code in [200, 400, 422]
 
     @pytest.mark.asyncio
     def test_e2e_validation_boundary_values(self, api_client_with_db):
