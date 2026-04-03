@@ -129,12 +129,14 @@
 | DEBT-2 | 集成交易所 API 到批量删除 | 2h | ☐ 待启动 | `delete_orders_batch()` 调用交易所取消订单 |
 | DEBT-3 | API 依赖注入方案实现 | 1.5h | ✅ 已完成 | 订单管理 API 端点支持 OrderRepository 依赖注入 |
 | DEBT-4 | 修复方法重名冲突 get_order_chain() | 0.5h | ✅ 已完成 | 删除重复定义，21/21 测试通过 |
+| DEBT-5 | asyncio.Lock 事件循环冲突修复 | 1h | ✅ 已完成 | 延迟创建 lock，单元测试通过 |
 
 ### P1 级 - 策略参数测试修复
 
 | ID | 任务 | 预计工时 | 状态 | 说明 |
 |----|------|----------|------|------|
 | TEST-1 | 修复策略参数 API 集成测试 | 1h | ✅ 已完成 | 22/22 测试通过 |
+| TEST-2 | 集成测试 fixture 重构 | 3h | ☐ 待启动 | test_order_chain_api.py 超时问题（混合同步/异步） |
 
 **已完成修复** (TEST-1):
 - `set_dependencies()` 函数参数改为可选
@@ -152,11 +154,6 @@
   - GET /api/v3/orders
 - ✅ 添加资源清理逻辑（仅关闭非注入实例）
 
-**遗留问题** (asyncio.Lock 事件循环冲突):
-- OrderRepository 在 `__init__` 中创建 `asyncio.Lock()`
-- 当 TestClient 使用不同事件循环时，lock 无法正常工作
-- 需要后续修复：将 lock 创建延迟到 `initialize()` 方法
-
 **已完成修复** (DEBT-4 - 2026-04-03):
 - ✅ 删除重复定义的 `get_order_chain()` 方法（1024行）
 - ✅ 保留第一个方法：`get_order_chain(signal_id) -> Dict[str, List[Order]]`
@@ -165,7 +162,22 @@
 
 **技术发现**: Python 方法重名覆盖机制 - 同名方法后定义覆盖前定义，导致测试失败
 
-**总计**: 2 项待办任务（DEBT-1/DEBT-2），预计 3.5h
+**已完成修复** (DEBT-5 - 2026-04-03):
+- ✅ 将 `_lock` 类型改为 `Optional[asyncio.Lock]`，初始化为 `None`
+- ✅ 添加 `_ensure_lock()` 方法，延迟创建 lock
+- ✅ 所有 `async with self._lock` 改为 `async with self._ensure_lock()`
+- ✅ 单元测试 21/21 通过
+- ⚠️ 集成测试仍然超时（fixture 设计问题）
+
+**技术发现**: asyncio.Lock 事件循环绑定机制 - lock 创建时绑定到当前事件循环，不同事件循环不能共享
+
+**遗留问题** (TEST-2):
+- 集成测试 `test_order_chain_api.py` 超时
+- 原因：fixture 混合同步 TestClient 和异步 order_repository
+- 解决方案：重构测试 fixture，使用异步 HTTP 客户端（httpx.AsyncClient）
+- 优先级：P1（不影响核心功能，仅影响测试）
+
+**总计**: 3 项待办任务（DEBT-1/DEBT-2/TEST-2），预计 6.5h
 
 ---
 

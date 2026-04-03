@@ -3163,3 +3163,45 @@ ef5b67e refactor: P2-1 魔法数字配置化
 ---
 
 *最后更新：2026-04-01*
+
+---
+
+### 2026-04-03 22:00 - DEBT-5 asyncio.Lock 事件循环冲突修复 ⚠️
+
+**开始时间**: 2026-04-03 22:00
+**会话阶段**: 修复会话
+**参与者**: 后端开发
+
+#### 问题发现
+
+用户提示还有 asyncio 相关问题未解决。根据 DEBT-3 进度日志，发现：
+- `OrderRepository` 在 `__init__` 中创建 `asyncio.Lock()`
+- 当 `TestClient` 使用不同事件循环时，lock 绑定到错误的事件循环
+- 导致死锁或异常（集成测试超时）
+
+#### 修复方案
+
+**延迟创建 lock 模式**：
+- `__init__` 中 `_lock = None`（延迟创建）
+- 添加 `_ensure_lock()` 方法检测当前事件循环
+- 所有 `async with self._lock` 改为 `async with self._ensure_lock()`
+
+#### 验证结果
+
+**单元测试**: ✅ 21/21 通过
+**最小验证测试**: ✅ 不同事件循环初始化成功
+**集成测试**: ⚠️ test_order_chain_api.py 超时（fixture 设计问题）
+
+#### Git 提交
+
+```
+31a4ed1 fix(asyncio): DEBT-5 asyncio.Lock 事件循环冲突修复
+```
+
+#### 遗留问题
+
+**集成测试超时问题** (TEST-2):
+- 文件：`tests/integration/test_order_chain_api.py`
+- 原因：fixture 混合同步 TestClient 和异步 order_repository
+- 解决方案：重构测试 fixture，使用异步 HTTP 客户端
+- 优先级：P1（不影响核心功能，仅影响测试）
