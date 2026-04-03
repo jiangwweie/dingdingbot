@@ -1649,7 +1649,8 @@ export async function fetchStrategyParamTemplates(): Promise<StrategyParamTempla
     (error as any).status = res.status;
     throw error;
   }
-  return res.json();
+  const data = await res.json();
+  return data.templates;
 }
 
 /**
