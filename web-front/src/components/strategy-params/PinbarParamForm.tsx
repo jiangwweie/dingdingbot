@@ -21,6 +21,13 @@ interface PinbarParamFormProps {
  * - 看跌 Pinbar：长上影线，实体在底部
  */
 export default function PinbarParamForm({ params, onChange, disabled = false }: PinbarParamFormProps) {
+  // 类型转换：确保参数为 number 类型（后端可能返回字符串）
+  const safeParams = {
+    min_wick_ratio: Number(params.min_wick_ratio) || 0.6,
+    max_body_ratio: Number(params.max_body_ratio) || 0.3,
+    body_position_tolerance: Number(params.body_position_tolerance) || 0.1,
+  };
+
   const handleChange = (field: keyof PinbarParams, value: number) => {
     onChange({
       ...params,
@@ -50,14 +57,14 @@ export default function PinbarParamForm({ params, onChange, disabled = false }: 
             <label className="text-sm font-medium text-gray-700">
               最小影线占比
             </label>
-            <span className="text-sm text-gray-500">{params.min_wick_ratio.toFixed(2)}</span>
+            <span className="text-sm text-gray-500">{safeParams.min_wick_ratio.toFixed(2)}</span>
           </div>
           <input
             type="range"
             min="0.3"
             max="0.9"
             step="0.05"
-            value={params.min_wick_ratio}
+            value={safeParams.min_wick_ratio}
             onChange={(e) => handleChange('min_wick_ratio', parseFloat(e.target.value))}
             disabled={disabled}
             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer disabled:opacity-50"
@@ -77,14 +84,14 @@ export default function PinbarParamForm({ params, onChange, disabled = false }: 
             <label className="text-sm font-medium text-gray-700">
               最大实体占比
             </label>
-            <span className="text-sm text-gray-500">{params.max_body_ratio.toFixed(2)}</span>
+            <span className="text-sm text-gray-500">{safeParams.max_body_ratio.toFixed(2)}</span>
           </div>
           <input
             type="range"
             min="0.1"
             max="0.5"
             step="0.05"
-            value={params.max_body_ratio}
+            value={safeParams.max_body_ratio}
             onChange={(e) => handleChange('max_body_ratio', parseFloat(e.target.value))}
             disabled={disabled}
             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer disabled:opacity-50"
@@ -104,14 +111,14 @@ export default function PinbarParamForm({ params, onChange, disabled = false }: 
             <label className="text-sm font-medium text-gray-700">
               实体位置容差
             </label>
-            <span className="text-sm text-gray-500">{params.body_position_tolerance.toFixed(2)}</span>
+            <span className="text-sm text-gray-500">{safeParams.body_position_tolerance.toFixed(2)}</span>
           </div>
           <input
             type="range"
             min="0.05"
             max="0.3"
             step="0.05"
-            value={params.body_position_tolerance}
+            value={safeParams.body_position_tolerance}
             onChange={(e) => handleChange('body_position_tolerance', parseFloat(e.target.value))}
             disabled={disabled}
             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer disabled:opacity-50"
@@ -127,7 +134,7 @@ export default function PinbarParamForm({ params, onChange, disabled = false }: 
       </div>
 
       {/* 参数校验提示 */}
-      {params.min_wick_ratio + params.max_body_ratio > 1 && (
+      {safeParams.min_wick_ratio + safeParams.max_body_ratio > 1 && (
         <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
           <p className="text-xs text-yellow-700">
             警告：影线比 + 实体比 {'>'} 1，这可能导致检测条件过于宽松

@@ -21,6 +21,16 @@ interface EmaParamFormProps {
  * EMA 趋势过滤器参数配置
  */
 export default function EmaParamForm({ emaParams, mtfParams, onChange, disabled = false }: EmaParamFormProps) {
+  // 类型转换：确保参数为 number 类型（后端可能返回字符串）
+  const safeEmaParams = {
+    period: Number(emaParams.period) || 60,
+    trend_direction: emaParams.trend_direction as 'bullish' | 'bearish' | 'either' | undefined,
+  };
+
+  const safeMtfParams = {
+    require_confirmation: Boolean(mtfParams.require_confirmation),
+  };
+
   const handleEmaChange = (field: keyof EmaParams, value: number | 'bullish' | 'bearish' | 'either') => {
     onChange({
       ema: {
@@ -60,14 +70,14 @@ export default function EmaParamForm({ emaParams, mtfParams, onChange, disabled 
             <label className="text-sm font-medium text-gray-700">
               EMA 周期
             </label>
-            <span className="text-sm font-mono text-gray-600">{emaParams.period}</span>
+            <span className="text-sm font-mono text-gray-600">{safeEmaParams.period}</span>
           </div>
           <input
             type="range"
             min="10"
             max="200"
             step="5"
-            value={emaParams.period}
+            value={safeEmaParams.period}
             onChange={(e) => handleEmaChange('period', parseInt(e.target.value))}
             disabled={disabled}
             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer disabled:opacity-50"
@@ -84,7 +94,7 @@ export default function EmaParamForm({ emaParams, mtfParams, onChange, disabled 
                 onClick={() => handleEmaChange('period', p)}
                 disabled={disabled}
                 className={`px-2 py-1 text-xs rounded transition ${
-                  emaParams.period === p
+                  safeEmaParams.period === p
                     ? 'bg-blue-500 text-white'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 } disabled:opacity-50`}
@@ -105,7 +115,7 @@ export default function EmaParamForm({ emaParams, mtfParams, onChange, disabled 
               onClick={() => handleEmaChange('trend_direction', 'either')}
               disabled={disabled}
               className={`px-3 py-2 text-sm rounded-lg border transition flex items-center justify-center gap-2 ${
-                emaParams.trend_direction === 'either'
+                safeEmaParams.trend_direction === 'either'
                   ? 'bg-gray-100 border-gray-300 text-gray-900'
                   : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
               } disabled:opacity-50`}
@@ -116,7 +126,7 @@ export default function EmaParamForm({ emaParams, mtfParams, onChange, disabled 
               onClick={() => handleEmaChange('trend_direction', 'bullish')}
               disabled={disabled}
               className={`px-3 py-2 text-sm rounded-lg border transition flex items-center justify-center gap-2 ${
-                emaParams.trend_direction === 'bullish'
+                safeEmaParams.trend_direction === 'bullish'
                   ? 'bg-green-50 border-green-300 text-green-700'
                   : 'bg-white border-gray-200 text-gray-600 hover:border-green-300'
               } disabled:opacity-50`}
@@ -128,7 +138,7 @@ export default function EmaParamForm({ emaParams, mtfParams, onChange, disabled 
               onClick={() => handleEmaChange('trend_direction', 'bearish')}
               disabled={disabled}
               className={`px-3 py-2 text-sm rounded-lg border transition flex items-center justify-center gap-2 ${
-                emaParams.trend_direction === 'bearish'
+                safeEmaParams.trend_direction === 'bearish'
                   ? 'bg-red-50 border-red-300 text-red-700'
                   : 'bg-white border-gray-200 text-gray-600 hover:border-red-300'
               } disabled:opacity-50`}
@@ -152,21 +162,21 @@ export default function EmaParamForm({ emaParams, mtfParams, onChange, disabled 
               </label>
             </div>
             <button
-              onClick={() => handleMtfChange('require_confirmation', !mtfParams.require_confirmation)}
+              onClick={() => handleMtfChange('require_confirmation', !safeMtfParams.require_confirmation)}
               disabled={disabled}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                mtfParams.require_confirmation ? 'bg-purple-500' : 'bg-gray-200'
+                safeMtfParams.require_confirmation ? 'bg-purple-500' : 'bg-gray-200'
               } disabled:opacity-50`}
             >
               <span
                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  mtfParams.require_confirmation ? 'translate-x-6' : 'translate-x-1'
+                  safeMtfParams.require_confirmation ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
             </button>
           </div>
           <p className="text-xs text-gray-500">
-            {mtfParams.require_confirmation
+            {safeMtfParams.require_confirmation
               ? '启用：需要更高时间周期确认（15m→1h, 1h→4h, 4h→1d）'
               : '禁用：仅当前周期信号即可触发'}
           </p>
