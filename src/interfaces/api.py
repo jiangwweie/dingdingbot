@@ -107,6 +107,19 @@ class ProfileDeleteResponse(BaseModel):
     message: str
 
 
+class ProfileRenameRequest(BaseModel):
+    """重命名 Profile 请求"""
+    name: str = Field(..., description="新名称 (1-32 字符)")
+    description: Optional[str] = Field(None, description="新描述 (0-100 字符)")
+
+
+class ProfileRenameResponse(BaseModel):
+    """重命名 Profile 响应"""
+    status: str
+    profile: dict
+    message: str
+
+
 class ProfileExportResponse(BaseModel):
     """导出 Profile 响应"""
     status: str
@@ -5802,6 +5815,70 @@ async def delete_profile(name: str):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"删除 Profile 失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/config/profiles/{name}", response_model=ProfileRenameResponse)
+async def rename_profile(name: str, request: ProfileRenameRequest):
+    """
+    重命名配置 Profile
+
+    Args:
+        name: 原 Profile 名称
+        name: 新 Profile 名称 (1-32 字符)
+        description: 新描述 (可选)
+
+    Returns:
+        重命名后的 Profile 信息
+
+    Raises:
+        HTTPException:
+            - 400: 名称冲突或不能重命名为 default
+            - 404: Profile 不存在
+    """
+    try:
+        from src.infrastructure.config_profile_repository import ConfigProfileRepository
+        from src.application.config_profile_service import ConfigProfileService
+
+        profile_repo = ConfigProfileRepository()
+        await profile_repo.initialize()
+
+        config_repo = _get_repository()
+        service = ConfigProfileService(profile_repo, config_repo.config_entry_repo)
+
+        # 验证原 Profile 存在
+        profile = await service.get_profile(name)
+        if not profile:
+            raise HTTPException(status_code=404, detail=f"Profile '{name}' 不存在")
+
+        # 名称验证
+        new_name = request.name
+        if not new_name or len(new_name) > 32:
+            raise HTTPException(status_code=400, detail="Profile 名称长度为 1-32 个字符")
+
+        # 边界检查：不能重命名为 default
+        if new_name == "default":
+            raise HTTPException(status_code=400, detail="不能重命名为 'default'")
+
+        # 检查新名称是否已被占用（排除自身）
+        existing = await service.get_profile(new_name)
+        if existing and existing.name != name:
+            raise HTTPException(status_code=400, detail=f"Profile '{new_name}' 已存在")
+
+        # 执行重命名
+        updated_profile = await service.rename_profile(name, new_name, request.description)
+
+        return ProfileRenameResponse(
+            status="success",
+            profile=updated_profile.to_dict(),
+            message=f"Profile '{name}' 已重命名为 '{new_name}'",
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"重命名 Profile 失败：{str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

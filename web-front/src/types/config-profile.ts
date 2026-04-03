@@ -2,7 +2,7 @@
  * 配置 Profile（配置档案）类型定义
  *
  * 用于配置 Profile 管理功能，支持多套配置档案的创建、切换、删除等操作
- * 与后端 /api/config-profiles 接口保持类型对齐
+ * 与后端 /api/config/profiles 接口保持类型对齐
  */
 
 // ============================================================
@@ -16,7 +16,7 @@ export interface ConfigProfile {
   /** Profile 名称（唯一标识） */
   name: string;
   /** Profile 描述 */
-  description: string;
+  description: string | null;
   /** 创建时间（ISO 8601 格式） */
   created_at: string;
   /** 最近更新时间（ISO 8601 格式） */
@@ -25,8 +25,8 @@ export interface ConfigProfile {
   config_count: number;
   /** 是否为当前激活的 Profile */
   is_active: boolean;
-  /** 是否为 default Profile（不可删除） */
-  is_default?: boolean;
+  /** 创建来源（从哪个 Profile 复制） */
+  created_from?: string | null;
 }
 
 /**
@@ -36,7 +36,7 @@ export interface ProfileListResponse {
   /** Profile 列表 */
   profiles: ConfigProfile[];
   /** 当前激活的 Profile 名称 */
-  active_profile: string;
+  active_profile: string | null;
   /** Profile 总数 */
   total: number;
 }
@@ -48,72 +48,81 @@ export interface CreateProfileRequest {
   /** 新 Profile 名称 */
   name: string;
   /** Profile 描述（可选） */
-  description?: string;
-  /** 创建后是否立即切换（可选，默认 false） */
-  switch_after_create?: boolean;
+  description?: string | null;
+  /** 从中复制配置的源 Profile（可选） */
+  copy_from?: string | null;
+  /** 创建后是否立即切换 */
+  switch_immediately?: boolean;
 }
 
 /**
- * 复制 Profile 请求
+ * 创建 Profile 响应
  */
-export interface CopyProfileRequest {
-  /** 源 Profile 名称 */
-  from_profile: string;
-  /** 新 Profile 名称 */
-  name: string;
-  /** 新 Profile 描述（可选） */
-  description?: string;
+export interface CreateProfileResponse {
+  /** 操作状态 */
+  status: string;
+  /** 创建的 Profile 信息 */
+  profile: ConfigProfile;
+  /** 消息 */
+  message: string;
 }
 
 /**
- * 重命名 Profile 请求
+ * 切换 Profile 响应
  */
-export interface RenameProfileRequest {
-  /** 新名称 */
-  new_name: string;
-  /** 新描述（可选） */
-  new_description?: string;
+export interface SwitchProfileResponse {
+  /** 操作状态 */
+  status: string;
+  /** 切换后的 Profile 信息 */
+  profile: ConfigProfile;
+  /** 配置差异信息 */
+  diff: ProfileDiffResponse;
+  /** 消息 */
+  message: string;
 }
 
 /**
- * Profile 差异项
+ * Profile 差异对比响应
  */
-export interface ProfileDiffItem {
-  /** 配置项路径（如 "strategy.pinbar.min_wick_ratio"） */
-  path: string;
-  /** 模块分类 */
-  module: 'strategy' | 'risk' | 'exchange' | 'system';
-  /** 源值（字符串表示） */
-  from_value: string;
-  /** 目标值（字符串表示） */
-  to_value: string;
-}
-
-/**
- * Profile 差异预览响应
- */
-export interface ProfileDiff {
+export interface ProfileDiffResponse {
   /** 源 Profile 名称 */
   from_profile: string;
   /** 目标 Profile 名称 */
   to_profile: string;
-  /** 差异项列表（按模块分组） */
-  diffs: ProfileDiffItem[];
-  /** 差异项总数 */
-  total_diffs: number;
-  /** 按模块分组的差异统计 */
-  module_stats: {
-    strategy: number;
-    risk: number;
-    exchange: number;
-    system: number;
+  /** 差异详情（按模块分组） */
+  diff: {
+    [module: string]: {
+      [key: string]: {
+        old: string;
+        new: string;
+      };
+    };
   };
+  /** 差异总数 */
+  total_changes: number;
 }
 
 /**
- * 导入 Profile 模式
+ * 删除 Profile 响应
  */
-export type ImportMode = 'create' | 'overwrite';
+export interface DeleteProfileResponse {
+  /** 操作状态 */
+  status: string;
+  /** 消息 */
+  message: string;
+}
+
+/**
+ * 导出 Profile 响应
+ */
+export interface ExportProfileResponse {
+  /** 操作状态 */
+  status: string;
+  /** Profile 名称 */
+  profile_name: string;
+  /** YAML 格式的配置内容 */
+  yaml_content: string;
+}
 
 /**
  * 导入 Profile 请求
@@ -121,74 +130,58 @@ export type ImportMode = 'create' | 'overwrite';
 export interface ImportProfileRequest {
   /** YAML 文件内容 */
   yaml_content: string;
-  /** 导入模式 */
-  mode: ImportMode;
-  /** 目标 Profile 名称（仅在 overwrite 模式下需要） */
-  target_profile?: string;
-  /** 新 Profile 描述（仅在 create 模式下需要） */
-  description?: string;
+  /** 指定 Profile 名称（可选） */
+  profile_name?: string | null;
+  /** 导入模式：create | overwrite */
+  mode: 'create' | 'overwrite';
 }
 
 /**
- * 导入 Profile 预览响应
+ * 导入 Profile 响应
  */
-export interface ImportPreviewResponse {
-  /** Profile 名称 */
-  profile_name: string;
-  /** Profile 描述 */
-  description: string;
-  /** 配置项数量 */
-  config_count: number;
-  /** 配置详情（扁平化键值对） */
-  configs: Record<string, any>;
-  /** 是否存在（用于判断是创建还是覆盖） */
-  exists: boolean;
-}
-
-/**
- * 导出 Profile 响应（YAML 字符串）
- */
-export interface ProfileExportResponse {
-  /** YAML 格式的配置内容 */
-  yaml_content: string;
-  /** 文件名建议 */
-  filename: string;
-}
-
-// ============================================================
-// API Response Types
-// ============================================================
-
-/**
- * 切换 Profile 响应
- */
-export interface SwitchProfileResponse {
-  /** 切换后的 Profile 名称 */
-  active_profile: string;
-  /** 切换是否成功 */
-  success: boolean;
+export interface ImportProfileResponse {
+  /** 操作状态 */
+  status: string;
+  /** 导入的 Profile 信息 */
+  profile: ConfigProfile;
+  /** 导入的配置项数量 */
+  imported_count: number;
   /** 消息 */
   message: string;
 }
 
 /**
- * 删除 Profile 响应
+ * 对比 Profile 响应
  */
-export interface DeleteProfileResponse {
-  /** 删除的 Profile 名称 */
-  deleted_profile: string;
-  /** 删除是否成功 */
-  success: boolean;
-  /** 消息 */
-  message: string;
+export interface CompareProfilesResponse {
+  /** 操作状态 */
+  status: string;
+  /** 源 Profile 名称 */
+  from_profile: string;
+  /** 目标 Profile 名称 */
+  to_profile: string;
+  /** 差异详情 */
+  diff: ProfileDiffResponse;
 }
 
 /**
- * 通用操作响应
+ * 重命名 Profile 请求
  */
-export interface ProfileOperationResponse {
-  /** 操作是否成功 */
-  success: boolean;
+export interface RenameProfileRequest {
+  /** 新 Profile 名称 */
+  name: string;
+  /** 新描述（可选） */
+  description?: string | null;
+}
+
+/**
+ * 重命名 Profile 响应
+ */
+export interface RenameProfileResponse {
+  /** 操作状态 */
+  status: string;
+  /** 重命名后的 Profile 信息 */
+  profile: ConfigProfile;
   /** 消息 */
   message: string;
 }

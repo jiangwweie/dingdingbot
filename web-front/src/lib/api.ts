@@ -25,6 +25,21 @@ import type {
   OrdersResponse,
 } from '../types/order';
 
+// Import config profile types
+import type {
+  ConfigProfile,
+  ProfileListResponse,
+  CreateProfileRequest,
+  CreateProfileResponse,
+  SwitchProfileResponse,
+  DeleteProfileResponse,
+  ExportProfileResponse,
+  ImportProfileRequest,
+  ImportProfileResponse,
+  CompareProfilesResponse,
+  RenameProfileResponse,
+} from '../types/config-profile';
+
 export const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) {
@@ -2287,6 +2302,196 @@ export async function deleteOrderChain(
   });
   if (!res.ok) {
     const error = new Error('Failed to delete order chain');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+// ============================================================================
+// Config Profile Management API
+// ============================================================================
+
+/**
+ * Fetch all configuration profiles
+ */
+export async function fetchProfiles(): Promise<ProfileListResponse> {
+  const res = await fetch('/api/config/profiles', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch profiles');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Fetch a single profile details
+ */
+export async function fetchProfile(name: string): Promise<ConfigProfile> {
+  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to fetch profile');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Create a new configuration profile
+ */
+export async function createProfile(
+  request: CreateProfileRequest
+): Promise<CreateProfileResponse> {
+  const res = await fetch('/api/config/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to create profile');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Switch to a different configuration profile
+ */
+export async function switchProfile(name: string): Promise<SwitchProfileResponse> {
+  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}/activate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to switch profile');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Delete a configuration profile
+ */
+export async function deleteProfile(name: string): Promise<DeleteProfileResponse> {
+  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to delete profile');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Export a profile to YAML format
+ */
+export async function exportProfile(name: string): Promise<ExportProfileResponse> {
+  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}/export`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to export profile');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Download profile YAML file
+ */
+export async function downloadProfileYaml(name: string): Promise<void> {
+  const response = await exportProfile(name);
+  const blob = new Blob([response.yaml_content], { type: 'text/yaml' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${name}_config_${new Date().toISOString().split('T')[0]}.yaml`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ * Import a profile from YAML
+ */
+export async function importProfile(
+  request: ImportProfileRequest
+): Promise<ImportProfileResponse> {
+  const res = await fetch('/api/config/profiles/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to import profile');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Compare two profiles
+ */
+export async function compareProfiles(
+  fromName: string,
+  toName: string
+): Promise<CompareProfilesResponse> {
+  const params = new URLSearchParams({
+    from_name: fromName,
+    to_name: toName,
+  });
+  const res = await fetch(`/api/config/profiles/compare?${params}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to compare profiles');
+    (error as any).status = res.status;
+    (error as any).info = await res.json().catch(() => ({}));
+    throw error;
+  }
+  return res.json();
+}
+
+/**
+ * Rename a configuration profile
+ */
+export async function renameProfile(
+  name: string,
+  request: { name: string; description?: string | null }
+): Promise<RenameProfileResponse> {
+  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = new Error('Failed to rename profile');
     (error as any).status = res.status;
     (error as any).info = await res.json().catch(() => ({}));
     throw error;

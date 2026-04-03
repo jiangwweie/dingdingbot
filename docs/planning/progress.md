@@ -6,6 +6,101 @@
 
 ## 📍 最近 7 天
 
+### 2026-04-03 - 配置 Profile 管理第二阶段功能完成
+
+**执行日期**: 2026-04-03  
+**状态**: ✅ 第二阶段功能开发完成 - 复制/重命名/导出 YAML
+
+**今日完成**:
+1. ✅ 后端重命名 API 端点实现 (`PUT /api/config/profiles/{name}`)
+   - 新增 `ProfileRenameRequest` 和 `ProfileRenameResponse` 模型
+   - 实现 Repository 层 `rename_profile()` 方法
+   - 实现 Service 层 `rename_profile()` 方法
+   - 边界检查：禁止重命名为 'default'，禁止名称冲突
+
+2. ✅ 前端复制 Profile 功能集成
+   - 在 Profile 卡片添加"复制"按钮
+   - 复用 CreateProfileModal，支持 sourceProfile 参数
+   - 调用现有 `createProfile` API (copy_from 参数)
+
+3. ✅ 前端重命名 Profile 对话框和集成
+   - 创建 `RenameProfileModal` 组件
+   - 在 Profile 卡片添加"编辑"按钮
+   - 实现 `renameProfile` API 函数
+   - 添加类型定义 `RenameProfileRequest` 和 `RenameProfileResponse`
+
+4. ✅ 前端导出 YAML 功能验证
+   - 验证现有 `downloadProfileYaml()` 函数
+   - 导出按钮正常工作，文件下载成功
+
+5. ✅ 单元测试新增 5 个测试用例
+   - `test_rename_profile_basic` - 基本重命名功能
+   - `test_rename_profile_duplicate_name` - 重命名冲突检查
+   - `test_rename_profile_to_default` - 禁止重命名为 default
+   - `test_rename_profile_nonexistent` - 不存在 Profile 错误处理
+   - `test_rename_profile_preserves_configs` - 配置项迁移验证
+   - **测试通过率**: 23/23 (100%)
+
+6. ✅ 前端构建验证
+   - TypeScript 编译通过
+   - 无类型错误
+
+**修改文件汇总**:
+
+**后端**:
+- `src/interfaces/api.py` - 新增重命名 API 端点
+- `src/application/config_profile_service.py` - 新增 `rename_profile()` 方法
+- `src/infrastructure/config_profile_repository.py` - 新增 `rename_profile()` 方法
+
+**前端**:
+- `web-front/src/types/config-profile.ts` - 新增重命名类型定义
+- `web-front/src/lib/api.ts` - 新增 `renameProfile()` API 函数
+- `web-front/src/pages/ConfigProfiles.tsx` - 添加复制/重命名按钮和集成
+- `web-front/src/components/profiles/CreateProfileModal.tsx` - 支持 sourceProfile 参数
+- `web-front/src/components/profiles/RenameProfileModal.tsx` - 新组件
+
+**测试**:
+- `tests/unit/test_config_profile.py` - 新增 5 个重命名测试用例
+
+**验收标准**:
+- [x] 复制 Profile：点击复制按钮 → 输入新名称 → 创建成功
+- [x] 重命名 Profile：点击编辑按钮 → 修改名称/描述 → 保存成功
+- [x] 导出 YAML：点击导出按钮 → 下载 YAML 文件
+- [x] 前端构建成功
+- [x] 新增测试用例覆盖 (5 个测试 100% 通过)
+
+**下一步计划**:
+- 第二阶段功能开发完成，可以进入第三阶段（Profile 对比/定时切换/使用统计）或继续其他 P1 任务
+
+---
+
+### 2026-04-03 - 工作流重构 v3.0 完成
+
+**执行日期**: 2026-04-03  
+**状态**: ✅ 工作流重构完成
+
+**今日完成**:
+1. ✅ 归档旧文档（auto-pipeline.md, checkpoints-checklist.md → docs/archive/）
+2. ✅ 创建新模板文件（tasks.json, board.md, handoff-template.md）
+3. ✅ 重写 Coordinator SKILL.md（兼任 PdM/Arch/PM，强制交互式头脑风暴 + Agent 调用）
+4. ✅ 统一 4 个团队技能名称（team-backend-dev, team-frontend-dev, team-qa-tester, team-code-reviewer）
+5. ✅ 更新 settings.json 统一技能配置
+6. ✅ 创建工作流重构总结文档（docs/workflows/workflow-v3-summary.md）
+
+**核心改进**:
+- 规划会话强制交互式头脑风暴（≥3 个澄清问题 + ≥2 个技术方案）
+- 开发会话强制 Agent 调用（写死代码示例，模型照着抄）
+- 状态看板实时更新（docs/planning/board.md）
+- Task 系统持久化（docs/planning/tasks.json）
+- 会话切割（规划/开发/测试三阶段可独立会话）
+
+**保留文档**（planning-with-files）:
+- task_plan.md - 任务计划
+- findings.md - 技术发现
+- progress.md - 进度日志
+
+---
+
 ### 2026-04-03 - Phase 6 E2E 测试修复
 
 **执行日期**: 2026-04-03  
@@ -50,10 +145,41 @@
 
 ---
 
+### 2026-04-03 - Profile 路由集成
+
+**执行日期**: 2026-04-03  
+**状态**: ✅ 路由集成完成，构建成功
+
+**今日完成**:
+1. ✅ P0 - Profile 路由集成
+   - 在 `App.tsx` 中添加 `ConfigProfiles` 组件导入
+   - 在 `App.tsx` 中添加 `/profiles` 路由
+   - 在 `Layout.tsx` 的导航菜单中添加"配置 Profile"入口
+   - 添加 `Database` 图标导入
+   - 修复 `ConfigProfiles.tsx` 中的导入路径（从 `../../` 改为 `../`）
+   - 构建验证：`npm run build` 编译通过
+
+**修改文件**:
+| 文件 | 修改内容 |
+|------|----------|
+| `web-front/src/App.tsx` | 添加 ConfigProfiles 导入和 /profiles 路由 |
+| `web-front/src/components/Layout.tsx` | 添加 Database 图标和"配置 Profile"导航项 |
+| `web-front/src/pages/ConfigProfiles.tsx` | 修复导入路径 |
+
+**功能验收**:
+- ✅ ConfigProfiles 页面可通过 /profiles 访问
+- ✅ 导航菜单"系统设置"分类中显示"配置 Profile"入口
+- ✅ 前端构建成功，无编译错误
+
+**下一步**:
+- P1 - 第二阶段功能：复制 Profile/重命名 Profile/导出 YAML（可选）
+
+---
+
 ### 2026-04-03 - 配置 Profile 管理功能开发
 
 **执行日期**: 2026-04-03  
-**状态**: ✅ 后端实现完成 + 单元测试通过 (18/18)
+**状态**: ✅ 后端 + 前端全部完成 (18/18 单元测试通过，前端构建成功)
 
 **今日完成**:
 1. ✅ B1: Profile 数据库迁移脚本
@@ -88,6 +214,61 @@
    - 创建 `tests/unit/test_config_profile.py`
    - 18 个测试用例 100% 通过
    - 覆盖 Repository 和 Service 核心功能
+
+6. ✅ F1: Profile 类型定义和 API 函数封装
+   - 更新 `web-front/src/types/config-profile.ts`
+   - 在 `web-front/src/lib/api.ts` 添加 8 个 API 函数
+   - fetchProfiles, createProfile, switchProfile, deleteProfile
+   - exportProfile, downloadProfileYaml, importProfile, compareProfiles
+
+7. ✅ F2: Profile 管理页面组件
+   - 创建 `web-front/src/pages/ConfigProfiles.tsx`
+   - Profile 列表展示（带搜索）
+   - 激活状态标识
+   - 操作按钮（切换/导出/删除）
+
+8. ✅ F3: CreateProfileModal 组件
+   - 创建 `web-front/src/components/profiles/CreateProfileModal.tsx`
+   - 名称实时验证
+   - 描述输入
+   - 创建后切换选项
+
+9. ✅ F4: SwitchPreviewModal 和 DeleteConfirmModal 组件
+   - 创建 `web-front/src/components/profiles/SwitchPreviewModal.tsx`
+   - 创建 `web-front/src/components/profiles/DeleteConfirmModal.tsx`
+   - 创建 `web-front/src/components/profiles/ImportProfileModal.tsx`
+   - 切换前差异预览
+   - 删除二次确认
+   - YAML 导入功能
+
+**修改文件**:
+| 文件 | 修改内容 |
+|------|----------|
+| `scripts/migrate_to_profiles.py` | 新建数据库迁移脚本 |
+| `src/infrastructure/config_profile_repository.py` | 新建 Profile Repository |
+| `src/application/config_profile_service.py` | 新建 Profile Service |
+| `src/interfaces/api.py` | 添加 7 个 Profile 管理 API 端点 |
+| `src/infrastructure/config_entry_repository.py` | 修改为支持 profile_name 字段 |
+| `tests/unit/test_config_profile.py` | 新建单元测试文件 |
+| `web-front/src/types/config-profile.ts` | 更新类型定义 |
+| `web-front/src/lib/api.ts` | 添加 8 个 API 函数 |
+| `web-front/src/pages/ConfigProfiles.tsx` | 新建管理页面 |
+| `web-front/src/components/profiles/` | 新建 4 个对话框组件 |
+
+**功能验收**:
+- ✅ 数据库迁移脚本可正确创建表和索引
+- ✅ Repository 层支持 Profile CRUD 操作
+- ✅ Service 层支持 Profile 切换和差异计算
+- ✅ API 端点返回正确的响应格式
+- ✅ 单元测试 18/18 通过
+- ✅ 前端构建成功 (npm run build)
+- ✅ 类型定义完整，API 函数封装完整
+
+**边界条件处理**:
+- ✅ 禁止删除 default Profile
+- ✅ 禁止删除当前激活的 Profile
+- ✅ Profile 名称唯一性验证 (1-32 字符)
+- ✅ 复制 Profile 时配置项完整复制
 
 **修改文件**:
 | 文件 | 修改内容 |
