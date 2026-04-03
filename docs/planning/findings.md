@@ -97,6 +97,80 @@
 
 ---
 
+## DEBT-3 API 依赖注入架构评审决策
+
+**日期**: 2026-04-03
+**评审人**: Architect
+**状态**: ✅ 通过（附带建议）
+
+### 问题背景
+
+订单链集成测试 fixture 失败（19 个用例无法验证），API 端点硬编码 `OrderRepository()` 使用默认数据库路径，测试 fixture 创建的临时数据库无法被 API 使用。
+
+### 架构评审结论
+
+**方案通过**，建议的依赖注入扩展方案与现有 `set_dependencies()` 机制保持一致，符合 Clean Architecture 规范。
+
+### 关键决策
+
+| 决策项 | 结论 | 说明 |
+|--------|------|------|
+| 扩展 `set_dependencies()` | ✅ 通过 | 添加 `order_repo` 参数 |
+| 端点数量 | ⚠️ 修正为 6 个 | 实际订单管理端点 6 个（含取消/K线） |
+| 添加 `_get_order_repo()` | ✅ 建议 | 统一调用模式，与 `_get_config_entry_repo()` 一致 |
+| 类型注解 | ⚠️ 需补充 | `Optional[OrderRepository]` |
+| 启动时初始化 | ⚠️ 可选 | 懒加载模式足够，不强制显式初始化 |
+| 一次性统一所有 Repository | ⚠️ 不建议 | 渐进式修改更安全 |
+
+### 实现模板
+
+```python
+# 全局变量定义
+_order_repo: Optional[OrderRepository] = None
+
+# 辅助函数（建议添加）
+def _get_order_repo() -> OrderRepository:
+    """Get order repository or create a new instance if not initialized."""
+    if _order_repo is None:
+        from src.infrastructure.order_repository import OrderRepository
+        return OrderRepository()
+    return _order_repo
+
+# 扩展 set_dependencies
+def set_dependencies(
+    config_entry_repo: Optional["ConfigEntryRepository"] = None,
+    order_repo: Optional[OrderRepository] = None,
+    ...
+) -> None:
+    global _config_entry_repo, _order_repo, ...
+    _config_entry_repo = config_entry_repo
+    _order_repo = order_repo
+    ...
+
+# API 端点调用模式
+repo = _get_order_repo()
+try:
+    await repo.initialize()
+    result = await repo.get_order_tree(...)
+finally:
+    if not _order_repo:
+        await repo.close()
+```
+
+### 技术发现
+
+1. **端点数量差异**: 评审请求声称 5 个端点，实际有 6 个订单管理端点（`DELETE /orders/{order_id}`, `GET /orders/tree`, `DELETE /orders/batch`, `GET /orders/{order_id}`, `GET /orders/{order_id}/klines`, `GET /orders`）
+
+2. **资源管理关键**: 注入实例不关闭，非注入实例关闭，避免测试数据库提前关闭
+
+3. **命名规范一致**: `_order_repo` 与 `_config_entry_repo` 格式一致，无需调整
+
+### 详细评审文档
+
+`docs/reviews/DEBT-3-architecture-review-result.md`
+
+---
+
 ## 订单详情页 K 线渲染升级 - 测试与审查
 
 **日期**: 2026-04-02  
