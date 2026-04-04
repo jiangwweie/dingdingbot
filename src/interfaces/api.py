@@ -287,6 +287,16 @@ async def lifespan(app: FastAPI):
     """
     from src.infrastructure.signal_repository import SignalRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
+    from src.infrastructure.repositories.config_repositories import (
+        StrategyConfigRepository,
+        RiskConfigRepository,
+        SystemConfigRepository,
+        SymbolConfigRepository,
+        NotificationConfigRepository,
+        ConfigHistoryRepository,
+        ConfigSnapshotRepositoryExtended,
+    )
+    from src.interfaces.api_v1_config import set_config_dependencies
 
     global _repository, _config_entry_repo
 
@@ -304,6 +314,48 @@ async def lifespan(app: FastAPI):
             await _config_entry_repo.initialize()
             logger.info("ConfigEntryRepository initialized in lifespan")
 
+        # 初始化配置管理 Repositories
+        strategy_repo = StrategyConfigRepository()
+        await strategy_repo.initialize()
+        logger.info("StrategyConfigRepository initialized")
+
+        risk_repo = RiskConfigRepository()
+        await risk_repo.initialize()
+        logger.info("RiskConfigRepository initialized")
+
+        system_repo = SystemConfigRepository()
+        await system_repo.initialize()
+        logger.info("SystemConfigRepository initialized")
+
+        symbol_repo = SymbolConfigRepository()
+        await symbol_repo.initialize()
+        logger.info("SymbolConfigRepository initialized")
+
+        notification_repo = NotificationConfigRepository()
+        await notification_repo.initialize()
+        logger.info("NotificationConfigRepository initialized")
+
+        history_repo = ConfigHistoryRepository()
+        await history_repo.initialize()
+        logger.info("ConfigHistoryRepository initialized")
+
+        snapshot_repo = ConfigSnapshotRepositoryExtended()
+        await snapshot_repo.initialize()
+        logger.info("ConfigSnapshotRepository initialized")
+
+        # 设置配置管理 API 依赖
+        set_config_dependencies(
+            strategy_repo=strategy_repo,
+            risk_repo=risk_repo,
+            system_repo=system_repo,
+            symbol_repo=symbol_repo,
+            notification_repo=notification_repo,
+            history_repo=history_repo,
+            snapshot_repo=snapshot_repo,
+            config_manager=_config_manager,
+            observer=None,  # TODO: Initialize observer when available
+        )
+
         # OrderRepository 按需创建（DEBT-3 方案）
 
         yield
@@ -317,6 +369,16 @@ async def lifespan(app: FastAPI):
         if _config_entry_repo is not None:
             await _config_entry_repo.close()
             logger.info("ConfigEntryRepository closed")
+
+        # 清理配置管理 Repositories
+        await strategy_repo.close()
+        await risk_repo.close()
+        await system_repo.close()
+        await symbol_repo.close()
+        await notification_repo.close()
+        await history_repo.close()
+        await snapshot_repo.close()
+        logger.info("Config repositories closed")
 
 
 # ============================================================
@@ -337,6 +399,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include v1 config router
+from src.interfaces.api_v1_config import router as config_v1_router
+app.include_router(config_v1_router)
 
 
 # ============================================================

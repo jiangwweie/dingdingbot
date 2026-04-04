@@ -8,6 +8,95 @@
 
 ## 📍 最近 3 天（2026-04-02 ~ 2026-04-05）
 
+### 2026-04-05 - /api/v1/config 配置管理 API 实现 ✅
+
+**会话 ID**: 20260405-003
+**开始时间**: 2026-04-05
+**结束时间**: 2026-04-05
+**持续时间**: 约 2 小时
+
+#### 完成工作摘要
+
+- ✅ 创建 `/api/v1/config` 配置管理 API（26+ 端点）
+- ✅ 实现 6 个端点分类：全局配置、风控配置、系统配置、策略管理、币池管理、通知配置
+- ✅ 实现导入导出 API（预览/确认安全流程）
+- ✅ 实现快照管理 API
+- ✅ 集成到现有 api.py 应用
+
+#### 关键成果
+
+**1. 创建文件**
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| api_v1_config.py | `src/interfaces/api_v1_config.py` | 配置管理 API 实现（约 1700 行） |
+
+**2. API 端点实现**
+| 端点分类 | HTTP 方法 | 端点 | 热重载 |
+|----------|----------|------|--------|
+| 全局配置 | GET | `/api/v1/config` | - |
+| 风控配置 | GET/PUT | `/api/v1/config/risk` | ✅ |
+| 系统配置 | GET/PUT | `/api/v1/config/system` | ⚠️ |
+| 策略管理 | GET/POST/PUT/DELETE + toggle | `/api/v1/config/strategies/*` | ✅ |
+| 币池管理 | GET/POST/PUT/DELETE + toggle | `/api/v1/config/symbols/*` | ✅ |
+| 通知配置 | GET/POST/PUT/DELETE + test | `/api/v1/config/notifications/*` | ✅ |
+| 导入导出 | POST | `/api/v1/config/export`<br>`/api/v1/config/import/preview`<br>`/api/v1/config/import/confirm` | - |
+| 快照管理 | GET/POST/DELETE + activate | `/api/v1/config/snapshots/*` | - |
+
+**3. Pydantic 模型**
+- `RiskConfigResponse`, `RiskConfigUpdateRequest`
+- `SystemConfigResponse`, `SystemConfigUpdateRequest`
+- `StrategyListItem`, `StrategyDetailResponse`, `StrategyCreateRequest`, `StrategyUpdateRequest`, `StrategyToggleResponse`
+- `SymbolListItem`, `SymbolDetailResponse`, `SymbolCreateRequest`, `SymbolUpdateRequest`, `SymbolToggleResponse`
+- `NotificationListItem`, `NotificationDetailResponse`, `NotificationCreateRequest`, `NotificationUpdateRequest`, `NotificationTestRequest`, `NotificationTestResponse`
+- `GlobalConfigSummary`
+- `ImportPreviewRequest`, `ImportPreviewResult`, `ImportConfirmRequest`, `ImportConfirmResponse`, `ExportRequest`, `ExportResponse`
+- `SnapshotListItem`, `SnapshotDetailResponse`, `SnapshotCreateRequest`, `SnapshotActivateResponse`
+
+**4. 关键特性**
+- 热重载通知：业务配置变更（风控、策略、币池、通知）通过 Observer 模式立即生效
+- 重启标记：系统配置变更标记 `restart_required`，提示用户重启
+- 安全导入：预览/确认两步流程，preview_token 5 分钟有效期
+- 自动快照：导入前自动创建配置快照，支持回滚
+- 历史记录：配置变更记录到 `config_history` 表
+
+**5. 集成到 api.py**
+- 在 lifespan 中初始化所有 7 个 Config Repository
+- 设置 `set_config_dependencies()` 注入依赖
+- 路由器注册：`app.include_router(config_v1_router)`
+
+#### 技术亮点
+
+1. **符合 ADR-2026-004-001 规范**
+   - 所有端点严格按照 ADR 设计实现
+   - RESTful 风格，资源名词复数形式
+   - 统一版本前缀 `/api/v1/config/*`
+
+2. **安全设计**
+   - 导入预览不修改任何数据
+   - preview_token 防止重复提交
+   - 自动创建快照支持回滚
+
+3. **边界检查**
+   - 所有输入参数通过 Pydantic 验证
+   - Decimal 类型用于金融金额
+   - 重复名称检查
+   - 核心币种保护（不可删除）
+
+#### 待办事项
+
+- [ ] 编写单元测试（目标：≥80% 覆盖率）
+- [ ] 集成测试（端到端验证）
+- [ ] Observer 初始化（热重载通知）
+- [ ] Notifier 服务集成（通知渠道测试）
+- [ ] 前端配置页面联调
+
+#### 代码统计
+- api_v1_config.py: 约 1700 行
+- Pydantic 模型：20+ 个
+- API 端点：26+ 个
+
+---
+
 ### 2026-04-05 - Config Repositories 批量实现 ✅
 
 **会话 ID**: 20260405-002

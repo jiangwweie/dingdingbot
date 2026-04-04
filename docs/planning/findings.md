@@ -9,29 +9,81 @@
 1. [Config Repositories 批量实现](#config-repositories-批量实现)
 2. [ConfigManager 数据库驱动重构](#configmanager-数据库驱动重构)
 3. [配置管理数据库表设计](#配置管理数据库表设计)
-4. [工作流重构 v3.0](#工作流重构 v30)
-5. [P1 任务产品分析](#p1-任务产品分析)
-6. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
-7. [策略参数配置数据库存储实现](#策略参数配置数据库存储实现)
-8. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
-9. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
-10. [Phase 8 Optuna 自动化调参集成要点](#phase-8-optuna-自动化调参集成要点)
-11. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
-12. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
-13. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-14. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-15. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-16. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-17. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-18. [Phase 6 前端架构](#phase-6-前端架构)
-19. [API 契约与端点](#api-契约与端点)
-20. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
-21. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
-22. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
+4. [/api/v1/config 配置管理 API 实现](#apiv1config-配置管理 api 实现)
+5. [工作流重构 v3.0](#工作流重构 v30)
+6. [P1 任务产品分析](#p1-任务产品分析)
+7. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
+8. [策略参数配置数据库存储实现](#策略参数配置数据库存储实现)
+9. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
+10. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
+11. [Phase 8 Optuna 自动化调参集成要点](#phase-8-optuna-自动化调参集成要点)
+12. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
+13. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
+14. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
+15. [BTC 历史数据导入记录](#btc-历史数据导入记录)
+16. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+17. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+18. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+19. [Phase 6 前端架构](#phase-6-前端架构)
+20. [API 契约与端点](#api-契约与端点)
+21. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
+22. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
+23. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
 
 ---
 
 ## 📌 2026-04-05 技术发现
+
+### /api/v1/config 配置管理 API 实现 ⭐⭐⭐
+
+**发现时间**: 2026-04-05
+
+**任务**: 实现 `/api/v1/config` 配置管理 API，符合 ADR-2026-004-001 规范
+
+**实现文件**:
+- `src/interfaces/api_v1_config.py` (约 1700 行)
+
+**API 端点分类**:
+| 端点分类 | HTTP 方法 | 端点 | 热重载 |
+|----------|----------|------|--------|
+| 全局配置 | GET | `/api/v1/config` | - |
+| 风控配置 | GET/PUT | `/api/v1/config/risk` | ✅ |
+| 系统配置 | GET/PUT | `/api/v1/config/system` | ⚠️ |
+| 策略管理 | GET/POST/PUT/DELETE + toggle | `/api/v1/config/strategies/*` | ✅ |
+| 币池管理 | GET/POST/PUT/DELETE + toggle | `/api/v1/config/symbols/*` | ✅ |
+| 通知配置 | GET/POST/PUT/DELETE + test | `/api/v1/config/notifications/*` | ✅ |
+| 导入导出 | POST | `/api/v1/config/export`<br>`/api/v1/config/import/preview`<br>`/api/v1/config/import/confirm` | - |
+| 快照管理 | GET/POST/DELETE + activate | `/api/v1/config/snapshots/*` | - |
+
+**关键技术点**:
+1. **热重载机制**: 业务配置变更通过 Observer 模式通知 ConfigManager 热重载
+2. **重启标记**: 系统配置变更设置 `restart_required=True`，提示用户重启
+3. **安全导入流程**: 预览/确认两步流程，preview_token 5 分钟有效期
+4. **自动快照**: 导入前自动创建配置快照，支持回滚
+5. **历史记录**: 所有配置变更记录到 `config_history` 表
+
+**Pydantic 模型**: 20+ 个 Request/Response 模型
+
+**集成方式**:
+```python
+# 在 api.py lifespan 中初始化
+from src.interfaces.api_v1_config import set_config_dependencies
+set_config_dependencies(
+    strategy_repo=strategy_repo,
+    risk_repo=risk_repo,
+    system_repo=system_repo,
+    symbol_repo=symbol_repo,
+    notification_repo=notification_repo,
+    history_repo=history_repo,
+    snapshot_repo=snapshot_repo,
+    config_manager=_config_manager,
+    observer=None,
+)
+
+# 路由器注册
+from src.interfaces.api_v1_config import router as config_v1_router
+app.include_router(config_v1_router)
+```
 
 ### Config Repositories 批量实现 ⭐⭐⭐
 
