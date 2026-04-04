@@ -622,7 +622,7 @@ export default function StrategyWorkbench() {
 
                     <button
                       onClick={handlePreviewStrategy}
-                      disabled={previewStatus === 'previewing'}
+                      disabled={previewStatus !== 'previewed'}
                       className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
                     >
                       <Play className="w-3 h-3" />

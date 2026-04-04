@@ -9,9 +9,11 @@ import { cn } from '../lib/utils';
 import {
   fetchBacktestReports,
   deleteBacktestReport,
-  type ListBacktestReportsRequest,
-  type BacktestReportSummary,
 } from '../lib/api';
+import type {
+  ListBacktestReportsRequest,
+  BacktestReportSummary,
+} from '../types/backtest';
 import { BacktestReportsTable } from '../components/v3/backtest/BacktestReportsTable';
 import { BacktestReportsFilters, type FilterValues } from '../components/v3/backtest/BacktestReportsFilters';
 import { BacktestReportsPagination } from '../components/v3/backtest/BacktestReportsPagination';

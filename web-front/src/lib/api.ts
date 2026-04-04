@@ -499,6 +499,13 @@ export interface BacktestRequest {
 }
 
 /**
+ * PMS Backtest request parameters (v3_pms mode)
+ */
+export interface PMSBacktestRequest extends BacktestRequest {
+  initial_balance?: number; // Initial balance for PMS backtest
+}
+
+/**
  * Backtest report response interface
  */
 export interface BacktestReport {
@@ -519,6 +526,14 @@ export interface BacktestReport {
   // Execution metadata
   execution_time_ms: number;
   klines_analyzed: number;
+
+  // Legacy field aliases for backward compatibility
+  signal_stats?: {
+    signals_fired?: number;
+    filtered_by_filters?: Record<string, number>;
+  };
+  candles_analyzed?: number;
+  attempts?: BacktestSignalLog[];
 }
 
 // ============================================================================
@@ -704,7 +719,7 @@ export async function runSignalBacktest(payload: BacktestRequest): Promise<Backt
  * PMS 订单回测 - 包含订单执行、滑点、手续费、止盈止损等完整交易流程模拟。
  * Positions and orders are automatically saved to database.
  */
-export async function runPMSBacktest(payload: BacktestRequest): Promise<PMSBacktestReport> {
+export async function runPMSBacktest(payload: PMSBacktestRequest): Promise<PMSBacktestReport> {
   const res = await fetch('/api/backtest/orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

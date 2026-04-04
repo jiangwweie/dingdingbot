@@ -14,7 +14,7 @@ import {
 import { cn } from '../lib/utils';
 import {
   runPMSBacktest,
-  BacktestRequest,
+  PMSBacktestRequest,
   StrategyDefinition,
   RiskConfig,
   PMSBacktestReport,
@@ -140,7 +140,7 @@ export default function PMSBacktest() {
     setReport(null);
 
     try {
-      const payload: BacktestRequest = {
+      const payload: PMSBacktestRequest = {
         symbol,
         timeframe,
         start_time: startTime!,

@@ -172,19 +172,18 @@ describe('SnapshotList', () => {
       expect(screen.getByText('第 1 页，共 3 页')).toBeInTheDocument();
     });
 
-    const nextPageButton = screen.getAllByRole('button').find(
-      (btn) => btn.querySelector('svg') && !btn.closest('[disabled]')
-    );
+    // Clear mock calls from initial render and filter
+    vi.mocked(api.fetchSnapshots).mockClear();
 
-    if (nextPageButton) {
-      fireEvent.click(nextPageButton);
+    // Find and click next page button
+    const nextPageButton = screen.getByLabelText('下一页');
+    fireEvent.click(nextPageButton);
 
-      await waitFor(() => {
-        expect(api.fetchSnapshots).toHaveBeenCalledWith(
-          expect.objectContaining({ offset: 10 })
-        );
-      });
-    }
+    await waitFor(() => {
+      expect(api.fetchSnapshots).toHaveBeenCalledWith(
+        expect.objectContaining({ offset: 10 })
+      );
+    });
   });
 
   it('disables previous button on first page', async () => {

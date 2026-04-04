@@ -184,6 +184,7 @@ export default function SnapshotList({ onSnapshotSelect, onRefresh }: SnapshotLi
                 onClick={handlePreviousPage}
                 disabled={currentPage === 1}
                 className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                aria-label="上一页"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -194,6 +195,7 @@ export default function SnapshotList({ onSnapshotSelect, onRefresh }: SnapshotLi
                 onClick={handleNextPage}
                 disabled={currentPage === totalPages}
                 className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                aria-label="下一页"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>

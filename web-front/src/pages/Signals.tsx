@@ -938,7 +938,7 @@ export default function Signals() {
       {/* Signal Details Modal */}
       <SignalDetailsModal
         signalId={selectedSignalId || ''}
-        isOpen={isModalOpen}
+        open={isModalOpen}
         onClose={closeModal}
       />
     </div>

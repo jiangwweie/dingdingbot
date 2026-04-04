@@ -6,9 +6,10 @@ import { fetchSignalContext, Signal } from '../lib/api';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 
-interface SignalDetailsModalProps {
-  signalId: string;
-  isOpen: boolean;
+interface SignalDetailsDrawerProps {
+  signalId?: string;
+  signal?: Signal;
+  open: boolean;
   onClose: () => void;
 }
 
@@ -18,7 +19,7 @@ const APPLE_RED = '#FF3B30';
 const APPLE_GRAY = '#86868B';
 const APPLE_BLUE = '#007AFF';
 
-export default function SignalDetailsModal({ signalId, isOpen, onClose }: SignalDetailsModalProps) {
+export default function SignalDetailsModal({ signalId, signal, open, onClose }: SignalDetailsDrawerProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -26,20 +27,23 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
   const [data, setData] = useState<{ signal: Signal; klines: number[][] } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Fetch data when drawer opens
+  // Fetch data when drawer opens (only if signalId provided)
   useEffect(() => {
-    if (isOpen && signalId) {
+    if (open && signalId && !signal) {
       setLoading(true);
       fetchSignalContext(signalId).then((result) => {
         setData(result);
         setLoading(false);
       });
+    } else if (open && signal) {
+      // Signal provided directly, no need to fetch
+      setData({ signal, klines: [] });
     }
-  }, [isOpen, signalId]);
+  }, [open, signalId, signal]);
 
   // Initialize chart when data is loaded
   useEffect(() => {
-    if (!isOpen || !data || !chartContainerRef.current) return;
+    if (!open || !data || !chartContainerRef.current) return;
 
     // Create chart
     const chart = createChart(chartContainerRef.current, {
@@ -202,7 +206,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
       candleSeriesRef.current = null;
       markersApiRef.current = null;
     };
-  }, [data, isOpen]);
+  }, [data, open]);
 
   const translateStrategy = (strategy?: string | null): string => {
     if (!strategy) return '-';
@@ -262,7 +266,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
     }
   };
 
-  if (!isOpen) return null;
+  if (!open) return null;
 
   return (
     <>
@@ -270,7 +274,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
       <div
         className={cn(
           "fixed inset-0 bg-black/20 backdrop-blur-sm z-50 transition-opacity duration-300",
-          isOpen ? "opacity-100" : "opacity-0"
+          open ? "opacity-100" : "opacity-0"
         )}
         onClick={onClose}
       />
@@ -283,7 +287,7 @@ export default function SignalDetailsModal({ signalId, isOpen, onClose }: Signal
           "z-50 bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl",
           "border border-gray-100/50",
           "transition-all duration-300",
-          isOpen ? "opacity-100 scale-100" : "opacity-0 scale-95"
+          open ? "opacity-100 scale-100" : "opacity-0 scale-95"
         )}
       >
         {/* Header */}

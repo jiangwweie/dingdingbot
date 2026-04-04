@@ -131,7 +131,7 @@ export default function Orders() {
   }, [loadOrderTree]);
 
   // Handle delete chain click
-  const handleDeleteChainClick = useCallback((orderIds: string[]) => {
+  const handleDeleteChainClick = useCallback(async (orderIds: string[]) => {
     setPendingDeleteOrderIds(orderIds);
     setIsDeleteModalOpen(true);
   }, []);
