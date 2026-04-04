@@ -171,8 +171,9 @@ export const OrderChainTreeTable = ({
 
   // 行组件
   const Row = ({ index, style, data }: { index: number; style: CSSProperties; data: FlatOrderTreeNode[]; "aria-posinset": number; "aria-setsize": number; role: "listitem" }): ReactNode => {
+    // 双重 null 检查：确保 data 和 data[index] 都存在
+    if (!data || !data[index]) return null;
     const item = data[index];
-    if (!item) return null;
 
     const { node, orderId, level } = item;
     const order = node.order;

@@ -292,6 +292,7 @@ async def run_application():
         from src.application.signal_tracker import SignalStatusTracker
         from src.application.config_snapshot_service import ConfigSnapshotService
         from src.infrastructure.config_snapshot_repository import ConfigSnapshotRepository
+        from src.infrastructure.config_entry_repository import ConfigEntryRepository
 
         _status_tracker = SignalStatusTracker(repository=signal_repository)
 
@@ -301,6 +302,11 @@ async def run_application():
         _snapshot_service = ConfigSnapshotService(repository=snapshot_repo)
         config_manager.set_snapshot_service(_snapshot_service)
 
+        # Initialize ConfigEntryRepository for strategy params API
+        _config_entry_repo = ConfigEntryRepository()
+        await _config_entry_repo.initialize()
+        logger.info("ConfigEntryRepository initialized")
+
         set_dependencies(
             repository=signal_repository,
             account_getter=_exchange_gateway.get_account_snapshot,
@@ -308,6 +314,7 @@ async def run_application():
             exchange_gateway=_exchange_gateway,
             signal_tracker=_status_tracker,
             snapshot_service=_snapshot_service,
+            config_entry_repo=_config_entry_repo,
         )
         logger.info("API dependencies initialized")
 
@@ -368,6 +375,11 @@ async def run_application():
         # Cleanup
         if _exchange_gateway:
             await _exchange_gateway.close()
+
+        # Close ConfigEntryRepository
+        if _config_entry_repo:
+            await _config_entry_repo.close()
+            logger.info("ConfigEntryRepository closed")
 
         # Stop API server task
         if 'api_task' in locals():

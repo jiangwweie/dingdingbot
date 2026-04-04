@@ -2946,6 +2946,9 @@ async def get_strategy_params():
                 if len(parts) == 2:
                     category, param_key = parts
                     if category in result and category != "filters":
+                        # Convert Decimal to float for JSON serialization
+                        if isinstance(value, Decimal):
+                            value = float(value)
                         result[category][param_key] = value
 
             return StrategyParamsResponse(**result)
