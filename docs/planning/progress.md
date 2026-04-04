@@ -6,7 +6,43 @@
 
 ---
 
-## 📍 最近 3 天（2026-04-01 ~ 2026-04-04）
+## 📍 最近 3 天（2026-04-02 ~ 2026-04-04）
+
+### 2026-04-04 20:15 - Config 页面 API 修复 + Orders 页面防御增强 ✅
+
+**会话 ID**: 20260404-003
+**开始时间**: 2026-04-04 20:00
+**结束时间**: 2026-04-04 20:15
+**持续时间**: 约 15 分钟
+
+#### 完成工作摘要
+
+- ✅ 架构师评审：生成 AR-20260404-003-review.md
+- ✅ 修复 main.py：添加 ConfigEntryRepository 初始化
+- ✅ 修复 api.py：Decimal 转 float 逻辑
+- ✅ 前端防御增强：OrderChainTreeTable.tsx 双重 null 检查
+- ✅ 测试验收：TR-20260404-001-test-report.md
+
+#### 关键成果
+
+**修复 Commit**: `51f8c3c`
+- 问题 1: `/api/strategy/params` 返回 Decimal 字符串 → 修复为返回 float
+- 问题 2: main.py 缺少 ConfigEntryRepository 初始化 → 已添加
+- 问题 3: Orders 页面 Row 组件防御不足 → 添加双重 null 检查
+
+**测试结果**: 全部通过
+- API 类型返回验证: ✅ pinbar.min_wick_ratio 返回 float 类型
+- 前端可访问性验证: ✅ http://localhost:3000 返回 200
+
+#### 关键文件
+
+- `docs/arch/AR-20260404-003-review.md` - 架构评审报告
+- `docs/reports/TR-20260404-001-test-report.md` - 测试验收报告
+- `src/main.py` - ConfigEntryRepository 初始化修复
+- `src/interfaces/api.py` - Decimal 转 float 修复
+- `web-front/src/components/v3/OrderChainTreeTable.tsx` - 防御增强
+
+---
 
 ### 2026-04-04 19:30 - 诊断分析 + Git 冲突解决 ✅
 
