@@ -26,7 +26,6 @@ Endpoints:
     POST /api/strategies/preview - Preview strategy configuration (dry-run)
     POST /api/strategies/{id}/apply - Apply strategy template to live trading
 """
-from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -91,8 +90,6 @@ class ProfileListResponse(BaseModel):
     """Profile 列表响应"""
     profiles: list
     total: int
-    limit: int = 50
-    offset: int = 0
     active_profile: Optional[str] = None
 
 
@@ -263,25 +260,19 @@ def _get_snapshot_service() -> Any:
     return _snapshot_service
 
 
-async def _get_config_entry_repo() -> Any:
-    """Get config entry repository or create a new instance if not initialized."""
-    global _config_entry_repo
+def _get_config_entry_repo() -> Any:
+    """Get config entry repository or raise error if not initialized."""
     if _config_entry_repo is None:
-        # Fallback: create and initialize a new instance
-        from src.infrastructure.config_entry_repository import ConfigEntryRepository
-        _config_entry_repo = ConfigEntryRepository()
-        await _config_entry_repo.initialize()
+        raise HTTPException(status_code=503, detail="Config entry repository not initialized. Please restart the server.")
     return _config_entry_repo
 
 
-async def _get_order_repo() -> Any:
+def _get_order_repo() -> Any:
     """Get order repository or create a new instance if not initialized."""
-    global _order_repo
     if _order_repo is None:
-        # Fallback: create and initialize a new instance
+        # Fallback: create a new instance
         from src.infrastructure.order_repository import OrderRepository
-        _order_repo = OrderRepository()
-        await _order_repo.initialize()
+        return OrderRepository()
     return _order_repo
 
 
@@ -296,17 +287,11 @@ async def lifespan(app: FastAPI):
     """
     from src.infrastructure.signal_repository import SignalRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
-    from src.application.config_manager import load_all_configs
 
-    global _repository, _config_entry_repo, _config_manager
+    global _repository, _config_entry_repo
 
     # Startup - 初始化所有 Repository
     try:
-        # 初始化 ConfigManager（必须在 Repository 之前）
-        if _config_manager is None:
-            _config_manager = load_all_configs()
-            logger.info("ConfigManager initialized in lifespan")
-
         # 初始化 SignalRepository（幂等）
         if _repository is None:
             _repository = SignalRepository()
@@ -430,11 +415,7 @@ async def health_check():
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"健康检查失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.get("/api/signals")
@@ -495,11 +476,7 @@ async def get_signals(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get signals: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取信号列表失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.delete("/api/signals")
@@ -537,11 +514,7 @@ async def delete_signals(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete signals: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"删除信号失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.delete("/api/signals/clear_all")
@@ -565,11 +538,7 @@ async def clear_all_signals():
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to clear all signals: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"清空信号失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.get("/api/signals/stats")
@@ -593,11 +562,7 @@ async def get_signal_stats():
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get signal stats: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取信号统计失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.get("/api/backtest/signals")
@@ -644,11 +609,7 @@ async def get_backtest_signals(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get backtest signals: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取回测信号失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.get("/api/account")
@@ -687,11 +648,7 @@ async def get_account():
             "timestamp": datetime.fromtimestamp(snapshot.timestamp / 1000, tz=timezone.utc).isoformat(),
         }
     except Exception as e:
-        logger.error(f"Failed to get account snapshot: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取账户快照失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.get("/api/diagnostics")
@@ -713,11 +670,7 @@ async def get_diagnostics(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get diagnostics: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取诊断信息失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.get("/api/signals/{signal_id}/context")
@@ -839,11 +792,7 @@ async def get_attempts(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get attempts: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取尝试记录失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.delete("/api/attempts")
@@ -882,11 +831,7 @@ async def delete_attempts(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete attempts: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"删除尝试记录失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.delete("/api/attempts/clear_all")
@@ -910,11 +855,7 @@ async def clear_all_attempts():
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to clear all attempts: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"清空尝试记录失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -999,11 +940,7 @@ async def get_config():
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get config: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取配置失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.put("/api/config")
@@ -1047,7 +984,7 @@ async def update_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update config (export/import endpoint): {e}")
+        # Pydantic ValidationError returns 422
         error_str = str(e)
         if "ValidationError" in type(e).__name__:
             from fastapi import status
@@ -1055,10 +992,7 @@ async def update_config(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Config validation failed: {error_str}",
             )
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"更新配置失败：{error_str}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -1107,11 +1041,7 @@ async def export_config():
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to export config: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"导出配置失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.post("/api/config/import")
@@ -1202,11 +1132,7 @@ async def import_config(
                 detail=f"Config validation failed: {error_str}",
                 headers={"X-Error-Code": "CONFIG-003"}
             )
-        logger.error(f"Failed to update config: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"更新配置失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.put("/api/config")
@@ -1269,11 +1195,7 @@ async def update_config(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Config validation failed: {error_str}",
             )
-        logger.error(f"Failed to update config: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"更新配置失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -1373,11 +1295,7 @@ async def run_signal_backtest(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run signal backtest: {e}")
-        return ErrorResponse(
-            error_code="BACKTEST_ERROR",
-            message=f"信号回测失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.post("/api/backtest/orders")
@@ -1473,11 +1391,7 @@ async def run_pms_backtest(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run PMS backtest: {e}")
-        return ErrorResponse(
-            error_code="BACKTEST_ERROR",
-            message=f"订单回测失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -1578,11 +1492,7 @@ async def run_backtest_deprecated(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run backtest (deprecated): {e}")
-        return ErrorResponse(
-            error_code="BACKTEST_ERROR",
-            message=f"回测失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -1691,7 +1601,7 @@ async def list_backtest_reports(
                     win_rate=r["win_rate"],
                     total_pnl=r["total_pnl"],
                     max_drawdown=r["max_drawdown"],
-                    sharpe_ratio=r["sharpe_ratio"] if "sharpe_ratio" in r else None,
+                    sharpe_ratio=r.get("sharpe_ratio"),
                 )
                 for r in result["reports"]
             ]
@@ -2277,85 +2187,43 @@ async def get_strategy_metadata():
 
 
 @app.get("/api/strategies/templates")
-async def list_strategy_templates(
-    limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
-    offset: int = Query(default=0, ge=0, description="分页偏移量"),
-):
+async def list_strategy_templates():
     """
     Get simplified strategy template list for backtest sandbox.
 
     Returns only basic info (id, name, description) for quick selection.
     Use GET /api/strategies/{id} to fetch full strategy details.
-
-    Args:
-        limit: Maximum number of results (1-200)
-        offset: Number of results to skip
     """
     try:
         repo = _get_repository()
-        all_strategies = await repo.get_all_custom_strategies()
-
-        # Apply pagination
-        total = len(all_strategies)
-        paginated_strategies = all_strategies[offset:offset + limit]
-
+        strategies = await repo.get_all_custom_strategies()
         templates = [
             {"id": s["id"], "name": s["name"], "description": s["description"]}
-            for s in paginated_strategies
+            for s in strategies
         ]
-        return StrategyTemplateListResponse(
-            templates=templates,
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
+        return {"templates": templates}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to list strategy templates: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取策略模板列表失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.get("/api/strategies")
-async def get_custom_strategies(
-    limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
-    offset: int = Query(default=0, ge=0, description="分页偏移量"),
-):
+async def get_custom_strategies():
     """
     Get all custom strategy templates (list view).
 
     Returns basic information (id, name, description) for each strategy.
     Use GET /api/strategies/{id} to fetch full strategy details.
-
-    Args:
-        limit: Maximum number of results (1-200)
-        offset: Number of results to skip
     """
     try:
         repo = _get_repository()
-        all_strategies = await repo.get_all_custom_strategies()
-
-        # Apply pagination
-        total = len(all_strategies)
-        paginated_strategies = all_strategies[offset:offset + limit]
-
-        return StrategyListResponse(
-            strategies=paginated_strategies,
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
+        strategies = await repo.get_all_custom_strategies()
+        return {"strategies": strategies}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get custom strategies: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取策略列表失败：{str(e)}"
-        )
+        return {"error": str(e)}
 
 
 @app.get("/api/strategies/{strategy_id}")
@@ -2386,11 +2254,7 @@ async def get_custom_strategy(strategy_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get custom strategy: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取策略详情失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.post("/api/strategies")
@@ -2439,11 +2303,7 @@ async def create_custom_strategy(request: StrategyCreateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create custom strategy: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"创建策略失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.put("/api/strategies/{strategy_id}")
@@ -2491,20 +2351,13 @@ async def update_custom_strategy(strategy_id: int, request: StrategyUpdateReques
         )
 
         if not updated:
-            return ErrorResponse(
-                error_code="INTERNAL_ERROR",
-                message="没有可更新的字段"
-            ).model_dump()
+            return {"error": "No fields to update"}
 
         return {"message": "Strategy updated successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update custom strategy: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"更新策略失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.delete("/api/strategies/{strategy_id}")
@@ -2530,110 +2383,7 @@ async def delete_custom_strategy(strategy_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete custom strategy: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"删除策略失败：{str(e)}"
-        ).model_dump()
-
-
-# ============================================================
-# Strategy Parameter Template Endpoints (/api/strategies/templates/*)
-# ============================================================
-
-@app.post("/api/strategies/templates/{strategy_id}/load")
-async def load_strategy_param_template(strategy_id: int):
-    """
-    Load a strategy parameter template by ID.
-
-    This endpoint returns the strategy parameters from a template
-    for editing in the frontend.
-
-    Args:
-        strategy_id: Strategy template ID
-
-    Returns:
-        Strategy parameters in StrategyParamsResponse format
-    """
-    try:
-        repo = _get_repository()
-
-        # Get strategy from database
-        strategy = await repo.get_custom_strategy_by_id(strategy_id)
-        if strategy is None:
-            raise HTTPException(status_code=404, detail="Strategy template not found")
-
-        # Parse strategy_json back to dict
-        import json
-        strategy_def = json.loads(strategy["strategy_json"])
-
-        # Extract parameters from strategy definition
-        # The strategy definition contains triggers and filters with their params
-        params = {
-            "pinbar": {},
-            "engulfing": {},
-            "ema": {},
-            "mtf": {},
-            "atr": {},
-            "filters": [],
-        }
-
-        # Extract trigger params
-        for trigger in strategy_def.get("triggers", []):
-            trigger_type = trigger.get("type")
-            if trigger_type in params:
-                params[trigger_type] = trigger.get("params", {})
-
-        # Extract filter params
-        for filter_config in strategy_def.get("filters", []):
-            params["filters"].append({
-                "type": filter_config.get("type"),
-                "enabled": filter_config.get("enabled", True),
-                "params": filter_config.get("params", {}),
-            })
-
-        return params
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to load strategy param template: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"加载策略参数模板失败：{str(e)}"
-        ).model_dump()
-
-
-@app.delete("/api/strategies/templates/{strategy_id}")
-async def delete_strategy_param_template(strategy_id: int):
-    """
-    Delete a strategy parameter template by ID.
-
-    This is an alias for /api/strategies/{strategy_id} to support
-    frontend API conventions.
-
-    Args:
-        strategy_id: Strategy template ID
-
-    Returns:
-        Success message or 404 if not found.
-    """
-    try:
-        repo = _get_repository()
-
-        deleted = await repo.delete_custom_strategy(strategy_id)
-
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Strategy template not found")
-
-        return {"message": f"Strategy template {strategy_id} deleted successfully"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete strategy param template: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"删除策略参数模板失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -2668,7 +2418,7 @@ class StrategyApplyResponse(BaseModel):
     strategy_name: str = Field(..., description="Applied strategy name")
 
 
-@app.post("/api/strategies/preview")
+@app.post("/api/strategies/preview", response_model=StrategyPreviewResponse)
 async def preview_strategy(request: StrategyPreviewRequest):
     """
     Preview a strategy configuration against recent kline data.
@@ -3088,10 +2838,7 @@ async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None)
         raise
     except Exception as e:
         logger.error(f"Failed to apply strategy template {strategy_id}: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"应用策略失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -3151,12 +2898,12 @@ async def get_strategy_params():
     """
     try:
         config_manager = _get_config_manager()
-        repo = await _get_config_entry_repo()
+        repo = _get_config_entry_repo()
 
         # Get all strategy parameters from database
         strategy_params = await repo.get_entries_by_prefix("strategy")
 
-        # Default values for all required fields (convert Decimal to float for JSON serialization)
+        # Default values for all required fields
         default_values = {
             "pinbar": {
                 "min_wick_ratio": float(config_manager.core_config.pinbar_defaults.min_wick_ratio),
@@ -3199,11 +2946,7 @@ async def get_strategy_params():
                 if len(parts) == 2:
                     category, param_key = parts
                     if category in result and category != "filters":
-                        # Convert Decimal/string values to float for JSON serialization
-                        try:
-                            result[category][param_key] = float(value)
-                        except (ValueError, TypeError):
-                            result[category][param_key] = value
+                        result[category][param_key] = value
 
             return StrategyParamsResponse(**result)
 
@@ -3240,7 +2983,7 @@ async def update_strategy_params(request: StrategyParamsUpdateRequest):
     """
     try:
         config_manager = _get_config_manager()
-        repo = await _get_config_entry_repo()
+        repo = _get_config_entry_repo()
         snapshot_service = _get_snapshot_service()
 
         # Get current params from database
@@ -3366,7 +3109,7 @@ async def preview_strategy_params(request: StrategyParamsPreviewRequest):
     """
     try:
         config_manager = _get_config_manager()
-        repo = await _get_config_entry_repo()
+        repo = _get_config_entry_repo()
 
         # Get current params from database
         current_params_flat = await repo.get_entries_by_prefix("strategy")
@@ -3388,23 +3131,12 @@ async def preview_strategy_params(request: StrategyParamsPreviewRequest):
                 if category in current_params and category != "filters":
                     current_params[category][param_key] = value
 
-        # Use StrategyParams.from_config_manager() to fill default values
-        # This ensures all required fields are present even if database is empty
-        params = StrategyParams.from_config_manager(config_manager)
-        default_params = params.to_dict()
+        # Filter out empty categories
+        current_params = {k: v for k, v in current_params.items() if v or k == "filters"}
 
-        # Merge database values over defaults
-        for category in default_params:
-            if category in current_params and isinstance(current_params[category], dict):
-                if category == "filters":
-                    # Keep filters from DB if present
-                    if current_params["filters"]:
-                        default_params["filters"] = current_params["filters"]
-                else:
-                    # Merge DB values over defaults for other categories
-                    default_params[category].update(current_params[category])
-
-        current_params = default_params
+        if not current_params_flat:
+            params = StrategyParams.from_config_manager(config_manager)
+            current_params = params.to_dict()
 
         # Build proposed config
         import copy
@@ -3516,7 +3248,7 @@ async def export_strategy_params():
     """
     try:
         config_manager = _get_config_manager()
-        repo = await _get_config_entry_repo()
+        repo = _get_config_entry_repo()
 
         # Get all strategy parameters from database
         strategy_params = await repo.get_entries_by_prefix("strategy")
@@ -3593,7 +3325,7 @@ async def export_strategy_params_to_file():
     """
     try:
         config_manager = _get_config_manager()
-        repo = await _get_config_entry_repo()
+        repo = _get_config_entry_repo()
 
         # Get all strategy parameters from database
         strategy_params = await repo.get_entries_by_prefix("strategy")
@@ -3691,7 +3423,7 @@ async def import_strategy_params(request: StrategyParamsImportRequest):
     """
     try:
         config_manager = _get_config_manager()
-        repo = await _get_config_entry_repo()
+        repo = _get_config_entry_repo()
         snapshot_service = _get_snapshot_service()
 
         # Parse YAML content
@@ -3862,22 +3594,6 @@ class ConfigSnapshotListResponse(BaseModel):
     data: List[ConfigSnapshotResponse]
 
 
-class StrategyListResponse(BaseModel):
-    """Response model for strategy template list with pagination."""
-    strategies: List[Dict[str, Any]]
-    total: int
-    limit: int
-    offset: int
-
-
-class StrategyTemplateListResponse(BaseModel):
-    """Response model for strategy template simplified list with pagination."""
-    templates: List[Dict[str, Any]]
-    total: int
-    limit: int
-    offset: int
-
-
 class ConfigRollbackResponse(BaseModel):
     """Response model for config rollback."""
     status: Literal["success"]
@@ -3951,14 +3667,10 @@ async def create_snapshot(request: ConfigSnapshotCreate):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create config snapshot: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code:
             raise HTTPException(status_code=400, detail=str(e), headers={"X-Error-Code": error_code})
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"创建配置快照失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.get("/api/config/snapshots", response_model=ConfigSnapshotListResponse)
@@ -4011,11 +3723,7 @@ async def list_snapshots(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to list config snapshots: {e}")
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取配置快照列表失败：{str(e)}"
-        )
+        return {"error": str(e)}
 
 
 @app.get("/api/config/snapshots/{snapshot_id}", response_model=ConfigSnapshotDetailResponse)
@@ -4045,14 +3753,10 @@ async def get_snapshot(snapshot_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get snapshot detail: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code == "CONFIG-004":
             raise HTTPException(status_code=404, detail=str(e))
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"获取配置快照详情失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.post("/api/config/snapshots/{snapshot_id}/rollback", response_model=ConfigRollbackResponse)
@@ -4101,16 +3805,12 @@ async def rollback_snapshot(snapshot_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to rollback config snapshot: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code == "CONFIG-004":
             raise HTTPException(status_code=404, detail=str(e))
         elif error_code == "CONFIG-003":
             raise HTTPException(status_code=422, detail=str(e))
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"回滚配置快照失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.post("/api/config/snapshots/{snapshot_id}/activate")
@@ -4145,14 +3845,10 @@ async def activate_snapshot(snapshot_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to activate config snapshot: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code == "CONFIG-004":
             raise HTTPException(status_code=404, detail=str(e))
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"激活配置快照失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 @app.delete("/api/config/snapshots/{snapshot_id}", response_model=ConfigDeleteResponse)
@@ -4184,16 +3880,12 @@ async def delete_snapshot(snapshot_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete config snapshot: {e}")
         error_code = getattr(e, 'error_code', None)
         if error_code == "CONFIG-004":
             raise HTTPException(status_code=404, detail=str(e))
         elif error_code == "CONFIG-006":
             raise HTTPException(status_code=400, detail=str(e))
-        return ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"删除配置快照失败：{str(e)}"
-        ).model_dump()
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -4530,7 +4222,7 @@ async def get_order_tree(
         effective_days = days if days is not None else 7
 
         # 使用依赖注入获取 OrderRepository 实例
-        repo = await _get_order_repo()
+        repo = _get_order_repo()
 
         # 仅在非注入实例时初始化
         if not _order_repo:
@@ -4613,7 +4305,7 @@ async def delete_orders_batch(request: OrderDeleteRequest) -> OrderDeleteRespons
     """
     try:
         # 使用依赖注入获取 OrderRepository 实例
-        repo = await _get_order_repo()
+        repo = _get_order_repo()
         # 仅在非注入实例时初始化
         if not _order_repo:
             await repo.initialize()
@@ -4720,8 +4412,86 @@ async def cancel_order(order_id: str, symbol: str = Query(..., description="币�
 
 
 # ------------------------------------------------------------
-# 1.6 Order K-line Data Endpoint (MUST be before /{order_id:path})
+# 1.7 Order Detail Endpoint (must be after /tree, /batch and /{order_id})
 # ------------------------------------------------------------
+
+@app.get("/api/v3/orders/{order_id:path}", response_model=OrderResponseFull)
+async def get_order(order_id: str, symbol: str = Query(..., description="币种对")) -> OrderResponseFull:
+    """
+    查询订单详情（v3 API）
+
+    Phase 6: v3.0 订单管理 - GET /api/v3/orders/{order_id}
+    Reference: docs/designs/phase5-contract.md Section 6
+
+    Args:
+        order_id: 系统订单 ID
+        symbol: 币种对（查询参数）
+
+    Returns:
+        OrderResponseFull: 订单详情
+
+    Raises:
+        HTTPException:
+            - 404 F-012: 订单不存在
+            - 429 C-010: API 频率限制
+    """
+    # 记录请求日志（order_id 脱敏）
+    order_id_display = mask_secret(order_id, visible_chars=8)
+    logger.info(f"查询订单请求：order_id={order_id_display}, symbol={symbol}")
+
+    # 使用依赖注入获取 OrderRepository 实例
+    order_repo = _get_order_repo()
+    await order_repo.initialize()
+    try:
+        order = await order_repo.get_order(order_id)
+        if not order:
+            logger.warning(f"订单不存在：order_id={order_id_display}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"订单不存在 (F-012): order_id={order_id}"
+            )
+
+        # 计算剩余数量
+        remaining_qty = order.requested_qty - order.filled_qty
+
+        # 构建完整响应
+        return OrderResponseFull(
+            order_id=order.id,
+            exchange_order_id=order.exchange_order_id,
+            symbol=order.symbol,
+            order_type=order.order_type,
+            order_role=order.order_role,
+            direction=order.direction,
+            status=order.status,
+            quantity=order.requested_qty,
+            filled_qty=order.filled_qty,
+            remaining_qty=remaining_qty,
+            price=order.price,
+            trigger_price=order.trigger_price,
+            average_exec_price=order.average_exec_price,
+            reduce_only=order.reduce_only,
+            client_order_id=order.exchange_order_id,  # 使用交易所订单 ID 作为客户端订单 ID
+            strategy_name=None,  # 策略名称需要从策略配置中获取，当前暂不返回
+            signal_id=order.signal_id,
+            stop_loss=None,  # 止盈止损需要从策略配置或订单链中获取
+            take_profit=None,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
+            filled_at=order.filled_at,
+            fee_paid=Decimal("0"),  # 手续费需要从交易所订单详情中获取
+            fee_currency=None,
+            tags=[],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询订单失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # 仅关闭非注入实例
+        if not _order_repo:
+            await order_repo.close()
+
 
 @app.get("/api/v3/orders/{order_id}/klines")
 async def get_order_klines(
@@ -4774,7 +4544,7 @@ async def get_order_klines(
     """
     try:
         # 使用依赖注入获取 OrderRepository 实例
-        repo = await _get_order_repo()
+        repo = _get_order_repo()
         # 仅在非注入实例时初始化
         if not _order_repo:
             await repo.initialize()
@@ -4907,88 +4677,6 @@ async def get_order_klines(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ------------------------------------------------------------
-# 1.7 Order Detail Endpoint (must be after /tree, /batch and /{order_id})
-# ------------------------------------------------------------
-
-@app.get("/api/v3/orders/{order_id:path}", response_model=OrderResponseFull)
-async def get_order(order_id: str, symbol: str = Query(..., description="币种对")) -> OrderResponseFull:
-    """
-    查询订单详情（v3 API）
-
-    Phase 6: v3.0 订单管理 - GET /api/v3/orders/{order_id}
-    Reference: docs/designs/phase5-contract.md Section 6
-
-    Args:
-        order_id: 系统订单 ID
-        symbol: 币种对（查询参数）
-
-    Returns:
-        OrderResponseFull: 订单详情
-
-    Raises:
-        HTTPException:
-            - 404 F-012: 订单不存在
-            - 429 C-010: API 频率限制
-    """
-    # 记录请求日志（order_id 脱敏）
-    order_id_display = mask_secret(order_id, visible_chars=8)
-    logger.info(f"查询订单请求：order_id={order_id_display}, symbol={symbol}")
-
-    # 使用依赖注入获取 OrderRepository 实例
-    order_repo = await _get_order_repo()
-    await order_repo.initialize()
-    try:
-        order = await order_repo.get_order(order_id)
-        if not order:
-            logger.warning(f"订单不存在：order_id={order_id_display}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"订单不存在 (F-012): order_id={order_id}"
-            )
-
-        # 计算剩余数量
-        remaining_qty = order.requested_qty - order.filled_qty
-
-        # 构建完整响应
-        return OrderResponseFull(
-            order_id=order.id,
-            exchange_order_id=order.exchange_order_id,
-            symbol=order.symbol,
-            order_type=order.order_type,
-            order_role=order.order_role,
-            direction=order.direction,
-            status=order.status,
-            quantity=order.requested_qty,
-            filled_qty=order.filled_qty,
-            remaining_qty=remaining_qty,
-            price=order.price,
-            trigger_price=order.trigger_price,
-            average_exec_price=order.average_exec_price,
-            reduce_only=order.reduce_only,
-            client_order_id=order.exchange_order_id,  # 使用交易所订单 ID 作为客户端订单 ID
-            strategy_name=None,  # 策略名称需要从策略配置中获取，当前暂不返回
-            signal_id=order.signal_id,
-            stop_loss=None,  # 止盈止损需要从策略配置或订单链中获取
-            take_profit=None,
-            created_at=order.created_at,
-            updated_at=order.updated_at,
-            filled_at=order.filled_at,
-            fee_paid=Decimal("0"),  # 手续费需要从交易所订单详情中获取
-            fee_currency=None,
-            tags=[],
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"查询订单失败：{str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        # 仅关闭非注入实例
-        if not _order_repo:
-            await order_repo.close()
-
-
 @app.get("/api/v3/orders", response_model=OrdersResponse)
 async def list_orders(
     symbol: Optional[str] = Query(None, description="币种对过滤"),
@@ -5022,7 +4710,7 @@ async def list_orders(
 
     try:
         # 使用依赖注入获取 OrderRepository 实例
-        repo = await _get_order_repo()
+        repo = _get_order_repo()
         # 仅在非注入实例时初始化
         if not _order_repo:
             await repo.initialize()
@@ -5970,8 +5658,8 @@ async def stop_optimization(job_id: str):
 # ============================================================
 
 # Profile Repository 和 Service 初始化
-_profile_repository: Optional["ConfigProfileRepository"] = None
-_profile_service: Optional["ConfigProfileService"] = None
+_profile_repository: Optional[ConfigProfileRepository] = None
+_profile_service: Optional[ConfigProfileService] = None
 
 
 def _get_profile_repository() -> "ConfigProfileRepository":
@@ -5983,30 +5671,22 @@ def _get_profile_repository() -> "ConfigProfileRepository":
     return _profile_repository
 
 
-async def _get_profile_service() -> "ConfigProfileService":
+def _get_profile_service() -> "ConfigProfileService":
     """Get profile service or raise error if not initialized."""
     global _profile_service
     if _profile_service is None:
         from src.infrastructure.config_profile_repository import ConfigProfileRepository
         from src.application.config_profile_service import ConfigProfileService
         _profile_repository = ConfigProfileRepository()
-        await _profile_repository.initialize()
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         _profile_service = ConfigProfileService(_profile_repository, config_entry_repo)
     return _profile_service
 
 
 @app.get("/api/config/profiles", response_model=ProfileListResponse)
-async def list_profiles(
-    limit: int = Query(default=50, ge=1, le=200, description="最大返回数量"),
-    offset: int = Query(default=0, ge=0, description="分页偏移量"),
-):
+async def list_profiles():
     """
     获取所有配置 Profile 列表
-
-    Args:
-        limit: 最大返回数量 (1-200)
-        offset: 分页偏移量
 
     Returns:
         Profile 列表，包含激活状态标识
@@ -6018,21 +5698,15 @@ async def list_profiles(
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
-        all_profiles = await service.list_profiles()
+        profiles = await service.list_profiles()
         active = await service.get_active_profile()
 
-        # Apply pagination
-        total = len(all_profiles)
-        paginated_profiles = all_profiles[offset:offset + limit]
-
         return ProfileListResponse(
-            profiles=[p.to_dict() for p in paginated_profiles],
-            total=total,
-            limit=limit,
-            offset=offset,
+            profiles=[p.to_dict() for p in profiles],
+            total=len(profiles),
             active_profile=active.name if active else None,
         )
     except Exception as e:
@@ -6058,7 +5732,7 @@ async def get_profile(name: str):
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
         profile = await service.get_profile(name)
@@ -6094,7 +5768,7 @@ async def create_profile(request: ProfileCreateRequest):
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
         # 名称验证
@@ -6140,7 +5814,7 @@ async def switch_profile(name: str):
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
         profile = await service.get_profile(name)
@@ -6187,7 +5861,7 @@ async def delete_profile(name: str):
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
         profile = await service.get_profile(name)
@@ -6234,7 +5908,7 @@ async def rename_profile(name: str, request: ProfileRenameRequest):
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
         # 验证原 Profile 存在
@@ -6291,7 +5965,7 @@ async def export_profile(name: str):
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
         profile = await service.get_profile(name)
@@ -6334,7 +6008,7 @@ async def import_profile(request: ProfileImportRequest):
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
         profile, count = await service.import_profile_yaml(
@@ -6380,7 +6054,7 @@ async def compare_profiles(
         profile_repo = ConfigProfileRepository()
         await profile_repo.initialize()
 
-        config_entry_repo = await _get_config_entry_repo()
+        config_entry_repo = _get_config_entry_repo()
         service = ConfigProfileService(profile_repo, config_entry_repo)
 
         from_profile = await service.get_profile(from_name)
@@ -6404,3 +6078,97 @@ async def compare_profiles(
     except Exception as e:
         logger.error(f"对比 Profile 失败：{str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/strategy/params/templates")
+async def get_strategy_param_templates():
+    """
+    Get available strategy parameter templates.
+
+    Returns a list of predefined strategy parameter templates that users can use as starting points.
+    """
+    templates = [
+        {
+            "name": "default",
+            "description": "Default strategy parameters",
+            "params": {
+                "pinbar": {
+                    "min_wick_ratio": "0.6",
+                    "max_body_ratio": "0.3",
+                    "body_position_tolerance": "0.3"
+                },
+                "engulfing": {
+                    "min_wick_ratio": "0.6",
+                    "max_body_ratio": "0.3"
+                },
+                "ema": {
+                    "period": 60
+                },
+                "mtf": {
+                    "enabled": True,
+                    "ema_period": 60
+                },
+                "atr": {
+                    "enabled": True,
+                    "period": 14,
+                    "min_atr_ratio": "0.5"
+                }
+            }
+        },
+        {
+            "name": "conservative",
+            "description": "Conservative strategy with stricter filters",
+            "params": {
+                "pinbar": {
+                    "min_wick_ratio": "0.7",
+                    "max_body_ratio": "0.25",
+                    "body_position_tolerance": "0.2"
+                },
+                "engulfing": {
+                    "min_wick_ratio": "0.7",
+                    "max_body_ratio": "0.25"
+                },
+                "ema": {
+                    "period": 100
+                },
+                "mtf": {
+                    "enabled": True,
+                    "ema_period": 100
+                },
+                "atr": {
+                    "enabled": True,
+                    "period": 20,
+                    "min_atr_ratio": "0.7"
+                }
+            }
+        },
+        {
+            "name": "aggressive",
+            "description": "Aggressive strategy with looser filters",
+            "params": {
+                "pinbar": {
+                    "min_wick_ratio": "0.5",
+                    "max_body_ratio": "0.4",
+                    "body_position_tolerance": "0.4"
+                },
+                "engulfing": {
+                    "min_wick_ratio": "0.5",
+                    "max_body_ratio": "0.4"
+                },
+                "ema": {
+                    "period": 30
+                },
+                "mtf": {
+                    "enabled": True,
+                    "ema_period": 30
+                },
+                "atr": {
+                    "enabled": True,
+                    "period": 10,
+                    "min_atr_ratio": "0.3"
+                }
+            }
+        }
+    ]
+
+    return {"templates": templates, "total": len(templates)}
