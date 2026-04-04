@@ -55,43 +55,73 @@ license: Proprietary
 6. 用户确认后 → PM 并行调度 Agent 执行
 ```
 
-## 📋 执行任务时调度 Agent
+## 📋 执行任务时调度 Agent（真并行）
 
-**正确方式：使用 Skill 工具直接调用**
+**正确方式：使用 Agent 工具真正并行启动 Subagent**
 
-```python
-# 分析任务后，直接调用对应角色的 Skill
-# 这些角色必须在 settings.json 的 skills.local 中定义
-
-# 后端开发
-Skill("team-backend-dev")
-
-# 前端开发
-Skill("team-frontend-dev")
-
-# 测试
-Skill("team-qa-tester")
-
-# 架构设计
-Skill("team-architect")
-
-# 代码审查
-Skill("team-code-reviewer")
-```
-
-**如需自定义任务描述，使用 args 参数**：
+当用户确认任务计划后，使用 Agent 工具并行启动各个角色的 Subagent：
 
 ```python
-Skill("team-backend-dev", args="实现用户认证 API，注意：必须使用 Decimal 类型")
+# 分析任务后，并行启动对应角色的 Subagent
+# 关键：在一个消息中发起多个 Agent 调用，实现真正的并行执行 ⭐⭐⭐
+
+# 示例：前后端并行开发
+Agent(
+    subagent_type="general-purpose",
+    description="后端开发 - API实现",
+    prompt="""
+你是后端开发专家 (Backend Developer)。
+
+【任务】实现用户认证 API
+
+要求：
+1. 使用 FastAPI + Pydantic v2
+2. 所有金额使用 Decimal 类型
+3. 编写单元测试，覆盖率≥80%
+4. 遵循 Clean Architecture 分层
+
+【角色规范】.claude/team/backend-dev/SKILL.md
+【开工/收工规范】阅读规范中的 Pre-Flight/Post-Flight 检查清单
+
+请立即开始执行此任务。
+"""
+)
+
+Agent(
+    subagent_type="general-purpose",
+    description="前端开发 - 组件实现",
+    prompt="""
+你是前端开发专家 (Frontend Developer)。
+
+【任务】实现用户登录页面
+
+要求：
+1. 使用 React + TypeScript + TailwindCSS
+2. 响应式设计
+3. 表单验证
+4. TypeScript 无 any 类型
+
+【角色规范】.claude/team/frontend-dev/SKILL.md
+【开工/收工规范】阅读规范中的 Pre-Flight/Post-Flight 检查清单
+
+请立即开始执行此任务。
+"""
+)
 ```
 
-**并行调度示例**：
+**关键原则**：
+- ✅ 在一个消息中发起多个 Agent 调用 = 真正并行执行
+- ✅ 每个 Agent 独立进程，互不阻塞
+- ✅ 总耗时 = 最慢那个任务的耗时，而不是累加
 
-```python
-# 前后端并行开发
-Skill("team-backend-dev")   # 并行执行
-Skill("team-frontend-dev")  # 并行执行
-```
+**角色 Prompt 模板**：
+
+每个角色的 prompt 必须包含：
+1. **角色身份声明**："你是 XXX 专家"
+2. **具体任务描述**：清楚说明要做什么
+3. **技术/质量要求**：技术栈、覆盖率、规范等
+4. **角色规范路径**：`.claude/team/{role}/SKILL.md`
+5. **开工收工提醒**：提醒阅读规范中的检查清单
 
 ## 📋 并行任务簇识别规则
 
@@ -147,35 +177,28 @@ def analyze_task_dependencies(tasks: list) -> dict:
 # T3: 集成测试（依赖 T1 和 T2）
 
 # ❌ 错误做法：串行调用
-# Agent(subagent_type="backend-dev", prompt="实现 API")  # 等待完成
-# Agent(subagent_type="frontend-dev", prompt="实现组件")  # 再启动前端
+# Agent(subagent_type="general-purpose", prompt="...")  # 等待完成
+# Agent(subagent_type="general-purpose", prompt="...")  # 再启动前端
 
 # ✅ 正确做法：并行调用（在一个消息中）
-# 使用 Python 列表推导式一次性发起所有 Agent 调用
-agents = [
-    Agent(
-        subagent_type="general-purpose",
-        description="后端 API 实现",
-        prompt="""
-        扮演 backend-dev 角色。
-        规范文件：.claude/team/backend-dev/SKILL.md
+# 使用 Agent 工具一次性发起所有调用
+Agent(
+    subagent_type="general-purpose",
+    description="后端 API 实现",
+    prompt="""你是后端开发专家。
+【任务】实现 API 接口（根据契约表）
+【角色规范】.claude/team/backend-dev/SKILL.md
+输出：代码文件 + 单元测试"""
+)  # 并行执行
 
-        任务：实现 API 接口（根据契约表）
-        输出：代码文件 + 单元测试
-        """
-    ),
-    Agent(
-        subagent_type="general-purpose",
-        description="前端组件实现",
-        prompt="""
-        扮演 frontend-dev 角色。
-        规范文件：.claude/team/frontend-dev/SKILL.md
-
-        任务：实现前端组件（根据契约表）
-        输出：组件文件 + 组件测试
-        """
-    )
-]
+Agent(
+    subagent_type="general-purpose",
+    description="前端组件实现",
+    prompt="""你是前端开发专家。
+【任务】实现前端组件（根据契约表）
+【角色规范】.claude/team/frontend-dev/SKILL.md
+输出：组件文件 + 组件测试"""
+)  # 并行执行
 
 # 两个 Agent 并行执行，总耗时 = max(后端时间, 前端时间)
 # 而不是串行执行的总耗时 = 后端时间 + 前端时间
@@ -184,22 +207,16 @@ agents = [
 ### 步骤 3：等待并行任务完成
 
 ```python
-# 并行任务启动后，等待所有任务完成
-all_completed = all(agent.status == 'completed' for agent in agents)
-
-if all_completed:
-    # 启动依赖任务（集成测试）
-    Agent(
-        subagent_type="general-purpose",
-        description="集成测试",
-        prompt="""
-        扮演 qa-tester 角色。
-        规范文件：.claude/team/qa-tester/SKILL.md
-
-        任务：集成测试（后端 + 前端）
-        依赖：T1 和 T2 已完成
-        """
-    )
+# 并行任务启动后，系统会自动等待所有任务完成
+# 然后启动依赖任务（集成测试）
+Agent(
+    subagent_type="general-purpose",
+    description="集成测试",
+    prompt="""你是 QA 测试专家。
+【任务】执行集成测试（后端 + 前端）
+依赖：T1 和 T2 已完成
+【角色规范】.claude/team/qa-tester/SKILL.md"""
+)
 ```
 
 ---
@@ -225,26 +242,25 @@ if all_completed:
 **并行调度代码**：
 ```python
 # 第一步：并行启动 T1 和 T2
-backend_agent = Agent(
+Agent(
     subagent_type="general-purpose",
     description="后端 API 实现",
-    prompt="扮演 backend-dev，实现 API（预计 2h）"
-)
+    prompt="你是后端开发专家。实现 API（预计 2h）。角色规范：.claude/team/backend-dev/SKILL.md"
+)   # 并行
 
-frontend_agent = Agent(
+Agent(
     subagent_type="general-purpose",
     description="前端组件实现",
-    prompt="扮演 frontend-dev，实现组件（预计 3h）"
-)
+    prompt="你是前端开发专家。实现组件（预计 3h）。角色规范：.claude/team/frontend-dev/SKILL.md"
+)  # 并行
 
-# 第二步：等待 T1 和 T2 完成
-# Agent 工具会自动等待所有并行任务完成
+# 第二步：系统会自动等待 T1 和 T2 完成
 
 # 第三步：启动 T3（集成测试）
-test_agent = Agent(
+Agent(
     subagent_type="general-purpose",
     description="集成测试",
-    prompt="扮演 qa-tester，执行集成测试（预计 1h）"
+    prompt="你是 QA 测试专家。执行集成测试（预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
 )
 ```
 
@@ -269,22 +285,41 @@ T1 (1h)
 **并行调度策略**：
 ```python
 # 第一批：T1
-agent_t1 = Agent(subagent_type="backend-dev", prompt="设计数据库表")
+Agent(
+    subagent_type="general-purpose",
+    description="数据库表设计",
+    prompt="你是后端开发专家。设计数据库表（预计 1h）。角色规范：.claude/team/backend-dev/SKILL.md"
+)
 
 # 等待 T1 完成后
 # 第二批：T2 和 T4 并行
-agents_batch2 = [
-    Agent(subagent_type="backend-dev", prompt="实现 Model（依赖 T1）"),
-    Agent(subagent_type="frontend-dev", prompt="实现组件（依赖 T1）")
-]
+Agent(
+    subagent_type="general-purpose",
+    description="后端 Model 实现",
+    prompt="你是后端开发专家。实现 Model（依赖 T1，预计 2h）。角色规范：.claude/team/backend-dev/SKILL.md"
+)   # 并行
+
+Agent(
+    subagent_type="general-purpose",
+    description="前端组件实现",
+    prompt="你是前端开发专家。实现组件（依赖 T1，预计 3h）。角色规范：.claude/team/frontend-dev/SKILL.md"
+)    # 并行
 
 # 等待 T2 和 T4 完成后
 # 第三批：T3
-agent_t3 = Agent(subagent_type="backend-dev", prompt="实现 API（依赖 T2）")
+Agent(
+    subagent_type="general-purpose",
+    description="后端 API 实现",
+    prompt="你是后端开发专家。实现 API（依赖 T2，预计 2h）。角色规范：.claude/team/backend-dev/SKILL.md"
+)
 
 # 等待 T3 和 T4 完成后
 # 第四批：T5
-agent_t5 = Agent(subagent_type="qa-tester", prompt="集成测试（依赖 T3 + T4）")
+Agent(
+    subagent_type="general-purpose",
+    description="集成测试",
+    prompt="你是 QA 测试专家。集成测试（依赖 T3 + T4，预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
+)
 ```
 
 **总耗时计算**：
@@ -314,38 +349,36 @@ agent_t5 = Agent(subagent_type="qa-tester", prompt="集成测试（依赖 T3 + T
 
 ```python
 # 第一批：T1 和 T2 并行开发
-agents_batch1 = [
-    Agent(
-        subagent_type="general-purpose",
-        description="后端 API 实现",
-        prompt="扮演 backend-dev，实现 API（预计 2h）"
-    ),
-    Agent(
-        subagent_type="general-purpose",
-        description="前端组件实现",
-        prompt="扮演 frontend-dev，实现组件（预计 3h）"
-    )
-]
+Agent(
+    subagent_type="general-purpose",
+    description="后端 API 实现",
+    prompt="你是后端开发专家。实现 API（预计 2h）。角色规范：.claude/team/backend-dev/SKILL.md"
+)   # 并行
+
+Agent(
+    subagent_type="general-purpose",
+    description="前端组件实现",
+    prompt="你是前端开发专家。实现组件（预计 3h）。角色规范：.claude/team/frontend-dev/SKILL.md"
+)  # 并行
 
 # 第二批：T3 和 T4 并行测试（T1 和 T2 完成后）
-agents_batch2 = [
-    Agent(
-        subagent_type="general-purpose",
-        description="后端单元测试",
-        prompt="扮演 qa-tester，编写后端单元测试（预计 1h）"
-    ),
-    Agent(
-        subagent_type="general-purpose",
-        description="前端组件测试",
-        prompt="扮演 qa-tester，编写前端组件测试（预计 1h）"
-    )
-]
+Agent(
+    subagent_type="general-purpose",
+    description="后端单元测试",
+    prompt="你是 QA 测试专家。编写后端单元测试（预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
+)  # 并行
+
+Agent(
+    subagent_type="general-purpose",
+    description="前端组件测试",
+    prompt="你是 QA 测试专家。编写前端组件测试（预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
+)  # 并行
 
 # 第三批：T5 集成测试（T3 和 T4 完成后）
-agent_t5 = Agent(
+Agent(
     subagent_type="general-purpose",
     description="集成测试",
-    prompt="扮演 qa-tester，执行集成测试（预计 1h）"
+    prompt="你是 QA 测试专家。执行集成测试（预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
 )
 ```
 
@@ -380,25 +413,50 @@ agent_t5 = Agent(
 
 ```python
 # 第一批：T1 和 T2 并行开发
-agents_batch1 = [
-    Agent(subagent_type="backend-dev", description="后端 API 实现"),
-    Agent(subagent_type="frontend-dev", description="前端组件实现")
-]
+Agent(
+    subagent_type="general-purpose",
+    description="后端 API 实现",
+    prompt="你是后端开发专家。后端 API 实现。角色规范：.claude/team/backend-dev/SKILL.md"
+)   # 并行
+
+Agent(
+    subagent_type="general-purpose",
+    description="前端组件实现",
+    prompt="你是前端开发专家。前端组件实现。角色规范：.claude/team/frontend-dev/SKILL.md"
+)   # 并行
 
 # 第二批：T3 和 T4 并行测试
-agents_batch2 = [
-    Agent(subagent_type="qa-tester", description="后端单元测试"),
-    Agent(subagent_type="qa-tester", description="前端组件测试")
-]
+Agent(
+    subagent_type="general-purpose",
+    description="后端单元测试",
+    prompt="你是 QA 测试专家。后端单元测试。角色规范：.claude/team/qa-tester/SKILL.md"
+)  # 并行
+
+Agent(
+    subagent_type="general-purpose",
+    description="前端组件测试",
+    prompt="你是 QA 测试专家。前端组件测试。角色规范：.claude/team/qa-tester/SKILL.md"
+)  # 并行
 
 # 第三批：T5 和 T6 并行审查
-agents_batch3 = [
-    Agent(subagent_type="code-reviewer", description="后端代码审查"),
-    Agent(subagent_type="code-reviewer", description="前端代码审查")
-]
+Agent(
+    subagent_type="general-purpose",
+    description="后端代码审查",
+    prompt="你是代码审查专家。后端代码审查。角色规范：.claude/team/code-reviewer/SKILL.md"
+)   # 并行
+
+Agent(
+    subagent_type="general-purpose",
+    description="前端代码审查",
+    prompt="你是代码审查专家。前端代码审查。角色规范：.claude/team/code-reviewer/SKILL.md"
+)   # 并行
 
 # 第四批：T7 集成测试
-agent_t7 = Agent(subagent_type="qa-tester", description="集成测试")
+Agent(
+    subagent_type="general-purpose",
+    description="集成测试",
+    prompt="你是 QA 测试专家。集成测试。角色规范：.claude/team/qa-tester/SKILL.md"
+)
 ```
 
 **总耗时计算**：
