@@ -9,8 +9,11 @@
 
 使用方式:
     python scripts/init_config_db.py
-"""
 
+支持模式:
+    - 同步模式 (sqlite3): 用于首次初始化
+    - 异步模式 (aiosqlite): 用于运行时初始化 (新增)
+"""
 import sqlite3
 import json
 import sys
@@ -331,6 +334,122 @@ def main():
     except Exception as e:
         print(f"\n  ❌ 未知错误：{e}")
         return 1
+
+
+# ============================================================
+# 异步版本 (用于 ConfigManager 运行时初始化)
+# ============================================================
+
+import aiosqlite
+
+
+async def async_init_database(db_path: str) -> None:
+    """
+    异步初始化数据库 (用于 ConfigManager 运行时初始化)
+
+    Args:
+        db_path: Path to SQLite database file
+    """
+    # 确保数据目录存在
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
+    async with aiosqlite.connect(db_path) as db:
+        # Enable WAL mode for high concurrency
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        await db.execute("PRAGMA wal_autocheckpoint=1000")
+
+        # 读取并执行 DDL
+        with open(SQL_PATH, "r", encoding="utf-8") as f:
+            ddl_sql = f.read()
+
+        await db.executescript(ddl_sql)
+
+        # 插入默认系统配置
+        await db.execute("""
+            INSERT OR IGNORE INTO system_configs
+            (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping,
+             signal_cooldown_seconds, queue_batch_size, queue_flush_interval,
+             queue_max_size, warmup_history_bars, atr_filter_enabled,
+             atr_period, atr_min_ratio, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """, (
+            "global",
+            DEFAULT_SYSTEM_CONFIG["core_symbols"],
+            DEFAULT_SYSTEM_CONFIG["ema_period"],
+            DEFAULT_SYSTEM_CONFIG["mtf_ema_period"],
+            DEFAULT_SYSTEM_CONFIG["mtf_mapping"],
+            DEFAULT_SYSTEM_CONFIG["signal_cooldown_seconds"],
+            DEFAULT_SYSTEM_CONFIG["queue_batch_size"],
+            DEFAULT_SYSTEM_CONFIG["queue_flush_interval"],
+            DEFAULT_SYSTEM_CONFIG["queue_max_size"],
+            DEFAULT_SYSTEM_CONFIG["warmup_history_bars"],
+            DEFAULT_SYSTEM_CONFIG["atr_filter_enabled"],
+            DEFAULT_SYSTEM_CONFIG["atr_period"],
+            DEFAULT_SYSTEM_CONFIG["atr_min_ratio"],
+        ))
+
+        # 插入默认风控配置
+        await db.execute("""
+            INSERT OR IGNORE INTO risk_configs
+            (id, max_loss_percent, max_leverage, max_total_exposure,
+             daily_max_trades, daily_max_loss, max_position_hold_time,
+             cooldown_minutes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """, (
+            DEFAULT_RISK_CONFIG["id"],
+            DEFAULT_RISK_CONFIG["max_loss_percent"],
+            DEFAULT_RISK_CONFIG["max_leverage"],
+            DEFAULT_RISK_CONFIG["max_total_exposure"],
+            DEFAULT_RISK_CONFIG["daily_max_trades"],
+            DEFAULT_RISK_CONFIG["daily_max_loss"],
+            DEFAULT_RISK_CONFIG["max_position_hold_time"],
+            DEFAULT_RISK_CONFIG["cooldown_minutes"],
+        ))
+
+        # 插入默认核心币种
+        for symbol_data in DEFAULT_SYMBOLS:
+            await db.execute("""
+                INSERT OR IGNORE INTO symbols
+                (symbol, is_active, is_core, min_quantity,
+                 price_precision, quantity_precision, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (
+                symbol_data["symbol"],
+                symbol_data["is_active"],
+                symbol_data["is_core"],
+                symbol_data["min_quantity"],
+                symbol_data["price_precision"],
+                symbol_data["quantity_precision"],
+            ))
+
+        # 插入默认通知配置 (仅当表为空时)
+        cursor = await db.execute("SELECT COUNT(*) FROM notifications")
+        count = await cursor.fetchone()
+        if count[0] == 0:
+            await db.execute("""
+                INSERT INTO notifications
+                (id, channel_type, webhook_url, is_active,
+                 notify_on_signal, notify_on_order, notify_on_error,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (
+                DEFAULT_NOTIFICATION["id"],
+                DEFAULT_NOTIFICATION["channel_type"],
+                DEFAULT_NOTIFICATION["webhook_url"],
+                DEFAULT_NOTIFICATION["is_active"],
+                DEFAULT_NOTIFICATION["notify_on_signal"],
+                DEFAULT_NOTIFICATION["notify_on_order"],
+                DEFAULT_NOTIFICATION["notify_on_error"],
+            ))
+
+        await db.commit()
+
+
+# 需要导入 os 模块
+import os
 
 
 if __name__ == "__main__":

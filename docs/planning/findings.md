@@ -6,30 +6,132 @@
 
 ## 📑 目录
 
-1. [配置管理数据库表设计](#配置管理数据库表设计)
-2. [工作流重构 v3.0](#工作流重构 v30)
-3. [P1 任务产品分析](#p1-任务产品分析)
-4. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
-5. [策略参数配置数据库存储实现](#策略参数配置数据库存储实现)
-6. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
-7. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
-8. [Phase 8 Optuna 自动化调参集成要点](#phase-8-optuna-自动化调参集成要点)
-9. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
-10. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
-11. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-12. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-13. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-14. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-15. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-16. [Phase 6 前端架构](#phase-6-前端架构)
-17. [API 契约与端点](#api-契约与端点)
-18. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
-19. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
-20. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
+1. [Config Repositories 批量实现](#config-repositories-批量实现)
+2. [ConfigManager 数据库驱动重构](#configmanager-数据库驱动重构)
+3. [配置管理数据库表设计](#配置管理数据库表设计)
+4. [工作流重构 v3.0](#工作流重构 v30)
+5. [P1 任务产品分析](#p1-任务产品分析)
+6. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
+7. [策略参数配置数据库存储实现](#策略参数配置数据库存储实现)
+8. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
+9. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
+10. [Phase 8 Optuna 自动化调参集成要点](#phase-8-optuna-自动化调参集成要点)
+11. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
+12. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
+13. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
+14. [BTC 历史数据导入记录](#btc-历史数据导入记录)
+15. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+16. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+17. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+18. [Phase 6 前端架构](#phase-6-前端架构)
+19. [API 契约与端点](#api-契约与端点)
+20. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
+21. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
+22. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
 
 ---
 
 ## 📌 2026-04-05 技术发现
+
+### Config Repositories 批量实现 ⭐⭐⭐
+
+**发现时间**: 2026-04-05
+
+**任务**: 实现 7 个 Config Repository 类，提供配置管理系统的数据库操作接口
+
+**实现文件**:
+- `src/infrastructure/repositories/config_repositories.py` (约 1800 行)
+- `src/infrastructure/repositories/__init__.py`
+- `tests/unit/test_config_repositories.py` (40 个测试用例)
+
+**7 个 Repository 类**:
+| 类名 | 功能 | 关键方法 |
+|------|------|----------|
+| `StrategyConfigRepository` | 策略配置管理 | CRUD + toggle |
+| `RiskConfigRepository` | 风控配置管理 | get_global, update |
+| `SystemConfigRepository` | 系统配置管理 | get_global, update (restart_required) |
+| `SymbolConfigRepository` | 币池配置管理 | get_all, get_active, CRUD, toggle, add_core_symbols |
+| `NotificationConfigRepository` | 通知配置管理 | CRUD + test_connection |
+| `ConfigSnapshotRepositoryExtended` | 配置快照管理 | CRUD + get_recent |
+| `ConfigHistoryRepository` | 配置历史管理 | record_change, get_history, get_summary |
+
+**技术要点**:
+1. **异步 IO**: 使用 aiosqlite 进行异步数据库操作
+2. **参数化查询**: 所有 SQL 查询使用参数化防止 SQL 注入
+3. **Decimal 处理**: SQLite 不直接支持 Decimal，需转换为 float
+4. **事务边界**: 写操作使用 asyncio.Lock 保证并发安全
+5. **WAL 模式**: 启用 WAL 模式支持高并发写入
+6. **共享连接**: ConfigDatabaseManager 使用共享连接避免 SQLite 锁定问题
+
+**踩坑记录**:
+1. **SQL 参数数量错误**: INSERT 语句占位符数量必须与参数严格匹配
+   - 错误示例：`VALUES (?, ?, ?)` 但只传 2 个参数
+   - 修复：仔细数列并补充缺失参数
+2. **Decimal 类型不支持**: SQLite 不支持 Decimal 类型绑定
+   - 修复：将 Decimal 转换为 float 或 str
+3. **多连接锁定问题**: 多个 Repository 同时打开同一 SQLite 文件会导致锁定
+   - 修复：ConfigDatabaseManager 使用单个共享连接
+
+**测试结果**:
+```
+============================== 40 passed in 0.25s ==============================
+测试覆盖率：88%
+```
+
+**架构决策**:
+- 每个 Repository 独立管理数据库连接（简单场景）
+- ConfigDatabaseManager 使用共享连接（复杂场景避免锁定）
+- 所有 Repository 提供统一的 initialize()/close() 接口
+
+---
+
+### ConfigManager 数据库驱动重构 ⭐⭐⭐
+
+**发现时间**: 2026-04-05
+
+**重构目标**: 将 ConfigManager 从 YAML 文件驱动改为数据库驱动
+
+**核心架构**:
+```
+ConfigManager (application 层)
+    ├── SystemConfigRepository
+    ├── RiskConfigRepository
+    ├── StrategyRepository
+    ├── SymbolRepository
+    ├── NotificationRepository
+    └── ConfigHistoryRepository
+```
+
+**技术要点**:
+
+1. **异步初始化**: `initialize_from_db()` 方法幂等设计
+2. **连接管理**: 使用 `aiosqlite` 进行异步数据库操作
+3. **事务边界**: 所有写操作在 `async with self._ensure_lock()` 内进行
+4. **缓存机制**: `_system_config_cache` 和 `_risk_config_cache` 避免重复查询
+5. **Observer 模式**: 支持热重载通知
+6. **自动快照**: 配置变更前自动创建快照（与 ConfigSnapshotService 集成）
+7. **历史记录**: 所有配置变更自动记录到 `config_history` 表
+
+**向后兼容**:
+- 未初始化 DB 时降级到 YAML 文件读取
+- `load_all_configs()` 保持原有签名
+- 新增 `load_all_configs_async()` 用于数据库加载
+
+**测试结果**:
+```
+19 passed, 6 warnings in 0.33s
+- 数据库初始化：5 tests ✅
+- 配置加载：3 tests ✅
+- 风控更新：2 tests ✅
+- 策略管理：3 tests ✅
+- Observer 模式：3 tests ✅
+- YAML 兼容：2 tests ✅
+- 便捷函数：1 test ✅
+```
+
+**踩坑记录**:
+- INSERT OR REPLACE 与 version 列冲突 → 改为先检查再 INSERT/UPDATE
+- 内联 SQL  schema 与 SQL 文件不一致 → 优先读取 SQL 文件
 
 ### 配置管理数据库表设计 ⭐⭐⭐
 

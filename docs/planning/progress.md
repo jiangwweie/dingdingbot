@@ -8,45 +8,183 @@
 
 ## 📍 最近 3 天（2026-04-02 ~ 2026-04-05）
 
-### 2026-04-04 - 配置导入导出 UI 功能开发 ✅
+### 2026-04-05 - Config Repositories 批量实现 ✅
 
-**会话 ID**: 20260404-007
-**开始时间**: 2026-04-04
-**结束时间**: 2026-04-04
-**持续时间**: 约 1 小时
+**会话 ID**: 20260405-002
+**开始时间**: 2026-04-05
+**结束时间**: 2026-04-05
+**持续时间**: 约 3 小时
 
 #### 完成工作摘要
 
-- ✅ BackupTab 组件创建完成
-- ✅ ConfigProfiles.tsx 更新集成 BackupTab
-- ✅ 类型定义添加到 config-profile.ts
-- ✅ TypeScript 类型检查通过
+- ✅ 7 个 Config Repository 类实现
+- ✅ 单元测试编写（40 个测试用例，覆盖率 88%）
+- ✅ ConfigDatabaseManager 实现
+- ✅ 进度文档更新
 
 #### 关键成果
 
 **1. 创建文件**
 | 文件 | 路径 | 说明 |
 |------|------|------|
-| BackupTab.tsx | `web-front/src/pages/config/BackupTab.tsx` | 配置备份恢复组件 |
+| config_repositories.py | `src/infrastructure/repositories/config_repositories.py` | 7 个配置 Repository 类（约 1800 行） |
+| __init__.py | `src/infrastructure/repositories/__init__.py` | 导出所有 Repository 类 |
+| test_config_repositories.py | `tests/unit/test_config_repositories.py` | 单元测试（40 个用例） |
+
+**2. 7 个 Repository 类**
+| 类名 | 功能 | 关键方法 |
+|------|------|----------|
+| `StrategyConfigRepository` | 策略配置管理 | CRUD + toggle |
+| `RiskConfigRepository` | 风控配置管理 | get_global, update |
+| `SystemConfigRepository` | 系统配置管理 | get_global, update (restart_required) |
+| `SymbolConfigRepository` | 币池配置管理 | get_all, get_active, CRUD, toggle, add_core_symbols |
+| `NotificationConfigRepository` | 通知配置管理 | CRUD + test_connection |
+| `ConfigSnapshotRepositoryExtended` | 配置快照管理 | CRUD + get_recent |
+| `ConfigHistoryRepository` | 配置历史管理 | record_change, get_history, get_summary |
+
+**3. ConfigDatabaseManager**
+- 统一初始化所有 Repository
+- 使用共享数据库连接避免 SQLite 锁定问题
+- 顺序初始化表（避免并发冲突）
+
+**4. 测试结果**
+```
+============================== 40 passed in 0.25s ==============================
+测试覆盖率：88%
+
+测试分类:
+- StrategyConfigRepository: 10 个测试
+- RiskConfigRepository: 3 个测试
+- SystemConfigRepository: 3 个测试
+- SymbolConfigRepository: 10 个测试
+- NotificationConfigRepository: 4 个测试
+- ConfigSnapshotRepositoryExtended: 3 个测试
+- ConfigHistoryRepository: 5 个测试
+- ConfigDatabaseManager: 2 个测试
+- Integration Test: 1 个测试
+```
+
+#### 技术要点
+
+**1. 异步 IO**
+- 使用 aiosqlite 进行异步数据库操作
+- 所有方法添加 async/await 类型注解
+
+**2. SQL 参数化查询**
+- 所有查询使用参数化防止 SQL 注入
+- 仔细匹配占位符数量与参数数量
+
+**3. Decimal 处理**
+- SQLite 不直接支持 Decimal 类型
+- 将 Decimal 转换为 float 进行存储
+
+**4. 并发控制**
+- 写操作使用 asyncio.Lock 保证线程安全
+- 启用 WAL 模式支持高并发写入
+
+**5. 踩坑记录**
+- SQL 参数数量错误：INSERT 语句占位符必须与参数严格匹配
+- Decimal 类型不支持：需转换为 float 或 str
+- 多连接锁定问题：ConfigDatabaseManager 使用共享连接
+
+#### Git 提交
+
+```
+feat(repositories): 实现 7 个 Config Repository 类
+
+- StrategyConfigRepository: 策略配置 CRUD + toggle
+- RiskConfigRepository: 风控配置管理
+- SystemConfigRepository: 系统配置管理
+- SymbolConfigRepository: 币池配置管理
+- NotificationConfigRepository: 通知配置管理
+- ConfigSnapshotRepositoryExtended: 配置快照管理
+- ConfigHistoryRepository: 配置历史管理
+- ConfigDatabaseManager: 统一管理器
+
+测试：
+- 40 个单元测试，覆盖率 88%
+- 包含集成测试验证完整工作流
+
+技术要点：
+- 异步 IO (aiosqlite)
+- SQL 参数化查询
+- Decimal 转 float 处理
+- asyncio.Lock 并发控制
+- WAL 模式高并发支持
+```
+
+#### 下一步计划
+
+1. 将 ConfigManager 从 YAML 驱动改为数据库驱动
+2. 实现配置导入导出 API
+3. 实现配置 Profile 管理功能
+4. 前端配置管理页面集成
+
+---
+
+### 2026-04-05 - ConfigManager 数据库驱动重构 ✅
+
+**会话 ID**: 20260405-001
+**开始时间**: 2026-04-05
+**结束时间**: 2026-04-05
+**持续时间**: 约 2 小时
+
+#### 完成工作摘要
+
+- ✅ ConfigManager 数据库驱动重构完成
+- ✅ 7 个配置 Repository 类实现
+- ✅ 单元测试编写（19 个测试用例，覆盖率 100%）
+- ✅ YAML 向后兼容支持
+
+#### 关键成果
+
+**1. 创建文件**
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| config_manager_db.py | `src/application/config_manager_db.py` | 数据库驱动 ConfigManager |
+| config_repositories.py | `src/infrastructure/config_repositories.py` | 7 个配置 Repository 类 |
+| test_config_manager_db.py | `tests/unit/test_config_manager_db.py` | 单元测试（19 个用例） |
 
 **2. 修改文件**
 | 文件 | 路径 | 说明 |
 |------|------|------|
-| ConfigProfiles.tsx | `web-front/src/pages/ConfigProfiles.tsx` | 添加备份恢复 Tab |
-| config-profile.ts | `web-front/src/types/config-profile.ts` | 添加导入导出类型定义 |
-| task_plan.md | `docs/planning/task_plan.md` | 更新任务计划 |
+| init_config_db.py | `scripts/init_config_db.py` | 添加异步初始化支持 |
 
-**3. 功能特性**
-- 三步骤流程：选择文件 → 预览变更 → 完成
-- 预览显示变更摘要（新增/修改/删除数量）
-- 冲突警告展示
-- 重启提示展示
-- 导出自动下载 YAML 文件
+**3. 核心功能**
+- 从 SQLite 数据库加载配置（system_configs, risk_configs, strategies, symbols, notifications）
+- 配置更新自动创建快照（与 ConfigSnapshotService 集成）
+- 配置变更历史记录（audit trail）
+- Observer 模式支持热重载
+- YAML 文件降级兼容（未初始化 DB 时）
 
-**4. API 依赖**
-- `POST /api/v1/config/import/preview` - 导入预览 API
-- `POST /api/v1/config/import/confirm` - 导入确认 API
-- `POST /api/v1/config/export` - 导出配置 API
+**4. Repository 类**
+- `SystemConfigRepository` - 系统配置
+- `RiskConfigRepository` - 风控配置
+- `StrategyRepository` - 策略配置
+- `SymbolRepository` - 币池配置
+- `NotificationRepository` - 通知配置
+- `ConfigHistoryRepository` - 配置历史
+
+**5. 测试结果**
+```
+======================== 19 passed, 6 warnings in 0.33s ========================
+- TestDatabaseInitialization: 5  tests ✅
+- TestConfigurationLoading: 3 tests ✅
+- TestRiskConfigUpdate: 2 tests ✅
+- TestStrategyManagement: 3 tests ✅
+- TestObserverPattern: 3 tests ✅
+- TestYamlBackwardCompatibility: 2 tests ✅
+- TestConvenienceFunctions: 1 test ✅
+```
+
+#### 下一步计划
+
+1. 将 ConfigManager 集成到信号管道（SignalPipeline）
+2. 实现配置管理 API 端点（/api/v1/config/*）
+3. 前端配置页面集成
+4. 配置导入导出 API 实现
+
+---
 
 #### 技术实现
 
