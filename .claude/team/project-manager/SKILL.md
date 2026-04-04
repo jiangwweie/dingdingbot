@@ -91,17 +91,347 @@ Agent(
 
 ## 📋 并行任务簇识别规则
 
+**核心原则**：能够并行启动的任务必须并行启动，减少总耗时 ⭐⭐⭐
+
+### 步骤 1：识别任务依赖关系
+
 ```python
-# 规则 1: 无依赖的任务先行
-先行任务 = [t for t in 任务 if not t.依赖]
+def analyze_task_dependencies(tasks: list) -> dict:
+    """分析任务依赖关系，识别并行簇"""
 
-# 规则 2: 依赖同一前置任务的任务可并行
-for 前置 in 先行任务:
-    可并行 = [t for t in 任务 if t.依赖 == [前置]]
-    if len(可并行) > 1: 标记为并行簇
+    # 1. 构建依赖图
+    dependency_graph = {}
+    for task in tasks:
+        task_id = task['id']
+        dependencies = task.get('blocked_by', [])
+        dependency_graph[task_id] = dependencies
 
-# 规则 3: 前后端独立任务优先并行
+    # 2. 识别无依赖的任务（第一批并行）
+    first_batch = [t for t in tasks if not t.get('blocked_by')]
+
+    # 3. 识别可并行的任务簇
+    parallel_clusters = []
+    for task in first_batch:
+        # 找出依赖此任务的所有任务
+        dependent_tasks = [
+            t for t in tasks
+            if task['id'] in t.get('blocked_by', [])
+        ]
+
+        if dependent_tasks:
+            parallel_clusters.append({
+                'trigger': task,
+                'parallel_tasks': dependent_tasks
+            })
+
+    return {
+        'first_batch': first_batch,
+        'parallel_clusters': parallel_clusters
+    }
 ```
+
+### 步骤 2：使用 Agent 工具并行调度
+
+**关键：在一个消息中发起多个 Agent 调用，实现真正的并行** ⭐⭐⭐
+
+```python
+# 示例：后端开发和前端开发并行启动
+
+# 假设任务分解结果：
+# T1: 后端 API 实现（无依赖）
+# T2: 前端组件实现（无依赖）
+# T3: 集成测试（依赖 T1 和 T2）
+
+# ❌ 错误做法：串行调用
+# Agent(subagent_type="backend-dev", prompt="实现 API")  # 等待完成
+# Agent(subagent_type="frontend-dev", prompt="实现组件")  # 再启动前端
+
+# ✅ 正确做法：并行调用（在一个消息中）
+# 使用 Python 列表推导式一次性发起所有 Agent 调用
+agents = [
+    Agent(
+        subagent_type="general-purpose",
+        description="后端 API 实现",
+        prompt="""
+        扮演 backend-dev 角色。
+        规范文件：.claude/team/backend-dev/SKILL.md
+
+        任务：实现 API 接口（根据契约表）
+        输出：代码文件 + 单元测试
+        """
+    ),
+    Agent(
+        subagent_type="general-purpose",
+        description="前端组件实现",
+        prompt="""
+        扮演 frontend-dev 角色。
+        规范文件：.claude/team/frontend-dev/SKILL.md
+
+        任务：实现前端组件（根据契约表）
+        输出：组件文件 + 组件测试
+        """
+    )
+]
+
+# 两个 Agent 并行执行，总耗时 = max(后端时间, 前端时间)
+# 而不是串行执行的总耗时 = 后端时间 + 前端时间
+```
+
+### 步骤 3：等待并行任务完成
+
+```python
+# 并行任务启动后，等待所有任务完成
+all_completed = all(agent.status == 'completed' for agent in agents)
+
+if all_completed:
+    # 启动依赖任务（集成测试）
+    Agent(
+        subagent_type="general-purpose",
+        description="集成测试",
+        prompt="""
+        扮演 qa-tester 角色。
+        规范文件：.claude/team/qa-tester/SKILL.md
+
+        任务：集成测试（后端 + 前端）
+        依赖：T1 和 T2 已完成
+        """
+    )
+```
+
+---
+
+## 📋 并行调度实战示例
+
+### 示例 1：前后端并行开发
+
+**任务分解**：
+- T1: 后端 API 实现（预计 2h，无依赖）
+- T2: 前端组件实现（预计 3h，无依赖）
+- T3: 集成测试（预计 1h，依赖 T1 + T2）
+
+**串行执行**：
+- 总耗时：2h + 3h + 1h = 6h
+
+**并行执行**：
+- T1 和 T2 并行：max(2h, 3h) = 3h
+- T3 串行：1h
+- 总耗时：3h + 1h = 4h
+- **节省 2h（33%）** ⭐⭐⭐
+
+**并行调度代码**：
+```python
+# 第一步：并行启动 T1 和 T2
+backend_agent = Agent(
+    subagent_type="general-purpose",
+    description="后端 API 实现",
+    prompt="扮演 backend-dev，实现 API（预计 2h）"
+)
+
+frontend_agent = Agent(
+    subagent_type="general-purpose",
+    description="前端组件实现",
+    prompt="扮演 frontend-dev，实现组件（预计 3h）"
+)
+
+# 第二步：等待 T1 和 T2 完成
+# Agent 工具会自动等待所有并行任务完成
+
+# 第三步：启动 T3（集成测试）
+test_agent = Agent(
+    subagent_type="general-purpose",
+    description="集成测试",
+    prompt="扮演 qa-tester，执行集成测试（预计 1h）"
+)
+```
+
+---
+
+### 示例 2：复杂依赖关系
+
+**任务分解**：
+- T1: 数据库表设计（预计 1h，无依赖）
+- T2: 后端 Model 实现（预计 2h，依赖 T1）
+- T3: 后端 API 实现（预计 2h，依赖 T2）
+- T4: 前端组件实现（预计 3h，依赖 T1）
+- T5: 集成测试（预计 1h，依赖 T3 + T4）
+
+**依赖图**：
+```
+T1 (1h)
+ ├── T2 (2h) → T3 (2h) → T5 (1h)
+ └── T4 (3h) ──────────→ T5 (1h)
+```
+
+**并行调度策略**：
+```python
+# 第一批：T1
+agent_t1 = Agent(subagent_type="backend-dev", prompt="设计数据库表")
+
+# 等待 T1 完成后
+# 第二批：T2 和 T4 并行
+agents_batch2 = [
+    Agent(subagent_type="backend-dev", prompt="实现 Model（依赖 T1）"),
+    Agent(subagent_type="frontend-dev", prompt="实现组件（依赖 T1）")
+]
+
+# 等待 T2 和 T4 完成后
+# 第三批：T3
+agent_t3 = Agent(subagent_type="backend-dev", prompt="实现 API（依赖 T2）")
+
+# 等待 T3 和 T4 完成后
+# 第四批：T5
+agent_t5 = Agent(subagent_type="qa-tester", prompt="集成测试（依赖 T3 + T4）")
+```
+
+**总耗时计算**：
+- 批次 1：T1 = 1h
+- 批次 2：max(T2, T4) = max(2h, 3h) = 3h
+- 批次 3：T3 = 2h
+- 批次 4：T5 = 1h
+- 总计：1h + 3h + 2h + 1h = 7h
+
+**对比串行**：1h + 2h + 2h + 3h + 1h = 9h
+**节省 2h（22%）** ⭐⭐
+
+---
+
+## 📋 并行调度实战示例（含测试）
+
+### 示例 3：前后端并行开发 + 单元测试并行
+
+**任务分解**：
+- T1: 后端 API 实现（预计 2h，无依赖）
+- T2: 前端组件实现（预计 3h，无依赖）
+- T3: 后端单元测试（预计 1h，依赖 T1）
+- T4: 前端组件测试（预计 1h，依赖 T2）
+- T5: 集成测试（预计 1h，依赖 T3 + T4）
+
+**并行调度策略**：⭐⭐⭐
+
+```python
+# 第一批：T1 和 T2 并行开发
+agents_batch1 = [
+    Agent(
+        subagent_type="general-purpose",
+        description="后端 API 实现",
+        prompt="扮演 backend-dev，实现 API（预计 2h）"
+    ),
+    Agent(
+        subagent_type="general-purpose",
+        description="前端组件实现",
+        prompt="扮演 frontend-dev，实现组件（预计 3h）"
+    )
+]
+
+# 第二批：T3 和 T4 并行测试（T1 和 T2 完成后）
+agents_batch2 = [
+    Agent(
+        subagent_type="general-purpose",
+        description="后端单元测试",
+        prompt="扮演 qa-tester，编写后端单元测试（预计 1h）"
+    ),
+    Agent(
+        subagent_type="general-purpose",
+        description="前端组件测试",
+        prompt="扮演 qa-tester，编写前端组件测试（预计 1h）"
+    )
+]
+
+# 第三批：T5 集成测试（T3 和 T4 完成后）
+agent_t5 = Agent(
+    subagent_type="general-purpose",
+    description="集成测试",
+    prompt="扮演 qa-tester，执行集成测试（预计 1h）"
+)
+```
+
+**总耗时计算**：
+- 批次 1：max(T1, T2) = max(2h, 3h) = 3h
+- 批次 2：max(T3, T4) = max(1h, 1h) = 1h
+- 批次 3：T5 = 1h
+- 总计：3h + 1h + 1h = 5h
+
+**对比串行**：2h + 3h + 1h + 1h + 1h = 8h
+**节省 3h（37.5%）** ⭐⭐⭐
+
+**关键点**：
+- ✅ 后端开发和前端开发并行
+- ✅ 后端单元测试和前端组件测试并行
+- ✅ 测试任务在开发完成后立即启动，不等待其他开发完成
+
+---
+
+### 示例 4：开发 + 测试 + 审查全面并行
+
+**任务分解**：
+- T1: 后端 API 实现（预计 2h，无依赖）
+- T2: 前端组件实现（预计 3h，无依赖）
+- T3: 后端单元测试（预计 1h，依赖 T1）
+- T4: 前端组件测试（预计 1h，依赖 T2）
+- T5: 后端代码审查（预计 0.5h，依赖 T3）
+- T6: 前端代码审查（预计 0.5h，依赖 T4）
+- T7: 集成测试（预计 1h，依赖 T5 + T6）
+
+**并行调度策略**：⭐⭐⭐
+
+```python
+# 第一批：T1 和 T2 并行开发
+agents_batch1 = [
+    Agent(subagent_type="backend-dev", description="后端 API 实现"),
+    Agent(subagent_type="frontend-dev", description="前端组件实现")
+]
+
+# 第二批：T3 和 T4 并行测试
+agents_batch2 = [
+    Agent(subagent_type="qa-tester", description="后端单元测试"),
+    Agent(subagent_type="qa-tester", description="前端组件测试")
+]
+
+# 第三批：T5 和 T6 并行审查
+agents_batch3 = [
+    Agent(subagent_type="code-reviewer", description="后端代码审查"),
+    Agent(subagent_type="code-reviewer", description="前端代码审查")
+]
+
+# 第四批：T7 集成测试
+agent_t7 = Agent(subagent_type="qa-tester", description="集成测试")
+```
+
+**总耗时计算**：
+- 批次 1：max(2h, 3h) = 3h
+- 批次 2：max(1h, 1h) = 1h
+- 批次 3：max(0.5h, 0.5h) = 0.5h
+- 批次 4：1h
+- 总计：3h + 1h + 0.5h + 1h = 5.5h
+
+**对比串行**：2h + 3h + 1h + 1h + 0.5h + 0.5h + 1h = 9h
+**节省 3.5h（39%）** ⭐⭐⭐
+
+**关键点**：
+- ✅ 开发、测试、审查全面并行
+- ✅ 后端流程独立：开发 → 单元测试 → 审查
+- ✅ 前端流程独立：开发 → 组件测试 → 审查
+- ✅ 最后集成测试等待所有审查完成
+
+---
+
+## ⚠️ 并行调度红线
+
+**违反以下规则 = P0 问题**：
+
+1. **禁止串行执行无依赖任务**
+   - ❌ 错误：T1 完成 → T2 完成（T1 和 T2 无依赖）
+   - ✅ 正确：T1 和 T2 并行启动
+
+2. **禁止忽略任务依赖**
+   - ❌ 错误：T1 和 T2 并行启动（但 T2 依赖 T1）
+   - ✅ 正确：T1 完成 → 启动 T2
+
+3. **禁止在一个 Agent 调用中等待另一个**
+   - ❌ 错误：在 backend Agent 内部调用 frontend Agent
+   - ✅ 正确：在主流程中并行启动 backend 和 frontend Agent
+
+---
 
 ## 📎 详细文档
 
