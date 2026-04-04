@@ -14,10 +14,13 @@
     "test:coverage": "vitest --coverage"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.1.1",
     "@google/genai": "^1.29.0",
     "@headlessui/react": "^2.2.9",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "antd": "^6.3.5",
+    "axios": "^1.14.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",

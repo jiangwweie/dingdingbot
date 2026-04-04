@@ -2138,3 +2138,58 @@ class OptimizationJob(BaseModel):
     study_id: Optional[str] = Field(None, description="Optuna Study ID")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+# ============================================================
+# Config Management Models (for Repository layer)
+# ============================================================
+
+class SystemConfig(BaseModel):
+    """
+    System configuration model.
+
+    Contains core system settings that require restart to take effect.
+    """
+    core_symbols: List[str] = Field(default_factory=list, description="Core trading symbols (protected)")
+    ema_period: int = Field(default=60, ge=5, le=200, description="EMA period for trend filter")
+    mtf_ema_period: int = Field(default=60, ge=5, le=200, description="MTF EMA period")
+    pinbar_min_wick_ratio: Decimal = Field(default=Decimal("0.6"), description="Pinbar min wick ratio")
+    pinbar_max_body_ratio: Decimal = Field(default=Decimal("0.3"), description="Pinbar max body ratio")
+    pinbar_body_position_tolerance: Decimal = Field(default=Decimal("0.1"), description="Pinbar body position tolerance")
+    signal_cooldown_seconds: int = Field(default=14400, ge=60, description="Signal deduplication cooldown")
+    backtest_take_profit_slippage_rate: Decimal = Field(default=Decimal("0.0005"), description="Backtest TP slippage")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class SymbolConfig(BaseModel):
+    """
+    Symbol configuration model.
+
+    Contains per-symbol settings for trading.
+    """
+    symbol: str = Field(..., description="Trading symbol (e.g., 'BTC/USDT:USDT')")
+    is_active: bool = Field(default=True, description="Whether this symbol is active for trading")
+    max_leverage: int = Field(default=10, ge=1, le=125, description="Maximum leverage for this symbol")
+    custom_settings: Dict[str, Any] = Field(default_factory=dict, description="Custom per-symbol settings")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class ConfigHistoryEntry(BaseModel):
+    """
+    Configuration history entry for audit trail.
+
+    Tracks all configuration changes with before/after values.
+    """
+    id: Optional[int] = None
+    entity_type: str = Field(..., description="Entity type: 'strategy', 'risk', 'system', 'symbol', 'notification'")
+    entity_id: str = Field(..., description="Entity identifier (strategy_id, symbol, etc.)")
+    action: str = Field(..., description="Action: 'create', 'update', 'delete', 'toggle', 'rollback'")
+    old_values: str = Field(default="{}", description="Previous values (JSON string)")
+    new_values: str = Field(default="{}", description="New values (JSON string)")
+    summary: str = Field(..., description="Human-readable summary of the change")
+    changed_by: str = Field(default="user", description="Who made the change")
+    changed_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Change timestamp (ISO 8601)")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
