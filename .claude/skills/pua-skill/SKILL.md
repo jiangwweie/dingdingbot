@@ -218,10 +218,10 @@ PUA 输出:
 | 用户输入已详细 | ❌ 跳过升级 |
 | 子 Agent 任务分配前 | ✅ 升级任务描述 |
 
-### 与 Coordinator 协作
+### 与 PM 协作
 
 ```python
-# Coordinator 在分配任务前调用 PUA
+# PM 在分配任务前调用 PUA
 upgraded_prompt = Agent(
     subagent_type="pua",
     prompt=f"升级以下任务描述：{original_user_input}"
@@ -278,9 +278,9 @@ Agent(
 )
 ```
 
-### 方式 2: Coordinator 自动调用
+### 方式 2: PM 自动调用
 
-Coordinator 在分配任务前，自动调用 PUA 升级提示词。
+PM 在分配任务前，自动调用 PUA 升级提示词。
 
 ---
 

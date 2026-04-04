@@ -82,9 +82,9 @@
 - 需要有测试覆盖
 ```
 
-#### 步骤 3：Coordinator 分解任务
+#### 步骤 3：PM 分解任务
 
-Coordinator 会自动创建以下任务：
+PM 会自动创建以下任务：
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -102,7 +102,7 @@ Coordinator 会自动创建以下任务：
 #### 步骤 4：并行执行
 
 ```python
-# Coordinator 并行调用三个角色
+# PM 并行调用三个角色
 Agent(subagent_type="backend-dev", prompt="实现预览接口...")
 Agent(subagent_type="frontend-dev", prompt="实现预览按钮...")
 Agent(subagent_type="qa-tester", prompt="编写测试...")
@@ -169,7 +169,7 @@ GET /api/strategies/{id}/history
 
 ### 场景 4：完整功能开发
 ```bash
-/coordinator
+/pm
 
 实现"策略模板导入/导出"功能：
 1. 用户可以导出策略为 JSON 文件
@@ -184,13 +184,13 @@ GET /api/strategies/{id}/history
 ## ⚠️ 注意事项
 
 ### ✅ 推荐做法
-- 完整功能开发 → 使用 `/coordinator`
+- 完整功能开发 → 使用 `/pm`
 - 单一角色任务 → 直接调用 `/frontend`、`backend`、`qa`
-- 任务完成后 → 等待 Coordinator 汇总再验收
+- 任务完成后 → 等待 PM 汇总再验收
 
 ### ❌ 避免做法
 - 同时调用多个角色做同一件事（会冲突）
-- 跳过 Coordinator 直接并行多个 Agent
+- 跳过 PM 直接并行多个 Agent
 - 修改不属于自己负责的文件
 
 ---
@@ -202,7 +202,7 @@ GET /api/strategies/{id}/history
 
 **解决**：
 ```bash
-/coordinator
+/pm
 刚才的任务分配有误，请重新分解：
 - XX 文件应该由 frontend-dev 修改
 - XX 文件应该由 backend-dev 修改
@@ -213,7 +213,7 @@ GET /api/strategies/{id}/history
 
 **解决**：
 ```bash
-/coordinator
+/pm
 检测到文件冲突：XX 文件被多个角色修改
 请重新协调任务边界，确保每人只改自己的文件
 ```
@@ -223,7 +223,7 @@ GET /api/strategies/{id}/history
 
 **解决**：
 ```bash
-/coordinator
+/pm
 Task X 依赖 Task Y 完成，但 Task Y 卡住了
 请检查依赖关系，调整执行顺序
 ```
@@ -252,10 +252,10 @@ Task X 依赖 Task Y 完成，但 Task Y 卡住了
 3. **可验证**：说明如何验证完成
 
 ### 文件边界
-1. **先确认**：不确定文件归属时先问 Coordinator
+1. **先确认**：不确定文件归属时先问 PM
 2. **不越界**：只改自己负责的文件
 3. **早报告**：发现冲突立即停止并报告
 
 ---
 
-*开始使用吧！输入 `/coordinator` 然后描述你的第一个需求！*
+*开始使用吧！输入 `/pm` 然后描述你的第一个需求！*

@@ -293,12 +293,12 @@ web-front/                    # 前端代码（绝对禁止）
 ### 🔶 需要协调的文件
 ```
 .clause/team/                 # 团队技能文件
-└── README.md                 # 修改前需通知 Coordinator
+└── README.md                 # 修改前需通知 PM
 
-CLAUDE.md                     # 项目级配置（仅 Coordinator 可改）
+CLAUDE.md                     # 项目级配置（仅 PM 可改）
 ```
 
 ### 冲突解决
-- 如果需要修改的文件不在"你可以修改"列表中，**停止并通知 Coordinator**
-- 前端需要 API 变更时，**不要直接改前端**，通知 Coordinator 分配给 frontend-dev
-- 需要修改测试断言或测试策略时，**不要直接改**，通知 Coordinator 分配给 qa-tester
+- 如果需要修改的文件不在"你可以修改"列表中，**停止并通知 PM**
+- 前端需要 API 变更时，**不要直接改前端**，通知 PM 分配给 frontend-dev
+- 需要修改测试断言或测试策略时，**不要直接改**，通知 PM 分配给 qa-tester

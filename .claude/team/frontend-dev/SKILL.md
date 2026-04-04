@@ -219,12 +219,12 @@ config/                       # 后端配置
 ### 🔶 需要协调的文件
 ```
 .clause/team/                 # 团队技能文件
-└── README.md                 # 修改前需通知 Coordinator
+└── README.md                 # 修改前需通知 PM
 
-CLAUDE.md                     # 项目级配置（仅 Coordinator 可改）
+CLAUDE.md                     # 项目级配置（仅 PM 可改）
 ```
 
 ### 冲突解决
-- 如果需要修改的文件不在"你可以修改"列表中，**停止并通知 Coordinator**
-- 发现后端 API 与前端需求不匹配时，**不要直接改后端**，而是通知 Coordinator 分配给 backend-dev
-- 测试失败时，**不要直接改测试**，而是通知 Coordinator 分配给 qa-tester
+- 如果需要修改的文件不在"你可以修改"列表中，**停止并通知 PM**
+- 发现后端 API 与前端需求不匹配时，**不要直接改后端**，而是通知 PM 分配给 backend-dev
+- 测试失败时，**不要直接改测试**，而是通知 PM 分配给 qa-tester

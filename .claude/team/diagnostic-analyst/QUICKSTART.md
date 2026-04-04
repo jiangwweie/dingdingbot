@@ -21,7 +21,7 @@
 
 | 场景 | 应该使用的角色 |
 |------|----------------|
-| **新功能开发** | Team Coordinator / Backend Dev |
+| **新功能开发** | Team PM / Backend Dev |
 | **代码审查** | Code Reviewer |
 | **编写测试** | QA Tester |
 | **前端实现** | Frontend Dev |
@@ -50,10 +50,10 @@
 
 诊断分析师会自动激活并输出诊断报告。
 
-### 方式 3: 从 Coordinator 分配
+### 方式 3: 从 PM 分配
 
 ```
-/coordinator
+/pm
 我发现信号止损距离有问题，先让 diagnostic 分析一下根因
 ```
 
@@ -154,7 +154,7 @@ Why 5: 为什么框架有了但逻辑没实现？
        ↓
 6. 输出诊断报告（包含 A/B/C 多方案）
        ↓
-7.  Coordinator 分配任务给 Dev 实施
+7.  PM 分配任务给 Dev 实施
 ```
 
 ---
@@ -194,9 +194,9 @@ Why 5: 为什么框架有了但逻辑没实现？
                      ↓
             输出诊断报告
                      ↓
-用户 → Coordinator: 阅读报告，请求实施
+用户 → PM: 阅读报告，请求实施
                      ↓
-         Coordinator → Backend Dev: 分配修复任务
+         PM → Backend Dev: 分配修复任务
                      ↓
             Backend Dev 实施修复
                      ↓

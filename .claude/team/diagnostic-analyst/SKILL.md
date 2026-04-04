@@ -647,14 +647,14 @@ pytest tests/unit/test_xxx.py -v
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│ 诊断分析师 → Team Coordinator                         │
+│ 诊断分析师 → Team PM                         │
 ├──────────────────────────────────────────────────────┤
 │ 输出：                                               │
 │ - 诊断报告文档                                        │
 │ - 修复优先级建议                                      │
 │ - 工作量预估                                          │
 │                                                      │
-│ Coordinator 职责：                                    │
+│ PM 职责：                                    │
 │ - 阅读诊断报告                                        │
 │ - 负责任务分解                                        │
 │ - 分配给 Backend Dev / Frontend Dev                  │
@@ -714,9 +714,9 @@ pytest tests/unit/test_xxx.py -v
        ↓
 2. 诊断分析师接手 → 输出诊断报告
        ↓
-3. Team Coordinator 阅读报告
+3. Team PM 阅读报告
        ↓
-4. Coordinator 分解任务 → Backend Dev + QA
+4. PM 分解任务 → Backend Dev + QA
        ↓
 5. Backend Dev 实现修复
        ↓
@@ -724,7 +724,7 @@ pytest tests/unit/test_xxx.py -v
        ↓
 7. Code Reviewer 审查代码
        ↓
-8. Coordinator 合并代码
+8. PM 合并代码
        ↓
 9. 诊断分析师确认问题已解决（可选）
 ```
@@ -1022,4 +1022,4 @@ pytest tests/unit/test_xxx.py -v
 ---
 
 *本技能文件最后更新：2026-04-02 - 新增五维分析法（用户报告问题专用）*
-*创建者：Team Coordinator*
+*创建者：Team PM*

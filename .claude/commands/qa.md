@@ -7,7 +7,7 @@ Agent(
 请阅读并遵循 .claude/team/qa-tester/SKILL.md 中的规范。
 
 重要：严格遵守文件边界，只修改 tests/ 目录下的文件！
-发现业务代码 Bug 时，不要直接修改，通知 Coordinator 分配给对应开发角色。
+发现业务代码 Bug 时，不要直接修改，通知 PM 分配给对应开发角色。
 
 用户任务：{{arguments}}
 
