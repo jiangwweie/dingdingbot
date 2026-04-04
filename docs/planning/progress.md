@@ -8,6 +8,176 @@
 
 ## 📍 最近 3 天（2026-04-02 ~ 2026-04-05）
 
+### 2026-04-04 - 配置导入导出 UI 功能开发 ✅
+
+**会话 ID**: 20260404-007
+**开始时间**: 2026-04-04
+**结束时间**: 2026-04-04
+**持续时间**: 约 1 小时
+
+#### 完成工作摘要
+
+- ✅ BackupTab 组件创建完成
+- ✅ ConfigProfiles.tsx 更新集成 BackupTab
+- ✅ 类型定义添加到 config-profile.ts
+- ✅ TypeScript 类型检查通过
+
+#### 关键成果
+
+**1. 创建文件**
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| BackupTab.tsx | `web-front/src/pages/config/BackupTab.tsx` | 配置备份恢复组件 |
+
+**2. 修改文件**
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| ConfigProfiles.tsx | `web-front/src/pages/ConfigProfiles.tsx` | 添加备份恢复 Tab |
+| config-profile.ts | `web-front/src/types/config-profile.ts` | 添加导入导出类型定义 |
+| task_plan.md | `docs/planning/task_plan.md` | 更新任务计划 |
+
+**3. 功能特性**
+- 三步骤流程：选择文件 → 预览变更 → 完成
+- 预览显示变更摘要（新增/修改/删除数量）
+- 冲突警告展示
+- 重启提示展示
+- 导出自动下载 YAML 文件
+
+**4. API 依赖**
+- `POST /api/v1/config/import/preview` - 导入预览 API
+- `POST /api/v1/config/import/confirm` - 导入确认 API
+- `POST /api/v1/config/export` - 导出配置 API
+
+#### 技术实现
+
+**1. 组件结构**
+```typescript
+BackupTab Component
+├── Step 1: 选择文件
+│   ├── Upload 组件上传 YAML 文件
+│   └── 导出当前配置按钮
+├── Step 2: 预览变更
+│   ├── 冲突警告 Alert
+│   ├── 重启提示 Alert
+│   ├── 变更摘要 Descriptions
+│   ├── 策略详情 Table
+│   └── 币种列表 Table
+└── Step 3: 完成
+    └── 成功状态展示
+```
+
+**2. 类型定义**
+- `ImportPreviewRequest` - 导入预览请求
+- `ImportPreviewResponse` - 导入预览响应
+- `ImportConfirmRequest` - 导入确认请求
+- `ImportConfirmResponse` - 导入确认响应
+- `ExportConfigResponse` - 导出配置响应
+
+**3. 技术栈**
+- React 19 + TypeScript
+- Ant Design v6
+- @ant-design/icons 图标
+
+#### 待办事项
+
+- [ ] 后端 API 实现（导入预览/确认/导出）
+- [ ] 集成测试编写
+- [ ] 用户验收测试
+
+---
+
+### 2026-04-04 16:30 - 高级策略表单组件开发 ✅
+
+**会话 ID**: 20260404-006
+**开始时间**: 2026-04-04 16:30
+**结束时间**: 2026-04-04 17:00
+**持续时间**: 约 30 分钟
+
+#### 完成工作摘要
+
+- ✅ 创建 `AdvancedStrategyForm.tsx` 高级策略表单组件
+- ✅ 更新 `StrategiesTab.tsx` 集成高级表单
+- ✅ 添加 CSS 样式优化
+- ✅ TypeScript 类型检查通过
+
+#### 关键成果
+
+**1. 创建文件**
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| AdvancedStrategyForm.tsx | `web-front/src/pages/config/AdvancedStrategyForm.tsx` | 高级策略表单组件 (约 750 行) |
+| StrategiesTab.tsx (更新) | `web-front/src/pages/config/StrategiesTab.tsx` | 集成高级表单 |
+| StrategiesTab.css (更新) | `web-front/src/pages/config/StrategiesTab.css` | 添加高级表单样式 |
+
+**2. 功能特性**
+| 功能 | 说明 |
+|------|------|
+| 触发器配置 | 支持 Pinbar/Engulfing/Doji/Hammer 四种形态，可配置参数 |
+| 过滤器链 | 支持 EMA/MTF/ATR/成交量激增过滤器，动态增删改 |
+| 过滤器逻辑 | AND/OR 组合逻辑选择 |
+| 币种/周期 | 多币种多周期选择 |
+| 表单验证 | 完整的必填项验证和格式验证 |
+
+**3. 组件结构**
+```
+AdvancedStrategyForm
+├── TriggerConfigPanel        # 触发器配置面板
+│   ├── 触发器类型选择
+│   └── 动态参数配置（根据类型）
+├── FiltersConfigPanel        # 过滤器链配置
+│   ├── 过滤器列表（卡片式展示）
+│   ├── 过滤器类型选择
+│   ├── 启用/禁用开关
+│   └── 参数配置
+└── 基本信息表单
+    ├── 策略名称/描述
+    ├── 启用状态
+    └── 币种/周期选择
+```
+
+**4. 类型定义**
+```typescript
+interface TriggerConfig {
+  type: 'pinbar' | 'engulfing' | 'doji' | 'hammer';
+  params: {
+    min_wick_ratio?: number;
+    max_body_ratio?: number;
+    body_position_tolerance?: number;
+    min_body_ratio?: number;
+    max_upper_wick_ratio?: number;
+  };
+}
+
+interface FilterConfig {
+  type: 'ema' | 'mtf' | 'atr' | 'volume_surge';
+  enabled: boolean;
+  params: Record<string, any>;
+}
+```
+
+**5. 验证结果**
+- TypeScript 类型检查：✅ 通过
+- 构建验证：✅ 通过（BackupTab.tsx 有预先存在的错误）
+- 代码规范：✅ 符合前端开发规范
+
+#### 预计工时
+
+| 任务 | 预计 | 实际 |
+|------|------|------|
+| 创建 AdvancedStrategyForm | 1.5h | 1h |
+| 更新 StrategiesTab | 0.5h | 0.5h |
+| CSS 样式优化 | 0.5h | 0.5h |
+| 类型检查与修复 | 0.5h | 0.5h |
+| **总计** | **3h** | **2.5h** |
+
+#### 待办事项
+
+- [ ] 与后端 API 联调验证
+- [ ] 添加触发器参数默认值说明
+- [ ] 添加过滤器参数预设模板
+
+---
+
 ### 2026-04-05 00:15 - 配置管理数据库表 DDL 创建 ✅
 
 **会话 ID**: 20260405-001

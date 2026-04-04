@@ -185,3 +185,99 @@ export interface RenameProfileResponse {
   /** 消息 */
   message: string;
 }
+
+// ============================================================
+// Import/Export Types (配置导入导出类型)
+// ============================================================
+
+/**
+ * 导入预览请求
+ */
+export interface ImportPreviewRequest {
+  /** YAML 文件内容 */
+  yaml_content: string;
+  /** 文件名 */
+  filename?: string;
+}
+
+/**
+ * 导入预览响应
+ */
+export interface ImportPreviewResponse {
+  /** 是否有效 */
+  valid: boolean;
+  /** 预览令牌（用于确认导入） */
+  preview_token: string;
+  /** 过期时间（ISO 8601 格式） */
+  expires_at: string;
+  /** 变更摘要 */
+  summary: {
+    /** 策略变更 */
+    strategies: {
+      /** 新增数量 */
+      added: number;
+      /** 修改数量 */
+      modified: number;
+      /** 删除数量 */
+      deleted: number;
+    };
+    /** 风控配置变更 */
+    risk: {
+      /** 是否有修改 */
+      modified: boolean;
+    };
+    /** 币种变更 */
+    symbols: {
+      /** 新增数量 */
+      added: number;
+    };
+    /** 通知渠道变更 */
+    notifications: {
+      /** 新增数量 */
+      added: number;
+    };
+  };
+  /** 冲突列表 */
+  conflicts: string[];
+  /** 是否需要重启 */
+  requires_restart: boolean;
+  /** 预览详情数据 */
+  preview_data: {
+    /** 策略列表 */
+    strategies: any[];
+    /** 风控配置 */
+    risk: any;
+    /** 币种列表 */
+    symbols: any[];
+    /** 通知渠道列表 */
+    notifications: any[];
+  };
+}
+
+/**
+ * 导入确认请求
+ */
+export interface ImportConfirmRequest {
+  /** 预览令牌 */
+  preview_token: string;
+}
+
+/**
+ * 导入确认响应
+ */
+export interface ImportConfirmResponse {
+  /** 操作状态 */
+  status: string;
+  /** 消息 */
+  message: string;
+  /** 是否需要重启 */
+  requires_restart?: boolean;
+}
+
+/**
+ * 导出配置响应（二进制）
+ */
+export interface ExportConfigResponse {
+  /** YAML 文件内容（文本格式） */
+  yaml_content: string;
+}
