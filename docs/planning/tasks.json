@@ -1,9 +1,43 @@
 {
-  "feature": "订单管理技术债修复 + OpenClaw 集成规划",
+  "feature": "订单管理技术债修复 + OpenClaw 集成规划 + 前端紧急修复",
   "created_at": "2026-04-03T08:00:00Z",
-  "session": "development",
+  "session": "completed",
   "status": "partial_completed",
+  "last_updated": "2026-04-04T20:30:00Z",
   "tasks": [
+    {
+      "id": "FIX-1",
+      "subject": "Config 页面 toFixed 错误修复",
+      "role": "backend-dev",
+      "estimated_hours": 0.5,
+      "status": "completed",
+      "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-04T19:00:00Z",
+      "completion_notes": "Decimal → float 转换修复，API 返回类型修正"
+    },
+    {
+      "id": "FIX-2",
+      "subject": "Orders 页面 react-window 错误修复",
+      "role": "frontend-dev",
+      "estimated_hours": 0.5,
+      "status": "completed",
+      "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-04T19:00:00Z",
+      "completion_notes": "双重 null 检查增强，防御逻辑修复"
+    },
+    {
+      "id": "FIX-3",
+      "subject": "main.py ConfigEntryRepository 初始化补充",
+      "role": "backend-dev",
+      "estimated_hours": 0.25,
+      "status": "completed",
+      "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-04T19:30:00Z",
+      "completion_notes": "补充 ConfigEntryRepository 初始化，API 依赖注入完整"
+    },
     {
       "id": "TEST-1",
       "subject": "修复策略参数 API 集成测试",
