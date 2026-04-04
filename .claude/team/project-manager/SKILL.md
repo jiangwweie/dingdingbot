@@ -52,10 +52,10 @@ license: Proprietary
    ↓
 5. 请求用户确认 (产品范围/技术方案/任务计划)
    ↓
-6. 用户确认后 → 调用 Coordinator 执行
+6. 用户确认后 → PM 并行调度 Agent 执行
 ```
 
-## 📋 执行任务时调用 Coordinator
+## 📋 执行任务时调度 Agent
 
 **正确方式：使用 general-purpose subagent**
 
@@ -63,11 +63,7 @@ license: Proprietary
 Agent(
     subagent_type="general-purpose",
     prompt="""
-请扮演团队协调器（Team Coordinator）角色。
-
-角色规范文件：.claude/team/team-coordinator/SKILL.md
-
-请阅读并遵循角色规范文件中的工作流程。
+请作为项目协调助手，执行以下任务：
 
 重要：
 1. 使用 planning-with-files-zh 管理进度（禁止使用内置 planning）

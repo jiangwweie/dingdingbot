@@ -7,13 +7,6 @@
       "tools": ["all"],
       "skill": "pua"
     },
-    "coordinator": {
-      "name": "团队协调器",
-      "description": "负责需求头脑风暴、架构设计、任务分解、并行调度、进度追踪",
-      "model": "sonnet",
-      "tools": ["all"],
-      "skill": "team-coordinator"
-    },
     "backend-dev": {
       "name": "后端开发专家",
       "description": "负责 Python + FastAPI + asyncio 后端实现",
