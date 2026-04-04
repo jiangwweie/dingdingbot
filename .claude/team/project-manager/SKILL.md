@@ -23,7 +23,7 @@ license: Proprietary
    - "想要/加个/新功能" → 转 Product Manager
    - "进度/状态" → 直接回答
    - "方案/架构" → 转 Architect
-   ↓
+↓
 2. 等待 Product Manager 输出 PRD
    ↓
 3. 等待 Architect 完成架构设计 + 契约表
@@ -33,6 +33,40 @@ license: Proprietary
 5. 请求用户确认 (产品范围/技术方案/任务计划)
    ↓
 6. 用户确认后 → 调用 Coordinator 执行
+```
+
+## 📋 执行任务时调用 Coordinator
+
+**正确方式：使用 general-purpose subagent**
+
+```python
+Agent(
+    subagent_type="general-purpose",
+    prompt="""
+请扮演团队协调器（Team Coordinator）角色。
+
+角色规范文件：.claude/team/team-coordinator/SKILL.md
+
+请阅读并遵循角色规范文件中的工作流程。
+
+重要：
+1. 使用 planning-with-files-zh 管理进度（禁止使用内置 planning）
+2. 任务计划输出到 docs/planning/task_plan.md
+3. 会话日志输出到 docs/planning/progress.md
+
+用户任务：{{arguments}}
+
+请执行以下步骤：
+1. 分析任务需求
+2. 使用 TaskCreate 创建任务清单
+3. 使用 Agent(subagent_type="general-purpose") 调用其他角色：
+   - 后端开发：prompt 中指定 "扮演 backend-dev 角色，规范文件：.claude/team/backend-dev/SKILL.md"
+   - 前端开发：prompt 中指定 "扮演 frontend-dev 角色，规范文件：.claude/team/frontend-dev/SKILL.md"
+   - 测试专家：prompt 中指定 "扮演 qa-tester 角色，规范文件：.claude/team/qa-tester/SKILL.md"
+   - 架构师：prompt 中指定 "扮演 architect 角色，规范文件：.claude/team/architect/SKILL.md"
+4. 追踪进度并在完成后生成验收报告
+"""
+)
 ```
 
 ## 📋 并行任务簇识别规则
@@ -55,4 +89,4 @@ for 前置 in 先行任务:
 
 ---
 
-**技能文件说明**: 为确模型记住核心约束，此文件已精简。详细规范见上方文档链接。
+**技能文件说明**: 为确保模型记住核心约束，此文件已精简。详细规范见上方文档链接。

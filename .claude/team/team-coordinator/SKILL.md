@@ -159,11 +159,13 @@ for cluster in tasks["parallel_clusters"]:
     # 1. 并行调用簇内所有 Agent
     for task_id in cluster:
         task = get_task(task_id, tasks)
-        
-        # ⚠️ 必须调用 Agent 工具！
+
+        # ⚠️ 必须调用 Agent 工具！使用 general-purpose subagent
         Agent(
-            subagent_type=f"team-{task['role']}",
-            prompt=f"""请完成以下任务：
+            subagent_type="general-purpose",
+            prompt=f"""请扮演 {task['role']} 角色。
+
+角色规范文件：.claude/team/{task['role']}/SKILL.md
 
 任务 ID: {task_id}
 任务描述：{task['subject']}
@@ -171,7 +173,7 @@ for cluster in tasks["parallel_clusters"]:
 契约表：docs/designs/xxx-contract.md
 任务清单：docs/planning/tasks.json
 
-完成后请确认任务已完成。"""
+请阅读角色规范文件并按规范完成任务。完成后请确认任务已完成。"""
         )
     
     # 2. 更新任务状态
