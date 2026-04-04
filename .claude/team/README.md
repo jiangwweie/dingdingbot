@@ -537,9 +537,14 @@ prompt="请阅读 .claude/team/backend-dev/SKILL.md 并按规范实现..."
 ```
 
 ### 问题 2: 任务依赖顺序混乱
-**解决**: 使用 TaskCreate 设置 `addBlockedBy` 依赖
+**解决**: 使用 TaskCreate + TaskUpdate 设置依赖关系
 ```python
-TaskCreate(subject="前端实现", addBlockedBy=["T1"])  # 等待后端完成
+# 步骤 1: 创建任务
+task_backend = TaskCreate(subject="后端 Schema 定义", description="...")
+task_frontend = TaskCreate(subject="前端 UI 实现", description="...")
+
+# 步骤 2: 使用 TaskUpdate 设置依赖
+TaskUpdate(taskId=task_frontend.id, addBlockedBy=[task_backend.id])  # 前端等待后端
 ```
 
 ### 问题 3: 接口定义不一致

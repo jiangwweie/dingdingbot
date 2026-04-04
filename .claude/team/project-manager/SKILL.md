@@ -57,32 +57,40 @@ license: Proprietary
 
 ## 📋 执行任务时调度 Agent
 
-**正确方式：使用 general-purpose subagent**
+**正确方式：使用 Skill 工具直接调用**
 
 ```python
-Agent(
-    subagent_type="general-purpose",
-    prompt="""
-请作为项目协调助手，执行以下任务：
+# 分析任务后，直接调用对应角色的 Skill
+# 这些角色必须在 settings.json 的 skills.local 中定义
 
-重要：
-1. 使用 planning-with-files-zh 管理进度（禁止使用内置 planning）
-2. 任务计划输出到 docs/planning/task_plan.md
-3. 会话日志输出到 docs/planning/progress.md
+# 后端开发
+Skill("team-backend-dev")
 
-用户任务：{{arguments}}
+# 前端开发
+Skill("team-frontend-dev")
 
-请执行以下步骤：
-1. 分析任务需求
-2. 使用 TaskCreate 创建任务清单
-3. 使用 Agent(subagent_type="general-purpose") 调用其他角色：
-   - 后端开发：prompt 中指定 "扮演 backend-dev 角色，规范文件：.claude/team/backend-dev/SKILL.md"
-   - 前端开发：prompt 中指定 "扮演 frontend-dev 角色，规范文件：.claude/team/frontend-dev/SKILL.md"
-   - 测试专家：prompt 中指定 "扮演 qa-tester 角色，规范文件：.claude/team/qa-tester/SKILL.md"
-   - 架构师：prompt 中指定 "扮演 architect 角色，规范文件：.claude/team/architect/SKILL.md"
-4. 追踪进度并在完成后生成验收报告
-"""
-)
+# 测试
+Skill("team-qa-tester")
+
+# 架构设计
+Skill("team-architect")
+
+# 代码审查
+Skill("team-code-reviewer")
+```
+
+**如需自定义任务描述，使用 args 参数**：
+
+```python
+Skill("team-backend-dev", args="实现用户认证 API，注意：必须使用 Decimal 类型")
+```
+
+**并行调度示例**：
+
+```python
+# 前后端并行开发
+Skill("team-backend-dev")   # 并行执行
+Skill("team-frontend-dev")  # 并行执行
 ```
 
 ## 📋 并行任务簇识别规则

@@ -475,7 +475,7 @@ flake8 src/ tests/
 
     2.3 PM 任务分解（自动）
         - 识别并行簇
-        - 创建任务依赖（TaskCreate + addBlockedBy）
+        - 创建任务清单（TaskCreate）并标注依赖（TaskUpdate + addBlockedBy）
 
     2.4 Backend + Frontend 并行开发
         - Foreground 执行（用户可见进度）

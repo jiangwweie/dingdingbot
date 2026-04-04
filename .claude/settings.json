@@ -1,61 +1,52 @@
 {
-  "subagents": {
-    "pua": {
-      "name": "提示词升级助手",
-      "description": "自动优化用户提示词，添加技术约束、验收标准、边界条件",
-      "model": "sonnet",
-      "tools": ["all"],
-      "skill": "pua"
-    },
-    "backend-dev": {
-      "name": "后端开发专家",
-      "description": "负责 Python + FastAPI + asyncio 后端实现",
-      "model": "sonnet",
-      "tools": ["all"],
-      "skill": "team-backend-dev"
-    },
-    "frontend-dev": {
-      "name": "前端开发专家",
-      "description": "负责 React + TypeScript + TailwindCSS 前端实现",
-      "model": "sonnet",
-      "tools": ["all"],
-      "skill": "team-frontend-dev"
-    },
-    "qa-tester": {
-      "name": "质量保障专家",
-      "description": "负责测试策略设计、单元测试、集成测试",
-      "model": "sonnet",
-      "tools": ["all"],
-      "skill": "team-qa-tester"
-    },
-    "code-reviewer": {
-      "name": "代码审查员",
-      "description": "负责独立代码审查、架构一致性检查",
-      "model": "sonnet",
-      "tools": ["all"],
-      "skill": "team-code-reviewer"
-    },
-    "architect": {
-      "name": "架构师",
-      "description": "负责架构设计、技术选型、关联影响评估",
-      "model": "opus",
-      "tools": ["all"],
-      "skill": "team-architect"
-    },
-    "product-manager": {
-      "name": "产品经理",
-      "description": "负责需求收集、优先级排序、用户故事编写",
-      "model": "sonnet",
-      "tools": ["all"],
-      "skill": "team-product-manager"
-    },
-    "diagnostic-analyst": {
-      "name": "诊断分析师",
-      "description": "负责问题根因分析、共性问题排查",
-      "model": "opus",
-      "tools": ["all"],
-      "skill": "team-diagnostic-analyst"
-    }
+  "skills": {
+    "local": [
+      {
+        "name": "pua",
+        "description": "提示词升级助手 - 自动优化用户提示词，添加技术约束、验收标准、边界条件",
+        "path": "./.claude/skills/pua/SKILL.md"
+      },
+      {
+        "name": "team-product-manager",
+        "description": "产品经理 - 负责需求收集、优先级排序、用户故事编写、MVP范围定义",
+        "path": "./.claude/team/product-manager/SKILL.md"
+      },
+      {
+        "name": "team-project-manager",
+        "description": "项目经理 - 统一入口，负责任务分解、进度追踪、代码提交",
+        "path": "./.claude/team/project-manager/SKILL.md"
+      },
+      {
+        "name": "team-architect",
+        "description": "架构师 - 负责架构设计、技术选型、关联影响评估",
+        "path": "./.claude/team/architect/SKILL.md"
+      },
+      {
+        "name": "team-backend-dev",
+        "description": "后端开发专家 - 负责 Python + FastAPI + asyncio 后端实现",
+        "path": "./.claude/team/backend-dev/SKILL.md"
+      },
+      {
+        "name": "team-frontend-dev",
+        "description": "前端开发专家 - 负责 React + TypeScript + TailwindCSS 前端实现",
+        "path": "./.claude/team/frontend-dev/SKILL.md"
+      },
+      {
+        "name": "team-qa-tester",
+        "description": "质量保障专家 - 负责测试策略设计、单元测试、集成测试",
+        "path": "./.claude/team/qa-tester/SKILL.md"
+      },
+      {
+        "name": "team-code-reviewer",
+        "description": "代码审查员 - 负责独立代码审查、架构一致性检查、安全隐患识别",
+        "path": "./.claude/team/code-reviewer/SKILL.md"
+      },
+      {
+        "name": "team-diagnostic-analyst",
+        "description": "诊断分析师 - 负责问题根因分析、共性问题排查、技术债识别",
+        "path": "./.claude/team/diagnostic-analyst/SKILL.md"
+      }
+    ]
   },
   "mcpServers": {
     "memory": {
