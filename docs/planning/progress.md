@@ -3168,3 +3168,112 @@ a557e11 docs(v3): 调整回测数据结构为 SQLite 统一存储
 - 决策追溯：Memory MCP 永久保留架构决策
 - 用户体验：Foreground 模式可见进度
 
+
+---
+
+### 2026-04-04 23:00 - 工作流优化实施完成 ✅
+
+**会话 ID**: 20260404-005
+**开始时间**: 2026-04-04 21:30
+**结束时间**: 2026-04-04 23:00
+**持续时间**: 约 90 分钟
+
+#### 完成工作摘要
+
+**核心成果**：
+- ✅ 三阶段工作流实施完成（需求沟通 → 架构设计+开发+单元测试 → 集成测试+代码审查+交付）
+- ✅ 废弃交接 Skill（用暂停关键词触发替代）
+- ✅ Memory MCP 混合方案集成（架构决策永久保留）
+- ✅ PM 并行调度逻辑增强（开发+测试+审查全面并行，节省 37.5%-39% 时间）
+
+**修改文件**（8 个）：
+- 删除：`.claude/commands/handoff.md`
+- 更新：`.claude/commands/kaigong.md`（v8.0 Memory MCP 混合版）
+- 更新：`.claude/commands/shougong.md`（v5.0 Memory MCP 混合版）
+- 更新：`.claude/team/WORKFLOW.md`（三阶段工作流定义）
+- 更新：`.claude/team/project-manager/SKILL.md`（并行调度逻辑）
+- 更新：`CLAUDE.md`（三阶段工作流说明）
+- 新增：`docs/planning/20260404-workflow-optimization-final.md`（实施方案）
+- 新增：`docs/planning/20260404-team-config-discussion-handoff.md`（讨论记录）
+
+**Git 提交**（2 次）：
+- `c961ee7` - feat: 工作流优化 - 三阶段工作流 + Memory MCP 混合方案
+- `45cc69b` - feat: PM 并行调度逻辑增强 - 支持开发+测试+审查全面并行
+
+#### 关键决策
+
+**决策 1：三阶段工作流** ⭐⭐⭐
+- 阶段 1：需求沟通（头脑风暴，强制交互式）
+- 阶段 2：架构设计 + 开发 + 单元测试（架构设计后暂停等待审查）
+- 阶段 3：集成测试 + 代码审查 + 交付（自动收工）
+
+**决策 2：废弃交接 Skill** ⭐⭐
+- 用暂停关键词触发替代（用户输入"暂停"/"午休"/"休息"等关键词自动更新文档）
+- 简化工具（只保留开工 + 收工）
+
+**决策 3：Memory MCP 混合方案** ⭐⭐⭐
+- 架构决策：永久保留（Arch 设计后立即写入）
+- 技术发现：暂停/收工时写入
+- 今日总结：收工时写入
+- 进度日志：3 天归档
+- 上下文占用：减少 77K（progress 119K → 总计 42K）
+
+**决策 4：强制 Foreground 执行** ⭐⭐
+- 所有阶段用户可见进度
+- 禁止 background 模式
+
+**决策 5：PM 并行调度逻辑** ⭐⭐⭐
+- 后端开发和前端开发并行
+- 后端单元测试和前端组件测试并行
+- 后端代码审查和前端代码审查并行
+- 节省 37.5%-39% 时间
+
+#### 关键技术点
+
+**并行调度示例**：
+```python
+# 第一批：后端开发和前端开发并行
+agents_batch1 = [
+    Agent(subagent_type="backend-dev", description="后端 API 实现"),
+    Agent(subagent_type="frontend-dev", description="前端组件实现")
+]
+
+# 第二批：后端单元测试和前端组件测试并行
+agents_batch2 = [
+    Agent(subagent_type="qa-tester", description="后端单元测试"),
+    Agent(subagent_type="qa-tester", description="前端组件测试")
+]
+
+# 第三批：后端代码审查和前端代码审查并行
+agents_batch3 = [
+    Agent(subagent_type="code-reviewer", description="后端代码审查"),
+    Agent(subagent_type="code-reviewer", description="前端代码审查")
+]
+```
+
+**暂停关键词检测**：
+```python
+pause_keywords = [
+    "暂停", "午休", "休息", "暂停一下", "我要休息",
+    "临时离开", "等我回来", "先停一下", "pause"
+]
+```
+
+#### 预期收益
+
+| 维度 | 优化前 | 优化后 | 提升 |
+|------|--------|--------|------|
+| **用户操作** | 手动触发 7 个阶段 | 手动触发 3 个阶段 | 减少 4 次 ✅ |
+| **阶段暂停** | 无暂停机制 | 关键点暂停等待审查 | 用户可控 ✅ |
+| **上下文占用** | progress.md 119K | 总计 42K | 减少 77K ✅ |
+| **决策追溯** | 文档归档后丢失 | Memory MCP 永久保留 | 永久追溯 ✅ |
+| **执行可见性** | background 模式看不到进度 | foreground 模式可见进度 | 用户体验 ✅ |
+| **并行调度** | 串行执行 | 开发+测试+审查全面并行 | 节省 37.5%-39% 时间 ✅ |
+
+#### 下一步行动
+
+1. 测试三阶段工作流（完整走一遍流程）
+2. 测试开工 Skill（验证 Memory MCP 读取）
+3. 测试暂停机制（验证关键词触发）
+4. 测试并行调度（验证前后端并行执行）
+
