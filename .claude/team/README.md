@@ -121,10 +121,11 @@
          ▼               ▼               ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────────┐
 │  Product Mgr    │ │   Architect     │ │     Team                │
-│  (产品经理)     │ │   (架构师)      │ │     Coordinator         │
-│ - 需求收集      │ │ - 架构设计      │ │     (PM 执行代理)        │
+│  (产品经理)     │ │   (架构师)      │ │        PM                │
+│ - 需求收集      │ │ - 架构设计      │ │     (项目经理)            │
 │ - 优先级排序    │ │ - 契约设计      │ │ - 任务分解              │
 │ - 用户故事      │ │ - 影响评估      │ │ - 并行调度              │
+│                 │ │                 │ │ - 进度追踪              │
 └─────────────────┘ └─────────────────┘ └─────────────────────────┘
                                                │
                     ┌──────────────────────────┼──────────────────┐
@@ -158,7 +159,7 @@
 | 分类 | 角色 | 职责 |
 |------|------|------|
 | **决策层** | PM, PdM, Arch | 需求决策、技术决策、优先级决策 |
-| **执行层** | Coordinator, Backend, Frontend | 任务执行、代码实现 |
+| **执行层** | PM, Backend, Frontend | 任务执行、代码实现 |
 | **支持层** | QA, Reviewer, Diagnostic | 测试、审查、诊断 |
 
 ---
@@ -180,9 +181,9 @@
 - **触发场景**: 技术方案评审、架构审查、技术选型讨论
 - **使用方式**: PM 自动路由，或手动输入 `/architect`
 
-### Team Coordinator (`/coordinator`) - 团队协调器
+### PM (`/pm`) - 项目经理（统一协调入口）
 - **职责**: PM 的执行代理，专注于任务分解、并行调度、结果整合
-- **触发场景**: PM 分配任务后，由 Coordinator 执行具体调度
+- **触发场景**: PM 分配任务后，由 PM 执行具体调度
 - **使用方式**: 由 PM 调用，用户无需直接使用
 
 ### Frontend Developer (`/frontend`)
@@ -225,7 +226,7 @@
 /architect              # 架构师（技术方案）
 
 # 执行层角色
-/coordinator            # 团队协调器（PM 调用，用户无需直接使用）
+/pm            # 团队协调器（PM 调用，用户无需直接使用）
 /backend                # 后端开发
 /frontend               # 前端开发
 
@@ -252,7 +253,7 @@
    1. PdM: 评估需求优先级和 MVP 范围
    2. Arch: 设计技术方案和契约表
    3. PM: 分解任务并请求用户确认
-   4. Coordinator: 执行并行开发
+   4. PM: 执行并行开发
    5. PM: 代码提交和交付汇报
 ```
 
@@ -335,7 +336,7 @@ Agent(subagent_type="qa-tester", prompt="...")
 ❌ 禁止：src/** (业务代码), web-front/** (前端代码)
 ```
 
-#### Coordinator 边界
+#### PM 边界
 ```
 ✅ 可修改：CLAUDE.md, .claude/team/**
 ⚠️ 协调：跨角色文件变更
@@ -359,7 +360,7 @@ Agent(subagent_type="qa-tester", prompt="...")
 ```
 1. 发现冲突 → 立即停止修改
 2. 通知 PM → 说明冲突情况
-3. PM 调用 Coordinator 分析 → 重新分配任务
+3. PM 调用 PM 分析 → 重新分配任务
 4. 按新分配执行 → 验证无冲突后继续
 ```
 
@@ -367,9 +368,9 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 | 场景 | 原因 | 解决方案 |
 |------|------|----------|
-| API 字段不匹配 | 后端改了返回结构，前端未更新 | Coordinator 同步分配两个任务 |
+| API 字段不匹配 | 后端改了返回结构，前端未更新 | PM 同步分配两个任务 |
 | 测试失败需改业务代码 | QA 发现 Bug | QA 报告 → PM 分配给对应 Dev |
-| 多人改同一文件 | 任务分解不清 | PM 调用 Coordinator 重新分配 |
+| 多人改同一文件 | 任务分解不清 | PM 调用 PM 重新分配 |
 | 需求变更 | PdM 调整优先级 | PM 重新评估任务计划 |
 
 ---
@@ -378,7 +379,7 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 ### ✅ 推荐做法
 - 日常对话首选 PM 作为统一入口
-- 完整功能开发走完整工作流（PdM → Arch → PM → Coordinator）
+- 完整功能开发走完整工作流（PdM → Arch → PM → PM）
 - 独立任务直接调用对应角色
 - 测试先行：先写测试再实现功能
 - 并行执行：前端和后端任务同时进行
@@ -401,7 +402,7 @@ Agent(subagent_type="qa-tester", prompt="...")
 ├── product-manager/SKILL.md    # 产品经理（需求评估）
 ├── architect/SKILL.md          # 架构师（技术设计）
 ├── project-manager/SKILL.md    # 项目经理（统一入口）
-├── team-coordinator/SKILL.md   # 团队协调器（PM 执行代理）
+├── team-pm/SKILL.md   # 团队协调器（PM 执行代理）
 ├── frontend-dev/SKILL.md       # 前端开发专家
 ├── backend-dev/SKILL.md        # 后端开发专家
 ├── qa-tester/SKILL.md          # 质量保障专家
@@ -486,7 +487,7 @@ Project Manager 工作流:
   2. 需求类 → 转 PdM
   3. 技术类 → 转 Arch
   4. 任务类 → 调用 planning-with-files-zh 制定计划
-  5. 请求用户确认 → 调用 Coordinator 执行
+  5. 请求用户确认 → 调用 PM 执行
   6. 完成前 → 调用 verification-before-completion
 
 Frontend Dev 工作流:
@@ -517,7 +518,7 @@ Diagnostic Analyst 工作流:
   5. 根因分析 → 调用 brainstorming 进行 5 Why 分析
   6. 输出报告 → 调用 planning-with-files-zh 整理诊断报告
 
-Coordinator 工作流:
+PM 工作流:
   1. 接收 PM 任务计划
   2. 阅读契约表
   3. 分解任务 → TaskCreate
@@ -542,7 +543,7 @@ TaskCreate(subject="前端实现", addBlockedBy=["T1"])  # 等待后端完成
 ```
 
 ### 问题 3: 接口定义不一致
-**解决**: Team Coordinator 主持接口对齐会议，输出契约文档
+**解决**: Team PM 主持接口对齐会议，输出契约文档
 
 ---
 

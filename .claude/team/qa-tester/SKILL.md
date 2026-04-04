@@ -310,22 +310,22 @@ web-front/src/                # 前端业务代码（禁止修改实现）
 
 ### 🔶 需要协调的文件
 ```
-pytest.ini                    # Pytest 配置（需 Coordinator 协调）
-vitest.config.ts              # Vitest 配置（需 Coordinator 协调）
+pytest.ini                    # Pytest 配置（需 PM 协调）
+vitest.config.ts              # Vitest 配置（需 PM 协调）
 ```
 
 ### 测试发现 Bug 时的流程
 1. **不要直接修改业务代码**来让测试通过
 2. 运行测试确认失败
 3. 分析失败原因
-4. 通知 Coordinator，说明：
+4. 通知 PM，说明：
    - 测试文件路径
    - 失败的测试名称
    - 失败原因分析
    - 建议修复的责任方（frontend-dev 或 backend-dev）
 
 ### 冲突解决
-- 业务代码和测试都需要修改时，**先通知 Coordinator 分解任务**
+- 业务代码和测试都需要修改时，**先通知 PM 分解任务**
 - 后端 dev 和前端 dev 的修改导致测试失败，**让他们各自修复**，你负责验证
 
 ## 快速命令

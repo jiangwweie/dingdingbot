@@ -9,8 +9,8 @@
 ### 方式 1：最简单 - 直接描述需求
 
 ```bash
-# 输入 /coordinator 然后描述你的需求
-/coordinator
+# 输入 /pm 然后描述你的需求
+/pm
 
 我想添加一个策略预览功能，用户可以：
 1. 在策略编辑器中点击"测试"按钮
@@ -19,7 +19,7 @@
 ```
 
 **会发生什么**：
-1. Coordinator 自动分解任务
+1. PM 自动分解任务
 2. 并行调用 Backend、Frontend、QA
 3. 每个角色只修改自己负责的文件
 4. 最后汇总输出
@@ -61,9 +61,9 @@
 
 ### 示例：开发"策略预览"功能
 
-#### 步骤 1：启动 Coordinator
+#### 步骤 1：启动 PM
 ```bash
-/coordinator
+/pm
 ```
 
 #### 步骤 2：描述需求
@@ -235,7 +235,7 @@ Task X 依赖 Task Y 完成，但 Task Y 卡住了
 - `.claude/team/frontend-dev/SKILL.md` - 前端角色详细规范
 - `.claude/team/backend-dev/SKILL.md` - 后端角色详细规范
 - `.claude/team/qa-tester/SKILL.md` - 测试角色详细规范
-- `.claude/team/team-coordinator/SKILL.md` - 协调员详细规范
+- `.claude/team/project-manager/SKILL.md` - 项目经理详细规范 ⭐
 
 ---
 

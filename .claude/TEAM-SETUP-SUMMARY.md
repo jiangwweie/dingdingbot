@@ -29,7 +29,7 @@
 
 | 技能 | 命令 | 用途 |
 |------|------|------|
-| `team-coordinator` | `/coordinator` | 任务分解与调度 |
+| `project-manager` | `/pm` | 任务分解与调度 |
 | `backend-dev` | `/backend` | 后端开发 |
 | `frontend-dev` | `/frontend` | 前端开发 |
 | `qa-tester` | `/qa` | 测试专家 |
@@ -43,7 +43,7 @@
 
 | 角色 | 文件 | 更新内容 |
 |------|------|----------|
-| Coordinator | `team/team-coordinator/SKILL.md` | MCP 查询权限、调度指南 |
+| PM | `team/project-manager/SKILL.md` | MCP 查询权限、调度指南 |
 | Backend Dev | `team/backend-dev/SKILL.md` | TDD、类型检查、MCP 查询 |
 | Frontend Dev | `team/frontend-dev/SKILL.md` | UI 设计、E2E 测试、Puppeteer |
 | QA Tester | `team/qa-tester/SKILL.md` | 测试技能、数据库查询 |
@@ -72,7 +72,7 @@
 
 ### 文件修改权限
 
-| 目录 | Backend | Frontend | QA | Reviewer | Coordinator |
+| 目录 | Backend | Frontend | QA | Reviewer | PM |
 |------|---------|----------|----|----------|-------------|
 | `src/` | ✅ | ❌ | ⚠️ | ✅ | ✅ |
 | `web-front/` | ❌ | ✅ | ⚠️ | ✅ | ✅ |
@@ -89,7 +89,7 @@
 | Frontend | ❌ | ✅ | ❌ | ✅ | ✅ |
 | QA | ✅ | ✅ | ✅ | ⚠️ | ❌ |
 | Reviewer | ⚠️ | ✅ | ❌ | ❌ | ❌ |
-| Coordinator | ⚠️ | ✅ | ⚠️ | ❌ | ❌ |
+| PM | ⚠️ | ✅ | ⚠️ | ❌ | ❌ |
 
 ---
 
@@ -98,8 +98,8 @@
 ### 新功能开发 (TDD + 类型检查)
 
 ```bash
-# 1. Coordinator 分解任务
-/coordinator 实现移动止损功能
+# 1. PM 分解任务
+/pm 实现移动止损功能
 
 # 2. Backend 调用 TDD 技能
 /backend
@@ -116,7 +116,7 @@
 # 5. Reviewer 审查
 /reviewer 审查移动止损代码
 
-# 6. Coordinator 整合交付
+# 6. PM 整合交付
 ```
 
 ### Bug 修复流程
@@ -142,7 +142,7 @@ pytest tests/unit/test_xxx.py -v
 # 5. Reviewer 审查
 /reviewer 审查 Bug 修复
 
-# 6. Coordinator 交付
+# 6. PM 交付
 ```
 
 ---

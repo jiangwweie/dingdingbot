@@ -12,7 +12,7 @@
 
 | 技能名称 | 命令 | 用途 |
 |---------|------|------|
-| `team-coordinator` | `/coordinator` | 团队协调器 - 任务分解与调度 |
+| `project-manager` | `/pm` | 团队协调器 - 任务分解与调度 |
 | `backend-dev` | `/backend` | 后端开发专家 |
 | `frontend-dev` | `/frontend` | 前端开发专家 |
 | `qa-tester` | `/qa` | 质量保障专家 |

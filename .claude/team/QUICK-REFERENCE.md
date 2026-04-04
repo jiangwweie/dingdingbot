@@ -10,7 +10,7 @@
 
 | 角色 | 命令 | 核心职责 | 关键技能 |
 |------|------|----------|----------|
-| **Coordinator** | `/coordinator` | 任务分解、调度 | 并行调度、进度追踪 |
+| **PM** | `/pm` | 任务分解、调度 | 并行调度、进度追踪 |
 | **Backend Dev** | `/backend` | 后端开发 | `/tdd`, `/type-check` |
 | **Frontend Dev** | `/frontend` | 前端开发 | `/ui-ux`, `/webapp-testing` |
 | **QA Tester** | `/qa` | 测试专家 | `/tdd`, `/webapp-testing` |
@@ -176,7 +176,7 @@ Bash(python3 scripts/check_quantize.py)
 
 ---
 
-### Team Coordinator (`/coordinator`)
+### Team PM (`/pm`)
 
 **核心技能**:
 ```bash
@@ -214,8 +214,8 @@ mcp__sqlite__read_query: |
 ### 新功能开发 (TDD)
 
 ```bash
-# 1. Coordinator 分解任务
-/coordinator 实现移动止损功能
+# 1. PM 分解任务
+/pm 实现移动止损功能
 
 # 2. Backend 调用 TDD 技能
 /backend
@@ -232,7 +232,7 @@ mcp__sqlite__read_query: |
 # 5. Reviewer 审查
 /reviewer 审查移动止损代码
 
-# 6. Coordinator 整合
+# 6. PM 整合
 ```
 
 ### Bug 修复
