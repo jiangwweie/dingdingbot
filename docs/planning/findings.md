@@ -2751,3 +2751,96 @@ def client(order_repo):
 ---
 
 *最后更新: 2026-04-03 - TEST-2 asyncio.Lock Bug 发现*
+
+---
+
+## 配置管理系统架构重构决策
+
+> **发现时间**: 2026-04-04
+> **决策者**: 用户 + P8 架构师
+> **重要性**: ⭐⭐⭐⭐⭐ 系统核心架构
+
+### 一、问题诊断
+
+**现状问题**:
+1. ConfigManager 从 YAML 读取配置，与设计意图不符（YAML 应仅用于备份恢复）
+2. 配置双源问题：数据库 + YAML 混用
+3. `config_profiles` 表冗余，Profile 概念不必要
+4. 启动方式不一致导致 503 错误
+
+### 二、架构决策
+
+**决策 1：移除 Profile 概念**
+- **理由**: 环境区分通过环境变量前缀实现，配置可通过页面维护 + 导入导出
+- **影响**: 删除 `config_profiles` 表，简化系统
+
+**决策 2：配置入口改为数据库**
+- **数据源**: SQLite 数据库为唯一配置源
+- **YAML 角色**: 仅用于导入、导出、备份、恢复
+- **默认值**: 通过初始化脚本 `scripts/init_default_config.py` 写入
+
+**决策 3：7 张表结构**
+```
+strategy_configs     - 策略配置（单激活策略约束）
+risk_configs         - 风控配置（单例表，热重载）
+system_configs       - 系统配置（单例表，需重启生效）
+symbol_configs       - 币池配置（核心币种不可删除）
+notification_configs - 通知渠道配置
+config_snapshots     - 快照版本控制
+config_history       - 变更审计（SQLite 触发器自动记录）
+```
+
+**决策 4：热重载分层**
+| 配置类型 | 热重载 | 说明 |
+|----------|--------|------|
+| 风控配置 | ✅ | 立即生效 |
+| 策略配置 | ✅ | 立即生效 |
+| 币池配置 | ✅ | 立即生效 |
+| 通知配置 | ✅ | 立即生效 |
+| 系统配置 | ⚠️ | 需重启生效 |
+
+### 三、API 端点设计
+
+```
+GET    /api/v1/config                      - 获取全部配置
+PUT    /api/v1/config/risk                 - 更新风控（热重载）
+PUT    /api/v1/config/system               - 更新系统（需重启）
+GET    /api/v1/config/symbols              - 币池列表
+POST   /api/v1/config/symbols              - 添加币种
+DELETE /api/v1/config/symbols/{id}         - 删除币种
+GET    /api/v1/config/notifications        - 通知渠道列表
+POST   /api/v1/config/notifications        - 添加通知渠道
+DELETE /api/v1/config/notifications/{id}   - 删除通知渠道
+POST   /api/v1/config/export               - 导出 YAML
+POST   /api/v1/config/import/preview       - 预览导入
+POST   /api/v1/config/import/confirm       - 确认导入
+GET    /api/config/snapshots               - 快照列表
+POST   /api/config/snapshots               - 创建快照
+POST   /api/config/snapshots/{id}/activate - 回滚快照
+GET    /api/v1/history                     - 变更历史
+```
+
+### 四、改动影响评估
+
+| 维度 | 评估 |
+|------|------|
+| 改动范围 | **小**（Clean Architecture 隔离了变更） |
+| 外部调用者 | 无需改动（ConfigManager 对外接口不变） |
+| 核心改动 | ConfigManager 内部实现 + 新建 ConfigRepository |
+
+**不需要改动的模块**:
+- SignalPipeline - 调用接口不变
+- api.py 端点逻辑 - 调用接口不变
+- domain/models.py - 不变
+- 前端代码 - 不变
+
+### 五、待输出文档
+
+- [ ] 完整架构设计文档（含字段定义）
+- [ ] 数据库迁移脚本
+- [ ] 初始化默认配置脚本
+- [ ] 前后端契约表
+
+---
+
+*最后更新: 2026-04-04 - 配置管理系统架构重构决策*
