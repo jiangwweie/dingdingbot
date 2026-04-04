@@ -1,56 +1,59 @@
 # 盯盘狗 Agent Team 开工/收工规范
 
-**版本**: v3.0 (智能精简版)
-**最后更新**: 2026-04-03 - 采用智能精简，减少 92% 上下文占用
+**版本**: v4.0 (三阶段工作流 + Memory MCP 混合版)
+**最后更新**: 2026-04-04 - 采用三阶段工作流 + Memory MCP 混合方案
 
 ---
 
 ## ⚠️ 全局强制要求 (红线)
 
-### 所有成员必须使用 `planning-with-files-zh` 管理进度（智能精简版）
+### 所有成员必须使用 `planning-with-files-zh` 管理进度（Memory MCP 混合版）
 
 **禁止使用内置的 `writing-plans` / `executing-plans` 技能**
 
-**强制使用**: `planning-with-files-zh` 技能（智能精简）
+**强制使用**: `planning-with-files-zh` 技能（Memory MCP 混合版）
 
 **原因**:
 - 内置 planning 不创建文件，上下文丢失后进度无法追溯
 - `planning-with-files-zh` 强制创建持久化文件到 `docs/planning/` 目录
 - 支持会话恢复和进度回溯
-- **v3.0 新增**：智能精简，减少 92% 上下文占用（从 252K → 20K）⭐
+- **v4.0 新增**：Memory MCP 混合方案，架构决策永久保留 ⭐
 
-**三文件管理规范（智能精简版）**:
+**三文件管理规范（Memory MCP 混合版）**:
 
-| 文件 | 路径 | 用途 | 更新时机 | 大小限制 |
+| 文件 | 路径 | 用途 | 更新时机 | 保留时长 |
 |------|------|------|----------|----------|
-| **task_plan.md** | `docs/planning/task_plan.md` | 任务计划与阶段追踪 | 每个阶段完成后更新状态 | **≤ 15K**（仅当前阶段）⭐ |
-| **findings.md** | `docs/planning/findings.md` | 研究发现与技术笔记 | 发现重要技术洞见时立即更新 | **≤ 82K**（按主题标签分类）⭐ |
-| **progress.md** | `docs/planning/progress.md` | 进度日志与会话记录 | 每个会话结束时更新 | **≤ 30K**（仅最近 3 天）⭐ |
+| **Memory MCP** | Memory MCP 知识图谱 | 架构决策、技术选型、踩坑记录 | Arch 设计后立即写入 | **永久保留** ⭐ |
+| **findings.md** | `docs/planning/findings.md` | 研究发现与技术笔记 | 发现重要技术洞见时立即更新 | **7 天归档** |
+| **progress.md** | `docs/planning/progress.md` | 进度日志与会话记录 | 每个会话结束时更新 | **3 天归档** |
 
-**v3.0 智能精简特性** ⭐:
+**v4.0 Memory MCP 混合特性** ⭐:
 
-1. **progress.md 分段读取**:
+1. **Memory MCP 永久保留**:
+   - 架构决策（如选择 REST API 而非 WebSocket）
+   - 技术选型（如使用 Optuna 而非手动调参）
+   - 架构约束（如 Clean Architecture 分层约束）
+   - 技术踩坑（如 MCP 配置踩坑记录）
+   - **效果**: 永久追溯，上下文丢失后仍可恢复 ⭐⭐⭐
+
+2. **progress.md 分段读取**:
    - 仅保留最近 3 天详细日志
-   - 新增"今日待办"章节（快速访问）
    - 超过 3 天自动归档到 `archive/progress-archive.md`
    - **效果**: 119K → 30K（减少 89K）
 
-2. **findings.md 智能匹配**:
+3. **findings.md 智能匹配**:
    - 按主题标签分类（asyncio, api, test, frontend）
    - 开工时仅读取相关发现（智能匹配标签）
    - **效果**: 82K → 10K（减少 72K）
 
-3. **task_plan.md 精简读取**:
-   - 仅保留当前阶段任务
-   - 已完成任务归档到 `archive/task-plan-archive.md`
-   - **效果**: 51K → 15K（减少 36K）
-
 **违反处理**: Code Reviewer 在审查时必须检查是否使用了 `planning-with-files-zh`，未使用则标记为 P0 问题。
 
 **相关技能**:
-- `/kaigong` (v4.0 智能精简版) - 开工时智能提取今日待办和相关发现
-- `/shougong` (v4.0 智能精简版) - 收工时智能更新文档并自动归档
-- `/handoff` (v2.0 精简版) - 会话交接（仅保留技术决策/问题分析）
+- `/kaigong` (v8.0 Memory MCP 混合版) - 开工时读取 Memory MCP + progress + findings
+- `/shougong` (v5.0 Memory MCP 混合版) - 收工时写入 Memory MCP（今日总结）+ 自动归档
+
+**废弃技能**:
+- ~~`/handoff`~~ - 已废弃，用暂停关键词触发替代（用户输入"暂停"/"午休"/"休息"等关键词自动更新文档）
 
 ---
 
@@ -429,74 +432,127 @@ flake8 src/ tests/
 
 ---
 
-## 完整工作流程示例 (v2.0 - 交互式增强)
+## 完整工作流程示例 (v4.0 - 三阶段工作流 + Memory MCP 混合版)
 
 ### 场景：开发"策略预览功能"（复杂任务）
 
 ```
-【阶段 -2】需求收集 (PdM)
-   ↓ 【交互式沟通】与用户对话澄清需求（至少 3 个澄清问题）
-   ↓ 【交互式沟通】启动 brainstorming 技能探索需求
-   ↓ 【交互式沟通】复述需求并获得用户确认
-   ↓ 输出：docs/products/backlog.md
+【阶段 1】需求沟通（头脑风暴，强制交互式）
 
-【阶段 -1】产品定义 (PdM)
-   ↓ 【交互式沟通】写 PRD 前与用户确认需求理解
-   ↓ 输出：docs/products/preview-brief.md
+  执行方式：Foreground（用户可见）
+  触发命令：/product-manager
 
-【阶段 0】架构设计 (Arch)
-   ↓ 【交互式沟通】与用户讨论技术方案选项（至少 2 个方案）
-   ↓ 【交互式沟通】启动 brainstorming 技能探索方案
-   ↓ 【交互式沟通】解释 trade-off，用户确认技术方向
-   ↓ 输出：docs/arch/preview-design.md + 契约表
-   ↓ 关联影响评估：docs/arch/preview-impact-analysis.md
+  执行步骤：
+    1.1 PdM 需求澄清（至少 3 个问题）
+    1.2 用户确认需求理解（交互式）
+    1.3 PdM 输出 PRD 文档
 
-【阶段 1】任务分解 (PM)
-   ↓ 阅读架构设计，分解任务
-   ↓ 输出：docs/planning/preview-task-plan.md
-   ↓ ⚠️ 请求用户确认（产品范围、技术方案、任务计划）
+  输出文档：
+    - docs/products/<feature>-brief.md（PRD）
+    - Memory MCP（需求背景）
 
-【阶段 2】并行开发 (Coordinator + Dev Team)
-   ↓ PM 调用 Coordinator 执行
-   ↓ Coordinator 调度 Backend/Frontend/QA
-   ↓ Backend Dev → 调用 code-simplifier 优化 → 运行 pytest
-   ↓ Frontend Dev → 调用 ui-ux-pro-max 设计 → 运行 npm run build
-   ↓ QA Tester → 编写测试 → 运行覆盖率检查
+  用户审查点：需求理解确认 ⭐
 
-【阶段 3】审查验证 (Reviewer)
-   ↓ Reviewer 审查代码
-   ↓ 发现问题 → 返回对应角色修复
+  暂停触发：用户输入"暂停"/"午休"/"休息"等关键词
+    → 自动更新 progress.md + findings.md + Memory MCP
+    → Git 提交（不推送）
 
-【阶段 4】测试执行 (QA)
-   ↓ QA 运行完整测试套件
-   ↓ 生成测试报告
 
-【阶段 5】交付汇报 (PM)
-   ↓ PM 生成交付报告
-   ↓ git commit & push
-   ↓ 通知用户验收
+【阶段 2】架构设计 + 开发 + 单元测试
 
-【阶段 6】收工总结 (PM)
-   ↓ 更新 docs/planning/progress.md
-   ↓ 更新 docs/delivery/preview-report.md
+  执行方式：Foreground（用户可见）
+  触发命令：/architect → /pm
+
+  执行步骤：
+    2.1 Arch 架构设计（可选交互式）
+        - 输出：ADR + 契约表
+        - Memory MCP：立即写入架构决策 ⭐
+        - ⚠️ 暂停等待用户审查 ⭐⭐⭐
+
+    2.2 用户审查架构方案（交互式）
+        - 用户回复"确认" → 继续
+        - 用户回复"修改" → 返回 2.1
+
+    2.3 PM 任务分解（自动）
+        - 识别并行簇
+        - 创建任务依赖（TaskCreate + addBlockedBy）
+
+    2.4 Backend + Frontend 并行开发
+        - Foreground 执行（用户可见进度）
+        - 使用 Agent 工具并行调度
+
+    2.5 QA 单元测试
+        - 后端单元测试（pytest）
+        - 前端组件测试（React Testing Library）
+
+    2.6 Reviewer 实时审查（每个模块完成后）
+
+  用户确认点：测试前确认（耗时 30-60 分钟）⭐
+
+  输出文档：
+    - 代码文件（src/, web-front/）
+    - 单元测试文件（tests/unit/）
+    - docs/designs/<feature>-contract.md（契约表）
+    - Memory MCP（架构决策）
+
+  暂停触发：用户输入"暂停"/"午休"/"休息"等关键词
+    → 自动更新 progress.md + findings.md + Memory MCP
+    → Git 提交（不推送）
+
+
+【阶段 3】集成测试 + 代码审查 + 交付
+
+  执行方式：Foreground（用户可见）
+  触发命令：/pm → /shougong
+
+  执行步骤：
+    3.1 QA 集成测试
+        - 前端+后端 API 交互（Mock API）
+        - 数据库集成测试
+
+    3.2 QA E2E 测试（Playwright）
+        - 关键路径覆盖
+
+    3.3 Reviewer 最终审查
+        - 架构一致性检查
+        - 安全隐患识别（OWASP Top 10）
+        - 代码质量评估
+
+    3.4 PM 交付汇报
+        - 生成交付报告
+        - 汇报完成情况
+
+    3.5 收工（自动）
+        - 更新 progress.md + findings.md
+        - 写入 Memory MCP（今日总结）
+        - Git 提交 + 推送
+        - 自动归档旧文档（超过 7 天交接文档，超过 3 天进度日志）
+
+  输出文档：
+    - 测试报告（docs/test-reports/）
+    - 交付文档（docs/delivery/）
+    - Git 推送
+
+  用户验收点：PM 汇报，用户验收 ⭐
 ```
 
 ---
 
-## 交互式沟通检查点 (Interactive Checkpoints)
+## 交互式沟通检查点 (v4.0 - 三阶段)
 
 | 阶段 | 负责人 | 检查点 | 产出物 |
 |------|--------|--------|--------|
-| **阶段 -2** | PdM | 需求澄清对话，至少 3 个问题 | 需求理解确认 |
-| **阶段 -1** | PdM | 写 PRD 前确认需求理解 | PRD 文档 |
-| **阶段 0** | Arch | 技术方案共创，至少 2 个方案 | 技术方向确认 |
-| **阶段 1** | PM | 任务计划确认（范围/排期） | 任务计划批准 |
+| **阶段 1** | PdM | 需求澄清对话，至少 3 个问题 | 需求理解确认 + PRD 文档 |
+| **阶段 2** | Arch | 架构方案审查，至少 2 个方案 | 技术方向确认 + ADR + 契约表 ⭐ |
+| **阶段 2** | PM | 测试前确认（耗时 30-60 分钟） | 测试执行批准 ⭐ |
+| **阶段 3** | PM | 交付汇报，用户验收 | 交付确认 |
 
 **核心原则**:
-- **先对话，后文档** - 任何文档编写前必须先与用户交互式澄清
-- **先共创，后决策** - 技术方案选项与用户共创，让用户理解 trade-off
-- **确认前置** - 用户确认环节从第 4 步提前到第 0/1/2 步
-- **文档是对话的产物** - 文档是对话结果的记录，不是决策本身
+- **先对话，后文档** - 阶段 1 强制交互式沟通（头脑风暴）
+- **先共创，后决策** - 阶段 2 架构方案选项与用户共创
+- **关键点暂停** - 阶段 2 架构设计后暂停等待用户审查 ⭐⭐⭐
+- **文档是对话的产物** - 文档是对话结果的记录
+- **Memory MCP 永久保留** - 架构决策永久追溯 ⭐
 
 ---
 

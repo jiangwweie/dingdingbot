@@ -14,6 +14,26 @@ license: Proprietary
 3. 【强制】任务分解必须识别并行簇和依赖关系
 ```
 
+## ⭐ v4.0 新增：强制 Foreground 执行 + 暂停机制
+
+**强制 Foreground 执行**：
+- ✅ 所有阶段必须使用 Foreground 执行（用户可见进度）
+- ❌ 禁止使用 background 模式（`run_in_background=True`）
+- 理由：用户需要审查架构方案、确认测试执行
+
+**暂停机制**：
+- 用户输入"暂停"/"午休"/"休息"等关键词
+- Agent 自动更新文档（progress.md + findings.md + Memory MCP）
+- Git 提交（不推送）
+- 下次开工自动读取
+
+**Memory MCP 集成**：
+- Arch 设计后：立即写入架构决策到 Memory MCP
+- 收工时：写入今日总结到 Memory MCP
+- 开工时：读取 Memory MCP（架构决策永久追溯）
+
+---
+
 ## 🟢 需求处理流程
 
 ```

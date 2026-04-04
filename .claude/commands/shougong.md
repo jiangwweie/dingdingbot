@@ -1,17 +1,18 @@
-# 收工技能 - 全套收工 (v4.0 智能精简版)
+# 收工技能 - 全套收工 (v5.0 Memory MCP 混合版)
 
 **触发词**: 收工、结束工作、结束、下班、shougong
 
-**版本**: v4.0 (智能精简 - 减少 92% 上下文占用)
+**版本**: v5.0 (Memory MCP 混合版)
 
 **核心原则**: 全自动执行，无需用户确认，仅在异常时介入
 
-**v4.0 核心改进** ⭐:
+**v5.0 核心改进** ⭐:
+- ✅ Memory MCP 写入（今日总结永久保留）
 - ✅ 自动归档交接文档（超过 7 天）
 - ✅ 自动归档进度日志（超过 3 天）
 - ✅ 智能更新技术发现（仅追加相关发现）
 - ✅ 智能更新任务计划（仅更新当前阶段）
-- ✅ 上下文占用从 267K → 20K（减少 92%）
+- ✅ 上下文占用从 267K → 42K（减少 84%）
 
 ---
 
@@ -273,45 +274,71 @@ with open("docs/planning/board.md", "w") as f:
 
 ---
 
-### 阶段 3: 交接文档生成
+### 阶段 3: 写入 Memory MCP ⭐ (v5.0 新增)
 
-创建 `docs/planning/{{YYYY-MM-DD}}-handoff.md`:
+```python
+from datetime import datetime
 
-```markdown
-# {{YYYY-MM-DD}} 会话交接
+def write_daily_summary_to_memory():
+    """写入今日总结到 Memory MCP（永久保留）"""
 
-## 完成工作
-[根据 git diff 推断的详细总结]
+    # 1. 从 Git 提交推断今日工作
+    today_commits = get_today_commits()
+    completed_tasks = infer_completed_tasks(today_commits)
+    modified_files = get_modified_files()
 
-## 修改文件清单
-[按类型分组：后端/前端/测试/文档]
+    # 2. 从 progress.md 提取今日总结
+    today_summary = extract_today_summary()
 
-### 后端 (src/)
-- `src/xxx.py` - 功能说明
+    # 3. 从 findings.md 提取今日技术发现
+    today_findings = extract_today_findings()
 
-### 前端 (web-front/)
-- `web-front/src/xxx.tsx` - 功能说明
+    # 4. 写入 Memory MCP
+    mcp__memory__create_entities(
+        entities=[
+            {
+                "entityType": "daily_summary",
+                "name": f"总结-{datetime.now().strftime('%Y-%m-%d')}",
+                "observations": [
+                    f"完成任务：{completed_tasks}",
+                    f"修改文件：{modified_files}",
+                    f"Git 提交：{today_commits}",
+                    f"技术发现：{today_findings}",
+                    f"下一步：{get_next_steps()}"
+                ]
+            }
+        ]
+    )
 
-### 测试 (tests/)
-- `tests/test_xxx.py` - 测试说明
+    # 5. 写入技术发现（如有重要发现）
+    for finding in today_findings:
+        if finding.get('importance') == 'high':
+            mcp__memory__create_entities(
+                entities=[
+                    {
+                        "entityType": "technical_finding",
+                        "name": f"发现-{finding['title']}",
+                        "observations": [
+                            finding['content'],
+                            f"标签：{finding['tags']}",
+                            f"日期：{datetime.now().strftime('%Y-%m-%d')}"
+                        ]
+                    }
+                ]
+            )
 
-### 文档 (docs/)
-- `docs/planning/tasks.json` - 任务状态更新
-- `docs/planning/board.md` - 看板更新
-
-## 任务状态
-
-| 任务 ID | 任务名称 | 状态变更 |
-|---------|----------|----------|
-| T1 | xxx | pending → completed |
-| T2 | xxx | in_progress → completed |
-
-## 待完成任务
-[从 tasks.json 读取 pending 状态的任务]
-
-## 相关文件索引
-[本次修改涉及的文件路径]
+    print("✅ 已写入 Memory MCP（今日总结 + 技术发现）")
 ```
+
+**Memory MCP 使用场景**：
+- ✅ 今日总结（永久保留）：完成任务、修改文件、下一步计划
+- ✅ 技术发现（永久保留）：重要技术发现、踩坑记录
+- ✅ 架构决策（Arch 设计后已写入）：架构方案、技术选型
+
+**不写入 Memory 的内容**：
+- ❌ 临时对话上下文：用会话记忆即可
+- ❌ 代码片段：用文件系统更好
+- ❌ 详细日志：用 progress.md（3 天归档）
 
 ---
 
@@ -346,18 +373,15 @@ git push
 ```
 🐶 收工完成 - {{YYYY-MM-DD}}
 
-📦 归档交接文档：
-  - {{archived_files}} (已归档)
-  归档数量: {{count}}
-
 📝 变更统计:
    M docs/planning/progress.md
    M docs/planning/findings.md (如有)
    M docs/planning/task_plan.md (如有)
    U docs/planning/tasks.json (任务状态更新)
    U docs/planning/board.md (看板更新)
-   A docs/planning/{{YYYY-MM-DD}}-handoff.md
    [其他业务文件变更...]
+
+💾 Memory MCP：今日总结已写入（永久保留）
 
 💾 Git 提交：[短哈希] [提交信息]
 

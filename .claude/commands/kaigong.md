@@ -1,16 +1,21 @@
-# 开工技能 - v7.5 智能分层加载版
+# 开工技能 - v8.0 Memory MCP 混合方案版
 
-**触发词**: 开工、开始工作、开始、kaigong
+**触发词**: 开工、开始工作、开始、kaigong、暂停、午休、休息
 
-**版本**: v7.5 (智能分层加载 - 总计 9K)
+**版本**: v8.0 (Memory MCP 混合方案 - 总计约 42K)
 
 **核心改进** ⭐⭐⭐:
-- ✅ 启动极快（3.5K）- 红线规则 + Git + 待办标题 + 决策摘要
-- ✅ 用户选择后完整信息（5.5K）- 背景 + 决策 + 方案 + 依赖
-- ✅ 总计控制在 10K 内（实际 9K）
-- ✅ 核心约束必须加载（红线规则）
-- ✅事项背景和技术决策必须加载
+- ✅ Memory MCP 集成（架构决策永久保留）
+- ✅ 暂停关键词检测（自动更新文档）
+- ✅ 智能加载策略（Memory + progress + findings + 红线规则）
+- ✅ 总计控制在 50K 内（实际约 42K）
+- ✅ 核心约束必须加载（红线规则 2K）
+- ✅ 事项背景和技术决策必须加载（Memory MCP 不限）
 - ✅ 交互式引导（用户自主选择待办）
+
+**暂停关键词列表**：
+- "暂停"、"午休"、"休息"、"暂停一下"、"我要休息"
+- "临时离开"、"等我回来"、"先停一下"、"pause"
 
 ---
 
@@ -582,25 +587,216 @@ def startup_first_time():
 
 ---
 
-## v7.5 核心优势
+## 🆕 v8.0 新增功能：Memory MCP 集成 ⭐⭐⭐
 
-1. ✅ **启动极快**（3.5K）- 比 v4.0 减少 85%
-2. ✅ **核心约束必须加载**（红线规则 2K）- 架构安全、流程合规
-3. ✅ **事项背景必须加载**（1K）- 理解任务由来
-4. ✅ **技术决策必须加载**（2K）- 完整版决策详情
-5. ✅ **用户自主选择**（交互式引导）- 不强迫加载无关信息
-6. ✅ **总计控制在 10K内**（实际 9K）- 完全符合要求
+### Memory MCP 读取逻辑
+
+```python
+def read_memory_mcp():
+    """读取 Memory MCP 中的架构决策和技术发现"""
+
+    # 1. 读取整个知识图谱
+    memory_entities = mcp__memory__read_graph()
+
+    # 2. 提取架构决策
+    arch_decisions = [
+        e for e in memory_entities
+        if e.get('entityType') == 'architecture_decision'
+    ]
+
+    # 3. 提取技术发现
+    tech_findings = [
+        e for e in memory_entities
+        if e.get('entityType') == 'technical_finding'
+    ]
+
+    # 4. 提取今日总结
+    daily_summaries = [
+        e for e in memory_entities
+        if e.get('entityType') == 'daily_summary'
+    ]
+
+    return {
+        'arch_decisions': arch_decisions,
+        'tech_findings': tech_findings,
+        'daily_summaries': daily_summaries
+    }
+```
+
+**Memory MCP 使用场景**：
+- ✅ 架构决策（永久保留）：如选择 REST API 而非 WebSocket
+- ✅ 技术选型（永久保留）：如使用 Optuna 而非手动调参
+- ✅ 架构约束（永久保留）：如 Clean Architecture 分层约束
+- ✅ 技术踩坑（永久保留）：如 MCP 配置踩坑记录
+
+**不推荐场景**：
+- ❌ 临时对话上下文：用会话记忆即可
+- ❌ 代码片段存储：用文件系统更好
+- ❌ 大型文档归档：知识图谱不适合大文本
+
+---
+
+## 🆕 v8.0 新增功能：暂停关键词检测 ⭐⭐⭐
+
+### 暂停关键词触发逻辑
+
+```python
+def detect_pause_keywords(user_input: str) -> bool:
+    """检测用户输入的暂停关键词"""
+
+    pause_keywords = [
+        "暂停", "午休", "休息", "暂停一下", "我要休息",
+        "临时离开", "等我回来", "先停一下", "pause"
+    ]
+
+    return any(keyword in user_input.lower() for keyword in pause_keywords)
+
+
+def handle_pause_session():
+    """处理会话暂停（自动更新文档）"""
+
+    print("⏸️ 会话暂停\n正在自动更新文档...")
+
+    # 1. 更新 progress.md（今日工作）
+    append_today_progress()
+
+    # 2. 更新 findings.md（技术发现）
+    append_today_findings()
+
+    # 3. 写入 Memory MCP（关键技术决策）
+    write_key_decisions_to_memory()
+
+    # 4. Git 提交（不推送）
+    git_add_docs()
+    git_commit("docs: session pause - auto update")
+
+    print("""
+✅ 文档已更新
+
+📝 已更新文档：
+- docs/planning/progress.md（今日工作）
+- docs/planning/findings.md（技术发现）
+- Memory MCP（技术决策）
+
+💾 Git 已提交（不推送）：docs: session pause - auto update
+
+---
+📌 下次开工时执行 `/kaigong`，会自动读取以上文档。
+
+等你回来！
+""")
+```
+
+**暂停触发示例**：
+```
+用户输入："暂停一下，我去吃个饭"
+    ↓
+Agent 自动检测到"暂停一下"关键词
+    ↓
+自动执行暂停流程：
+    1. 更新 progress.md（今日工作）
+    2. 更新 findings.md（技术发现）
+    3. 写入 Memory MCP（关键技术决策）
+    4. Git 提交（不推送）
+    ↓
+输出："✅ 文档已更新，下次开工自动读取"
+```
+
+---
+
+## 🆕 v8.0 新增功能：智能加载策略（混合方案）
+
+### 开工智能加载流程
+
+```python
+def kaigong_smart_loading():
+    """开工智能加载（Memory MCP 混合方案）"""
+
+    print("🐶 开工 - 智能加载（v8.0 混合方案）")
+
+    # 1. 读取 Memory MCP（永久决策）
+    memory_entities = mcp__memory__read_graph()
+    arch_decisions = [e for e in memory_entities
+                      if e.get('entityType') == 'architecture_decision']
+
+    # 2. 读取红线规则（CLAUDE.md）
+    red_lines = extract_section("CLAUDE.md", "## 🔴 3 条红线")
+
+    # 3. 读取 findings.md（最近 7 天）
+    recent_findings = read_recent_findings(days=7)
+
+    # 4. 读取 progress.md（最近 3 天）
+    recent_progress = read_recent_progress(days=3)
+
+    # 5. Git 状态检查
+    git_status = git_status_short()
+
+    # 6. 推断今日待办
+    todos = infer_todos_from_progress(recent_progress)
+
+    # 上下文占用统计
+    total_context = (
+        len(str(arch_decisions)) +  # Memory MCP（不限）
+        len(red_lines) +             # 红线规则（2K）
+        len(recent_findings) +       # findings（10K）
+        len(recent_progress)         # progress（30K）
+    )
+
+    # 输出给用户
+    print(f"""
+📍 当前分支：{git_status['branch']}
+📝 最近提交：{git_status['commits']}
+
+---
+
+📌 核心约束（红线规则）⭐⭐⭐：
+{red_lines}
+
+---
+
+💡 最近架构决策（Memory MCP）：
+{format_decisions(arch_decisions[:3])}
+
+---
+
+📋 今日待办（共 {len(todos)} 个）：
+{format_todos(todos)}
+
+---
+
+📊 上下文统计：
+  - Memory MCP：{len(str(arch_decisions))} 字符
+  - 红线规则：{len(red_lines)} 字符（约 2K）
+  - findings.md：{len(recent_findings)} 字符（约 10K）
+  - progress.md：{len(recent_progress)} 字符（约 30K）
+  - 总计：{total_context} 字符（约 42K）
+
+---
+
+准备好开始了吗？
+""")
+```
+
+---
+
+## v8.0 核心优势
+
+1. ✅ **Memory MCP 永久保留**（架构决策永久追溯）
+2. ✅ **暂停关键词检测**（自动更新文档）
+3. ✅ **混合文档策略**（Memory + progress + findings）
+4. ✅ **核心约束必须加载**（红线规则 2K）
+5. ✅ **总计控制在 50K 内**（实际约 42K）
+6. ✅ **用户自主选择**（交互式引导）
 
 ---
 
 ## 版本对比
 
-| 版本 | 启动 | 按需加载 | 总计 | 核心约束 | 事项背景 | 技术决策 | 推荐度 |
-|------|------|---------|------|---------|---------|---------|--------|
-| v4.0 | 24K | 无 | 24K | ✅ | ❌ | ⚠️ 摘要 | ⭐⭐⭐ |
-| v6.0 极简 | 0.4K | 按需 | 未知 | ❌ ⚠️ | ❌ | ❌ | ⭐⭐ |
-| **v7.5** | **3.5K** | **5.5K** | **9K** | **✅** | **✅** | **✅** | **⭐⭐⭐⭐⭐** |
+| 版本 | Memory MCP | 暂停机制 | 总计上下文 | 推荐度 |
+|------|-----------|---------|-----------|--------|
+| v7.5 | ❌ | ❌ | 9K | ⭐⭐⭐⭐ |
+| **v8.0** | **✅** | **✅** | **42K** | **⭐⭐⭐⭐⭐** |
 
 ---
 
-*版本：v7.5 智能分层加载版 | 最后更新：2026-04-03*
+*版本：v8.0 Memory MCP 混合方案版 | 最后更新：2026-04-04*
