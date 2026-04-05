@@ -192,6 +192,15 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # R10.3: Add config_version column to signal_attempts for configuration traceability
+        try:
+            await self._db.execute("""
+                ALTER TABLE signal_attempts ADD COLUMN config_version TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
         # Add signal_id column to signals table (S5-2)
         try:
             await self._db.execute("""
@@ -549,7 +558,7 @@ class SignalRepository:
 
         return root
 
-    async def save_attempt(self, attempt, symbol: str, timeframe: str) -> None:
+    async def save_attempt(self, attempt, symbol: str, timeframe: str, config_version: str = None) -> None:
         """
         Save a SignalAttempt to the signal_attempts table.
 
@@ -557,6 +566,7 @@ class SignalRepository:
             attempt: SignalAttempt object from strategy engine
             symbol: Trading pair symbol
             timeframe: Timeframe string
+            config_version: Configuration version when this attempt was generated (R10.3)
         """
         created_at = datetime.now(timezone.utc).isoformat()
 
@@ -598,8 +608,8 @@ class SignalRepository:
                 created_at, symbol, timeframe, strategy_name,
                 direction, pattern_score, final_result,
                 filter_stage, filter_reason, details, kline_timestamp,
-                evaluation_summary, trace_tree
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                evaluation_summary, trace_tree, config_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -615,6 +625,7 @@ class SignalRepository:
                 kline_timestamp,
                 evaluation_summary,
                 trace_tree_json,
+                config_version,
             ),
         )
         await self._db.commit()

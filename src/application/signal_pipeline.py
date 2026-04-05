@@ -8,6 +8,7 @@ Supports:
 - Async queue worker for non-blocking SQLite persistence
 """
 import asyncio
+import copy
 import time
 import json
 from typing import Optional, Dict, List, Any, Tuple
@@ -68,9 +69,11 @@ class SignalPipeline:
         self._status_tracker = SignalStatusTracker(signal_repository)
 
         # Queue configuration from core.yaml (S4-2)
-        self._queue_batch_size = config_manager.core_config.signal_pipeline.queue.batch_size
-        self._queue_flush_interval = config_manager.core_config.signal_pipeline.queue.flush_interval
-        self._queue_max_size = config_manager.core_config.signal_pipeline.queue.max_queue_size
+        # R3.1 fix: 使用同步方法获取配置副本
+        core_config = config_manager.get_core_config()
+        self._queue_batch_size = core_config.signal_pipeline.queue.batch_size
+        self._queue_flush_interval = core_config.signal_pipeline.queue.flush_interval
+        self._queue_max_size = core_config.signal_pipeline.queue.max_queue_size
 
         # Store K-line history per symbol/timeframe (for warmup on reload)
         self._kline_history: Dict[str, List[KlineData]] = {}
@@ -92,7 +95,8 @@ class SignalPipeline:
 
         # S3-1: MTF EMA indicators (one per symbol:timeframe combination)
         self._mtf_ema_indicators: Dict[str, EMACalculator] = {}
-        self._mtf_ema_period = config_manager.user_config.mtf_ema_period or 60
+        # R3.1 fix: 使用同步方法获取配置副本
+        self._mtf_ema_period = config_manager.get_user_config_sync().mtf_ema_period or 60
 
         # Build dynamic strategy runner from config (uses _kline_history for warmup)
         self._runner = self._build_and_warmup_runner()
@@ -270,9 +274,11 @@ class SignalPipeline:
             return
 
         try:
+            # R10.3: Get current config version for traceability
+            config_version = str(self._config_manager.get_config_version())
             for attempt, symbol, timeframe in buffer:
-                await self._repository.save_attempt(attempt, symbol, timeframe)
-            logger.debug(f"Flushed {len(buffer)} attempts to database")
+                await self._repository.save_attempt(attempt, symbol, timeframe, config_version)
+            logger.debug(f"Flushed {len(buffer)} attempts to database (config_version={config_version})")
         except Exception as e:
             logger.error(f"Failed to flush attempts batch: {e}")
 
@@ -287,11 +293,13 @@ class SignalPipeline:
         logger.info("Configuration hot-reload triggered, rebuilding strategy runner...")
 
         async with self._get_runner_lock():
+            # R3.1 fix: 使用 await 获取配置副本，而非直接引用
+            user_config = await self._config_manager.get_user_config()
+
             # Step 1: Reload risk configuration (R1.2 fix: _risk_config was stale on hot-reload)
-            user_config = self._config_manager.user_config
             old_max_loss = self._risk_config.max_loss_percent
             old_max_leverage = self._risk_config.max_leverage
-            self._risk_config = user_config.risk
+            self._risk_config = copy.deepcopy(user_config.risk)
             logger.info(
                 f"Risk config reloaded: max_loss_percent={old_max_loss}->{self._risk_config.max_loss_percent}, "
                 f"max_leverage={old_max_leverage}->{self._risk_config.max_leverage}"
@@ -337,9 +345,10 @@ class SignalPipeline:
         Returns:
             DynamicStrategyRunner instance
         """
-        # Get active strategies from config
-        active_strategies = self._config_manager.user_config.active_strategies
-        core_config = self._config_manager.core_config
+        # R3.1 fix: 使用 get_user_config() 和 get_core_config() 获取副本
+        # 注意：这些是同步方法，在初始化时使用
+        active_strategies = self._config_manager.get_user_config_sync().active_strategies
+        core_config = self._config_manager.get_core_config()
 
         # Build runner using factory function
         runner = create_dynamic_runner(active_strategies, core_config)
@@ -597,10 +606,10 @@ class SignalPipeline:
         result: Dict[str, TrendDirection] = {}
         current_tf = kline.timeframe
 
-        # Get higher timeframe from config
+        # Get higher timeframe from config (R3.1 fix: use sync method to get copy)
         higher_tf = get_higher_timeframe(
             current_tf,
-            self._config_manager.user_config.mtf_mapping
+            self._config_manager.get_user_config_sync().mtf_mapping
         )
 
         if higher_tf is None:

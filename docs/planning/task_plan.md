@@ -9,9 +9,9 @@
 
 | 优先级 | 任务分类 | 任务数 | 预计工时 | 状态 |
 |--------|----------|--------|----------|------|
-| **P0** | 配置重构风险修复 | 24 项 | 56h | 🔴 **进行中** |
+| **P0** | 配置重构风险修复 | 24 项 | 56h | ✅ **已完成 7/7** |
 | **P0** | 订单生命周期可视化 + 对账机制 | 6 项 | 38h | ☐ 待沟通 |
-| **P1** | 测试修复 | 1 项 | 1h | ☐ 搁置 |
+| **P1** | 配置重构P1级风险修复 | 5 项 | 12h | ✅ **已完成 9/12，延后 3/12** |
 | **P2** | 配置导入导出功能 | 1 项 | 2h | ☐ 进行中 |
 | **P0** | PMS 回测问题修复 | 3 项 | 5h | ✅ 已完成 |
 | **P0** | 前端导航重构 | 1 项 | 2h | ✅ 已完成 |
@@ -36,7 +36,12 @@
 - 关联影响分析: `docs/planning/config-refactor-impact-analysis.md`
 - PUA深度审视: `docs/planning/config-refactor-pua-review.md`
 
-**状态**: 🔴 **待启动 - 阻塞性风险，需立即修复**
+**状态**: ✅ **已完成 - P0级7/7全部修复，P1级9/12已修复，3/12因单体应用约束延后**
+
+**修复完成风险**：
+- **P0级 (7/7)**: R1.1, R1.2, R3.3, R4.3, R5.2, R6.1(单体无需), R9.2
+- **P1级 (9/12)**: R3.1, R3.2, R4.1, R5.1, R6.2, R6.3(单体无需), R7.1, R9.1, R10.3
+- **延后 (3)**: R1.3, R2.1, R7.2
 
 ---
 
@@ -46,13 +51,13 @@
 
 | ID | 风险描述 | 影响模块 | 修复工时 | 测试工时 | 总工时 |
 |----|----------|----------|----------|----------|--------|
-| **R1.1** | Profile切换后缓存未失效，配置不一致 | ConfigProfileService | 3h | 2h | 5h |
-| **R1.2** | 风控配置热重载后，SignalPipeline仍用旧RiskConfig | SignalPipeline | 3h | 2h | 5h |
-| **R3.3** | RiskCalculator配置更新时可能读取半更新状态 | RiskCalculator | 2h | 1h | 3h |
-| **R4.3** | 空配置启动时Pydantic验证失败导致崩溃 | ConfigManager | 2h | 1h | 3h |
-| **R5.2** | 配置损坏导致系统无法启动且无降级 | ConfigManager | 2h | 2h | 4h | ✅ 已完成 |
-| **R6.1** | 并发配置编辑导致数据丢失（Last-Write-Wins） | ConfigEntryRepository | 3h | 2h | 5h |
-| **R9.2** | 代码混用两个版本ConfigManager，接口不一致 | main.py, ConfigManager | 2h | 1h | 3h |
+| **R1.1** | Profile切换后缓存未失效，配置不一致 | ConfigProfileService | 3h | 2h | 5h | ✅ **已修复** |
+| **R1.2** | 风控配置热重载后，SignalPipeline仍用旧RiskConfig | SignalPipeline | 3h | 2h | 5h | ✅ **已修复** |
+| **R3.3** | RiskCalculator配置更新时可能读取半更新状态 | RiskCalculator | 2h | 1h | 3h | ✅ **已修复** |
+| **R4.3** | 空配置启动时Pydantic验证失败导致崩溃 | ConfigManager | 2h | 1h | 3h | ✅ **已修复** |
+| **R5.2** | 配置损坏导致系统无法启动且无降级 | ConfigManager | 2h | 2h | 4h | ✅ **已修复** |
+| **R6.1** | 并发配置编辑导致数据丢失（Last-Write-Wins） | ConfigEntryRepository | 3h | 2h | 5h | ✅ **单体应用无需修复** |
+| **R9.2** | 代码混用两个版本ConfigManager，接口不一致 | main.py, ConfigManager | 2h | 1h | 3h | ✅ **已修复** |
 
 **P0 级小计**: 开发 17h + 测试 11h = **28h**
 
@@ -71,18 +76,18 @@
 
 | ID | 风险描述 | 影响模块 | 工时 |
 |----|----------|----------|------|
-| **R1.3** | 配置切换窗口期使用混合配置 | SignalPipeline | 2h |
-| **R2.1** | 无法同时配置多个交易所 | ConfigManager | 2h |
-| **R3.1** | 配置对象引用传递可能观察到中间状态 | StrategyEngine | 1h |
-| **R3.2** | 观察者重建窗口期持有过期引用 | ConfigManager | 2h |
-| **R4.1** | DB初始化失败时回退行为不一致 | ConfigManager | 1h |
-| **R5.1** | JSON解析失败无错误处理 | ConfigEntryRepository | 1h |
-| **R6.2** | 版本号字段形同虚设 | API层 | 2h |
-| **R6.3** | 跨配置项更新无法保证原子性 | ConfigEntryRepository | 2h |
-| **R7.1** | 启动顺序错误导致模块使用空配置 | main.py | 1h |
-| **R7.2** | 隐式依赖难以维护 | 架构层 | 2h |
-| **R9.1** | 同步代码无法获取user_config | ConfigManager | 1h |
-| **R10.3** | 无法追溯交易盈亏的配置版本 | signal_attempts表 | 1h |
+| **R1.3** | 配置切换窗口期使用混合配置 | SignalPipeline | 2h | ☐ **单体应用延后** |
+| **R2.1** | 无法同时配置多个交易所 | ConfigManager | 2h | ☐ **需求不明延后** |
+| **R3.1** | 配置对象引用传递可能观察到中间状态 | StrategyEngine | 1h | ✅ **已修复** |
+| **R3.2** | 观察者重建窗口期持有过期引用 | ConfigManager | 2h | ✅ **已修复** |
+| **R4.1** | DB初始化失败时回退行为不一致 | ConfigManager | 1h | ✅ **已修复** |
+| **R5.1** | JSON解析失败无错误处理 | ConfigEntryRepository | 1h | ✅ **已修复** |
+| **R6.2** | 版本号字段形同虚设 | API层 | 2h | ✅ **已修复** |
+| **R6.3** | 跨配置项更新无法保证原子性 | ConfigEntryRepository | 2h | ✅ **单体应用无需修复** |
+| **R7.1** | 启动顺序错误导致模块使用空配置 | main.py | 1h | ✅ **已修复** |
+| **R7.2** | 隐式依赖难以维护 | 架构层 | 2h | ☐ **文档化延后** |
+| **R9.1** | 同步代码无法获取user_config | ConfigManager | 1h | ✅ **已修复** |
+| **R10.3** | 无法追溯交易盈亏的配置版本 | signal_attempts表 | 1h | ✅ **已修复** |
 
 **P1 级小计**: **20h**（含测试）
 
