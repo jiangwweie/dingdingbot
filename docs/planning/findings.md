@@ -6,33 +6,142 @@
 
 ## 📑 目录
 
-1. [Config Repositories 批量实现](#config-repositories-批量实现)
-2. [ConfigManager 数据库驱动重构](#configmanager-数据库驱动重构)
-3. [配置管理数据库表设计](#配置管理数据库表设计)
-4. [/api/v1/config 配置管理 API 实现](#apiv1config-配置管理 api 实现)
-5. [工作流重构 v3.0](#工作流重构 v30)
-6. [P1 任务产品分析](#p1-任务产品分析)
-7. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
-8. [策略参数配置数据库存储实现](#策略参数配置数据库存储实现)
-9. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
-10. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
-11. [Phase 8 Optuna 自动化调参集成要点](#phase-8-optuna-自动化调参集成要点)
-12. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
-13. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
-14. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-15. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-16. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-17. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-18. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-19. [Phase 6 前端架构](#phase-6-前端架构)
-20. [API 契约与端点](#api-契约与端点)
-21. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
-22. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
-23. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
+1. [E3 信号通知 E2E 测试技术发现](#e3-信号通知 e2e 测试技术发现)
+2. [Config Repositories 批量实现](#config-repositories-批量实现)
+3. [ConfigManager 数据库驱动重构](#configmanager-数据库驱动重构)
+4. [配置管理数据库表设计](#配置管理数据库表设计)
+5. [/api/v1/config 配置管理 API 实现](#apiv1config-配置管理 api 实现)
+6. [工作流重构 v3.0](#工作流重构 v30)
+7. [P1 任务产品分析](#p1-任务产品分析)
+8. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
+9. [策略参数配置数据库存储实现](#策略参数配置数据库存储实现)
+10. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
+11. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
+12. [Phase 8 Optuna 自动化调参集成要点](#phase-8-optuna-自动化调参集成要点)
+13. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
+14. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
+15. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
+16. [BTC 历史数据导入记录](#btc-历史数据导入记录)
+17. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
+18. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
+19. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
+20. [Phase 6 前端架构](#phase-6-前端架构)
+21. [API 契约与端点](#api-契约与端点)
+22. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
+23. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
+24. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
 
 ---
 
 ## 📌 2026-04-05 技术发现
+
+### I2 配置历史记录 API 路由顺序 Bug ⭐⭐⭐
+
+**发现时间**: 2026-04-05
+
+**任务**: I2 - 配置历史记录集成测试
+
+**核心问题**: FastAPI 路由定义顺序导致 `/history/rollback-candidates` 被 `/history/{history_id}` 拦截
+
+**现象**: 请求 `/history/rollback-candidates` 返回 422，系统把 "rollback-candidates" 当成 `history_id` 参数
+
+**解决方案**: 将具体路由放在动态路由之前
+
+```python
+# ✅ 正确的顺序
+@router.get("/history/rollback-candidates", ...)  # 具体路由在前
+@router.post("/history/rollback", ...)
+@router.get("/history/{history_id}", ...)          # 动态路由在后
+```
+
+**影响**: 修复了回滚候选配置 API 无法访问的问题
+
+---
+
+### I2 字段名映射问题 ⭐⭐
+
+**发现时间**: 2026-04-05
+
+**任务**: I2 - 配置历史记录集成测试
+
+**核心问题**: API 字段名 `trigger` 与数据库字段名 `trigger_config` 不一致
+
+**解决方案**: 在回滚时添加字段名映射
+
+```python
+# 将 API 字段名映射到数据库字段名
+if "trigger" in strategy_data:
+    strategy_data["trigger_config"] = strategy_data.pop("trigger")
+```
+
+---
+
+### E3 信号通知 E2E 测试技术发现 ⭐⭐⭐
+
+**发现时间**: 2026-04-05
+
+**任务**: E3 - 信号通知功能 E2E 测试
+
+**核心问题**: Puppeteer 不支持 jQuery 风格的 `:contains()` 选择器
+
+**解决方案**: 使用 XPath 和 `page.evaluate()` 实现文本匹配
+
+```typescript
+// 辅助函数 1: 检查页面是否包含指定文本
+async function pageContainsText(page: Page, text: string): Promise<boolean> {
+  return await page.evaluate((txt) => {
+    return document.body?.textContent?.includes(txt) || false;
+  }, text);
+}
+
+// 辅助函数 2: 使用 XPath 查找包含文本的元素
+async function findElementByText(
+  page: Page,
+  tagName: string,
+  text: string
+): Promise<ElementHandle | null> {
+  try {
+    const handles = await page.$x(`//${tagName}[contains(text(), "${text}")]`);
+    return handles[0] || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// 辅助函数 3: 检查是否存在包含指定文本的元素
+async function elementExistsByText(
+  page: Page,
+  tagName: string,
+  text: string
+): Promise<boolean> {
+  const handle = await findElementByText(page, tagName, text);
+  return handle !== null;
+}
+```
+
+**错误选择器示例**（❌ 不可用）:
+```javascript
+'button:contains("系统配置")'  // Puppeteer 不支持
+'div:contains("通知渠道")'     // 语法错误
+```
+
+**正确选择器示例**（✅ 可用）:
+```javascript
+// 使用 XPath
+await page.$x('//button[contains(text(), "系统配置")]')
+
+// 使用 page.evaluate
+await page.evaluate(() => document.body.textContent.includes('通知渠道'))
+
+// 使用通用类名选择器
+'[class*="Modal"], [class*="Drawer"]'
+```
+
+**测试文件**: `web-front/e2e/notifications/signals.e2e.test.ts`
+**测试用例数**: 28 个
+**截图数量**: 46+ 张
+
+---
 
 ### /api/v1/config 配置管理 API 实现 ⭐⭐⭐
 

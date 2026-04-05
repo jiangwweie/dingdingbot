@@ -33,6 +33,11 @@ Endpoints:
     GET     /api/v1/config/snapshots/{id}         - Get snapshot details
     POST    /api/v1/config/snapshots/{id}/activate- Rollback to snapshot
     DELETE  /api/v1/config/snapshots/{id}         - Delete snapshot
+    GET     /api/v1/config/history                - Get history list with pagination
+    GET     /api/v1/config/history/{id}           - Get history detail
+    GET     /api/v1/config/history/entity/{type}/{id} - Get entity history
+    GET     /api/v1/config/history/rollback-candidates - Get rollback candidates
+    POST    /api/v1/config/history/rollback       - Rollback to specific version
 """
 import json
 import logging
@@ -491,6 +496,68 @@ class SnapshotActivateResponse(BaseModel):
     name: str
     message: str
     requires_restart: bool
+
+
+# ============================================================
+# Pydantic Models - History Management
+# ============================================================
+class HistoryListItem(BaseModel):
+    """History list item"""
+    id: int
+    entity_type: str
+    entity_id: str
+    action: str
+    changed_by: Optional[str] = None
+    changed_at: str
+    change_summary: Optional[str] = None
+
+
+class HistoryDetailResponse(BaseModel):
+    """History detail response"""
+    id: int
+    entity_type: str
+    entity_id: str
+    action: str
+    old_values: Optional[Dict[str, Any]] = None
+    new_values: Optional[Dict[str, Any]] = None
+    changed_by: Optional[str] = None
+    changed_at: str
+    change_summary: Optional[str] = None
+
+
+class HistoryListResponse(BaseModel):
+    """History list response with pagination"""
+    items: List[HistoryListItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class RollbackCandidateResponse(BaseModel):
+    """Rollback candidate response"""
+    id: int
+    entity_type: str
+    entity_id: str
+    action: str
+    changed_at: str
+    change_summary: Optional[str] = None
+    new_values: Optional[Dict[str, Any]] = None
+
+
+class RollbackRequest(BaseModel):
+    """Rollback request"""
+    history_id: int = Field(..., description="History record ID to rollback to")
+    entity_type: str = Field(..., description="Entity type")
+    entity_id: str = Field(..., description="Entity ID")
+
+
+class RollbackResponse(BaseModel):
+    """Rollback response"""
+    status: str
+    message: str
+    history_id: int
+    entity_type: str
+    entity_id: str
 
 
 # ============================================================
@@ -1821,3 +1888,281 @@ async def delete_snapshot(
         "id": snapshot_id,
         "message": f"Snapshot '{snapshot['name']}' deleted successfully"
     }
+
+
+# ============================================================
+# History Management Endpoints
+# ============================================================
+@router.get("/history", response_model=HistoryListResponse)
+async def get_history_list(
+    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
+    entity_id: Optional[str] = Query(None, description="Filter by entity ID"),
+    limit: int = Query(default=50, ge=0, le=500, description="Maximum number of results"),
+    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
+):
+    """
+    Get configuration change history with pagination and filters.
+
+    - **entity_type**: Optional filter by entity type (strategy, risk_config, system_config, symbol, notification)
+    - **entity_id**: Optional filter by entity ID
+    - **limit**: Maximum number of results (0-500, 0 returns empty list)
+    - **offset**: Number of results to skip
+    """
+    if not _history_repo:
+        raise HTTPException(status_code=503, detail="History repository not initialized")
+
+    # Handle limit=0 case
+    if limit == 0:
+        return HistoryListResponse(
+            items=[],
+            total=0,
+            limit=limit,
+            offset=offset
+        )
+
+    items, total = await _history_repo.get_history(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        limit=limit,
+        offset=offset
+    )
+
+    # Convert to list items
+    list_items = [
+        HistoryListItem(
+            id=item["id"],
+            entity_type=item["entity_type"],
+            entity_id=item["entity_id"],
+            action=item["action"],
+            changed_by=item.get("changed_by"),
+            changed_at=item["changed_at"],
+            change_summary=item.get("change_summary"),
+        )
+        for item in items
+    ]
+
+    return HistoryListResponse(
+        items=list_items,
+        total=total,
+        limit=limit,
+        offset=offset
+    )
+
+
+@router.get("/history/rollback-candidates", response_model=List[RollbackCandidateResponse])
+async def get_rollback_candidates(
+    entity_type: Optional[str] = Query(None, description="Entity type"),
+    entity_id: Optional[str] = Query(None, description="Entity ID"),
+):
+    """
+    Get potential rollback points for an entity.
+
+    - **entity_type**: Entity type (strategy, risk_config, system_config, symbol, notification)
+    - **entity_id**: Entity ID
+
+    Note: Returns empty list if entity_type or entity_id is not provided.
+    """
+    if not _history_repo:
+        raise HTTPException(status_code=503, detail="History repository not initialized")
+
+    if not entity_type or not entity_id:
+        return []
+
+    candidates = await _history_repo.get_rollback_candidates(
+        entity_type=entity_type,
+        entity_id=entity_id
+    )
+
+    return [
+        RollbackCandidateResponse(
+            id=item["id"],
+            entity_type=item["entity_type"],
+            entity_id=item["entity_id"],
+            action=item["action"],
+            changed_at=item["changed_at"],
+            change_summary=item.get("change_summary"),
+            new_values=item.get("new_values"),
+        )
+        for item in candidates
+    ]
+
+
+@router.get("/history/entity/{entity_type}/{entity_id}", response_model=HistoryListResponse)
+async def get_entity_history(
+    entity_type: str,
+    entity_id: str,
+    limit: int = Query(default=20, ge=1, le=100, description="Maximum number of results"),
+):
+    """
+    Get complete history for a specific entity.
+
+    - **entity_type**: Entity type (strategy, risk_config, system_config, symbol, notification)
+    - **entity_id**: Entity ID
+    - **limit**: Maximum number of results (1-100)
+    """
+    if not _history_repo:
+        raise HTTPException(status_code=503, detail="History repository not initialized")
+
+    items = await _history_repo.get_entity_history(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        limit=limit
+    )
+
+    list_items = [
+        HistoryListItem(
+            id=item["id"],
+            entity_type=item["entity_type"],
+            entity_id=item["entity_id"],
+            action=item["action"],
+            changed_by=item.get("changed_by"),
+            changed_at=item["changed_at"],
+            change_summary=item.get("change_summary"),
+        )
+        for item in items
+    ]
+
+    return HistoryListResponse(
+        items=list_items,
+        total=len(items),
+        limit=limit,
+        offset=0
+    )
+
+
+@router.get("/history/{history_id}", response_model=HistoryDetailResponse)
+async def get_history_detail(
+    history_id: int,
+):
+    """
+    Get detailed information about a specific history record.
+
+    - **history_id**: History record ID
+    """
+    if not _history_repo:
+        raise HTTPException(status_code=503, detail="History repository not initialized")
+
+    # Get all history and find the specific one
+    # Note: This is inefficient, consider adding get_by_id method to repository
+    items, _ = await _history_repo.get_history(limit=1000, offset=0)
+
+    for item in items:
+        if item["id"] == history_id:
+            return HistoryDetailResponse(
+                id=item["id"],
+                entity_type=item["entity_type"],
+                entity_id=item["entity_id"],
+                action=item["action"],
+                old_values=item.get("old_values"),
+                new_values=item.get("new_values"),
+                changed_by=item.get("changed_by"),
+                changed_at=item["changed_at"],
+                change_summary=item.get("change_summary"),
+            )
+
+    raise HTTPException(status_code=404, detail=f"History record '{history_id}' not found")
+
+
+@router.post("/history/rollback", response_model=RollbackResponse)
+async def rollback_to_version(
+    request: RollbackRequest,
+    admin: bool = Depends(check_admin_permission)
+):
+    """
+    Rollback configuration to a specific version.
+
+    - **history_id**: History record ID to rollback to
+    - **entity_type**: Entity type
+    - **entity_id**: Entity ID
+    """
+    if not _history_repo:
+        raise HTTPException(status_code=503, detail="History repository not initialized")
+
+    # Get the history record
+    items, _ = await _history_repo.get_history(limit=1000, offset=0)
+    target_history = None
+    for item in items:
+        if item["id"] == request.history_id:
+            target_history = item
+            break
+
+    if not target_history:
+        raise HTTPException(status_code=404, detail=f"History record '{request.history_id}' not found")
+
+    # Verify entity matches
+    if target_history["entity_type"] != request.entity_type or target_history["entity_id"] != request.entity_id:
+        raise HTTPException(status_code=400, detail="Entity type or ID mismatch")
+
+    # Cannot rollback to DELETE action
+    if target_history["action"] == "DELETE":
+        raise HTTPException(status_code=400, detail="Cannot rollback to DELETE action")
+
+    # Get the values to rollback to
+    if target_history["action"] == "CREATE":
+        values_to_restore = target_history.get("new_values")
+    elif target_history["action"] == "UPDATE":
+        values_to_restore = target_history.get("old_values")
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported action type: {target_history['action']}")
+
+    if not values_to_restore:
+        raise HTTPException(status_code=400, detail="No values to restore")
+
+    # Apply the rollback based on entity type
+    requires_restart = False
+
+    if request.entity_type == "risk_config":
+        if _risk_repo:
+            await _risk_repo.update(values_to_restore)
+    elif request.entity_type == "system_config":
+        if _system_repo:
+            restart_fields = ["core_symbols", "ema_period", "mtf_ema_period", "mtf_mapping"]
+            requires_restart = any(field in values_to_restore for field in restart_fields)
+            await _system_repo.update(values_to_restore, restart_required=requires_restart)
+    elif request.entity_type == "strategy":
+        if _strategy_repo:
+            # Map API field names to database field names
+            update_data = {}
+            for k, v in values_to_restore.items():
+                if k in ["id", "created_at", "updated_at", "version"]:
+                    continue
+                # Map API field names to DB field names
+                if k == "trigger":
+                    update_data["trigger_config"] = v
+                elif k == "filters":
+                    update_data["filter_configs"] = v
+                else:
+                    update_data[k] = v
+            await _strategy_repo.update(request.entity_id, update_data)
+    elif request.entity_type == "symbol":
+        if _symbol_repo:
+            update_data = {k: v for k, v in values_to_restore.items() if k not in ["symbol", "created_at", "updated_at"]}
+            await _symbol_repo.update(request.entity_id, update_data)
+    elif request.entity_type == "notification":
+        if _notification_repo:
+            update_data = {k: v for k, v in values_to_restore.items() if k not in ["id", "created_at", "updated_at"]}
+            await _notification_repo.update(request.entity_id, update_data)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported entity type: {request.entity_type}")
+
+    # Record the rollback action in history
+    await _history_repo.record_change(
+        entity_type=request.entity_type,
+        entity_id=request.entity_id,
+        action="ROLLBACK",
+        old_values=None,
+        new_values=values_to_restore,
+        changed_by="admin",
+        change_summary=f"Rolled back to version {request.history_id}"
+    )
+
+    # Notify hot-reload
+    await notify_hot_reload("rollback")
+
+    return RollbackResponse(
+        status="success",
+        message=f"Successfully rolled back to version {request.history_id}",
+        history_id=request.history_id,
+        entity_type=request.entity_type,
+        entity_id=request.entity_id,
+    )
