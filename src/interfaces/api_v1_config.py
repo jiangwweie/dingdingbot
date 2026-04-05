@@ -46,6 +46,8 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Body, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from src.infrastructure.logger import mask_secret
+
 
 def _decimal_representer(dumper, data):
     """Custom YAML representer for Decimal types."""
@@ -347,7 +349,7 @@ class NotificationDetailResponse(BaseModel):
     """Notification channel detail response"""
     id: str
     channel_type: str
-    webhook_url: str
+    webhook_url_masked: str  # 脱敏后的 webhook URL，防止敏感信息泄露
     is_active: bool
     notify_on_signal: bool
     notify_on_order: bool
@@ -420,6 +422,7 @@ class ImportPreviewResult(BaseModel):
     conflicts: List[str]
     requires_restart: bool
     errors: List[str] = Field(default_factory=list)
+    preview_data: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ImportConfirmRequest(BaseModel):
@@ -1256,7 +1259,11 @@ async def get_notification(
     if not notification:
         raise HTTPException(status_code=404, detail=f"Notification '{notification_id}' not found")
 
-    return NotificationDetailResponse(**notification)
+    # 对 webhook_url 进行脱敏处理
+    notification_data = dict(notification)
+    notification_data["webhook_url_masked"] = mask_secret(notification.get("webhook_url", ""), visible_chars=4)
+
+    return NotificationDetailResponse(**notification_data)
 
 
 @router.put("/notifications/{notification_id}", response_model=NotificationDetailResponse)
@@ -1298,7 +1305,11 @@ async def update_notification(
             change_summary=f"Updated notification channel '{notification_id}'",
         )
 
-    return NotificationDetailResponse(**updated_notification)
+    # 对 webhook_url 进行脱敏处理
+    updated_notification_data = dict(updated_notification)
+    updated_notification_data["webhook_url_masked"] = mask_secret(updated_notification.get("webhook_url", ""), visible_chars=4)
+
+    return NotificationDetailResponse(**updated_notification_data)
 
 
 @router.delete("/notifications/{notification_id}")
@@ -1536,6 +1547,14 @@ async def preview_import(
         "filename": request.filename or "import.yaml",
     }
 
+    # Build preview_data for frontend display
+    preview_data_dict = {
+        "strategies": import_data.get("strategies", []) if valid and import_data else [],
+        "risk": import_data.get("risk", {}) if valid and import_data else {},
+        "symbols": import_data.get("symbols", []) if valid and import_data else [],
+        "notifications": import_data.get("notifications", []) if valid and import_data else [],
+    }
+
     return ImportPreviewResult(
         valid=valid,
         preview_token=preview_token,
@@ -1544,6 +1563,7 @@ async def preview_import(
         conflicts=conflicts,
         requires_restart=requires_restart,
         errors=errors,
+        preview_data=preview_data_dict,
     )
 
 
