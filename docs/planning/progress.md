@@ -6,6 +6,71 @@
 
 ---
 
+### 2026-04-05 - R9.3 配置加载竞态条件修复 ✅
+
+**会话 ID**: 20260405-011
+**开始时间**: 2026-04-05 17:30
+**结束时间**: 2026-04-05 18:00
+**持续时间**: 约 30 分钟
+
+#### 完成工作摘要
+
+**P1 级风险 R9.3 修复完成，9/9 测试通过 (100%)**
+
+#### 问题描述
+
+ConfigManager 异步初始化期间，同步代码可能获取到不完整的配置（部分来自 DB，部分来自 YAML）。
+
+#### 修复方案
+
+1. **添加初始化状态标记**:
+   - `_initialized`: 初始化完成标记
+   - `_initializing`: 初始化进行中标记
+   - `_init_lock`: asyncio.Lock 用于线程安全初始化
+   - `_init_event`: asyncio.Event 用于通知等待的协程
+
+2. **双重检查锁定模式重构 `initialize_from_db()`**:
+   - 快速路径：已初始化时直接返回（无锁）
+   - 锁保护：使用 `_init_lock` 防止并发初始化
+   - 双重检查：获取锁后再次确认是否已初始化
+   - 等待机制：如果正在初始化，等待 ` _init_event` 完成
+   - 失败处理：初始化失败时重置状态并清除事件
+
+3. **`get_user_config()` 添加初始化等待**:
+   - 检查 `_initialized` 状态
+   - 如未初始化，等待 `_init_event` 完成（最多 30 秒）
+   - 超时处理：抛出 `RuntimeError("ConfigManager 初始化超时 (30 秒)")`
+
+4. **添加 `is_initialized` 属性**:
+   - 用于测试和健康检查
+
+#### 测试结果
+
+```
+test_config_manager_db_r93.py - 9/9 通过
+- test_concurrent_initialize_doesnt_duplicate ✅
+- test_sequential_initialize_is_idempotent ✅
+- test_get_config_waits_for_initialization ✅
+- test_initialization_failure_propagates ✅
+- test_initialization_timeout ✅
+- test_concurrent_get_config_during_init ✅
+- test_initial_state ✅
+- test_state_after_init ✅
+- test_init_event_is_set ✅
+
+回归测试:
+- test_config_manager_db.py - 29/29 通过 ✅
+- test_config_manager_db_r43.py - 9/9 通过 ✅
+```
+
+#### 修改文件
+
+- `src/application/config_manager_db.py`: 添加初始化状态和锁保护
+- `tests/unit/test_config_manager_db_r93.py`: 新增 9 个测试用例
+- `.claude/projects/-Users-jiangwei-Documents-final/memory/r93-race-condition-fix.md`: Memory 文档
+
+---
+
 ### 2026-04-05 - R1.1 Profile 切换后缓存失效修复 ✅
 
 **会话 ID**: 20260405-010
