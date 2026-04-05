@@ -50,7 +50,7 @@
 | **R1.2** | 风控配置热重载后，SignalPipeline仍用旧RiskConfig | SignalPipeline | 3h | 2h | 5h |
 | **R3.3** | RiskCalculator配置更新时可能读取半更新状态 | RiskCalculator | 2h | 1h | 3h |
 | **R4.3** | 空配置启动时Pydantic验证失败导致崩溃 | ConfigManager | 2h | 1h | 3h |
-| **R5.2** | 配置损坏导致系统无法启动且无降级 | ConfigManager | 2h | 2h | 4h |
+| **R5.2** | 配置损坏导致系统无法启动且无降级 | ConfigManager | 2h | 2h | 4h | ✅ 已完成 |
 | **R6.1** | 并发配置编辑导致数据丢失（Last-Write-Wins） | ConfigEntryRepository | 3h | 2h | 5h |
 | **R9.2** | 代码混用两个版本ConfigManager，接口不一致 | main.py, ConfigManager | 2h | 1h | 3h |
 
