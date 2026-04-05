@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any, Union
 import aiosqlite
 
 from src.domain.exceptions import FatalStartupError
+from src.infrastructure.logger import logger
 
 
 class ConfigEntryRepository:
@@ -180,22 +181,26 @@ class ConfigEntryRepository:
             value_type: Type hint
 
         Returns:
-            Deserialized Python value
+            Deserialized Python value, or None if deserialization fails
         """
-        if value_type == "decimal":
-            return Decimal(value_str)
-        elif value_type == "boolean":
-            return value_str == "true"
-        elif value_type == "number":
-            # Try int first, then float
-            try:
-                return int(value_str)
-            except ValueError:
-                return float(value_str)
-        elif value_type == "json":
-            return json.loads(value_str)
-        else:
-            return value_str
+        try:
+            if value_type == "decimal":
+                return Decimal(value_str)
+            elif value_type == "boolean":
+                return value_str == "true"
+            elif value_type == "number":
+                # Try int first, then float
+                try:
+                    return int(value_str)
+                except ValueError:
+                    return float(value_str)
+            elif value_type == "json":
+                return json.loads(value_str)
+            else:
+                return value_str
+        except (json.JSONDecodeError, ValueError, Exception) as e:
+            logger.error(f"配置项解析失败 [key=unknown]: {e}")
+            return None  # 返回 None 让上层使用默认值
 
     async def get_entry(self, config_key: str) -> Optional[Dict[str, Any]]:
         """
