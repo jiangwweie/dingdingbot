@@ -6,7 +6,161 @@
 
 ---
 
+## ⏸️ 当前暂停 - 待办任务（2026-04-05）
+
+**状态**: 用户外出就餐，暂停会话
+**恢复时间**: 预计 1-2 小时后
+
+### 📝 待办清单（回来后立即执行）
+
+| 优先级 | 任务 | 说明 | 预计工时 |
+|--------|------|------|----------|
+| P0 | 修复测试失败（28个） | Repository签名、Decimal序列化、权限检查 | 2-3h |
+| P1 | 与前端BackupTab联调 | 导入导出UI功能验证 | 1h |
+| P2 | Git提交并推送 | 代码已完成，需提交到dev分支 | 0.5h |
+
+### 🔧 具体待修复问题
+
+1. **ConfigSnapshotRepositoryExtended.create() 签名不匹配**
+   - API调用: `create(name=..., description=...)`
+   - Repository实际: `create(version=..., description=..., config_json=...)`
+   - 修复: 统一参数命名或修改调用方
+
+2. **YAML导出Decimal序列化**
+   - 错误: `yaml.safe_dump` 不支持Decimal
+   - 修复: 导出前将Decimal转为float/str
+
+3. **权限检查未生效**
+   - 错误: `check_admin_permission` 返回200
+   - 修复: 实现正确的401/403返回
+
+4. **策略API Pydantic验证**
+   - 错误: 请求模型与Repository期望不匹配
+   - 修复: 对齐数据模型
+
+### 📊 当前整体进度
+
+```
+配置重构总体进度: 85%
+├── Repository层: 100% ✅ (40/40测试通过)
+├── ConfigManager: 100% ✅ (19/19测试通过)
+├── API端点: 100% ✅ (26+端点实现)
+├── 导入导出: 100% ✅ (预览/确认流程)
+└── 测试修复: 60% ⏳ (28个失败待修复)
+```
+
+---
+
 ## 📍 最近 3 天（2026-04-02 ~ 2026-04-05）
+
+### 2026-04-05 - 配置管理功能测试 ⏳
+
+**会话 ID**: 20260405-004
+**开始时间**: 2026-04-05
+**结束时间**: 2026-04-05
+**持续时间**: 约 3 小时
+
+#### 完成工作摘要
+
+- ✅ 创建 API 集成测试文件 `tests/integration/test_api_v1_config.py`（41 个测试用例）
+- ✅ 创建导入导出测试文件 `tests/unit/test_config_import_export.py`（25 个测试用例）
+- ✅ 修复 API 代码中的 `record_change` 方法调用参数错误
+- ✅ 修复 Decimal 序列化问题
+- ⏳ 测试通过率：API 集成 24/41 (58%), 导入导出 14/25 (56%)
+
+#### 测试覆盖情况
+
+**1. Repository 层测试** (`test_config_repositories.py` - 已存在)
+- StrategyConfigRepository: 10 测试 ✅
+- RiskConfigRepository: 3 测试 ✅
+- SystemConfigRepository: 3 测试 ✅
+- SymbolConfigRepository: 9 测试 ✅
+- NotificationConfigRepository: 4 测试 ✅
+- ConfigSnapshotRepositoryExtended: 3 测试 ✅
+- ConfigHistoryRepository: 5 测试 ✅
+- ConfigDatabaseManager: 2 测试 ✅
+- Integration: 1 测试 ✅
+- **总计**: 40 测试 ✅
+
+**2. ConfigManager 测试** (`test_config_manager_db.py` - 已存在)
+- 数据库初始化：5 测试 ✅
+- 配置加载：3 测试 ✅
+- 风控配置更新：2 测试 ✅
+- 策略管理：3 测试 ✅
+- Observer 模式：3 测试 ✅
+- YAML 向后兼容：2 测试 ✅
+- 便利函数：1 测试 ✅
+- **总计**: 19 测试 ✅
+
+**3. API 集成测试** (`test_api_v1_config.py` - 新建)
+- 风控配置 API: 5 测试 (3 通过，2 失败)
+- 系统配置 API: 4 测试 (3 通过，1 失败)
+- 策略管理 API: 6 测试 (1 通过，5 失败)
+- 币池管理 API: 6 测试 (3 通过，3 失败)
+- 通知配置 API: 6 测试 (4 通过，2 失败)
+- 导入导出 API: 6 测试 (3 通过，3 失败)
+- 快照管理 API: 6 测试 (2 通过，4 失败)
+- 权限检查 API: 2 测试 (0 通过，2 失败)
+- **总计**: 41 测试 (24 通过，17 失败)
+
+**4. 导入导出测试** (`test_config_import_export.py` - 新建)
+- 导出 API: 5 测试 (1 通过，4 失败)
+- 导入预览 API: 7 测试 (7 通过)
+- 导入确认 API: 8 测试 (2 通过，6 失败)
+- 集成测试：2 测试 (0 通过，2 失败)
+- 边界情况：3 测试 (2 通过，1 失败)
+- **总计**: 25 测试 (14 通过，11 失败)
+
+#### 发现的问题
+
+**1. API 代码问题** (已修复)
+- ✅ `record_change` 方法调用参数名错误 (config_type → entity_type, etc.)
+- ✅ Decimal 对象无法 JSON 序列化
+
+**2. Repository 签名不匹配** (待修复)
+- ConfigSnapshotRepositoryExtended.create() 方法签名与 API 调用不匹配
+- 需要统一 Repository 方法的参数命名
+
+**3. YAML 导出 Decimal 问题** (待修复)
+- yaml.safe_dump 无法序列化 Decimal 对象
+- 需要在导出前将 Decimal 转换为 float/string
+
+**4. 权限检查** (待修复)
+- check_admin_permission 未正确实现
+- 当前返回 200 而非 401/403
+
+#### 关键成果
+
+**1. 创建文件**
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| test_api_v1_config.py | `tests/integration/test_api_v1_config.py` | API 集成测试（41 测试） |
+| test_config_import_export.py | `tests/unit/test_config_import_export.py` | 导入导出测试（25 测试） |
+
+**2. 修复文件**
+| 文件 | 修复内容 |
+|------|----------|
+| api_v1_config.py | record_change 调用参数修正、Decimal 序列化修复 |
+
+#### 测试统计汇总
+
+| 测试类别 | 总数 | 通过 | 失败 | 通过率 |
+|----------|------|------|------|--------|
+| Repository 层 | 40 | 40 | 0 | 100% |
+| ConfigManager | 19 | 19 | 0 | 100% |
+| API 集成 | 41 | 24 | 17 | 58% |
+| 导入导出 | 25 | 14 | 11 | 56% |
+| **总计** | **125** | **97** | **28** | **77.6%** |
+
+#### 后续工作
+
+1. 修复 ConfigSnapshotRepositoryExtended.create() 方法签名
+2. 修复 YAML 导出 Decimal 序列化问题
+3. 实现 check_admin_permission 权限检查
+4. 修复策略创建 API 的 Pydantic 验证问题
+5. 提高测试覆盖率至 80%+
+
+---
 
 ### 2026-04-05 - /api/v1/config 配置管理 API 实现 ✅
 

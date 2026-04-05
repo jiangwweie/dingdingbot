@@ -607,12 +607,15 @@ async def update_risk_config(
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    # Convert string decimals back to Decimal
+    # Convert string decimals back to Decimal for repository
+    decimal_update_data = {}
     for key, value in update_data.items():
         if key in ("max_loss_percent", "max_total_exposure", "daily_max_loss"):
-            update_data[key] = Decimal(str(value)) if value is not None else None
+            decimal_update_data[key] = Decimal(str(value)) if value is not None else None
+        else:
+            decimal_update_data[key] = value
 
-    success = await _risk_repo.update(update_data)
+    success = await _risk_repo.update(decimal_update_data)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to update risk config")
 
@@ -622,15 +625,15 @@ async def update_risk_config(
     # Notify hot-reload
     await notify_hot_reload("risk")
 
-    # Record history
+    # Record history (use JSON-serializable update_data)
     if _history_repo:
         await _history_repo.record_change(
-            config_type="risk",
-            config_id="global",
-            action="update",
-            old_value={},  # TODO: Get old value before update
-            new_value=update_data,
+            entity_type="risk_config",
+            entity_id="global",
+            action="UPDATE",
+            new_values=update_data,
             changed_by="admin",
+            change_summary="Updated risk config",
         )
 
     return RiskConfigResponse(**updated_config)
@@ -707,12 +710,12 @@ async def update_system_config(
     # Record history
     if _history_repo:
         await _history_repo.record_change(
-            config_type="system",
-            config_id="global",
-            action="update",
-            old_value={},  # TODO: Get old value before update
-            new_value=update_data,
+            entity_type="system_config",
+            entity_id="global",
+            action="UPDATE",
+            new_values=update_data,
             changed_by="admin",
+            change_summary="Updated system config" + (" (restart required)" if restart_required else ""),
         )
 
     response_data = SystemConfigResponse(**updated_config)
@@ -775,12 +778,12 @@ async def create_strategy(
         # Record history
         if _history_repo:
             await _history_repo.record_change(
-                config_type="strategy",
-                config_id=strategy_id,
-                action="create",
-                old_value={},
-                new_value=strategy_data,
+                entity_type="strategy",
+                entity_id=strategy_id,
+                action="CREATE",
+                new_values=strategy_data,
                 changed_by="admin",
+                change_summary=f"Created strategy '{request.name}'",
             )
 
         # Notify hot-reload
@@ -846,12 +849,13 @@ async def update_strategy(
         # Record history
         if _history_repo:
             await _history_repo.record_change(
-                config_type="strategy",
-                config_id=strategy_id,
-                action="update",
-                old_value=existing,
-                new_value=update_data,
+                entity_type="strategy",
+                entity_id=strategy_id,
+                action="UPDATE",
+                old_values=existing,
+                new_values=update_data,
                 changed_by="admin",
+                change_summary=f"Updated strategy '{updated_strategy.get('name', strategy_id)}'",
             )
 
         # Notify hot-reload
@@ -883,12 +887,12 @@ async def delete_strategy(
     # Record history
     if _history_repo:
         await _history_repo.record_change(
-            config_type="strategy",
-            config_id=strategy_id,
-            action="delete",
-            old_value=existing,
-            new_value={},
+            entity_type="strategy",
+            entity_id=strategy_id,
+            action="DELETE",
+            old_values=existing,
             changed_by="admin",
+            change_summary=f"Deleted strategy '{existing['name']}'",
         )
 
     # Notify hot-reload
@@ -922,12 +926,13 @@ async def toggle_strategy(
     # Record history
     if _history_repo:
         await _history_repo.record_change(
-            config_type="strategy",
-            config_id=strategy_id,
-            action="toggle",
-            old_value={"is_active": not new_status},
-            new_value={"is_active": new_status},
+            entity_type="strategy",
+            entity_id=strategy_id,
+            action="UPDATE",
+            old_values={"is_active": not new_status},
+            new_values={"is_active": new_status},
             changed_by="admin",
+            change_summary=f"Toggled strategy '{existing['name']}' to {'active' if new_status else 'inactive'}",
         )
 
     # Notify hot-reload
@@ -991,12 +996,12 @@ async def create_symbol(
         # Record history
         if _history_repo:
             await _history_repo.record_change(
-                config_type="symbol",
-                config_id=request.symbol,
-                action="create",
-                old_value={},
-                new_value=symbol_data,
+                entity_type="symbol",
+                entity_id=request.symbol,
+                action="CREATE",
+                new_values=symbol_data,
                 changed_by="admin",
+                change_summary=f"Added symbol '{request.symbol}'",
             )
 
         # Notify hot-reload
@@ -1050,12 +1055,13 @@ async def update_symbol(
     # Record history
     if _history_repo:
         await _history_repo.record_change(
-            config_type="symbol",
-            config_id=symbol,
-            action="update",
-            old_value=existing,
-            new_value=update_data,
+            entity_type="symbol",
+            entity_id=symbol,
+            action="UPDATE",
+            old_values=existing,
+            new_values=update_data,
             changed_by="admin",
+            change_summary=f"Updated symbol '{symbol}'",
         )
 
     # Notify hot-reload
@@ -1085,12 +1091,13 @@ async def toggle_symbol(
     # Record history
     if _history_repo:
         await _history_repo.record_change(
-            config_type="symbol",
-            config_id=symbol,
-            action="toggle",
-            old_value={"is_active": not new_status},
-            new_value={"is_active": new_status},
+            entity_type="symbol",
+            entity_id=symbol,
+            action="UPDATE",
+            old_values={"is_active": not new_status},
+            new_values={"is_active": new_status},
             changed_by="admin",
+            change_summary=f"Toggled symbol '{symbol}' to {'active' if new_status else 'inactive'}",
         )
 
     # Notify hot-reload
@@ -1125,12 +1132,12 @@ async def delete_symbol(
         # Record history
         if _history_repo:
             await _history_repo.record_change(
-                config_type="symbol",
-                config_id=symbol,
-                action="delete",
-                old_value=existing,
-                new_value={},
+                entity_type="symbol",
+                entity_id=symbol,
+                action="DELETE",
+                old_values=existing,
                 changed_by="admin",
+                change_summary=f"Deleted symbol '{symbol}'",
             )
 
         # Notify hot-reload
@@ -1182,12 +1189,12 @@ async def create_notification(
     # Record history
     if _history_repo:
         await _history_repo.record_change(
-            config_type="notification",
-            config_id=notification_id,
-            action="create",
-            old_value={},
-            new_value=notification_data,
+            entity_type="notification",
+            entity_id=notification_id,
+            action="CREATE",
+            new_values=notification_data,
             changed_by="admin",
+            change_summary=f"Created notification channel '{request.channel_type}'",
         )
 
     return {
@@ -1243,12 +1250,13 @@ async def update_notification(
     # Record history
     if _history_repo:
         await _history_repo.record_change(
-            config_type="notification",
-            config_id=notification_id,
-            action="update",
-            old_value=existing,
-            new_value=update_data,
+            entity_type="notification",
+            entity_id=notification_id,
+            action="UPDATE",
+            old_values=existing,
+            new_values=update_data,
             changed_by="admin",
+            change_summary=f"Updated notification channel '{notification_id}'",
         )
 
     return NotificationDetailResponse(**updated_notification)
@@ -1275,12 +1283,12 @@ async def delete_notification(
     # Record history
     if _history_repo:
         await _history_repo.record_change(
-            config_type="notification",
-            config_id=notification_id,
-            action="delete",
-            old_value=existing,
-            new_value={},
+            entity_type="notification",
+            entity_id=notification_id,
+            action="DELETE",
+            old_values=existing,
             changed_by="admin",
+            change_summary=f"Deleted notification channel '{notification_id}'",
         )
 
     return {
