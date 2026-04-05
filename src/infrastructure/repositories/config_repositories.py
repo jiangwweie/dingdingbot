@@ -425,15 +425,27 @@ class RiskConfigRepository:
             # Check if global config exists
             existing = await self.get_global()
 
+            # Prepare update values with Decimal → str conversion
+            update_values: Dict[str, Any] = {}
+            decimal_fields = {"max_loss_percent", "max_total_exposure", "daily_max_loss"}
+
+            for key, value in config.items():
+                if key == "updated_at":
+                    continue
+                # Convert Decimal to string for database storage
+                if key in decimal_fields and value is not None:
+                    update_values[key] = str(value)
+                else:
+                    update_values[key] = value
+
             if existing:
                 # Update existing
                 set_clauses = ["updated_at = ?", "version = version + 1"]
                 set_params: List[Any] = [now]
 
-                for key, value in config.items():
-                    if key != "updated_at":
-                        set_clauses.append(f"{key} = ?")
-                        set_params.append(value)
+                for key, value in update_values.items():
+                    set_clauses.append(f"{key} = ?")
+                    set_params.append(value)
 
                 sql = f"UPDATE risk_configs SET {', '.join(set_clauses)} WHERE id = 'global'"
                 await self._db.execute(sql, set_params)
@@ -446,13 +458,13 @@ class RiskConfigRepository:
                      cooldown_minutes, created_at, updated_at, version)
                     VALUES ('global', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    float(config.get("max_loss_percent", Decimal("0.01"))),
-                    config.get("max_leverage", 10),
-                    float(config.get("max_total_exposure", Decimal("0.8"))) if config.get("max_total_exposure") else None,
-                    config.get("daily_max_trades"),
-                    float(config.get("daily_max_loss")) if config.get("daily_max_loss") else None,
-                    config.get("max_position_hold_time"),
-                    config.get("cooldown_minutes", 240),
+                    str(update_values.get("max_loss_percent", Decimal("0.01"))),
+                    update_values.get("max_leverage", 10),
+                    str(update_values.get("max_total_exposure", Decimal("0.8"))) if update_values.get("max_total_exposure") else None,
+                    update_values.get("daily_max_trades"),
+                    str(update_values.get("daily_max_loss")) if update_values.get("daily_max_loss") else None,
+                    update_values.get("max_position_hold_time"),
+                    update_values.get("cooldown_minutes", 240),
                     now,
                     now,
                     1
@@ -1043,6 +1055,20 @@ class NotificationConfigRepository:
         async with self._db.execute(
             f"SELECT * FROM notifications {where_sql} ORDER BY created_at DESC"
         ) as cursor:
+            rows = await cursor.fetchall()
+            return [self._row_to_dict(row) for row in rows]
+
+    async def get_notifications(self) -> List[Dict[str, Any]]:
+        """
+        Get all notification configurations.
+
+        Returns:
+            List of notification dicts ordered by created_at DESC
+        """
+        async with self._lock:
+            cursor = await self._db.execute(
+                "SELECT * FROM notifications ORDER BY created_at DESC"
+            )
             rows = await cursor.fetchall()
             return [self._row_to_dict(row) for row in rows]
 

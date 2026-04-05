@@ -726,9 +726,9 @@ class ConfigManager:
                     max_total_exposure = ?, updated_at = ?
                 WHERE id = 'global'
             """, (
-                float(config.max_loss_percent),
+                str(config.max_loss_percent),
                 config.max_leverage,
-                float(config.max_total_exposure),
+                str(config.max_total_exposure),
                 now,
             ))
 
@@ -738,9 +738,9 @@ class ConfigManager:
                 entity_id="global",
                 action="UPDATE",
                 new_values={
-                    "max_loss_percent": float(config.max_loss_percent),
+                    "max_loss_percent": str(config.max_loss_percent),
                     "max_leverage": config.max_leverage,
-                    "max_total_exposure": float(config.max_total_exposure),
+                    "max_total_exposure": str(config.max_total_exposure),
                 },
                 changed_by=changed_by,
             )
