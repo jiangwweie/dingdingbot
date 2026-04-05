@@ -172,13 +172,14 @@ class ConfigEntryRepository:
         else:
             return str(value)
 
-    def _deserialize_value(self, value_str: str, value_type: str) -> Any:
+    def _deserialize_value(self, value_str: str, value_type: str, config_key: str = "") -> Any:
         """
         Deserialize value from storage.
 
         Args:
             value_str: JSON string representation
             value_type: Type hint
+            config_key: Configuration key for error logging
 
         Returns:
             Deserialized Python value, or None if deserialization fails
@@ -199,7 +200,8 @@ class ConfigEntryRepository:
             else:
                 return value_str
         except (json.JSONDecodeError, ValueError, Exception) as e:
-            logger.error(f"配置项解析失败 [key=unknown]: {e}")
+            key_info = f"key={config_key}" if config_key else "key=unknown"
+            logger.error(f"配置项解析失败 [{key_info}]: {e}, value={value_str[:100]}")
             return None  # 返回 None 让上层使用默认值
 
     async def get_entry(self, config_key: str) -> Optional[Dict[str, Any]]:
@@ -222,7 +224,7 @@ class ConfigEntryRepository:
                 return {
                     "id": row["id"],
                     "config_key": row["config_key"],
-                    "config_value": self._deserialize_value(row["config_value"], row["value_type"]),
+                    "config_value": self._deserialize_value(row["config_value"], row["value_type"], row["config_key"]),
                     "value_type": row["value_type"],
                     "version": row["version"],
                     "updated_at": row["updated_at"],
@@ -285,7 +287,7 @@ class ConfigEntryRepository:
             result = {}
             for row in rows:
                 result[row["config_key"]] = self._deserialize_value(
-                    row["config_value"], row["value_type"]
+                    row["config_value"], row["value_type"], row["config_key"]
                 )
             return result
 
@@ -311,7 +313,7 @@ class ConfigEntryRepository:
             result = {}
             for row in rows:
                 result[row["config_key"]] = self._deserialize_value(
-                    row["config_value"], row["value_type"]
+                    row["config_value"], row["value_type"], row["config_key"]
                 )
             return result
 

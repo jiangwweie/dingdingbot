@@ -608,3 +608,133 @@ class TestConfigEntryRepositoryIntegration:
 
         entry = await repository.get_entry("strategy.pinbar.min_wick_ratio")
         assert before <= entry["updated_at"] <= after
+
+
+# ============================================================
+# Test Class: JSON Parsing Error Handling (P1-R5.1)
+# ============================================================
+class TestConfigEntryRepositoryJsonErrorHandling:
+    """Test JSON parsing error handling - P1-R5.1 risk fix."""
+
+    @pytest.mark.asyncio
+    async def test_json_parse_failure_returns_none(self, repository):
+        """Test that invalid JSON returns None instead of raising exception."""
+        # Insert invalid JSON directly into database
+        async with repository._db.execute("""
+            INSERT INTO config_entries_v2
+            (config_key, config_value, value_type, version, updated_at, profile_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, ("strategy.invalid.json", "{invalid json}", "json", "v1.0.0",
+              int(datetime.now(timezone.utc).timestamp() * 1000), "default")):
+            await repository._db.commit()
+
+        # Should return None, not raise exception
+        entry = await repository.get_entry("strategy.invalid.json")
+        assert entry is not None
+        assert entry["config_value"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_all_entries_with_single_invalid_json(self, repository):
+        """Test that single invalid JSON doesn't break other entries."""
+        # Insert valid entries
+        await repository.upsert_entry("strategy.valid.key1", "value1", "v1.0.0")
+        await repository.upsert_entry("strategy.valid.key2", 123, "v1.0.0")
+
+        # Insert invalid JSON directly
+        async with repository._db.execute("""
+            INSERT INTO config_entries_v2
+            (config_key, config_value, value_type, version, updated_at, profile_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, ("strategy.invalid.json", "{\"broken\": json}", "json", "v1.0.0",
+              int(datetime.now(timezone.utc).timestamp() * 1000), "default")):
+            await repository._db.commit()
+
+        # get_all_entries should return all entries, with invalid one being None
+        entries = await repository.get_all_entries()
+
+        assert "strategy.valid.key1" in entries
+        assert "strategy.valid.key2" in entries
+        assert entries["strategy.valid.key1"] == "value1"
+        assert entries["strategy.valid.key2"] == 123
+        # Invalid JSON entry should have None value
+        assert "strategy.invalid.json" in entries
+        assert entries["strategy.invalid.json"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_entries_by_prefix_with_invalid_json(self, repository):
+        """Test prefix query handles invalid JSON gracefully."""
+        # Insert valid entries
+        await repository.upsert_entry("strategy.test.valid", "value", "v1.0.0")
+
+        # Insert invalid JSON with same prefix
+        async with repository._db.execute("""
+            INSERT INTO config_entries_v2
+            (config_key, config_value, value_type, version, updated_at, profile_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, ("strategy.test.invalid", "not valid json", "json", "v1.0.0",
+              int(datetime.now(timezone.utc).timestamp() * 1000), "default")):
+            await repository._db.commit()
+
+        entries = await repository.get_entries_by_prefix("strategy.test")
+
+        assert "strategy.test.valid" in entries
+        assert "strategy.test.invalid" in entries
+        assert entries["strategy.test.valid"] == "value"
+        assert entries["strategy.test.invalid"] is None
+
+    @pytest.mark.asyncio
+    async def test_decimal_invalid_value_returns_none(self, repository):
+        """Test that invalid decimal value returns None."""
+        # Insert invalid decimal directly
+        async with repository._db.execute("""
+            INSERT INTO config_entries_v2
+            (config_key, config_value, value_type, version, updated_at, profile_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, ("strategy.invalid.decimal", "not-a-number", "decimal", "v1.0.0",
+              int(datetime.now(timezone.utc).timestamp() * 1000), "default")):
+            await repository._db.commit()
+
+        entry = await repository.get_entry("strategy.invalid.decimal")
+        assert entry is not None
+        assert entry["config_value"] is None
+
+    @pytest.mark.asyncio
+    async def test_number_invalid_value_returns_none(self, repository):
+        """Test that invalid number value returns None."""
+        # Insert invalid number directly
+        async with repository._db.execute("""
+            INSERT INTO config_entries_v2
+            (config_key, config_value, value_type, version, updated_at, profile_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, ("strategy.invalid.number", "not-a-number", "number", "v1.0.0",
+              int(datetime.now(timezone.utc).timestamp() * 1000), "default")):
+            await repository._db.commit()
+
+        entry = await repository.get_entry("strategy.invalid.number")
+        assert entry is not None
+        assert entry["config_value"] is None
+
+    @pytest.mark.asyncio
+    async def test_error_log_contains_config_key(self, repository, caplog):
+        """Test that error log includes config_key for debugging."""
+        import logging
+        caplog.set_level(logging.ERROR)
+
+        # Insert invalid JSON
+        async with repository._db.execute("""
+            INSERT INTO config_entries_v2
+            (config_key, config_value, value_type, version, updated_at, profile_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, ("strategy.test.error.log.key", "{invalid}", "json", "v1.0.0",
+              int(datetime.now(timezone.utc).timestamp() * 1000), "default")):
+            await repository._db.commit()
+
+        # Trigger deserialization
+        await repository.get_entry("strategy.test.error.log.key")
+
+        # Verify error log contains the config key
+        assert any(
+            "strategy.test.error.log.key" in record.message
+            for record in caplog.records
+            if record.levelname == "ERROR"
+        )
