@@ -74,16 +74,25 @@ Agent(
 
 【任务】实现用户认证 API
 
-要求：
+⚠️ 【强制要求 - 执行前必须完成】
+1. **先读取角色规范文件**：`Read` 工具读取 `.claude/team/backend-dev/SKILL.md`
+2. **按照 Pre-Flight 清单执行**：检查清单中的所有项目必须完成
+3. **使用 planning-with-files-zh 管理进度**：禁止内置 planning
+
+【技术约束】
 1. 使用 FastAPI + Pydantic v2
 2. 所有金额使用 Decimal 类型
 3. 编写单元测试，覆盖率≥80%
 4. 遵循 Clean Architecture 分层
 
-【角色规范】.claude/team/backend-dev/SKILL.md
-【开工/收工规范】阅读规范中的 Pre-Flight/Post-Flight 检查清单
+【验收标准】
+- [ ] 功能实现完整
+- [ ] 单元测试通过率 100%
+- [ ] 新增代码覆盖率 ≥ 80%
+- [ ] 代码已简化优化（调用 /simplify）
+- [ ] 进度已更新到 docs/planning/progress.md
 
-请立即开始执行此任务。
+请立即开始执行此任务。记住：必须先读取角色规范文件！
 """
 )
 
@@ -95,16 +104,25 @@ Agent(
 
 【任务】实现用户登录页面
 
-要求：
+⚠️ 【强制要求 - 执行前必须完成】
+1. **先读取角色规范文件**：`Read` 工具读取 `.claude/team/frontend-dev/SKILL.md`
+2. **按照 Pre-Flight 清单执行**：检查清单中的所有项目必须完成
+3. **使用 planning-with-files-zh 管理进度**：禁止内置 planning
+
+【技术约束】
 1. 使用 React + TypeScript + TailwindCSS
 2. 响应式设计
 3. 表单验证
 4. TypeScript 无 any 类型
 
-【角色规范】.claude/team/frontend-dev/SKILL.md
-【开工/收工规范】阅读规范中的 Pre-Flight/Post-Flight 检查清单
+【验收标准】
+- [ ] 功能实现完整
+- [ ] 组件测试通过率 100%
+- [ ] 类型检查通过
+- [ ] 代码已简化优化（调用 /simplify）
+- [ ] 进度已更新到 docs/planning/progress.md
 
-请立即开始执行此任务。
+请立即开始执行此任务。记住：必须先读取角色规范文件！
 """
 )
 ```
@@ -114,14 +132,39 @@ Agent(
 - ✅ 每个 Agent 独立进程，互不阻塞
 - ✅ 总耗时 = 最慢那个任务的耗时，而不是累加
 
-**角色 Prompt 模板**：
+**角色 Prompt 模板（必须包含以下内容）**：
 
-每个角色的 prompt 必须包含：
+每个角色的 prompt **必须严格包含**：
 1. **角色身份声明**："你是 XXX 专家"
-2. **具体任务描述**：清楚说明要做什么
-3. **技术/质量要求**：技术栈、覆盖率、规范等
-4. **角色规范路径**：`.claude/team/{role}/SKILL.md`
-5. **开工收工提醒**：提醒阅读规范中的检查清单
+2. **⚠️ 强制要求（加粗标注）**：
+   - 必须先读取角色规范文件（使用 `Read` 工具）
+   - 必须按照 Pre-Flight 清单执行
+   - 必须使用 planning-with-files-zh 管理进度
+3. **具体任务描述**：清楚说明要做什么
+4. **技术/质量要求**：技术栈、覆盖率、规范等
+5. **验收标准（Checklist 格式）**：可验证的完成标准
+6. **角色规范路径**：`.claude/team/{role}/SKILL.md`
+
+**❌ 禁止的写法**：
+```python
+# 错误：没有强制要求读取角色规范
+prompt="你是后端开发专家。修复测试失败。"
+
+# 错误：只是"提醒"而不是"强制要求"
+prompt="...【角色规范】.claude/team/backend-dev/SKILL.md..."
+```
+
+**✅ 正确的写法**：
+```python
+# 正确：明确强制要求先读取角色规范
+prompt="""
+你是后端开发专家。
+
+⚠️ 【强制要求 - 执行前必须完成】
+1. **先读取角色规范文件**：`Read` 工具读取 `.claude/team/backend-dev/SKILL.md`
+2. **按照 Pre-Flight 清单执行**：检查清单中的所有项目
+...
+"""
 
 ## 📋 并行任务簇识别规则
 
@@ -245,13 +288,27 @@ Agent(
 Agent(
     subagent_type="general-purpose",
     description="后端 API 实现",
-    prompt="你是后端开发专家。实现 API（预计 2h）。角色规范：.claude/team/backend-dev/SKILL.md"
+    prompt="""
+你是后端开发专家。实现 API（预计 2h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/backend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】实现 API 接口（根据契约表）
+【输出】代码文件 + 单元测试
+"""
 )   # 并行
 
 Agent(
     subagent_type="general-purpose",
     description="前端组件实现",
-    prompt="你是前端开发专家。实现组件（预计 3h）。角色规范：.claude/team/frontend-dev/SKILL.md"
+    prompt="""
+你是前端开发专家。实现组件（预计 3h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/frontend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】实现前端组件（根据契约表）
+【输出】组件文件 + 组件测试
+"""
 )  # 并行
 
 # 第二步：系统会自动等待 T1 和 T2 完成
@@ -260,7 +317,14 @@ Agent(
 Agent(
     subagent_type="general-purpose",
     description="集成测试",
-    prompt="你是 QA 测试专家。执行集成测试（预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
+    prompt="""
+你是 QA 测试专家。执行集成测试（预计 1h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/qa-tester/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】执行集成测试（后端 + 前端）
+依赖：T1 和 T2 已完成
+"""
 )
 ```
 
@@ -288,7 +352,13 @@ T1 (1h)
 Agent(
     subagent_type="general-purpose",
     description="数据库表设计",
-    prompt="你是后端开发专家。设计数据库表（预计 1h）。角色规范：.claude/team/backend-dev/SKILL.md"
+    prompt="""
+你是后端开发专家。设计数据库表（预计 1h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/backend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】设计数据库表
+"""
 )
 
 # 等待 T1 完成后
@@ -296,13 +366,21 @@ Agent(
 Agent(
     subagent_type="general-purpose",
     description="后端 Model 实现",
-    prompt="你是后端开发专家。实现 Model（依赖 T1，预计 2h）。角色规范：.claude/team/backend-dev/SKILL.md"
+    prompt="""
+你是后端开发专家。实现 Model（依赖 T1，预计 2h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/backend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )   # 并行
 
 Agent(
     subagent_type="general-purpose",
     description="前端组件实现",
-    prompt="你是前端开发专家。实现组件（依赖 T1，预计 3h）。角色规范：.claude/team/frontend-dev/SKILL.md"
+    prompt="""
+你是前端开发专家。实现组件（依赖 T1，预计 3h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/frontend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )    # 并行
 
 # 等待 T2 和 T4 完成后
@@ -310,7 +388,11 @@ Agent(
 Agent(
     subagent_type="general-purpose",
     description="后端 API 实现",
-    prompt="你是后端开发专家。实现 API（依赖 T2，预计 2h）。角色规范：.claude/team/backend-dev/SKILL.md"
+    prompt="""
+你是后端开发专家。实现 API（依赖 T2，预计 2h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/backend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )
 
 # 等待 T3 和 T4 完成后
@@ -318,7 +400,11 @@ Agent(
 Agent(
     subagent_type="general-purpose",
     description="集成测试",
-    prompt="你是 QA 测试专家。集成测试（依赖 T3 + T4，预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
+    prompt="""
+你是 QA 测试专家。集成测试（依赖 T3 + T4，预计 1h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/qa-tester/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )
 ```
 
@@ -352,33 +438,63 @@ Agent(
 Agent(
     subagent_type="general-purpose",
     description="后端 API 实现",
-    prompt="你是后端开发专家。实现 API（预计 2h）。角色规范：.claude/team/backend-dev/SKILL.md"
+    prompt="""
+你是后端开发专家。实现 API（预计 2h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/backend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】实现 API 接口（根据契约表）
+"""
 )   # 并行
 
 Agent(
     subagent_type="general-purpose",
     description="前端组件实现",
-    prompt="你是前端开发专家。实现组件（预计 3h）。角色规范：.claude/team/frontend-dev/SKILL.md"
+    prompt="""
+你是前端开发专家。实现组件（预计 3h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/frontend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】实现前端组件（根据契约表）
+"""
 )  # 并行
 
 # 第二批：T3 和 T4 并行测试（T1 和 T2 完成后）
 Agent(
     subagent_type="general-purpose",
     description="后端单元测试",
-    prompt="你是 QA 测试专家。编写后端单元测试（预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
+    prompt="""
+你是 QA 测试专家。编写后端单元测试（预计 1h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/qa-tester/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】编写后端单元测试
+"""
 )  # 并行
 
 Agent(
     subagent_type="general-purpose",
     description="前端组件测试",
-    prompt="你是 QA 测试专家。编写前端组件测试（预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
+    prompt="""
+你是 QA 测试专家。编写前端组件测试（预计 1h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/qa-tester/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】编写前端组件测试
+"""
 )  # 并行
 
 # 第三批：T5 集成测试（T3 和 T4 完成后）
 Agent(
     subagent_type="general-purpose",
     description="集成测试",
-    prompt="你是 QA 测试专家。执行集成测试（预计 1h）。角色规范：.claude/team/qa-tester/SKILL.md"
+    prompt="""
+你是 QA 测试专家。执行集成测试（预计 1h）。
+
+⚠️ 【强制要求】先读取 `.claude/team/qa-tester/SKILL.md`，按 Pre-Flight 清单执行。
+
+【任务】执行集成测试
+"""
 )
 ```
 

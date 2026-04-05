@@ -1360,8 +1360,9 @@ class ConfigSnapshotRepositoryExtended:
             "id": row["id"],
             "name": row["name"],
             "description": row["description"],
-            "snapshot_data": json.loads(row["snapshot_data"]),
+            "config_data": json.loads(row["snapshot_data"]),  # API expects config_data
             "created_at": row["created_at"],
+            "updated_at": row["created_at"],  # Use created_at as updated_at (no updates)
             "created_by": row["created_by"],
             "is_auto": bool(row["is_auto"]),
         }

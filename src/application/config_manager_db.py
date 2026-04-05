@@ -33,12 +33,12 @@ from src.domain.models import (
     FilterConfig,
 )
 from src.infrastructure.logger import logger, register_secret, mask_secret
-from src.infrastructure.config_repositories import (
+from src.infrastructure.repositories import (
     SystemConfigRepository,
     RiskConfigRepository,
-    StrategyRepository,
-    SymbolRepository,
-    NotificationRepository,
+    StrategyConfigRepository as StrategyRepository,
+    SymbolConfigRepository as SymbolRepository,
+    NotificationConfigRepository as NotificationRepository,
     ConfigHistoryRepository,
 )
 from typing import TYPE_CHECKING
