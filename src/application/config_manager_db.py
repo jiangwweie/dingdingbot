@@ -306,6 +306,9 @@ class ConfigManager:
             await self._load_system_config()
             await self._load_risk_config()
 
+            # R4.3: Validate configuration integrity and apply defaults if empty
+            await self._validate_and_apply_default_configs()
+
         logger.info(f"ConfigManager initialized from database: {self.db_path}")
 
     async def _create_tables(self) -> None:
@@ -402,7 +405,12 @@ class ConfigManager:
         await self._db.commit()
 
     async def _initialize_default_configs(self) -> None:
-        """Initialize default configurations if not exists."""
+        """Initialize default configurations if not exists.
+
+        Note: This method creates minimal core configs (system, risk, symbols).
+        R4.3: Notification channels are created by _validate_and_apply_default_configs()
+        to ensure warning logs are generated when starting with empty database.
+        """
         # Initialize system config
         async with self._db.execute(
             "SELECT id FROM system_configs WHERE id = 'global'"
@@ -441,7 +449,105 @@ class ConfigManager:
                 VALUES (?, ?, ?)
             """, (symbol, is_core, True))
 
+        # R4.3: Removed notification channel initialization from here
+        # It is now handled by _validate_and_apply_default_configs() to generate warning logs
+
         await self._db.commit()
+
+    async def _validate_and_apply_default_configs(self) -> None:
+        """
+        R4.3: Validate configuration integrity and apply defaults if empty.
+
+        This method ensures that the system can start even with an empty database
+        by applying hard-coded default configurations.
+        """
+        # Check if database is effectively empty (no user-configured data)
+        is_empty = await self._is_empty_config()
+
+        if is_empty:
+            logger.warning("数据库配置为空或不完全，使用默认配置启动系统")
+            await self._apply_hardcoded_defaults()
+
+    async def _is_empty_config(self) -> bool:
+        """
+        Check if the database configuration is empty.
+
+        Returns:
+            True if critical configurations are missing
+        """
+        # Check for notification channels
+        async with self._db.execute(
+            "SELECT COUNT(*) as cnt FROM notifications WHERE is_active = TRUE"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row["cnt"] == 0:
+                return True
+
+        # Check for risk config
+        async with self._db.execute(
+            "SELECT COUNT(*) as cnt FROM risk_configs WHERE id = 'global'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row["cnt"] == 0:
+                return True
+
+        # Check for system config
+        async with self._db.execute(
+            "SELECT COUNT(*) as cnt FROM system_configs WHERE id = 'global'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row["cnt"] == 0:
+                return True
+
+        return False
+
+    async def _apply_hardcoded_defaults(self) -> None:
+        """
+        R4.3: Apply hard-coded default configurations to ensure system can start.
+
+        This method inserts minimal required configurations for system startup.
+        """
+        # Default risk config
+        async with self._db.execute(
+            "SELECT id FROM risk_configs WHERE id = 'global'"
+        ) as cursor:
+            if not await cursor.fetchone():
+                await self._db.execute("""
+                    INSERT INTO risk_configs
+                    (id, max_loss_percent, max_leverage, max_total_exposure, cooldown_minutes)
+                    VALUES ('global', 0.01, 10, 0.8, 240)
+                """)
+                logger.info("已插入默认风控配置")
+
+        # Default notification channel
+        async with self._db.execute(
+            "SELECT id FROM notifications LIMIT 1"
+        ) as cursor:
+            if not await cursor.fetchone():
+                await self._db.execute("""
+                    INSERT INTO notifications
+                    (id, channel_type, webhook_url, is_active, notify_on_signal, notify_on_order, notify_on_error)
+                    VALUES ('default', 'feishu', 'https://placeholder.feishu.cn/webhook', TRUE, TRUE, TRUE, TRUE)
+                """)
+                logger.info("已插入默认通知渠道（占位符）")
+
+        # Default system config
+        async with self._db.execute(
+            "SELECT id FROM system_configs WHERE id = 'global'"
+        ) as cursor:
+            if not await cursor.fetchone():
+                await self._db.execute("""
+                    INSERT INTO system_configs
+                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds)
+                    VALUES ('global', ?, 60, 60, ?, 14400)
+                """, (
+                    json.dumps(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]),
+                    json.dumps({"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
+                ))
+                logger.info("已插入默认系统配置")
+
+        await self._db.commit()
+        logger.info("默认配置已应用，系统可以安全启动")
 
     async def _load_system_config(self) -> Dict[str, Any]:
         """Load system configuration from database."""
@@ -543,8 +649,24 @@ class ConfigManager:
                 signal_pipeline=SignalPipelineConfig(cooldown_seconds=14400),
             )
 
-        with open(core_path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f)
+        try:
+            with open(core_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            logger.error(f"core.yaml 解析失败，使用默认配置：{e}")
+            return CoreConfig(
+                core_symbols=["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"],
+                pinbar_defaults=PinbarDefaults(
+                    min_wick_ratio=Decimal("0.6"),
+                    max_body_ratio=Decimal("0.3"),
+                    body_position_tolerance=Decimal("0.1"),
+                ),
+                ema=EmaConfig(period=60),
+                mtf_mapping=MtfMapping(**{"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
+                mtf_ema_period=60,
+                warmup=WarmupConfig(history_bars=100),
+                signal_pipeline=SignalPipelineConfig(cooldown_seconds=14400),
+            )
 
         return CoreConfig(**data)
 
@@ -553,21 +675,23 @@ class ConfigManager:
         Get user configuration from database.
 
         Returns:
-            UserConfig with all settings from database
+            UserConfig with all settings from database, or default config if data is corrupted
         """
         if self._db is None:
             # Not initialized - fallback to YAML
             return self._load_user_config_from_yaml()
 
-        # Build UserConfig from database
-        # For now, load exchange and notification from YAML (backward compatibility)
-        # In production, these would be stored in database
+        # Build UserConfig from database with degradation support
         user_config_dict = await self._build_user_config_dict()
 
-        return UserConfig(**user_config_dict)
+        try:
+            return UserConfig(**user_config_dict)
+        except ValidationError as e:
+            logger.error(f"UserConfig 验证失败，使用默认配置：{e}")
+            return self._create_default_user_config()  # 兜底
 
     async def _build_user_config_dict(self) -> Dict[str, Any]:
-        """Build user config dictionary from database."""
+        """Build user config dictionary from database with degradation support."""
         # Load from YAML for backward compatibility
         # TODO: Migrate to full database storage
         yaml_config = self._load_user_config_from_yaml()
@@ -576,11 +700,14 @@ class ConfigManager:
         await self._load_system_config()
         await self._load_risk_config()
 
+        # Load strategies with degradation support
+        strategies = await self._load_strategies_from_db()
+
         return {
             "exchange": yaml_config.exchange,
             "user_symbols": [],  # Will be loaded from symbols table
             "timeframes": yaml_config.timeframes,
-            "active_strategies": await self._load_strategies_from_db(),
+            "active_strategies": strategies,
             "risk": self._risk_config_cache,
             "asset_polling": yaml_config.asset_polling,
             "notification": await self._build_notification_config(),
@@ -589,7 +716,7 @@ class ConfigManager:
         }
 
     async def _load_strategies_from_db(self) -> List[StrategyDefinition]:
-        """Load strategies from database."""
+        """Load strategies from database with degradation support."""
         if self._db is None:
             return []
 
@@ -600,8 +727,14 @@ class ConfigManager:
             strategies = []
             for row in rows:
                 try:
-                    trigger_data = json.loads(row["trigger_config"])
-                    filter_data = json.loads(row["filter_configs"])
+                    # Handle corrupted JSON data
+                    trigger_data = json.loads(row["trigger_config"]) if row["trigger_config"] else {}
+                    filter_data = json.loads(row["filter_configs"]) if row["filter_configs"] else []
+
+                    # Validate required fields
+                    if not isinstance(trigger_data, dict):
+                        logger.warning(f"策略 {row['id']} trigger_config 格式错误，跳过")
+                        continue
 
                     trigger = TriggerConfig(
                         type=trigger_data.get("type", "pinbar"),
@@ -609,14 +742,16 @@ class ConfigManager:
                         params=trigger_data.get("params", {}),
                     )
 
-                    filters = [
-                        FilterConfig(
-                            type=f.get("type", "ema"),
-                            enabled=f.get("enabled", True),
-                            params=f.get("params", {}),
-                        )
-                        for f in filter_data
-                    ]
+                    # Handle corrupted filter data
+                    filters = []
+                    if isinstance(filter_data, list):
+                        for f in filter_data:
+                            if isinstance(f, dict):
+                                filters.append(FilterConfig(
+                                    type=f.get("type", "ema"),
+                                    enabled=f.get("enabled", True),
+                                    params=f.get("params", {}),
+                                ))
 
                     strategies.append(StrategyDefinition(
                         id=row["id"],
@@ -625,8 +760,12 @@ class ConfigManager:
                         filters=filters,
                         filter_logic=row["filter_logic"] or "AND",
                     ))
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                    logger.warning(f"策略 {row['id']} 数据损坏，跳过：{e}")
+                    continue
                 except Exception as e:
-                    logger.error(f"Failed to parse strategy: {e}")
+                    logger.error(f"策略 {row['id']} 解析失败：{e}")
+                    continue
 
             return strategies
 
@@ -659,37 +798,81 @@ class ConfigManager:
 
         if not user_path.exists():
             # Return minimal default config
-            return UserConfig(
-                exchange=ExchangeConfig(
-                    name="binance",
-                    api_key="placeholder",
-                    api_secret="placeholder",
-                    testnet=True,
-                ),
-                timeframes=["15m", "1h"],
-                risk=RiskConfig(
-                    max_loss_percent=Decimal("0.01"),
-                    max_leverage=10,
-                    max_total_exposure=Decimal("0.8"),
-                ),
-                notification=NotificationConfig(
-                    channels=[NotificationChannel(
-                        type="feishu",
-                        webhook_url="https://placeholder",
-                    )]
-                ),
-            )
+            return self._create_default_user_config()
 
-        with open(user_path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f)
+        try:
+            with open(user_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            logger.error(f"user.yaml 解析失败，使用默认配置：{e}")
+            return self._create_default_user_config()
 
-        return UserConfig(**data)
+        try:
+            return UserConfig(**data)
+        except ValidationError as e:
+            logger.error(f"user.yaml 配置验证失败，使用默认配置：{e}")
+            return self._create_default_user_config()
+
+    def _create_default_user_config(self) -> UserConfig:
+        """
+        Create a default user configuration.
+
+        This is used as a fallback when database or YAML config is corrupted.
+        """
+        return UserConfig(
+            exchange=ExchangeConfig(
+                name="binance",
+                api_key="placeholder",
+                api_secret="placeholder",
+                testnet=True,
+            ),
+            timeframes=["15m", "1h"],
+            risk=RiskConfig(
+                max_loss_percent=Decimal("0.01"),
+                max_leverage=10,
+                max_total_exposure=Decimal("0.8"),
+            ),
+            notification=NotificationConfig(
+                channels=[NotificationChannel(
+                    type="feishu",
+                    webhook_url="https://placeholder",
+                )]
+            ),
+        )
 
     async def close(self) -> None:
         """Close database connection."""
         if self._db:
             await self._db.close()
             self._db = None
+
+    # ============================================================
+    # Cache Refresh (for Profile Switch)
+    # ============================================================
+
+    async def reload_all_configs_from_db(self) -> None:
+        """
+        Reload all configurations from database and refresh caches.
+
+        用于 Profile 切换后刷新内存缓存，确保读取到新 Profile 的配置。
+
+        注意：此方法会刷新所有缓存并通知观察者。
+        """
+        if self._db is None:
+            logger.warning("ConfigManager: Database not initialized, skipping reload")
+            return
+
+        async with self._ensure_lock():
+            # 重新加载系统配置
+            await self._load_system_config()
+
+            # 重新加载风控配置
+            await self._load_risk_config()
+
+            logger.info("ConfigManager: All configs reloaded from database")
+
+            # 通知观察者（触发 SignalPipeline 等组件更新）
+            await self._notify_observers()
 
     # ============================================================
     # Configuration Update Methods

@@ -5748,7 +5748,7 @@ def _get_profile_service() -> "ConfigProfileService":
         from src.application.config_profile_service import ConfigProfileService
         _profile_repository = ConfigProfileRepository()
         config_entry_repo = _get_config_entry_repo()
-        _profile_service = ConfigProfileService(_profile_repository, config_entry_repo)
+        _profile_service = ConfigProfileService(_profile_repository, config_entry_repo, _config_manager)
     return _profile_service
 
 
@@ -5768,7 +5768,7 @@ async def list_profiles():
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         profiles = await service.list_profiles()
         active = await service.get_active_profile()
@@ -5802,7 +5802,7 @@ async def get_profile(name: str):
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         profile = await service.get_profile(name)
         if not profile:
@@ -5838,7 +5838,7 @@ async def create_profile(request: ProfileCreateRequest):
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         # 名称验证
         if not request.name or len(request.name) > 32:
@@ -5884,7 +5884,7 @@ async def switch_profile(name: str):
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         profile = await service.get_profile(name)
         if not profile:
@@ -5931,7 +5931,7 @@ async def delete_profile(name: str):
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         profile = await service.get_profile(name)
         if not profile:
@@ -5978,7 +5978,7 @@ async def rename_profile(name: str, request: ProfileRenameRequest):
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         # 验证原 Profile 存在
         profile = await service.get_profile(name)
@@ -6035,7 +6035,7 @@ async def export_profile(name: str):
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         profile = await service.get_profile(name)
         if not profile:
@@ -6078,7 +6078,7 @@ async def import_profile(request: ProfileImportRequest):
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         profile, count = await service.import_profile_yaml(
             yaml_content=request.yaml_content,
@@ -6124,7 +6124,7 @@ async def compare_profiles(
         await profile_repo.initialize()
 
         config_entry_repo = _get_config_entry_repo()
-        service = ConfigProfileService(profile_repo, config_entry_repo)
+        service = ConfigProfileService(profile_repo, config_entry_repo, _config_manager)
 
         from_profile = await service.get_profile(from_name)
         if not from_profile:

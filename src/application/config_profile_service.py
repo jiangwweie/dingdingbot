@@ -8,10 +8,13 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 import yaml
+import logging
 
 from src.infrastructure.config_profile_repository import ConfigProfileRepository, ProfileInfo
 from src.infrastructure.config_entry_repository import ConfigEntryRepository
 from src.domain.exceptions import FatalStartupError
+
+logger = logging.getLogger(__name__)
 
 
 class ProfileDiff:
@@ -56,6 +59,7 @@ class ConfigProfileService:
         self,
         profile_repository: ConfigProfileRepository,
         config_repository: ConfigEntryRepository,
+        config_manager: Optional[Any] = None,  # ConfigManager for cache refresh
     ):
         """
         Initialize ConfigProfileService.
@@ -63,9 +67,11 @@ class ConfigProfileService:
         Args:
             profile_repository: Profile 数据仓库
             config_repository: 配置项数据仓库
+            config_manager: ConfigManager 实例（用于缓存刷新，可选）
         """
         self.profile_repository = profile_repository
         self.config_repository = config_repository
+        self.config_manager = config_manager  # May be None in some contexts
 
     async def list_profiles(self) -> List[ProfileInfo]:
         """
@@ -154,6 +160,14 @@ class ConfigProfileService:
 
         # 执行切换
         await self.profile_repository.activate_profile(name)
+
+        # 新增：通知 ConfigManager 刷新缓存（如果已注入）
+        if self.config_manager is not None:
+            try:
+                await self.config_manager.reload_all_configs_from_db()
+                logger.info(f"ConfigProfileService: Cache refreshed after switching to profile '{name}'")
+            except Exception as e:
+                logger.error(f"Failed to refresh config cache after profile switch: {e}")
 
         return diff
 

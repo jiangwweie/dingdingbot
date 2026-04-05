@@ -576,5 +576,92 @@ class TestProfileDiff:
         assert "strategy" in result["diff"]
 
 
+# ============================================================
+# Profile Switch Cache Refresh Tests (R1.1 Fix)
+# ============================================================
+
+class TestProfileSwitchCacheRefresh:
+    """Tests for Profile switch cache refresh (R1.1 bug fix)"""
+
+    @pytest.mark.asyncio
+    async def test_switch_profile_calls_config_manager_reload(self, profile_repo):
+        """Test that switch_profile() calls ConfigManager.reload_all_configs_from_db()"""
+        from unittest.mock import AsyncMock, MagicMock
+
+        # Create config repo
+        config_repo = ConfigEntryRepository(db_path=TEST_DB_PATH)
+        await config_repo.initialize()
+
+        # Create mock ConfigManager
+        mock_config_manager = AsyncMock()
+        mock_config_manager.reload_all_configs_from_db = AsyncMock()
+
+        # Create service with ConfigManager
+        service = ConfigProfileService(profile_repo, config_repo, mock_config_manager)
+
+        # Create a test profile
+        await profile_repo.create_profile(name="test_profile", description="Test")
+
+        # Switch profile
+        diff = await service.switch_profile("test_profile")
+
+        # Verify ConfigManager was called
+        mock_config_manager.reload_all_configs_from_db.assert_called_once()
+
+        await config_repo.close()
+
+    @pytest.mark.asyncio
+    async def test_switch_profile_without_config_manager(self, profile_repo):
+        """Test that switch_profile() works without ConfigManager (backward compatible)"""
+        # Create config repo
+        config_repo = ConfigEntryRepository(db_path=TEST_DB_PATH)
+        await config_repo.initialize()
+
+        # Create service WITHOUT ConfigManager
+        service = ConfigProfileService(profile_repo, config_repo, config_manager=None)
+
+        # Create a test profile
+        await profile_repo.create_profile(name="test_profile", description="Test")
+
+        # Switch profile - should NOT raise error
+        diff = await service.switch_profile("test_profile")
+
+        assert diff is not None
+        assert diff.from_profile == "default"
+        assert diff.to_profile == "test_profile"
+
+        await config_repo.close()
+
+    @pytest.mark.asyncio
+    async def test_switch_profile_cache_refresh_logs_error(self, profile_repo):
+        """Test that ConfigManager reload error is logged but doesn't break switch"""
+        from unittest.mock import AsyncMock
+
+        # Create config repo
+        config_repo = ConfigEntryRepository(db_path=TEST_DB_PATH)
+        await config_repo.initialize()
+
+        # Create mock ConfigManager that raises error
+        mock_config_manager = AsyncMock()
+        mock_config_manager.reload_all_configs_from_db = AsyncMock(side_effect=Exception("DB error"))
+
+        # Create service with failing ConfigManager
+        service = ConfigProfileService(profile_repo, config_repo, mock_config_manager)
+
+        # Create a test profile
+        await profile_repo.create_profile(name="test_profile", description="Test")
+
+        # Switch profile - should NOT raise error even if ConfigManager fails
+        diff = await service.switch_profile("test_profile")
+
+        # Verify switch still succeeded
+        assert diff is not None
+
+        # Verify ConfigManager was still called
+        mock_config_manager.reload_all_configs_from_db.assert_called_once()
+
+        await config_repo.close()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

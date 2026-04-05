@@ -29,6 +29,63 @@ from src.application.config_manager_db import (
 from src.domain.models import RiskConfig, StrategyDefinition, TriggerConfig, FilterConfig
 
 
+@pytest.fixture
+def yaml_config_dir():
+    """Create temporary YAML config directory for testing."""
+    temp_dir = tempfile.mkdtemp()
+
+    # Create core.yaml
+    core_yaml = """
+core_symbols:
+  - BTC/USDT:USDT
+  - ETH/USDT:USDT
+pinbar_defaults:
+  min_wick_ratio: 0.6
+  max_body_ratio: 0.3
+  body_position_tolerance: 0.1
+ema:
+  period: 60
+mtf_mapping:
+  15m: 1h
+  1h: 4h
+mtf_ema_period: 60
+warmup:
+  history_bars: 100
+signal_pipeline:
+  cooldown_seconds: 14400
+"""
+    with open(os.path.join(temp_dir, "core.yaml"), "w") as f:
+        f.write(core_yaml)
+
+    # Create user.yaml
+    user_yaml = """
+exchange:
+  name: binance
+  api_key: test_api_key
+  api_secret: test_api_secret
+  testnet: true
+user_symbols: []
+timeframes:
+  - 15m
+  - 1h
+risk:
+  max_loss_percent: 0.01
+  max_leverage: 10
+  max_total_exposure: 0.8
+asset_polling:
+  interval_seconds: 60
+notification:
+  channels:
+    - type: feishu
+      webhook_url: https://test.feishu.cn/webhook
+"""
+    with open(os.path.join(temp_dir, "user.yaml"), "w") as f:
+        f.write(user_yaml)
+
+    yield temp_dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 # ============================================================
 # Fixtures
 # ============================================================
@@ -382,62 +439,6 @@ class TestObserverPattern:
 class TestYamlBackwardCompatibility:
     """Test YAML backward compatibility."""
 
-    @pytest.fixture
-    def yaml_config_dir(self):
-        """Create temporary YAML config directory."""
-        temp_dir = tempfile.mkdtemp()
-
-        # Create core.yaml
-        core_yaml = """
-core_symbols:
-  - BTC/USDT:USDT
-  - ETH/USDT:USDT
-pinbar_defaults:
-  min_wick_ratio: 0.6
-  max_body_ratio: 0.3
-  body_position_tolerance: 0.1
-ema:
-  period: 60
-mtf_mapping:
-  15m: 1h
-  1h: 4h
-mtf_ema_period: 60
-warmup:
-  history_bars: 100
-signal_pipeline:
-  cooldown_seconds: 14400
-"""
-        with open(os.path.join(temp_dir, "core.yaml"), "w") as f:
-            f.write(core_yaml)
-
-        # Create user.yaml
-        user_yaml = """
-exchange:
-  name: binance
-  api_key: test_api_key
-  api_secret: test_api_secret
-  testnet: true
-user_symbols: []
-timeframes:
-  - 15m
-  - 1h
-risk:
-  max_loss_percent: 0.01
-  max_leverage: 10
-  max_total_exposure: 0.8
-asset_polling:
-  interval_seconds: 60
-notification:
-  channels:
-    - type: feishu
-      webhook_url: https://test.feishu.cn/webhook
-"""
-        with open(os.path.join(temp_dir, "user.yaml"), "w") as f:
-            f.write(user_yaml)
-
-        yield temp_dir
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
     def test_load_from_yaml_fallback(self, yaml_config_dir):
         """Test loading config from YAML when DB not initialized."""
         manager = ConfigManager(config_dir=yaml_config_dir)
@@ -476,6 +477,229 @@ class TestConvenienceFunctions:
             assert "BTC/USDT:USDT" in core_config.core_symbols
         finally:
             await manager.close()
+
+
+# ============================================================
+# Configuration Corruption Degradation Tests (R5.2)
+# ============================================================
+
+class TestConfigCorruptionDegradation:
+    """Test configuration corruption degradation handling (R5.2)."""
+
+    @pytest.mark.asyncio
+    async def test_corrupted_json_returns_none(self, temp_db_path):
+        """Test that corrupted JSON returns None instead of crashing."""
+        from src.infrastructure.config_entry_repository import ConfigEntryRepository
+
+        repo = ConfigEntryRepository(db_path=temp_db_path)
+        await repo.initialize()
+
+        # Insert corrupted JSON data
+        corrupted_json = "{ invalid json }"
+        await repo.upsert_entry("test.corrupted_key", corrupted_json, version="v1.0.0")
+
+        # Manually update the value_type to 'json' to simulate corrupted data
+        async with repo._db.execute(
+            "UPDATE config_entries_v2 SET config_value = ?, value_type = 'json' WHERE config_key = ?",
+            (corrupted_json, "test.corrupted_key")
+        ) as cursor:
+            await repo._db.commit()
+
+        # Try to get the entry - should not crash
+        entry = await repo.get_entry("test.corrupted_key")
+
+        # Should return None for corrupted data
+        assert entry is None or entry.get("config_value") is None
+
+        await repo.close()
+
+    @pytest.mark.asyncio
+    async def test_system_config_corruption_uses_default(self, temp_db_path):
+        """Test that corrupted system config uses default values."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Corrupt system config by injecting invalid JSON
+        async with manager._db.execute(
+            "UPDATE system_configs SET mtf_mapping = ? WHERE id = 'global'",
+            ("{ invalid json }",)
+        ) as cursor:
+            await manager._db.commit()
+
+        # Should still return valid config (using defaults for corrupted fields)
+        core_config = manager.get_core_config()
+        assert core_config is not None
+        assert core_config.mtf_mapping is not None
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_user_config_validation_error_uses_default(self, temp_db_path):
+        """Test that UserConfig validation error falls back to default config."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Get user config should not crash even with potential validation issues
+        user_config = await manager.get_user_config()
+
+        # Should return valid config
+        assert user_config is not None
+        assert user_config.exchange is not None
+        assert user_config.risk is not None
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_corrupted_strategy_json_skipped(self, temp_db_path):
+        """Test that corrupted strategy JSON is skipped."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Insert corrupted strategy directly into database
+        async with manager._db.execute("""
+            INSERT INTO strategies (id, name, is_active, trigger_config, filter_configs, filter_logic, symbols, timeframes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            "corrupted_strategy",
+            "Corrupted Strategy",
+            True,
+            "{ invalid json }",  # Corrupted trigger_config
+            "also invalid json",  # Corrupted filter_configs
+            "AND",
+            "[]",
+            "[]",
+        )) as cursor:
+            await manager._db.commit()
+
+        # Load user config - should skip corrupted strategy
+        user_config = await manager.get_user_config()
+        assert user_config is not None
+
+        # Corrupted strategy should be skipped
+        strategy_ids = [s.id for s in user_config.active_strategies]
+        assert "corrupted_strategy" not in strategy_ids
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_corrupted_strategy_name_field_skipped(self, temp_db_path):
+        """Test that strategy with empty trigger_config is handled gracefully."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Insert strategy with empty trigger_config (NOT NULL constraint)
+        async with manager._db.execute("""
+            INSERT INTO strategies (id, name, is_active, trigger_config, filter_configs, filter_logic, symbols, timeframes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            "empty_trigger_strategy",
+            "Empty Trigger Strategy",
+            True,
+            "",  # Empty string instead of NULL
+            "[]",
+            "AND",
+            "[]",
+            "[]",
+        )) as cursor:
+            await manager._db.commit()
+
+        # Load user config - should handle empty string gracefully
+        user_config = await manager.get_user_config()
+        assert user_config is not None
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_create_default_user_config(self, temp_db_path):
+        """Test _create_default_user_config method."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        default_config = manager._create_default_user_config()
+
+        assert default_config is not None
+        assert default_config.exchange.name == "binance"
+        assert default_config.risk.max_loss_percent == Decimal("0.01")
+        assert default_config.risk.max_leverage == 10
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_yaml_corruption_uses_default(self, temp_db_path, yaml_config_dir):
+        """Test that corrupted YAML uses default config."""
+        # Corrupt user.yaml with invalid YAML
+        with open(os.path.join(yaml_config_dir, "user.yaml"), "w") as f:
+            f.write("invalid: yaml: content: { broken")
+
+        manager = ConfigManager(db_path=temp_db_path, config_dir=yaml_config_dir)
+        await manager.initialize_from_db()
+
+        # Should fall back to default config instead of crashing
+        user_config = await manager.get_user_config()
+        assert user_config is not None
+        assert user_config.exchange is not None
+
+        await manager.close()
+
+
+# ============================================================
+# Profile Switch Cache Refresh Tests (R1.1)
+# ============================================================
+
+class TestProfileSwitchCacheRefresh:
+    """Test cache refresh functionality for Profile switch (R1.1 fix)."""
+
+    @pytest.mark.asyncio
+    async def test_reload_all_configs_from_db(self, config_manager):
+        """Test reloading all configs from database."""
+        # Get initial config
+        initial_core = config_manager.get_core_config()
+        initial_ema_period = initial_core.ema.period
+
+        # Modify config in database directly
+        await config_manager._db.execute("""
+            UPDATE system_configs
+            SET ema_period = ?, updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (999,))
+        await config_manager._db.commit()
+
+        # Verify cache still has old value
+        cached_core = config_manager.get_core_config()
+        assert cached_core.ema.period == initial_ema_period
+
+        # Reload from database
+        await config_manager.reload_all_configs_from_db()
+
+        # Verify cache is updated
+        reloaded_core = config_manager.get_core_config()
+        assert reloaded_core.ema.period == 999
+
+    @pytest.mark.asyncio
+    async def test_reload_all_configs_from_db_notifies_observers(self, config_manager):
+        """Test that reload_all_configs_from_db notifies observers."""
+        called = False
+
+        async def observer():
+            nonlocal called
+            called = True
+
+        config_manager.add_observer(observer)
+
+        # Reload configs
+        await config_manager.reload_all_configs_from_db()
+
+        # Verify observer was called
+        assert called is True
+
+    @pytest.mark.asyncio
+    async def test_reload_all_configs_from_db_handles_uninitialized(self):
+        """Test that reload handles uninitialized database gracefully."""
+        manager = ConfigManager()
+        # Don't initialize database
+
+        # Should not raise error
+        await manager.reload_all_configs_from_db()
 
 
 # ============================================================

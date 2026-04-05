@@ -78,6 +78,18 @@ class ProfileImportResponse(BaseModel):
 # ------------------------------------------------------------
 _profile_repository: Optional[ConfigProfileRepository] = None
 _profile_service: Optional[ConfigProfileService] = None
+_config_manager: Optional[Any] = None  # ConfigManager for cache refresh
+
+
+def set_profile_dependencies(
+    profile_repository: Optional[ConfigProfileRepository] = None,
+    config_manager: Optional[Any] = None,
+):
+    """Inject dependencies for profile endpoints."""
+    global _profile_repository, _profile_service, _config_manager
+    _profile_repository = profile_repository
+    _config_manager = config_manager
+    _profile_service = None  # Reset service to force re-initialization
 
 
 def _get_profile_repository() -> ConfigProfileRepository:
@@ -89,13 +101,20 @@ def _get_profile_repository() -> ConfigProfileRepository:
     return _profile_repository
 
 
+def _get_config_manager() -> Optional[Any]:
+    """Get ConfigManager or None."""
+    return _config_manager
+
+
 def _get_profile_service() -> ConfigProfileService:
     """Get profile service or raise error if not initialized."""
     global _profile_service
     if _profile_service is None:
         repo = _get_profile_repository()
-        config_repo = _get_repository()
-        _profile_service = ConfigProfileService(repo, config_repo)
+        from src.infrastructure.config_entry_repository import ConfigEntryRepository
+        config_repo = ConfigEntryRepository()
+        config_manager = _get_config_manager()
+        _profile_service = ConfigProfileService(repo, config_repo, config_manager)
     return _profile_service
 
 
