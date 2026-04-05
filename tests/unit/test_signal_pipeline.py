@@ -664,3 +664,183 @@ class TestMTFEMAWarmup:
         # 验证：所有 EMA 都应该 ready
         for key in pipeline._mtf_ema_indicators:
             assert pipeline._mtf_ema_indicators[key].is_ready is True
+
+
+# ============================================================
+# 测试：R1.2 风控配置热重载 (2026-04-05)
+# ============================================================
+
+class TestRiskConfigHotReload:
+    """测试 R1.2: 风控配置热重载后 SignalPipeline 使用新 RiskConfig"""
+
+    @pytest.fixture
+    def pipeline_with_initial_config(self):
+        """创建带有初始风控配置的 pipeline"""
+        # Mock config manager
+        mock_config_manager = MagicMock()
+        mock_config_manager.user_config = MagicMock()
+        mock_config_manager.user_config.active_strategies = []
+        mock_config_manager.user_config.mtf_ema_period = 60
+        mock_config_manager.core_config = MagicMock()
+        mock_config_manager.core_config.signal_pipeline.queue.batch_size = 10
+        mock_config_manager.core_config.signal_pipeline.queue.flush_interval = 5.0
+        mock_config_manager.core_config.signal_pipeline.queue.max_queue_size = 1000
+        mock_config_manager.add_observer = MagicMock()
+
+        # 初始风控配置
+        initial_risk_config = RiskConfig(
+            max_loss_percent=Decimal("0.01"),  # 1%
+            max_leverage=10,
+        )
+
+        pipeline = SignalPipeline(
+            config_manager=mock_config_manager,
+            risk_config=initial_risk_config,
+        )
+
+        # 设置账户快照用于仓位计算
+        pipeline.update_account_snapshot(AccountSnapshot(
+            total_balance=Decimal("10000"),
+            available_balance=Decimal("10000"),
+            unrealized_pnl=Decimal("0"),
+            positions=[],
+            timestamp=1234567890000,
+        ))
+
+        return pipeline
+
+    @pytest.mark.asyncio
+    async def test_risk_config_updated_on_hot_reload(self, pipeline_with_initial_config):
+        """测试：热重载后 _risk_config 被更新"""
+        pipeline = pipeline_with_initial_config
+
+        # 验证初始配置
+        assert pipeline._risk_config.max_loss_percent == Decimal("0.01")
+        assert pipeline._risk_config.max_leverage == 10
+
+        # 模拟配置更新：创建新的风控配置
+        new_risk_config = RiskConfig(
+            max_loss_percent=Decimal("0.02"),  # 2% (增加)
+            max_leverage=20,  # 增加到 20x
+        )
+
+        # 更新 mock 的 user_config
+        pipeline._config_manager.user_config.risk = new_risk_config
+
+        # 触发热重载
+        await pipeline.on_config_updated()
+
+        # 验证：_risk_config 已更新
+        assert pipeline._risk_config.max_loss_percent == Decimal("0.02")
+        assert pipeline._risk_config.max_leverage == 20
+
+    @pytest.mark.asyncio
+    async def test_mtf_ema_period_updated_on_hot_reload(self, pipeline_with_initial_config):
+        """测试：热重载后 _mtf_ema_period 被更新"""
+        pipeline = pipeline_with_initial_config
+
+        # 验证初始配置
+        assert pipeline._mtf_ema_period == 60
+
+        # 模拟配置更新
+        pipeline._config_manager.user_config.mtf_ema_period = 100
+
+        # 触发热重载
+        await pipeline.on_config_updated()
+
+        # 验证：_mtf_ema_period 已更新
+        assert pipeline._mtf_ema_period == 100
+
+    @pytest.mark.asyncio
+    async def test_mtf_ema_indicators_cleared_on_hot_reload(self, pipeline_with_initial_config):
+        """测试：热重载后 MTF EMA indicators 被清空重建"""
+        pipeline = pipeline_with_initial_config
+
+        # 预填充一些 EMA indicators
+        from src.domain.indicators import EMACalculator
+        pipeline._mtf_ema_indicators["BTC/USDT:USDT:1h"] = EMACalculator(period=60)
+        pipeline._mtf_ema_indicators["BTC/USDT:USDT:4h"] = EMACalculator(period=60)
+
+        # 验证初始有 indicators
+        assert len(pipeline._mtf_ema_indicators) == 2
+
+        # 触发热重载
+        await pipeline.on_config_updated()
+
+        # 验证：indicators 被清空（将在下次 K 线处理时重建）
+        assert len(pipeline._mtf_ema_indicators) == 0
+
+    @pytest.mark.asyncio
+    async def test_signal_cooldown_cache_cleared_on_hot_reload(self, pipeline_with_initial_config):
+        """测试：热重载后 signal cooldown cache 被清空"""
+        pipeline = pipeline_with_initial_config
+
+        # 预填充 cooldown cache
+        pipeline._signal_cooldown_cache["BTC/USDT:USDT:15m:long:pinbar"] = 1234567890.0
+
+        # 验证初始有 cache
+        assert len(pipeline._signal_cooldown_cache) == 1
+
+        # 触发热重载
+        await pipeline.on_config_updated()
+
+        # 验证：cache 被清空
+        assert len(pipeline._signal_cooldown_cache) == 0
+
+    @pytest.mark.asyncio
+    async def test_position_calculation_uses_new_risk_config(self, pipeline_with_initial_config):
+        """测试：热重载后仓位计算使用新的风控参数"""
+        pipeline = pipeline_with_initial_config
+
+        # 初始配置：1% 止损，10x 杠杆
+        kline = create_kline(close=Decimal("50000"))
+
+        # 验证初始 risk_config
+        assert pipeline._risk_config.max_loss_percent == Decimal("0.01")
+        assert pipeline._risk_config.max_leverage == 10
+
+        # 模拟配置更新：2% 止损，20x 杠杆
+        new_risk_config = RiskConfig(
+            max_loss_percent=Decimal("0.02"),
+            max_leverage=20,
+        )
+        pipeline._config_manager.user_config.risk = new_risk_config
+
+        # 触发热重载
+        await pipeline.on_config_updated()
+
+        # 验证：配置已更新
+        assert pipeline._risk_config.max_loss_percent == Decimal("0.02")
+        assert pipeline._risk_config.max_leverage == 20
+
+        # 验证：risk_calculator 属性返回的 calculator 使用新配置
+        # (注意：_risk_calculator 是 property，每次访问都会创建新的 RiskCalculator)
+        calculator = pipeline._risk_calculator
+        assert calculator.config.max_loss_percent == Decimal("0.02")
+        assert calculator.config.max_leverage == 20
+
+    @pytest.mark.asyncio
+    async def test_hot_reload_logs_config_changes(self, pipeline_with_initial_config, caplog):
+        """测试：热重载时日志记录配置变更"""
+        import logging
+        pipeline = pipeline_with_initial_config
+
+        # 设置日志级别为 INFO
+        with caplog.at_level(logging.INFO):
+            # 模拟配置更新
+            new_risk_config = RiskConfig(
+                max_loss_percent=Decimal("0.02"),
+                max_leverage=20,
+            )
+            pipeline._config_manager.user_config.risk = new_risk_config
+            pipeline._config_manager.user_config.mtf_ema_period = 100
+
+            # 触发热重载
+            await pipeline.on_config_updated()
+
+        # 验证日志包含配置变更信息
+        assert "Risk config reloaded" in caplog.text
+        assert "0.01->0.02" in caplog.text
+        assert "10->20" in caplog.text
+        assert "MTF EMA period updated" in caplog.text
+        assert "60->100" in caplog.text

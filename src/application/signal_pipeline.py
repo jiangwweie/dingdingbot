@@ -282,14 +282,35 @@ class SignalPipeline:
 
         Called by ConfigManager when user.yaml is updated.
         Rebuilds the strategy runner and warms up with cached K-line history.
+        Updates _risk_config and _mtf_ema_period to reflect new configuration.
         """
         logger.info("Configuration hot-reload triggered, rebuilding strategy runner...")
 
         async with self._get_runner_lock():
-            # Step 1: Build new runner from updated config
+            # Step 1: Reload risk configuration (R1.2 fix: _risk_config was stale on hot-reload)
+            user_config = self._config_manager.user_config
+            old_max_loss = self._risk_config.max_loss_percent
+            old_max_leverage = self._risk_config.max_leverage
+            self._risk_config = user_config.risk
+            logger.info(
+                f"Risk config reloaded: max_loss_percent={old_max_loss}->{self._risk_config.max_loss_percent}, "
+                f"max_leverage={old_max_leverage}->{self._risk_config.max_leverage}"
+            )
+
+            # Step 2: Reload MTF EMA period (S3-1 fix: _mtf_ema_period was stale on hot-reload)
+            old_mtf_ema_period = self._mtf_ema_period
+            self._mtf_ema_period = user_config.mtf_ema_period or 60
+            if old_mtf_ema_period != self._mtf_ema_period:
+                logger.info(f"MTF EMA period updated: {old_mtf_ema_period}->{self._mtf_ema_period}")
+
+            # Step 3: Rebuild MTF EMA indicators with new period (recreate all indicators)
+            self._mtf_ema_indicators.clear()
+            logger.info("MTF EMA indicators cleared (will be recreated on next K-line processing)")
+
+            # Step 4: Build new runner from updated config
             self._runner = self._build_and_warmup_runner()
 
-            # Step 2: Clear stale cooldown cache (config params may have changed)
+            # Step 5: Clear stale cooldown cache (config params may have changed)
             self._signal_cooldown_cache.clear()
             logger.info("Signal cooldown cache cleared (stale cache prevention)")
 

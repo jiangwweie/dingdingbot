@@ -260,37 +260,6 @@ npm run lint  # 如已配置
 
 ---
 
-### PM 专属规范
-
-**文件位置**: `.claude/team/project-manager/SKILL.md`
-
-**定位**: 项目统一协调入口，负责任务分解、并行调度、进度追踪
-
-#### 🟢 开工前检查清单
-```markdown
-- [ ] **接收任务计划**: 已从 PM 接收任务计划 (`docs/planning/<feature>-task-plan.md`)
-- [ ] **契约阅读**: 已阅读接口契约表 (`docs/designs/<feature>-contract.md`)
-- [ ] **任务分解**: 已将任务计划拆分为可执行的子任务
-- [ ] **依赖标注**: 已识别任务依赖关系 (addBlockedBy)
-- [ ] **角色分配**: 已确定需要参与的角色 (Backend/Frontend/QA)
-```
-
-#### 🔴 收工时检查清单
-```markdown
-- [ ] **集成验证**: 所有子任务测试通过
-- [ ] **结果汇总**: 已生成交付结果给 PM
-- [ ] **代码审查**: Reviewer 审查通过 (如有)
-- [ ] **测试报告**: QA 测试报告已生成
-```
-
-**验证命令**:
-```bash
-# 运行完整测试套件
-pytest tests/unit/ tests/integration/ -v --tb=short
-```
-
----
-
 ### Backend Dev 专属
 
 **文件位置**: `.claude/team/backend-dev/SKILL.md`
