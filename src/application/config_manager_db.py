@@ -13,6 +13,7 @@ Architecture:
 - Integrates with ConfigSnapshotService for version control
 """
 import asyncio
+import copy
 import json
 import os
 from datetime import datetime, timezone
@@ -25,7 +26,7 @@ import aiosqlite
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from src.domain.exceptions import FatalStartupError
+from src.domain.exceptions import FatalStartupError, DependencyNotReadyError
 from src.domain.models import (
     RiskConfig,
     StrategyDefinition,
@@ -259,6 +260,33 @@ class ConfigManager:
         # YAML fallback flag
         self._use_yaml_fallback = True
 
+        # R9.3: Initialization state and lock for race condition prevention
+        self._initialized = False
+        self._initializing = False
+        self._init_lock: Optional[asyncio.Lock] = None
+        self._init_event: Optional[asyncio.Event] = None
+
+        # R3.2: Configuration version for hot-reload consistency
+        self._config_version = 0
+        self._config_lock: Optional[asyncio.Lock] = None
+
+    def _ensure_init_lock(self) -> asyncio.Lock:
+        """Ensure init lock is created for current event loop (R9.3)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.Lock()
+
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
+        return self._init_lock
+
+    def _ensure_init_event(self) -> asyncio.Event:
+        """Ensure init event is created for current event loop (R9.3)."""
+        if self._init_event is None:
+            self._init_event = asyncio.Event()
+        return self._init_event
+
     def _ensure_lock(self) -> asyncio.Lock:
         """Ensure lock is created for current event loop."""
         try:
@@ -270,46 +298,116 @@ class ConfigManager:
             self._lock = asyncio.Lock()
         return self._lock
 
+    def _ensure_config_lock(self) -> asyncio.Lock:
+        """Ensure config lock is created for current event loop (R3.2)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.Lock()
+
+        if self._config_lock is None:
+            self._config_lock = asyncio.Lock()
+        return self._config_lock
+
+    def get_config_version(self) -> int:
+        """Get current configuration version number (R3.2)."""
+        return self._config_version
+
     async def initialize_from_db(self) -> None:
         """
         Initialize database connection and create default configurations.
 
         This method is idempotent - calling it multiple times has no effect
         after first initialization.
+
+        R9.3: Uses double-checked locking to prevent race conditions during
+        concurrent initialization. Concurrent callers will wait for the first
+        initialization to complete.
         """
-        if self._db is not None:
-            # Already initialized
+        # Fast path - already initialized
+        if self._initialized:
             return
 
-        async with self._ensure_lock():
-            # Create data directory if not exists
-            db_dir = os.path.dirname(self.db_path)
-            if db_dir and not os.path.exists(db_dir):
-                os.makedirs(db_dir, exist_ok=True)
+        # R9.3: Get lock and event for current event loop
+        init_lock = self._ensure_init_lock()
+        init_event = self._ensure_init_event()
 
-            # Open database connection
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
+        async with init_lock:
+            # Double-check after acquiring lock
+            if self._initialized:
+                return
 
-            # Enable WAL mode for high concurrency
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            # If already initializing, wait for completion
+            if self._initializing:
+                logger.debug("ConfigManager: Waiting for concurrent initialization to complete")
+                await init_event.wait()
+                return
 
-            # Create tables if not exists
-            await self._create_tables()
+            # Mark as initializing
+            self._initializing = True
 
-            # Initialize default configurations
-            await self._initialize_default_configs()
+            try:
+                # Create data directory if not exists
+                db_dir = os.path.dirname(self.db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
 
-            # Load configurations into cache
-            await self._load_system_config()
-            await self._load_risk_config()
+                # Open database connection
+                self._db = await aiosqlite.connect(self.db_path)
+                self._db.row_factory = aiosqlite.Row
 
-            # R4.3: Validate configuration integrity and apply defaults if empty
-            await self._validate_and_apply_default_configs()
+                # Enable WAL mode for high concurrency
+                await self._db.execute("PRAGMA journal_mode=WAL")
+                await self._db.execute("PRAGMA synchronous=NORMAL")
+                await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+
+                # Create tables if not exists
+                await self._create_tables()
+
+                # Initialize default configurations
+                await self._initialize_default_configs()
+
+                # Load configurations into cache
+                await self._load_system_config()
+                await self._load_risk_config()
+
+                # R4.3: Validate configuration integrity and apply defaults if empty
+                await self._validate_and_apply_default_configs()
+
+                # Mark as initialized
+                self._initialized = True
+                init_event.set()  # Notify waiting coroutines
+            except Exception:
+                # Reset state on failure
+                self._initializing = False
+                init_event.clear()
+                raise
+            finally:
+                self._initializing = False
 
         logger.info(f"ConfigManager initialized from database: {self.db_path}")
+
+    def assert_initialized(self) -> None:
+        """
+        R7.1: Assert that ConfigManager has been fully initialized.
+
+        Other modules should call this method before accessing configuration
+        to ensure ConfigManager is ready.
+
+        Raises:
+            DependencyNotReadyError: If ConfigManager is not initialized yet
+        """
+        if not self._initialized:
+            if self._initializing:
+                raise DependencyNotReadyError(
+                    "ConfigManager 正在初始化中，请稍候",
+                    "F-003",
+                )
+            else:
+                raise DependencyNotReadyError(
+                    "ConfigManager 未初始化 - 请确保在 main.py 中先调用 config_manager.initialize_from_db()",
+                    "F-003",
+                )
 
     async def _create_tables(self) -> None:
         """Create configuration tables if not exists."""
@@ -675,20 +773,45 @@ class ConfigManager:
         Get user configuration from database.
 
         Returns:
-            UserConfig with all settings from database, or default config if data is corrupted
+            UserConfig 配置副本（深拷贝），防止外部修改影响内部状态
+        
+        R9.3: If initialization is in progress, wait for it to complete (up to 30s timeout).
         """
+        # R9.3: Wait for initialization if in progress
+        if not self._initialized and self._init_event is not None:
+            try:
+                logger.debug("ConfigManager: Waiting for initialization to complete")
+                await asyncio.wait_for(self._init_event.wait(), timeout=30.0)
+            except asyncio.TimeoutError:
+                raise RuntimeError("ConfigManager 初始化超时 (30 秒)")
+        
         if self._db is None:
             # Not initialized - fallback to YAML
-            return self._load_user_config_from_yaml()
+            config = self._load_user_config_from_yaml()
+        else:
+            # Build UserConfig from database with degradation support
+            user_config_dict = await self._build_user_config_dict()
 
-        # Build UserConfig from database with degradation support
-        user_config_dict = await self._build_user_config_dict()
+            try:
+                config = UserConfig(**user_config_dict)
+            except ValidationError as e:
+                logger.error(f"UserConfig 验证失败，使用默认配置：{e}")
+                config = self._create_default_user_config()  # 兜底
 
-        try:
-            return UserConfig(**user_config_dict)
-        except ValidationError as e:
-            logger.error(f"UserConfig 验证失败，使用默认配置：{e}")
-            return self._create_default_user_config()  # 兜底
+        # R3.1 fix: 返回配置副本，防止外部修改影响内部状态
+        return copy.deepcopy(config)
+
+    @property
+    def is_initialized(self) -> bool:
+        """
+        Check if ConfigManager has been initialized.
+        
+        R9.3: Useful for testing and health checks.
+        
+        Returns:
+            True if initialization is complete
+        """
+        return self._initialized
 
     async def _build_user_config_dict(self) -> Dict[str, Any]:
         """Build user config dictionary from database with degradation support."""
@@ -1100,9 +1223,19 @@ class ConfigManager:
         self._observers.discard(callback)
 
     async def _notify_observers(self) -> None:
-        """Notify all observers of config changes."""
+        """
+        Notify all observers of config changes (R3.2).
+
+        Increments configuration version number before notifying observers
+        to ensure observers can detect stale configurations.
+        """
         if not self._observers:
             return
+
+        # R3.2: Increment version number atomically under lock
+        async with self._ensure_config_lock():
+            self._config_version += 1
+            logger.debug(f"Configuration version updated to {self._config_version}")
 
         results = await asyncio.gather(
             *[self._safe_observer_call(cb) for cb in self._observers],

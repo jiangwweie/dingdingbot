@@ -22,6 +22,14 @@ class FatalStartupError(CryptoMonitorError):
     pass
 
 
+class DependencyNotReadyError(FatalStartupError):
+    """
+    Dependency not ready error.
+    Raised when a module tries to use another module that hasn't been initialized yet.
+    """
+    pass
+
+
 # ============================================================
 # CRITICAL - Connection lost, system in degraded mode
 # ============================================================

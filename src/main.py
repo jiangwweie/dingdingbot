@@ -22,7 +22,7 @@ from src.infrastructure.notifier import NotificationService, get_notification_se
 from src.application.signal_pipeline import SignalPipeline
 from src.domain.risk_calculator import RiskConfig
 from src.domain.models import KlineData
-from src.domain.exceptions import FatalStartupError, ConnectionLostError
+from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, ConnectionLostError
 from src.infrastructure.logger import logger, setup_logger, register_secret
 
 
@@ -91,34 +91,35 @@ async def on_kline_received(kline: KlineData):
 _signal_pipeline: Optional[SignalPipeline] = None
 
 
-def create_signal_pipeline(config_manager: ConfigManager, signal_repository=None) -> SignalPipeline:
+def create_signal_pipeline(
+    signal_config: Any,  # SignalPipelineConfig
+    risk_config: RiskConfig,
+    notification_service: NotificationService,
+    signal_repository=None,
+    cooldown_seconds: int = 14400,
+) -> SignalPipeline:
     """
-    Create SignalPipeline from configuration.
+    Create SignalPipeline from configuration objects.
 
     Args:
-        config_manager: Loaded ConfigManager instance
+        signal_config: SignalPipelineConfig object
+        risk_config: RiskConfig object
+        notification_service: NotificationService instance
         signal_repository: Optional SignalRepository instance for persistence
+        cooldown_seconds: Signal deduplication cooldown period in seconds
 
     Returns:
         Configured SignalPipeline instance
     """
     global _signal_pipeline
 
-    # Get risk config from user config
-    user = config_manager.user_config
-
-    risk_config = RiskConfig(
-        max_loss_percent=user.risk.max_loss_percent,
-        max_leverage=user.risk.max_leverage,
-    )
-
-    # Create pipeline with new dynamic config
+    # Create pipeline with injected config objects
     _signal_pipeline = SignalPipeline(
-        config_manager=config_manager,
+        signal_config=signal_config,
         risk_config=risk_config,
-        notification_service=get_notification_service(),
+        notification_service=notification_service,
         signal_repository=signal_repository,
-        cooldown_seconds=config_manager.core_config.signal_pipeline.cooldown_seconds,
+        cooldown_seconds=cooldown_seconds,
     )
 
     return _signal_pipeline
@@ -156,7 +157,11 @@ async def run_application():
         # =============================================
         logger.info("Phase 1: Loading configuration...")
         config_manager = load_all_configs()
+        await config_manager.initialize_from_db()
         logger.info("Configuration loaded successfully")
+
+        # R7.1: Explicit marker - ConfigManager initialization complete
+        logger.info("[启动顺序] Phase 1 完成：ConfigManager 已初始化")
 
         # =============================================
         # Phase 1.5: Initialize Signal Database
@@ -168,21 +173,32 @@ async def run_application():
         logger.info("Signal database initialized")
 
         # =============================================
-        # Phase 2: Initialize Notification Service
+        # Phase 2: Get Configuration Snapshots (Dependency Injection)
         # =============================================
-        logger.info("Phase 2: Setting up notification channels...")
+        logger.info("Phase 2: Getting configuration snapshots...")
+        # R7.1: Defensive check - ensure ConfigManager is ready
+        config_manager.assert_initialized()
+        core_config = await config_manager.get_core_config()
+        user_config = await config_manager.get_user_config()
+        merged_symbols = await config_manager.get_merged_symbols()
+        logger.info("Configuration snapshots ready for dependency injection")
+
+        # =============================================
+        # Phase 3: Initialize Notification Service
+        # =============================================
+        logger.info("Phase 3: Setting up notification channels...")
         _notification_service = get_notification_service()
         _notification_service.setup_channels(
             [{"type": ch.type, "webhook_url": ch.webhook_url}
-             for ch in config_manager.user_config.notification.channels]
+             for ch in user_config.notification.channels]
         )
         logger.info(f"Notification channels ready: {len(_notification_service._channels)}")
 
         # =============================================
-        # Phase 3: Initialize Exchange Gateway
+        # Phase 4: Initialize Exchange Gateway
         # =============================================
-        logger.info("Phase 3: Initializing exchange gateway...")
-        exchange_cfg = config_manager.user_config.exchange
+        logger.info("Phase 4: Initializing exchange gateway...")
+        exchange_cfg = user_config.exchange
 
         _exchange_gateway = ExchangeGateway(
             exchange_name=exchange_cfg.name,
@@ -195,26 +211,38 @@ async def run_application():
         logger.info("Exchange gateway initialized")
 
         # =============================================
-        # Phase 3.5: Check API Key Permissions
+        # Phase 4.5: Check API Key Permissions
         # =============================================
-        logger.info("Phase 3.5: Checking API key permissions...")
+        logger.info("Phase 4.5: Checking API key permissions...")
         await config_manager.check_api_key_permissions(_exchange_gateway.rest_exchange)
         logger.info("API key permission check passed")
 
         # =============================================
-        # Phase 4: Create Signal Pipeline
+        # Phase 5: Create Signal Pipeline (Dependency Injection)
         # =============================================
-        logger.info("Phase 4: Creating signal pipeline...")
-        create_signal_pipeline(config_manager, signal_repository=signal_repository)
+        logger.info("Phase 5: Creating signal pipeline...")
+        risk_config = RiskConfig(
+            max_loss_percent=user_config.risk.max_loss_percent,
+            max_leverage=user_config.risk.max_leverage,
+        )
+        create_signal_pipeline(
+            signal_config=core_config.signal_pipeline,
+            risk_config=risk_config,
+            notification_service=_notification_service,
+            signal_repository=signal_repository,
+            cooldown_seconds=core_config.signal_pipeline.cooldown_seconds,
+        )
+        # Inject config_manager for hot-reload
+        _signal_pipeline._config_manager = config_manager
         logger.info("Signal pipeline ready")
 
         # =============================================
-        # Phase 5: REST API Warmup
+        # Phase 6: REST API Warmup
         # =============================================
-        logger.info("Phase 5: Warming up historical data...")
-        warmup_bars = config_manager.core_config.warmup.history_bars
-        symbols = config_manager.merged_symbols
-        timeframes = config_manager.user_config.timeframes
+        logger.info("Phase 6: Warming up historical data...")
+        warmup_bars = core_config.warmup.history_bars
+        symbols = merged_symbols
+        timeframes = user_config.timeframes
 
         warmup_tasks = []
         for symbol in symbols:
@@ -242,10 +270,10 @@ async def run_application():
         logger.info("Historical data fed to pipeline for EMA warmup")
 
         # =============================================
-        # Phase 6: Start Asset Polling
+        # Phase 7: Start Asset Polling
         # =============================================
-        logger.info("Phase 6: Starting asset polling...")
-        polling_interval = config_manager.user_config.asset_polling.interval_seconds
+        logger.info("Phase 7: Starting asset polling...")
+        polling_interval = user_config.asset_polling.interval_seconds
         await _exchange_gateway.start_asset_polling(polling_interval)
 
         # Periodically update pipeline with latest snapshot
@@ -260,9 +288,9 @@ async def run_application():
         logger.info("Asset polling started")
 
         # =============================================
-        # Phase 7: Start WebSocket Subscriptions
+        # Phase 8: Start WebSocket Subscriptions
         # =============================================
-        logger.info("Phase 7: Starting WebSocket subscriptions...")
+        logger.info("Phase 8: Starting WebSocket subscriptions...")
 
         # Create WebSocket task
         ws_task = asyncio.create_task(
@@ -279,14 +307,14 @@ async def run_application():
         logger.info("=" * 60)
 
         # =============================================
-        # Phase 7.5: Start REST API Server (embedded)
+        # Phase 9: Start REST API Server (embedded)
         # =============================================
         import os
         import uvicorn
         from src.interfaces.api import app as api_app, set_dependencies
 
         api_port = int(os.environ.get("BACKEND_PORT", 8000))
-        logger.info(f"Phase 7.5: Starting REST API server on port {api_port}...")
+        logger.info(f"Phase 9: Starting REST API server on port {api_port}...")
 
         # Set API dependencies (shared with main process)
         from src.application.signal_tracker import SignalStatusTracker
