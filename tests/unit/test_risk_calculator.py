@@ -3,6 +3,7 @@ Unit tests for domain/risk_calculator.py - Position sizing and risk calculation.
 All assertions use Decimal for precision, no float comparisons.
 """
 import pytest
+import pytest_asyncio
 from decimal import Decimal
 from src.domain.models import (
     AccountSnapshot,
@@ -170,14 +171,14 @@ class TestCalculatePositionSize:
         )
         return RiskCalculator(config)
 
-    def test_position_size_basic_formula_no_positions(self, calculator_default):
+    async def test_position_size_basic_formula_no_positions(self, calculator_default):
         """Test basic position size formula with no existing positions."""
         # No positions, so full available_balance can be used
         account = create_account(total_balance=Decimal("100000"), available_balance=Decimal("100000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("95")  # 5 stop distance
 
-        position_size, leverage = calculator_default.calculate_position_size(
+        position_size, leverage = await calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -186,14 +187,14 @@ class TestCalculatePositionSize:
         # Position size = 1000 / 5 = 200
         assert position_size == Decimal("200")
 
-    def test_position_size_uses_available_balance_not_total(self, calculator_default):
+    async def test_position_size_uses_available_balance_not_total(self, calculator_default):
         """Test that calculation uses available_balance, not total_balance."""
         # available_balance is lower, we use available_balance (Scheme B)
         account = create_account(total_balance=Decimal("100000"), available_balance=Decimal("50000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator_default.calculate_position_size(
+        position_size, leverage = await calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -203,7 +204,7 @@ class TestCalculatePositionSize:
         # Position size = 500 / 5 = 100
         assert position_size == Decimal("100")
 
-    def test_position_size_reduced_with_existing_positions(self, calculator_default):
+    async def test_position_size_reduced_with_existing_positions(self, calculator_default):
         """Test that position size is reduced when existing positions consume exposure."""
         # Current positions: 40% exposure (40000 / 100000)
         positions = [
@@ -224,7 +225,7 @@ class TestCalculatePositionSize:
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator_default.calculate_position_size(
+        position_size, leverage = await calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -236,7 +237,7 @@ class TestCalculatePositionSize:
         # Position size = 600 / 5 = 120
         assert position_size == Decimal("120")
 
-    def test_position_size_limited_by_exposure_cap(self, calculator_custom_exposure):
+    async def test_position_size_limited_by_exposure_cap(self, calculator_custom_exposure):
         """Test that position size is limited when approaching exposure cap."""
         # Current positions: 45% exposure (45000 / 100000)
         positions = [
@@ -257,7 +258,7 @@ class TestCalculatePositionSize:
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator_custom_exposure.calculate_position_size(
+        position_size, leverage = await calculator_custom_exposure.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -269,7 +270,7 @@ class TestCalculatePositionSize:
         # Position size = 550 / 5 = 110
         assert position_size == Decimal("110")
 
-    def test_position_size_zero_when_exposure_full(self, calculator_default):
+    async def test_position_size_zero_when_exposure_full(self, calculator_default):
         """Test that position size is zero when exposure is at or above limit."""
         # Current positions: 80% exposure (at limit)
         positions = [
@@ -290,7 +291,7 @@ class TestCalculatePositionSize:
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator_default.calculate_position_size(
+        position_size, leverage = await calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -300,13 +301,13 @@ class TestCalculatePositionSize:
         assert position_size == Decimal("0")
         assert leverage == 1
 
-    def test_position_size_with_leverage_cap(self, calculator_default):
+    async def test_position_size_with_leverage_cap(self, calculator_default):
         """Test that position size respects leverage cap."""
         account = create_account(total_balance=Decimal("10000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("99")  # 1 stop distance
 
-        position_size, leverage = calculator_default.calculate_position_size(
+        position_size, leverage = await calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -315,15 +316,16 @@ class TestCalculatePositionSize:
         # Position size = 100 / 1 = 100
         # Position value = 100 * 100 = 10000
         # Leverage = 10000 / 10000 = 1x
-        assert leverage <= calculator_default.config.max_leverage
+        config = await calculator_default.get_config()
+        assert leverage <= config.max_leverage
 
-    def test_position_size_tight_stop_requires_higher_leverage(self, calculator_default):
+    async def test_position_size_tight_stop_requires_higher_leverage(self, calculator_default):
         """Test that tight stop-loss requires higher leverage."""
         account = create_account(total_balance=Decimal("10000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("99.9")  # 0.1 stop distance
 
-        position_size, leverage = calculator_default.calculate_position_size(
+        position_size, leverage = await calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -332,41 +334,42 @@ class TestCalculatePositionSize:
         # Position size = 100 / 0.1 = 1000
         # Position value = 1000 * 100 = 100000
         # Leverage required = 100000 / 10000 = 10x
-        assert leverage == calculator_default.config.max_leverage
+        config = await calculator_default.get_config()
+        assert leverage == config.max_leverage
 
-    def test_position_size_zero_balance(self, calculator_default):
+    async def test_position_size_zero_balance(self, calculator_default):
         """Test position size is zero with no balance."""
         account = create_account(total_balance=Decimal("0"))
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator_default.calculate_position_size(
+        position_size, leverage = await calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
         assert position_size == Decimal("0")
         assert leverage == 1
 
-    def test_position_size_stop_loss_distance_zero_raises(self, calculator_default):
+    async def test_position_size_stop_loss_distance_zero_raises(self, calculator_default):
         """Test that zero stop-loss distance raises DataQualityWarning (W-001)."""
         account = create_account(total_balance=Decimal("100000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("100")  # Same as entry, distance = 0
 
         with pytest.raises(DataQualityWarning) as exc_info:
-            calculator_default.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
+            await calculator_default.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
 
         assert exc_info.value.error_code == "W-001"
         assert "Stop loss distance is zero" in str(exc_info.value)
 
-    def test_position_size_short_direction(self, calculator_default):
+    async def test_position_size_short_direction(self, calculator_default):
         """Test position size calculation for SHORT."""
         # Use same parameters as basic formula test for consistency
         account = create_account(total_balance=Decimal("100000"), available_balance=Decimal("100000"))
         entry_price = Decimal("100")
         stop_loss = Decimal("105")  # 5 stop distance
 
-        position_size, leverage = calculator_default.calculate_position_size(
+        position_size, leverage = await calculator_default.calculate_position_size(
             account, entry_price, stop_loss, Direction.SHORT
         )
 
@@ -383,14 +386,14 @@ class TestGenerateRiskInfo:
         config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         return RiskCalculator(config)
 
-    def test_risk_info_format(self, calculator):
+    async def test_risk_info_format(self, calculator):
         """Test risk info string format."""
         account = create_account(total_balance=Decimal("100000"))
         position_size = Decimal("200")
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        risk_info = calculator.generate_risk_info(
+        risk_info = await calculator.generate_risk_info(
             account, position_size, entry_price, stop_loss, Direction.LONG
         )
 
@@ -408,7 +411,7 @@ class TestCalculateSignalResult:
         config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         return RiskCalculator(config)
 
-    def test_signal_result_all_fields_populated(self, calculator):
+    async def test_signal_result_all_fields_populated(self, calculator):
         """Test that signal result has all fields populated."""
         account = create_account(total_balance=Decimal("100000"))
         kline = create_kline(
@@ -417,7 +420,7 @@ class TestCalculateSignalResult:
             low=Decimal("90"), close=Decimal("109"),
         )
 
-        result = calculator.calculate_signal_result(
+        result = await calculator.calculate_signal_result(
             kline=kline,
             account=account,
             direction=Direction.LONG,
@@ -435,12 +438,12 @@ class TestCalculateSignalResult:
         assert result.tags == [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
         assert result.risk_reward_info != ""
 
-    def test_signal_result_stop_loss_correct(self, calculator):
+    async def test_signal_result_stop_loss_correct(self, calculator):
         """Test that stop-loss is correctly calculated."""
         account = create_account(total_balance=Decimal("100000"))
         kline = create_kline(low=Decimal("90"))
 
-        result = calculator.calculate_signal_result(
+        result = await calculator.calculate_signal_result(
             kline=kline,
             account=account,
             direction=Direction.LONG,
@@ -450,7 +453,7 @@ class TestCalculateSignalResult:
         # Stop loss should be at Pinbar low
         assert result.suggested_stop_loss == Decimal("90")
 
-    def test_signal_result_position_size_reasonable(self, calculator):
+    async def test_signal_result_position_size_reasonable(self, calculator):
         """Test that position size is reasonable."""
         account = create_account(total_balance=Decimal("100000"))
         kline = create_kline(
@@ -458,7 +461,7 @@ class TestCalculateSignalResult:
             low=Decimal("90"), close=Decimal("109"),
         )
 
-        result = calculator.calculate_signal_result(
+        result = await calculator.calculate_signal_result(
             kline=kline,
             account=account,
             direction=Direction.LONG,
@@ -481,7 +484,7 @@ class TestDecimalPrecision:
         config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         return RiskCalculator(config)
 
-    def test_no_float_leakage(self, calculator):
+    async def test_no_float_leakage(self, calculator):
         """Test that no float types leak into calculations."""
         account = create_account(total_balance=Decimal("100000.12345678"))
         kline = create_kline(
@@ -489,7 +492,7 @@ class TestDecimalPrecision:
             low=Decimal("89.00000001"), close=Decimal("109.55555555"),
         )
 
-        result = calculator.calculate_signal_result(
+        result = await calculator.calculate_signal_result(
             kline=kline,
             account=account,
             direction=Direction.LONG,
@@ -501,7 +504,7 @@ class TestDecimalPrecision:
         assert isinstance(result.suggested_stop_loss, Decimal)
         assert isinstance(result.suggested_position_size, Decimal)
 
-    def test_high_precision_prices(self, calculator):
+    async def test_high_precision_prices(self, calculator):
         """Test calculations work with high-precision crypto prices."""
         account = create_account(total_balance=Decimal("100000"))
 
@@ -511,7 +514,7 @@ class TestDecimalPrecision:
             low=Decimal("3400.00000001"), close=Decimal("3455.55555555"),
         )
 
-        result = calculator.calculate_signal_result(
+        result = await calculator.calculate_signal_result(
             kline=kline,
             account=account,
             direction=Direction.LONG,
@@ -532,7 +535,7 @@ class TestStopLossDistanceZero:
         config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         return RiskCalculator(config)
 
-    def test_doji_candle_stop_loss_equals_entry(self, calculator):
+    async def test_doji_candle_stop_loss_equals_entry(self, calculator):
         """Test doji candle where stop_loss equals entry_price."""
         account = create_account(total_balance=Decimal("100000"))
         # Doji: open=high=low=close, so stop_loss = low = close = entry
@@ -546,11 +549,11 @@ class TestStopLossDistanceZero:
 
         # Should raise DataQualityWarning when calculating position size
         with pytest.raises(DataQualityWarning) as exc_info:
-            calculator.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
+            await calculator.calculate_position_size(account, entry_price, stop_loss, Direction.LONG)
 
         assert exc_info.value.error_code == "W-001"
 
-    def test_short_doji_stop_loss_equals_entry(self, calculator):
+    async def test_short_doji_stop_loss_equals_entry(self, calculator):
         """Test SHORT position with doji candle."""
         account = create_account(total_balance=Decimal("100000"))
         kline = create_kline(open=Decimal("100"), high=Decimal("100"), low=Decimal("100"), close=Decimal("100"))
@@ -562,7 +565,7 @@ class TestStopLossDistanceZero:
         assert stop_loss == entry_price
 
         with pytest.raises(DataQualityWarning) as exc_info:
-            calculator.calculate_position_size(account, entry_price, stop_loss, Direction.SHORT)
+            await calculator.calculate_position_size(account, entry_price, stop_loss, Direction.SHORT)
 
         assert exc_info.value.error_code == "W-001"
 
@@ -576,7 +579,7 @@ class TestAdvancedBoundaryCases:
         config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         return RiskCalculator(config)
 
-    def test_position_size_with_unrealized_loss(self, calculator):
+    async def test_position_size_with_unrealized_loss(self, calculator):
         """Test that unrealized loss does not directly affect calculation (uses available_balance)."""
         positions = [
             PositionInfo(
@@ -598,7 +601,7 @@ class TestAdvancedBoundaryCases:
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -607,7 +610,7 @@ class TestAdvancedBoundaryCases:
         # Position size = 550 / 5 = 110
         assert position_size == Decimal("110")
 
-    def test_position_size_with_unrealized_profit(self, calculator):
+    async def test_position_size_with_unrealized_profit(self, calculator):
         """Test that unrealized profit increases total_balance but calculation uses available_balance."""
         positions = [
             PositionInfo(
@@ -628,7 +631,7 @@ class TestAdvancedBoundaryCases:
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -637,7 +640,7 @@ class TestAdvancedBoundaryCases:
         # Position size = 650 / 5 = 130
         assert position_size == Decimal("130")
 
-    def test_position_size_multiple_positions_consume_exposure(self, calculator):
+    async def test_position_size_multiple_positions_consume_exposure(self, calculator):
         """Test that multiple positions correctly consume exposure room."""
         positions = [
             PositionInfo(
@@ -667,7 +670,7 @@ class TestAdvancedBoundaryCases:
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -679,7 +682,7 @@ class TestAdvancedBoundaryCases:
         # Position size = 650 / 5 = 130
         assert position_size == Decimal("130")
 
-    def test_position_size_extreme_exposure_limit(self, calculator):
+    async def test_position_size_extreme_exposure_limit(self, calculator):
         """Test with very tight exposure limit (10%)."""
         config = RiskConfig(
             max_loss_percent=Decimal("0.01"),
@@ -706,7 +709,7 @@ class TestAdvancedBoundaryCases:
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = tight_calculator.calculate_position_size(
+        position_size, leverage = await tight_calculator.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -718,7 +721,7 @@ class TestAdvancedBoundaryCases:
         # Position size = 920 / 5 = 184
         assert position_size == Decimal("184")
 
-    def test_position_size_exposure_already_exceeded(self, calculator):
+    async def test_position_size_exposure_already_exceeded(self, calculator):
         """Test that zero position is returned when exposure already exceeds limit."""
         positions = [
             PositionInfo(
@@ -738,7 +741,7 @@ class TestAdvancedBoundaryCases:
         entry_price = Decimal("100")
         stop_loss = Decimal("95")
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price, stop_loss, Direction.LONG
         )
 
@@ -793,7 +796,7 @@ class TestCalculateTakeProfitLevels:
         risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         return RiskCalculator(risk_config)
 
-    def test_calculate_take_profit_levels_long(self, calculator_default):
+    async def test_calculate_take_profit_levels_long(self, calculator_default):
         """测试 LONG 方向止盈价格计算"""
         entry_price = Decimal("40000")
         stop_loss = Decimal("38000")  # 止损距离 = 2000
@@ -818,7 +821,7 @@ class TestCalculateTakeProfitLevels:
         assert levels[1]["position_ratio"] == "0.5"
         assert levels[1]["risk_reward"] == "3.0"
 
-    def test_calculate_take_profit_levels_short(self, calculator_default):
+    async def test_calculate_take_profit_levels_short(self, calculator_default):
         """测试 SHORT 方向止盈价格计算"""
         entry_price = Decimal("40000")
         stop_loss = Decimal("42000")  # 止损距离 = 2000
@@ -839,7 +842,7 @@ class TestCalculateTakeProfitLevels:
         assert levels[1]["id"] == "TP2"
         assert Decimal(levels[1]["price"]) == Decimal("34000")
 
-    def test_take_profit_config_override(self):
+    async def test_take_profit_config_override(self):
         """测试用户配置覆盖默认值"""
         risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         custom_tp_config = TakeProfitConfig(
@@ -875,7 +878,7 @@ class TestCalculateTakeProfitLevels:
         assert levels[2]["id"] == "TP3"
         assert Decimal(levels[2]["price"]) == Decimal("150")
 
-    def test_take_profit_disabled(self):
+    async def test_take_profit_disabled(self):
         """测试止盈配置禁用时返回空列表"""
         risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=10)
         disabled_tp_config = TakeProfitConfig(enabled=False, levels=[])
@@ -892,7 +895,7 @@ class TestCalculateTakeProfitLevels:
         # 验证返回空列表
         assert levels == []
 
-    def test_take_profit_levels_in_signal_result(self, calculator_default):
+    async def test_take_profit_levels_in_signal_result(self, calculator_default):
         """测试信号结果包含止盈级别"""
         account = create_account(total_balance=Decimal("100000"))
         kline = create_kline(
@@ -901,7 +904,7 @@ class TestCalculateTakeProfitLevels:
             low=Decimal("90"), close=Decimal("109"),
         )
 
-        result = calculator_default.calculate_signal_result(
+        result = await calculator_default.calculate_signal_result(
             kline=kline,
             account=account,
             direction=Direction.LONG,

@@ -93,7 +93,7 @@ class TestRealAccountSnapshotIntegration:
     Verifies available_balance is used instead of total_balance.
     """
 
-    def test_uses_available_balance_not_total(self, calculator):
+    async def test_uses_available_balance_not_total(self, calculator):
         """
         Verify position calculation uses available_balance.
 
@@ -110,7 +110,7 @@ class TestRealAccountSnapshotIntegration:
 
         kline = create_kline(close="50000", high="50500", low="49500")
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
@@ -127,7 +127,7 @@ class TestRealAccountSnapshotIntegration:
         max_position_if_total = Decimal("10000") * Decimal("0.01") / Decimal("0.01") / Decimal("50000")
         assert position_size < max_position_if_total, "Should use available_balance, not total_balance"
 
-    def test_full_account_snapshot_scenario(self, calculator):
+    async def test_full_account_snapshot_scenario(self, calculator):
         """
         Test with a full realistic account snapshot.
 
@@ -163,7 +163,7 @@ class TestRealAccountSnapshotIntegration:
 
         kline = create_kline(symbol="SOL/USDT:USDT", close="150", high="155", low="145")
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("150"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
@@ -172,7 +172,7 @@ class TestRealAccountSnapshotIntegration:
         assert leverage >= 1
         assert leverage <= 10
 
-    def test_zero_available_balance(self, calculator):
+    async def test_zero_available_balance(self, calculator):
         """
         Test when available_balance is zero.
 
@@ -188,7 +188,7 @@ class TestRealAccountSnapshotIntegration:
 
         kline = create_kline()
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
@@ -205,7 +205,7 @@ class TestMultiPositionExposureScenarios:
     Verifies exposure-based risk reduction.
     """
 
-    def test_risk_reduced_with_existing_positions(self, risk_config):
+    async def test_risk_reduced_with_existing_positions(self, risk_config):
         """
         Test risk is reduced when approaching exposure limit.
 
@@ -245,7 +245,7 @@ class TestMultiPositionExposureScenarios:
 
         kline = create_kline(close="50000", high="50500", low="49500")
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
@@ -254,7 +254,7 @@ class TestMultiPositionExposureScenarios:
         # Position should be limited accordingly
         assert position_size > Decimal("0")
 
-    def test_position_rejected_at_exposure_limit(self, risk_config):
+    async def test_position_rejected_at_exposure_limit(self, risk_config):
         """
         Test new position rejected when at exposure limit.
 
@@ -285,14 +285,14 @@ class TestMultiPositionExposureScenarios:
 
         kline = create_kline(close="50000", high="50500", low="49500")
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
         # No exposure room, should return zero position
         assert position_size == Decimal("0")
 
-    def test_exposure_exceeded_still_rejected(self, risk_config):
+    async def test_exposure_exceeded_still_rejected(self, risk_config):
         """
         Test position rejected when already exceeded exposure.
 
@@ -323,14 +323,14 @@ class TestMultiPositionExposureScenarios:
 
         kline = create_kline(close="50000", high="50500", low="49500")
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
         # Already exceeded exposure limit, should return zero
         assert position_size == Decimal("0")
 
-    def test_multiple_positions_cumulative_exposure(self, risk_config):
+    async def test_multiple_positions_cumulative_exposure(self, risk_config):
         """
         Test cumulative exposure from multiple positions.
 
@@ -376,7 +376,7 @@ class TestMultiPositionExposureScenarios:
 
         kline = create_kline(symbol="AVAX/USDT:USDT", close="50", high="52", low="48")
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
@@ -392,7 +392,7 @@ class TestRiskConfigContinuityAfterHotReload:
     Test RiskConfig continuity during hot-reload scenarios.
     """
 
-    def test_config_update_propagates_to_calculator(self):
+    async def test_config_update_propagates_to_calculator(self):
         """
         Test RiskConfig changes propagate correctly.
 
@@ -418,7 +418,7 @@ class TestRiskConfigContinuityAfterHotReload:
 
         kline = create_kline()
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_before, _ = calculator.calculate_position_size(
+        position_before, _ = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
@@ -428,19 +428,20 @@ class TestRiskConfigContinuityAfterHotReload:
             max_leverage=10,
             max_total_exposure=Decimal("0.6"),  # Reduced to 60%
         )
-        calculator.config = new_config
+        await calculator.update_config(new_config)
 
         # Calculate again with new config
-        position_after, _ = calculator.calculate_position_size(
+        position_after, _ = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
         # With lower exposure limit, position should be smaller
         # Note: For empty positions, both may be similar since no existing exposure
         # The key test is the config is used, not rejected
-        assert calculator.config.max_total_exposure == Decimal("0.6")
+        config = await calculator.get_config()
+        assert config.max_total_exposure == Decimal("0.6")
 
-    def test_risk_config_loaded_from_real_config_manager(self):
+    async def test_risk_config_loaded_from_real_config_manager(self):
         """
         Test RiskConfig can be loaded from real ConfigManager.
 
@@ -465,8 +466,9 @@ class TestRiskConfigContinuityAfterHotReload:
         calculator = RiskCalculator(risk_config)
 
         # Should work without error
-        assert calculator.config.max_leverage > 0
-        assert calculator.config.max_loss_percent > 0
+        config = await calculator.get_config()
+        assert config.max_leverage > 0
+        assert config.max_loss_percent > 0
 
 
 # ============================================================
@@ -477,7 +479,7 @@ class TestEndToEndSignalPipelineWithRisk:
     End-to-end tests for signal pipeline with risk calculation.
     """
 
-    def test_signal_pipeline_calculates_risk(self):
+    async def test_signal_pipeline_calculates_risk(self):
         """
         Test SignalPipeline integrates risk calculation.
 
@@ -522,7 +524,7 @@ class TestEndToEndSignalPipelineWithRisk:
         assert pipeline._risk_calculator is not None
         assert isinstance(pipeline._risk_calculator, RiskCalculator)
 
-    def test_full_signal_with_risk_calculation(self):
+    async def test_full_signal_with_risk_calculation(self):
         """
         Test complete signal generation with risk calculation.
 
@@ -554,7 +556,7 @@ class TestEndToEndSignalPipelineWithRisk:
         )
 
         # Calculate signal result
-        signal = calculator.calculate_signal_result(
+        signal = await calculator.calculate_signal_result(
             kline=kline,
             account=account,
             direction=Direction.LONG,
@@ -573,7 +575,7 @@ class TestEndToEndSignalPipelineWithRisk:
         assert signal.current_leverage <= 10
         assert "Risk" in signal.risk_reward_info
 
-    def test_mtf_filter_with_risk_calculation(self):
+    async def test_mtf_filter_with_risk_calculation(self):
         """
         Test MTF filter integration with risk calculation.
 
@@ -616,7 +618,7 @@ class TestEndToEndSignalPipelineWithRisk:
 
         # Proceed with risk calculation
         kline = create_kline(close="50000", high="50100", low="49000")
-        signal = calculator.calculate_signal_result(
+        signal = await calculator.calculate_signal_result(
             kline=kline,
             account=account,
             direction=Direction.LONG,
@@ -640,7 +642,7 @@ class TestEndToEndSignalPipelineWithRisk:
 class TestBoundaryAndEdgeCases:
     """Test boundary conditions and edge cases."""
 
-    def test_very_tight_stop_requires_higher_leverage(self, risk_config):
+    async def test_very_tight_stop_requires_higher_leverage(self, risk_config):
         """
         Test tight stop-loss requires higher leverage.
 
@@ -660,7 +662,7 @@ class TestBoundaryAndEdgeCases:
         kline = create_kline(close="50000", high="50050", low="49950")  # Very tight range
         stop_loss = Decimal("49990")  # Very tight stop (0.02% below)
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
@@ -668,7 +670,7 @@ class TestBoundaryAndEdgeCases:
         assert leverage >= 1
         assert leverage <= risk_config.max_leverage
 
-    def test_wide_stop_reduces_position_size(self, risk_config):
+    async def test_wide_stop_reduces_position_size(self, risk_config):
         """
         Test wide stop-loss reduces position size.
 
@@ -688,14 +690,14 @@ class TestBoundaryAndEdgeCases:
         kline = create_kline(close="50000", high="52500", low="47500")  # Wide range
         stop_loss = Decimal("47500")  # 5% below
 
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
         # Wide stop = smaller position
         assert position_size > Decimal("0")
 
-    def test_unrealized_loss_reduces_available_balance(self, risk_config):
+    async def test_unrealized_loss_reduces_available_balance(self, risk_config):
         """
         Test unrealized loss reduces available balance for risk.
 
@@ -724,14 +726,14 @@ class TestBoundaryAndEdgeCases:
 
         kline = create_kline()
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
         # Should still calculate, but with reduced balance
         assert position_size >= Decimal("0")
 
-    def test_unrealized_profit_increases_available_balance(self, risk_config):
+    async def test_unrealized_profit_increases_available_balance(self, risk_config):
         """
         Test unrealized profit increases available balance.
 
@@ -760,7 +762,7 @@ class TestBoundaryAndEdgeCases:
 
         kline = create_kline()
         stop_loss = calculator.calculate_stop_loss(kline, Direction.LONG)
-        position_size, leverage = calculator.calculate_position_size(
+        position_size, leverage = await calculator.calculate_position_size(
             account, entry_price=Decimal("50000"), stop_loss=stop_loss, direction=Direction.LONG
         )
 
