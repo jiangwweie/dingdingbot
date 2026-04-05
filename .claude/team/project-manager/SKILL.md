@@ -59,7 +59,91 @@ license: Proprietary
 
 **正确方式：使用 Agent 工具真正并行启动 Subagent**
 
-当用户确认任务计划后，使用 Agent 工具并行启动各个角色的 Subagent：
+当用户确认任务计划后，使用 Agent 工具并行启动各个角色的 Subagent。
+
+### 方式 1：使用专用 Subagent 类型（推荐）
+
+如果 settings.json 中配置了 subagents，直接使用专用类型：
+
+```python
+# 示例：前后端并行开发（使用专用 subagent 类型）
+Agent(
+    subagent_type="backend-dev",
+    description="后端开发 - API实现",
+    prompt="""
+【任务】实现用户认证 API
+
+⚠️ 【强制要求】先读取本角色的 SKILL.md，按 Pre-Flight 清单执行。
+
+【技术约束】
+1. 使用 FastAPI + Pydantic v2
+2. 所有金额使用 Decimal 类型
+3. 编写单元测试，覆盖率≥80%
+4. 遵循 Clean Architecture 分层
+
+【验收标准】
+- [ ] 功能实现完整
+- [ ] 单元测试通过率 100%
+- [ ] 新增代码覆盖率 ≥ 80%
+- [ ] 进度已更新到 docs/planning/progress.md
+
+请立即开始执行此任务。
+"""
+)
+
+Agent(
+    subagent_type="frontend-dev",
+    description="前端开发 - 组件实现",
+    prompt="""
+【任务】实现用户登录页面
+
+⚠️ 【强制要求】先读取本角色的 SKILL.md，按 Pre-Flight 清单执行。
+
+【技术约束】
+1. 使用 React + TypeScript + TailwindCSS
+2. 响应式设计
+3. 表单验证
+4. TypeScript 无 any 类型
+
+【验收标准】
+- [ ] 功能实现完整
+- [ ] 组件测试通过率 100%
+- [ ] 类型检查通过
+- [ ] 进度已更新到 docs/planning/progress.md
+
+请立即开始执行此任务。
+"""
+)
+
+Agent(
+    subagent_type="qa-tester",
+    description="QA - 集成测试",
+    prompt="""
+【任务】执行集成测试
+
+⚠️ 【强制要求】先读取本角色的 SKILL.md，按 Pre-Flight 清单执行。
+
+【依赖】等待后端和前端任务完成
+
+【验收标准】
+- [ ] 集成测试通过率 100%
+- [ ] 关键路径已覆盖
+- [ ] 进度已更新
+"""
+)
+```
+
+**可用的 Subagent 类型**（需在 settings.json 中配置）：
+- `backend-dev` - 后端开发专家
+- `frontend-dev` - 前端开发专家
+- `qa-tester` - 质量保障专家
+- `code-reviewer` - 代码审查专家
+- `architect` - 架构师
+- `diagnostic-analyst` - 诊断分析师
+
+### 方式 2：使用 general-purpose（备用）
+
+如果专用 subagent 类型不可用，使用 general-purpose + 明确的角色声明：
 
 ```python
 # 分析任务后，并行启动对应角色的 Subagent
@@ -702,6 +786,30 @@ prompt="""
 3. **禁止在一个 Agent 调用中等待另一个**
    - ❌ 错误：在 backend Agent 内部调用 frontend Agent
    - ✅ 正确：在主流程中并行启动 backend 和 frontend Agent
+
+4. **必须使用正确的 subagent_type**
+   - ❌ 错误：`subagent_type="frontend"`（未配置的自定义类型）
+   - ✅ 正确：`subagent_type="frontend-dev"`（settings.json 中配置的类型）
+   - ✅ 正确：`subagent_type="general-purpose"`（备用方案）
+
+---
+
+## 📋 调度前检查清单
+
+PM 在调用 Agent 工具前，必须确认：
+
+- [ ] **确认了 subagent_type 可用**
+  - 首选：`backend-dev`, `frontend-dev`, `qa-tester` 等专用类型
+  - 备用：`general-purpose` + 明确角色声明
+  
+- [ ] **Prompt 包含强制要求**
+  - ⚠️ 先读取角色规范 SKILL.md
+  - ⚠️ 按 Pre-Flight 清单执行
+  - ⚠️ 禁止只返回文本不执行工具
+
+- [ ] **识别了并行簇**
+  - 无依赖任务并行启动
+  - 依赖任务等待完成后再启动
 
 ---
 
