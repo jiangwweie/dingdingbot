@@ -7,6 +7,16 @@
         "path": "./.claude/skills/pua/SKILL.md"
       },
       {
+        "name": "prd",
+        "description": "生成产品需求文档(PRD) - 用于新功能规划",
+        "path": "./.claude/skills/prd/SKILL.md"
+      },
+      {
+        "name": "ralph",
+        "description": "将 PRD 转换为 Ralph JSON 格式 - 用于自主 AI Agent 循环",
+        "path": "./.claude/skills/ralph/SKILL.md"
+      },
+      {
         "name": "team-product-manager",
         "description": "产品经理 - 负责需求收集、优先级排序、用户故事编写、MVP范围定义",
         "path": "./.claude/team/product-manager/SKILL.md"
