@@ -1431,11 +1431,29 @@ class ConfigHistoryRepository:
                 action TEXT NOT NULL,
                 old_values TEXT,
                 new_values TEXT,
+                old_full_snapshot TEXT,  -- R5.3: 变更前完整配置快照
+                new_full_snapshot TEXT,  -- R5.3: 变更后完整配置快照
                 changed_by TEXT,
                 changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 change_summary TEXT
             )
         """)
+
+        # R5.3: Migration - Add full snapshot columns if not exists
+        try:
+            await self._db.execute("""
+                ALTER TABLE config_history ADD COLUMN old_full_snapshot TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+        try:
+            await self._db.execute("""
+                ALTER TABLE config_history ADD COLUMN new_full_snapshot TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
 
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_history_entity ON config_history(entity_type, entity_id)
@@ -1459,6 +1477,8 @@ class ConfigHistoryRepository:
         action: Literal["CREATE", "UPDATE", "DELETE", "ROLLBACK"],
         old_values: Optional[Dict[str, Any]] = None,
         new_values: Optional[Dict[str, Any]] = None,
+        old_full_snapshot: Optional[Dict[str, Any]] = None,  # R5.3
+        new_full_snapshot: Optional[Dict[str, Any]] = None,  # R5.3
         changed_by: str = "user",
         change_summary: Optional[str] = None
     ) -> int:
@@ -1472,6 +1492,8 @@ class ConfigHistoryRepository:
             action: Action type ('CREATE', 'UPDATE', 'DELETE', 'ROLLBACK')
             old_values: Previous values (for UPDATE actions)
             new_values: New values (for CREATE/UPDATE actions)
+            old_full_snapshot: Complete configuration snapshot before change (R5.3)
+            new_full_snapshot: Complete configuration snapshot after change (R5.3)
             changed_by: User identifier
             change_summary: Human-readable summary
 
@@ -1484,14 +1506,16 @@ class ConfigHistoryRepository:
             cursor = await self._db.execute("""
                 INSERT INTO config_history
                 (entity_type, entity_id, action, old_values, new_values,
-                 changed_by, changed_at, change_summary)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 old_full_snapshot, new_full_snapshot, changed_by, changed_at, change_summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 entity_type,
                 entity_id,
                 action,
                 json.dumps(old_values) if old_values else None,
                 json.dumps(new_values) if new_values else None,
+                json.dumps(old_full_snapshot) if old_full_snapshot else None,  # R5.3
+                json.dumps(new_full_snapshot) if new_full_snapshot else None,  # R5.3
                 changed_by,
                 now,
                 change_summary
@@ -1557,7 +1581,10 @@ class ConfigHistoryRepository:
         self,
         entity_type: str,
         entity_id: str,
-        limit: int = 20
+        limit: int = 20,
+        action: Optional[str] = None,  # R10.1: 按动作类型过滤
+        start_date: Optional[str] = None,  # R10.1: 按时间范围过滤
+        end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get complete history for a specific entity.
@@ -1566,16 +1593,38 @@ class ConfigHistoryRepository:
             entity_type: Type of entity
             entity_id: ID of the entity
             limit: Maximum number of records
+            action: Filter by action type (CREATE/UPDATE/DELETE/ROLLBACK) - R10.1
+            start_date: Filter by start date (ISO format) - R10.1
+            end_date: Filter by end date (ISO format) - R10.1
 
         Returns:
             List of history dicts for the entity
         """
-        async with self._db.execute("""
+        where_clauses = ["entity_type = ?", "entity_id = ?"]
+        params: List[Any] = [entity_type, entity_id]
+
+        # R10.1: Add action filter
+        if action:
+            where_clauses.append("action = ?")
+            params.append(action)
+
+        # R10.1: Add date range filters
+        if start_date:
+            where_clauses.append("changed_at >= ?")
+            params.append(start_date)
+        if end_date:
+            where_clauses.append("changed_at <= ?")
+            params.append(end_date)
+
+        query = f"""
             SELECT * FROM config_history
-            WHERE entity_type = ? AND entity_id = ?
+            WHERE {' AND '.join(where_clauses)}
             ORDER BY changed_at DESC
             LIMIT ?
-        """, (entity_type, entity_id, limit)) as cursor:
+        """
+        params.append(limit)
+
+        async with self._db.execute(query, tuple(params)) as cursor:
             rows = await cursor.fetchall()
             return [self._row_to_dict(row) for row in rows]
 

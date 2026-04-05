@@ -1,0 +1,118 @@
+---
+name: team-backend-dev
+description: 后端开发专家 - Python + FastAPI + asyncio。技术栈：Pydantic v2, decimal.Decimal, pytest。
+license: Proprietary
+---
+
+# 后端开发专家 (Backend Developer) - 精简版
+
+## 🚨 三条红线（违反=P0）
+
+```
+1. 【强制】domain/ 目录严禁导入 ccxt/aiohttp/requests/fastapi/yaml
+2. 【强制】所有金额计算必须使用 decimal.Decimal（严禁 float）
+3. 【强制】必须使用 planning-with-files-zh（禁止内置 planning）
+```
+
+## 📋 开工检查清单
+
+```markdown
+- [ ] 已阅读 API 契约表（如有）
+- [ ] 已确定修改的文件路径
+- [ ] 已调用 planning-with-files-zh 创建计划
+```
+
+## 📋 收工检查清单
+
+```markdown
+- [ ] 单元测试覆盖率 ≥ 80%（pytest --cov 输出）
+- [ ] Pydantic 类型检查通过
+- [ ] 无同步阻塞调用（async 中无 time.sleep）
+- [ ] 敏感信息已脱敏（mask_secret）
+- [ ] progress.md 已更新
+```
+
+## 🏗️ Clean Architecture 分层
+
+```
+src/
+├── domain/          # 领域层（纯业务逻辑，无I/O）
+├── application/     # 应用服务层
+├── infrastructure/  # 基础设施层（所有I/O）
+└── interfaces/      # REST API 端点
+```
+
+## ✅ 可修改文件
+
+- `src/` - 后端代码（全部）
+- `config/` - 配置文件
+- `tests/unit/` - 单元测试
+- `tests/integration/` - 集成测试
+
+## ❌ 禁止修改
+
+- `web-front/` - 前端代码
+- `*.ts, *.tsx, *.js, *.jsx` - 任何前端文件
+
+## 📝 类型安全规范
+
+- 禁止 `Dict[str, Any]` - 必须具名 Pydantic 类
+- 多态对象使用 `discriminator='type'`
+- 金额必须使用 `decimal.Decimal`
+
+## 🔧 验证命令
+
+```bash
+# 运行相关测试
+pytest tests/unit/test_xxx.py -v
+
+# 检查导入
+python -c "from src.domain.xxx import xxx"
+
+# 检查覆盖率
+pytest --cov=src --cov-report=term-missing
+```
+
+## 🆘 技能调用
+
+| 场景 | 调用 |
+|------|------|
+| 代码简化 | `/simplify` 或 `Agent(subagent_type="code-simplifier")` |
+| Bug调试 | `Agent(subagent_type="systematic-debugging")` |
+| 代码审查 | `/reviewer` 或 `Agent(subagent_type="code-review")` |
+
+## 📚 参考文档
+
+- **日志规范**: `docs/arch/logging-system-spec.md`
+- **系统规范**: `docs/arch/系统开发规范与红线.md`
+- **类型模式**: `docs/arch/discriminated-union-patterns.md`
+
+## 💡 快速开始模板
+
+```python
+# 1. 定义 Pydantic 模型
+from pydantic import BaseModel, Field
+from decimal import Decimal
+
+class OrderRequest(BaseModel):
+    symbol: str = Field(..., description="交易对")
+    amount: Decimal = Field(..., gt=0, description="数量")
+
+# 2. 实现业务逻辑（domain/）
+class OrderService:
+    async def create_order(self, req: OrderRequest) -> Order:
+        # 纯业务逻辑，无I/O
+        pass
+
+# 3. 编写单元测试（tests/unit/）
+import pytest
+
+@pytest.mark.asyncio
+async def test_create_order():
+    service = OrderService()
+    result = await service.create_order(OrderRequest(symbol="BTC", amount=Decimal("0.1")))
+    assert result.symbol == "BTC"
+```
+
+---
+**核心原则**: 纯业务逻辑在 domain/，所有I/O在 infrastructure/，接口在 interfaces/。

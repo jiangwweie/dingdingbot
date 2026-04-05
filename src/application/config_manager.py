@@ -601,10 +601,14 @@ class ConfigManager:
 
     async def _apply_hardcoded_defaults(self) -> None:
         """
-        R4.3: Apply hard-coded default configurations to ensure system can start.
+        R4.2/R4.3: Apply hard-coded default configurations to ensure system can start.
 
         This method inserts minimal required configurations for system startup.
+        NOTE: These are hardcoded defaults. User should modify via Config UI.
         """
+        # R4.2: Track which defaults were applied for startup warning
+        applied_defaults = []
+
         # Default risk config
         async with self._db.execute(
             "SELECT id FROM risk_configs WHERE id = 'global'"
@@ -615,7 +619,7 @@ class ConfigManager:
                     (id, max_loss_percent, max_leverage, max_total_exposure, cooldown_minutes)
                     VALUES ('global', 0.01, 10, 0.8, 240)
                 """)
-                logger.info("已插入默认风控配置")
+                applied_defaults.append("风控配置: max_loss=1%, max_leverage=10x, max_exposure=80%")
 
         # Default notification channel
         async with self._db.execute(
@@ -627,7 +631,7 @@ class ConfigManager:
                     (id, channel_type, webhook_url, is_active, notify_on_signal, notify_on_order, notify_on_error)
                     VALUES ('default', 'feishu', 'https://placeholder.feishu.cn/webhook', TRUE, TRUE, TRUE, TRUE)
                 """)
-                logger.info("已插入默认通知渠道（占位符）")
+                applied_defaults.append("通知渠道: 飞书占位符 (需配置真实 webhook)")
 
         # Default system config
         async with self._db.execute(
@@ -642,10 +646,19 @@ class ConfigManager:
                     json.dumps(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]),
                     json.dumps({"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
                 ))
-                logger.info("已插入默认系统配置")
+                applied_defaults.append("系统配置: core_symbols=BTC/ETH/SOL/BNB, ema_period=60")
 
         await self._db.commit()
-        logger.info("默认配置已应用，系统可以安全启动")
+
+        # R4.2: Startup warning for hardcoded defaults
+        if applied_defaults:
+            logger.warning(
+                "⚠️  [R4.2] 系统使用默认配置启动:\n"
+                + "\n".join(f"  - {d}" for d in applied_defaults)
+                + "\n建议尽快在配置管理页面修改为适合您交易风格的参数。"
+            )
+        else:
+            logger.info("配置已加载，系统可以安全启动")
 
     async def _load_system_config(self) -> Dict[str, Any]:
         """Load system configuration from database."""

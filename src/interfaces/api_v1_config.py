@@ -1992,6 +1992,9 @@ async def get_entity_history(
     entity_type: str,
     entity_id: str,
     limit: int = Query(default=20, ge=1, le=100, description="Maximum number of results"),
+    action: Optional[str] = Query(default=None, description="Filter by action type (CREATE/UPDATE/DELETE/ROLLBACK)"),  # R10.1
+    start_date: Optional[str] = Query(default=None, description="Filter by start date (ISO format)"),  # R10.1
+    end_date: Optional[str] = Query(default=None, description="Filter by end date (ISO format)"),  # R10.1
 ):
     """
     Get complete history for a specific entity.
@@ -1999,6 +2002,9 @@ async def get_entity_history(
     - **entity_type**: Entity type (strategy, risk_config, system_config, symbol, notification)
     - **entity_id**: Entity ID
     - **limit**: Maximum number of results (1-100)
+    - **action**: Filter by action type (CREATE/UPDATE/DELETE/ROLLBACK) - R10.1
+    - **start_date**: Filter by start date (ISO format) - R10.1
+    - **end_date**: Filter by end date (ISO format) - R10.1
     """
     if not _history_repo:
         raise HTTPException(status_code=503, detail="History repository not initialized")
@@ -2006,7 +2012,10 @@ async def get_entity_history(
     items = await _history_repo.get_entity_history(
         entity_type=entity_type,
         entity_id=entity_id,
-        limit=limit
+        limit=limit,
+        action=action,
+        start_date=start_date,
+        end_date=end_date,
     )
 
     list_items = [

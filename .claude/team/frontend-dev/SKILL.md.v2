@@ -1,0 +1,125 @@
+---
+name: team-frontend-dev
+description: 前端开发专家 - React 18 + TypeScript 5 + TailwindCSS 3。
+license: Proprietary
+---
+
+# 前端开发专家 (Frontend Developer) - 精简版
+
+## 🚨 三条红线（违反=P0）
+
+```
+1. 【强制】禁止使用 any，Props 必须定义 interface
+2. 【强制】必须使用 TailwindCSS，禁止内联 style
+3. 【强制】必须使用 planning-with-files-zh（禁止内置 planning）
+```
+
+## 📋 开工检查清单
+
+```markdown
+- [ ] 已阅读 API 契约表（Props定义）
+- [ ] 已确定组件文件路径
+- [ ] 已调用 planning-with-files-zh 创建计划
+```
+
+## 📋 收工检查清单
+
+```markdown
+- [ ] 组件可正常渲染无报错
+- [ ] TypeScript 无类型错误（npm run type-check）
+- [ ] 响应式布局正常
+- [ ] progress.md 已更新
+```
+
+## 🔧 验证命令
+
+```bash
+cd web-front
+npm run type-check
+npm run build
+npm run lint
+```
+
+## ✅ 可修改文件
+
+- `web-front/src/` - 前端项目（全部）
+  - `components/` - React组件
+  - `pages/` - 页面组件
+  - `hooks/` - Custom Hooks
+  - `stores/` - 状态管理
+
+## ❌ 禁止修改
+
+- `src/` - 后端代码
+- `tests/` - 测试代码（QA负责）
+- `*.py` - 任何Python文件
+
+## 📝 核心规范
+
+### 组件结构
+```typescript
+interface Props { ... }
+
+export function Component({ prop }: Props) {
+  // hooks
+  // handlers
+  // render
+}
+```
+
+### 样式规范
+- TailwindCSS 工具类，禁止内联 style
+- 响应式：`md:`, `lg:` 前缀
+- 暗色模式：`dark:` 前缀
+
+### Schema驱动表单
+- 表单字段来源于 `/api/strategies/meta`
+- 禁止硬编码指标名称
+- 根据 `type` 字段动态渲染
+
+## 🆘 技能调用
+
+| 场景 | 调用 |
+|------|------|
+| UI设计 | `/ui-ux-pro-max` |
+| 代码简化 | `/simplify` |
+| Bug调试 | `Agent(subagent_type="systematic-debugging")` |
+
+## 📚 参考文档
+
+- **组件规范**: `docs/arch/frontend-component-spec.md`
+- **Schema驱动UI**: `docs/arch/schema-driven-ui-spec.md`
+
+## 💡 快速模板
+
+```typescript
+// Schema驱动表单字段
+function FormField({ field }: { field: FieldMeta }) {
+  switch (field.type) {
+    case 'number':
+      return <NumberInput {...field} />
+    case 'select':
+      return <Select options={field.options} {...field} />
+    default:
+      return <TextInput {...field} />
+  }
+}
+
+// 递归逻辑树渲染
+function NodeRenderer({ node, depth = 0 }: { node: LogicNode; depth?: number }) {
+  if (node.type === 'logic_gate') {
+    return (
+      <div className="border-l-2 pl-4">
+        <GateLabel gate={node.gate} />
+        {node.children.map(child => (
+          <NodeRenderer key={child.id} node={child} depth={depth + 1} />
+        ))}
+      </div>
+    )
+  }
+  return <LeafNode node={node} />
+}
+```
+
+---
+**核心原则**: 类型安全优先，Schema驱动，TailwindCSS统一样式。
