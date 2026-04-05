@@ -280,3 +280,133 @@ class TestSecretMasking:
 
         # Config should load successfully
         assert manager.user_config.exchange.api_key == "sk_test_abcdefghijklmnop"
+
+
+class TestConfigImmutability:
+    """Test R3.1: Configuration object immutability to prevent reference issues"""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create temporary directory with test config files"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+
+            # Create core.yaml
+            core_config = {
+                "core_symbols": ["BTC/USDT:USDT"],
+                "pinbar_defaults": {
+                    "min_wick_ratio": "0.6",
+                    "max_body_ratio": "0.3",
+                    "body_position_tolerance": "0.1",
+                },
+                "ema": {"period": 60},
+                "mtf_mapping": {"15m": "1h"},
+                "warmup": {"history_bars": 100},
+            }
+
+            with open(config_dir / "core.yaml", "w") as f:
+                yaml.dump(core_config, f)
+
+            # Create user.yaml
+            user_config = {
+                "exchange": {
+                    "name": "binance",
+                    "api_key": "test_api_key",
+                    "api_secret": "test_api_secret",
+                    "testnet": True,
+                },
+                "user_symbols": ["ETH/USDT:USDT"],
+                "timeframes": ["15m", "1h"],
+                "strategy": {
+                    "trend_filter_enabled": True,
+                    "mtf_validation_enabled": True,
+                },
+                "risk": {
+                    "max_loss_percent": "0.01",
+                    "max_leverage": 10,
+                },
+                "asset_polling": {"interval_seconds": 60},
+                "notification": {
+                    "channels": [{
+                        "type": "feishu",
+                        "webhook_url": "https://test.feishu.cn/webhook",
+                    }],
+                },
+            }
+
+            with open(config_dir / "user.yaml", "w") as f:
+                yaml.dump(user_config, f)
+
+            yield config_dir
+
+    def test_get_user_config_returns_copy(self, temp_config_dir):
+        """Test that get_user_config() returns a copy, not a reference"""
+        import asyncio
+        from src.application.config_manager_db import ConfigManager
+
+        manager = ConfigManager(config_dir=temp_config_dir)
+
+        # Get config twice
+        config1 = asyncio.run(manager.get_user_config())
+        config2 = asyncio.run(manager.get_user_config())
+
+        # They should be equal but not the same object
+        assert config1 == config2
+        assert config1 is not config2
+
+        # Modifying config1 should NOT affect config2 or internal state
+        original_max_loss = config1.risk.max_loss_percent
+        config1.risk.max_loss_percent = Decimal("0.99")
+
+        # config2 should still have original value
+        assert config2.risk.max_loss_percent == original_max_loss
+
+        # Getting config again should return original value
+        config3 = asyncio.run(manager.get_user_config())
+        assert config3.risk.max_loss_percent == original_max_loss
+
+    def test_get_core_config_returns_copy(self, temp_config_dir):
+        """Test that get_core_config() returns a copy, not a reference"""
+        from src.application.config_manager_db import ConfigManager
+
+        manager = ConfigManager(config_dir=temp_config_dir)
+
+        # Get config twice
+        config1 = manager.get_core_config()
+        config2 = manager.get_core_config()
+
+        # They should be equal but not the same object
+        assert config1.core_symbols == config2.core_symbols
+        assert config1 is not config2
+
+        # Modifying config1 should NOT affect config2 or internal state
+        original_symbols = config1.core_symbols.copy()
+        config1.core_symbols.append("MODIFIED")
+
+        # config2 should still have original value
+        assert "MODIFIED" not in config2.core_symbols
+        assert config2.core_symbols == original_symbols
+
+        # Getting config again should return original value
+        config3 = manager.get_core_config()
+        assert "MODIFIED" not in config3.core_symbols
+        assert config3.core_symbols == original_symbols
+
+    def test_external_modification_does_not_affect_internal_state(self, temp_config_dir):
+        """Test that external modification does not affect internal state"""
+        import asyncio
+        from src.application.config_manager_db import ConfigManager
+
+        manager = ConfigManager(config_dir=temp_config_dir)
+
+        # Get config and modify it
+        config = asyncio.run(manager.get_user_config())
+        original_leverage = config.risk.max_leverage
+
+        # Try to modify the config
+        config.risk.max_leverage = 999
+
+        # Get config again - should have original value
+        config2 = asyncio.run(manager.get_user_config())
+        assert config2.risk.max_leverage == original_leverage
+        assert config2.risk.max_leverage != 999

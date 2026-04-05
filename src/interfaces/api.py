@@ -991,7 +991,7 @@ async def get_config():
     """
     try:
         config_manager = _get_config_manager()
-        user_config = config_manager.user_config
+        user_config = await config_manager.get_user_config()
 
         # Convert Pydantic model to dict
         config_dict = user_config.model_dump()
@@ -1079,7 +1079,7 @@ async def export_config():
         from src.infrastructure.logger import mask_secret
 
         config_manager = _get_config_manager()
-        user_config = config_manager.user_config
+        user_config = await config_manager.get_user_config()
 
         # Convert Pydantic model to dict (with masking)
         config_dict = user_config.model_dump(mode='json')
@@ -1156,8 +1156,11 @@ async def import_config(
         # Validate against UserConfig schema
         config_manager = _get_config_manager()
 
+        # Get existing config for partial updates
+        existing_config = await config_manager.get_user_config()
+
         # Merge with existing config for partial updates
-        existing_dict = config_manager.user_config.model_dump(mode='json')
+        existing_dict = existing_config.model_dump(mode='json')
         merged_dict = config_manager._deep_merge(existing_dict, config_data)
 
         try:
@@ -2857,7 +2860,8 @@ async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None)
             strategy_def = strategy_def.model_copy(update=update_dict)
 
         # Step 4: Get current active strategies and add/replace this strategy
-        current_config = config_manager.user_config
+        config_manager = _get_config_manager()
+        current_config = await config_manager.get_user_config()
         active_strategies = list(current_config.active_strategies)
 
         # Check if strategy with same name already exists
@@ -2966,26 +2970,30 @@ async def get_strategy_params():
         config_manager = _get_config_manager()
         repo = _get_config_entry_repo()
 
+        # Get config snapshots for default values
+        core_config = await config_manager.get_core_config()
+        user_config = await config_manager.get_user_config()
+
         # Get all strategy parameters from database
         strategy_params = await repo.get_entries_by_prefix("strategy")
 
         # Default values for all required fields
         default_values = {
             "pinbar": {
-                "min_wick_ratio": float(config_manager.core_config.pinbar_defaults.min_wick_ratio),
-                "max_body_ratio": float(config_manager.core_config.pinbar_defaults.max_body_ratio),
-                "body_position_tolerance": float(config_manager.core_config.pinbar_defaults.body_position_tolerance),
+                "min_wick_ratio": float(core_config.pinbar_defaults.min_wick_ratio),
+                "max_body_ratio": float(core_config.pinbar_defaults.max_body_ratio),
+                "body_position_tolerance": float(core_config.pinbar_defaults.body_position_tolerance),
             },
             "engulfing": {
                 "min_wick_ratio": 0.6,
                 "max_body_ratio": 0.3,
             },
             "ema": {
-                "period": config_manager.core_config.ema.period,
+                "period": core_config.ema.period,
             },
             "mtf": {
-                "enabled": config_manager.user_config.mtf_ema_period > 0 if config_manager.user_config else True,
-                "ema_period": config_manager.user_config.mtf_ema_period if config_manager.user_config else 60,
+                "enabled": user_config.mtf_ema_period > 0 if user_config else True,
+                "ema_period": user_config.mtf_ema_period if user_config else 60,
             },
             "atr": {
                 "enabled": True,
@@ -3020,7 +3028,9 @@ async def get_strategy_params():
             return StrategyParamsResponse(**result)
 
         # Fallback to ConfigManager defaults
-        params = StrategyParams.from_config_manager(config_manager)
+        core_config = await config_manager.get_core_config()
+        user_config = await config_manager.get_user_config()
+        params = StrategyParams.from_configs(core_config, user_config)
         return StrategyParamsResponse(**params.to_dict())
 
     except HTTPException:
@@ -3111,8 +3121,9 @@ async def update_strategy_params(request: StrategyParamsUpdateRequest):
         # Create auto-snapshot before update
         if snapshot_service:
             try:
+                user_config = await config_manager.get_user_config()
                 await snapshot_service.create_auto_snapshot(
-                    config=config_manager.user_config,
+                    config=user_config,
                     description="策略参数变更自动快照"
                 )
                 logger.info("Auto-snapshot created before strategy params update")
@@ -3571,8 +3582,9 @@ async def import_strategy_params(request: StrategyParamsImportRequest):
         # Create auto-snapshot before update
         if snapshot_service and request.overwrite:
             try:
+                user_config = await config_manager.get_user_config()
                 await snapshot_service.create_auto_snapshot(
-                    config=config_manager.user_config,
+                    config=user_config,
                     description="策略参数导入前自动快照"
                 )
                 logger.info("Auto-snapshot created before strategy params import")
@@ -3698,7 +3710,8 @@ async def create_snapshot(request: ConfigSnapshotCreate):
             # Fallback to repository if service not available
             repo = _get_repository()
             config_manager = _get_config_manager()
-            config_dict = config_manager.user_config.model_dump(mode='json')
+            user_config = await config_manager.get_user_config()
+            config_dict = user_config.model_dump(mode='json')
             config_json = json.dumps(config_dict)
 
             snapshot_id = await repo.create_config_snapshot(
@@ -3717,9 +3730,10 @@ async def create_snapshot(request: ConfigSnapshotCreate):
             )
 
         # Use service layer
+        user_config = await config_manager.get_user_config()
         snapshot_id = await snapshot_service.create_manual_snapshot(
             version=request.version,
-            config=config_manager.user_config,
+            config=user_config,
             description=request.description,
             created_by="user",
         )

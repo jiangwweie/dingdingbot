@@ -315,6 +315,7 @@ class StrategyParams(BaseModel):
     def from_config_manager(cls, config_manager: Any) -> "StrategyParams":
         """
         Build StrategyParams from ConfigManager.
+        Deprecated: Use from_configs() instead.
 
         Args:
             config_manager: ConfigManager instance
@@ -322,11 +323,9 @@ class StrategyParams(BaseModel):
         Returns:
             StrategyParams instance populated from config
         """
-        # Extract from core config
-        core = config_manager.core_config
-
-        # Extract from user config
-        user = config_manager.user_config
+        # R3.1 fix: 使用 get_方法获取配置副本
+        core = config_manager.get_core_config()
+        user = config_manager.get_user_config()
 
         # Build pinbar params from core config
         pinbar = PinbarParams(
@@ -342,6 +341,47 @@ class StrategyParams(BaseModel):
         mtf = MtfParams(
             enabled=user.mtf_ema_period > 0,
             ema_period=user.mtf_ema_period,
+        )
+
+        # Default values for others
+        engulfing = EngulfingParams()
+        atr = AtrParams()
+
+        return cls(
+            pinbar=pinbar,
+            engulfing=engulfing,
+            ema=ema,
+            mtf=mtf,
+            atr=atr,
+            filters=[],
+        )
+
+    @classmethod
+    def from_configs(cls, core_config: Any, user_config: Any) -> "StrategyParams":
+        """
+        Build StrategyParams from core and user config objects.
+
+        Args:
+            core_config: CoreConfig instance
+            user_config: UserConfig instance
+
+        Returns:
+            StrategyParams instance populated from config
+        """
+        # Build pinbar params from core config
+        pinbar = PinbarParams(
+            min_wick_ratio=core_config.pinbar_defaults.min_wick_ratio,
+            max_body_ratio=core_config.pinbar_defaults.max_body_ratio,
+            body_position_tolerance=core_config.pinbar_defaults.body_position_tolerance,
+        )
+
+        # Build ema params from core config
+        ema = EmaParams(period=core_config.ema.period)
+
+        # Build mtf params from user config
+        mtf = MtfParams(
+            enabled=user_config.mtf_ema_period > 0,
+            ema_period=user_config.mtf_ema_period,
         )
 
         # Default values for others

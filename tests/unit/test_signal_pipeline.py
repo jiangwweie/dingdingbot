@@ -44,9 +44,39 @@ class TestSignalDeduplication:
         """Create a signal pipeline with mocked dependencies."""
         # Mock config manager
         mock_config_manager = MagicMock()
-        mock_config_manager.user_config = MagicMock()
-        mock_config_manager.user_config.active_strategies = []
-        mock_config_manager.core_config = MagicMock()
+
+        # Create mock user config (R3.1 fix: also need get_user_config_sync method)
+        mock_user_config = MagicMock()
+        mock_user_config.active_strategies = []
+        mock_user_config.risk = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+        )
+        mock_user_config.mtf_ema_period = 60
+        mock_user_config.mtf_mapping = {"15m": "1h"}
+
+        # Create mock core config
+        mock_core_config = MagicMock()
+        mock_core_config.core_symbols = ["BTC/USDT:USDT"]
+        mock_core_config.pinbar_defaults = MagicMock()
+        mock_core_config.pinbar_defaults.min_wick_ratio = Decimal("0.6")
+        mock_core_config.pinbar_defaults.max_body_ratio = Decimal("0.3")
+        mock_core_config.pinbar_defaults.body_position_tolerance = Decimal("0.1")
+        mock_core_config.ema = MagicMock()
+        mock_core_config.ema.period = 60
+        mock_core_config.mtf_mapping = {"15m": "1h"}
+        mock_core_config.mtf_ema_period = 60
+        mock_core_config.warmup = MagicMock()
+        mock_core_config.warmup.history_bars = 100
+        mock_core_config.signal_pipeline = MagicMock()
+        mock_core_config.signal_pipeline.queue = MagicMock()
+        mock_core_config.signal_pipeline.queue.batch_size = 10
+        mock_core_config.signal_pipeline.queue.flush_interval = 5.0
+        mock_core_config.signal_pipeline.queue.max_queue_size = 1000
+
+        # Mock sync methods for R3.1 fix
+        mock_config_manager.get_user_config_sync = MagicMock(return_value=mock_user_config)
+        mock_config_manager.get_core_config = MagicMock(return_value=mock_core_config)
         mock_config_manager.add_observer = MagicMock()
 
         risk_config = RiskConfig(
@@ -213,10 +243,41 @@ class TestDynamicTags:
     @pytest.fixture
     def pipeline(self):
         """Create a signal pipeline with mocked dependencies."""
+        # Mock config manager (R3.1 fix)
         mock_config_manager = MagicMock()
-        mock_config_manager.user_config = MagicMock()
-        mock_config_manager.user_config.active_strategies = []
-        mock_config_manager.core_config = MagicMock()
+
+        # Create mock user config
+        mock_user_config = MagicMock()
+        mock_user_config.active_strategies = []
+        mock_user_config.risk = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+        )
+        mock_user_config.mtf_ema_period = 60
+        mock_user_config.mtf_mapping = {"15m": "1h"}
+
+        # Create mock core config
+        mock_core_config = MagicMock()
+        mock_core_config.core_symbols = ["BTC/USDT:USDT"]
+        mock_core_config.pinbar_defaults = MagicMock()
+        mock_core_config.pinbar_defaults.min_wick_ratio = Decimal("0.6")
+        mock_core_config.pinbar_defaults.max_body_ratio = Decimal("0.3")
+        mock_core_config.pinbar_defaults.body_position_tolerance = Decimal("0.1")
+        mock_core_config.ema = MagicMock()
+        mock_core_config.ema.period = 60
+        mock_core_config.mtf_mapping = {"15m": "1h"}
+        mock_core_config.mtf_ema_period = 60
+        mock_core_config.warmup = MagicMock()
+        mock_core_config.warmup.history_bars = 100
+        mock_core_config.signal_pipeline = MagicMock()
+        mock_core_config.signal_pipeline.queue = MagicMock()
+        mock_core_config.signal_pipeline.queue.batch_size = 10
+        mock_core_config.signal_pipeline.queue.flush_interval = 5.0
+        mock_core_config.signal_pipeline.queue.max_queue_size = 1000
+
+        # Mock sync methods for R3.1 fix
+        mock_config_manager.get_user_config_sync = MagicMock(return_value=mock_user_config)
+        mock_config_manager.get_core_config = MagicMock(return_value=mock_core_config)
         mock_config_manager.add_observer = MagicMock()
 
         risk_config = RiskConfig(
@@ -559,10 +620,41 @@ class TestMTFEMAWarmup:
         from src.domain.indicators import EMACalculator
 
         # Mock config manager
+        # Mock config manager (R3.1 fix)
         mock_config_manager = MagicMock()
-        mock_config_manager.user_config = MagicMock()
-        mock_config_manager.user_config.active_strategies = []
-        mock_config_manager.core_config = MagicMock()
+
+        # Create mock user config
+        mock_user_config = MagicMock()
+        mock_user_config.active_strategies = []
+        mock_user_config.risk = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+        )
+        mock_user_config.mtf_ema_period = 60
+        mock_user_config.mtf_mapping = {"15m": "1h"}
+
+        # Create mock core config
+        mock_core_config = MagicMock()
+        mock_core_config.core_symbols = ["BTC/USDT:USDT"]
+        mock_core_config.pinbar_defaults = MagicMock()
+        mock_core_config.pinbar_defaults.min_wick_ratio = Decimal("0.6")
+        mock_core_config.pinbar_defaults.max_body_ratio = Decimal("0.3")
+        mock_core_config.pinbar_defaults.body_position_tolerance = Decimal("0.1")
+        mock_core_config.ema = MagicMock()
+        mock_core_config.ema.period = 60
+        mock_core_config.mtf_mapping = {"15m": "1h"}
+        mock_core_config.mtf_ema_period = 60
+        mock_core_config.warmup = MagicMock()
+        mock_core_config.warmup.history_bars = 100
+        mock_core_config.signal_pipeline = MagicMock()
+        mock_core_config.signal_pipeline.queue = MagicMock()
+        mock_core_config.signal_pipeline.queue.batch_size = 10
+        mock_core_config.signal_pipeline.queue.flush_interval = 5.0
+        mock_core_config.signal_pipeline.queue.max_queue_size = 1000
+
+        # Mock sync methods for R3.1 fix
+        mock_config_manager.get_user_config_sync = MagicMock(return_value=mock_user_config)
+        mock_config_manager.get_core_config = MagicMock(return_value=mock_core_config)
         mock_config_manager.add_observer = MagicMock()
         mock_config_manager.user_config.mtf_ema_period = 60  # 添加 mtf_ema_period 配置
 
@@ -633,10 +725,41 @@ class TestMTFEMAWarmup:
         from src.domain.indicators import EMACalculator
 
         # Mock config manager
+        # Mock config manager (R3.1 fix)
         mock_config_manager = MagicMock()
-        mock_config_manager.user_config = MagicMock()
-        mock_config_manager.user_config.active_strategies = []
-        mock_config_manager.core_config = MagicMock()
+
+        # Create mock user config
+        mock_user_config = MagicMock()
+        mock_user_config.active_strategies = []
+        mock_user_config.risk = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+        )
+        mock_user_config.mtf_ema_period = 60
+        mock_user_config.mtf_mapping = {"15m": "1h"}
+
+        # Create mock core config
+        mock_core_config = MagicMock()
+        mock_core_config.core_symbols = ["BTC/USDT:USDT"]
+        mock_core_config.pinbar_defaults = MagicMock()
+        mock_core_config.pinbar_defaults.min_wick_ratio = Decimal("0.6")
+        mock_core_config.pinbar_defaults.max_body_ratio = Decimal("0.3")
+        mock_core_config.pinbar_defaults.body_position_tolerance = Decimal("0.1")
+        mock_core_config.ema = MagicMock()
+        mock_core_config.ema.period = 60
+        mock_core_config.mtf_mapping = {"15m": "1h"}
+        mock_core_config.mtf_ema_period = 60
+        mock_core_config.warmup = MagicMock()
+        mock_core_config.warmup.history_bars = 100
+        mock_core_config.signal_pipeline = MagicMock()
+        mock_core_config.signal_pipeline.queue = MagicMock()
+        mock_core_config.signal_pipeline.queue.batch_size = 10
+        mock_core_config.signal_pipeline.queue.flush_interval = 5.0
+        mock_core_config.signal_pipeline.queue.max_queue_size = 1000
+
+        # Mock sync methods for R3.1 fix
+        mock_config_manager.get_user_config_sync = MagicMock(return_value=mock_user_config)
+        mock_config_manager.get_core_config = MagicMock(return_value=mock_core_config)
         mock_config_manager.add_observer = MagicMock()
         mock_config_manager.user_config.mtf_ema_period = 60  # 添加 mtf_ema_period 配置
 
