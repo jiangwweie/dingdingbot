@@ -6,6 +6,125 @@
 
 ---
 
+### 2026-04-05 - R1.1 Profile 切换后缓存失效修复 ✅
+
+**会话 ID**: 20260405-010
+**开始时间**: 2026-04-05 16:30
+**结束时间**: 2026-04-05 17:30
+**持续时间**: 约 1 小时
+
+#### 完成工作摘要
+
+**P0 级风险 R1.1 修复完成，6/6 测试通过 (100%)**
+
+#### 问题描述
+
+ConfigProfileService.switch_profile() 切换 Profile 后，ConfigManager 的内存缓存仍指向旧配置，导致配置不一致。
+
+#### 修复方案
+
+1. **ConfigManager 添加缓存刷新方法**:
+   - `reload_all_configs_from_db()`: 重新加载系统配置和风控配置，刷新缓存并通知观察者
+
+2. **ConfigProfileService 注入 ConfigManager 依赖**:
+   - 构造函数接受可选的 `config_manager` 参数
+   - `switch_profile()` 方法中调用 `reload_all_configs_from_db()` 刷新缓存
+   - 错误处理：ConfigManager 刷新失败不影响 Profile 切换
+
+3. **API 层依赖注入更新**:
+   - `api.py`: `_get_profile_service()` 注入 `_config_manager`
+   - `api_profile_endpoints.py`: 添加 `set_profile_dependencies()` 和 `_get_config_manager()`
+
+#### 测试结果
+
+```
+test_config_profile.py::TestProfileSwitchCacheRefresh - 3/3 通过
+- test_switch_profile_calls_config_manager_reload ✅
+- test_switch_profile_without_config_manager ✅
+- test_switch_profile_cache_refresh_logs_error ✅
+
+test_config_manager_db.py::TestProfileSwitchCacheRefresh - 3/3 通过
+- test_reload_all_configs_from_db ✅
+- test_reload_all_configs_from_db_notifies_observers ✅
+- test_reload_all_configs_from_db_handles_uninitialized ✅
+```
+
+#### 修改文件清单
+
+```
+src/application/
+├── config_manager_db.py         # 新增 reload_all_configs_from_db() 方法
+└── config_profile_service.py    # 添加 ConfigManager 依赖注入
+
+src/interfaces/
+├── api.py                       # 更新 _get_profile_service() 注入 ConfigManager
+└── api_profile_endpoints.py     # 添加 set_profile_dependencies()
+
+tests/unit/
+├── test_config_profile.py       # 新增 3 个 R1.1 测试
+└── test_config_manager_db.py    # 新增 3 个 reload 测试
+
+docs/planning/
+└── task_plan.md                 # 标记 R1.1 为已完成
+```
+
+#### Git 提交
+
+```
+341d021 fix(config): R1.1 Profile 切换后缓存失效修复
+```
+
+---
+
+### 2026-04-05 - 配置重构缺陷修复 R5.2 ✅
+
+**会话 ID**: 20260405-009
+**开始时间**: 2026-04-05 16:00
+**结束时间**: 2026-04-05 16:30
+**持续时间**: 约 30 分钟
+
+#### 完成工作摘要
+
+**P0 缺陷 R5.2: 配置损坏导致系统无法启动且无降级 - 已修复 ✅**
+
+修复内容:
+1. ✅ `config_entry_repository.py` - 添加 `_deserialize_value` 异常捕获，JSON 损坏时返回 None
+2. ✅ `config_manager_db.py` - 添加 `_create_default_user_config` 兜底方法
+3. ✅ `config_manager_db.py` - `get_user_config` 添加 ValidationError 捕获，使用默认配置
+4. ✅ `config_manager_db.py` - `_load_strategies_from_db` 添加损坏数据跳过逻辑
+5. ✅ `config_manager_db.py` - `_load_user_config_from_yaml` 添加 YAML 解析异常捕获
+6. ✅ `config_manager_db.py` - `_load_core_config_from_yaml` 添加 YAML 解析异常捕获
+7. ✅ `config_entry_repository.py` - 添加 `logger` 导入
+
+#### 测试用例
+
+新增 7 个配置损坏降级测试用例，100% 通过:
+- ✅ `test_corrupted_json_returns_none` - JSON 损坏返回 None
+- ✅ `test_system_config_corruption_uses_default` - 系统配置损坏使用默认值
+- ✅ `test_user_config_validation_error_uses_default` - 用户配置验证失败使用默认值
+- ✅ `test_corrupted_strategy_json_skipped` - 损坏的策略 JSON 被跳过
+- ✅ `test_corrupted_strategy_name_field_skipped` - 空字符串 trigger_config 被处理
+- ✅ `test_create_default_user_config` - 默认配置创建方法
+- ✅ `test_yaml_corruption_uses_default` - YAML 损坏使用默认配置
+
+#### 修改文件清单
+
+```
+src/infrastructure/config_entry_repository.py  - 添加异常捕获和 logger 导入
+src/application/config_manager_db.py          - 添加降级逻辑和默认配置方法
+tests/unit/test_config_manager_db.py          - 新增 7 个配置损坏测试用例
+```
+
+#### 测试结果
+
+```
+tests/unit/test_config_manager_db.py::TestConfigCorruptionDegradation - 7/7 通过 (100%)
+tests/unit/test_config_manager_db.py - 29/29 通过 (100%)
+tests/unit/test_config_repositories.py - 40/40 通过 (100%)
+```
+
+---
+
 ### 2026-04-05 - 配置重构测试补全完成 ✅
 
 **会话 ID**: 20260405-008
