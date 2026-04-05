@@ -264,7 +264,7 @@ Agent(
 
 ---
 
-## 📋 并行调度实战示例
+## 📋 并行调度实战示例（含测试）
 
 ### 示例 1：前后端并行开发
 
@@ -532,46 +532,74 @@ Agent(
 Agent(
     subagent_type="general-purpose",
     description="后端 API 实现",
-    prompt="你是后端开发专家。后端 API 实现。角色规范：.claude/team/backend-dev/SKILL.md"
+    prompt="""
+你是后端开发专家。后端 API 实现。
+
+⚠️ 【强制要求】先读取 `.claude/team/backend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )   # 并行
 
 Agent(
     subagent_type="general-purpose",
     description="前端组件实现",
-    prompt="你是前端开发专家。前端组件实现。角色规范：.claude/team/frontend-dev/SKILL.md"
+    prompt="""
+你是前端开发专家。前端组件实现。
+
+⚠️ 【强制要求】先读取 `.claude/team/frontend-dev/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )   # 并行
 
 # 第二批：T3 和 T4 并行测试
 Agent(
     subagent_type="general-purpose",
     description="后端单元测试",
-    prompt="你是 QA 测试专家。后端单元测试。角色规范：.claude/team/qa-tester/SKILL.md"
+    prompt="""
+你是 QA 测试专家。后端单元测试。
+
+⚠️ 【强制要求】先读取 `.claude/team/qa-tester/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )  # 并行
 
 Agent(
     subagent_type="general-purpose",
     description="前端组件测试",
-    prompt="你是 QA 测试专家。前端组件测试。角色规范：.claude/team/qa-tester/SKILL.md"
+    prompt="""
+你是 QA 测试专家。前端组件测试。
+
+⚠️ 【强制要求】先读取 `.claude/team/qa-tester/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )  # 并行
 
 # 第三批：T5 和 T6 并行审查
 Agent(
     subagent_type="general-purpose",
     description="后端代码审查",
-    prompt="你是代码审查专家。后端代码审查。角色规范：.claude/team/code-reviewer/SKILL.md"
+    prompt="""
+你是代码审查专家。后端代码审查。
+
+⚠️ 【强制要求】先读取 `.claude/team/code-reviewer/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )   # 并行
 
 Agent(
     subagent_type="general-purpose",
     description="前端代码审查",
-    prompt="你是代码审查专家。前端代码审查。角色规范：.claude/team/code-reviewer/SKILL.md"
+    prompt="""
+你是代码审查专家。前端代码审查。
+
+⚠️ 【强制要求】先读取 `.claude/team/code-reviewer/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )   # 并行
 
 # 第四批：T7 集成测试
 Agent(
     subagent_type="general-purpose",
     description="集成测试",
-    prompt="你是 QA 测试专家。集成测试。角色规范：.claude/team/qa-tester/SKILL.md"
+    prompt="""
+你是 QA 测试专家。集成测试。
+
+⚠️ 【强制要求】先读取 `.claude/team/qa-tester/SKILL.md`，按 Pre-Flight 清单执行。
+"""
 )
 ```
 
@@ -590,6 +618,72 @@ Agent(
 - ✅ 后端流程独立：开发 → 单元测试 → 审查
 - ✅ 前端流程独立：开发 → 组件测试 → 审查
 - ✅ 最后集成测试等待所有审查完成
+
+---
+
+## 🐛 空任务问题解决方案
+
+**问题现象**：
+Agent 启动后显示"Done"但**没有任何工具调用**，即"空任务"。
+
+**根本原因**：
+子 Agent 没有正确理解任务要求，或者没有执行任何实际操作。
+
+**解决方案**（Prompt 中必须包含）：
+
+### 1. 强制读取角色规范
+```python
+prompt="""
+你是 XXX 专家。
+
+⚠️ 【强制要求 - 第一步】
+**必须使用 `Read` 工具读取** `.claude/team/{role}/SKILL.md`
+**然后按照 Pre-Flight 清单执行**
+
+【任务】...
+"""
+```
+
+### 2. 明确要求输出文件
+```python
+prompt="""
+...
+【输出要求】
+- 必须修改至少一个文件（使用 Edit/Write 工具）
+- 必须运行测试验证（使用 Bash 工具）
+- 必须更新进度文档（使用 Read + Edit 工具）
+
+禁止：只返回文本说明而不执行任何工具调用
+"""
+```
+
+### 3. 检查清单强制
+```python
+prompt="""
+...
+【开工检查清单】
+- [ ] 已读取角色规范 `.claude/team/{role}/SKILL.md`
+- [ ] 已创建/更新任务计划 `docs/planning/task_plan.md`
+- [ ] 已阅读相关契约表（如有）
+
+如果以上任何一项未完成，**立即停止并先完成该项**。
+"""
+```
+
+### 4. 验收标准强制
+```python
+prompt="""
+...
+【验收标准】
+完成以下所有项目后才能标记为 Done：
+- [ ] 功能代码已提交（git add + commit）
+- [ ] 测试已通过（pytest 输出证明）
+- [ ] 覆盖率已达标（coverage report 输出）
+- [ ] 进度文档已更新（progress.md 已修改）
+
+**缺少任何一项 = 任务未完成**
+"""
+```
 
 ---
 

@@ -4,11 +4,11 @@ description: 后端开发专家 - 负责 Python + FastAPI + asyncio 后端实现
 license: Proprietary
 ---
 
-# 启动真正的并行 Agent
-Agent(
-    subagent_type="general-purpose",
-    description="后端开发专家 - {{arguments}}",
-    prompt="""你是后端开发专家 (Backend Developer Agent)，负责 Python + FastAPI + asyncio 后端实现。
+# 后端开发专家 (Backend Developer)
+
+> **角色说明**：本文件定义后端开发专家的行为规范。由 Project Manager 通过 `Agent` 工具调度执行。
+> 
+> **执行前必须**：PM 必须在 prompt 中明确要求"先读取本文件"。
 
 ## ⚠️ 全局强制要求
 
@@ -87,12 +87,6 @@ src/
 ---
 
 ## 当前任务
-
-{{arguments}}
-
-请开始执行此任务。首先阅读相关文件，然后按照开工/收工规范执行。
-"""
-)
 
 ## ⚠️ 全局强制要求
 
