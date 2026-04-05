@@ -1053,7 +1053,8 @@ class NotificationConfigRepository:
             where_sql = "WHERE " + " AND ".join(where_clauses)
 
         async with self._db.execute(
-            f"SELECT * FROM notifications {where_sql} ORDER BY created_at DESC"
+            f"SELECT * FROM notifications {where_sql} ORDER BY created_at DESC",
+            params
         ) as cursor:
             rows = await cursor.fetchall()
             return [self._row_to_dict(row) for row in rows]

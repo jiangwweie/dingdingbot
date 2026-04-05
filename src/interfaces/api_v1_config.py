@@ -1207,14 +1207,19 @@ async def get_notifications(
     if not _notification_repo:
         raise HTTPException(status_code=503, detail="Notification repository not initialized")
 
-    # TODO: Implement filter by active status in repository
-    notifications = []
+    # Use get_list method with optional filters
+    notifications = await _notification_repo.get_list(is_active=is_active)
 
-    # Get all notifications (repository method not yet implemented)
-    # For now, return empty list
-    # TODO: Implement get_all method in NotificationConfigRepository
+    # Mask webhook URLs for security
+    result = []
+    for notification in notifications:
+        notification_data = dict(notification)
+        notification_data["webhook_url_masked"] = mask_secret(
+            notification.get("webhook_url", ""), visible_chars=4
+        )
+        result.append(NotificationListItem(**notification_data))
 
-    return notifications
+    return result
 
 
 @router.post("/notifications", status_code=201)

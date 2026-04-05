@@ -554,6 +554,49 @@ class TestNotificationConfigAPI:
         assert isinstance(data, list)
 
     @pytest.mark.asyncio
+    async def test_get_notifications_with_data(self, client):
+        """Test GET /notifications returns data after creating notifications."""
+        # Create two notifications
+        client.post(
+            "/api/v1/config/notifications",
+            json={
+                "channel_type": "feishu",
+                "webhook_url": "https://example.com/webhook1",
+                "is_active": True,
+            },
+            headers={"X-User-Role": "admin"}
+        )
+        client.post(
+            "/api/v1/config/notifications",
+            json={
+                "channel_type": "wechat",
+                "webhook_url": "https://example.com/webhook2",
+                "is_active": False,
+            },
+            headers={"X-User-Role": "admin"}
+        )
+
+        # Get all notifications
+        response = client.get("/api/v1/config/notifications")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 2
+
+        # Filter by is_active=True
+        response = client.get("/api/v1/config/notifications?is_active=true")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["is_active"] is True
+
+        # Filter by is_active=False
+        response = client.get("/api/v1/config/notifications?is_active=false")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["is_active"] is False
+
+    @pytest.mark.asyncio
     async def test_create_notification(self, client):
         """Test POST /notifications creates a new notification."""
         notification_data = {
