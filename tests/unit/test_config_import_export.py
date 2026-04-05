@@ -740,8 +740,11 @@ strategies:
         # Verify strategies were created
         strategies_response = client.get("/api/v1/config/strategies")
         data = strategies_response.json()
-        # Should have at least 3 strategies
-        assert len(data.get("items", data)) >= 3
+        # API returns a list directly, not a dict with 'items'
+        if isinstance(data, list):
+            assert len(data) >= 3
+        else:
+            assert len(data.get("items", [])) >= 3
 
 
 # ============================================================

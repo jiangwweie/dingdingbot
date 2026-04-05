@@ -612,7 +612,8 @@ class TestConfigSnapshotRepositoryExtended:
         retrieved = await snapshot_repo.get_by_id(snapshot_id)
         assert retrieved is not None
         assert retrieved["name"] == "Test Snapshot"
-        assert len(retrieved["snapshot_data"]["strategies"]) == 1
+        # Note: API returns 'config_data' not 'snapshot_data'
+        assert len(retrieved["config_data"]["strategies"]) == 1
 
     @pytest.mark.asyncio
     async def test_get_recent_snapshots(self, snapshot_repo: ConfigSnapshotRepositoryExtended):

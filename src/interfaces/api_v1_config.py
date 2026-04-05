@@ -1600,6 +1600,11 @@ async def confirm_import(
         # 3. Strategies
         if "strategies" in import_data and _strategy_repo:
             for strategy in import_data["strategies"]:
+                # Convert legacy trigger/filters format to trigger_config/filter_configs
+                if "trigger" in strategy and "trigger_config" not in strategy:
+                    strategy["trigger_config"] = strategy.pop("trigger")
+                if "filters" in strategy and "filter_configs" not in strategy:
+                    strategy["filter_configs"] = strategy.pop("filters")
                 # Check if exists by name
                 # For simplicity, create all as new
                 await _strategy_repo.create(strategy)
