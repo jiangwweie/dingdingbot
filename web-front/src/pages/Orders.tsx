@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Plus, Filter, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Filter, X, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { message, Modal } from 'antd';
 import { OrderTreeNode, OrderStatus, OrderRole, OrderBatchDeleteRequest } from '../types/order';
 import { OrderChainTreeTable } from '../components/v3/OrderChainTreeTable';
 import { DeleteChainConfirmModal } from '../components/v3/DeleteChainConfirmModal';
@@ -142,16 +143,32 @@ export default function Orders() {
       const request: OrderBatchDeleteRequest = {
         order_ids: pendingDeleteOrderIds,
         cancel_on_exchange: true,
+        audit_info: {
+          operator_id: 'user-001', // TODO: 从登录信息获取
+          ip_address: '',
+          user_agent: navigator.userAgent,
+        },
       };
 
-      await deleteOrderChain(request);
+      const response = await deleteOrderChain(request);
+
+      // 显示结果
+      if (response.deleted_count > 0) {
+        message.success(`成功删除 ${response.deleted_count} 个订单`);
+      }
+      if (response.failed_to_cancel && response.failed_to_cancel.length > 0) {
+        message.warning(
+          `${response.failed_to_cancel.length} 个订单取消失败：${response.failed_to_cancel.map(f => f.reason).join(', ')}`
+        );
+      }
+
       setIsDeleteModalOpen(false);
       setPendingDeleteOrderIds([]);
       setSelectedRowKeys([]);
       await loadOrderTree();
     } catch (error) {
       console.error('Failed to delete order chain:', error);
-      alert('删除订单链失败，请重试');
+      message.error(`删除失败：${error.message || '请重试'}`);
       throw error;
     }
   }, [pendingDeleteOrderIds, loadOrderTree]);
@@ -221,13 +238,34 @@ export default function Orders() {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-apple-blue text-white rounded-lg font-medium hover:bg-blue-600 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          创建订单
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 批量删除按钮 */}
+          {selectedRowKeys.length > 0 && (
+            <button
+              onClick={() => {
+                Modal.confirm({
+                  title: `确认删除 ${selectedRowKeys.length} 个订单？`,
+                  content: '此操作将同步取消交易所挂单，无法撤销。',
+                  onOk: async () => {
+                    await handleDeleteConfirm();
+                  },
+                });
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              批量删除 ({selectedRowKeys.length})
+            </button>
+          )}
+
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-apple-blue text-white rounded-lg font-medium hover:bg-blue-600 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            创建订单
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

@@ -1169,14 +1169,49 @@ class OrderRepository:
                         orders_to_delete.append(self._row_to_order(row))
 
                 # Step 3: 取消 OPEN 状态的订单（调用交易所 API）
-                # 注意：这里需要 exchange_gateway，暂时跳过实现
-                # TODO: 集成 exchange_gateway 后实现
                 if cancel_on_exchange:
+                    # 获取 ExchangeGateway 实例（通过全局或单例）
+                    from src.infrastructure.exchange_gateway import ExchangeGateway
+                    gateway = None
+
                     for order in orders_to_delete:
                         if order.status in [OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]:
-                            # TODO: 调用交易所取消 API
-                            # await self.exchange_gateway.cancel_order(order.exchange_order_id, order.symbol)
-                            result["cancelled_on_exchange"].append(order.id)
+                            if order.exchange_order_id:
+                                try:
+                                    # 懒加载 ExchangeGateway
+                                    if gateway is None:
+                                        # TODO: 从配置或依赖注入获取 ExchangeGateway 实例
+                                        # 这里使用一个临时的初始化方式
+                                        logger.warning(f"跳过交易所取消：ExchangeGateway 未注入")
+                                        result["failed_to_cancel"].append({
+                                            "order_id": order.id,
+                                            "reason": "ExchangeGateway not initialized",
+                                        })
+                                        continue
+
+                                    result_cancel = await gateway.cancel_order(
+                                        exchange_order_id=order.exchange_order_id,
+                                        symbol=order.symbol,
+                                    )
+                                    if result_cancel.is_success:
+                                        result["cancelled_on_exchange"].append(order.id)
+                                    else:
+                                        result["failed_to_cancel"].append({
+                                            "order_id": order.id,
+                                            "reason": result_cancel.error_message or "Unknown error",
+                                        })
+                                except Exception as e:
+                                    logger.warning(f"取消订单失败 {order.id}: {e}")
+                                    result["failed_to_cancel"].append({
+                                        "order_id": order.id,
+                                        "reason": str(e),
+                                    })
+                            else:
+                                # 没有 exchange_order_id，无法调用交易所
+                                result["failed_to_cancel"].append({
+                                    "order_id": order.id,
+                                    "reason": "No exchange_order_id",
+                                })
 
                 # Step 4: 批量删除数据库记录（事务保护）
                 await self._db.execute("BEGIN")
@@ -1197,25 +1232,38 @@ class OrderRepository:
                 audit_log_id = str(uuid.uuid4())
                 result["audit_log_id"] = audit_log_id
 
-                # TODO: 创建 order_audit_logs 表后实现审计日志持久化
-                # await self._db.execute(
-                #     """
-                #     INSERT INTO order_audit_logs
-                #     (id, operation, operator_id, order_ids, cancelled_on_exchange, deleted_from_db, ip_address, user_agent, created_at)
-                #     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                #     """,
-                #     (
-                #         audit_log_id,
-                #         "DELETE_BATCH",
-                #         audit_info.get("operator_id") if audit_info else None,
-                #         json.dumps(result["deleted_from_db"]),
-                #         json.dumps(result["cancelled_on_exchange"]),
-                #         json.dumps(result["deleted_from_db"]),
-                #         audit_info.get("ip_address") if audit_info else None,
-                #         audit_info.get("user_agent") if audit_info else None,
-                #         int(datetime.now(timezone.utc).timestamp() * 1000),
-                #     )
-                # )
+                # 集成 OrderAuditLogger（ORD-5 已完成）
+                try:
+                    from src.application.order_audit_logger import OrderAuditLogger
+                    from src.domain.models import OrderAuditEventType, OrderAuditTriggerSource
+
+                    # 创建审计日志仓库（临时方案，应该复用单例）
+                    from src.infrastructure.order_audit_repository import OrderAuditLogRepository
+                    audit_repo = OrderAuditLogRepository()
+                    audit_logger = OrderAuditLogger(audit_repo)
+
+                    # 记录批量删除审计日志
+                    await audit_logger.log(
+                        order_id="BATCH_DELETE",
+                        signal_id=None,
+                        old_status=None,
+                        new_status="DELETED",
+                        event_type=OrderAuditEventType.ORDER_CANCELED,
+                        triggered_by=OrderAuditTriggerSource.USER,
+                        metadata={
+                            "operation": "DELETE_BATCH",
+                            "order_ids": order_ids,
+                            "cancelled_on_exchange": result["cancelled_on_exchange"],
+                            "deleted_from_db": result["deleted_from_db"],
+                            "operator_id": audit_info.get("operator_id") if audit_info else None,
+                            "ip_address": audit_info.get("ip_address") if audit_info else None,
+                        },
+                    )
+
+                    logger.info(f"审计日志已记录：{audit_log_id}")
+                except Exception as audit_error:
+                    # 审计日志失败不影响主流程
+                    logger.warning(f"记录审计日志失败：{audit_error}")
 
                 return result
 
