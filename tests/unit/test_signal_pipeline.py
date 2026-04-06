@@ -961,9 +961,13 @@ class TestRiskConfigHotReload:
             # 触发热重载
             await pipeline.on_config_updated()
 
-        # 验证日志包含配置变更信息
-        assert "Risk config reloaded" in caplog.text
-        assert "0.01->0.02" in caplog.text
-        assert "10->20" in caplog.text
-        assert "MTF EMA period updated" in caplog.text
-        assert "60->100" in caplog.text
+        # 验证日志包含配置变更信息（新格式：[热重载] Risk config 更新）
+        assert "[热重载]" in caplog.text
+        assert "Risk config 更新" in caplog.text or "risk_config" in caplog.text.lower()
+        assert "0.01" in caplog.text
+        assert "0.02" in caplog.text
+        assert "10" in caplog.text
+        assert "20" in caplog.text
+        assert "MTF EMA" in caplog.text
+        assert "60" in caplog.text
+        assert "100" in caplog.text

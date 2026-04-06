@@ -1504,6 +1504,32 @@ async def export_config(
 
     filename = f"config_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.yaml"
 
+    # Record export operation to history
+    if _history_repo:
+        # Build change summary
+        exported_sections = []
+        if request.include_risk and "risk" in export_data:
+            exported_sections.append("risk")
+        if request.include_system and "system" in export_data:
+            exported_sections.append("system")
+        if request.include_strategies and "strategies" in export_data:
+            exported_sections.append(f"{len(export_data['strategies'])} strategies")
+        if request.include_symbols and "symbols" in export_data:
+            exported_sections.append(f"{len(export_data['symbols'])} symbols")
+        if request.include_notifications:
+            exported_sections.append("notifications")
+
+        change_summary = f"Exported config: {', '.join(exported_sections)}"
+
+        await _history_repo.record_change(
+            entity_type="config_bundle",
+            entity_id="export",
+            action="EXPORT",
+            new_values={"filename": filename, "sections": exported_sections},
+            changed_by="admin",
+            change_summary=change_summary,
+        )
+
     return ExportResponse(
         status="success",
         filename=filename,
@@ -1605,9 +1631,9 @@ async def preview_import(
     valid = len(errors) == 0
 
     # Generate preview token
+    from datetime import timedelta
     preview_token = str(uuid.uuid4())
-    expires_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    expires_at = expires_at.replace(minute=expires_at.minute + 5)  # 5 minutes expiry
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)  # 5 minutes expiry
 
     # Store in cache
     _import_preview_cache[preview_token] = {
@@ -1716,6 +1742,32 @@ async def confirm_import(
         if "notifications" in import_data and _notification_repo:
             for notification in import_data["notifications"]:
                 await _notification_repo.create(notification)
+
+        # Record import operation to history
+        if _history_repo:
+            summary = preview_data.get("summary", {})
+            imported_sections = []
+            if "risk" in import_data:
+                imported_sections.append("risk")
+            if "system" in import_data:
+                imported_sections.append("system")
+            if "strategies" in import_data:
+                imported_sections.append(f"{len(import_data['strategies'])} strategies")
+            if "symbols" in import_data:
+                imported_sections.append(f"{len(import_data['symbols'])} symbols")
+            if "notifications" in import_data:
+                imported_sections.append(f"{len(import_data['notifications'])} notifications")
+
+            change_summary = f"Imported config from {preview_data['filename']}: {', '.join(imported_sections)}"
+
+            await _history_repo.record_change(
+                entity_type="config_bundle",
+                entity_id="import",
+                action="IMPORT",
+                new_values={"filename": preview_data['filename'], "sections": imported_sections, "snapshot_id": snapshot_id},
+                changed_by="admin",
+                change_summary=change_summary,
+            )
 
         # Clean up preview cache
         del _import_preview_cache[request.preview_token]

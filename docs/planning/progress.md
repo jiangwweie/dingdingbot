@@ -47,31 +47,27 @@
 #### 日志输出示例
 
 ```
-[INFO] Configuration hot-reload triggered, rebuilding strategy runner...
-[INFO] 开始热重载，新 risk_config: max_loss_percent=1.0, max_leverage=20
-[INFO] Risk config reloaded: max_loss_percent=1.0->1.0, max_leverage=20->20
-[INFO] 更新 MTF EMA 周期：60 -> 60
-[INFO] 清空 MTF EMA indicators 缓存，原缓存数量：5
-[INFO] 开始重建 strategy runner...
-[INFO] Strategy runner 创建完成，激活策略数：2
-[INFO] 重放 K-line 历史：200 根 K 线，时间范围 2026-04-05 10:00:00 - 2026-04-06 12:00:00 (UTC: 1711785600000-1711872000000)
-[INFO] Runner warmup complete: 200 K-lines replayed from 2 streams
+[INFO] [热重载] 开始热重载，新 risk_config: max_loss_percent=1.0, max_leverage=20
+[INFO] [热重载] Risk config 更新：max_loss_percent=1.0->1.0, max_leverage=20->20
+[INFO] [热重载] MTF EMA 周期更新：60 -> 100
+[INFO] [热重载] MTF EMA indicators 清空：移除 5 个缓存指标
+[INFO] [热重载] K-line 历史重放：200 根 K 线，时间范围 2026-04-05 10:00:00 - 2026-04-06 12:00:00 (UTC: 1711785600000-1711872000000)
 [INFO] [热重载] MTF EMA 预加热：检查 2 个周期，预热 180 个数据点到 2 个指标
 [INFO] [热重载] MTF EMA 重建完成：180 个数据点，2 个指标就绪
-[INFO] Signal cooldown cache cleared, 原缓存数量：3
-[INFO] ============================================================
-[INFO] 热重载完成，runner 重建成功
-[INFO] ============================================================
+[INFO] [热重载] Signal cooldown cache 清空：移除 3 条缓存记录
+[INFO] [热重载] 策略 runner 重建完成，热重载流程结束
 ```
 
 #### 测试结果
 
 - ✅ 语法检查通过
-- ✅ 代码审查通过
+- ✅ 日志格式统一为 `[热重载]` 前缀
+- ✅ 测试文件已更新以适配新日志格式
 
 #### 修改文件
 
 - `src/application/signal_pipeline.py`: 添加热重载详细日志
+- `tests/unit/test_signal_pipeline.py`: 更新日志验证测试以适应新格式
 
 #### 验收标准完成情况
 

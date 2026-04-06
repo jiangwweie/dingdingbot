@@ -824,6 +824,238 @@ strategies:
 
 
 # ============================================================
+# History Recording Tests
+# ============================================================
+
+class TestImportExportHistoryRecording:
+    """Tests for verifying import/export operations are recorded to history."""
+
+    @pytest.mark.asyncio
+    async def test_export_records_to_history(self, client, db_manager):
+        """Test that export operation is recorded to config_history table."""
+        # Create some config first
+        client.put(
+            "/api/v1/config/risk",
+            json={"max_loss_percent": "0.01", "max_leverage": 10},
+            headers={"X-User-Role": "admin"}
+        )
+        client.put(
+            "/api/v1/config/system",
+            json={"core_symbols": ["BTC/USDT:USDT"], "ema_period": 50},
+            headers={"X-User-Role": "admin"}
+        )
+
+        # Export config
+        response = client.post(
+            "/api/v1/config/export",
+            json={
+                "include_risk": True,
+                "include_system": True,
+                "include_strategies": False,
+            },
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+
+        # Verify history record was created
+        history_records, total = await db_manager.history_repo.get_history(
+            entity_type="config_bundle",
+            entity_id="export",
+            limit=10
+        )
+
+        assert total >= 1
+        assert len(history_records) >= 1
+
+        # Check the latest record
+        latest_record = history_records[0]
+        assert latest_record["action"] == "EXPORT"
+        assert latest_record["changed_by"] == "admin"
+        assert "risk" in latest_record["change_summary"]
+        assert "system" in latest_record["change_summary"]
+
+        # Verify new_values contains filename and sections
+        # Note: new_values may be a dict or a JSON string depending on repository implementation
+        new_values = latest_record["new_values"]
+        if isinstance(new_values, str):
+            new_values = json.loads(new_values)
+        assert "filename" in new_values
+        assert "sections" in new_values
+        assert "risk" in new_values["sections"]
+        assert "system" in new_values["sections"]
+
+    @pytest.mark.asyncio
+    async def test_import_records_to_history(self, client, db_manager):
+        """Test that import operation is recorded to config_history table."""
+        yaml_content = """
+risk:
+  max_loss_percent: 0.025
+  max_leverage: 25
+  cooldown_minutes: 120
+system:
+  core_symbols:
+    - BTC/USDT:USDT
+    - ETH/USDT:USDT
+  ema_period: 45
+strategies:
+  - name: Import Test Strategy
+    trigger:
+      type: pinbar
+      enabled: true
+      params: {}
+    filters: []
+    filter_logic: AND
+"""
+        # Preview import
+        preview_response = client.post(
+            "/api/v1/config/import/preview",
+            json={"yaml_content": yaml_content, "filename": "test_import.yaml"},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert preview_response.status_code == 200
+        preview_token = preview_response.json()["preview_token"]
+
+        # Confirm import
+        confirm_response = client.post(
+            "/api/v1/config/import/confirm",
+            json={"preview_token": preview_token},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert confirm_response.status_code == 200
+
+        # Verify history record was created
+        history_records, total = await db_manager.history_repo.get_history(
+            entity_type="config_bundle",
+            entity_id="import",
+            limit=10
+        )
+
+        assert total >= 1
+        assert len(history_records) >= 1
+
+        # Check the latest record
+        latest_record = history_records[0]
+        assert latest_record["action"] == "IMPORT"
+        assert latest_record["changed_by"] == "admin"
+        assert "test_import.yaml" in latest_record["change_summary"]
+        assert "risk" in latest_record["change_summary"]
+
+        # Verify new_values contains filename and sections
+        new_values = latest_record["new_values"]
+        if isinstance(new_values, str):
+            new_values = json.loads(new_values)
+        assert "filename" in new_values
+        assert "sections" in new_values
+        assert new_values["filename"] == "test_import.yaml"
+        assert "risk" in new_values["sections"]
+        assert "system" in new_values["sections"]
+        assert any("strategies" in s for s in new_values["sections"])
+
+    @pytest.mark.asyncio
+    async def test_export_history_records_all_sections(self, client, db_manager):
+        """Test that export history records all exported sections."""
+        # Create config
+        client.put(
+            "/api/v1/config/risk",
+            json={"max_loss_percent": "0.01", "max_leverage": 10},
+            headers={"X-User-Role": "admin"}
+        )
+        client.put(
+            "/api/v1/config/system",
+            json={"core_symbols": ["BTC/USDT:USDT"], "ema_period": 50},
+            headers={"X-User-Role": "admin"}
+        )
+        client.post(
+            "/api/v1/config/strategies",
+            json={
+                "name": "Test Strategy",
+                "trigger": {"type": "pinbar", "enabled": True, "params": {}},
+                "filters": [],
+                "filter_logic": "AND",
+            },
+            headers={"X-User-Role": "admin"}
+        )
+
+        # Export all
+        response = client.post(
+            "/api/v1/config/export",
+            json={
+                "include_risk": True,
+                "include_system": True,
+                "include_strategies": True,
+                "include_symbols": True,
+            },
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+
+        # Verify history
+        history_records, total = await db_manager.history_repo.get_history(
+            entity_type="config_bundle",
+            entity_id="export",
+            limit=1
+        )
+
+        assert total >= 1
+        latest_record = history_records[0]
+        new_values = latest_record["new_values"]
+        if isinstance(new_values, str):
+            new_values = json.loads(new_values)
+
+        # Should record all sections
+        assert "risk" in new_values["sections"]
+        assert "system" in new_values["sections"]
+        assert any("strategies" in s for s in new_values["sections"])
+        assert any("symbols" in s for s in new_values["sections"])
+
+    @pytest.mark.asyncio
+    async def test_import_history_records_snapshot_id(self, client, db_manager):
+        """Test that import history record includes snapshot_id."""
+        yaml_content = """
+risk:
+  max_loss_percent: 0.015
+  max_leverage: 15
+"""
+        # Preview and confirm
+        preview_response = client.post(
+            "/api/v1/config/import/preview",
+            json={"yaml_content": yaml_content, "filename": "snapshot_test.yaml"},
+            headers={"X-User-Role": "admin"}
+        )
+        preview_token = preview_response.json()["preview_token"]
+
+        confirm_response = client.post(
+            "/api/v1/config/import/confirm",
+            json={"preview_token": preview_token},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert confirm_response.status_code == 200
+
+        # Verify history record has snapshot_id
+        history_records, total = await db_manager.history_repo.get_history(
+            entity_type="config_bundle",
+            entity_id="import",
+            limit=1
+        )
+
+        assert total >= 1
+        latest_record = history_records[0]
+        new_values = latest_record["new_values"]
+        if isinstance(new_values, str):
+            new_values = json.loads(new_values)
+
+        assert "snapshot_id" in new_values
+        assert new_values["snapshot_id"] is not None
+
+
+# ============================================================
 # Main entry point
 # ============================================================
 
