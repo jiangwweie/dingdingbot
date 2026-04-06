@@ -7,6 +7,84 @@
 
 ---
 
+### 2026-04-06 - 配置 DB 表字段扩展 ✅
+
+**会话 ID**: 20260406-003
+**开始时间**: 2026-04-06
+**结束时间**: 2026-04-06
+**持续时间**: 约 1 小时
+
+#### 完成工作摘要
+
+**TASK-2: 配置 DB 表字段扩展 - 可选字段添加**
+
+#### 需求描述
+
+为 RiskConfig 和 SystemConfig 添加可选字段支持，以匹配数据库表结构。
+
+#### 实现内容
+
+**1. RiskConfig 扩展字段** (`src/domain/models.py:164-202`):
+- `daily_max_trades: Optional[int]` - 每日最大交易次数
+- `daily_max_loss: Optional[Decimal]` - 每日最大损失金额
+- `max_position_hold_time: Optional[int]` - 最大持仓时间（分钟）
+- 所有新字段均为可选，默认值为 None
+
+**2. CoreConfig ATR 配置字段** (`src/application/config_manager.py:95-122`):
+- 新增 `AtrConfig` 类：包含 `enabled`, `period`, `min_ratio` 字段
+- `CoreConfig` 添加 `atr: AtrConfig` 嵌套对象
+- 对应数据库字段：`atr_filter_enabled`, `atr_period`, `atr_min_ratio`
+
+**3. 配置加载逻辑修复** (`src/application/config_manager.py:671-702`):
+- 修复 `_load_system_config` 方法使用 `row.get()` 的问题
+- aiosqlite.Row 不支持 `.get()` 方法，改用 `row["column"]` 访问
+- 添加 NULL 值处理逻辑
+
+**4. update_risk_config 方法扩展** (`src/application/config_manager.py:1062-1118`):
+- 扩展 UPDATE 语句，包含扩展字段
+- 更新历史记录逻辑，记录所有字段变更
+
+#### 单元测试
+
+**新增测试类** (`tests/unit/test_config_manager_db.py`):
+
+1. `TestCoreConfigAtrObject`:
+   - `test_core_config_atr_default_values` - 验证 ATR 默认值
+   - `test_core_config_atr_from_database` - 验证从数据库加载 ATR 配置
+   - `test_core_config_warmup_history_bars` - 验证 warmup 字段加载
+
+2. `TestRiskConfigUpdate::test_update_risk_config_with_extended_fields`:
+   - 验证 RiskConfig 扩展字段的更新功能
+
+#### 测试结果
+
+```
+======================== 40 passed, 7 warnings in 0.51s ========================
+```
+
+所有测试通过，包括：
+- 数据库初始化测试 (5 个)
+- 配置加载测试 (3 个)
+- RiskConfig 扩展字段测试 (3 个)
+- SystemConfig 扩展字段测试 (5 个)
+- CoreConfig ATR 对象测试 (3 个) ⭐ 新增
+- RiskConfig 更新测试 (2 个)
+- 策略管理测试 (3 个)
+- 观察者模式测试 (3 个)
+- YAML 向后兼容测试 (2 个)
+- 配置降级测试 (7 个)
+- 缓存刷新测试 (3 个)
+
+#### 相关文件
+
+- `src/domain/models.py` - RiskConfig 扩展字段
+- `src/application/config_manager.py` - CoreConfig ATR 配置 + 加载逻辑
+- `src/infrastructure/repositories/config_repositories.py` - Repository 层（已支持）
+- `src/infrastructure/db/config_tables.sql` - 数据库表结构（已支持）
+- `tests/unit/test_config_manager_db.py` - 单元测试
+
+---
+
 ### 2026-04-06 - 配置导入导出历史记录功能 ✅
 
 **会话 ID**: 20260406-002

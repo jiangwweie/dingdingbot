@@ -8,6 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import yaml
+import json
 
 from src.application.config_manager import ConfigManager, load_all_configs
 from src.domain.exceptions import FatalStartupError
@@ -410,3 +411,354 @@ class TestConfigImmutability:
         config2 = asyncio.run(manager.get_user_config())
         assert config2.risk.max_leverage == original_leverage
         assert config2.risk.max_leverage != 999
+
+
+# ============================================================
+# Import/Export History Tracking Tests
+# ============================================================
+
+class TestImportExportHistoryTracking:
+    """Tests for import/export history tracking in ConfigManager."""
+
+    @pytest.fixture
+    def temp_db_path(self):
+        """Create a temporary database file for testing."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        yield path
+        # Cleanup
+        if os.path.exists(path):
+            os.remove(path)
+        for suffix in ["-wal", "-shm"]:
+            wal_path = path + suffix
+            if os.path.exists(wal_path):
+                os.remove(wal_path)
+
+    @pytest.fixture
+    def sample_yaml_config(self):
+        """Sample valid configuration YAML for testing."""
+        return """
+risk:
+  max_loss_percent: 0.02
+  max_leverage: 20
+  max_total_exposure: 0.9
+  cooldown_minutes: 300
+
+system:
+  core_symbols:
+    - BTC/USDT:USDT
+    - ETH/USDT:USDT
+  ema_period: 50
+  mtf_ema_period: 50
+  mtf_mapping:
+    "15m": "1h"
+    "1h": "4h"
+  signal_cooldown_seconds: 7200
+
+strategies:
+  - name: Test Strategy
+    description: Test strategy for import/export
+    trigger:
+      type: pinbar
+      enabled: true
+      params:
+        min_wick_ratio: 0.6
+    filters: []
+    filter_logic: AND
+"""
+
+    @pytest.fixture
+    def yaml_config_path(self, sample_yaml_config) -> str:
+        """Create a temporary YAML config file."""
+        fd, path = tempfile.mkstemp(suffix=".yaml")
+        os.close(fd)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(sample_yaml_config)
+
+        yield path
+
+        # Cleanup
+        if os.path.exists(path):
+            os.remove(path)
+
+    @pytest.mark.asyncio
+    async def test_import_records_to_history(self, temp_db_path, yaml_config_path):
+        """Test that import_from_yaml records operation to config_history table."""
+        from src.application.config_manager import ConfigManager
+
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Perform import
+        await manager.import_from_yaml(
+            yaml_path=yaml_config_path,
+            changed_by="test_user"
+        )
+
+        # Query history table
+        async with manager._db.execute(
+            """
+            SELECT entity_type, entity_id, action, changed_by, change_summary
+            FROM config_history
+            WHERE action = 'IMPORT'
+            ORDER BY changed_at DESC
+            LIMIT 1
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None, "Import operation should be recorded in config_history"
+        assert row[0] == "config_bundle", "Entity type should be 'config_bundle'"
+        assert row[1] == "import_export", "Entity ID should be 'import_export'"
+        assert row[2] == "IMPORT", "Action should be 'IMPORT'"
+        assert row[3] == "test_user", "Changed by should match the operator"
+        assert "imported from" in row[4], "Summary should mention import source"
+
+        # Cleanup
+        await manager._db.close()
+
+    @pytest.mark.asyncio
+    async def test_import_history_new_values_contains_metadata(self, temp_db_path, yaml_config_path):
+        """Test that import history new_values contains source path and data keys."""
+        from src.application.config_manager import ConfigManager
+
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Perform import
+        await manager.import_from_yaml(
+            yaml_path=yaml_config_path,
+            changed_by="import_tester"
+        )
+
+        # Query history table for new_values
+        async with manager._db.execute(
+            """
+            SELECT new_values FROM config_history
+            WHERE action = 'IMPORT'
+            ORDER BY changed_at DESC
+            LIMIT 1
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None
+        new_values = json.loads(row[0])
+
+        assert "source_path" in new_values, "new_values should contain source_path"
+        assert yaml_config_path in new_values["source_path"], "source_path should match"
+        assert "data_keys" in new_values, "new_values should contain data_keys"
+        assert isinstance(new_values["data_keys"], list), "data_keys should be a list"
+        # Sample YAML has: risk, system, strategies
+        assert len(new_values["data_keys"]) >= 3, "Should have at least 3 top-level keys"
+
+        # Cleanup
+        await manager._db.close()
+
+    @pytest.mark.asyncio
+    async def test_import_history_default_operator(self, temp_db_path, yaml_config_path):
+        """Test that import uses default 'system' operator when not specified."""
+        from src.application.config_manager import ConfigManager
+
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        await manager.import_from_yaml(yaml_path=yaml_config_path)
+
+        # Query history table
+        async with manager._db.execute(
+            """
+            SELECT changed_by FROM config_history
+            WHERE action = 'IMPORT'
+            ORDER BY changed_at DESC
+            LIMIT 1
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None
+        assert row[0] == "system", "Default operator should be 'system'"
+
+        # Cleanup
+        await manager._db.close()
+
+    @pytest.mark.asyncio
+    async def test_export_records_to_history(self, temp_db_path):
+        """Test that export_to_yaml records operation to config_history table."""
+        from src.application.config_manager import ConfigManager
+
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        export_path = temp_db_path.replace(".db", "_export.yaml")
+
+        # Perform export
+        await manager.export_to_yaml(
+            yaml_path=export_path,
+            changed_by="export_user"
+        )
+
+        # Query history table
+        async with manager._db.execute(
+            """
+            SELECT entity_type, entity_id, action, changed_by, change_summary
+            FROM config_history
+            WHERE action = 'EXPORT'
+            ORDER BY changed_at DESC
+            LIMIT 1
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None, "Export operation should be recorded in config_history"
+        assert row[0] == "config_bundle", "Entity type should be 'config_bundle'"
+        assert row[1] == "import_export", "Entity ID should be 'import_export'"
+        assert row[2] == "EXPORT", "Action should be 'EXPORT'"
+        assert row[3] == "export_user", "Changed by should match the operator"
+        assert "exported to" in row[4], "Summary should mention export target"
+
+        # Cleanup
+        if os.path.exists(export_path):
+            os.remove(export_path)
+        await manager._db.close()
+
+    @pytest.mark.asyncio
+    async def test_export_history_new_values_contains_target_path(self, temp_db_path):
+        """Test that export history new_values contains target path."""
+        from src.application.config_manager import ConfigManager
+
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        export_path = temp_db_path.replace(".db", "_export_test.yaml")
+
+        # Perform export
+        await manager.export_to_yaml(
+            yaml_path=export_path,
+            changed_by="path_tester"
+        )
+
+        # Query history table for new_values
+        async with manager._db.execute(
+            """
+            SELECT new_values FROM config_history
+            WHERE action = 'EXPORT'
+            ORDER BY changed_at DESC
+            LIMIT 1
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None
+        new_values = json.loads(row[0])
+
+        assert "target_path" in new_values, "new_values should contain target_path"
+        assert export_path in new_values["target_path"], "target_path should match"
+
+        # Cleanup
+        if os.path.exists(export_path):
+            os.remove(export_path)
+        await manager._db.close()
+
+    @pytest.mark.asyncio
+    async def test_export_history_default_operator(self, temp_db_path):
+        """Test that export uses default 'system' operator when not specified."""
+        from src.application.config_manager import ConfigManager
+
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        export_path = temp_db_path.replace(".db", "_export_default.yaml")
+
+        await manager.export_to_yaml(yaml_path=export_path)
+
+        # Query history table
+        async with manager._db.execute(
+            """
+            SELECT changed_by FROM config_history
+            WHERE action = 'EXPORT'
+            ORDER BY changed_at DESC
+            LIMIT 1
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None
+        assert row[0] == "system", "Default operator should be 'system'"
+
+        # Cleanup
+        if os.path.exists(export_path):
+            os.remove(export_path)
+        await manager._db.close()
+
+    @pytest.mark.asyncio
+    async def test_multiple_import_export_operations(self, temp_db_path, yaml_config_path):
+        """Test that multiple import/export operations are all recorded."""
+        from src.application.config_manager import ConfigManager
+
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Perform multiple operations
+        await manager.import_from_yaml(yaml_path=yaml_config_path, changed_by="user1")
+
+        export_path1 = temp_db_path.replace(".db", "_export1.yaml")
+        await manager.export_to_yaml(yaml_path=export_path1, changed_by="user2")
+
+        await manager.import_from_yaml(yaml_path=yaml_config_path, changed_by="user3")
+
+        export_path2 = temp_db_path.replace(".db", "_export2.yaml")
+        await manager.export_to_yaml(yaml_path=export_path2, changed_by="user4")
+
+        # Query all history records
+        async with manager._db.execute(
+            """
+            SELECT action, changed_by FROM config_history
+            WHERE entity_type = 'config_bundle'
+            ORDER BY changed_at ASC
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+            # Convert sqlite3.Row objects to tuples
+            rows = [(row[0], row[1]) for row in rows]
+
+        assert len(rows) == 4, "Should have 4 history records (2 imports + 2 exports)"
+        assert rows[0] == ("IMPORT", "user1"), f"First record should be (IMPORT, user1), got {rows[0]}"
+        assert rows[1] == ("EXPORT", "user2"), f"Second record should be (EXPORT, user2), got {rows[1]}"
+        assert rows[2] == ("IMPORT", "user3"), f"Third record should be (IMPORT, user3), got {rows[2]}"
+        assert rows[3] == ("EXPORT", "user4"), f"Fourth record should be (EXPORT, user4), got {rows[3]}"
+
+        # Cleanup
+        for path in [export_path1, export_path2]:
+            if os.path.exists(path):
+                os.remove(path)
+        await manager._db.close()
+
+    @pytest.mark.asyncio
+    async def test_import_nonexistent_file_raises_error_no_history(self, temp_db_path):
+        """Test that importing nonexistent file raises error without recording history."""
+        from src.application.config_manager import ConfigManager
+
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        with pytest.raises(FileNotFoundError):
+            await manager.import_from_yaml(
+                yaml_path="/nonexistent/path/config.yaml",
+                changed_by="error_tester"
+            )
+
+        # Verify no history was recorded
+        async with manager._db.execute(
+            """
+            SELECT COUNT(*) FROM config_history
+            WHERE action = 'IMPORT' AND changed_by = 'error_tester'
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == 0, "Should not record history for failed import"
+
+        # Cleanup
+        await manager._db.close()
