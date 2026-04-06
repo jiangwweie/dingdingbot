@@ -158,54 +158,35 @@ tests/unit/test_order_state_machine.py (62 测试) ✅
 - `src/domain/order_manager.py` - 重构状态管理逻辑
 - `tests/unit/test_order_manager.py` - 更新为 async 测试
 
+### Git 提交
+
+- `5b901ba` docs(ORD-1-T4): OrderManager 集成到 OrderLifecycleService - 文档和测试更新
+
 ---
 
-1. **create_order_chain()** (line 137): 创建 ENTRY 订单，设置 `status=OrderStatus.OPEN`
-   - 问题：应该使用 OrderLifecycleService 创建，初始状态应为 CREATED
-   - 迁移方案：删除此方法，改用 OrderLifecycleService.create_order()
+### 附录：重构历史
 
-2. **_generate_tp_sl_orders()** (lines 340, 359): 生成 TP/SL 订单，设置 `status=OrderStatus.OPEN`
-   - 问题：这是订单生成逻辑，但状态设置应该通过状态机
-   - 迁移方案：保留订单生成逻辑，状态设置改用 OrderLifecycleService
+**OrderManager 中直接修改订单状态的代码位置（已重构）**:
 
-3. **_apply_oco_logic_for_tp()** (lines 467-470): 直接设置 `order.status = OrderStatus.CANCELED`
-   - 问题：直接修改状态，绕过状态机
-   - 迁移方案：改用 OrderLifecycleService.cancel_order()
+1. ~~**create_order_chain()** (line 137): 创建 ENTRY 订单，设置 `status=OrderStatus.OPEN`~~
+   - ~~问题：应该使用 OrderLifecycleService 创建，初始状态应为 CREATED~~
+   - ~~迁移方案：删除此方法，改用 OrderLifecycleService.create_order()~~
 
-4. **_cancel_all_tp_orders()** (lines 501-504): 直接设置 `order.status = OrderStatus.CANCELED`
-   - 问题：直接修改状态，绕过状态机
-   - 迁移方案：改用 OrderLifecycleService.cancel_order()
+2. ~~**_generate_tp_sl_orders()** (lines 340, 359): 生成 TP/SL 订单，设置 `status=OrderStatus.OPEN`~~
+   - ~~问题：这是订单生成逻辑，但状态设置应该通过状态机~~
+   - ~~迁移方案：保留订单生成逻辑，状态设置改用 OrderLifecycleService~~
 
-5. **apply_oco_logic()** (lines 657-659): 直接设置 `order.status = OrderStatus.CANCELED`
-   - 问题：直接修改状态，绕过状态机
-   - 迁移方案：改用 OrderLifecycleService.cancel_order()
+3. ~~**_apply_oco_logic_for_tp()** (lines 467-470): 直接设置 `order.status = OrderStatus.CANCELED`~~
+   - ~~问题：直接修改状态，绕过状态机~~
+   - ~~迁移方案：改用 OrderLifecycleService.cancel_order()~~
 
-### 职责重新划分
+4. ~~**_cancel_all_tp_orders()** (lines 501-504): 直接设置 `order.status = OrderStatus.CANCELED`~~
+   - ~~问题：直接修改状态，绕过状态机~~
+   - ~~迁移方案：改用 OrderLifecycleService.cancel_order()~~
 
-| 职责 | OrderManager (保留) | OrderLifecycleService (迁移) |
-|------|---------------------|------------------------------|
-| 订单创建 | create_order_chain() 仅生成订单对象 | create_order() 创建并管理状态 |
-| 订单链编排 | ✅ 保留 | - |
-| TP/SL 订单生成 | ✅ 保留 | - |
-| OCO 逻辑执行 | ✅ 保留 (调用 Service 取消订单) | ✅ 提供 cancel_order() 方法 |
-| 状态转换 | ❌ 移除 | ✅ 独占 (通过 OrderStateMachine) |
-| 订单持久化 | ✅ 保留 (调用 Service) | ✅ 统一管理 |
-
-### 实施方案
-
-**阶段 1**: OrderManager 注入 OrderLifecycleService 依赖
-
-**阶段 2**: 重构 create_order_chain() 方法
-- 删除直接创建订单的逻辑
-- 调用 OrderLifecycleService.create_order()
-
-**阶段 3**: 重构 OCO 逻辑
-- _apply_oco_logic_for_tp() 调用 service.cancel_order()
-- _cancel_all_tp_orders() 调用 service.cancel_order()
-- apply_oco_logic() 调用 service.cancel_order()
-
-**阶段 4**: 更新测试
-- 确保现有测试不受影响
+5. ~~**apply_oco_logic()** (lines 657-659): 直接设置 `order.status = OrderStatus.CANCELED`~~
+   - ~~问题：直接修改状态，绕过状态机~~
+   - ~~迁移方案：改用 OrderLifecycleService.cancel_order()~~
 
 ---
 
