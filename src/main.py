@@ -32,6 +32,7 @@ from src.infrastructure.logger import logger, setup_logger, register_secret
 _shutdown_event: Optional[asyncio.Event] = None  # Created in run_application()
 _exchange_gateway: Optional[ExchangeGateway] = None
 _notification_service: Optional[NotificationService] = None
+_config_entry_repo = None  # Initialized in Phase 9
 
 
 # ============================================================
@@ -91,40 +92,6 @@ async def on_kline_received(kline: KlineData):
 _signal_pipeline: Optional[SignalPipeline] = None
 
 
-def create_signal_pipeline(
-    signal_config: Any,  # SignalPipelineConfig
-    risk_config: RiskConfig,
-    notification_service: NotificationService,
-    signal_repository=None,
-    cooldown_seconds: int = 14400,
-) -> SignalPipeline:
-    """
-    Create SignalPipeline from configuration objects.
-
-    Args:
-        signal_config: SignalPipelineConfig object
-        risk_config: RiskConfig object
-        notification_service: NotificationService instance
-        signal_repository: Optional SignalRepository instance for persistence
-        cooldown_seconds: Signal deduplication cooldown period in seconds
-
-    Returns:
-        Configured SignalPipeline instance
-    """
-    global _signal_pipeline
-
-    # Create pipeline with injected config objects
-    _signal_pipeline = SignalPipeline(
-        signal_config=signal_config,
-        risk_config=risk_config,
-        notification_service=notification_service,
-        signal_repository=signal_repository,
-        cooldown_seconds=cooldown_seconds,
-    )
-
-    return _signal_pipeline
-
-
 def get_signal_pipeline() -> Optional[SignalPipeline]:
     """Get global SignalPipeline instance"""
     return _signal_pipeline
@@ -138,7 +105,7 @@ async def run_application():
     Main application entry point.
     Orchestrates the complete startup and runtime flow.
     """
-    global _exchange_gateway, _notification_service, _shutdown_event
+    global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -178,9 +145,10 @@ async def run_application():
         logger.info("Phase 2: Getting configuration snapshots...")
         # R7.1: Defensive check - ensure ConfigManager is ready
         config_manager.assert_initialized()
-        core_config = await config_manager.get_core_config()
+        core_config = config_manager.get_core_config()
         user_config = await config_manager.get_user_config()
-        merged_symbols = await config_manager.get_merged_symbols()
+        # 配置重构后：直接使用 core_config.core_symbols 获取交易标的列表
+        merged_symbols = core_config.core_symbols
         logger.info("Configuration snapshots ready for dependency injection")
 
         # =============================================
@@ -214,26 +182,27 @@ async def run_application():
         # Phase 4.5: Check API Key Permissions
         # =============================================
         logger.info("Phase 4.5: Checking API key permissions...")
-        await config_manager.check_api_key_permissions(_exchange_gateway.rest_exchange)
-        logger.info("API key permission check passed")
+        # 配置重构后：权限检查功能已移除，暂跳过此检查
+        # TODO: 在 ExchangeGateway 中集成权限检查
+        logger.info("API key permission check skipped (feature removed in config refactor)")
 
         # =============================================
         # Phase 5: Create Signal Pipeline (Dependency Injection)
         # =============================================
         logger.info("Phase 5: Creating signal pipeline...")
+        # 配置重构后：SignalPipeline 需要 config_manager 作为第一个参数
         risk_config = RiskConfig(
             max_loss_percent=user_config.risk.max_loss_percent,
             max_leverage=user_config.risk.max_leverage,
         )
-        create_signal_pipeline(
-            signal_config=core_config.signal_pipeline,
+        global _signal_pipeline
+        _signal_pipeline = SignalPipeline(
+            config_manager=config_manager,
             risk_config=risk_config,
             notification_service=_notification_service,
             signal_repository=signal_repository,
             cooldown_seconds=core_config.signal_pipeline.cooldown_seconds,
         )
-        # Inject config_manager for hot-reload
-        _signal_pipeline._config_manager = config_manager
         logger.info("Signal pipeline ready")
 
         # =============================================

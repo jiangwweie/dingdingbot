@@ -5740,9 +5740,9 @@ async def stop_optimization(job_id: str):
 # Reference: docs/products/config-profile-management-prd.md
 # ============================================================
 
-# Profile Repository 和 Service 初始化
-_profile_repository: Optional[ConfigProfileRepository] = None
-_profile_service: Optional[ConfigProfileService] = None
+# Profile Repository 和 Service 初始化（使用字符串类型注解避免导入错误）
+_profile_repository: Optional["ConfigProfileRepository"] = None
+_profile_service: Optional["ConfigProfileService"] = None
 
 
 def _get_profile_repository() -> "ConfigProfileRepository":
