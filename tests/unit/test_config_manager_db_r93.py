@@ -25,7 +25,7 @@ import pytest
 from decimal import Decimal
 from unittest.mock import patch, AsyncMock
 
-from src.application.config_manager_db import ConfigManager
+from src.application.config_manager import ConfigManager
 
 
 class TestR93ConcurrentInitialization:

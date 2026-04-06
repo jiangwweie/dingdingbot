@@ -107,11 +107,6 @@
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-memory"],
       "description": "Persistent memory storage for Claude - enables knowledge graph"
-    },
-    "pup": {
-      "command": "npx",
-      "args": ["-y", "puppeteer-mcp-server"],
-      "description": "Browser automation (Puppeteer) - E2E testing, screenshots, form filling"
     }
   }
 }

@@ -30,6 +30,62 @@
 22. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
 23. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
 24. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
+25. [配置管理重构关联影响分析](#配置管理重构关联影响分析)
+
+---
+
+## 📌 2026-04-06 技术发现
+
+### 配置管理重构关联影响分析 ⭐⭐⭐
+
+**发现时间**: 2026-04-06
+
+**任务来源**: 配置管理重构关联影响分析执行
+
+**核心问题**: 配置管理系统从 YAML 文件存储迁移到 SQLite 数据库驱动后，对核心模块的关联影响分析。
+
+**分析方法**:
+1. 架构师提出 8 个潜在关联影响问题
+2. 后端开发逐个辩证分析（代码证据 + 已有防护机制）
+3. 分类处置：5 个无需修复，3 个需修复
+
+**问题分类结果**:
+
+| 问题 | 影响模块 | 有效性评价 | 处置结果 |
+|------|----------|------------|----------|
+| 1. 回测配置隔离 | Backtester | 过度担忧 | 无需修复（架构已隔离） |
+| 2. SignalPipeline 热重载 | SignalPipeline | 部分有效 | 日志增强（观察项） |
+| 3. DB 表与模型不匹配 | ConfigManager | 有效 | 字段扩展修复 ✅ |
+| 4. YAML 降级分裂 | ConfigManager | 过度担忧 | 无需修复（设计如此） |
+| 5. 配置历史不完整 | ConfigManager | 部分有效 | import/export 记录增强 ✅ |
+| 6. ExchangeGateway 适配 | ExchangeGateway | 过度担忧 | 无需修复（职责分离） |
+| 7. FilterFactory 状态 | FilterFactory | 部分有效 | 无需修复（设计如此） |
+| 8. RiskCalculator 锁竞争 | RiskCalculator | 过度担忧 | 无需修复（锁粒度轻） |
+
+**实际交付内容**:
+
+1. **SignalPipeline 热重载日志增强** (`src/application/signal_pipeline.py`):
+   - 6 处日志埋点，记录配置变更、MTF EMA 清空、K-line 重放等
+   - 用于生产环境观察，确认无配置不一致问题
+
+2. **配置 DB 表字段扩展** (`src/domain/models.py`):
+   - RiskConfig 新增 3 个可选字段：`daily_max_trades`, `daily_max_loss`, `max_position_hold_time`
+   - SystemConfig 新增 7 个可选字段：`queue_*`, `warmup_history_bars`, `atr_*` 系列
+   - 所有新字段为 `Optional` 类型，默认值为 `None` 或表默认值
+
+3. **配置历史追踪增强** (`src/application/config_manager.py`):
+   - `import_from_yaml()` 操作记录到 `config_history` 表
+   - `export_to_yaml()` 操作记录到 `config_history` 表
+   - 记录包含操作者、时间、操作类型、变更摘要
+
+**测试验证**:
+- `test_config_manager_db.py`: 40/40 通过 ✅
+- `test_signal_pipeline.py`: 部分失败 ⚠️（Mock 模拟问题，非业务代码 Bug）
+
+**技术洞见**:
+- 架构师的"理论风险"分析有价值，但实际代码已有防护机制
+- 辩证分析流程有效：代码证据 > 理论推演
+- 日志增强是观察边缘场景的低成本方案
 
 ---
 

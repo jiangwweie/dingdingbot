@@ -799,15 +799,32 @@ class TestRiskConfigHotReload:
     @pytest.fixture
     def pipeline_with_initial_config(self):
         """创建带有初始风控配置的 pipeline"""
-        # Mock config manager
+        # Mock config manager with sync support (SignalPipeline constructor calls sync methods)
         mock_config_manager = MagicMock()
-        mock_config_manager.user_config = MagicMock()
-        mock_config_manager.user_config.active_strategies = []
-        mock_config_manager.user_config.mtf_ema_period = 60
-        mock_config_manager.core_config = MagicMock()
-        mock_config_manager.core_config.signal_pipeline.queue.batch_size = 10
-        mock_config_manager.core_config.signal_pipeline.queue.flush_interval = 5.0
-        mock_config_manager.core_config.signal_pipeline.queue.max_queue_size = 1000
+        mock_user_config = MagicMock()
+        mock_user_config.active_strategies = []
+        mock_user_config.mtf_ema_period = 60
+        initial_risk = RiskConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=10,
+        )
+        mock_user_config.risk = initial_risk
+
+        # Store reference to user_config so test can modify it
+        mock_config_manager._mock_user_config = mock_user_config
+
+        # For on_config_updated async call - returns the current mock_user_config
+        async def async_get_user_config():
+            return mock_config_manager._mock_user_config
+        mock_config_manager.get_user_config = async_get_user_config
+        mock_config_manager.get_user_config_sync = MagicMock(return_value=mock_user_config)
+
+        mock_core_config = MagicMock()
+        mock_core_config.signal_pipeline.queue.batch_size = 10
+        mock_core_config.signal_pipeline.queue.flush_interval = 5.0
+        mock_core_config.signal_pipeline.queue.max_queue_size = 1000
+        mock_config_manager.get_core_config = MagicMock(return_value=mock_core_config)
+        mock_config_manager.get_core_config_sync = MagicMock(return_value=mock_core_config)
         mock_config_manager.add_observer = MagicMock()
 
         # 初始风控配置
@@ -847,8 +864,8 @@ class TestRiskConfigHotReload:
             max_leverage=20,  # 增加到 20x
         )
 
-        # 更新 mock 的 user_config
-        pipeline._config_manager.user_config.risk = new_risk_config
+        # 更新 mock 的 user_config (use _mock_user_config reference)
+        pipeline._config_manager._mock_user_config.risk = new_risk_config
 
         # 触发热重载
         await pipeline.on_config_updated()
@@ -865,8 +882,8 @@ class TestRiskConfigHotReload:
         # 验证初始配置
         assert pipeline._mtf_ema_period == 60
 
-        # 模拟配置更新
-        pipeline._config_manager.user_config.mtf_ema_period = 100
+        # 模拟配置更新 (use _mock_user_config reference)
+        pipeline._config_manager._mock_user_config.mtf_ema_period = 100
 
         # 触发热重载
         await pipeline.on_config_updated()
@@ -922,12 +939,12 @@ class TestRiskConfigHotReload:
         assert pipeline._risk_config.max_loss_percent == Decimal("0.01")
         assert pipeline._risk_config.max_leverage == 10
 
-        # 模拟配置更新：2% 止损，20x 杠杆
+        # 模拟配置更新：2% 止损，20x 杠杆 (use _mock_user_config reference)
         new_risk_config = RiskConfig(
             max_loss_percent=Decimal("0.02"),
             max_leverage=20,
         )
-        pipeline._config_manager.user_config.risk = new_risk_config
+        pipeline._config_manager._mock_user_config.risk = new_risk_config
 
         # 触发热重载
         await pipeline.on_config_updated()
@@ -939,8 +956,8 @@ class TestRiskConfigHotReload:
         # 验证：risk_calculator 属性返回的 calculator 使用新配置
         # (注意：_risk_calculator 是 property，每次访问都会创建新的 RiskCalculator)
         calculator = pipeline._risk_calculator
-        assert calculator.config.max_loss_percent == Decimal("0.02")
-        assert calculator.config.max_leverage == 20
+        assert calculator._config.max_loss_percent == Decimal("0.02")
+        assert calculator._config.max_leverage == 20
 
     @pytest.mark.asyncio
     async def test_hot_reload_logs_config_changes(self, pipeline_with_initial_config, caplog):
@@ -950,13 +967,13 @@ class TestRiskConfigHotReload:
 
         # 设置日志级别为 INFO
         with caplog.at_level(logging.INFO):
-            # 模拟配置更新
+            # 模拟配置更新 (use _mock_user_config reference)
             new_risk_config = RiskConfig(
                 max_loss_percent=Decimal("0.02"),
                 max_leverage=20,
             )
-            pipeline._config_manager.user_config.risk = new_risk_config
-            pipeline._config_manager.user_config.mtf_ema_period = 100
+            pipeline._config_manager._mock_user_config.risk = new_risk_config
+            pipeline._config_manager._mock_user_config.mtf_ema_period = 100
 
             # 触发热重载
             await pipeline.on_config_updated()
