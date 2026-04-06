@@ -121,8 +121,10 @@ order_repository.py (5 次修改) - 集中重构
 | **ORD-1-T3** | TypeScript 类型定义更新 | 前端 order.ts 类型定义 + OrderStatusBadge 组件 | 1h | ✅ 已完成 |
 | **ORD-1-T4** | OrderManager 集成 | OrderManager 使用 OrderLifecycleService | 2h | ✅ 已完成 |
 | **ORD-1-T5** | ExchangeGateway 集成 | WebSocket 订单推送集成到 OrderLifecycleService | 2h | ✅ 已完成 |
-| **ORD-1-T6** | 端到端状态流转测试 | 完整订单链路测试 | 3h | ☐ 待启动 |
-| **ORD-1-T7** | 代码审查 | 架构一致性和代码质量审查 | 1.5h | ☐ 待启动 |
+| **ORD-1-T6** | 端到端状态流转测试 | 完整订单链路测试 | 3h | ✅ 已完成 |
+| **ORD-1-T7** | 代码审查 | 架构一致性和代码质量审查 | 1.5h | ✅ 已完成 |
+| **ORD-1-T8** | 订单列表页适配 | 前端订单列表页适配 9 状态机 | 2h | ✅ 已完成 |
+| **ORD-1-T9** | 订单详情抽屉适配 | 前端订单详情抽屉适配 9 状态机 | 2h | ✅ 已完成 |
 | **ORD-2** | 对账机制实现 | 自动对账 (启动/WebSocket/轮询) + 手动对账 API+UI | 20h | ☐ 待启动 |
 | **ORD-3** | 外部订单手动关联 | 用户主动将外部订单关联到系统信号 | 10h | ☐ 待启动 |
 | **ORD-4** | K 线图完整展示 | 在 K 线图上展示 ENTRY/TP/SL 所有成交订单 | 4h | ☐ 待启动 |
