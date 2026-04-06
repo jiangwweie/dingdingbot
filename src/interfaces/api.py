@@ -1780,7 +1780,6 @@ async def analyze_backtest_attribution(
     """
     from src.application.attribution_analyzer import AttributionAnalyzer
     from src.infrastructure.backtest_repository import BacktestReportRepository
-    from src.domain.backtest_repository import BacktestReport as BacktestReportEntity
 
     try:
         # 1. 从数据库加载回测报告
@@ -1796,9 +1795,14 @@ async def analyze_backtest_attribution(
             raise HTTPException(status_code=404, detail=f"Backtest report {report_id} not found")
 
         # 2. 将报告实体转换为字典格式
-        # 注意：report_entity 是 ORM 对象，需要转换为 dict
+        # 注意：report_entity 是 ORM 对象，attempts 存储为 JSON 字符串
+        import json
+        attempts = report_entity.attempts
+        if isinstance(attempts, str):
+            attempts = json.loads(attempts)
+
         backtest_report_dict = {
-            "attempts": report_entity.attempts or [],  # attempts 存储为 JSON 字符串
+            "attempts": attempts or [],
         }
 
         # 3. 执行归因分析

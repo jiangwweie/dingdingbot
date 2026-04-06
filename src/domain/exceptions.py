@@ -88,6 +88,28 @@ class OrderAlreadyFilledError(FatalStartupError):
 
 
 # ============================================================
+# Order State Machine Errors (ORD-1)
+# ============================================================
+class InvalidOrderStateTransition(Exception):
+    """
+    Invalid order state transition.
+    Raised when attempting to transition an order from one status to an invalid status.
+    """
+    def __init__(self, order_id: str, from_status: str, to_status: str,
+                 valid_transitions: set[str]):
+        self.order_id = order_id
+        self.from_status = from_status
+        self.to_status = to_status
+        self.valid_transitions = valid_transitions
+        valid_transitions_str = ", ".join(sorted(valid_transitions)) if valid_transitions else "none"
+        message = (
+            f"Cannot transition order '{order_id}' from {from_status} to {to_status}. "
+            f"Valid transitions are: {valid_transitions_str}"
+        )
+        super().__init__(message)
+
+
+# ============================================================
 # Order Validation Errors (P0-004)
 # ============================================================
 class InvalidOrderAmountError(InvalidOrderError):

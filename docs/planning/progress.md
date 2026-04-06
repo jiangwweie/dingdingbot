@@ -4,6 +4,64 @@
 
 ---
 
+### 2026-04-06 - 配置重构后启动问题修复 ✅
+
+**任务来源**: 配置重构后服务无法正常启动，配置接口返回 503/500 错误
+
+**问题根因**:
+1. `ConfigManager` 方法签名变更（同步/异步混用）
+2. 前端 API 路径 `/api/v1/config/*` 与后端实际路径不匹配
+3. 过期间接工厂函数导致混淆
+
+**完成工作**:
+
+1. ✅ **后端启动修复** (`src/main.py`):
+   - `get_user_config()` 添加 `await` 关键字
+   - `get_merged_symbols()` 改用 `core_config.core_symbols`
+   - `SignalPipeline` 参数更新为 `config_manager`
+   - `_config_entry_repo` 添加 global 声明
+   - 删除过期 `create_signal_pipeline()` 工厂函数
+   - `check_api_key_permissions()` 暂时跳过（用户决策）
+
+2. ✅ **后端 API 修复** (`src/interfaces/api.py`):
+   - `get_core_config()` 移除 `await`（同步方法）- 3 处
+   - `ConfigProfileRepository` 类型注解改为字符串格式
+
+3. ✅ **前端 API 路径修复** (`web-front/src/api/config.ts`):
+   - baseURL 从 `/api/v1/config` 改为 `/api`
+   - 映射接口到后端实际路径
+
+4. ✅ **前端组件修复** (`web-front/src/pages/config/BackupTab.tsx`):
+   - 导入改为 `FormData` multipart/form-data 格式
+   - 导出改为 GET 方法
+
+5. ✅ **策略列表加载修复** (`web-front/src/pages/config/StrategiesTab.tsx`):
+   - 提取 `response.data.strategies` 字段
+   - 添加 `symbols`/`timeframes` 空值检查
+
+**测试结果**:
+- ✅ 服务启动成功，无 ERROR/503 日志
+- ✅ `/api/config`: 200 OK
+- ✅ `/api/strategies`: 200 OK
+- ✅ `/api/strategy/params`: 200 OK
+- ✅ `/api/config/profiles`: 200 OK
+- ✅ `test_config_manager_db.py`: 40/40 通过
+
+**遗留说明**:
+- API Key 权限检查跳过（F-002），由开发者自行提供只读 API
+- antd 废弃警告（`destroyOnClose`, `tip`）不影响功能
+
+**Git 提交**:
+- e90bde3 fix(frontend): 修复策略列表 symbols/timeframes 未定义错误
+- ac6f223 fix(frontend): 修复策略列表加载错误
+- 0617a51 fix(frontend): 修正配置 API 路径 - 从/api/v1/config 改为/api
+- e088f2e fix(api): 修复配置接口 500 错误 - get_core_config() 同步调用
+- cfc4516 fix: 配置重构后启动问题修复 - 中危和低危问题清理
+
+**架构审查结论**: ⚠️ **有条件通过**（需开发者自行承担 API 权限风险）
+
+---
+
 ### 2026-04-06 - 回测配置 KV 化开发完成 ✅
 
 **主任务**: 回测配置 KV 化 - 滑点/资金费率配置

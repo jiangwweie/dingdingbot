@@ -33,19 +33,40 @@ class OrderRepository:
     2. 订单状态追踪 - 记录订单从创建到终结的全生命周期
     3. 订单链管理 - 通过 parent_order_id 和 oco_group_id 追踪关联订单
     4. 查询服务 - 支持按信号、币种、状态、角色等多维度查询
+
+    依赖注入:
+    - ExchangeGateway: 交易所网关（可选）
+    - OrderAuditLogger: 审计日志器（可选）
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        exchange_gateway: Optional[Any] = None,
+        audit_logger: Optional[Any] = None,
+    ):
         """
         Initialize OrderRepository.
 
         Args:
             db_path: Path to SQLite database file
+            exchange_gateway: ExchangeGateway instance for canceling orders (dependency injection)
+            audit_logger: OrderAuditLogger instance for audit logging (dependency injection)
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
         self._lock: Optional[asyncio.Lock] = None  # 延迟创建，避免事件循环冲突
+        self._exchange_gateway = exchange_gateway  # 依赖注入：交易所网关
+        self._audit_logger = audit_logger  # 依赖注入：审计日志器
         logger.info(f"订单仓库初始化完成：{db_path}")
+
+    def set_exchange_gateway(self, gateway: Any) -> None:
+        """设置交易所网关（依赖注入）"""
+        self._exchange_gateway = gateway
+
+    def set_audit_logger(self, logger_instance: Any) -> None:
+        """设置审计日志器（依赖注入）"""
+        self._audit_logger = logger_instance
 
     def _ensure_lock(self) -> asyncio.Lock:
         """Ensure lock is created for current event loop.
@@ -428,6 +449,18 @@ class OrderRepository:
 
             return [self._row_to_order(row) for row in rows]
 
+    async def get_by_signal_id(self, signal_id: str) -> List[Order]:
+        """
+        Get all orders for a specific signal - alias for get_orders_by_signal.
+
+        Args:
+            signal_id: Signal ID to query
+
+        Returns:
+            List of Order objects
+        """
+        return await self.get_orders_by_signal(signal_id)
+
     async def get_orders(
         self,
         symbol: Optional[str] = None,
@@ -637,6 +670,26 @@ class OrderRepository:
                 cursor = await self._db.execute(
                     "SELECT * FROM orders WHERE status IN ('OPEN', 'PARTIALLY_FILLED') ORDER BY created_at DESC"
                 )
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+            return [self._row_to_order(row) for row in rows]
+
+    async def get_by_status(self, status: str) -> List[Order]:
+        """
+        Get all orders by status.
+
+        Args:
+            status: Order status to filter
+
+        Returns:
+            List of Order objects
+        """
+        async with self._ensure_lock():
+            cursor = await self._db.execute(
+                "SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC",
+                (status,)
+            )
             rows = await cursor.fetchall()
             await cursor.close()
 
@@ -1064,6 +1117,50 @@ class OrderRepository:
             "updated_at": order.updated_at,
             "filled_at": order.filled_at,
         }
+
+    async def _get_all_related_order_ids(self, order_ids: List[str]) -> Set[str]:
+        """
+        递归获取所有关联订单 ID（包括子订单和父订单）
+
+        Args:
+            order_ids: 初始订单 ID 列表
+
+        Returns:
+            所有关联订单 ID 集合
+        """
+        all_ids = set(order_ids)
+        queue = list(order_ids)
+
+        while queue:
+            current_id = queue.pop(0)
+
+            # 获取子订单
+            cursor = await self._db.execute(
+                "SELECT id FROM orders WHERE parent_order_id = ?",
+                (current_id,)
+            )
+            child_rows = await cursor.fetchall()
+            await cursor.close()
+
+            for child_row in child_rows:
+                child_id = child_row[0]
+                if child_id not in all_ids:
+                    all_ids.add(child_id)
+                    queue.append(child_id)
+
+            # 获取父订单
+            cursor = await self._db.execute(
+                "SELECT parent_order_id FROM orders WHERE id = ?",
+                (current_id,)
+            )
+            parent_row = await cursor.fetchone()
+            await cursor.close()
+
+            if parent_row and parent_row[0] and parent_row[0] not in all_ids:
+                all_ids.add(parent_row[0])
+                queue.append(parent_row[0])
+
+        return all_ids
 
     async def delete_orders_batch(
         self,
