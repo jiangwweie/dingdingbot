@@ -4,6 +4,83 @@
 
 ---
 
+### 2026-04-06 - ORD-1 Task B: OrderLifecycleService 测试用例补充完成 ✅
+
+**任务 ID**: ORD-1-Task-B-Test-Supplement
+**负责人**: QA Tester
+**总工时**: 1h
+**优先级**: P0
+
+**任务目标**: 补充 10+ 个测试用例，提升 OrderLifecycleService 测试覆盖率从 81% 到 95%+
+
+**完成工作**:
+
+1. ✅ **Pre-Flight 检查**
+   - 使用 Read 工具读取 `.claude/team/qa-tester/SKILL.md`
+   - 使用 Read 工具读取现有测试文件 `tests/unit/test_order_lifecycle_service.py`
+   - 分析覆盖率报告，识别未覆盖代码行
+
+2. ✅ **新增测试用例 (20 个)**
+   
+   **异常处理测试 (8 个)**
+   - `test_create_order_empty_list_raises_error` - OrderManager 返回空列表抛 ValueError
+   - `test_confirm_nonexistent_order_raises_value_error` - 确认不存在订单抛 ValueError
+   - `test_fill_nonexistent_order_raises_value_error` - 成交不存在订单抛 ValueError
+   - `test_update_from_exchange_nonexistent_order_raises_error` - 交易所更新不存在订单抛 ValueError
+   - `test_partial_fill_nonexistent_order_raises_error` - 部分成交不存在订单抛 ValueError
+   - `test_cancel_nonexistent_order_raises_error` - 取消不存在订单抛 ValueError
+   - `test_reject_nonexistent_order_raises_error` - 拒绝不存在订单抛 ValueError
+   - `test_expire_nonexistent_order_raises_error` - 过期不存在订单抛 ValueError
+   
+   **update_order_from_exchange 分支覆盖测试 (6 个)**
+   - `test_update_from_exchange_unknown_status_logs_warning` - 未知交易所状态记录 warning
+   - `test_update_from_exchange_filled_partial_qty` - FILLED 状态但数量不足转部分成交
+   - `test_update_from_exchange_filled_full_qty` - FILLED 状态且数量相等转完全成交
+   - `test_update_from_exchange_canceled_status` - 交易所 CANCELED 状态
+   - `test_update_from_exchange_rejected_status` - 交易所 REJECTED 状态
+   - `test_update_from_exchange_partially_filled_explicit_status` - OPEN 状态 + filled_qty 触发部分成交
+   
+   **拒绝/过期订单测试 (2 个)**
+   - `test_reject_order` - 拒绝订单
+   - `test_expire_order` - 过期订单
+   
+   **查询方法测试 (2 个)**
+   - `test_get_orders_by_signal_id` - 根据信号 ID 获取订单列表
+   - `test_get_state_machine_nonexistent_returns_none` - 获取不存在的订单状态机返回 None
+   
+   **异常处理测试 (2 个)**
+   - `test_callback_exception_is_caught_and_logged` - 回调异常被捕获并记录
+   - `test_audit_log_exception_is_caught_and_logged` - 审计日志异常被捕获并记录
+
+3. ✅ **测试验收**
+   ```
+   ============================== 40 passed in 0.54s ==============================
+   src/application/order_lifecycle_service.py     193      3    98%
+   ```
+
+**修改文件**:
+- `tests/unit/test_order_lifecycle_service.py` - 新增 20 个测试用例（原 20 个 → 现 40 个）
+
+**测试结果**:
+- 新增测试：20/20 通过 (100%)
+- 总测试数：40/40 通过 (100%)
+- 覆盖率：81% → 98% (提升 17 个百分点)
+
+**验收标准**:
+- [x] 使用 Read 工具读取 `.claude/team/qa-tester/SKILL.md`
+- [x] 使用 Edit 工具修改 `tests/unit/test_order_lifecycle_service.py`
+- [x] 使用 Bash 运行 `pytest tests/unit/test_order_lifecycle_service.py -v` 测试通过
+- [x] 10+ 个新增测试全部通过 (实际 20 个)
+- [x] 使用 Edit 工具更新 `docs/planning/progress.md`
+- [x] 覆盖率 ≥ 95% (实际 98%)
+
+**剩余未覆盖代码行 (3 行)**:
+- 行 506: `PARTIALLY_FILLED` 状态分支（交易所状态映射中无此键，实际不会被触发）
+- 行 664: `get_orders_by_symbol` 方法（需要 OrderRepository 添加 `get_by_symbol` 方法）
+- 行 685: `get_state_machine` 返回 None（测试已覆盖）
+
+---
+
 ### 2026-04-06 - ORD-1 测试用例补充完成 ✅
 
 **任务 ID**: ORD-1-Test-Supplement-Complete
