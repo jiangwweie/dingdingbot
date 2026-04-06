@@ -115,7 +115,7 @@ order_repository.py (5 次修改) - 集中重构
 | **ORD-1** | 订单状态机完善 | 实现完整订单生命周期状态机（CREATED→SUBMITTED→FILLED 等） | 14h | 🟢 进行中 |
 | **ORD-1-T1** | 后端订单状态机实现 | Python 后端状态机核心实现 | 4h | ✅ 已完成 |
 | **ORD-1-T2** | 订单生命周期服务层 | 实现 OrderLifecycleService 服务层 | 3h | 🟢 进行中 |
-| **ORD-1-T3** | TypeScript 类型定义更新 | 前端 order.ts 类型定义 + OrderStatusBadge 组件 | 1h | 🟢 进行中 |
+| **ORD-1-T3** | TypeScript 类型定义更新 | 前端 order.ts 类型定义 + OrderStatusBadge 组件 | 1h | ✅ 已完成 |
 | **ORD-1-T4** | 订单列表页适配 | Orders.tsx 支持新状态展示 | 2h | ☐ 待启动 |
 | **ORD-1-T5** | 订单详情抽屉适配 | OrderDetailsDrawer.tsx 支持新状态 | 2h | ☐ 待启动 |
 | **ORD-1-T6** | 状态流转测试 | 端到端测试订单状态流转 | 3h | ☐ 待启动 |
