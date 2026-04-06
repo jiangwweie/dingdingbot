@@ -46,6 +46,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.application.config_snapshot_service import ConfigSnapshotService
+    from src.infrastructure.config_entry_repository import ConfigEntryRepository
+    from src.infrastructure.config_profile_repository import ConfigProfileRepository
 
 
 # ============================================================
@@ -264,6 +266,10 @@ class ConfigManager:
 
         # Snapshot service (for auto-snapshot hook)
         self._snapshot_service: Optional["ConfigSnapshotService"] = None
+
+        # Repository references (for KV config operations)
+        self._config_entry_repo: Optional["ConfigEntryRepository"] = None
+        self._config_profile_repo: Optional["ConfigProfileRepository"] = None
 
         # YAML fallback flag
         self._use_yaml_fallback = True
@@ -1326,6 +1332,132 @@ class ConfigManager:
         """Inject snapshot service for auto-snapshot hooks."""
         self._snapshot_service = snapshot_service
         logger.info("Snapshot service injected for auto-snapshot hooks")
+
+    def set_config_entry_repository(self, repo: "ConfigEntryRepository") -> None:
+        """Inject ConfigEntryRepository for KV config operations."""
+        self._config_entry_repo = repo
+        logger.info("ConfigEntryRepository injected for KV config operations")
+
+    def set_config_profile_repository(self, repo: "ConfigProfileRepository") -> None:
+        """Inject ConfigProfileRepository for profile management."""
+        self._config_profile_repo = repo
+        logger.info("ConfigProfileRepository injected for profile management")
+
+    # ============================================================
+    # Backtest Configuration KV Methods (T2 Task)
+    # ============================================================
+
+    async def get_backtest_configs(self, profile_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        获取回测配置（KV 模式）。
+
+        Args:
+            profile_name: Profile 名称，如果未指定则获取当前激活的 Profile
+
+        Returns:
+            回测配置字典，包含以下键：
+            - slippage_rate: Decimal (默认 0.001)
+            - fee_rate: Decimal (默认 0.0004)
+            - initial_balance: Decimal (默认 10000)
+            - tp_slippage_rate: Decimal (默认 0.0005)
+
+        Raises:
+            RuntimeError: 如果 ConfigEntryRepository 未注入
+        """
+        if self._config_entry_repo is None:
+            raise RuntimeError("ConfigEntryRepository 未注入，请先调用 set_config_entry_repository()")
+
+        # 如果未指定 Profile，获取当前激活的 Profile
+        if profile_name is None:
+            profile_name = await self._get_current_profile_name()
+
+        # 使用 ConfigEntryRepository 读取配置
+        configs = await self._config_entry_repo.get_backtest_configs(profile_name=profile_name)
+        return configs
+
+    async def save_backtest_configs(
+        self,
+        configs: Dict[str, Any],
+        profile_name: Optional[str] = None,
+        changed_by: str = "user"
+    ) -> int:
+        """
+        保存回测配置（KV 模式）。
+
+        Args:
+            configs: 回测配置字典，支持的键：
+                    - slippage_rate (Decimal)
+                    - fee_rate (Decimal)
+                    - initial_balance (Decimal)
+                    - tp_slippage_rate (Decimal)
+            profile_name: Profile 名称，如果未指定则使用当前激活的 Profile
+            changed_by: 变更操作人标识
+
+        Returns:
+            保存的配置项数量
+
+        Raises:
+            RuntimeError: 如果 ConfigEntryRepository 未注入
+
+        Side Effects:
+            - 创建自动快照（如果 snapshot_service 可用）
+            - 记录配置变更历史
+        """
+        if self._config_entry_repo is None:
+            raise RuntimeError("ConfigEntryRepository 未注入，请先调用 set_config_entry_repository()")
+
+        # 如果未指定 Profile，获取当前激活的 Profile
+        if profile_name is None:
+            profile_name = await self._get_current_profile_name()
+
+        # 创建自动快照（在配置变更前）
+        if self._snapshot_service:
+            try:
+                user_config = await self.get_user_config()
+                await self._snapshot_service.create_auto_snapshot(
+                    config=user_config,
+                    description=f"回测配置变更 - {changed_by}"
+                )
+            except Exception as e:
+                logger.warning(f"回测配置自动快照创建失败：{e}")
+
+        # 使用 ConfigEntryRepository 保存配置
+        saved_count = await self._config_entry_repo.save_backtest_configs(
+            configs=configs,
+            profile_name=profile_name,
+            version="v1.0.0"
+        )
+
+        # 记录配置变更历史
+        await self._log_config_change(
+            entity_type="backtest_config",
+            entity_id=f"profile:{profile_name}",
+            action="UPDATE",
+            old_values=None,  # 旧值需要查询之前的配置，为简化暂不记录
+            new_values={k: str(v) for k, v in configs.items()},
+            changed_by=changed_by,
+            change_summary=f"回测配置更新 - Profile:{profile_name}, 变更项:{len(configs)}",
+        )
+
+        return saved_count
+
+    async def _get_current_profile_name(self) -> str:
+        """
+        获取当前激活的 Profile 名称。
+
+        Returns:
+            Profile 名称，默认为 'default'
+        """
+        if self._config_profile_repo is not None:
+            try:
+                active_profile = await self._config_profile_repo.get_active_profile()
+                if active_profile:
+                    return active_profile.name
+            except Exception as e:
+                logger.warning(f"获取激活 Profile 失败，使用默认值：{e}")
+
+        # 默认返回 'default'
+        return "default"
 
     # ============================================================
     # YAML Backward Compatibility
