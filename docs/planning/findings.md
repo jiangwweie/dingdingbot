@@ -6,114 +6,153 @@
 
 ## 📑 目录
 
-1. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+1. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
+2. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
+3. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+4. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+5. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
 
-1. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
-2. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
-3. [配置管理重构关联影响分析](#配置管理重构关联影响分析)
-3. [E3 信号通知 E2E 测试技术发现](#e3-信号通知 e2e 测试技术发现)
-4. [Config Repositories 批量实现](#config-repositories-批量实现)
-5. [ConfigManager 数据库驱动重构](#configmanager-数据库驱动重构)
-6. [配置管理数据库表设计](#配置管理数据库表设计)
-7. [/api/v1/config 配置管理 API 实现](#apiv1config-配置管理 api 实现)
-8. [工作流重构 v3.0](#工作流重构 v30)
-9. [P1 任务产品分析](#p1-任务产品分析)
-## ORD-1-T3 TypeScript 类型定义更新
+---
+
+## 📌 ORD-1-T1 订单状态机领域层实现
 
 **实现时间**: 2026-04-06  
-**任务负责人**: Frontend Developer  
-**状态**: 进行中
+**任务负责人**: Backend Developer  
+**状态**: ✅ 已完成
 
-### 核心修改
+### 核心交付
 
-**文件 1**: `web-front/src/types/order.ts`
-- 在 `OrderStatus` 枚举中添加 `CREATED` 和 `SUBMITTED` 状态
+**文件 1**: `src/domain/order_state_machine.py` (新建)
+- OrderStateMachine 类 - 9 种订单状态管理
+- 合法流转矩阵定义
+- 核心方法：can_transition(), get_valid_transitions(), is_terminal_state()
 
-**文件 2**: `web-front/src/components/v3/OrderStatusBadge.tsx`
-- 在 `statusConfig` 记录中添加新状态的配置
+**文件 2**: `src/domain/exceptions.py` (修改)
+- InvalidOrderStateTransition 异常类
+- 包含 order_id, from_status, to_status, valid_transitions 属性
 
-### 订单状态流转
+**文件 3**: `tests/unit/test_order_state_machine.py` (新建)
+- 62 个测试用例，100% 覆盖所有状态流转路径
+
+### 订单状态定义 (9 种)
+
+| 状态 | 说明 | 类型 |
+|------|------|------|
+| CREATED | 订单已创建（本地） | 非终态 |
+| SUBMITTED | 订单已提交到交易所 | 非终态 |
+| PENDING | 尚未发送到交易所 | 非终态 |
+| OPEN | 挂单中 | 非终态 |
+| PARTIALLY_FILLED | 部分成交 | 非终态 |
+| FILLED | 完全成交 | 终态 |
+| CANCELED | 已撤销 | 终态 |
+| REJECTED | 交易所拒单 | 终态 |
+| EXPIRED | 已过期 | 终态 |
+
+### 状态流转矩阵
 
 ```
-CREATED → SUBMITTED → OPEN → FILLED/PARTIALLY_FILLED
-                           ↓
-                     CANCELED/REJECTED/EXPIRED
+CREATED      → SUBMITTED, CANCELED
+SUBMITTED    → OPEN, REJECTED, CANCELED, EXPIRED
+PENDING      → OPEN, REJECTED, CANCELED, SUBMITTED
+OPEN         → PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED
+PARTIALLY_FILLED → FILLED, CANCELED
+FILLED       → (终态)
+CANCELED     → (终态)
+REJECTED     → (终态)
+EXPIRED      → (终态)
 ```
 
-### 状态颜色映射
+### 测试结果
 
-| 状态 | 颜色类 | 标签 |
-|------|--------|------|
-| CREATED | `bg-gray-100 text-gray-700` | 已创建 |
-| SUBMITTED | `bg-blue-100 text-blue-700` | 已提交 |
+```
+============================== 62 passed in 0.16s ==============================
+```
+
+### 测试覆盖
+
+- 状态定义测试 (3 个)
+- 状态流转测试 (8 个)
+- can_transition() 测试 (20+ 个)
+- can_transition_with_exception() 测试 (3 个)
+- is_terminal_state() 测试 (4 个)
+- 辅助方法测试 (6 个)
+- 边界情况测试 (4 个)
+- 完整流转路径测试 (6 个)
+
+### 技术决策
+
+**决策 1: 9 状态 vs 7 状态**
+- 初始设计为 7 状态 (PENDING 开始)
+- Linter 自动扩展为 9 状态 (增加 CREATED, SUBMITTED)
+- 决策：采纳 9 状态设计，更完整描述订单生命周期
+
+**决策 2: frozenset vs set**
+- STATES 和 TERMINAL_STATES 使用 frozenset (不可变集合)
+- 理由：状态定义是常量，不可变集合更安全且性能略优
+
+**决策 3: 异常继承 Exception 而非 DomainError**
+- InvalidOrderStateTransition 直接继承 Exception
+- 理由：这是编程错误，不是业务异常
 
 ---
 
-10. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
-11. [策略参数配置数据库存储实现](#策略参数配置数据库存储实现)
-12. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)
-13. [订单详情页 K 线渲染升级 - 时间线对齐方案](#订单详情页 k 线渲染升级 - 时间线对齐方案)
-14. [Phase 8 Optuna 自动化调参集成要点](#phase-8-optuna-自动化调参集成要点)
-15. [Phase 8 后端实现技术细节](#phase-8-后端实现技术细节)
-16. [Phase 8 前端实现技术细节](#phase-8-前端实现技术细节)
-17. [Phase 7 回测数据本地化架构](#phase-7-回测数据本地化架构)
-18. [BTC 历史数据导入记录](#btc-历史数据导入记录)
-19. [P1 问题系统性修复技术细节](#p1-问题系统性修复技术细节)
-20. [P1/P2 问题修复技术细节](#p1p2-问题修复技术细节)
-21. [P0-003/004 资金安全加固](#p0-003004-资金安全加固)
-22. [Phase 6 前端架构](#phase-6-前端架构)
-23. [API 契约与端点](#api-契约与端点)
-24. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
-25. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
-26. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
-27. [T1 任务：ConfigEntryRepository 回测配置扩展](#t1-任务-configentryrepository-回测配置扩展)
+## 📌 T2 任务：ConfigManager 回测配置 KV 接口
 
+**实现时间**: 2026-04-06  
+**任务负责人**: Backend Developer  
+**状态**: ✅ 已完成
 
+### 核心交付
 
----
+**文件 1**: `src/application/config_manager.py` (修改)
+- 添加 `_config_entry_repo` 和 `_config_profile_repo` 属性
+- 添加 `set_config_entry_repository()` 和 `set_config_profile_repository()` 注入方法
+- 实现 `get_backtest_configs()` - 获取回测配置
+- 实现 `save_backtest_configs()` - 保存回测配置
+- 实现 `_get_current_profile_name()` - 获取当前激活的 Profile
 
-## 📌 2026-04-06 下午技术发现
+**文件 2**: `tests/unit/test_config_manager_backtest_kv.py` (新建)
+- 17 个测试用例，覆盖基本 CRUD、Profile 自动检测、自动快照、变更历史、错误处理
 
-### T1 任务：ConfigEntryRepository 回测配置扩展 ⭐⭐⭐
+### 回测配置项 (4 项)
 
-**实现时间**: 2026-04-06
+| 配置键 | 默认值 | 说明 |
+|--------|--------|------|
+| slippage_rate | Decimal('0.001') | 滑点率 (0.1%) |
+| fee_rate | Decimal('0.0004') | 费率 (0.04%) |
+| initial_balance | Decimal('10000') | 初始资金 (10000 USDT) |
+| tp_slippage_rate | Decimal('0.0005') | 止盈止损滑点率 (0.05%) |
 
-**任务 ID**: #11
+### Profile 隔离机制
 
-**核心功能**: 回测配置 KV 存储（支持 Profile 隔离）
-
-**实现方法**:
-
-
-
-**配置键命名规范**:
-
-
-**Profile 隔离机制**:
 - config_entries_v2 表的唯一约束为 (profile_name, config_key)
 - 不同 Profile 可以有相同的 config_key 但值独立
 - 默认 Profile 为 'default'
 
-**单元测试覆盖** (11 个测试用例，51/51 通过):
-- 默认值返回测试
-- 存储值覆盖测试
-- 保存数量验证
-- 前缀存储验证
-- Profile 隔离验证
-- upsert 插入/更新验证
+### 自动快照与变更历史
 
-**技术要点**:
-1. 默认值在代码中定义，KV 不存在时自动应用
-2. save_backtest_configs 支持带或不带前缀的键名
-3. get_backtest_configs 返回无前缀的简洁键名
-4. Profile 隔离通过 WHERE profile_name = ? 实现
+- 配置保存前自动创建快照（通过 ConfigSnapshotService）
+- 配置变更记录到 config_history 表
+- 记录操作人 (changed_by) 和变更摘要
 
-**验收标准**:
+### 测试结果
+
+```
+============================== 17 passed in 0.27s ==============================
+```
+
+### 验收标准
+
 - [x] get_backtest_configs() 可正确读取 KV 配置
-- [x] get_backtest_configs() 在 KV 不存在时应用默认值
-- [x] save_backtest_configs() 可保存配置到 config_entries_v2
-- [x] Profile 隔离正确（不同 profile 的配置不互相干扰）
+- [x] get_backtest_configs() 支持自动获取当前 Profile
+- [x] save_backtest_configs() 可保存配置
+- [x] save_backtest_configs() 创建自动快照
+- [x] save_backtest_configs() 记录变更历史
 - [x] 添加单元测试验证功能
+
+---
+
+## 📌 ORD-1-T3 TypeScript 类型定义更新
 
 
 ---

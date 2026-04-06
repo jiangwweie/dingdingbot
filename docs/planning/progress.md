@@ -4,6 +4,95 @@
 
 ---
 
+### 2026-04-06 - ORD-1-T1: 订单状态机领域层实现 ✅
+
+**会话阶段**: 任务完成
+**任务目标**: 
+- 创建 `src/domain/order_state_machine.py` - OrderStateMachine 类
+- 修改 `src/domain/exceptions.py` - 添加 InvalidOrderStateTransition 异常
+- 编写 `tests/unit/test_order_state_machine.py` - 单元测试
+
+**完成工作**:
+1. ✅ 创建 OrderStateMachine 类 - 9 种状态 + 流转矩阵
+2. ✅ 添加 InvalidOrderStateTransition 异常类
+3. ✅ 编写 62 个测试用例，覆盖所有状态流转路径
+4. ✅ 测试全部通过 (62/62 passed in 0.16s)
+5. ✅ 更新 ord-1-task-plan.md - 标记 T1 完成
+
+**修改文件**:
+- `src/domain/order_state_machine.py` (新建) - OrderStateMachine 类
+- `src/domain/exceptions.py` (修改) - InvalidOrderStateTransition 异常
+- `tests/unit/test_order_state_machine.py` (新建) - 62 个测试用例
+
+**订单状态定义 (9 种)**:
+- CREATED, SUBMITTED, PENDING, OPEN, PARTIALLY_FILLED
+- FILLED, CANCELED, REJECTED, EXPIRED (后 4 种为终态)
+
+**核心方法**:
+- can_transition() - 验证流转合法性
+- can_transition_with_exception() - 非法时抛异常
+- get_valid_transitions() - 获取合法目标状态
+- is_terminal_state() - 判断终态
+
+**测试结果**:
+```
+============================== 62 passed in 0.16s ==============================
+```
+
+---
+
+### 2026-04-06 - T2: ConfigManager KV 配置接口 ✅
+
+**会话阶段**: 任务完成
+**任务目标**: 
+- 在 ConfigManager 中添加回测配置 KV 管理方法
+- 实现 get_backtest_configs() 和 save_backtest_configs()
+- 支持 Profile 自动检测和自动快照
+- 编写单元测试
+
+**完成工作**:
+1. ✅ 修改 `src/application/config_manager.py`:
+   - 添加 `_config_entry_repo` 和 `_config_profile_repo` 属性
+   - 添加 `set_config_entry_repository()` 注入方法
+   - 添加 `set_config_profile_repository()` 注入方法
+   - 实现 `get_backtest_configs()` - 获取回测配置（支持自动获取当前 Profile）
+   - 实现 `save_backtest_configs()` - 保存回测配置（支持自动快照和变更历史）
+   - 实现 `_get_current_profile_name()` - 获取当前激活的 Profile
+
+2. ✅ 创建 `tests/unit/test_config_manager_backtest_kv.py`:
+   - 17 个单元测试全部通过
+   - 覆盖基本 CRUD 操作
+   - 覆盖 Profile 自动检测
+   - 覆盖自动快照功能
+   - 覆盖变更历史记录
+   - 覆盖错误处理场景
+
+**功能特性**:
+- Profile 隔离：不同 Profile 的配置独立存储
+- 自动快照：配置变更前自动创建快照（如果 snapshot_service 可用）
+- 变更历史：记录操作人和变更摘要到 config_history 表
+- 默认值应用：KV 不存在时自动应用默认配置
+
+**测试结果**:
+```
+tests/unit/test_config_manager_backtest_kv.py:: 17/17 通过
+tests/unit/infrastructure/test_config_entry_repository.py:: 51/51 通过（回归）
+tests/unit/test_config_manager_db.py:: 40/40 通过（回归）
+```
+
+**验收标准**:
+- [x] get_backtest_configs() 可正确读取 KV 配置
+- [x] get_backtest_configs() 支持自动获取当前 Profile
+- [x] save_backtest_configs() 可保存配置
+- [x] save_backtest_configs() 创建自动快照
+- [x] save_backtest_configs() 记录变更历史
+- [x] 添加单元测试验证功能
+
+**Git 提交**:
+- 8c75fd1 feat(T2): ConfigManager 回测配置 KV 接口实现
+
+---
+
 ### 2026-04-06 - ORD-1-T2: 订单生命周期服务层实现
 
 **会话阶段**: 任务启动
