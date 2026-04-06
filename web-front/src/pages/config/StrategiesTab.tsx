@@ -56,8 +56,10 @@ export const StrategiesTab: React.FC = () => {
     setLoading(true);
     try {
       const response = await configApi.getStrategies();
+      // 后端返回格式：{"strategies": [...]}, 需要提取 strategies 字段
+      const strategiesArray = response.data.strategies || response.data || [];
       // 将后端 Strategy 转换为前端展示用的 StrategyDisplay
-      const displayStrategies: StrategyDisplay[] = response.data.map((s) => ({
+      const displayStrategies: StrategyDisplay[] = strategiesArray.map((s) => ({
         ...s,
         trigger_type: s.trigger_config?.type || 'unknown',
         filter_count: s.filter_configs?.length || 0,
