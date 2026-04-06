@@ -4,6 +4,47 @@
 
 ---
 
+### 2026-04-06 - 方案 C 测试架构重构阶段完成 ✅
+
+**任务 ID**: TEST-0  
+**负责人**: PM + QA Tester + Architect  
+**总工时**: 4h  
+**优先级**: P0
+
+**阶段目标**: 按方案 C 执行测试架构重构，提升 OrderManager 和 OrderRepository 覆盖率
+
+**完成工作**:
+
+1. ✅ **TEST-1: 测试基础设施搭建** (2h)
+   - 添加 pytest-mock>=2.0.0 依赖
+   - 创建 `tests/unit/conftest.py` - 全局 fixtures + 工厂导入
+   - 创建 4 个工厂类：
+     - `OrderFactory` - 订单工厂 (thread-safe with itertools.count)
+     - `PositionFactory` - 仓位工厂
+     - `SignalFactory` - 信号工厂
+     - `StrategyFactory` - 策略工厂
+   - 验收：66 个测试通过，工厂正常导入
+
+2. ✅ **TEST-2: OrderManager 测试重构** (2h)
+   - 重构测试文件，覆盖率从 75% 提升到 **100%**
+   - 新增 24 个测试用例（目标 12+）
+   - 参数化测试覆盖 LONG/SHORT 方向
+   - 异常处理路径 100% 覆盖
+   - 验收：43/43 测试通过，覆盖率 100%
+
+3. ⚠️ **TEST-3: OrderRepository 测试重构** (部分完成)
+   - 已有集成测试 `test_order_repository_queries.py` (4 个测试通过)
+   - 单元测试因工具错误未完全创建
+   - 延期到下一会话完成
+
+**Git 提交**:
+- `5dceef7` feat(TEST-1): 测试基础设施搭建完成
+- `a6aa2e4` test(TEST-2): OrderManager 测试重构 - 覆盖率 75%→100%
+
+**推送状态**: 待推送
+
+---
+
 ### 2026-04-06 - TEST-2 OrderManager 测试重构完成 ✅
 
 **任务 ID**: TEST-2  
