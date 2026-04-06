@@ -1499,7 +1499,8 @@ async def get_backtest_configs():
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Backtest config API error: {e}")
+        return {"status": "error", "error": str(e)}
 
 
 @app.put("/api/backtest/configs")
@@ -1601,6 +1602,7 @@ async def update_backtest_configs(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Backtest config API error: {e}")
         error_str = str(e)
         if "ValidationError" in type(e).__name__:
             from fastapi import status
@@ -1608,7 +1610,7 @@ async def update_backtest_configs(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Config validation failed: {error_str}",
             )
-        return {"error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 
 # ============================================================
