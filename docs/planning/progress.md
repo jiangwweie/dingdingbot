@@ -4,6 +4,104 @@
 
 ---
 
+### 2026-04-06 - ORD-1 测试用例补充 - OrderRepository 集成测试 ✅
+
+**任务 ID**: ORD-1-Test-Supplement-OrderRepository
+**负责人**: QA Tester
+**工时**: 0.5h
+**优先级**: P1
+
+**任务目标**: 补充 3 个集成测试用例提升 OrderRepository 测试覆盖率至 75%+
+
+**完成工作**:
+
+1. ✅ **新增测试用例** (创建新文件 `tests/integration/test_order_repository_queries.py`):
+   - `test_get_orders_by_symbol` - 按币种查询订单功能
+   - `test_get_open_orders_integration` - 获取未完成订单功能（OPEN/PARTIALLY_FILLED）
+   - `test_mark_partially_filled_persistence` - 部分成交持久化功能
+   - `test_get_orders_by_symbol_with_limit` - 按币种查询带 limit 限制（边界条件测试）
+
+2. ✅ **测试验收**:
+   - 4/4 测试全部通过 (100%)
+   - 新增 4 个集成测试用例通过
+
+**修改文件**:
+- `tests/integration/test_order_repository_queries.py` - 新建集成测试文件
+
+**测试结果**:
+```
+============================== 4 passed in 0.15s ===============================
+tests/integration/test_order_repository_queries.py (4 测试) ✅
+```
+
+**新增测试覆盖**:
+| 测试方法 | 覆盖功能 | 状态 |
+|--------|--------|------|
+| `test_get_orders_by_symbol` | 按币种查询订单，返回正确 symbol 的订单列表 | ✅ |
+| `test_get_open_orders_integration` | 获取未完成订单，只返回 OPEN/PARTIALLY_FILLED 状态 | ✅ |
+| `test_mark_partially_filled_persistence` | 部分成交持久化，filled_qty 和 average_exec_price 正确保存 | ✅ |
+| `test_get_orders_by_symbol_with_limit` | 按币种查询带 limit 限制 | ✅ |
+
+**验收标准**:
+- [x] 使用 Read 工具读取 `.claude/team/qa-tester/SKILL.md`
+- [x] 使用 Write 工具创建 `tests/integration/test_order_repository_queries.py`
+- [x] 使用 Bash 运行 `pytest tests/integration/test_order_repository_queries.py -v` 测试通过
+- [x] 3 个新增测试全部通过（实际完成 4 个，含 1 个边界条件测试）
+- [x] 使用 Edit 工具更新 `docs/planning/progress.md`
+
+**发现的问题**:
+- `OrderRepository.update_status()` 方法中 `filled_at` 参数未被处理（方法签名有该参数，但实现中未保存到数据库）
+- 建议后续修复此 bug，确保 `filled_at` 字段能正确持久化
+
+**Git 提交**: 待提交
+
+---
+
+### 2026-04-06 - ORD-1 测试用例补充 - OrderManager TP 部分成交测试 ✅
+
+**任务 ID**: ORD-1-Test-Supplement-OrderManager
+**负责人**: QA Tester
+**工时**: 0.5h
+**优先级**: P1
+
+**任务目标**: 补充 1 个关键测试用例提升 OrderManager 测试覆盖率
+
+**完成工作**:
+
+1. ✅ **新增测试用例**:
+   - `test_handle_order_filled_tp_partial_fill` - 测试 TP 订单部分成交场景
+   - 场景：TP1 订单请求 0.5 BTC，实际成交 0.3 BTC（部分成交）
+   - 验证：SL 订单数量更新为剩余仓位（0.7 BTC）
+
+2. ✅ **测试验收**:
+   - 15/15 测试全部通过 (100%)
+   - 新增 1 个测试用例通过
+
+**修改文件**:
+- `tests/unit/test_order_manager.py` - 新增 UT-008-Partial 测试用例
+
+**测试结果**:
+```
+============================== 15 passed in 0.11s ==============================
+tests/unit/test_order_manager.py (15 测试) ✅
+```
+
+**新增测试覆盖**:
+| 测试方法 | 覆盖功能 | 状态 |
+|--------|--------|------|
+| `test_handle_order_filled_tp_partial_fill` | TP 部分成交后更新 SL 数量 | ✅ |
+
+**验收标准**:
+- [x] 使用 Read 工具读取 `.claude/team/qa-tester/SKILL.md`
+- [x] 使用 Edit 工具修改 `tests/unit/test_order_manager.py`
+- [x] 使用 Bash 运行 `pytest tests/unit/test_order_manager.py -v` 测试通过
+- [x] 1 个新增测试通过
+- [x] 使用 Edit 工具更新 `docs/planning/progress.md`
+
+**Git 提交**: 待提交
+
+---
+
 ### 2026-04-06 - ORD-1 测试用例补充 - OrderStateMachine 实例方法测试 ✅
 
 **任务 ID**: ORD-1-T6-Test-Supplement

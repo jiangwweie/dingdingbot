@@ -600,3 +600,411 @@ class TestCompleteOrderLifecycle:
         # 6. 终态不可再转换
         state_machine = lifecycle_service.get_state_machine(order.id)
         assert state_machine.is_terminal is True
+
+
+# ============================================================
+# 补充测试用例 - 提升覆盖率到 95%+
+# ============================================================
+
+class TestOrderCreationEdgeCases:
+    """测试订单创建边界情况"""
+
+    @pytest.mark.asyncio
+    async def test_create_order_empty_list_raises_error(self, sample_strategy, temp_db):
+        """测试 OrderManager 返回空列表时抛 ValueError"""
+        from src.domain.order_manager import OrderManager
+        from unittest.mock import patch
+
+        repository = OrderRepository(db_path=temp_db)
+        await repository.initialize()
+        service = OrderLifecycleService(repository=repository)
+        await service.start()
+
+        try:
+            # Mock OrderManager 返回空列表
+            with patch.object(OrderManager, 'create_order_chain', return_value=[]):
+                with pytest.raises(ValueError, match="创建订单失败：OrderManager 返回空列表"):
+                    await service.create_order(
+                        strategy=sample_strategy,
+                        signal_id="sig_test_empty",
+                        symbol="BTC/USDT:USDT",
+                        direction=Direction.LONG,
+                        total_qty=Decimal('1.0'),
+                        initial_sl_rr=Decimal('-1.0'),
+                        tp_targets=[Decimal('1.5')],
+                    )
+        finally:
+            await service.stop()
+
+
+class TestOrderNonexistentErrors:
+    """测试操作不存在订单时的异常"""
+
+    @pytest.mark.asyncio
+    async def test_confirm_nonexistent_order_raises_value_error(self, lifecycle_service):
+        """测试确认不存在订单抛 ValueError"""
+        with pytest.raises(ValueError, match="订单不存在"):
+            await lifecycle_service.confirm_order(order_id="nonexistent_order")
+
+    @pytest.mark.asyncio
+    async def test_fill_nonexistent_order_raises_value_error(self, lifecycle_service):
+        """测试成交不存在订单抛 ValueError"""
+        with pytest.raises(ValueError, match="订单不存在"):
+            await lifecycle_service.update_order_filled(
+                order_id="nonexistent_order",
+                filled_qty=Decimal('1.0'),
+                average_exec_price=Decimal('65000'),
+            )
+
+    @pytest.mark.asyncio
+    async def test_update_from_exchange_nonexistent_order_raises_error(self, lifecycle_service):
+        """测试交易所更新不存在订单抛 ValueError"""
+        with pytest.raises(ValueError, match="订单不存在"):
+            await lifecycle_service.update_order_from_exchange(
+                order_id="nonexistent_order",
+                exchange_order_data={"status": "open"}
+            )
+
+    @pytest.mark.asyncio
+    async def test_partial_fill_nonexistent_order_raises_error(self, lifecycle_service):
+        """测试部分成交不存在订单抛 ValueError"""
+        with pytest.raises(ValueError, match="订单不存在"):
+            await lifecycle_service.update_order_partially_filled(
+                order_id="nonexistent_order",
+                filled_qty=Decimal('0.5'),
+                average_exec_price=Decimal('65000'),
+            )
+
+    @pytest.mark.asyncio
+    async def test_cancel_nonexistent_order_raises_error(self, lifecycle_service):
+        """测试取消不存在订单抛 ValueError"""
+        with pytest.raises(ValueError, match="订单不存在"):
+            await lifecycle_service.cancel_order(order_id="nonexistent_order")
+
+    @pytest.mark.asyncio
+    async def test_reject_nonexistent_order_raises_error(self, lifecycle_service):
+        """测试拒绝不存在订单抛 ValueError"""
+        with pytest.raises(ValueError, match="订单不存在"):
+            await lifecycle_service.reject_order(
+                order_id="nonexistent_order",
+                reason="Test rejection"
+            )
+
+    @pytest.mark.asyncio
+    async def test_expire_nonexistent_order_raises_error(self, lifecycle_service):
+        """测试过期不存在订单抛 ValueError"""
+        with pytest.raises(ValueError, match="订单不存在"):
+            await lifecycle_service.expire_order(order_id="nonexistent_order")
+
+
+class TestOrderUpdateFromExchangeBranches:
+    """测试 update_order_from_exchange 分支覆盖"""
+
+    @pytest.mark.asyncio
+    async def test_update_from_exchange_unknown_status_logs_warning(
+        self, lifecycle_service, sample_strategy, caplog
+    ):
+        """测试未知交易所状态记录 warning"""
+        import logging
+
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_unknown",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        # 模拟未知状态
+        exchange_data = {
+            "id": "binance_unknown",
+            "status": "UNKNOWN_STATUS",  # 未知状态
+        }
+
+        with caplog.at_level(logging.WARNING):
+            updated_order = await lifecycle_service.update_order_from_exchange(
+                order_id=order.id,
+                exchange_order_data=exchange_data
+            )
+
+        # 验证订单状态未变（保持 CREATED）
+        assert updated_order.status == OrderStatus.CREATED
+        # 验证记录了警告日志
+        assert "未知交易所状态" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_update_from_exchange_filled_partial_qty(
+        self, lifecycle_service, sample_strategy
+    ):
+        """测试 FILLED 状态但数量不足转部分成交"""
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_filled_partial",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),  # 请求 1.0
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        await lifecycle_service.submit_order(order.id)
+        await lifecycle_service.confirm_order(order.id)
+
+        # 交易所推送 FILLED 状态但只有 0.5 成交量
+        exchange_data = {
+            "id": "binance_filled_partial",
+            "status": "closed",  # closed → FILLED
+            "filled": 0.5,  # 只成交了 0.5
+            "average": 65000,
+        }
+
+        updated_order = await lifecycle_service.update_order_from_exchange(
+            order_id=order.id,
+            exchange_order_data=exchange_data
+        )
+
+        # 应该转为部分成交状态
+        assert updated_order.status == OrderStatus.PARTIALLY_FILLED
+        assert updated_order.filled_qty == Decimal('0.5')
+
+    @pytest.mark.asyncio
+    async def test_update_from_exchange_canceled_status(
+        self, lifecycle_service, sample_strategy
+    ):
+        """测试交易所 CANCELED 状态"""
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_canceled",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        await lifecycle_service.submit_order(order.id)
+
+        # 交易所推送 CANCELED 状态
+        exchange_data = {
+            "id": "binance_canceled",
+            "status": "canceled",
+            "filled": 0,
+        }
+
+        updated_order = await lifecycle_service.update_order_from_exchange(
+            order_id=order.id,
+            exchange_order_data=exchange_data
+        )
+
+        assert updated_order.status == OrderStatus.CANCELED
+
+    @pytest.mark.asyncio
+    async def test_update_from_exchange_rejected_status(
+        self, lifecycle_service, sample_strategy
+    ):
+        """测试交易所 REJECTED 状态"""
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_rejected",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        await lifecycle_service.submit_order(order.id)
+
+        # 交易所推送 REJECTED 状态
+        exchange_data = {
+            "id": "binance_rejected",
+            "status": "rejected",
+            "info": {"msg": "Insufficient balance"}
+        }
+
+        updated_order = await lifecycle_service.update_order_from_exchange(
+            order_id=order.id,
+            exchange_order_data=exchange_data
+        )
+
+        assert updated_order.status == OrderStatus.REJECTED
+
+    @pytest.mark.asyncio
+    async def test_update_from_exchange_partially_filled_status(
+        self, lifecycle_service, sample_strategy
+    ):
+        """测试交易所 PARTIALLY_FILLED 状态"""
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_partial",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        await lifecycle_service.submit_order(order.id)
+        await lifecycle_service.confirm_order(order.id)
+
+        # 交易所推送 OPEN 状态但有成交量（部分成交）
+        exchange_data = {
+            "id": "binance_partial",
+            "status": "open",
+            "filled": 0.3,
+            "average": 65000,
+        }
+
+        updated_order = await lifecycle_service.update_order_from_exchange(
+            order_id=order.id,
+            exchange_order_data=exchange_data
+        )
+
+        assert updated_order.status == OrderStatus.PARTIALLY_FILLED
+        assert updated_order.filled_qty == Decimal('0.3')
+
+
+class TestOrderRejectAndExpire:
+    """测试拒绝和过期订单"""
+
+    @pytest.mark.asyncio
+    async def test_reject_order(self, lifecycle_service, sample_strategy):
+        """测试拒绝订单"""
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_reject",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        await lifecycle_service.submit_order(order.id)
+
+        # 拒绝订单
+        updated_order = await lifecycle_service.reject_order(
+            order_id=order.id,
+            reason="Insufficient margin"
+        )
+
+        assert updated_order.status == OrderStatus.REJECTED
+
+    @pytest.mark.asyncio
+    async def test_expire_order(self, lifecycle_service, sample_strategy):
+        """测试过期订单"""
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_expire",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        await lifecycle_service.submit_order(order.id)
+        await lifecycle_service.confirm_order(order.id)
+
+        # 过期订单
+        updated_order = await lifecycle_service.expire_order(order_id=order.id)
+
+        assert updated_order.status == OrderStatus.EXPIRED
+
+
+class TestOrderQueryMethods:
+    """测试订单查询方法"""
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_signal_id(self, lifecycle_service, sample_strategy):
+        """测试根据信号 ID 获取订单列表"""
+        # 创建两个订单使用相同信号 ID
+        signal_id = "sig_test_symbol_batch"
+
+        await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id=signal_id,
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        # 获取该信号 ID 的订单（只有 1 个）
+        orders = await lifecycle_service.get_orders_by_signal(signal_id)
+        assert len(orders) >= 1
+
+        # 获取不存在的信号 ID 订单（空列表）
+        orders = await lifecycle_service.get_orders_by_signal("nonexistent_signal")
+        assert len(orders) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_state_machine_nonexistent_returns_none(
+        self, lifecycle_service, sample_strategy
+    ):
+        """测试获取不存在的订单状态机返回 None"""
+        state_machine = lifecycle_service.get_state_machine("nonexistent_order_id")
+        assert state_machine is None
+
+
+class TestCallbackAndAuditErrorHandling:
+    """测试回调和审计日志异常处理"""
+
+    @pytest.mark.asyncio
+    async def test_callback_exception_is_caught_and_logged(
+        self, lifecycle_service, sample_strategy, caplog
+    ):
+        """测试回调异常被捕获并记录"""
+        import logging
+
+        async def failing_callback(order: Order):
+            raise Exception("Callback error test")
+
+        lifecycle_service.set_order_changed_callback(failing_callback)
+
+        with caplog.at_level(logging.ERROR):
+            order = await lifecycle_service.create_order(
+                strategy=sample_strategy,
+                signal_id="sig_test_callback_error",
+                symbol="BTC/USDT:USDT",
+                direction=Direction.LONG,
+                total_qty=Decimal('1.0'),
+                initial_sl_rr=Decimal('-1.0'),
+                tp_targets=[Decimal('1.5')],
+            )
+
+        # 验证订单创建成功（异常被捕获不影响主流程）
+        assert order.status == OrderStatus.CREATED
+        # 验证记录了错误日志
+        assert "回调失败" in caplog.text or "Callback error test" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_audit_log_exception_is_caught_and_logged(
+        self, lifecycle_service_with_audit, sample_strategy, caplog
+    ):
+        """测试审计日志异常被捕获并记录"""
+        import logging
+
+        service, audit_logger = lifecycle_service_with_audit
+
+        # 让审计日志抛出异常
+        audit_logger.log = AsyncMock(side_effect=Exception("Audit log error"))
+
+        with caplog.at_level(logging.ERROR):
+            order = await service.create_order(
+                strategy=sample_strategy,
+                signal_id="sig_test_audit_error",
+                symbol="BTC/USDT:USDT",
+                direction=Direction.LONG,
+                total_qty=Decimal('1.0'),
+                initial_sl_rr=Decimal('-1.0'),
+                tp_targets=[Decimal('1.5')],
+            )
+
+        # 验证订单创建成功（异常被捕获不影响主流程）
+        assert order.status == OrderStatus.CREATED
+        # 验证记录了错误日志
+        assert "审计日志记录失败" in caplog.text or "Audit log error" in caplog.text

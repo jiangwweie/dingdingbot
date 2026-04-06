@@ -405,6 +405,90 @@ async def test_handle_order_filled_tp1_updates_sl_qty(
 
 
 # ============================================================
+# UT-008-Partial: handle_order_filled TP 部分成交
+# ============================================================
+@pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
+@pytest.mark.asyncio
+async def test_handle_order_filled_tp_partial_fill(
+    multi_tp_strategy: "OrderStrategy",
+    sample_signal: Signal,
+):
+    """
+    UT-008-Partial: handle_order_filled TP 订单部分成交
+    验证：TP 部分成交后，SL 数量更新为剩余仓位
+
+    场景：TP1 订单请求 0.5 BTC，但只成交了 0.3 BTC（部分成交）
+    注意：position.current_qty 反映的是最新剩余仓位 (0.7 BTC)
+    """
+    manager = OrderManager()
+
+    # 模拟仓位：TP1 部分成交后剩余 0.7 BTC
+    # 注意：在真实场景中，交易所会先更新仓位，然后触发订单成交回调
+    position = Position(
+        id="pos-001",
+        signal_id=sample_signal.id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        entry_price=Decimal('65065'),
+        current_qty=Decimal('0.7'),  # TP1 成交 0.3 后剩余
+    )
+
+    # 模拟 TP1 订单部分成交（请求 0.5，实际成交 0.3）
+    tp1_order = Order(
+        id="order-tp1-001",
+        signal_id=sample_signal.id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0.3'),  # 部分成交
+        average_exec_price=Decimal('66065'),
+        status=OrderStatus.PARTIALLY_FILLED,
+        created_at=1711785600000,
+        updated_at=1711785660000,
+    )
+
+    # 模拟 SL 订单 (尚未成交)
+    sl_order = Order(
+        id="order-sl-001",
+        signal_id=sample_signal.id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        requested_qty=Decimal('1.0'),  # 初始为总数量
+        filled_qty=Decimal('0'),
+        trigger_price=Decimal('64065'),
+        status=OrderStatus.OPEN,
+        created_at=1711785600000,
+        updated_at=1711785600000,
+    )
+
+    active_orders = [tp1_order, sl_order]
+    # positions_map uses signal_id as the key (not position.id)
+    positions_map = {sample_signal.id: position}
+
+    # 处理 TP1 部分成交事件
+    new_orders = await manager.handle_order_filled(
+        filled_order=tp1_order,
+        active_orders=active_orders,
+        positions_map=positions_map,
+    )
+
+    # 验证 SL 订单数量已更新为剩余仓位
+    # 剩余仓位 = 0.7 BTC (由 position.current_qty 反映)
+    sl_updated = False
+    for order in active_orders + (new_orders or []):
+        if order.order_role == OrderRole.SL and order.id == sl_order.id:
+            assert order.requested_qty == Decimal('0.7'), f"SL 订单数量应该更新为剩余仓位 0.7，实际为 {order.requested_qty}"
+            sl_updated = True
+            break
+
+    assert sl_updated, "SL 订单数量应该更新为剩余仓位"
+
+
+# ============================================================
 # UT-009: handle_order_filled SL 成交
 # ============================================================
 @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
