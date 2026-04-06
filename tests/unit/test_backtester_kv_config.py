@@ -819,6 +819,64 @@ class TestConfigPriorityBoundaryCases:
         # Should use default when field is missing
         assert captured_slippage == Decimal('0.001')
 
+    async def test_tp_slippage_rate_request_param_overrides_kv(self, mock_exchange_gateway, sample_klines):
+        """Test 17: tp_slippage_rate 请求参数优先级高于 KV 配置"""
+        # KV configs
+        kv_configs = {
+            'tp_slippage_rate': Decimal('0.0008'),
+        }
+
+        backtester = Backtester(exchange_gateway=mock_exchange_gateway)
+
+        # Request with explicit tp_slippage_rate param
+        request = BacktestRequest(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            mode="v3_pms",
+            tp_slippage_rate=Decimal('0.001'),  # Override KV (0.1% vs 0.08%)
+        )
+
+        captured_tp_slippage = None
+
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+            nonlocal captured_tp_slippage
+            captured_tp_slippage = (
+                request.tp_slippage_rate
+                or (kv_configs.get('tp_slippage_rate') if kv_configs else None)
+                or Decimal('0.0005')
+            )
+
+            from src.domain.models import PMSBacktestReport
+            return PMSBacktestReport(
+                strategy_id='test',
+                strategy_name='test',
+                backtest_start=0,
+                backtest_end=0,
+                initial_balance=Decimal('10000'),
+                final_balance=Decimal('10000'),
+                total_return=Decimal('0'),
+                total_trades=0,
+                winning_trades=0,
+                losing_trades=0,
+                win_rate=Decimal('0'),
+                total_pnl=Decimal('0'),
+                total_fees_paid=Decimal('0'),
+                total_slippage_cost=Decimal('0'),
+                max_drawdown=Decimal('0'),
+                positions=[],
+            )
+
+        with patch.object(backtester, '_run_v3_pms_backtest', side_effect=mock_run_v3_pms):
+            with patch('src.application.config_manager.ConfigManager') as mock_cm_class:
+                mock_cm = MagicMock()
+                mock_cm.get_backtest_configs = AsyncMock(return_value=kv_configs)
+                mock_cm_class.get_instance = MagicMock(return_value=mock_cm)
+
+                await backtester.run_backtest(request)
+
+        # Assert: Should use request tp_slippage_rate (0.001), not KV (0.0008)
+        assert captured_tp_slippage == Decimal('0.001'), f"Expected tp_slippage from request (0.001), got {captured_tp_slippage}"
+
     async def test_all_configs_missing_uses_all_defaults(self, mock_exchange_gateway, sample_klines):
         """Test 16: 所有配置缺失时使用全部默认值"""
         backtester = Backtester(exchange_gateway=mock_exchange_gateway)

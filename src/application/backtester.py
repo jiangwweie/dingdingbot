@@ -871,8 +871,71 @@ class Backtester:
         # No clear outcome (trade still open or reached end of data)
         return None
 
+    def _calculate_attempt_outcome(
+        self,
+        attempt: SignalAttempt,
+        klines: List[KlineData],
+        risk_config: RiskConfig,
+    ) -> Tuple[Optional[float], Optional[str]]:
+        """
+        Calculate pnl_ratio and exit_reason for a fired signal.
+
+        Args:
+            attempt: Signal attempt with SIGNAL_FIRED result
+            klines: Historical K-line data
+            risk_config: Risk configuration for stop-loss calculation
+
+        Returns:
+            Tuple of (pnl_ratio, exit_reason)
+            - pnl_ratio: float or None (e.g., 2.0 for 2R gain, -1.0 for 1R loss)
+            - exit_reason: str or None (e.g., "STOP_LOSS", "TAKE_PROFIT", "TIME_EXIT")
+        """
+        if attempt.final_result != "SIGNAL_FIRED" or not attempt.pattern:
+            return None, None
+
+        # Find entry kline
+        entry_kline = None
+        for k in klines:
+            if k.timestamp == attempt.kline_timestamp:
+                entry_kline = k
+                break
+
+        if not entry_kline:
+            return None, None
+
+        # Calculate stop-loss level
+        if attempt.direction == Direction.LONG:
+            stop_loss = entry_kline.low
+            take_profit_target = entry_kline.close + (entry_kline.close - stop_loss) * 2
+        else:  # SHORT
+            stop_loss = entry_kline.high
+            take_profit_target = entry_kline.close - (stop_loss - entry_kline.close) * 2
+
+        # Determine outcome using existing logic
+        outcome = self._determine_trade_outcome(
+            klines,
+            attempt.kline_timestamp,
+            entry_kline,
+            stop_loss,
+            take_profit_target,
+            attempt.direction,
+        )
+
+        if outcome == "WIN":
+            return 2.0, "TAKE_PROFIT"  # 2R gain
+        elif outcome == "LOSS":
+            return -1.0, "STOP_LOSS"   # 1R loss
+        else:
+            return 0.0, "TIME_EXIT"    # No clear outcome
+
     def _attempt_to_dict(self, attempt: SignalAttempt) -> Dict[str, Any]:
-        """Convert SignalAttempt to dictionary for JSON serialization."""
+        """Convert SignalAttempt to dictionary for JSON serialization.
+
+        BT-4 归因分析扩展字段:
+        - pnl_ratio: 盈亏比 (仅 SIGNAL_FIRED 信号)
+        - exit_reason: 出场原因 (仅 SIGNAL_FIRED 信号)
+        - metadata: 标准化元数据
+        """
         return {
             "strategy_name": attempt.strategy_name,
             "final_result": attempt.final_result,
@@ -880,9 +943,17 @@ class Backtester:
             "kline_timestamp": attempt.kline_timestamp,
             "pattern_score": attempt.pattern.score if attempt.pattern else None,
             "filter_results": [
-                {"filter": name, "passed": r.passed, "reason": r.reason}
+                {
+                    "filter": name,
+                    "passed": r.passed,
+                    "reason": r.reason,
+                    "metadata": r.metadata,  # BT-4: 包含标准化 metadata
+                }
                 for name, r in attempt.filter_results
             ],
+            # BT-4 新增字段
+            "pnl_ratio": attempt.pnl_ratio,
+            "exit_reason": attempt.exit_reason,
         }
 
     async def _save_backtest_signals(
@@ -1051,7 +1122,11 @@ class Backtester:
         slippage_rate = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
         fee_rate = request.fee_rate or (kv_configs.get('fee_rate') if kv_configs else None) or Decimal('0.0004')
         initial_balance = request.initial_balance or (kv_configs.get('initial_balance') if kv_configs else None) or Decimal('10000')
-        tp_slippage_rate = (kv_configs.get('tp_slippage_rate') if kv_configs else None) or Decimal('0.0005')  # 0.05% default
+        tp_slippage_rate = (
+            request.tp_slippage_rate
+            or (kv_configs.get('tp_slippage_rate') if kv_configs else None)
+            or Decimal('0.0005')
+        )  # 0.05% default
 
         logger.info(
             f"Running v3 PMS backtest with config: "

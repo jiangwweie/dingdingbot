@@ -490,9 +490,23 @@ class SignalAttempt:
     final_result: str                                # "SIGNAL_FIRED" / "NO_PATTERN" / "FILTERED"
     kline_timestamp: Optional[int] = None            # K-line close timestamp in milliseconds
 
+    # BT-4 归因分析扩展字段
+    _pnl_ratio: Optional[float] = None
+    _exit_reason: Optional[str] = None
+
     @property
     def direction(self) -> Optional[Direction]:
         return self.pattern.direction if self.pattern else None
+
+    @property
+    def pnl_ratio(self) -> Optional[float]:
+        """盈亏比 (仅 SIGNAL_FIRED 信号)"""
+        return self._pnl_ratio
+
+    @property
+    def exit_reason(self) -> Optional[str]:
+        """出场原因 (仅 SIGNAL_FIRED 信号)"""
+        return self._exit_reason
 
 
 # ============================================================
@@ -608,6 +622,10 @@ class BacktestRequest(BaseModel):
     fee_rate: Optional[Decimal] = Field(
         default=None,
         description="Fee rate for v3_pms mode (default: 0.0004, or from KV config)"
+    )
+    tp_slippage_rate: Optional[Decimal] = Field(
+        default=None,
+        description="Take-profit slippage rate for v3_pms mode (default: 0.0005, or from KV config)"
     )
 
     # Phase 4: 订单编排
