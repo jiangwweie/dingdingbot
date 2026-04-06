@@ -11,7 +11,7 @@ import json
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Set
 
 import aiosqlite
 
@@ -1206,87 +1206,32 @@ class OrderRepository:
             raise ValueError("批量删除最多支持 100 个订单")
 
         # 注意：移除外层锁，避免锁嵌套死锁
-        # 调用的方法（get_order_chain_by_order_id, get_order）已有锁保护
         # 数据库事务操作在单独的锁上下文中执行
         try:
             # Step 1: 收集所有需要删除的订单 ID（包括级联子订单）
-            # 使用锁保护数据库操作部分
-            async with self._ensure_lock():
-                all_order_ids = set(order_ids)
-                for order_id in order_ids:
-                    # 直接查询数据库，避免调用带锁的方法
-                    cursor = await self._db.execute(
-                        "SELECT * FROM orders WHERE id = ? ORDER BY created_at ASC",
-                        (order_id,)
-                    )
-                    row = await cursor.fetchone()
-                    await cursor.close()
+            # FIX-004: 使用递归方法获取完整订单链
+            all_order_ids = await self._get_all_related_order_ids(order_ids)
 
-                    if row:
-                        target_order = self._row_to_order(row)
-                        all_order_ids.add(target_order.id)
+            # Step 2: 获取订单详情
+            orders_to_delete = []
+            for oid in all_order_ids:
+                cursor = await self._db.execute(
+                    "SELECT * FROM orders WHERE id = ?",
+                    (oid,)
+                )
+                row = await cursor.fetchone()
+                await cursor.close()
+                if row:
+                    orders_to_delete.append(self._row_to_order(row))
 
-                        # 如果是子订单，获取父订单
-                        if target_order.parent_order_id:
-                            all_order_ids.add(target_order.parent_order_id)
-
-                        # 获取所有同 parent_order_id 或 oco_group_id 的订单
-                        if target_order.order_role == OrderRole.ENTRY:
-                            # ENTRY订单，获取所有子订单
-                            cursor = await self._db.execute(
-                                "SELECT id FROM orders WHERE parent_order_id = ?",
-                                (target_order.id,)
-                            )
-                            child_rows = await cursor.fetchall()
-                            await cursor.close()
-                            for child_row in child_rows:
-                                all_order_ids.add(child_row[0])
-                        else:
-                            # 子订单，获取父订单和所有兄弟订单
-                            if target_order.parent_order_id:
-                                cursor = await self._db.execute(
-                                    "SELECT id FROM orders WHERE parent_order_id = ?",
-                                    (target_order.parent_order_id,)
-                                )
-                                sibling_rows = await cursor.fetchall()
-                                await cursor.close()
-                                for sibling_row in sibling_rows:
-                                    all_order_ids.add(sibling_row[0])
-
-                # Step 2: 获取订单详情
-                orders_to_delete = []
-                for oid in all_order_ids:
-                    cursor = await self._db.execute(
-                        "SELECT * FROM orders WHERE id = ?",
-                        (oid,)
-                    )
-                    row = await cursor.fetchone()
-                    await cursor.close()
-                    if row:
-                        orders_to_delete.append(self._row_to_order(row))
-
-                # Step 3: 取消 OPEN 状态的订单（调用交易所 API）
-                if cancel_on_exchange:
-                    # 获取 ExchangeGateway 实例（通过全局或单例）
-                    from src.infrastructure.exchange_gateway import ExchangeGateway
-                    gateway = None
-
-                    for order in orders_to_delete:
+            # Step 3: 取消 OPEN 状态的订单（调用交易所 API）
+            # FIX-001: 使用注入的 ExchangeGateway 实例
+            if cancel_on_exchange:
+                for order in orders_to_delete:
                         if order.status in [OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]:
-                            if order.exchange_order_id:
+                            if order.exchange_order_id and self._exchange_gateway:
                                 try:
-                                    # 懒加载 ExchangeGateway
-                                    if gateway is None:
-                                        # TODO: 从配置或依赖注入获取 ExchangeGateway 实例
-                                        # 这里使用一个临时的初始化方式
-                                        logger.warning(f"跳过交易所取消：ExchangeGateway 未注入")
-                                        result["failed_to_cancel"].append({
-                                            "order_id": order.id,
-                                            "reason": "ExchangeGateway not initialized",
-                                        })
-                                        continue
-
-                                    result_cancel = await gateway.cancel_order(
+                                    result_cancel = await self._exchange_gateway.cancel_order(
                                         exchange_order_id=order.exchange_order_id,
                                         symbol=order.symbol,
                                     )
@@ -1298,11 +1243,19 @@ class OrderRepository:
                                             "reason": result_cancel.error_message or "Unknown error",
                                         })
                                 except Exception as e:
+                                    # FIX-009: 取消失败记录为 warning（业务异常）
                                     logger.warning(f"取消订单失败 {order.id}: {e}")
                                     result["failed_to_cancel"].append({
                                         "order_id": order.id,
                                         "reason": str(e),
                                     })
+                            elif not self._exchange_gateway:
+                                # FIX-009: 预期行为降级为 info
+                                logger.info(f"跳过交易所取消：ExchangeGateway 未注入")
+                                result["failed_to_cancel"].append({
+                                    "order_id": order.id,
+                                    "reason": "ExchangeGateway not initialized",
+                                })
                             else:
                                 # 没有 exchange_order_id，无法调用交易所
                                 result["failed_to_cancel"].append({
@@ -1310,37 +1263,35 @@ class OrderRepository:
                                     "reason": "No exchange_order_id",
                                 })
 
-                # Step 4: 批量删除数据库记录（事务保护）
-                await self._db.execute("BEGIN")
-                try:
-                    placeholders = ','.join('?' * len(orders_to_delete))
+            # Step 4: 批量删除数据库记录（事务保护）
+            # FIX-005: 分批删除，避免单次操作过大
+            BATCH_SIZE = 50
+            await self._db.execute("BEGIN")
+            try:
+                for i in range(0, len(orders_to_delete), BATCH_SIZE):
+                    batch = orders_to_delete[i:i + BATCH_SIZE]
+                    placeholders = ','.join('?' * len(batch))
                     await self._db.execute(
                         f"DELETE FROM orders WHERE id IN ({placeholders})",
-                        tuple(o.id for o in orders_to_delete)
+                        tuple(o.id for o in batch)
                     )
-                    await self._db.commit()
-                    result["deleted_from_db"] = [o.id for o in orders_to_delete]
-                    result["deleted_count"] = len(result["deleted_from_db"])
-                except Exception as db_error:
-                    await self._db.rollback()
-                    raise db_error
+                await self._db.commit()
+                result["deleted_from_db"] = [o.id for o in orders_to_delete]
+                result["deleted_count"] = len(result["deleted_from_db"])
+            except Exception as db_error:
+                await self._db.rollback()
+                raise db_error
 
-                # Step 5: 记录审计日志
-                audit_log_id = str(uuid.uuid4())
-                result["audit_log_id"] = audit_log_id
+            # Step 5: 记录审计日志
+            # FIX-002: 使用注入的审计日志器（全局单例）
+            audit_log_id = str(uuid.uuid4())
+            result["audit_log_id"] = audit_log_id
 
-                # 集成 OrderAuditLogger（ORD-5 已完成）
-                try:
-                    from src.application.order_audit_logger import OrderAuditLogger
-                    from src.domain.models import OrderAuditEventType, OrderAuditTriggerSource
+            try:
+                from src.domain.models import OrderAuditEventType, OrderAuditTriggerSource
 
-                    # 创建审计日志仓库（临时方案，应该复用单例）
-                    from src.infrastructure.order_audit_repository import OrderAuditLogRepository
-                    audit_repo = OrderAuditLogRepository()
-                    audit_logger = OrderAuditLogger(audit_repo)
-
-                    # 记录批量删除审计日志
-                    await audit_logger.log(
+                if self._audit_logger:
+                    await self._audit_logger.log(
                         order_id="BATCH_DELETE",
                         signal_id=None,
                         old_status=None,
@@ -1352,17 +1303,23 @@ class OrderRepository:
                             "order_ids": order_ids,
                             "cancelled_on_exchange": result["cancelled_on_exchange"],
                             "deleted_from_db": result["deleted_from_db"],
+                            # FIX-010: 增加失败详情
+                            "failed_to_cancel": result["failed_to_cancel"],
+                            "failed_to_delete": result.get("failed_to_delete", []),
                             "operator_id": audit_info.get("operator_id") if audit_info else None,
                             "ip_address": audit_info.get("ip_address") if audit_info else None,
                         },
                     )
-
                     logger.info(f"审计日志已记录：{audit_log_id}")
-                except Exception as audit_error:
-                    # 审计日志失败不影响主流程
-                    logger.warning(f"记录审计日志失败：{audit_error}")
+                else:
+                    # FIX-009: 预期行为降级为 info
+                    logger.info("审计日志器未注入，跳过日志记录")
+            except Exception as audit_error:
+                # FIX-009: 审计日志失败记录为 error（系统错误）
+                logger.error(f"记录审计日志失败：{audit_error}")
 
-                return result
+            return result
+
 
         except Exception as e:
             logger.error(f"批量删除订单失败：{str(e)}")

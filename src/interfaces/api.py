@@ -195,6 +195,7 @@ _signal_tracker: Optional[Any] = None  # SignalStatusTracker instance
 _snapshot_service: Optional[Any] = None  # ConfigSnapshotService instance
 _config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
 _order_repo: Optional[Any] = None  # OrderRepository instance
+_audit_logger: Optional[Any] = None  # OrderAuditLogger instance
 
 
 def set_dependencies(
@@ -206,6 +207,7 @@ def set_dependencies(
     snapshot_service: Optional[Any] = None,
     config_entry_repo: Optional[Any] = None,
     order_repo: Optional[Any] = None,
+    audit_logger: Optional[Any] = None,
 ) -> None:
     """
     Inject dependencies for API endpoints.
@@ -219,8 +221,9 @@ def set_dependencies(
         snapshot_service: Optional ConfigSnapshotService instance
         config_entry_repo: Optional ConfigEntryRepository instance
         order_repo: Optional OrderRepository instance
+        audit_logger: Optional OrderAuditLogger instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _audit_logger
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
@@ -229,6 +232,7 @@ def set_dependencies(
     _snapshot_service = snapshot_service
     _config_entry_repo = config_entry_repo
     _order_repo = order_repo
+    _audit_logger = audit_logger
 
 
 def _get_repository() -> SignalRepository:
@@ -276,8 +280,21 @@ def _get_order_repo() -> Any:
     if _order_repo is None:
         # Fallback: create a new instance
         from src.infrastructure.order_repository import OrderRepository
-        return OrderRepository()
+        repo = OrderRepository()
+        # Auto-inject dependencies if available
+        if _exchange_gateway:
+            repo.set_exchange_gateway(_exchange_gateway)
+        if _audit_logger:
+            repo.set_audit_logger(_audit_logger)
+        return repo
     return _order_repo
+
+
+def _get_audit_logger() -> Any:
+    """Get audit logger or raise error if not initialized."""
+    if _audit_logger is None:
+        raise HTTPException(status_code=503, detail="Audit logger not initialized")
+    return _audit_logger
 
 
 # ============================================================
@@ -360,7 +377,29 @@ async def lifespan(app: FastAPI):
             observer=None,  # TODO: Initialize observer when available
         )
 
+        # Initialize OrderAuditLogger global singleton (FIX-002)
+        global _audit_logger
+        from src.application.order_audit_logger import OrderAuditLogger
+        from src.infrastructure.order_audit_repository import OrderAuditLogRepository
+        
+        # Get db_session_factory from config_manager if available
+        def get_db_session():
+            """Get database session factory for audit logger."""
+            from src.infrastructure.order_audit_repository import get_db_session
+            return get_db_session()
+        
+        audit_repo = OrderAuditLogRepository(db_session_factory=get_db_session)
+        await audit_repo.initialize(queue_size=1000)
+        _audit_logger = OrderAuditLogger(audit_repo)
+        logger.info("OrderAuditLogger initialized as global singleton")
+
         # OrderRepository 按需创建（DEBT-3 方案）
+        # Auto-inject dependencies if _order_repo is set externally
+        if _order_repo is not None:
+            if _exchange_gateway:
+                _order_repo.set_exchange_gateway(_exchange_gateway)
+            if _audit_logger:
+                _order_repo.set_audit_logger(_audit_logger)
 
         yield
 
@@ -373,6 +412,11 @@ async def lifespan(app: FastAPI):
         if _config_entry_repo is not None:
             await _config_entry_repo.close()
             logger.info("ConfigEntryRepository closed")
+
+        # Shutdown audit logger (FIX-002)
+        if _audit_logger is not None:
+            await _audit_logger.stop()
+            logger.info("OrderAuditLogger stopped")
 
         # 清理配置管理 Repositories
         await strategy_repo.close()
