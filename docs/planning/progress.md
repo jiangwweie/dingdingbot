@@ -4,9 +4,63 @@
 
 ---
 
-### 2026-04-06 - 会话完成总结 🎉
+### 2026-04-06 - BT-4 策略归因分析功能完成 🎉
 
 **本次会话完成内容**:
+
+**1. BT-4 策略归因分析功能开发** (33 测试通过，代码审查已通过)
+
+**核心功能**: 四个维度的策略归因分析
+- **B 维度**: 形态质量归因（Pinbar 评分与表现关系）
+- **C 维度**: 过滤器归因（各过滤器对胜率/回撤的影响）
+- **D 维度**: 市场趋势归因（顺势/逆势交易表现）
+- **F 维度**: 盈亏比归因（最优盈亏比区间识别）
+
+**任务完成**:
+- BT-4.1: AttributionAnalyzer 和 AttributionReport 模型 ✅
+- BT-4.2: 维度 B - 形态质量归因 ✅
+- BT-4.3: 维度 C - 过滤器归因 ✅
+- BT-4.4: 维度 D - 市场趋势归因 ✅
+- BT-4.5: 维度 F - 盈亏比归因 ✅
+- BT-4.6: Attribution API 端点 (2 个) ✅
+
+**API 端点**:
+- `POST /api/backtest/{report_id}/attribution` - 对数据库报告进行归因分析
+- `POST /api/backtest/attribution/preview` - 预览归因分析（支持直接传入报告数据）
+
+**代码审查问题修复** (ADR-002):
+| 优先级 | 问题编号 | 修复内容 | 状态 |
+|--------|---------|---------|------|
+| Critical | C-01 | `_compare_score_performance` 除零风险 | ✅ |
+| Critical | C-02 | `_analyze_trend` 除零风险 | ✅ |
+| Critical | C-03 | `AttributionAnalysisRequest` 验证器 | ✅ |
+| Important | I-01 | `impact_on_win_rate` 硬编码 | ✅ |
+| Important | I-02 | `suggested_rr` 格式修正 | ✅ |
+| Important | I-03 | 测试资源泄漏 | ✅ |
+| Important | I-04 | `AttributionReport` 版本字段 | ✅ |
+| Minor | M-04 | 日志上下文增强 | ✅ |
+
+**测试结果**:
+- 单元测试：20 个通过
+- 集成测试：13 个通过
+- **总计：33 个测试 100% 通过**
+
+**修改文件**:
+- `src/application/attribution_analyzer.py` (新建，+180 行)
+- `src/domain/models.py` (+10 行)
+- `src/interfaces/api.py` (+25 行)
+- `tests/unit/test_attribution_analyzer.py` (新建，+100 行)
+- `tests/integration/test_attribution_api.py` (新建，+80 行)
+
+**文档**:
+- `docs/arch/adr-001-backtest-data-integrity-fix.md` - 数据完整性修复设计
+- `docs/arch/adr-002-bt4-review-fixes.md` - 审查问题修复方案
+
+**Git 提交**: `ec77a68 fix(attribution): 修复 BT-4 策略归因分析功能代码审查问题`
+
+---
+
+### 2026-04-06 - 回测配置 KV 化开发完成
 
 **1. 回测配置 KV 化开发** (132 测试通过，代码审查 97/100)
 - T1: ConfigEntryRepository 回测配置扩展 ✅

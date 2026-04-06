@@ -1,103 +1,89 @@
 {
-  "feature": "订单管理技术债修复 + OpenClaw 集成规划 + 前端紧急修复",
-  "created_at": "2026-04-03T08:00:00Z",
+  "feature": "BT-4 策略归因分析功能开发",
+  "created_at": "2026-04-06T08:00:00Z",
   "session": "completed",
-  "status": "partial_completed",
-  "last_updated": "2026-04-06T17:30:00Z",
+  "status": "completed",
+  "last_updated": "2026-04-06T23:00:00Z",
   "tasks": [
     {
-      "id": "FIX-1",
-      "subject": "Config 页面 toFixed 错误修复",
-      "role": "backend-dev",
-      "estimated_hours": 0.5,
-      "status": "completed",
-      "blocks": [],
-      "blocked_by": [],
-      "completed_at": "2026-04-04T19:00:00Z",
-      "completion_notes": "Decimal → float 转换修复，API 返回类型修正"
-    },
-    {
-      "id": "FIX-2",
-      "subject": "Orders 页面 react-window 错误修复",
-      "role": "frontend-dev",
-      "estimated_hours": 0.5,
-      "status": "completed",
-      "blocks": [],
-      "blocked_by": [],
-      "completed_at": "2026-04-04T19:00:00Z",
-      "completion_notes": "双重 null 检查增强，防御逻辑修复"
-    },
-    {
-      "id": "FIX-3",
-      "subject": "main.py ConfigEntryRepository 初始化补充",
-      "role": "backend-dev",
-      "estimated_hours": 0.25,
-      "status": "completed",
-      "blocks": [],
-      "blocked_by": [],
-      "completed_at": "2026-04-04T19:30:00Z",
-      "completion_notes": "补充 ConfigEntryRepository 初始化，API 依赖注入完整"
-    },
-    {
-      "id": "TEST-1",
-      "subject": "修复策略参数 API 集成测试",
-      "role": "qa-tester",
-      "estimated_hours": 1,
-      "status": "completed",
-      "blocks": [],
-      "blocked_by": [],
-      "completed_at": "2026-04-03T14:00:00Z"
-    },
-    {
-      "id": "DEBT-3",
-      "subject": "API 依赖注入方案实现",
-      "role": "backend-dev",
-      "estimated_hours": 1.5,
-      "status": "completed",
-      "blocks": ["DEBT-4"],
-      "blocked_by": [],
-      "completed_at": "2026-04-03T20:00:00Z"
-    },
-    {
-      "id": "CONFIG-1",
-      "subject": "SignalPipeline 热重载日志观察",
-      "role": "backend-dev",
-      "estimated_hours": 1,
-      "status": "completed",
-      "blocks": [],
-      "blocked_by": [],
-      "completed_at": "2026-04-06T17:30:00Z",
-      "completion_notes": "6 处日志埋点，记录配置变更、MTF EMA 清空、K-line 重放等"
-    },
-    {
-      "id": "CONFIG-2",
-      "subject": "配置 DB 表字段扩展 - 可选字段添加",
+      "id": "BT-4.1",
+      "subject": "创建 AttributionAnalyzer 和 AttributionReport 模型",
       "role": "backend-dev",
       "estimated_hours": 2,
       "status": "completed",
       "blocks": [],
       "blocked_by": [],
-      "completed_at": "2026-04-06T17:30:00Z",
-      "completion_notes": "RiskConfig 新增 3 字段，SystemConfig 新增 7 字段"
+      "completed_at": "2026-04-06T20:00:00Z",
+      "completion_notes": "归因分析引擎和模型定义完成"
     },
     {
-      "id": "CONFIG-3",
-      "subject": "配置历史追踪增强 - 记录 import/export",
+      "id": "BT-4.2",
+      "subject": "实现维度 B - 形态质量归因",
       "role": "backend-dev",
       "estimated_hours": 2,
       "status": "completed",
       "blocks": [],
       "blocked_by": [],
-      "completed_at": "2026-04-06T17:30:00Z",
-      "completion_notes": "import/export 操作记录到 config_history 表"
+      "completed_at": "2026-04-06T20:30:00Z",
+      "completion_notes": "Pinbar 评分分组统计完成"
     },
     {
-      "id": "DEBT-1",
-      "subject": "创建 order_audit_logs 表",
+      "id": "BT-4.3",
+      "subject": "实现维度 C - 过滤器归因",
       "role": "backend-dev",
-      "estimated_hours": 1.5,
-      "status": "pending",
+      "estimated_hours": 2,
+      "status": "completed",
       "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-06T21:00:00Z",
+      "completion_notes": "过滤器影响计算完成"
+    },
+    {
+      "id": "BT-4.4",
+      "subject": "实现维度 D - 市场趋势归因",
+      "role": "backend-dev",
+      "estimated_hours": 3,
+      "status": "completed",
+      "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-06T21:30:00Z",
+      "completion_notes": "顺势/逆势交易统计完成"
+    },
+    {
+      "id": "BT-4.5",
+      "subject": "实现维度 F - 盈亏比归因",
+      "role": "backend-dev",
+      "estimated_hours": 2,
+      "status": "completed",
+      "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-06T22:00:00Z",
+      "completion_notes": "最优盈亏比区间识别完成"
+    },
+    {
+      "id": "BT-4.6",
+      "subject": "创建 Attribution API 端点",
+      "role": "backend-dev",
+      "estimated_hours": 1,
+      "status": "completed",
+      "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-06T22:30:00Z",
+      "completion_notes": "2 个 API 端点完成"
+    },
+    {
+      "id": "BT-4.REVIEW",
+      "subject": "代码审查问题修复",
+      "role": "backend-dev",
+      "estimated_hours": 4,
+      "status": "completed",
+      "blocks": [],
+      "blocked_by": [],
+      "completed_at": "2026-04-06T23:00:00Z",
+      "completion_notes": "8 个审查问题全部修复（C-01~C-03, I-01~I-04, M-04）"
+    }
+  ]
+}
       "blocked_by": []
     },
     {

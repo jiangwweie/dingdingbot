@@ -1,8 +1,8 @@
 # 状态看板
 
-**功能**: 订单管理技术债修复 + OpenClaw 集成规划
-**最后更新**: 2026-04-03 18:37
-**当前阶段**: 开发会话 (大部分已完成)
+**功能**: BT-4 策略归因分析功能开发
+**最后更新**: 2026-04-06 23:00
+**当前阶段**: completed
 
 ---
 
@@ -10,59 +10,39 @@
 
 | 任务 ID | 任务名称 | 角色 | 状态 | 阻塞依赖 |
 |---------|----------|------|------|----------|
-| TEST-1 | 修复策略参数 API 集成测试 | qa-tester | ✅ 已完成 | 无 |
-| TEST-2 | 集成测试 fixture 重构 - asyncio.Lock 死锁修复 | qa-tester | ✅ 已完成 | 无 |
-| DEBT-3 | API 依赖注入方案实现 | backend-dev | ✅ 已完成 | 无 |
-| DEBT-4 | asyncio.Lock 事件循环修复 | backend-dev | ✅ 已完成 | 无 |
-| DEBT-5 | asyncio.Lock (OrderRepository) | backend-dev | ✅ 已完成 | 无 |
-| DEBT-6 | asyncio.Lock (Signal+Config) | backend-dev | ✅ 已完成 | 无 |
-| DEBT-7 | lifespan 初始化 | backend-dev | ✅ 已完成 | 无 |
-| DEBT-1 | 创建 order_audit_logs 表 | backend-dev | ☐ 待启动 | 无 |
-| DEBT-2 | 集成交易所 API 到批量删除 | backend-dev | ☐ 待启动 | DEBT-1 |
+| BT-4.1 | 创建 AttributionAnalyzer 和 AttributionReport 模型 | backend-dev | ✅ 已完成 | 无 |
+| BT-4.2 | 实现维度 B - 形态质量归因 | backend-dev | ✅ 已完成 | 无 |
+| BT-4.3 | 实现维度 C - 过滤器归因 | backend-dev | ✅ 已完成 | 无 |
+| BT-4.4 | 实现维度 D - 市场趋势归因 | backend-dev | ✅ 已完成 | 无 |
+| BT-4.5 | 实现维度 F - 盈亏比归因 | backend-dev | ✅ 已完成 | 无 |
+| BT-4.6 | 创建 Attribution API 端点 | backend-dev | ✅ 已完成 | 无 |
+| BT-4.REVIEW | 代码审查问题修复 | backend-dev | ✅ 已完成 | 无 |
 
 **图例**: ☐ 待开始 | 🔄 进行中 | ✅ 已完成 | 🔴 阻塞
 
 ---
 
-## 🎯 并行任务簇
+## 📈 本日成果
 
-| 簇 ID | 任务 | 状态 |
-|-------|------|------|
-| 簇 1 (TEST-1) | TEST-1 | ✅ 已完成 |
-| 簇 2 (DEBT-3) | DEBT-3 | ✅ 已完成 |
-| 簇 3 (技术债并行) | DEBT-4, DEBT-5, DEBT-6 | ✅ 已完成 |
-| 簇 4 (依赖任务) | DEBT-7 | ✅ 已完成 |
-| 簇 5 (测试重构) | TEST-2 | ✅ 已完成 |
-| 簇 6 (审计日志) | DEBT-1, DEBT-2 | ☐ 待开始 |
-
----
-
-## 🔴 阻塞问题
-
-| 阻塞 ID | 任务 | 原因 | 解决状态 |
-|---------|------|------|----------|
-| 无 | - | - | - |
+- ✅ 7 个任务全部完成
+- ✅ 33 个测试 100% 通过
+- ✅ 8 个代码审查问题全部修复
+- ✅ ADR-002 修复方案文档完成
 
 ---
 
 ## 📝 备注
 
-**今日完成** (2026-04-03):
-- ✅ TEST-1: 策略参数 API 集成测试修复 (22/22 通过)
-- ✅ DEBT-3: API 依赖注入方案实现 (架构评审通过)
-- ✅ DEBT-4: asyncio.Lock 事件循环修复 (方法重名冲突解决)
-- ✅ DEBT-5: asyncio.Lock (OrderRepository) (_ensure_lock() 延迟创建)
-- ✅ DEBT-6: asyncio.Lock (Signal+Config) (_ensure_lock() 延迟创建)
-- ✅ DEBT-7: lifespan 初始化 (两阶段修复避免死锁)
+**今日完成** (2026-04-06):
+- ✅ BT-4.1: 归因分析引擎和模型定义
+- ✅ BT-4.2: 形态质量归因（Pinbar 评分分组）
+- ✅ BT-4.3: 过滤器归因（影响计算实现）
+- ✅ BT-4.4: 市场趋势归因（顺势/逆势统计）
+- ✅ BT-4.5: 盈亏比归因（最优区间识别）
+- ✅ BT-4.6: 2 个 Attribution API 端点
+- ✅ BT-4.REVIEW: 8 个审查问题修复（C-01~C-03, I-01~I-04, M-04）
 
-**遗留问题**:
-- ⚠️ TEST-2: 集成测试 fixture 重构（P1 优先级）
-  - fixture 混合同步 TestClient 和异步 order_repository
-  - 事件循环冲突导致集成测试无法运行
-  - 建议：使用 httpx.AsyncClient + 明确事件循环管理
-
-**推荐执行顺序**:
-1. TEST-2 (集成测试 fixture 重构) - 3h
-2. DEBT-1 (审计日志表创建) - 1.5h
-3. DEBT-2 (交易所 API 集成) - 2h
-4. 订单链完整测试验证 - 0.5h
+**下一优先级**:
+- ORD-1: 订单状态机实现
+- ORD-2: 对账机制实现
+- BT-1: 滑点与流动性模型
