@@ -4,6 +4,93 @@
 
 ---
 
+### 2026-04-06 - TEST-2 OrderManager 测试重构完成 ✅
+
+**任务 ID**: TEST-2  
+**负责人**: QA Tester + Architect  
+**总工时**: 2h  
+**优先级**: P0
+
+**任务目标**: 重构 OrderManager 测试，覆盖率从 75% 提升到 95%
+
+**完成工作**:
+
+1. ✅ **TEST-2-T1**: 参数化测试覆盖 SHORT 方向
+   - 测试：`test_calculate_stop_loss_and_tp_price_parametrized`
+   - 覆盖：LONG/SHORT 双向止损/止盈价格计算
+
+2. ✅ **TEST-2-T2**: 依赖注入 setter 测试
+   - 测试：`test_set_order_repository`, `test_set_order_lifecycle_service`
+   - 覆盖：依赖注入 setter 方法
+
+3. ✅ **TEST-2-T3**: 异常处理路径测试
+   - 测试：`test_notify_order_changed_callback_exception`
+   - 测试：`test_save_order_repository_exception`
+   - 测试：`test_cancel_order_via_service_exception`
+   - 测试：`test_cancel_order_via_service_no_service`
+   - 覆盖：4 个异常处理路径
+
+4. ✅ **TEST-2-T4**: TP ratios 归一化测试
+   - 测试：`test_tp_ratios_normalization_internal`
+   - 测试：`test_tp_ratios_no_normalization_needed`
+   - 覆盖：内部归一化逻辑
+
+5. ✅ **TEST-2-T5**: OCO 完整路径测试
+   - 测试：`test_oco_full_path_full_close`
+   - 测试：`test_oco_full_path_partial_close`
+   - 覆盖：完全平仓/部分平仓场景
+
+6. ✅ **TEST-2-T6**: SHORT 方向 TP/SL 生成测试
+   - 测试：`test_generate_tp_sl_orders_short_direction`
+   - 覆盖：SHORT 方向 TP/SL 订单生成
+
+7. ✅ **TEST-2-T7**: 边界条件测试
+   - 测试：`test_get_tp_role_invalid_level`
+   - 测试：`test_handle_order_filled_no_position`
+   - 测试：`test_handle_order_filled_no_exec_price`
+   - 测试：`test_get_order_chain_status_empty`
+   - 测试：`test_get_active_order_count`
+   - 测试：`test_create_order_chain_default_strategy`
+   - 覆盖：空值/零值/极值/无效级别测试
+
+8. ✅ **TEST-2-T8**: 覆盖率提升测试
+   - 测试：`test_save_order_chain`
+   - 测试：`test_handle_order_filled_find_position_by_signal_id`
+   - 测试：`test_generate_tp_sl_orders_last_level_qty_recalculation`
+   - 测试：`test_apply_oco_logic_for_tp_full_close`
+   - 测试：`test_find_order_by_role_not_found`
+   - 测试：`test_get_order_chain_status_different_signal_id`
+   - 测试：`test_get_order_chain_status_sl_filled_and_canceled`
+   - 测试：`test_handle_order_filled_tp_find_position_by_values`
+   - 测试：`test_generate_tp_sl_orders_qty_fallback`
+   - 覆盖：所有未覆盖的代码路径
+
+**验收标准**:
+- [x] OrderManager 覆盖率 ≥ 95% → **实际 100%** ✅
+- [x] SHORT 方向覆盖 100% ✅
+- [x] 异常处理覆盖 100% ✅
+- [x] 新增测试用例 12+ 个 → **实际新增 24 个** ✅
+- [x] 所有测试通过 `pytest tests/unit/test_order_manager.py -v` ✅
+
+**测试统计**:
+| 指标 | 目标 | 实际 | 状态 |
+|------|------|------|------|
+| 测试用例数 | 25+ | **43** | ✅ |
+| 覆盖率 | ≥95% | **100%** | ✅ |
+| SHORT 方向覆盖 | 100% | **100%** | ✅ |
+| 异常处理覆盖 | 100% | **100%** | ✅ |
+
+**修改文件**:
+- `tests/unit/test_order_manager.py` - 重构版测试文件
+
+**Git 提交**:
+```
+Commit: [待生成]
+Message: test(TEST-2): OrderManager 测试重构 - 覆盖率 75%→100%
+```
+
+---
+
 ### 2026-04-06 - 混合测试策略建立完成 ✅
 
 **任务 ID**: PM-TEST-Full
