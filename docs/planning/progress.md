@@ -4,6 +4,121 @@
 
 ---
 
+### 2026-04-06 - T8: 回测配置集成测试与验收 ✅
+
+**会话阶段**: 任务完成
+**任务目标**: 
+- 执行端到端集成测试，验证回测配置 KV 化功能完整可用
+- 验证配置管理流程：保存 → 读取 → 验证值
+- 验证 Backtester 集成：使用 KV 配置运行回测，验证优先级逻辑
+- 验证 API 端点集成：GET/PUT 端点功能与边界值验证
+
+**完成工作**:
+1. ✅ 运行单元测试 `test_backtester_kv_config.py` - 16 个测试全部通过
+2. ✅ 运行集成测试 `test_backtest_config_api.py` - 24 个测试全部通过
+3. ✅ 验证配置优先级逻辑：请求参数 > KV 配置 > 代码默认值
+4. ✅ 验证 Profile 隔离测试
+5. ✅ 验证边界值测试：零值/最大值/负值/类型错误
+
+**测试文件**:
+- `tests/unit/test_backtester_kv_config.py` (16 个测试)
+- `tests/integration/test_backtest_config_api.py` (24 个测试)
+
+**单元测试覆盖场景**:
+1. KV Config Loading (4 个测试):
+   - v3_pms 模式加载 KV 配置 ✅
+   - 传统模式不加载 KV 配置 ✅
+   - ConfigManager 不可用降级 ✅
+   - KV 加载异常降级 ✅
+
+2. Config Priority (4 个测试):
+   - 请求参数覆盖 KV 配置 ✅
+   - KV 配置覆盖代码默认值 ✅
+   - KV 为空使用代码默认 ✅
+   - 部分 KV 缺失使用默认 ✅
+
+3. MockMatchingEngine Integration (4 个测试):
+   - 合并配置传递给匹配引擎 ✅
+   - 请求参数在匹配引擎中覆盖 KV ✅
+   - initial_balance 传递给 Account ✅
+   - 请求 initial_balance 覆盖 KV ✅
+
+4. Config Priority Boundary Cases (4 个测试):
+   - 零值 slippage_rate 行为 ✅
+   - 显式 None 与缺失字段区别 ✅
+   - 所有配置缺失使用默认 ✅
+
+**集成测试覆盖场景**:
+1. GET /api/backtest/configs (4 个测试):
+   - 返回 HTTP 200 ✅
+   - 返回 4 个配置项 ✅
+   - 配置值为字符串格式 ✅
+   - 默认值正确 ✅
+
+2. PUT /api/backtest/configs (4 个测试):
+   - 返回 HTTP 200 ✅
+   - 更新全部 4 个配置项 ✅
+   - 部分更新支持 ✅
+   - 返回更新后的值 ✅
+
+3. 验证测试 (10 个测试):
+   - slippage_rate 负值验证 ✅
+   - slippage_rate 超限验证 ✅
+   - fee_rate 负值/超限验证 ✅
+   - initial_balance 零值/负值验证 ✅
+   - tp_slippage_rate 负值/超限验证 ✅
+   - 无效类型验证 ✅
+   - 多字段错误验证 ✅
+
+4. 边界情况测试 (6 个测试):
+   - slippage_rate 零值边界 ✅
+   - slippage_rate 最大值边界 ✅
+   - 极小值测试 ✅
+   - 大数值测试 ✅
+   - 字符串数字测试 ✅
+   - 空 payload 测试 ✅
+
+**测试结果**:
+```
+单元测试:
+======================== 16 passed, 1 warning in 0.73s ========================
+tests/unit/test_backtester_kv_config.py::TestKVConfigLoading (4 测试) ✅
+tests/unit/test_backtester_kv_config.py::TestConfigPriority (4 测试) ✅
+tests/unit/test_backtester_kv_config.py::TestConfigLogging (1 测试) ✅
+tests/unit/test_backtester_kv_config.py::TestMockMatchingEngineIntegration (4 测试) ✅
+tests/unit/test_backtester_kv_config.py::TestConfigPriorityBoundaryCases (3 测试) ✅
+
+集成测试:
+======================== 24 passed, 11 warnings in 0.80s ========================
+tests/integration/test_backtest_config_api.py::TestGetBacktestConfigs (4 测试) ✅
+tests/integration/test_backtest_config_api.py::TestUpdateBacktestConfigs (4 测试) ✅
+tests/integration/test_backtest_config_api.py::TestUpdateConfigsValidation (10 测试) ✅
+tests/integration/test_backtest_config_api.py::TestEdgeCases (6 测试) ✅
+
+总计：40/40 测试通过 ✅
+```
+
+**配置优先级规则验证**:
+```
+1. API 请求参数 (最高优先级) ✅
+2. KV 配置 (config_entries_v2) ✅
+3. 代码默认值 (最低优先级) ✅
+```
+
+**代码默认值**:
+- `slippage_rate`: 0.001 (0.1%)
+- `fee_rate`: 0.0004 (0.04%)
+- `initial_balance`: 10000 (USDT)
+- `tp_slippage_rate`: 0.0005 (0.05%)
+
+**验收标准**:
+- [x] 所有单元测试通过 (16/16) ✅
+- [x] 所有集成测试通过 (24/24) ✅
+- [x] 配置可保存和读取 ✅
+- [x] Backtester 使用 KV 配置运行正常 ✅
+
+---
+
 ### 2026-04-06 - T7: 回测配置单元测试 ✅
 
 **会话阶段**: 任务完成
