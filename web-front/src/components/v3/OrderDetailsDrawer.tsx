@@ -37,6 +37,8 @@ interface OrderDetailsDrawerProps {
 }
 
 const statusIcon: Record<OrderStatus, JSX.Element> = {
+  CREATED: <Timer className="w-5 h-5" />,
+  SUBMITTED: <Activity className="w-5 h-5" />,
   PENDING: <Timer className="w-5 h-5" />,
   OPEN: <Clock className="w-5 h-5" />,
   FILLED: <CheckCircle className="w-5 h-5" />,
