@@ -53,8 +53,9 @@ async def repository():
     yield repo
 
     await repo.close()
-    os.remove(db_path)
-    os.rmdir(temp_dir)
+    # Cleanup: remove db file and temp directory
+    import shutil
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -151,6 +152,81 @@ class TestConfigSnapshotServiceCreateAutoSnapshot:
 
         snapshot = await service.get_snapshot_detail(snapshot_id)
         assert "配置变更自动快照" in snapshot["description"]
+
+    @pytest.mark.asyncio
+    async def test_create_auto_snapshot_with_kv_configs(self, service, sample_user_config):
+        """Test auto-snapshot includes KV configs by default."""
+        from src.infrastructure.config_entry_repository import ConfigEntryRepository
+
+        # Setup: Create a test KV config entry
+        kv_repo = ConfigEntryRepository()
+        await kv_repo.initialize()
+        await kv_repo.upsert_entry("test.key", "test_value")
+        await kv_repo.close()
+
+        # Create auto snapshot (should include KV configs by default)
+        snapshot_id = await service.create_auto_snapshot(
+            config=sample_user_config,
+            description="Auto snapshot with KV"
+        )
+
+        # Verify snapshot was created
+        assert snapshot_id is not None
+        snapshot = await service.get_snapshot_detail(snapshot_id)
+
+        # Verify KV configs are included in config_json
+        import json
+        config_data = json.loads(snapshot["config_json"])
+        assert "_kv_configs" in config_data
+        assert "test.key" in config_data["_kv_configs"]
+        assert config_data["_kv_configs"]["test.key"] == "test_value"
+
+    @pytest.mark.asyncio
+    async def test_create_auto_snapshot_without_kv_configs(self, service, sample_user_config):
+        """Test auto-snapshot can exclude KV configs when disabled."""
+        # Create auto snapshot with include_kv_configs=False
+        snapshot_id = await service.create_auto_snapshot(
+            config=sample_user_config,
+            description="Auto snapshot without KV",
+            include_kv_configs=False
+        )
+
+        # Verify snapshot was created
+        assert snapshot_id is not None
+        snapshot = await service.get_snapshot_detail(snapshot_id)
+
+        # Verify KV configs are NOT included
+        import json
+        config_data = json.loads(snapshot["config_json"])
+        assert "_kv_configs" not in config_data
+
+    @pytest.mark.asyncio
+    async def test_create_manual_snapshot_with_kv_configs(self, service, sample_user_config):
+        """Test manual snapshot with KV configs."""
+        from src.infrastructure.config_entry_repository import ConfigEntryRepository
+
+        # Setup: Create a test KV config entry
+        kv_repo = ConfigEntryRepository()
+        await kv_repo.initialize()
+        await kv_repo.upsert_entry("manual.test", "manual_value")
+        await kv_repo.close()
+
+        # Create manual snapshot with KV configs
+        snapshot_id = await service.create_manual_snapshot_with_kv_configs(
+            version="v1.0.1",
+            config=sample_user_config,
+            description="Manual snapshot with KV"
+        )
+
+        # Verify snapshot was created
+        assert snapshot_id is not None
+        snapshot = await service.get_snapshot_detail(snapshot_id)
+
+        # Verify KV configs are included
+        import json
+        config_data = json.loads(snapshot["config_json"])
+        assert "_kv_configs" in config_data
+        assert "manual.test" in config_data["_kv_configs"]
 
 
 class TestConfigSnapshotServiceGetSnapshotList:

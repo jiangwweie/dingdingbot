@@ -4,12 +4,21 @@ Config Snapshot Service - Business logic for configuration version control.
 import json
 import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional, Dict, Any, List, Tuple
 
 from src.application.config_manager import UserConfig
 from src.domain.models import ConfigSnapshot
 from src.infrastructure.config_snapshot_repository import ConfigSnapshotRepository
-from src.infrastructure.logger import mask_secret
+from src.infrastructure.logger import mask_secret, logger
+
+
+class DecimalEncoder(json.JSONEncoder):
+    """Custom JSON encoder for Decimal types."""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return str(obj)
+        return super().default(obj)
 
 
 class ConfigSnapshotError(Exception):
@@ -97,7 +106,65 @@ class ConfigSnapshotService:
         # Serialize config to JSON (with masking for sensitive fields)
         config_dict = config.model_dump(mode='json')
         masked_config = self._mask_config(config_dict)
-        config_json = json.dumps(masked_config, indent=2)
+        config_json = json.dumps(masked_config, indent=2, cls=DecimalEncoder)
+
+        snapshot_data = {
+            "version": version,
+            "config_json": config_json,
+            "description": description,
+            "created_by": created_by,
+        }
+
+        return await self.repo.create(snapshot_data)
+
+    async def create_manual_snapshot_with_kv_configs(
+        self,
+        version: str,
+        config: UserConfig,
+        description: str = "",
+        created_by: str = "user",
+        include_kv_configs: bool = True
+    ) -> int:
+        """
+        Create a manual configuration snapshot with optional KV configs.
+
+        Args:
+            version: Semantic version string (e.g., 'v1.0.0')
+            config: UserConfig model to snapshot
+            description: Optional description
+            created_by: Creator identifier
+            include_kv_configs: Whether to include KV configs from database (default: True)
+
+        Returns:
+            Created snapshot ID
+
+        Raises:
+            SnapshotValidationError: If version format is invalid
+        """
+        # Validate version format
+        if not self.VERSION_PATTERN.match(version):
+            raise SnapshotValidationError(
+                f"Invalid version format '{version}': must match pattern 'vX.Y' where X is date (YYYYMMDD) and Y is time (HHMMSS or HH), e.g., 'v1.0.0' or 'v20260402.153045'"
+            )
+
+        # Serialize config to JSON (with masking for sensitive fields)
+        config_dict = config.model_dump(mode='json')
+        masked_config = self._mask_config(config_dict)
+
+        # If include_kv_configs is True, fetch and merge KV configs
+        if include_kv_configs:
+            try:
+                from src.infrastructure.config_entry_repository import ConfigEntryRepository
+                kv_repo = ConfigEntryRepository()
+                await kv_repo.initialize()
+                kv_configs = await kv_repo.get_all_entries()
+                masked_config['_kv_configs'] = kv_configs
+                await kv_repo.close()
+            except Exception as e:
+                # Log warning but don't fail the snapshot
+                logger.warning(f"Failed to include KV configs in snapshot: {e}")
+
+        config_json = json.dumps(masked_config, indent=2, cls=DecimalEncoder)
 
         snapshot_data = {
             "version": version,
@@ -111,7 +178,8 @@ class ConfigSnapshotService:
     async def create_auto_snapshot(
         self,
         config: UserConfig,
-        description: str = "配置变更自动快照"
+        description: str = "配置变更自动快照",
+        include_kv_configs: bool = True
     ) -> Optional[int]:
         """
         Create an automatic configuration snapshot (before config change).
@@ -122,6 +190,7 @@ class ConfigSnapshotService:
         Args:
             config: UserConfig model to snapshot
             description: Auto-generated description
+            include_kv_configs: Whether to include KV configs from database (default: True)
 
         Returns:
             Created snapshot ID, or None if snapshot creation failed
@@ -134,16 +203,35 @@ class ConfigSnapshotService:
             # Append description with timestamp
             full_description = f"{description} - {now.isoformat()}"
 
-            return await self.create_manual_snapshot(
-                version=version,
-                config=config,
-                description=full_description,
-                created_by="system"
-            )
+            # Serialize config to JSON (with masking for sensitive fields)
+            config_dict = config.model_dump(mode='json')
+            masked_config = self._mask_config(config_dict)
+
+            # If include_kv_configs is True, fetch and merge KV configs
+            if include_kv_configs:
+                try:
+                    from src.infrastructure.config_entry_repository import ConfigEntryRepository
+                    kv_repo = ConfigEntryRepository()
+                    await kv_repo.initialize()
+                    kv_configs = await kv_repo.get_all_entries()
+                    masked_config['_kv_configs'] = kv_configs
+                    await kv_repo.close()
+                except Exception as e:
+                    # Log warning but don't fail the snapshot
+                    logger.warning(f"Failed to include KV configs in snapshot: {e}")
+
+            config_json = json.dumps(masked_config, indent=2, cls=DecimalEncoder)
+
+            snapshot_data = {
+                "version": version,
+                "config_json": config_json,
+                "description": full_description,
+                "created_by": "system",
+            }
+
+            return await self.repo.create(snapshot_data)
         except Exception as e:
             # Log error but don't block config update
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"Auto-snapshot creation failed: {e}")
             return None
 
