@@ -13,6 +13,8 @@ Endpoints:
     DELETE /api/attempts/clear_all - Clear all signal attempts
     GET /api/config - Get current config (masked)
     PUT /api/config - Update user config (hot-reload)
+    GET /api/backtest/configs - Get backtest configuration
+    PUT /api/backtest/configs - Update backtest configuration
     POST /api/backtest - Run backtest
     GET /api/v3/backtest/reports - List backtest reports (with filters, sorting, pagination)
     GET /api/v3/backtest/reports/{id} - Get backtest report details
@@ -1460,6 +1462,152 @@ async def run_pms_backtest(
     except HTTPException:
         raise
     except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================
+# Backtest Configuration Endpoints (T4)
+# ============================================================
+
+@app.get("/api/backtest/configs")
+async def get_backtest_configs():
+    """
+    获取当前回测配置。
+
+    从 KV 存储读取回测配置参数，包括：
+    - slippage_rate: 滑点率（默认 0.001）
+    - fee_rate: 手续费率（默认 0.0004）
+    - initial_balance: 初始资金（默认 10000）
+    - tp_slippage_rate: 止盈平仓滑点率（默认 0.0005）
+
+    Returns:
+        包含回测配置的字典
+    """
+    try:
+        config_manager = _get_config_manager()
+        configs = await config_manager.get_backtest_configs()
+
+        return {
+            "status": "success",
+            "configs": {
+                "slippage_rate": str(configs.get('slippage_rate', '0.001')),
+                "fee_rate": str(configs.get('fee_rate', '0.0004')),
+                "initial_balance": str(configs.get('initial_balance', '10000')),
+                "tp_slippage_rate": str(configs.get('tp_slippage_rate', '0.0005')),
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.put("/api/backtest/configs")
+async def update_backtest_configs(
+    configs: Dict[str, Any] = Body(..., description="回测配置更新"),
+):
+    """
+    更新回测配置。
+
+    保存回测配置参数到 KV 存储，需要验证配置值范围。
+
+    支持的配置项：
+    - slippage_rate: 滑点率 (0~0.01)
+    - fee_rate: 手续费率 (0~0.01)
+    - initial_balance: 初始资金 (>0)
+    - tp_slippage_rate: 止盈平仓滑点率 (0~0.01)
+
+    Request body example:
+    {
+        "slippage_rate": 0.001,
+        "fee_rate": 0.0004,
+        "initial_balance": 10000,
+        "tp_slippage_rate": 0.0005
+    }
+
+    Returns:
+        更新结果和更新后的配置
+    """
+    try:
+        config_manager = _get_config_manager()
+
+        # 验证配置值范围
+        validated_configs = {}
+        errors = []
+
+        # 验证 slippage_rate
+        if 'slippage_rate' in configs:
+            try:
+                value = Decimal(str(configs['slippage_rate']))
+                if value < 0 or value > Decimal('0.01'):
+                    errors.append("slippage_rate 必须在 0~0.01 范围内")
+                else:
+                    validated_configs['slippage_rate'] = value
+            except Exception as e:
+                errors.append(f"slippage_rate 格式错误：{e}")
+
+        # 验证 fee_rate
+        if 'fee_rate' in configs:
+            try:
+                value = Decimal(str(configs['fee_rate']))
+                if value < 0 or value > Decimal('0.01'):
+                    errors.append("fee_rate 必须在 0~0.01 范围内")
+                else:
+                    validated_configs['fee_rate'] = value
+            except Exception as e:
+                errors.append(f"fee_rate 格式错误：{e}")
+
+        # 验证 initial_balance
+        if 'initial_balance' in configs:
+            try:
+                value = Decimal(str(configs['initial_balance']))
+                if value <= Decimal('0'):
+                    errors.append("initial_balance 必须大于 0")
+                else:
+                    validated_configs['initial_balance'] = value
+            except Exception as e:
+                errors.append(f"initial_balance 格式错误：{e}")
+
+        # 验证 tp_slippage_rate
+        if 'tp_slippage_rate' in configs:
+            try:
+                value = Decimal(str(configs['tp_slippage_rate']))
+                if value < 0 or value > Decimal('0.01'):
+                    errors.append("tp_slippage_rate 必须在 0~0.01 范围内")
+                else:
+                    validated_configs['tp_slippage_rate'] = value
+            except Exception as e:
+                errors.append(f"tp_slippage_rate 格式错误：{e}")
+
+        # 如果有验证错误，返回 422
+        if errors:
+            from fastapi import status
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "配置验证失败",
+                    "errors": errors
+                }
+            )
+
+        # 保存配置到 KV 存储
+        count = await config_manager.save_backtest_configs(validated_configs)
+
+        return {
+            "status": "success",
+            "message": f"Updated {count} backtest config entries",
+            "configs": {k: str(v) for k, v in validated_configs.items()}
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_str = str(e)
+        if "ValidationError" in type(e).__name__:
+            from fastapi import status
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Config validation failed: {error_str}",
+            )
         return {"error": str(e)}
 
 
