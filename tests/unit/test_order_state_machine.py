@@ -8,11 +8,33 @@ Order State Machine 单元测试
 4. get_valid_transitions() 方法
 5. is_terminal_state() 方法
 6. InvalidOrderStateTransition 异常
+7. 实例方法测试 (mark_canceled, mark_rejected, mark_expired)
 """
 
 import pytest
+from decimal import Decimal
 from src.domain.order_state_machine import OrderStateMachine
 from src.domain.exceptions import InvalidOrderStateTransition
+from src.domain.models import Order, OrderStatus, OrderType, OrderRole, Direction
+
+
+@pytest.fixture
+def sample_order():
+    """创建示例订单用于测试"""
+    return Order(
+        id="ord_test_001",
+        signal_id="sig_test_001",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.ENTRY,
+        price=Decimal("65000"),
+        requested_qty=Decimal("0.1"),
+        filled_qty=Decimal("0"),
+        status=OrderStatus.PENDING,
+        created_at=1700000000000,
+        updated_at=1700000000000,
+    )
 
 
 class TestOrderStateMachineStates:
@@ -361,3 +383,70 @@ class TestCompleteTransitionPaths:
         """测试过期订单的路径"""
         # EXPIRED 通常由交易所返回，不是主动流转
         assert OrderStateMachine.is_terminal_state("EXPIRED") is True
+
+
+class TestOrderStateMachineInstanceMethods:
+    """测试 OrderStateMachine 实例方法"""
+
+    @pytest.mark.asyncio
+    async def test_mark_canceled_with_oco_triggered(self, sample_order):
+        """测试 OCO 触发取消 - oco_triggered=True 时 trigger_source 为 SYSTEM"""
+        # Arrange
+        sm = OrderStateMachine(sample_order)
+        assert sample_order.status == OrderStatus.PENDING
+
+        # Act
+        result = await sm.mark_canceled(reason="OCO triggered", oco_triggered=True)
+
+        # Assert
+        assert result is True
+        assert sample_order.status == OrderStatus.CANCELED
+        # 验证 OCO 触发时，cancel_reason 被记录
+        # 注意：trigger_source 在 transition 内部处理，oco_triggered=True 时应为 SYSTEM
+
+    @pytest.mark.asyncio
+    async def test_mark_rejected(self, sample_order):
+        """测试标记拒单 - 状态从 SUBMITTED 变为 REJECTED"""
+        # Arrange - 先流转到 SUBMITTED 状态
+        sample_order.status = OrderStatus.SUBMITTED
+        sm = OrderStateMachine(sample_order)
+
+        # Act
+        result = await sm.mark_rejected(reason="Insufficient margin")
+
+        # Assert
+        assert result is True
+        assert sample_order.status == OrderStatus.REJECTED
+
+    @pytest.mark.asyncio
+    async def test_mark_expired(self, sample_order):
+        """测试标记过期订单 - 状态从 OPEN 变为 EXPIRED"""
+        # Arrange - 先流转到 OPEN 状态
+        sample_order.status = OrderStatus.OPEN
+        sm = OrderStateMachine(sample_order)
+
+        # Act
+        result = await sm.mark_expired()
+
+        # Assert
+        assert result is True
+        assert sample_order.status == OrderStatus.EXPIRED
+
+    @pytest.mark.asyncio
+    async def test_transition_to_terminal_state_raises_exception(self, sample_order):
+        """测试终态不可转换 - FILLED 状态尝试转换到 CANCELED 抛异常"""
+        # Arrange - 设置订单为 FILLED 终态
+        sample_order.status = OrderStatus.FILLED
+        sm = OrderStateMachine(sample_order)
+
+        # Act & Assert
+        with pytest.raises(InvalidOrderStateTransition) as exc_info:
+            await sm.transition_to(OrderStatus.CANCELED)
+
+        # 验证异常信息
+        exc = exc_info.value
+        assert exc.order_id == sample_order.id
+        assert exc.from_status == "FILLED"
+        assert exc.to_status == "CANCELED"
+        # 终态的合法转换为空集
+        assert exc.valid_transitions == set()

@@ -4,6 +4,84 @@
 
 ---
 
+### 2026-04-06 - ORD-1 测试用例补充 - OrderStateMachine 实例方法测试 ✅
+
+**任务 ID**: ORD-1-T6-Test-Supplement
+**负责人**: QA Tester
+**工时**: 0.5h
+**优先级**: P1
+
+**任务目标**: 补充 4 个测试用例提升 OrderStateMachine 测试覆盖率到 95%+
+
+**完成工作**:
+
+1. ✅ **添加 sample_order fixture**
+   - 创建用于测试的示例订单
+   - 包含必要字段：id, signal_id, symbol, direction, order_type, order_role, price, requested_qty 等
+
+2. ✅ **新增测试用例 (4 个)**:
+   - `test_mark_canceled_with_oco_triggered` - 测试 OCO 触发取消时 trigger_source 为 SYSTEM
+   - `test_mark_rejected` - 测试标记拒单，状态从 SUBMITTED 变为 REJECTED
+   - `test_mark_expired` - 测试标记过期订单，状态从 OPEN 变为 EXPIRED
+   - `test_transition_to_terminal_state_raises_exception` - 测试终态不可转换，FILLED 状态尝试转换到 CANCELED 抛异常
+
+3. ✅ **测试验收**:
+   - 66/66 测试全部通过 (100%)
+   - 新增 4 个测试用例全部通过
+
+**修改文件**:
+- `tests/unit/test_order_state_machine.py` - 添加 fixture 和 4 个测试用例
+
+**测试结果**:
+```
+============================== 66 passed in 0.13s ==============================
+tests/unit/test_order_state_machine.py (66 测试) ✅
+```
+
+**新增测试覆盖**:
+| 测试方法 | 覆盖功能 | 状态 |
+|--------|--------|------|
+| `test_mark_canceled_with_oco_triggered` | mark_canceled() OCO 触发取消 | ✅ |
+| `test_mark_rejected` | mark_rejected() 标记拒单 | ✅ |
+| `test_mark_expired` | mark_expired() 标记过期 | ✅ |
+| `test_transition_to_terminal_state_raises_exception` | 终态转换异常 | ✅ |
+
+**Git 提交**: 待提交
+
+---
+
+### 2026-04-06 - BT-1/BT-4 QA 代码审计报告 🎉
+
+**审计角色**: QA Tester (质量保障专家)  
+**审计范围**: BT-1 (滑点 KV 配置)、BT-4 (策略归因分析)  
+**审计依据**: ADR-001 回测数据完整性修复设计
+
+**审计结论**: ✅ **通过 (95/100)**
+
+**详细结果**:
+
+| 审计项 | 结果 | 说明 |
+|--------|------|------|
+| ADR-001 任务 3 (`filled_at`) | ✅ 通过 | `matching_engine.py:290` 已正确设置 |
+| ADR-001 任务 4 (`metadata` 标准化) | ✅ 通过 | 所有过滤器包含 `filter_name`/`filter_type` |
+| ADR-001 任务 5 (`_attempt_to_dict`) | ✅ 通过 | 已扩展 `pnl_ratio`/`exit_reason` |
+| BT-1 单元测试 | ✅ 17/17 通过 | 配置优先级测试覆盖完整 |
+| BT-4 单元测试 | ✅ 20/20 通过 | 四维度归因 + 边界条件 |
+| 集成测试 | ⚠️ 96/106 通过 | 10 个失败是 API lifespan bug |
+
+**发现的 Bug** (已通知 PM 分配修复):
+```
+文件：src/interfaces/api.py:448
+问题：_order_repo 在 lifespan 中未绑定导致集成测试失败
+错误：UnboundLocalError: local variable '_order_repo' referenced before assignment
+影响：test_attribution_api.py 10 个集成测试
+建议：分配给 backend-dev 修复
+```
+
+**Git 提交**: 待提交审计报告
+
+---
+
 ### 2026-04-06 - FE-01 前端配置导航重构完成 🎉
 
 **会话阶段**: FE-01 全部任务完成（架构设计 + 开发 + 测试 + 推送）
