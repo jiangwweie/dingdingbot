@@ -196,7 +196,8 @@ def test_create_order_chain_only_entry(sample_signal: Signal, single_tp_strategy
 # UT-005: handle_order_filled ENTRY 成交
 # ============================================================
 @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
-def test_handle_order_filled_entry_creates_tp_sl(
+@pytest.mark.asyncio
+async def test_handle_order_filled_entry_creates_tp_sl(
     single_tp_strategy: "OrderStrategy",
     sample_signal: Signal,
 ):
@@ -236,7 +237,7 @@ def test_handle_order_filled_entry_creates_tp_sl(
     positions_map = {position.id: position}
 
     # 处理 ENTRY 成交事件
-    new_orders = manager.handle_order_filled(
+    new_orders = await manager.handle_order_filled(
         filled_order=entry_order,
         active_orders=active_orders,
         positions_map=positions_map,
@@ -327,7 +328,8 @@ def test_tp_target_price_short(single_tp_strategy: "OrderStrategy"):
 # UT-008: handle_order_filled TP1 成交
 # ============================================================
 @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
-def test_handle_order_filled_tp1_updates_sl_qty(
+@pytest.mark.asyncio
+async def test_handle_order_filled_tp1_updates_sl_qty(
     multi_tp_strategy: "OrderStrategy",
     sample_signal: Signal,
 ):
@@ -384,7 +386,7 @@ def test_handle_order_filled_tp1_updates_sl_qty(
     positions_map = {sample_signal.id: position}
 
     # 处理 TP1 成交事件
-    new_orders = manager.handle_order_filled(
+    new_orders = await manager.handle_order_filled(
         filled_order=tp1_order,
         active_orders=active_orders,
         positions_map=positions_map,
@@ -406,7 +408,8 @@ def test_handle_order_filled_tp1_updates_sl_qty(
 # UT-009: handle_order_filled SL 成交
 # ============================================================
 @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
-def test_handle_order_filled_sl_cancels_all_tp(
+@pytest.mark.asyncio
+async def test_handle_order_filled_sl_cancels_all_tp(
     sample_signal: Signal,
 ):
     """
@@ -466,7 +469,7 @@ def test_handle_order_filled_sl_cancels_all_tp(
     positions_map = {}
 
     # 处理 SL 成交事件
-    new_orders = manager.handle_order_filled(
+    new_orders = await manager.handle_order_filled(
         filled_order=sl_order,
         active_orders=active_orders,
         positions_map=positions_map,
@@ -482,7 +485,8 @@ def test_handle_order_filled_sl_cancels_all_tp(
 # UT-010: apply_oco_logic 完全平仓
 # ============================================================
 @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
-def test_apply_oco_logic_full_close(sample_signal: Signal):
+@pytest.mark.asyncio
+async def test_apply_oco_logic_full_close(sample_signal: Signal):
     """
     UT-010: apply_oco_logic 完全平仓
     验证：current_qty==0 时撤销所有挂单
@@ -534,7 +538,7 @@ def test_apply_oco_logic_full_close(sample_signal: Signal):
     active_orders = [tp2_order, sl_order]
 
     # 应用 OCO 逻辑 (需要传入 position 参数)
-    canceled_orders = manager.apply_oco_logic(
+    canceled_orders = await manager.apply_oco_logic(
         filled_order=Order(
             id="order-tp3-001",
             signal_id=sample_signal.id,
@@ -561,7 +565,8 @@ def test_apply_oco_logic_full_close(sample_signal: Signal):
 # UT-011: apply_oco_logic 部分平仓
 # ============================================================
 @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
-def test_apply_oco_logic_partial_close(sample_signal: Signal):
+@pytest.mark.asyncio
+async def test_apply_oco_logic_partial_close(sample_signal: Signal):
     """
     UT-011: apply_oco_logic 部分平仓
     验证：更新 SL 数量与 current_qty 对齐
@@ -612,7 +617,7 @@ def test_apply_oco_logic_partial_close(sample_signal: Signal):
     )
 
     # 应用 OCO 逻辑 (需要传入 position 参数)
-    manager.apply_oco_logic(
+    await manager.apply_oco_logic(
         filled_order=tp1_filled,
         active_orders=active_orders,
         position=position,

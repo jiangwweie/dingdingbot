@@ -92,11 +92,73 @@ _notify_order_changed() - 业务回调
 
 **实现日期**: 2026-04-06  
 **任务负责人**: Backend Developer  
-**状态**: 🟢 进行中
+**状态**: ✅ 已完成
 
-### 问题分析
+### 职责重新划分
 
-**OrderManager 中直接修改订单状态的代码位置**:
+| 职责 | OrderManager (保留) | OrderLifecycleService (迁移) |
+|------|---------------------|------------------------------|
+| 订单创建 | create_order_chain() 仅生成订单对象 | create_order() 创建并管理状态 |
+| 订单链编排 | ✅ 保留 | - |
+| TP/SL 订单生成 | ✅ 保留 | - |
+| OCO 逻辑执行 | ✅ 保留 (调用 Service 取消订单) | ✅ 提供 cancel_order() 方法 |
+| 状态转换 | ❌ 移除 | ✅ 独占 (通过 OrderStateMachine) |
+| 订单持久化 | ✅ 保留 (调用 Service) | ✅ 统一管理 |
+
+### 实现细节
+
+**1. OrderManager 添加 OrderLifecycleService 依赖**
+```python
+def __init__(
+    self,
+    order_repository: Optional[Any] = None,
+    order_lifecycle_service: Optional[Any] = None,
+):
+    self._order_repository = order_repository
+    self._order_lifecycle_service = order_lifecycle_service
+```
+
+**2. _cancel_order_via_service() 辅助方法**
+```python
+async def _cancel_order_via_service(
+    self,
+    order: Order,
+    reason: Optional[str] = None,
+    oco_triggered: bool = False
+) -> None:
+    if self._order_lifecycle_service:
+        await self._order_lifecycle_service.cancel_order(...)
+    else:
+        # 降级处理：直接保存订单状态（用于单元测试）
+        order.status = OrderStatus.CANCELED
+        await self._save_order(order)
+```
+
+**3. OCO 逻辑重构**
+- `_apply_oco_logic_for_tp()`: 使用 `_cancel_order_via_service()`
+- `_cancel_all_tp_orders()`: 使用 `_cancel_order_via_service()`
+- `apply_oco_logic()`: 使用 `_cancel_order_via_service()`
+
+**4. create_order_chain() 初始状态修正**
+- 从 `OrderStatus.OPEN` 改为 `OrderStatus.CREATED`
+- 由 OrderLifecycleService 管理状态转换
+
+### 测试结果
+```
+======================== 14 passed in 0.12s =========================
+tests/unit/test_order_manager.py (14 测试) ✅
+
+======================== 110 passed in 1.07s ========================
+tests/unit/test_order_lifecycle_service.py (20 测试) ✅
+tests/unit/test_order_repository.py (28 测试) ✅
+tests/unit/test_order_state_machine.py (62 测试) ✅
+```
+
+### 修改文件
+- `src/domain/order_manager.py` - 重构状态管理逻辑
+- `tests/unit/test_order_manager.py` - 更新为 async 测试
+
+---
 
 1. **create_order_chain()** (line 137): 创建 ENTRY 订单，设置 `status=OrderStatus.OPEN`
    - 问题：应该使用 OrderLifecycleService 创建，初始状态应为 CREATED

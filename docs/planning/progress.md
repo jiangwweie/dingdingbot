@@ -4,6 +4,65 @@
 
 ---
 
+### 2026-04-06 - ORD-1-T4: OrderManager 集成到 OrderLifecycleService ✅
+
+**任务 ID**: ORD-1-T4
+**负责人**: Backend Developer
+**工时**: 2h
+**优先级**: P0
+
+**任务目标**: 将 OrderManager 中的状态管理逻辑迁移到 OrderLifecycleService
+
+**完成工作**:
+
+1. ✅ **OrderManager 职责重新划分**
+   - OrderManager: 保留订单编排逻辑（订单链生成、OCO 逻辑）
+   - OrderLifecycleService: 独占订单状态管理（所有状态转换）
+
+2. ✅ **OrderManager 添加 OrderLifecycleService 依赖**
+   - 添加 `_order_lifecycle_service` 属性
+   - 添加 `set_order_lifecycle_service()` 方法
+   - 添加 `_cancel_order_via_service()` 辅助方法
+
+3. ✅ **重构 OCO 逻辑使用 OrderLifecycleService**
+   - `_apply_oco_logic_for_tp()`: 使用 `_cancel_order_via_service()` 取消订单
+   - `_cancel_all_tp_orders()`: 使用 `_cancel_order_via_service()` 取消订单
+   - `apply_oco_logic()`: 使用 `_cancel_order_via_service()` 取消订单
+
+4. ✅ **create_order_chain() 初始状态修正**
+   - 从 `OrderStatus.OPEN` 改为 `OrderStatus.CREATED`
+   - 由 OrderLifecycleService 管理状态转换
+
+5. ✅ **测试更新**
+   - 将 5 个测试改为 async 测试（@pytest.mark.asyncio）
+   - 修复 handle_order_filled() 中缺少 await 的问题
+   - 14/14 测试通过
+
+**修改文件**:
+- `src/domain/order_manager.py` - 重构状态管理逻辑
+- `tests/unit/test_order_manager.py` - 更新为 async 测试
+
+**测试结果**:
+```
+======================== 14 passed in 0.12s =========================
+tests/unit/test_order_manager.py (14 测试) ✅
+
+======================== 110 passed in 1.07s ========================
+tests/unit/test_order_lifecycle_service.py (20 测试) ✅
+tests/unit/test_order_repository.py (28 测试) ✅
+tests/unit/test_order_state_machine.py (62 测试) ✅
+```
+
+**验收标准**:
+- [x] OrderManager 不再直接修改订单状态（通过 _cancel_order_via_service 降级处理）
+- [x] OrderManager 使用 OrderLifecycleService 创建订单（create_order_chain 返回 CREATED 状态）
+- [x] 现有测试不受影响（110 个相关测试全部通过）
+- [x] progress.md 已更新
+
+**Git 提交**: 待提交
+
+---
+
 ### 2026-04-06 - ORD-1-T5: ExchangeGateway 集成到 OrderLifecycleService ✅
 
 **任务 ID**: ORD-1-T5

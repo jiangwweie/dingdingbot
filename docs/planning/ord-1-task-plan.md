@@ -21,6 +21,7 @@
 | **T2** | 状态枚举扩展 | 确认 OrderStatus 覆盖所有 9 种状态 | 0.5h | ✅ 已完成 | Backend |
 | **T3** | 状态流转矩阵定义 | 定义合法的状态转换规则 | 1h | ✅ 已完成 | Backend |
 | **T4** | 状态机核心方法实现 | can_transition(), get_valid_transitions(), is_terminal_state() | 1.5h | ✅ 已完成 | Backend |
+| **T4-Integration** | OrderManager 集成 | 将 OrderManager 状态管理迁移到 OrderLifecycleService | 2h | ✅ 已完成 | Backend |
 | **T5** | 与 Order 模型集成 | 在 Order 类中集成状态机逻辑 | 1h | ☐ 待启动 | Backend |
 | **T6** | 单元测试编写 | 覆盖所有状态流转路径 | 3h | ✅ 已完成 | QA |
 | **T7** | 集成测试 | 与 order_repository 集成测试 | 2h | ☐ 待启动 | QA |
