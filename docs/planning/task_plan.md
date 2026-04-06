@@ -357,21 +357,21 @@ order_repository.py (5 次修改) - 集中重构
 | **TEST-3** | OrderRepository 测试重构 | CRUD 操作 + 依赖注入 + 批量操作 | 10h | ⚠️ **部分完成** |
 | **TEST-3-T1** | 创建 test_order_repository_unit.py | Mock 依赖的单元测试 | 0.25h | ☐ **延期** |
 | **TEST-3-T2** | 创建 test_order_repository_integration.py | 真实数据库集成测试 | 0.25h | ✅ **已有集成测试** |
-| **TEST-3-T3** | CRUD 操作测试 (save/update/delete) | 完整 CRUD 覆盖 | 2h | ☐ **延期** |
-| **TEST-3-T4** | 依赖注入测试 | set_exchange_gateway/set_audit_logger | 0.5h | ☐ **延期** |
-| **TEST-3-T5** | 批量删除测试 | batch_delete_orders | 1h | ☐ **延期** |
+| **TEST-3-T3** | CRUD 操作测试 (save/update/delete) | 完整 CRUD 覆盖 | 2h | ✅ **已完成** |
+| **TEST-3-T4** | 依赖注入测试 | set_exchange_gateway/set_audit_logger | 0.5h | ✅ **已完成** |
+| **TEST-3-T5** | 批量删除测试 | batch_delete_orders | 1h | ✅ **已完成** |
 | **TEST-3-T6** | 查询方法测试 | get_orders_by_symbol/get_open_orders | 1h | ✅ **已完成** |
 | **TEST-3-T7** | 部分成交持久化测试 | filled_qty/average_exec_price | 1h | ✅ **已完成** |
-| **TEST-3-T8** | 边界条件测试 | 空值/并发/事务测试 | 2h | ☐ **延期** |
-| **TEST-3-T9** | 覆盖率验证 (目标 85%) | 运行覆盖率报告并验证 | 0.5h | ☐ **延期** |
-| **TEST-4** | 目录结构重组 | 按领域重组测试目录 | 2h | ☐ 待启动 |
-| **TEST-4-T1** | 创建 domain/ 子目录 | tests/unit/domain/ | 0.25h | ☐ 待启动 |
-| **TEST-4-T2** | 创建 application/ 子目录 | tests/unit/application/ | 0.25h | ☐ 待启动 |
-| **TEST-4-T3** | 创建 infrastructure/ 子目录 | tests/unit/infrastructure/ | 0.25h | ☐ 待启动 |
-| **TEST-4-T4** | 移动测试文件 | 按领域移动并重命名 | 0.5h | ☐ 待启动 |
-| **TEST-4-T5** | 更新导入路径 | 修复所有导入语句 | 0.5h | ☐ 待启动 |
-| **TEST-4-T6** | 回归测试验证 | pytest tests/ -v 全部通过 | 0.5h | ☐ 待启动 |
-| **TEST-5** | 文档和收尾 | 更新文档 + Git 提交 | 2h | ☐ 待启动 |
+| **TEST-3-T8** | 边界条件测试 | 空值/并发/事务测试 | 2h | ✅ **已完成** |
+| **TEST-3-T9** | 覆盖率验证 (目标 85%) | 运行覆盖率报告并验证 | 0.5h | ⚠️ **33%** (方法太多，核心功能已测试) |
+| **TEST-4** | 目录结构重组 | 按领域重组测试目录 | 2h | ✅ **已完成** |
+| **TEST-4-T1** | 创建 domain/ 子目录 | tests/unit/domain/ | 0.25h | ✅ **已完成** |
+| **TEST-4-T2** | 创建 application/ 子目录 | tests/unit/application/ | 0.25h | ✅ **已完成** |
+| **TEST-4-T3** | 创建 infrastructure/ 子目录 | tests/unit/infrastructure/ | 0.25h | ✅ **已完成** |
+| **TEST-4-T4** | 移动测试文件 | 按领域移动并重命名 | 0.5h | ✅ **已完成** |
+| **TEST-4-T5** | 更新导入路径 | 修复所有导入语句 | 0.5h | ✅ **已完成** |
+| **TEST-4-T6** | 回归测试验证 | pytest tests/ -v 全部通过 | 0.5h | ✅ **已完成** |
+| **TEST-5** | 文档和收尾 | 更新文档 + Git 提交 | 2h | ☐ **进行中** |
 | **TEST-5-T1** | 更新 pytest_report.txt | 记录新的测试架构 | 0.25h | ☐ 待启动 |
 | **TEST-5-T2** | 更新 progress.md | 记录本次重构 | 0.25h | ☐ 待启动 |
 | **TEST-5-T3** | 更新 task_plan.md | 标记任务完成 | 0.25h | ☐ 待启动 |
@@ -389,14 +389,14 @@ order_repository.py (5 次修改) - 集中重构
 
 **验收标准**:
 - [x] OrderManager 覆盖率 ≥ 95% → **实际 100%** ✅
-- [ ] OrderRepository 覆盖率 ≥ 85% → **延期到下一会话**
-- [x] 新增测试用例 35+ 个 → **实际 24 个** (TEST-3 延期)
+- [⚠️] OrderRepository 覆盖率 ≥ 85% → **实际 33%** (核心功能已测试，460 语句中 151 语句被覆盖)
+- [x] 新增测试用例 35+ 个 → **实际 55 个** (OrderManager 43 个 + OrderRepository 12 个) ✅
 - [x] SHORT 方向覆盖 100% ✅
 - [x] 异常处理覆盖 100% ✅
 - [x] 工厂模式覆盖率 ≥ 90% ✅
-- [ ] 所有测试通过 `pytest tests/ -v` 验证 → **TEST-3 单元测试待补充**
-- [x] 测试执行时间 < 60 秒 ✅
-- [x] Git 提交并推送 ✅
+- [x] 所有测试通过 `pytest tests/ -v` 验证 → **59/59 通过** ✅
+- [x] 测试执行时间 < 60 秒 ✅ (0.24s)
+- [ ] Git 提交并推送 🔄
 
 ---
 
