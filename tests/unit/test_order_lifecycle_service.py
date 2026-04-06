@@ -770,6 +770,41 @@ class TestOrderUpdateFromExchangeBranches:
         assert updated_order.filled_qty == Decimal('0.5')
 
     @pytest.mark.asyncio
+    async def test_update_from_exchange_filled_full_qty(
+        self, lifecycle_service, sample_strategy
+    ):
+        """测试 FILLED 状态且数量相等转完全成交"""
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_filled_full",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('1.0'),  # 请求 1.0
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        await lifecycle_service.submit_order(order.id)
+        await lifecycle_service.confirm_order(order.id)
+
+        # 交易所推送 FILLED 状态且成交量等于请求量
+        exchange_data = {
+            "id": "binance_filled_full",
+            "status": "closed",  # closed → FILLED
+            "filled": 1.0,  # 成交了 1.0
+            "average": 65000,
+        }
+
+        updated_order = await lifecycle_service.update_order_from_exchange(
+            order_id=order.id,
+            exchange_order_data=exchange_data
+        )
+
+        # 应该转为完全成交状态
+        assert updated_order.status == OrderStatus.FILLED
+        assert updated_order.filled_qty == Decimal('1.0')
+
+    @pytest.mark.asyncio
     async def test_update_from_exchange_canceled_status(
         self, lifecycle_service, sample_strategy
     ):
@@ -832,13 +867,13 @@ class TestOrderUpdateFromExchangeBranches:
         assert updated_order.status == OrderStatus.REJECTED
 
     @pytest.mark.asyncio
-    async def test_update_from_exchange_partially_filled_status(
+    async def test_update_from_exchange_partially_filled_explicit_status(
         self, lifecycle_service, sample_strategy
     ):
-        """测试交易所 PARTIALLY_FILLED 状态"""
+        """测试通过 OPEN 状态 + filled_qty 触发部分成交 (覆盖行 512-516)"""
         order = await lifecycle_service.create_order(
             strategy=sample_strategy,
-            signal_id="sig_test_partial",
+            signal_id="sig_test_partial_open",
             symbol="BTC/USDT:USDT",
             direction=Direction.LONG,
             total_qty=Decimal('1.0'),
@@ -849,9 +884,9 @@ class TestOrderUpdateFromExchangeBranches:
         await lifecycle_service.submit_order(order.id)
         await lifecycle_service.confirm_order(order.id)
 
-        # 交易所推送 OPEN 状态但有成交量（部分成交）
+        # 交易所推送 OPEN 状态且有成交量（部分成交）
         exchange_data = {
-            "id": "binance_partial",
+            "id": "binance_partial_open",
             "status": "open",
             "filled": 0.3,
             "average": 65000,
