@@ -508,7 +508,15 @@ class OrderLifecycleService:
                 average_exec_price=str(average_exec_price) if average_exec_price else "0"
             )
         elif target_status == OrderStatus.OPEN:
-            await state_machine.confirm_open()
+            # 订单开放但有成交量 → 部分成交
+            if filled_qty > 0 and filled_qty < order.requested_qty:
+                await state_machine.mark_partially_filled(
+                    filled_qty=str(filled_qty),
+                    average_exec_price=str(average_exec_price) if average_exec_price else "0"
+                )
+            # 订单开放且无成交量 → 确认挂单
+            elif order.status != OrderStatus.OPEN:
+                await state_machine.confirm_open()
 
         await self._repository.save(order)
         logger.info(f"订单根据交易所数据更新：{order_id} -> {target_status.value}")

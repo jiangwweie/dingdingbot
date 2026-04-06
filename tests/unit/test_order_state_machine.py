@@ -48,47 +48,47 @@ class TestOrderStateMachineTransitions:
 
     def test_created_transitions(self):
         """测试 CREATED 状态的合法流转"""
-        valid = OrderStateMachine.get_valid_transitions("CREATED")
+        valid = OrderStateMachine.get_valid_transitions_from("CREATED")
         assert valid == {"SUBMITTED", "CANCELED"}
 
     def test_submitted_transitions(self):
         """测试 SUBMITTED 状态的合法流转"""
-        valid = OrderStateMachine.get_valid_transitions("SUBMITTED")
+        valid = OrderStateMachine.get_valid_transitions_from("SUBMITTED")
         assert valid == {"OPEN", "REJECTED", "CANCELED", "EXPIRED"}
 
     def test_pending_transitions(self):
         """测试 PENDING 状态的合法流转"""
-        valid = OrderStateMachine.get_valid_transitions("PENDING")
+        valid = OrderStateMachine.get_valid_transitions_from("PENDING")
         assert valid == {"OPEN", "REJECTED", "CANCELED", "SUBMITTED"}
 
     def test_open_transitions(self):
         """测试 OPEN 状态的合法流转"""
-        valid = OrderStateMachine.get_valid_transitions("OPEN")
+        valid = OrderStateMachine.get_valid_transitions_from("OPEN")
         assert valid == {"PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED", "EXPIRED"}
 
     def test_partially_filled_transitions(self):
         """测试 PARTIALLY_FILLED 状态的合法流转"""
-        valid = OrderStateMachine.get_valid_transitions("PARTIALLY_FILLED")
+        valid = OrderStateMachine.get_valid_transitions_from("PARTIALLY_FILLED")
         assert valid == {"FILLED", "CANCELED"}
 
     def test_filled_transitions(self):
         """测试 FILLED 状态的合法流转 (终态)"""
-        valid = OrderStateMachine.get_valid_transitions("FILLED")
+        valid = OrderStateMachine.get_valid_transitions_from("FILLED")
         assert valid == set()
 
     def test_canceled_transitions(self):
         """测试 CANCELED 状态的合法流转 (终态)"""
-        valid = OrderStateMachine.get_valid_transitions("CANCELED")
+        valid = OrderStateMachine.get_valid_transitions_from("CANCELED")
         assert valid == set()
 
     def test_rejected_transitions(self):
         """测试 REJECTED 状态的合法流转 (终态)"""
-        valid = OrderStateMachine.get_valid_transitions("REJECTED")
+        valid = OrderStateMachine.get_valid_transitions_from("REJECTED")
         assert valid == set()
 
     def test_expired_transitions(self):
         """测试 EXPIRED 状态的合法流转 (终态)"""
-        valid = OrderStateMachine.get_valid_transitions("EXPIRED")
+        valid = OrderStateMachine.get_valid_transitions_from("EXPIRED")
         assert valid == set()
 
 

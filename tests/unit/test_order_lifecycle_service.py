@@ -573,24 +573,24 @@ class TestCompleteOrderLifecycle:
         )
         assert order.status == OrderStatus.CREATED
 
-        # 2. 提交订单
-        await lifecycle_service.submit_order(order.id, exchange_order_id="binance_123")
+        # 2. 提交订单 - 使用返回的订单对象
+        order = await lifecycle_service.submit_order(order.id, exchange_order_id="binance_123")
         assert order.status == OrderStatus.SUBMITTED
 
-        # 3. 确认挂单
-        await lifecycle_service.confirm_order(order.id)
+        # 3. 确认挂单 - 使用返回的订单对象
+        order = await lifecycle_service.confirm_order(order.id)
         assert order.status == OrderStatus.OPEN
 
-        # 4. 部分成交
-        await lifecycle_service.update_order_partially_filled(
+        # 4. 部分成交 - 使用返回的订单对象
+        order = await lifecycle_service.update_order_partially_filled(
             order.id,
             Decimal('0.3'),
             Decimal('65000')
         )
         assert order.status == OrderStatus.PARTIALLY_FILLED
 
-        # 5. 完全成交
-        await lifecycle_service.update_order_filled(
+        # 5. 完全成交 - 使用返回的订单对象
+        order = await lifecycle_service.update_order_filled(
             order.id,
             Decimal('1.0'),
             Decimal('65500')
