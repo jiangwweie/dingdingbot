@@ -1271,10 +1271,12 @@ class AttributionReport(FinancialModel):
     - trend_attribution: 市场趋势归因（D 维度）
     - rr_attribution: 盈亏比归因（F 维度）
     """
+    version: str = Field(default="1.0.0", description="归因分析报告版本")
     shape_quality: Dict[str, Any] = Field(default_factory=dict, description="形态质量归因")
     filter_attribution: Dict[str, Any] = Field(default_factory=dict, description="过滤器归因")
     trend_attribution: Dict[str, Any] = Field(default_factory=dict, description="市场趋势归因")
     rr_attribution: Dict[str, Any] = Field(default_factory=dict, description="盈亏比归因")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="元数据（分析时间、数据源等）")
 
 
 # ============================================================

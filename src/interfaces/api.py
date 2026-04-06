@@ -71,7 +71,7 @@ from src.domain.models import (
 )
 
 # Profile 管理 Models (配置 Profile 管理功能)
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator, ValidationError
 from typing import Optional
 
 
@@ -1769,6 +1769,13 @@ class AttributionAnalysisRequest(BaseModel):
     report_id: Optional[str] = Field(None, description="回测报告 ID（从数据库加载）")
     backtest_report: Optional[Dict[str, Any]] = Field(None, description="直接传入回测报告数据")
 
+    @model_validator(mode='after')
+    def validate_mutually_exclusive_fields(self):
+        """验证 report_id 和 backtest_report 有且仅有一个存在"""
+        if self.report_id is None and self.backtest_report is None:
+            raise ValueError("必须提供 report_id 或 backtest_report 其中之一")
+        return self
+
 
 class AttributionAnalysisResponse(BaseModel):
     """归因分析响应"""
@@ -1861,7 +1868,7 @@ async def analyze_backtest_attribution(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Attribution analysis failed: {e}")
+        logger.error(f"Attribution analysis failed for report_id={report_id}: {type(e).__name__} - {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1924,7 +1931,8 @@ async def preview_backtest_attribution(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Attribution preview failed: {e}")
+        request_context = "backtest_report" if request.backtest_report else f"report_id={request.report_id}"
+        logger.error(f"Attribution preview failed for {request_context}: {type(e).__name__} - {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

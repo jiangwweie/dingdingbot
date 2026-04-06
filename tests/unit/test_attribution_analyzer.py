@@ -337,6 +337,104 @@ class TestAttributionReportModel:
         assert hasattr(report, 'trend_attribution')
         assert hasattr(report, 'rr_attribution')
 
+    def test_attribution_report_has_version(self):
+        """测试报告包含版本字段"""
+        from src.application.attribution_analyzer import AttributionAnalyzer
+
+        analyzer = AttributionAnalyzer()
+        report = analyzer.analyze({
+            "attempts": [
+                {
+                    "final_result": "SIGNAL_FIRED",
+                    "pattern_score": 0.8,
+                    "pnl_ratio": 1.5,
+                }
+            ]
+        })
+
+        assert report.version == "1.0.0"
+        assert "analyzed_at" in report.metadata
+        assert "total_attempts" in report.metadata
+        assert "fired_signals" in report.metadata
+
+
+# ============================================================
+# Tests: 边界情况测试 (C-01/C-02 修复验证)
+# ============================================================
+
+class TestAttributionAnalyzerBoundaryCases:
+    """归因分析器边界情况测试"""
+
+    def test_compare_score_performance_with_empty_lists(self):
+        """测试空列表时的边界情况"""
+        from src.application.attribution_analyzer import AttributionAnalyzer
+
+        analyzer = AttributionAnalyzer()
+
+        # 两组都为空
+        result = analyzer._compare_score_performance([], [])
+        assert result == "数据不足"
+
+        # 仅高分组为空
+        result = analyzer._compare_score_performance([], [{"pnl_ratio": 1.0}])
+        assert result == "仅有低分组数据"
+
+        # 仅低分组为空
+        result = analyzer._compare_score_performance([{"pnl_ratio": 1.0}], [])
+        assert result == "仅有高分组数据"
+
+    def test_calculate_alignment_ratio_with_zero_total(self):
+        """测试零总数时的边界情况"""
+        from src.application.attribution_analyzer import AttributionAnalyzer
+
+        analyzer = AttributionAnalyzer()
+        result = analyzer._calculate_alignment_ratio(0, 0)
+        assert result == 0.0
+
+    def test_calculate_alignment_ratio_normal(self):
+        """测试正常情况"""
+        from src.application.attribution_analyzer import AttributionAnalyzer
+
+        analyzer = AttributionAnalyzer()
+        result = analyzer._calculate_alignment_ratio(75, 100)
+        assert result == 0.75
+
+    def test_filter_impact_calculation(self):
+        """测试过滤器影响计算"""
+        from src.application.attribution_analyzer import AttributionAnalyzer
+
+        analyzer = AttributionAnalyzer()
+
+        passed = [{"pnl_ratio": 2.0}, {"pnl_ratio": 1.5}, {"pnl_ratio": -1.0}]  # 2/3 = 66.7%
+        disabled = [{"pnl_ratio": -1.0}, {"pnl_ratio": -0.5}]  # 0/2 = 0%
+
+        impact = analyzer._calculate_filter_impact(passed, disabled)
+        assert impact > 0  # 正向影响
+
+    def test_optimal_range_returns_readable_format(self):
+        """测试最优区间返回可读格式"""
+        from src.application.attribution_analyzer import AttributionAnalyzer
+
+        analyzer = AttributionAnalyzer()
+        report = analyzer.analyze({
+            "attempts": [
+                {
+                    "final_result": "SIGNAL_FIRED",
+                    "pattern_score": 0.8,
+                    "pnl_ratio": 2.5,
+                },
+                {
+                    "final_result": "SIGNAL_FIRED",
+                    "pattern_score": 0.6,
+                    "pnl_ratio": 1.5,
+                }
+            ]
+        })
+
+        optimal = report.rr_attribution["optimal_range"]
+        assert optimal["suggested_rr"] in ["2:1 以上", "1:1 - 2:1", "0:1 - 1:1"]
+        assert "optimal_group" in optimal
+
 
 # ============================================================
 # Integration Tests: 端到端测试

@@ -36,6 +36,13 @@ class AttributionAnalyzer:
     HIGH_RR_THRESHOLD = 2.0
     MEDIUM_RR_THRESHOLD = 1.0
 
+    # 盈亏比区间映射
+    RR_RANGE_MAP = {
+        "high_rr": "2:1 以上",
+        "medium_rr": "1:1 - 2:1",
+        "low_rr": "0:1 - 1:1",
+    }
+
     def analyze(self, backtest_report: Dict[str, Any]) -> AttributionReport:
         """
         执行完整的归因分析
@@ -46,13 +53,21 @@ class AttributionAnalyzer:
         Returns:
             AttributionReport 包含四个维度的分析结果
         """
+        from datetime import datetime, timezone
+
         attempts = backtest_report.get("attempts", [])
 
         return AttributionReport(
+            version="1.0.0",
             shape_quality=self._analyze_shape_quality(attempts),
             filter_attribution=self._analyze_filters(attempts),
             trend_attribution=self._analyze_trend(attempts),
             rr_attribution=self._analyze_rr(attempts),
+            metadata={
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
+                "total_attempts": len(attempts),
+                "fired_signals": len([a for a in attempts if a.get("final_result") == "SIGNAL_FIRED"]),
+            },
         )
 
     def _analyze_shape_quality(self, attempts: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -144,20 +159,26 @@ class AttributionAnalyzer:
         # 过滤器拒绝统计
         rejection_stats = self._calculate_rejection_stats(filtered_signals)
 
+        # 计算过滤器影响（通过过滤器的胜率 - 被过滤器拒绝的模拟胜率）
+        ema_impact = self._calculate_filter_impact(ema_passed, ema_disabled)
+        mtf_impact = self._calculate_filter_impact(mtf_passed, mtf_disabled)
+
         return {
             "ema_filter": {
                 "enabled_trades": len(ema_enabled),
                 "passed_trades": len(ema_passed),
                 "disabled_trades": len(ema_disabled),
                 "win_rate_with_ema": self._calculate_win_rate(ema_passed),
-                "impact_on_win_rate": 0.0,  # 简化实现
+                "win_rate_without_ema": self._calculate_win_rate(ema_disabled),
+                "impact_on_win_rate": ema_impact,
             },
             "mtf_filter": {
                 "enabled_trades": len(mtf_enabled),
                 "passed_trades": len(mtf_passed),
                 "disabled_trades": len(mtf_disabled),
                 "win_rate_with_mtf": self._calculate_win_rate(mtf_passed),
-                "impact_on_win_rate": 0.0,
+                "win_rate_without_mtf": self._calculate_win_rate(mtf_disabled),
+                "impact_on_win_rate": mtf_impact,
             },
             "rejection_stats": rejection_stats,
         }
@@ -195,7 +216,7 @@ class AttributionAnalyzer:
             "alignment_stats": {
                 "aligned_trades": aligned_trades,
                 "against_trend_trades": against_trend,
-                "alignment_ratio": aligned_trades / len(fired_signals) if fired_signals else 0.0,
+                "alignment_ratio": self._calculate_alignment_ratio(aligned_trades, len(fired_signals)),
             },
         }
 
@@ -223,13 +244,19 @@ class AttributionAnalyzer:
                 "avg_pnl": self._calculate_avg_pnl(signals),
             }
 
-        # 识别最优盈亏比区间
+        # 识别最优盈亏比区间（按胜率排序，而非交易数量）
         groups = {
             "high_rr": high_rr,
             "medium_rr": medium_rr,
             "low_rr": low_rr,
         }
-        optimal_group = max(groups.keys(), key=lambda k: len(groups[k])) if any(groups.values()) else "medium_rr"
+
+        # 计算各组胜率，找出最优组
+        group_win_rates = {k: self._calculate_win_rate(v) for k, v in groups.items() if v}
+        optimal_group = max(group_win_rates.keys(), key=lambda k: group_win_rates[k]) if group_win_rates else "medium_rr"
+
+        # 计算最优组的平均 PnL
+        optimal_avg_pnl = self._calculate_avg_pnl(groups.get(optimal_group, []))
 
         return {
             "high_rr": {
@@ -249,8 +276,9 @@ class AttributionAnalyzer:
                 "threshold": "< 0:1 (止损)",
             },
             "optimal_range": {
-                "suggested_rr": optimal_group.replace("_rr", ""),
-                "reasoning": f"最多交易落在该区间 ({len(groups.get(optimal_group, []))} 笔)",
+                "suggested_rr": self.RR_RANGE_MAP.get(optimal_group, "1:1 - 2:1"),
+                "reasoning": f"该区间胜率最高 ({group_win_rates.get(optimal_group, 0):.1%})，平均盈亏比 {optimal_avg_pnl:.2f}",
+                "optimal_group": optimal_group.replace("_rr", ""),
             },
         }
 
@@ -288,6 +316,13 @@ class AttributionAnalyzer:
                     stats[filter_name] = stats.get(filter_name, 0) + 1
         return stats
 
+    def _calculate_filter_impact(self, passed: List[Dict], disabled: List[Dict]) -> float:
+        """计算过滤器对胜率的影响"""
+        passed_win_rate = self._calculate_win_rate(passed)
+        disabled_win_rate = self._calculate_win_rate(disabled)
+        # 正向影响：通过过滤器的胜率高于被拒绝的
+        return round(passed_win_rate - disabled_win_rate, 4)
+
     def _calculate_win_rate(self, signals: List[Dict]) -> float:
         """计算胜率"""
         if not signals:
@@ -315,8 +350,21 @@ class AttributionAnalyzer:
                     aligned += 1
         return aligned
 
+    def _calculate_alignment_ratio(self, aligned_trades: int, total_trades: int) -> float:
+        """计算顺势交易比例"""
+        if total_trades == 0:
+            return 0.0
+        return aligned_trades / total_trades
+
     def _compare_score_performance(self, high_score: List[Dict], low_score: List[Dict]) -> str:
         """比较高分组和低分组的表现"""
+        if not high_score and not low_score:
+            return "数据不足"
+        if not high_score:
+            return "仅有低分组数据"
+        if not low_score:
+            return "仅有高分组数据"
+
         high_win_rate = self._calculate_win_rate(high_score)
         low_win_rate = self._calculate_win_rate(low_score)
 

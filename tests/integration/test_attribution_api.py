@@ -53,7 +53,7 @@ def mock_backtest_report():
 
 @pytest.fixture
 def test_client():
-    """创建 FastAPI 测试客户端"""
+    """创建 FastAPI 测试客户端（带资源清理）"""
     from src.interfaces.api import app
 
     # Mock dependencies
@@ -62,8 +62,9 @@ def test_client():
     with patch('src.interfaces.api._get_repository', return_value=Mock()):
         with patch('src.interfaces.api._account_getter', mock_account_getter):
             with patch('src.interfaces.api._get_exchange_gateway', return_value=Mock()):
-                client = TestClient(app)
-                yield client
+                # 使用 TestClient 的上下文管理器确保资源清理
+                with TestClient(app) as client:
+                    yield client
 
 
 # ============================================================
@@ -173,7 +174,38 @@ class TestAttributionPreviewEndpoint:
             json={}
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422  # 验证错误（Pydantic 验证器）
+
+
+# ============================================================
+# Tests: AttributionAnalysisRequest 验证器测试 (C-03 修复验证)
+# ============================================================
+
+class TestAttributionAnalysisRequestValidator:
+    """AttributionAnalysisRequest 验证器测试"""
+
+    def test_attribution_request_requires_one_field(self):
+        """测试请求必须提供至少一个字段"""
+        from src.interfaces.api import AttributionAnalysisRequest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            AttributionAnalysisRequest()
+        assert "必须提供 report_id 或 backtest_report 其中之一" in str(exc_info.value)
+
+    def test_attribution_request_accepts_report_id(self):
+        """测试接受 report_id"""
+        from src.interfaces.api import AttributionAnalysisRequest
+
+        request = AttributionAnalysisRequest(report_id="test-id")
+        assert request.report_id == "test-id"
+
+    def test_attribution_request_accepts_backtest_report(self):
+        """测试接受 backtest_report"""
+        from src.interfaces.api import AttributionAnalysisRequest
+
+        request = AttributionAnalysisRequest(backtest_report={"attempts": []})
+        assert request.backtest_report is not None
 
 
 # ============================================================
