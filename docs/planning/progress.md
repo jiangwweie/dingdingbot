@@ -4,6 +4,42 @@
 
 ---
 
+### 2026-04-06 下午 - ORD-5: 订单审计日志表实现 ✅
+
+**会话阶段**: 任务实现与交付
+**完成工作**:
+1. 创建数据库迁移脚本 `migrations/004_create_order_audit_logs.sql`
+2. 添加 Pydantic 模型到 `src/domain/models.py`:
+   - `OrderAuditEventType` - 9 种事件类型
+   - `OrderAuditTriggerSource` - 3 种触发来源
+   - `OrderAuditLog` - 审计日志模型
+   - `OrderAuditLogCreate` - 创建请求模型
+   - `OrderAuditLogQuery` - 查询参数模型
+3. 实现 `src/infrastructure/order_audit_repository.py`:
+   - 异步队列写入（容量 1000，满时降级同步）
+   - 按订单 ID/信号 ID/时间范围/事件类型查询
+4. 实现 `src/application/order_audit_logger.py`:
+   - 应用层服务，封装 Repository
+   - 便捷方法：log_status_change, log_order_created 等
+5. 创建集成指南 `docs/designs/ord-5-order-audit-log-integration.md`
+6. 运行迁移脚本，验证表已创建
+7. 更新 task_plan.md 标记 ORD-5 为已完成
+
+**Git 提交**:
+- 9c23b2d feat(ORD-5): 订单审计日志表实现
+
+**与 ORD-1 对齐**:
+- 事件类型枚举与订单状态机完全对齐
+- 触发来源：USER / SYSTEM / EXCHANGE
+- 异步队列设计，不阻塞订单状态流转
+
+**下一步**:
+- ORD-1 订单状态机完成后，集成审计日志调用
+- ORD-2 对账机制可使用审计日志查询
+- ORD-6 批量删除时记录审计日志
+
+---
+
 ### 2026-04-06 00:00 - 配置重构风险修复项目完成 ✅
 
 **会话阶段**: 收工总结
