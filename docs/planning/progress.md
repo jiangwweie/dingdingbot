@@ -4,6 +4,60 @@
 
 ---
 
+### 2026-04-06 - BT-1/BT-4 质量专项完成 ✅
+
+**任务 ID**: PM-BT1-BT4-QA-Audit
+**负责人**: PM + Architect + Backend + QA
+**总工时**: 2h
+**优先级**: P0
+
+**任务目标**: 对 BT-1(滑点 KV 配置) 和 BT-4(策略归因分析) 进行代码审计和问题修复
+
+**完成工作**:
+
+1. ✅ **代码审计** (P8 测试专家)
+   - BT-1 审计：滑点 KV 配置实现验证
+   - BT-4 审计：归因分析四维度实现验证
+   - 发现 10 个集成测试失败 (api.py lifespan bug)
+
+2. ✅ **Bug 修复** (Task #2)
+   - 问题：`UnboundLocalError: local variable '_order_repo' referenced before assignment`
+   - 根因：`src/interfaces/api.py` line 372 缺少 `_order_repo` global 声明
+   - 修复：添加 `global _repository, _config_entry_repo, _order_repo`
+   - 验证：13/13 集成测试通过
+
+3. ✅ **集成测试验证** (Task #3)
+   - 执行 `tests/integration/test_attribution_api.py`
+   - 结果：13/13 通过 (100%)
+   - 覆盖：归因分析 API/预览 API/请求校验/结果验证
+
+4. ✅ **ADR-001 测试补充** (Task #4)
+   - 新增测试文件 `tests/unit/test_backtester_attempt.py` (5 个测试)
+   - 新增测试 `test_ut_018_filled_at_timestamp` 系列 (3 个测试)
+   - 新增测试 `TestFilterMetadataStandardization` (4 个测试)
+   - 总计：12 个 ADR-001 测试全部通过
+
+5. ✅ **废弃测试清理** (Task #5)
+   - 删除 `test_config_manager_db_r43.py`
+   - 删除 `test_config_manager_r71.py`
+   - 验证：pytest 收集错误减少
+
+**验收结果**:
+| 任务 | 状态 | 测试通过 |
+|------|------|----------|
+| Bug 修复 | ✅ | 13/13 |
+| 集成测试 | ✅ | 13/13 |
+| ADR-001 测试 | ✅ | 12/12 |
+| 废弃清理 | ✅ | N/A |
+
+**代码变更**:
+- `src/interfaces/api.py` line 372: 添加 `_order_repo` global 声明
+- `tests/unit/test_backtester_attempt.py`: 新增文件 (5 个测试)
+- `tests/unit/test_matching_engine.py`: 新增 3 个 filled_at 测试
+- `tests/unit/test_filter_factory.py`: 新增 metadata 标准化测试
+
+---
+
 ### 2026-04-06 - ORD-1 Task B: OrderLifecycleService 测试用例补充完成 ✅
 
 **任务 ID**: ORD-1-Task-B-Test-Supplement

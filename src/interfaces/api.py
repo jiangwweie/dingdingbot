@@ -369,7 +369,7 @@ async def lifespan(app: FastAPI):
     )
     from src.interfaces.api_v1_config import set_config_dependencies
 
-    global _repository, _config_entry_repo
+    global _repository, _config_entry_repo, _order_repo
 
     # Startup - 初始化所有 Repository
     try:

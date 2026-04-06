@@ -1235,3 +1235,147 @@ class TestFilterMetadataStandardization:
             # CRITICAL: metadata should never be None
             assert event.metadata is not None, f"{f.name} metadata should never be None"
             assert isinstance(event.metadata, dict), f"{f.name} metadata should be dict"
+
+
+# ============================================================
+# ADR-001 Task 4: Filter Metadata Standardization Tests
+# ============================================================
+class TestFilterMetadataStandardization:
+    """Test that all filters produce standardized metadata structure.
+
+    ADR-001 Requirement:
+    All FilterResult.metadata must contain standard fields:
+    - filter_name: str (e.g., "ema_trend", "mtf", "atr_volatility")
+    - filter_type: str (same as filter_name for single-type filters)
+    """
+
+    def test_ema_filter_metadata_contains_standard_fields(self):
+        """ADR-001 Task 4: Verify EmaTrendFilter metadata contains filter_name and filter_type."""
+        f = EmaTrendFilterDynamic(period=60, enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        # Test when EMA data not ready
+        context = FilterContext(
+            higher_tf_trends={},
+            current_trend=None,
+            current_timeframe="15m",
+        )
+
+        event = f.check(pattern, context)
+
+        # ADR-001: Verify standard metadata fields
+        assert "filter_name" in event.metadata, "EMA filter metadata must contain 'filter_name'"
+        assert "filter_type" in event.metadata, "EMA filter metadata must contain 'filter_type'"
+        assert event.metadata["filter_name"] == "ema_trend"
+        assert event.metadata["filter_type"] == "ema_trend"
+        assert event.metadata["period"] == 60
+
+    def test_mtf_filter_metadata_contains_standard_fields(self):
+        """ADR-001 Task 4: Verify MtfFilter metadata contains filter_name and filter_type."""
+        f = MtfFilterDynamic(enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        # Test with higher timeframe data available
+        context = FilterContext(
+            higher_tf_trends={"1h": TrendDirection.BULLISH},
+            current_timeframe="15m",
+        )
+
+        event = f.check(pattern, context)
+
+        # ADR-001: Verify standard metadata fields
+        assert "filter_name" in event.metadata, "MTF filter metadata must contain 'filter_name'"
+        assert "filter_type" in event.metadata, "MTF filter metadata must contain 'filter_type'"
+        assert event.metadata["filter_name"] == "mtf"
+        assert event.metadata["filter_type"] == "mtf"
+        assert event.metadata["higher_timeframe"] == "1h"
+        assert event.metadata["higher_trend"] == "bullish"
+
+    def test_atr_filter_metadata_contains_standard_fields(self, sample_kline):
+        """ADR-001 Task 4: Verify AtrFilter metadata contains filter_name and filter_type."""
+        f = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        # Pre-populate ATR data
+        key = "BTC/USDT:USDT:15m"
+        f._atr_state[key] = {
+            "tr_values": [Decimal("100")] * 14,
+            "atr": Decimal("100"),
+            "prev_close": None
+        }
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=sample_kline,
+        )
+
+        event = f.check(pattern, context)
+
+        # ADR-001: Verify standard metadata fields
+        assert "filter_name" in event.metadata, "ATR filter metadata must contain 'filter_name'"
+        assert "filter_type" in event.metadata, "ATR filter metadata must contain 'filter_type'"
+        assert event.metadata["filter_name"] == "atr_volatility"
+        assert event.metadata["filter_type"] == "atr_volatility"
+        assert "candle_range" in event.metadata
+        assert "atr_value" in event.metadata
+
+    def test_all_filters_metadata_have_standard_fields(self):
+        """ADR-001 Task 4: Comprehensive test for all filter types metadata standardization."""
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        test_cases = [
+            (
+                EmaTrendFilterDynamic(period=60, enabled=False),
+                FilterContext(higher_tf_trends={}, current_trend=None, current_timeframe="15m"),
+                "ema_trend",
+                "filter_disabled",
+            ),
+            (
+                MtfFilterDynamic(enabled=False),
+                FilterContext(higher_tf_trends={}, current_timeframe="15m"),
+                "mtf",
+                "filter_disabled",
+            ),
+            (
+                AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=False),
+                FilterContext(higher_tf_trends={}, current_timeframe="15m", kline=None),
+                "atr_volatility",
+                "filter_disabled",
+            ),
+        ]
+
+        for filter_instance, context, expected_name, expected_reason in test_cases:
+            event = filter_instance.check(pattern, context)
+
+            # Verify standard fields exist
+            assert "filter_name" in event.metadata, f"{expected_name} missing 'filter_name'"
+            assert "filter_type" in event.metadata, f"{expected_name} missing 'filter_type'"
+
+            # Verify values
+            assert event.metadata["filter_name"] == expected_name
+            assert event.metadata["filter_type"] == expected_name
+            assert event.reason == expected_reason
