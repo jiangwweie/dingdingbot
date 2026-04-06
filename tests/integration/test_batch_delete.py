@@ -170,17 +170,100 @@ async def test_batch_delete_full_flow(order_repository):
     assert deleted_order is None
 
 
+# ============================================================
+# Mock ExchangeGateway 实现
+# ============================================================
+
+class MockOrderCancelResult:
+    """Mock OrderCancelResult for testing"""
+
+    def __init__(self, order_id: str, symbol: str, success: bool = True, error_message: str = None):
+        self.order_id = order_id
+        self.exchange_order_id = None
+        self.symbol = symbol
+        self.status = OrderStatus.CANCELED if success else OrderStatus.OPEN
+        self.message = error_message or "Order canceled successfully"
+        self.error_code = "CANCEL_FAILED" if not success else None
+        self.error_message = error_message
+
+    @property
+    def is_success(self) -> bool:
+        return self.error_code is None
+
+
+class MockExchangeGateway:
+    """
+    Mock ExchangeGateway for testing batch delete functionality.
+
+    Simulates exchange order cancellation with configurable success/failure scenarios.
+    """
+
+    def __init__(self, failure_order_ids: List[str] = None, failure_reason: str = "Order already filled"):
+        """
+        Initialize MockExchangeGateway.
+
+        Args:
+            failure_order_ids: List of exchange_order_id that should fail to cancel
+            failure_reason: Error message for failed cancellations
+        """
+        self.failure_order_ids = set(failure_order_ids or [])
+        self.failure_reason = failure_reason
+        self.cancelled_ids: List[str] = []
+        self.failed_ids: List[str] = []
+        self.call_history: List[Dict[str, Any]] = []
+
+    async def cancel_order(self, exchange_order_id: str, symbol: str) -> MockOrderCancelResult:
+        """
+        Mock cancel_order method.
+
+        Args:
+            exchange_order_id: Exchange order ID to cancel
+            symbol: Symbol pair
+
+        Returns:
+            MockOrderCancelResult with success or failure
+        """
+        self.call_history.append({
+            "exchange_order_id": exchange_order_id,
+            "symbol": symbol,
+        })
+
+        if exchange_order_id in self.failure_order_ids:
+            self.failed_ids.append(exchange_order_id)
+            return MockOrderCancelResult(
+                order_id="",
+                symbol=symbol,
+                success=False,
+                error_message=self.failure_reason,
+            )
+        else:
+            self.cancelled_ids.append(exchange_order_id)
+            return MockOrderCancelResult(
+                order_id="",
+                symbol=symbol,
+                success=True,
+            )
+
+
+# ============================================================
+# 集成测试用例 - 带 Mock 交易所
+# ============================================================
+
 @pytest.mark.asyncio
 async def test_batch_delete_with_exchange_mock(order_repository):
     """
     INT-ORD-6-002: 使用 Mock 交易所的批量删除测试
 
     测试场景:
-    1. 创建带有 exchange_order_id 的 OPEN 状态订单
+    1. 创建带有 exchange_order_id 的 OPEN 状态订单 (3 个)
     2. Mock ExchangeGateway 的 cancel_order 方法
+       - 订单 0 和 2 取消成功
+       - 订单 1 取消失败（已成交）
     3. 执行批量删除（cancel_on_exchange=True）
-    4. 验证交易所取消成功
-    5. 验证数据库记录已删除
+    4. 验证:
+       - cancelled_on_exchange: 2 个成功
+       - failed_to_cancel: 1 个失败
+       - deleted_from_db: 3 个删除
     """
     current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
 
@@ -209,46 +292,250 @@ async def test_batch_delete_with_exchange_mock(order_repository):
     for order in orders:
         await order_repository.save(order)
 
-    # 准备：Mock ExchangeGateway
-    cancelled_exchange_ids = []
-    failed_exchange_ids = []
+    # 验证：订单已保存
+    all_orders_before = await order_repository.get_all_orders(limit=100)
+    mock_orders = [o for o in all_orders_before if o.signal_id.startswith("sig_exchange_mock")]
+    assert len(mock_orders) == 3
 
-    class MockExchangeGateway:
-        async def cancel_order(self, exchange_order_id: str, symbol: str):
-            class MockResponse:
-                def __init__(self, success: bool, error: str = None):
-                    self.is_success = success
-                    self.error_message = error
-
-            # 模拟：第 2 个订单取消失败
-            if exchange_order_id == "binance_mock_1":
-                failed_exchange_ids.append(exchange_order_id)
-                return MockResponse(success=False, error="Order already filled")
-            else:
-                cancelled_exchange_ids.append(exchange_order_id)
-                return MockResponse(success=True)
-
-    # 执行：注入 Mock Gateway 并执行批量删除
-    # 注意：由于 delete_orders_batch 内部懒加载 ExchangeGateway
-    # 我们需要通过 patch 来注入 Mock
-    with patch.object(order_repository, '_db') as mock_db:
-        # 这里需要更复杂的 Mock 设置，暂时简化测试
-        pass
-
-    # 简化测试：不真正 Mock ExchangeGateway，只验证数据库删除
-    result = await order_repository.delete_orders_batch(
-        order_ids=["ord_exchange_mock_0", "ord_exchange_mock_1", "ord_exchange_mock_2"],
-        cancel_on_exchange=False,  # 简化：跳过交易所取消
+    # 准备：Mock ExchangeGateway - 订单 1 取消失败
+    mock_gateway = MockExchangeGateway(
+        failure_order_ids=["binance_mock_1"],
+        failure_reason="Order already filled",
     )
 
-    # 验证：所有订单已从数据库删除
+    # 注入 Mock Gateway
+    order_repository.set_exchange_gateway(mock_gateway)
+
+    # 执行：批量删除（cancel_on_exchange=True）
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_exchange_mock_0", "ord_exchange_mock_1", "ord_exchange_mock_2"],
+        cancel_on_exchange=True,
+        audit_info={
+            "operator_id": "test-user",
+            "ip_address": "127.0.0.1",
+            "user_agent": "pytest-integration-test",
+        },
+    )
+
+    # 验证：交易所取消结果
+    # 2 个成功取消（订单 0 和 2）
+    assert len(result["cancelled_on_exchange"]) == 2
+    assert "ord_exchange_mock_0" in result["cancelled_on_exchange"]
+    assert "ord_exchange_mock_2" in result["cancelled_on_exchange"]
+
+    # 1 个取消失败（订单 1）
+    assert len(result["failed_to_cancel"]) == 1
+    assert result["failed_to_cancel"][0]["order_id"] == "ord_exchange_mock_1"
+    assert "Order already filled" in result["failed_to_cancel"][0]["reason"]
+
+    # 验证：数据库删除结果
     assert result["deleted_count"] == 3
     assert len(result["deleted_from_db"]) == 3
+    assert "ord_exchange_mock_0" in result["deleted_from_db"]
+    assert "ord_exchange_mock_1" in result["deleted_from_db"]
+    assert "ord_exchange_mock_2" in result["deleted_from_db"]
 
     # 验证：订单确实被删除
     for i in range(3):
         order = await order_repository.get_order(f"ord_exchange_mock_{i}")
         assert order is None
+
+    # 验证：Mock Gateway 被正确调用
+    assert len(mock_gateway.call_history) == 3
+    # 使用集合比较（顺序可能因字典迭代而异）
+    assert set(mock_gateway.cancelled_ids) == {"binance_mock_0", "binance_mock_2"}
+    assert mock_gateway.failed_ids == ["binance_mock_1"]
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_exchange_all_failures(order_repository):
+    """
+    INT-ORD-6-007: 交易所取消全部失败场景测试
+
+    测试场景:
+    1. 创建 3 个 OPEN 状态订单
+    2. Mock 所有订单取消都失败
+    3. 验证数据库仍然删除成功
+    4. 验证所有失败都被正确记录
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建 OPEN 状态的订单
+    orders = [
+        Order(
+            id=f"ord_all_fail_{i}",
+            signal_id=f"sig_all_fail_{i}",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            price=Decimal('70000'),
+            requested_qty=Decimal('0.5'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            exchange_order_id=f"binance_fail_{i}",
+            reduce_only=True,
+        )
+        for i in range(3)
+    ]
+
+    # 执行：保存订单
+    for order in orders:
+        await order_repository.save(order)
+
+    # 准备：Mock ExchangeGateway - 所有订单都失败
+    mock_gateway = MockExchangeGateway(
+        failure_order_ids=["binance_fail_0", "binance_fail_1", "binance_fail_2"],
+        failure_reason="Order not found",
+    )
+
+    # 注入 Mock Gateway
+    order_repository.set_exchange_gateway(mock_gateway)
+
+    # 执行：批量删除
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_all_fail_0", "ord_all_fail_1", "ord_all_fail_2"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：所有交易所取消都失败
+    assert len(result["cancelled_on_exchange"]) == 0
+    assert len(result["failed_to_cancel"]) == 3
+
+    # 验证所有订单都在 failed_to_cancel 中（使用集合比较，顺序可能不同）
+    failed_order_ids = {f["order_id"] for f in result["failed_to_cancel"]}
+    assert failed_order_ids == {"ord_all_fail_0", "ord_all_fail_1", "ord_all_fail_2"}
+
+    for failed in result["failed_to_cancel"]:
+        assert "Order not found" in failed["reason"]
+
+    # 验证：数据库仍然删除成功
+    assert result["deleted_count"] == 3
+    assert len(result["deleted_from_db"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_exchange_all_success(order_repository):
+    """
+    INT-ORD-6-008: 交易所取消全部成功场景测试
+
+    测试场景:
+    1. 创建 3 个 OPEN 状态订单
+    2. Mock 所有订单取消都成功
+    3. 验证所有取消都成功
+    4. 验证数据库删除成功
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建 OPEN 状态的订单
+    orders = [
+        Order(
+            id=f"ord_all_success_{i}",
+            signal_id=f"sig_all_success_{i}",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            price=Decimal('70000'),
+            requested_qty=Decimal('0.5'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            exchange_order_id=f"binance_success_{i}",
+            reduce_only=True,
+        )
+        for i in range(3)
+    ]
+
+    # 执行：保存订单
+    for order in orders:
+        await order_repository.save(order)
+
+    # 准备：Mock ExchangeGateway - 所有订单都成功
+    mock_gateway = MockExchangeGateway(failure_order_ids=[])
+
+    # 注入 Mock Gateway
+    order_repository.set_exchange_gateway(mock_gateway)
+
+    # 执行：批量删除
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_all_success_0", "ord_all_success_1", "ord_all_success_2"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：所有交易所取消都成功
+    assert len(result["cancelled_on_exchange"]) == 3
+    assert len(result["failed_to_cancel"]) == 0
+
+    # 验证：数据库删除成功
+    assert result["deleted_count"] == 3
+    assert len(result["deleted_from_db"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_no_exchange_order_id(order_repository):
+    """
+    INT-ORD-6-009: 幽灵订单（无 exchange_order_id）批量删除测试
+
+    测试场景:
+    1. 创建没有 exchange_order_id 的 OPEN 状态订单（幽灵订单）
+    2. 执行批量删除（cancel_on_exchange=True）
+    3. 验证：这些订单不会被尝试取消（因为没有交易所 ID）
+    4. 验证：数据库删除成功
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建幽灵订单（没有 exchange_order_id）
+    orders = [
+        Order(
+            id=f"ord_ghost_{i}",
+            signal_id=f"sig_ghost_{i}",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            price=Decimal('70000'),
+            requested_qty=Decimal('0.5'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            # 注意：没有 exchange_order_id
+            reduce_only=True,
+        )
+        for i in range(3)
+    ]
+
+    # 执行：保存订单
+    for order in orders:
+        await order_repository.save(order)
+
+    # 准备：Mock ExchangeGateway（不应该被调用）
+    mock_gateway = MockExchangeGateway()
+    order_repository.set_exchange_gateway(mock_gateway)
+
+    # 执行：批量删除
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_ghost_0", "ord_ghost_1", "ord_ghost_2"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：没有调用交易所取消（因为没有 exchange_order_id）
+    assert len(result["cancelled_on_exchange"]) == 0
+    # 注意：没有 exchange_order_id 的订单会被记录到 failed_to_cancel 中，原因为 "No exchange_order_id"
+    assert len(result["failed_to_cancel"]) == 3
+    for failed in result["failed_to_cancel"]:
+        assert "No exchange_order_id" in failed["reason"]
+
+    # 验证：数据库删除成功
+    assert result["deleted_count"] == 3
+    assert len(result["deleted_from_db"]) == 3
+
+    # 验证：Mock Gateway 没有被调用
+    assert len(mock_gateway.call_history) == 0
 
 
 @pytest.mark.asyncio

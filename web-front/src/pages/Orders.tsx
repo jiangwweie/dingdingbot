@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Plus, Filter, X, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
-import { message, Modal } from 'antd';
+import { message } from 'antd';
 import { OrderTreeNode, OrderStatus, OrderRole, OrderBatchDeleteRequest } from '../types/order';
 import { OrderChainTreeTable } from '../components/v3/OrderChainTreeTable';
 import { DeleteChainConfirmModal } from '../components/v3/DeleteChainConfirmModal';
@@ -52,6 +52,17 @@ export default function Orders() {
   // Delete confirm modal state
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [pendingDeleteOrderIds, setPendingDeleteOrderIds] = useState<string[]>([]);
+
+  // 获取客户端 IP
+  const getClientIP = useCallback(async (): Promise<string> => {
+    try {
+      const response = await fetch('/api/v1/client/info');
+      const data = await response.json();
+      return data.ip_address || '';
+    } catch {
+      return '';
+    }
+  }, []);
 
   // Build URL for filter count display
   const filterCount = [symbolFilter, timeframeFilter, startDate, endDate].filter(Boolean).length;
@@ -144,21 +155,29 @@ export default function Orders() {
         order_ids: pendingDeleteOrderIds,
         cancel_on_exchange: true,
         audit_info: {
-          operator_id: 'user-001', // TODO: 从登录信息获取
-          ip_address: '',
+          operator_id: 'web-user',
+          ip_address: await getClientIP(),
           user_agent: navigator.userAgent,
         },
       };
 
       const response = await deleteOrderChain(request);
 
-      // 显示结果
-      if (response.deleted_count > 0) {
-        message.success(`成功删除 ${response.deleted_count} 个订单`);
+      // 显示完整结果
+      if (response.deleted_from_db && response.deleted_from_db.length > 0) {
+        message.success(`已从数据库删除 ${response.deleted_from_db.length} 个订单`);
+      }
+      if (response.cancelled_on_exchange && response.cancelled_on_exchange.length > 0) {
+        message.success(`已在交易所取消 ${response.cancelled_on_exchange.length} 个订单`);
       }
       if (response.failed_to_cancel && response.failed_to_cancel.length > 0) {
         message.warning(
-          `${response.failed_to_cancel.length} 个订单取消失败：${response.failed_to_cancel.map(f => f.reason).join(', ')}`
+          `交易所取消失败：${response.failed_to_cancel.map(f => `${f.order_id}(${f.reason})`).join(', ')}`
+        );
+      }
+      if (response.failed_to_delete && response.failed_to_delete.length > 0) {
+        message.error(
+          `数据库删除失败：${response.failed_to_delete.map(f => `${f.order_id}(${f.reason})`).join(', ')}`
         );
       }
 
@@ -171,7 +190,7 @@ export default function Orders() {
       message.error(`删除失败：${error.message || '请重试'}`);
       throw error;
     }
-  }, [pendingDeleteOrderIds, loadOrderTree]);
+  }, [pendingDeleteOrderIds, loadOrderTree, getClientIP]);
 
   // Handle delete cancel
   const handleDeleteCancel = useCallback(() => {
@@ -242,15 +261,7 @@ export default function Orders() {
           {/* 批量删除按钮 */}
           {selectedRowKeys.length > 0 && (
             <button
-              onClick={() => {
-                Modal.confirm({
-                  title: `确认删除 ${selectedRowKeys.length} 个订单？`,
-                  content: '此操作将同步取消交易所挂单，无法撤销。',
-                  onOk: async () => {
-                    await handleDeleteConfirm();
-                  },
-                });
-              }}
+              onClick={() => handleDeleteChainClick(selectedRowKeys)}
               className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
             >
               <Trash2 className="w-4 h-4" />

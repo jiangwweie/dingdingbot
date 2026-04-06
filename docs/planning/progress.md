@@ -4,6 +4,47 @@
 
 ---
 
+### 2026-04-06 - ORD-1 T2 任务完成 ✅
+
+**任务**: OrderLifecycleService 服务层实现
+
+**完成工作**:
+1. ✅ 实现 `OrderLifecycleService` 服务层
+2. ✅ 实现订单全生命周期方法：`create_order`, `submit_order`, `confirm_order`, `update_order_from_exchange`, `cancel_order`
+3. ✅ 与 `OrderStateMachine` 状态机集成
+4. ✅ 与审计日志集成
+
+**修复的问题**:
+- 修复 `order_repository.py` 缺少 `Set` 导入的问题
+- 修复测试中 `OrderTransitionError` 导入问题
+
+**测试结果**:
+- ✅ 20/20 测试通过 (100%)
+- ✅ 覆盖订单创建、提交、确认、成交、取消全流程
+- ✅ 覆盖状态机集成测试
+- ✅ 覆盖边界情况测试
+
+**修改文件**:
+- `src/application/order_lifecycle_service.py` (新建)
+- `src/infrastructure/order_repository.py` (添加 Set 导入)
+- `tests/unit/test_order_lifecycle_service.py` (修复导入)
+
+---
+
+### 2026-04-06 - 清理后台挂起测试任务 🧹
+
+**问题发现**: 后台有 16+ 个长期挂起的 pytest 测试进程
+
+**清理的进程**:
+- `test_order_lifecycle_service.py` 相关测试进程 (4 个)
+- `test_config_manager_db*.py` 相关测试进程 (6 个)
+- `test_signal_pipeline.py` 相关测试进程 (2 个)
+- 临时测试脚本进程 (4 个)
+
+**清理结果**: ✅ 已清理 16 个僵尸进程，释放系统资源
+
+---
+
 ### 2026-04-06 - ORD-6 P0/P1/P2 问题修复完成 ✅
 
 **任务来源**: ORD-6 代码审查发现 12 个问题（3P0+5P1+4P2）
