@@ -40,9 +40,15 @@
 **Git 提交**:
 - `5dceef7` feat(TEST-1): 测试基础设施搭建完成
 - `a6aa2e4` test(TEST-2): OrderManager 测试重构 - 覆盖率 75%→100%
+- `9d2b831` docs(TEST-0): 方案 C 测试架构重构阶段完成
 - `dc84803` docs: 更新 Playwright 配置和进度日志
 
-**推送状态**: 待推送
+**推送状态**: ✅ 已推送到 origin/dev
+
+**遗留问题**:
+1. TEST-3 单元测试因 Write 工具参数错误未完全创建，延期到下一会话
+2. TEST-4 测试目录重组未启动
+3. TEST-5 文档收尾部分完成（progress.md/task_plan.md 已更新）
 
 ---
 
