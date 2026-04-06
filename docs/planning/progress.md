@@ -51,9 +51,9 @@
 
 ---
 
-### 2026-04-06 - ORD-1 系统性重构完成 🎉
+### 2026-04-06 - ORD-1 系统性重构完成 + 代码审查启动 🎉
 
-**会话阶段**: ORD-1 全部任务完成（T1-T9）
+**会话阶段**: ORD-1 全部任务完成（T1-T9），代码审查进行中
 
 **完成工作**:
 
@@ -78,6 +78,28 @@
 **3. 前端适配 (T8/T9)** ✅
 - OrderStatusBadge.tsx - 已适配 9 种订单状态
 - OrderDetailsDrawer.tsx - 修复 statusIcon 映射（添加 CREATED/SUBMITTED）
+- OrderChainTreeTable.tsx - 取消按钮逻辑正确（OPEN/PARTIALLY_FILLED）
+- DeleteChainConfirmModal.tsx - 挂单统计逻辑正确
+
+**前端修复** (构建时修复 2 个无关问题):
+- StrategyEditor.tsx - 修复中文引号语法错误
+- SystemSettings.tsx - 替换不存在的 BackupOutlined 为 SaveOutlined
+
+**测试结果**:
+- 前端构建：✅ 成功
+- 后端测试：✅ 96/96 通过
+
+**Git 提交**:
+- `6c633f9` docs(ORD-1): 更新任务计划 - T6/T7/T8/T9 全部完成
+- `ea5f146` feat(ORD-1-T8/T9): 前端订单列表和详情适配 9 状态机
+
+**推送状态**: ✅ 已推送到 origin/dev
+
+**下一步**:
+- 代码审查继续进行（无阻塞性问题）
+- 准备启动 ORD-2: 对账机制实现 (20h)
+
+---
 - OrderChainTreeTable.tsx - 取消按钮逻辑正确（OPEN/PARTIALLY_FILLED）
 - DeleteChainConfirmModal.tsx - 挂单统计逻辑正确
 
