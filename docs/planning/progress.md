@@ -4,6 +4,75 @@
 
 ---
 
+### 2026-04-06 - ORD-6 批量删除功能 P0/P1/P2 问题全部修复完成 ✅
+
+**任务来源**: ORD-6 代码审查发现 12 个问题（3P0+5P1+4P2）
+
+**修复范围**: 后端 + 前端 + 测试（10 个任务）
+
+**完成工作**:
+
+**后端修复** (6 个任务，4b0ab1d):
+1. ✅ **FIX-001**: ExchangeGateway 依赖注入
+   - 修改 `OrderRepository.__init__()` 添加 `exchange_gateway` 和 `audit_logger` 参数
+   - 添加 `set_exchange_gateway()` 和 `set_audit_logger()` 方法
+   - 修改 `delete_orders_batch()` 使用注入的 gateway
+
+2. ✅ **FIX-002**: OrderAuditLogger 全局单例
+   - 在 `api.py` 中添加 `_audit_logger` 全局变量
+   - 在 `lifespan` 中初始化审计日志器
+   - 添加 `_get_audit_logger()` 函数
+
+3. ✅ **FIX-004**: 级联删除逻辑完善
+   - 新增 `_get_all_related_order_ids()` 递归方法
+   - 使用 BFS 递归获取所有关联订单（子订单 + 父订单）
+
+4. ✅ **FIX-005**: SQL 注入风险修复
+   - 添加 `BATCH_SIZE = 50` 常量
+   - 循环分批执行 DELETE 操作
+
+5. ✅ **FIX-009**: 日志级别调整
+   - "跳过交易所取消" → `logger.info()`
+   - "记录审计日志失败" → `logger.error()`
+
+6. ✅ **FIX-010**: 审计日志详情增强
+   - metadata 中增加 `failed_to_cancel` 和 `failed_to_delete` 详情
+
+**前端修复** (3 个任务):
+7. ✅ **FIX-003**: 前端批量删除逻辑统一
+   - 移除内联 `Modal.confirm`，统一使用 `DeleteChainConfirmModal` 组件
+   - `handleDeleteChainClick` 作为批量删除统一入口
+   - 完善删除结果展示
+
+8. ✅ **FIX-006**: 前端 audit_info 真实化
+   - 新增 `getClientIP()` 函数获取真实 IP 地址
+   - `audit_info` 使用真实用户信息 (`operator_id`, `ip_address`)
+
+9. ✅ **FIX-008**: 删除结果展示完善
+   - 显示完整删除结果：`deleted_from_db` / `cancelled_on_exchange` / `failed_to_cancel` / `failed_to_delete`
+
+**测试修复** (1 个任务):
+10. ✅ **FIX-007**: 测试 Mock 完善
+    - 实现 `MockExchangeGateway` 类
+    - 实现 `MockOrderCancelResult` 类
+    - 新增 4 个测试用例覆盖交易所取消成功/失败场景
+
+**修改文件**:
+- `src/infrastructure/order_repository.py` (173 行修改)
+- `src/interfaces/api.py` (48 行修改)
+- `web-front/src/pages/Orders.tsx` (前端修复)
+- `tests/integration/test_batch_delete.py` (测试 Mock 完善)
+
+**测试结果**:
+- ✅ 后端单元测试：28/28 通过 (100%)
+- ✅ 后端集成测试：9/9 通过 (100%)
+- **总计**: 37/37 通过 (100%)
+
+**Git 提交**:
+- `4b0ab1d` fix(backend): 修复 ORD-6 批量删除功能 P0/P1/P2 问题
+
+---
+
 ### 2026-04-06 - BT-4 策略归因分析功能完成 🎉
 
 **本次会话完成内容**:
