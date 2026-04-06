@@ -4,6 +4,100 @@
 
 ---
 
+### 2026-04-06 - ORD-1-T2: 订单生命周期服务层实现 ✅
+
+**会话阶段**: 任务完成
+**任务目标**: 
+- 创建 `src/application/order_lifecycle_service.py`
+- 实现 OrderLifecycleService 类及其核心方法
+- 编写单元测试
+- 更新 progress.md 和 task_plan.md
+
+**任务依赖**: 
+- 依赖 ORD-1-T1 完成的 OrderStateMachine（状态转换核心）
+- 依赖 OrderRepository（订单持久化）
+- 依赖 OrderAuditLogger（审计日志）
+
+**完成工作**:
+1. ✅ 确认 `src/application/order_lifecycle_service.py` 已存在，但需要修复
+2. ✅ 修复 `_get_or_create_state_machine()` 方法 - 更新状态机持有的订单对象引用
+3. ✅ 修复 `update_order_from_exchange()` 方法 - 正确处理 OPEN 状态下的部分成交
+4. ✅ 在 `OrderRepository` 中添加缺失的方法：
+   - `get_by_signal_id()` - 按信号 ID 查询订单
+   - `get_by_status()` - 按状态查询订单
+5. ✅ 修复 `OrderStateMachine` 方法命名冲突：
+   - 将类方法 `get_valid_transitions()` 重命名为 `get_valid_transitions_from()`
+   - 避免与实例方法名称冲突
+6. ✅ 更新测试文件 `tests/unit/test_order_state_machine.py` - 使用新方法名
+7. ✅ 更新测试文件 `tests/unit/test_order_lifecycle_service.py` - 修复测试逻辑
+8. ✅ 添加 `Set` 到 `order_repository.py` 的导入
+
+**修改文件**:
+- `src/application/order_lifecycle_service.py` (修改) - 修复状态机引用更新和交易所数据更新逻辑
+- `src/domain/order_state_machine.py` (修改) - 重命名类方法避免冲突
+- `src/infrastructure/order_repository.py` (修改) - 添加缺失的查询方法和 Set 导入
+- `tests/unit/test_order_lifecycle_service.py` (修改) - 修复测试逻辑
+- `tests/unit/test_order_state_machine.py` (修改) - 更新方法名调用
+
+**OrderLifecycleService 核心方法**:
+1. `create_order()` - 创建订单 (CREATED)
+2. `submit_order()` - 提交到交易所 (SUBMITTED)
+3. `confirm_order()` - 确认挂单 (OPEN)
+4. `update_order_partially_filled()` - 更新部分成交
+5. `update_order_filled()` - 更新完全成交
+6. `update_order_from_exchange()` - 根据交易所推送更新状态
+7. `cancel_order()` - 取消订单
+8. `reject_order()` - 标记为被拒绝
+9. `expire_order()` - 标记为已过期
+10. `_transition()` - 状态转换核心逻辑（通过 OrderStateMachine）
+11. `_notify_order_changed()` - 触发回调（用于 WebSocket 推送）
+
+**测试结果**:
+```
+======================== 110 passed, 1 warning in 1.11s ========================
+tests/unit/test_order_state_machine.py (62 测试) ✅
+tests/unit/test_order_repository.py (28 测试) ✅
+tests/unit/test_order_lifecycle_service.py (20 测试) ✅
+```
+
+**订单状态定义 (9 种)**:
+| 状态 | 说明 | 类型 |
+|------|------|------|
+| CREATED | 订单已创建（本地） | 非终态 |
+| SUBMITTED | 订单已提交到交易所 | 非终态 |
+| PENDING | 尚未发送到交易所 | 非终态 |
+| OPEN | 挂单中 | 非终态 |
+| PARTIALLY_FILLED | 部分成交 | 非终态 |
+| FILLED | 完全成交 | 终态 |
+| CANCELED | 已撤销 | 终态 |
+| REJECTED | 交易所拒单 | 终态 |
+| EXPIRED | 已过期 | 终态 |
+
+**状态流转矩阵**:
+```
+CREATED      → SUBMITTED, CANCELED
+SUBMITTED    → OPEN, REJECTED, CANCELED, EXPIRED
+PENDING      → OPEN, REJECTED, CANCELED, SUBMITTED
+OPEN         → PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED
+PARTIALLY_FILLED → FILLED, CANCELED
+FILLED       → (终态)
+CANCELED     → (终态)
+REJECTED     → (终态)
+EXPIRED      → (终态)
+```
+
+**验收标准**:
+- [x] `src/application/order_lifecycle_service.py` 已创建
+- [x] 所有方法可正常工作
+- [x] 单元测试通过 (20/20)
+- [x] progress.md 已更新
+- [x] task_plan.md 已更新
+
+**Git 提交**:
+- 待提交：feat(ORD-1-T2): 订单生命周期服务层实现
+
+---
+
 ### 2026-04-06 - ORD-6 批量删除功能 P0/P1/P2 问题全部修复完成 ✅
 
 **任务来源**: ORD-6 代码审查发现 12 个问题（3P0+5P1+4P2）
