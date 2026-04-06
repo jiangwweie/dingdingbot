@@ -418,3 +418,163 @@ class ConfigEntryRepository:
             Dictionary with config_key -> config_value mappings
         """
         return await self.get_all_entries()
+
+    # ============================================================
+    # Backtest Configuration Methods (KV Mode with Profile Support)
+    # ============================================================
+
+    async def get_backtest_configs(self, profile_name: str = 'default') -> Dict[str, Any]:
+        """
+        Get backtest configuration (KV mode) with profile support.
+
+        Args:
+            profile_name: Profile name (default: 'default')
+
+        Returns:
+            Dictionary with backtest configuration values
+
+        Default values (applied if KV not exists):
+            - slippage_rate: Decimal('0.001')
+            - fee_rate: Decimal('0.0004')
+            - initial_balance: Decimal('10000')
+            - tp_slippage_rate: Decimal('0.0005')
+        """
+        # Default configuration values
+        DEFAULT_BACKTEST_CONFIG = {
+            'backtest.slippage_rate': Decimal('0.001'),
+            'backtest.fee_rate': Decimal('0.0004'),
+            'backtest.initial_balance': Decimal('10000'),
+            'backtest.tp_slippage_rate': Decimal('0.0005'),
+        }
+
+        # Get stored configs with prefix and profile
+        stored_configs = await self.get_entries_by_prefix_with_profile(
+            prefix='backtest',
+            profile_name=profile_name
+        )
+
+        # Merge with defaults (stored values override defaults)
+        result = {}
+        for key, default_value in DEFAULT_BACKTEST_CONFIG.items():
+            config_key = key.replace('backtest.', '')  # Remove prefix for cleaner key names
+            result[config_key] = stored_configs.get(key, default_value)
+
+        return result
+
+    async def save_backtest_configs(
+        self,
+        configs: Dict[str, Any],
+        profile_name: str = 'default',
+        version: str = 'v1.0.0'
+    ) -> int:
+        """
+        Save backtest configuration (KV mode) with profile support.
+
+        Args:
+            configs: Dictionary of backtest configuration values
+                    Keys can be with or without 'backtest.' prefix
+            profile_name: Profile name (default: 'default')
+            version: Version string (default: 'v1.0.0')
+
+        Returns:
+            Number of config entries saved
+
+        Configuration keys:
+            - slippage_rate (stored as backtest.slippage_rate)
+            - fee_rate (stored as backtest.fee_rate)
+            - initial_balance (stored as backtest.initial_balance)
+            - tp_slippage_rate (stored as backtest.tp_slippage_rate)
+        """
+        saved_count = 0
+
+        for key, value in configs.items():
+            # Add 'backtest.' prefix if not present
+            if not key.startswith('backtest.'):
+                full_key = f'backtest.{key}'
+            else:
+                full_key = key
+
+            await self.upsert_entry_with_profile(
+                config_key=full_key,
+                config_value=value,
+                version=version,
+                profile_name=profile_name
+            )
+            saved_count += 1
+
+        return saved_count
+
+    async def get_entries_by_prefix_with_profile(
+        self,
+        prefix: str,
+        profile_name: str
+    ) -> Dict[str, Any]:
+        """
+        Get all config entries with keys starting with a prefix for a specific profile.
+
+        Args:
+            prefix: Key prefix (e.g., 'backtest', 'strategy.pinbar')
+            profile_name: Profile name to filter by
+
+        Returns:
+            Dictionary mapping config_key -> config_value
+        """
+        if not prefix.endswith("."):
+            prefix = prefix + "."
+
+        async with self._db.execute(
+            "SELECT config_key, config_value, value_type FROM config_entries_v2 "
+            "WHERE config_key LIKE ? AND profile_name = ? ORDER BY config_key",
+            (f"{prefix}%", profile_name)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            result = {}
+            for row in rows:
+                result[row["config_key"]] = self._deserialize_value(
+                    row["config_value"], row["value_type"], row["config_key"]
+                )
+            return result
+
+    async def upsert_entry_with_profile(
+        self,
+        config_key: str,
+        config_value: Any,
+        version: str = "v1.0.0",
+        profile_name: str = 'default'
+    ) -> int:
+        """
+        Insert or update a config entry with profile support.
+
+        Args:
+            config_key: Configuration key (e.g., 'backtest.slippage_rate')
+            config_value: Configuration value (any JSON-serializable type)
+            version: Version string
+            profile_name: Profile name (default: 'default')
+
+        Returns:
+            Config entry ID
+        """
+        value_type = self._get_value_type(config_value)
+        value_str = self._serialize_value(config_value, value_type)
+        now = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        async with self._ensure_lock():
+            # Try update first
+            cursor = await self._db.execute("""
+                UPDATE config_entries_v2
+                SET config_value = ?, value_type = ?, version = ?, updated_at = ?
+                WHERE config_key = ? AND profile_name = ?
+            """, (value_str, value_type, version, now, config_key, profile_name))
+
+            if cursor.rowcount == 0:
+                # Insert new entry
+                cursor = await self._db.execute("""
+                    INSERT INTO config_entries_v2
+                    (config_key, config_value, value_type, version, updated_at, profile_name)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (config_key, value_str, value_type, version, now, profile_name))
+                await self._db.commit()
+                return cursor.lastrowid
+
+            await self._db.commit()
+            return cursor.lastrowid

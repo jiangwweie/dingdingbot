@@ -37,10 +37,10 @@ async def repository():
 
     # Cleanup
     await repo.close()
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    # Remove all files in temp directory (including WAL/SHM files)
     if os.path.exists(temp_dir):
-        os.rmdir(temp_dir)
+        import shutil
+        shutil.rmtree(temp_dir)
 
 
 @pytest.fixture
@@ -738,3 +738,253 @@ class TestConfigEntryRepositoryJsonErrorHandling:
             for record in caplog.records
             if record.levelname == "ERROR"
         )
+
+
+# ============================================================
+# Test Class: Backtest Configuration Methods (T1 Task)
+# ============================================================
+class TestConfigEntryRepositoryBacktestConfig:
+    """Test backtest configuration KV storage methods."""
+
+    @pytest.mark.asyncio
+    async def test_get_backtest_configs_returns_defaults_when_empty(self, repository):
+        """Test that get_backtest_configs returns defaults when no KV exists."""
+        configs = await repository.get_backtest_configs(profile_name='default')
+
+        assert len(configs) == 4
+        assert configs['slippage_rate'] == Decimal('0.001')
+        assert configs['fee_rate'] == Decimal('0.0004')
+        assert configs['initial_balance'] == Decimal('10000')
+        assert configs['tp_slippage_rate'] == Decimal('0.0005')
+
+    @pytest.mark.asyncio
+    async def test_get_backtest_configs_overrides_with_stored_values(self, repository):
+        """Test that stored values override defaults."""
+        # Save custom values
+        custom_configs = {
+            'slippage_rate': Decimal('0.002'),
+            'fee_rate': Decimal('0.0006'),
+        }
+        await repository.save_backtest_configs(custom_configs, profile_name='default', version='v1.0.0')
+
+        # Get configs
+        configs = await repository.get_backtest_configs(profile_name='default')
+
+        # Custom values should override defaults
+        assert configs['slippage_rate'] == Decimal('0.002')
+        assert configs['fee_rate'] == Decimal('0.0006')
+        # Unspecified values should use defaults
+        assert configs['initial_balance'] == Decimal('10000')
+        assert configs['tp_slippage_rate'] == Decimal('0.0005')
+
+    @pytest.mark.asyncio
+    async def test_save_backtest_configs_returns_count(self, repository):
+        """Test that save_backtest_configs returns correct count."""
+        configs = {
+            'slippage_rate': Decimal('0.001'),
+            'fee_rate': Decimal('0.0004'),
+            'initial_balance': Decimal('10000'),
+            'tp_slippage_rate': Decimal('0.0005'),
+        }
+
+        count = await repository.save_backtest_configs(configs, profile_name='default', version='v1.0.0')
+
+        assert count == 4
+
+    @pytest.mark.asyncio
+    async def test_save_backtest_configs_stores_with_prefix(self, repository):
+        """Test that save_backtest_configs stores keys with 'backtest.' prefix."""
+        configs = {
+            'slippage_rate': Decimal('0.002'),
+        }
+
+        await repository.save_backtest_configs(configs, profile_name='default', version='v1.0.0')
+
+        # Verify entry was stored with prefix
+        entry = await repository.get_entry('backtest.slippage_rate')
+        assert entry is not None
+        assert entry['config_value'] == Decimal('0.002')
+
+    @pytest.mark.asyncio
+    async def test_save_backtest_configs_handles_full_prefix_keys(self, repository):
+        """Test that save_backtest_configs handles keys already with 'backtest.' prefix."""
+        configs = {
+            'backtest.slippage_rate': Decimal('0.003'),
+        }
+
+        await repository.save_backtest_configs(configs, profile_name='default', version='v1.0.0')
+
+        # Verify entry was stored correctly (not double-prefixed)
+        entry = await repository.get_entry('backtest.slippage_rate')
+        assert entry is not None
+        assert entry['config_value'] == Decimal('0.003')
+
+    @pytest.mark.asyncio
+    async def test_get_entries_by_prefix_with_profile_filters_correctly(self, repository):
+        """Test that get_entries_by_prefix_with_profile filters by profile."""
+        # Save configs for two profiles
+        await repository.save_backtest_configs(
+            {'slippage_rate': Decimal('0.001')},
+            profile_name='profile_a',
+            version='v1.0.0'
+        )
+        await repository.save_backtest_configs(
+            {'slippage_rate': Decimal('0.002')},
+            profile_name='profile_b',
+            version='v1.0.0'
+        )
+
+        # Get entries for profile_a only
+        entries = await repository.get_entries_by_prefix_with_profile(
+            prefix='backtest',
+            profile_name='profile_a'
+        )
+
+        assert len(entries) == 1
+        assert entries['backtest.slippage_rate'] == Decimal('0.001')
+
+        # Get entries for profile_b only
+        entries = await repository.get_entries_by_prefix_with_profile(
+            prefix='backtest',
+            profile_name='profile_b'
+        )
+
+        assert len(entries) == 1
+        assert entries['backtest.slippage_rate'] == Decimal('0.002')
+
+    @pytest.mark.asyncio
+    async def test_upsert_entry_with_profile_inserts_new_entry(self, repository):
+        """Test that upsert_entry_with_profile inserts new entry."""
+        entry_id = await repository.upsert_entry_with_profile(
+            config_key='test.key',
+            config_value=Decimal('123.45'),
+            version='v1.0.0',
+            profile_name='test_profile'
+        )
+
+        assert isinstance(entry_id, int)
+        assert entry_id > 0
+
+        # Verify entry was stored with correct profile
+        async with repository._db.execute(
+            "SELECT config_key, config_value, value_type, profile_name FROM config_entries_v2 WHERE id = ?",
+            (entry_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            assert row['config_key'] == 'test.key'
+            assert row['profile_name'] == 'test_profile'
+
+    @pytest.mark.asyncio
+    async def test_upsert_entry_with_profile_updates_existing_entry(self, repository):
+        """Test that upsert_entry_with_profile updates existing entry (same key+profile)."""
+        # Insert first entry
+        entry_id1 = await repository.upsert_entry_with_profile(
+            config_key='test.key',
+            config_value=Decimal('100'),
+            version='v1.0.0',
+            profile_name='test_profile'
+        )
+
+        # Update with different value and profile
+        entry_id2 = await repository.upsert_entry_with_profile(
+            config_key='test.key',
+            config_value=Decimal('200'),
+            version='v1.1.0',
+            profile_name='test_profile'
+        )
+
+        # Should return same ID (update, not insert)
+        assert entry_id1 == entry_id2
+
+        # Verify value was updated
+        entry = await repository.get_entry('test.key')
+        assert entry is not None
+        assert entry['config_value'] == Decimal('200')
+        assert entry['version'] == 'v1.1.0'
+
+    @pytest.mark.asyncio
+    async def test_upsert_entry_with_profile_different_profile_same_key(self, repository):
+        """Test that upsert_entry_with_profile allows same key for different profiles."""
+        # Insert with profile_a
+        entry_id1 = await repository.upsert_entry_with_profile(
+            config_key='shared.key',
+            config_value=Decimal('100'),
+            version='v1.0.0',
+            profile_name='profile_a'
+        )
+
+        # Insert with profile_b (same key, different profile)
+        entry_id2 = await repository.upsert_entry_with_profile(
+            config_key='shared.key',
+            config_value=Decimal('200'),
+            version='v1.0.0',
+            profile_name='profile_b'
+        )
+
+        # Should have different IDs (different profile = different entry)
+        assert entry_id1 != entry_id2
+
+        # Verify both entries exist with different values
+        entries_a = await repository.get_entries_by_prefix_with_profile('shared', 'profile_a')
+        entries_b = await repository.get_entries_by_prefix_with_profile('shared', 'profile_b')
+
+        assert entries_a['shared.key'] == Decimal('100')
+        assert entries_b['shared.key'] == Decimal('200')
+
+    @pytest.mark.asyncio
+    async def test_profile_isolation_backtest_configs(self, repository):
+        """Test that different profiles have isolated backtest configs."""
+        # Save different configs for two profiles
+        await repository.save_backtest_configs(
+            {
+                'slippage_rate': Decimal('0.001'),
+                'fee_rate': Decimal('0.0004'),
+                'initial_balance': Decimal('10000'),
+            },
+            profile_name='conservative',
+            version='v1.0.0'
+        )
+
+        await repository.save_backtest_configs(
+            {
+                'slippage_rate': Decimal('0.005'),
+                'fee_rate': Decimal('0.0008'),
+                'initial_balance': Decimal('50000'),
+            },
+            profile_name='aggressive',
+            version='v1.0.0'
+        )
+
+        # Get configs for each profile
+        conservative_configs = await repository.get_backtest_configs(profile_name='conservative')
+        aggressive_configs = await repository.get_backtest_configs(profile_name='aggressive')
+
+        # Verify isolation
+        assert conservative_configs['slippage_rate'] == Decimal('0.001')
+        assert conservative_configs['fee_rate'] == Decimal('0.0004')
+        assert conservative_configs['initial_balance'] == Decimal('10000')
+
+        assert aggressive_configs['slippage_rate'] == Decimal('0.005')
+        assert aggressive_configs['fee_rate'] == Decimal('0.0008')
+        assert aggressive_configs['initial_balance'] == Decimal('50000')
+
+    @pytest.mark.asyncio
+    async def test_get_backtest_configs_partial_override(self, repository):
+        """Test get_backtest_configs with partial stored values."""
+        # Save only one config
+        await repository.save_backtest_configs(
+            {'initial_balance': Decimal('50000')},
+            profile_name='default',
+            version='v1.0.0'
+        )
+
+        configs = await repository.get_backtest_configs(profile_name='default')
+
+        # Should have stored value
+        assert configs['initial_balance'] == Decimal('50000')
+
+        # Should have defaults for others
+        assert configs['slippage_rate'] == Decimal('0.001')
+        assert configs['fee_rate'] == Decimal('0.0004')
+        assert configs['tp_slippage_rate'] == Decimal('0.0005')

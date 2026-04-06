@@ -32,6 +32,55 @@
 24. [订单管理级联展示功能 - 技术方案](#订单管理级联展示功能 - 技术方案)
 25. [订单管理级联展示功能 - 架构审查修正](#订单管理级联展示功能 - 架构审查修正)
 26. [订单管理级联展示功能 - 路由顺序修复](#订单管理级联展示功能 - 路由顺序修复)
+27. [T1 任务：ConfigEntryRepository 回测配置扩展](#t1-任务-configentryrepository-回测配置扩展)
+
+
+
+---
+
+## 📌 2026-04-06 下午技术发现
+
+### T1 任务：ConfigEntryRepository 回测配置扩展 ⭐⭐⭐
+
+**实现时间**: 2026-04-06
+
+**任务 ID**: #11
+
+**核心功能**: 回测配置 KV 存储（支持 Profile 隔离）
+
+**实现方法**:
+
+
+
+**配置键命名规范**:
+
+
+**Profile 隔离机制**:
+- config_entries_v2 表的唯一约束为 (profile_name, config_key)
+- 不同 Profile 可以有相同的 config_key 但值独立
+- 默认 Profile 为 'default'
+
+**单元测试覆盖** (11 个测试用例，51/51 通过):
+- 默认值返回测试
+- 存储值覆盖测试
+- 保存数量验证
+- 前缀存储验证
+- Profile 隔离验证
+- upsert 插入/更新验证
+
+**技术要点**:
+1. 默认值在代码中定义，KV 不存在时自动应用
+2. save_backtest_configs 支持带或不带前缀的键名
+3. get_backtest_configs 返回无前缀的简洁键名
+4. Profile 隔离通过 WHERE profile_name = ? 实现
+
+**验收标准**:
+- [x] get_backtest_configs() 可正确读取 KV 配置
+- [x] get_backtest_configs() 在 KV 不存在时应用默认值
+- [x] save_backtest_configs() 可保存配置到 config_entries_v2
+- [x] Profile 隔离正确（不同 profile 的配置不互相干扰）
+- [x] 添加单元测试验证功能
+
 
 ---
 
@@ -202,6 +251,53 @@ application/
 - `docs/arch/2026-04-06-系统架构全面分析报告.md` - 架构健康度评估
 - `docs/planning/config-refactor-impact-analysis.md` - 配置重构影响分析
 - `docs/planning/order-lifecycle-viz-task.md` - 订单生命周期可视化需求
+
+
+---
+
+## 📌 2026-04-06 下午技术发现
+
+### T1 任务：ConfigEntryRepository 回测配置扩展 ⭐⭐⭐
+
+**实现时间**: 2026-04-06
+
+**任务 ID**: #11
+
+**核心功能**: 回测配置 KV 存储（支持 Profile 隔离）
+
+**实现方法**:
+
+
+
+**配置键命名规范**:
+
+
+**Profile 隔离机制**:
+- config_entries_v2 表的唯一约束为 (profile_name, config_key)
+- 不同 Profile 可以有相同的 config_key 但值独立
+- 默认 Profile 为 'default'
+
+**单元测试覆盖** (11 个测试用例，51/51 通过):
+- 默认值返回测试
+- 存储值覆盖测试
+- 保存数量验证
+- 前缀存储验证
+- Profile 隔离验证
+- upsert 插入/更新验证
+
+**技术要点**:
+1. 默认值在代码中定义，KV 不存在时自动应用
+2. save_backtest_configs 支持带或不带前缀的键名
+3. get_backtest_configs 返回无前缀的简洁键名
+4. Profile 隔离通过 WHERE profile_name = ? 实现
+
+**验收标准**:
+- [x] get_backtest_configs() 可正确读取 KV 配置
+- [x] get_backtest_configs() 在 KV 不存在时应用默认值
+- [x] save_backtest_configs() 可保存配置到 config_entries_v2
+- [x] Profile 隔离正确（不同 profile 的配置不互相干扰）
+- [x] 添加单元测试验证功能
+
 
 ---
 
