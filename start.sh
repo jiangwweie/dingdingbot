@@ -29,7 +29,13 @@ fi
 # 停止旧服务
 echo ""
 echo "📋 步骤 1/3: 停止旧服务..."
-./scripts/deploy/stop.sh 2>/dev/null || true
+./scripts/deploy/stop.sh 2>/dev/null || {
+    # 备用方案：直接清理进程
+    pkill -f "python3.*src.main" 2>/dev/null || true
+    pkill -f "vite.*--port" 2>/dev/null || true
+    pkill -f "uvicorn.*src.interfaces.api" 2>/dev/null || true
+    echo "   ✅ 旧服务已清理"
+}
 sleep 1
 
 # 启动后端
