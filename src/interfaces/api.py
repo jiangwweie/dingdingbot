@@ -2971,7 +2971,7 @@ async def get_strategy_params():
         repo = _get_config_entry_repo()
 
         # Get config snapshots for default values
-        core_config = await config_manager.get_core_config()
+        core_config = config_manager.get_core_config()
         user_config = await config_manager.get_user_config()
 
         # Get all strategy parameters from database
@@ -3028,7 +3028,7 @@ async def get_strategy_params():
             return StrategyParamsResponse(**result)
 
         # Fallback to ConfigManager defaults
-        core_config = await config_manager.get_core_config()
+        core_config = config_manager.get_core_config()
         user_config = await config_manager.get_user_config()
         params = StrategyParams.from_configs(core_config, user_config)
         return StrategyParamsResponse(**params.to_dict())
