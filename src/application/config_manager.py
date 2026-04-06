@@ -1421,6 +1421,9 @@ class ConfigManager:
             except Exception as e:
                 logger.warning(f"回测配置自动快照创建失败：{e}")
 
+        # 查询旧配置（用于记录变更历史）
+        old_configs = await self.get_backtest_configs(profile_name=profile_name)
+
         # 使用 ConfigEntryRepository 保存配置
         saved_count = await self._config_entry_repo.save_backtest_configs(
             configs=configs,
@@ -1428,12 +1431,12 @@ class ConfigManager:
             version="v1.0.0"
         )
 
-        # 记录配置变更历史
+        # 记录配置变更历史（包含旧值和新值）
         await self._log_config_change(
             entity_type="backtest_config",
             entity_id=f"profile:{profile_name}",
             action="UPDATE",
-            old_values=None,  # 旧值需要查询之前的配置，为简化暂不记录
+            old_values={k: str(v) for k, v in old_configs.items()} if old_configs else None,
             new_values={k: str(v) for k, v in configs.items()},
             changed_by=changed_by,
             change_summary=f"回测配置更新 - Profile:{profile_name}, 变更项:{len(configs)}",
