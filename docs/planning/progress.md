@@ -40,6 +40,45 @@
 **Git 提交**:
 - `5dceef7` feat(TEST-1): 测试基础设施搭建完成
 - `a6aa2e4` test(TEST-2): OrderManager 测试重构 - 覆盖率 75%→100%
+- `dc84803` docs: 更新 Playwright 配置和进度日志
+
+**推送状态**: 待推送
+
+---
+
+### 2026-04-06 - Playwright E2E 测试环境搭建完成 ✅
+
+**任务 ID**: TEST-FRONTEND-1  
+**负责人**: Frontend Dev + QA Tester  
+**总工时**: 1h  
+**优先级**: P0
+
+**任务目标**: 手动安装 Playwright 浏览器（Chromium + WebKit）
+
+**完成工作**:
+
+1. ✅ **浏览器安装**
+   - Chromium: 使用用户下载的 `chrome-mac-arm64.zip` (173MB)
+   - WebKit: 使用用户下载的 `webkit-mac-15-arm64.zip` (75MB)
+   - 安装位置：`/Users/jiangwei/Library/Caches/ms-playwright/`
+
+2. ✅ **配置文件更新**
+   - `web-front/playwright.config.ts`: 添加 `testIgnore` 排除旧 Vitest 测试
+   - 解决 Playwright 与 Vitest 测试文件冲突问题
+
+3. ✅ **测试验证**
+   - 8 个测试已识别（Chromium 4 个 + WebKit 4 个）
+   - 测试文件：`tests/e2e/playwright/backtest.spec.ts`
+
+**运行方式**:
+```bash
+cd web-front
+npm run dev &          # 启动开发服务器
+npx playwright test    # 运行测试
+```
+
+**Git 提交**:
+- `dc84803` docs: 更新 Playwright 配置和进度日志
 
 **推送状态**: 待推送
 

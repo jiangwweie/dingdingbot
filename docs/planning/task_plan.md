@@ -15,7 +15,7 @@
 | **前端优化** | P0 | 3 项 | 4h | ✅ **已完成** | 100% |
 | **配置管理** | P2 | 3 项 | 4h | ✅ 已完成 | 100% |
 | **架构监控** | P2 | 2 项 | 24h | ☐ 远端规划 | 0% |
-| **测试重构** | P1 | 6 项 | 22h | ☐ 待启动 | 0% |
+| **测试重构** | P1 | 6 项 | 22h | 🟢 **部分完成** | 40% |
 
 **待办总计**: 7 大领域，**26 项任务**，约 **156h** 工作量
 
@@ -328,9 +328,9 @@ order_repository.py (5 次修改) - 集中重构
 
 ---
 
-## 📌 领域六：测试重构领域 (22h) ☐ 待启动
+## 📌 领域六：测试重构领域 (22h) 🟢 部分完成
 
-**状态**: ☐ **待启动 - 设计文档已审核通过**
+**状态**: 🟢 **部分完成 - TEST-1/TEST-2 已完成，TEST-3 延期**
 
 **核心目标**: 重构订单核心领域测试架构，提升测试覆盖率和可维护性。
 
@@ -338,32 +338,32 @@ order_repository.py (5 次修改) - 集中重构
 
 | ID | 任务名称 | 说明 | 工时 | 状态 |
 |----|----------|------|------|------|
-| **TEST-1** | 测试基础设施搭建 | 添加 pytest-mock + 创建 conftest.py + 工厂类 | 2h | ☐ 待启动 |
-| **TEST-1-T1** | 添加 pytest-mock 依赖 | requirements.txt 中添加 pytest-mock>=2.0.0 | 0.25h | ☐ 待启动 |
-| **TEST-1-T2** | 创建 tests/unit/conftest.py | 全局 fixtures + factories | 0.5h | ☐ 待启动 |
-| **TEST-1-T3** | 创建 OrderFactory | 订单工厂类 | 0.5h | ☐ 待启动 |
-| **TEST-1-T4** | 创建 PositionFactory | 仓位工厂类 | 0.25h | ☐ 待启动 |
-| **TEST-1-T5** | 创建 SignalFactory | 信号工厂类 | 0.25h | ☐ 待启动 |
-| **TEST-1-T6** | 创建 StrategyFactory | 策略工厂类 | 0.25h | ☐ 待启动 |
-| **TEST-2** | OrderManager 测试重构 | 参数化测试 + 异常处理 + 依赖注入 | 6h | ☐ 待启动 |
-| **TEST-2-T1** | 参数化测试覆盖 SHORT 方向 | LONG/SHORT 方向全覆盖 | 0.5h | ☐ 待启动 |
-| **TEST-2-T2** | 依赖注入 setter 测试 | set_order_repository/set_lifecycle_service | 0.25h | ☐ 待启动 |
-| **TEST-2-T3** | 异常处理路径测试 (3 个) | _notify/_save/_cancel 异常处理 | 0.75h | ☐ 待启动 |
-| **TEST-2-T4** | TP ratios 归一化测试 | tp_ratios 总和≠1.0 时自动调整 | 0.25h | ☐ 待启动 |
-| **TEST-2-T5** | OCO 完整路径测试 | 完全平仓/部分平仓场景 | 0.5h | ☐ 待启动 |
-| **TEST-2-T6** | SHORT 方向 TP/SL 生成测试 | _generate_tp_sl_orders SHORT 路径 | 1h | ☐ 待启动 |
-| **TEST-2-T7** | 边界条件测试 | 空值/零值/极值测试 | 1h | ☐ 待启动 |
-| **TEST-2-T8** | 覆盖率验证 (目标 95%) | 运行覆盖率报告并验证 | 0.25h | ☐ 待启动 |
-| **TEST-3** | OrderRepository 测试重构 | CRUD 操作 + 依赖注入 + 批量操作 | 10h | ☐ 待启动 |
-| **TEST-3-T1** | 创建 test_order_repository_unit.py | Mock 依赖的单元测试 | 0.25h | ☐ 待启动 |
-| **TEST-3-T2** | 创建 test_order_repository_integration.py | 真实数据库集成测试 | 0.25h | ☐ 待启动 |
-| **TEST-3-T3** | CRUD 操作测试 (save/update/delete) | 完整 CRUD 覆盖 | 2h | ☐ 待启动 |
-| **TEST-3-T4** | 依赖注入测试 | set_exchange_gateway/set_audit_logger | 0.5h | ☐ 待启动 |
-| **TEST-3-T5** | 批量删除测试 | batch_delete_orders | 1h | ☐ 待启动 |
-| **TEST-3-T6** | 查询方法测试 | get_orders_by_symbol/get_open_orders | 1h | ☐ 待启动 |
-| **TEST-3-T7** | 部分成交持久化测试 | filled_qty/average_exec_price | 1h | ☐ 待启动 |
-| **TEST-3-T8** | 边界条件测试 | 空值/并发/事务测试 | 2h | ☐ 待启动 |
-| **TEST-3-T9** | 覆盖率验证 (目标 85%) | 运行覆盖率报告并验证 | 0.5h | ☐ 待启动 |
+| **TEST-1** | 测试基础设施搭建 | 添加 pytest-mock + 创建 conftest.py + 工厂类 | 2h | ✅ **已完成** |
+| **TEST-1-T1** | 添加 pytest-mock 依赖 | requirements.txt 中添加 pytest-mock>=2.0.0 | 0.25h | ✅ **已完成** |
+| **TEST-1-T2** | 创建 tests/unit/conftest.py | 全局 fixtures + factories | 0.5h | ✅ **已完成** |
+| **TEST-1-T3** | 创建 OrderFactory | 订单工厂类 | 0.5h | ✅ **已完成** |
+| **TEST-1-T4** | 创建 PositionFactory | 仓位工厂类 | 0.25h | ✅ **已完成** |
+| **TEST-1-T5** | 创建 SignalFactory | 信号工厂类 | 0.25h | ✅ **已完成** |
+| **TEST-1-T6** | 创建 StrategyFactory | 策略工厂类 | 0.25h | ✅ **已完成** |
+| **TEST-2** | OrderManager 测试重构 | 参数化测试 + 异常处理 + 依赖注入 | 6h | ✅ **已完成** |
+| **TEST-2-T1** | 参数化测试覆盖 SHORT 方向 | LONG/SHORT 方向全覆盖 | 0.5h | ✅ **已完成** |
+| **TEST-2-T2** | 依赖注入 setter 测试 | set_order_repository/set_lifecycle_service | 0.25h | ✅ **已完成** |
+| **TEST-2-T3** | 异常处理路径测试 (3 个) | _notify/_save/_cancel 异常处理 | 0.75h | ✅ **已完成** |
+| **TEST-2-T4** | TP ratios 归一化测试 | tp_ratios 总和≠1.0 时自动调整 | 0.25h | ✅ **已完成** |
+| **TEST-2-T5** | OCO 完整路径测试 | 完全平仓/部分平仓场景 | 0.5h | ✅ **已完成** |
+| **TEST-2-T6** | SHORT 方向 TP/SL 生成测试 | _generate_tp_sl_orders SHORT 路径 | 1h | ✅ **已完成** |
+| **TEST-2-T7** | 边界条件测试 | 空值/零值/极值测试 | 1h | ✅ **已完成** |
+| **TEST-2-T8** | 覆盖率验证 (目标 95%) | 运行覆盖率报告并验证 | 0.25h | ✅ **已完成** |
+| **TEST-3** | OrderRepository 测试重构 | CRUD 操作 + 依赖注入 + 批量操作 | 10h | ⚠️ **部分完成** |
+| **TEST-3-T1** | 创建 test_order_repository_unit.py | Mock 依赖的单元测试 | 0.25h | ☐ **延期** |
+| **TEST-3-T2** | 创建 test_order_repository_integration.py | 真实数据库集成测试 | 0.25h | ✅ **已有集成测试** |
+| **TEST-3-T3** | CRUD 操作测试 (save/update/delete) | 完整 CRUD 覆盖 | 2h | ☐ **延期** |
+| **TEST-3-T4** | 依赖注入测试 | set_exchange_gateway/set_audit_logger | 0.5h | ☐ **延期** |
+| **TEST-3-T5** | 批量删除测试 | batch_delete_orders | 1h | ☐ **延期** |
+| **TEST-3-T6** | 查询方法测试 | get_orders_by_symbol/get_open_orders | 1h | ✅ **已完成** |
+| **TEST-3-T7** | 部分成交持久化测试 | filled_qty/average_exec_price | 1h | ✅ **已完成** |
+| **TEST-3-T8** | 边界条件测试 | 空值/并发/事务测试 | 2h | ☐ **延期** |
+| **TEST-3-T9** | 覆盖率验证 (目标 85%) | 运行覆盖率报告并验证 | 0.5h | ☐ **延期** |
 | **TEST-4** | 目录结构重组 | 按领域重组测试目录 | 2h | ☐ 待启动 |
 | **TEST-4-T1** | 创建 domain/ 子目录 | tests/unit/domain/ | 0.25h | ☐ 待启动 |
 | **TEST-4-T2** | 创建 application/ 子目录 | tests/unit/application/ | 0.25h | ☐ 待启动 |
