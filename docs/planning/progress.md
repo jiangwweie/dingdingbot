@@ -6,9 +6,9 @@
 
 ### 2026-04-06 - BT-1/BT-4 质量专项完成 ✅
 
-**任务 ID**: PM-BT1-BT4-QA-Audit
-**负责人**: PM + Architect + Backend + QA
-**总工时**: 2h
+**任务 ID**: PM-BT1-BT4-QA-Audit  
+**负责人**: PM + Architect + Backend + QA  
+**总工时**: 2h  
 **优先级**: P0
 
 **任务目标**: 对 BT-1(滑点 KV 配置) 和 BT-4(策略归因分析) 进行代码审计和问题修复
@@ -55,6 +55,13 @@
 - `tests/unit/test_backtester_attempt.py`: 新增文件 (5 个测试)
 - `tests/unit/test_matching_engine.py`: 新增 3 个 filled_at 测试
 - `tests/unit/test_filter_factory.py`: 新增 metadata 标准化测试
+
+**Git 提交**:
+```
+Commit: 6fd8f5f
+Message: test(BT-4): 修复 API lifespan bug + 补充 ADR-001 测试
+Refs: ADR-001, ADR-002
+```
 
 ---
 
