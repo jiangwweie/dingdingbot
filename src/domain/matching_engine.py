@@ -287,6 +287,8 @@ class MockMatchingEngine:
         order.status = OrderStatus.FILLED
         order.filled_qty = order.requested_qty
         order.average_exec_price = exec_price
+        order.filled_at = timestamp  # 任务 3: 设置成交时间戳
+        order.updated_at = timestamp  # 任务 3: 同步更新时间戳
 
         # 计算交易手续费
         trade_value = exec_price * order.requested_qty

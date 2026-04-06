@@ -713,6 +713,122 @@ def test_ut_017_tp1_slippage_default_rate():
 
 
 # ============================================================
+# UT-018: filled_at timestamp - Task 3 fix
+# ============================================================
+def test_ut_018_filled_at_timestamp():
+    """
+    UT-018: _execute_fill 正确设置 filled_at 字段 - 任务 3 修复验证
+
+    预期：
+    - order.filled_at 被设置为传入的 timestamp 参数
+    - order.updated_at 同步更新为相同时间戳
+    """
+    engine = MockMatchingEngine(slippage_rate=Decimal("0.001"), fee_rate=Decimal("0.0004"))
+
+    signal_id = "sig_test_filled_at"
+    position = create_position(signal_id, direction=Direction.LONG, entry_price=Decimal("70000"))
+
+    entry_order = create_order(
+        signal_id=signal_id,
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal("0.1"),
+    )
+
+    account = create_account(total_balance=Decimal("10000"))
+    positions_map = {signal_id: position}
+
+    # Use a specific timestamp for testing
+    test_timestamp = 1711785600000  # 2024-03-30 00:00:00 UTC
+
+    # Execute fill
+    engine._execute_fill(entry_order, Decimal("70000"), position, account, positions_map, test_timestamp)
+
+    # Assertions - Task 3 fix verification
+    assert entry_order.filled_at == test_timestamp, f"filled_at should be {test_timestamp}, got {entry_order.filled_at}"
+    assert entry_order.updated_at == test_timestamp, f"updated_at should be {test_timestamp}, got {entry_order.updated_at}"
+
+
+def test_ut_018b_filled_at_timestamp_stop_loss():
+    """
+    UT-018b: 止损单触发时 filled_at 正确设置
+
+    预期：止损单触发后，order.filled_at 设置为 K 线时间戳
+    """
+    engine = MockMatchingEngine(slippage_rate=Decimal("0.001"), fee_rate=Decimal("0.0004"))
+
+    kline = create_kline(
+        low=Decimal("69000"),
+        high=Decimal("71000"),
+        timestamp=1711785700000,  # Specific timestamp for testing
+    )
+
+    signal_id = "sig_test_sl_filled_at"
+    position = create_position(signal_id, direction=Direction.LONG, entry_price=Decimal("70000"))
+
+    sl_order = create_order(
+        signal_id=signal_id,
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        trigger_price=Decimal("69500"),
+        requested_qty=Decimal("0.1"),
+    )
+
+    account = create_account()
+    positions_map = {signal_id: position}
+
+    # Execute matching engine (should trigger SL)
+    executed = engine.match_orders_for_kline(kline, [sl_order], positions_map, account)
+
+    # Assertions
+    assert len(executed) == 1
+    assert sl_order.filled_at == 1711785700000, f"SL filled_at should match kline timestamp"
+
+
+def test_ut_018c_filled_at_timestamp_tp1():
+    """
+    UT-018c: 止盈单触发时 filled_at 正确设置
+
+    预期：止盈单触发后，order.filled_at 设置为 K 线时间戳
+    """
+    engine = MockMatchingEngine(
+        slippage_rate=Decimal("0.001"),
+        fee_rate=Decimal("0.0004"),
+        tp_slippage_rate=Decimal("0.0005"),
+    )
+
+    kline = create_kline(
+        low=Decimal("69000"),
+        high=Decimal("71000"),
+        timestamp=1711785800000,  # Specific timestamp for testing
+    )
+
+    signal_id = "sig_test_tp_filled_at"
+    position = create_position(signal_id, direction=Direction.LONG, entry_price=Decimal("70000"))
+
+    tp1_order = create_order(
+        signal_id=signal_id,
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal("70500"),
+        requested_qty=Decimal("0.1"),
+    )
+
+    account = create_account()
+    positions_map = {signal_id: position}
+
+    # Execute matching engine (should trigger TP1)
+    executed = engine.match_orders_for_kline(kline, [tp1_order], positions_map, account)
+
+    # Assertions
+    assert len(executed) == 1
+    assert tp1_order.filled_at == 1711785800000, f"TP1 filled_at should match kline timestamp"
+
+
+# ============================================================
 # Integration Test: Complete trade cycle
 # ============================================================
 def test_it_001_complete_trade_cycle():

@@ -454,7 +454,7 @@ class TestAtrFilterDynamic:
         assert event.passed is False
         assert event.reason == "insufficient_volatility"
         assert "candle_range" in event.metadata
-        assert "atr" in event.metadata
+        assert "atr_value" in event.metadata
         assert "min_required" in event.metadata
 
     def test_atr_filter_accepts_normal_volatility(self):
@@ -497,8 +497,8 @@ class TestAtrFilterDynamic:
         assert event.passed is True
         assert event.reason == "volatility_sufficient"
         assert "candle_range" in event.metadata
-        assert "atr" in event.metadata
-        assert event.metadata["ratio"] == 2.0  # 200 / 100 = 2.0
+        assert "atr_value" in event.metadata
+        assert event.metadata["volatility_ratio"] == 2.0  # 200 / 100 = 2.0
 
     def test_atr_filter_returns_metadata(self):
         """Test that TraceEvent contains proper metadata."""
@@ -538,11 +538,11 @@ class TestAtrFilterDynamic:
         # Verify metadata structure
         assert isinstance(event.metadata, dict)
         assert "candle_range" in event.metadata
-        assert "atr" in event.metadata
-        assert "ratio" in event.metadata
+        assert "atr_value" in event.metadata
+        assert "volatility_ratio" in event.metadata
         assert event.metadata["candle_range"] == 70.0  # 3050 - 2980
-        assert event.metadata["atr"] == 50.0
-        assert event.metadata["ratio"] == 1.4  # 70 / 50 = 1.4
+        assert event.metadata["atr_value"] == 50.0
+        assert event.metadata["volatility_ratio"] == 1.4  # 70 / 50 = 1.4
 
     def test_atr_filter_data_not_ready(self, sample_kline):
         """Test ATR filter when ATR data is not ready (not enough periods)."""
@@ -607,7 +607,7 @@ class TestAtrFilterDynamic:
         # candle_range (1.0) is NOT < min_range (1.0), so it passes
         assert event.passed is True
         assert event.reason == "volatility_sufficient"
-        assert event.metadata["ratio"] == 0.5  # 1.0 / 2.0 = 0.5
+        assert event.metadata["volatility_ratio"] == 0.5  # 1.0 / 2.0 = 0.5
 
     def test_atr_filter_kline_missing(self):
         """Test ATR filter when kline data is None."""
@@ -668,7 +668,7 @@ class TestAtrFilterDynamic:
         event = f.check(pattern, context)
         assert event.passed is True
         assert event.reason == "volatility_sufficient"
-        assert event.metadata["ratio"] == 0.5  # 10 / 20 = 0.5
+        assert event.metadata["volatility_ratio"] == 0.5  # 10 / 20 = 0.5
 
 
 # ============================================================
@@ -871,3 +871,367 @@ class TestCreateDynamicRunner:
 
         # Only pinbar should be included
         assert len(runner._strategies) == 1
+
+
+# ============================================================
+# Task 4: Filter metadata standardization tests
+# ============================================================
+class TestFilterMetadataStandardization:
+    """Test FilterResult.metadata standardization across all filter types."""
+
+    def test_ema_filter_metadata_structure(self):
+        """Test EMA filter metadata has standard fields."""
+        from src.domain.filter_factory import EmaTrendFilterDynamic, FilterContext
+
+        ema_filter = EmaTrendFilterDynamic(period=60, enabled=True)
+
+        # Create pattern and context
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={"wick_ratio": 0.7},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_trend=TrendDirection.BULLISH,
+            current_timeframe="15m",
+        )
+
+        event = ema_filter.check(pattern, context)
+
+        # Verify metadata is a dict (not None)
+        assert isinstance(event.metadata, dict)
+
+        # Standard fields for EMA filter
+        assert "filter_name" in event.metadata or "filter_type" in event.metadata or \
+               "trend_direction" in event.metadata or "period" in event.metadata or \
+               len(event.metadata) > 0  # At minimum, metadata should be populated
+
+    def test_ema_filter_metadata_when_disabled(self):
+        """Test EMA filter metadata when disabled."""
+        from src.domain.filter_factory import EmaTrendFilterDynamic, FilterContext
+
+        ema_filter = EmaTrendFilterDynamic(period=60, enabled=False)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_trend=None,
+            current_timeframe="15m",
+        )
+
+        event = ema_filter.check(pattern, context)
+
+        # Verify metadata is initialized (not None)
+        assert isinstance(event.metadata, dict)
+
+    def test_ema_filter_metadata_when_data_not_ready(self):
+        """Test EMA filter metadata when EMA data not ready."""
+        from src.domain.filter_factory import EmaTrendFilterDynamic, FilterContext
+
+        ema_filter = EmaTrendFilterDynamic(period=60, enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_trend=None,  # No data
+            current_timeframe="15m",
+        )
+
+        event = ema_filter.check(pattern, context)
+
+        # Verify metadata is initialized
+        assert isinstance(event.metadata, dict)
+        # Should contain diagnostic info
+        assert event.reason == "ema_data_not_ready"
+
+    def test_mtf_filter_metadata_structure(self):
+        """Test MTF filter metadata has standard fields."""
+        from src.domain.filter_factory import MtfFilterDynamic, FilterContext
+
+        mtf_filter = MtfFilterDynamic(enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={"1h": TrendDirection.BULLISH},
+            current_timeframe="15m",
+        )
+
+        event = mtf_filter.check(pattern, context)
+
+        # Verify metadata is a dict
+        assert isinstance(event.metadata, dict)
+
+        # MTF filter should include higher_timeframe info when available
+        if event.passed and event.reason == "mtf_confirmed_bullish":
+            assert "higher_timeframe" in event.metadata
+            assert "higher_trend" in event.metadata
+
+    def test_mtf_filter_metadata_no_higher_timeframe(self):
+        """Test MTF filter metadata when no higher timeframe."""
+        from src.domain.filter_factory import MtfFilterDynamic, FilterContext
+
+        mtf_filter = MtfFilterDynamic(enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="1w",  # No higher TF
+        )
+
+        event = mtf_filter.check(pattern, context)
+
+        assert isinstance(event.metadata, dict)
+        assert event.reason == "no_higher_timeframe"
+
+    def test_mtf_filter_metadata_higher_tf_unavailable(self):
+        """Test MTF filter metadata when higher TF data unavailable."""
+        from src.domain.filter_factory import MtfFilterDynamic, FilterContext
+
+        mtf_filter = MtfFilterDynamic(enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},  # Empty
+            current_timeframe="15m",
+        )
+
+        event = mtf_filter.check(pattern, context)
+
+        assert isinstance(event.metadata, dict)
+        assert event.reason == "higher_tf_data_unavailable"
+        assert "higher_timeframe" in event.metadata
+
+    def test_atr_filter_metadata_structure(self):
+        """Test ATR filter metadata has standard fields."""
+        from src.domain.filter_factory import AtrFilterDynamic, FilterContext
+
+        atr_filter = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        kline = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            timestamp=1000000,
+            open=Decimal("50000"),
+            high=Decimal("50150"),
+            low=Decimal("49950"),
+            close=Decimal("50100"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        # Pre-populate ATR data
+        key = "BTC/USDT:USDT:15m"
+        atr_filter._atr_state[key] = {
+            "tr_values": [Decimal("100")] * 14,
+            "atr": Decimal("100"),
+            "prev_close": None,
+        }
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=kline,
+        )
+
+        event = atr_filter.check(pattern, context)
+
+        # Verify metadata structure
+        assert isinstance(event.metadata, dict)
+        assert event.reason == "volatility_sufficient"
+
+        # Standard ATR metadata fields
+        assert "candle_range" in event.metadata
+        assert "atr_value" in event.metadata
+        assert "volatility_ratio" in event.metadata
+
+    def test_atr_filter_metadata_insufficient_volatility(self):
+        """Test ATR filter metadata when volatility is insufficient."""
+        from src.domain.filter_factory import AtrFilterDynamic, FilterContext
+
+        atr_filter = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        kline = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            timestamp=1000000,
+            open=Decimal("100"),
+            high=Decimal("100.01"),  # Very small range
+            low=Decimal("99.99"),
+            close=Decimal("100"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        # Pre-populate ATR data with high ATR
+        key = "BTC/USDT:USDT:15m"
+        atr_filter._atr_state[key] = {
+            "tr_values": [Decimal("1.0")] * 14,
+            "atr": Decimal("1.0"),
+            "prev_close": None,
+        }
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=kline,
+        )
+
+        event = atr_filter.check(pattern, context)
+
+        # Verify metadata structure
+        assert isinstance(event.metadata, dict)
+        assert event.reason == "insufficient_volatility"
+
+        # Should contain diagnostic fields
+        assert "candle_range" in event.metadata
+        assert "atr_value" in event.metadata
+        assert "min_required" in event.metadata
+
+    def test_atr_filter_metadata_data_not_ready(self):
+        """Test ATR filter metadata when ATR data not ready."""
+        from src.domain.filter_factory import AtrFilterDynamic, FilterContext
+
+        atr_filter = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        kline = KlineData(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            timestamp=1000000,
+            open=Decimal("50000"),
+            high=Decimal("50100"),
+            low=Decimal("49900"),
+            close=Decimal("50050"),
+            volume=Decimal("1000"),
+            is_closed=True,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=kline,
+        )
+
+        event = atr_filter.check(pattern, context)
+
+        # Verify metadata structure
+        assert isinstance(event.metadata, dict)
+        assert event.reason == "atr_data_not_ready"
+
+        # Should contain diagnostic fields
+        assert "required_period" in event.metadata
+        assert event.metadata["required_period"] == 14
+
+    def test_atr_filter_metadata_kline_missing(self):
+        """Test ATR filter metadata when kline is None."""
+        from src.domain.filter_factory import AtrFilterDynamic, FilterContext
+
+        atr_filter = AtrFilterDynamic(period=14, min_atr_ratio=Decimal("0.5"), enabled=True)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        context = FilterContext(
+            higher_tf_trends={},
+            current_timeframe="15m",
+            kline=None,  # No kline data
+        )
+
+        event = atr_filter.check(pattern, context)
+
+        # Verify metadata structure
+        assert isinstance(event.metadata, dict)
+        assert event.reason == "kline_data_missing"
+        assert event.metadata.get("error") == "kline is None"
+
+    def test_filter_metadata_never_none(self):
+        """Test that filter metadata is never None for any filter type."""
+        from src.domain.filter_factory import (
+            EmaTrendFilterDynamic,
+            MtfFilterDynamic,
+            AtrFilterDynamic,
+            FilterContext,
+        )
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        # Test all filter types
+        filters = [
+            EmaTrendFilterDynamic(period=60, enabled=True),
+            MtfFilterDynamic(enabled=True),
+            AtrFilterDynamic(period=14, enabled=True),
+        ]
+
+        for f in filters:
+            context = FilterContext(
+                higher_tf_trends={},
+                current_trend=None,
+                current_timeframe="15m",
+            )
+            event = f.check(pattern, context)
+
+            # CRITICAL: metadata should never be None
+            assert event.metadata is not None, f"{f.name} metadata should never be None"
+            assert isinstance(event.metadata, dict), f"{f.name} metadata should be dict"

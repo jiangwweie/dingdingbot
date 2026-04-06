@@ -166,7 +166,13 @@ class EmaTrendFilterDynamic(FilterBase):
             return TraceEvent(
                 node_name=self.name,
                 passed=True,
-                reason="filter_disabled"
+                reason="filter_disabled",
+                metadata={
+                    "filter_name": "ema_trend",
+                    "filter_type": "ema_trend",
+                    "period": self._period,
+                    "enabled": False,
+                }
             )
 
         current_trend = context.current_trend
@@ -176,7 +182,14 @@ class EmaTrendFilterDynamic(FilterBase):
                 passed=False,
                 reason="ema_data_not_ready",
                 expected="valid_ema_trend",
-                actual="no_data"
+                actual="no_data",
+                metadata={
+                    "filter_name": "ema_trend",
+                    "filter_type": "ema_trend",
+                    "period": self._period,
+                    "ema_value": None,
+                    "trend_direction": None,
+                }
             )
 
         # Check if pattern direction matches trend
@@ -187,7 +200,14 @@ class EmaTrendFilterDynamic(FilterBase):
                     passed=True,
                     reason="trend_match",
                     expected="bullish",
-                    actual="bullish"
+                    actual="bullish",
+                    metadata={
+                        "filter_name": "ema_trend",
+                        "filter_type": "ema_trend",
+                        "period": self._period,
+                        "trend_direction": current_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                    }
                 )
             else:
                 return TraceEvent(
@@ -195,7 +215,14 @@ class EmaTrendFilterDynamic(FilterBase):
                     passed=False,
                     reason="bearish_trend_blocks_long",
                     expected="bullish",
-                    actual="bearish"
+                    actual="bearish",
+                    metadata={
+                        "filter_name": "ema_trend",
+                        "filter_type": "ema_trend",
+                        "period": self._period,
+                        "trend_direction": current_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                    }
                 )
         else:  # SHORT
             if current_trend == TrendDirection.BEARISH:
@@ -204,7 +231,14 @@ class EmaTrendFilterDynamic(FilterBase):
                     passed=True,
                     reason="trend_match",
                     expected="bearish",
-                    actual="bearish"
+                    actual="bearish",
+                    metadata={
+                        "filter_name": "ema_trend",
+                        "filter_type": "ema_trend",
+                        "period": self._period,
+                        "trend_direction": current_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                    }
                 )
             else:
                 return TraceEvent(
@@ -212,7 +246,14 @@ class EmaTrendFilterDynamic(FilterBase):
                     passed=False,
                     reason="bullish_trend_blocks_short",
                     expected="bearish",
-                    actual="bullish"
+                    actual="bullish",
+                    metadata={
+                        "filter_name": "ema_trend",
+                        "filter_type": "ema_trend",
+                        "period": self._period,
+                        "trend_direction": current_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                    }
                 )
 
 
@@ -259,7 +300,12 @@ class MtfFilterDynamic(FilterBase):
             return TraceEvent(
                 node_name=self.name,
                 passed=True,
-                reason="filter_disabled"
+                reason="filter_disabled",
+                metadata={
+                    "filter_name": "mtf",
+                    "filter_type": "mtf",
+                    "enabled": False,
+                }
             )
 
         current_tf = context.current_timeframe
@@ -271,7 +317,13 @@ class MtfFilterDynamic(FilterBase):
                 node_name=self.name,
                 passed=True,
                 reason="no_higher_timeframe",
-                metadata={"current_timeframe": current_tf}
+                metadata={
+                    "filter_name": "mtf",
+                    "filter_type": "mtf",
+                    "current_timeframe": current_tf,
+                    "higher_timeframe": None,
+                    "higher_trend": None,
+                }
             )
 
         higher_tf_trend = context.higher_tf_trends.get(higher_tf)
@@ -282,7 +334,13 @@ class MtfFilterDynamic(FilterBase):
                 reason="higher_tf_data_unavailable",
                 expected=f"trend_data_for_{higher_tf}",
                 actual="no_data",
-                metadata={"higher_timeframe": higher_tf}
+                metadata={
+                    "filter_name": "mtf",
+                    "filter_type": "mtf",
+                    "current_timeframe": current_tf,
+                    "higher_timeframe": higher_tf,
+                    "higher_trend": None,
+                }
             )
 
         # Check if signal direction matches higher timeframe trend
@@ -294,7 +352,14 @@ class MtfFilterDynamic(FilterBase):
                     reason="mtf_confirmed_bullish",
                     expected="bullish",
                     actual="bullish",
-                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={
+                        "filter_name": "mtf",
+                        "filter_type": "mtf",
+                        "current_timeframe": current_tf,
+                        "higher_timeframe": higher_tf,
+                        "higher_trend": higher_tf_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                    }
                 )
             else:
                 return TraceEvent(
@@ -303,7 +368,14 @@ class MtfFilterDynamic(FilterBase):
                     reason="mtf_rejected_bearish_higher_tf",
                     expected="bullish",
                     actual="bearish",
-                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={
+                        "filter_name": "mtf",
+                        "filter_type": "mtf",
+                        "current_timeframe": current_tf,
+                        "higher_timeframe": higher_tf,
+                        "higher_trend": higher_tf_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                    }
                 )
         else:  # SHORT
             if higher_tf_trend == TrendDirection.BEARISH:
@@ -313,7 +385,14 @@ class MtfFilterDynamic(FilterBase):
                     reason="mtf_confirmed_bearish",
                     expected="bearish",
                     actual="bearish",
-                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={
+                        "filter_name": "mtf",
+                        "filter_type": "mtf",
+                        "current_timeframe": current_tf,
+                        "higher_timeframe": higher_tf,
+                        "higher_trend": higher_tf_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                    }
                 )
             else:
                 return TraceEvent(
@@ -322,7 +401,14 @@ class MtfFilterDynamic(FilterBase):
                     reason="mtf_rejected_bullish_higher_tf",
                     expected="bearish",
                     actual="bullish",
-                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={
+                        "filter_name": "mtf",
+                        "filter_type": "mtf",
+                        "current_timeframe": current_tf,
+                        "higher_timeframe": higher_tf,
+                        "higher_trend": higher_tf_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                    }
                 )
 
 
@@ -415,7 +501,12 @@ class AtrFilterDynamic(FilterBase):
             return TraceEvent(
                 node_name=self.name,
                 passed=True,
-                reason="filter_disabled"
+                reason="filter_disabled",
+                metadata={
+                    "filter_name": "atr_volatility",
+                    "filter_type": "atr_volatility",
+                    "enabled": False,
+                }
             )
 
         kline = context.kline
@@ -424,7 +515,11 @@ class AtrFilterDynamic(FilterBase):
                 node_name=self.name,
                 passed=False,
                 reason="kline_data_missing",
-                metadata={"error": "kline is None"}
+                metadata={
+                    "filter_name": "atr_volatility",
+                    "filter_type": "atr_volatility",
+                    "error": "kline is None",
+                }
             )
 
         atr = self._get_atr(kline.symbol, kline.timeframe)
@@ -435,9 +530,12 @@ class AtrFilterDynamic(FilterBase):
                 passed=False,
                 reason="atr_data_not_ready",
                 metadata={
+                    "filter_name": "atr_volatility",
+                    "filter_type": "atr_volatility",
                     "symbol": kline.symbol,
                     "timeframe": kline.timeframe,
                     "required_period": self._period,
+                    "atr_value": None,
                 }
             )
 
@@ -451,10 +549,13 @@ class AtrFilterDynamic(FilterBase):
                 passed=False,
                 reason="insufficient_volatility",
                 metadata={
+                    "filter_name": "atr_volatility",
+                    "filter_type": "atr_volatility",
                     "candle_range": float(candle_range),
-                    "atr": float(atr),
+                    "atr_value": float(atr),
                     "min_required": float(min_range),
-                    "ratio": float(candle_range / atr),
+                    "volatility_ratio": float(candle_range / atr),
+                    "min_atr_ratio": float(self._min_atr_ratio),
                 }
             )
 
@@ -463,9 +564,12 @@ class AtrFilterDynamic(FilterBase):
             passed=True,
             reason="volatility_sufficient",
             metadata={
+                "filter_name": "atr_volatility",
+                "filter_type": "atr_volatility",
                 "candle_range": float(candle_range),
-                "atr": float(atr),
-                "ratio": float(candle_range / atr),
+                "atr_value": float(atr),
+                "volatility_ratio": float(candle_range / atr),
+                "min_atr_ratio": float(self._min_atr_ratio),
             }
         )
 

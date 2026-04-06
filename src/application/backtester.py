@@ -251,6 +251,15 @@ class Backtester:
             attempts, klines, request, RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=20)
         )
 
+        # Step 6.5: Calculate pnl_ratio and exit_reason for each attempt (BT-4)
+        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=20)
+        for attempt in attempts:
+            pnl_ratio, exit_reason = self._calculate_attempt_outcome(
+                attempt, klines, risk_config
+            )
+            attempt._pnl_ratio = pnl_ratio
+            attempt._exit_reason = exit_reason
+
         # Step 7: Build report
         report = BacktestReport(
             symbol=request.symbol,

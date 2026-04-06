@@ -500,3 +500,212 @@ class TestBacktesterInternalMethods:
         runner = backtester._build_dynamic_runner(strategies)
 
         assert runner is not None
+
+
+# ============================================================
+# Task 5: _attempt_to_dict extension tests (BT-4 Attribution)
+# ============================================================
+class TestAttemptToDictExtension:
+    """Tests for _attempt_to_dict BT-4 attribution fields."""
+
+    def test_attempt_to_dict_includes_pnl_exit(self, mock_exchange_gateway):
+        """
+        Test: _attempt_to_dict 包含 pnl_ratio 和 exit_reason 字段
+
+        验收标准：
+        - 返回的字典包含 pnl_ratio 键
+        - 返回的字典包含 exit_reason 键
+        - filter_results 包含 metadata 字段
+        """
+        from src.application.backtester import Backtester
+        from src.domain.models import SignalAttempt, PatternResult, FilterResult, Direction
+
+        backtester = Backtester(exchange_gateway=mock_exchange_gateway)
+
+        # Create a SignalAttempt with SIGNAL_FIRED result
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.85,
+            details={"wick_ratio": 0.7},
+        )
+
+        filter_results = [
+            ("ema_trend", FilterResult(passed=True, reason="trend_match", metadata={"trend": "bullish"})),
+            ("mtf", FilterResult(passed=True, reason="mtf_confirmed", metadata={"higher_timeframe": "1h"})),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="SIGNAL_FIRED",
+            kline_timestamp=1711785600000,
+            _pnl_ratio=2.0,  # 2R gain
+            _exit_reason="TAKE_PROFIT",
+        )
+
+        # Convert to dict
+        result = backtester._attempt_to_dict(attempt)
+
+        # Assertions - BT-4 attribution fields
+        assert "pnl_ratio" in result
+        assert "exit_reason" in result
+        assert result["pnl_ratio"] == 2.0
+        assert result["exit_reason"] == "TAKE_PROFIT"
+
+        # Verify filter_results metadata is included
+        assert len(result["filter_results"]) == 2
+        assert "metadata" in result["filter_results"][0]
+        assert result["filter_results"][0]["metadata"] == {"trend": "bullish"}
+
+    def test_attempt_to_dict_no_pattern(self, mock_exchange_gateway):
+        """
+        Test: _attempt_to_dict for NO_PATTERN result
+
+        预期：pnl_ratio 和 exit_reason 为 None
+        """
+        from src.application.backtester import Backtester
+        from src.domain.models import SignalAttempt
+
+        backtester = Backtester(exchange_gateway=mock_exchange_gateway)
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=None,  # No pattern detected
+            filter_results=[],
+            final_result="NO_PATTERN",
+            kline_timestamp=1711785600000,
+        )
+
+        result = backtester._attempt_to_dict(attempt)
+
+        # Assertions
+        assert result["final_result"] == "NO_PATTERN"
+        assert result["pnl_ratio"] is None
+        assert result["exit_reason"] is None
+        assert result["pattern_score"] is None
+
+    def test_attempt_to_dict_filtered_out(self, mock_exchange_gateway):
+        """
+        Test: _attempt_to_dict for FILTERED result
+
+        预期：pnl_ratio 和 exit_reason 为 None
+        """
+        from src.application.backtester import Backtester
+        from src.domain.models import SignalAttempt, PatternResult, FilterResult, Direction
+
+        backtester = Backtester(exchange_gateway=mock_exchange_gateway)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.75,
+            details={},
+        )
+
+        filter_results = [
+            ("ema_trend", FilterResult(passed=False, reason="bearish_trend_blocks_long", metadata={})),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="FILTERED",
+            kline_timestamp=1711785600000,
+        )
+
+        result = backtester._attempt_to_dict(attempt)
+
+        # Assertions
+        assert result["final_result"] == "FILTERED"
+        assert result["pnl_ratio"] is None
+        assert result["exit_reason"] is None
+        assert len(result["filter_results"]) == 1
+        assert result["filter_results"][0]["passed"] is False
+
+    def test_attempt_to_dict_metadata_standardization(self, mock_exchange_gateway):
+        """
+        Test: filter_results metadata is standardized dict (never None)
+
+        验收标准：
+        - 所有 filter_results 的 metadata 字段都是 dict 类型
+        - metadata 永远不会为 None
+        """
+        from src.application.backtester import Backtester
+        from src.domain.models import SignalAttempt, PatternResult, FilterResult, Direction
+
+        backtester = Backtester(exchange_gateway=mock_exchange_gateway)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        # Test with metadata=None (edge case - should be handled)
+        filter_results = [
+            ("ema_trend", FilterResult(passed=True, reason="trend_match", metadata=None)),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="SIGNAL_FIRED",
+            kline_timestamp=1711785600000,
+        )
+
+        result = backtester._attempt_to_dict(attempt)
+
+        # Metadata should be serialized (even if None in FilterResult)
+        # Note: FilterResult.__post_init__ converts None to {}
+        assert isinstance(result["filter_results"][0]["metadata"], dict)
+
+    def test_attempt_to_dict_exit_reasons(self, mock_exchange_gateway):
+        """
+        Test: Various exit_reason values
+
+        预期：exit_reason 可以是以下值之一:
+        - "TAKE_PROFIT" (止盈出场)
+        - "STOP_LOSS" (止损出场)
+        - "TIME_EXIT" (时间出场)
+        - None (未出场)
+        """
+        from src.application.backtester import Backtester
+        from src.domain.models import SignalAttempt, PatternResult, Direction
+
+        backtester = Backtester(exchange_gateway=mock_exchange_gateway)
+
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=0.8,
+            details={},
+        )
+
+        # Test different exit reasons
+        exit_reasons = ["TAKE_PROFIT", "STOP_LOSS", "TIME_EXIT", None]
+
+        for expected_reason in exit_reasons:
+            attempt = SignalAttempt(
+                strategy_name="pinbar",
+                pattern=pattern,
+                filter_results=[],
+                final_result="SIGNAL_FIRED",
+                kline_timestamp=1711785600000,
+                _pnl_ratio=2.0 if expected_reason == "TAKE_PROFIT" else (-1.0 if expected_reason == "STOP_LOSS" else 0.0),
+                _exit_reason=expected_reason,
+            )
+
+            result = backtester._attempt_to_dict(attempt)
+
+            assert result["exit_reason"] == expected_reason
+            if expected_reason == "TAKE_PROFIT":
+                assert result["pnl_ratio"] == 2.0
+            elif expected_reason == "STOP_LOSS":
+                assert result["pnl_ratio"] == -1.0
+            elif expected_reason == "TIME_EXIT":
+                assert result["pnl_ratio"] == 0.0
