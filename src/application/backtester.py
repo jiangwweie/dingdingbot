@@ -177,13 +177,28 @@ class Backtester:
         Returns:
             BacktestReport (v2_classic mode) or PMSBacktestReport (v3_pms mode)
         """
+        # Step 0: Load KV configs as defaults for v3_pms mode
+        kv_configs = {}
+        if request.mode == "v3_pms":
+            try:
+                from src.application.config_manager import ConfigManager
+                config_manager = ConfigManager.get_instance()
+                if config_manager:
+                    kv_configs = await config_manager.get_backtest_configs()
+                    logger.debug(f"Loaded backtest configs from KV: {kv_configs}")
+                else:
+                    logger.warning("ConfigManager instance not available, using code defaults")
+            except Exception as e:
+                logger.warning(f"Failed to load backtest configs from KV, using defaults: {e}")
+                kv_configs = {}
+
         # Determine mode: v3_pms or dynamic rule engine or legacy
         use_v3_pms = request.mode == "v3_pms"
         use_dynamic = request.strategies is not None and len(request.strategies) > 0
 
         if use_v3_pms:
             # v3 PMS mode: Use MockMatchingEngine for position-level backtesting
-            return await self._run_v3_pms_backtest(request, repository, backtest_repository, order_repository)
+            return await self._run_v3_pms_backtest(request, repository, backtest_repository, order_repository, kv_configs)
 
         if use_dynamic:
             # Step 1: Build dynamic strategy runner from strategy definitions
@@ -999,6 +1014,7 @@ class Backtester:
         repository = None,
         backtest_repository = None,
         order_repository = None,  # T4: OrderRepository for persisting orders
+        kv_configs: Optional[Dict[str, Any]] = None,  # KV configs as defaults
     ) -> PMSBacktestReport:
         """
         Run v3 PMS mode backtest with MockMatchingEngine.
@@ -1011,10 +1027,16 @@ class Backtester:
         5. Generate PMSBacktestReport with detailed position-level statistics
         6. T4: Persist all orders to database if order_repository is provided
 
+        Config Priority:
+        1. API request parameters (highest priority)
+        2. KV configs (config_entries_v2)
+        3. Code defaults (lowest priority)
+
         Args:
             request: Backtest request with v3_pms mode
             repository: Optional SignalRepository for saving signals
             order_repository: Optional OrderRepository for saving orders
+            kv_configs: Optional KV configs dict with backtest defaults
 
         Returns:
             PMSBacktestReport with detailed position-level statistics
@@ -1025,12 +1047,23 @@ class Backtester:
         from src.domain.order_manager import OrderManager
         import uuid
 
-        # Step 1: Initialize MockMatchingEngine
-        # T2 fix: Add TP slippage rate (0.05% default)
+        # Step 1: Merge configs with priority: request > KV > code defaults
+        slippage_rate = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
+        fee_rate = request.fee_rate or (kv_configs.get('fee_rate') if kv_configs else None) or Decimal('0.0004')
+        initial_balance = request.initial_balance or (kv_configs.get('initial_balance') if kv_configs else None) or Decimal('10000')
+        tp_slippage_rate = (kv_configs.get('tp_slippage_rate') if kv_configs else None) or Decimal('0.0005')  # 0.05% default
+
+        logger.info(
+            f"Running v3 PMS backtest with config: "
+            f"slippage={slippage_rate}, fee={fee_rate}, "
+            f"initial_balance={initial_balance}, tp_slippage={tp_slippage_rate}"
+        )
+
+        # Step 2: Initialize MockMatchingEngine with merged configs
         engine = MockMatchingEngine(
-            slippage_rate=request.slippage_rate or Decimal('0.001'),
-            fee_rate=request.fee_rate or Decimal('0.0004'),
-            tp_slippage_rate=Decimal('0.0005'),  # 0.05% TP slippage
+            slippage_rate=slippage_rate,
+            fee_rate=fee_rate,
+            tp_slippage_rate=tp_slippage_rate,
         )
 
         # Step 2: Fetch historical K-line data
@@ -1050,8 +1083,7 @@ class Backtester:
             strategy_id = 'pinbar'
             strategy_name = 'pinbar'
 
-        # Step 4: Initialize Account and state tracking
-        initial_balance = request.initial_balance or Decimal('10000')
+        # Step 4: Initialize Account and state tracking (use merged initial_balance)
         account = Account(
             account_id="backtest_wallet",
             total_balance=initial_balance,

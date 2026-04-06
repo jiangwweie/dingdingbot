@@ -596,17 +596,18 @@ class BacktestRequest(BaseModel):
         default="v2_classic",
         description="Backtest mode: 'v2_classic' (signal-level) or 'v3_pms' (position-level with matching engine)"
     )
+    # T3: Changed defaults to None to support KV config priority (request > KV > code defaults)
     initial_balance: Optional[Decimal] = Field(
-        default=Decimal('10000'),
-        description="Initial balance for v3_pms mode"
+        default=None,
+        description="Initial balance for v3_pms mode (default: 10000, or from KV config)"
     )
     slippage_rate: Optional[Decimal] = Field(
-        default=Decimal('0.001'),
-        description="Slippage rate for v3_pms mode (default 0.1%)"
+        default=None,
+        description="Slippage rate for v3_pms mode (default: 0.001, or from KV config)"
     )
     fee_rate: Optional[Decimal] = Field(
-        default=Decimal('0.0004'),
-        description="Fee rate for v3_pms mode (default 0.04%)"
+        default=None,
+        description="Fee rate for v3_pms mode (default: 0.0004, or from KV config)"
     )
 
     # Phase 4: 订单编排
@@ -876,7 +877,9 @@ class FinancialModel(BaseModel):
 
 class OrderStatus(str, Enum):
     """订单状态（与 CCXT 对齐）"""
-    PENDING = "PENDING"           # 尚未发送到交易所
+    CREATED = "CREATED"           # 订单已创建（本地）
+    SUBMITTED = "SUBMITTED"       # 订单已提交到交易所
+    PENDING = "PENDING"           # 尚未发送到交易所（保留兼容）
     OPEN = "OPEN"                 # 挂单中
     PARTIALLY_FILLED = "PARTIALLY_FILLED"  # 部分成交
     FILLED = "FILLED"             # 完全成交

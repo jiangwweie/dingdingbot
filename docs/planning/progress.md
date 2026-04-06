@@ -4,6 +4,90 @@
 
 ---
 
+### 2026-04-06 - T3: Backtester 配置集成 ✅
+
+**会话阶段**: 任务完成
+**任务目标**: 
+- 修改 `src/application/backtester.py`，从 KV 配置读取回测默认参数
+- 实现优先级合并逻辑：请求参数 > KV 配置 > 代码默认值
+- 添加单元测试验证优先级逻辑
+
+**完成工作**:
+1. ✅ 修改 `BacktestRequest` 模型 - 将 `slippage_rate`、`fee_rate`、`initial_balance` 默认值改为 `None`
+2. ✅ 修改 `Backtester.run_backtest()` - 在 v3_pms 模式下加载 KV 配置
+3. ✅ 修改 `Backtester._run_v3_pms_backtest()` - 实现配置合并逻辑
+4. ✅ 添加配置日志输出 - 记录使用的配置值
+5. ✅ 编写单元测试 - 9 个测试用例全部通过
+6. ✅ 更新 progress.md - 标记 T3 完成
+
+**修改文件**:
+- `src/domain/models.py` (修改) - BacktestRequest 默认值改为 None
+- `src/application/backtester.py` (修改) - KV 配置加载 + 合并逻辑
+- `tests/unit/test_backtester_kv_config.py` (新建) - 9 个测试用例
+
+**配置优先级**:
+```
+1. API 请求参数 (最高优先级)
+2. KV 配置 (config_entries_v2)
+3. 代码默认值 (最低优先级)
+```
+
+**代码默认值**:
+- `slippage_rate`: 0.001 (0.1%)
+- `fee_rate`: 0.0004 (0.04%)
+- `initial_balance`: 10000 (USDT)
+- `tp_slippage_rate`: 0.0005 (0.05%)
+
+**测试结果**:
+```
+======================== 9 passed in 0.56s =========================
+tests/unit/test_backtester_kv_config.py::TestKVConfigLoading::test_loads_kv_configs_for_v3_pms_mode PASSED
+tests/unit/test_backtester_kv_config.py::TestKVConfigLoading::test_skips_kv_load_for_legacy_mode PASSED
+tests/unit/test_backtester_kv_config.py::TestKVConfigLoading::test_handles_config_manager_not_available PASSED
+tests/unit/test_backtester_kv_config.py::TestKVConfigLoading::test_handles_exception_during_kv_load PASSED
+tests/unit/test_backtester_kv_config.py::TestConfigPriority::test_request_param_overrides_kv_config PASSED
+tests/unit/test_backtester_kv_config.py::TestConfigPriority::test_kv_config_overrides_code_defaults PASSED
+tests/unit/test_backtester_kv_config.py::TestConfigPriority::test_code_defaults_when_kv_empty PASSED
+tests/unit/test_backtester_kv_config.py::TestConfigPriority::test_partial_kv_configs_use_defaults_for_missing PASSED
+tests/unit/test_backtester_kv_config.py::TestConfigLogging::test_logs_used_config_values PASSED
+```
+
+**关键代码变更**:
+
+1. `BacktestRequest` 模型修改:
+```python
+# 修改前
+slippage_rate: Optional[Decimal] = Field(default=Decimal('0.001'), ...)
+
+# 修改后
+slippage_rate: Optional[Decimal] = Field(default=None, ...)
+```
+
+2. `Backtester.run_backtest()` 添加 KV 配置加载:
+```python
+# Step 0: Load KV configs as defaults for v3_pms mode
+kv_configs = {}
+if request.mode == "v3_pms":
+    try:
+        config_manager = ConfigManager.get_instance()
+        if config_manager:
+            kv_configs = await config_manager.get_backtest_configs()
+    except Exception as e:
+        logger.warning(f"Failed to load backtest configs from KV, using defaults: {e}")
+        kv_configs = {}
+```
+
+3. `Backtester._run_v3_pms_backtest()` 配置合并逻辑:
+```python
+# Step 1: Merge configs with priority: request > KV > code defaults
+slippage_rate = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
+fee_rate = request.fee_rate or (kv_configs.get('fee_rate') if kv_configs else None) or Decimal('0.0004')
+initial_balance = request.initial_balance or (kv_configs.get('initial_balance') if kv_configs else None) or Decimal('10000')
+tp_slippage_rate = (kv_configs.get('tp_slippage_rate') if kv_configs else None) or Decimal('0.0005')
+```
+
+---
+
 ### 2026-04-06 - ORD-1-T1: 订单状态机领域层实现 ✅
 
 **会话阶段**: 任务完成
