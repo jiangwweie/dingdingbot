@@ -72,6 +72,7 @@ _notify_order_changed() - 业务回调
 ### 修改文件
 
 - `src/interfaces/api.py` - 添加 OrderLifecycleService 初始化和回调注册
+- `src/domain/order_manager.py` - 修复重复 else 块语法错误
 
 ### 验收标准
 
@@ -79,6 +80,11 @@ _notify_order_changed() - 业务回调
 - [x] WebSocket 订单推送回调正常工作
 - [x] 现有测试不受影响
 - [x] progress.md 已更新
+- [x] Git 提交并推送
+
+### Git 提交
+
+- `e74a373` feat(ORD-1-T5): ExchangeGateway 订单状态更新集成到 OrderLifecycleService
 
 ---
 
