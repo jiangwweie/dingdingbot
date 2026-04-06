@@ -171,6 +171,21 @@ class RiskConfig(BaseModel):
         le=1,
         description="Maximum total exposure as % of balance (e.g., 0.8 = 80%)"
     )
+    # Extended fields from database (optional, for future features)
+    daily_max_trades: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Maximum number of trades per day (optional)"
+    )
+    daily_max_loss: Optional[Decimal] = Field(
+        default=None,
+        description="Maximum daily loss amount (optional)"
+    )
+    max_position_hold_time: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Maximum position hold time in minutes (optional)"
+    )
 
     @field_validator('max_loss_percent')
     @classmethod
@@ -2198,6 +2213,41 @@ class SystemConfig(BaseModel):
     pinbar_body_position_tolerance: Decimal = Field(default=Decimal("0.1"), description="Pinbar body position tolerance")
     signal_cooldown_seconds: int = Field(default=14400, ge=60, description="Signal deduplication cooldown")
     backtest_take_profit_slippage_rate: Decimal = Field(default=Decimal("0.0005"), description="Backtest TP slippage")
+    # Extended fields from database (optional, for future features)
+    queue_batch_size: Optional[int] = Field(
+        default=10,
+        ge=1,
+        description="Queue batch size for async I/O (optional)"
+    )
+    queue_flush_interval: Optional[Decimal] = Field(
+        default=Decimal("5.0"),
+        ge=Decimal("0.1"),
+        description="Queue flush interval in seconds (optional)"
+    )
+    queue_max_size: Optional[int] = Field(
+        default=1000,
+        ge=100,
+        description="Queue maximum size (optional)"
+    )
+    warmup_history_bars: Optional[int] = Field(
+        default=100,
+        ge=10,
+        description="Warmup history bars count (optional)"
+    )
+    atr_filter_enabled: Optional[bool] = Field(
+        default=True,
+        description="ATR filter enable switch (optional)"
+    )
+    atr_period: Optional[int] = Field(
+        default=14,
+        ge=1,
+        description="ATR period (optional)"
+    )
+    atr_min_ratio: Optional[Decimal] = Field(
+        default=Decimal("0.5"),
+        ge=Decimal("0"),
+        description="ATR minimum ratio (optional)"
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

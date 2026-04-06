@@ -92,6 +92,13 @@ class SignalPipelineConfig(BaseModel):
     queue: SignalQueueConfig = Field(default_factory=SignalQueueConfig)
 
 
+class AtrConfig(BaseModel):
+    """ATR (Average True Range) filter configuration."""
+    enabled: bool = Field(default=True, description="Enable ATR filter")
+    period: int = Field(default=14, ge=1, description="ATR calculation period")
+    min_ratio: Decimal = Field(default=Decimal('0.5'), ge=0, description="Minimum ATR ratio for signal validation")
+
+
 class CoreConfig(BaseModel):
     """Core system configuration (read-only)"""
     core_symbols: List[str] = Field(..., min_length=1, description="Core trading symbols")
@@ -109,6 +116,7 @@ class CoreConfig(BaseModel):
 
     warmup: WarmupConfig
     signal_pipeline: SignalPipelineConfig = Field(default_factory=SignalPipelineConfig)
+    atr: AtrConfig = Field(default_factory=AtrConfig)
 
 
 class ExchangeConfig(BaseModel):
@@ -673,6 +681,11 @@ class ConfigManager:
                     "mtf_ema_period": row["mtf_ema_period"],
                     "mtf_mapping": json.loads(row["mtf_mapping"]),
                     "signal_cooldown_seconds": row["signal_cooldown_seconds"],
+                    # Extended fields (optional, with defaults from table schema)
+                    "warmup_history_bars": row["warmup_history_bars"] if row["warmup_history_bars"] is not None else 100,
+                    "atr_filter_enabled": bool(row["atr_filter_enabled"]) if row["atr_filter_enabled"] is not None else True,
+                    "atr_period": row["atr_period"] if row["atr_period"] is not None else 14,
+                    "atr_min_ratio": str(row["atr_min_ratio"]) if row["atr_min_ratio"] is not None else "0.5",
                 }
             else:
                 self._system_config_cache = {
@@ -681,6 +694,10 @@ class ConfigManager:
                     "mtf_ema_period": 60,
                     "mtf_mapping": {"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"},
                     "signal_cooldown_seconds": 14400,
+                    "warmup_history_bars": 100,
+                    "atr_filter_enabled": True,
+                    "atr_period": 14,
+                    "atr_min_ratio": "0.5",
                 }
         return self._system_config_cache
 
@@ -695,6 +712,9 @@ class ConfigManager:
                     max_loss_percent=Decimal(str(row["max_loss_percent"])),
                     max_leverage=row["max_leverage"],
                     max_total_exposure=Decimal(str(row["max_total_exposure"] or "0.8")),
+                    daily_max_trades=row["daily_max_trades"] if row["daily_max_trades"] is not None else None,
+                    daily_max_loss=Decimal(str(row["daily_max_loss"])) if row["daily_max_loss"] is not None else None,
+                    max_position_hold_time=row["max_position_hold_time"] if row["max_position_hold_time"] is not None else None,
                 )
             else:
                 self._risk_config_cache = RiskConfig(
@@ -725,9 +745,14 @@ class ConfigManager:
             ema=EmaConfig(period=self._system_config_cache["ema_period"]),
             mtf_mapping=MtfMapping(**self._system_config_cache["mtf_mapping"]),
             mtf_ema_period=self._system_config_cache["mtf_ema_period"],
-            warmup=WarmupConfig(history_bars=100),
+            warmup=WarmupConfig(history_bars=self._system_config_cache.get("warmup_history_bars", 100)),
             signal_pipeline=SignalPipelineConfig(
                 cooldown_seconds=self._system_config_cache["signal_cooldown_seconds"]
+            ),
+            atr=AtrConfig(
+                enabled=self._system_config_cache.get("atr_filter_enabled", True),
+                period=self._system_config_cache.get("atr_period", 14),
+                min_ratio=Decimal(str(self._system_config_cache.get("atr_min_ratio", "0.5"))) if self._system_config_cache.get("atr_min_ratio") is not None else Decimal("0.5"),
             ),
         )
 
@@ -758,6 +783,7 @@ class ConfigManager:
                 mtf_ema_period=60,
                 warmup=WarmupConfig(history_bars=100),
                 signal_pipeline=SignalPipelineConfig(cooldown_seconds=14400),
+                atr=AtrConfig(enabled=True, period=14, min_ratio=Decimal("0.5")),
             )
 
         try:
@@ -777,6 +803,7 @@ class ConfigManager:
                 mtf_ema_period=60,
                 warmup=WarmupConfig(history_bars=100),
                 signal_pipeline=SignalPipelineConfig(cooldown_seconds=14400),
+                atr=AtrConfig(enabled=True, period=14, min_ratio=Decimal("0.5")),
             )
 
         return CoreConfig(**data)
@@ -1055,17 +1082,24 @@ class ConfigManager:
                 except Exception as e:
                     logger.warning(f"Auto-snapshot failed: {e}")
 
-            # Update database
+            # Update database with all fields including extended ones
             now = datetime.now(timezone.utc).isoformat()
             await self._db.execute("""
                 UPDATE risk_configs
                 SET max_loss_percent = ?, max_leverage = ?,
-                    max_total_exposure = ?, updated_at = ?
+                    max_total_exposure = ?,
+                    daily_max_trades = ?,
+                    daily_max_loss = ?,
+                    max_position_hold_time = ?,
+                    updated_at = ?
                 WHERE id = 'global'
             """, (
                 str(config.max_loss_percent),
                 config.max_leverage,
                 str(config.max_total_exposure),
+                config.daily_max_trades,
+                str(config.daily_max_loss) if config.daily_max_loss is not None else None,
+                config.max_position_hold_time,
                 now,
             ))
 
@@ -1078,6 +1112,9 @@ class ConfigManager:
                     "max_loss_percent": str(config.max_loss_percent),
                     "max_leverage": config.max_leverage,
                     "max_total_exposure": str(config.max_total_exposure),
+                    "daily_max_trades": config.daily_max_trades,
+                    "daily_max_loss": str(config.daily_max_loss) if config.daily_max_loss is not None else None,
+                    "max_position_hold_time": config.max_position_hold_time,
                 },
                 changed_by=changed_by,
             )
@@ -1294,7 +1331,7 @@ class ConfigManager:
     # YAML Backward Compatibility
     # ============================================================
 
-    async def import_from_yaml(self, yaml_path: str) -> None:
+    async def import_from_yaml(self, yaml_path: str, changed_by: str = "system") -> None:
         """Import configuration from YAML file."""
         if not os.path.exists(yaml_path):
             raise FileNotFoundError(f"YAML file not found: {yaml_path}")
@@ -1305,10 +1342,32 @@ class ConfigManager:
         # TODO: Parse and import into database
         logger.info(f"Configuration imported from {yaml_path}")
 
-    async def export_to_yaml(self, yaml_path: str) -> None:
+        # Log the import operation to config history
+        await self._log_config_change(
+            entity_type="config_bundle",
+            entity_id="import_export",
+            action="IMPORT",
+            old_values=None,
+            new_values={"source_path": yaml_path, "data_keys": list(data.keys()) if data else []},
+            changed_by=changed_by,
+            change_summary=f"Configuration imported from {yaml_path}",
+        )
+
+    async def export_to_yaml(self, yaml_path: str, changed_by: str = "system") -> None:
         """Export current configuration to YAML file."""
         # TODO: Export database config to YAML
         logger.info(f"Configuration exported to {yaml_path}")
+
+        # Log the export operation to config history
+        await self._log_config_change(
+            entity_type="config_bundle",
+            entity_id="import_export",
+            action="EXPORT",
+            old_values=None,
+            new_values={"target_path": yaml_path},
+            changed_by=changed_by,
+            change_summary=f"Configuration exported to {yaml_path}",
+        )
 
 
 # ============================================================

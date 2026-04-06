@@ -17,7 +17,7 @@ from typing import Dict, Any
 import tempfile
 import shutil
 
-from src.application.config_manager_db import (
+from src.application.config_manager import (
     ConfigManager,
     load_all_configs_async,
     CoreConfig,
@@ -227,6 +227,284 @@ class TestConfigurationLoading:
 
 
 # ============================================================
+# Extended Field Parsing Tests (TASK-2)
+# ============================================================
+
+class TestRiskConfigExtendedFields:
+    """Test RiskConfig extended optional fields parsing."""
+
+    @pytest.mark.asyncio
+    async def test_risk_config_with_extended_fields(self, temp_db_path):
+        """Test loading RiskConfig with all extended fields from database."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Update risk config with extended fields
+        async with manager._db.execute("""
+            UPDATE risk_configs
+            SET daily_max_trades = ?,
+                daily_max_loss = ?,
+                max_position_hold_time = ?,
+                updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (100, "0.05", 480)) as cursor:
+            await manager._db.commit()
+
+        # Load and verify
+        user_config = await manager.get_user_config()
+
+        assert user_config.risk.daily_max_trades == 100
+        assert user_config.risk.daily_max_loss == Decimal("0.05")
+        assert user_config.risk.max_position_hold_time == 480
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_risk_config_with_null_extended_fields(self, config_manager):
+        """Test RiskConfig handles None values for extended fields."""
+        user_config = await config_manager.get_user_config()
+
+        # Extended fields should be None when not set in database
+        assert user_config.risk.daily_max_trades is None
+        assert user_config.risk.daily_max_loss is None
+        assert user_config.risk.max_position_hold_time is None
+
+        # Core fields should still have values
+        assert user_config.risk.max_loss_percent == Decimal("0.01")
+        assert user_config.risk.max_leverage == 10
+        assert user_config.risk.max_total_exposure == Decimal("0.8")
+
+    @pytest.mark.asyncio
+    async def test_risk_config_partial_extended_fields(self, temp_db_path):
+        """Test RiskConfig with partial extended fields set."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Set only daily_max_trades
+        async with manager._db.execute("""
+            UPDATE risk_configs
+            SET daily_max_trades = ?,
+                updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (50,)) as cursor:
+            await manager._db.commit()
+
+        user_config = await manager.get_user_config()
+
+        assert user_config.risk.daily_max_trades == 50
+        assert user_config.risk.daily_max_loss is None
+        assert user_config.risk.max_position_hold_time is None
+
+        await manager.close()
+
+
+class TestSystemConfigExtendedFields:
+    """Test SystemConfig extended optional fields parsing."""
+
+    @pytest.mark.asyncio
+    async def test_system_config_with_queue_fields(self, temp_db_path):
+        """Test loading SystemConfig with queue configuration fields."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Update queue fields
+        async with manager._db.execute("""
+            UPDATE system_configs
+            SET queue_batch_size = ?,
+                queue_flush_interval = ?,
+                queue_max_size = ?,
+                updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (20, "10.5", 2000)) as cursor:
+            await manager._db.commit()
+
+        # Reload and verify queue fields
+        await manager.reload_all_configs_from_db()
+        core_config = manager.get_core_config()
+
+        # Note: CoreConfig may not expose these fields directly
+        # Verify they can be loaded from database
+        async with manager._db.execute(
+            "SELECT queue_batch_size, queue_flush_interval, queue_max_size FROM system_configs WHERE id = 'global'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            assert row["queue_batch_size"] == 20
+            assert Decimal(str(row["queue_flush_interval"])) == Decimal("10.5")
+            assert row["queue_max_size"] == 2000
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_system_config_with_warmup_field(self, temp_db_path):
+        """Test loading SystemConfig with warmup_history_bars field."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Update warmup field
+        async with manager._db.execute("""
+            UPDATE system_configs
+            SET warmup_history_bars = ?,
+                updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (200,)) as cursor:
+            await manager._db.commit()
+
+        # Verify database value
+        async with manager._db.execute(
+            "SELECT warmup_history_bars FROM system_configs WHERE id = 'global'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            assert row["warmup_history_bars"] == 200
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_system_config_with_atr_fields(self, temp_db_path):
+        """Test loading SystemConfig with ATR filter configuration fields."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Update ATR fields
+        async with manager._db.execute("""
+            UPDATE system_configs
+            SET atr_filter_enabled = ?,
+                atr_period = ?,
+                atr_min_ratio = ?,
+                updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (False, 21, "0.8")) as cursor:
+            await manager._db.commit()
+
+        # Verify database values
+        async with manager._db.execute(
+            "SELECT atr_filter_enabled, atr_period, atr_min_ratio FROM system_configs WHERE id = 'global'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            assert row["atr_filter_enabled"] == False
+            assert row["atr_period"] == 21
+            assert Decimal(str(row["atr_min_ratio"])) == Decimal("0.8")
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_system_config_with_all_extended_fields(self, temp_db_path):
+        """Test loading SystemConfig with all extended fields at once."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Update all extended fields
+        async with manager._db.execute("""
+            UPDATE system_configs
+            SET queue_batch_size = ?,
+                queue_flush_interval = ?,
+                queue_max_size = ?,
+                warmup_history_bars = ?,
+                atr_filter_enabled = ?,
+                atr_period = ?,
+                atr_min_ratio = ?,
+                updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (15, "8.0", 1500, 150, True, 18, "0.6")) as cursor:
+            await manager._db.commit()
+
+        # Verify all fields in database
+        async with manager._db.execute(
+            "SELECT * FROM system_configs WHERE id = 'global'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            assert row["queue_batch_size"] == 15
+            assert Decimal(str(row["queue_flush_interval"])) == Decimal("8.0")
+            assert row["queue_max_size"] == 1500
+            assert row["warmup_history_bars"] == 150
+            assert row["atr_filter_enabled"] == True
+            assert row["atr_period"] == 18
+            assert Decimal(str(row["atr_min_ratio"])) == Decimal("0.6")
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_system_config_null_extended_fields(self, config_manager):
+        """Test SystemConfig handles None values for extended fields."""
+        # Verify database has default values or NULL
+        async with config_manager._db.execute(
+            "SELECT queue_batch_size, warmup_history_bars, atr_period FROM system_configs WHERE id = 'global'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            # Should have defaults from table creation
+            assert row["queue_batch_size"] == 10
+            assert row["warmup_history_bars"] == 100
+            assert row["atr_period"] == 14
+
+
+# ============================================================
+# CoreConfig ATR Object Tests (TASK-2)
+# ============================================================
+
+class TestCoreConfigAtrObject:
+    """Test CoreConfig.atr nested object loading."""
+
+    @pytest.mark.asyncio
+    async def test_core_config_atr_default_values(self, config_manager):
+        """Test CoreConfig.atr has correct default values."""
+        core_config = config_manager.get_core_config()
+
+        assert hasattr(core_config, 'atr')
+        assert core_config.atr.enabled is True
+        assert core_config.atr.period == 14
+        assert core_config.atr.min_ratio == Decimal("0.5")
+
+    @pytest.mark.asyncio
+    async def test_core_config_atr_from_database(self, temp_db_path):
+        """Test CoreConfig.atr loads correctly from database."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Update ATR fields in database
+        async with manager._db.execute("""
+            UPDATE system_configs
+            SET atr_filter_enabled = ?,
+                atr_period = ?,
+                atr_min_ratio = ?,
+                updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (False, 21, "0.8")) as cursor:
+            await manager._db.commit()
+
+        # Reload and verify CoreConfig.atr
+        await manager.reload_all_configs_from_db()
+        core_config = manager.get_core_config()
+
+        assert core_config.atr.enabled is False
+        assert core_config.atr.period == 21
+        assert core_config.atr.min_ratio == Decimal("0.8")
+
+        await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_core_config_warmup_history_bars(self, temp_db_path):
+        """Test CoreConfig.warmup.history_bars loads from database."""
+        manager = ConfigManager(db_path=temp_db_path)
+        await manager.initialize_from_db()
+
+        # Update warmup_history_bars
+        async with manager._db.execute("""
+            UPDATE system_configs
+            SET warmup_history_bars = ?,
+                updated_at = datetime('now')
+            WHERE id = 'global'
+        """, (250,)) as cursor:
+            await manager._db.commit()
+
+        # Reload and verify
+        await manager.reload_all_configs_from_db()
+        core_config = manager.get_core_config()
+
+        assert core_config.warmup.history_bars == 250
+
+        await manager.close()
+
+
+# ============================================================
 # Risk Config Update Tests
 # ============================================================
 
@@ -234,12 +512,15 @@ class TestRiskConfigUpdate:
     """Test risk configuration updates."""
 
     @pytest.mark.asyncio
-    async def test_update_risk_config(self, config_manager):
-        """Test updating risk config."""
+    async def test_update_risk_config_with_extended_fields(self, config_manager):
+        """Test updating risk config with extended fields."""
         new_risk = RiskConfig(
             max_loss_percent=Decimal("0.02"),  # 2%
             max_leverage=20,
             max_total_exposure=Decimal("0.9"),
+            daily_max_trades=100,
+            daily_max_loss=Decimal("0.05"),
+            max_position_hold_time=480,
         )
 
         await config_manager.update_risk_config(new_risk, changed_by="test")
@@ -249,6 +530,9 @@ class TestRiskConfigUpdate:
         assert user_config.risk.max_loss_percent == Decimal("0.02")
         assert user_config.risk.max_leverage == 20
         assert user_config.risk.max_total_exposure == Decimal("0.9")
+        assert user_config.risk.daily_max_trades == 100
+        assert user_config.risk.daily_max_loss == Decimal("0.05")
+        assert user_config.risk.max_position_hold_time == 480
 
     @pytest.mark.asyncio
     async def test_update_risk_config_logs_history(self, config_manager):
