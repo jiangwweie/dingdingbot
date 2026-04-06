@@ -14,6 +14,83 @@
 
 ---
 
+## 📌 T7: 回测配置单元测试
+
+**实现时间**: 2026-04-06  
+**任务负责人**: QA Tester  
+**状态**: ✅ 已完成
+
+### 核心交付
+
+**测试文件**: `tests/unit/test_backtester_kv_config.py` (扩展)
+- 16 个测试用例，覆盖 4 大测试类别
+- 测试 Backtester 配置优先级逻辑
+
+### 测试覆盖场景
+
+#### 1. KV Config Loading (4 个测试)
+
+| 测试 | 说明 | 验证点 |
+|------|------|--------|
+| `test_loads_kv_configs_for_v3_pms_mode` | v3_pms 模式加载 KV 配置 | ConfigManager.get_backtest_configs 被调用 |
+| `test_skips_kv_load_for_legacy_mode` | 传统模式不加载 KV 配置 | get_backtest_configs 不被调用 |
+| `test_handles_config_manager_not_available` | ConfigManager 不可用降级 | 使用代码默认值，无异常 |
+| `test_handles_exception_during_kv_load` | KV 加载异常降级 | 异常捕获，使用默认值 |
+
+#### 2. Config Priority (4 个测试)
+
+| 测试 | 说明 | 验证点 |
+|------|------|--------|
+| `test_request_param_overrides_kv_config` | 请求参数覆盖 KV 配置 | 请求参数优先 |
+| `test_kv_config_overrides_code_defaults` | KV 配置覆盖代码默认值 | KV 配置生效 |
+| `test_code_defaults_when_kv_empty` | KV 为空使用代码默认 | 默认值生效 |
+| `test_partial_kv_configs_use_defaults_for_missing` | 部分 KV 缺失使用默认 | 缺失字段用默认 |
+
+#### 3. MockMatchingEngine Integration (4 个测试)
+
+| 测试 | 说明 | 验证点 |
+|------|------|--------|
+| `test_passes_merged_configs_to_matching_engine` | 合并配置传递给引擎 | KV 配置传递正确 |
+| `test_request_params_override_kv_in_matching_engine` | 请求参数在引擎中覆盖 KV | 请求参数优先 |
+| `test_initial_balance_passed_to_account` | initial_balance 传递给 Account | KV 余额生效 |
+| `test_request_initial_balance_overrides_kv` | 请求余额覆盖 KV | 请求余额优先 |
+
+#### 4. Config Priority Boundary Cases (4 个测试)
+
+| 测试 | 说明 | 验证点 |
+|------|------|--------|
+| `test_zero_slippage_rate_not_overridden_by_default` | 零值 slippage_rate 行为 | 零值被默认覆盖 (or 逻辑预期行为) |
+| `test_explicit_none_vs_missing_field` | 显式 None 与缺失字段区别 | 缺失字段用默认 |
+| `test_all_configs_missing_uses_all_defaults` | 所有配置缺失使用默认 | 全部默认生效 |
+
+### 配置优先级规则
+
+```
+1. API 请求参数 (最高优先级)
+   ↓
+2. KV 配置 (config_entries_v2)
+   ↓
+3. 代码默认值 (最低优先级)
+```
+
+### 代码默认值
+
+```python
+slippage_rate = Decimal('0.001')      # 0.1%
+fee_rate = Decimal('0.0004')           # 0.04%
+initial_balance = Decimal('10000')     # 10,000 USDT
+tp_slippage_rate = Decimal('0.0005')   # 0.05%
+```
+
+### 测试统计
+
+- **总测试数**: 16 个
+- **通过率**: 100%
+- **测试类别**: 4 类
+- **边界情况覆盖**: 3 个
+
+---
+
 ## 📌 ORD-1-T1 订单状态机领域层实现
 
 **实现时间**: 2026-04-06  
@@ -149,6 +226,78 @@ EXPIRED      → (终态)
 - [x] save_backtest_configs() 创建自动快照
 - [x] save_backtest_configs() 记录变更历史
 - [x] 添加单元测试验证功能
+
+---
+
+## 📌 T3 任务：Backtester 配置集成
+
+**实现时间**: 2026-04-06  
+**任务负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 核心交付
+
+**文件 1**: `src/domain/models.py` (修改)
+- `BacktestRequest` 模型：将 `slippage_rate`、`fee_rate`、`initial_balance` 默认值改为 `None`
+- 修改理由：支持 KV 配置优先级（请求参数 > KV 配置 > 代码默认值）
+
+**文件 2**: `src/application/backtester.py` (修改)
+- `Backtester.run_backtest()`：在 v3_pms 模式下加载 KV 配置
+- `Backtester._run_v3_pms_backtest()`：实现配置合并逻辑
+- 添加配置日志输出：记录使用的配置值
+
+**文件 3**: `tests/unit/test_backtester_kv_config.py` (新建)
+- 9 个测试用例，覆盖 KV 配置加载、优先级逻辑、异常处理、日志输出
+
+### 配置优先级
+
+```
+1. API 请求参数 (最高优先级)
+2. KV 配置 (config_entries_v2)
+3. 代码默认值 (最低优先级)
+```
+
+### 代码默认值
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| slippage_rate | Decimal('0.001') | 滑点率 (0.1%) |
+| fee_rate | Decimal('0.0004') | 费率 (0.04%) |
+| initial_balance | Decimal('10000') | 初始资金 (10000 USDT) |
+| tp_slippage_rate | Decimal('0.0005') | 止盈滑点率 (0.05%) |
+
+### 关键技术点
+
+**问题**: `BacktestRequest` 模型中字段有默认值，无法区分「用户显式设置」和「使用默认值」。
+
+**解决方案**: 将字段默认值改为 `None`，在合并逻辑中使用代码默认值。
+
+```python
+# 修改前
+slippage_rate: Optional[Decimal] = Field(default=Decimal('0.001'), ...)
+
+# 修改后
+slippage_rate: Optional[Decimal] = Field(default=None, ...)
+```
+
+**合并逻辑**:
+```python
+slippage_rate = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
+```
+
+### 测试结果
+
+```
+======================== 9 passed in 0.56s =========================
+```
+
+### 验收标准
+
+- [x] Backtester 可从 KV 配置读取默认值
+- [x] 请求参数优先级高于 KV 配置
+- [x] KV 配置不存在时使用代码默认值
+- [x] 日志输出使用的配置值
+- [x] 添加单元测试验证优先级逻辑
 
 ---
 

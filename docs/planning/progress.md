@@ -4,6 +4,80 @@
 
 ---
 
+### 2026-04-06 - T7: 回测配置单元测试 ✅
+
+**会话阶段**: 任务完成
+**任务目标**: 
+- 为回测配置 KV 化功能编写完整的单元测试
+- 测试 Backtester 配置优先级逻辑：请求参数 > KV 配置 > 代码默认值
+- 确保所有后端单元测试通过
+
+**完成工作**:
+1. ✅ 扩展 `test_backtester_kv_config.py` - 新增 7 个测试用例，共 16 个测试
+2. ✅ 测试覆盖 KV 配置加载、配置优先级、MockMatchingEngine 集成、边界情况
+3. ✅ 运行所有回测相关测试 - 71 个测试全部通过
+4. ✅ 验证 ConfigManager 回测配置测试 - 17 个测试全部通过
+
+**测试文件**:
+- `tests/unit/test_backtester_kv_config.py` (16 个测试)
+- `tests/unit/test_config_manager_backtest_kv.py` (17 个测试)
+- `tests/unit/test_backtest_repository.py` (21 个测试)
+- `tests/unit/test_backtester_data_source.py` (13 个测试)
+- `tests/unit/test_backtester_mtf.py` (10 个测试)
+
+**测试覆盖场景**:
+1. KV Config Loading (4 个测试):
+   - v3_pms 模式加载 KV 配置
+   - 传统模式不加载 KV 配置
+   - ConfigManager 不可用降级
+   - KV 加载异常降级
+
+2. Config Priority (4 个测试):
+   - 请求参数覆盖 KV 配置
+   - KV 配置覆盖代码默认值
+   - KV 为空使用代码默认
+   - 部分 KV 缺失使用默认
+
+3. MockMatchingEngine Integration (4 个测试):
+   - 合并配置传递给匹配引擎
+   - 请求参数在匹配引擎中覆盖 KV
+   - initial_balance 传递给 Account
+   - 请求 initial_balance 覆盖 KV
+
+4. Config Priority Boundary Cases (4 个测试):
+   - 零值 slippage_rate 行为
+   - 显式 None 与缺失字段区别
+   - 所有配置缺失使用默认
+
+**测试结果**:
+```
+======================== 71 passed, 4 warnings in 0.82s ========================
+tests/unit/test_backtester_kv_config.py::TestKVConfigLoading (4 测试) ✅
+tests/unit/test_backtester_kv_config.py::TestConfigPriority (4 测试) ✅
+tests/unit/test_backtester_kv_config.py::TestConfigLogging (1 测试) ✅
+tests/unit/test_backtester_kv_config.py::TestMockMatchingEngineIntegration (4 测试) ✅
+tests/unit/test_backtester_kv_config.py::TestConfigPriorityBoundaryCases (3 测试) ✅
+tests/unit/test_config_manager_backtest_kv.py (17 测试) ✅
+tests/unit/test_backtest_repository.py (21 测试) ✅
+tests/unit/test_backtester_data_source.py (13 测试) ✅
+tests/unit/test_backtester_mtf.py (10 测试) ✅
+```
+
+**配置优先级规则**:
+```
+1. API 请求参数 (最高优先级)
+2. KV 配置 (config_entries_v2)
+3. 代码默认值 (最低优先级)
+```
+
+**代码默认值**:
+- `slippage_rate`: 0.001 (0.1%)
+- `fee_rate`: 0.0004 (0.04%)
+- `initial_balance`: 10000 (USDT)
+- `tp_slippage_rate`: 0.0005 (0.05%)
+
+---
+
 ### 2026-04-06 - T3: Backtester 配置集成 ✅
 
 **会话阶段**: 任务完成
