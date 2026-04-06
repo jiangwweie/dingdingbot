@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp, ChevronDown, Monitor, Briefcase, Beaker, Settings2, History, Database } from 'lucide-react';
+import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp, ChevronDown, Monitor, Briefcase, Beaker, Settings2, History, Database, Sliders, Atom } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 import SettingsPanel from './SettingsPanel';
@@ -21,6 +21,7 @@ interface NavCategory {
 }
 
 // Navigation data with categories
+// FE-01 新导航结构：监控中心 / 回测沙箱 / 策略配置 / 系统设置
 const navCategories: NavCategory[] = [
   {
     id: 'monitoring',
@@ -45,26 +46,34 @@ const navCategories: NavCategory[] = [
   },
   {
     id: 'backtest',
-    label: '策略回测',
+    label: '回测沙箱',
     icon: Beaker,
     color: 'purple',
     items: [
-      { to: '/strategies', icon: Zap, label: '策略工作台' },
       { to: '/backtest', icon: FlaskConical, label: '回测沙箱' },
       { to: '/backtest-reports', icon: History, label: '回测报告' },
-      { to: '/pms-backtest', icon: BarChart2, label: 'PMS 回测' },
+      { to: '/strategies', icon: Zap, label: '策略工作台' },
+    ],
+  },
+  {
+    id: 'config',
+    label: '策略配置',
+    icon: Sliders,
+    color: 'cyan',
+    items: [
+      { to: '/config/strategies', icon: Atom, label: '策略配置' },
+      { to: '/config/system', icon: Settings2, label: '系统设置' },
     ],
   },
   {
     id: 'settings',
-    label: '系统设置',
-    icon: Settings2,
+    label: '系统设置 (下拉)',
+    icon: Settings,
     color: 'gray',
     items: [
-      { to: '/account', icon: Wallet, label: '账户' },
+      { to: '/config/profiles', icon: Database, label: 'Profile 管理' },
       { to: '/snapshots', icon: Save, label: '配置快照' },
-      { to: '/profiles', icon: Database, label: '配置 Profile' },
-      { to: '/config', icon: Settings, label: '配置管理' },
+      { to: '/account', icon: Wallet, label: '账户' },
     ],
   },
 ];

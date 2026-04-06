@@ -15,6 +15,8 @@ import {
   Zap,
   Upload,
   History,
+  ChevronDown,
+  Settings,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -32,6 +34,7 @@ import StrategyBuilder from '../components/StrategyBuilder';
 import QuickDateRangePicker from '../components/QuickDateRangePicker';
 import StrategyTemplatePicker from '../components/StrategyTemplatePicker';
 import SignalDetailsDrawer from '../components/SignalDetailsDrawer';
+import { Collapse } from 'antd';
 
 // Timeframe options
 const TIMEFRAMES = [
@@ -83,6 +86,9 @@ export default function Backtest() {
 
   // View mode for results
   const [viewMode, setViewMode] = useState<'dashboard' | 'logs'>('dashboard');
+
+  // 高级配置折叠状态 (FE-01 新增)
+  const [advancedConfigExpanded, setAdvancedConfigExpanded] = useState(false);
 
   // Strategy template picker state
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
@@ -286,21 +292,26 @@ export default function Backtest() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Control Panel */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Time & Asset Selection */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Activity className="w-4 h-4" />
-              时间序列与资产维度
-            </h2>
+          {/* 快速配置区 (FE-01 优化 - 显眼区域) */}
+          <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-xl border-2 border-blue-200 p-5 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-blue-900 flex items-center gap-2">
+                <Activity className="w-4 h-4" />
+                快速配置
+              </h2>
+              <span className="text-xs text-blue-600 bg-blue-200 px-2 py-1 rounded-full">
+                Level 3
+              </span>
+            </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                交易对
+              <label className="block text-sm font-medium text-blue-900 mb-1">
+                🪙 交易对
               </label>
               <select
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
+                className="w-full rounded-lg border border-blue-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors bg-white"
               >
                 {SYMBOLS.map((s) => (
                   <option key={s} value={s}>
@@ -311,13 +322,13 @@ export default function Backtest() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                时间周期
+              <label className="block text-sm font-medium text-blue-900 mb-1">
+                📊 时间周期
               </label>
               <select
                 value={timeframe}
                 onChange={(e) => setTimeframe(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
+                className="w-full rounded-lg border border-blue-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors bg-white"
               >
                 {TIMEFRAMES.map((tf) => (
                   <option key={tf.value} value={tf.value}>
@@ -328,8 +339,8 @@ export default function Backtest() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                时间范围
+              <label className="block text-sm font-medium text-blue-900 mb-1">
+                📅 时间范围
               </label>
               <QuickDateRangePicker
                 startTime={startTime}
@@ -340,66 +351,91 @@ export default function Backtest() {
             </div>
           </div>
 
-          {/* Strategy Builder */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Zap className="w-4 h-4" />
-              策略组装工作台
-            </h2>
-            <StrategyBuilder
-              strategies={strategies}
-              onChange={setStrategies}
-              readOnly={false}
-            />
-          </div>
-
-          {/* Risk Overrides */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              风控参数覆写
-            </h2>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                最大亏损比例
-              </label>
-              <input
-                type="number"
-                step="0.005"
-                min="0.001"
-                max="0.1"
-                value={riskOverrides.max_loss_percent}
-                onChange={(e) =>
-                  setRiskOverrides((prev) => ({
-                    ...prev,
-                    max_loss_percent: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
-              />
-              <p className="mt-1 text-xs text-gray-500">0.01 = 1%</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                测试杠杆倍数
-              </label>
-              <input
-                type="number"
-                step="1"
-                min="1"
-                max="125"
-                value={riskOverrides.max_leverage}
-                onChange={(e) =>
-                  setRiskOverrides((prev) => ({
-                    ...prev,
-                    max_leverage: parseInt(e.target.value) || 1,
-                  }))
-                }
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
+          {/* 高级配置折叠区 (FE-01 新增) */}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div
+              className="flex items-center justify-between px-5 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
+              onClick={() => setAdvancedConfigExpanded(!advancedConfigExpanded)}
+            >
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-gray-600" />
+                <span className="text-sm font-semibold text-gray-700">高级配置</span>
+              </div>
+              <ChevronDown
+                className={cn(
+                  'w-4 h-4 text-gray-500 transition-transform',
+                  advancedConfigExpanded ? 'rotate-180' : ''
+                )}
               />
             </div>
+
+            {advancedConfigExpanded && (
+              <div className="p-5 space-y-4 border-t border-gray-200">
+                {/* 策略组装工作台 */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    <Zap className="w-4 h-4" />
+                    策略组装工作台
+                  </h3>
+                  <StrategyBuilder
+                    strategies={strategies}
+                    onChange={setStrategies}
+                    readOnly={false}
+                  />
+                </div>
+
+                {/* 风控参数覆写 */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    <Filter className="w-4 h-4" />
+                    风控参数覆写
+                  </h3>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        最大亏损比例
+                      </label>
+                      <input
+                        type="number"
+                        step="0.005"
+                        min="0.001"
+                        max="0.1"
+                        value={riskOverrides.max_loss_percent}
+                        onChange={(e) =>
+                          setRiskOverrides((prev) => ({
+                            ...prev,
+                            max_loss_percent: parseFloat(e.target.value) || 0,
+                          }))
+                        }
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">0.01 = 1%</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        测试杠杆倍数
+                      </label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        max="125"
+                        value={riskOverrides.max_leverage}
+                        onChange={(e) =>
+                          setRiskOverrides((prev) => ({
+                            ...prev,
+                            max_leverage: parseInt(e.target.value) || 1,
+                          }))
+                        }
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Execute Button */}
