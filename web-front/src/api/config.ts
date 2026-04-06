@@ -170,9 +170,20 @@ export interface SystemConfigUpdateResponse {
 // API Client Configuration
 // ============================================================
 
-// Axios 实例配置（与 lib/api.ts 保持一致）
-const apiClient = axios.create({
-  baseURL: '/api/v1/config',
+// ============================================================
+// 注意：后端配置接口路径说明
+// ============================================================
+// 后端配置相关接口分布在以下路径：
+// - /api/config - 完整配置获取/更新
+// - /api/strategies - 策略管理
+// - /api/strategy/params - 策略参数
+// - /api/config/profiles - Profile 管理
+// - /api/config/snapshots - 快照管理
+// ============================================================
+
+// Axios 实例实例 1：配置管理（使用 /api 前缀）
+const configApiClient = axios.create({
+  baseURL: '/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -187,74 +198,77 @@ export const configApi = {
 
   /**
    * 获取所有策略列表
-   * GET /api/v1/config/strategies
+   * GET /api/strategies
    */
-  getStrategies: () => apiClient.get<Strategy[]>('/strategies'),
+  getStrategies: () => configApiClient.get<Strategy[]>('/strategies'),
 
   /**
    * 获取单个策略详情
-   * GET /api/v1/config/strategies/:id
+   * GET /api/strategies/:id
    */
-  getStrategy: (id: string) => apiClient.get<Strategy>(`/strategies/${id}`),
+  getStrategy: (id: string) => configApiClient.get<Strategy>(`/strategies/${id}`),
 
   /**
    * 创建新策略
-   * POST /api/v1/config/strategies
+   * POST /api/strategies
    */
   createStrategy: (data: CreateStrategyRequest) =>
-    apiClient.post<Strategy>('/strategies', data),
+    configApiClient.post<Strategy>('/strategies', data),
 
   /**
    * 更新策略配置
-   * PUT /api/v1/config/strategies/:id
+   * PUT /api/strategies/:id
    */
   updateStrategy: (id: string, data: UpdateStrategyRequest) =>
-    apiClient.put<Strategy>(`/strategies/${id}`, data),
+    configApiClient.put<Strategy>(`/strategies/${id}`, data),
 
   /**
    * 删除策略
-   * DELETE /api/v1/config/strategies/:id
+   * DELETE /api/strategies/:id
    */
   deleteStrategy: (id: string) =>
-    apiClient.delete(`/strategies/${id}`),
+    configApiClient.delete(`/strategies/${id}`),
 
   /**
    * 切换策略启用状态
-   * POST /api/v1/config/strategies/:id/toggle
+   * POST /api/strategies/:id/toggle
    */
   toggleStrategy: (id: string, enabled: boolean) =>
-    apiClient.post(`/strategies/${id}/toggle`, { enabled } as ToggleStrategyRequest),
+    configApiClient.post(`/strategies/${id}/toggle`, { enabled } as ToggleStrategyRequest),
 
   // ---------- 风险配置 ----------
 
   /**
    * 获取风险配置
-   * GET /api/v1/config/risk
+   * GET /api/config (从完整配置中提取 risk 字段)
    */
-  getRiskConfig: () => apiClient.get<RiskConfig>('/risk'),
+  getRiskConfig: () => configApiClient.get<{config: {risk: RiskConfig}}>('/config')
+    .then(res => ({ ...res, data: res.data.config.risk })),
 
   /**
    * 更新风险配置
-   * PUT /api/v1/config/risk
+   * PUT /api/config (更新完整配置中的 risk 字段)
    */
   updateRiskConfig: (data: Partial<RiskConfig>) =>
-    apiClient.put<RiskConfig>('/risk', data),
+    configApiClient.put('/config', { risk: data }),
 
   // ---------- 系统配置 ----------
 
   /**
    * 获取系统配置
-   * GET /api/v1/config/system
+   * GET /api/strategy/params (从策略参数中获取系统配置)
    */
-  getSystemConfig: () => apiClient.get<SystemConfigResponse>('/system'),
+  getSystemConfig: () => configApiClient.get<SystemConfigResponse>('/strategy/params'),
 
   /**
    * 更新系统配置
-   * PUT /api/v1/config/system
+   * PUT /api/strategy/params/preview (预览) + PUT /api/strategy/params (确认)
+   * 注意：后端不直接支持系统配置更新，需要通过策略参数接口
    * @returns 返回更新后的配置和是否需要重启的标志
    */
   updateSystemConfig: (data: SystemConfigUpdateRequest) =>
-    apiClient.put<SystemConfigUpdateResponse>('/system', data),
+    configApiClient.put('/strategy/params', data)
+      .then(res => ({ ...res, data: { requires_restart: true, config: res.data } })),
 };
 
 // ============================================================

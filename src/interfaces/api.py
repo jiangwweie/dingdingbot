@@ -2277,6 +2277,26 @@ async def list_strategy_templates():
         return {"error": str(e)}
 
 
+# ============================================================
+# 配置管理 API - /api/v1/config/* 前缀别名（兼容前端路径）
+# ============================================================
+
+@app.get("/api/v1/config/strategies")
+async def get_custom_strategies_v1():
+    """
+    Get all custom strategy templates (list view).
+    Alias for /api/strategies - compatible with frontend /api/v1/config/* path.
+    """
+    try:
+        repo = _get_repository()
+        strategies = await repo.get_all_custom_strategies()
+        return {"strategies": strategies}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/strategies")
 async def get_custom_strategies():
     """
