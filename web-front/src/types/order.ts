@@ -54,12 +54,16 @@ export enum OrderRole {
 }
 
 /**
- * 订单状态 - 7 状态机
+ * 订单状态 - 9 状态机（含 CREATED/SUBMITTED）
  */
 export enum OrderStatus {
-  /** 待处理 (已创建但未提交到交易所) */
+  /** 已创建 (本地系统生成，尚未提交到交易所) */
+  CREATED = "CREATED",
+  /** 已提交 (已提交到交易所，等待交易所确认) */
+  SUBMITTED = "SUBMITTED",
+  /** 待处理 (已确认，等待成交) */
   PENDING = "PENDING",
-  /** 进行中 (已提交到交易所，等待成交) */
+  /** 进行中 (交易所已接受，等待成交) */
   OPEN = "OPEN",
   /** 已完全成交 */
   FILLED = "FILLED",

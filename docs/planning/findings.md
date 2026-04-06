@@ -6,8 +6,11 @@
 
 ## 📑 目录
 
-1. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
-2. [配置管理重构关联影响分析](#配置管理重构关联影响分析)
+1. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+
+1. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+2. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+3. [配置管理重构关联影响分析](#配置管理重构关联影响分析)
 3. [E3 信号通知 E2E 测试技术发现](#e3-信号通知 e2e 测试技术发现)
 4. [Config Repositories 批量实现](#config-repositories-批量实现)
 5. [ConfigManager 数据库驱动重构](#configmanager-数据库驱动重构)
@@ -15,6 +18,37 @@
 7. [/api/v1/config 配置管理 API 实现](#apiv1config-配置管理 api 实现)
 8. [工作流重构 v3.0](#工作流重构 v30)
 9. [P1 任务产品分析](#p1-任务产品分析)
+## ORD-1-T3 TypeScript 类型定义更新
+
+**实现时间**: 2026-04-06  
+**任务负责人**: Frontend Developer  
+**状态**: 进行中
+
+### 核心修改
+
+**文件 1**: `web-front/src/types/order.ts`
+- 在 `OrderStatus` 枚举中添加 `CREATED` 和 `SUBMITTED` 状态
+
+**文件 2**: `web-front/src/components/v3/OrderStatusBadge.tsx`
+- 在 `statusConfig` 记录中添加新状态的配置
+
+### 订单状态流转
+
+```
+CREATED → SUBMITTED → OPEN → FILLED/PARTIALLY_FILLED
+                           ↓
+                     CANCELED/REJECTED/EXPIRED
+```
+
+### 状态颜色映射
+
+| 状态 | 颜色类 | 标签 |
+|------|--------|------|
+| CREATED | `bg-gray-100 text-gray-700` | 已创建 |
+| SUBMITTED | `bg-blue-100 text-blue-700` | 已提交 |
+
+---
+
 10. [策略参数配置存储方案决策](#策略参数配置存储方案决策)
 11. [策略参数配置数据库存储实现](#策略参数配置数据库存储实现)
 12. [订单详情页 K 线渲染升级 - 测试与审查](#订单详情页 k 线渲染升级 - 测试与审查)

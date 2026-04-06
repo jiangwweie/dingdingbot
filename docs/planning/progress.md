@@ -4,6 +4,54 @@
 
 ---
 
+### 2026-04-06 - ORD-1-T2: 订单生命周期服务层实现
+
+**会话阶段**: 任务启动
+**任务目标**: 
+- 创建 `src/application/order_lifecycle_service.py`
+- 实现 OrderLifecycleService 类及其核心方法
+- 编写单元测试
+
+**任务依赖**: 
+- 依赖 ORD-1-T1 完成的 OrderStateMachine（状态转换核心）
+- 依赖 OrderRepository（订单持久化）
+- 依赖 OrderAuditLogger（审计日志）
+
+**进行中的工作**:
+1. 已读取相关架构文档和现有代码
+2. 已确认 T1 任务状态（OrderStateMachine 需同步实现）
+3. 准备实现 OrderLifecycleService
+
+---
+
+### 2026-04-06 - ORD-1-T3: TypeScript 类型定义更新 ✅
+
+**会话阶段**: 任务完成
+**任务目标**: 
+- 在 OrderStatus 枚举中添加 CREATED 和 SUBMITTED 状态
+- 更新 OrderStatusBadge 组件支持新状态展示
+
+**完成工作**:
+1. ✅ 修改 `web-front/src/types/order.ts` - 添加 CREATED 和 SUBMITTED 状态到 OrderStatus 枚举
+2. ✅ 修改 `web-front/src/components/v3/OrderStatusBadge.tsx` - 添加新状态的配置
+3. ✅ TypeScript 类型检查通过 - 修改的文件无错误
+4. ✅ 更新 findings.md - 记录技术决策
+5. ✅ 更新 task_plan.md - 标记任务状态
+
+**修改详情**:
+- `OrderStatus` 枚举从 7 状态扩展到 9 状态
+- `CREATED`: 灰色徽章 (bg-gray-100 text-gray-700) - 已创建
+- `SUBMITTED`: 蓝色徽章 (bg-blue-100 text-blue-700) - 已提交
+
+**订单状态流转**:
+```
+CREATED → SUBMITTED → OPEN → FILLED/PARTIALLY_FILLED
+                           ↓
+                     CANCELED/REJECTED/EXPIRED
+```
+
+---
+
 ### 2026-04-06 下午 - ORD-5: 订单审计日志表实现 ✅
 
 **会话阶段**: 任务实现与交付

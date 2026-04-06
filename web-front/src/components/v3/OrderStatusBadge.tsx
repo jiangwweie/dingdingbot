@@ -7,6 +7,14 @@ interface OrderStatusBadgeProps {
 }
 
 const statusConfig: Record<OrderStatus, { label: string; className: string }> = {
+  CREATED: {
+    label: '已创建',
+    className: 'bg-gray-100 text-gray-700',
+  },
+  SUBMITTED: {
+    label: '已提交',
+    className: 'bg-blue-100 text-blue-700',
+  },
   PENDING: {
     label: '待处理',
     className: 'bg-gray-100 text-gray-700',
