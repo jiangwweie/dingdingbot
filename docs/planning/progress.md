@@ -28,6 +28,39 @@
 
 3. ✅ **集成测试验证** (Task #3)
    - 执行 `tests/integration/test_attribution_api.py`
+
+---
+
+### 2026-04-06 - 测试架构重构设计文档完成 ✅
+
+**任务**: TEST-0-Design
+**负责人**: Architect + QA Tester
+**工时**: 1h
+
+**完成工作**:
+
+1. ✅ **设计文档编写**
+   - 输出 `docs/arch/test-architecture-refactor-design.md`
+   - 包含测试分层架构、工厂模式、参数化测试、Mock 策略、数据库策略
+
+2. ✅ **QA 审查完成**
+   - 识别 3 个 P0 问题和 3 个 P1 问题
+   - P0 问题已全部修复
+
+3. ✅ **设计文档更新**
+   - 修复工厂计数器线程安全问题 (itertools.count)
+   - 补充 SignalFactory 和 StrategyFactory 设计
+   - 补充参数化测试计算公式说明
+   - 补充 Mock 对象方法清单表格
+   - 调整工时评估 (8.5h → 18-22h)
+   - 新增回归测试策略章节
+
+4. ✅ **任务计划更新**
+   - 更新 `docs/planning/task_plan.md`
+   - 新增测试重构领域 (6 大阶段 22 个子任务)
+   - 预计工时 22h
+
+**下一步**: 等待用户确认启动执行
    - 结果：13/13 通过 (100%)
    - 覆盖：归因分析 API/预览 API/请求校验/结果验证
 
