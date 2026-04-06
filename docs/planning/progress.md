@@ -4,6 +4,45 @@
 
 ---
 
+### 2026-04-06 - ORD-1-T5: ExchangeGateway 集成到 OrderLifecycleService ✅
+
+**任务 ID**: ORD-1-T5
+**负责人**: Backend Developer
+**工时**: 2h
+**优先级**: P0
+
+**任务目标**: 将 ExchangeGateway 订单状态更新逻辑集成到 OrderLifecycleService
+
+**完成工作**:
+
+1. ✅ **api.py 全局变量扩展**
+   - 添加 `_order_lifecycle_service: Optional[Any] = None` 全局变量
+   - 更新 `set_dependencies()` 函数支持注入 `order_lifecycle_service`
+
+2. ✅ **api.py lifespan 初始化 OrderLifecycleService**
+   - 在 lifespan 启动阶段创建 OrderRepository（如果未设置）
+   - 初始化 OrderLifecycleService 并启动
+   - 注册 ExchangeGateway 的全局订单回调到 `OrderLifecycleService.update_order_from_exchange()`
+   - 在 lifespan 关闭阶段停止 OrderLifecycleService
+
+3. ✅ **架构设计**
+   - ExchangeGateway 保留订单解析逻辑（`_handle_order_update()`）
+   - OrderLifecycleService 负责状态机转换和订单状态更新
+   - WebSocket 订单推送通过回调自动触发 OrderLifecycleService
+
+**修改文件**:
+- `src/interfaces/api.py` - 添加 OrderLifecycleService 初始化和回调注册
+
+**验收标准**:
+- [x] ExchangeGateway 使用 OrderLifecycleService 更新订单状态
+- [x] WebSocket 订单推送回调正常工作
+- [x] 现有测试不受影响
+- [x] progress.md 已更新
+
+**Git 提交**: 待提交
+
+---
+
 ### 2026-04-06 - 会话完成总结 🎉
 
 **本次会话完成的主要任务**:

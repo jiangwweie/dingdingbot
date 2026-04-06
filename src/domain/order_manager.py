@@ -10,7 +10,8 @@ v3.0 Phase 4: 订单编排核心组件
 4. 订单生成与撤销
 
 职责边界声明:
-- OrderManager: 负责 SL 订单的 requested_qty 更新 (数量同步)
+- OrderManager: 负责订单编排逻辑（订单链生成、OCO 逻辑）
+- OrderLifecycleService: 负责订单状态管理（所有状态转换）
 - DynamicRiskManager: 负责 SL 订单的 trigger_price 调整 (Breakeven/Trailing)
 """
 from decimal import Decimal
@@ -43,23 +44,34 @@ class OrderManager:
     4. 订单生成与撤销
 
     职责边界声明:
-    - OrderManager: 负责 SL 订单的 requested_qty 更新 (数量同步)
+    - OrderManager: 负责订单编排逻辑（订单链生成、OCO 逻辑）
+    - OrderLifecycleService: 负责订单状态管理（所有状态转换）
     - DynamicRiskManager: 负责 SL 订单的 trigger_price 调整 (Breakeven/Trailing)
     """
 
-    def __init__(self, order_repository: Optional[Any] = None):
+    def __init__(
+        self,
+        order_repository: Optional[Any] = None,
+        order_lifecycle_service: Optional[Any] = None,
+    ):
         """
         初始化订单管理器
 
         Args:
             order_repository: OrderRepository 实例（可选，用于订单持久化）
+            order_lifecycle_service: OrderLifecycleService 实例（可选，用于状态管理）
         """
         self._order_repository = order_repository
+        self._order_lifecycle_service = order_lifecycle_service
         self._on_order_changed: Optional[Callable[[Order], Awaitable[None]]] = None
 
     def set_order_repository(self, order_repository: Any) -> None:
         """设置订单仓库"""
         self._order_repository = order_repository
+
+    def set_order_lifecycle_service(self, service: Any) -> None:
+        """设置订单生命周期服务"""
+        self._order_lifecycle_service = service
 
     def set_order_changed_callback(self, callback: Callable[[Order], Awaitable[None]]) -> None:
         """
@@ -89,6 +101,39 @@ class OrderManager:
                 pass
         # 触发变更通知
         await self._notify_order_changed(order)
+
+    async def _cancel_order_via_service(
+        self,
+        order: Order,
+        reason: Optional[str] = None,
+        oco_triggered: bool = False
+    ) -> None:
+        """
+        通过 OrderLifecycleService 取消订单
+
+        Args:
+            order: 订单对象
+            reason: 取消原因
+            oco_triggered: 是否由 OCO 逻辑触发
+        """
+        if self._order_lifecycle_service:
+            try:
+                await self._order_lifecycle_service.cancel_order(
+                    order_id=order.id,
+                    reason=reason,
+                    oco_triggered=oco_triggered
+                )
+            except Exception as e:
+                logger.error(f"通过 Service 取消订单失败：{order.id}, error={e}")
+                # 降级处理：直接保存订单状态
+                order.status = OrderStatus.CANCELED
+                order.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+                await self._save_order(order)
+        else:
+            # 降级处理：直接保存订单状态（用于单元测试或无服务场景）
+            order.status = OrderStatus.CANCELED
+            order.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await self._save_order(order)
 
     def create_order_chain(
         self,
@@ -125,7 +170,7 @@ class OrderManager:
 
         current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-        # 仅生成 ENTRY 订单
+        # 仅生成 ENTRY 订单（状态为 CREATED，由 OrderLifecycleService 管理）
         entry_order = Order(
             id=f"ord_{uuid.uuid4().hex[:8]}",
             signal_id=signal_id,
@@ -134,7 +179,7 @@ class OrderManager:
             order_type=OrderType.MARKET,
             order_role=OrderRole.ENTRY,
             requested_qty=total_qty,
-            status=OrderStatus.OPEN,
+            status=OrderStatus.CREATED,  # 初始状态为 CREATED
             created_at=current_time,
             updated_at=current_time,
             reduce_only=False,
@@ -226,13 +271,13 @@ class OrderManager:
                         position = p
                         break
             if position:
-                self._apply_oco_logic_for_tp(filled_order, active_orders, position)
+                await self._apply_oco_logic_for_tp(filled_order, active_orders, position)
             # P5-011: 保存已成交的 TP 订单
             await self._save_order(filled_order)
 
         elif filled_order.order_role == OrderRole.SL:
             # SL 成交：撤销所有 TP 订单
-            self._cancel_all_tp_orders(filled_order.signal_id, active_orders)
+            await self._cancel_all_tp_orders(filled_order.signal_id, active_orders)
             # P5-011: 保存已成交的 SL 订单
             await self._save_order(filled_order)
 
@@ -467,10 +512,12 @@ class OrderManager:
                     and order.status == OrderStatus.OPEN
                     and order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5, OrderRole.SL]
                 ):
-                    order.status = OrderStatus.CANCELED
-                    order.updated_at = current_time
-                    # P5-011: 保存被撤销的订单
-                    await self._save_order(order)
+                    # 使用 OrderLifecycleService 取消订单
+                    await self._cancel_order_via_service(
+                        order=order,
+                        reason="OCO 逻辑触发（完全平仓）",
+                        oco_triggered=True
+                    )
         else:
             # 部分平仓：更新 SL 数量与剩余仓位对齐
             sl_order = self._find_order_by_role(active_orders, OrderRole.SL, signal_id)
@@ -492,8 +539,6 @@ class OrderManager:
             signal_id: 信号 ID
             active_orders: 活跃订单列表
         """
-        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
-
         tp_roles = [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]
         for order in active_orders:
             if (
@@ -501,10 +546,12 @@ class OrderManager:
                 and order.status == OrderStatus.OPEN
                 and order.order_role in tp_roles
             ):
-                order.status = OrderStatus.CANCELED
-                order.updated_at = current_time
-                # P5-011: 保存被撤销的 TP 订单
-                await self._save_order(order)
+                # 使用 OrderLifecycleService 取消订单
+                await self._cancel_order_via_service(
+                    order=order,
+                    reason="SL 成交，取消剩余 TP 订单",
+                    oco_triggered=True
+                )
 
     def _find_order_by_role(
         self,
@@ -642,10 +689,7 @@ class OrderManager:
         Returns:
             被撤销的订单列表
         """
-        from datetime import datetime, timezone
-
         canceled_orders = []
-        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
         signal_id = filled_order.signal_id
 
         # 核心判定：基于仓位剩余数量
@@ -656,17 +700,19 @@ class OrderManager:
                     order.signal_id == signal_id
                     and order.status == OrderStatus.OPEN
                 ):
-                    order.status = OrderStatus.CANCELED
-                    order.updated_at = current_time
                     canceled_orders.append(order)
-                    # P5-011: 保存被撤销的订单
-                    await self._save_order(order)
+                    # 使用 OrderLifecycleService 取消订单
+                    await self._cancel_order_via_service(
+                        order=order,
+                        reason="OCO 逻辑触发（完全平仓）",
+                        oco_triggered=True
+                    )
         else:
             # 部分平仓：更新 SL 数量与剩余仓位对齐
             sl_order = self._find_order_by_role(active_orders, OrderRole.SL, signal_id)
             if sl_order:
                 sl_order.requested_qty = position.current_qty
-                sl_order.updated_at = current_time
+                sl_order.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
                 # P5-011: 保存更新后的 SL 订单
                 await self._save_order(sl_order)
 

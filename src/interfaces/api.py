@@ -196,6 +196,7 @@ _snapshot_service: Optional[Any] = None  # ConfigSnapshotService instance
 _config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
 _order_repo: Optional[Any] = None  # OrderRepository instance
 _audit_logger: Optional[Any] = None  # OrderAuditLogger instance
+_order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
 
 
 def set_dependencies(
@@ -208,6 +209,7 @@ def set_dependencies(
     config_entry_repo: Optional[Any] = None,
     order_repo: Optional[Any] = None,
     audit_logger: Optional[Any] = None,
+    order_lifecycle_service: Optional[Any] = None,
 ) -> None:
     """
     Inject dependencies for API endpoints.
@@ -222,8 +224,9 @@ def set_dependencies(
         config_entry_repo: Optional ConfigEntryRepository instance
         order_repo: Optional OrderRepository instance
         audit_logger: Optional OrderAuditLogger instance
+        order_lifecycle_service: Optional OrderLifecycleService instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _audit_logger
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _audit_logger, _order_lifecycle_service
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
@@ -233,6 +236,7 @@ def set_dependencies(
     _config_entry_repo = config_entry_repo
     _order_repo = order_repo
     _audit_logger = audit_logger
+    _order_lifecycle_service = order_lifecycle_service
 
 
 def _get_repository() -> SignalRepository:
@@ -378,28 +382,48 @@ async def lifespan(app: FastAPI):
         )
 
         # Initialize OrderAuditLogger global singleton (FIX-002)
-        global _audit_logger
+        global _audit_logger, _order_lifecycle_service
         from src.application.order_audit_logger import OrderAuditLogger
         from src.infrastructure.order_audit_repository import OrderAuditLogRepository
-        
+
         # Get db_session_factory from config_manager if available
         def get_db_session():
             """Get database session factory for audit logger."""
             from src.infrastructure.order_audit_repository import get_db_session
             return get_db_session()
-        
+
         audit_repo = OrderAuditLogRepository(db_session_factory=get_db_session)
         await audit_repo.initialize(queue_size=1000)
         _audit_logger = OrderAuditLogger(audit_repo)
         logger.info("OrderAuditLogger initialized as global singleton")
 
-        # OrderRepository 按需创建（DEBT-3 方案）
-        # Auto-inject dependencies if _order_repo is set externally
-        if _order_repo is not None:
+        # Initialize OrderRepository if not already set (ORD-1-T5)
+        # This ensures we have an order repo for the lifecycle service
+        if _order_repo is None:
+            from src.infrastructure.order_repository import OrderRepository
+            _order_repo = OrderRepository()
+            await _order_repo.initialize()
+            # Auto-inject dependencies
             if _exchange_gateway:
                 _order_repo.set_exchange_gateway(_exchange_gateway)
             if _audit_logger:
                 _order_repo.set_audit_logger(_audit_logger)
+            logger.info("OrderRepository initialized in lifespan")
+
+        # Initialize OrderLifecycleService (ORD-1-T5)
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        _order_lifecycle_service = OrderLifecycleService(
+            repository=_order_repo,
+            audit_logger=_audit_logger,
+        )
+        await _order_lifecycle_service.start()
+        logger.info("OrderLifecycleService initialized as global singleton")
+
+        # Register order update callback with ExchangeGateway (ORD-1-T5)
+        # This ensures all WebSocket order updates go through the lifecycle service
+        if _exchange_gateway is not None:
+            _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
+            logger.info("ExchangeGateway global callback registered with OrderLifecycleService")
 
         yield
 
@@ -412,6 +436,11 @@ async def lifespan(app: FastAPI):
         if _config_entry_repo is not None:
             await _config_entry_repo.close()
             logger.info("ConfigEntryRepository closed")
+
+        # Shutdown OrderLifecycleService (ORD-1-T5)
+        if _order_lifecycle_service is not None:
+            await _order_lifecycle_service.stop()
+            logger.info("OrderLifecycleService stopped")
 
         # Shutdown audit logger (FIX-002)
         if _audit_logger is not None:

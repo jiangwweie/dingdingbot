@@ -10,8 +10,134 @@
 2. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
 3. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
 4. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
-5. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
-6. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+5. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
+6. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
+7. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+8. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+
+---
+
+## 📌 ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService
+
+**实现日期**: 2026-04-06  
+**任务负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 架构设计
+
+**核心职责划分**:
+| 组件 | 职责 | 不负责的职责 |
+|------|------|-------------|
+| **ExchangeGateway** | 交易所通信（REST/WebSocket）<br>订单数据解析（CCXT → Order）<br>去重逻辑（filled_qty 比较） | 订单状态机转换<br>订单持久化<br>审计日志记录 |
+| **OrderLifecycleService** | 订单状态机转换<br>订单持久化协调<br>审计日志记录<br>订单变更回调触发 | 交易所通信<br>CCXT 数据解析 |
+
+### 集成方案
+
+**方案**: 通过回调函数将 ExchangeGateway 的订单推送委托给 OrderLifecycleService
+
+```python
+# api.py lifespan 初始化
+_order_lifecycle_service = OrderLifecycleService(
+    repository=_order_repo,
+    audit_logger=_audit_logger,
+)
+await _order_lifecycle_service.start()
+
+# 注册 ExchangeGateway 全局回调
+_exchange_gateway.set_global_order_callback(
+    _order_lifecycle_service.update_order_from_exchange
+)
+```
+
+### 数据流
+
+```
+WebSocket 订单推送 (Binance/Bybit/OKX)
+    ↓
+ExchangeGateway.watch_orders()
+    ↓
+_handle_order_update() - 解析 CCXT 数据 → Order 对象
+    ↓
+_notify_global_order_callback(order)  ← 关键点
+    ↓
+OrderLifecycleService.update_order_from_exchange(order_id, exchange_order_data)
+    ↓
+OrderStateMachine 状态转换
+    ↓
+OrderRepository.save() - 持久化
+OrderAuditLogger.log() - 审计日志
+_notify_order_changed() - 业务回调
+```
+
+### 修改文件
+
+- `src/interfaces/api.py` - 添加 OrderLifecycleService 初始化和回调注册
+
+### 验收标准
+
+- [x] ExchangeGateway 使用 OrderLifecycleService 更新订单状态
+- [x] WebSocket 订单推送回调正常工作
+- [x] 现有测试不受影响
+- [x] progress.md 已更新
+
+---
+
+## 📌 ORD-1-T4 OrderManager 集成到 OrderLifecycleService
+
+**实现日期**: 2026-04-06  
+**任务负责人**: Backend Developer  
+**状态**: 🟢 进行中
+
+### 问题分析
+
+**OrderManager 中直接修改订单状态的代码位置**:
+
+1. **create_order_chain()** (line 137): 创建 ENTRY 订单，设置 `status=OrderStatus.OPEN`
+   - 问题：应该使用 OrderLifecycleService 创建，初始状态应为 CREATED
+   - 迁移方案：删除此方法，改用 OrderLifecycleService.create_order()
+
+2. **_generate_tp_sl_orders()** (lines 340, 359): 生成 TP/SL 订单，设置 `status=OrderStatus.OPEN`
+   - 问题：这是订单生成逻辑，但状态设置应该通过状态机
+   - 迁移方案：保留订单生成逻辑，状态设置改用 OrderLifecycleService
+
+3. **_apply_oco_logic_for_tp()** (lines 467-470): 直接设置 `order.status = OrderStatus.CANCELED`
+   - 问题：直接修改状态，绕过状态机
+   - 迁移方案：改用 OrderLifecycleService.cancel_order()
+
+4. **_cancel_all_tp_orders()** (lines 501-504): 直接设置 `order.status = OrderStatus.CANCELED`
+   - 问题：直接修改状态，绕过状态机
+   - 迁移方案：改用 OrderLifecycleService.cancel_order()
+
+5. **apply_oco_logic()** (lines 657-659): 直接设置 `order.status = OrderStatus.CANCELED`
+   - 问题：直接修改状态，绕过状态机
+   - 迁移方案：改用 OrderLifecycleService.cancel_order()
+
+### 职责重新划分
+
+| 职责 | OrderManager (保留) | OrderLifecycleService (迁移) |
+|------|---------------------|------------------------------|
+| 订单创建 | create_order_chain() 仅生成订单对象 | create_order() 创建并管理状态 |
+| 订单链编排 | ✅ 保留 | - |
+| TP/SL 订单生成 | ✅ 保留 | - |
+| OCO 逻辑执行 | ✅ 保留 (调用 Service 取消订单) | ✅ 提供 cancel_order() 方法 |
+| 状态转换 | ❌ 移除 | ✅ 独占 (通过 OrderStateMachine) |
+| 订单持久化 | ✅ 保留 (调用 Service) | ✅ 统一管理 |
+
+### 实施方案
+
+**阶段 1**: OrderManager 注入 OrderLifecycleService 依赖
+
+**阶段 2**: 重构 create_order_chain() 方法
+- 删除直接创建订单的逻辑
+- 调用 OrderLifecycleService.create_order()
+
+**阶段 3**: 重构 OCO 逻辑
+- _apply_oco_logic_for_tp() 调用 service.cancel_order()
+- _cancel_all_tp_orders() 调用 service.cancel_order()
+- apply_oco_logic() 调用 service.cancel_order()
+
+**阶段 4**: 更新测试
+- 确保现有测试不受影响
 
 ---
 
