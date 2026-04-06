@@ -115,14 +115,14 @@ order_repository.py (5 次修改) - 集中重构
 
 | ID | 任务名称 | 说明 | 工时 | 状态 |
 |----|----------|------|------|------|
-| **ORD-1** | 订单状态机完善 | 实现完整订单生命周期状态机（CREATED→SUBMITTED→FILLED 等） | 14h | 🟢 进行中 |
+| **ORD-1** | 订单状态机完善 | 实现完整订单生命周期状态机（CREATED→SUBMITTED→FILLED 等） | 14h | ✅ 已完成 |
 | **ORD-1-T1** | 后端订单状态机实现 | Python 后端状态机核心实现 | 4h | ✅ 已完成 |
 | **ORD-1-T2** | 订单生命周期服务层 | 实现 OrderLifecycleService 服务层 | 3h | ✅ 已完成 |
 | **ORD-1-T3** | TypeScript 类型定义更新 | 前端 order.ts 类型定义 + OrderStatusBadge 组件 | 1h | ✅ 已完成 |
-| **ORD-1-T4** | 订单列表页适配 | Orders.tsx 支持新状态展示 | 2h | ☐ 待启动 |
-| **ORD-1-T5** | 订单详情抽屉适配 | OrderDetailsDrawer.tsx 支持新状态 | 2h | ☐ 待启动 |
-| **ORD-1-T6** | ExchangeGateway 集成 | 将订单状态更新逻辑迁移到 OrderLifecycleService | 2h | ✅ 已完成 |
-| **ORD-1-T7** | 状态流转测试 | 端到端测试订单状态流转 | 3h | ☐ 待启动 |
+| **ORD-1-T4** | OrderManager 集成 | OrderManager 使用 OrderLifecycleService | 2h | ✅ 已完成 |
+| **ORD-1-T5** | ExchangeGateway 集成 | WebSocket 订单推送集成到 OrderLifecycleService | 2h | ✅ 已完成 |
+| **ORD-1-T6** | 端到端状态流转测试 | 完整订单链路测试 | 3h | ☐ 待启动 |
+| **ORD-1-T7** | 代码审查 | 架构一致性和代码质量审查 | 1.5h | ☐ 待启动 |
 | **ORD-2** | 对账机制实现 | 自动对账 (启动/WebSocket/轮询) + 手动对账 API+UI | 20h | ☐ 待启动 |
 | **ORD-3** | 外部订单手动关联 | 用户主动将外部订单关联到系统信号 | 10h | ☐ 待启动 |
 | **ORD-4** | K 线图完整展示 | 在 K 线图上展示 ENTRY/TP/SL 所有成交订单 | 4h | ☐ 待启动 |
