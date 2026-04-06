@@ -4,6 +4,59 @@
 
 ---
 
+### 2026-04-06 - 混合测试策略建立完成 ✅
+
+**任务 ID**: PM-TEST-Full
+**负责人**: PM + Architect + QA + Frontend
+**总工时**: 3h
+**优先级**: P0
+
+**任务目标**: 建立混合测试策略（Playwright E2E + Vitest 组件测试），补充配置模块测试覆盖
+
+**完成工作**:
+
+1. ✅ **E2E 测试环境配置**
+   - 安装 `@playwright/test` v1.59.1
+   - 下载 Chromium 浏览器
+   - 创建 `web-front/playwright.config.ts` 配置文件
+   - 创建 E2E 测试目录 `web-front/tests/e2e/playwright/`
+
+2. ✅ **后端 E2E 测试补充** (CFG-1)
+   - 文件：`tests/e2e/test_config_import_export_e2e.py`
+   - 测试数：15 个
+   - 通过率：15/15 (100%)
+   - 覆盖：导出/导入/预览/冲突检测/回滚/边界条件/历史记录
+
+3. ✅ **前端 Playwright E2E 测试**
+   - 文件：`web-front/tests/e2e/playwright/backtest.spec.ts`
+   - 测试数：5 个
+   - 覆盖：页面加载/参数选择/配置折叠/执行回测流程
+
+4. ✅ **Vitest 组件测试优化**
+   - Backtest.tsx 添加 6 个 `data-testid` 属性
+   - 创建 `Backtest.core.test.tsx` 简化核心测试
+   - 测试结果：6/6 通过 (100%)
+
+5. ✅ **前端组件测试修复**
+   - 修复导入路径问题 (`../../../lib/api` → `../../lib/api`)
+   - 使用 `getByTestId` 替代不稳定的 `getByText`
+
+**测试覆盖总结**:
+| 测试类型 | 文件 | 通过 | 总计 | 覆盖率 |
+|----------|------|------|------|--------|
+| Python E2E | `test_config_import_export_e2e.py` | 15 | 15 | 100% |
+| Playwright E2E | `backtest.spec.ts` | 待运行 | 5 | - |
+| Vitest 组件 | `Backtest.core.test.tsx` | 6 | 6 | 100% |
+| **总计** | | **21** | **26** | **81%** |
+
+**Git 提交**:
+```
+Commit: a17b3e1
+Message: test(frontend): 建立混合测试策略 - Playwright E2E + Vitest 组件测试
+```
+
+---
+
 ### 2026-04-06 - BT-1/BT-4 质量专项完成 ✅
 
 **任务 ID**: PM-BT1-BT4-QA-Audit  
