@@ -2283,3 +2283,81 @@ class ConfigHistoryEntry(BaseModel):
     changed_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Change timestamp (ISO 8601)")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+# ============================================================
+# ORD-5: Order Audit Log Models (订单审计日志模型)
+# ============================================================
+
+class OrderAuditEventType(str, Enum):
+    """
+    订单审计事件类型（与 ORD-1 状态机对齐）
+    """
+    ORDER_CREATED = "ORDER_CREATED"           # 订单创建
+    ORDER_SUBMITTED = "ORDER_SUBMITTED"       # 订单提交到交易所
+    ORDER_CONFIRMED = "ORDER_CONFIRMED"       # 订单确认挂单
+    ORDER_PARTIAL_FILLED = "ORDER_PARTIAL_FILLED"  # 部分成交
+    ORDER_FILLED = "ORDER_FILLED"             # 完全成交
+    ORDER_CANCELED = "ORDER_CANCELED"         # 订单取消
+    ORDER_REJECTED = "ORDER_REJECTED"         # 交易所拒单
+    ORDER_EXPIRED = "ORDER_EXPIRED"           # 订单过期
+    ORDER_UPDATED = "ORDER_UPDATED"           # 订单信息更新
+
+
+class OrderAuditTriggerSource(str, Enum):
+    """
+    审计日志触发来源（与 ORD-1 对齐）
+    """
+    USER = "USER"         # 用户主动操作
+    SYSTEM = "SYSTEM"     # 系统自动触发
+    EXCHANGE = "EXCHANGE" # 交易所推送
+
+
+class OrderAuditLog(BaseModel):
+    """
+    订单审计日志
+
+    记录订单全生命周期的所有事件，用于审计追溯和问题诊断。
+    """
+    id: str = Field(..., description="审计日志 ID, UUID 格式")
+    order_id: str = Field(..., description="订单 ID")
+    signal_id: Optional[str] = Field(None, description="关联信号 ID（可选，用于追踪订单链）")
+    old_status: Optional[str] = Field(None, description="旧状态（首次创建时为 None）")
+    new_status: str = Field(..., description="新状态")
+    event_type: OrderAuditEventType = Field(..., description="事件类型")
+    triggered_by: OrderAuditTriggerSource = Field(..., description="触发来源")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="元数据（JSON 格式）")
+    created_at: int = Field(..., description="创建时间（毫秒时间戳）")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, use_enum_values=True)
+
+
+class OrderAuditLogCreate(BaseModel):
+    """
+    创建审计日志请求模型
+    """
+    order_id: str = Field(..., description="订单 ID")
+    signal_id: Optional[str] = Field(None, description="关联信号 ID")
+    old_status: Optional[str] = Field(None, description="旧状态")
+    new_status: str = Field(..., description="新状态")
+    event_type: OrderAuditEventType = Field(..., description="事件类型")
+    triggered_by: OrderAuditTriggerSource = Field(..., description="触发来源")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="元数据")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, use_enum_values=True)
+
+
+class OrderAuditLogQuery(BaseModel):
+    """
+    审计日志查询参数模型
+    """
+    order_id: Optional[str] = Field(None, description="订单 ID")
+    signal_id: Optional[str] = Field(None, description="信号 ID")
+    event_type: Optional[OrderAuditEventType] = Field(None, description="事件类型")
+    triggered_by: Optional[OrderAuditTriggerSource] = Field(None, description="触发来源")
+    start_time: Optional[int] = Field(None, description="开始时间（毫秒时间戳）")
+    end_time: Optional[int] = Field(None, description="结束时间（毫秒时间戳）")
+    limit: int = Field(default=100, ge=1, le=1000, description="返回数量限制")
+    offset: int = Field(default=0, ge=0, description="偏移量")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, use_enum_values=True)
