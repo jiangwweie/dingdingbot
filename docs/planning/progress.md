@@ -4,6 +4,42 @@
 
 ---
 
+### 2026-04-06 21:00 - FE-01 架构设计 + 接口契约文档完成 🎉
+
+**任务**: FE-01 前端配置导航重构 - 架构设计 + 接口契约文档
+
+**完成工作**:
+1. ✅ 创建架构设计文档 `docs/arch/fe-001-frontend-config-navigation-redesign.md`
+2. ✅ 创建接口契约文档 `docs/contracts/fe-001-config-api-contracts.md`
+3. ✅ 更新任务计划 `docs/planning/task_plan.md`
+
+**架构设计文档内容**:
+- 路由设计表 (明确 `/config/strategies` 和 `/strategies` 的区分)
+- 组件树拆分图 (策略配置页面/系统设置页面/回测沙箱页面)
+- 状态管理设计 (React Query + React Hook Form)
+- Level 1 配置折叠交互说明
+- 实时保存机制 (输入停止 1 秒后防抖)
+- 用户反馈状态设计 (Loading/Error/Success)
+
+**接口契约文档内容**:
+- API 路径统一使用 `/api/config/*` 前缀
+- 策略配置管理 API (GET/POST/PUT/DELETE)
+- 策略参数管理 API (GET/PUT/Preview)
+- 系统配置管理 API (GET/PUT)
+- Tooltip Schema API (后端提供配置项说明)
+- 前端组件 Props 定义
+- 类型对齐检查表
+
+**修复的 P0 问题**:
+- ✅ P0-1: 架构设计文档缺失
+- ✅ P0-2: 接口契约文档缺失
+- ✅ P0-3: `/strategies` 路由冲突 (解决方案：新页面使用 `/config/strategies`)
+- ✅ P0-4: API 接口未定义 (解决方案：统一使用 `/api/config/*`)
+
+**下一步**: 前端开发启动 (FE-1 ~ FE-5)
+
+---
+
 ### 2026-04-06 20:00 - ORD-1 收工总结 🎉
 
 **会话阶段**: ORD-1 核心后端完成，已推送

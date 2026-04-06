@@ -6,14 +6,100 @@
 
 ## 📑 目录
 
-1. [前端配置页面优化 PRD](#前端配置页面优化 prd)
-2. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
+1. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
+2. [前端配置页面优化 PRD](#前端配置页面优化 prd)
+3. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
 3. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
 4. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
 5. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
 6. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
 7. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
 8. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+
+---
+
+## 📌 FE-01 前端配置导航重构 - 架构设计
+
+**创建日期**: 2026-04-06  
+**任务负责人**: Claude (前端开发专家)  
+**状态**: ✅ 架构设计完成
+
+### 路由设计决策
+
+**问题**: `/strategies` 路由已被 `StrategyWorkbench` 占用，但 PRD 计划用于新策略配置页面
+
+**解决方案**: 
+- 新策略配置页面使用 `/config/strategies` 前缀
+- 保留 `/strategies` 给策略工作台 (策略模板管理)
+- 添加路由重定向 (可选): `/profiles/strategies` → `/config/strategies`
+
+**边界说明**:
+| 页面 | 用途 | 配置类型 |
+|------|------|----------|
+| `/config/strategies` | 配置策略参数 (触发器/过滤器/风控) | Level 2 - 策略级配置 |
+| `/strategies` | 策略模板管理 (保存/加载/切换) | 策略模板操作 |
+
+### API 路径统一设计
+
+**问题**: 策略 CRUD 接口路径不统一 (`/api/strategies` vs `/api/config/strategies`)
+
+**解决方案**: 统一使用 `/api/config/*` 前缀
+
+```
+策略配置管理:
+GET    /api/config/strategies      // 获取策略列表
+POST   /api/config/strategies      // 创建策略
+PUT    /api/config/strategies/:id  // 更新策略
+DELETE /api/config/strategies/:id  // 删除策略
+
+策略参数管理:
+GET    /api/strategy/params        // 获取策略参数
+PUT    /api/strategy/params        // 更新策略参数 (热重载)
+POST   /api/strategy/params/preview // 预览参数变更
+
+系统配置管理:
+GET    /api/config/system          // 获取系统配置 (Level 1)
+PUT    /api/config/system          // 更新系统配置
+
+Tooltip Schema:
+GET    /api/config/schema          // 获取配置项 Schema (含 tooltip)
+```
+
+### 状态管理设计
+
+| 状态类型 | 推荐方案 | 使用场景 | 理由 |
+|----------|----------|----------|------|
+| **服务端状态** | React Query (`useQuery`, `useMutation`) | 策略列表、策略详情、系统配置 | 需要缓存、后台刷新、乐观更新 |
+| **表单状态** | React Hook Form (`useForm`) | 策略编辑表单、系统配置表单 | 频繁变更，无需立即同步 |
+| **全局 UI 状态** | Zustand / Context | 当前 Profile、主题、抽屉打开状态 | 跨组件共享的 UI 状态 |
+
+### 实时保存机制
+
+**防抖策略**: 输入停止 1 秒后自动保存
+
+```typescript
+const debouncedSave = useCallback(
+  debounce((values: StrategyFormValues) => {
+    updateMutation.mutate(values);
+  }, 1000),
+  [updateMutation]
+);
+```
+
+### 组件复用计划
+
+| 现有组件 | 目标位置 | 复用方式 |
+|----------|----------|----------|
+| `StrategyParamPanel.tsx` | `/config/strategies` → `StrategyEditorDrawer` | 拆分复用 (移除模板管理逻辑) |
+| `SystemTab.tsx` | `/config/system` → `Level1ConfigSection` | 直接迁移 |
+| `QuickDateRangePicker.tsx` | `/backtest` → `QuickConfigSection` | 直接复用 |
+
+### 相关文档
+
+- 架构设计文档：`docs/arch/fe-001-frontend-config-navigation-redesign.md`
+- 接口契约文档：`docs/contracts/fe-001-config-api-contracts.md`
+- PRD: `docs/products/frontend-config-optimization-prd.md`
+- 前端审查报告：`docs/reviews/fe-001-frontend-design-review.md`
 
 ---
 
