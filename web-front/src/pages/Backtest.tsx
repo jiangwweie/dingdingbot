@@ -293,7 +293,7 @@ export default function Backtest() {
         {/* Left: Control Panel */}
         <div className="lg:col-span-1 space-y-4">
           {/* 快速配置区 (FE-01 优化 - 显眼区域) */}
-          <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-xl border-2 border-blue-200 p-5 space-y-4 shadow-sm">
+          <div data-testid="quick-config-section" className="bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-xl border-2 border-blue-200 p-5 space-y-4 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-blue-900 flex items-center gap-2">
                 <Activity className="w-4 h-4" />
@@ -309,6 +309,7 @@ export default function Backtest() {
                 🪙 交易对
               </label>
               <select
+                data-testid="symbol-select"
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value)}
                 className="w-full rounded-lg border border-blue-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors bg-white"
@@ -326,6 +327,7 @@ export default function Backtest() {
                 📊 时间周期
               </label>
               <select
+                data-testid="timeframe-select"
                 value={timeframe}
                 onChange={(e) => setTimeframe(e.target.value)}
                 className="w-full rounded-lg border border-blue-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors bg-white"
@@ -352,8 +354,9 @@ export default function Backtest() {
           </div>
 
           {/* 高级配置折叠区 (FE-01 新增) */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div data-testid="advanced-config-section" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div
+              data-testid="advanced-config-toggle"
               className="flex items-center justify-between px-5 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
               onClick={() => setAdvancedConfigExpanded(!advancedConfigExpanded)}
             >
@@ -370,7 +373,7 @@ export default function Backtest() {
             </div>
 
             {advancedConfigExpanded && (
-              <div className="p-5 space-y-4 border-t border-gray-200">
+              <div data-testid="advanced-config-content" className="p-5 space-y-4 border-t border-gray-200">
                 {/* 策略组装工作台 */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
@@ -440,6 +443,7 @@ export default function Backtest() {
 
           {/* Execute Button */}
           <button
+            data-testid="run-backtest-btn"
             onClick={handleRunBacktest}
             disabled={isRunning || strategies.length === 0}
             className={cn(
@@ -464,7 +468,7 @@ export default function Backtest() {
 
           {/* Error Display */}
           {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-3">
+            <div data-testid="error-message" className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-3">
               <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-medium">回测失败</p>

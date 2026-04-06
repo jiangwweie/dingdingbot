@@ -24,6 +24,8 @@ vi.mock('../../lib/api', () => ({
   fetch: vi.fn(),
 }));
 
+const { runPMSBacktest, fetchStrategyTemplates, fetchBacktestSignals } = await import('../../lib/api');
+
 // ============================================================
 // Mock 子组件
 // ============================================================
@@ -185,10 +187,6 @@ const mockPMSReport = {
   candles_analyzed: 1000,
 };
 
-const { runPMSBacktest, fetchStrategyTemplates, fetchBacktestSignals } = await import(
-  '../../lib/api'
-);
-
 // ============================================================
 // Tests
 // ============================================================
@@ -214,14 +212,15 @@ describe('PMSBacktest Page', () => {
       const balanceLabel = screen.getByText(/初始资金/i);
       expect(balanceLabel).toBeInTheDocument();
 
-      const balanceInput = screen.getByLabelText(/初始资金/i);
+      // 使用 role 查找 input
+      const balanceInput = screen.getByRole('spinbutton');
       expect(balanceInput).toBeInTheDocument();
     });
 
     it('default initial_balance is 10000', () => {
       render(<PMSBacktest />);
 
-      const balanceInput = screen.getByLabelText(/初始资金/i);
+      const balanceInput = screen.getByRole('spinbutton');
       expect(balanceInput).toHaveValue('10000');
     });
 
@@ -233,12 +232,12 @@ describe('PMSBacktest Page', () => {
       expect(screen.getByText(/PMS 回测 vs 经典回测/i)).toBeInTheDocument();
 
       // 验证币种选择器 (8 个选项)
-      const symbolSelect = screen.getByLabelText(/交易对/i);
+      const symbolSelect = screen.getByRole('combobox');
       expect(symbolSelect).toBeInTheDocument();
       expect(symbolSelect.querySelectorAll('option').length).toBe(8);
 
       // 验证周期选择器 (5 个选项：15m/1h/4h/1d/1w)
-      const timeframeSelect = screen.getByLabelText(/时间周期/i);
+      const timeframeSelect = screen.getAllByRole('combobox')[1];
       expect(timeframeSelect).toBeInTheDocument();
       expect(timeframeSelect.querySelectorAll('option').length).toBe(5);
     });
@@ -252,7 +251,7 @@ describe('PMSBacktest Page', () => {
     it('updates initial_balance on input', () => {
       render(<PMSBacktest />);
 
-      const balanceInput = screen.getByLabelText(/初始资金/i);
+      const balanceInput = screen.getByRole('spinbutton');
       fireEvent.change(balanceInput, { target: { value: '50000' } });
 
       expect(balanceInput).toHaveValue('50000');
@@ -261,7 +260,7 @@ describe('PMSBacktest Page', () => {
     it('shows error on negative/zero value', () => {
       render(<PMSBacktest />);
 
-      const balanceInput = screen.getByLabelText(/初始资金/i);
+      const balanceInput = screen.getByRole('spinbutton');
 
       // 输入 0
       fireEvent.change(balanceInput, { target: { value: '0' } });
@@ -360,12 +359,12 @@ describe('PMSBacktest Page', () => {
       render(<PMSBacktest />);
 
       // 设置初始资金
-      const balanceInput = screen.getByLabelText(/初始资金/i);
+      const balanceInput = screen.getByRole('spinbutton');
       fireEvent.change(balanceInput, { target: { value: '50000' } });
 
       // 设置币种和周期
-      const symbolSelect = screen.getByLabelText(/交易对/i);
-      const timeframeSelect = screen.getByLabelText(/时间周期/i);
+      const symbolSelect = screen.getByRole('combobox');
+      const timeframeSelect = screen.getAllByRole('combobox')[1];
       fireEvent.change(symbolSelect, { target: { value: 'ETH/USDT:USDT' } });
       fireEvent.change(timeframeSelect, { target: { value: '4h' } });
 

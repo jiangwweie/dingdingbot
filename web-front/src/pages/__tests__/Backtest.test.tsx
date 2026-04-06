@@ -18,6 +18,7 @@ import Backtest from '../Backtest';
 // ============================================================
 // Mock API 模块
 // ============================================================
+
 vi.mock('../../lib/api', () => ({
   runSignalBacktest: vi.fn(),
   fetchStrategyTemplates: vi.fn(),
@@ -27,13 +28,6 @@ vi.mock('../../lib/api', () => ({
 const { runSignalBacktest, fetchStrategyTemplates, fetchBacktestSignals } = await import(
   '../../lib/api'
 );
-
-vi.mock('../../../lib/api', () => ({
-  runSignalBacktest: vi.fn(),
-  fetchStrategyTemplates: vi.fn(),
-  fetchBacktestSignals: vi.fn(),
-  fetch: vi.fn(),
-}));
 
 // ============================================================
 // Mock 子组件
@@ -162,10 +156,6 @@ const mockBacktestReport = {
   candles_analyzed: 1000,
 };
 
-const { runSignalBacktest, fetchStrategyTemplates, fetchBacktestSignals } = await import(
-  '../../../lib/api'
-);
-
 // ============================================================
 // Tests
 // ============================================================
@@ -188,7 +178,7 @@ describe('Backtest Page', () => {
     it('renders symbol selector with 8 options', () => {
       render(<Backtest />);
 
-      const symbolSelect = screen.getByLabelText(/交易对/i);
+      const symbolSelect = screen.getByLabelText(/🪙 交易对/i);
       expect(symbolSelect).toBeInTheDocument();
 
       // 检查选项数量 (BTC/ETH/SOL/BNB/XRP/ADA/DOGE/MATIC)
@@ -198,7 +188,7 @@ describe('Backtest Page', () => {
     it('renders timeframe selector with 7 options', () => {
       render(<Backtest />);
 
-      const timeframeSelect = screen.getByLabelText(/时间周期/i);
+      const timeframeSelect = screen.getByLabelText(/📊 时间周期/i);
       expect(timeframeSelect).toBeInTheDocument();
 
       // 检查选项数量 (1m/5m/15m/1h/4h/1d/1w)
@@ -208,7 +198,7 @@ describe('Backtest Page', () => {
     it('renders date range picker', () => {
       render(<Backtest />);
 
-      expect(screen.getByLabelText(/时间范围/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/📅 时间范围/i)).toBeInTheDocument();
       expect(screen.getByTestId('date-picker')).toBeInTheDocument();
     });
 
@@ -230,7 +220,7 @@ describe('Backtest Page', () => {
     it('updates symbol state on selection', () => {
       render(<Backtest />);
 
-      const symbolSelect = screen.getByLabelText(/交易对/i);
+      const symbolSelect = screen.getByLabelText(/🪙 交易对/i);
       fireEvent.change(symbolSelect, { target: { value: 'ETH/USDT:USDT' } });
 
       expect(symbolSelect).toHaveValue('ETH/USDT:USDT');
@@ -239,7 +229,7 @@ describe('Backtest Page', () => {
     it('updates timeframe state on selection', () => {
       render(<Backtest />);
 
-      const timeframeSelect = screen.getByLabelText(/时间周期/i);
+      const timeframeSelect = screen.getByLabelText(/📊 时间周期/i);
       fireEvent.change(timeframeSelect, { target: { value: '4h' } });
 
       expect(timeframeSelect).toHaveValue('4h');
@@ -324,16 +314,6 @@ describe('Backtest Page', () => {
         fireEvent.click(addStrategyBtn);
       });
 
-      // Mock 日期选择器设置错误的时间范围
-      const { onStartChange, onEndChange } = await import('../../../components/QuickDateRangePicker');
-
-      // 模拟设置开始时间晚于结束时间
-      // 注意：由于我们 mock 了组件，这里通过直接模拟时间戳来测试
-      // 开始时间设置为较晚的时间
-      const startDateBtn = screen.getByText('设置结束时间'); // mock 中的按钮
-      // 实际上我们的 mock 组件两个按钮设置的是有效时间范围
-      // 所以需要重新设计 mock 来测试这个场景
-
       // 简化测试：直接验证 validateForm 逻辑
       // 由于组件内部逻辑，我们测试点击执行后的错误展示
       const runButton = screen.getByRole('button', { name: /一键执行回测/i });
@@ -368,8 +348,8 @@ describe('Backtest Page', () => {
       fireEvent.click(expandButton!);
 
       // 设置币种和周期
-      const symbolSelect = screen.getByLabelText(/交易对/i);
-      const timeframeSelect = screen.getByLabelText(/时间周期/i);
+      const symbolSelect = screen.getByLabelText(/🪙 交易对/i);
+      const timeframeSelect = screen.getByLabelText(/📊 时间周期/i);
       fireEvent.change(symbolSelect, { target: { value: 'ETH/USDT:USDT' } });
       fireEvent.change(timeframeSelect, { target: { value: '4h' } });
 
