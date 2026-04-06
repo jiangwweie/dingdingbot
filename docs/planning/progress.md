@@ -7,6 +7,70 @@
 
 ---
 
+### 2026-04-06 - 配置导入导出历史记录功能 ✅
+
+**会话 ID**: 20260406-002
+**开始时间**: 2026-04-06
+**结束时间**: 2026-04-06
+**持续时间**: 约 1 小时
+
+#### 完成工作摘要
+
+**TASK-3: 配置历史追踪增强 - 记录 import/export 操作**
+
+#### 需求描述
+
+在配置导入导出操作中添加历史记录功能，记录操作者、时间、操作类型和变更摘要，以便追踪配置导出和导入操作。
+
+#### 实现内容
+
+**1. export_config 端点历史记录**:
+- 在 `src/interfaces/api_v1_config.py:1507-1531` 添加历史记录逻辑
+- 记录导出的配置 sections（risk/system/strategies/symbols/notifications）
+- 记录导出文件名
+- action 使用 "EXPORT"
+- entity_type 使用 "config_bundle"
+- entity_id 使用 "export"
+
+**2. confirm_import 端点历史记录**:
+- 在 `src/interfaces/api_v1_config.py:1746-1770` 添加历史记录逻辑
+- 记录导入的配置 sections 和文件名
+- 记录关联的 snapshot_id
+- action 使用 "IMPORT"
+- entity_type 使用 "config_bundle"
+- entity_id 使用 "import"
+
+**3. preview_import 时间计算 bug 修复**:
+- 修复 `src/interfaces/api_v1_config.py:1634-1635` 中的时间计算 bug
+- 原代码使用 `replace(minute=minute+5)` 在分钟数 >= 55 时会崩溃
+- 改用 `timedelta(minutes=5)` 正确计算 5 分钟后时间
+
+#### 单元测试
+
+**新增测试用例** (`tests/unit/test_config_import_export.py`):
+- `TestImportExportHistoryRecording::test_export_records_to_history` - 验证导出操作记录
+- `TestImportExportHistoryRecording::test_import_records_to_history` - 验证导入操作记录
+- `TestImportExportHistoryRecording::test_export_history_records_all_sections` - 验证导出所有 sections 时的记录
+- `TestImportExportHistoryRecording::test_import_history_records_snapshot_id` - 验证 snapshot_id 被正确记录
+
+**测试结果**: 29/29 测试通过 ✅
+
+#### 变更记录
+
+```
+src/interfaces/api_v1_config.py     - 添加 export/import 历史记录 + 修复 time bug
+tests/unit/test_config_import_export.py - 新增 4 个历史记录测试用例
+```
+
+#### 验收标准完成情况
+
+- [x] `import_from_yaml()` 操作记录到 config_history 表（通过 confirm_import 端点实现）
+- [x] `export_to_yaml()` 操作记录到 config_history 表（通过 export_config 端点实现）
+- [x] 记录包含操作者（admin）、时间（自动）、操作类型（IMPORT/EXPORT）、变更摘要
+- [x] 新增单元测试验证历史记录功能
+
+---
+
 ### 2026-04-06 - SignalPipeline 热重载日志增强 ✅
 
 **会话 ID**: 20260406-001
