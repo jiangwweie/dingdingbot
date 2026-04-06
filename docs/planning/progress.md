@@ -4,6 +4,52 @@
 
 ---
 
+### 2026-04-06 - P2-3: 配置变更历史旧值记录 ✅
+
+**任务 ID**: #24
+**优先级**: P2
+**任务目标**: 修复 `save_backtest_configs()` 方法在记录配置变更历史时未记录旧值的问题
+
+**问题描述**:
+- `save_backtest_configs()` 方法在记录配置变更历史时，`old_values` 始终为 `None`
+- 无法追溯配置变更前的原始值，影响审计和回滚能力
+
+**完成工作**:
+1. ✅ 修复 `src/application/config_manager.py`:
+   - 在保存新配置前，先调用 `get_backtest_configs()` 查询旧配置
+   - 将旧配置转换为字符串字典后传递给 `_log_config_change()`
+   - `old_values` 参数从 `None` 改为实际查询的旧配置值
+
+2. ✅ 添加测试 `tests/unit/test_config_manager_backtest_kv.py`:
+   - `test_save_backtest_configs_records_old_values` - 验证更新操作记录旧值
+   - `test_save_backtest_configs_first_save_has_no_old_values` - 验证首次保存的行为
+
+3. ✅ 测试验收:
+   - 所有 19 个回测配置测试通过 (100%)
+   - 配置变更历史同时包含 `old_values` 和 `new_values`
+
+**关键代码变更**:
+```python
+# 查询旧配置（用于记录变更历史）
+old_configs = await self.get_backtest_configs(profile_name=profile_name)
+
+# 记录配置变更历史（包含旧值和新值）
+await self._log_config_change(
+    entity_type="backtest_config",
+    entity_id=f"profile:{profile_name}",
+    action="UPDATE",
+    old_values={k: str(v) for k, v in old_configs.items()} if old_configs else None,
+    new_values={k: str(v) for k, v in configs.items()},
+    changed_by=changed_by,
+    change_summary=f"回测配置更新 - Profile:{profile_name}, 变更项:{len(configs)}",
+)
+```
+
+**Git 提交**:
+- 93c55f5 fix: 配置变更历史记录旧值 - save_backtest_configs 记录 old_values
+
+---
+
 ### 2026-04-06 - ORD-6: 批量删除集成交易所 API ✅
 
 **会话阶段**: 任务完成（代码审查发现 P0 问题待修复）
