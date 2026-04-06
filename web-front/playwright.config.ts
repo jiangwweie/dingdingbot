@@ -12,6 +12,8 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e/playwright',
   outputDir: './tests/e2e/playwright/test-results',
+  // 排除 e2e 目录下的旧 Vitest 测试文件
+  testIgnore: ['**/e2e/**/*.test.ts', '**/e2e/**/*.test.tsx'],
 
   // 超时设置
   timeout: 30 * 1000,
