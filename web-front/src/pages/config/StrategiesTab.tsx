@@ -200,31 +200,37 @@ export const StrategiesTab: React.FC = () => {
       dataIndex: 'symbols',
       key: 'symbols',
       width: 200,
-      render: (symbols: string[]) => (
-        <div className="symbols-tags">
-          {symbols.slice(0, 3).map((symbol) => (
-            <Tag key={symbol} color="gray">
-              {symbol.split('/')[0]}
-            </Tag>
-          ))}
-          {symbols.length > 3 && <Tag>+{symbols.length - 3}</Tag>}
-        </div>
-      ),
+      render: (symbols: string[] | undefined) => {
+        const symbolsList = symbols || [];
+        return (
+          <div className="symbols-tags">
+            {symbolsList.slice(0, 3).map((symbol) => (
+              <Tag key={symbol} color="gray">
+                {symbol.split('/')[0]}
+              </Tag>
+            ))}
+            {symbolsList.length > 3 && <Tag>+{symbolsList.length - 3}</Tag>}
+          </div>
+        );
+      },
     },
     {
       title: '周期',
       dataIndex: 'timeframes',
       key: 'timeframes',
       width: 150,
-      render: (timeframes: string[]) => (
-        <div className="timeframes-tags">
-          {timeframes.map((tf) => (
-            <Tag key={tf} color="green">
-              {tf}
-            </Tag>
-          ))}
-        </div>
-      ),
+      render: (timeframes: string[] | undefined) => {
+        const timeframesList = timeframes || [];
+        return (
+          <div className="timeframes-tags">
+            {timeframesList.map((tf) => (
+              <Tag key={tf} color="green">
+                {tf}
+              </Tag>
+            ))}
+          </div>
+        );
+      },
     },
     {
       title: '状态',
