@@ -1,8 +1,84 @@
 # 进度日志
 
 > **说明**: 本文件仅保留最近 3 天的详细进度日志，历史日志已归档至 `archive/progress-history/`。
+> **最后更新**: 2026-04-06
 > **归档时间**: 2026-04-03
 > **归档文件**: `archive/progress-history/2026-03.log`（328 行）
+
+---
+
+### 2026-04-06 - SignalPipeline 热重载日志增强 ✅
+
+**会话 ID**: 20260406-001
+**开始时间**: 2026-04-06
+**结束时间**: 2026-04-06
+**持续时间**: 约 1 小时
+
+#### 完成工作摘要
+
+**TASK-1: SignalPipeline 热重载日志观察完成**
+
+#### 需求描述
+
+在 SignalPipeline 热重载流程中添加详细日志，观察配置刷新和状态恢复情况，为后续可能的优化提供数据支持。
+
+#### 实现内容
+
+**1. on_config_updated() 方法日志增强**:
+- 添加热重载流程开始标记（分隔线）
+- 记录新 risk_config 详情（max_loss_percent, max_leverage）
+- 记录 MTF EMA 周期变更详情（旧值 -> 新值）
+- 记录 MTF EMA indicators 清空前的缓存数量
+- 记录 strategy runner 重建开始标记
+- 记录 Signal cooldown cache 清空前的缓存数量
+- 添加热重载完成标记（分隔线）
+
+**2. _build_and_warmup_runner() 方法日志增强**:
+- 记录 strategy runner 创建完成（激活策略数）
+- 记录 K-line 历史重放详情：
+  - 重放 K-line 总数量
+  - 时间范围（本地时间和 UTC 时间戳）
+  - 每个数据流的详细信息（symbol:timeframe:bar 数量）
+- 记录 MTF EMA 预加热详情：
+  - 检查的周期数量
+  - 预热的数据点数量
+  - 指标就绪数量
+
+#### 日志输出示例
+
+```
+[INFO] Configuration hot-reload triggered, rebuilding strategy runner...
+[INFO] 开始热重载，新 risk_config: max_loss_percent=1.0, max_leverage=20
+[INFO] Risk config reloaded: max_loss_percent=1.0->1.0, max_leverage=20->20
+[INFO] 更新 MTF EMA 周期：60 -> 60
+[INFO] 清空 MTF EMA indicators 缓存，原缓存数量：5
+[INFO] 开始重建 strategy runner...
+[INFO] Strategy runner 创建完成，激活策略数：2
+[INFO] 重放 K-line 历史：200 根 K 线，时间范围 2026-04-05 10:00:00 - 2026-04-06 12:00:00 (UTC: 1711785600000-1711872000000)
+[INFO] Runner warmup complete: 200 K-lines replayed from 2 streams
+[INFO] [热重载] MTF EMA 预加热：检查 2 个周期，预热 180 个数据点到 2 个指标
+[INFO] [热重载] MTF EMA 重建完成：180 个数据点，2 个指标就绪
+[INFO] Signal cooldown cache cleared, 原缓存数量：3
+[INFO] ============================================================
+[INFO] 热重载完成，runner 重建成功
+[INFO] ============================================================
+```
+
+#### 测试结果
+
+- ✅ 语法检查通过
+- ✅ 代码审查通过
+
+#### 修改文件
+
+- `src/application/signal_pipeline.py`: 添加热重载详细日志
+
+#### 验收标准完成情况
+
+- [x] 热重载触发时记录配置变更详情
+- [x] 记录 MTF EMA indicators 清空和重建过程
+- [x] 记录 K-line 历史重放数量和时间范围
+- [x] 记录 runner 重建完成状态
 
 ---
 

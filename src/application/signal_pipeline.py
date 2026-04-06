@@ -290,7 +290,13 @@ class SignalPipeline:
         Rebuilds the strategy runner and warms up with cached K-line history.
         Updates _risk_config and _mtf_ema_period to reflect new configuration.
         """
-        logger.info("Configuration hot-reload triggered, rebuilding strategy runner...")
+        # 记录新 risk_config 详情
+        user_config_snapshot = await self._config_manager.get_user_config()
+        new_risk_config = user_config_snapshot.risk
+        logger.info(
+            f"[热重载] 开始热重载，新 risk_config: max_loss_percent={new_risk_config.max_loss_percent}, "
+            f"max_leverage={new_risk_config.max_leverage}"
+        )
 
         async with self._get_runner_lock():
             # R3.1 fix: 使用 await 获取配置副本，而非直接引用
@@ -301,7 +307,7 @@ class SignalPipeline:
             old_max_leverage = self._risk_config.max_leverage
             self._risk_config = copy.deepcopy(user_config.risk)
             logger.info(
-                f"Risk config reloaded: max_loss_percent={old_max_loss}->{self._risk_config.max_loss_percent}, "
+                f"[热重载] Risk config 更新：max_loss_percent={old_max_loss}->{self._risk_config.max_loss_percent}, "
                 f"max_leverage={old_max_leverage}->{self._risk_config.max_leverage}"
             )
 
@@ -309,20 +315,24 @@ class SignalPipeline:
             old_mtf_ema_period = self._mtf_ema_period
             self._mtf_ema_period = user_config.mtf_ema_period or 60
             if old_mtf_ema_period != self._mtf_ema_period:
-                logger.info(f"MTF EMA period updated: {old_mtf_ema_period}->{self._mtf_ema_period}")
+                logger.info(f"[热重载] MTF EMA 周期更新：{old_mtf_ema_period} -> {self._mtf_ema_period}")
+            else:
+                logger.info(f"[热重载] MTF EMA 周期保持不变：{self._mtf_ema_period}")
 
             # Step 3: Rebuild MTF EMA indicators with new period (recreate all indicators)
+            old_indicator_count = len(self._mtf_ema_indicators)
             self._mtf_ema_indicators.clear()
-            logger.info("MTF EMA indicators cleared (will be recreated on next K-line processing)")
+            logger.info(f"[热重载] MTF EMA indicators 清空：移除 {old_indicator_count} 个缓存指标")
 
             # Step 4: Build new runner from updated config
             self._runner = self._build_and_warmup_runner()
 
             # Step 5: Clear stale cooldown cache (config params may have changed)
+            old_cache_size = len(self._signal_cooldown_cache)
             self._signal_cooldown_cache.clear()
-            logger.info("Signal cooldown cache cleared (stale cache prevention)")
+            logger.info(f"[热重载] Signal cooldown cache 清空：移除 {old_cache_size} 条缓存记录")
 
-            logger.info("Strategy runner rebuilt and warmup complete")
+            logger.info("[热重载] 策略 runner 重建完成，热重载流程结束")
 
     def _get_runner_lock(self) -> asyncio.Lock:
         """Get or create the runner lock."""
@@ -352,24 +362,51 @@ class SignalPipeline:
 
         # Build runner using factory function
         runner = create_dynamic_runner(active_strategies, core_config)
+        logger.info(f"Strategy runner 创建完成，激活策略数：{len(active_strategies)}")
 
         # Warmup: replay cached K-lines to restore EMA and other stateful indicators
         if self._kline_history:
             warmup_count = 0
             warmup_details = []
+            total_time_range_start = None
+            total_time_range_end = None
             for key, history in self._kline_history.items():
                 parts = key.split(":")
                 symbol = parts[0]
                 timeframe = parts[1]
                 count = len(history)
-                warmup_details.append(f"{symbol}:{timeframe}({count} bars)")
+
+                # 计算时间范围
+                if history:
+                    first_timestamp = history[0].timestamp
+                    last_timestamp = history[-1].timestamp
+                    if total_time_range_start is None or first_timestamp < total_time_range_start:
+                        total_time_range_start = first_timestamp
+                    if total_time_range_end is None or last_timestamp > total_time_range_end:
+                        total_time_range_end = last_timestamp
+                    time_range_str = f"time_range: {first_timestamp}-{last_timestamp}"
+                else:
+                    time_range_str = "time_range: N/A"
+
+                warmup_details.append(f"{symbol}:{timeframe}({count} bars, {time_range_str})")
                 for kline in history:
                     # The runner's update_state takes only kline, symbol/timeframe are extracted internally
                     runner.update_state(kline)
                     warmup_count += 1
 
-            logger.info(f"Runner warmup complete: {warmup_count} K-lines replayed from {len(warmup_details)} streams")
-            logger.debug(f"Warmup details: {', '.join(warmup_details)}")
+            # 格式化总时间范围
+            if total_time_range_start and total_time_range_end:
+                from datetime import datetime
+                start_dt = datetime.fromtimestamp(total_time_range_start / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                end_dt = datetime.fromtimestamp(total_time_range_end / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                logger.info(
+                    f"[热重载] K-line 历史重放：{warmup_count} 根 K 线，时间范围 {start_dt} - {end_dt} "
+                    f"(UTC: {total_time_range_start}-{total_time_range_end})"
+                )
+            else:
+                logger.info(f"[热重载] K-line 历史重放：{warmup_count} 根 K 线")
+
+            logger.debug(f"[热重载] 重放详情：{', '.join(warmup_details)}")
 
         # MTF EMA warmup: pre-warm higher timeframe EMA indicators for MTF filters
         # This ensures MTF filters have ready EMAs on first signal check
@@ -397,11 +434,11 @@ class SignalPipeline:
                         mtf_warmup_count += 1
 
             # Log MTF EMA warmup completion
-            logger.info(f"MTF EMA warmup: checked {len(mtf_debug_keys)} keys, warmed {mtf_warmup_count} data points across {len(self._mtf_ema_indicators)} indicators")
+            logger.info(f"[热重载] MTF EMA 预加热：检查 {len(mtf_debug_keys)} 个周期，预热 {mtf_warmup_count} 个数据点到 {len(self._mtf_ema_indicators)} 个指标")
             if mtf_warmup_count > 0:
-                logger.info(f"MTF EMA warmup complete: {mtf_warmup_count} data points across {len(self._mtf_ema_indicators)} indicators ready")
+                logger.info(f"[热重载] MTF EMA 重建完成：{mtf_warmup_count} 个数据点，{len(self._mtf_ema_indicators)} 个指标就绪")
             elif self._kline_history:
-                logger.info("MTF EMA warmup skipped: no higher timeframe data available yet")
+                logger.info("[热重载] MTF EMA 重建跳过：暂无更高周期数据可用")
 
         return runner
 
