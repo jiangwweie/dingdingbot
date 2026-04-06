@@ -1258,6 +1258,26 @@ class PMSBacktestReport(FinancialModel):
 
 
 # ============================================================
+# BT-4: Strategy Attribution Analysis Models
+# ============================================================
+
+class AttributionReport(FinancialModel):
+    """
+    策略归因分析报告
+
+    包含四个维度的归因分析结果：
+    - shape_quality: 形态质量归因（B 维度）
+    - filter_attribution: 过滤器归因（C 维度）
+    - trend_attribution: 市场趋势归因（D 维度）
+    - rr_attribution: 盈亏比归因（F 维度）
+    """
+    shape_quality: Dict[str, Any] = Field(default_factory=dict, description="形态质量归因")
+    filter_attribution: Dict[str, Any] = Field(default_factory=dict, description="过滤器归因")
+    trend_attribution: Dict[str, Any] = Field(default_factory=dict, description="市场趋势归因")
+    rr_attribution: Dict[str, Any] = Field(default_factory=dict, description="盈亏比归因")
+
+
+# ============================================================
 # Phase 5: Reconciliation Models
 # ============================================================
 

@@ -66,6 +66,8 @@ from src.domain.models import (
     # Strategy Parameter Models (Phase K)
     StrategyParams, StrategyParamsUpdate, StrategyParamsPreview,
     PinbarParams, EngulfingParams, EmaParams, MtfParams, AtrParams,
+    # BT-4: Attribution Analysis Models
+    AttributionReport,
 )
 
 # Profile 管理 Models (配置 Profile 管理功能)
@@ -1715,7 +1717,171 @@ async def run_backtest_deprecated(
 
 
 # ============================================================
-# Backtest Reports Management Endpoints (v3)
+# BT-4: Strategy Attribution Analysis Endpoints
+# ============================================================
+
+class AttributionAnalysisRequest(BaseModel):
+    """归因分析请求"""
+    report_id: Optional[str] = Field(None, description="回测报告 ID（从数据库加载）")
+    backtest_report: Optional[Dict[str, Any]] = Field(None, description="直接传入回测报告数据")
+
+
+class AttributionAnalysisResponse(BaseModel):
+    """归因分析响应"""
+    status: str
+    attribution: AttributionReport
+
+
+@app.post("/api/backtest/{report_id}/attribution", response_model=AttributionAnalysisResponse)
+async def analyze_backtest_attribution(
+    report_id: str,
+):
+    """
+    对回测报告进行策略归因分析
+
+    **BT-4 策略归因分析** - 四个维度：
+    - B: 形态质量归因（Pinbar 评分与表现关系）
+    - C: 过滤器归因（各过滤器对胜率/回撤的影响）
+    - D: 市场趋势归因（顺势/逆势交易表现）
+    - F: 盈亏比归因（最优盈亏比区间识别）
+
+    ## 请求参数
+    - `report_id`: 回测报告 ID（从 `/api/v3/backtest/reports` 获取）
+
+    ## 返回示例
+    ```json
+    {
+      "status": "success",
+      "attribution": {
+        "shape_quality": {
+          "high_score": {"count": 10, "win_rate": 0.65, "avg_pnl_ratio": 1.8},
+          "medium_score": {"count": 15, "win_rate": 0.53, "avg_pnl_ratio": 1.2},
+          "low_score": {"count": 8, "win_rate": 0.38, "avg_pnl_ratio": 0.5}
+        },
+        "filter_attribution": {
+          "ema_filter": {"enabled_trades": 25, "passed_trades": 20, "win_rate_with_ema": 0.60},
+          "mtf_filter": {"enabled_trades": 25, "passed_trades": 18, "win_rate_with_mtf": 0.61},
+          "rejection_stats": {"ema_trend": 5, "mtf": 7}
+        },
+        "trend_attribution": {
+          "bullish_trend": {"trade_count": 15, "win_rate": 0.67, "avg_pnl": 1.5},
+          "bearish_trend": {"trade_count": 18, "win_rate": 0.56, "avg_pnl": 1.2},
+          "alignment_stats": {"aligned_trades": 28, "against_trend_trades": 5}
+        },
+        "rr_attribution": {
+          "high_rr": {"count": 8, "win_rate": 0.75},
+          "medium_rr": {"count": 12, "win_rate": 0.58},
+          "low_rr": {"count": 5, "win_rate": 0.40},
+          "optimal_range": {"suggested_rr": "high", "reasoning": "高盈亏比区间胜率最高"}
+        }
+      }
+    }
+    ```
+    """
+    from src.application.attribution_analyzer import AttributionAnalyzer
+    from src.infrastructure.backtest_repository import BacktestReportRepository
+    from src.domain.backtest_repository import BacktestReport as BacktestReportEntity
+
+    try:
+        # 1. 从数据库加载回测报告
+        backtest_repository = BacktestReportRepository()
+        await backtest_repository.initialize()
+
+        try:
+            report_entity = await backtest_repository.get_report_by_id(report_id)
+        finally:
+            await backtest_repository.close()
+
+        if not report_entity:
+            raise HTTPException(status_code=404, detail=f"Backtest report {report_id} not found")
+
+        # 2. 将报告实体转换为字典格式
+        # 注意：report_entity 是 ORM 对象，需要转换为 dict
+        backtest_report_dict = {
+            "attempts": report_entity.attempts or [],  # attempts 存储为 JSON 字符串
+        }
+
+        # 3. 执行归因分析
+        analyzer = AttributionAnalyzer()
+        attribution_report = analyzer.analyze(backtest_report_dict)
+
+        return {
+            "status": "success",
+            "attribution": attribution_report,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Attribution analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/backtest/attribution/preview", response_model=AttributionAnalysisResponse)
+async def preview_backtest_attribution(
+    request: AttributionAnalysisRequest,
+):
+    """
+    预览归因分析（无需保存报告到数据库）
+
+    适用于：
+    - 回测完成后立即查看归因分析
+    - 本地回测数据的归因分析
+
+    ## 请求体
+    ```json
+    {
+      "backtest_report": { "attempts": [...] }  # 回测报告的 attempts 字段
+    }
+    ```
+    或
+    ```json
+    {
+      "report_id": "xxx"  # 从数据库加载
+    }
+    ```
+    """
+    from src.application.attribution_analyzer import AttributionAnalyzer
+
+    try:
+        analyzer = AttributionAnalyzer()
+
+        if request.backtest_report:
+            # 直接分析传入的报告数据
+            attribution_report = analyzer.analyze(request.backtest_report)
+        elif request.report_id:
+            # 从数据库加载报告
+            from src.infrastructure.backtest_repository import BacktestReportRepository
+            backtest_repository = BacktestReportRepository()
+            await backtest_repository.initialize()
+
+            try:
+                report_entity = await backtest_repository.get_report_by_id(request.report_id)
+            finally:
+                await backtest_repository.close()
+
+            if not report_entity:
+                raise HTTPException(status_code=404, detail=f"Backtest report {request.report_id} not found")
+
+            backtest_report_dict = {"attempts": report_entity.attempts or []}
+            attribution_report = analyzer.analyze(backtest_report_dict)
+        else:
+            raise HTTPException(status_code=400, detail="Either report_id or backtest_report must be provided")
+
+        return {
+            "status": "success",
+            "attribution": attribution_report,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Attribution preview failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Backtest Reports Management Endpoints (v3) - Continued
 # ============================================================
 
 class BacktestReportSummary(BaseModel):
