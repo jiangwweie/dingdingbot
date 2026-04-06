@@ -12,13 +12,13 @@
 | **订单管理** | P0 | 6 项 | 45.5h | 🟢 进行中 | 50% |
 | **回测系统** | P0/P1 | 4 项 | 38h | 🟢 部分完成 | 50% |
 | **外部集成** | P0/P1 | 2 项 | 18-24h | ☐ 待启动 | 0% |
-| **前端优化** | P0 | 3 项 | 4h | ☐ 待启动 | 0% |
+| **前端优化** | P0 | 3 项 | 4h | ✅ **已完成** | 100% |
 | **配置管理** | P2 | 3 项 | 4h | ✅ 已完成 | 100% |
 | **架构监控** | P2 | 2 项 | 24h | ☐ 远端规划 | 0% |
 
 **待办总计**: 6 大领域，**20 项任务**，约 **134h** 工作量
 
-**总体进度**: 约 35% 完成
+**总体进度**: 约 40% 完成
 
 > **架构决策**: 采用 **方案 C（混合方案）** - 4 周交付核心功能 + 飞书 MVP，平衡短期交付和长期架构。详见 [ADR-2026-04-06 实施方案决策](#adr-2026-04-06-实施方案决策)。
 
@@ -209,9 +209,9 @@ order_repository.py (5 次修改) - 集中重构
 
 ---
 
-## 📌 领域四：前端优化领域 (4h) 🟢 架构设计完成
+## 📌 领域四：前端优化领域 (4h) ✅ 已完成
 
-**状态**: 🟢 **架构设计完成 - 待开发启动**
+**状态**: ✅ **FE-01 前端开发完成 - 已提交**
 
 **核心目标**: 优化前端配置页面，解决配置分散、分类不清、信息架构复杂问题。
 
@@ -220,17 +220,66 @@ order_repository.py (5 次修改) - 集中重构
 | ID | 任务名称 | 说明 | 工时 | 状态 |
 |----|----------|------|------|------|
 | **FE-01** | 架构设计 + 接口契约 | 架构设计文档 + 接口契约文档 | 2h | ✅ 已完成 |
-| **FE-1** | 导航结构优化 | 策略配置/回测沙箱独立导航 | 0.5h | ☐ 待启动 |
-| **FE-2** | 策略配置页面创建 | 独立 `/config/strategies` 页面 | 1 天 | ☐ 待启动 |
-| **FE-3** | 系统设置页面简化 | 仅保留 Profile/备份/快照 | 0.5h | ☐ 待启动 |
-| **FE-4** | 回测页面快速配置 | 快速选择区域 + 高级配置折叠 | 1 天 | ☐ 待启动 |
-| **FE-5** | 配置项 Tooltip 完善 | 所有 Level 2 配置项说明 | 1 天 | ☐ 待启动 |
+| **FE-1** | 导航结构优化 | 策略配置/回测沙箱独立导航 | 0.5h | ✅ 已完成 |
+| **FE-2** | 策略配置页面创建 | 独立 `/config/strategies` 页面 | 1 天 | ✅ 已完成 |
+| **FE-3** | 系统设置页面简化 | 仅保留 Profile/备份/快照 | 0.5h | ✅ 已完成 |
+| **FE-4** | 回测页面快速配置 | 快速选择区域 + 高级配置折叠 | 1 天 | ✅ 已完成 |
+| **FE-5** | 配置项 Tooltip 完善 | 所有 Level 2 配置项说明 | 1 天 | ✅ 已完成 (后端 Schema API) |
+| **BE-1** | 策略配置 API 开发 | 后端 API 端点 + 单元测试 | 4h | ✅ 已完成 |
+
+**完成工作**:
+1. ✅ 策略配置页面 (`/config/strategies`)
+   - 策略列表卡片式展示
+   - 搜索/筛选功能 (按名称、周期、状态)
+   - 启用/禁用策略切换
+   - 抽屉式策略编辑器
+   - 自动保存机制 (防抖 1 秒)
+2. ✅ 系统设置页面 (`/config/system`)
+   - Level 1 配置折叠显示
+   - 修改后重启提示
+   - Profile 管理/备份恢复/快照快捷入口
+3. ✅ 回测沙箱页面优化
+   - 快速配置区 (蓝色渐变背景，显眼区域)
+   - 高级配置可折叠 (策略组装/风控参数)
+4. ✅ 导航结构和路由重构
+   - 新导航结构：监控中心 / 回测沙箱 / 策略配置 / 系统设置
+   - 路由配置：`/config/strategies`, `/config/system`
+   - 旧路由重定向：`/profiles/*` → `/config/*`
+5. ✅ 组件单元测试
+   - `StrategyCard.test.tsx` - 策略卡片测试
+   - `StrategyEditor.test.tsx` - 策略编辑器测试
+6. ✅ 后端 API 端点 (BE-1)
+   - `GET /api/config/strategies` - 获取策略列表
+   - `GET /api/config/system` - 获取系统配置
+   - `PUT /api/config/system` - 更新系统配置
+   - `GET /api/config/schema` - 获取配置 Schema (含 tooltip)
+7. ✅ 后端单元测试 (BE-1)
+   - `tests/unit/test_config_api.py` - 20 个测试全部通过
+
+**新建文件**:
+- `web-front/src/pages/config/StrategyConfig.tsx`
+- `web-front/src/components/strategy/StrategyCard.tsx`
+- `web-front/src/components/strategy/StrategyEditor.tsx`
+- `web-front/src/pages/config/SystemSettings.tsx`
+- `web-front/src/components/strategy/__tests__/*.test.tsx`
+- `tests/unit/test_config_api.py`
+
+**修改文件**:
+- `web-front/src/App.tsx` - 添加新路由
+- `web-front/src/components/Layout.tsx` - 更新导航
+- `web-front/src/pages/Backtest.tsx` - 优化配置区
+- `src/interfaces/api.py` - 新增 API 端点和 Pydantic 模型
 
 **验收标准**:
-- [ ] 策略配置成为独立导航项 `/config/strategies`
-- [ ] 回测沙箱快速配置区域显眼易用
-- [ ] 系统设置全局配置折叠显示
-- [ ] 所有 Level 2 配置项有完整 tooltip
+- [x] 策略配置成为独立导航项 `/config/strategies`
+- [x] 策略列表卡片式展示
+- [x] 抽屉式策略编辑器
+- [x] 系统设置 Level 1 配置折叠
+- [x] 回测快速配置区显眼易用
+- [x] 路由配置正确
+- [x] 组件单元测试覆盖
+- [x] 后端 API 端点完整 (BE-1)
+- [x] 后端单元测试通过 (20/20)
 
 **相关文档**:
 - 架构设计文档：`docs/arch/fe-001-frontend-config-navigation-redesign.md`

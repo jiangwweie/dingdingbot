@@ -4,6 +4,138 @@
 
 ---
 
+### 2026-04-06 - BE-1 策略配置 API 开发完成 🎉
+
+**任务**: BE-1 策略配置 API 开发 (FE-01 前端配置导航重构 - 后端支持)
+
+**完成工作**:
+1. ✅ 新增 Pydantic 模型定义
+   - `SystemConfigResponse` - 系统配置响应模型
+   - `SystemConfigUpdateRequest` - 系统配置更新请求模型
+   - `SystemConfigUpdateResponse` - 系统配置更新响应模型
+   - `ConfigFieldSchema` - 配置字段 Schema 模型
+   - `ConfigSchemaResponse` - 配置 Schema 响应模型
+
+2. ✅ 新增 API 端点
+   - `GET /api/config/strategies` - 获取策略列表
+   - `GET /api/config/system` - 获取系统配置 (Level 1)
+   - `PUT /api/config/system` - 更新系统配置
+   - `GET /api/config/schema` - 获取配置 Schema (含 tooltip 说明)
+
+3. ✅ 编写单元测试
+   - 创建 `tests/unit/test_config_api.py`
+   - 20 个测试全部通过 (100%)
+
+**修改文件**:
+- `src/interfaces/api.py` - 新增 API 端点和 Pydantic 模型
+
+**新建文件**:
+- `tests/unit/test_config_api.py` - BE-1 单元测试
+
+**API 端点详情**:
+
+| 端点 | 方法 | 说明 | 响应模型 |
+|------|------|------|----------|
+| `/api/config/strategies` | GET | 获取策略列表 | `{"strategies": [...]}` |
+| `/api/config/system` | GET | 获取系统配置 | `SystemConfigResponse` |
+| `/api/config/system` | PUT | 更新系统配置 | `SystemConfigUpdateResponse` |
+| `/api/config/schema` | GET | 获取配置 Schema | `ConfigSchemaResponse` |
+
+**系统配置参数**:
+- `queue_batch_size`: 队列批量落盘大小 (1-100, 默认 10)
+- `queue_flush_interval`: 队列最大等待时间 (1.0-60.0 秒，默认 5.0)
+- `queue_max_size`: 队列最大容量 (100-10000, 默认 1000)
+- `warmup_history_bars`: 数据预热历史 K 线数量 (50-500, 默认 100)
+- `signal_cooldown_seconds`: 信号冷却时间 (3600-86400 秒，默认 14400)
+
+**配置 Schema 特性**:
+- 包含所有策略参数 (pinbar, engulfing, ema, mtf, atr) 的详细说明
+- 每个字段包含 type, default, min, max, step, tooltip 信息
+- tooltip 包含 description, default_value, range, adjustment_tips
+
+**测试结果**:
+```
+tests/unit/test_config_api.py - 20/20 通过 (100%)
+```
+
+**下一步**: 
+- 前端集成新 API 端点
+- 系统配置持久化到数据库 (TODO)
+- 配置变更热重载通知机制 (TODO)
+
+---
+
+### 2026-04-06 - FE-01 前端配置导航重构开发完成 🎉
+
+**任务**: FE-01 前端配置导航重构 - 前端页面开发
+
+**完成工作**:
+1. ✅ FE-01-T1: 创建策略配置页面 (/config/strategies)
+2. ✅ FE-01-T2: 创建策略卡片组件
+3. ✅ FE-01-T3: 创建策略编辑器组件
+4. ✅ FE-01-T4: 创建系统设置页面 (/config/system)
+5. ✅ FE-01-T5: 回测沙箱页面优化
+6. ✅ FE-01-T6: 导航结构和路由重构
+7. ✅ FE-01-T7: 组件单元测试
+
+**新建文件**:
+- `web-front/src/pages/config/StrategyConfig.tsx` - 策略配置主页面
+- `web-front/src/components/strategy/StrategyCard.tsx` - 策略卡片组件
+- `web-front/src/components/strategy/StrategyEditor.tsx` - 策略编辑器抽屉
+- `web-front/src/pages/config/SystemSettings.tsx` - 系统设置页面
+- `web-front/src/components/strategy/__tests__/StrategyCard.test.tsx` - 策略卡片测试
+- `web-front/src/components/strategy/__tests__/StrategyEditor.test.tsx` - 策略编辑器测试
+
+**修改文件**:
+- `web-front/src/App.tsx` - 添加新路由配置
+- `web-front/src/components/Layout.tsx` - 更新导航结构
+- `web-front/src/pages/Backtest.tsx` - 优化快速配置区和高级配置折叠
+
+**新导航结构**:
+```
+主导航
+├── 📊 监控中心 (/dashboard)
+├── 💼 交易管理 (/positions, /orders)
+├── 🧪 回测沙箱 (/backtest, /backtest-reports, /strategies)
+├── ⚙️ 策略配置 (/config/strategies, /config/system) [新增]
+└── 🔧 系统设置 (下拉)
+    ├── Profile 管理 (/config/profiles)
+    ├── 配置快照 (/snapshots)
+    └── 账户 (/account)
+```
+
+**策略配置页面功能**:
+- 策略列表卡片式展示
+- 搜索/筛选功能 (按名称、周期、状态)
+- 启用/禁用策略切换
+- 抽屉式策略编辑器
+- 自动保存机制 (防抖 1 秒)
+- 策略创建/编辑/删除/复制操作
+
+**系统设置页面功能**:
+- Level 1 配置折叠显示 (全局系统配置)
+- 队列配置、预热配置、信号冷却、EMA 指标、ATR 过滤器
+- 修改后重启提示
+- Profile 管理/备份恢复/配置快照快捷入口
+
+**回测沙箱页面优化**:
+- 快速配置区 (蓝色渐变背景，显眼区域)
+- 高级配置可折叠 (策略组装/风控参数)
+- Level 3 配置标签标识
+
+**验收标准**:
+- [x] 策略配置成为独立导航项 `/config/strategies`
+- [x] 策略列表卡片式展示
+- [x] 抽屉式策略编辑器
+- [x] 系统设置 Level 1 配置折叠
+- [x] 回测快速配置区显眼易用
+- [x] 路由配置正确
+- [x] 组件单元测试覆盖
+
+**下一步**: 后端策略配置 API 开发 (BE-1)
+
+---
+
 ### 2026-04-06 21:00 - FE-01 架构设计 + 接口契约文档完成 🎉
 
 **任务**: FE-01 前端配置导航重构 - 架构设计 + 接口契约文档

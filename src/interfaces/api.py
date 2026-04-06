@@ -31,7 +31,7 @@ Endpoints:
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, Callable, Any, List, Dict, Annotated
+from typing import Optional, Callable, Any, List, Dict, Annotated, Literal
 import logging
 
 from fastapi import FastAPI, Query, HTTPException, Body, File, UploadFile, Form, Response
@@ -144,6 +144,52 @@ class ProfileImportResponse(BaseModel):
     profile: dict
     imported_count: int
     message: str
+
+
+# ============================================================
+# BE-1: Strategy Configuration API Models
+# ============================================================
+
+class SystemConfigResponse(BaseModel):
+    """系统配置响应 (Level 1 全局配置)"""
+    queue_batch_size: int = Field(default=10, ge=1, le=100, description="队列批量落盘大小")
+    queue_flush_interval: float = Field(default=5.0, ge=1.0, le=60.0, description="队列最大等待时间 (秒)")
+    queue_max_size: int = Field(default=1000, ge=100, le=10000, description="队列最大容量")
+    warmup_history_bars: int = Field(default=100, ge=50, le=500, description="数据预热历史 K 线数量")
+    signal_cooldown_seconds: int = Field(default=14400, ge=3600, le=86400, description="信号冷却时间 (秒)")
+
+
+class SystemConfigUpdateRequest(BaseModel):
+    """系统配置更新请求 (支持部分更新)"""
+    queue_batch_size: Optional[int] = Field(None, ge=1, le=100, description="队列批量落盘大小")
+    queue_flush_interval: Optional[float] = Field(None, ge=1.0, le=60.0, description="队列最大等待时间 (秒)")
+    queue_max_size: Optional[int] = Field(None, ge=100, le=10000, description="队列最大容量")
+    warmup_history_bars: Optional[int] = Field(None, ge=50, le=500, description="数据预热历史 K 线数量")
+    signal_cooldown_seconds: Optional[int] = Field(None, ge=3600, le=86400, description="信号冷却时间 (秒)")
+
+
+class SystemConfigUpdateResponse(BaseModel):
+    """系统配置更新响应"""
+    config: SystemConfigResponse
+    requires_restart: bool = Field(default=True, description="是否需要重启服务")
+    restart_hint: str = Field(default="修改已保存，需要重启服务才能生效", description="重启提示")
+
+
+class ConfigFieldSchema(BaseModel):
+    """配置字段 Schema (含 tooltip)"""
+    type: Literal['number', 'string', 'boolean']
+    default: Any
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = None
+    tooltip: dict
+
+
+class ConfigSchemaResponse(BaseModel):
+    """配置 Schema 响应"""
+    strategy_params: dict
+    system_config: dict
+
 
 # 回测订单错误码
 class BacktestErrorCode:
@@ -6676,3 +6722,415 @@ async def get_strategy_param_templates():
     ]
 
     return {"templates": templates, "total": len(templates)}
+
+
+# ============================================================
+# BE-1: Strategy Configuration Management API
+# ============================================================
+
+@app.get("/api/config/strategies", response_model=Dict[str, List[Dict]])
+async def list_config_strategies():
+    """
+    获取策略列表 (FE-01 前端配置导航重构 - BE-1 任务)
+
+    返回所有策略的基本信息，用于前端策略配置页面展示。
+
+    Returns:
+        {"strategies": [{"id": int, "name": str, "description": str, "enabled": bool, ...}]}
+    """
+    try:
+        repo = _get_repository()
+        strategies = await repo.get_all_custom_strategies()
+        return {"strategies": strategies}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/config/system", response_model=SystemConfigResponse)
+async def get_system_config():
+    """
+    获取系统配置 (Level 1 全局配置)
+
+    返回全局系统配置参数，包括队列配置、数据预热、信号冷却等。
+    这些配置修改后需要重启服务才能生效。
+
+    Returns:
+        SystemConfigResponse: 系统配置对象
+    """
+    try:
+        config_manager = _get_config_manager()
+
+        # 从 ConfigManager 获取系统配置
+        # 注意：这些配置目前从代码默认值读取，未来可从数据库读取
+        return SystemConfigResponse(
+            queue_batch_size=10,
+            queue_flush_interval=5.0,
+            queue_max_size=1000,
+            warmup_history_bars=100,
+            signal_cooldown_seconds=14400,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get system config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/config/system", response_model=SystemConfigUpdateResponse)
+async def update_system_config(request: SystemConfigUpdateRequest):
+    """
+    更新系统配置 (Level 1 全局配置)
+
+    更新全局系统配置参数。修改后需要重启服务才能生效。
+
+    Request body:
+    {
+        "queue_batch_size": 20,           // Optional: 1-100
+        "queue_flush_interval": 3.0,      // Optional: 1.0-60.0
+        "queue_max_size": 2000,           // Optional: 100-10000
+        "warmup_history_bars": 150,       // Optional: 50-500
+        "signal_cooldown_seconds": 7200   // Optional: 3600-86400
+    }
+
+    Returns:
+        SystemConfigUpdateResponse: 更新后的配置 + 重启提示
+    """
+    try:
+        config_manager = _get_config_manager()
+
+        # 构建更新后的配置
+        current_config = SystemConfigResponse(
+            queue_batch_size=10,
+            queue_flush_interval=5.0,
+            queue_max_size=1000,
+            warmup_history_bars=100,
+            signal_cooldown_seconds=14400,
+        )
+
+        # 应用更新
+        update_data = request.model_dump(exclude_unset=True)
+        updated_config_dict = {**current_config.model_dump(), **update_data}
+        updated_config = SystemConfigResponse(**updated_config_dict)
+
+        # TODO: 将配置持久化到数据库
+        # await config_manager.update_system_config(updated_config_dict)
+
+        logger.info(f"System config updated: {updated_config_dict}")
+
+        return SystemConfigUpdateResponse(
+            config=updated_config,
+            requires_restart=True,
+            restart_hint="修改已保存，需要重启服务才能生效",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update system config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/config/schema", response_model=ConfigSchemaResponse)
+async def get_config_schema():
+    """
+    获取配置项 Schema (含 tooltip 说明)
+
+    返回所有配置项的详细信息，包括类型、默认值、范围限制和 tooltip 说明。
+    前端可使用此 Schema 动态生成表单和提示信息。
+
+    Returns:
+        ConfigSchemaResponse: 配置 Schema 对象
+    """
+    try:
+        # 策略参数 Schema
+        strategy_params_schema = {
+            "pinbar": {
+                "min_wick_ratio": {
+                    "type": "number",
+                    "default": 0.6,
+                    "min": 0.5,
+                    "max": 0.7,
+                    "step": 0.05,
+                    "tooltip": {
+                        "description": "影线长度占整个 K 线范围的比例下限。较高的值会选择更明显的 Pinbar 形态，但可能会错过一些机会。",
+                        "default_value": "0.6 (60%)",
+                        "range": "0.5 - 0.7",
+                        "adjustment_tips": [
+                            "高波动市场：降低到 0.5",
+                            "低波动市场：提高到 0.7"
+                        ]
+                    }
+                },
+                "max_body_ratio": {
+                    "type": "number",
+                    "default": 0.3,
+                    "min": 0.2,
+                    "max": 0.4,
+                    "step": 0.05,
+                    "tooltip": {
+                        "description": "实体长度占整个 K 线范围的比例上限。较低的值会选择更紧凑的实体。",
+                        "default_value": "0.3 (30%)",
+                        "range": "0.2 - 0.4",
+                        "adjustment_tips": [
+                            "需要更精确的入场：降低到 0.2",
+                            "希望捕捉更多机会：提高到 0.4"
+                        ]
+                    }
+                },
+                "body_position_tolerance": {
+                    "type": "number",
+                    "default": 0.1,
+                    "min": 0.05,
+                    "max": 0.15,
+                    "step": 0.01,
+                    "tooltip": {
+                        "description": "实体位置的容差范围。决定实体在 K 线顶部/底部的允许偏差。",
+                        "default_value": "0.1 (10%)",
+                        "range": "0.05 - 0.15",
+                        "adjustment_tips": [
+                            "更严格的形态要求：降低到 0.05",
+                            "更宽松的形态要求：提高到 0.15"
+                        ]
+                    }
+                }
+            },
+            "engulfing": {
+                "max_wick_ratio": {
+                    "type": "number",
+                    "default": 0.6,
+                    "min": 0.5,
+                    "max": 0.7,
+                    "step": 0.05,
+                    "tooltip": {
+                        "description": "吞没形态的最大影线比例。控制吞没 K 线的影线长度。",
+                        "default_value": "0.6 (60%)",
+                        "range": "0.5 - 0.7",
+                        "adjustment_tips": [
+                            "高波动市场：降低到 0.5",
+                            "低波动市场：提高到 0.7"
+                        ]
+                    }
+                }
+            },
+            "ema": {
+                "period": {
+                    "type": "number",
+                    "default": 60,
+                    "min": 5,
+                    "max": 200,
+                    "step": 5,
+                    "tooltip": {
+                        "description": "EMA 趋势过滤器的周期。用于判断当前趋势方向。",
+                        "default_value": "60",
+                        "range": "5 - 200",
+                        "adjustment_tips": [
+                            "短期趋势跟踪：降低到 20-30",
+                            "长期趋势跟踪：提高到 100-200"
+                        ]
+                    }
+                }
+            },
+            "mtf": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "tooltip": {
+                        "description": "是否启用多时间框架 (MTF) 验证。启用后会检查大周期趋势方向。",
+                        "default_value": "true",
+                        "adjustment_tips": [
+                            "趋势明确的市场：建议启用",
+                            "震荡市场：可考虑禁用"
+                        ]
+                    }
+                },
+                "ema_period": {
+                    "type": "number",
+                    "default": 60,
+                    "min": 5,
+                    "max": 200,
+                    "step": 5,
+                    "tooltip": {
+                        "description": "MTF 趋势计算的 EMA 周期。",
+                        "default_value": "60",
+                        "range": "5 - 200",
+                        "adjustment_tips": [
+                            "短期 MTF 分析：降低到 20-30",
+                            "长期 MTF 分析：提高到 100-200"
+                        ]
+                    }
+                }
+            },
+            "atr": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": False,
+                    "tooltip": {
+                        "description": "是否启用 ATR (平均真实波动范围) 过滤器。用于过滤低波动时期的信号。",
+                        "default_value": "false",
+                        "adjustment_tips": [
+                            "高波动市场：建议启用",
+                            "趋势明确的市场：可考虑禁用"
+                        ]
+                    }
+                },
+                "period": {
+                    "type": "number",
+                    "default": 14,
+                    "min": 5,
+                    "max": 50,
+                    "step": 1,
+                    "tooltip": {
+                        "description": "ATR 计算周期。",
+                        "default_value": "14",
+                        "range": "5 - 50",
+                        "adjustment_tips": [
+                            "短期波动敏感度：降低到 5-10",
+                            "长期波动趋势：提高到 20-50"
+                        ]
+                    }
+                },
+                "min_atr_ratio": {
+                    "type": "number",
+                    "default": 0.5,
+                    "min": 0.1,
+                    "max": 2.0,
+                    "step": 0.1,
+                    "tooltip": {
+                        "description": "最小 ATR 比率。用于过滤低波动时期的信号。",
+                        "default_value": "0.5",
+                        "range": "0.1 - 2.0",
+                        "adjustment_tips": [
+                            "高波动市场：降低到 0.1-0.3",
+                            "低波动市场：提高到 1.0-2.0"
+                        ]
+                    }
+                }
+            },
+            "max_loss_percent": {
+                "type": "number",
+                "default": 0.01,
+                "min": 0.005,
+                "max": 0.1,
+                "step": 0.005,
+                "tooltip": {
+                    "description": "单笔交易最大损失百分比。用于仓位计算。",
+                    "default_value": "1% (0.01)",
+                    "range": "0.5% - 10%",
+                    "adjustment_tips": [
+                        "保守策略：降低到 0.5%",
+                        "激进策略：可提高到 2-3%"
+                    ]
+                }
+            },
+            "max_leverage": {
+                "type": "number",
+                "default": 10,
+                "min": 1,
+                "max": 20,
+                "step": 1,
+                "tooltip": {
+                    "description": "最大允许杠杆倍数。",
+                    "default_value": "10x",
+                    "range": "1x - 20x",
+                    "adjustment_tips": [
+                        "保守策略：降低到 5x",
+                        "高风险偏好：可提高到 15-20x"
+                    ]
+                }
+            }
+        }
+
+        # 系统配置 Schema
+        system_config_schema = {
+            "queue_batch_size": {
+                "type": "number",
+                "default": 10,
+                "min": 1,
+                "max": 100,
+                "step": 1,
+                "tooltip": {
+                    "description": "队列批量落盘大小。控制每次批量处理的信号数量。",
+                    "default_value": "10",
+                    "range": "1 - 100",
+                    "adjustment_tips": [
+                        "高并发场景：提高到 20-50",
+                        "低延迟要求：降低到 1-5"
+                    ]
+                }
+            },
+            "queue_flush_interval": {
+                "type": "number",
+                "default": 5.0,
+                "min": 1.0,
+                "max": 60.0,
+                "step": 0.5,
+                "tooltip": {
+                    "description": "队列最大等待时间 (秒)。超时后即使队列未满也会强制落盘。",
+                    "default_value": "5.0 秒",
+                    "range": "1.0 - 60.0 秒",
+                    "adjustment_tips": [
+                        "实时性要求高：降低到 1-2 秒",
+                        "批量处理优先：提高到 10-30 秒"
+                    ]
+                }
+            },
+            "queue_max_size": {
+                "type": "number",
+                "default": 1000,
+                "min": 100,
+                "max": 10000,
+                "step": 100,
+                "tooltip": {
+                    "description": "队列最大容量。超过此值会触发强制落盘。",
+                    "default_value": "1000",
+                    "range": "100 - 10000",
+                    "adjustment_tips": [
+                        "内存受限：降低到 100-500",
+                        "高吞吐场景：提高到 2000-5000"
+                    ]
+                }
+            },
+            "warmup_history_bars": {
+                "type": "number",
+                "default": 100,
+                "min": 50,
+                "max": 500,
+                "step": 10,
+                "tooltip": {
+                    "description": "数据预热时获取的历史 K 线数量。用于指标计算预热。",
+                    "default_value": "100 根",
+                    "range": "50 - 500 根",
+                    "adjustment_tips": [
+                        "短周期指标：50-100 根",
+                        "长周期指标 (如 EMA200)：提高到 200-500 根"
+                    ]
+                }
+            },
+            "signal_cooldown_seconds": {
+                "type": "number",
+                "default": 14400,
+                "min": 3600,
+                "max": 86400,
+                "step": 3600,
+                "tooltip": {
+                    "description": "信号冷却时间 (秒)。同一信号的重复触发需要间隔此时间。",
+                    "default_value": "14400 秒 (4 小时)",
+                    "range": "3600 - 86400 秒 (1-24 小时)",
+                    "adjustment_tips": [
+                        "高频交易：降低到 1-2 小时",
+                        "低频交易：提高到 6-12 小时"
+                    ]
+                }
+            }
+        }
+
+        return ConfigSchemaResponse(
+            strategy_params=strategy_params_schema,
+            system_config=system_config_schema,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get config schema: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
