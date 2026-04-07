@@ -436,35 +436,51 @@ class OrderManager:
         """
         计算止损价格
 
-        注意：rr_multiple 参数的绝对值表示止损距离占入场价的百分比
-        例如：rr_multiple = -0.02 表示止损距离为入场价的 2%
+        语义说明:
+        - rr_multiple < 0: 表示止损 RR 倍数（如 -1.0 表示亏损 1R）
+        - rr_multiple > 0: 表示止损百分比（如 0.02 表示 2% 止损）
 
-        LONG: sl_price = entry × (1 - |rr_multiple|)
-        SHORT: sl_price = entry × (1 + |rr_multiple|)
+        计算公式:
+        - LONG: sl_price = entry × (1 + rr_multiple)  if rr_multiple < 0
+        - LONG: sl_price = entry × (1 - rr_multiple)  if rr_multiple > 0
+        - SHORT: sl_price = entry × (1 - rr_multiple) if rr_multiple < 0
+        - SHORT: sl_price = entry × (1 + rr_multiple) if rr_multiple > 0
 
         Args:
             entry_price: 入场价格
-            direction: 方向
-            rr_multiple: RR 倍数 (负值表示止损，绝对值表示百分比)
+            direction: 方向 (LONG/SHORT)
+            rr_multiple:
+                - 负值表示 RR 倍数（如 -1.0 表示 1R 止损）
+                - 正值表示百分比（如 0.02 表示 2% 止损）
 
         Returns:
             止损价格
+
+        Examples:
+            >>> _calculate_stop_loss_price(50000, Direction.LONG, Decimal('-1.0'))
+            Decimal('49500')  # LONG 1R 止损 = 50000 * (1 - 0.01)
+
+            >>> _calculate_stop_loss_price(50000, Direction.LONG, Decimal('0.02'))
+            Decimal('49000')  # LONG 2% 止损 = 50000 * (1 - 0.02)
         """
-        # 使用 |rr_multiple| 作为止损百分比
-        # 如果 rr_multiple 的绝对值 > 1，则视为比例因子，否则视为百分比
-        sl_percent = abs(rr_multiple)
-
-        # 如果 sl_percent > 1，说明是倍数而非百分比，转换为百分比 (例如 1.0 -> 0.02 表示 2%)
-        # 这是为了向后兼容旧的使用方式
-        if sl_percent >= Decimal('1'):
-            sl_percent = Decimal('0.02')  # 默认 2% 止损
-
-        if direction == Direction.LONG:
-            # LONG: 止损在入场价下方
-            return entry_price * (Decimal('1') - sl_percent)
+        # P2-4 修复：明确区分 RR 倍数模式和百分比模式
+        if rr_multiple < 0:
+            # RR 倍数模式：基于入场价和止损距离计算
+            # 对于 LONG: sl_price = entry - entry × |rr_multiple| × 0.01
+            # 对于 SHORT: sl_price = entry + entry × |rr_multiple| × 0.01
+            sl_ratio = abs(rr_multiple) * Decimal('0.01')  # 转换为百分比
+            if direction == Direction.LONG:
+                return entry_price * (Decimal('1') - sl_ratio)
+            else:
+                return entry_price * (Decimal('1') + sl_ratio)
         else:
-            # SHORT: 止损在入场价上方
-            return entry_price * (Decimal('1') + sl_percent)
+            # 百分比模式：直接按百分比计算
+            # 对于 LONG: sl_price = entry × (1 - percent)
+            # 对于 SHORT: sl_price = entry × (1 + percent)
+            if direction == Direction.LONG:
+                return entry_price * (Decimal('1') - rr_multiple)
+            else:
+                return entry_price * (Decimal('1') + rr_multiple)
 
     def _calculate_tp_price(
         self,
