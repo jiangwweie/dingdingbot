@@ -1,3 +1,99 @@
+## P1-5 Repository 层实现技术要点
+
+**创建日期**: 2026-04-07  
+**实现负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 实现概述
+
+ConfigRepository 类是三层架构的第二层，负责配置数据的持久化。
+
+**代码统计**:
+- 总行数：1225 行
+- 方法数：25+ 个
+- 测试用例设计：30 个
+
+### 架构设计
+
+```
+ConfigService (业务逻辑)
+       ↓
+ConfigRepository (数据持久化) ← 本次实现
+       ↓
+ConfigParser (YAML 解析)
+```
+
+### 核心技术点
+
+**1. 数据库连接管理**
+- 使用 aiosqlite 进行异步数据库操作
+- WAL 模式启用高并发支持
+- 幂等性 initialize() 方法设计
+
+**2. 缓存管理**
+- TTLCache (maxsize=100, ttl=300s) 用于导入/导出预览
+- 配置更新时自动失效缓存
+- 内存缓存优先策略
+
+**3. 并发安全**
+- asyncio.Lock 保护写操作
+- _ensure_lock() 确保事件循环兼容
+- 双重检查锁防止竞态条件
+
+**4. YAML 导入/导出**
+- 复用 ConfigParser 进行解析/序列化
+- Decimal 精度保持 (字符串表示)
+- 配置历史自动记录
+
+### 7 张配置表
+
+| 表名 | 用途 | 主要操作 |
+|------|------|---------|
+| strategies | 策略定义 | CRUD |
+| risk_configs | 风控参数 | R/U |
+| system_configs | 系统配置 | R/U |
+| symbols | 交易对列表 | R |
+| notifications | 通知渠道 | R/U |
+| config_snapshots | 配置快照 | R |
+| config_history | 变更历史 | W |
+
+### 复用 P1-2 修复
+
+TTLCache 机制复用自 `api_v1_config.py`:
+```python
+# 原始实现 (api_v1_config.py:1461)
+_import_preview_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=300)
+
+# Repository 层实现 (config_repository.py:91)
+self._import_preview_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=300)
+```
+
+### 边界情况处理
+
+| 边界场景 | 处理策略 |
+|---------|---------|
+| 数据库连接失败 | 抛出 FatalStartupError |
+| 表创建失败 | 事务回滚 |
+| JSON 数据损坏 | 跳过损坏记录，记录警告日志 |
+| YAML 文件不存在 | FileNotFoundError |
+| 未初始化调用 | assert_initialized() 检查 |
+| 并发写入冲突 | asyncio.Lock 串行化 |
+
+### 测试设计文档
+
+测试设计文档：`docs/planning/p1_5_repository_test_design.md`
+
+**测试分类**:
+- 数据库操作测试：14 个
+- 缓存管理测试：4 个
+- YAML 导入/导出测试：4 个
+- 并发安全测试：3 个
+- 异常处理测试：5 个
+
+**总计**: 30 个测试用例
+
+---
+
 # 研究发现
 
 > **说明**: 本文件记录有长期参考价值的技术发现、架构决策和踩坑记录。临时性发现已归档。
