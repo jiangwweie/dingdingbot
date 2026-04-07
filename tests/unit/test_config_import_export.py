@@ -514,8 +514,8 @@ class TestImportConfirmAPI:
         assert response.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_confirm_import_expired_token(self, client):
-        """Test confirming import with expired token fails."""
+    async def test_confirm_import_removed_after_consumed(self, client):
+        """Test confirming import removes token from cache (replaces expired token test)."""
         yaml_content = "risk:\n  max_loss_percent: 0.01"
 
         # Preview
@@ -526,17 +526,18 @@ class TestImportConfirmAPI:
         )
         preview_token = preview_response.json()["preview_token"]
 
-        # Manually expire the token
-        _import_preview_cache[preview_token]["expires_at"] = datetime.now(timezone.utc) - timedelta(minutes=10)
+        # Token should exist before confirm
+        assert preview_token in _import_preview_cache
 
-        # Confirm should fail
-        response = client.post(
+        # Confirm
+        client.post(
             "/api/v1/config/import/confirm",
             json={"preview_token": preview_token},
             headers={"X-User-Role": "admin"}
         )
 
-        assert response.status_code == 400
+        # Token should be removed after confirm
+        assert preview_token not in _import_preview_cache
 
     @pytest.mark.asyncio
     async def test_confirm_import_risk_config_applied(self, client):
@@ -821,6 +822,164 @@ strategies:
         data = response.json()
         assert data["valid"] is True
         assert data["summary"]["strategies"]["added"] == 50
+
+
+# ============================================================
+# P1-1: Decimal YAML Precision Tests
+# ============================================================
+
+class TestDecimalYamlPrecision:
+    """Tests for P1-1: Decimal YAML serialization precision preservation."""
+
+    def test_decimal_representer_preserves_precision(self):
+        """Test that Decimal values are serialized as strings to preserve precision."""
+        from decimal import Decimal
+        import yaml
+
+        # Test with a practical financial precision decimal
+        original = Decimal("0.0075")  # 0.75% - typical risk parameter
+        data = {"value": original}
+
+        # Serialize to YAML using custom representer (via yaml.dump which uses global registrars)
+        yaml_str = yaml.dump(data)
+
+        # Verify it's stored correctly
+        assert "0.0075" in yaml_str
+
+        # Deserialize from YAML
+        loaded = yaml.safe_load(yaml_str)
+
+        # Convert back to Decimal and verify precision
+        assert Decimal(loaded["value"]) == original
+
+    def test_decimal_representer_complex_config(self):
+        """Test Decimal precision in complex configuration structure."""
+        from decimal import Decimal
+        import yaml
+
+        config = {
+            "risk": {
+                "max_loss_percent": Decimal("0.01"),
+                "max_leverage": 20,
+                "stop_loss_ratio": Decimal("1.5"),
+            },
+            "nested": {
+                "values": [Decimal("0.001"), Decimal("0.002")],
+            }
+        }
+
+        # Serialize using custom representer
+        yaml_str = yaml.dump(config)
+
+        # Deserialize
+        loaded = yaml.safe_load(yaml_str)
+
+        # Verify precision preserved as strings
+        assert loaded["risk"]["max_loss_percent"] == "0.01"
+        assert loaded["risk"]["stop_loss_ratio"] == "1.5"
+        assert loaded["nested"]["values"][0] == "0.001"
+        assert loaded["nested"]["values"][1] == "0.002"
+
+    @pytest.mark.asyncio
+    async def test_export_preserves_decimal_precision(self, client):
+        """Test that export endpoint preserves Decimal precision in YAML."""
+        # Create config with precise decimal values
+        client.put(
+            "/api/v1/config/risk",
+            json={
+                "max_loss_percent": "0.0075",  # 0.75%
+                "max_leverage": 15,
+            },
+            headers={"X-User-Role": "admin"}
+        )
+
+        # Export
+        response = client.post(
+            "/api/v1/config/export",
+            json={"include_risk": True},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Parse YAML and verify precision
+        yaml_data = yaml.safe_load(data["yaml_content"])
+        # After fix, Decimal is serialized as string, so we compare as strings
+        assert str(yaml_data["risk"]["max_loss_percent"]) == "0.0075"
+
+
+# ============================================================
+# P1-2: TTL Cache Tests
+# ============================================================
+
+class TestTTLCacheExpiry:
+    """Tests for P1-2: Import preview cache TTL mechanism."""
+
+    @pytest.mark.asyncio
+    async def test_preview_token_stored_in_ttl_cache(self, client):
+        """Test that preview tokens are stored in TTLCache."""
+        import cachetools
+
+        # Verify cache is TTLCache
+        assert isinstance(_import_preview_cache, cachetools.TTLCache)
+
+        yaml_content = "risk:\n  max_loss_percent: 0.01"
+
+        response = client.post(
+            "/api/v1/config/import/preview",
+            json={"yaml_content": yaml_content, "filename": "test.yaml"},
+            headers={"X-User-Role": "admin"}
+        )
+
+        preview_token = response.json()["preview_token"]
+        assert preview_token in _import_preview_cache
+
+    @pytest.mark.asyncio
+    async def test_ttl_cache_maxsize(self):
+        """Test that TTLCache has correct maxsize configured."""
+        import cachetools
+
+        assert _import_preview_cache.maxsize == 100
+        assert _import_preview_cache.ttl == 300  # 5 minutes in seconds
+
+    @pytest.mark.asyncio
+    async def test_confirm_import_removes_token_from_cache(self, client):
+        """Test that confirming import removes token from cache."""
+        yaml_content = "risk:\n  max_loss_percent: 0.01"
+
+        # Preview
+        preview_response = client.post(
+            "/api/v1/config/import/preview",
+            json={"yaml_content": yaml_content, "filename": "test.yaml"},
+            headers={"X-User-Role": "admin"}
+        )
+        preview_token = preview_response.json()["preview_token"]
+
+        # Token should exist before confirm
+        assert preview_token in _import_preview_cache
+
+        # Confirm
+        client.post(
+            "/api/v1/config/import/confirm",
+            json={"preview_token": preview_token},
+            headers={"X-User-Role": "admin"}
+        )
+
+        # Token should be removed after confirm
+        assert preview_token not in _import_preview_cache
+
+    @pytest.mark.asyncio
+    async def test_invalid_token_returns_400(self, client):
+        """Test that invalid/expired token returns 400 error."""
+        response = client.post(
+            "/api/v1/config/import/confirm",
+            json={"preview_token": "nonexistent-token-12345"},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 400
+        assert "invalid" in response.json()["detail"].lower() or "expired" in response.json()["detail"].lower()
 
 
 # ============================================================

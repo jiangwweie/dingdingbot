@@ -48,6 +48,7 @@ from decimal import Decimal
 from typing import Optional, List, Dict, Any, Literal
 
 import yaml
+import cachetools
 from fastapi import APIRouter, Depends, HTTPException, Body, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -55,23 +56,32 @@ from src.infrastructure.logger import mask_secret
 
 
 def _decimal_representer(dumper, data):
-    """Custom YAML representer for Decimal types."""
-    return dumper.represent_scalar('tag:yaml.org,2002:float', float(data))
+    """Represent Decimal as string to preserve precision during YAML serialization."""
+    return dumper.represent_scalar('tag:yaml.org,2002:str', str(data))
 
 
+def _decimal_constructor(loader, node):
+    """Construct Decimal from string during YAML deserialization."""
+    value = loader.construct_scalar(node)
+    return Decimal(value)
+
+
+# Register Decimal representer and constructor for YAML
 yaml.add_representer(Decimal, _decimal_representer)
+yaml.add_constructor('tag:yaml.org,2002:str', _decimal_constructor)
 
 
-def _convert_decimals_to_float(obj: Any) -> Any:
+def _convert_decimals_to_str(obj: Any) -> Any:
     """
-    Recursively convert all Decimal values in a dict/list to float for JSON/YAML serialization.
+    Recursively convert all Decimal values in a dict/list to string for JSON/YAML serialization.
+    This preserves full precision without float conversion errors.
     """
     if isinstance(obj, Decimal):
-        return float(obj)
+        return str(obj)
     elif isinstance(obj, dict):
-        return {k: _convert_decimals_to_float(v) for k, v in obj.items()}
+        return {k: _convert_decimals_to_str(v) for k, v in obj.items()}
     elif isinstance(obj, list):
-        return [_convert_decimals_to_float(item) for item in obj]
+        return [_convert_decimals_to_str(item) for item in obj]
     return obj
 
 from src.infrastructure.repositories.config_repositories import (
@@ -422,7 +432,6 @@ class ImportPreviewResult(BaseModel):
     """Import preview result"""
     valid: bool
     preview_token: str
-    expires_at: str
     summary: Dict[str, Any]
     conflicts: List[str]
     requires_restart: bool
@@ -1448,8 +1457,8 @@ async def test_notification(
 # ============================================================
 # Import/Export Endpoints
 # ============================================================
-# Preview tokens storage (in-memory, expires after 5 minutes)
-_import_preview_cache: Dict[str, Dict[str, Any]] = {}
+# Preview tokens storage with TTL (5 minutes expiry, max 100 entries)
+_import_preview_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=300)
 
 
 @router.post("/export", response_model=ExportResponse)
@@ -1491,8 +1500,8 @@ async def export_config(
         # TODO: Implement get_all method
         export_data["notifications"] = []
 
-    # Convert Decimals to floats for YAML serialization
-    export_data = _convert_decimals_to_float(export_data)
+    # Convert Decimals to strings for YAML serialization (preserve precision)
+    export_data = _convert_decimals_to_str(export_data)
 
     # Convert to YAML
     yaml_content = yaml.safe_dump(
@@ -1631,14 +1640,11 @@ async def preview_import(
     valid = len(errors) == 0
 
     # Generate preview token
-    from datetime import timedelta
     preview_token = str(uuid.uuid4())
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)  # 5 minutes expiry
 
-    # Store in cache
+    # Store in TTL cache (auto-expires after 5 minutes)
     _import_preview_cache[preview_token] = {
         "import_data": import_data if valid else None,
-        "expires_at": expires_at,
         "summary": summary,
         "conflicts": conflicts,
         "requires_restart": requires_restart,
@@ -1656,7 +1662,6 @@ async def preview_import(
     return ImportPreviewResult(
         valid=valid,
         preview_token=preview_token,
-        expires_at=expires_at.isoformat(),
         summary=summary,
         conflicts=conflicts,
         requires_restart=requires_restart,
@@ -1675,16 +1680,11 @@ async def confirm_import(
 
     使用预览 token 确认导入，实际写入数据库并创建快照。
     """
-    # Check preview token
+    # Check preview token (TTLCache auto-expires after 5 minutes)
     if request.preview_token not in _import_preview_cache:
         raise HTTPException(status_code=400, detail="Invalid or expired preview token")
 
     preview_data = _import_preview_cache[request.preview_token]
-
-    # Check expiry
-    if datetime.now(timezone.utc) > preview_data["expires_at"]:
-        del _import_preview_cache[request.preview_token]
-        raise HTTPException(status_code=400, detail="Preview token expired")
 
     import_data = preview_data.get("import_data")
     if not import_data:
@@ -1696,8 +1696,8 @@ async def confirm_import(
     try:
         # Create snapshot before import
         if _snapshot_repo:
-            # Convert Decimals to floats for JSON serialization
-            import_data_serialized = _convert_decimals_to_float(import_data)
+            # Convert Decimals to strings for JSON serialization (preserve precision)
+            import_data_serialized = _convert_decimals_to_str(import_data)
             snapshot = {
                 "name": f"Pre-import snapshot ({preview_data['filename']})",
                 "description": f"Auto-created before importing {preview_data['filename']}",
@@ -1884,8 +1884,8 @@ async def create_snapshot(
     if _symbol_repo:
         config_data["symbols"] = await _symbol_repo.get_all()
 
-    # Convert Decimals to floats for JSON serialization
-    config_data = _convert_decimals_to_float(config_data)
+    # Convert Decimals to strings for JSON serialization (preserve precision)
+    config_data = _convert_decimals_to_str(config_data)
 
     # Build snapshot dict matching repository signature
     snapshot = {

@@ -4,6 +4,91 @@
 
 ---
 
+### 2026-04-07 - T009 P2-9 Worker 异常处理增强完成 ✅
+
+**任务 ID**: T009  
+**优先级**: P2  
+**工时估算**: 2h  
+**实际工时**: 1h  
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ 修改 `src/infrastructure/order_audit_repository.py` 添加异常处理增强
+2. ✅ 添加 logger 导入
+3. ✅ 创建测试文件 `tests/unit/infrastructure/test_order_audit_repository.py`
+4. ✅ 新增 5 个单元测试
+5. ✅ 运行测试验证（5 passed，现有测试 16 passed 无回归）
+6. ✅ 更新任务计划和进度日志
+
+**修复说明**:
+- **问题**: Worker 捕获异常后仅 `task_done()`，没有记录错误详情，异常日志丢失
+- **修复方案**:
+  - 添加 `consecutive_errors` 计数器和 `max_consecutive_errors=10` 阈值
+  - 异常时记录详细日志（含堆栈跟踪 `exc_info=True`）
+  - 成功后重置错误计数
+  - 达到阈值时触发 CRITICAL 告警
+  - 优雅处理 CancelledError
+
+**修改代码**:
+```python
+async def _worker(self) -> None:
+    """后台 Worker 异步写入审计日志"""
+    consecutive_errors = 0
+    max_consecutive_errors = 10
+
+    while True:
+        log_entry = None
+        try:
+            log_entry = await self._queue.get()
+            await self._save_log_entry(log_entry)
+            consecutive_errors = 0  # ✅ 重置错误计数
+            self._queue.task_done()
+        except asyncio.CancelledError:
+            logger.info("审计日志 Worker 已停止")
+            if log_entry:
+                self._queue.task_done()
+            break
+        except Exception as e:
+            consecutive_errors += 1
+            logger.error(
+                f"审计日志写入失败 (错误 {consecutive_errors}/{max_consecutive_errors}): "
+                f"log_entry={log_entry}, error={e}",
+                exc_info=True,  # ✅ 记录堆栈跟踪
+            )
+            if log_entry:
+                self._queue.task_done()
+
+            # ✅ 连续错误超过阈值，记录告警
+            if consecutive_errors >= max_consecutive_errors:
+                logger.critical(
+                    f"审计日志 Worker 连续失败 {consecutive_errors} 次，"
+                    f"可能导致审计数据丢失"
+                )
+```
+
+**新增测试**:
+| 测试用例 | 测试目标 | 状态 |
+|---------|----------|------|
+| test_worker_logs_error_on_exception | 测试异常时记录错误日志 | ✅ |
+| test_worker_consecutive_error_count | 测试连续错误计数 | ✅ |
+| test_worker_critical_alert_on_max_errors | 测试达到阈值时告警 | ✅ |
+| test_worker_resets_count_on_success | 测试成功后重置计数 | ✅ |
+| test_worker_handles_cancellation_gracefully | 测试优雅处理取消 | ✅ |
+
+**测试结果**:
+```
+============================== 5 passed in 1.37s ===============================
+```
+
+**验收标准**:
+- ✅ Worker 捕获异常后记录详细错误日志（含堆栈跟踪）
+- ✅ 实现连续错误计数机制
+- ✅ 达到阈值 (10 次) 时触发 CRITICAL 告警
+- ✅ 新增 5 个单元测试全部通过
+- ✅ 现有测试无回归 (16 passed)
+
+---
+
 ### 2026-04-07 - T008 P2-8 状态描述映射缺失修复完成 ✅
 
 **任务 ID**: T008  

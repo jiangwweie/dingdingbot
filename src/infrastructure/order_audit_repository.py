@@ -28,6 +28,9 @@ from src.domain.models import (
     OrderAuditEventType,
     OrderAuditTriggerSource,
 )
+from src.infrastructure.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class OrderAuditLogRepository:
@@ -69,17 +72,44 @@ class OrderAuditLogRepository:
                 pass
 
     async def _worker(self) -> None:
-        """后台 Worker 异步写入审计日志"""
+        """
+        后台 Worker 异步写入审计日志
+
+        P2-9 修复：详细记录异常，增加连续错误计数和告警机制
+        """
+        consecutive_errors = 0
+        max_consecutive_errors = 10
+
         while True:
+            log_entry = None
             try:
                 log_entry = await self._queue.get()
                 await self._save_log_entry(log_entry)
+                consecutive_errors = 0  # ✅ 重置错误计数
                 self._queue.task_done()
             except asyncio.CancelledError:
+                logger.info("审计日志 Worker 已停止")
+                # 清理队列
+                if log_entry:
+                    self._queue.task_done()
                 break
             except Exception as e:
-                # 记录错误但不中断 Worker
-                self._queue.task_done()
+                consecutive_errors += 1
+                logger.error(
+                    f"审计日志写入失败 (错误 {consecutive_errors}/{max_consecutive_errors}): "
+                    f"log_entry={log_entry}, error={e}",
+                    exc_info=True,  # ✅ 记录堆栈跟踪
+                )
+                if log_entry:
+                    self._queue.task_done()
+
+                # ✅ 连续错误超过阈值，记录告警
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.critical(
+                        f"审计日志 Worker 连续失败 {consecutive_errors} 次，"
+                        f"可能导致审计数据丢失"
+                    )
+                    # 不中断 Worker，继续尝试，但持续告警
 
     async def _save_log_entry(self, log_entry: Dict[str, Any]) -> None:
         """

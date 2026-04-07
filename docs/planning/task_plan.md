@@ -1,75 +1,96 @@
-# 任务计划：P1-1 和 P1-2 配置修复
+# 任务计划：T009 - P2-9 Worker 异常处理增强
 
-> **创建时间**: 2026-04-07
-> **状态**: 进行中
+> **创建时间**: 2026-04-07  
+> **状态**: 已完成  
+> **优先级**: P2  
+> **工时估算**: 2h
 
 ---
 
 ## 任务概述
 
-### P1-1: Decimal YAML 精度修复
-- **文件位置**: `src/interfaces/api_v1_config.py:57-62`
-- **问题**: Decimal 被转换为 float 后序列化，精度丢失
-- **方案**: 使用字符串表示 Decimal
-
-### P1-2: 缓存 TTL 机制
-- **文件位置**: `src/interfaces/api_v1_config.py:1452`
-- **问题**: 预览数据永久占用内存，无过期机制
-- **方案**: 使用 cachetools.TTLCache
+**任务 ID**: T009  
+**问题位置**: `src/infrastructure/order_audit_repository.py:71-83`  
+**修复目标**:
+- 添加详细异常日志记录
+- 实现连续错误计数和告警机制
+- 避免异常静默导致问题难以排查
 
 ---
 
 ## 任务分解
 
-### P1-1 实施步骤
-- [x] 读取当前实现代码
-- [x] 修改 `_decimal_representer` 使用字符串表示
-- [x] 添加 `_decimal_constructor` 用于反序列化
-- [x] 编写测试用例验证精度
-- [ ] 运行测试验证
+### 阶段 1: 代码修改
+- [x] 阅读当前实现代码
+- [x] 修改 `_worker()` 方法添加异常处理增强
+- [x] 添加 logger 导入
 
-### P1-2 实施步骤
-- [x] 确认项目依赖是否有 cachetools (确认：无)
-- [x] 添加 cachetools 到 requirements.txt
-- [x] 替换 `_import_preview_cache` 为 TTLCache
-- [x] 更新使用 TTLCache 的代码（移除手动过期检查）
-- [x] 验证过期行为测试
-- [ ] 运行测试验证
+### 阶段 2: 单元测试编写
+- [x] 创建测试文件 `tests/unit/infrastructure/test_order_audit_repository.py`
+- [x] `test_worker_logs_error_on_exception` - 测试异常时记录错误日志
+- [x] `test_worker_consecutive_error_count` - 测试连续错误计数
+- [x] `test_worker_critical_alert_on_max_errors` - 测试达到阈值时告警
+- [x] `test_worker_resets_count_on_success` - 测试成功后重置计数
+
+### 阶段 3: 测试验证
+- [x] 运行 `pytest tests/unit/infrastructure/test_order_audit_repository.py -v`
+- [x] 确认新增 5 个测试全部通过
+- [x] 确认现有测试无回归 (16 passed)
+
+### 阶段 4: 文档更新
+- [x] 更新 `docs/planning/task_plan.md`
+- [ ] 更新 `docs/planning/progress.md`
+- [ ] Git 提交
 
 ---
 
-## 进度追踪
+## 验收标准
 
-| 时间 | 任务 | 状态 |
+- ✅ Worker 捕获异常后记录详细错误日志（含堆栈跟踪）
+- ✅ 实现连续错误计数机制
+- ✅ 达到阈值 (10 次) 时触发 CRITICAL 告警
+- ✅ 新增 5 个单元测试全部通过 (5 passed)
+- ✅ 现有测试无回归 (16 passed)
+
+---
+
+## 相关文件
+
+| 文件 | 路径 | 状态 |
 |------|------|------|
-| 2026-04-07 | P1-1 实施 | 已完成 |
-| 2026-04-07 | P1-2 实施 | 已完成 |
-| 2026-04-07 | 测试验证 | 进行中 |
-| 2026-04-07 | 代码提交 | 待开始 |
+| 设计文档 | `docs/arch/order-management-fix-design.md` | 已阅读 |
+| 源代码 | `src/infrastructure/order_audit_repository.py` | 已修改 |
+| 测试文件 | `tests/unit/infrastructure/test_order_audit_repository.py` | 已创建 |
+| 任务计划 | `docs/planning/task_plan.md` | 已更新 |
+| 进度日志 | `docs/planning/progress.md` | 待更新 |
 
 ---
 
-## 依赖关系
+## 修改摘要
 
-- P1-1 和 P1-2 串行执行（同一文件，避免冲突）
-- 两个任务都完成后统一测试提交
+### 源代码修改
 
----
+**文件**: `src/infrastructure/order_audit_repository.py`
 
-## 其他任务
+1. 添加 logger 导入：
+```python
+from src.infrastructure.logger import setup_logger
+logger = setup_logger(__name__)
+```
 
-### T008 - P2-8 状态描述映射缺失修复 ✅ 已完成
+2. 增强 `_worker()` 方法：
+- 添加 `consecutive_errors` 计数器和 `max_consecutive_errors` 阈值
+- 异常时记录详细日志（含堆栈跟踪）
+- 成功后重置错误计数
+- 达到阈值时触发 CRITICAL 告警
+- 优雅处理 CancelledError
 
-**任务描述**: 补充 `OrderStateMachine.describe_transition()` 方法中缺失的状态转换描述
+### 测试文件
 
-**实施步骤**:
-- [x] 审计 `describe_transition()` 方法的状态描述映射
-- [x] 确认所有 17 个合法状态转换描述已完整
-- [x] 新增 `TestDescribeTransitionCompleteness` 测试类（7 个测试用例）
-- [x] 运行测试验证（73 passed，无回归）
-- [x] 更新进度日志
+**文件**: `tests/unit/infrastructure/test_order_audit_repository.py`
 
-**验收标准**:
-- ✅ 所有合法状态转换都有描述映射
-- ✅ 新增 7 个单元测试全部通过
-- ✅ 现有测试无回归 (73 passed)
+新增测试类：
+- `TestP2_9_WorkerErrorHandling` - 4 个测试用例
+- `TestP2_9_WorkerCancellation` - 1 个测试用例
+
+测试结果：5 passed
