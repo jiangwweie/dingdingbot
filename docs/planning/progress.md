@@ -4,6 +4,52 @@
 
 ---
 
+### 2026-04-07 - T004 P2-4 止损逻辑歧义修复完成 ✅
+
+**任务 ID**: T004  
+**优先级**: P2  
+**工时估算**: 3h  
+**实际工时**: 1.5h  
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ 阅读设计文档 `docs/arch/order-management-fix-design.md` §2.4
+2. ✅ 验证 `_calculate_stop_loss_price()` 方法已按修复代码实现
+3. ✅ 新增 `TestP2Fix_StopLossCalculation` 测试类（5 个测试用例）
+4. ✅ 运行测试验证（53 passed，无回归）
+5. ✅ 更新任务计划和进度日志
+6. ✅ Git 提交（2 commits）
+
+**修复说明**:
+- **修复前问题**: `rr_multiple=-1.0` 本意是 1R 止损，但代码转成 2%
+- **修复后行为**: 
+  - `rr_multiple < 0`: RR 倍数模式，`abs(rr_multiple) × 0.01` 转换为百分比
+    - `rr_multiple=-1.0` → 1% 止损 (50000 → 49500)
+    - `rr_multiple=-2.0` → 2% 止损 (50000 → 49000)
+  - `rr_multiple > 0`: 百分比模式，直接使用
+    - `rr_multiple=0.02` → 2% 止损 (50000 → 49000)
+
+**测试用例**:
+| 测试用例 | 方向 | rr_multiple | 预期结果 | 状态 |
+|---------|------|-------------|----------|------|
+| test_rr_mode_long_position | LONG | -1.0 | 49500 | ✅ |
+| test_rr_mode_short_position | SHORT | -1.0 | 50500 | ✅ |
+| test_percent_mode_long_position | LONG | 0.02 | 49000 | ✅ |
+| test_percent_mode_short_position | SHORT | 0.02 | 51000 | ✅ |
+| test_rr_mode_2r_stop_loss | LONG | -2.0 | 49000 | ✅ |
+
+**Git 提交**:
+- `4d6bf36 refactor(T004): P2-4 止损计算逻辑语义修复`
+- `2b1044e test(T004): P2-4 止损逻辑修复单元测试`
+
+**验收标准**:
+- ✅ `_calculate_stop_loss_price()` 明确区分 RR 倍数和百分比语义
+- ✅ `rr_multiple=-1.0` 正确计算为 1% 止损（而非 2%）
+- ✅ 新增 5 个单元测试全部通过
+- ✅ 现有测试无回归 (53 passed)
+
+---
+
 ### 2026-04-07 - BT-2 资金费率模拟功能完成 ✅
 
 **任务 ID**: BT-2  
