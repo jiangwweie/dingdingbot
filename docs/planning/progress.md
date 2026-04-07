@@ -4,6 +4,63 @@
 
 ---
 
+## 2026-04-07 架构审查 - WebSocket K 线处理与形态检测缺陷 ✅
+
+**任务**: 用户报告历史版本问题审查 + 回测引擎排查
+**执行者**: Architect
+**状态**: ✅ 审查完成，待办事项已创建
+**实际工时**: 1h
+
+### 完成内容
+
+#### 1. 架构审查报告
+- ✅ 确认系统存在 3 个 P0 级严重缺陷
+- ✅ 生成详细审查报告（代码位置、根本原因、修复方案）
+- ✅ 报告路径：`docs/reviews/websocket-kline-defect-review.md`
+
+#### 2. 问题确认
+
+**🔴 问题 1: WebSocket 未正确处理 `is_closed` 字段**
+- 代码位置：`src/infrastructure/exchange_gateway.py:439-462`
+- 根本原因：忽略交易所提供的 `is_closed` 字段，使用时间戳推断
+- 影响：未收盘 K 线可能触发信号
+
+**🔴 问题 2: `process_kline()` 缺少防御性检查**
+- 代码位置：`src/application/signal_pipeline.py:455`
+- 根本原因：没有验证 `kline.is_closed == True`
+- 影响：问题 1 的下游放大器
+
+**🔴 问题 3: Pinbar 检测缺少最小波幅检查**
+- 代码位置：`src/domain/strategy_engine.py:184-276`
+- 根本原因：只检查 `candle_range == 0`，未检查最小波幅
+- 影响：刚开盘的 K 线被误判为 Pinbar
+
+#### 3. 回测引擎排查
+
+**✅ 结论**: 回测引擎不受影响
+- ✅ 历史数据必定已收盘，数据源正确
+- ✅ `_parse_ohlcv()` 硬编码 `is_closed=True` 符合历史数据特性
+- ✅ 不存在"未收盘 K 线触发信号"的风险
+
+**审查报告**: `docs/reviews/backtester-kline-review.md`
+
+#### 4. 待办事项创建
+
+**创建文档**: `docs/planning/websocket-defect-todo.md`
+
+**待办清单**:
+- [1] WebSocket K 线处理缺陷修复（预计 2h）- [P0]
+- [2] process_kline() 防御性检查（预计 0.5h）- [P0]
+- [3] Pinbar 最小波幅检查（预计 0.5h）- [P0]
+
+**总工时**: 3 小时（剩余）
+
+### Git 提交
+
+- 待提交：docs: 架构审查报告 - WebSocket K 线处理缺陷
+
+---
+
 ## 2026-04-07 文档更新 - 配置管理系统进度确认 ✅
 
 **任务**: 开工检查 + 配置管理系统进度确认 + 文档更新
