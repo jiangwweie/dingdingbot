@@ -1630,6 +1630,73 @@ def test_create_order_chain_default_strategy():
 
 
 # ============================================================
+# T005: P2-5 strategy None 处理缺失 - 新增测试
+# ============================================================
+@pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
+def test_create_order_chain_with_strategy_none():
+    """
+    T005: 测试 strategy 为 None 时使用默认值
+    验证：strategy=None 时使用默认单 TP 配置 (tp_levels=1, tp_ratios=[1.0])
+    """
+    manager = OrderManager()
+
+    orders = manager.create_order_chain(
+        strategy=None,  # 明确传入 None
+        signal_id="sig_none_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        total_qty=Decimal('1.0'),
+        initial_sl_rr=Decimal('-1.0'),
+        tp_targets=[Decimal('1.5')],
+    )
+
+    # 验证：只生成 ENTRY 订单
+    assert len(orders) == 1
+    assert orders[0].order_role == OrderRole.ENTRY
+    assert orders[0].signal_id == "sig_none_test"
+    assert orders[0].symbol == "BTC/USDT:USDT"
+    assert orders[0].requested_qty == Decimal('1.0')
+
+
+@pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
+def test_create_order_chain_with_strategy_valid():
+    """
+    T005: 测试 strategy 有效时正常使用
+    验证：传入有效的 OrderStrategy 时正确解析配置
+    """
+    manager = OrderManager()
+
+    # 创建自定义策略：2 个 TP 级别，比例分别为 0.6 和 0.4
+    custom_strategy = OrderStrategy(
+        id="custom_multi_tp",
+        name="自定义多 TP",
+        tp_levels=2,
+        tp_ratios=[Decimal('0.6'), Decimal('0.4')],
+        initial_stop_loss_rr=Decimal('-1.0'),
+        trailing_stop_enabled=True,
+        oco_enabled=True,
+    )
+
+    orders = manager.create_order_chain(
+        strategy=custom_strategy,
+        signal_id="sig_custom_test",
+        symbol="ETH/USDT:USDT",
+        direction=Direction.SHORT,
+        total_qty=Decimal('10.0'),
+        initial_sl_rr=Decimal('-1.0'),
+        tp_targets=[Decimal('1.5'), Decimal('2.5')],
+    )
+
+    # 验证：只生成 ENTRY 订单（TP/SL 在成交后动态生成）
+    assert len(orders) == 1
+    assert orders[0].order_role == OrderRole.ENTRY
+    assert orders[0].signal_id == "sig_custom_test"
+    assert orders[0].symbol == "ETH/USDT:USDT"
+    assert orders[0].direction == Direction.SHORT
+    assert orders[0].requested_qty == Decimal('10.0')
+
+
+# ============================================================
 # TEST-2-T8: 覆盖率提升测试 - 覆盖未覆盖的代码路径
 # ============================================================
 @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
@@ -2135,6 +2202,163 @@ async def test_generate_tp_sl_orders_qty_fallback():
     assert tp2 is not None, "应该有 TP2 订单"
     # 当 tp_qty <= 0 时，应该使用 fallback: requested_qty * tp_ratio = 1.0 * 0 = 0
     # 但由于比例归一化逻辑，实际会重新计算
+
+
+# ============================================================
+# P1-2 Fix Tests: 动态止损比例配置
+# ============================================================
+
+class TestP1Fix_DynamicStopLoss:
+    """P1-2: 动态止损比例修复测试"""
+
+    @pytest.mark.asyncio
+    async def test_uses_strategy_stop_loss_rr(self, single_tp_strategy: "OrderStrategy"):
+        """测试使用策略配置的止损比例"""
+        # Arrange
+        manager = OrderManager()
+
+        # 创建使用 2R 止损的策略
+        strategy = OrderStrategy(
+            id="test_2r_stop",
+            name="2R 止损测试",
+            tp_levels=1,
+            tp_ratios=[Decimal('1.0')],
+            initial_stop_loss_rr=Decimal('-2.0'),  # 2R 止损
+        )
+
+        filled_entry = Order(
+            id="ord_test",
+            signal_id="sig_test",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            average_exec_price=Decimal('50000'),
+            status=OrderStatus.FILLED,
+            created_at=1711785600000,
+            updated_at=1711785660000,
+        )
+
+        position = Position(
+            id="pos_test",
+            signal_id="sig_test",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            entry_price=Decimal('50000'),
+            current_qty=Decimal('1.0'),
+        )
+
+        # Act
+        orders = manager._generate_tp_sl_orders(
+            filled_entry=filled_entry,
+            positions_map={"sig_test": position},
+            strategy=strategy,
+        )
+
+        # Assert: SL 订单应使用 2R 止损
+        sl_order = next(o for o in orders if o.order_role == OrderRole.SL)
+        # 根据_calculate_stop_loss_price 逻辑：
+        # abs(-2.0) >= 1, 所以 sl_percent = 0.02 (默认 2%)
+        # LONG: sl_price = 50000 * (1 - 0.02) = 49000
+        expected_sl_price = Decimal('49000')
+        assert sl_order.trigger_price == expected_sl_price, \
+            f"SL 价格应为 {expected_sl_price}, 实际为 {sl_order.trigger_price}"
+
+    @pytest.mark.asyncio
+    async def test_uses_default_when_strategy_none(self):
+        """测试 strategy 为 None 时使用默认值"""
+        # Arrange
+        manager = OrderManager()
+
+        filled_entry = Order(
+            id="ord_test",
+            signal_id="sig_test",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            average_exec_price=Decimal('50000'),
+            status=OrderStatus.FILLED,
+            created_at=1711785600000,
+            updated_at=1711785660000,
+        )
+
+        position = Position(
+            id="pos_test",
+            signal_id="sig_test",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            entry_price=Decimal('50000'),
+            current_qty=Decimal('1.0'),
+        )
+
+        # Act
+        orders = manager._generate_tp_sl_orders(
+            filled_entry=filled_entry,
+            positions_map={"sig_test": position},
+            strategy=None,  # None
+        )
+
+        # Assert: 应使用默认 -1.0 RR
+        sl_order = next(o for o in orders if o.order_role == OrderRole.SL)
+        assert sl_order.trigger_price is not None
+        # 默认 -1.0 RR, abs(-1.0) >= 1, 所以 sl_percent = 0.02
+        # LONG: sl_price = 50000 * (1 - 0.02) = 49000
+        assert sl_order.trigger_price == Decimal('49000')
+
+    @pytest.mark.asyncio
+    async def test_uses_default_when_stop_loss_rr_none(self):
+        """测试 strategy.initial_stop_loss_rr 为 None 时使用默认值"""
+        # Arrange
+        manager = OrderManager()
+
+        # 创建策略但 initial_stop_loss_rr 为 None
+        strategy = OrderStrategy(
+            id="test_none_stop",
+            name="None 止损测试",
+            tp_levels=1,
+            tp_ratios=[Decimal('1.0')],
+            initial_stop_loss_rr=None,  # None
+        )
+
+        filled_entry = Order(
+            id="ord_test",
+            signal_id="sig_test",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            average_exec_price=Decimal('50000'),
+            status=OrderStatus.FILLED,
+            created_at=1711785600000,
+            updated_at=1711785660000,
+        )
+
+        position = Position(
+            id="pos_test",
+            signal_id="sig_test",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            entry_price=Decimal('50000'),
+            current_qty=Decimal('1.0'),
+        )
+
+        # Act
+        orders = manager._generate_tp_sl_orders(
+            filled_entry=filled_entry,
+            positions_map={"sig_test": position},
+            strategy=strategy,
+        )
+
+        # Assert: 应使用默认 -1.0 RR
+        sl_order = next(o for o in orders if o.order_role == OrderRole.SL)
+        assert sl_order.trigger_price is not None
+        # 默认 -1.0 RR, abs(-1.0) >= 1, 所以 sl_percent = 0.02
+        # LONG: sl_price = 50000 * (1 - 0.02) = 49000
+        assert sl_order.trigger_price == Decimal('49000')
 
 
 # ============================================================

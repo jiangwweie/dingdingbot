@@ -137,13 +137,13 @@ class OrderManager:
 
     def create_order_chain(
         self,
-        strategy: OrderStrategy,
-        signal_id: str,
-        symbol: str,
-        direction: Direction,
-        total_qty: Decimal,
-        initial_sl_rr: Decimal,
-        tp_targets: List[Decimal],
+        strategy: Optional[OrderStrategy] = None,
+        signal_id: str = "",
+        symbol: str = "",
+        direction: Optional[Direction] = None,
+        total_qty: Optional[Decimal] = None,
+        initial_sl_rr: Optional[Decimal] = None,
+        tp_targets: Optional[List[Decimal]] = None,
     ) -> List[Order]:
         """
         创建订单链 - 仅生成 ENTRY 订单
@@ -153,7 +153,7 @@ class OrderManager:
              必须在 ENTRY 成交后，以实际开仓价为锚点计算 TP/SL 价格
 
         Args:
-            strategy: 订单策略
+            strategy: 订单策略 (可选，为 None 时使用默认单 TP 配置)
             signal_id: 信号 ID
             symbol: 交易对
             direction: 方向
@@ -167,6 +167,15 @@ class OrderManager:
         from src.domain.models import OrderType, OrderRole, OrderStatus
         import uuid
         from datetime import datetime, timezone
+
+        # strategy 为 None 时使用默认单 TP 配置
+        if strategy is None:
+            # 默认策略：单 TP 级别，100% 比例
+            tp_levels = 1
+            tp_ratios = [Decimal('1.0')]
+        else:
+            tp_levels = strategy.tp_levels
+            tp_ratios = strategy.tp_ratios
 
         current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
 
@@ -320,11 +329,17 @@ class OrderManager:
 
         current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-        # 计算止损价格 (基于实际开仓价，默认使用 -1.0 RR)
+        # P1-2 修复：从策略获取止损比例，支持动态配置
+        stop_loss_rr = (
+            strategy.initial_stop_loss_rr
+            if strategy and strategy.initial_stop_loss_rr is not None
+            else Decimal('-1.0')  # 默认值：1R 止损
+        )
+
         stop_loss_price = self._calculate_stop_loss_price(
             actual_entry_price,
             filled_entry.direction,
-            Decimal('-1.0'),
+            stop_loss_rr,
         )
 
         new_orders = []
