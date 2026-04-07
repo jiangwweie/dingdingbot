@@ -40,8 +40,8 @@ class TestStress:
         semaphore = asyncio.Semaphore(max_concurrent)
 
         response_times: List[float] = []
-        success_count = 0
-        failure_count = 0
+        success_results: List = []
+        failure_results: List = []
         stats_lock = asyncio.Lock()
 
         async def make_request(request_id: int) -> Tuple[int, bool, float]:
@@ -55,14 +55,14 @@ class TestStress:
 
                     async with stats_lock:
                         response_times.append(elapsed)
-                        success_count += 1
+                        success_results.append(request_id)
 
                     return (request_id, True, elapsed)
 
                 except Exception as e:
                     elapsed = time.perf_counter() - start_time
                     async with stats_lock:
-                        failure_count += 1
+                        failure_results.append(request_id)
                     return (request_id, False, elapsed)
 
         # Act - Launch 100 concurrent requests
@@ -80,9 +80,6 @@ class TestStress:
         assert len(results) == num_requests, "All requests should complete"
 
         # 2. High success rate expected
-        success_results = [r for r in results if r[1]]
-        failure_results = [r for r in results if not r[1]]
-
         success_rate = len(success_results) / num_requests
         assert success_rate >= 0.95, f"Success rate should be >= 95%, got {success_rate:.2%}"
 
@@ -208,38 +205,37 @@ class TestInitializationStress:
         场景：大量并发初始化请求
 
         验证 R9.3 竞态修复在高压下的正确性
+
+        Note: This tests a SINGLE manager instance with concurrent initialize calls,
+        which is the actual R9.3 race condition scenario.
         """
-        # Arrange
+        # Arrange - Use single manager instance
+        manager = ConfigManager(db_path=temp_db_path)
         num_concurrent = 50
 
-        async def create_and_init(task_id: int):
-            manager = ConfigManager(db_path=temp_db_path)
+        async def call_initialize(task_id: int):
+            """Call initialize on the shared manager."""
             await manager.initialize_from_db()
-            return manager
+            return task_id
 
-        # Act - Launch many concurrent initializations
+        # Act - Launch many concurrent initialization calls on SAME manager
         tasks = [
-            asyncio.create_task(create_and_init(i))
+            asyncio.create_task(call_initialize(i))
             for i in range(num_concurrent)
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Assert
-        # All should succeed
+        # All should succeed (R9.3 double-checked locking handles this)
         exceptions = [r for r in results if isinstance(r, Exception)]
         assert len(exceptions) == 0, f"No exceptions expected: {exceptions}"
 
-        # All managers should be initialized
-        managers = [r for r in results if isinstance(r, ConfigManager)]
-        assert len(managers) == num_concurrent, "All should return managers"
-
-        for m in managers:
-            assert m.is_initialized, "All managers should be initialized"
+        # Manager should be initialized
+        assert manager.is_initialized, "Manager should be initialized"
 
         # Cleanup
-        for m in managers:
-            await m._db.close()
+        await manager._db.close()
 
     @pytest.mark.asyncio
     async def test_rapid_init_close_cycles(self, temp_db_path: str):

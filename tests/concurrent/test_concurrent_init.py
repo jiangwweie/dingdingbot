@@ -38,20 +38,22 @@ class TestConcurrentInitialization:
         initialization_order: List[int] = []
         lock = asyncio.Lock()
 
-        async def create_and_init(task_id: int) -> ConfigManager:
-            """Create and initialize a ConfigManager instance."""
-            manager = ConfigManager(db_path=temp_db_path)
+        # Use a single shared manager to test R9.3 double-checked locking
+        # This is the key test - multiple coroutines calling initialize on SAME instance
+        manager = ConfigManager(db_path=temp_db_path)
+
+        async def concurrent_init(task_id: int) -> ConfigManager:
+            """Call initialize on the same manager concurrently."""
             await manager.initialize_from_db()
 
             async with lock:
                 initialization_order.append(task_id)
-                managers.append(manager)
 
             return manager
 
-        # Act - Create 50 concurrent initialization tasks
+        # Act - Create 50 concurrent initialization calls on SAME manager
         tasks = [
-            asyncio.create_task(create_and_init(i))
+            asyncio.create_task(concurrent_init(i))
             for i in range(num_tasks)
         ]
 
@@ -62,17 +64,15 @@ class TestConcurrentInitialization:
         exceptions = [r for r in results if isinstance(r, Exception)]
         assert len(exceptions) == 0, f"Unexpected exceptions: {exceptions}"
 
-        # 2. All managers should be initialized
-        for manager in managers:
-            assert manager.is_initialized, "Manager should be initialized"
-            assert manager._db is not None, "Database connection should exist"
+        # 2. Manager should be initialized
+        assert manager.is_initialized, "Manager should be initialized"
+        assert manager._db is not None, "Database connection should exist"
 
         # 3. Verify all completed initialization
-        assert len(managers) == num_tasks, "All tasks should complete"
+        assert len(initialization_order) == num_tasks, "All tasks should complete"
 
         # Cleanup
-        for manager in managers:
-            await manager._db.close()
+        await manager._db.close()
 
     @pytest.mark.asyncio
     async def test_read_during_initialization(self, temp_db_path: str, temp_config_dir: Path):
@@ -208,21 +208,18 @@ class TestDoubleCheckedLocking:
 
         # Track actual initialization attempts
         init_count = 0
-        original_init = manager.initialize_from_db
 
         async def tracked_init():
             nonlocal init_count
             init_count += 1
-            return await original_init()
+            return await manager.initialize_from_db()
 
-        # Act - Multiple sequential initializations (should be no-ops)
-        manager.initialize_from_db = tracked_init
-
+        # Act - Multiple sequential initializations (should be no-ops due to fast path)
         for _ in range(10):
-            await manager.initialize_from_db()
+            await tracked_init()
 
-        # Assert - Should only initialize once
-        # Note: This test verifies the fast path works
+        # Assert - Each call increments count but fast path returns immediately
+        # The key is that after first, all others return at the fast path check
         assert init_count == 10, "Each call goes through but fast path returns immediately"
 
         # Cleanup
@@ -235,25 +232,27 @@ class TestDoubleCheckedLocking:
 
         通过检查数据库连接数量来验证
         """
-        # Arrange
+        # Arrange - Use single manager instance
+        manager = ConfigManager(db_path=temp_db_path)
         num_concurrent = 20
-        managers: list[ConfigManager] = []
 
-        async def create_manager(task_id: int):
-            m = ConfigManager(db_path=temp_db_path)
-            await m.initialize_from_db()
-            managers.append(m)
-            return m
+        async def concurrent_init(task_id: int):
+            await manager.initialize_from_db()
+            return task_id
 
-        # Act
-        tasks = [asyncio.create_task(create_manager(i)) for i in range(num_concurrent)]
-        await asyncio.gather(*tasks)
+        # Act - Multiple concurrent calls to initialize SAME manager
+        tasks = [
+            asyncio.create_task(concurrent_init(i))
+            for i in range(num_concurrent)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Assert - All managers should share same database state
-        # Each manager has its own connection, but they all should be initialized
-        for m in managers:
-            assert m.is_initialized
+        # Assert - All should succeed without error
+        exceptions = [r for r in results if isinstance(r, Exception)]
+        assert len(exceptions) == 0, f"No exceptions expected: {exceptions}"
+
+        # Manager should be initialized
+        assert manager.is_initialized
 
         # Cleanup
-        for m in managers:
-            await m._db.close()
+        await manager._db.close()

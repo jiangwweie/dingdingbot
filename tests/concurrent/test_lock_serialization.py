@@ -37,23 +37,22 @@ class TestLockSerialization:
         await manager.initialize_from_db()
 
         write_log: List[Tuple[float, float, int]] = []  # (start, end, task_id)
-        write_lock = asyncio.Lock()
 
-        async def write_config(task_id: int, value: float):
+        async def write_config(task_id: int):
             """Simulate a write operation with logging."""
-            start_time = time.perf_counter()
-
             async with manager._ensure_config_lock():
+                # Record lock acquisition time
+                acquire_time = time.perf_counter()
                 # Simulate write work
                 await asyncio.sleep(0.1)
-                # Record the write
-                async with write_lock:
-                    write_log.append((start_time, time.perf_counter(), task_id))
+                # Record lock release time
+                release_time = time.perf_counter()
+                write_log.append((acquire_time, release_time, task_id))
 
         # Act - Launch concurrent writes
         num_writes = 5
         tasks = [
-            asyncio.create_task(write_config(i, i * 1.0))
+            asyncio.create_task(write_config(i))
             for i in range(num_writes)
         ]
         await asyncio.gather(*tasks)
@@ -61,19 +60,21 @@ class TestLockSerialization:
         # Assert
         assert len(write_log) == num_writes, "All writes should complete"
 
-        # Sort by start time
+        # Sort by acquisition time
         write_log.sort(key=lambda x: x[0])
 
         # Check for overlaps - each write should complete before next starts
+        # With proper locking, release of write[i] should be before acquire of write[i+1]
         for i in range(len(write_log) - 1):
-            _, end_current, _ = write_log[i]
-            start_next, _, _ = write_log[i + 1]
+            _, release_current, _ = write_log[i]
+            acquire_next, _, _ = write_log[i + 1]
 
-            # Writes should be serialized (no overlap)
-            # Allow small tolerance for timing measurement
-            assert end_current <= start_next + 0.01, \
-                f"Write overlap detected: write {write_log[i][2]} ended at {end_current}, " \
-                f"write {write_log[i+1][2]} started at {start_next}"
+            # With proper locking, current should release before next acquires
+            # Allow 10ms tolerance for timing measurement and asyncio scheduling
+            tolerance = 0.01
+            assert release_current <= acquire_next + tolerance, \
+                f"Write overlap detected: write {write_log[i][2]} released at {release_current}, " \
+                f"write {write_log[i+1][2]} acquired at {acquire_next}"
 
         # Cleanup
         await manager._db.close()
