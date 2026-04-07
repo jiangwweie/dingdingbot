@@ -701,3 +701,841 @@ async def test_get_orders_by_status(order_repository):
     canceled_result = await order_repository.get_orders_by_status(OrderStatus.CANCELED)
     assert len(canceled_result) == 1
     assert canceled_result[0].id == "ord_status_canceled_001"
+
+
+# ============================================================
+# 极高风险方法测试 - delete_orders_batch
+# ============================================================
+
+@pytest.fixture
+def mock_exchange_gateway_with_cancel():
+    """Mock ExchangeGateway with cancel_order method"""
+    gateway = MagicMock()
+    gateway.cancel_order = AsyncMock(return_value=MagicMock(is_success=True, error_message=None))
+    return gateway
+
+
+@pytest.fixture
+def mock_audit_logger_instance():
+    """Mock OrderAuditLogger"""
+    logger = MagicMock()
+    logger.log = AsyncMock(return_value="audit-log-id-123")
+    return logger
+
+
+def create_test_order(
+    order_id: str,
+    signal_id: str = "sig_test",
+    symbol: str = "BTC/USDT:USDT",
+    direction: Direction = Direction.LONG,
+    order_role: OrderRole = OrderRole.ENTRY,
+    status: OrderStatus = OrderStatus.OPEN,
+    parent_order_id: Optional[str] = None,
+    oco_group_id: Optional[str] = None,
+    exchange_order_id: Optional[str] = None,
+    filled_qty: Optional[Decimal] = None,
+) -> Order:
+    """辅助函数：创建测试订单"""
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return Order(
+        id=order_id,
+        signal_id=signal_id,
+        symbol=symbol,
+        direction=direction,
+        order_type=OrderType.MARKET,
+        order_role=order_role,
+        requested_qty=Decimal('1.0'),
+        filled_qty=filled_qty if filled_qty is not None else Decimal('0'),
+        status=status,
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+        parent_order_id=parent_order_id,
+        oco_group_id=oco_group_id,
+        exchange_order_id=exchange_order_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_normal_success(
+    order_repository,
+    mock_exchange_gateway_with_cancel,
+    mock_audit_logger_instance,
+):
+    """
+    TEST-DEL-BATCH-001: 正常批量删除成功场景
+
+    测试场景:
+    1. 创建多个订单
+    2. 注入交易所网关和审计日志器
+    3. 调用 delete_orders_batch 批量删除
+    4. 验证删除结果
+
+    验收标准:
+    - 所有订单成功删除
+    - 交易所取消成功
+    - 审计日志记录完整
+    """
+    # 准备：创建多个订单
+    order_ids = ["ord_del_batch_001", "ord_del_batch_002", "ord_del_batch_003"]
+    orders = [
+        create_test_order(
+            order_id=oid,
+            exchange_order_id=f"binance_{oid}",
+        )
+        for oid in order_ids
+    ]
+
+    for order in orders:
+        await order_repository.save(order)
+
+    # 注入依赖
+    order_repository.set_exchange_gateway(mock_exchange_gateway_with_cancel)
+    order_repository.set_audit_logger(mock_audit_logger_instance)
+
+    # 执行：批量删除
+    result = await order_repository.delete_orders_batch(
+        order_ids=order_ids,
+        cancel_on_exchange=True,
+        audit_info={"operator_id": "user_123", "ip_address": "192.168.1.1"},
+    )
+
+    # 验证：删除结果
+    assert result["deleted_count"] == 3
+    assert len(result["deleted_from_db"]) == 3
+    assert set(result["deleted_from_db"]) == set(order_ids)
+    assert len(result["cancelled_on_exchange"]) == 3
+    assert len(result["failed_to_cancel"]) == 0
+    assert result["audit_log_id"] is not None
+
+    # 验证：订单已从数据库删除
+    for oid in order_ids:
+        saved_order = await order_repository.get_order(oid)
+        assert saved_order is None
+
+    # 验证：审计日志被调用
+    mock_audit_logger_instance.log.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_with_child_orders(
+    order_repository,
+    mock_exchange_gateway_with_cancel,
+    mock_audit_logger_instance,
+):
+    """
+    TEST-DEL-BATCH-002: 批量删除包含子订单的父订单
+
+    测试场景:
+    1. 创建 ENTRY 订单及其 TP/SL 子订单
+    2. 删除 ENTRY 订单
+    3. 验证子订单也被级联删除
+
+    验收标准:
+    - 父订单和子订单都被删除
+    - _get_all_related_order_ids 递归获取所有关联订单
+    """
+    # 准备：创建订单链
+    entry_order = create_test_order(
+        order_id="ord_entry_001",
+        order_role=OrderRole.ENTRY,
+        exchange_order_id="binance_entry_001",
+    )
+    tp_order = create_test_order(
+        order_id="ord_tp_001",
+        order_role=OrderRole.TP1,
+        parent_order_id="ord_entry_001",
+        exchange_order_id="binance_tp_001",
+    )
+    sl_order = create_test_order(
+        order_id="ord_sl_001",
+        order_role=OrderRole.SL,
+        parent_order_id="ord_entry_001",
+        exchange_order_id="binance_sl_001",
+    )
+
+    for order in [entry_order, tp_order, sl_order]:
+        await order_repository.save(order)
+
+    # 注入依赖
+    order_repository.set_exchange_gateway(mock_exchange_gateway_with_cancel)
+    order_repository.set_audit_logger(mock_audit_logger_instance)
+
+    # 执行：只删除 ENTRY 订单
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_entry_001"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：所有关联订单都被删除
+    assert result["deleted_count"] == 3
+    assert set(result["deleted_from_db"]) == {"ord_entry_001", "ord_tp_001", "ord_sl_001"}
+
+    # 验证：所有订单已从数据库删除
+    for oid in ["ord_entry_001", "ord_tp_001", "ord_sl_001"]:
+        saved_order = await order_repository.get_order(oid)
+        assert saved_order is None
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_cascade_false(
+    order_repository,
+    mock_exchange_gateway_with_cancel,
+):
+    """
+    TEST-DEL-BATCH-003: 删除子订单时级联获取父订单
+
+    测试场景:
+    1. 创建父子订单关系
+    2. 删除子订单
+    3. 验证 _get_all_related_order_ids 递归获取父订单
+
+    注意：_get_all_related_order_ids 设计为递归获取所有关联订单
+    包括父订单和兄弟订单，所以删除子订单时会同时删除父订单
+
+    验收标准:
+    - 子订单和父订单都被删除（因为递归获取）
+    - 这是预期的设计行为
+    """
+    # 准备：创建订单链
+    entry_order = create_test_order(
+        order_id="ord_entry_002",
+        order_role=OrderRole.ENTRY,
+        exchange_order_id="binance_entry_002",
+    )
+    tp_order = create_test_order(
+        order_id="ord_tp_002",
+        order_role=OrderRole.TP1,
+        parent_order_id="ord_entry_002",
+        exchange_order_id="binance_tp_002",
+    )
+
+    for order in [entry_order, tp_order]:
+        await order_repository.save(order)
+
+    # 注入依赖
+    order_repository.set_exchange_gateway(mock_exchange_gateway_with_cancel)
+
+    # 执行：只删除 TP 订单
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_tp_002"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：_get_all_related_order_ids 递归获取父订单
+    # 所以 TP 订单和 ENTRY 订单都会被删除
+    assert result["deleted_count"] == 2
+    assert set(result["deleted_from_db"]) == {"ord_entry_002", "ord_tp_002"}
+
+    # 验证：所有订单都从数据库删除
+    for oid in ["ord_entry_002", "ord_tp_002"]:
+        saved_order = await order_repository.get_order(oid)
+        assert saved_order is None
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_exchange_cancel_failure(
+    order_repository,
+    mock_exchange_gateway_with_cancel,
+):
+    """
+    TEST-DEL-BATCH-004: 交易所取消失败场景
+
+    测试场景:
+    1. Mock 交易所取消失败
+    2. 执行批量删除
+    3. 验证失败订单被记录
+
+    验收标准:
+    - 取消失败的订单记录在 failed_to_cancel
+    - DB 删除仍然成功
+    - 审计日志记录失败详情
+    """
+    # 准备：创建订单
+    order1 = create_test_order(
+        order_id="ord_fail_001",
+        exchange_order_id="binance_fail_001",
+    )
+    order2 = create_test_order(
+        order_id="ord_fail_002",
+        exchange_order_id="binance_fail_002",
+    )
+
+    for order in [order1, order2]:
+        await order_repository.save(order)
+
+    # Mock：第一个订单取消失败
+    async def cancel_side_effect(*args, **kwargs):
+        if kwargs.get("exchange_order_id") == "binance_fail_001":
+            return MagicMock(is_success=False, error_message="Order already canceled")
+        return MagicMock(is_success=True, error_message=None)
+
+    mock_exchange_gateway_with_cancel.cancel_order = AsyncMock(side_effect=cancel_side_effect)
+
+    # 注入依赖
+    order_repository.set_exchange_gateway(mock_exchange_gateway_with_cancel)
+    order_repository.set_audit_logger(mock_audit_logger_instance)
+
+    # 执行：批量删除
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_fail_001", "ord_fail_002"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：取消失败记录
+    assert len(result["failed_to_cancel"]) == 1
+    assert result["failed_to_cancel"][0]["order_id"] == "ord_fail_001"
+    assert "already canceled" in result["failed_to_cancel"][0]["reason"]
+
+    # 验证：DB 删除仍然成功
+    assert result["deleted_count"] == 2
+    assert set(result["deleted_from_db"]) == {"ord_fail_001", "ord_fail_002"}
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_no_exchange_gateway(
+    order_repository,
+):
+    """
+    TEST-DEL-BATCH-005: ExchangeGateway 未注入场景
+
+    测试场景:
+    1. 不注入 ExchangeGateway
+    2. 执行批量删除
+    3. 验证跳过交易所取消
+
+    验收标准:
+    - 所有订单记录为取消失败（原因：未注入网关）
+    - DB 删除成功
+    """
+    # 准备：创建订单
+    order = create_test_order(
+        order_id="ord_no_gateway_001",
+        exchange_order_id="binance_no_gateway_001",
+    )
+    await order_repository.save(order)
+
+    # 不注入 ExchangeGateway
+
+    # 执行：批量删除
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_no_gateway_001"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：取消失败（网关未注入）
+    assert len(result["failed_to_cancel"]) == 1
+    assert "not initialized" in result["failed_to_cancel"][0]["reason"]
+
+    # 验证：DB 删除成功
+    assert result["deleted_count"] == 1
+    saved_order = await order_repository.get_order("ord_no_gateway_001")
+    assert saved_order is None
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_empty_order_ids(
+    order_repository,
+):
+    """
+    TEST-DEL-BATCH-006: 空订单 ID 列表参数验证
+
+    测试场景:
+    1. 传入空订单 ID 列表
+    2. 验证抛出 ValueError
+
+    验收标准:
+    - 抛出 ValueError 异常
+    """
+    # 执行 & 验证：空列表抛出异常
+    with pytest.raises(ValueError, match="订单 ID 列表不能为空"):
+        await order_repository.delete_orders_batch(
+            order_ids=[],
+            cancel_on_exchange=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_exceeds_limit(
+    order_repository,
+):
+    """
+    TEST-DEL-BATCH-007: 超过 100 个订单限制验证
+
+    测试场景:
+    1. 传入超过 100 个订单 ID
+    2. 验证抛出 ValueError
+
+    验收标准:
+    - 抛出 ValueError 异常
+    """
+    # 准备：超过 100 个订单 ID
+    order_ids = [f"ord_{i}" for i in range(101)]
+
+    # 执行 & 验证：抛出异常
+    with pytest.raises(ValueError, match="批量删除最多支持 100 个订单"):
+        await order_repository.delete_orders_batch(
+            order_ids=order_ids,
+            cancel_on_exchange=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_partial_filled_orders(
+    order_repository,
+    mock_exchange_gateway_with_cancel,
+    mock_audit_logger_instance,
+):
+    """
+    TEST-DEL-BATCH-008: PARTIALLY_FILLED 状态订单取消
+
+    测试场景:
+    1. 创建 PARTIALLY_FILLED 状态的订单
+    2. 执行批量删除
+    3. 验证仍然尝试取消
+
+    验收标准:
+    - PARTIALLY_FILLED 订单也尝试取消
+    - 删除成功
+    """
+    # 准备：创建部分成交订单
+    order = create_test_order(
+        order_id="ord_partial_001",
+        status=OrderStatus.PARTIALLY_FILLED,
+        exchange_order_id="binance_partial_001",
+        filled_qty=Decimal('0.5'),
+    )
+    await order_repository.save(order)
+
+    # 注入依赖
+    order_repository.set_exchange_gateway(mock_exchange_gateway_with_cancel)
+    order_repository.set_audit_logger(mock_audit_logger_instance)
+
+    # 执行：批量删除
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_partial_001"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：取消成功
+    assert len(result["cancelled_on_exchange"]) == 1
+    assert result["deleted_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_batch_no_exchange_order_id(
+    order_repository,
+    mock_exchange_gateway_with_cancel,
+):
+    """
+    TEST-DEL-BATCH-009: 订单没有 exchange_order_id
+
+    测试场景:
+    1. 创建没有 exchange_order_id 的订单
+    2. 执行批量删除
+    3. 验证跳过交易所取消
+
+    验收标准:
+    - 记录为取消失败（原因：无 exchange_order_id）
+    - DB 删除成功
+    """
+    # 准备：创建订单（无 exchange_order_id）
+    order = create_test_order(
+        order_id="ord_no_exchange_id_001",
+        exchange_order_id=None,
+    )
+    await order_repository.save(order)
+
+    # 注入依赖
+    order_repository.set_exchange_gateway(mock_exchange_gateway_with_cancel)
+
+    # 执行：批量删除
+    result = await order_repository.delete_orders_batch(
+        order_ids=["ord_no_exchange_id_001"],
+        cancel_on_exchange=True,
+    )
+
+    # 验证：取消失败（无 exchange_order_id）
+    assert len(result["failed_to_cancel"]) == 1
+    assert "No exchange_order_id" in result["failed_to_cancel"][0]["reason"]
+
+    # 验证：DB 删除成功
+    assert result["deleted_count"] == 1
+
+
+# ============================================================
+# 极高风险方法测试 - get_oco_group
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_get_oco_group_normal(order_repository):
+    """
+    TEST-OCO-001: 正常获取 OCO 组
+
+    测试场景:
+    1. 创建多个相同 oco_group_id 的订单
+    2. 调用 get_oco_group 查询
+    3. 验证返回所有 OCO 组成员
+
+    验收标准:
+    - 返回所有相同 oco_group_id 的订单
+    - 订单按 created_at 升序排列
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+    oco_group_id = "oco_group_001"
+
+    # 准备：创建 OCO 组订单
+    orders = [
+        create_test_order(
+            order_id=f"ord_oco_{i}",
+            oco_group_id=oco_group_id,
+            order_role=OrderRole.TP1 if i % 2 == 0 else OrderRole.SL,
+        )
+        for i in range(3)
+    ]
+
+    for order in orders:
+        await order_repository.save(order)
+
+    # 执行：获取 OCO 组
+    result = await order_repository.get_oco_group(oco_group_id)
+
+    # 验证：返回所有 OCO 成员
+    assert len(result) == 3
+    assert all(o.oco_group_id == oco_group_id for o in result)
+
+    # 验证：按 created_at 升序排列
+    for i in range(len(result) - 1):
+        assert result[i].created_at <= result[i + 1].created_at
+
+
+@pytest.mark.asyncio
+async def test_get_oco_group_not_exists(order_repository):
+    """
+    TEST-OCO-002: OCO 组不存在
+
+    测试场景:
+    1. 查询不存在的 oco_group_id
+    2. 验证返回空列表
+
+    验收标准:
+    - 返回空列表
+    """
+    # 执行：查询不存在的 OCO 组
+    result = await order_repository.get_oco_group("oco_group_not_exists")
+
+    # 验证：返回空列表
+    assert len(result) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_oco_group_with_filled_orders(order_repository):
+    """
+    TEST-OCO-003: OCO 组包含已成交订单
+
+    测试场景:
+    1. 创建 OCO 组订单
+    2. 更新其中一个订单为 FILLED 状态
+    3. 查询 OCO 组
+
+    验收标准:
+    - 返回所有订单（包括已成交的）
+    - 订单状态正确
+    """
+    oco_group_id = "oco_group_filled_001"
+
+    # 准备：创建 OCO 组订单
+    tp_order = create_test_order(
+        order_id="ord_oco_tp",
+        oco_group_id=oco_group_id,
+        order_role=OrderRole.TP1,
+        status=OrderStatus.OPEN,
+    )
+    sl_order = create_test_order(
+        order_id="ord_oco_sl",
+        oco_group_id=oco_group_id,
+        order_role=OrderRole.SL,
+        status=OrderStatus.OPEN,
+    )
+
+    for order in [tp_order, sl_order]:
+        await order_repository.save(order)
+
+    # 执行：更新 TP 订单为已成交
+    await order_repository.update_status(
+        order_id="ord_oco_tp",
+        status=OrderStatus.FILLED,
+        filled_qty=Decimal('1.0'),
+    )
+
+    # 执行：获取 OCO 组
+    result = await order_repository.get_oco_group(oco_group_id)
+
+    # 验证：返回所有订单
+    assert len(result) == 2
+
+    # 验证：状态正确
+    tp_result = next(o for o in result if o.id == "ord_oco_tp")
+    sl_result = next(o for o in result if o.id == "ord_oco_sl")
+    assert tp_result.status == OrderStatus.FILLED
+    assert sl_result.status == OrderStatus.OPEN
+
+
+@pytest.mark.asyncio
+async def test_get_oco_group_with_canceled_orders(order_repository):
+    """
+    TEST-OCO-004: OCO 组包含已取消订单
+
+    测试场景:
+    1. 创建 OCO 组订单
+    2. 取消其中一个订单
+    3. 查询 OCO 组
+
+    验收标准:
+    - 返回所有订单（包括已取消的）
+    - 取消订单状态正确
+    """
+    oco_group_id = "oco_group_canceled_001"
+
+    # 准备：创建 OCO 组订单
+    orders = [
+        create_test_order(
+            order_id=f"ord_oco_cancel_{i}",
+            oco_group_id=oco_group_id,
+            status=OrderStatus.OPEN,
+        )
+        for i in range(2)
+    ]
+
+    for order in orders:
+        await order_repository.save(order)
+
+    # 执行：取消一个订单
+    await order_repository.update_status(
+        order_id="ord_oco_cancel_0",
+        status=OrderStatus.CANCELED,
+    )
+
+    # 执行：获取 OCO 组
+    result = await order_repository.get_oco_group(oco_group_id)
+
+    # 验证：返回所有订单
+    assert len(result) == 2
+
+    # 验证：状态正确
+    canceled_order = next(o for o in result if o.id == "ord_oco_cancel_0")
+    assert canceled_order.status == OrderStatus.CANCELED
+
+
+@pytest.mark.asyncio
+async def test_get_oco_group_single_order(order_repository):
+    """
+    TEST-OCO-005: OCO 组只有一个订单
+
+    测试场景:
+    1. 创建单个订单带 oco_group_id
+    2. 查询 OCO 组
+
+    验收标准:
+    - 返回单个订单
+    """
+    oco_group_id = "oco_group_single_001"
+
+    # 准备：创建单个订单
+    order = create_test_order(
+        order_id="ord_oco_single",
+        oco_group_id=oco_group_id,
+    )
+    await order_repository.save(order)
+
+    # 执行：获取 OCO 组
+    result = await order_repository.get_oco_group(oco_group_id)
+
+    # 验证：返回单个订单
+    assert len(result) == 1
+    assert result[0].id == "ord_oco_single"
+
+
+@pytest.mark.asyncio
+async def test_get_oco_group_null_oco_id(order_repository):
+    """
+    TEST-OCO-006: oco_group_id 为 None 的订单
+
+    测试场景:
+    1. 创建 oco_group_id 为 None 的订单
+    2. 查询 None 的 OCO 组
+
+    验收标准:
+    - None 不作为有效的 oco_group_id 查询
+    - 返回空列表
+    """
+    # 准备：创建订单（oco_group_id=None）
+    order = create_test_order(
+        order_id="ord_no_oco",
+        oco_group_id=None,
+    )
+    await order_repository.save(order)
+
+    # 执行：查询 None（应该返回空或处理）
+    # 注意：SQL 中 WHERE oco_group_id = NULL 不会匹配任何行
+    result = await order_repository.get_oco_group(None)  # type: ignore
+
+    # 验证：返回空列表
+    assert len(result) == 0
+
+
+# ============================================================
+# 辅助方法测试 - _get_all_related_order_ids
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_get_all_related_order_ids_parent_only(order_repository):
+    """
+    TEST-RELATED-001: 只获取子订单
+
+    测试场景:
+    1. 创建 ENTRY 订单和多个 TP/SL 子订单
+    2. 从 ENTRY 订单 ID 开始查询
+    3. 验证返回所有子订单 ID
+
+    验收标准:
+    - 返回所有子订单 ID
+    - 包含父订单本身
+    """
+    # 准备：创建订单链
+    entry_order = create_test_order(
+        order_id="ord_related_entry",
+        order_role=OrderRole.ENTRY,
+    )
+    tp_orders = [
+        create_test_order(
+            order_id=f"ord_related_tp{i}",
+            order_role=OrderRole.TP1,
+            parent_order_id="ord_related_entry",
+        )
+        for i in range(3)
+    ]
+    sl_order = create_test_order(
+        order_id="ord_related_sl",
+        order_role=OrderRole.SL,
+        parent_order_id="ord_related_entry",
+    )
+
+    for order in [entry_order] + tp_orders + [sl_order]:
+        await order_repository.save(order)
+
+    # 执行：获取关联订单 ID
+    result = await order_repository._get_all_related_order_ids(["ord_related_entry"])
+
+    # 验证：包含所有订单
+    expected_ids = {"ord_related_entry", "ord_related_tp0", "ord_related_tp1", "ord_related_tp2", "ord_related_sl"}
+    assert result == expected_ids
+
+
+@pytest.mark.asyncio
+async def test_get_all_related_order_ids_from_child(order_repository):
+    """
+    TEST-RELATED-002: 从子订单开始查询
+
+    测试场景:
+    1. 创建订单链
+    2. 从子订单 ID 开始查询
+    3. 验证返回父订单和所有兄弟订单
+
+    验收标准:
+    - 返回父订单 ID
+    - 返回所有兄弟订单 ID
+    """
+    # 准备：创建订单链
+    entry_order = create_test_order(
+        order_id="ord_chain_entry",
+        order_role=OrderRole.ENTRY,
+    )
+    tp1 = create_test_order(
+        order_id="ord_chain_tp1",
+        order_role=OrderRole.TP1,
+        parent_order_id="ord_chain_entry",
+    )
+    tp2 = create_test_order(
+        order_id="ord_chain_tp2",
+        order_role=OrderRole.TP2,
+        parent_order_id="ord_chain_entry",
+    )
+
+    for order in [entry_order, tp1, tp2]:
+        await order_repository.save(order)
+
+    # 执行：从 TP1 开始查询
+    result = await order_repository._get_all_related_order_ids(["ord_chain_tp1"])
+
+    # 验证：包含父订单和兄弟订单
+    expected_ids = {"ord_chain_entry", "ord_chain_tp1", "ord_chain_tp2"}
+    assert result == expected_ids
+
+
+@pytest.mark.asyncio
+async def test_get_all_related_order_ids_no_relations(order_repository):
+    """
+    TEST-RELATED-003: 订单没有关联关系
+
+    测试场景:
+    1. 创建独立订单（无 parent/children）
+    2. 查询关联订单
+
+    验收标准:
+    - 只返回订单本身
+    """
+    # 准备：创建独立订单
+    order = create_test_order(
+        order_id="ord_isolated",
+        parent_order_id=None,
+        oco_group_id=None,
+    )
+    await order_repository.save(order)
+
+    # 执行：查询关联订单
+    result = await order_repository._get_all_related_order_ids(["ord_isolated"])
+
+    # 验证：只包含自己
+    assert result == {"ord_isolated"}
+
+
+@pytest.mark.asyncio
+async def test_get_all_related_order_ids_multiple_roots(order_repository):
+    """
+    TEST-RELATED-004: 多个根订单
+
+    测试场景:
+    1. 创建多个独立订单链
+    2. 从多个根订单开始查询
+    3. 验证返回所有关联订单
+
+    验收标准:
+    - 返回所有订单链的订单
+    """
+    # 准备：创建两个订单链
+    for i in range(2):
+        entry = create_test_order(
+            order_id=f"ord_multi_entry_{i}",
+            order_role=OrderRole.ENTRY,
+        )
+        tp = create_test_order(
+            order_id=f"ord_multi_tp_{i}",
+            order_role=OrderRole.TP1,
+            parent_order_id=f"ord_multi_entry_{i}",
+        )
+        for order in [entry, tp]:
+            await order_repository.save(order)
+
+    # 执行：从两个根订单开始查询
+    result = await order_repository._get_all_related_order_ids([
+        "ord_multi_entry_0",
+        "ord_multi_entry_1",
+    ])
+
+    # 验证：包含所有订单
+    expected_ids = {
+        "ord_multi_entry_0", "ord_multi_tp_0",
+        "ord_multi_entry_1", "ord_multi_tp_1",
+    }
+    assert result == expected_ids

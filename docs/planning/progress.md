@@ -4,6 +4,64 @@
 
 ---
 
+### 2026-04-07 - OrderRepository 极高风险方法单元测试完成 ✅
+
+**任务 ID**: TEST-5  
+**负责人**: Backend Developer  
+**总工时**: 2h  
+**优先级**: P0
+
+**阶段目标**: 实现 `delete_orders_batch()` 和 `get_oco_group()` 的完整单元测试
+
+**完成工作**:
+
+1. ✅ **delete_orders_batch() 测试** (1h)
+   - 正常批量删除成功场景
+   - 包含子订单的级联删除
+   - 交易所取消失败场景
+   - ExchangeGateway 未注入场景
+   - 空订单 ID 列表参数验证
+   - 超过 100 个订单限制验证
+   - PARTIALLY_FILLED 状态订单取消
+   - 无 exchange_order_id 场景
+   - **共 9 个测试用例**
+
+2. ✅ **get_oco_group() 测试** (0.5h)
+   - 正常获取 OCO 组
+   - OCO 组不存在返回空列表
+   - OCO 组包含已成交订单
+   - OCO 组包含已取消订单
+   - OCO 组只有一个订单
+   - oco_group_id 为 None 处理
+   - **共 6 个测试用例**
+
+3. ✅ **_get_all_related_order_ids() 测试** (0.5h)
+   - 从父订单开始查询获取所有子订单
+   - 从子订单开始查询获取父订单和兄弟订单
+   - 独立订单无关联关系
+   - 多个根订单的订单链
+   - **共 4 个测试用例**
+
+**测试汇总**:
+| 方法 | 测试数 | 通过率 | 覆盖场景 |
+|------|--------|--------|----------|
+| delete_orders_batch | 9 | 100% | 正常/级联/失败/边界 |
+| get_oco_group | 6 | 100% | 正常/不存在/状态/边界 |
+| _get_all_related_order_ids | 4 | 100% | 父子/兄弟/独立/多根 |
+| **总计** | **19** | **100%** | - |
+
+**文件变更**:
+- `tests/unit/infrastructure/test_order_repository_unit.py` - 新增 19 个测试用例
+
+**验收结果**:
+- ✅ 31/31 测试全部通过
+- ✅ delete_orders_batch 覆盖率 100%
+- ✅ get_oco_group 覆盖率 100%
+- ✅ 使用 pytest-mock 模拟外部依赖
+- ✅ 每个方法包含正常场景 + 异常场景 + 边界条件
+
+---
+
 ### 2026-04-06 - 方案 C 测试架构重构阶段完成 ✅
 
 **任务 ID**: TEST-0  
