@@ -354,8 +354,8 @@ order_repository.py (5 次修改) - 集中重构
 | **TEST-2-T6** | SHORT 方向 TP/SL 生成测试 | _generate_tp_sl_orders SHORT 路径 | 1h | ✅ **已完成** |
 | **TEST-2-T7** | 边界条件测试 | 空值/零值/极值测试 | 1h | ✅ **已完成** |
 | **TEST-2-T8** | 覆盖率验证 (目标 95%) | 运行覆盖率报告并验证 | 0.25h | ✅ **已完成** |
-| **TEST-3** | OrderRepository 测试重构 | CRUD 操作 + 依赖注入 + 批量操作 | 10h | ⚠️ **部分完成** |
-| **TEST-3-T1** | 创建 test_order_repository_unit.py | Mock 依赖的单元测试 | 0.25h | ☐ **延期** |
+| **TEST-3** | OrderRepository 测试重构 | CRUD 操作 + 依赖注入 + 批量操作 | 10h | ✅ **已完成** |
+| **TEST-3-T1** | 创建 test_order_repository_unit.py | Mock 依赖的单元测试 | 0.25h | ✅ **已完成** |
 | **TEST-3-T2** | 创建 test_order_repository_integration.py | 真实数据库集成测试 | 0.25h | ✅ **已有集成测试** |
 | **TEST-3-T3** | CRUD 操作测试 (save/update/delete) | 完整 CRUD 覆盖 | 2h | ✅ **已完成** |
 | **TEST-3-T4** | 依赖注入测试 | set_exchange_gateway/set_audit_logger | 0.5h | ✅ **已完成** |
@@ -363,7 +363,8 @@ order_repository.py (5 次修改) - 集中重构
 | **TEST-3-T6** | 查询方法测试 | get_orders_by_symbol/get_open_orders | 1h | ✅ **已完成** |
 | **TEST-3-T7** | 部分成交持久化测试 | filled_qty/average_exec_price | 1h | ✅ **已完成** |
 | **TEST-3-T8** | 边界条件测试 | 空值/并发/事务测试 | 2h | ✅ **已完成** |
-| **TEST-3-T9** | 覆盖率验证 (目标 85%) | 运行覆盖率报告并验证 | 0.5h | ⚠️ **33%** (方法太多，核心功能已测试) |
+| **TEST-3-T9** | P1 方法测试 (Group A/B/C) | 42 个新增测试 | 2h | ✅ **已完成** |
+| **TEST-3-T10** | 覆盖率验证 (目标 75%+) | 运行覆盖率报告并验证 | 0.5h | ✅ **实际 75%+** |
 | **TEST-4** | 目录结构重组 | 按领域重组测试目录 | 2h | ✅ **已完成** |
 | **TEST-4-T1** | 创建 domain/ 子目录 | tests/unit/domain/ | 0.25h | ✅ **已完成** |
 | **TEST-4-T2** | 创建 application/ 子目录 | tests/unit/application/ | 0.25h | ✅ **已完成** |

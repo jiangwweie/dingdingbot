@@ -6,15 +6,95 @@
 
 ## 📑 目录
 
-1. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
-2. [前端配置页面优化 PRD](#前端配置页面优化 prd)
-3. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
-3. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
-4. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
-5. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
-6. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
-7. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
-8. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+1. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
+2. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
+3. [前端配置页面优化 PRD](#前端配置页面优化 prd)
+4. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
+5. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
+6. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+7. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
+8. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
+9. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+10. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+
+---
+
+## 📌 BT-2 资金费用计算实现
+
+**创建日期**: 2026-04-07  
+**任务负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 计算模型
+
+```
+资金费用 = 持仓价值 × 资金费率 × 持仓时长系数
+
+其中:
+- 持仓价值 = 入场价格 × 持仓数量
+- 资金费率 = 0.0001 (0.01%，默认值)
+- 持仓时长系数 = 时间周期小时数 / 8
+
+时间周期映射:
+- 15m = 0.25h → 0.25/8 = 1/32 个资金费率周期
+- 1h = 1h → 1/8 个资金费率周期
+- 4h = 4h → 4/8 = 1/2 个资金费率周期
+- 1d = 24h → 24/8 = 3 个资金费率周期
+- 1w = 168h → 168/8 = 21 个资金费率周期
+```
+
+### 会计处理规则
+
+**多头持仓**: 资金费用为正（支付成本）
+```python
+# 示例：多头 1 BTC，入场价 50000 USDT，1h K 线
+funding_cost = 50000 × 1 × 0.0001 × (1/8) = 0.625 USDT (支付)
+```
+
+**空头持仓**: 资金费用为负（收取收益）
+```python
+# 示例：空头 1 BTC，入场价 50000 USDT，1h K 线
+funding_cost = -50000 × 1 × 0.0001 × (1/8) = -0.625 USDT (收取)
+```
+
+### 配置优先级
+
+```
+1. API Request 参数 (request.funding_rate_enabled)
+2. KV 配置 (config_entries_v2 数据库存储)
+3. Code Defaults (代码硬编码默认值)
+```
+
+### 实现位置
+
+| 组件 | 文件路径 | 说明 |
+|------|---------|------|
+| 计算方法 | `src/application/backtester.py:1483-1521` | `_calculate_funding_cost()` |
+| 主循环集成 | `src/application/backtester.py:1405-1416` | 动态风险管理之后调用 |
+| 报告填充 | `src/application/backtester.py:1453` | `total_funding_cost` 字段 |
+| 请求模型 | `src/domain/models.py:632-635` | `BacktestRequest.funding_rate_enabled` |
+
+### 单元测试
+
+```bash
+# 测试覆盖率
+pytest tests/unit/test_backtester_funding_cost.py -v
+# 10 passed
+
+# 回归测试
+pytest tests/unit/test_backtester*.py -v
+# 59 passed
+```
+
+### 技术决策
+
+**决策 1**: 固定费率 0.01% vs 动态费率  
+**选择**: 固定费率  
+**理由**: 简化实现、长期平均值、保守估计
+
+**决策 2**: 按 K 线数量估算 vs 精确追踪 8 小时结算时点  
+**选择**: 按 K 线数量估算  
+**理由**: 计算开销低、长期回测结果趋于准确
 
 ---
 
