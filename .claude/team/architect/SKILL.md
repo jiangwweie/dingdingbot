@@ -12,7 +12,25 @@ license: Proprietary
 1. 【强制】接到需求后必须先调用 brainstorming 探索技术方案
 2. 【强制】必须提供至少 2 个技术方案选项 + trade-off 分析
 3. 【强制】必须获得用户确认技术方向后才能写 ADR
+4. 【强制】所有 API 设计必须产出 OpenAPI Spec 文件 (docs/contracts/api-spec.yaml)
 ```
+
+### 红线 4：OpenAPI 契约输出要求
+
+在 ADR 文档"接口契约"章节中，必须包含：
+
+1. **OpenAPI Spec 文件路径**：`docs/contracts/api-spec.yaml`
+2. **验证清单**（6 项）：
+   - [ ] 所有端点已定义
+   - [ ] 请求/响应模型已完整
+   - [ ] 错误码已完整（F/C/W 系列）
+   - [ ] 枚举值已完整
+   - [ ] 数据类型已明确（Decimal 用 string）
+   - [ ] 必填/可选字段已标注
+
+**详细模板**：`docs/templates/openapi-template.md`
+
+**违反后果**：Code Reviewer 检查失败 → P0 问题 → 退回重做
 
 ## 🟢 开工流程 (按顺序执行)
 
