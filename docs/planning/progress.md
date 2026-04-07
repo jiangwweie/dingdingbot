@@ -4,6 +4,81 @@
 
 ---
 
+### 2026-04-07 10:15 - OrderRepository P1 Group A 核心查询方法测试完成 ✅
+
+**任务 ID**: TEST-ORDER-REPO-P1-GA  
+**负责人**: Backend Developer  
+**总工时**: 2.5h  
+**优先级**: P1
+
+**阶段目标**: 实现 OrderRepository P1 Group A 核心查询方法单元测试
+
+**完成工作**:
+
+1. ✅ **测试夹具准备** (15 分钟)
+   - 新增 `sample_orders_factory` 夹具（可配置化生成测试数据）
+   - 确认临时数据库夹具 `temp_db_path`
+   - 确认仓库实例夹具 `order_repository`
+
+2. ✅ **TestGetOrders 测试类实现** (60 分钟)
+   - P1-001: 无过滤条件查询（默认行为）
+   - P1-002: symbol 过滤（单币种）
+   - P1-003: status 过滤（单状态）
+   - P1-004: order_role 过滤（单角色）
+   - P1-005: 多条件组合过滤（symbol + status + order_role）
+   - P1-006: 分页测试 - 第一页（limit=10, offset=0）
+   - P1-007: 分页测试 - 第二页（limit=10, offset=10）
+   - P1-008: 分页边界 - 空结果（超出总记录数）
+   - P1-009: limit 边界值（limit=1）
+   - P1-010: 空数据库查询（无任何订单）
+
+3. ✅ **TestGetOrdersBySignalIds 测试类实现** (45 分钟)
+   - P1-011: 单信号查询（单个 signal_id）
+   - P1-012: 多信号批量查询（多个 signal_ids）
+   - P1-013: 带角色过滤（signal_ids + order_role）
+   - P1-014: 分页测试 - page=1（第一页）
+   - P1-015: 分页测试 - page=2（第二页）
+   - P1-016: 空信号列表（signal_ids=[]）
+   - P1-017: 不存在的信号（signal_ids 不含有效数据）
+
+4. ✅ **测试验收标准** (30 分钟)
+   - 17 个测试用例全部通过
+   - 分页逻辑 100% 覆盖
+   - 多条件组合过滤测试完整
+   - 测试代码符合项目规范
+
+5. ✅ **代码提交**
+   - 文件：`tests/unit/infrastructure/test_order_repository_unit.py`
+   - 新增测试：17 个 P1 Group A 测试
+   - 新增夹具：`sample_orders_factory`
+   - 代码行数：+450 行
+
+**测试执行结果**:
+```
+测试文件：tests/unit/infrastructure/test_order_repository_unit.py
+Group A 测试数：17
+通过数：17
+失败数：0
+执行时间：0.14s
+
+覆盖率验证:
+- get_orders(): ✅ 10/10 测试通过
+- get_orders_by_signal_ids(): ✅ 7/7 测试通过
+- 分页逻辑：✅ 100% 覆盖
+- 多条件组合过滤：✅ 完整覆盖
+```
+
+**关键验证点**:
+- ✅ 分页逻辑验证（offset/limit、page/page_size）
+- ✅ 过滤条件验证（symbol、status、order_role 单条件 + 组合）
+- ✅ 边界条件验证（空数据库、limit=1、超出范围）
+- ✅ 排序验证（created_at 降序/升序）
+
+**输出文件**:
+- `docs/planning/order-repo-p1-group-a-complete.md` - 完成报告
+
+---
+
 ### 2026-04-07 10:00 - OrderRepository P1 Group C 别名方法测试完成 ✅
 
 **任务 ID**: TEST-ORDER-REPO-P1-GC  

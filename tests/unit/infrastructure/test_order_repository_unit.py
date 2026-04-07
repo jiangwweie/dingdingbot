@@ -2324,6 +2324,553 @@ def sample_orders_factory():
 
 
 # ============================================================
+# P1 Group A: 核心查询方法测试
+# ============================================================
+
+# ------------------------------------------------------------
+# TestGetOrders: get_orders() 方法测试 (10 个用例)
+# ------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestGetOrders:
+    """P1-001 ~ P1-010: get_orders() 方法测试"""
+
+    @pytest.mark.asyncio
+    async def test_p1_001_no_filters(self, order_repository, sample_orders_factory):
+        """
+        P1-001: 无过滤条件查询（默认行为）
+
+        测试场景:
+        1. 创建 25 个订单
+        2. 无过滤条件调用 get_orders()
+        3. 验证返回所有订单
+
+        验收标准:
+        - 返回默认 limit=50 内的所有订单
+        - 按 created_at 降序排列
+        - total 正确
+        """
+        orders = sample_orders_factory("sig_p1_001", count=25)
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders()
+
+        assert result['total'] == 25
+        assert len(result['items']) == 25
+        assert result['limit'] == 50
+        assert result['offset'] == 0
+        for i in range(len(result['items']) - 1):
+            assert result['items'][i].created_at >= result['items'][i + 1].created_at
+
+    @pytest.mark.asyncio
+    async def test_p1_002_symbol_filter(self, order_repository, sample_orders_factory):
+        """
+        P1-002: symbol 过滤（单币种）
+
+        测试场景:
+        1. 创建多币种订单
+        2. 使用 symbol 过滤查询
+        3. 验证只返回指定币种订单
+
+        验收标准:
+        - 只返回 BTC/USDT:USDT 订单
+        """
+        orders = sample_orders_factory("sig_p1_002", count=30)
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders(symbol="BTC/USDT:USDT")
+
+        assert result['total'] == 10
+        assert len(result['items']) == 10
+        assert all(o.symbol == "BTC/USDT:USDT" for o in result['items'])
+
+    @pytest.mark.asyncio
+    async def test_p1_003_status_filter(self, order_repository, sample_orders_factory):
+        """
+        P1-003: status 过滤（单状态）
+
+        测试场景:
+        1. 创建多状态订单
+        2. 使用 status 过滤查询
+        3. 验证只返回指定状态订单
+
+        验收标准:
+        - 只返回 OPEN 状态订单
+        """
+        orders = sample_orders_factory("sig_p1_003", count=30)
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders(status=OrderStatus.OPEN)
+
+        assert result['total'] == 10
+        assert len(result['items']) == 10
+        assert all(o.status == OrderStatus.OPEN for o in result['items'])
+
+    @pytest.mark.asyncio
+    async def test_p1_004_order_role_filter(self, order_repository, sample_orders_factory):
+        """
+        P1-004: order_role 过滤（单角色）
+
+        测试场景:
+        1. 创建多角色订单
+        2. 使用 order_role 过滤查询
+        3. 验证只返回指定角色订单
+
+        验收标准:
+        - 只返回 ENTRY 角色订单
+        """
+        orders = sample_orders_factory("sig_p1_004", count=30)
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders(order_role=OrderRole.ENTRY)
+
+        assert result['total'] == 10
+        assert len(result['items']) == 10
+        assert all(o.order_role == OrderRole.ENTRY for o in result['items'])
+
+    @pytest.mark.asyncio
+    async def test_p1_005_combined_filters(self, order_repository, sample_orders_factory):
+        """
+        P1-005: 多条件组合过滤（symbol + status + order_role）
+
+        测试场景:
+        1. 创建多条件组合订单
+        2. 使用多条件过滤查询
+        3. 验证返回同时满足所有条件的订单
+
+        验收标准:
+        - 返回同时满足 symbol + status + order_role 的订单
+        """
+        orders = sample_orders_factory("sig_p1_005", count=27)
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders(
+            symbol="BTC/USDT:USDT",
+            status=OrderStatus.OPEN,
+            order_role=OrderRole.ENTRY,
+        )
+
+        assert all(
+            o.symbol == "BTC/USDT:USDT" and
+            o.status == OrderStatus.OPEN and
+            o.order_role == OrderRole.ENTRY
+            for o in result['items']
+        )
+
+    @pytest.mark.asyncio
+    async def test_p1_006_pagination_page1(self, order_repository, sample_orders_factory):
+        """
+        P1-006: 分页测试 - 第一页（limit=10, offset=0）
+
+        测试场景:
+        1. 创建 25 个订单
+        2. 查询第一页（limit=10, offset=0）
+        3. 验证返回前 10 条
+
+        验收标准:
+        - 返回 10 条记录
+        - total=25
+        """
+        orders = sample_orders_factory("sig_p1_006", count=25)
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders(limit=10, offset=0)
+
+        assert result['total'] == 25
+        assert len(result['items']) == 10
+        assert result['limit'] == 10
+        assert result['offset'] == 0
+
+    @pytest.mark.asyncio
+    async def test_p1_007_pagination_page2(self, order_repository, sample_orders_factory):
+        """
+        P1-007: 分页测试 - 第二页（limit=10, offset=10）
+
+        测试场景:
+        1. 创建 25 个订单
+        2. 查询第二页（limit=10, offset=10）
+        3. 验证返回第 11-20 条
+
+        验收标准:
+        - 返回 10 条记录
+        - 第二页数据与第一页不重叠
+        """
+        orders = sample_orders_factory("sig_p1_007", count=25)
+        for order in orders:
+            await order_repository.save(order)
+
+        page1 = await order_repository.get_orders(limit=10, offset=0)
+        page2 = await order_repository.get_orders(limit=10, offset=10)
+
+        assert page1['total'] == 25
+        assert len(page1['items']) == 10
+        assert page2['total'] == 25
+        assert len(page2['items']) == 10
+        page1_ids = {o.id for o in page1['items']}
+        page2_ids = {o.id for o in page2['items']}
+        assert page1_ids.isdisjoint(page2_ids)
+
+    @pytest.mark.asyncio
+    async def test_p1_008_pagination_empty_result(self, order_repository, sample_orders_factory):
+        """
+        P1-008: 分页边界 - 空结果（超出总记录数）
+
+        测试场景:
+        1. 创建 10 个订单
+        2. 查询 offset=20（超出总数）
+        3. 验证返回空列表
+
+        验收标准:
+        - items 为空列表
+        - total=10
+        """
+        orders = sample_orders_factory("sig_p1_008", count=10)
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders(limit=10, offset=20)
+
+        assert result['total'] == 10
+        assert len(result['items']) == 0
+
+    @pytest.mark.asyncio
+    async def test_p1_009_limit_boundary(self, order_repository, sample_orders_factory):
+        """
+        P1-009: limit 边界值（limit=1）
+
+        测试场景:
+        1. 创建 5 个订单
+        2. 查询 limit=1
+        3. 验证只返回 1 条
+
+        验收标准:
+        - 只返回 1 条记录
+        - total=5
+        """
+        orders = sample_orders_factory("sig_p1_009", count=5)
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders(limit=1, offset=0)
+
+        assert result['total'] == 5
+        assert len(result['items']) == 1
+        assert result['limit'] == 1
+
+    @pytest.mark.asyncio
+    async def test_p1_010_empty_database(self, order_repository):
+        """
+        P1-010: 空数据库查询（无任何订单）
+
+        测试场景:
+        1. 空数据库（无任何订单）
+        2. 调用 get_orders()
+        3. 验证返回空列表
+
+        验收标准:
+        - items 为空列表
+        - total=0
+        """
+        result = await order_repository.get_orders()
+
+        assert result['total'] == 0
+        assert len(result['items']) == 0
+
+
+# ------------------------------------------------------------
+# TestGetOrdersBySignalIds: get_orders_by_signal_ids() 方法测试 (7 个用例)
+# ------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestGetOrdersBySignalIds:
+    """P1-011 ~ P1-017: get_orders_by_signal_ids() 方法测试"""
+
+    @pytest.mark.asyncio
+    async def test_p1_011_single_signal(self, order_repository):
+        """
+        P1-011: 单信号查询（单个 signal_id）
+
+        测试场景:
+        1. 创建同一信号的多个订单
+        2. 使用单信号查询
+        3. 验证返回该信号的所有订单
+
+        验收标准:
+        - 返回该信号的所有订单
+        - total 正确
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        orders = [
+            Order(
+                id=f"ord_single_{i}",
+                signal_id="sig_single",
+                symbol="BTC/USDT:USDT",
+                direction=Direction.LONG,
+                order_type=OrderType.MARKET,
+                order_role=OrderRole.ENTRY,
+                requested_qty=Decimal('1.0'),
+                filled_qty=Decimal('0'),
+                status=OrderStatus.OPEN,
+                created_at=current_time + i * 1000,
+                updated_at=current_time + i * 1000,
+                reduce_only=False,
+            )
+            for i in range(5)
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders_by_signal_ids(signal_ids=["sig_single"])
+
+        assert result['total'] == 5
+        assert len(result['orders']) == 5
+        assert result['page'] == 1
+        assert all(o.signal_id == "sig_single" for o in result['orders'])
+
+    @pytest.mark.asyncio
+    async def test_p1_012_multiple_signals(self, order_repository):
+        """
+        P1-012: 多信号批量查询（多个 signal_ids）
+
+        测试场景:
+        1. 创建 3 个信号的订单
+        2. 使用多信号查询
+        3. 验证返回所有信号的订单
+
+        验收标准:
+        - 返回所有指定信号的订单
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        orders = []
+        for sig_idx in range(3):
+            for i in range(5):
+                orders.append(
+                    Order(
+                        id=f"ord_multi_{sig_idx}_{i}",
+                        signal_id=f"sig_multi_{sig_idx:02d}",
+                        symbol="BTC/USDT:USDT",
+                        direction=Direction.LONG,
+                        order_type=OrderType.MARKET,
+                        order_role=OrderRole.ENTRY,
+                        requested_qty=Decimal('1.0'),
+                        filled_qty=Decimal('0'),
+                        status=OrderStatus.OPEN,
+                        created_at=current_time + sig_idx * 10000 + i * 1000,
+                        updated_at=current_time + sig_idx * 10000 + i * 1000,
+                        reduce_only=False,
+                    )
+                )
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders_by_signal_ids(
+            signal_ids=["sig_multi_00", "sig_multi_01"]
+        )
+
+        assert result['total'] == 10
+        assert len(result['orders']) == 10
+        assert all(o.signal_id in ["sig_multi_00", "sig_multi_01"] for o in result['orders'])
+
+    @pytest.mark.asyncio
+    async def test_p1_013_with_role_filter(self, order_repository):
+        """
+        P1-013: 带角色过滤（signal_ids + order_role）
+
+        测试场景:
+        1. 创建多角色订单
+        2. 使用 signal_ids + order_role 过滤
+        3. 验证返回过滤后的订单
+
+        验收标准:
+        - 返回指定信号且指定角色的订单
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        roles = [OrderRole.ENTRY, OrderRole.TP1, OrderRole.SL]
+        orders = []
+        for role_idx, role in enumerate(roles):
+            for i in range(3):
+                orders.append(
+                    Order(
+                        id=f"ord_role_{role_idx}_{i}",
+                        signal_id="sig_role_test",
+                        symbol="BTC/USDT:USDT",
+                        direction=Direction.LONG,
+                        order_type=OrderType.MARKET,
+                        order_role=role,
+                        requested_qty=Decimal('1.0'),
+                        filled_qty=Decimal('0'),
+                        status=OrderStatus.OPEN,
+                        created_at=current_time + role_idx * 10000 + i * 1000,
+                        updated_at=current_time + role_idx * 10000 + i * 1000,
+                        reduce_only=False,
+                    )
+                )
+        for order in orders:
+            await order_repository.save(order)
+
+        result = await order_repository.get_orders_by_signal_ids(
+            signal_ids=["sig_role_test"],
+            order_role="ENTRY",
+        )
+
+        assert result['total'] == 3
+        assert len(result['orders']) == 3
+        assert all(o.order_role == OrderRole.ENTRY for o in result['orders'])
+
+    @pytest.mark.asyncio
+    async def test_p1_014_pagination_page1(self, order_repository, sample_orders_factory):
+        """
+        P1-014: 分页测试 - page=1（第一页）
+
+        测试场景:
+        1. 创建 25 个订单
+        2. 查询 page=1, page_size=10
+        3. 验证返回第一页
+
+        验收标准:
+        - 返回 10 条记录
+        - page=1
+        """
+        orders = sample_orders_factory("sig_p1_014", count=25)
+        for order in orders:
+            await order_repository.save(order)
+
+        signal_ids = [f"sig_p1_014_{i:02d}" for i in range(5)]
+        result = await order_repository.get_orders_by_signal_ids(
+            signal_ids=signal_ids,
+            page=1,
+            page_size=10,
+        )
+
+        assert result['total'] == 25
+        assert len(result['orders']) == 10
+        assert result['page'] == 1
+
+    @pytest.mark.asyncio
+    async def test_p1_015_pagination_page2(self, order_repository, sample_orders_factory):
+        """
+        P1-015: 分页测试 - page=2（第二页）
+
+        测试场景:
+        1. 创建 25 个订单
+        2. 查询 page=2, page_size=10
+        3. 验证返回第二页
+
+        验收标准:
+        - 返回 10 条记录
+        - page=2
+        - 两页数据不重叠
+        """
+        orders = sample_orders_factory("sig_p1_015", count=25)
+        for order in orders:
+            await order_repository.save(order)
+
+        signal_ids = [f"sig_p1_015_{i:02d}" for i in range(5)]
+        page1 = await order_repository.get_orders_by_signal_ids(
+            signal_ids=signal_ids,
+            page=1,
+            page_size=10,
+        )
+        page2 = await order_repository.get_orders_by_signal_ids(
+            signal_ids=signal_ids,
+            page=2,
+            page_size=10,
+        )
+
+        assert page1['total'] == 25
+        assert len(page1['orders']) == 10
+        assert page2['total'] == 25
+        assert len(page2['orders']) == 10
+        page1_ids = {o.id for o in page1['orders']}
+        page2_ids = {o.id for o in page2['orders']}
+        assert page1_ids.isdisjoint(page2_ids)
+
+    @pytest.mark.asyncio
+    async def test_p1_016_empty_signal_ids(self, order_repository):
+        """
+        P1-016: 空信号列表（signal_ids=[]）
+
+        测试场景:
+        1. 创建一些订单
+        2. 使用空信号列表查询
+        3. 验证返回空结果
+
+        验收标准:
+        - 返回空列表
+        - total=0
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        order = Order(
+            id="ord_empty_sig_001",
+            signal_id="sig_not_empty",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            reduce_only=False,
+        )
+        await order_repository.save(order)
+
+        # 执行：空信号列表查询
+        result = await order_repository.get_orders_by_signal_ids(signal_ids=[])
+
+        # 验证：返回空结果
+        assert result['total'] == 0
+        assert len(result['orders']) == 0
+        assert result['page'] == 1
+        assert result['page_size'] == 20
+
+    @pytest.mark.asyncio
+    async def test_p1_017_not_exist_signal(self, order_repository):
+        """
+        P1-017: 不存在的信号（signal_ids 不含有效数据）
+
+        测试场景:
+        1. 创建一些订单
+        2. 查询不存在的信号
+        3. 验证返回空列表
+
+        验收标准:
+        - 返回空列表
+        - total=0
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        order = Order(
+            id="ord_exist_001",
+            signal_id="sig_exist",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            reduce_only=False,
+        )
+        await order_repository.save(order)
+
+        result = await order_repository.get_orders_by_signal_ids(
+            signal_ids=["sig_not_exist_1", "sig_not_exist_2"],
+        )
+
+        assert result['total'] == 0
+        assert len(result['orders']) == 0
+
+
+# ============================================================
 # P1 Group C: 别名方法测试
 # ============================================================
 
