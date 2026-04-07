@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-04-07 P1-5 阶段 2 核心功能实现完成 (Backend)
+
+**任务**: P1-5 Day 5-2 实现具体 Provider（阶段 2 核心功能）
+**执行者**: Backend Developer
+**状态**: ✅ 已完成
+**实际工时**: 2h
+
+### 实施内容
+
+**阶段 2: 实现 3 个具体 Provider**
+
+| 文件 | 内容 | 行数 |
+|------|------|------|
+| `src/application/config/providers/core_provider.py` | CoreConfigProvider | ~140 |
+| `src/application/config/providers/user_provider.py` | UserConfigProvider | ~200 |
+| `src/application/config/providers/risk_provider.py` | RiskConfigProvider | ~140 |
+| `src/application/config/providers/__init__.py` | 导出新增 Provider | +6 行 |
+
+**Provider 实现特性**:
+- 继承 `CachedProvider` 基类，自动获得 TTL 缓存能力
+- 注入 `ConfigRepository` 依赖，不直接访问数据库
+- 注入 `ClockProtocol` 依赖，支持测试时模拟时间
+- 完整的类型注解和 docstring
+- Decimal 精度保持（使用 `Decimal(str(value))` 转换）
+
+**ConfigRepository 扩展方法**:
+- `update_risk_config_item(key, value)`: KV 模式更新风控配置
+- `update_user_config_item(key, value)`: KV 模式更新用户配置
+
+### 验证结果
+
+```bash
+# 导入验证
+python3 -c "from src.application.config.providers import CoreConfigProvider, UserConfigProvider, RiskConfigProvider"
+# ✅ Import successful
+```
+
+### Git 提交
+
+- [ ] 提交消息："feat(P1-5): 实现 Core/User/Risk Provider"
+- [ ] 更新 progress.md
+- [ ] 更新 task_plan.md
+
+---
+
 ## 2026-04-07 P1-5 Provider 层测试环境准备完成 (QA)
 
 **任务**: P1-5 Day 5-3 Provider 层测试准备（阶段 0 测试准备）

@@ -32,6 +32,9 @@ from .cached_provider import (
     SystemClock,
     MockClock,
 )
+from .core_provider import CoreConfigProvider
+from .user_provider import UserConfigProvider
+from .risk_provider import RiskConfigProvider
 
 __all__ = [
     # Protocol
@@ -44,4 +47,8 @@ __all__ = [
     "ClockProtocol",
     "SystemClock",
     "MockClock",
+    # Concrete Providers
+    "CoreConfigProvider",
+    "UserConfigProvider",
+    "RiskConfigProvider",
 ]

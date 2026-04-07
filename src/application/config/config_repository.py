@@ -637,7 +637,49 @@ class ConfigRepository:
             
             # Invalidate cache
             self._risk_config_cache = config
-    
+
+    async def update_risk_config_item(self, key: str, value: Any) -> None:
+        """
+        Update a single risk config item (KV mode).
+
+        Args:
+            key: Config key (e.g., 'max_leverage', 'max_loss_percent')
+            value: New value
+
+        Note:
+            This method updates a single field and refreshes the cache
+        """
+        self.assert_initialized()
+
+        # Get current config
+        current = await self.get_risk_config()
+
+        # Validate key exists in RiskConfig
+        if not hasattr(current, key):
+            raise ValueError(f"Invalid risk config key: {key}")
+
+        # Handle Decimal conversion for numeric values
+        if key in ('max_loss_percent', 'max_total_exposure', 'daily_max_loss'):
+            if value is not None and not isinstance(value, Decimal):
+                value = Decimal(str(value))
+
+        # Build updated config
+        updated_data = {
+            'max_loss_percent': getattr(current, 'max_loss_percent'),
+            'max_leverage': getattr(current, 'max_leverage'),
+            'max_total_exposure': getattr(current, 'max_total_exposure'),
+            'daily_max_trades': getattr(current, 'daily_max_trades'),
+            'daily_max_loss': getattr(current, 'daily_max_loss'),
+            'max_position_hold_time': getattr(current, 'max_position_hold_time'),
+        }
+        updated_data[key] = value
+
+        # Create updated config
+        updated_config = RiskConfig(**updated_data)
+
+        # Save full config
+        await self.update_risk_config(updated_config, changed_by="api")
+
     async def _load_risk_config(self) -> RiskConfig:
         """Load risk configuration from database."""
         async with self._db.execute(
@@ -757,9 +799,53 @@ class ConfigRepository:
             
             if not channels:
                 return self._load_user_config_from_yaml().notification
-            
+
             return NotificationConfig(channels=channels)
-    
+
+    async def update_user_config_item(self, key: str, value: Any) -> None:
+        """
+        Update a single user config item (KV mode).
+
+        Args:
+            key: Config key (e.g., 'user_symbols', 'timeframes', 'mtf_ema_period')
+            value: New value
+
+        Note:
+            This method updates the user_config YAML file for backward compatibility.
+            User config is stored in user.yaml and loaded from there.
+        """
+        self.assert_initialized()
+
+        # For now, user config is stored in YAML
+        # Read current user config
+        yaml_path = self._config_dir / 'user.yaml'
+
+        if yaml_path.exists():
+            with open(yaml_path, 'r', encoding='utf-8') as f:
+                import yaml
+                user_config = yaml.safe_load(f) or {}
+        else:
+            user_config = {}
+
+        # Handle nested keys (e.g., 'exchange.api_key')
+        if '.' in key:
+            keys = key.split('.')
+            current = user_config
+            for k in keys[:-1]:
+                if k not in current:
+                    current[k] = {}
+                current = current[k]
+            current[keys[-1]] = value
+        else:
+            user_config[key] = value
+
+        # Write back to YAML
+        with open(yaml_path, 'w', encoding='utf-8') as f:
+            import yaml
+            yaml.safe_dump(user_config, f, allow_unicode=True, default_flow_style=False)
+
+        logger.info(f"User config updated: {key} = {value}")
+
     # ============================================================
     # Strategy CRUD Operations
     # ============================================================
