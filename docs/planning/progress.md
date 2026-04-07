@@ -4,6 +4,63 @@
 
 ---
 
+### 2026-04-07 - BT-2 资金费率模拟功能完成 ✅
+
+**任务 ID**: BT-2  
+**优先级**: P1  
+**工时估算**: 12h  
+**实际工时**: 8h  
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ 配置管理新增资金费率配置（KV 配置化设计）
+2. ✅ Position 和 PMSBacktestReport 模型新增字段
+3. ✅ Backtester 实现资金费用计算逻辑
+4. ✅ 前端详情页展示资金费用（方案 A：最小改动）
+5. ✅ 采用方案 A 避免数据库迁移（仅详情页展示）
+
+**后端修改文件**:
+- `src/infrastructure/config_entry_repository.py` - 新增默认配置
+- `src/application/config_manager.py` - 更新文档注释
+- `src/domain/models.py` - 新增 3 个字段（Position/PMSBacktestReport/BacktestRequest）
+- `src/application/backtester.py` - 实现计算逻辑和主循环集成
+
+**前端修改文件**:
+- `web-front/src/types/backtest.ts` - 新增 total_funding_cost 字段
+- `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` - 新建详情弹窗（398 行）
+- `web-front/src/pages/BacktestReports.tsx` - 集成详情弹窗组件
+
+**资金费率设计决策**:
+- 固定费率 0.01%（0.0001）每 8 小时
+- 多头支付（正成本），空头收取（负成本/正收益）
+- 按 K 线时长估算：funding_events = (klines_held × timeframe_hours) / 8
+- 默认开启（可通过 KV 配置或 Request 参数关闭）
+
+**验收标准**:
+- ✅ KV 配置读取逻辑正确（request > KV > defaults）
+- ✅ 资金费用计算方法实现并集成主循环
+- ✅ Position 累计资金费用字段填充
+- ✅ PMSBacktestReport 总资金费用字段填充
+- ✅ 前端详情页展示资金费用（颜色区分正负）
+
+**架构文档**: `docs/arch/adr-002-funding-rate-simulation.md`
+
+---
+
+### 待办事项
+
+**T11: 同时同向持仓限制**（P2, 1h）
+- **问题**: 回测中同一币种连续触发同向信号会重复开仓
+- **位置**: `src/application/backtester.py:1249-1312`
+- **修复**: 开仓前检查是否已有同向持仓，跳过重复开仓信号
+
+**T12: 权益金检查修复**（P2, 1h）
+- **问题**: `account.positions` 为 None 时迭代报错
+- **位置**: `src/domain/risk_calculator.py:133-135`
+- **修复**: 添加防御性检查 `account.positions or []`
+
+---
+
 ### 2026-04-07 - T007 P2-7 UPSERT 数据丢失修复 ✅
 
 **任务 ID**: T007  
