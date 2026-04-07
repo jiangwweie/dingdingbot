@@ -1075,7 +1075,18 @@ def _deep_mask_config(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Deep mask sensitive fields in config dictionary.
 
-    Sensitive fields: api_key, api_secret, webhook_url, secret, password, token
+    # P1-4 Fix: Enhanced sensitive field list with comprehensive coverage
+    # Matches field names containing these keywords (case-insensitive):
+    # - password: any password field
+    # - passphrase: API passphrase
+    # - token: access_token, refresh_token, auth_token, etc.
+    # - secret: api_secret, client_secret, webhook_secret, etc.
+    # - private_key: encryption private keys
+    # - mnemonic: wallet recovery phrases
+
+    Sensitive fields: api_key, api_secret, webhook_url, secret, password,
+                      token, passphrase, private_key, mnemonic, client_id,
+                      client_secret, auth_token, bearer_token
 
     Args:
         data: Dictionary to mask
@@ -1083,15 +1094,38 @@ def _deep_mask_config(data: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dictionary with sensitive values masked
     """
-    sensitive_keys = {"api_key", "api_secret", "webhook_url", "secret", "password", "token"}
+    # P1-4 Fix: Enhanced sensitive field keywords (substring match)
+    SENSITIVE_KEYWORDS = {
+        "password",      # matches: password, db_password, etc.
+        "passphrase",    # matches: passphrase, api_passphrase
+        "token",         # matches: token, access_token, auth_token
+        "secret",        # matches: secret, api_secret, client_secret
+        "private_key",   # matches: private_key, wallet_private_key
+        "mnemonic",      # matches: mnemonic, seed_mnemonic
+        "api_key",       # matches: api_key, exchange_api_key
+        "webhook_url",   # matches: webhook_url, notify_webhook_url
+        "client_id",     # matches: client_id, oauth_client_id
+        "client_secret", # matches: client_secret, oauth_client_secret
+        "auth_token",    # matches: auth_token
+        "bearer_token",  # matches: bearer_token
+        "access_token",  # matches: access_token
+        "refresh_token", # matches: refresh_token
+    }
+
+    def is_sensitive_key(key: str) -> bool:
+        """Check if a key contains sensitive keywords (case-insensitive)."""
+        key_lower = key.lower()
+        return any(keyword in key_lower for keyword in SENSITIVE_KEYWORDS)
+
     result = {}
 
     for key, value in data.items():
-        if key.lower() in sensitive_keys:
+        if is_sensitive_key(key):
             result[key] = _mask_config_value(value, is_sensitive=True)
         elif isinstance(value, dict):
             result[key] = _deep_mask_config(value)
         elif isinstance(value, list):
+            # P1-4 Fix: Recursively mask sensitive fields in lists
             result[key] = [
                 _deep_mask_config(item) if isinstance(item, dict) else item
                 for item in value
@@ -1129,58 +1163,6 @@ async def get_config():
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
-
-
-@app.put("/api/config")
-async def update_config(
-    config_update: Dict[str, Any] = Body(..., description="Partial user config update"),
-):
-    """
-    Update user configuration with hot-reload.
-
-    Accepts partial config update. Validates against Pydantic UserConfig model.
-    On success, atomically replaces in-memory config and persists to disk.
-
-    Request body example:
-    {
-        "strategy": {
-            "trend_filter_enabled": false
-        },
-        "risk": {
-            "max_loss_percent": 0.02
-        }
-    }
-
-    Returns:
-        Updated config (masked) or 422 on validation error
-    """
-    try:
-        config_manager = _get_config_manager()
-
-        # Call hot-reload method (validates + atomic swap + persist)
-        new_config = await config_manager.update_user_config(config_update)
-
-        # Return masked config
-        config_dict = new_config.model_dump()
-        masked_config = _deep_mask_config(config_dict)
-
-        return {
-            "status": "success",
-            "message": "Configuration updated",
-            "config": masked_config,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Pydantic ValidationError returns 422
-        error_str = str(e)
-        if "ValidationError" in type(e).__name__:
-            from fastapi import status
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Config validation failed: {error_str}",
-            )
         return {"error": str(e)}
 
 

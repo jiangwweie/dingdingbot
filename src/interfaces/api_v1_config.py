@@ -1790,18 +1790,69 @@ async def confirm_import(
 # ============================================================
 # Snapshot Management Endpoints
 # ============================================================
+
+
+def extract_config_types(config_data: Dict[str, Any]) -> List[str]:
+    """从快照数据中提取配置类型列表
+
+    Args:
+        config_data: 快照配置数据字典
+
+    Returns:
+        配置类型名称列表，如 ["risk", "system", "strategies"]
+    """
+    if not config_data:
+        return []
+
+    types = []
+    if "risk" in config_data:
+        types.append("risk")
+    if "system" in config_data:
+        types.append("system")
+    if "strategies" in config_data:
+        types.append("strategies")
+    if "symbols" in config_data:
+        types.append("symbols")
+    if "notifications" in config_data:
+        types.append("notifications")
+    return types
+
+
 @router.get("/snapshots", response_model=List[SnapshotListItem])
 async def get_snapshots(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    """获取快照列表"""
+    """获取快照列表
+
+    Args:
+        limit: 每页数量 (1-500)
+        offset: 偏移量
+
+    Returns:
+        快照列表，包含 id, name, description, created_at, created_by, config_types
+    """
     if not _snapshot_repo:
         raise HTTPException(status_code=503, detail="Snapshot repository not initialized")
 
-    # TODO: Implement get_list method in ConfigSnapshotRepository
-    # For now, return empty list
-    return []
+    # 调用 repository 获取数据
+    snapshots, total = await _snapshot_repo.get_list(limit=limit, offset=offset)
+
+    # 转换为响应模型
+    result = []
+    for snap in snapshots:
+        result.append(SnapshotListItem(
+            id=snap["id"],
+            name=snap["name"],
+            description=snap.get("description"),
+            created_at=snap["created_at"],
+            created_by=snap.get("created_by", "unknown"),
+            config_types=extract_config_types(snap.get("config_data", {}))
+        ))
+
+    logger.info(f"[SNAPSHOT_LIST] fetched {len(result)} snapshots (total={total}, limit={limit}, offset={offset})")
+
+    return result
 
 
 @router.post("/snapshots", status_code=201)

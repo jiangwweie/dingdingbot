@@ -17,6 +17,63 @@
 9. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
 10. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
 11. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+12. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
+
+---
+
+## 📌 P0-2 快照列表查询功能实现
+
+**创建日期**: 2026-04-07  
+**实现负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 实现要点
+
+1. **`extract_config_types` 辅助函数设计**
+   - 从快照 `config_data` 字典中提取配置类型名称
+   - 支持 5 种配置类型：risk, system, strategies, symbols, notifications
+   - 边界条件处理：`None` 输入返回空列表
+   - 代码简洁清晰，使用简单的 `if key in dict` 模式
+
+2. **`get_snapshots` 端点实现**
+   - 调用 `ConfigSnapshotRepositoryExtended.get_list()` 获取数据
+   - Repository 返回 `(snapshots, total)` 元组
+   - 数据转换：repository dict → `SnapshotListItem` Pydantic 模型
+   - 日志记录：`[SNAPSHOT_LIST] fetched N snapshots (total=T, limit=L, offset=O)`
+
+3. **单元测试覆盖**
+   - `TestExtractConfigTypes` - 5 个测试用例
+   - `TestGetSnapshotsEndpoint` - 6 个测试用例
+   - `TestSnapshotListItemModel` - 3 个测试用例
+   - 总计：14/14 通过
+
+### 技术参考
+
+**Repository 返回数据结构**:
+```python
+snapshots, total = await _snapshot_repo.get_list(limit=50, offset=0)
+# snapshots: List[Dict[str, Any]]
+# 每个 snapshot 包含:
+#   - id: str
+#   - name: str
+#   - description: str | None
+#   - config_data: Dict[str, Any]  # 包含 risk/system/strategies/symbols/notifications
+#   - created_at: str
+#   - created_by: str
+```
+
+**数据转换模式**:
+```python
+for snap in snapshots:
+    result.append(SnapshotListItem(
+        id=snap["id"],
+        name=snap["name"],
+        description=snap.get("description"),  # 可选字段
+        created_at=snap["created_at"],
+        created_by=snap.get("created_by", "unknown"),  # 默认值
+        config_types=extract_config_types(snap.get("config_data", {}))
+    ))
+```
 
 ---
 
