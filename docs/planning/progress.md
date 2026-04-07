@@ -4,6 +4,59 @@
 
 ---
 
+### 2026-04-07 - P1-5: ConfigParser 单元测试 ✅
+
+**任务 ID**: P1-5
+**优先级**: P1
+**工时估算**: 2h
+**实际工时**: 1.5h
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ 创建测试设计文档 `docs/planning/p1_5_parser_test_design.md`
+2. ✅ 创建测试 fixture 文件（5 个 YAML 测试数据文件）
+3. ✅ 编写完整单元测试 `tests/unit/test_config_parser.py`（38 个测试用例）
+4. ✅ Decimal 精度验证（20 位以上精度保持）
+5. ✅ 测试覆盖率 98%
+
+**测试结果**:
+```
+YAML 解析测试：        5 PASSED ✅
+Decimal 精度测试：     7 PASSED ✅
+模型验证测试：7 PASSED ✅
+序列化测试：5 PASSED ✅
+集成测试：5 PASSED ✅
+边界情况测试：9 PASSED ✅
+总计：38 PASSED, 0 FAILED
+```
+
+**测试覆盖率**:
+```
+Name                                      Stmts   Miss  Cover   Missing
+src/application/config/config_parser.py      85      2    98%   324, 347
+```
+*注：未覆盖的 2 行为错误日志记录，仅在异常时执行*
+
+**核心验证**:
+- ✅ Decimal 20 位精度不丢失：`0.12345678901234567890`
+- ✅ YAML 往返序列化精度保持
+- ✅ Pydantic 模型验证正确
+- ✅ 异常处理健壮（文件不存在、语法错误、验证失败）
+
+**交付物**:
+- `tests/unit/test_config_parser.py` - 38 个单元测试用例
+- `tests/fixtures/config_parser/*.yaml` - 5 个测试数据文件
+- `docs/planning/p1_5_parser_test_design.md` - 测试设计文档
+
+**验收标准**:
+- ✅ 测试用例数量 >= 15（实际 38 个）
+- ✅ 测试覆盖率 >= 95%（实际 98%）
+- ✅ 所有 P0 测试通过
+- ✅ Decimal 精度验证通过
+- ✅ Git 提交：`23780cd`
+
+---
+
 ### 2026-04-07 - T010 集成测试与验证 ✅
 
 **任务 ID**: T010
