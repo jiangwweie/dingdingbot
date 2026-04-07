@@ -397,21 +397,22 @@ self._import_preview_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=10
 1. [P1-1 Decimal YAML 精度修复](#p1-1-decimal-yaml-精度修复)
 2. [P1-2 缓存 TTL 机制](#p1-2-缓存-ttl-机制)
 3. [T001 P1-1 Lock 竞态条件修复](#t001-p1-1-lock-竞态条件修复)
-4. [T007 P2-7 UPSERT 数据丢失修复](#t007-p2-7-upsert-数据丢失修复)
-5. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
-6. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
-7. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
-8. [前端配置页面优化 PRD](#前端配置页面优化-prd)
-9. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
-10. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置-kv-接口)
-11. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
-12. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
-13. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
-14. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
-15. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
-16. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
-17. [IMP-002 tp_ratios 求和精度修复](#imp-002-tp_ratios-求和精度修复)
-18. [IMP-001 save_batch() COALESCE 问题修复](#imp-001-save_batch-coalesce-问题修复)
+4. [T11 & T12 回测系统边界条件修复方案](#t11--t12-回测系统边界条件修复方案)
+5. [T007 P2-7 UPSERT 数据丢失修复](#t007-p2-7-upsert-数据丢失修复)
+6. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
+7. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
+8. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
+9. [前端配置页面优化 PRD](#前端配置页面优化-prd)
+10. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
+11. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置-kv-接口)
+12. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+13. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
+14. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
+15. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+16. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+17. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
+18. [IMP-002 tp_ratios 求和精度修复](#imp-002-tp_ratios-求和精度修复)
+19. [IMP-001 save_batch() COALESCE 问题修复](#imp-001-save_batch-coalesce-问题修复)
 
 ---
 
@@ -563,6 +564,109 @@ IMP-001 新增测试：3 PASSED ✅
 13. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
 14. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
 15. [P1-5 Parser 层代码审查发现](#p1-5-parser-层代码审查发现)
+
+---
+
+## 📌 T11 & T12 回测系统边界条件修复方案
+
+**创建日期**: 2026-04-07  
+**需求分析**: Product Manager  
+**状态**: ⏳ 待实施（方案已确认）
+
+### 核心发现：T11 和 T12 必须结合考虑
+
+**共同根源**: 两者都指向 `Account` 模型与回测状态跟踪的不一致性
+
+- **T11**: 回测使用 `positions_map` 跟踪持仓，但开仓决策时却使用空的 `AccountSnapshot`（硬编码 `positions=[]`）
+- **T12**: `RiskCalculator` 直接迭代 `account.positions`，但未考虑该字段可能为 `None`
+
+**数据流断裂**: 回测主循环中，`positions_map` 是真实的状态源，但传递给 `RiskCalculator` 的 `AccountSnapshot` 却是"失忆"的快照
+
+### 推荐方案：方案 A (MVP)
+
+**轻量级修复，改动最小，风险最低**
+
+**T11 修复** (`backtester.py`):
+```python
+# 新增辅助函数
+def _check_position_conflict(
+    positions_map: Dict[str, Position],
+    symbol: str,
+    direction: Direction
+) -> bool:
+    """检查是否存在同向持仓冲突"""
+    for position in positions_map.values():
+        if (position.symbol == symbol and 
+            position.direction == direction and 
+            not position.is_closed):
+            return True
+    return False
+
+# 开仓前调用冲突检查
+if _check_position_conflict(positions_map, request.symbol, attempt.pattern.direction):
+    logger.debug(f"跳过同向信号：{request.symbol} {attempt.pattern.direction} - 已有未平仓持仓")
+    continue
+```
+
+**T12 修复** (`risk_calculator.py`):
+```python
+# 添加防御性检查
+total_position_value = sum(
+    pos.size * pos.entry_price for pos in (account.positions or [])
+)
+```
+
+### 业务规则
+
+**BR-1: 同时同向持仓限制** (T11)
+- 同一币种在同一时间只能存在一个未平仓的同向持仓
+- 已有 LONG 持仓时，新的 LONG 信号应被跳过
+- 允许反向持仓存在（即同时存在 LONG 和 SHORT 持仓）
+
+**BR-2: 权益金检查防御性编程** (T12)
+- 空持仓时，`total_position_value` 应为 `Decimal(0)`
+- 所有迭代 `account.positions` 的代码必须使用 `account.positions or []` 防御模式
+
+### 长期方案：方案 B (Future)
+
+**深度重构，解决数据流断裂的根本问题**
+
+重构 `AccountSnapshot` 构建逻辑，从 `positions_map` 获取真实持仓数据：
+
+```python
+def _build_account_snapshot(
+    account: Account,
+    positions_map: Dict[str, Position],
+    timestamp: int
+) -> AccountSnapshot:
+    """从 positions_map 构建真实的账户快照"""
+    position_infos = [
+        PositionInfo(...)
+        for pos in positions_map.values()
+        if not pos.is_closed and pos.current_qty > 0
+    ]
+
+    return AccountSnapshot(
+        total_balance=account.total_balance,
+        available_balance=account.available_balance,
+        positions=position_infos,  # ← 使用真实持仓数据
+        ...
+    )
+```
+
+### 影响分析
+
+**修复后数据流**:
+```
+策略信号 → 检查 positions_map → [有冲突] → 跳过信号
+                        ↓ [无冲突]
+                   创建 AccountSnapshot → RiskCalculator 计算 → 防御性检查保护
+```
+
+**预期变化**:
+- 回测报告中的"总交易次数"可能减少（同向重复信号被过滤）
+- 胜率可能提升（低质量重复开仓减少）
+- 最大回撤可能改善（仓位控制更严格）
 
 ---
 
