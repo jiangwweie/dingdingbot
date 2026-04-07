@@ -44,10 +44,44 @@ async def temp_db():
 
 
 @pytest.fixture
-async def config_repository(temp_db):
+def temp_config_dir():
+    """创建临时配置目录"""
+    temp_dir = tempfile.mkdtemp()
+    # 创建默认 user.yaml（包含所有必填字段）
+    user_yaml_path = Path(temp_dir) / 'user.yaml'
+    with open(user_yaml_path, 'w', encoding='utf-8') as f:
+        f.write("""
+exchange:
+  name: binance
+  api_key: test_api_key
+  api_secret: test_api_secret
+  testnet: true
+timeframes:
+  - 15m
+  - 1h
+  - 4h
+asset_polling:
+  interval_seconds: 60
+risk:
+  max_loss_percent: 0.01
+  max_leverage: 20
+  max_total_exposure: 0.8
+notification:
+  channels:
+    - type: feishu
+      webhook_url: https://open.feishu.cn/open-apis/bot/v2/hook/test
+""")
+    yield temp_dir
+    # 清理
+    import shutil
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+async def config_repository(temp_db, temp_config_dir):
     """创建已初始化的 ConfigRepository 实例"""
     repo = ConfigRepository()
-    await repo.initialize(db_path=temp_db)
+    await repo.initialize(db_path=temp_db, config_dir=temp_config_dir)
     yield repo
     await repo.close()
 
@@ -180,14 +214,10 @@ class TestCoreProviderRepositoryIntegration:
 class TestUserProviderRepositoryIntegration:
     """UserProvider 与 Repository 集成测试
 
-    注意：UserProvider 依赖 ConfigRepository.get_user_config_dict() 返回字典格式数据。
-    当前 Repository 返回的是 Pydantic 模型，导致测试失败。
-    这是 Provider 与 Repository 之间的契约问题，需要 Backend Dev 修复。
-
-    失败测试标记为 @pytest.mark.skip，待修复后取消跳过。
+    测试 UserProvider 从 ConfigRepository 加载用户配置并转换为 Pydantic 模型。
+    Repository 返回字典格式数据，Provider 负责转换为 UserConfig 模型。
     """
 
-    @pytest.mark.skip(reason="UserProvider 与 Repository 契约不匹配：get_user_config_dict 应返回 dict 而非 Pydantic 模型")
     async def test_user_provider_get_all_config(self, user_provider):
         """测试获取全部用户配置"""
         # Act
@@ -200,7 +230,6 @@ class TestUserProviderRepositoryIntegration:
         assert hasattr(config, 'timeframes')
         assert hasattr(config, 'risk')
 
-    @pytest.mark.skip(reason="UserProvider 与 Repository 契约不匹配")
     async def test_user_provider_get_exchange_config(self, user_provider):
         """测试获取交易所配置"""
         # Act
@@ -211,7 +240,6 @@ class TestUserProviderRepositoryIntegration:
         assert hasattr(exchange, 'name')
         assert exchange.name in ['binance', 'bybit', 'okx']
 
-    @pytest.mark.skip(reason="UserProvider 与 Repository 契约不匹配")
     async def test_user_provider_get_nested_exchange_key(self, user_provider):
         """测试获取嵌套的交易所配置项"""
         # Act
@@ -221,7 +249,6 @@ class TestUserProviderRepositoryIntegration:
         assert testnet is not None
         assert isinstance(testnet, bool)
 
-    @pytest.mark.skip(reason="UserProvider 与 Repository 契约不匹配")
     async def test_user_provider_get_risk_config(self, user_provider):
         """测试获取风控配置"""
         # Act
@@ -233,20 +260,18 @@ class TestUserProviderRepositoryIntegration:
         assert isinstance(risk.max_loss_percent, Decimal)
         assert risk.max_loss_percent == Decimal('0.01')
 
-    @pytest.mark.skip(reason="UserProvider 与 Repository 契约不匹配")
     async def test_user_provider_update_config(self, user_provider):
         """测试更新用户配置"""
         # Arrange
         new_interval = 120
 
         # Act
-        await user_provider.update('asset_polling_interval', new_interval)
+        await user_provider.update('asset_polling.interval_seconds', new_interval)
 
-        # Assert - 验证更新后的值
-        interval = await user_provider.get('asset_polling_interval')
+        # Assert - 验证更新后的值（使用正确的嵌套键）
+        interval = await user_provider.get('asset_polling.interval_seconds')
         assert interval == new_interval
 
-    @pytest.mark.skip(reason="UserProvider 与 Repository 契约不匹配")
     async def test_user_provider_refresh(self, user_provider):
         """测试刷新用户配置缓存"""
         # Act - 首次访问加载缓存

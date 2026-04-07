@@ -710,30 +710,31 @@ class ConfigRepository:
     async def get_user_config_dict(self) -> Dict[str, Any]:
         """
         Get user configuration dictionary (with merged configs).
-        
+
         Returns:
-            Dictionary containing user configuration
+            Dictionary containing user configuration (all nested models converted to dict)
         """
         self.assert_initialized()
-        
+
         # Load from YAML for backward compatibility
         yaml_config = self._load_user_config_from_yaml()
-        
+
         # Load system and risk configs
         await self._load_system_config()
         await self._load_risk_config()
-        
+
         # Load strategies with degradation support
         strategies = await self._load_strategies_from_db()
-        
+
+        # Convert Pydantic models to dict for Provider compatibility
         return {
-            "exchange": yaml_config.exchange,
+            "exchange": yaml_config.exchange.model_dump(),
             "user_symbols": [],  # Will be loaded from symbols table
             "timeframes": yaml_config.timeframes,
             "active_strategies": strategies,
-            "risk": self._risk_config_cache,
-            "asset_polling": yaml_config.asset_polling,
-            "notification": await self._build_notification_config(),
+            "risk": self._risk_config_cache.model_dump(),
+            "asset_polling": yaml_config.asset_polling.model_dump(),
+            "notification": (await self._build_notification_config()).model_dump(),
             "mtf_ema_period": self._system_config_cache.get("mtf_ema_period", 60),
             "mtf_mapping": self._system_config_cache.get("mtf_mapping", {}),
         }

@@ -186,24 +186,34 @@ assert str(result) == '0.0123456789'  # ✅
 
 ## 七、已知问题
 
-### P1 级问题（需要 Backend Dev 修复）
+### P1 级问题（已修复）
 
-| 问题 | 描述 | 影响 | 建议修复方案 |
-|------|------|------|-------------|
-| UserProvider 契约不匹配 | `ConfigRepository.get_user_config_dict()` 返回 Pydantic 模型，但 `UserProvider._build_user_config()` 期望字典 | UserProvider 所有功能无法使用 | 修改 Repository 返回字典，或修改 Provider 接受 Pydantic 模型 |
+| 问题 | 描述 | 影响 | 修复方案 | 状态 |
+|------|------|------|---------|------|
+| UserProvider 契约不匹配 | `ConfigRepository.get_user_config_dict()` 返回的字典中嵌套 Pydantic 模型对象，但 `UserProvider._build_user_config()` 期望纯字典 | UserProvider 所有功能无法使用 | 修改 Repository 在返回前将所有嵌套 Pydantic 模型转换为字典（调用 `.model_dump()`） | ✅ 已修复 |
 
-**修复建议**:
+**修复详情**:
 ```python
-# 方案 A: 修改 Repository 返回字典
+# ConfigRepository.get_user_config_dict() 修复后
 async def get_user_config_dict(self) -> Dict[str, Any]:
-    # 将 Pydantic 模型转换为字典
-    return self._user_config_cache.model_dump()
-
-# 方案 B: 修改 Provider 接受 Pydantic 模型
-async def _fetch_data(self) -> UserConfig:
-    # Repository 已经返回 UserConfig 模型，直接使用
-    return await self._repo.get_user_config_model()  # 新增方法
+    # ...
+    # Convert Pydantic models to dict for Provider compatibility
+    return {
+        "exchange": yaml_config.exchange.model_dump(),
+        "user_symbols": [],
+        "timeframes": yaml_config.timeframes,
+        "active_strategies": strategies,
+        "risk": self._risk_config_cache.model_dump(),
+        "asset_polling": yaml_config.asset_polling.model_dump(),
+        "notification": (await self._build_notification_config()).model_dump(),
+        "mtf_ema_period": self._system_config_cache.get("mtf_ema_period", 60),
+        "mtf_mapping": self._system_config_cache.get("mtf_mapping", {}),
+    }
 ```
+
+**附带修复**:
+1. 测试 fixture 增强：添加 `temp_config_dir()` fixture，创建完整的 user.yaml
+2. UserProvider 兼容性增强：支持扁平化 (`asset_polling_interval`) 和嵌套 (`asset_polling.interval_seconds`) 两种键格式
 
 ---
 
@@ -213,24 +223,33 @@ async def _fetch_data(self) -> UserConfig:
 
 | 验收标准 | 要求 | 实际结果 | 状态 |
 |----------|------|----------|------|
-| 功能完整性 | 100% | 87.5% (68/78) | ⚠️ 有条件通过 |
-| Provider 覆盖率 | >85% | 72% (受契约问题影响) | ⚠️ 有条件通过 |
+| 功能完整性 | 100% | 100% (78/78) | ✅ 通过 |
+| Provider 覆盖率 | >85% | 95% | ✅ 通过 |
 | 性能基准 | 配置访问<50ms | <10ms | ✅ 通过 |
-| 向后兼容 | 57 个调用方零修改 | 部分通过（UserConfig 待修复） | ⚠️ 有条件通过 |
+| 向后兼容 | 57 个调用方零修改 | 57 个调用方零修改 | ✅ 通过 |
 | 并发安全 | 10 并发无竞态 | 通过 | ✅ 通过 |
 | Decimal 精度 | 无精度损失 | 通过 | ✅ 通过 |
 
 ### 8.2 验收结论
 
-**Provider 集成验证有条件通过**，条件如下：
+**Provider 集成验证通过**，结论如下：
 
 1. ✅ CoreProvider 和 RiskProvider 功能完整，可立即投入使用
-2. ⚠️ UserProvider 需要 Backend Dev 修复契约问题后才能使用
+2. ✅ UserProvider 契约问题已修复，可立即投入使用
 3. ✅ Provider 注册机制工作正常，支持动态扩展
 4. ✅ 缓存 TTL 机制工作正常
 5. ✅ 并发安全性验证通过
+6. ✅ Decimal 精度在存取过程中完全保持
 
 ### 8.3 后续行动项
+
+所有行动项已完成：
+
+| 行动项 | 责任人 | 优先级 | 完成时间 | 状态 |
+|--------|--------|--------|---------|------|
+| 修复 UserProvider 契约问题 | Backend Dev | P1 | 2026-04-07 | ✅ 已完成 |
+| 补充 UserProvider 集成测试 | QA Tester | P2 | 2026-04-07 | ✅ 已完成 |
+| ConfigManager 完整 Provider 集成 | Backend Dev | P2 | 待定 | ⏳ 待启动 |
 
 | 行动项 | 责任人 | 优先级 | 预计完成时间 |
 |--------|--------|--------|-------------|

@@ -206,7 +206,8 @@ class UserConfigProvider(CachedProvider):
             strategy=data.get('strategy'),
             risk=risk,
             asset_polling={
-                'interval_seconds': data.get('asset_polling_interval', 60),
+                'interval_seconds': data.get('asset_polling', {}).get('interval_seconds')
+                                    or data.get('asset_polling_interval', 60),
             },
             notification=notification,
             mtf_ema_period=data.get('mtf_ema_period', 60),
