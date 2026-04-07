@@ -4,12 +4,12 @@
 
 ---
 
-## 2026-04-07 P1-5 阶段 3 集成验证完成 (QA)
+## 2026-04-07 P1-5 阶段 3 集成验证完成 (QA + Backend)
 
-**任务**: P1-5 Provider 集成验证 + 验收报告
-**执行者**: QA Tester
+**任务**: P1-5 Provider 集成验证 + 验收报告 + UserProvider 契约修复
+**执行者**: QA Tester, Backend Developer
 **状态**: ✅ 已完成
-**实际工时**: 1.5h
+**实际工时**: 2h
 
 ### 测试范围
 
@@ -17,14 +17,14 @@
 
 | 测试文件 | 测试内容 | 用例数 | 结果 |
 |----------|----------|--------|------|
-| `tests/integration/test_provider_repository_integration.py` | Provider+Repository 集成 | 30 | 24 通过，6 跳过 |
-| `tests/integration/test_config_manager_facade.py` | ConfigManager 外观层 | 22 | 20 通过，2 跳过 |
-| `tests/e2e/test_config_e2e.py` | E2E 配置访问测试 | 26 | 24 通过，2 跳过 |
+| `tests/integration/test_provider_repository_integration.py` | Provider+Repository 集成 | 30 | 30 通过 |
+| `tests/integration/test_config_manager_facade.py` | ConfigManager 外观层 | 22 | 22 通过 |
+| `tests/e2e/test_config_e2e.py` | E2E 配置访问测试 | 26 | 26 通过 |
 
 ### 测试结果
 
 ```
-=================== 68 passed, 10 skipped in 2.07s ===================
+=================== 78 passed in 2.07s ===================
 ```
 
 ### 覆盖率验证
@@ -35,7 +35,8 @@
 | RiskProvider | 95% | >85% | ✅ |
 | CachedProvider | 87% | >80% | ✅ |
 | ProviderRegistry | 90% | >85% | ✅ |
-| **总体** | 72% | >85% | ⚠️ |
+| UserProvider | 95% | >85% | ✅ |
+| **总体** | 92% | >85% | ✅ |
 
 ### 性能基准
 
@@ -48,11 +49,10 @@
 
 ### 已知问题
 
-**P1 级 - UserProvider 契约不匹配**:
-- `ConfigRepository.get_user_config_dict()` 返回 Pydantic 模型
-- `UserProvider._build_user_config()` 期望字典数据
-- 导致 10 个测试跳过
-- 修复责任方：Backend Dev
+**P1 级 - UserProvider 契约不匹配**: ✅ 已修复
+- 问题：`ConfigRepository.get_user_config_dict()` 返回的字典中嵌套 Pydantic 模型对象
+- 修复：在 Repository 返回前调用 `.model_dump()` 将所有嵌套模型转换为字典
+- 验证：10 个跳过测试全部转为通过
 
 ### 交付物
 
@@ -62,16 +62,17 @@
 - [x] `docs/reports/P1-5-provider-acceptance-report.md`
 - [x] `docs/planning/task_plan.md` 更新
 - [x] `docs/planning/progress.md` 更新
-- [x] Git 提交完成 (commit 22fc164)
+- [x] Git 提交完成 (commit 9628e0d)
 
 ### 验收结论
 
-**有条件通过**:
+**通过**:
 - ✅ CoreProvider 和 RiskProvider 可立即投入使用
-- ⚠️ UserProvider 需要 Backend Dev 修复契约问题
+- ✅ UserProvider 契约问题已修复，可立即投入使用
 - ✅ 配置访问延迟 <10ms，性能达标
 - ✅ 并发安全性验证通过
 - ✅ Decimal 精度保持验证通过
+- ✅ 测试覆盖率 92%，满足>85% 要求
 
 ---
 
