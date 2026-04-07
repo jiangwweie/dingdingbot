@@ -78,6 +78,68 @@
 
 ---
 
+## 📌 配置管理模块架构审查发现
+
+**创建日期**: 2026-04-07  
+**审查负责人**: Code Reviewer  
+**状态**: ✅ 已完成
+**审查报告**: `docs/reviews/config-management-architecture-review.md`
+
+### 总体评价
+- **等级**: **B+ (良好，有改进空间)**
+- **Clean Architecture 合规性**: A-
+- **依赖管理**: B
+- **Repository 模式**: A
+- **关注点分离**: B+
+- **类型安全**: A
+- **异步规范**: A-
+- **错误处理**: B+
+- **测试覆盖**: B
+
+### 发现的架构问题
+
+#### P1 级问题 (重要改进)
+1. **全局状态依赖过多** - api_v1_config.py 使用 8 个全局变量，违反依赖注入原则
+2. **ConfigManager 职责过重** - 约 1600 行，违反单一职责原则 (God Object 风险)
+3. **同步/异步混用风险** - get_core_config() 同步方法访问文件 I/O，可能阻塞事件循环
+
+#### P2 级问题 (建议改进)
+1. **裸 except 捕获异常** - config_manager.py 第 950-955 行
+2. **硬编码默认配置分散** - 多处重复定义默认配置
+3. **Repository 层异常处理不一致** - 部分返回 None/False，部分抛出异常
+4. **API 层类型注解不完整** - 使用 `Optional[Any]` 模糊类型
+
+### 技术债务清单
+
+| ID | 位置 | 描述 | 优先级 | 预计工时 |
+|----|------|------|--------|----------|
+| TD-CONFIG-001 | api_v1_config.py:101-109 | 全局状态依赖 | P1 | 2h |
+| TD-CONFIG-002 | config_manager.py:1-1600 | God Object | P1 | 8h |
+| TD-CONFIG-003 | config_manager.py:733-763 | 同步/异步混用 | P1 | 3h |
+| TD-CONFIG-004 | config_manager.py:950-955 | 裸 except | P2 | 0.5h |
+| TD-CONFIG-005 | 多处 | 硬编码默认配置分散 | P2 | 1h |
+| TD-CONFIG-006 | config_repositories.py | 异常处理不一致 | P2 | 2h |
+| TD-CONFIG-007 | api_v1_config.py:108 | 类型注解模糊 | P2 | 1h |
+
+**技术债务总计**: 约 17.5h
+
+### 架构改进建议
+
+**短期改进 (1-2 周)**:
+1. 依赖注入重构 - 将全局变量改为 FastAPI Depends
+2. 异步统一化 - 移除同步文件 I/O，统一为 async/await
+3. 默认配置集中化 - 创建 `domain/config_defaults.py`
+
+**中期改进 (2-4 周)**:
+1. ConfigManager 拆分 - 拆分为 ConfigReader, ConfigUpdater, ConfigObserver
+2. 异常处理统一化 - Repository 层统一返回风格，增加 NotFound 异常
+3. 类型注解完善 - 使用 Protocol 定义接口，移除 `Any` 类型
+
+### 批准决定
+**🟡 有条件批准合并** - P1 级问题需在下个迭代 (2 周内) 修复
+
+---
+
 ## 📌 BT-2 资金费用计算实现
 
 **创建日期**: 2026-04-07  
