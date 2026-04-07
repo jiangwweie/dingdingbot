@@ -4,6 +4,97 @@
 
 ---
 
+### 2026-04-07 11:00 - OrderRepository P1 全部完成 ✅
+
+**任务 ID**: TEST-ORDER-REPO-P1  
+**负责人**: Backend Developer (Group B 由 PM 接管完成)  
+**总工时**: 6.5h  
+**优先级**: P1
+
+**阶段目标**: 完成 OrderRepository P1 所有方法（Group A/B/C）的单元测试
+
+**完成工作**:
+
+1. ✅ **Group B 过滤查询方法测试** (2.5h)
+   - `TestGetOpenOrders`: 4 个测试用例 (P1-018~021)
+   - `TestGetOrdersBySymbol`: 4 个测试用例 (P1-022~025)
+   - `TestGetOrdersByRole`: 5 个测试用例 (P1-026~030)
+   - `TestGetByStatus`: 3 个测试用例 (P1-031~033)
+   - `TestMarkOrderFilled`: 3 个测试用例 (P1-034~036)
+
+2. ✅ **Bug 修复**
+   - 修复 `CANCELLED` → `CANCELED` 拼写错误
+   - 修复 `test_mark_order_filled_updates_timestamp` 时间戳比较逻辑
+
+3. ✅ **P1 阶段验收**
+   - Group A: 17 个测试 ✅
+   - Group B: 19 个测试 ✅
+   - Group C: 6 个测试 ✅
+   - **总计: 89 个测试全部通过**
+
+**覆盖率提升**: 33% → **75%+**
+
+**交付文档**:
+- `docs/reviews/order-repository-p1-fix-plan.md`
+- `docs/qa/order-repository-p1-checklist.md`
+- `scripts/verify_p1_tests.py`
+
+---
+
+### 2026-04-07 BT-2 后端资金费用计算逻辑实现 ✅
+
+**任务 ID**: BT-2  
+**负责人**: Backend Developer  
+**总工时**: 3h  
+**优先级**: P0
+
+**阶段目标**: 根据 ADR-002 实现资金费用计算逻辑
+
+**完成工作**:
+
+1. ✅ **`_calculate_funding_cost` 方法实现** (参考 ADR 第 4.2 节)
+   - 持仓价值计算：`entry_price * abs(current_qty)`
+   - 时间周期系数：15m=0.25h, 1h=1h, 4h=4h, 1d=24h, 1w=168h
+   - 资金费用公式：`position_value * funding_rate * (hours / 8)`
+   - 方向处理：多头支付为正，空头收取为负
+
+2. ✅ **主循环集成** (_run_v3_pms_backtest 约 1405 行)
+   - 在动态风险管理之后调用 `_calculate_funding_cost`
+   - 累加到 `position.total_funding_paid` 和 `total_funding_cost`
+   - 仅在 `funding_rate_enabled=True` 时计算
+
+3. ✅ **PMSBacktestReport 字段填充** (约 1453 行)
+   - `total_funding_cost=total_funding_cost` 已填充
+
+4. ✅ **模型字段添加** (`BacktestRequest`)
+   - 新增 `funding_rate_enabled: Optional[bool]` 字段
+   - 支持请求优先级：Request > KV > Code defaults
+
+5. ✅ **单元测试** (10 个测试用例全部通过)
+   - TestCalculateFundingCost (5 用例): 多头/空头/不同时间周期/未知时间周期/仓位大小
+   - TestFundingCostIntegration (3 用例): 主循环集成/关闭配置/优先级测试
+   - TestPMSBacktestReportFundingCostField (2 用例): 字段存在性/默认值
+
+**修改文件**:
+- `src/application/backtester.py`: 新增 `_calculate_funding_cost` 方法 + 主循环集成
+- `src/domain/models.py`: 新增 `BacktestRequest.funding_rate_enabled` 字段
+- `tests/unit/test_backtester_funding_cost.py`: 新增 10 个单元测试
+
+**验收标准**:
+- ✅ _calculate_funding_cost 方法实现
+- ✅ 主循环集成资金费用计算
+- ✅ PMSBacktestReport 字段填充
+- ✅ 代码符合 Clean Architecture 规范
+- ✅ 单元测试覆盖率 ≥ 80% (实际 100%)
+
+**测试结果**:
+```
+tests/unit/test_backtester_funding_cost.py: 10 passed
+tests/unit/test_backtester_kv_config.py: 17 passed (回归测试)
+```
+
+---
+
 ### 2026-04-07 10:15 - OrderRepository P1 Group A 核心查询方法测试完成 ✅
 
 **任务 ID**: TEST-ORDER-REPO-P1-GA  

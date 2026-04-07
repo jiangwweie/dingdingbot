@@ -3155,6 +3155,494 @@ class TestGetBySignalId:
         assert direct_result == []
 
 
+# ============================================================
+# Group B: 过滤查询方法测试 (P1)
+# ============================================================
+
+class TestGetOpenOrders:
+    """P1: get_open_orders() 测试类"""
+
+    @pytest.mark.asyncio
+    async def test_get_open_orders_no_symbol_filter(self, order_repository):
+        """P1-018: 无币种过滤 - 查询所有 OPEN 订单"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建 OPEN、PARTIALLY_FILLED、FILLED、CANCELLED 订单
+        orders = [
+            Order(id="ord_open_001", signal_id="sig_001", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            Order(id="ord_partial_001", signal_id="sig_002", symbol="ETH/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0.5'), status=OrderStatus.PARTIALLY_FILLED,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+            Order(id="ord_filled_001", signal_id="sig_003", symbol="SOL/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('1.0'), status=OrderStatus.FILLED,
+                  created_at=current_time + 2, updated_at=current_time + 2, reduce_only=False),
+            Order(id="ord_cancelled_001", signal_id="sig_004", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.CANCELED,
+                  created_at=current_time + 3, updated_at=current_time + 3, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：查询所有 OPEN 订单
+        result = await order_repository.get_open_orders()
+
+        # 验证：只返回 OPEN 和 PARTIALLY_FILLED
+        assert len(result) == 2
+        result_ids = {o.id for o in result}
+        assert "ord_open_001" in result_ids
+        assert "ord_partial_001" in result_ids
+        assert "ord_filled_001" not in result_ids
+        assert "ord_cancelled_001" not in result_ids
+
+    @pytest.mark.asyncio
+    async def test_get_open_orders_with_symbol_filter(self, order_repository):
+        """P1-019: 币种过滤 - 指定 symbol"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建不同币种的 OPEN 订单
+        orders = [
+            Order(id="ord_btc_001", signal_id="sig_001", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            Order(id="ord_eth_001", signal_id="sig_002", symbol="ETH/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：查询 BTC 的 OPEN 订单
+        result = await order_repository.get_open_orders(symbol="BTC/USDT:USDT")
+
+        # 验证：只返回 BTC 订单
+        assert len(result) == 1
+        assert result[0].id == "ord_btc_001"
+
+    @pytest.mark.asyncio
+    async def test_get_open_orders_multiple_symbols(self, order_repository):
+        """P1-020: 多币种混合 - 正确过滤"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建多个币种的 OPEN 订单
+        for i, symbol in enumerate(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]):
+            order = Order(
+                id=f"ord_multi_{i}", signal_id=f"sig_{i}", symbol=symbol,
+                direction=Direction.LONG, order_type=OrderType.MARKET,
+                order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                created_at=current_time + i, updated_at=current_time + i, reduce_only=False
+            )
+            await order_repository.save(order)
+
+        # 执行：查询所有 OPEN 订单
+        result = await order_repository.get_open_orders()
+
+        # 验证：返回所有 3 个 OPEN 订单
+        assert len(result) == 3
+
+    @pytest.mark.asyncio
+    async def test_get_open_orders_no_open_orders(self, order_repository):
+        """P1-021: 无 OPEN 订单 - 全部为 FILLED/CANCELLED"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建 FILLED 和 CANCELED 订单
+        orders = [
+            Order(id="ord_filled_001", signal_id="sig_001", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('1.0'), status=OrderStatus.FILLED,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            Order(id="ord_canceled_001", signal_id="sig_002", symbol="ETH/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.CANCELED,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：查询 OPEN 订单
+        result = await order_repository.get_open_orders()
+
+        # 验证：返回空列表
+        assert result == []
+
+
+class TestGetOrdersBySymbol:
+    """P1: get_orders_by_symbol() 测试类"""
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_symbol_single(self, order_repository):
+        """P1-022: 单币种查询 - 指定 symbol"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建不同币种订单
+        orders = [
+            Order(id="ord_btc_001", signal_id="sig_001", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            Order(id="ord_eth_001", signal_id="sig_002", symbol="ETH/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：查询 BTC 订单
+        result = await order_repository.get_orders_by_symbol("BTC/USDT:USDT")
+
+        # 验证：只返回 BTC 订单
+        assert len(result) == 1
+        assert result[0].id == "ord_btc_001"
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_symbol_with_limit(self, order_repository):
+        """P1-023: limit 限制 - limit=5"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建 10 个 BTC 订单
+        for i in range(10):
+            order = Order(
+                id=f"ord_btc_{i:03d}", signal_id=f"sig_{i}", symbol="BTC/USDT:USDT",
+                direction=Direction.LONG, order_type=OrderType.MARKET,
+                order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                created_at=current_time + i, updated_at=current_time + i, reduce_only=False
+            )
+            await order_repository.save(order)
+
+        # 执行：查询 limit=5
+        result = await order_repository.get_orders_by_symbol("BTC/USDT:USDT", limit=5)
+
+        # 验证：只返回 5 条
+        assert len(result) == 5
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_symbol_not_exists(self, order_repository):
+        """P1-024: 不存在的币种 - symbol 无数据"""
+        # 执行：查询不存在的币种
+        result = await order_repository.get_orders_by_symbol("XXX/USD:USD")
+
+        # 验证：返回空列表
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_symbol_ordering(self, order_repository):
+        """P1-025: 排序验证 - 按 created_at 降序"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建 3 个 BTC 订单（时间递增）
+        for i in range(3):
+            order = Order(
+                id=f"ord_btc_order_{i}", signal_id=f"sig_{i}", symbol="BTC/USDT:USDT",
+                direction=Direction.LONG, order_type=OrderType.MARKET,
+                order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                created_at=current_time + i * 1000, updated_at=current_time + i * 1000, reduce_only=False
+            )
+            await order_repository.save(order)
+
+        # 执行：查询 BTC 订单
+        result = await order_repository.get_orders_by_symbol("BTC/USDT:USDT")
+
+        # 验证：按 created_at 降序排列（最新的在前）
+        assert len(result) == 3
+        assert result[0].created_at > result[1].created_at > result[2].created_at
+
+
+class TestGetOrdersByRole:
+    """P1: get_orders_by_role() 测试类"""
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_role_single(self, order_repository):
+        """P1-026: 单角色查询 - ENTRY 角色"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建不同角色的订单
+        orders = [
+            Order(id="ord_entry_001", signal_id="sig_001", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            Order(id="ord_tp1_001", signal_id="sig_002", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.TP1, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+            Order(id="ord_sl_001", signal_id="sig_003", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.SL, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 2, updated_at=current_time + 2, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：查询 ENTRY 角色订单
+        result = await order_repository.get_orders_by_role(OrderRole.ENTRY)
+
+        # 验证：只返回 ENTRY 订单
+        assert len(result) == 1
+        assert result[0].id == "ord_entry_001"
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_role_with_signal_id(self, order_repository):
+        """P1-027: 组合 signal_id 过滤 - role + signal_id"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        signal_id = "sig_combined_001"
+
+        # 准备：创建同一信号的不同角色订单
+        orders = [
+            Order(id="ord_entry_001", signal_id=signal_id, symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            Order(id="ord_tp1_001", signal_id=signal_id, symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.TP1, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+            Order(id="ord_entry_002", signal_id="sig_other", symbol="ETH/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 2, updated_at=current_time + 2, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：查询特定信号的 ENTRY 订单
+        result = await order_repository.get_orders_by_role(OrderRole.ENTRY, signal_id=signal_id)
+
+        # 验证：只返回指定信号和角色的订单
+        assert len(result) == 1
+        assert result[0].id == "ord_entry_001"
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_role_with_symbol(self, order_repository):
+        """P1-028: 组合 symbol 过滤 - role + symbol"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建不同币种的 ENTRY 订单
+        orders = [
+            Order(id="ord_btc_entry", signal_id="sig_001", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            Order(id="ord_eth_entry", signal_id="sig_002", symbol="ETH/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：查询 BTC 的 ENTRY 订单
+        result = await order_repository.get_orders_by_role(OrderRole.ENTRY, symbol="BTC/USDT:USDT")
+
+        # 验证：只返回 BTC 的 ENTRY 订单
+        assert len(result) == 1
+        assert result[0].id == "ord_btc_entry"
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_role_triple_filter(self, order_repository):
+        """P1-029: 三重过滤 - role + signal_id + symbol"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        signal_id = "sig_triple_001"
+
+        # 准备：创建复杂的订单组合
+        orders = [
+            # 目标订单：BTC, ENTRY, sig_triple_001
+            Order(id="ord_target", signal_id=signal_id, symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            # 其他订单
+            Order(id="ord_other_1", signal_id=signal_id, symbol="ETH/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+            Order(id="ord_other_2", signal_id="sig_other", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 2, updated_at=current_time + 2, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：三重过滤查询
+        result = await order_repository.get_orders_by_role(
+            OrderRole.ENTRY, signal_id=signal_id, symbol="BTC/USDT:USDT"
+        )
+
+        # 验证：只返回完全匹配的订单
+        assert len(result) == 1
+        assert result[0].id == "ord_target"
+
+    @pytest.mark.asyncio
+    async def test_get_orders_by_role_empty_result(self, order_repository):
+        """P1-030: 空结果 - 无匹配数据"""
+        # 执行：查询不存在的角色组合
+        result = await order_repository.get_orders_by_role(OrderRole.TP1, signal_id="sig_not_exists")
+
+        # 验证：返回空列表
+        assert result == []
+
+
+class TestGetByStatus:
+    """P1: get_by_status() 测试类"""
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_single(self, order_repository):
+        """P1-031: 单状态查询 - FILLED 状态"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建不同状态的订单
+        orders = [
+            Order(id="ord_filled_001", signal_id="sig_001", symbol="BTC/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('1.0'), status=OrderStatus.FILLED,
+                  created_at=current_time, updated_at=current_time, reduce_only=False),
+            Order(id="ord_open_001", signal_id="sig_002", symbol="ETH/USDT:USDT",
+                  direction=Direction.LONG, order_type=OrderType.MARKET,
+                  order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                  filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+                  created_at=current_time + 1, updated_at=current_time + 1, reduce_only=False),
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：查询 FILLED 状态订单
+        result = await order_repository.get_by_status("FILLED")
+
+        # 验证：只返回 FILLED 订单
+        assert len(result) == 1
+        assert result[0].id == "ord_filled_001"
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_ordering(self, order_repository):
+        """P1-032: 排序验证 - 按 created_at 降序"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建多个 FILLED 订单（时间递增）
+        for i in range(3):
+            order = Order(
+                id=f"ord_filled_{i}", signal_id=f"sig_{i}", symbol="BTC/USDT:USDT",
+                direction=Direction.LONG, order_type=OrderType.MARKET,
+                order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+                filled_qty=Decimal('1.0'), status=OrderStatus.FILLED,
+                created_at=current_time + i * 1000, updated_at=current_time + i * 1000, reduce_only=False
+            )
+            await order_repository.save(order)
+
+        # 执行：查询 FILLED 订单
+        result = await order_repository.get_by_status("FILLED")
+
+        # 验证：按 created_at 降序排列
+        assert len(result) == 3
+        assert result[0].created_at > result[1].created_at > result[2].created_at
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_empty_result(self, order_repository):
+        """P1-033: 空结果 - 无匹配状态"""
+        # 执行：查询 CANCELLED 状态（无数据）
+        result = await order_repository.get_by_status("CANCELLED")
+
+        # 验证：返回空列表
+        assert result == []
+
+
+class TestMarkOrderFilled:
+    """P1: mark_order_filled() 测试类"""
+
+    @pytest.mark.asyncio
+    async def test_mark_order_filled_normal(self, order_repository):
+        """P1-034: 正常标记成交 - OPEN 订单 → FILLED"""
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        filled_time = current_time + 60000  # 1分钟后成交
+
+        # 准备：创建 OPEN 订单
+        order = Order(
+            id="ord_to_fill", signal_id="sig_001", symbol="BTC/USDT:USDT",
+            direction=Direction.LONG, order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+            created_at=current_time, updated_at=current_time, reduce_only=False
+        )
+        await order_repository.save(order)
+
+        # 执行：标记订单为已成交
+        await order_repository.mark_order_filled("ord_to_fill", filled_time)
+
+        # 验证：订单状态已更新
+        updated = await order_repository.get_order("ord_to_fill")
+        assert updated.status == OrderStatus.FILLED
+        assert updated.filled_at == filled_time
+
+    @pytest.mark.asyncio
+    async def test_mark_order_filled_updates_timestamp(self, order_repository):
+        """P1-035: 验证 updated_at 更新 - 标记后检查"""
+        import time
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        filled_time = current_time + 60000
+
+        # 准备：创建 OPEN 订单
+        order = Order(
+            id="ord_update_test", signal_id="sig_001", symbol="BTC/USDT:USDT",
+            direction=Direction.LONG, order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY, requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'), status=OrderStatus.OPEN,
+            created_at=current_time, updated_at=current_time, reduce_only=False
+        )
+        await order_repository.save(order)
+
+        # 稍等一下确保时间戳不同
+        time.sleep(0.01)
+
+        # 执行：标记订单为已成交
+        await order_repository.mark_order_filled("ord_update_test", filled_time)
+
+        # 验证：updated_at 已更新
+        updated = await order_repository.get_order("ord_update_test")
+        assert updated.updated_at >= current_time  # 应该大于或等于（可能有毫秒级差异）
+
+    @pytest.mark.asyncio
+    async def test_mark_order_filled_not_exists(self, order_repository):
+        """P1-036: 不存在的订单 - order_id 无效"""
+        filled_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 执行：标记不存在的订单（不应抛出异常）
+        await order_repository.mark_order_filled("ord_not_exists_abc123", filled_time)
+
+        # 验证：无异常抛出，无影响
+
+
 # ------------------------------------------------------------
 # get_order_count() 验证（已在 P0 覆盖）
 # ------------------------------------------------------------

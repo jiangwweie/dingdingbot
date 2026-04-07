@@ -1360,6 +1360,8 @@ class ConfigManager:
             - fee_rate: Decimal (默认 0.0004)
             - initial_balance: Decimal (默认 10000)
             - tp_slippage_rate: Decimal (默认 0.0005)
+            - funding_rate_enabled: bool (默认 True)
+            - funding_rate: Decimal (默认 0.0001, 每 8 小时)
 
         Raises:
             RuntimeError: 如果 ConfigEntryRepository 未注入
@@ -1390,6 +1392,8 @@ class ConfigManager:
                     - fee_rate (Decimal)
                     - initial_balance (Decimal)
                     - tp_slippage_rate (Decimal)
+                    - funding_rate_enabled (bool)
+                    - funding_rate (Decimal)
             profile_name: Profile 名称，如果未指定则使用当前激活的 Profile
             changed_by: 变更操作人标识
 

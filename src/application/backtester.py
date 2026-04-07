@@ -1136,11 +1136,25 @@ class Backtester:
             or (kv_configs.get('tp_slippage_rate') if kv_configs else None)
             or Decimal('0.0005')
         )  # 0.05% default
+        # BT-2: 资金费率配置
+        funding_rate_enabled = (
+            request.funding_rate_enabled
+            if request.funding_rate_enabled is not None
+            else (kv_configs.get('funding_rate_enabled') if kv_configs else None)
+        )
+        if funding_rate_enabled is None:
+            funding_rate_enabled = True  # 默认开启
+        funding_rate = (
+            kv_configs.get('funding_rate')
+            if kv_configs and kv_configs.get('funding_rate') is not None
+            else Decimal('0.0001')
+        )  # 默认 0.01% 每 8 小时
 
         logger.info(
             f"Running v3 PMS backtest with config: "
             f"slippage={slippage_rate}, fee={fee_rate}, "
-            f"initial_balance={initial_balance}, tp_slippage={tp_slippage_rate}"
+            f"initial_balance={initial_balance}, tp_slippage={tp_slippage_rate}, "
+            f"funding_enabled={funding_rate_enabled}, funding_rate={funding_rate}"
         )
 
         # Step 2: Initialize MockMatchingEngine with merged configs
@@ -1194,6 +1208,7 @@ class Backtester:
         total_pnl = Decimal('0')
         total_fees_paid = Decimal('0')
         total_slippage_cost = Decimal('0')
+        total_funding_cost = Decimal('0')  # BT-2: 总资金费用
 
         # Step 5: Generate signals and create orders
         higher_tf_data = {}  # For MTF validation
@@ -1387,6 +1402,19 @@ class Backtester:
                 if not position.is_closed and position.current_qty > 0:
                     dynamic_risk_manager.evaluate_and_mutate(kline, position, active_orders)
 
+            # ===== BT-2: 资金费用计算 =====
+            # 在动态风险管理之后，对每个未平仓的持仓计算资金费用
+            if funding_rate_enabled:
+                for position in positions_map.values():
+                    if not position.is_closed and position.current_qty > 0:
+                        funding_cost = self._calculate_funding_cost(
+                            position=position,
+                            kline=kline,
+                            funding_rate=funding_rate,
+                        )
+                        position.total_funding_paid += funding_cost
+                        total_funding_cost += funding_cost
+
             # Remove executed/cancelled orders from active list
             active_orders = [o for o in active_orders if o.status == OrderStatus.OPEN]
 
@@ -1422,6 +1450,7 @@ class Backtester:
             total_pnl=total_pnl,
             total_fees_paid=total_fees_paid,
             total_slippage_cost=total_slippage_cost,
+            total_funding_cost=total_funding_cost,  # BT-2: 总资金费用
             max_drawdown=max_drawdown,
             sharpe_ratio=None,
             positions=position_summaries,
@@ -1450,6 +1479,46 @@ class Backtester:
         )
 
         return report
+
+    def _calculate_funding_cost(
+        self,
+        position: Position,
+        kline: KlineData,
+        funding_rate: Decimal,
+    ) -> Decimal:
+        """
+        计算单根 K 线的资金费用
+
+        Args:
+            position: 持仓对象
+            kline: 当前 K 线数据
+            funding_rate: 资金费率 (Decimal)
+
+        Returns:
+            资金费用金额（正数=支付，负数=收取）
+        """
+        # 持仓价值 = 入场价 × 持仓量
+        position_value = position.entry_price * abs(position.current_qty)
+
+        # 时间周期系数
+        timeframe_hours = {
+            "15m": Decimal('0.25'),
+            "1h": Decimal('1'),
+            "4h": Decimal('4'),
+            "1d": Decimal('24'),
+            "1w": Decimal('168'),
+        }
+        hours = timeframe_hours.get(kline.timeframe, Decimal('1'))
+        funding_events = hours / Decimal('8')
+
+        # 资金费用计算 (多头支付，空头收取)
+        funding_cost = position_value * funding_rate * funding_events
+
+        # 多头支付为正成本，空头收取为负成本 (正收益)
+        if position.direction == Direction.LONG:
+            return funding_cost
+        else:
+            return -funding_cost
 
 
 # ============================================================

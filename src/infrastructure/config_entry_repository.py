@@ -438,6 +438,8 @@ class ConfigEntryRepository:
             - fee_rate: Decimal('0.0004')
             - initial_balance: Decimal('10000')
             - tp_slippage_rate: Decimal('0.0005')
+            - funding_rate_enabled: True
+            - funding_rate: Decimal('0.0001')  # 0.01% per 8 hours
         """
         # Default configuration values
         DEFAULT_BACKTEST_CONFIG = {
@@ -445,6 +447,8 @@ class ConfigEntryRepository:
             'backtest.fee_rate': Decimal('0.0004'),
             'backtest.initial_balance': Decimal('10000'),
             'backtest.tp_slippage_rate': Decimal('0.0005'),
+            'backtest.funding_rate_enabled': True,
+            'backtest.funding_rate': Decimal('0.0001'),  # BT-2: 资金费率 0.01%
         }
 
         # Get stored configs with prefix and profile

@@ -628,6 +628,12 @@ class BacktestRequest(BaseModel):
         description="Take-profit slippage rate for v3_pms mode (default: 0.0005, or from KV config)"
     )
 
+    # BT-2: 资金费率配置
+    funding_rate_enabled: Optional[bool] = Field(
+        default=None,
+        description="是否启用资金费用计算 (default: True, or from KV config)"
+    )
+
     # Phase 4: 订单编排
     order_strategy: Optional['OrderStrategy'] = Field(
         default=None,
@@ -1075,6 +1081,7 @@ class Position(FinancialModel):
     # 业绩追踪
     realized_pnl: Decimal = Field(default=Decimal('0'), description="已实现盈亏 (落袋为安)")
     total_fees_paid: Decimal = Field(default=Decimal('0'), description="累计支付的手续费")
+    total_funding_paid: Decimal = Field(default=Decimal('0'), description="累计支付的资金费用 (BT-2)")
 
     is_closed: bool = False      # current_qty 归零时标记为 True
 
@@ -1234,6 +1241,7 @@ class PMSBacktestReport(FinancialModel):
     - total_pnl: 总盈亏 (USDT)
     - total_fees_paid: 总手续费
     - total_slippage_cost: 总滑点成本
+    - total_funding_cost: 总资金费用 (BT-2)
     - max_drawdown: 最大回撤 (%)
     - sharpe_ratio: 夏普比率 (可选)
     - positions: 仓位历史摘要列表
@@ -1252,6 +1260,7 @@ class PMSBacktestReport(FinancialModel):
     total_pnl: Decimal           # 总盈亏 (USDT)
     total_fees_paid: Decimal     # 总手续费
     total_slippage_cost: Decimal # 总滑点成本
+    total_funding_cost: Decimal = Field(default=Decimal('0'), description="总资金费用 (BT-2)")  # 总资金费用
     max_drawdown: Decimal        # 最大回撤 (%)
     sharpe_ratio: Optional[Decimal] = None  # 夏普比率
     positions: List[PositionSummary] = Field(default_factory=list)
