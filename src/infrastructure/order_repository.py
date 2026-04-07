@@ -8,7 +8,9 @@ P5-011: 订单清理机制
 """
 import asyncio
 import json
+import logging
 import os
+import threading
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List, Dict, Any, Tuple, Set
@@ -19,9 +21,8 @@ from src.domain.models import (
     Order, OrderStatus, OrderType, OrderRole, Direction,
     OrderResponse, OrderResponseFull,
 )
-from src.infrastructure.logger import setup_logger
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class OrderRepository:
@@ -55,7 +56,10 @@ class OrderRepository:
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
-        self._lock: Optional[asyncio.Lock] = None  # 延迟创建，避免事件循环冲突
+        # ✅ 修复：使用字典存储每个事件循环专用的 Lock
+        self._locks: Dict[int, asyncio.Lock] = {}
+        self._global_lock = threading.Lock()  # 保护 _locks 字典
+        self._sync_lock = threading.Lock()  # 用于同步调用场景
         self._exchange_gateway = exchange_gateway  # 依赖注入：交易所网关
         self._audit_logger = audit_logger  # 依赖注入：审计日志器
         logger.info(f"订单仓库初始化完成：{db_path}")
@@ -69,25 +73,31 @@ class OrderRepository:
         self._audit_logger = logger_instance
 
     def _ensure_lock(self) -> asyncio.Lock:
-        """Ensure lock is created for current event loop.
+        """
+        获取当前事件循环专用的 Lock。
 
-        This method is safe to call from any event loop context.
-        Each call will return the lock associated with the current running event loop.
+        使用双重检查锁定模式确保线程安全。
+        每个事件循环有独立的 Lock，避免跨事件循环共享导致的竞态条件。
+
+        Returns:
+            asyncio.Lock: 当前事件循环专用的锁实例
         """
         try:
-            # 尝试获取当前运行的事件循环
             loop = asyncio.get_running_loop()
+            loop_id = id(loop)
         except RuntimeError:
-            # 没有运行的事件循环，返回一个新创建的 lock
-            # 这种情况通常发生在同步代码中
-            return asyncio.Lock()
+            # 同步调用场景：返回同步锁
+            # 注意：这种情况下获得的锁无法在异步代码中使用
+            return self._sync_lock
 
-        # 为当前事件循环创建或获取 lock
-        # 使用 id(loop) 作为唯一标识符，避免跨事件循环共享 lock
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        # 双重检查锁定模式
+        if loop_id not in self._locks:
+            with self._global_lock:
+                # 再次检查，避免多个线程同时创建 Lock
+                if loop_id not in self._locks:
+                    self._locks[loop_id] = asyncio.Lock()
 
-        return self._lock
+        return self._locks[loop_id]
 
     async def initialize(self) -> None:
         """

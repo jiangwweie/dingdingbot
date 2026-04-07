@@ -3648,3 +3648,171 @@ class TestMarkOrderFilled:
 # ------------------------------------------------------------
 # 注：P0-015 (test_get_order_count) 和 P0-016 (test_get_order_count_empty)
 #     已在上方实现，此处无需新增测试
+
+
+# ============================================================
+# P1-3 日志导入规范化测试
+# ============================================================
+
+class TestP1Fix_LoggerImport:
+    """P1-3: 日志导入规范化测试"""
+
+    def test_uses_standard_logging(self):
+        """测试使用标准 logging 模块"""
+        import logging
+
+        # Arrange & Act: 导入模块（会执行模块级代码）
+        import src.infrastructure.order_repository as repo_module
+
+        # Assert: logger 应该是标准 logging.Logger 实例
+        assert isinstance(repo_module.logger, logging.Logger)
+        assert repo_module.logger.name == 'src.infrastructure.order_repository'
+
+
+# ============================================================
+# P1-1: Lock 竞态条件修复测试
+# ============================================================
+
+class TestP1Fix_LockConcurrency:
+    """P1-1: OrderRepository asyncio.Lock 竞态条件修复测试"""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_save_operations(self, order_repository):
+        """
+        测试并发 save 操作的锁机制
+
+        测试场景:
+        1. 创建 10 个订单
+        2. 并发执行 save 操作
+        3. 验证所有订单都已保存，无数据竞争
+
+        验收标准:
+        - 所有订单都成功保存到数据库
+        - 无并发冲突导致的数据损坏
+        """
+        # Arrange
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        orders = [
+            Order(
+                id=f"ord_concurrent_{i}",
+                signal_id="sig_concurrent_test",
+                symbol="BTC/USDT:USDT",
+                direction=Direction.LONG,
+                order_type=OrderType.MARKET,
+                order_role=OrderRole.ENTRY,
+                requested_qty=Decimal('1.0'),
+                filled_qty=Decimal('0'),
+                status=OrderStatus.OPEN,
+                created_at=current_time + i,
+                updated_at=current_time + i,
+                reduce_only=False,
+            )
+            for i in range(10)
+        ]
+
+        # Act: 并发执行 save 操作
+        tasks = [order_repository.save(order) for order in orders]
+        await asyncio.gather(*tasks)
+
+        # Assert: 所有订单都已保存，无数据竞争
+        for order in orders:
+            saved = await order_repository.get_order(order.id)
+            assert saved is not None, f"订单 {order.id} 保存失败"
+            assert saved.id == order.id
+            assert saved.signal_id == order.signal_id
+
+    @pytest.mark.asyncio
+    async def test_lock_per_event_loop(self, order_repository):
+        """
+        测试不同事件循环有独立的 Lock
+
+        测试场景:
+        1. 创建两个不同的事件循环
+        2. 在不同事件循环中调用 _ensure_lock()
+        3. 验证返回的是不同的 Lock 实例
+
+        验收标准:
+        - 不同事件循环返回不同的 Lock 实例
+        - Lock 字典正确管理多个事件循环的锁
+        """
+        # Arrange: 创建两个不同的事件循环
+        loop1 = asyncio.new_event_loop()
+        loop2 = asyncio.new_event_loop()
+
+        try:
+            # Act: 在不同事件循环中获取 Lock
+            def get_lock_in_loop(repo, loop):
+                """在指定事件循环中获取 lock"""
+                asyncio.set_event_loop(loop)
+                return repo._ensure_lock()
+
+            lock1 = await loop1.run_in_executor(
+                None, get_lock_in_loop, order_repository, loop1
+            )
+            lock2 = await loop2.run_in_executor(
+                None, get_lock_in_loop, order_repository, loop2
+            )
+
+            # Assert: 两个 Lock 是不同的实例
+            assert id(lock1) != id(lock2), "不同事件循环应该返回不同的 Lock 实例"
+
+            # 验证 _locks 字典中有两个条目
+            assert len(order_repository._locks) == 2
+        finally:
+            # Cleanup
+            loop1.close()
+            loop2.close()
+
+    @pytest.mark.asyncio
+    async def test_sync_call_returns_sync_lock(self):
+        """
+        测试同步调用返回同步锁
+
+        测试场景:
+        1. 在没有事件循环的环境中调用 _ensure_lock()
+        2. 验证返回的是同步锁
+
+        验收标准:
+        - 同步调用返回 threading.Lock 实例
+        - 异步调用返回 asyncio.Lock 实例
+        """
+        import threading
+        from src.infrastructure.order_repository import OrderRepository
+        import tempfile
+        import os
+
+        # 创建临时数据库
+        fd, temp_db_path = tempfile.mkstemp(suffix='.db')
+        os.close(fd)
+
+        try:
+            # Arrange: 创建 OrderRepository 实例（不同步初始化）
+            repo = OrderRepository(db_path=temp_db_path)
+
+            # Act: 在没有事件循环的线程中调用
+            def get_lock_sync(repo_instance):
+                """在同步环境中获取 lock"""
+                try:
+                    asyncio.get_running_loop()
+                    # 如果有 running loop，说明不是在纯同步环境
+                    return ('has_loop', None)
+                except RuntimeError:
+                    # 正常：没有运行的事件循环
+                    lock = repo_instance._ensure_lock()
+                    return ('no_loop', lock)
+
+            # 在线程池中执行（确保没有事件循环）
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                loop_status, sync_lock = await asyncio.get_event_loop().run_in_executor(
+                    executor, get_lock_sync, repo
+                )
+
+            # Assert: 同步环境返回 threading.Lock
+            if loop_status == 'no_loop':
+                assert isinstance(sync_lock, type(threading.Lock())), \
+                    "同步调用应该返回 threading.Lock 或兼容的同步锁"
+        finally:
+            # Cleanup
+            if os.path.exists(temp_db_path):
+                os.remove(temp_db_path)

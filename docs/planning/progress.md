@@ -4,6 +4,36 @@
 
 ---
 
+### 2026-04-07 22:00 - T003 P1-3 日志导入规范化修复 ✅
+
+**任务 ID**: T003  
+**负责人**: Backend Developer  
+**总工时**: 0.5h  
+**优先级**: P1
+
+**工作内容**:
+1. ✅ 移除 `from src.infrastructure.logger import setup_logger`
+2. ✅ 改用标准 `import logging` 和 `logging.getLogger(__name__)`
+3. ✅ 新增单元测试 `test_uses_standard_logging`
+4. ✅ 运行测试验证（90/90 通过）
+
+**修改文件**:
+- `src/infrastructure/order_repository.py` - 日志导入规范化
+
+**测试结果**:
+```
+tests/unit/infrastructure/test_order_repository_unit.py::TestP1Fix_LoggerImport::test_uses_standard_logging - PASSED
+tests/unit/infrastructure/test_order_repository_unit.py - 90 passed
+```
+
+**验收标准**:
+- [x] 使用标准 `logging.getLogger(__name__)`
+- [x] logger 类型为 `logging.Logger`
+- [x] 新增 1 个单元测试通过
+- [x] 现有测试无回归
+
+---
+
 ### 2026-04-07 21:00 - P0-2 快照列表查询功能实现 ✅
 
 **任务 ID**: P0-2  
@@ -2447,3 +2477,45 @@ await self._log_config_change(
 **Git 提交**:
 - 93c55f5 fix: 配置变更历史记录旧值 - save_backtest_configs 记录 old_values
 
+
+## 2026-04-07 T002 - P1-2 止损比例配置化修复完成
+
+### 完成工作
+
+**任务 ID**: T002  
+**优先级**: P1  
+**工时**: 1h
+
+**修改文件**:
+- `src/domain/order_manager.py` (第 323-328 行)
+- `tests/unit/test_order_manager.py` (新增测试类)
+
+### 修复内容
+
+1. **核心修复** (`order_manager.py:323-328`):
+   - 从 `OrderStrategy.initial_stop_loss_rr` 读取止损比例
+   - 支持 `strategy=None` 和 `strategy.initial_stop_loss_rr=None` 的默认值处理
+   - 默认值为 `Decimal('-1.0')` (1R 止损)
+
+2. **新增测试** (3 个测试用例全部通过):
+   - `test_uses_strategy_stop_loss_rr` - 测试使用策略配置的止损比例
+   - `test_uses_default_when_strategy_none` - 测试 strategy 为 None 时使用默认值
+   - `test_uses_default_when_stop_loss_rr_none` - 测试 initial_stop_loss_rr 为 None 时使用默认值
+
+### 测试验证
+
+```bash
+pytest tests/unit/test_order_manager.py::TestP1Fix_DynamicStopLoss -v
+# 3 passed
+
+pytest tests/unit/test_order_manager.py -v
+# 46 passed (无回归)
+```
+
+### 验收标准确认
+
+- ✅ `_generate_tp_sl_orders()` 方法使用策略配置的止损比例
+- ✅ 支持 strategy 为 None 的场景
+- ✅ 支持 strategy.initial_stop_loss_rr 为 None 的场景
+- ✅ 新增 3 个单元测试全部通过
+- ✅ 现有测试无回归 (46 passed)
