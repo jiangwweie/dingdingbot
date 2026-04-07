@@ -141,28 +141,31 @@ core_config = parser.create_default_core_config()  # ✓ 成功
 user_config = parser.create_default_user_config()  # ✓ 成功
 ```
 
-**测试用例设计** (20 个):
-- YAML 解析测试 (5 个): 有效文件、文件不存在、语法错误、空文件、Unicode
-- Decimal 精度测试 (5 个): 精度保持、构造器恢复、复杂配置、零值、极大值
-- 模型验证测试 (5 个): CoreConfig、UserConfig、RiskConfig 有效/无效验证
-- 序列化测试 (3 个): 基本序列化、Decimal 序列化、往返序列化
-- Fallback 方法测试 (2 个): 默认核心配置、默认用户配置
+**测试结果** (QA Tester 已完成):
+```
+tests/unit/test_config_parser.py - 38 passed in 0.06s
+- TestYamlParsing: 5 passed
+- TestDecimalPrecision: 7 passed
+- TestModelValidation: 7 passed
+- TestSerialization: 5 passed
+- TestIntegration: 5 passed
+- TestEdgeCases: 9 passed
+覆盖率：100% 通过
+```
 
 **验收标准**:
 - ✅ Parser 层实现完整
 - ✅ Decimal 精度处理正确（全局注册 representer/constructor）
 - ✅ 向后兼容（复用现有模型，无重复定义）
 - ✅ 测试用例设计文档完整
+- ✅ 单元测试 38/38 通过
 
 **下一步**:
-- QA Tester 根据测试设计文档编写单元测试 (`test_config_parser.py`)
 - 进入阶段 2：Repository 层实现（Day 3-4）
 
 **Git 提交**:
-- `feat(P1-5): 创建 config 包目录结构`
-- `feat(P1-5): 定义配置数据模型`
-- `feat(P1-5): 实现 ConfigParser 类`
-- `docs(P1-5): Parser 层测试用例设计`
+- `feat(P1-5): 实现 Parser 层配置解析器` (b29220b)
+- `docs(P1-5): 更新任务计划和进度日志` (23780cd)
 
 ---
 
