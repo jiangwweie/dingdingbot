@@ -220,6 +220,14 @@ npm run lint  # 如已配置
 #### 🔴 收工时检查清单
 ```markdown
 - [ ] **ADR 文档**: `docs/arch/<feature>-design.md` 已创建
+- [ ] **OpenAPI Spec**: `docs/contracts/api-spec.yaml` 已生成 ⭐
+- [ ] **契约验证**: 6 项验证清单已通过 ⭐
+  - [ ] 所有端点已定义
+  - [ ] 请求/响应模型已完整
+  - [ ] 错误码已完整（F/C/W 系列）
+  - [ ] 枚举值已完整
+  - [ ] 数据类型已明确（Decimal 用 string）
+  - [ ] 必填/可选字段已标注
 - [ ] **契约表**: 接口契约表已完成（`docs/designs/<feature>-contract.md`）
 - [ ] **Schema 对齐**: Pydantic ↔ TypeScript 类型已对齐
 - [ ] **关联影响评估**: 已评估对现有模块的影响
@@ -277,7 +285,9 @@ npm run lint  # 如已配置
 #### 🟢 开工前检查清单
 ```markdown
 - [ ] **契约阅读**: 已阅读 API 契约表 (如有)
+- [ ] **OpenAPI Spec 阅读确认**: 已阅读 docs/contracts/api-spec.yaml ⭐
 - [ ] **接口确认**: 明确请求/响应 Schema
+- [ ] **类型导入验证**: 已从 OpenAPI Spec 生成类型定义 ⭐
 - [ ] **模型定位**: 确定需要修改的文件路径
 - [ ] **测试定位**: 确定需要编写的测试文件
 ```
@@ -286,6 +296,7 @@ npm run lint  # 如已配置
 ```markdown
 - [ ] **单元测试**: 新功能测试覆盖率 ≥ 80%
 - [ ] **类型验证**: Pydantic 模型验证通过
+- [ ] **契约一致性**: 实现与 OpenAPI Spec 一致 ⭐
 - [ ] **代码简化**: 已调用 `code-simplifier` 优化 (如需要)
 - [ ] **异步检查**: 无同步阻塞调用 (async 中无 time.sleep)
 - [ ] **日志脱敏**: 敏感信息已脱敏
@@ -301,6 +312,9 @@ python -c "from src.domain.xxx import xxx"
 
 # 确认无循环导入
 pytest --import-mode=importlib tests/unit/
+
+# 验证类型定义来自 OpenAPI Spec ⭐
+grep -r "from generated_client import" src/
 ```
 
 ---
@@ -312,15 +326,21 @@ pytest --import-mode=importlib tests/unit/
 #### 🟢 开工前检查清单
 ```markdown
 - [ ] **契约阅读**: 已阅读 API 契约表 (Props 定义)
+- [ ] **OpenAPI Spec 阅读确认**: 已阅读 docs/contracts/api-spec.yaml ⭐
 - [ ] **UI 确认**: 明确组件交互流程
 - [ ] **组件定位**: 确定需要修改的组件文件
-- [ ] **类型定义**: 准备 TypeScript 类型定义
+- [ ] **类型导入验证**: 已从 OpenAPI Spec 导入类型定义 ⭐
+  ```bash
+  # 生成 TypeScript 类型
+  openapi-typescript docs/contracts/api-spec.yaml > web-front/src/types/api.ts
+  ```
 ```
 
 #### 🔴 收工时检查清单
 ```markdown
 - [ ] **组件渲染**: 组件可正常渲染无报错
 - [ ] **类型检查**: TypeScript 无类型错误
+- [ ] **契约一致性**: 实现与 OpenAPI Spec 一致 ⭐
 - [ ] **样式验证**: 响应式布局正常
 - [ ] **设计优化**: 已调用 `ui-ux-pro-max` (如需要)
 - [ ] **代码简化**: 已调用 `code-simplifier` 优化 (如需要)
@@ -338,6 +358,9 @@ npm run build
 
 # 样式检查
 npm run lint
+
+# 验证类型定义来自 OpenAPI Spec ⭐
+grep -r "from '@/types/api'" src/
 ```
 
 ---
@@ -349,6 +372,7 @@ npm run lint
 #### 🟢 开工前检查清单
 ```markdown
 - [ ] **契约阅读**: 已阅读 API 契约表 (测试范围)
+- [ ] **OpenAPI Spec 阅读确认**: 已阅读 docs/contracts/api-spec.yaml ⭐
 - [ ] **数据准备**: 已准备测试数据和 Mock
 - [ ] **测试定位**: 确定需要编写的测试文件
 - [ ] **工具确认**: 确认需要调用的测试技能
@@ -359,6 +383,7 @@ npm run lint
 - [ ] **测试报告**: 已生成测试通过率报告
 - [ ] **覆盖率达标**: 新增代码覆盖率 ≥ 80%
 - [ ] **回归测试**: 现有测试全部通过
+- [ ] **契约一致性验证**: 实现与 OpenAPI Spec 一致 ⭐
 - [ ] **E2E 测试**: 关键路径已覆盖 (如需要)
 - [ ] **失败分析**: 失败测试已分析根因
 ```
@@ -373,6 +398,11 @@ pytest --cov=src --cov-report=html
 
 # 检查覆盖率
 coverage report --fail-under=80
+
+# 验证 API 响应与 OpenAPI Spec 一致 ⭐
+# 使用 schemathesis 进行契约测试
+pip install schemathesis
+st run docs/contracts/api-spec.yaml --base-url http://localhost:8000
 ```
 
 ---
@@ -384,6 +414,7 @@ coverage report --fail-under=80
 #### 🟢 开工前检查清单
 ```markdown
 - [ ] **契约阅读**: 已阅读 API 契约表和变更范围
+- [ ] **OpenAPI Spec 阅读确认**: 已阅读 docs/contracts/api-spec.yaml ⭐
 - [ ] **审查重点**: 明确需要重点关注的风险区域
 - [ ] **工具准备**: 准备好审查工具和测试命令
 ```
@@ -393,6 +424,7 @@ coverage report --fail-under=80
 - [ ] **审查报告**: 已生成正式审查报告
 - [ ] **问题标注**: 所有问题已标注优先级 (P0/P1/P2)
 - [ ] **架构检查**: Clean Architecture 分层验证通过
+- [ ] **契约一致性检查**: 实现与 OpenAPI Spec 一致 ⭐
 - [ ] **安全检查**: 无安全隐患 (命令注入、SQL 注入等)
 - [ ] **批准决定**: 明确批准/拒绝/需改进
 ```
@@ -407,6 +439,9 @@ mypy src/
 
 # 代码风格检查
 flake8 src/ tests/
+
+# 验证 OpenAPI Spec 完整性 ⭐
+openapi-spec-validator docs/contracts/api-spec.yaml
 ```
 
 ---
@@ -437,40 +472,63 @@ flake8 src/ tests/
     → Git 提交（不推送）
 
 
-【阶段 2】架构设计 + 开发 + 单元测试
+【阶段 2】架构设计 + 契约生成 + 开发 + 单元测试
 
   执行方式：Foreground（用户可见）
   触发命令：/architect → /pm
 
   执行步骤：
-    2.1 Arch 架构设计（可选交互式）
-        - 输出：ADR + 契约表
-        - Memory MCP：立即写入架构决策 ⭐
-        - ⚠️ 暂停等待用户审查 ⭐⭐⭐
+    2.1 Arch 架构设计（强制输出 OpenAPI Spec）⭐
+        - 输出：ADR + OpenAPI Spec（docs/contracts/api-spec.yaml）⭐
+        - 验证：6 项验证清单（所有端点、模型、错误码、枚举、类型、字段）⭐
+        - Memory MCP：立即写入架构决策
 
-    2.2 用户审查架构方案（交互式）
+    2.2 契约生成子任务（新增）⭐
+        - 后端：从 OpenAPI Spec 生成类型定义 + Mock 服务器
+          ```bash
+          # 生成 Python 类型定义
+          pip install openapi-python-client
+          openapi-python-client generate --path docs/contracts/api-spec.yaml
+
+          # 启动 Mock API 服务器
+          npm install -g @stoplight/prism-cli
+          prism mock docs/contracts/api-spec.yaml
+          ```
+        - 前端：从 OpenAPI Spec 导入类型定义
+          ```bash
+          # 生成 TypeScript 类型
+          npm install -D openapi-typescript
+          openapi-typescript docs/contracts/api-spec.yaml > web-front/src/types/api.ts
+          ```
+        - 验证：契约文件生成成功，前后端类型一致 ⭐
+
+    2.3 用户审查架构方案（交互式）
+        - 审查 ADR + OpenAPI Spec + 契约生成结果
         - 用户回复"确认" → 继续
         - 用户回复"修改" → 返回 2.1
 
-    2.3 PM 任务分解（自动）
+    2.4 PM 任务分解（自动）
         - 识别并行簇
         - 创建任务清单（TaskCreate）并标注依赖（TaskUpdate + addBlockedBy）
 
-    2.4 Backend + Frontend 并行开发
+    2.5 Backend + Frontend 并行开发
         - Foreground 执行（用户可见进度）
         - 使用 Agent 工具并行调度
+        - ⚠️ 禁止自己定义接口类型，必须从 OpenAPI Spec 导入 ⭐
 
-    2.5 QA 单元测试
+    2.6 QA 单元测试
         - 后端单元测试（pytest）
         - 前端组件测试（React Testing Library）
 
-    2.6 Reviewer 实时审查（每个模块完成后）
+    2.7 Reviewer 实时审查（每个模块完成后）
+        - 检查接口是否符合 OpenAPI Spec ⭐
 
   用户确认点：测试前确认（耗时 30-60 分钟）⭐
 
   输出文档：
     - 代码文件（src/, web-front/）
     - 单元测试文件（tests/unit/）
+    - docs/contracts/api-spec.yaml（OpenAPI Spec）⭐
     - docs/designs/<feature>-contract.md（契约表）
     - Memory MCP（架构决策）
 
@@ -522,14 +580,16 @@ flake8 src/ tests/
 | 阶段 | 负责人 | 检查点 | 产出物 |
 |------|--------|--------|--------|
 | **阶段 1** | PdM | 需求澄清对话，至少 3 个问题 | 需求理解确认 + PRD 文档 |
-| **阶段 2** | Arch | 架构方案审查，至少 2 个方案 | 技术方向确认 + ADR + 契约表 ⭐ |
+| **阶段 2** | Arch | 架构方案审查 + OpenAPI Spec 验证 ⭐ | 技术方向确认 + ADR + OpenAPI Spec ⭐ |
+| **阶段 2** | Arch/Backend/Frontend | 契约生成验证（类型定义 + Mock 服务器）⭐ | 契约文件生成成功 ⭐ |
 | **阶段 2** | PM | 测试前确认（耗时 30-60 分钟） | 测试执行批准 ⭐ |
 | **阶段 3** | PM | 交付汇报，用户验收 | 交付确认 |
 
 **核心原则**:
 - **先对话，后文档** - 阶段 1 强制交互式沟通（头脑风暴）
+- **先契约，后开发** - 阶段 2 强制 OpenAPI Spec + 契约生成 ⭐⭐⭐
 - **先共创，后决策** - 阶段 2 架构方案选项与用户共创
-- **关键点暂停** - 阶段 2 架构设计后暂停等待用户审查 ⭐⭐⭐
+- **关键点暂停** - 阶段 2 架构设计后暂停等待用户审查
 - **文档是对话的产物** - 文档是对话结果的记录
 - **Memory MCP 永久保留** - 架构决策永久追溯 ⭐
 
