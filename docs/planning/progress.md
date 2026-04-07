@@ -4,6 +4,60 @@
 
 ---
 
+### 2026-04-07 15:30 - BT-2 前端资金费用展示完成 ✅
+
+**任务 ID**: BT-2-FRONTEND  
+**负责人**: Frontend Developer  
+**总工时**: 1.5h  
+**优先级**: P0
+
+**方案 A (最小改动)**: 仅在回测报告**详情弹窗**展示资金费用，避免数据库迁移
+
+**完成工作**:
+
+1. ✅ **类型定义更新** (`web-front/src/types/backtest.ts`)
+   - `BacktestReportDetail` 添加 `total_funding_cost: string` 字段
+   - 注释说明：正数=支付，负数=收取
+
+2. ✅ **详情弹窗组件开发** (`web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx`)
+   - 新建独立 Modal 组件，替代原有 alert 实现
+   - 展示完整的回测报告详情：
+     - 核心指标看板（总收益、胜率、总盈亏、最大回撤）
+     - **成本明细（手续费、滑点、资金费用）** ← BT-2 新增
+     - 交易统计（总次数/盈利/亏损/盈亏比）
+     - 仓位历史列表（前 10 笔）
+   - 资金费用展示设计：
+     - 正数=支付（红色背景）
+     - 负数=收取（绿色背景）
+     - 格式：`+$12.34` 或 `-$5.67`
+
+3. ✅ **回测报告列表页更新** (`web-front/src/pages/BacktestReports.tsx`)
+   - 导入 `BacktestReportDetailModal` 组件
+   - 添加 modal 状态管理 (`selectedReportId`, `selectedReport`)
+   - `handleViewDetails` 改用 Modal 展示（替代 alert）
+   - 添加 `handleCloseModal` 回调
+
+**构建验证**:
+```bash
+cd web-front
+npm run build
+# ✓ built in 6.17s - 无类型错误
+```
+
+**验收标准**:
+- [x] 点击回测报告"查看详情"按钮打开详情弹窗
+- [x] 弹窗展示资金费用字段
+- [x] 颜色区分正确（支付=红色，收取=绿色）
+- [x] 格式正确（带正负号的美元金额）
+- [x] TypeScript 类型检查通过
+
+**修改文件**:
+- `web-front/src/types/backtest.ts` - 添加 `total_funding_cost` 字段
+- `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` - 新建详情弹窗组件
+- `web-front/src/pages/BacktestReports.tsx` - 集成弹窗组件
+
+---
+
 ### 2026-04-07 11:00 - OrderRepository P1 全部完成 ✅
 
 **任务 ID**: TEST-ORDER-REPO-P1  

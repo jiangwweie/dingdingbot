@@ -17,6 +17,7 @@ import type {
 import { BacktestReportsTable } from '../components/v3/backtest/BacktestReportsTable';
 import { BacktestReportsFilters, type FilterValues } from '../components/v3/backtest/BacktestReportsFilters';
 import { BacktestReportsPagination } from '../components/v3/backtest/BacktestReportsPagination';
+import BacktestReportDetailModal from '../components/v3/backtest/BacktestReportDetailModal';
 
 type SortField = 'total_return' | 'win_rate' | 'created_at';
 type SortOrder = 'asc' | 'desc';
@@ -41,6 +42,11 @@ export default function BacktestReports() {
 
   // Delete confirmation state
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Detail modal state
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [selectedReport, setSelectedReport] = useState<any | null>(null);
+  const [isModalLoading, setIsModalLoading] = useState(false);
 
   // Fetch reports
   const fetchReports = useCallback(async () => {
@@ -112,15 +118,25 @@ export default function BacktestReports() {
 
   // Handle view details
   const handleViewDetails = useCallback(async (reportId: string) => {
+    setSelectedReportId(reportId);
+    setIsModalLoading(true);
     try {
       const { fetchBacktestReportDetail } = await import('../lib/api');
       const report = await fetchBacktestReportDetail(reportId);
-      // Show report details in an alert for now (can be enhanced with a modal)
-      alert(`回测报告详情：${reportId}\n\n策略：${report.strategy_name || 'N/A'}\n总收益：${report.total_return}%\n夏普比率：${report.sharpe_ratio || 'N/A'}\n最大回撤：${report.max_drawdown}%\n胜率：${report.win_rate}%`);
+      setSelectedReport(report);
     } catch (err: any) {
       console.error('Failed to fetch report details:', err);
       alert(`获取报告详情失败：${err.message || '未知错误'}`);
+      setSelectedReportId(null);
+    } finally {
+      setIsModalLoading(false);
     }
+  }, []);
+
+  // Handle close modal
+  const handleCloseModal = useCallback(() => {
+    setSelectedReportId(null);
+    setSelectedReport(null);
   }, []);
 
   // Handle delete
@@ -215,6 +231,14 @@ export default function BacktestReports() {
         onDelete={handleDelete}
         isLoading={isLoading}
       />
+
+      {/* Detail Modal */}
+      {selectedReportId && (
+        <BacktestReportDetailModal
+          report={selectedReport}
+          onClose={handleCloseModal}
+        />
+      )}
 
       {/* Pagination */}
       {total > 0 && (

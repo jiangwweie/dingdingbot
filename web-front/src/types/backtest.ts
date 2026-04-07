@@ -90,6 +90,8 @@ export interface BacktestReportDetail extends BacktestReportSummary {
   total_fees_paid: string;
   /** 总滑点成本（USDT） */
   total_slippage_cost: string;
+  /** 总资金费用（USDT，BT-2）正数=支付，负数=收取 */
+  total_funding_cost: string;
   /** 夏普比率（可选） */
   sharpe_ratio?: string | null;
   /** 仓位历史摘要列表 */
