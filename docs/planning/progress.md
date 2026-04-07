@@ -54,12 +54,59 @@ oco_group_id = excluded.oco_group_id,  -- 允许设置为 NULL
 
 ---
 
-### 2026-04-07 - T006 AuditLogger 类型校验缺失修复
+### 2026-04-07 - T006 AuditLogger 类型校验缺失修复 ✅
 
 **任务 ID**: T006  
 **优先级**: P2  
 **工时估算**: 2h  
-**状态**: 进行中
+**实际工时**: 1h  
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ 分析 `order_audit_logger.py` 现有代码
+2. ✅ 实现 `_validate_event_type()` 和 `_validate_trigger_source()` 辅助方法
+3. ✅ 编写 16 个单元测试用例（超出预期的 4 个）
+4. ✅ 运行测试验证：16/16 通过
+
+**修改文件**:
+- `src/application/order_audit_logger.py` - 添加类型校验逻辑
+- `tests/unit/application/test_order_audit_logger.py` - 新增测试文件
+
+**类型校验逻辑**:
+```python
+def _validate_event_type(self, event_type) -> OrderAuditEventType:
+    if isinstance(event_type, OrderAuditEventType):
+        return event_type
+    try:
+        return OrderAuditEventType(event_type)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid event_type: {event_type}")
+
+def _validate_trigger_source(self, triggered_by) -> OrderAuditTriggerSource:
+    if isinstance(triggered_by, OrderAuditTriggerSource):
+        return triggered_by
+    try:
+        return OrderAuditTriggerSource(triggered_by)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid triggered_by: {triggered_by}")
+```
+
+**测试结果**:
+- ✅ `test_valid_enum_types` - 有效枚举类型传入
+- ✅ `test_string_to_enum_conversion` - 字符串自动转换
+- ✅ `test_invalid_event_type` - 无效 event_type 异常
+- ✅ `test_invalid_triggered_by` - 无效 triggered_by 异常
+- ✅ 12 个辅助方法测试用例
+- ✅ 现有 order 相关测试无回归
+
+**验收标准**: 全部满足
+- ✅ 方法参数添加类型注解
+- ✅ 添加类型校验逻辑
+- ✅ 支持字符串自动转换为枚举
+- ✅ 新增 16 个单元测试全部通过
+- ✅ 现有测试无回归
+
+---
 
 **工作内容**:
 1. 分析 `order_audit_logger.py` 现有代码
