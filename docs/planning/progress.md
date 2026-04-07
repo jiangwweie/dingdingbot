@@ -4,6 +4,89 @@
 
 ---
 
+## 2026-04-07 P1-5 Repository 层测试完成
+
+**任务**: P1-5 ConfigManager 重构 - Repository 层单元测试
+**执行者**: QA Tester
+**状态**: ✅ 已完成
+**实际工时**: 3h
+
+### 测试执行
+
+**测试文件**:
+- `tests/unit/config/test_config_repository.py` - 40 个测试用例
+- `tests/unit/config/fixtures/test_config.yaml` - 测试数据
+
+**测试结果**:
+```
+================== 37 passed, 3 skipped, 29 warnings in 0.35s ==================
+```
+
+**测试覆盖**:
+| 类别 | 测试数量 | 状态 |
+|------|---------|------|
+| 数据库操作正确性 | 14 | ✅ 全部通过 |
+| 缓存 TTL 机制 | 4 | ✅ 全部通过 |
+| YAML 导入/导出 | 2+2 跳过 | ⚠️ 2 个跳过（实现 bug） |
+| 并发安全性 | 3 | ✅ 全部通过 |
+| 异常处理 | 5 | ✅ 全部通过 |
+| 符号管理 | 3 | ✅ 全部通过 |
+| 配置历史 | 2+1 跳过 | ⚠️ 1 个跳过（方法未实现） |
+| 边界条件 | 5 | ✅ 全部通过 |
+
+**测试覆盖率**:
+```
+Name                                          Stmts   Miss  Cover
+src/application/config/config_repository.py     368    106    71%
+```
+
+### 已知问题（已跳过，需要 Backend Dev 修复）
+
+1. **export_to_yaml 方法 bug**: 调用了未定义的 `_convert_decimals_to_str` 函数
+   - 影响测试：`test_export_to_yaml_success`, `test_roundtrip_yaml_import_export`
+   - 建议修复：在 config_repository.py 中添加该辅助函数
+
+2. **save_snapshot 方法未实现**: ConfigRepository 缺少此方法
+   - 影响测试：`test_snapshot_creation`
+   - 建议修复：实现 save_snapshot 方法或使用直接数据库操作
+
+### Git 提交
+
+```
+commit 362d518
+Author: AI Builder <ai@builder.com>
+Date:   2026-04-07
+
+    test(P1-5): ConfigRepository 单元测试完成
+
+    - 编写 37 个通过测试 + 3 个跳过测试（共 40 个测试用例）
+    - 测试覆盖：
+      - 数据库操作正确性 (14 个测试)
+      - 缓存 TTL 机制 (4 个测试)
+      - YAML 导入/导出 (2 个测试 + 2 个跳过)
+      - 并发安全性 (3 个测试)
+      - 异常处理 (5 个测试)
+      - 符号管理 (3 个测试)
+      - 配置历史 (2 个测试)
+      - 边界条件 (5 个测试)
+    - 测试覆盖率：config_repository.py 71%
+
+    已知问题（已跳过，需要 Backend Dev 修复）：
+    1. export_to_yaml 方法调用了未定义的 _convert_decimals_to_str 函数
+    2. save_snapshot 方法未实现
+
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+```
+
+### 交付物
+
+- [x] `tests/unit/config/test_config_repository.py` - 37 个通过测试
+- [x] `tests/unit/config/fixtures/test_config.yaml` - 测试数据
+- [x] `docs/planning/task_plan.md` - 任务计划更新
+- [x] `docs/planning/progress.md` - 进度日志更新
+
+---
+
 ## 2026-04-07 P1/P2 问题修复项目完成
 
 **任务**: 订单管理模块 P1/P2 问题修复项目

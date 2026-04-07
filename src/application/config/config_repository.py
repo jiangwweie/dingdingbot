@@ -1124,30 +1124,27 @@ class ConfigRepository:
     async def export_to_yaml(self, yaml_path: str, config: Optional[Dict[str, Any]] = None, changed_by: str = "system") -> None:
         """
         Export current configuration to YAML file.
-        
+
         Args:
             yaml_path: Path to output YAML file
             config: Configuration to export. If None, exports current config
             changed_by: User identifier
         """
         self.assert_initialized()
-        
+
         # Get current config if not provided
         if config is None:
             config = await self.get_user_config_dict()
-        
-        # Convert Decimal to string for YAML serialization
-        config = _convert_decimals_to_str(config)
-        
-        # Serialize to YAML
-        yaml_str = yaml.dump(config, default_flow_style=False, allow_unicode=True, encoding=None)
-        
+
+        # Use ConfigParser to serialize - handles Decimal precision and Pydantic models
+        yaml_str = self._parser.dump_to_yaml(config)
+
         # Write to file
         with open(yaml_path, 'w', encoding='utf-8') as f:
             f.write(yaml_str)
-        
+
         logger.info(f"Configuration exported to {yaml_path}")
-        
+
         # Log the export operation
         await self._log_config_change(
             entity_type="config_bundle",

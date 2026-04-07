@@ -438,17 +438,41 @@ class TestYamlImportExport:
             await repository.import_from_yaml("/nonexistent/path.yaml")
 
     @pytest.mark.asyncio
-    async def test_export_to_yaml_skip(self, repository, tmp_path: Path):
-        """YAML-03: 导出配置到 YAML（跳过，实现有 bug）"""
-        # 跳过：export_to_yaml 调用了未定义的 _convert_decimals_to_str 函数
-        # 这是 Backend Dev 实现的 bug，需要他们修复
-        pytest.skip("export_to_yaml 方法有 bug: _convert_decimals_to_str 未定义")
+    async def test_export_to_yaml_success(self, repository, tmp_path: Path, test_yaml_file: str):
+        """YAML-03: 导出配置到 YAML"""
+        yaml_path = tmp_path / "exported_config.yaml"
+
+        # 先导入测试数据
+        await repository.import_from_yaml(test_yaml_file)
+
+        # 导出配置
+        await repository.export_to_yaml(str(yaml_path))
+
+        # 验证文件已创建
+        assert yaml_path.exists()
+
+        # 验证导出的内容可以读取
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            assert "exchange:" in content
+            assert "risk:" in content
 
     @pytest.mark.asyncio
-    async def test_roundtrip_yaml_import_export_skip(self, repository, tmp_path: Path, test_yaml_file: str):
-        """YAML-04: YAML 往返测试（跳过，实现有 bug）"""
-        # 跳过：export_to_yaml 调用了未定义的 _convert_decimals_to_str 函数
-        pytest.skip("export_to_yaml 方法有 bug: _convert_decimals_to_str 未定义")
+    async def test_roundtrip_yaml_import_export_success(self, repository, tmp_path: Path, test_yaml_file: str):
+        """YAML-04: YAML 往返测试（导出 -> 再导入）"""
+        # 1. 导出当前配置
+        export_path = tmp_path / "exported.yaml"
+        await repository.export_to_yaml(str(export_path))
+
+        # 2. 验证导出的文件可以再次导入
+        imported_data = await repository.import_from_yaml(str(export_path))
+
+        # 3. 验证导出的配置包含预期的核心字段
+        assert "exchange" in imported_data
+        assert "timeframes" in imported_data
+        assert "risk" in imported_data
+        assert imported_data["exchange"]["name"] in ["binance", "bybit", "okx"]  # 支持的交易所
+        assert isinstance(imported_data["timeframes"], list)
 
 
 # ============================================================

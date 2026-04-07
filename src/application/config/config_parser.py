@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+from pydantic import BaseModel
 
 from src.application.config.models import (
     CoreConfig,
@@ -68,16 +69,20 @@ yaml.add_constructor('tag:yaml.org,2002:str', _decimal_constructor)
 def _convert_decimals_to_str(obj: Any) -> Any:
     """
     Recursively convert all Decimal values in a dict/list to string for JSON/YAML serialization.
+    Also converts Pydantic models to dicts.
 
     This preserves full precision without float conversion errors.
 
     Args:
-        obj: Object to convert (dict, list, or Decimal)
+        obj: Object to convert (dict, list, Decimal, or Pydantic model)
 
     Returns:
-        Object with all Decimal values converted to strings
+        Object with all Decimal values converted to strings and Pydantic models converted to dicts
     """
-    if isinstance(obj, Decimal):
+    if isinstance(obj, BaseModel):
+        # Convert Pydantic model to dict recursively
+        return _convert_decimals_to_str(obj.model_dump(mode='python'))
+    elif isinstance(obj, Decimal):
         return str(obj)
     elif isinstance(obj, dict):
         return {k: _convert_decimals_to_str(v) for k, v in obj.items()}
