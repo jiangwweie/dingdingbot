@@ -12,6 +12,7 @@ Usage:
 """
 
 from src.application.config.config_parser import ConfigParser
+from src.application.config.config_repository import ConfigRepository
 from src.application.config.models import (
     CoreConfig,
     UserConfig,
@@ -22,7 +23,11 @@ from src.application.config.models import (
 )
 
 __all__ = [
+    # Parser layer
     "ConfigParser",
+    # Repository layer
+    "ConfigRepository",
+    # Models
     "CoreConfig",
     "UserConfig",
     "RiskConfig",
