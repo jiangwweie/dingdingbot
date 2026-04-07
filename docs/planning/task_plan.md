@@ -1,74 +1,75 @@
-# 任务计划 - T004 P2-4 止损逻辑歧义修复
+# 任务计划：P1-1 和 P1-2 配置修复
 
-> **任务 ID**: T004
-> **优先级**: P2
-> **工时估算**: 3h
 > **创建时间**: 2026-04-07
-> **状态**: 已完成 ✅
+> **状态**: 进行中
 
 ---
 
-## 任务目标
+## 任务概述
 
-修复 `_calculate_stop_loss_price()` 方法的语义歧义问题，并添加完整的单元测试覆盖。
+### P1-1: Decimal YAML 精度修复
+- **文件位置**: `src/interfaces/api_v1_config.py:57-62`
+- **问题**: Decimal 被转换为 float 后序列化，精度丢失
+- **方案**: 使用字符串表示 Decimal
 
----
-
-## 阶段划分
-
-### 阶段 1: 代码验证 (已完成 ✅)
-- [x] 阅读设计文档 `docs/arch/order-management-fix-design.md`
-- [x] 确认 `_calculate_stop_loss_price()` 方法已按修复代码实现
-- [x] 确认修复代码与设计文档一致
-
-**验证结果**:
-- 代码已修复 (第 430-483 行)
-- 语义说明清晰：`rr_multiple < 0` 表示 RR 倍数，`rr_multiple > 0` 表示百分比
-- `rr_multiple=-1.0` 正确计算为 1% 止损
-
-### 阶段 2: 单元测试编写 (已完成 ✅)
-- [x] 新增 `test_rr_mode_long_position` - LONG 1R 止损
-- [x] 新增 `test_rr_mode_short_position` - SHORT 1R 止损
-- [x] 新增 `test_percent_mode_long_position` - LONG 2% 止损
-- [x] 新增 `test_percent_mode_short_position` - SHORT 2% 止损
-- [x] 新增 `test_rr_mode_2r_stop_loss` - 2R 止损
-
-**测试结果**:
-```
-LONG 1R (rr=-1.0): 50000 → 49500 (50000 × 0.99) ✅
-SHORT 1R (rr=-1.0): 50000 → 50500 (50000 × 1.01) ✅
-LONG 2% (rr=0.02): 50000 → 49000 (50000 × 0.98) ✅
-SHORT 2% (rr=0.02): 50000 → 51000 (50000 × 1.02) ✅
-LONG 2R (rr=-2.0): 50000 → 49000 (50000 × 0.98) ✅
-```
-
-### 阶段 3: 测试验证 (已完成 ✅)
-- [x] 运行 `pytest tests/unit/test_order_manager.py -v`
-- [x] 确认新增 5 个测试全部通过
-- [x] 确认现有测试无回归 (53 passed)
-
-### 阶段 4: 文档更新 (已完成 ✅)
-- [x] 更新 `docs/planning/task_plan.md`
-- [x] 更新 `docs/planning/progress.md`
-- [x] Git 提交
+### P1-2: 缓存 TTL 机制
+- **文件位置**: `src/interfaces/api_v1_config.py:1452`
+- **问题**: 预览数据永久占用内存，无过期机制
+- **方案**: 使用 cachetools.TTLCache
 
 ---
 
-## 验收标准
+## 任务分解
 
-- ✅ `_calculate_stop_loss_price()` 明确区分 RR 倍数和百分比语义
-- ✅ `rr_multiple=-1.0` 正确计算为 1% 止损（而非 2%）
-- ✅ 新增 5 个单元测试全部通过
-- ✅ 现有测试无回归 (53 passed)
+### P1-1 实施步骤
+- [x] 读取当前实现代码
+- [x] 修改 `_decimal_representer` 使用字符串表示
+- [x] 添加 `_decimal_constructor` 用于反序列化
+- [x] 编写测试用例验证精度
+- [ ] 运行测试验证
+
+### P1-2 实施步骤
+- [x] 确认项目依赖是否有 cachetools (确认：无)
+- [x] 添加 cachetools 到 requirements.txt
+- [x] 替换 `_import_preview_cache` 为 TTLCache
+- [x] 更新使用 TTLCache 的代码（移除手动过期检查）
+- [x] 验证过期行为测试
+- [ ] 运行测试验证
 
 ---
 
-## 相关文件
+## 进度追踪
 
-| 文件 | 路径 | 状态 |
+| 时间 | 任务 | 状态 |
 |------|------|------|
-| 设计文档 | `docs/arch/order-management-fix-design.md` | 已阅读 |
-| 源代码 | `src/domain/order_manager.py` | 已验证 |
-| 测试文件 | `tests/unit/test_order_manager.py` | 已新增测试 |
-| 任务计划 | `docs/planning/task_plan.md` | 已更新 |
-| 进度日志 | `docs/planning/progress.md` | 已更新 |
+| 2026-04-07 | P1-1 实施 | 已完成 |
+| 2026-04-07 | P1-2 实施 | 已完成 |
+| 2026-04-07 | 测试验证 | 进行中 |
+| 2026-04-07 | 代码提交 | 待开始 |
+
+---
+
+## 依赖关系
+
+- P1-1 和 P1-2 串行执行（同一文件，避免冲突）
+- 两个任务都完成后统一测试提交
+
+---
+
+## 其他任务
+
+### T008 - P2-8 状态描述映射缺失修复 ✅ 已完成
+
+**任务描述**: 补充 `OrderStateMachine.describe_transition()` 方法中缺失的状态转换描述
+
+**实施步骤**:
+- [x] 审计 `describe_transition()` 方法的状态描述映射
+- [x] 确认所有 17 个合法状态转换描述已完整
+- [x] 新增 `TestDescribeTransitionCompleteness` 测试类（7 个测试用例）
+- [x] 运行测试验证（73 passed，无回归）
+- [x] 更新进度日志
+
+**验收标准**:
+- ✅ 所有合法状态转换都有描述映射
+- ✅ 新增 7 个单元测试全部通过
+- ✅ 现有测试无回归 (73 passed)

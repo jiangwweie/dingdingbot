@@ -385,6 +385,89 @@ class TestCompleteTransitionPaths:
         assert OrderStateMachine.is_terminal_state("EXPIRED") is True
 
 
+class TestDescribeTransitionCompleteness:
+    """测试 describe_transition() 方法的完整性"""
+
+    def test_all_transitions_have_descriptions(self):
+        """测试所有合法状态转换都有描述映射"""
+        missing_descriptions = []
+
+        # 遍历所有状态对
+        for from_status in OrderStateMachine.STATES:
+            valid_targets = OrderStateMachine.TRANSITIONS.get(from_status, frozenset())
+            for to_status in valid_targets:
+                # 跳过终态（无合法转换）
+                if not valid_targets:
+                    continue
+
+                result = OrderStateMachine.describe_transition(from_status, to_status)
+
+                # 检查描述是否包含 "Invalid transition"
+                if "Invalid transition" in result:
+                    missing_descriptions.append((from_status, to_status))
+
+        # 所有合法转换都应该有描述
+        assert missing_descriptions == [], f"缺失描述的状态转换：{missing_descriptions}"
+
+    def test_partially_filled_to_filled_description(self):
+        """测试 PARTIALLY_FILLED → FILLED 转换描述"""
+        result = OrderStateMachine.describe_transition("PARTIALLY_FILLED", "FILLED")
+        assert "PARTIALLY_FILLED" in result
+        assert "FILLED" in result
+        assert "Remaining quantity filled" in result
+
+    def test_partially_filled_to_canceled_description(self):
+        """测试 PARTIALLY_FILLED → CANCELED 转换描述"""
+        result = OrderStateMachine.describe_transition("PARTIALLY_FILLED", "CANCELED")
+        assert "PARTIALLY_FILLED" in result
+        assert "CANCELED" in result
+        assert "Remaining quantity canceled" in result
+
+    def test_all_terminal_states_return_invalid(self):
+        """测试从终态出发的转换都返回 Invalid"""
+        terminal_states = {"FILLED", "CANCELED", "REJECTED", "EXPIRED"}
+
+        for terminal_state in terminal_states:
+            for to_status in OrderStateMachine.STATES:
+                result = OrderStateMachine.describe_transition(terminal_state, to_status)
+                assert "Invalid transition" in result, f"终态 {terminal_state} → {to_status} 应该返回 Invalid"
+
+    def test_created_state_descriptions(self):
+        """测试 CREATED 状态的所有转换描述"""
+        # 合法转换
+        assert "Order submitted to exchange" in OrderStateMachine.describe_transition("CREATED", "SUBMITTED")
+        assert "Order canceled before submission" in OrderStateMachine.describe_transition("CREATED", "CANCELED")
+
+        # 非法转换
+        assert "Invalid transition" in OrderStateMachine.describe_transition("CREATED", "OPEN")
+        assert "Invalid transition" in OrderStateMachine.describe_transition("CREATED", "FILLED")
+
+    def test_submitted_state_descriptions(self):
+        """测试 SUBMITTED 状态的所有转换描述"""
+        # 合法转换
+        assert "Order confirmed by exchange" in OrderStateMachine.describe_transition("SUBMITTED", "OPEN")
+        assert "Order rejected by exchange" in OrderStateMachine.describe_transition("SUBMITTED", "REJECTED")
+        assert "Order canceled after submission" in OrderStateMachine.describe_transition("SUBMITTED", "CANCELED")
+        assert "Order expired" in OrderStateMachine.describe_transition("SUBMITTED", "EXPIRED")
+
+        # 非法转换
+        assert "Invalid transition" in OrderStateMachine.describe_transition("SUBMITTED", "FILLED")
+        assert "Invalid transition" in OrderStateMachine.describe_transition("SUBMITTED", "PARTIALLY_FILLED")
+
+    def test_open_state_descriptions(self):
+        """测试 OPEN 状态的所有转换描述"""
+        # 合法转换
+        assert "Order partially filled" in OrderStateMachine.describe_transition("OPEN", "PARTIALLY_FILLED")
+        assert "Order fully filled" in OrderStateMachine.describe_transition("OPEN", "FILLED")
+        assert "Order canceled" in OrderStateMachine.describe_transition("OPEN", "CANCELED")
+        assert "Order rejected during execution" in OrderStateMachine.describe_transition("OPEN", "REJECTED")
+        assert "Order expired" in OrderStateMachine.describe_transition("OPEN", "EXPIRED")
+
+        # 非法转换
+        assert "Invalid transition" in OrderStateMachine.describe_transition("OPEN", "PENDING")
+        assert "Invalid transition" in OrderStateMachine.describe_transition("OPEN", "SUBMITTED")
+
+
 class TestOrderStateMachineInstanceMethods:
     """测试 OrderStateMachine 实例方法"""
 

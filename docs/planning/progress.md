@@ -4,6 +4,66 @@
 
 ---
 
+### 2026-04-07 - T008 P2-8 状态描述映射缺失修复完成 ✅
+
+**任务 ID**: T008  
+**优先级**: P2  
+**工时估算**: 0.5h  
+**实际工时**: 0.5h  
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ 审计 `describe_transition()` 方法的状态描述映射
+2. ✅ 确认所有 17 个合法状态转换描述已完整
+3. ✅ 新增 `TestDescribeTransitionCompleteness` 测试类（7 个测试用例）
+4. ✅ 运行测试验证（73 passed，无回归）
+5. ✅ 更新进度日志
+
+**修复说明**:
+- **任务要求**: 补充缺失的状态转换描述映射（如 `PARTIALLY_FILLED → FILLED`）
+- **审计结果**: 所有合法转换描述已存在，无需修改源代码
+- **新增测试**:
+  - `test_all_transitions_have_descriptions`: 验证所有合法转换都有描述
+  - `test_partially_filled_to_filled_description`: 验证特定转换描述
+  - `test_partially_filled_to_canceled_description`: 验证部分成交后取消描述
+  - `test_all_terminal_states_return_invalid`: 验证终态返回 Invalid
+  - `test_created_state_descriptions`: 验证 CREATED 状态描述
+  - `test_submitted_state_descriptions`: 验证 SUBMITTED 状态描述
+  - `test_open_state_descriptions`: 验证 OPEN 状态描述
+
+**测试覆盖的状态转换**:
+| 源状态 | 目标状态 | 描述 |
+|--------|----------|------|
+| CREATED | SUBMITTED | Order submitted to exchange |
+| CREATED | CANCELED | Order canceled before submission |
+| SUBMITTED | OPEN | Order confirmed by exchange |
+| SUBMITTED | REJECTED | Order rejected by exchange |
+| SUBMITTED | CANCELED | Order canceled after submission |
+| SUBMITTED | EXPIRED | Order expired |
+| PENDING | OPEN | Order sent to exchange |
+| PENDING | REJECTED | Order rejected by exchange |
+| PENDING | CANCELED | Order canceled before submission |
+| PENDING | SUBMITTED | Order moved to submitted |
+| OPEN | PARTIALLY_FILLED | Order partially filled |
+| OPEN | FILLED | Order fully filled |
+| OPEN | CANCELED | Order canceled |
+| OPEN | REJECTED | Order rejected during execution |
+| OPEN | EXPIRED | Order expired |
+| PARTIALLY_FILLED | FILLED | Remaining quantity filled |
+| PARTIALLY_FILLED | CANCELED | Remaining quantity canceled |
+
+**测试结果**:
+```
+============================== 73 passed in 0.04s ==============================
+```
+
+**验收标准**:
+- ✅ 所有合法状态转换都有描述映射
+- ✅ 新增 7 个单元测试全部通过
+- ✅ 现有测试无回归 (73 passed)
+
+---
+
 ### 2026-04-07 - T004 P2-4 止损逻辑歧义修复完成 ✅
 
 **任务 ID**: T004  
