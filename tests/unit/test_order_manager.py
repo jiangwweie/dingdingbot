@@ -895,12 +895,12 @@ def test_responsibility_boundary():
 # ============================================================
 @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
 @pytest.mark.parametrize("direction,expected_sl_price,expected_tp_price", [
-    # entry=65000, sl_rr=-1.0
-    # 根据代码逻辑：sl_percent = abs(-1.0) = 1.0, 由于 1.0 >= 1，所以 sl_percent = 0.02 (默认 2%)
-    # LONG: sl = 65000 × (1 - 0.02) = 63700, tp = 65000 + 1.5 × (65000-63700) = 66950
-    (Direction.LONG, Decimal('63700'), Decimal('66950')),
-    # SHORT: sl = 65000 × (1 + 0.02) = 66300, tp = 65000 - 1.5 × (66300-65000) = 63050
-    (Direction.SHORT, Decimal('66300'), Decimal('63050')),
+    # entry=65000, sl_rr=-1.0 (1R 止损=1%)
+    # P2-4 修复后：rr_multiple < 0 表示 RR 倍数模式，sl_ratio = abs(-1.0) * 0.01 = 0.01
+    # LONG: sl = 65000 × (1 - 0.01) = 64350, tp = 65000 + 1.5 × (65000-64350) = 65975
+    (Direction.LONG, Decimal('64350'), Decimal('65975')),
+    # SHORT: sl = 65000 × (1 + 0.01) = 65650, tp = 65000 - 1.5 × (65650-65000) = 64025
+    (Direction.SHORT, Decimal('65650'), Decimal('64025')),
 ])
 def test_calculate_stop_loss_and_tp_price_parametrized(direction, expected_sl_price, expected_tp_price):
     """
@@ -2258,8 +2258,7 @@ class TestP1Fix_DynamicStopLoss:
 
         # Assert: SL 订单应使用 2R 止损
         sl_order = next(o for o in orders if o.order_role == OrderRole.SL)
-        # 根据_calculate_stop_loss_price 逻辑：
-        # abs(-2.0) >= 1, 所以 sl_percent = 0.02 (默认 2%)
+        # P2-4 修复后：-2.0 RR 表示 2R 止损=2%
         # LONG: sl_price = 50000 * (1 - 0.02) = 49000
         expected_sl_price = Decimal('49000')
         assert sl_order.trigger_price == expected_sl_price, \
@@ -2304,9 +2303,9 @@ class TestP1Fix_DynamicStopLoss:
         # Assert: 应使用默认 -1.0 RR
         sl_order = next(o for o in orders if o.order_role == OrderRole.SL)
         assert sl_order.trigger_price is not None
-        # 默认 -1.0 RR, abs(-1.0) >= 1, 所以 sl_percent = 0.02
-        # LONG: sl_price = 50000 * (1 - 0.02) = 49000
-        assert sl_order.trigger_price == Decimal('49000')
+        # P2-4 修复后：默认 -1.0 RR 表示 1R 止损=1%
+        # LONG: sl_price = 50000 * (1 - 0.01) = 49500
+        assert sl_order.trigger_price == Decimal('49500')
 
     @pytest.mark.asyncio
     async def test_uses_default_when_stop_loss_rr_none(self):
@@ -2356,9 +2355,102 @@ class TestP1Fix_DynamicStopLoss:
         # Assert: 应使用默认 -1.0 RR
         sl_order = next(o for o in orders if o.order_role == OrderRole.SL)
         assert sl_order.trigger_price is not None
-        # 默认 -1.0 RR, abs(-1.0) >= 1, 所以 sl_percent = 0.02
-        # LONG: sl_price = 50000 * (1 - 0.02) = 49000
-        assert sl_order.trigger_price == Decimal('49000')
+        # P2-4 修复后：默认 -1.0 RR 表示 1R 止损=1%
+        # LONG: sl_price = 50000 * (1 - 0.01) = 49500
+        assert sl_order.trigger_price == Decimal('49500')
+
+
+# ============================================================
+# P2-4 Fix Tests: 止损计算逻辑歧义修复
+# ============================================================
+
+class TestP2Fix_StopLossCalculation:
+    """P2-4: 止损计算逻辑修复测试 - 验证 RR 倍数模式和百分比模式的正确性"""
+
+    @pytest.fixture
+    def order_manager(self) -> OrderManager:
+        """创建 OrderManager 实例"""
+        return OrderManager()
+
+    def test_rr_mode_long_position(self, order_manager: OrderManager):
+        """测试 RR 倍数模式 - LONG 仓位 1R 止损"""
+        # Arrange: 入场价 50000, 1R 止损 (rr_multiple = -1.0)
+        entry_price = Decimal('50000')
+        direction = Direction.LONG
+        rr_multiple = Decimal('-1.0')  # 1R 止损
+
+        # Act
+        sl_price = order_manager._calculate_stop_loss_price(
+            entry_price, direction, rr_multiple
+        )
+
+        # Assert: LONG 1R 止损 = 50000 * (1 - 0.01) = 49500
+        assert sl_price == Decimal('49500'), \
+            f"LONG 1R 止损应为 49500, 实际为 {sl_price}"
+
+    def test_rr_mode_short_position(self, order_manager: OrderManager):
+        """测试 RR 倍数模式 - SHORT 仓位 1R 止损"""
+        # Arrange: 入场价 50000, 1R 止损
+        entry_price = Decimal('50000')
+        direction = Direction.SHORT
+        rr_multiple = Decimal('-1.0')
+
+        # Act
+        sl_price = order_manager._calculate_stop_loss_price(
+            entry_price, direction, rr_multiple
+        )
+
+        # Assert: SHORT 1R 止损 = 50000 * (1 + 0.01) = 50500
+        assert sl_price == Decimal('50500'), \
+            f"SHORT 1R 止损应为 50500, 实际为 {sl_price}"
+
+    def test_percent_mode_long_position(self, order_manager: OrderManager):
+        """测试百分比模式 - LONG 仓位 2% 止损"""
+        # Arrange: 入场价 50000, 2% 止损
+        entry_price = Decimal('50000')
+        direction = Direction.LONG
+        rr_multiple = Decimal('0.02')  # 2% 止损
+
+        # Act
+        sl_price = order_manager._calculate_stop_loss_price(
+            entry_price, direction, rr_multiple
+        )
+
+        # Assert: LONG 2% 止损 = 50000 * (1 - 0.02) = 49000
+        assert sl_price == Decimal('49000'), \
+            f"LONG 2% 止损应为 49000, 实际为 {sl_price}"
+
+    def test_percent_mode_short_position(self, order_manager: OrderManager):
+        """测试百分比模式 - SHORT 仓位 2% 止损"""
+        # Arrange: 入场价 50000, 2% 止损
+        entry_price = Decimal('50000')
+        direction = Direction.SHORT
+        rr_multiple = Decimal('0.02')
+
+        # Act
+        sl_price = order_manager._calculate_stop_loss_price(
+            entry_price, direction, rr_multiple
+        )
+
+        # Assert: SHORT 2% 止损 = 50000 * (1 + 0.02) = 51000
+        assert sl_price == Decimal('51000'), \
+            f"SHORT 2% 止损应为 51000, 实际为 {sl_price}"
+
+    def test_rr_mode_2r_stop_loss(self, order_manager: OrderManager):
+        """测试 2R 止损计算"""
+        # Arrange: 入场价 50000, 2R 止损
+        entry_price = Decimal('50000')
+        direction = Direction.LONG
+        rr_multiple = Decimal('-2.0')  # 2R 止损
+
+        # Act
+        sl_price = order_manager._calculate_stop_loss_price(
+            entry_price, direction, rr_multiple
+        )
+
+        # Assert: LONG 2R 止损 = 50000 * (1 - 0.02) = 49000
+        assert sl_price == Decimal('49000'), \
+            f"LONG 2R 止损应为 49000, 实际为 {sl_price}"
 
 
 # ============================================================

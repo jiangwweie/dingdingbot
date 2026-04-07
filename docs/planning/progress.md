@@ -2887,3 +2887,61 @@ pytest tests/unit/test_order_manager.py -v
 - ✅ 支持 strategy.initial_stop_loss_rr 为 None 的场景
 - ✅ 新增 3 个单元测试全部通过
 - ✅ 现有测试无回归 (46 passed)
+
+---
+
+## 2026-04-07 T004 P2-4 止损逻辑歧义修复完成
+
+### 完成工作
+
+1. **代码验证** (阶段 1 ✅)
+   - 确认 `_calculate_stop_loss_price()` 方法已按设计文档修复
+   - 修复位置：`src/domain/order_manager.py:430-483`
+
+2. **单元测试编写** (阶段 2 ✅)
+   - 新增 `TestP2Fix_StopLossCalculation` 测试类
+   - 实现 5 个测试用例：
+     - `test_rr_mode_long_position` - LONG 1R 止损 (50000 → 49500)
+     - `test_rr_mode_short_position` - SHORT 1R 止损 (50000 → 50500)
+     - `test_percent_mode_long_position` - LONG 2% 止损 (50000 → 49000)
+     - `test_percent_mode_short_position` - SHORT 2% 止损 (50000 → 51000)
+     - `test_rr_mode_2r_stop_loss` - LONG 2R 止损 (50000 → 49000)
+
+3. **测试验证** (阶段 3 ✅)
+   - 新增 5 个测试全部通过
+   - 现有 48 个测试无回归
+   - 总计 53 个测试 100% 通过
+
+### 修复说明
+
+**修复前问题**:
+- `rr_multiple=-1.0` 本意是 1R 止损，但代码转成 2%
+- 逻辑歧义：注释说"负值表示止损"，但实际计算使用绝对值
+
+**修复后行为**:
+- `rr_multiple < 0`: RR 倍数模式，`abs(rr_multiple) × 0.01` 转换为百分比
+  - `rr_multiple=-1.0` → 1% 止损
+  - `rr_multiple=-2.0` → 2% 止损
+- `rr_multiple > 0`: 百分比模式，直接使用
+  - `rr_multiple=0.02` → 2% 止损
+
+### 相关文件
+
+| 文件 | 变更 |
+|------|------|
+| `tests/unit/test_order_manager.py` | 新增 5 个测试用例 |
+| `docs/planning/task_plan.md` | 创建任务计划 |
+| `docs/planning/progress.md` | 更新进度日志 |
+
+### Git 提交
+
+```bash
+git add tests/unit/test_order_manager.py
+git commit -m "test(T004): P2-4 止损逻辑修复单元测试
+
+- 新增 TestP2Fix_StopLossCalculation 测试类
+- 实现 5 个测试用例覆盖 RR 倍数模式和百分比模式
+- 验证 rr_multiple=-1.0 正确计算为 1% 止损
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+```
