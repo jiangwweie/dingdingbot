@@ -1125,7 +1125,10 @@ class OrderStrategy(FinancialModel):
         """
         if not self.tp_ratios:
             return False
-        total = sum(self.tp_ratios)
+        # ✅ IMP-002 修复：使用 Decimal 累加器确保精度
+        total = Decimal('0')
+        for ratio in self.tp_ratios:
+            total += ratio
         # 使用 Decimal 精度比较，允许小误差
         return abs(total - Decimal('1.0')) < Decimal('0.0001')
 
@@ -1133,8 +1136,11 @@ class OrderStrategy(FinancialModel):
     @classmethod
     def validate_tp_ratios_sum(cls, v):
         """验证 tp_ratios 总和是否接近 1.0"""
-        if v and sum(v) != Decimal('1.0'):
-            total = sum(v)
+        if v:
+            # ✅ IMP-002 修复：使用 Decimal 累加器确保精度
+            total = Decimal('0')
+            for ratio in v:
+                total += ratio
             if abs(total - Decimal('1.0')) > Decimal('0.0001'):
                 raise ValueError(f"tp_ratios 总和必须为 1.0，当前为 {total}")
         return v

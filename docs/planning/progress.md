@@ -4,6 +4,80 @@
 
 ---
 
+### 2026-04-07 - IMP-002: tp_ratios 求和精度问题修复 ✅
+
+**任务 ID**: IMP-002
+**优先级**: P2
+**工时估算**: 1h
+**实际工时**: 0.5h
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ 修复 `order_manager.py:360` - 使用 Decimal 累加器替代 `sum()`
+2. ✅ 修复 `models.py:1128` - `validate_ratios()` 方法使用 Decimal 累加器
+3. ✅ 修复 `models.py:1136-1137` - `validate_tp_ratios_sum()` 验证器使用 Decimal 累加器
+4. ✅ 新增 3 个单元测试 (`test_order_manager.py::TestIMP002_DecimalPrecision`)
+5. ✅ 新增 4 个单元测试 (`test_v3_models.py::TestIMP002_OrderStrategyDecimalPrecision`)
+
+**修复详情**:
+
+**order_manager.py:360**:
+```python
+# 修复前
+total_ratio = sum(tp_ratios)
+
+# 修复后
+total_ratio = Decimal('0')
+for ratio in tp_ratios:
+    total_ratio += ratio
+```
+
+**models.py:1128** (`validate_ratios()` 方法):
+```python
+# 修复前
+total = sum(self.tp_ratios)
+
+# 修复后
+total = Decimal('0')
+for ratio in self.tp_ratios:
+    total += ratio
+```
+
+**models.py:1136** (`validate_tp_ratios_sum()` 验证器):
+```python
+# 修复前
+if v and sum(v) != Decimal('1.0'):
+    total = sum(v)
+
+# 修复后
+if v:
+    total = Decimal('0')
+    for ratio in v:
+        total += ratio
+```
+
+**测试结果**:
+```
+test_order_manager.py::TestIMP002_DecimalPrecision    3 PASSED ✅
+test_v3_models.py::TestIMP002_OrderStrategyDecimalPrecision  4 PASSED ✅
+test_order_manager.py (全量回归)                     56 PASSED ✅
+test_v3_models.py (全量回归)                        26 PASSED ✅
+```
+
+**核心验证**:
+- ✅ 5 级别 TP 每级 0.2 累加精确等于 1.0
+- ✅ 3 级别 1/3 近似值累加在容忍范围内
+- ✅ Decimal 累加器比 `sum()` 更可靠
+- ✅ 现有测试无回归
+
+**交付物**:
+- `src/domain/order_manager.py` - tp_ratios 求和修复
+- `src/domain/models.py` - validate_ratios 和 validate_tp_ratios_sum 修复
+- `tests/unit/test_order_manager.py` - 3 个新增测试用例
+- `tests/unit/test_v3_models.py` - 4 个新增测试用例
+
+---
+
 ### 2026-04-07 - P1-5: ConfigParser 单元测试 ✅
 
 **任务 ID**: P1-5

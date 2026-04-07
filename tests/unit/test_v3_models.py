@@ -357,3 +357,83 @@ class TestV3ModelsIntegration:
         assert account.total_balance == Decimal("102500")
         assert position.current_qty == Decimal("0.5")
         assert position.realized_pnl == Decimal("2500")
+
+
+# ============================================================
+# IMP-002: OrderStrategy tp_ratios 求和精度修复测试
+# ============================================================
+
+class TestIMP002_OrderStrategyDecimalPrecision:
+    """IMP-002: OrderStrategy Decimal 精度测试 - 验证 tp_ratios 求和使用 Decimal 累加器"""
+
+    def test_validate_ratios_with_decimal_sum(self):
+        """测试比例验证使用 Decimal 累加 - 多级别 TP 场景"""
+        # Arrange: 3 级别 TP，每级 1/3
+        from src.domain.models import OrderStrategy
+
+        strategy = OrderStrategy(
+            id="strategy_001",
+            name="Test Strategy",
+            tp_levels=3,
+            tp_ratios=[Decimal('0.33333333'), Decimal('0.33333333'), Decimal('0.33333334')],
+        )
+
+        # Act
+        is_valid = strategy.validate_ratios()
+
+        # Assert: 验证通过
+        assert is_valid is True, f"比例验证应通过，实际为 {is_valid}"
+
+    def test_validate_ratios_sum_not_one(self):
+        """测试比例总和不等于 1.0 时抛出异常"""
+        from src.domain.models import OrderStrategy
+        from pydantic import ValidationError
+
+        # Arrange & Act & Assert: 总和 1.5 应抛出异常
+        with pytest.raises(ValidationError) as exc_info:
+            OrderStrategy(
+                id="strategy_002",
+                name="Test Strategy",
+                tp_levels=3,
+                tp_ratios=[Decimal('0.5'), Decimal('0.5'), Decimal('0.5')],  # 总和 1.5
+            )
+
+        assert "tp_ratios 总和必须为 1.0" in str(exc_info.value), \
+            f"错误信息应包含总和验证失败提示，实际为 {exc_info.value}"
+
+    def test_validate_ratios_edge_case_five_levels(self):
+        """测试边界情况：5 级别 TP 每级 0.2"""
+        from src.domain.models import OrderStrategy
+
+        # Arrange: 5 级别 TP，每级 0.2
+        strategy = OrderStrategy(
+            id="strategy_003",
+            name="5-Level TP",
+            tp_levels=5,
+            tp_ratios=[Decimal('0.2')] * 5,
+        )
+
+        # Act
+        is_valid = strategy.validate_ratios()
+
+        # Assert: 验证通过
+        assert is_valid is True, f"5 级 0.2 比例验证应通过，实际为 {is_valid}"
+
+    def test_validate_ratios_empty_list(self):
+        """测试空列表返回 False"""
+        from src.domain.models import OrderStrategy
+
+        # Arrange: tp_levels=1 但 tp_ratios 为空列表
+        # 注意：tp_levels 最小值为 1，这里测试 validate_ratios() 方法对空列表的处理
+        strategy = OrderStrategy(
+            id="strategy_004",
+            name="Empty Ratios",
+            tp_levels=1,
+            tp_ratios=[],
+        )
+
+        # Act
+        is_valid = strategy.validate_ratios()
+
+        # Assert: 空列表应返回 False
+        assert is_valid is False

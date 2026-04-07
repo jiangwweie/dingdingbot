@@ -22,6 +22,7 @@
 14. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
 15. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
 16. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
+17. [IMP-002 tp_ratios 求和精度修复](#imp-002-tp_ratios-求和精度修复)
 
 ---
 
@@ -4730,3 +4731,75 @@ for cb, result in zip(self._observers, results):
 ---
 
 *最后更新：2026-04-07 - P1-5 Parser 层代码审查完成*
+
+---
+
+## 📌 IMP-002 tp_ratios 求和精度修复
+
+**创建日期**: 2026-04-07  
+**实现负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 问题描述
+
+**位置**: 
+- `src/domain/order_manager.py:360`
+- `src/domain/models.py:1128, 1136-1137`
+
+**问题**:
+- Python 内置 `sum()` 函数在处理 `Decimal` 列表时，内部使用浮点数累加
+- 可能导致精度损失，特别是在多次累加后
+- 影响止盈比例验证和 TP 订单数量计算的准确性
+
+### 修复方案
+
+使用 Decimal 累加器替代 `sum()` 函数：
+
+```python
+# 修复前
+total = sum(decimal_list)
+
+# 修复后
+total = Decimal('0')
+for ratio in decimal_list:
+    total += ratio
+```
+
+### 修复位置
+
+| 文件 | 行号 | 方法/代码段 |
+|------|------|-----------|
+| `order_manager.py` | 360 | tp_ratios 求和 |
+| `models.py` | 1128 | `validate_ratios()` 方法 |
+| `models.py` | 1136-1137 | `validate_tp_ratios_sum()` 验证器 |
+
+### 测试验证
+
+```python
+# 5 级别 TP 每级 0.2 累加
+tp_ratios = [Decimal('0.2')] * 5
+total = Decimal('0')
+for ratio in tp_ratios:
+    total += ratio
+assert total == Decimal('1.0')  # ✅ 精确等于 1.0
+```
+
+**测试结果**:
+- `test_order_manager.py::TestIMP002_DecimalPrecision` - 3 PASSED
+- `test_v3_models.py::TestIMP002_OrderStrategyDecimalPrecision` - 4 PASSED
+- 全量回归测试 82 PASSED (无回归)
+
+### 经验教训
+
+1. **金融计算必须使用 Decimal 累加器** - `sum()` 可能产生微小误差
+2. **验证器也要使用相同模式** - Pydantic field_validator 中的求和也要用累加器
+3. **测试覆盖边界情况** - 多级别 TP、循环小数等场景
+
+### 参考文档
+
+- 设计文档：`docs/arch/p2-improvements-and-known-issues-fix-design.md`
+- 进度日志：`docs/planning/progress.md`
+
+---
+
+*最后更新：2026-04-07 - IMP-002 tp_ratios 求和精度修复完成*

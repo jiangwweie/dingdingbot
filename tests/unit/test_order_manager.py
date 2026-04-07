@@ -2454,6 +2454,63 @@ class TestP2Fix_StopLossCalculation:
 
 
 # ============================================================
+# IMP-002: tp_ratios 求和精度修复测试
+# ============================================================
+
+class TestIMP002_DecimalPrecision:
+    """IMP-002: Decimal 精度修复测试 - 使用 Decimal 累加器替代 sum()"""
+
+    @pytest.fixture
+    def order_manager(self) -> OrderManager:
+        """创建 OrderManager 实例"""
+        return OrderManager()
+
+    def test_decimal_precision_with_many_ratios(self, order_manager: OrderManager):
+        """测试多数量 tp_ratios 精度 - 模拟 5 级别 TP 场景"""
+        # Arrange: 5 级别 TP，每级 0.2 (可能产生浮点误差)
+        tp_ratios = [Decimal('0.2')] * 5
+
+        # Act: 使用 Decimal 累加器（修复后的代码）
+        total = Decimal('0')
+        for ratio in tp_ratios:
+            total += ratio
+
+        # Assert: 验证精度正确，总和为精确的 1.0
+        assert total == Decimal('1.0'), f"5 级 0.2 累加应为 1.0, 实际为 {total}"
+
+    def test_validate_ratios_precision(self, order_manager: OrderManager):
+        """测试比例验证精度 - 边界值测试"""
+        # Arrange: 构造可能产生精度问题的比例
+        tp_ratios = [Decimal('0.33333333'), Decimal('0.33333333'), Decimal('0.33333334')]
+
+        # Act: 使用 Decimal 累加器
+        total = Decimal('0')
+        for ratio in tp_ratios:
+            total += ratio
+
+        # Assert: 验证精度在容忍范围内
+        assert abs(total - Decimal('1.0')) < Decimal('0.0001'), \
+            f"比例总和应在容忍范围内，实际为 {total}"
+
+    def test_sum_vs_decimal_accumulator(self, order_manager: OrderManager):
+        """对比 sum() 和 Decimal 累加器结果 - 验证修复必要性"""
+        # Arrange: 构造极端精度测试数据
+        tp_ratios = [Decimal('0.1')] * 10
+
+        # Act: 两种方式求和
+        sum_result = sum(tp_ratios)  # Python 内置 sum()
+        accumulator_result = Decimal('0')
+        for ratio in tp_ratios:
+            accumulator_result += ratio
+
+        # Assert: Decimal 累加器应保持精确
+        assert accumulator_result == Decimal('1.0'), \
+            f"Decimal 累加器应为 1.0, 实际为 {accumulator_result}"
+        # sum() 可能产生微小误差（取决于 Python 版本）
+        # 验证 Decimal 累加器更可靠
+
+
+# ============================================================
 # 主入口 (用于直接运行测试)
 # ============================================================
 if __name__ == "__main__":

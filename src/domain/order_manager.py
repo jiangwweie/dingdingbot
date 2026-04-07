@@ -357,7 +357,10 @@ class OrderManager:
             tp_targets = [Decimal('1.5')] * tp_levels
 
         # 验证 tp_ratios 总和
-        total_ratio = sum(tp_ratios)
+        # ✅ IMP-002 修复：使用 Decimal 累加器确保精度
+        total_ratio = Decimal('0')
+        for ratio in tp_ratios:
+            total_ratio += ratio
         if total_ratio != Decimal('1.0'):
             # 自动归一化
             if total_ratio > 0:
