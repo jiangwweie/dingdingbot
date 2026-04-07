@@ -2288,3 +2288,328 @@ async def test_get_order_count_empty(order_repository):
 
     # 验证
     assert count == 0
+
+
+# ============================================================
+# P1 Group A: 核心查询方法测试
+# ============================================================
+
+@pytest.fixture
+def sample_orders_factory():
+    """辅助函数：创建样本订单列表"""
+    def create_orders(signal_id_prefix: str = "sig", count: int = 25):
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+        symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
+        statuses = [OrderStatus.OPEN, OrderStatus.FILLED, OrderStatus.CANCELED]
+        roles = [OrderRole.ENTRY, OrderRole.TP1, OrderRole.SL]
+
+        return [
+            Order(
+                id=f"ord_p1_{i:03d}",
+                signal_id=f"{signal_id_prefix}_{i % 5:02d}",
+                symbol=symbols[i % 3],
+                direction=Direction.LONG if i % 2 == 0 else Direction.SHORT,
+                order_type=OrderType.MARKET,
+                order_role=roles[i % 3],
+                requested_qty=Decimal('1.0'),
+                filled_qty=Decimal('0'),
+                status=statuses[i % 3],
+                created_at=current_time + i * 1000,
+                updated_at=current_time + i * 1000,
+                reduce_only=False,
+            )
+            for i in range(count)
+        ]
+    return create_orders
+
+
+# ============================================================
+# P1 Group C: 别名方法测试
+# ============================================================
+
+# ------------------------------------------------------------
+# save_order() 别名方法测试
+# ------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestSaveOrder:
+    """P1-037, P1-038: save_order() 别名方法测试"""
+
+    @pytest.mark.asyncio
+    async def test_save_order_new(self, order_repository):
+        """
+        P1-037: 保存新订单 - 验证委托给 save()
+
+        测试场景:
+        1. 创建新订单对象
+        2. 调用 save_order() 保存
+        3. 验证订单已持久化到数据库
+
+        验收标准:
+        - 订单成功保存到数据库
+        - 与 save() 行为完全一致
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建新订单
+        order = Order(
+            id="ord_save_order_new_001",
+            signal_id="sig_save_order_test",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            reduce_only=False,
+        )
+
+        # 执行：使用 save_order() 保存
+        await order_repository.save_order(order)
+
+        # 验证：查询订单，确认与 save() 行为一致
+        saved_order = await order_repository.get_order("ord_save_order_new_001")
+
+        assert saved_order is not None
+        assert saved_order.id == order.id
+        assert saved_order.signal_id == order.signal_id
+        assert saved_order.symbol == order.symbol
+        assert saved_order.direction == order.direction
+        assert saved_order.order_type == order.order_type
+        assert saved_order.order_role == order.order_role
+        assert saved_order.requested_qty == order.requested_qty
+
+    @pytest.mark.asyncio
+    async def test_save_order_update_existing(self, order_repository):
+        """
+        P1-038: 更新已存在订单 - UPSERT 行为验证
+
+        测试场景:
+        1. 创建并保存订单
+        2. 修改订单状态相关字段后再次调用 save_order()
+        3. 验证订单状态字段已更新（而非新增）
+
+        验收标准:
+        - 订单成功更新（UPSERT 行为）
+        - 与 save() 行为完全一致
+        - 注意：save() 只更新状态相关字段，不更新 requested_qty 等基础字段
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建并保存初始订单
+        order = Order(
+            id="ord_save_order_update_001",
+            signal_id="sig_save_order_update",
+            symbol="ETH/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            price=Decimal('3500'),
+            requested_qty=Decimal('2.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            reduce_only=True,
+        )
+        await order_repository.save_order(order)
+
+        # 验证：订单已保存
+        saved_order = await order_repository.get_order("ord_save_order_update_001")
+        assert saved_order is not None
+        assert saved_order.requested_qty == Decimal('2.0')
+        assert saved_order.status == OrderStatus.OPEN
+
+        # 执行：修改订单状态字段并再次调用 save_order()
+        # 注意：save() 只更新 status, filled_qty, average_exec_price, filled_at,
+        #       exchange_order_id, exit_reason, parent_order_id, oco_group_id, updated_at
+        order.status = OrderStatus.PARTIALLY_FILLED
+        order.filled_qty = Decimal('1.0')
+        order.average_exec_price = Decimal('3498.5')
+        order.updated_at = current_time + 1000
+
+        await order_repository.save_order(order)
+
+        # 验证：订单状态字段已更新而非新增
+        updated_order = await order_repository.get_order("ord_save_order_update_001")
+        assert updated_order is not None
+        # 状态字段已更新
+        assert updated_order.status == OrderStatus.PARTIALLY_FILLED
+        assert updated_order.filled_qty == Decimal('1.0')
+        assert updated_order.average_exec_price == Decimal('3498.5')
+        # 基础字段保持不变（save() 不更新这些字段）
+        assert updated_order.requested_qty == Decimal('2.0')
+        # 验证记录数未增加（仍为 1 条，证明是 UPSERT 而非新增）
+        count = await order_repository.get_order_count("sig_save_order_update")
+        assert count == 1
+
+
+# ------------------------------------------------------------
+# get_order_detail() 别名方法测试
+# ------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestGetOrderDetail:
+    """P1-039, P1-040: get_order_detail() 别名方法测试"""
+
+    @pytest.mark.asyncio
+    async def test_get_order_detail_exists(self, order_repository):
+        """
+        P1-039: 查询存在订单 - 验证委托给 get_order()
+
+        测试场景:
+        1. 创建并保存订单
+        2. 调用 get_order_detail() 查询
+        3. 验证返回正确的订单对象
+
+        验收标准:
+        - 返回正确的订单对象
+        - 与 get_order() 行为完全一致
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建并保存订单
+        order = Order(
+            id="ord_detail_test_001",
+            signal_id="sig_detail_test",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.5'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=current_time,
+            updated_at=current_time,
+            reduce_only=False,
+        )
+        await order_repository.save(order)
+
+        # 执行：使用 get_order_detail() 查询
+        result = await order_repository.get_order_detail("ord_detail_test_001")
+
+        # 验证：与 get_order() 行为一致
+        assert result is not None
+        assert result.id == order.id
+        assert result.signal_id == order.signal_id
+        assert result.symbol == order.symbol
+        assert result.requested_qty == order.requested_qty
+        # 验证与 get_order() 返回相同结果
+        direct_result = await order_repository.get_order("ord_detail_test_001")
+        assert result.id == direct_result.id
+        assert result.requested_qty == direct_result.requested_qty
+
+    @pytest.mark.asyncio
+    async def test_get_order_detail_not_exists(self, order_repository):
+        """
+        P1-040: 查询不存在订单 - order_id 无效
+
+        测试场景:
+        1. 调用 get_order_detail() 查询不存在的订单
+        2. 验证返回 None
+
+        验收标准:
+        - 返回 None
+        - 与 get_order() 行为完全一致
+        """
+        # 执行：查询不存在的订单
+        result = await order_repository.get_order_detail("ord_not_exists_xyz123")
+
+        # 验证：与 get_order() 行为一致
+        assert result is None
+        # 验证与 get_order() 返回相同结果
+        direct_result = await order_repository.get_order("ord_not_exists_xyz123")
+        assert direct_result is None
+
+
+# ------------------------------------------------------------
+# get_by_signal_id() 别名方法测试
+# ------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestGetBySignalId:
+    """P1-041, P1-042: get_by_signal_id() 别名方法测试"""
+
+    @pytest.mark.asyncio
+    async def test_get_by_signal_id_exists(self, order_repository):
+        """
+        P1-041: 查询存在信号 - 验证委托给 get_orders_by_signal()
+
+        测试场景:
+        1. 创建并保存多个同信号订单
+        2. 调用 get_by_signal_id() 查询
+        3. 验证返回正确的订单列表
+
+        验收标准:
+        - 返回该信号的所有订单
+        - 与 get_orders_by_signal() 行为完全一致
+        """
+        current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # 准备：创建并保存多个同信号订单
+        signal_id = "sig_get_by_signal_test"
+        orders = [
+            Order(
+                id=f"ord_signal_test_{i}",
+                signal_id=signal_id,
+                symbol="BTC/USDT:USDT",
+                direction=Direction.LONG,
+                order_type=OrderType.MARKET,
+                order_role=OrderRole.ENTRY,
+                requested_qty=Decimal('1.0'),
+                filled_qty=Decimal('0'),
+                status=OrderStatus.OPEN,
+                created_at=current_time + i * 1000,
+                updated_at=current_time + i * 1000,
+                reduce_only=False,
+            )
+            for i in range(3)
+        ]
+        for order in orders:
+            await order_repository.save(order)
+
+        # 执行：使用 get_by_signal_id() 查询
+        result = await order_repository.get_by_signal_id(signal_id)
+
+        # 验证：与 get_orders_by_signal() 行为一致
+        assert len(result) == 3
+        assert all(order.signal_id == signal_id for order in result)
+        # 验证与 get_orders_by_signal() 返回相同结果
+        direct_result = await order_repository.get_orders_by_signal(signal_id)
+        assert len(direct_result) == 3
+        # 验证两个方法返回的订单 ID 集合一致
+        result_ids = {order.id for order in result}
+        direct_ids = {order.id for order in direct_result}
+        assert result_ids == direct_ids
+
+    @pytest.mark.asyncio
+    async def test_get_by_signal_id_not_exists(self, order_repository):
+        """
+        P1-042: 查询不存在信号 - signal_id 无效
+
+        测试场景:
+        1. 调用 get_by_signal_id() 查询不存在的信号
+        2. 验证返回空列表
+
+        验收标准:
+        - 返回空列表
+        - 与 get_orders_by_signal() 行为完全一致
+        """
+        # 执行：查询不存在的信号
+        result = await order_repository.get_by_signal_id("sig_not_exists_abc123")
+
+        # 验证：与 get_orders_by_signal() 行为一致
+        assert result == []
+        # 验证与 get_orders_by_signal() 返回相同结果
+        direct_result = await order_repository.get_orders_by_signal("sig_not_exists_abc123")
+        assert direct_result == []
+
+
+# ------------------------------------------------------------
+# get_order_count() 验证（已在 P0 覆盖）
+# ------------------------------------------------------------
+# 注：P0-015 (test_get_order_count) 和 P0-016 (test_get_order_count_empty)
+#     已在上方实现，此处无需新增测试

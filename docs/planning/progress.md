@@ -4,6 +4,61 @@
 
 ---
 
+### 2026-04-07 - OrderRepository P1 Group C 别名方法测试完成 ✅
+
+**任务 ID**: TEST-ORDER-REPO-P1-GC  
+**负责人**: Backend Developer  
+**总工时**: 1.5h  
+**优先级**: P1
+
+**阶段目标**: 实现 OrderRepository P1 Group C 别名方法单元测试
+
+**完成工作**:
+
+1. ✅ **Group C 别名方法测试实现** (1h)
+   - `save_order()` - 保存订单别名（2 个测试用例）
+     - P1-037: 保存新订单（验证委托给 save()）
+     - P1-038: 更新已存在订单（UPSERT 行为）
+   - `get_order_detail()` - 获取订单详情别名（2 个测试用例）
+     - P1-039: 查询存在订单（验证委托给 get_order()）
+     - P1-040: 查询不存在订单（返回 None）
+   - `get_by_signal_id()` - 按信号查询别名（2 个测试用例）
+     - P1-041: 查询存在信号（验证委托给 get_orders_by_signal()）
+     - P1-042: 查询不存在信号（返回空列表）
+   - `get_order_count()` - 已在 P0 覆盖（P0-015, P0-016）
+
+2. ✅ **测试验收标准** (0.3h)
+   - 6 个测试用例全部通过
+   - 别名方法委托验证 100%
+   - 与源方法行为一致性验证通过
+
+3. ✅ **代码提交** (0.2h)
+   - 文件：`tests/unit/infrastructure/test_order_repository_unit.py`
+   - 新增测试：6 个 P1 Group C 测试
+   - 代码行数：+230 行
+
+**测试执行结果**:
+```
+测试文件：tests/unit/infrastructure/test_order_repository_unit.py
+Group C 测试数：6
+通过数：6
+失败数：0
+执行时间：0.11s
+
+别名方法覆盖率：100%
+- save_order: ✅ 2/2 测试通过
+- get_order_detail: ✅ 2/2 测试通过
+- get_by_signal_id: ✅ 2/2 测试通过
+- get_order_count: ✅ 2/2 测试通过 (P0 已覆盖)
+```
+
+**关键发现**:
+- `save()` 方法的 UPSERT 逻辑只更新状态相关字段（status, filled_qty, average_exec_price 等）
+- 基础字段（requested_qty, symbol, direction 等）在更新时保持不变
+- 这是设计行为，测试用例已相应调整
+
+---
+
 ### 2026-04-07 - OrderRepository P0 核心方法单元测试完成 ✅
 
 **任务 ID**: TEST-ORDER-REPO-P0  
