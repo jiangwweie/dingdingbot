@@ -182,19 +182,31 @@
 
 ---
 
-### 阶段 3: Service 层 + 适配层 (Day 5)
+### 阶段 3: Service 层 + 适配层设计 (Day 5) - ✅ 设计完成
 
 **任务清单**:
-- [ ] 实现 `ConfigService` 类
-- [ ] 迁移业务逻辑（验证、合并、观察者）
-- [ ] 迁移配置版本管理
-- [ ] 保留 `ConfigManager` 适配层
-- [ ] 实现委托方法
-- [ ] 编写 Service 层单元测试
+- [x] 架构师出具 Provider 注册模式设计文档
+- [x] QA Tester 审查设计方案（评分 A-）
+- [x] 修复 P0/P1 风险（竞态、时钟抽象、Protocol验证）
+- [x] 用户审查批准
+- [ ] 实现 `ConfigService` 类（待实施）
+- [ ] 实现 Provider 注册框架（待实施）
+- [ ] 迁移现有配置类型到 Provider（待实施）
+- [ ] 编写 Provider 层单元测试（待实施）
 
 **验收标准**:
-- Service 层测试通过率 100%
-- 适配层兼容性验证通过
+- ✅ 设计文档完整（v1.1 - QA 修复）
+- ✅ QA 审查通过（评分 A-）
+- 待实施：Service 层测试通过率 100%
+- 待实施：适配层兼容性验证通过
+
+**关键决策**:
+1. ✅ **外观模式 + Provider 注册**（用户核心需求：零修改扩展）
+2. ✅ **Protocol 接口 + 类型别名**（向后兼容优先）
+3. ✅ **统一入口**: `get_config(name)` 动态访问
+4. ✅ **模块化扩展**: 新增配置仅需 `register_provider(name, provider)`
+
+**负责人**: Architect + QA Tester（设计阶段），Backend Dev（实施阶段）
 
 ---
 

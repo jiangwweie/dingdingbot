@@ -4,6 +4,91 @@
 **项目经理**: PM Agent
 **状态**: ✅ 已完成
 
+---
+
+## 2026-04-07 P1-5 Provider 注册模式架构决策
+
+### 核心决策：外观模式 + Provider 注册
+
+**问题陈述**:
+用户需求："后期增加 config（新风控、系统参数），业务层直接通过 `manager.get_config('new_field')` 就可以，不用到处改代码"
+
+**方案对比**:
+| 方案 | 扩展成本 | 模块性 | 类型安全 | 向后兼容 |
+|------|----------|--------|----------|----------|
+| 硬编码方法 | 高（改3层代码） | ❌ 差 | ✅ 100% | ✅ 无破坏 |
+| Provider 注册 | ✅ 低（仅注册1行） | ✅ 强 | ✅ 90% | ✅ 别名保护 |
+
+**最终选择**: Provider 注册模式
+
+**技术要点**:
+1. **ConfigProvider Protocol 接口**: 4 个方法（get, update, refresh, cache_ttl）
+2. **ProviderRegistry 动态注册中心**: 支持懒加载 + TTL 缓存
+3. **CachedProvider 基类**: 子类继承自动获得缓存能力
+4. **ConfigManager 外观层**: 统一 API `get_config(name)` + 向后兼容别名
+
+**扩展性验证**:
+```python
+# 新增配置仅需 3 步（零修改核心层）
+# 步骤 1: 创建 Provider（独立文件）
+class NewRiskProvider(CachedProvider):
+    async def _fetch_data(self) -> NewRiskConfig:
+        return await self._repo.query("SELECT * FROM new_risk")
+
+# 步骤 2: 注册 Provider（1行代码）
+manager.register_provider('new_risk', NewRiskProvider(repo))
+
+# 步骤 3: 业务层直接用（零修改）
+config = await manager.get_config('new_risk')
+```
+
+---
+
+### QA 审查发现的风险
+
+**P0 风险**: ProviderRegistry 懒加载竞态条件
+- **问题**: `get_provider()` 并发调用可能重复创建 Provider
+- **修复**: 双重检查锁定 + asyncio.Lock
+- **代码**:
+```python
+async def get_provider(self, name: str):
+    if name not in self._providers:  # 第一次检查（无锁）
+        async with self._get_lock():  # 获取锁
+            if name not in self._providers:  # 第二次检查（有锁）
+                provider = await self._create_provider(name)
+                self._providers[name] = provider
+    return self._providers[name]
+```
+
+**P1 风险**: CachedProvider 时钟依赖
+- **问题**: `datetime.now()` 测试时不可控
+- **修复**: 时钟抽象注入（ClockProtocol + MockClock）
+- **好处**: 测试可控制 TTL 过期逻辑
+
+**P1 风险**: register_provider() 无验证
+- **问题**: 可能注册无效 Provider
+- **修复**: Protocol 类型检查 + TypeError 抛出
+
+---
+
+### 向后兼容策略
+
+**别名方法保留**:
+```python
+# 硬编码方法保留为别名（57 个调用方零修改）
+def get_core_config(self) -> CoreConfig:
+    return self.get_config('core')  # 别名委托
+
+def get_user_config(self) -> UserConfig:
+    return self.get_config('user')  # 别名委托
+```
+
+**覆盖率目标**:
+- Provider 层: >85%（可测试性 A-）
+- ConfigManager: >80%（委托层简单）
+
+---
+
 ### 项目概述
 
 订单管理模块 P1/P2 问题修复项目，修复 9 项 P1/P2 问题 + 3 项改进建议，共 12 项任务。
