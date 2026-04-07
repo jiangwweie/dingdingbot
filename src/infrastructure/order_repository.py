@@ -218,21 +218,12 @@ class OrderRepository:
                     status = excluded.status,
                     filled_qty = excluded.filled_qty,
                     average_exec_price = excluded.average_exec_price,
-                    -- P2-7 修复：使用 CASE 表达式，仅当 excluded 值为 NULL 时保留旧值
-                    -- 这样允许业务代码显式将字段设置为 NULL
-                    filled_at = CASE
-                        WHEN excluded.filled_at IS NULL AND orders.filled_at IS NOT NULL
-                        THEN orders.filled_at
-                        ELSE excluded.filled_at
-                    END,
-                    exchange_order_id = CASE
-                        WHEN excluded.exchange_order_id IS NULL AND orders.exchange_order_id IS NOT NULL
-                        THEN orders.exchange_order_id
-                        ELSE excluded.exchange_order_id
-                    END,
-                    exit_reason = excluded.exit_reason,  -- 允许设置为 NULL
-                    parent_order_id = excluded.parent_order_id,  -- 允许设置为 NULL
-                    oco_group_id = excluded.oco_group_id,  -- 允许设置为 NULL
+                    -- IMP-001 修复：直接更新为 excluded 值，支持将字段更新为 NULL
+                    filled_at = excluded.filled_at,
+                    exchange_order_id = excluded.exchange_order_id,
+                    exit_reason = excluded.exit_reason,
+                    parent_order_id = excluded.parent_order_id,
+                    oco_group_id = excluded.oco_group_id,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -286,11 +277,12 @@ class OrderRepository:
                             status = excluded.status,
                             filled_qty = excluded.filled_qty,
                             average_exec_price = excluded.average_exec_price,
-                            filled_at = COALESCE(excluded.filled_at, orders.filled_at),
-                            exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
-                            exit_reason = COALESCE(excluded.exit_reason, orders.exit_reason),
-                            parent_order_id = COALESCE(excluded.parent_order_id, orders.parent_order_id),
-                            oco_group_id = COALESCE(excluded.oco_group_id, orders.oco_group_id),
+                            -- IMP-001 修复：直接更新为 excluded 值，支持将字段更新为 NULL
+                            filled_at = excluded.filled_at,
+                            exchange_order_id = excluded.exchange_order_id,
+                            exit_reason = excluded.exit_reason,
+                            parent_order_id = excluded.parent_order_id,
+                            oco_group_id = excluded.oco_group_id,
                             updated_at = excluded.updated_at
                         """,
                         (

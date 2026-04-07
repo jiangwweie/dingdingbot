@@ -23,6 +23,78 @@
 15. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
 16. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
 17. [IMP-002 tp_ratios 求和精度修复](#imp-002-tp_ratios-求和精度修复)
+18. [IMP-001 save_batch() COALESCE 问题修复](#imp-001-save_batch-coalesce-问题修复)
+
+---
+
+## 📌 IMP-001 save_batch() COALESCE 问题修复
+
+**创建日期**: 2026-04-07  
+**实现负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 问题描述
+
+**位置**: `src/infrastructure/order_repository.py:289-293` (`save_batch()` 方法)
+
+**问题代码**:
+```sql
+-- 使用 COALESCE 语法
+filled_at = COALESCE(excluded.filled_at, orders.filled_at),
+exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
+```
+
+**问题描述**:
+- `COALESCE(excluded.field, orders.field)` 语法导致：当 `excluded.field` 为 NULL 时，会保留旧值而非更新为 NULL
+- 无法区分「不更新」和「设置为 NULL」两种业务语义
+
+### 修复方案
+
+**方案选择**: 直接更新为 `excluded` 值（而非使用 CASE 表达式保留旧值）
+
+**理由**:
+1. IMP-001 设计文档的测试用例期望：传入 NULL 时，字段被更新为 NULL
+2. 直接更新语义更清晰：应用层传入什么值，就更新为什么值
+3. 如果应用层想「保留旧值」，应该在调用前从旧记录中读取该字段的值
+
+**修复代码**:
+
+```sql
+-- 修复后 (直接更新)
+filled_at = excluded.filled_at,
+exchange_order_id = excluded.exchange_order_id,
+exit_reason = excluded.exit_reason,
+parent_order_id = excluded.parent_order_id,
+oco_group_id = excluded.oco_group_id,
+```
+
+### 受影响的测试
+
+**原有测试行为** (期望保留旧值) 需要修改为 **新行为** (更新为 NULL)：
+
+| 测试名称 | 修改前期望 | 修改后期望 |
+|---------|-----------|-----------|
+| `test_upsert_preserves_old_value_when_new_is_none` | 保留旧值 | 更新为 NULL |
+| `test_upsert_preserves_filled_at` | 保留旧值 | 更新为 NULL |
+
+**新增测试**:
+- `test_update_field_to_null` - 测试可以将字段更新为 NULL
+- `test_update_oco_group_id_to_null` - 测试 OCO 组 ID 更新为 NULL
+- `test_save_batch_update_fields_to_null` - 测试 save_batch() 可以将字段更新为 NULL
+
+### 一致性修复
+
+同时修复了 `save()` 方法，使其与 `save_batch()` 行为一致：
+- `save()` 方法之前使用 CASE 表达式保留旧值 (P2-7 修复)
+- 现在改为直接更新，与 `save_batch()` 行为一致
+
+### 测试结果
+
+```
+IMP-001 新增测试：3 PASSED ✅
+修改后测试：     4 PASSED ✅
+全部单元测试：  100 PASSED ✅
+```
 
 ---
 

@@ -4,6 +4,66 @@
 
 ---
 
+### 2026-04-07 - IMP-001: save_batch() COALESCE 问题修复 ✅
+
+**任务 ID**: IMP-001
+**优先级**: P2
+**工时估算**: 0.5h
+**实际工时**: 1h
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ 修复 `order_repository.py:289-293` (`save_batch()`) - 使用直接更新替代 COALESCE
+2. ✅ 修复 `order_repository.py:217-227` (`save()`) - 同步修复以保持一致性
+3. ✅ 新增 3 个单元测试：
+   - `test_update_field_to_null` - 测试可以将字段更新为 NULL
+   - `test_update_oco_group_id_to_null` - 测试 OCO 组 ID 更新为 NULL
+   - `test_save_batch_update_fields_to_null` - 测试 save_batch() 可以将字段更新为 NULL
+4. ✅ 修改 2 个现有测试以匹配新行为：
+   - `test_upsert_preserves_old_value_when_new_is_none` → `test_upsert_updates_to_null_when_explicitly_set`
+   - `test_upsert_preserves_filled_at` → `test_upsert_updates_filled_at_to_null`
+
+**修复详情**:
+
+**save_batch() 方法 (order_repository.py:276-286)**:
+```sql
+-- 修复前 (COALESCE)
+filled_at = COALESCE(excluded.filled_at, orders.filled_at),
+exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
+
+-- 修复后 (直接更新)
+filled_at = excluded.filled_at,
+exchange_order_id = excluded.exchange_order_id,
+```
+
+**save() 方法 (order_repository.py:217-227)**:
+```sql
+-- 修复前 (CASE 表达式保留旧值)
+filled_at = CASE
+    WHEN excluded.filled_at IS NULL AND orders.filled_at IS NOT NULL
+    THEN orders.filled_at
+    ELSE excluded.filled_at
+END,
+
+-- 修复后 (直接更新)
+filled_at = excluded.filled_at,
+```
+
+**测试结果**:
+```
+IMP-001 新增测试：3 PASSED ✅
+修改后测试：     4 PASSED ✅
+全部单元测试：  100 PASSED ✅
+```
+
+**验收标准验证**:
+- ✅ save_batch() 使用直接更新替代 COALESCE
+- ✅ 支持将字段更新为 NULL
+- ✅ 新增 3 个单元测试全部通过
+- ✅ 现有测试无回归 (100 个测试全部通过)
+
+---
+
 ### 2026-04-07 - IMP-002: tp_ratios 求和精度问题修复 ✅
 
 **任务 ID**: IMP-002

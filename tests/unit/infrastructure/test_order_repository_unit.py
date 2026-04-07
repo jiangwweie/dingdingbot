@@ -3823,17 +3823,17 @@ class TestP1Fix_LockConcurrency:
 # ============================================================
 
 @pytest.mark.asyncio
-async def test_upsert_preserves_old_value_when_new_is_none(order_repository):
+async def test_upsert_updates_to_null_when_explicitly_set(order_repository):
     """
-    P2-7: UPSERT 数据丢失修复 - 测试新值为 NULL 时保留旧值
+    P2-7/IMP-001: UPSERT 修复 - 测试显式设置为 NULL 时更新为 NULL
 
     测试场景:
     1. 创建订单并设置 filled_at 值
-    2. 更新时 filled_at 保持为 None（不更新）
-    3. 验证 filled_at 保留原值
+    2. 更新时将 filled_at 显式设置为 None
+    3. 验证 filled_at 被更新为 NULL
 
     验收标准:
-    - filled_at 字段在更新时为 NULL 时保留旧值
+    - filled_at 可以被更新为 NULL
     - 其他字段正常更新
     """
     current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -3860,16 +3860,15 @@ async def test_upsert_preserves_old_value_when_new_is_none(order_repository):
     saved = await order_repository.get_order("ord_p2_7_test_001")
     assert saved.filled_at == 1500
 
-    # Act: 更新时 filled_at 保持为 None（不更新 filled_at）
+    # Act: 更新时将 filled_at 显式设置为 None
     order.status = OrderStatus.FILLED
     order.updated_at = current_time + 1000
-    # filled_at 不设置，保持为 None（在 Order 模型中默认为 None）
-    order.filled_at = None  # 显式设置为 None，表示不更新此字段
+    order.filled_at = None  # 显式设置为 None，应该更新为 NULL
     await order_repository.save(order)
 
-    # Assert: filled_at 应保留原值
+    # Assert: filled_at 应被更新为 NULL
     saved_after_update = await order_repository.get_order("ord_p2_7_test_001")
-    assert saved_after_update.filled_at == 1500, "filled_at 在更新时为 NULL 应保留旧值"
+    assert saved_after_update.filled_at is None, "filled_at 应被更新为 NULL"
 
 
 @pytest.mark.asyncio
@@ -3972,17 +3971,17 @@ async def test_upsert_updates_to_new_value(order_repository):
 
 
 @pytest.mark.asyncio
-async def test_upsert_preserves_filled_at(order_repository):
+async def test_upsert_updates_filled_at_to_null(order_repository):
     """
-    P2-7: UPSERT 数据丢失修复 - 测试 filled_at 字段完整性
+    P2-7/IMP-001: UPSERT 修复 - 测试 filled_at 可以更新为 NULL
 
     测试场景:
     1. 创建订单并设置 filled_at 值
-    2. 多次更新订单，但不设置 filled_at
-    3. 验证 filled_at 始终保持原值
+    2. 更新时将 filled_at 设置为 None
+    3. 验证 filled_at 被更新为 NULL
 
     验收标准:
-    - filled_at 在多次更新中保持不变
+    - filled_at 可以被更新为 NULL
     - 其他字段正常更新
     """
     current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -4013,28 +4012,207 @@ async def test_upsert_preserves_filled_at(order_repository):
     saved = await order_repository.get_order("ord_p2_7_test_004")
     assert saved.filled_at == original_filled_at
 
-    # Act: 多次更新，但不设置 filled_at
-    # 第一次更新
+    # Act: 更新时将 filled_at 设置为 None
     order.status = OrderStatus.FILLED
     order.updated_at = current_time + 1000
     order.exchange_order_id = "eth_order_002"
-    order.filled_at = None  # 不更新 filled_at
+    order.filled_at = None  # 显式设置为 None，应该更新为 NULL
     await order_repository.save(order)
 
-    # 第二次更新
-    order.updated_at = current_time + 2000
-    order.exit_reason = "TAKE_PROFIT"
-    order.filled_at = None  # 不更新 filled_at
-    await order_repository.save(order)
-
-    # 第三次更新
-    order.updated_at = current_time + 3000
-    order.filled_qty = Decimal('5.0')
-    order.filled_at = None  # 不更新 filled_at
-    await order_repository.save(order)
-
-    # Assert: filled_at 应始终保持原值
+    # Assert: filled_at 应被更新为 NULL
     final_order = await order_repository.get_order("ord_p2_7_test_004")
-    assert final_order.filled_at == original_filled_at, f"filled_at 应保持为 {original_filled_at}，实际为 {final_order.filled_at}"
+    assert final_order.filled_at is None, f"filled_at 应被更新为 NULL，实际为 {final_order.filled_at}"
     assert final_order.exchange_order_id == "eth_order_002"
-    assert final_order.exit_reason == "TAKE_PROFIT"
+    assert final_order.exit_reason is None
+
+
+# ============================================================
+# IMP-001: save_batch() COALESCE 问题修复测试
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_update_field_to_null(order_repository):
+    """
+    IMP-001: 测试可以将字段更新为 NULL
+
+    测试场景:
+    1. 创建订单并设置 exchange_order_id 和 filled_at
+    2. 更新时将这两个字段设置为 None
+    3. 验证字段已被更新为 NULL
+
+    验收标准:
+    - exchange_order_id 被更新为 NULL
+    - filled_at 被更新为 NULL
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # Arrange: 创建订单并设置 exchange_order_id 和 filled_at
+    order1 = Order(
+        id="ord_imp001_test_001",
+        signal_id="sig_imp001_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        status=OrderStatus.OPEN,
+        exchange_order_id="binance_123",
+        filled_at=current_time,
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+    await order_repository.save(order1)
+
+    # 验证：订单已保存且有值
+    saved = await order_repository.get_order("ord_imp001_test_001")
+    assert saved.exchange_order_id == "binance_123"
+    assert saved.filled_at == current_time
+
+    # Act: 更新时将 exchange_order_id 和 filled_at 设置为 None
+    order2 = Order(
+        id="ord_imp001_test_001",  # 相同 ID
+        signal_id="sig_imp001_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        status=OrderStatus.OPEN,
+        exchange_order_id=None,  # 设置为 NULL
+        filled_at=None,  # 设置为 NULL
+        created_at=current_time,
+        updated_at=current_time + 1000,
+        reduce_only=False,
+    )
+    await order_repository.save(order2)
+
+    # Assert: 验证字段已被更新为 NULL
+    saved_after = await order_repository.get_order("ord_imp001_test_001")
+    assert saved_after.exchange_order_id is None, "exchange_order_id 应被更新为 NULL"
+    assert saved_after.filled_at is None, "filled_at 应被更新为 NULL"
+
+
+@pytest.mark.asyncio
+async def test_update_oco_group_id_to_null(order_repository):
+    """
+    IMP-001: 测试可以将 OCO 组 ID 更新为 NULL
+
+    测试场景:
+    1. 创建订单并设置 oco_group_id
+    2. 更新时将 oco_group_id 设置为 None
+    3. 验证 oco_group_id 已被更新为 NULL
+
+    验收标准:
+    - oco_group_id 被更新为 NULL
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # Arrange: 创建订单并设置 oco_group_id
+    order1 = Order(
+        id="ord_imp001_test_002",
+        signal_id="sig_imp001_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        status=OrderStatus.OPEN,
+        oco_group_id="oco_group_789",
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+    await order_repository.save(order1)
+
+    # 验证：订单已保存且有值
+    saved = await order_repository.get_order("ord_imp001_test_002")
+    assert saved.oco_group_id == "oco_group_789"
+
+    # Act: 更新时将 oco_group_id 设置为 None
+    order2 = Order(
+        id="ord_imp001_test_002",  # 相同 ID
+        signal_id="sig_imp001_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        status=OrderStatus.OPEN,
+        oco_group_id=None,  # 设置为 NULL
+        created_at=current_time,
+        updated_at=current_time + 1000,
+        reduce_only=False,
+    )
+    await order_repository.save(order2)
+
+    # Assert: 验证 oco_group_id 已被更新为 NULL
+    saved_after = await order_repository.get_order("ord_imp001_test_002")
+    assert saved_after.oco_group_id is None, "oco_group_id 应被更新为 NULL"
+
+
+@pytest.mark.asyncio
+async def test_save_batch_update_fields_to_null(order_repository):
+    """
+    IMP-001: 测试 save_batch() 可以将字段更新为 NULL
+
+    测试场景:
+    1. 创建订单并设置多个字段
+    2. 使用 save_batch() 更新时将字段设置为 None
+    3. 验证字段已被更新为 NULL
+
+    验收标准:
+    - save_batch() 支持将字段更新为 NULL
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # Arrange: 创建订单并设置字段
+    order1 = Order(
+        id="ord_imp001_batch_001",
+        signal_id="sig_imp001_batch",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        status=OrderStatus.OPEN,
+        exchange_order_id="binance_batch_123",
+        parent_order_id="parent_batch_456",
+        exit_reason="TAKE_PROFIT",
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+    await order_repository.save(order1)
+
+    # 验证：订单已保存且有值
+    saved = await order_repository.get_order("ord_imp001_batch_001")
+    assert saved.exchange_order_id == "binance_batch_123"
+    assert saved.parent_order_id == "parent_batch_456"
+    assert saved.exit_reason == "TAKE_PROFIT"
+
+    # Act: 使用 save_batch() 更新时将字段设置为 None
+    order2 = Order(
+        id="ord_imp001_batch_001",  # 相同 ID
+        signal_id="sig_imp001_batch",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        status=OrderStatus.CANCELED,
+        exchange_order_id=None,  # 设置为 NULL
+        parent_order_id=None,    # 设置为 NULL
+        exit_reason=None,        # 设置为 NULL
+        created_at=current_time,
+        updated_at=current_time + 1000,
+        reduce_only=False,
+    )
+    await order_repository.save_batch([order2])
+
+    # Assert: 验证字段已被更新为 NULL
+    saved_after = await order_repository.get_order("ord_imp001_batch_001")
+    assert saved_after.exchange_order_id is None, "exchange_order_id 应被更新为 NULL"
+    assert saved_after.parent_order_id is None, "parent_order_id 应被更新为 NULL"
+    assert saved_after.exit_reason is None, "exit_reason 应被更新为 NULL"
+    assert saved_after.status == OrderStatus.CANCELED
