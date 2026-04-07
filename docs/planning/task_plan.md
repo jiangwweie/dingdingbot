@@ -1,91 +1,118 @@
-# 任务计划：P1-1 和 P1-2 配置修复
+# P1-5 ConfigManager 重构任务计划
 
-> **创建时间**: 2026-04-07
-> **状态**: 已完成 ✅
+> **创建日期**: 2026-04-07  
+> **最后更新**: 2026-04-07  
+> **状态**: 阶段 1 已完成 ✅
 
 ---
 
 ## 任务概述
 
-### P1-1: Decimal YAML 精度修复
-- **文件位置**: `src/interfaces/api_v1_config.py:57-71`
-- **问题**: Decimal 被转换为 float 后序列化，精度丢失
-- **方案**: 使用字符串表示 Decimal
+**目标**: 将 ConfigManager 的 1600 行代码拆分为三层架构（Service/Repository/Parser）
 
-### P1-2: 缓存 TTL 机制
-- **文件位置**: `src/interfaces/api_v1_config.py:1457-1460`
-- **问题**: 预览数据永久占用内存，无过期机制
-- **方案**: 使用 cachetools.TTLCache
+**预计工时**: 16 小时（6 天分阶段实施）
 
----
-
-## 任务分解
-
-### P1-1 实施步骤
-- [x] 读取当前实现代码
-- [x] 修改 `_decimal_representer` 使用字符串表示
-- [x] 添加 `_decimal_constructor` 用于反序列化
-- [x] 更新 `_convert_decimals_to_str` 函数（原 `_convert_decimals_to_float`）
-- [x] 编写测试用例验证精度
-- [x] 运行测试验证（3 个测试全部通过）
-
-### P1-2 实施步骤
-- [x] 确认项目依赖是否有 cachetools (确认：无)
-- [x] 添加 cachetools 到 requirements.txt
-- [x] 替换 `_import_preview_cache` 为 TTLCache
-- [x] 更新使用 TTLCache 的代码（移除手动过期检查）
-- [x] 更新 `ImportPreviewResult` 模型（移除 `expires_at` 字段）
-- [x] 编写测试用例验证 TTL 机制
-- [x] 运行测试验证（4 个测试全部通过）
+**关键决策**:
+- 保留 ConfigManager 适配层（向后兼容）
+- 一次性重构（职责高度耦合）
+- 按 6 天分阶段实施
 
 ---
 
-## 测试结果
+## 阶段划分
 
-### P1-1 Decimal 精度测试
-```
-tests/unit/test_config_import_export.py::TestDecimalYamlPrecision::test_decimal_representer_preserves_precision PASSED
-tests/unit/test_config_import_export.py::TestDecimalYamlPrecision::test_decimal_representer_complex_config PASSED
-tests/unit/test_config_import_export.py::TestDecimalYamlPrecision::test_export_preserves_decimal_precision PASSED
-```
+### 阶段 1: Parser 层实现 (Day 1-2) - ✅ 已完成
 
-### P1-2 TTL 缓存测试
-```
-tests/unit/test_config_import_export.py::TestTTLCacheExpiry::test_preview_token_stored_in_ttl_cache PASSED
-tests/unit/test_config_import_export.py::TestTTLCacheExpiry::test_ttl_cache_maxsize PASSED
-tests/unit/test_config_import_export.py::TestTTLCacheExpiry::test_confirm_import_removes_token_from_cache PASSED
-tests/unit/test_config_import_export.py::TestTTLCacheExpiry::test_invalid_token_returns_400 PASSED
-```
+**任务清单**:
+- [x] 创建 `src/application/config/` 包目录
+- [x] 定义数据模型 (`models.py`)
+- [x] 实现 `ConfigParser` 类
+- [x] 迁移 YAML 解析逻辑
+- [x] 实现 Decimal 精度保持
+- [x] 编写 Parser 层单元测试设计文档
 
-### 完整测试套件
-```
-36 passed in 0.96s - 无回归
-```
+**验收标准**:
+- Parser 层测试通过率 100%
+- 精度验证测试通过
+- 测试用例设计文档完整
+
+**负责人**: Backend Developer
 
 ---
 
-## 进度追踪
+### 阶段 2: Repository 层实现 (Day 3-4)
 
-| 时间 | 任务 | 状态 |
-|------|------|------|
-| 2026-04-07 | P1-1 实施 | 已完成 ✅ |
-| 2026-04-07 | P1-2 实施 | 已完成 ✅ |
-| 2026-04-07 | 测试验证 | 已完成 ✅ |
-| 2026-04-07 | 代码提交 | 待执行 |
+**任务清单**:
+- [ ] 实现 `ConfigRepository` 类
+- [ ] 迁移数据库操作逻辑
+- [ ] 迁移缓存管理逻辑
+- [ ] 实现 TTL 缓存机制
+- [ ] 迁移 YAML 导入/导出逻辑
+- [ ] 编写 Repository 层单元测试
 
----
-
-## 修改文件清单
-
-| 文件 | 修改内容 |
-|------|----------|
-| `src/interfaces/api_v1_config.py` | P1-1: Decimal representer 改为字符串表示；P1-2: TTLCache 替换 Dict |
-| `requirements.txt` | 添加 `cachetools>=5.3.0` 依赖 |
-| `tests/unit/test_config_import_export.py` | 新增 7 个测试用例（P1-1: 3 个，P1-2: 4 个） |
+**验收标准**:
+- Repository 层测试通过率 100%
+- DB 操作正确性验证通过
+- 缓存 TTL 机制验证通过
 
 ---
 
-## 依赖关系
+### 阶段 3: Service 层 + 适配层 (Day 5)
 
-- P1-1 和 P1-2 串行执行（同一文件，避免冲突）
-- 两个任务都完成后统一测试提交
+**任务清单**:
+- [ ] 实现 `ConfigService` 类
+- [ ] 迁移业务逻辑（验证、合并、观察者）
+- [ ] 迁移配置版本管理
+- [ ] 保留 `ConfigManager` 适配层
+- [ ] 实现委托方法
+- [ ] 编写 Service 层单元测试
+
+**验收标准**:
+- Service 层测试通过率 100%
+- 适配层兼容性验证通过
+
+---
+
+### 阶段 4: 测试更新 + 回归验证 (Day 6)
+
+**任务清单**:
+- [ ] 更新现有测试文件（import 调整）
+- [ ] 更新 mock 对象
+- [ ] 运行全量测试套件
+- [ ] 性能基准对比
+- [ ] 文档更新
+
+**验收标准**:
+- 全量测试通过率 100%
+- 无性能回退
+- 文档完整更新
+
+---
+
+## 当前会话进度
+
+### 完成的工作 ✅
+1. 阅读影响分析报告
+2. 阅读现有 ConfigManager 代码
+3. 识别需要迁移的 YAML 解析逻辑
+4. 创建包目录结构
+5. 定义数据模型
+6. 实现 ConfigParser 类
+7. 编写测试用例设计文档
+8. Git 提交所有变更
+9. 更新 progress.md
+
+### 待办事项
+- 无（阶段 1 已完成）
+
+---
+
+## 里程碑
+
+| 里程碑 | 预计完成时间 | 状态 |
+|--------|--------------|------|
+| M1: Parser 层完成 | Day 2 结束 | ✅ 已完成 |
+| M2: Repository 层完成 | Day 4 结束 | 待开始 |
+| M3: Service 层完成 | Day 5 结束 | 待开始 |
+| M4: 适配层完成 | Day 5 结束 | 待开始 |
+| M5: 全量回归通过 | Day 6 结束 | 待开始 |

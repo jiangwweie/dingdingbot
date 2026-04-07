@@ -1,0 +1,5 @@
+# Invalid YAML syntax for testing
+risk:
+  max_loss_percent: 0.01
+  [invalid yaml syntax here
+  max_leverage: 10

@@ -1,0 +1,16 @@
+# Valid complete configuration for testing
+risk:
+  max_loss_percent: 0.015
+  max_leverage: 15
+  max_total_exposure: 0.85
+  cooldown_minutes: 240
+
+system:
+  core_symbols:
+    - BTC/USDT:USDT
+    - ETH/USDT:USDT
+  ema_period: 55
+  mtf_ema_period: 55
+  mtf_mapping:
+    "15m": "1h"
+    "1h": "4h"

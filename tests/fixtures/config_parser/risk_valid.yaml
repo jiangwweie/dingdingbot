@@ -1,0 +1,6 @@
+# Valid risk configuration for testing
+risk:
+  max_loss_percent: 0.01
+  max_leverage: 20
+  max_total_exposure: 0.9
+  cooldown_minutes: 300
