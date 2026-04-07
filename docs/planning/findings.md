@@ -6,16 +6,75 @@
 
 ## 📑 目录
 
-1. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
-2. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
-3. [前端配置页面优化 PRD](#前端配置页面优化 prd)
-4. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
-5. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
-6. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
-7. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
-8. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
-9. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
-10. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+1. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
+2. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
+3. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
+4. [前端配置页面优化 PRD](#前端配置页面优化 prd)
+5. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
+6. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
+7. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+8. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
+9. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
+10. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+11. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+
+---
+
+## 📌 配置管理测试代码审查发现
+
+**创建日期**: 2026-04-07  
+**审查负责人**: Code Reviewer  
+**状态**: ✅ 已完成
+
+### 审查文件清单
+- `tests/unit/test_config_manager_db.py` - 963 行
+- `tests/unit/test_config_manager.py` - 764 行
+- `tests/unit/test_config_snapshot_service.py` - 411 行
+- `tests/unit/test_config_api.py` - 474 行
+- `tests/integration/test_config_snapshot_api.py` - 335 行
+- `tests/integration/test_config_history.py` - 744 行
+- `tests/integration/test_config_hot_reload.py` - 976 行
+
+### 总体评价
+- **等级**: A- (优秀，但有改进空间)
+- **综合覆盖率**: ~85%
+- **批准决定**: ✅ 批准合并
+
+### 优秀实践参考
+
+1. **`test_config_hot_reload.py` - 并发测试典范**
+   - 使用 `asyncio.gather` 进行并发测试
+   - 死锁检测使用 `asyncio.wait_for` + timeout
+   - 锁序列化验证使用交错执行测试
+   - 快速重加载场景覆盖 (5-10 次连续 reload)
+
+2. **`test_config_history.py` - 历史记录测试模板**
+   - 覆盖 CRUD 全生命周期
+   - 边界条件测试 (0 limit, 大 offset, 无效类型)
+   - 权限检查测试 (admin 要求)
+   - change_summary 内容验证
+
+3. **`test_config_manager_db.py` - 腐败数据降级测试**
+   - corrupted JSON 返回 None 而非崩溃
+   - 腐败策略自动跳过
+   - YAML 腐败使用默认配置
+
+### 待改进问题
+
+| 文件 | 问题 | 建议修复 |
+|------|------|---------|
+| test_config_api.py | 仅模拟端点逻辑，未实际调用 API | 使用 TestClient 真实调用 |
+| test_config_manager_db.py | 缺少并发测试 | 参考 hot_reload 测试模式 |
+| test_config_snapshot_service.py | KV 配置测试耦合 | 使用 mock 隔离 |
+
+### 测试缺失清单 (供未来参考)
+- 数据库连接失败处理测试
+- SQLite WAL 模式配置测试
+- 配置迁移/升级逻辑测试
+- 快照版本冲突处理测试
+- 大量快照 (>1000) 性能测试
+- 观察者超时隔离测试
+- 认证/授权失败场景测试
 
 ---
 
