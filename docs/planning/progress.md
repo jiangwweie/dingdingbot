@@ -4,6 +4,102 @@
 
 ---
 
+### 2026-04-07 23:00 - T001 P1-1 Lock 竞态条件修复 ✅
+
+**任务 ID**: T001  
+**负责人**: Backend Developer  
+**总工时**: 4h  
+**优先级**: P1
+
+**工作内容**:
+1. ✅ 修改 `OrderRepository` 初始化方法，使用 `_locks` 字典管理每个事件循环专用的 Lock
+2. ✅ 添加 `_global_lock` (threading.Lock) 保护 `_locks` 字典的并发访问
+3. ✅ 添加 `_sync_lock` (threading.Lock) 用于同步调用场景
+4. ✅ 重写 `_ensure_lock()` 方法，使用双重检查锁定模式确保线程安全
+5. ✅ 新增 3 个单元测试验证修复效果
+6. ✅ 运行测试验证（93/93 通过）
+
+**修改文件**:
+- `src/infrastructure/order_repository.py` - 实现事件循环感知的 Lock 管理
+- `tests/unit/infrastructure/test_order_repository_unit.py` - 新增 3 个测试用例
+
+**测试结果**:
+```
+tests/unit/infrastructure/test_order_repository_unit.py::TestP1Fix_LockConcurrency::test_concurrent_save_operations - PASSED
+tests/unit/infrastructure/test_order_repository_unit.py::TestP1Fix_LockConcurrency::test_lock_per_event_loop - PASSED
+tests/unit/infrastructure/test_order_repository_unit.py::TestP1Fix_LockConcurrency::test_sync_call_returns_sync_lock - PASSED
+tests/unit/infrastructure/test_order_repository_unit.py - 93 passed
+```
+
+**验收标准**:
+- [x] `_ensure_lock()` 方法使用事件循环感知的 Lock 字典
+- [x] 双重检查锁定模式正确实现
+- [x] 新增 3 个单元测试全部通过
+- [x] 现有测试无回归（93 个测试全部通过）
+
+**技术要点**:
+1. **双重检查锁定 (Double-Checked Locking)**: 避免多线程同时创建 Lock 时的竞态条件
+2. **事件循环隔离**: 每个事件循环有独立的 Lock，避免跨事件循环共享导致的问题
+3. **同步/异步锁分离**: 同步调用返回 `threading.Lock`，异步调用返回 `asyncio.Lock`
+
+---
+
+### 2026-04-07 22:30 - T005 P2-5 strategy None 处理缺失修复 ✅
+
+**任务 ID**: T005  
+**负责人**: Backend Developer  
+**总工时**: 1h  
+**优先级**: P2
+
+**工作内容**:
+1. ✅ 修改 `create_order_chain` 方法签名添加 `Optional[OrderStrategy] = None`
+2. ✅ 添加 strategy 为 None 时的默认值处理逻辑 (tp_levels=1, tp_ratios=[1.0])
+3. ✅ 新增 2 个单元测试验证 None 处理和有效 strategy 使用
+4. ✅ 运行测试验证（48/48 通过）
+
+**修改文件**:
+- `src/domain/order_manager.py` - 添加 Optional 类型注解和 None 处理
+- `tests/unit/test_order_manager.py` - 新增 2 个测试用例
+
+**测试结果**:
+```
+tests/unit/test_order_manager.py::test_create_order_chain_with_strategy_none - PASSED
+tests/unit/test_order_manager.py::test_create_order_chain_with_strategy_valid - PASSED
+tests/unit/test_order_manager.py - 48 passed
+```
+
+**验收标准**:
+- [x] 方法签名添加 `Optional[OrderStrategy] = None` 类型注解
+- [x] strategy 为 None 时使用默认单 TP 配置 (tp_levels=1, tp_ratios=[1.0])
+- [x] 新增 2 个单元测试全部通过
+- [x] 现有测试无回归（48 个测试全部通过）
+
+**代码变更摘要**:
+```python
+# 修改前
+def create_order_chain(
+    self,
+    strategy: OrderStrategy,  # 必须有值
+    ...
+)
+
+# 修改后
+def create_order_chain(
+    self,
+    strategy: Optional[OrderStrategy] = None,  # 可选，支持 None
+    ...
+) -> List[Order]:
+    if strategy is None:
+        tp_levels = 1
+        tp_ratios = [Decimal('1.0')]
+    else:
+        tp_levels = strategy.tp_levels
+        tp_ratios = strategy.tp_ratios
+    ...
+```
+
+---
+
 ### 2026-04-07 22:00 - T003 P1-3 日志导入规范化修复 ✅
 
 **任务 ID**: T003  

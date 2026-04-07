@@ -6,18 +6,116 @@
 
 ## 📑 目录
 
-1. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
-2. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
-3. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
-4. [前端配置页面优化 PRD](#前端配置页面优化 prd)
-5. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
-6. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
-7. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
-8. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
-9. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
-10. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
-11. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
-12. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
+1. [T001 P1-1 Lock 竞态条件修复](#t001-p1-1-lock-竞态条件修复)
+2. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
+3. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
+4. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
+5. [前端配置页面优化 PRD](#前端配置页面优化 prd)
+6. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
+7. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
+8. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+9. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
+10. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
+11. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+12. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+13. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
+
+---
+
+## 📌 T001 P1-1 Lock 竞态条件修复
+
+**创建日期**: 2026-04-07  
+**实现负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 问题描述
+
+`OrderRepository._ensure_lock()` 方法存在竞态条件问题：
+
+1. **非原子操作**: `if self._lock is None` 检查不是原子操作，多协程并发时可能创建多个 Lock 实例
+2. **无事件循环场景**: 当没有运行中的事件循环时，返回一个新的 `asyncio.Lock()`，但这个 Lock 无法在任何事件循环中使用
+3. **事件循环切换**: 如果应用在不同事件循环之间切换，Lock 可能与当前事件循环不匹配
+
+### 修复方案
+
+采用**事件循环感知的 Lock 字典** + **双重检查锁定模式**：
+
+```python
+# 初始化
+self._locks: Dict[int, asyncio.Lock] = {}  # 每个事件循环专用 Lock
+self._global_lock = threading.Lock()  # 保护 _locks 字典的并发访问
+self._sync_lock = threading.Lock()  # 同步调用场景
+
+# _ensure_lock() 实现
+def _ensure_lock(self) -> asyncio.Lock:
+    """
+    获取当前事件循环专用的 Lock。
+    使用双重检查锁定模式确保线程安全。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+    except RuntimeError:
+        # 同步调用场景：返回同步锁
+        return self._sync_lock
+
+    # 双重检查锁定模式
+    if loop_id not in self._locks:
+        with self._global_lock:
+            # 再次检查，避免多个线程同时创建 Lock
+            if loop_id not in self._locks:
+                self._locks[loop_id] = asyncio.Lock()
+
+    return self._locks[loop_id]
+```
+
+### 技术要点
+
+1. **双重检查锁定 (Double-Checked Locking)**
+   - 第一次检查：无锁状态下快速判断是否需要创建
+   - 加锁：使用 `threading.Lock` 保护临界区
+   - 第二次检查：在临界区内再次确认，避免重复创建
+
+2. **事件循环隔离**
+   - 使用 `id(loop)` 作为字典键，每个事件循环有独立的 Lock
+   - 避免跨事件循环共享 Lock 导致的竞态条件
+
+3. **同步/异步锁分离**
+   - 异步调用：返回 `asyncio.Lock`，可与 `async with` 配合使用
+   - 同步调用：返回 `threading.Lock`，可与 `with` 配合使用
+
+### 测试用例
+
+```python
+class TestP1Fix_LockConcurrency:
+    """P1-1: Lock 竞态条件修复测试"""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_save_operations(self):
+        """测试并发 save 操作的锁机制"""
+        # 10 个订单并发保存，验证无数据竞争
+
+    @pytest.mark.asyncio
+    async def test_lock_per_event_loop(self):
+        """测试不同事件循环有独立的 Lock"""
+        # 验证不同事件循环返回不同的 Lock 实例
+
+    @pytest.mark.asyncio
+    async def test_sync_call_returns_sync_lock(self):
+        """测试同步调用返回同步锁"""
+        # 验证同步场景返回 threading.Lock
+```
+
+### 验收结果
+
+- ✅ `_ensure_lock()` 方法使用事件循环感知的 Lock 字典
+- ✅ 双重检查锁定模式正确实现
+- ✅ 新增 3 个单元测试全部通过
+- ✅ 现有测试无回归（93/93 通过）
+
+### 参考文档
+
+- [设计文档](../arch/order-management-fix-design.md) - 2.1 P1-1 修复方案
 
 ---
 
