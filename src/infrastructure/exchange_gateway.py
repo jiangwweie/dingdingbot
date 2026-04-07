@@ -362,20 +362,15 @@ class ExchangeGateway:
                     ohlcv = await self.ws_exchange.watch_ohlcv(symbol, timeframe)
 
                     # Get the latest candle
-                    if not ohlcv:
-                        continue
-
-                    # Get last candle (most recent)
-                    candle = ohlcv[-1]
-                    kline = self._parse_ohlcv(candle, symbol, timeframe)
-
-                    if not kline:
+                    if not ohlcv or len(ohlcv) < 2:
                         continue
 
                     # Check if candle is closed (completed)
                     # In CCXT, we need to track previous timestamp to detect closure
-                    if self._is_candle_closed(kline, symbol, timeframe):
-                        await callback(kline)
+                    # Returns the closed candle data if detected
+                    closed_kline = self._get_closed_candle(ohlcv, symbol, timeframe)
+                    if closed_kline:
+                        await callback(closed_kline)
 
             except asyncio.CancelledError:
                 logger.info(f"WebSocket subscription cancelled for {symbol} {timeframe}")
@@ -399,30 +394,42 @@ class ExchangeGateway:
                 logger.warning(f"Reconnecting in {delay:.1f}s (attempt {reconnect_count}/{self._max_reconnect_attempts})")
                 await asyncio.sleep(delay)
 
-    def _is_candle_closed(self, kline: KlineData, symbol: str, timeframe: str) -> bool:
+    def _get_closed_candle(self, ohlcv: List[Any], symbol: str, timeframe: str) -> Optional[KlineData]:
         """
-        Track if a candle has closed by detecting timestamp change.
+        Detect candle closure and return the closed candle data.
+
+        This fixes the bug where the wrong K-line timestamp was recorded.
+        When a new K-line timestamp is detected, the PREVIOUS candle (ohlcv[-2])
+        has just closed, not the new one (ohlcv[-1]).
 
         Args:
-            kline: Current KlineData
+            ohlcv: Array of OHLCV data from WebSocket
             symbol: Trading symbol
             timeframe: Timeframe
 
         Returns:
-            True if candle is newly closed
+            KlineData of the closed candle if detected, None otherwise
         """
+        if len(ohlcv) < 2:
+            return None
+
         key = f"{symbol}:{timeframe}"
-        current_ts = kline.timestamp
+        current_ts = ohlcv[-1][0]  # New candle timestamp
 
         if key in self._candle_timestamps:
             if current_ts != self._candle_timestamps[key]:
-                # Timestamp changed - previous candle is closed
+                # Timestamp changed - previous candle has closed
                 self._candle_timestamps[key] = current_ts
-                return True
+
+                # Parse the closed candle (second to last in array)
+                closed_candle = ohlcv[-2]
+                kline = self._parse_ohlcv(closed_candle, symbol, timeframe)
+                return kline
         else:
+            # First time seeing this symbol/timeframe
             self._candle_timestamps[key] = current_ts
 
-        return False
+        return None
 
     # ============================================================
     # Asset Polling - Account Balance & Positions

@@ -1240,6 +1240,21 @@ class SignalRepository:
                 for row in rows
             ]
 
+    async def update_signal_timestamp(self, signal_id: int, kline_timestamp: int) -> None:
+        """
+        Update kline_timestamp for a signal (used for data repair).
+
+        Args:
+            signal_id: Signal ID
+            kline_timestamp: Correct K-line timestamp in milliseconds
+        """
+        await self._db.execute(
+            "UPDATE signals SET kline_timestamp = ? WHERE id = ?",
+            (kline_timestamp, signal_id)
+        )
+        await self._db.commit()
+        logger.info(f"Updated signal {signal_id} kline_timestamp to {kline_timestamp}")
+
     async def update_signal_status(
         self,
         signal_id: int,

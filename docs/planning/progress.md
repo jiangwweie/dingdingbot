@@ -1,5 +1,38 @@
 # 进度日志
 
+## 🔴 CRITICAL: WebSocket信号触发BUG诊断 (2026-04-07)
+
+### 发现的核心问题
+
+**问题1：kline_timestamp记录错误（晚了1小时）**
+- **原因**：WebSocket使用 `ohlcv[-1]`（新K线）而不是 `ohlcv[-2]`（刚收盘的K线）
+- **影响**：所有WebSocket实时信号的时间戳错误
+- **状态**：✅ 代码已修复，待部署
+
+**问题2：WebSocket在K线进行中触发信号（严重！）**
+- **现象**：在K6刚开盘3秒就触发信号（应该在收盘时触发）
+- **原因**：`is_closed` 检查缺失，刚开盘的K线被误判为Pinbar
+- **影响**：形态误判，信号可能在不应该触发的时间点触发
+- **状态**：⚠️ 待修复（需添加 `is_closed` 检查和最小波幅检查）
+
+### 核心决策
+
+**P0 优先级（立即修复）**：
+1. ✅ 修复 WebSocket 时间戳处理（`exchange_gateway.py`）
+2. ⚠️ 添加 `is_closed` 检查到 `process_kline` 入口
+3. ⚠️ 添加最小波幅检查到形态检测逻辑
+4. ⚠️ 执行历史数据修复
+
+**修复文件**：
+- `src/infrastructure/exchange_gateway.py`（已修复）
+- `src/application/signal_pipeline.py`（待添加 `is_closed` 检查）
+- `src/domain/strategies/pinbar_strategy.py`（待添加波幅检查）
+- `scripts/fix_websocket_timestamps.py`（已创建）
+
+**详细报告**：`docs/diagnostic/WebSocket信号触发BUG诊断报告.md`
+
+---
+
 ## 2026-04-01 - MCP 工具集成配置 (已完成)
 
 **目标**: 为团队配置 MCP 工具，提升开发效率
@@ -1884,5 +1917,18 @@ async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
 - ATR 测试修复：默认值断言修正
 
 **Git 提交**: `71f1e89`
+
+---
+
+## 2026-04-04 - 开工
+
+**时间**: 16:48
+
+**今日目标**:
+- 查看配置管理系统完成情况
+- 检查是否有新的任务交接
+- 确认下一阶段工作重点
+
+---
 
 ---
