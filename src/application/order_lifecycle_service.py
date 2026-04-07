@@ -101,7 +101,7 @@ class OrderLifecycleService:
         """启动服务"""
         await self._repository.initialize()
         if self._audit_logger:
-            await self._audit_logger.start()
+            await self._audit_logger.start(queue_size=1000)  # 显式传入队列容量参数，增强可读性
         logger.info("OrderLifecycleService 已启动")
 
     async def stop(self) -> None:

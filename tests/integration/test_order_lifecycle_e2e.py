@@ -560,7 +560,7 @@ class TestP2FixAuditLoggerTypeValidation:
         with pytest.raises(Exception):
             audit_logger = OrderAuditLogger(repository=None)
             # 初始化的时候会发现问题
-            await audit_logger.start()
+            await audit_logger.start(queue_size=1000)  # 显式传入队列容量参数
 
 
 # ============================================================
