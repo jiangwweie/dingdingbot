@@ -4,6 +4,73 @@
 
 ---
 
+## 2026-04-07 P1-5 Provider 注册模式设计审查完成
+
+**任务**: P1-5 Provider 注册模式 - QA 设计审查
+**执行者**: QA Tester
+**状态**: ✅ 已完成
+**实际工时**: 2h
+
+### 审查输出
+
+**审查报告**: `docs/reviews/p1_5_provider_design_qa_review.md`
+
+**可测试性评分**: A- (优秀)
+
+| 评估维度 | 评分 | 说明 |
+|----------|------|------|
+| **可测试性** | **A-** | Protocol 接口设计优良，少数并发场景需额外关注 |
+| **覆盖率目标可行性** | **可行** | Provider 层>85% 可达，ConfigManager >80% 需 Mock 辅助 |
+| **风险等级** | **中低** | 3 项 P2 风险，1 项 P1 风险（并发注册） |
+| **设计修改建议** | **建议微调** | 增加 Provider 验证钩子，优化并发锁粒度 |
+
+### 识别的风险
+
+**P1 风险 (高优先级)**:
+- R1: ProviderRegistry 懒加载存在竞态条件
+  - 缓解措施：添加 asyncio.Lock 双重检查锁定
+
+**P2 风险 (中优先级)**:
+- R2: CachedProvider 依赖 datetime.now()，测试难验证 TTL
+- R3: 向后兼容别名方法 57 个调用方可能遗漏测试
+- R4: Provider 缓存失效可能数据不一致
+
+### 测试策略设计
+
+**测试用例总数**: 42 个
+
+| 类别 | 测试数量 | 优先级 |
+|------|----------|--------|
+| Provider 注册/注销 | 8 | P0 |
+| Provider 缓存 TTL | 10 | P0 |
+| 动态访问测试 | 8 | P1 |
+| 向后兼容测试 | 6 | P1 |
+| 并发安全测试 | 6 | P1 |
+| 扩展性验证 | 4 | P2 |
+
+**测试数据准备**:
+- MockConfigProvider - 通用 Mock Provider
+- FaultyConfigProvider - 故障注入 Provider
+- SlowConfigProvider - 慢速 Provider
+- 配置数据 Fixture (core/user/risk/account)
+
+### 设计修改建议
+
+**强烈建议采纳 (P0)**:
+1. 为 ProviderRegistry.get_provider() 添加并发保护（双重检查锁定）
+
+**建议采纳 (P1)**:
+2. 为 CachedProvider 注入时钟抽象（使 TTL 测试可控）
+3. 在 ConfigManager 中添加 Provider 验证钩子
+
+### 交付物
+
+- [x] `docs/reviews/p1_5_provider_design_qa_review.md` - 完整审查报告
+- [x] `docs/planning/task_plan.md` - 任务计划更新
+- [x] `docs/planning/progress.md` - 进度日志更新
+
+---
+
 ## 2026-04-07 P1-5 Repository 层测试完成
 
 **任务**: P1-5 ConfigManager 重构 - Repository 层单元测试
