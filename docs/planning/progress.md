@@ -4,6 +4,56 @@
 
 ---
 
+### 2026-04-07 - T007 P2-7 UPSERT 数据丢失修复 ✅
+
+**任务 ID**: T007  
+**优先级**: P2  
+**工时估算**: 2h  
+**状态**: ✅ 已完成
+
+**问题位置**: `src/infrastructure/order_repository.py:207-216`
+
+**修复内容**:
+1. ✅ 移除 COALESCE 语法，改用 CASE 表达式
+2. ✅ 支持「设置为 NULL」和「不更新」两种语义
+3. ✅ 新增 4 个单元测试全部通过
+4. ✅ 现有测试无回归（97/97 通过）
+
+**修复代码**:
+```sql
+-- 修复前（使用 COALESCE，无法设置为 NULL）
+filled_at = COALESCE(excluded.filled_at, orders.filled_at)
+
+-- 修复后（使用 CASE 表达式）
+filled_at = CASE
+    WHEN excluded.filled_at IS NULL AND orders.filled_at IS NOT NULL
+    THEN orders.filled_at
+    ELSE excluded.filled_at
+END,
+exchange_order_id = CASE
+    WHEN excluded.exchange_order_id IS NULL AND orders.exchange_order_id IS NOT NULL
+    THEN orders.exchange_order_id
+    ELSE excluded.exchange_order_id
+END,
+exit_reason = excluded.exit_reason,  -- 允许设置为 NULL
+parent_order_id = excluded.parent_order_id,  -- 允许设置为 NULL
+oco_group_id = excluded.oco_group_id,  -- 允许设置为 NULL
+```
+
+**测试用例**:
+- ✅ `test_upsert_preserves_old_value_when_new_is_none` - 新值为 NULL 时保留旧值
+- ✅ `test_upsert_updates_to_null_explicitly` - 显式设置为 NULL
+- ✅ `test_upsert_updates_to_new_value` - 更新为新值
+- ✅ `test_upsert_preserves_filled_at` - filled_at 字段完整性
+
+**验收标准**:
+- ✅ UPSERT 使用 CASE 表达式替代 COALESCE
+- ✅ 支持「设置为 NULL」和「不更新」两种语义
+- ✅ 新增 4 个单元测试全部通过
+- ✅ 现有测试无回归
+
+---
+
 ### 2026-04-07 - T006 AuditLogger 类型校验缺失修复
 
 **任务 ID**: T006  

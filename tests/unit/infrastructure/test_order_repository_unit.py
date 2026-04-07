@@ -3816,3 +3816,225 @@ class TestP1Fix_LockConcurrency:
             # Cleanup
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
+
+
+# ============================================================
+# P2-7 修复测试：UPSERT 数据丢失修复
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_upsert_preserves_old_value_when_new_is_none(order_repository):
+    """
+    P2-7: UPSERT 数据丢失修复 - 测试新值为 NULL 时保留旧值
+
+    测试场景:
+    1. 创建订单并设置 filled_at 值
+    2. 更新时 filled_at 保持为 None（不更新）
+    3. 验证 filled_at 保留原值
+
+    验收标准:
+    - filled_at 字段在更新时为 NULL 时保留旧值
+    - 其他字段正常更新
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # Arrange: 创建一个已成交的订单
+    order = Order(
+        id="ord_p2_7_test_001",
+        signal_id="sig_p2_7_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('1.0'),
+        filled_at=1500,  # 设置 filled_at 值
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+    await order_repository.save(order)
+
+    # 验证：订单已保存且 filled_at 有值
+    saved = await order_repository.get_order("ord_p2_7_test_001")
+    assert saved.filled_at == 1500
+
+    # Act: 更新时 filled_at 保持为 None（不更新 filled_at）
+    order.status = OrderStatus.FILLED
+    order.updated_at = current_time + 1000
+    # filled_at 不设置，保持为 None（在 Order 模型中默认为 None）
+    order.filled_at = None  # 显式设置为 None，表示不更新此字段
+    await order_repository.save(order)
+
+    # Assert: filled_at 应保留原值
+    saved_after_update = await order_repository.get_order("ord_p2_7_test_001")
+    assert saved_after_update.filled_at == 1500, "filled_at 在更新时为 NULL 应保留旧值"
+
+
+@pytest.mark.asyncio
+async def test_upsert_updates_to_null_explicitly(order_repository):
+    """
+    P2-7: UPSERT 数据丢失修复 - 测试显式设置为 NULL
+
+    测试场景:
+    1. 创建订单并设置 parent_order_id 值
+    2. 更新时将 parent_order_id 设置为 None
+    3. 验证 parent_order_id 成功设置为 NULL
+
+    验收标准:
+    - 可以显式将字段更新为 NULL
+    - parent_order_id 从有值变为 NULL
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # Arrange: 先创建一个有 parent_order_id 的订单
+    order = Order(
+        id="ord_p2_7_test_002",
+        signal_id="sig_p2_7_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.TP1,
+        requested_qty=Decimal('0.5'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_parent_123",  # 设置父订单 ID
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=True,
+    )
+    await order_repository.save(order)
+
+    # 验证：订单已保存且 parent_order_id 有值
+    saved = await order_repository.get_order("ord_p2_7_test_002")
+    assert saved.parent_order_id == "ord_parent_123"
+
+    # Act: 更新时将 parent_order_id 设置为 None
+    order.parent_order_id = None  # 显式设置为 None
+    order.updated_at = current_time + 1000
+    await order_repository.save(order)
+
+    # Assert: parent_order_id 应为 None
+    saved_after_update = await order_repository.get_order("ord_p2_7_test_002")
+    assert saved_after_update.parent_order_id is None, "parent_order_id 应成功更新为 NULL"
+
+
+@pytest.mark.asyncio
+async def test_upsert_updates_to_new_value(order_repository):
+    """
+    P2-7: UPSERT 数据丢失修复 - 测试更新为新值
+
+    测试场景:
+    1. 创建订单并设置 exchange_order_id 值
+    2. 更新时将 exchange_order_id 设置为新值
+    3. 验证 exchange_order_id 成功更新
+
+    验收标准:
+    - exchange_order_id 从旧值更新为新值
+    - 其他字段正常更新
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # Arrange: 创建订单并设置 exchange_order_id
+    order = Order(
+        id="ord_p2_7_test_003",
+        signal_id="sig_p2_7_test",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        status=OrderStatus.OPEN,
+        exchange_order_id="binance_12345",  # 设置交易所订单 ID
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+    await order_repository.save(order)
+
+    # 验证：订单已保存且 exchange_order_id 有值
+    saved = await order_repository.get_order("ord_p2_7_test_003")
+    assert saved.exchange_order_id == "binance_12345"
+
+    # Act: 更新时将 exchange_order_id 设置为新值
+    order.exchange_order_id = "binance_67890"  # 新值
+    order.status = OrderStatus.FILLED
+    order.filled_qty = Decimal('1.0')
+    order.filled_at = 2000
+    order.updated_at = current_time + 1000
+    await order_repository.save(order)
+
+    # Assert: exchange_order_id 应更新为新值
+    saved_after_update = await order_repository.get_order("ord_p2_7_test_003")
+    assert saved_after_update.exchange_order_id == "binance_67890", "exchange_order_id 应成功更新为新值"
+    assert saved_after_update.status == OrderStatus.FILLED
+    assert saved_after_update.filled_at == 2000
+
+
+@pytest.mark.asyncio
+async def test_upsert_preserves_filled_at(order_repository):
+    """
+    P2-7: UPSERT 数据丢失修复 - 测试 filled_at 字段完整性
+
+    测试场景:
+    1. 创建订单并设置 filled_at 值
+    2. 多次更新订单，但不设置 filled_at
+    3. 验证 filled_at 始终保持原值
+
+    验收标准:
+    - filled_at 在多次更新中保持不变
+    - 其他字段正常更新
+    """
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+    original_filled_at = 1609459200000  # 2021-01-01 00:00:00 UTC
+
+    # Arrange: 创建已成交订单
+    order = Order(
+        id="ord_p2_7_test_004",
+        signal_id="sig_p2_7_test",
+        symbol="ETH/USDT:USDT",
+        direction=Direction.SHORT,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.ENTRY,
+        price=Decimal('2000'),
+        requested_qty=Decimal('5.0'),
+        filled_qty=Decimal('5.0'),
+        average_exec_price=Decimal('2000'),
+        filled_at=original_filled_at,
+        status=OrderStatus.FILLED,
+        exchange_order_id="eth_order_001",
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+    await order_repository.save(order)
+
+    # 验证：订单已保存
+    saved = await order_repository.get_order("ord_p2_7_test_004")
+    assert saved.filled_at == original_filled_at
+
+    # Act: 多次更新，但不设置 filled_at
+    # 第一次更新
+    order.status = OrderStatus.FILLED
+    order.updated_at = current_time + 1000
+    order.exchange_order_id = "eth_order_002"
+    order.filled_at = None  # 不更新 filled_at
+    await order_repository.save(order)
+
+    # 第二次更新
+    order.updated_at = current_time + 2000
+    order.exit_reason = "TAKE_PROFIT"
+    order.filled_at = None  # 不更新 filled_at
+    await order_repository.save(order)
+
+    # 第三次更新
+    order.updated_at = current_time + 3000
+    order.filled_qty = Decimal('5.0')
+    order.filled_at = None  # 不更新 filled_at
+    await order_repository.save(order)
+
+    # Assert: filled_at 应始终保持原值
+    final_order = await order_repository.get_order("ord_p2_7_test_004")
+    assert final_order.filled_at == original_filled_at, f"filled_at 应保持为 {original_filled_at}，实际为 {final_order.filled_at}"
+    assert final_order.exchange_order_id == "eth_order_002"
+    assert final_order.exit_reason == "TAKE_PROFIT"
