@@ -1539,3 +1539,752 @@ async def test_get_all_related_order_ids_multiple_roots(order_repository):
         "ord_multi_entry_1", "ord_multi_tp_1",
     }
     assert result == expected_ids
+
+
+# ============================================================
+# P0 核心方法测试 - get_order_chain
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_get_order_chain_complete(order_repository):
+    """
+    P0-001: 获取订单链 - 完整订单链场景
+
+    测试场景:
+    1. 创建 ENTRY + TP1 + TP2 + SL 订单链
+    2. 调用 get_order_chain 查询
+    3. 验证返回正确的订单分类
+
+    验收标准:
+    - entry 列表包含 ENTRY 订单
+    - tps 列表包含 TP1、TP2 订单
+    - sl 列表包含 SL 订单
+    """
+    signal_id = "sig_chain_test_001"
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建订单链
+    entry_order = Order(
+        id="ord_chain_entry",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+
+    tp1_order = Order(
+        id="ord_chain_tp1",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('66000'),
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_chain_entry",
+        oco_group_id="oco_001",
+        created_at=current_time + 1000,
+        updated_at=current_time + 1000,
+        reduce_only=True,
+    )
+
+    tp2_order = Order(
+        id="ord_chain_tp2",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP2,
+        price=Decimal('67000'),
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_chain_entry",
+        oco_group_id="oco_001",
+        created_at=current_time + 2000,
+        updated_at=current_time + 2000,
+        reduce_only=True,
+    )
+
+    sl_order = Order(
+        id="ord_chain_sl",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        trigger_price=Decimal('64000'),
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_chain_entry",
+        oco_group_id="oco_001",
+        created_at=current_time + 3000,
+        updated_at=current_time + 3000,
+        reduce_only=True,
+    )
+
+    for order in [entry_order, tp1_order, tp2_order, sl_order]:
+        await order_repository.save(order)
+
+    # 执行：获取订单链
+    chain = await order_repository.get_order_chain(signal_id)
+
+    # 验证
+    assert len(chain["entry"]) == 1
+    assert chain["entry"][0].id == "ord_chain_entry"
+    assert chain["entry"][0].order_role == OrderRole.ENTRY
+
+    assert len(chain["tps"]) == 2
+    tp_ids = [o.id for o in chain["tps"]]
+    assert "ord_chain_tp1" in tp_ids
+    assert "ord_chain_tp2" in tp_ids
+
+    assert len(chain["sl"]) == 1
+    assert chain["sl"][0].id == "ord_chain_sl"
+
+
+@pytest.mark.asyncio
+async def test_get_order_chain_empty(order_repository):
+    """
+    P0-002: 获取订单链 - 空结果边界测试
+
+    测试场景:
+    1. 查询不存在的信号
+    2. 验证返回空字典结构
+
+    验收标准:
+    - entry、tps、sl 均为空列表
+    """
+    # 执行：查询不存在的信号
+    chain = await order_repository.get_order_chain("sig_not_exists")
+
+    # 验证
+    assert chain == {"entry": [], "tps": [], "sl": []}
+
+
+@pytest.mark.asyncio
+async def test_get_order_chain_multiple_entry(order_repository):
+    """
+    P0-003: 获取订单链 - 多个 ENTRY 订单场景
+
+    测试场景:
+    1. 创建同一信号的多个 ENTRY 订单
+    2. 每个 ENTRY 有关联的 TP/SL
+    3. 验证返回所有 ENTRY 订单
+
+    验收标准:
+    - entry 列表包含所有 ENTRY 订单
+    - tps 列表包含所有 TP 订单
+    """
+    signal_id = "sig_multi_entry"
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建两个 ENTRY 订单及其子订单
+    entry1 = Order(
+        id="ord_entry_1",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+
+    entry2 = Order(
+        id="ord_entry_2",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time + 1000,
+        updated_at=current_time + 1000,
+        reduce_only=False,
+    )
+
+    tp1 = Order(
+        id="ord_tp_entry1",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('66000'),
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_entry_1",
+        created_at=current_time + 2000,
+        updated_at=current_time + 2000,
+        reduce_only=True,
+    )
+
+    tp2 = Order(
+        id="ord_tp_entry2",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('67000'),
+        requested_qty=Decimal('0.25'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_entry_2",
+        created_at=current_time + 3000,
+        updated_at=current_time + 3000,
+        reduce_only=True,
+    )
+
+    for order in [entry1, entry2, tp1, tp2]:
+        await order_repository.save(order)
+
+    # 执行：获取订单链
+    chain = await order_repository.get_order_chain(signal_id)
+
+    # 验证
+    assert len(chain["entry"]) == 2
+    assert len(chain["tps"]) == 2
+
+
+# ============================================================
+# P0 核心方法测试 - get_order_chain_by_order_id
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_get_order_chain_by_order_id_from_entry(order_repository):
+    """
+    P0-004: 按订单 ID 获取订单链 - 从 ENTRY 订单追溯
+
+    测试场景:
+    1. 创建 ENTRY + TP + SL 订单链
+    2. 从 ENTRY 订单 ID 查询
+    3. 验证返回完整订单链（父订单 + 子订单）
+
+    验收标准:
+    - 返回列表包含 ENTRY 订单（第一个）
+    - 包含所有 TP/SL 子订单
+    """
+    signal_id = "sig_tree_test_001"
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    entry_order = Order(
+        id="ord_tree_entry",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+
+    tp_order = Order(
+        id="ord_tree_tp",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('66000'),
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_tree_entry",
+        created_at=current_time + 1000,
+        updated_at=current_time + 1000,
+        reduce_only=True,
+    )
+
+    sl_order = Order(
+        id="ord_tree_sl",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        trigger_price=Decimal('64000'),
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_tree_entry",
+        created_at=current_time + 2000,
+        updated_at=current_time + 2000,
+        reduce_only=True,
+    )
+
+    for order in [entry_order, tp_order, sl_order]:
+        await order_repository.save(order)
+
+    # 执行：从 ENTRY 订单 ID 查询
+    chain = await order_repository.get_order_chain_by_order_id("ord_tree_entry")
+
+    # 验证
+    assert len(chain) == 3
+    assert chain[0].id == "ord_tree_entry"  # ENTRY 订单在第一个
+    assert chain[0].order_role == OrderRole.ENTRY
+
+
+@pytest.mark.asyncio
+async def test_get_order_chain_by_order_id_from_child(order_repository):
+    """
+    P0-005: 按订单 ID 获取订单链 - 从子订单追溯
+
+    测试场景:
+    1. 创建 ENTRY + TP + SL 订单链
+    2. 从 TP 订单 ID 查询
+    3. 验证返回父订单和兄弟订单
+
+    验收标准:
+    - 返回列表包含父 ENTRY 订单（第一个）
+    - 包含所有 TP/SL 兄弟订单
+    """
+    signal_id = "sig_tree_test_002"
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    entry_order = Order(
+        id="ord_tree_entry_2",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+        reduce_only=False,
+    )
+
+    tp_order = Order(
+        id="ord_tree_tp_2",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal('66000'),
+        requested_qty=Decimal('0.5'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_tree_entry_2",
+        created_at=current_time + 1000,
+        updated_at=current_time + 1000,
+        reduce_only=True,
+    )
+
+    sl_order = Order(
+        id="ord_tree_sl_2",
+        signal_id=signal_id,
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        trigger_price=Decimal('64000'),
+        requested_qty=Decimal('1.0'),
+        filled_qty=Decimal('0'),
+        status=OrderStatus.OPEN,
+        parent_order_id="ord_tree_entry_2",
+        created_at=current_time + 2000,
+        updated_at=current_time + 2000,
+        reduce_only=True,
+    )
+
+    for order in [entry_order, tp_order, sl_order]:
+        await order_repository.save(order)
+
+    # 执行：从 TP 订单 ID 查询
+    chain = await order_repository.get_order_chain_by_order_id("ord_tree_tp_2")
+
+    # 验证
+    assert len(chain) == 3
+    assert chain[0].id == "ord_tree_entry_2"  # 父订单在第一个
+    assert chain[0].order_role == OrderRole.ENTRY
+
+
+@pytest.mark.asyncio
+async def test_get_order_chain_by_order_id_not_found(order_repository):
+    """
+    P0-006: 按订单 ID 获取订单链 - 订单不存在边界测试
+
+    测试场景:
+    1. 查询不存在的订单 ID
+    2. 验证返回空列表
+
+    验收标准:
+    - 返回空列表
+    """
+    # 执行：查询不存在的订单
+    chain = await order_repository.get_order_chain_by_order_id("ord_not_exists")
+
+    # 验证
+    assert chain == []
+
+
+# ============================================================
+# P0 核心方法测试 - initialize / close
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_initialize_creates_tables(temp_db_path):
+    """
+    P0-007: 初始化数据库 - 创建表和索引
+
+    测试场景:
+    1. 创建 OrderRepository 实例
+    2. 调用 initialize 方法
+    3. 验证表已创建
+
+    验收标准:
+    - orders 表存在
+    - 索引已创建
+    """
+    from src.infrastructure.order_repository import OrderRepository
+
+    repo = OrderRepository(db_path=temp_db_path)
+
+    # 执行：初始化
+    await repo.initialize()
+
+    # 验证：表存在
+    cursor = await repo._db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='orders'"
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    assert row is not None
+    assert row[0] == "orders"
+
+    # 验证：索引存在
+    cursor = await repo._db.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_orders_signal_id'"
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    assert row is not None
+
+    await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_initialize_idempotent(temp_db_path):
+    """
+    P0-008: 初始化数据库 - 幂等性测试
+
+    测试场景:
+    1. 调用 initialize 方法
+    2. 再次调用 initialize 方法
+    3. 验证重复初始化不会报错
+
+    验收标准:
+    - 重复初始化不抛出异常
+    - 数据库连接相同
+    """
+    from src.infrastructure.order_repository import OrderRepository
+
+    repo = OrderRepository(db_path=temp_db_path)
+
+    # 执行：第一次初始化
+    await repo.initialize()
+    first_db = repo._db
+
+    # 执行：第二次初始化（幂等性）
+    await repo.initialize()
+
+    # 验证：数据库连接相同
+    assert repo._db is first_db
+
+    await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_initialize_creates_directory(tmp_path):
+    """
+    P0-009: 初始化数据库 - 自动创建目录
+
+    测试场景:
+    1. 使用不存在的目录路径
+    2. 调用 initialize 方法
+    3. 验证目录自动创建
+
+    验收标准:
+    - 目录自动创建
+    - 数据库文件创建成功
+    """
+    from src.infrastructure.order_repository import OrderRepository
+    import os
+
+    db_path = str(tmp_path / "subdir" / "test.db")
+
+    repo = OrderRepository(db_path=db_path)
+
+    # 执行：初始化（应自动创建目录）
+    await repo.initialize()
+
+    # 验证：目录和文件存在
+    assert os.path.exists(db_path)
+
+    await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_close_normal(temp_db_path):
+    """
+    P0-010: 关闭数据库连接 - 正常场景
+
+    测试场景:
+    1. 初始化 OrderRepository
+    2. 调用 close 方法
+    3. 验证连接已关闭
+
+    验收标准:
+    - 连接关闭
+    - 可再次初始化
+    """
+    from src.infrastructure.order_repository import OrderRepository
+
+    repo = OrderRepository(db_path=temp_db_path)
+    await repo.initialize()
+
+    # 验证：连接已打开
+    assert repo._db is not None
+
+    # 执行：关闭连接
+    await repo.close()
+
+    # 验证：连接已关闭
+    assert repo._db is None
+
+
+@pytest.mark.asyncio
+async def test_close_idempotent(temp_db_path):
+    """
+    P0-011: 关闭数据库连接 - 幂等性测试
+
+    测试场景:
+    1. 调用 close 方法
+    2. 再次调用 close 方法
+    3. 验证重复关闭不会报错
+
+    验收标准:
+    - 重复关闭不抛出异常
+    """
+    from src.infrastructure.order_repository import OrderRepository
+
+    repo = OrderRepository(db_path=temp_db_path)
+    await repo.initialize()
+
+    # 执行：第一次关闭
+    await repo.close()
+
+    # 执行：第二次关闭（幂等性）
+    await repo.close()
+
+    # 验证：不抛出异常
+
+
+# ============================================================
+# P0 核心方法测试 - get_orders_by_signal
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_get_orders_by_signal_multiple(order_repository):
+    """
+    P0-012: 按信号查询订单 - 多订单场景
+
+    测试场景:
+    1. 创建同一信号的多个订单
+    2. 调用 get_orders_by_signal 查询
+    3. 验证返回所有订单
+
+    验收标准:
+    - 返回所有该信号的订单
+    - 订单按 created_at 升序排列
+    """
+    signal_id = "sig_multi_order_test"
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建 5 个订单
+    orders = [
+        Order(
+            id=f"ord_multi_{i}",
+            signal_id=signal_id,
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.CREATED,
+            created_at=current_time + i * 1000,
+            updated_at=current_time + i * 1000,
+            reduce_only=False,
+        )
+        for i in range(5)
+    ]
+
+    for order in orders:
+        await order_repository.save(order)
+
+    # 执行：查询
+    result = await order_repository.get_orders_by_signal(signal_id)
+
+    # 验证
+    assert len(result) == 5
+    assert all(o.signal_id == signal_id for o in result)
+
+
+@pytest.mark.asyncio
+async def test_get_orders_by_signal_empty(order_repository):
+    """
+    P0-013: 按信号查询订单 - 空结果边界测试
+
+    测试场景:
+    1. 查询不存在的信号
+    2. 验证返回空列表
+
+    验收标准:
+    - 返回空列表
+    """
+    # 执行：查询不存在的信号
+    result = await order_repository.get_orders_by_signal("sig_not_exists")
+
+    # 验证
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_orders_by_signal_order_asc(order_repository):
+    """
+    P0-014: 按信号查询订单 - 验证排序顺序
+
+    测试场景:
+    1. 创建同一信号的多个订单（不同时间戳）
+    2. 查询订单
+    3. 验证按 created_at 升序排列
+
+    验收标准:
+    - 订单按 created_at 升序排列
+    """
+    signal_id = "sig_order_test"
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建 3 个订单（乱序时间戳）
+    orders_data = [
+        ("ord_3", current_time + 3000),
+        ("ord_1", current_time + 1000),
+        ("ord_2", current_time + 2000),
+    ]
+
+    for order_id, ts in orders_data:
+        order = Order(
+            id=order_id,
+            signal_id=signal_id,
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.CREATED,
+            created_at=ts,
+            updated_at=ts,
+            reduce_only=False,
+        )
+        await order_repository.save(order)
+
+    # 执行：查询
+    result = await order_repository.get_orders_by_signal(signal_id)
+
+    # 验证：按 created_at 升序排列
+    assert len(result) == 3
+    assert result[0].id == "ord_1"
+    assert result[1].id == "ord_2"
+    assert result[2].id == "ord_3"
+
+
+# ============================================================
+# P0 核心方法测试 - get_order_count
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_get_order_count(order_repository):
+    """
+    P0-015: 获取订单数量
+
+    测试场景:
+    1. 创建同一信号的多个订单
+    2. 调用 get_order_count 查询
+    3. 验证返回正确数量
+
+    验收标准:
+    - 返回正确的订单数量
+    """
+    signal_id = "sig_count_test"
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # 准备：创建 5 个订单
+    for i in range(5):
+        order = Order(
+            id=f"ord_count_{i}",
+            signal_id=signal_id,
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.CREATED,
+            created_at=current_time + i * 1000,
+            updated_at=current_time + i * 1000,
+            reduce_only=False,
+        )
+        await order_repository.save(order)
+
+    # 执行：查询数量
+    count = await order_repository.get_order_count(signal_id)
+
+    # 验证
+    assert count == 5
+
+
+@pytest.mark.asyncio
+async def test_get_order_count_empty(order_repository):
+    """
+    P0-016: 获取订单数量 - 空结果边界测试
+
+    测试场景:
+    1. 查询不存在的信号
+    2. 验证返回 0
+
+    验收标准:
+    - 返回 0
+    """
+    # 执行：查询不存在的信号
+    count = await order_repository.get_order_count("sig_not_exists")
+
+    # 验证
+    assert count == 0
