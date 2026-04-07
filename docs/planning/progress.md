@@ -4,6 +4,80 @@
 
 ---
 
+### 2026-04-07 - P1-1 和 P1-2 配置修复完成 ✅
+
+**任务 ID**: P1-1, P1-2  
+**优先级**: P1  
+**工时估算**: 2h  
+**实际工时**: 2h  
+**状态**: ✅ 已完成
+
+**工作内容**:
+1. ✅ P1-1: 修复 Decimal YAML 序列化精度丢失问题
+2. ✅ P1-2: 实现进口预览缓存 TTL 机制
+3. ✅ 添加 cachetools 依赖到 requirements.txt
+4. ✅ 编写 7 个新增测试用例
+5. ✅ 运行测试验证（36 passed，无回归）
+
+**P1-1 修复说明**:
+- **问题**: `api_v1_config.py:57-62` Decimal 被转换为 float 后序列化，精度丢失
+- **修复方案**:
+  - 修改 `_decimal_representer` 使用字符串表示 Decimal
+  - 添加 `_decimal_constructor` 用于反序列化时恢复 Decimal
+  - 更新 `_convert_decimals_to_str` 函数（原 `_convert_decimals_to_float`）递归转换 Decimal 为字符串
+- **修改代码**:
+```python
+def _decimal_representer(dumper, data):
+    """Represent Decimal as string to preserve precision during YAML serialization."""
+    return dumper.represent_scalar('tag:yaml.org,2002:str', str(data))
+
+def _decimal_constructor(loader, node):
+    """Construct Decimal from string during YAML deserialization."""
+    value = loader.construct_scalar(node)
+    return Decimal(value)
+
+yaml.add_representer(Decimal, _decimal_representer)
+yaml.add_constructor('tag:yaml.org,2002:str', _decimal_constructor)
+```
+
+**P1-2 修复说明**:
+- **问题**: `api_v1_config.py:1452` 预览数据永久占用内存，无过期机制
+- **修复方案**:
+  - 使用 `cachetools.TTLCache` 替换 `Dict`，5 分钟 TTL，最大 100 条目
+  - 移除手动过期检查代码（`expires_at` 字段）
+  - 更新 `ImportPreviewResult` 模型移除 `expires_at` 字段
+- **修改代码**:
+```python
+import cachetools
+
+# Preview tokens storage with TTL (5 minutes expiry, max 100 entries)
+_import_preview_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=300)
+```
+
+**新增测试**:
+| 测试类 | 测试用例数 | 状态 |
+|--------|-----------|------|
+| TestDecimalYamlPrecision | 3 | ✅ |
+| TestTTLCacheExpiry | 4 | ✅ |
+
+**测试结果**:
+```
+============================== 36 passed in 0.96s ===============================
+```
+
+**验收标准**:
+- ✅ Decimal 序列化/反序列化精度保持
+- ✅ 缓存数据 5 分钟后自动清理
+- ✅ 新增 7 个测试用例全部通过
+- ✅ 现有测试无回归 (36 passed)
+
+**修改文件**:
+- `src/interfaces/api_v1_config.py` - P1-1 和 P1-2 核心修复
+- `requirements.txt` - 添加 `cachetools>=5.3.0`
+- `tests/unit/test_config_import_export.py` - 新增 7 个测试用例
+
+---
+
 ### 2026-04-07 - T009 P2-9 Worker 异常处理增强完成 ✅
 
 **任务 ID**: T009  

@@ -6,6 +6,87 @@
 
 ## 📑 目录
 
+1. [P1-1 Decimal YAML 精度修复](#p1-1-decimal-yaml-精度修复)
+2. [P1-2 缓存 TTL 机制](#p1-2-缓存-ttl-机制)
+3. [T001 P1-1 Lock 竞态条件修复](#t001-p1-1-lock-竞态条件修复)
+4. [T007 P2-7 UPSERT 数据丢失修复](#t007-p2-7-upsert-数据丢失修复)
+5. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
+6. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
+7. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
+8. [前端配置页面优化 PRD](#前端配置页面优化-prd)
+9. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
+10. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置-kv-接口)
+11. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+12. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
+13. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
+14. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+15. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+16. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
+
+---
+
+## 📌 P1-1 Decimal YAML 精度修复
+
+**创建日期**: 2026-04-07  
+**实现负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 问题描述
+
+**位置**: `src/interfaces/api_v1_config.py:57-62`
+
+**问题**:
+- Decimal 被转换为 float 后序列化，精度丢失
+- float 精度问题可能导致金融计算误差
+
+### 修复方案
+
+使用字符串表示 Decimal，添加 representer 和 constructor。
+
+**踩坑记录**:
+1. `yaml.safe_dump` 不使用自定义 representer - 需使用 `yaml.dump`
+2. `str(Decimal("0.00000001"))` 返回 `'1E-8'` - 测试应使用合理金融精度值
+
+### 参考文档
+
+- `docs/arch/config-management-p0p1-fix-design.md` 第 601-724 行
+
+---
+
+## 📌 P1-2 缓存 TTL 机制
+
+**创建日期**: 2026-04-07  
+**实现负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 问题描述
+
+**位置**: `src/interfaces/api_v1_config.py:1452`
+
+**问题**:
+- 预览数据永久占用内存，无过期机制
+- 长期运行可能导致内存泄漏
+
+### 修复方案
+
+使用 `cachetools.TTLCache` 替换 `Dict`：
+- 5 分钟 TTL
+- 最大 100 个条目
+- 自动过期和 LRU 淘汰
+
+**依赖添加**: `cachetools>=5.3.0`
+
+### 技术细节
+
+**TTLCache 特点**:
+- 自动过期：使用 `time.monotonic()` 计算 TTL
+- 惰性清理：只有在访问时检查过期
+- LRU 淘汰：达到 maxsize 时淘汰最久未使用的条目
+
+---
+
+## 📑 目录
+
 1. [T001 P1-1 Lock 竞态条件修复](#t001-p1-1-lock-竞态条件修复)
 2. [T007 P2-7 UPSERT 数据丢失修复](#t007-p2-7-upsert-数据丢失修复)
 3. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
