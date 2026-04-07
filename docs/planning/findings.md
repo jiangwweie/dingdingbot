@@ -7,18 +7,102 @@
 ## 📑 目录
 
 1. [T001 P1-1 Lock 竞态条件修复](#t001-p1-1-lock-竞态条件修复)
-2. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
-3. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
-4. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
-5. [前端配置页面优化 PRD](#前端配置页面优化 prd)
-6. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
-7. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
-8. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
-9. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
-10. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
-11. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
-12. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
-13. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
+2. [T007 P2-7 UPSERT 数据丢失修复](#t007-p2-7-upsert-数据丢失修复)
+3. [配置管理测试代码审查发现](#配置管理测试代码审查发现)
+4. [BT-2 资金费用计算实现](#bt-2-资金费用计算实现)
+5. [FE-01 前端配置导航重构 - 架构设计](#fe-01-前端配置导航重构 - 架构设计)
+6. [前端配置页面优化 PRD](#前端配置页面优化 prd)
+7. [ORD-1-T1 订单状态机领域层实现](#ord-1-t1-订单状态机领域层实现)
+8. [T2 任务：ConfigManager 回测配置 KV 接口](#t2-任务-configmanager-回测配置 kv 接口)
+9. [ORD-1-T3 TypeScript 类型定义更新](#ord-1-t3-typescript-类型定义更新)
+10. [ORD-1-T4 OrderManager 集成到 OrderLifecycleService](#ord-1-t4-ordermanager-集成到-orderlifecycle-service)
+11. [ORD-1-T5 ExchangeGateway 集成到 OrderLifecycleService](#ord-1-t5-exchangegateway-集成到-orderlifecycle-service)
+12. [ORD-1 订单状态机系统性重构](#ord-1-订单状态机系统性重构)
+13. [2026-04-06 架构关联分析与方案决策](#2026-04-06-架构关联分析与方案决策)
+14. [P0-2 快照列表查询功能实现](#p0-2-快照列表查询功能实现)
+
+---
+
+## 📌 T007 P2-7 UPSERT 数据丢失修复
+
+**创建日期**: 2026-04-07  
+**实现负责人**: Backend Developer  
+**状态**: ✅ 已完成
+
+### 问题描述
+
+`OrderRepository.save()` 方法使用 `COALESCE` 语法处理 UPSERT 逻辑时存在语义混淆问题：
+
+```sql
+-- 修复前：使用 COALESCE
+filled_at = COALESCE(excluded.filled_at, orders.filled_at)
+```
+
+**问题本质**:
+- `COALESCE(a, b)` 在 `a` 为 `NULL` 时返回 `b`
+- 无法区分「不更新该字段」和「显式将字段设置为 NULL」
+- 业务代码无法将已存在的字段值清零
+
+### 修复方案
+
+使用 `CASE` 表达式替代 `COALESCE`，明确两种语义：
+
+```sql
+-- 修复后：使用 CASE 表达式
+filled_at = CASE
+    WHEN excluded.filled_at IS NULL AND orders.filled_at IS NOT NULL
+    THEN orders.filled_at  -- 不更新：保留旧值
+    ELSE excluded.filled_at  -- 更新：使用新值（包括 NULL）
+END,
+exchange_order_id = CASE
+    WHEN excluded.exchange_order_id IS NULL AND orders.exchange_order_id IS NOT NULL
+    THEN orders.exchange_order_id
+    ELSE excluded.exchange_order_id
+END,
+exit_reason = excluded.exit_reason,  -- 允许设置为 NULL
+parent_order_id = excluded.parent_order_id,  -- 允许设置为 NULL
+oco_group_id = excluded.oco_group_id,  -- 允许设置为 NULL
+```
+
+### 语义对比
+
+| 场景 | COALESCE 行为 | CASE 表达式行为 |
+|------|--------------|----------------|
+| 新值=有值，旧值=有值 | 更新为新值 ✅ | 更新为新值 ✅ |
+| 新值=NULL，旧值=有值 | 保留旧值 ❌ (无法设置为 NULL) | 保留旧值 ✅ (不更新语义) |
+| 新值=有值，旧值=NULL | 更新为新值 ✅ | 更新为新值 ✅ |
+| 新值=NULL，旧值=NULL | 保持 NULL ✅ | 保持 NULL ✅ |
+| 显式设置为 NULL | ❌ 不支持 | ✅ 支持 (直接赋值) |
+
+### 测试覆盖
+
+4 个测试用例覆盖所有场景：
+
+```python
+# 1. 新值为 NULL 时保留旧值
+test_upsert_preserves_old_value_when_new_is_none
+
+# 2. 显式将字段设置为 NULL
+test_upsert_updates_to_null_explicitly
+
+# 3. 更新为新值
+test_upsert_updates_to_new_value
+
+# 4. filled_at 字段完整性（多次更新保持不变）
+test_upsert_preserves_filled_at
+```
+
+### 验收结果
+
+- ✅ UPSERT 使用 CASE 表达式替代 COALESCE
+- ✅ 支持「设置为 NULL」和「不更新」两种语义
+- ✅ 新增 4 个单元测试全部通过 (4/4)
+- ✅ 现有测试无回归 (97/97 通过)
+
+### 参考文档
+
+- 设计文档：`docs/arch/order-management-fix-design.md#27-p2-7-upsert-数据丢失修复`
+- 任务 ID: T007
 
 ---
 

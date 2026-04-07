@@ -55,6 +55,46 @@ class OrderAuditLogger:
         self._repository = repository
         self._started = False
 
+    def _validate_event_type(self, event_type) -> OrderAuditEventType:
+        """
+        验证并转换 event_type 为枚举类型
+
+        Args:
+            event_type: 事件类型（可以是枚举或字符串）
+
+        Returns:
+            OrderAuditEventType 枚举值
+
+        Raises:
+            ValueError: 当传入无效的 event_type 时
+        """
+        if isinstance(event_type, OrderAuditEventType):
+            return event_type
+        try:
+            return OrderAuditEventType(event_type)
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid event_type: {event_type}")
+
+    def _validate_trigger_source(self, triggered_by) -> OrderAuditTriggerSource:
+        """
+        验证并转换 triggered_by 为枚举类型
+
+        Args:
+            triggered_by: 触发来源（可以是枚举或字符串）
+
+        Returns:
+            OrderAuditTriggerSource 枚举值
+
+        Raises:
+            ValueError: 当传入无效的 triggered_by 时
+        """
+        if isinstance(triggered_by, OrderAuditTriggerSource):
+            return triggered_by
+        try:
+            return OrderAuditTriggerSource(triggered_by)
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid triggered_by: {triggered_by}")
+
     async def start(self, queue_size: int = 1000) -> None:
         """
         启动审计日志服务
@@ -98,14 +138,21 @@ class OrderAuditLogger:
 
         Returns:
             审计日志 ID
+
+        Raises:
+            ValueError: 当 event_type 或 triggered_by 参数无效时
         """
+        # 类型校验
+        validated_event_type = self._validate_event_type(event_type)
+        validated_triggered_by = self._validate_trigger_source(triggered_by)
+
         return await self._repository.log(
             order_id=order_id,
             signal_id=signal_id,
             old_status=old_status,
             new_status=new_status,
-            event_type=event_type,
-            triggered_by=triggered_by,
+            event_type=validated_event_type,
+            triggered_by=validated_triggered_by,
             metadata=metadata,
             use_queue=True,
         )
@@ -116,6 +163,7 @@ class OrderAuditLogger:
         signal_id: Optional[str],
         old_status: Optional[str],
         new_status: str,
+        event_type: OrderAuditEventType,
         triggered_by: OrderAuditTriggerSource,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
@@ -127,18 +175,26 @@ class OrderAuditLogger:
             signal_id: 信号 ID
             old_status: 旧状态
             new_status: 新状态
+            event_type: 事件类型
             triggered_by: 触发来源
             metadata: 元数据
 
         Returns:
             审计日志 ID
+
+        Raises:
+            ValueError: 当 event_type 或 triggered_by 参数无效时
         """
+        # 类型校验
+        validated_event_type = self._validate_event_type(event_type)
+        validated_triggered_by = self._validate_trigger_source(triggered_by)
+
         return await self._repository.log_status_change(
             order_id=order_id,
             signal_id=signal_id,
             old_status=old_status,
             new_status=new_status,
-            triggered_by=triggered_by,
+            triggered_by=validated_triggered_by,
             metadata=metadata,
         )
 
