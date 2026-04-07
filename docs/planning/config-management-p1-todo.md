@@ -71,6 +71,12 @@
 - **工时**: 16h
 - **负责人**: 待分配
 - **参考文档**: `docs/arch/config-management-p1-implementation-strategy.md` 第 4 章
+- **影响分析**: `docs/arch/P1-5-config-manager-refactor-impact-analysis.md` ✅
+- **决策状态**: ✅ 用户已确认 (2026-04-07)
+- **决策记录**:
+  - ✅ 保留 ConfigManager 适配层
+  - ✅ 一次性重构
+  - ✅ 按 6 天分阶段实施
 - **任务内容**:
   - [ ] 阶段 1: 提取独立管理器 (8h)
     - RiskConfigManager
