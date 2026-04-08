@@ -369,6 +369,15 @@ class TestAtrFilterDynamic:
         assert f._period == 14
         assert f._min_atr_ratio == Decimal("0.5")
 
+    def test_filter_default_values(self):
+        """Test ATR filter default values (P0-3: 默认不启用)."""
+        # P0-3: 验证默认值
+        f = AtrFilterDynamic()
+
+        assert f._period == 14  # 默认周期
+        assert f._min_atr_ratio == Decimal("0.001")  # 保持当前值
+        assert f._enabled is False  # P0-3: 默认不启用
+
     def test_update_state(self, sample_kline):
         """Test updating ATR state with klines."""
         f = AtrFilterDynamic(period=14, enabled=True)
