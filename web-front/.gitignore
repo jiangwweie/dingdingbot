@@ -6,5 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
 # Test screenshots (manual review artifacts)
 tests/e2e/playwright/screenshots/
+
+# Playwright test reports
+playwright-report/
