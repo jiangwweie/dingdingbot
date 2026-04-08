@@ -4,6 +4,130 @@
 
 ---
 
+## 2026-04-08 P0 缺陷修复实施 - WebSocket K 线选择逻辑 ✅
+
+**任务**: 修复 WebSocket K 线选择逻辑 + Pinbar 最小波幅检查
+**执行者**: Backend Developer
+**状态**: ✅ 已完成
+**实际工时**: 2.5h
+**ADR 文档**: `docs/arch/P0-websocket-kline-fix-design.md`
+
+### 核心修复项
+
+#### 🔴 修复 1: WebSocket K 线选择逻辑（P0）✅
+
+**问题**: 当前逻辑错误处理 `ohlcv[-1]`（未收盘 K 线）
+
+**修复方案**:
+1. 优先使用交易所 `x` 字段判断收盘状态 (`candle.info['x']`)
+2. 后备使用时间戳推断（处理 `ohlcv[-2]` 前一根已收盘 K 线）
+3. `_parse_ohlcv()` 新增 `raw_info` 参数
+4. `KlineData` 新增 `info` 字段保留原始数据
+
+**修改文件**: `src/infrastructure/exchange_gateway.py`, `src/domain/models.py`
+
+**Git 提交**: `9d4aa27`
+
+---
+
+#### 🟡 修复 2: Pinbar 最小波幅检查（P0）✅
+
+**问题**: 缺少最小波幅检查，开盘初期波幅极小时可能误判 Pinbar
+
+**修复方案**:
+1. 在 `PinbarStrategy.detect()` 中添加最小波幅检查
+2. 动态 ATR 阈值：ATR 的 10%
+3. 后备方案：价格的 0.1%（适配不同价格级别币种）
+
+**修改文件**: `src/domain/strategy_engine.py`
+
+**设计决策**:
+- 使用百分比而非固定值（如 0.5 USDT），避免过滤低价格币种（如 DOGE）
+- 日志级别为 DEBUG
+
+**Git 提交**: `4ffd17f`
+
+---
+
+#### 🟢 修复 3: ATR 过滤器默认值确认（P1）✅
+
+**决策**: 保持默认不启用（`enabled=False`），用户可选开启
+
+**修改文件**: `tests/unit/test_filter_factory.py`（新增测试验证默认值）
+
+---
+
+### 单元测试
+
+**新增测试文件**:
+1. `tests/unit/test_websocket_kline_selection.py` - 7 个测试
+2. `tests/unit/test_pinbar_min_range.py` - 8 个测试
+3. `tests/unit/test_filter_factory.py` - 新增 1 个测试
+
+**测试结果**:
+- ✅ 15 个新增测试全部通过
+- ✅ 回归测试通过（`test_strategy_engine.py` 57 个测试）
+- ✅ 无功能回退
+
+**Git 提交**: `a3ee2cd`
+
+---
+
+### 验收标准
+
+| 验收项 | 状态 |
+|--------|------|
+| 功能性：所有单元测试 100% 通过 | ✅ |
+| 正确性：WebSocket 仅推送已收盘 K 线 | ✅ |
+| 性能：无显著性能回退 | ✅ |
+| 覆盖率：修改代码有完整测试覆盖 | ✅ |
+
+---
+
+### 下一步
+
+- [ ] 用户确认是否需要集成测试
+- [ ] 实盘验证（Phase 5 启动后）
+
+**问题**: 缺少最小波幅检查，开盘初期误判
+
+**修复方案**:
+- 动态 ATR 阈值：`min_required_range = atr * 0.1`（10%）
+- 后备固定值：`min_required_range = 0.5 USDT`
+
+**修改文件**: `src/domain/strategy_engine.py`
+
+---
+
+#### 🟢 修复 3: ATR 过滤器默认值确认（P1）
+
+**决策**: 保持默认不启用（`enabled=False`），用户可选开启
+
+**修改文件**: 无需修改（确认现有配置）
+
+---
+
+### 技术决策确认
+
+| 决策项 | 选择 | 状态 |
+|--------|------|------|
+| K 线选择策略 | 交易所 `x` 字段优先 + 时间戳后备 | ✅ 已确认 |
+| ATR 阈值 | 动态 ATR（Pinbar 使用 10%） | ✅ 已确认 |
+| ATR 过滤器 | 默认不启用 (`enabled=False`) | ✅ 已确认 |
+| 日志策略 | DEBUG 级别 | ✅ 已确认 |
+
+---
+
+### 实施进度
+
+- [ ] 修复 WebSocket K 线选择逻辑（预计 1.5h）
+- [ ] 添加 Pinbar 最小波幅检查（预计 0.5h）
+- [ ] 更新单元测试（预计 1h）
+- [ ] 集成测试验证（预计 0.5h）
+- [ ] 文档更新（预计 0.5h）
+
+---
+
 ## 2026-04-07 架构审查 - WebSocket K 线处理与形态检测缺陷 ✅
 
 **任务**: 用户报告历史版本问题审查 + 回测引擎排查
