@@ -462,6 +462,12 @@ python3 scripts/read_markdown.py "docs/tasks/文件名.md"
 ### WebSocket
 - 自动重连（指数退避：1s 初始，60s 最大）
 - 仅在 `is_closed=True` 时触发策略计算
+- **K 线收盘状态判断**（P0 修复）：
+  - 优先使用交易所 `x` 字段（CCXT Pro 第 7 个元素，索引 6）
+  - 后备使用时间戳推断机制
+  - 当 `x=true` 时，`ohlcv[-1]` 就是刚收盘的 K 线
+  - 当 `x=false` 时，跳过未收盘 K 线
+  - 详见：`docs/arch/P0-websocket-kline-fix-design.md`
 
 ### MTF 映射
 - 15m → 1h, 1h → 4h, 4h → 1d, 1d → 1w

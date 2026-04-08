@@ -234,7 +234,13 @@ class ExchangeGateway:
             logger.error(f"Failed to fetch historical OHLCV for {symbol} {timeframe}: {e}")
             raise
 
-    def _parse_ohlcv(self, candle: List[Any], symbol: str, timeframe: str) -> Optional[KlineData]:
+    def _parse_ohlcv(
+        self,
+        candle: List[Any],
+        symbol: str,
+        timeframe: str,
+        raw_info: Optional[Dict] = None  # ✅ 新增参数：原始交易所数据（包含 x 字段）
+    ) -> Optional[KlineData]:
         """
         Parse OHLCV candle to KlineData model.
 
@@ -242,6 +248,7 @@ class ExchangeGateway:
             candle: [timestamp, open, high, low, close, volume]
             symbol: Trading symbol
             timeframe: Timeframe
+            raw_info: 交易所原始数据（包含 x 字段）
 
         Returns:
             KlineData object or None if invalid
@@ -271,6 +278,12 @@ class ExchangeGateway:
                     "W-001"
                 )
 
+            # ✅ 新增：使用 x 字段判断收盘状态（CCXT Pro 第 7 个元素）
+            if raw_info and 'x' in raw_info:
+                is_closed = bool(raw_info['x'])
+            else:
+                is_closed = True  # 默认值（REST API 或无 x 字段时）
+
             return KlineData(
                 symbol=symbol,
                 timeframe=timeframe,
@@ -280,7 +293,8 @@ class ExchangeGateway:
                 low=low_price,
                 close=close_price,
                 volume=volume,
-                is_closed=True,
+                is_closed=is_closed,
+                info=raw_info,  # ✅ 新增：传递原始数据
             )
 
         except DataQualityWarning:
@@ -398,12 +412,13 @@ class ExchangeGateway:
         """
         Detect candle closure and return the closed candle data.
 
-        This fixes the bug where the wrong K-line timestamp was recorded.
-        When a new K-line timestamp is detected, the PREVIOUS candle (ohlcv[-2])
-        has just closed, not the new one (ohlcv[-1]).
+        Priority logic:
+        1. Check CCXT Pro 'x' field (ohlcv[-1][6]) - if true, candle just closed
+        2. If 'x' is false, skip (candle still forming)
+        3. If 'x' field missing, fallback to timestamp change detection
 
         Args:
-            ohlcv: Array of OHLCV data from WebSocket
+            ohlcv: Array of OHLCV data from WebSocket [timestamp, open, high, low, close, volume, x?]
             symbol: Trading symbol
             timeframe: Timeframe
 
@@ -414,19 +429,45 @@ class ExchangeGateway:
             return None
 
         key = f"{symbol}:{timeframe}"
-        current_ts = ohlcv[-1][0]  # New candle timestamp
+        latest_candle = ohlcv[-1]
+
+        # ✅ 优先检查 CCXT Pro 的 'x' 字段（第 7 个元素，索引 6）
+        # 'x' = true 表示该 K 线已收盘
+        if len(latest_candle) >= 7:
+            x_field = latest_candle[6]
+            if x_field is True:
+                # ✅ x=true，K 线已收盘，返回 ohlcv[-1]
+                logger.debug(
+                    f"[X_FIELD] {symbol} {timeframe}: candle closed (x=true) "
+                    f"ts={latest_candle[0]}"
+                )
+                return self._parse_ohlcv(latest_candle, symbol, timeframe, raw_info={'x': True})
+            elif x_field is False:
+                # ❌ x=false，K 线还未收盘，跳过
+                logger.debug(
+                    f"[X_FIELD] {symbol} {timeframe}: candle still forming (x=false) "
+                    f"ts={latest_candle[0]}"
+                )
+                return None
+            # 如果 x 字段存在但不是明确的 True/False，继续降级逻辑
+
+        # ✅ 降级到时间戳推断逻辑（旧方法）
+        current_ts = latest_candle[0]  # Latest candle timestamp
 
         if key in self._candle_timestamps:
             if current_ts != self._candle_timestamps[key]:
-                # Timestamp changed - previous candle has closed
+                # 时间戳变化 - 前一根 K 线已收盘
                 self._candle_timestamps[key] = current_ts
 
-                # Parse the closed candle (second to last in array)
+                # 返回 ohlcv[-2]（刚收盘的 K 线）
                 closed_candle = ohlcv[-2]
-                kline = self._parse_ohlcv(closed_candle, symbol, timeframe)
-                return kline
+                logger.debug(
+                    f"[TIMESTAMP_FALLBACK] {symbol} {timeframe}: "
+                    f"closed candle ts={closed_candle[0]}"
+                )
+                return self._parse_ohlcv(closed_candle, symbol, timeframe, raw_info=None)
         else:
-            # First time seeing this symbol/timeframe
+            # 第一次见到这个 symbol/timeframe
             self._candle_timestamps[key] = current_ts
 
         return None

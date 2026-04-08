@@ -60,6 +60,7 @@ class KlineData(BaseModel):
     close: Decimal
     volume: Decimal             # Volume in base asset
     is_closed: bool = True
+    info: Optional[Dict[str, Any]] = None  # Raw exchange data (e.g., CCXT Pro 'x' field)
 
 
 class PositionInfo(BaseModel):

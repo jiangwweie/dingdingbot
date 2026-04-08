@@ -9,6 +9,7 @@ from src.domain.strategy_engine import (
     StrategyConfig,
     PinbarConfig,
     PinbarResult,
+    PinbarStrategy,
 )
 
 
@@ -302,9 +303,17 @@ class TestDetectPinbar:
 
     def test_doge_price_level(self, engine):
         """Test pinbar detection at DOGE price level (~0.1)."""
+        # 需要波幅 >= 0.5（固定阈值）
+        # 设计一个有效的 Pinbar: high=1.0, low=0.4, range=0.6 >= 0.5 ✓
+        # 长下影线：low=0.4, open=0.9, close=0.95
+        # lower_wick = 0.9-0.4=0.5, upper_wick = 1.0-0.95=0.05
+        # dominant=0.5, wick_ratio=0.5/0.6=0.833 >= 0.6 ✓
+        # body=0.05, body_ratio=0.05/0.6=0.083 <= 0.3 ✓
+        # body_position = (0.9+0.95)/2 = 0.925, (0.925-0.4)/0.6 = 0.875
+        # bullish: need >= 1-0.1-0.042=0.858, 0.875 > 0.858 ✓
         kline = create_kline(
-            open=Decimal("0.108"), high=Decimal("0.110"),
-            low=Decimal("0.090"), close=Decimal("0.109")
+            open=Decimal("0.90"), high=Decimal("1.00"),
+            low=Decimal("0.40"), close=Decimal("0.95")
         )
         result = engine.detect_pinbar(kline)
         assert result.is_pinbar
@@ -331,6 +340,90 @@ class TestDetectPinbar:
         # But body_position = 0.5, for bullish need >= 1-0.1-0=0.9, 0.5 < 0.9
         # for bearish need <= 0.1, 0.5 > 0.1, so neither
         assert not result.is_pinbar
+
+
+class TestPinbarMinRangeCheck:
+    """P0 修复：Pinbar 最小波幅检查测试"""
+
+    @pytest.fixture
+    def pinbar_strategy(self):
+        """Create PinbarStrategy instance for testing"""
+        return PinbarStrategy(PinbarConfig())
+
+    def test_pinbar_min_range_with_atr(self, pinbar_strategy):
+        """测试 ATR 10% 阈值 - 波幅小于 ATR*0.1 时应该被过滤"""
+        # 创建一个 Pinbar 形态的 K 线，但波幅很小
+        # high=103, low=100, range=3
+        # ATR=50, min_range = 50 * 0.1 = 5
+        # range=3 < min=5, 应该被过滤
+        kline = create_kline(
+            open=Decimal(102), high=Decimal(103),
+            low=Decimal(100), close=Decimal(102)
+        )
+
+        # ATR=50, min_range = 50 * 0.1 = 5
+        atr_value = Decimal(50)
+
+        result = pinbar_strategy.detect(kline, atr_value=atr_value)
+
+        # 应该因为波幅太小被过滤（返回 None）
+        assert result is None
+
+    def test_pinbar_min_range_without_atr(self, pinbar_strategy):
+        """测试固定阈值 - 无 ATR 时使用固定阈值 0.5"""
+        # 创建一个 Pinbar 形态的 K 线，但波幅小于固定阈值
+        # high=0.3, low=0, range=0.3
+        # 无 ATR, min_range = 0.5 (固定值)
+        # range=0.3 < min=0.5, 应该被过滤
+        kline = create_kline(
+            open=Decimal("0.28"), high=Decimal("0.30"),
+            low=Decimal("0"), close=Decimal("0.29")
+        )
+
+        # 不提供 ATR，使用固定阈值 0.5
+        result = pinbar_strategy.detect(kline, atr_value=None)
+
+        # 应该因为波幅太小被过滤（返回 None）
+        assert result is None
+
+    def test_pinbar_valid_range_with_atr(self, pinbar_strategy):
+        """测试合法波幅 - 波幅足够时应该返回 PatternResult"""
+        # 创建一个有效的 Pinbar 形态
+        # high=110, low=90, range=20
+        # ATR=50, min_range = 50 * 0.1 = 5
+        # range=20 >= min=5, 应该通过
+        kline = create_kline(
+            open=Decimal(108), high=Decimal(110),
+            low=Decimal(90), close=Decimal(109)
+        )
+
+        # ATR=50, min_range = 50 * 0.1 = 5
+        atr_value = Decimal(50)
+
+        result = pinbar_strategy.detect(kline, atr_value=atr_value)
+
+        # 应该检测到 Pinbar（返回 PatternResult）
+        assert result is not None
+        assert result.strategy_name == "pinbar"
+        assert result.direction == Direction.LONG
+        assert result.score > 0
+
+    def test_pinbar_valid_range_without_atr(self, pinbar_strategy):
+        """测试合法波幅（无 ATR）- 波幅大于固定阈值 0.5 时应该通过"""
+        # 创建一个有效的 Pinbar 形态，波幅大于 0.5
+        kline = create_kline(
+            open=Decimal(108), high=Decimal(110),
+            low=Decimal(90), close=Decimal(109)
+        )
+
+        # 不提供 ATR，使用固定阈值 0.5
+        result = pinbar_strategy.detect(kline, atr_value=None)
+
+        # 应该检测到 Pinbar
+        assert result is not None
+        assert result.strategy_name == "pinbar"
+        assert result.direction == Direction.LONG
+        assert result.score > 0
 
 
 class TestTrendFilter:

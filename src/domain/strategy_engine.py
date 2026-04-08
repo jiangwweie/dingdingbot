@@ -19,6 +19,7 @@ from .models import (
 )
 from .indicators import EMACalculator, EMACache
 from .filter_factory import FilterBase, FilterContext, TraceEvent, FilterFactory, AtrFilterDynamic
+from src.infrastructure.logger import logger
 
 
 # ============================================================
@@ -195,6 +196,7 @@ class PinbarStrategy(PatternStrategy):
 
         Args:
             kline: K-line data to analyze
+            atr_value: Optional ATR value for dynamic minimum range check
 
         Returns:
             PatternResult if Pinbar detected, None otherwise
@@ -213,8 +215,24 @@ class PinbarStrategy(PatternStrategy):
         if candle_range == Decimal(0):
             return None
 
-        if candle_range < self.MIN_CANDLE_RANGE:
+        # ✅ P0 修复：动态最小波幅检查
+        # 如果有 ATR → min_range = atr * 0.1（动态阈值）
+        # 如果无 ATR → min_range = 0.5（固定后备值）
+        if atr_value and atr_value > 0:
+            min_required_range = atr_value * Decimal("0.1")  # ATR 的 10%
+            logger.debug(
+                f"[PINBAR_MIN_RANGE] {kline.symbol} {kline.timeframe}: "
+                f"range={candle_range}, min={min_required_range} (atr={atr_value})"
+            )
+        else:
+            min_required_range = Decimal("0.5")  # 固定后备值
+
+        if candle_range < min_required_range:
             # 波幅太小，跳过
+            logger.debug(
+                f"[PINBAR_RANGE_TOO_SMALL] {kline.symbol} {kline.timeframe}: "
+                f"range={candle_range} < min={min_required_range} (atr={atr_value})"
+            )
             return None
 
         # Calculate body size
