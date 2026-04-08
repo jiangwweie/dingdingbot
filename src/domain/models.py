@@ -92,6 +92,7 @@ class KlineData(BaseModel):
     close: Decimal
     volume: Decimal             # Volume in base asset
     is_closed: bool = True
+    info: Optional[Dict[str, Any]] = None  # 交易所原始数据（可选）
 
 
 class PositionInfo(BaseModel):

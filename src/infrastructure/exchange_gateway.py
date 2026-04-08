@@ -271,7 +271,13 @@ class ExchangeGateway:
             logger.error(f"Failed to fetch historical OHLCV for {symbol} {timeframe}: {e}")
             raise
 
-    def _parse_ohlcv(self, candle: List[Any], symbol: str, timeframe: str) -> Optional[KlineData]:
+    def _parse_ohlcv(
+        self,
+        candle: List[Any],
+        symbol: str,
+        timeframe: str,
+        raw_info: Optional[Dict] = None
+    ) -> Optional[KlineData]:
         """
         Parse OHLCV candle to KlineData model.
 
@@ -279,6 +285,7 @@ class ExchangeGateway:
             candle: [timestamp, open, high, low, close, volume]
             symbol: Trading symbol
             timeframe: Timeframe
+            raw_info: Optional exchange raw data (e.g., {"x": True} for closed candle)
 
         Returns:
             KlineData object or None if invalid
@@ -308,6 +315,15 @@ class ExchangeGateway:
                     "W-001"
                 )
 
+            # P0-1: 优先使用交易所 x 字段判断收盘状态
+            is_closed = True  # 默认假设已收盘
+            if raw_info and 'x' in raw_info:
+                is_closed = bool(raw_info['x'])
+                logger.debug(
+                    f"[K 线解析] {symbol} {timeframe} x={is_closed} "
+                    f"ts={timestamp} close={close_price}"
+                )
+
             return KlineData(
                 symbol=symbol,
                 timeframe=timeframe,
@@ -317,7 +333,8 @@ class ExchangeGateway:
                 low=low_price,
                 close=close_price,
                 volume=volume,
-                is_closed=True,
+                is_closed=is_closed,
+                info=raw_info,  # 保留原始数据（可选）
             )
 
         except DataQualityWarning:
@@ -399,20 +416,56 @@ class ExchangeGateway:
                     ohlcv = await self.ws_exchange.watch_ohlcv(symbol, timeframe)
 
                     # Get the latest candle
-                    if not ohlcv:
+                    if not ohlcv or len(ohlcv) < 1:
                         continue
 
-                    # Get last candle (most recent)
-                    candle = ohlcv[-1]
-                    kline = self._parse_ohlcv(candle, symbol, timeframe)
+                    # ============================================================
+                    # P0-1: WebSocket K 线选择逻辑修复
+                    # 核心逻辑：
+                    # - 当 x=true 时，ohlcv[-1] 就是刚收盘的 K 线
+                    # - 当 x=false 或无 x 字段时，使用 ohlcv[-2]（前一根已收盘 K 线）
+                    # ============================================================
 
-                    if not kline:
-                        continue
+                    latest_candle = ohlcv[-1]
 
-                    # Check if candle is closed (completed)
-                    # In CCXT, we need to track previous timestamp to detect closure
-                    if self._is_candle_closed(kline, symbol, timeframe):
-                        await callback(kline)
+                    # 方案 1: 优先使用交易所 x 字段
+                    # CCXT Pro 规范：candle[6] 可能包含 info 字典，其中有 x 字段
+                    if len(latest_candle) > 6 and isinstance(latest_candle[6], dict):
+                        raw_info = latest_candle[6]
+                        if 'x' in raw_info:
+                            is_closed = bool(raw_info['x'])
+
+                            if is_closed:
+                                # 当 x=true 时，ohlcv[-1] 就是刚收盘的 K 线
+                                kline = self._parse_ohlcv(latest_candle, symbol, timeframe, raw_info)
+                                if kline:
+                                    logger.debug(
+                                        f"[WebSocket K 线] {symbol} {timeframe} "
+                                        f"收盘确认 x=true ts={kline.timestamp} close={kline.close}"
+                                    )
+                                    await callback(kline)
+                            # else: x=false，未收盘，跳过
+
+                            continue  # 已处理，跳过后续逻辑
+
+                    # 方案 2: 时间戳推断（后备）
+                    # 适用于不支持 x 字段的交易所
+                    if len(ohlcv) >= 2:
+                        prev_candle = ohlcv[-2]  # 前一根已收盘 K 线
+                        kline = self._parse_ohlcv(prev_candle, symbol, timeframe)
+                        if kline:
+                            key = f"{symbol}:{timeframe}"
+                            current_ts = kline.timestamp
+
+                            if key not in self._candle_timestamps:
+                                self._candle_timestamps[key] = current_ts
+                            elif current_ts != self._candle_timestamps[key]:
+                                self._candle_timestamps[key] = current_ts
+                                logger.debug(
+                                    f"[WebSocket K 线] {symbol} {timeframe} "
+                                    f"时间戳推断收盘 ts={current_ts} close={kline.close}"
+                                )
+                                await callback(kline)
 
             except asyncio.CancelledError:
                 logger.info(f"WebSocket subscription cancelled for {symbol} {timeframe}")
