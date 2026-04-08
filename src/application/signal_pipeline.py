@@ -460,6 +460,14 @@ class SignalPipeline:
             kline: Closed K-line data
         """
         try:
+            # P0-2: 防御性检查 - 仅处理已收盘 K 线
+            if not kline.is_closed:
+                logger.warning(
+                    f"[DEFENSE] Received unclosed K-line: {kline.symbol} {kline.timeframe} "
+                    f"ts={kline.timestamp} close={kline.close} - skipped"
+                )
+                return
+
             # Ensure async primitives and flush worker are running (lazy init)
             self._ensure_flush_worker()
 
