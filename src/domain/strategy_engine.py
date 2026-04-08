@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional, Dict, List, Tuple, Any
 from enum import Enum
+import logging
 
 from .models import (
     KlineData,
@@ -19,6 +20,9 @@ from .models import (
 )
 from .indicators import EMACalculator, EMACache
 from .filter_factory import FilterBase, FilterContext, TraceEvent, FilterFactory, AtrFilterDynamic
+
+# 获取 logger（domain 层使用基础 logging 模块，避免依赖 infrastructure）
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -190,8 +194,15 @@ class PinbarStrategy(PatternStrategy):
         Bullish Pinbar: Long lower wick, body positioned at top
         Bearish Pinbar: Long upper wick, body positioned at bottom
 
+        P0-4: 新增最小波幅检查（防止开盘初期波幅极小误判）
+
+        逻辑：
+        - 如果 ATR 可用：min_required_range = atr * 0.1 (10%)
+        - 后备：min_required_range = 0.5 USDT (固定值)
+
         Args:
             kline: K-line data to analyze
+            atr_value: Optional ATR value for dynamic threshold
 
         Returns:
             PatternResult if Pinbar detected, None otherwise
@@ -207,6 +218,31 @@ class PinbarStrategy(PatternStrategy):
         candle_range = high - low
         if candle_range == Decimal(0):
             return None
+
+        # ============================================================
+        # P0-4: 新增最小波幅检查（形态检测层）
+        # 目的：防止开盘初期波幅极小误判
+        #
+        # 逻辑：
+        # - 如果 ATR 可用：min_required_range = atr * 0.1 (10%)
+        # - 后备：min_required_range = close * 0.001 (0.1% 价格波幅)
+        #   使用百分比而非绝对值，适配不同价格级别的币种
+        # ============================================================
+        if atr_value and atr_value > 0:
+            min_required_range = atr_value * Decimal("0.1")  # ATR 的 10%
+        else:
+            # 后备方案：使用价格的 0.1% 作为最小波幅
+            # 例如：BTC=100000 时，min_required = 100 USDT
+            #      DOGE=0.10 时，min_required = 0.0001 USDT
+            min_required_range = close * Decimal("0.001")
+
+        if candle_range < min_required_range:
+            logger.debug(
+                f"[Pinbar] 波幅过小过滤：{kline.symbol} {kline.timeframe} "
+                f"range={candle_range} min={min_required_range} "
+                f"(ATR={atr_value})"
+            )
+            return None  # 波幅太小，可能是开盘初期或低波动市场
 
         # Calculate body size
         body_size = abs(close - open_price)
