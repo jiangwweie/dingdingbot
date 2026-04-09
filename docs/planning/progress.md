@@ -56,13 +56,38 @@
 **Week 1（本周，P0 任务）**:
 ```
 阶段 1 核心任务：Pinbar 策略验证
-├─ 回测数据对齐优化 (0.5h)
-├─ Pinbar 单元测试补充 (1.5h)
-├─ ConfigRepository 修复 (1h)
-└─ 多品种组合回测 (8h)
+├─ ✅ 回测数据对齐优化 (0.5h) - 已完成 (2026-04-01, commit 36c7563)
+├─ ⏳ Pinbar 单元测试补充 (1.5h) - 待实施
+├─ ✅ ConfigRepository 修复 (1h) - 已完成 (export_to_yaml 已实现)
+└─ ⏳ 多品种组合回测 (8h) - 待实施
 
-小计：11h
+实际剩余：9.5h
 ```
+
+**实际已完成**:
+- ✅ 回测数据对齐优化：MTF 未来函数问题修复（2026-04-01）
+- ✅ ConfigRepository 修复：export_to_yaml 已实现，Decimal 精度正确处理
+
+---
+
+### 任务状态更新（2026-04-09 检查）
+
+**已完成任务**:
+1. ✅ **回测数据对齐优化** (commit 36c7563)
+   - 修复 MTF 过滤器未来函数问题
+   - 往前偏移 1 根 K 线
+   - 10 个单元测试全部通过
+
+2. ✅ **ConfigRepository 修复**
+   - export_to_yaml 方法已实现（commit 5afd6a5）
+   - _convert_decimals_to_str 函数已实现
+   - 支持 Decimal 精度和 Pydantic 模型序列化
+
+**待实施任务**:
+1. ⏳ Pinbar 单元测试补充 (1.5h)
+2. ⏳ 多品种组合回测 (8h)
+
+---
 
 **Week 2-3（阶段 2 验证）**:
 ```
