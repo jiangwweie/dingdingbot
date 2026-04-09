@@ -5494,3 +5494,482 @@ assert total == Decimal('1.0')  # ✅ 精确等于 1.0
 ---
 
 *最后更新：2026-04-07 - IMP-002 tp_ratios 求和精度修复完成*
+
+---
+
+## 📌 P0 问题修复方案 - 架构师设计完成
+
+**创建日期**: 2026-04-09  
+**设计负责人**: 系统架构师  
+**状态**: ✅ 方案设计完成，待实施
+
+---
+
+### P1-01: Snapshot 版本重复处理 (IntegrityError)
+
+#### 问题根因
+
+**位置**: `src/infrastructure/config_snapshot_repository.py:250-260`
+
+**根因分析**:
+- `aiosqlite.IntegrityError` 异常消息不够详细，缺少重复版本号信息
+- 用户无法快速定位具体冲突的版本
+- 影响配置快照保存失败时的调试效率
+
+**发生场景**:
+1. 同一秒内快速连续保存多次快照（版本号碰撞）
+2. 数据库 UNIQUE 约束触发，抛出 IntegrityError
+3. 异常消息只有 `UNIQUE constraint failed: snapshots.version`，无具体版本号
+
+#### 修复方案
+
+**文件 1**: `src/infrastructure/config_snapshot_repository.py`
+
+```python
+# 位置：文件开头，导入部分之后
+
+# 修复前代码：
+# （无自定义异常）
+
+# 修复后代码：
+class ConfigSnapshotIntegrityError(Exception):
+    """配置快照完整性错误（版本号重复等）"""
+    def __init__(self, version: str, original_error: Exception):
+        self.version = version
+        self.original_error = original_error
+        super().__init__(
+            f"配置快照版本 '{version}' 已存在（数据库 UNIQUE 约束冲突）。"
+            f"原始错误：{original_error}"
+        )
+```
+
+```python
+# 位置：create() 方法中，第 250-260 行附近
+
+# 修复前代码：
+try:
+    await cursor.execute(...)
+    await self._db.commit()
+except Exception as e:
+    logger.error(f"Failed to create snapshot: {e}")
+    raise
+
+# 修复后代码：
+try:
+    await cursor.execute(...)
+    await self._db.commit()
+except aiosqlite.IntegrityError as e:
+    # 捕获 UNIQUE 约束冲突，包装为自定义异常
+    error_msg = str(e)
+    if "snapshots.version" in error_msg:
+        await self._db.rollback()
+        logger.error(
+            f"Snapshot version '{snapshot['version']}' already exists in database",
+            extra={"version": snapshot['version'], "error": error_msg}
+        )
+        raise ConfigSnapshotIntegrityError(
+            version=snapshot['version'],
+            original_error=e
+        )
+    else:
+        # 其他 IntegrityError（外键约束等）
+        await self._db.rollback()
+        logger.error(f"Database integrity error: {error_msg}")
+        raise
+except Exception as e:
+    await self._db.rollback()
+    logger.error(f"Failed to create snapshot: {e}")
+    raise
+```
+
+**文件 2**: `src/application/config_snapshot_service.py`
+
+```python
+# 位置：文件开头，导入部分
+
+# 修复后代码：
+from src.infrastructure.config_snapshot_repository import ConfigSnapshotIntegrityError
+
+class SnapshotIntegrityError(Exception):
+    """配置快照版本冲突异常"""
+    def __init__(self, version: str):
+        self.version = version
+        self.error_code = "CONFIG-007"
+        super().__init__(
+            f"[{self.error_code}] 配置快照版本 '{version}' 已存在。"
+            f"建议：等待 1 秒后重试，或手动指定新版本号。"
+        )
+```
+
+```python
+# 位置：save_snapshot() 方法中
+
+# 修复后代码：
+try:
+    snapshot_id = await self._repository.create(snapshot_data)
+    logger.info(f"Snapshot {snapshot_id} created successfully (version: {version})")
+    return snapshot_id
+except ConfigSnapshotIntegrityError as e:
+    # 转换为 Service 层异常
+    raise SnapshotIntegrityError(version=e.version)
+```
+
+**文件 3**: `src/interfaces/api.py`
+
+```python
+# 位置：create_snapshot() 路由方法中
+
+# 修复后代码：
+from src.application.config_snapshot_service import SnapshotIntegrityError
+
+@router.post("/snapshots", response_model=SnapshotResponse)
+async def create_snapshot(...):
+    try:
+        snapshot_id = await config_service.save_snapshot(...)
+        return {"id": snapshot_id, "version": version}
+    except SnapshotIntegrityError as e:
+        raise HTTPException(
+            status_code=409,  # Conflict
+            detail={
+                "error_code": e.error_code,
+                "message": str(e),
+                "version": e.version,
+            }
+        )
+```
+
+#### 修复说明
+
+**为什么这样修复**:
+1. **异常分层设计**: Repository 层异常包含技术细节，Service 层异常包含用户友好消息，API 层返回 HTTP 409 Conflict
+2. **详细错误信息**: 异常消息明确包含重复的版本号，方便调试
+3. **错误码标准化**: `CONFIG-007` 符合系统错误码规范（参考 CLAUDE.md）
+4. **回滚保护**: IntegrityError 发生时立即 rollback，避免数据库状态不一致
+
+#### 影响范围分析
+
+**影响模块**:
+- ✅ 不影响其他模块（仅异常处理增强）
+- ✅ 不影响 API 契约（HTTP 409 合理）
+- ⚠️ 需要更新单元测试（新增异常类测试）
+
+**需要修改的测试**:
+- `tests/unit/test_config_snapshot_repository.py` - 新增 IntegrityError 测试用例
+- `tests/unit/test_config_snapshot_service.py` - 新增异常转换测试
+
+#### 测试验证建议
+
+**单元测试用例**:
+```python
+# tests/unit/test_config_snapshot_repository.py
+
+@pytest.mark.asyncio
+async def test_create_snapshot_integrity_error_duplicate_version():
+    """测试重复版本号抛出 ConfigSnapshotIntegrityError"""
+    repo = ConfigSnapshotRepository(...)
+    
+    # 第一次保存成功
+    snapshot1 = {"version": "v20260409.153045", ...}
+    await repo.create(snapshot1)
+    
+    # 第二次保存同一版本号，应抛出异常
+    snapshot2 = {"version": "v20260409.153045", ...}
+    with pytest.raises(ConfigSnapshotIntegrityError) as exc_info:
+        await repo.create(snapshot2)
+    
+    assert exc_info.value.version == "v20260409.153045"
+    assert "已存在" in str(exc_info.value)
+
+@pytest.mark.asyncio
+async def test_service_converts_integrity_error():
+    """测试 Service 层转换 IntegrityError"""
+    service = ConfigSnapshotService(...)
+    
+    with pytest.raises(SnapshotIntegrityError) as exc_info:
+        await service.save_snapshot(version="v20260409.153045", ...)
+    
+    assert exc_info.value.error_code == "CONFIG-007"
+```
+
+**边界情况测试**:
+- 连续保存 10 次（验证版本号碰撞检测）
+- 不同类型的 IntegrityError（外键约束等）
+
+#### 风险评估
+
+**修复风险**: 🟢 低风险
+- 仅增强异常处理，不改变核心逻辑
+- 不影响现有成功保存的快照
+
+**回滚方案**: 
+- 删除自定义异常类，恢复原有 `except Exception as e` 处理即可
+
+---
+
+### P1-03: 版本号唯一性验证 (并发场景)
+
+#### 问题根因
+
+**位置**: `src/application/config_snapshot_service.py:421-430`
+
+**根因分析**:
+- `generate_next_version()` 使用秒级时间戳 `v20260409.153045`
+- 同一秒内多次调用会生成相同版本号
+- 缺少并发保护和碰撞检测机制
+
+**发生场景**:
+1. 用户快速连续点击"保存快照"按钮
+2. 同一秒内调用多次 `save_snapshot()`
+3. 版本号碰撞 → IntegrityError → 保存失败
+
+#### 修复方案
+
+**文件 1**: `src/application/config_snapshot_service.py`
+
+```python
+# 位置：类开头，新增属性
+
+# 修复后代码：
+class ConfigSnapshotService:
+    def __init__(self, repository: ConfigSnapshotRepository, ...):
+        self._repository = repository
+        # 新增：版本号生成锁（防止同一秒内并发冲突）
+        self._version_generation_lock = asyncio.Lock()
+```
+
+```python
+# 位置：generate_next_version() 方法
+
+# 修复前代码：
+def generate_next_version(self) -> str:
+    """生成下一个版本号（基于当前时间戳）"""
+    now = datetime.now()
+    return f"v{now.strftime('%Y%m%d.%H%M%S')}"
+
+# 修复后代码：
+async def generate_next_version(self) -> str:
+    """
+    生成下一个唯一版本号（异步方法，带并发保护）
+    
+    机制：
+    1. 使用 asyncio.Lock 防止同一秒内并发冲突
+    2. 检测数据库中是否已存在该版本号
+    3. 如果碰撞，自动添加后缀递增（v20260409.153045.1, v20260409.153045.2）
+    """
+    async with self._version_generation_lock:
+        # 基础版本号（秒级时间戳）
+        base_version = f"v{datetime.now().strftime('%Y%m%d.%H%M%S')}"
+        
+        # 检查数据库中是否已存在
+        existing = await self._repository.get_by_version(base_version)
+        
+        if existing is None:
+            # 未碰撞，直接返回
+            return base_version
+        
+        # 碰撞检测：自动递增后缀
+        suffix = 1
+        while True:
+            candidate = f"{base_version}.{suffix}"
+            existing = await self._repository.get_by_version(candidate)
+            if existing is None:
+                return candidate
+            suffix += 1
+            
+            # 安全保护：最多递增 100 次
+            if suffix > 100:
+                logger.warning(
+                    f"Version collision detected >100 times for {base_version}, "
+                    f"fallback to timestamp+random"
+                )
+                return f"{base_version}.{uuid.uuid4().hex[:8]}"
+```
+
+**文件 2**: `src/infrastructure/config_snapshot_repository.py`
+
+```python
+# 位置：新增方法
+
+# 修复后代码：
+async def get_by_version(self, version: str) -> Optional[Dict[str, Any]]:
+    """
+    根据版本号查询快照
+    
+    Args:
+        version: 快照版本号（如 'v20260409.153045'）
+    
+    Returns:
+        快照数据字典，不存在则返回 None
+    """
+    async with self._lock:
+        cursor = await self._db.execute(
+            "SELECT * FROM snapshots WHERE version = ?",
+            (version,)
+        )
+        row = await cursor.fetchone()
+        
+        if row is None:
+            return None
+        
+        # 转换为字典
+        return {
+            "id": row[0],
+            "version": row[1],
+            "profile_name": row[2],
+            # ... 其他字段
+        }
+```
+
+**文件 3**: `src/application/config_snapshot_service.py` - 调用方法修改
+
+```python
+# 位置：save_snapshot() 方法中
+
+# 修复前代码：
+version = self.generate_next_version()
+
+# 修复后代码：
+version = await self.generate_next_version()
+```
+
+#### 修复说明
+
+**为什么这样修复**:
+1. **并发保护**: `asyncio.Lock` 确保同一时刻只有一个协程生成版本号
+2. **碰撞检测**: 主动查询数据库，避免被动等待 IntegrityError
+3. **自动递增**: 碰撞后自动添加后缀（`.1`, `.2`），用户无需手动干预
+4. **安全降级**: 递增超过 100 次，使用 UUID 随机后缀，避免无限循环
+5. **异步改造**: `generate_next_version()` 改为 `async` 方法，支持数据库查询
+
+#### 影响范围分析
+
+**影响模块**:
+- ✅ 仅影响版本号生成逻辑
+- ⚠️ 需要将 `save_snapshot()` 中调用改为 `await generate_next_version()`
+- ✅ 不影响已存在的快照
+
+**需要修改的测试**:
+- `tests/unit/test_config_snapshot_service.py` - 新增并发测试、碰撞检测测试
+- `tests/integration/test_config_snapshot_flow.py` - 新增快速连续保存测试
+
+#### 测试验证建议
+
+**单元测试用例**:
+```python
+# tests/unit/test_config_snapshot_service.py
+
+@pytest.mark.asyncio
+async def test_generate_next_version_unique():
+    """测试版本号唯一性"""
+    service = ConfigSnapshotService(...)
+    
+    # 清空数据库
+    await service._repository.delete_all()
+    
+    # 连续生成 10 个版本号
+    versions = []
+    for _ in range(10):
+        version = await service.generate_next_version()
+        versions.append(version)
+    
+    # 验证所有版本号唯一
+    assert len(set(versions)) == 10
+
+@pytest.mark.asyncio
+async def test_version_collision_auto_increment():
+    """测试版本号碰撞自动递增"""
+    service = ConfigSnapshotService(...)
+    
+    # 手动插入冲突版本号
+    await service._repository.create({
+        "version": "v20260409.153045",
+        ...
+    })
+    
+    # 再次生成版本号（同一秒）
+    new_version = await service.generate_next_version()
+    
+    # 验证自动递增后缀
+    assert new_version == "v20260409.153045.1"
+
+@pytest.mark.asyncio
+async def test_concurrent_version_generation():
+    """测试并发生成版本号"""
+    service = ConfigSnapshotService(...)
+    
+    # 模拟 10 个协程并发生成版本号
+    tasks = [
+        service.generate_next_version()
+        for _ in range(10)
+    ]
+    versions = await asyncio.gather(*tasks)
+    
+    # 验证无碰撞
+    assert len(set(versions)) == 10
+```
+
+**边界情况测试**:
+- 递增后缀超过 100 次（验证 UUID 降级）
+- 跨秒生成（验证时间戳变化）
+- 数据库查询失败场景
+
+#### 风险评估
+
+**修复风险**: 🟡 中风险
+- 引入新的数据库查询，可能影响性能（频繁保存场景）
+- 异步改造需要修改调用链
+
+**缓解措施**:
+- 版本号生成锁确保单线程执行，避免竞态
+- 碰撞检测只在同一秒内触发，跨秒无需查询
+
+**回滚方案**:
+- 将 `generate_next_version()` 改回同步方法
+- 删除 `_version_generation_lock`
+- 恢复原有时间戳生成逻辑
+
+---
+
+## 实施优先级
+
+**推荐执行顺序**:
+```
+P1-01（IntegrityError 处理） → P1-03（版本号唯一性）
+```
+
+**理由**:
+1. P1-01 是基础异常处理，P1-03 依赖其完整性
+2. P1-03 的碰撞检测会触发 P1-01 的异常处理
+3. 两者协同工作，确保配置快照系统稳定性
+
+---
+
+## 关键文件清单
+
+**实施时需要修改的 5 个文件**:
+
+1. `/Users/jiangwei/Documents/final/src/infrastructure/config_snapshot_repository.py`
+   - 新增 `ConfigSnapshotIntegrityError` 异常类
+   - 增强 `create()` 方法异常处理
+   - 新增 `get_by_version()` 方法
+
+2. `/Users/jiangwei/Documents/final/src/application/config_snapshot_service.py`
+   - 新增 `SnapshotIntegrityError` 异常类
+   - 重构 `generate_next_version()` 为异步方法
+   - 新增 `_version_generation_lock` 属性
+   - 修改 `save_snapshot()` 调用方式
+
+3. `/Users/jiangwei/Documents/final/src/interfaces/api.py`
+   - 增强 `create_snapshot()` 路由的异常处理
+   - 返回 HTTP 409 Conflict
+
+4. `/Users/jiangwei/Documents/final/tests/unit/test_config_snapshot_repository.py`
+   - 新增 IntegrityError 测试用例
+
+5. `/Users/jiangwei/Documents/final/tests/unit/test_config_snapshot_service.py`
+   - 新增版本号唯一性测试
+   - 新增并发测试
+
+---
+
+*最后更新：2026-04-09 - P0 问题修复方案设计完成*
