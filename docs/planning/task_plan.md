@@ -281,20 +281,23 @@ Task 1 (Pinbar 单元测试) ──┬── Task 2 (集成测试-真实 K 线)
 Task 2 ──> Task 4 (Testnet 模拟盘)
 ```
 
-### Task 1: Pinbar 单元测试补充 [P1, ~2h]
+### Task 1: Pinbar 单元测试补充 [P1, ~2h] ✅ 已完成
 
-**范围**: 形态检测边界 + 过滤器组合 + 信号输出验证
+**实际交付**: 57 个新增测试全部通过，122 个回归测试无失败
 
-| 子项 | 说明 | 预计用例 |
-|------|------|----------|
-| 形态边界 | 影线/实体比例边界、零波幅、价格级别适配 | ~10 |
-| 过滤器组合 | Pinbar + ATR / EMA Trend / MTF | ~8 |
-| 信号输出 | 动态标签、score 评分、risk_reward_info | ~5 |
+| 文件 | 测试数 | 状态 |
+|------|--------|------|
+| `test_pinbar_detection.py` | 27 | ✅ 形态检测边界值（P0）|
+| `test_pinbar_filter_combinations.py` | 18 | ✅ 过滤器组合逻辑（P1）|
+| `test_pinbar_signal_output.py` | 12 | ✅ 信号输出验证（P1）|
+
+**回归验证**: 122 个 Pinbar 相关测试全部通过
+**提交**: `e7d34e8`
 
 **已有测试**: `test_pinbar_min_range.py` (8 个，最小波幅检查)
 **目标**: 新增 ~23 个测试用例
 
-### Task 2: Pinbar 集成测试 [P1, ~3h]
+### Task 2: Pinbar 集成测试 [P1, ~3h] 🟡 待开始
 
 **范围**: 从 v3_dev.db 读取真实 K 线数据验证
 
@@ -306,7 +309,7 @@ Task 2 ──> Task 4 (Testnet 模拟盘)
 
 **数据源**: `data/v3_dev.db` (BTC/ETH/SOL × 15m/1h/4h/1d, 共 11万+ 条)
 
-### Task 3: PMS 回测功能检查 [P1, ~1h]
+### Task 3: PMS 回测功能检查 [P1, ~1h] 🟡 待开始
 
 **范围**: 检查功能完善度（用户通过 Web 端自行验证）
 
@@ -320,7 +323,7 @@ Task 2 ──> Task 4 (Testnet 模拟盘)
 | 前端报告页 | ✅ | BacktestReports.tsx + 详情弹窗 |
 | 报告组件 | ✅ | 概览/权益图/交易表/PnL 分布/月度热力图 |
 
-### Task 4: Testnet 模拟盘验证 [P1, ~2h]
+### Task 4: Testnet 模拟盘验证 [P1, ~2h] 🔒 阻塞于 Task 2
 
 **范围**: 交易所 Testnet 方式验证
 
