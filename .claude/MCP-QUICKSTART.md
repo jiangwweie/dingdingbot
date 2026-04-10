@@ -33,17 +33,27 @@
       "command": "node",
       "args": ["/opt/homebrew/lib/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "/Users/jiangwei/Documents/final"]
     },
-    "openclaw": {
-      "command": "openclaw",
-      "args": ["acp", "--url", "ws://127.0.0.1:18789", "--token-file", "~/.openclaw/gateway.token", "--session", "agent:main:main"]
-    },
     "puppeteer": {
       "command": "node",
       "args": ["/opt/homebrew/lib/node_modules/@modelcontextprotocol/server-puppeteer/dist/index.js"]
+    },
+    "time": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-time"]
+    },
+    "duckdb": {
+      "command": "uvx",
+      "args": ["mcp-server-duckdb", "--db-path", "/Users/jiangwei/Documents/final/data/backtest.db"]
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "/Users/jiangwei/Documents/final"]
     }
   }
 }
 ```
+
+> 注：telegram / ssh / sentry 占位符已移除，需要时再添加。详见 [MCP-ENV-CONFIG.md](MCP-ENV-CONFIG.md)。
 
 ---
 
@@ -212,60 +222,11 @@ curl -X POST "https://testnet.binancefuture.com/fapi/v1/order" \
 
 ---
 
-#### 6. Slack / Telegram MCP (实时告警模块集成) 📢
+#### 6. Telegram MCP (实时告警模块集成) 📢
+
+> ⚠️ 待启用：需要真实 Bot Token 和 Chat ID。详见 [MCP-ENV-CONFIG.md](MCP-ENV-CONFIG.md)。
 
 **应用场景**: 测试 Notifier 模块，验证信号通知的 Markdown 格式。
-
-**实战效果**:
-```
-用户：配置好权限后，你可以直接对本地的 Claude Code 发指令
-
-→ AI 直接调用 Telegram API 发送测试消息到指定频道
-```
-
-**安装 - Telegram**:
-```json
-{
-  "mcpServers": {
-    "telegram": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-telegram"],
-      "env": {
-        "TELEGRAM_BOT_TOKEN": "your_bot_token",
-        "TELEGRAM_CHAT_ID": "your_channel_id"
-      }
-    }
-  }
-}
-```
-
-**安装 - Slack**:
-```json
-{
-  "mcpServers": {
-    "slack": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-slack"],
-      "env": {
-        "SLACK_BOT_TOKEN": "xoxb-...",
-        "SLACK_TEAM_ID": "T01234567"
-      }
-    }
-  }
-}
-```
-
-**使用示例**:
-```
-用户：发送一条测试信号到 Telegram 频道
-
-格式:
-🚀 BTC/USDT:USDT - 15m 多头信号
-入场：50000
-止损：49500 (-1%)
-目标：51000 (+2%)
-标签：[Pinbar][EMA 多头]
-```
 
 ---
 
@@ -331,76 +292,19 @@ console.log(`Fear & Greed Index: ${score}`);
 
 ### 五、部署运维与监控 (DevOps & Monitoring)
 
-#### 9. SSH / Remote Server MCP (云节点直接调度) 🖥️
+#### 9. SSH MCP (云节点直接调度) 🖥️
+
+> ⚠️ 待启用：需要真实服务器信息。详见 [MCP-ENV-CONFIG.md](MCP-ENV-CONFIG.md)。
 
 **应用场景**: 新加坡节点服务器部署，远程更新代码、查看日志。
 
-**实战效果**:
-```
-用户：连上新加坡的节点，帮我拉取最新代码，检查守护进程状态
-
-→ AI 执行:
-1. SSH 连接到服务器
-2. git pull origin main
-3. systemctl status dingdingbot
-4. tail -100 /var/log/dingdingbot/error.log
-5. 分析异常日志
-```
-
-**安装**:
-```json
-{
-  "mcpServers": {
-    "ssh": {
-      "command": "uvx",
-      "args": ["mcp-server-ssh"],
-      "env": {
-        "SSH_HOST": "sgp1.your-server.com",
-        "SSH_USER": "deploy",
-        "SSH_KEY_PATH": "~/.ssh/id_ed25519"
-      }
-    }
-  }
-}
-```
-
-**权限建议**: ⚠️ 仅授予只读命令权限
-- `git pull`, `systemctl status`, `journalctl`, `tail`, `cat` 允许
-- `rm`, `systemctl stop`, `kill` 禁止
-
 ---
 
-#### 10. Sentry / 日志监控 MCP (实盘异常追踪) 🚨
+#### 10. Sentry MCP (实盘异常追踪) 🚨
+
+> ⚠️ 待启用：需要真实 Sentry 凭证。详见 [MCP-ENV-CONFIG.md](MCP-ENV-CONFIG.md).
 
 **应用场景**: 实盘系统异常时，快速拉取错误堆栈并定位问题。
-
-**实战效果**:
-```
-用户：查看过去 1 小时内 Sentry 上报的所有 CRITICAL 级别错误
-
-→ AI 返回:
-- 错误类型分布
-- 堆栈跟踪
-- 触发条件分析
-- 修复建议
-```
-
-**安装**:
-```json
-{
-  "mcpServers": {
-    "sentry": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sentry"],
-      "env": {
-        "SENTRY_ORG": "your-org",
-        "SENTRY_PROJECT": "dingpingbot",
-        "SENTRY_AUTH_TOKEN": "sntrys_..."
-      }
-    }
-  }
-}
-```
 
 ---
 
@@ -408,30 +312,22 @@ console.log(`Fear & Greed Index: ${score}`);
 
 ### 🔥 立即配置 (当前开发阶段必需)
 
-| MCP 服务器 | 用途 | 优先级 |
-|------------|------|--------|
-| ✅ SQLite | 订单/信号数据库查询 | 已配置 |
-| ✅ FileSystem | 文件操作/代码检索 | 已配置 |
-| ✅ Git | 版本控制 | 已配置 |
-| ⏰ Time | 时区/时间戳处理 | 高 |
-| 🔌 REST API | 交易所 API 调试 | 高 |
+| MCP 服务器 | 用途 | 状态 |
+|------------|------|------|
+| SQLite | 订单/信号数据库查询 | ✅ 已配置 |
+| FileSystem | 文件操作/代码检索 | ✅ 已配置 |
+| Git | 版本控制 | ✅ 已配置 |
+| Time | 时区/时间戳处理 | ✅ 已配置 |
+| DuckDB | 海量数据回测 | ✅ 已配置 |
+| Puppeteer | 无头浏览器 | ✅ 已配置 |
 
 ### 📋 实盘前配置
 
 | MCP 服务器 | 用途 | 优先级 |
 |------------|------|--------|
-| 📢 Telegram/Slack | 告警通知测试 | 高 |
-| 🖥️ SSH | 远程部署监控 | 高 |
-| 🚨 Sentry | 异常追踪 | 中 |
-
-### 🧪 可选增强
-
-| MCP 服务器 | 用途 | 优先级 |
-|------------|------|--------|
-| 🦆 DuckDB | 海量数据回测 | 中 |
-| 🧠 Memory | 长期记忆 | 低 |
-| 🤖 Puppeteer | 网页抓取 | 低 |
-| 🔎 Brave Search | 文献检索 | 低 |
+| Telegram | 告警通知测试 | 高 (待启用) |
+| SSH | 远程部署监控 | 高 (待启用) |
+| Sentry | 异常追踪 | 中 (待启用) |
 
 ---
 
