@@ -1,7 +1,65 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-10 旧策略页面迁移完成 + 删除旧路由
+> **最后更新**: 2026-04-10 API 契约对齐修复（方案 A）全部完成
+
+---
+
+## 2026-04-10 API 契约对齐修复（方案 A）- 全部完成
+
+### 修复摘要
+
+**根因**：系统存在两套策略管理 API，前端使用了旧 API (`/api/strategies`) 但数据结构匹配新 API (`/api/v1/config/strategies`)
+
+**修复方案**：前端 baseURL `/api` → `/api/v1/config`，后端新增系统配置端点
+
+### 前端改动（3 个提交）
+| 文件 | 改动 |
+|------|------|
+| `web-front/src/api/config.ts` | baseURL 迁移 + 风险配置路径修复 + 系统配置端点更新 |
+| `web-front/src/pages/config/StrategyConfig.tsx` | 降级逻辑简化 |
+| `web-front/src/pages/config/SystemSettings.tsx` | `requires_restart` → `restart_required` |
+| `web-front/src/pages/config/SystemTab.tsx` | `requires_restart` → `restart_required` |
+| `web-front/src/pages/config/__tests__/SystemTab.test.tsx` | Mock 数据格式更新 |
+
+### 后端改动（2 个提交）
+| 文件 | 改动 |
+|------|------|
+| `src/interfaces/api_v1_config.py` | 新增 GET/PUT `/system` 端点 + 嵌套模型 + 转换层 + admin bypass |
+| `src/application/config/config_parser.py` | YAML `!decimal` tag 修复 |
+
+### 测试验证
+| 测试套件 | 通过 | 失败 | 通过率 |
+|----------|------|------|--------|
+| 集成测试 | 41 | 1 (P1 Bug) | 97.6% |
+| 系统配置单元测试 | 39 | 0 | 100% |
+| 权限验证 | 48 | 0 | 100% |
+| 配置导入导出 | 36 | 0 | 100% |
+| 配置 API 基础 | 20 | 0 | 100% |
+| E2E 配置流程 | 15 | 0 | 100% |
+| **合计** | **199** | **1** | **99.5%** |
+
+### 已知 P1 Bug（待修复）
+| # | 问题 | 文件 | 说明 |
+|---|------|------|------|
+| 1 | Decimal 绑定 SQLite 失败 | `config_repositories.py:596` | `queue_flush_interval` 转 Decimal 后 SQLite 不支持 |
+
+### Git 提交
+| Commit | 说明 |
+|--------|------|
+| `a6a1ef1` | fix: API 契约对齐修复（方案 A）- 前后端接口统一 |
+| `2c91cef` | feat(api): align system config endpoints |
+| `7e70d2a` | fix: 前端 SystemSettings 数据适配 |
+| `9df70eb` | fix: 前端 API baseURL 迁移 |
+
+### 验证报告
+- `docs/reviews/2026-04-10-api-contract-fix-verification.md`
+
+### 当前待办
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 6 | 修复 P1 Bug: Decimal 绑定 SQLite | P1 | 📋 待修复 |
+| 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
 
 ---
 
