@@ -1,7 +1,52 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-10 API 契约对齐修复（方案 A）全部完成
+> **最后更新**: 2026-04-10 Phase 1 策略系统整合 + 测试挂起修复完成
+
+---
+
+## 2026-04-10 Phase 1 策略系统整合 + 测试挂起修复 - 全部完成
+
+### 修复摘要
+
+**Phase 1 的 8 个任务全部完成**，包括前端迁移、后端修复、测试修复。
+
+### 完成的任务
+
+| # | 任务 | 状态 |
+|---|------|------|
+| Task 1 | 旧页面功能迁移 + 删除旧路由 (`/strategies` + StrategyWorkbench.tsx) | ✅ 完成 |
+| Task 2 | 修复策略下发断裂（统一走 apply 标准接口） | ✅ 完成（随 Task 1 自动修复） |
+| Task 3 | 移除 MTF 冗余映射配置 | ✅ 完成 |
+| Task 4 | 策略详情预览 Modal | ✅ 完成 |
+| Task 5 | 回测页面一键导入已保存策略 | ✅ 完成 |
+| Task 6 | 修复 RiskConfig 类型不匹配 | ✅ 完成 |
+| Task 7 | 修复 YAML 全局 Decimal 构造器劫持（改为 `!decimal` tag） | ✅ 完成 |
+| Task 8 | 修复热重载缓存未刷新（notify_hot_reload 增加 ConfigManager 缓存刷新） | ✅ 完成 |
+
+### 测试修复
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| pytest 全量挂起（死锁） | `test_concurrent_position_update.py` 测试在外部获取锁后调用 reduce_position，内部再次获取同一 asyncio.Lock（不可重入） | 移除测试外部锁获取，改用 mock 追踪 |
+| test_atr_filter.py 3 个失败 | metadata key 名称错误 `ratio` → 实际为 `volatility_ratio` | 修正 4 处断言 |
+| test_config_entry_repository.py 失败 | 默认回测配置数量 4 → 6（新增 funding_rate 等） | 更新断言 |
+
+### 全量测试结果
+
+```
+2338 passed, 3 skipped, 100 failed, 12 errors (108s)
+```
+
+- **Phase 1 相关测试全部通过**
+- 100 failed + 12 errors 全部是已有问题（非 Phase 1 改动引起）
+- 全量测试不再挂起
+
+### Git 提交
+
+| Commit | 说明 |
+|--------|------|
+| `7da5802` | fix: Phase 1 策略系统整合 + 测试挂起修复 |
 
 ---
 
