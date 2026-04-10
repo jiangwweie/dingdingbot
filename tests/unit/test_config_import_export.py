@@ -183,8 +183,7 @@ class TestExportAPI:
         client.put(
             "/api/v1/config/system",
             json={
-                "core_symbols": ["BTC/USDT:USDT"],
-                "ema_period": 55,
+                "ema": {"period": 55},
             },
             headers={"X-User-Role": "admin"}
         )
@@ -224,7 +223,7 @@ class TestExportAPI:
         )
         client.put(
             "/api/v1/config/system",
-            json={"core_symbols": ["BTC/USDT:USDT"], "ema_period": 60},
+            json={"ema": {"period": 60}},
             headers={"X-User-Role": "admin"}
         )
 
@@ -596,7 +595,7 @@ system:
         # Verify system config was applied
         get_response = client.get("/api/v1/config/system")
         data = get_response.json()
-        assert data["ema_period"] == 45
+        assert data["ema"]["period"] == 45
 
     @pytest.mark.asyncio
     async def test_confirm_import_creates_snapshot(self, client):
@@ -1000,7 +999,7 @@ class TestImportExportHistoryRecording:
         )
         client.put(
             "/api/v1/config/system",
-            json={"core_symbols": ["BTC/USDT:USDT"], "ema_period": 50},
+            json={"ema": {"period": 50}},
             headers={"X-User-Role": "admin"}
         )
 
@@ -1126,7 +1125,7 @@ strategies:
         )
         client.put(
             "/api/v1/config/system",
-            json={"core_symbols": ["BTC/USDT:USDT"], "ema_period": 50},
+            json={"ema": {"period": 50}},
             headers={"X-User-Role": "admin"}
         )
         client.post(

@@ -41,6 +41,7 @@ Endpoints:
 """
 import json
 import logging
+import os
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -177,39 +178,70 @@ class RiskConfigUpdateRequest(BaseModel):
 # ============================================================
 # Pydantic Models - System Config
 # ============================================================
+
+# Nested sub-models matching frontend SystemConfigResponse format
+class EmaConfig(BaseModel):
+    """EMA configuration nested model"""
+    period: int = Field(default=60, ge=5, le=200)
+
+
+class QueueConfig(BaseModel):
+    """Queue configuration nested model"""
+    batch_size: int = Field(default=10, ge=1, le=100)
+    flush_interval: float = Field(default=5.0, ge=0.1, le=60.0)
+    max_queue_size: int = Field(default=1000, ge=100, le=10000)
+
+
+class SignalPipelineConfig(BaseModel):
+    """Signal pipeline configuration nested model"""
+    cooldown_seconds: int = Field(default=14400, ge=3600, le=86400)
+    queue: QueueConfig = Field(default_factory=QueueConfig)
+
+
+class WarmupConfig(BaseModel):
+    """Warmup configuration nested model"""
+    history_bars: int = Field(default=100, ge=50, le=500)
+
+
 class SystemConfigResponse(BaseModel):
-    """System configuration response"""
-    id: str
-    core_symbols: List[str]
-    ema_period: int
-    mtf_ema_period: int
-    mtf_mapping: Dict[str, str]
-    signal_cooldown_seconds: int
-    queue_batch_size: int
-    queue_flush_interval: Decimal
-    queue_max_size: int
-    warmup_history_bars: int
-    atr_filter_enabled: bool
-    atr_period: int
-    atr_min_ratio: Decimal
-    restart_required: bool
-    updated_at: str
+    """System configuration response - matches frontend SystemConfigResponse format"""
+    # Core identity (backend internal)
+    id: str = "global"
+    updated_at: str = ""
+
+    # EMA config (nested to match frontend)
+    ema: EmaConfig = Field(default_factory=EmaConfig)
+    mtf_ema_period: int = Field(default=60, ge=5, le=200)
+
+    # Signal pipeline (nested to match frontend)
+    signal_pipeline: SignalPipelineConfig = Field(default_factory=SignalPipelineConfig)
+
+    # Warmup (nested to match frontend)
+    warmup: WarmupConfig = Field(default_factory=WarmupConfig)
+
+    # ATR filter
+    atr_filter_enabled: bool = True
+    atr_period: int = Field(default=14, ge=5, le=50)
+    atr_min_ratio: float = Field(default=0.5, ge=0.0)
+
+    # Restart flag
+    restart_required: bool = False
+
+    def model_post_init(self, __context):
+        """Set default updated_at if not provided"""
+        if not self.updated_at:
+            self.updated_at = datetime.now(timezone.utc).isoformat()
 
 
 class SystemConfigUpdateRequest(BaseModel):
-    """System configuration update request"""
-    core_symbols: Optional[List[str]] = None
-    ema_period: Optional[int] = Field(None, ge=5, le=200)
+    """System configuration update request - matches frontend SystemConfigUpdateRequest format"""
+    ema: Optional[EmaConfig] = None
     mtf_ema_period: Optional[int] = Field(None, ge=5, le=200)
-    mtf_mapping: Optional[Dict[str, str]] = None
-    signal_cooldown_seconds: Optional[int] = Field(None, ge=0)
-    queue_batch_size: Optional[int] = Field(None, ge=1)
-    queue_flush_interval: Optional[Decimal] = Field(None, ge=Decimal("0"))
-    queue_max_size: Optional[int] = Field(None, ge=1)
-    warmup_history_bars: Optional[int] = Field(None, ge=1)
+    signal_pipeline: Optional[SignalPipelineConfig] = None
+    warmup: Optional[WarmupConfig] = None
     atr_filter_enabled: Optional[bool] = None
     atr_period: Optional[int] = Field(None, ge=5, le=50)
-    atr_min_ratio: Optional[Decimal] = Field(None, ge=Decimal("0"))
+    atr_min_ratio: Optional[float] = Field(None, ge=0.0)
 
 
 # ============================================================
@@ -584,7 +616,16 @@ async def check_admin_permission(request: Request):
 
     Checks for X-User-Role header with value 'admin'.
     When full auth system is ready, this will integrate with the auth module.
+
+    Local Development Bypass:
+    Set DISABLE_AUTH=True environment variable to skip admin check.
+    This is ONLY for local development and should NEVER be used in production.
     """
+    # Local development bypass
+    if os.environ.get("DISABLE_AUTH", "").lower() in ("true", "1", "yes"):
+        logger.warning("[DEV_MODE] Admin permission check bypassed (DISABLE_AUTH=True)")
+        return True
+
     # Check for admin role header (used in tests and simple deployments)
     # Support both X-User-Role and X-User-User-Role (typo in some tests)
     user_role = request.headers.get("X-User-Role") or request.headers.get("X-User-User-Role")
@@ -765,34 +806,118 @@ async def update_risk_config(
 # ============================================================
 # System Config Endpoints
 # ============================================================
+
+def _flat_to_nested(system_data: Dict[str, Any]) -> SystemConfigResponse:
+    """Convert flat database format to nested frontend format.
+
+    DB format: {ema_period, signal_cooldown_seconds, queue_batch_size, queue_flush_interval, ...}
+    Frontend format: {ema: {period}, signal_pipeline: {cooldown_seconds, queue: {...}}, ...}
+    """
+    return SystemConfigResponse(
+        id=system_data.get("id", "global"),
+        updated_at=system_data.get("updated_at", ""),
+        ema=EmaConfig(period=system_data.get("ema_period", 60)),
+        mtf_ema_period=system_data.get("mtf_ema_period", 60),
+        signal_pipeline=SignalPipelineConfig(
+            cooldown_seconds=system_data.get("signal_cooldown_seconds", 14400),
+            queue=QueueConfig(
+                batch_size=system_data.get("queue_batch_size", 10),
+                flush_interval=float(system_data.get("queue_flush_interval", 5.0)),
+                max_queue_size=system_data.get("queue_max_size", 1000),
+            ),
+        ),
+        warmup=WarmupConfig(history_bars=system_data.get("warmup_history_bars", 100)),
+        atr_filter_enabled=system_data.get("atr_filter_enabled", True),
+        atr_period=system_data.get("atr_period", 14),
+        atr_min_ratio=float(system_data.get("atr_min_ratio", 0.5)),
+        restart_required=system_data.get("restart_required", False),
+    )
+
+
+def _nested_to_flat(update_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert nested frontend update format to flat database format.
+
+    Frontend: {ema: {period}, signal_pipeline: {cooldown_seconds, queue: {...}}, ...}
+    DB: {ema_period, signal_cooldown_seconds, queue_batch_size, queue_flush_interval, ...}
+    """
+    flat = {}
+
+    # ema.period -> ema_period
+    if "ema" in update_data and update_data["ema"]:
+        ema = update_data["ema"]
+        if isinstance(ema, dict):
+            if "period" in ema:
+                flat["ema_period"] = ema["period"]
+        elif hasattr(ema, "period"):
+            flat["ema_period"] = ema.period
+
+    # mtf_ema_period -> mtf_ema_period
+    if "mtf_ema_period" in update_data and update_data["mtf_ema_period"] is not None:
+        flat["mtf_ema_period"] = update_data["mtf_ema_period"]
+
+    # signal_pipeline -> signal_cooldown_seconds, queue_*
+    if "signal_pipeline" in update_data and update_data["signal_pipeline"]:
+        sp = update_data["signal_pipeline"]
+        if isinstance(sp, dict):
+            if "cooldown_seconds" in sp:
+                flat["signal_cooldown_seconds"] = sp["cooldown_seconds"]
+            if "queue" in sp and sp["queue"]:
+                queue = sp["queue"]
+                if isinstance(queue, dict):
+                    if "batch_size" in queue:
+                        flat["queue_batch_size"] = queue["batch_size"]
+                    if "flush_interval" in queue:
+                        flat["queue_flush_interval"] = Decimal(str(queue["flush_interval"]))
+                    if "max_queue_size" in queue:
+                        flat["queue_max_size"] = queue["max_queue_size"]
+                elif hasattr(queue, "batch_size"):
+                    flat["queue_batch_size"] = queue.batch_size
+                    flat["queue_flush_interval"] = Decimal(str(queue.flush_interval))
+                    flat["queue_max_size"] = queue.max_queue_size
+        elif hasattr(sp, "cooldown_seconds"):
+            flat["signal_cooldown_seconds"] = sp.cooldown_seconds
+            if hasattr(sp, "queue"):
+                flat["queue_batch_size"] = sp.queue.batch_size
+                flat["queue_flush_interval"] = Decimal(str(sp.queue.flush_interval))
+                flat["queue_max_size"] = sp.queue.max_queue_size
+
+    # warmup.history_bars -> warmup_history_bars
+    if "warmup" in update_data and update_data["warmup"]:
+        warmup = update_data["warmup"]
+        if isinstance(warmup, dict):
+            if "history_bars" in warmup:
+                flat["warmup_history_bars"] = warmup["history_bars"]
+        elif hasattr(warmup, "history_bars"):
+            flat["warmup_history_bars"] = warmup.history_bars
+
+    # Direct fields
+    if "atr_filter_enabled" in update_data and update_data["atr_filter_enabled"] is not None:
+        flat["atr_filter_enabled"] = update_data["atr_filter_enabled"]
+    if "atr_period" in update_data and update_data["atr_period"] is not None:
+        flat["atr_period"] = update_data["atr_period"]
+    if "atr_min_ratio" in update_data and update_data["atr_min_ratio"] is not None:
+        flat["atr_min_ratio"] = Decimal(str(update_data["atr_min_ratio"]))
+
+    return flat
+
+
 @router.get("/system", response_model=SystemConfigResponse)
 async def get_system_config():
-    """获取系统配置"""
+    """
+    获取系统配置
+
+    Returns system config in nested format matching frontend SystemConfigResponse.
+    No admin permission required (read-only endpoint).
+    """
     if not _system_repo:
         raise HTTPException(status_code=503, detail="System repository not initialized")
 
     system_data = await _system_repo.get_global()
     if not system_data:
-        # Return default
-        system_data = {
-            "id": "global",
-            "core_symbols": ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"],
-            "ema_period": 60,
-            "mtf_ema_period": 60,
-            "mtf_mapping": {"15m": "1h", "1h": "4h", "4h": "1d"},
-            "signal_cooldown_seconds": 14400,
-            "queue_batch_size": 10,
-            "queue_flush_interval": Decimal("5.0"),
-            "queue_max_size": 1000,
-            "warmup_history_bars": 100,
-            "atr_filter_enabled": True,
-            "atr_period": 14,
-            "atr_min_ratio": Decimal("0.5"),
-            "restart_required": False,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        # Return default in nested format
+        return SystemConfigResponse()
 
-    return SystemConfigResponse(**system_data)
+    return _flat_to_nested(system_data)
 
 
 @router.put("/system", response_model=SystemConfigResponse)
@@ -804,33 +929,37 @@ async def update_system_config(
     更新系统配置（需重启⚠️）
 
     系统配置变更需要重启系统才能生效。
+    Accepts nested format matching frontend SystemConfigUpdateRequest.
+    Sends hot-reload notification after successful update.
     """
     if not _system_repo:
         raise HTTPException(status_code=503, detail="System repository not initialized")
 
-    # Build update dict
+    # Convert nested request to flat database format
     update_data = request.model_dump(mode='json', exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    # Convert string decimals back to Decimal
-    for key, value in update_data.items():
-        if key in ("queue_flush_interval", "atr_min_ratio"):
-            update_data[key] = Decimal(str(value)) if value is not None else None
+    flat_data = _nested_to_flat(update_data)
+    if not flat_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
 
-    # Determine if restart is required
-    restart_required_fields = ["core_symbols", "ema_period", "mtf_ema_period", "mtf_mapping",
-                               "queue_batch_size", "queue_flush_interval", "queue_max_size"]
-    restart_required = any(key in update_data for key in restart_required_fields)
+    # Determine if restart is required (most system config changes require restart)
+    restart_required_fields = [
+        "ema_period", "mtf_ema_period",
+        "signal_cooldown_seconds", "queue_batch_size", "queue_flush_interval", "queue_max_size",
+        "warmup_history_bars", "atr_filter_enabled", "atr_period", "atr_min_ratio",
+    ]
+    restart_required = any(key in flat_data for key in restart_required_fields)
 
-    success = await _system_repo.update(update_data, restart_required=restart_required)
+    success = await _system_repo.update(flat_data, restart_required=restart_required)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to update system config")
 
     # Get updated config
     updated_config = await _system_repo.get_global()
 
-    # Record history
+    # Record history (use the nested update_data for audit trail)
     if _history_repo:
         await _history_repo.record_change(
             entity_type="system_config",
@@ -841,10 +970,12 @@ async def update_system_config(
             change_summary="Updated system config" + (" (restart required)" if restart_required else ""),
         )
 
-    response_data = SystemConfigResponse(**updated_config)
+    # Send hot-reload notification (observer can decide whether to apply immediately)
+    await notify_hot_reload("system")
+
+    response_data = _flat_to_nested(updated_config)
 
     if restart_required:
-        # Log warning
         logger.warning("System config updated - restart required for changes to take effect")
 
     return response_data
