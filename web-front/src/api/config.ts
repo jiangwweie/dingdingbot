@@ -174,16 +174,14 @@ export interface SystemConfigUpdateResponse {
 // 注意：后端配置接口路径说明
 // ============================================================
 // 后端配置相关接口分布在以下路径：
-// - /api/config - 完整配置获取/更新
-// - /api/strategies - 策略管理
-// - /api/strategy/params - 策略参数
-// - /api/config/profiles - Profile 管理
-// - /api/config/snapshots - 快照管理
+// - /api/v1/config/strategies - 策略管理（CRUD + Toggle）
+// - /api/v1/config/risk - 风险配置
+// - /api/v1/config/system - 系统配置（待后端补充）
 // ============================================================
 
-// Axios 实例实例 1：配置管理（使用 /api 前缀）
+// Axios 实例实例 1：配置管理（使用 /api/v1/config 前缀）
 const configApiClient = axios.create({
-  baseURL: '/api',
+  baseURL: '/api/v1/config',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -198,40 +196,40 @@ export const configApi = {
 
   /**
    * 获取所有策略列表
-   * GET /api/strategies
+   * GET /api/v1/config/strategies
    */
   getStrategies: () => configApiClient.get<Strategy[]>('/strategies'),
 
   /**
    * 获取单个策略详情
-   * GET /api/strategies/:id
+   * GET /api/v1/config/strategies/:id
    */
   getStrategy: (id: string) => configApiClient.get<Strategy>(`/strategies/${id}`),
 
   /**
    * 创建新策略
-   * POST /api/strategies
+   * POST /api/v1/config/strategies
    */
   createStrategy: (data: CreateStrategyRequest) =>
     configApiClient.post<Strategy>('/strategies', data),
 
   /**
    * 更新策略配置
-   * PUT /api/strategies/:id
+   * PUT /api/v1/config/strategies/:id
    */
   updateStrategy: (id: string, data: UpdateStrategyRequest) =>
     configApiClient.put<Strategy>(`/strategies/${id}`, data),
 
   /**
    * 删除策略
-   * DELETE /api/strategies/:id
+   * DELETE /api/v1/config/strategies/:id
    */
   deleteStrategy: (id: string) =>
     configApiClient.delete(`/strategies/${id}`),
 
   /**
    * 切换策略启用状态
-   * POST /api/strategies/:id/toggle
+   * POST /api/v1/config/strategies/:id/toggle
    */
   toggleStrategy: (id: string, enabled: boolean) =>
     configApiClient.post(`/strategies/${id}/toggle`, { enabled } as ToggleStrategyRequest),
@@ -240,17 +238,16 @@ export const configApi = {
 
   /**
    * 获取风险配置
-   * GET /api/config (从完整配置中提取 risk 字段)
+   * GET /api/v1/config/risk
    */
-  getRiskConfig: () => configApiClient.get<{config: {risk: RiskConfig}}>('/config')
-    .then(res => ({ ...res, data: res.data.config.risk })),
+  getRiskConfig: () => configApiClient.get<RiskConfig>('/risk'),
 
   /**
    * 更新风险配置
-   * PUT /api/config (更新完整配置中的 risk 字段)
+   * PUT /api/v1/config/risk
    */
   updateRiskConfig: (data: Partial<RiskConfig>) =>
-    configApiClient.put('/config', { risk: data }),
+    configApiClient.put('/risk', data),
 
   // ---------- 系统配置 ----------
 

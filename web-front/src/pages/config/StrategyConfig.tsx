@@ -86,8 +86,8 @@ const StrategyConfigPage: React.FC = () => {
     setError(null);
     try {
       const response = await configApi.getStrategies();
-      // 后端返回格式可能是 {"strategies": [...]} 或直接 [...]
-      const strategiesArray = response.data.strategies || response.data || [];
+      // 新 API (/api/v1/config/strategies) 直接返回数组
+      const strategiesArray = response.data || [];
       setStrategies(strategiesArray);
     } catch (err: any) {
       console.error('加载策略列表失败:', err);
@@ -314,7 +314,7 @@ const StrategyConfigPage: React.FC = () => {
               ? '暂无策略，点击右上角"创建策略"开始配置'
               : '没有符合条件的策略'
           }
-          image={SimpleImage}
+          image={<SimpleImage />}
         >
           {strategies.length === 0 && (
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
