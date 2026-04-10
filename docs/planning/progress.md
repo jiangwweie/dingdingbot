@@ -1,7 +1,32 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-10
+> **最后更新**: 2026-04-10 下午
+
+---
+
+## 2026-04-10 下午 前端 Bug 修复 + API 契约分析报告
+
+### 前端 Bug 修复（3 个）
+1. **StrategyConfig.tsx 白屏**：`SimpleImage` 组件 const 不提升，从文件底部移到顶部
+2. **Layout.tsx 侧边栏崩溃**：`colorClasses` 缺少 `cyan` 和 `orange` 颜色映射
+3. **CSS 500 错误**：Vite 缓存损坏 + Tailwind 扫描到 `playwright-report/` 目录
+
+**提交**: `f5b9070`
+**验证**: Playwright E2E 15/15 全部通过
+
+### API 契约不匹配分析
+- 发现 7 个前后端接口不匹配问题（5 个 P0，1 个 P1，1 个已兼容）
+- 根因：两套策略管理 API 并存，前端 baseURL 指向了旧 API
+- 修复方案文档：`docs/reviews/2026-04-10-api-contract-mismatch-fix-plan.md`
+- 推荐方案 A：前端 baseURL `/api` → `/api/v1/config`，后端补充系统配置端点
+- 预估工时：约 3 小时
+
+### 待办
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 5 | API 契约对齐修复（方案 A） | P0 | 📋 待确认 |
+| 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
 
 ---
 
