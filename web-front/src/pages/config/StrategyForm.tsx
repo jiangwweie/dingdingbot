@@ -15,6 +15,8 @@ import type {
   CreateStrategyRequest,
   UpdateStrategyRequest,
 } from '../../api/config';
+import { TriggerParamsForm } from '../../components/strategy/TriggerParamsForm';
+import { getTriggerDefaultParams } from '../../components/strategy/triggerSchemas';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -76,19 +78,26 @@ export const StrategyForm: React.FC<StrategyFormProps> = ({
   const [form] = Form.useForm();
   const isEdit = !!strategy;
 
+  // 监听触发器类型变化，切换时重置参数为默认值
+  const triggerType = Form.useWatch('trigger_type', form) || 'pinbar';
+
   // 重置表单数据当模态框打开时
   useEffect(() => {
     if (visible) {
       if (strategy) {
         // 编辑模式：填充现有数据
+        const triggerType = strategy.trigger_config?.type || 'pinbar';
         form.setFieldsValue({
           name: strategy.name,
           description: strategy.description,
           is_active: strategy.is_active,
-          trigger_type: strategy.trigger_config?.type || 'pinbar',
+          trigger_type: triggerType,
           filter_logic: strategy.filter_logic || 'AND',
           symbols: strategy.symbols || [],
           timeframes: strategy.timeframes || [],
+          trigger_params:
+            strategy.trigger_config?.params ||
+            getTriggerDefaultParams(triggerType),
         });
       } else {
         // 创建模式：使用默认值
@@ -99,6 +108,7 @@ export const StrategyForm: React.FC<StrategyFormProps> = ({
           filter_logic: 'AND',
           symbols: ['BTC/USDT:USDT'],
           timeframes: ['1h'],
+          trigger_params: getTriggerDefaultParams('pinbar'),
         });
       }
     }
@@ -115,7 +125,7 @@ export const StrategyForm: React.FC<StrategyFormProps> = ({
         is_active: values.is_active,
         trigger_config: {
           type: values.trigger_type,
-          params: {}, // TODO: 添加触发器参数配置表单
+          params: values.trigger_params || {},
         },
         filter_configs: [], // TODO: 添加过滤器配置表单
         filter_logic: values.filter_logic,
@@ -201,6 +211,9 @@ export const StrategyForm: React.FC<StrategyFormProps> = ({
             ))}
           </Select>
         </Form.Item>
+
+        {/* 触发器参数配置 */}
+        <TriggerParamsForm triggerType={triggerType} form={form} disabled={loading} />
 
         {/* 过滤器配置 */}
         <Form.Item

@@ -86,10 +86,26 @@
 
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
-| 9 | 修复 BackupTab 导入/导出功能损坏 | P0 | 🔓 待规划 |
+| 9 | 修复 BackupTab 导入/导出功能损坏 | P0 | ✅ 已完成 |
 | 10 | 合并两个重复的 SystemTab 组件 | P1 | 🔓 待规划 |
-| 11 | StrategyForm 触发器参数表单补全 | P1 | 🔓 待规划 |
+| 11 | StrategyForm 触发器参数表单补全 | P1 | ✅ 已完成 |
 | 12 | 共享 DB 连接池 | P1 | 🔓 待规划 |
+
+#### Task 9: BackupTab 修复计划
+
+**5 个断裂点诊断**:
+1. `handleExport`: 路径 `/api/config/export` → 应为 `POST /api/v1/config/export`
+2. `handleUpload`: 前端本地 js-yaml 解析 → 应调用后端 `/api/v1/config/import/preview`
+3. `handleConfirmImport`: 路径 `/api/config/import` FormData → 应为 `/api/v1/config/import/confirm` + preview_token
+4. 预览渲染: 使用错误的 `changes` 字段 → 应使用后端返回的 `summary`/`preview_data`/`conflicts`/`errors`
+5. 无 preview_token 过期处理 → 需添加 5 分钟 TTL 检测
+
+**修复步骤**:
+1. 在 `config.ts` 新增 3 个 API 方法 + 类型定义
+2. 重写 `handleExport` 使用正确的端点 + Blob 下载
+3. 重写 `handleUpload` 调用 preview API
+4. 重写 `handleConfirmImport` 使用 preview_token
+5. 添加错误展示和 token 过期处理
 
 ### 第三阶段（渐进式清理 - 不现在做）
 

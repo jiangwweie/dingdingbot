@@ -182,6 +182,85 @@ export interface SystemConfigUpdateResponse {
 }
 
 // ============================================================
+// Backup/Import/Export Types
+// ============================================================
+
+/**
+ * 导出配置请求
+ * 与后端 ExportRequest (api_v1_config.py:492) 保持类型对齐
+ */
+export interface ExportRequest {
+  include_risk?: boolean;
+  include_system?: boolean;
+  include_strategies?: boolean;
+  include_symbols?: boolean;
+  include_notifications?: boolean;
+}
+
+/**
+ * 导出配置响应
+ * 与后端 ExportResponse (api_v1_config.py:501) 保持类型对齐
+ */
+export interface ExportResponse {
+  status: string;
+  filename: string;
+  yaml_content: string;
+  created_at: string;
+}
+
+/**
+ * 导入预览请求
+ * 与后端 ImportPreviewRequest (api_v1_config.py:462) 保持类型对齐
+ */
+export interface ImportPreviewRequest {
+  yaml_content: string;
+  filename?: string;
+}
+
+/**
+ * 导入预览结果
+ * 与后端 ImportPreviewResult (api_v1_config.py:468) 保持类型对齐
+ */
+export interface ImportPreviewResult {
+  valid: boolean;
+  preview_token: string;
+  summary: {
+    strategies: { added: number; modified: number; deleted: number };
+    risk: { modified: boolean };
+    symbols: { added: number };
+    notifications: { added: number };
+  };
+  conflicts: string[];
+  requires_restart: boolean;
+  errors: string[];
+  preview_data: {
+    strategies: any[];
+    risk: Record<string, any>;
+    symbols: any[];
+    notifications: any[];
+  };
+}
+
+/**
+ * 确认导入请求
+ * 与后端 ImportConfirmRequest (api_v1_config.py:479) 保持类型对齐
+ */
+export interface ImportConfirmRequest {
+  preview_token: string;
+}
+
+/**
+ * 确认导入响应
+ * 与后端 ImportConfirmResponse (api_v1_config.py:484) 保持类型对齐
+ */
+export interface ImportConfirmResponse {
+  status: string;
+  snapshot_id: string | null;
+  message: string;
+  summary: Record<string, any>;
+}
+
+// ============================================================
 // API Client Configuration
 // ============================================================
 
@@ -192,6 +271,9 @@ export interface SystemConfigUpdateResponse {
 // - /api/v1/config/strategies - 策略管理（CRUD + Toggle）
 // - /api/v1/config/risk - 风险配置
 // - /api/v1/config/system - 系统配置（GET/PUT）
+// - /api/v1/config/export - 导出配置（POST）
+// - /api/v1/config/import/preview - 预览导入（POST）
+// - /api/v1/config/import/confirm - 确认导入（POST）
 // ============================================================
 
 // Axios 实例实例 1：配置管理（使用 /api/v1/config 前缀）
@@ -329,6 +411,35 @@ export const configApi = {
    */
   updateSystemConfig: (data: SystemConfigUpdateRequest) =>
     configApiClient.put<SystemConfigResponse>('/system', data),
+
+  // ---------- 备份/导入/导出 ----------
+
+  /**
+   * 导出配置为 YAML
+   * POST /api/v1/config/export
+   * @param data - 导出选项（默认导出全部）
+   * @returns ExportResponse 包含 yaml_content 和 filename
+   */
+  exportConfig: (data?: ExportRequest) =>
+    configApiClient.post<ExportResponse>('/export', data ?? {}),
+
+  /**
+   * 预览导入变更（发送 YAML 内容，后端返回变更摘要和 preview_token）
+   * POST /api/v1/config/import/preview
+   * @param data - { yaml_content: string, filename?: string }
+   * @returns ImportPreviewResult 包含 summary/conflicts/errors/preview_data
+   */
+  previewImport: (data: ImportPreviewRequest) =>
+    configApiClient.post<ImportPreviewResult>('/import/preview', data),
+
+  /**
+   * 确认导入（仅传 preview_token）
+   * POST /api/v1/config/import/confirm
+   * @param data - { preview_token: string }
+   * @returns ImportConfirmResponse 包含 status/snapshot_id/message
+   */
+  confirmImport: (data: ImportConfirmRequest) =>
+    configApiClient.post<ImportConfirmResponse>('/import/confirm', data),
 };
 
 // ============================================================

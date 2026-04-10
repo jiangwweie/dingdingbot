@@ -1,21 +1,103 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-10 Phase 1 策略系统整合 + 测试挂起修复完成，今日收工
+> **最后更新**: 2026-04-10 Task 11: StrategyForm 触发器参数表单补全完成
 
 ### 收工状态
 
 **今日完成工作**:
-1. Phase 1 策略系统整合 - 8 个任务全部完成 ✅
-2. 全量测试挂起问题定位并修复（5 个测试 bug 修复）✅
-3. 规划文档更新（task_plan.md + progress.md）✅
-4. Git 推送完成（2 commits 推送到 dev）✅
-
-**全量测试结果**: 2338 passed, 3 skipped（剩余 100 failed + 12 errors 为已有问题，非 Phase 1 改动引起）
+1. Task 11: StrategyForm 触发器参数表单补全 ✅
+   - 新建 triggerSchemas.ts (SSOT 参数 Schema 定义)
+   - 新建 TriggerParamsForm.tsx (动态参数表单组件)
+   - 修改 StrategyForm.tsx (集成参数表单 + 回填 + 提交)
+   - 重构 StrategyEditor.tsx (统一使用共享 Schema)
+2. TypeScript 编译通过 + 生产构建成功 ✅
 
 **遗留待办**:
-- 第二阶段任务：BackupTab 修复、合并 SystemTab、StrategyForm 参数表单、共享连接池
+- 第二阶段任务：合并 SystemTab、共享连接池
 - MVP Task 4: Testnet 模拟盘验证
+
+---
+
+## 2026-04-10 Task 11: StrategyForm 触发器参数表单补全
+
+### 问题
+
+`StrategyForm.tsx` 第 108 行 `trigger_config.params` 硬编码为空对象 `{}`，用户无法配置触发器参数。
+
+### 新建文件
+
+| 文件 | 说明 |
+|------|------|
+| `web-front/src/components/strategy/triggerSchemas.ts` | 触发器参数 Schema 定义 (SSOT)，包含 pinbar/engulfing/doji/hammer 四种类型的字段元数据 + 默认值 + 范围校验 |
+| `web-front/src/components/strategy/TriggerParamsForm.tsx` | 动态参数表单组件，根据 triggerType 自动渲染对应字段，支持 Slider + InputNumber 联动 |
+
+### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `web-front/src/pages/config/StrategyForm.tsx` | 导入 TriggerParamsForm + getTriggerDefaultParams；useEffect 中回填 trigger_params；handleSubmit 中使用 form 值替代空对象；trigger_type Select 下方渲染参数表单 |
+| `web-front/src/components/strategy/StrategyEditor.tsx` | 移除内联 DEFAULT_TRIGGER_PARAMS 和 helper 函数，统一引用 triggerSchemas.ts (SSOT) |
+
+### 技术要点
+
+- **SSOT 设计**: triggerSchemas.ts 作为所有触发器参数定义的唯一来源，StrategyForm 和 StrategyEditor 共享
+- **表单集成**: TriggerParamsForm 直接注册到父级 Ant Design Form 的 `trigger_params` 路径下，无需状态同步
+- **SliderInputNumber**: 自定义复合控件，Slider 与 InputNumber 通过 Form.Item 的 value/onChange 自动联动
+- **兜底处理**: 未知触发器类型显示友好提示，不渲染空字段
+- **编辑模式回填**: 优先使用后端返回的 params，缺失时从 Schema 获取默认值
+
+### 验证
+
+- TypeScript 编译: 新增文件零错误
+- 生产构建: 成功 (`npm run build` 通过)
+- 无回归: 修改 StrategyEditor.tsx 无新增错误 (预存在的 parser 类型问题不受影响)
+
+---
+
+## 2026-04-10 BackupTab 导入/导出功能完全重写
+
+### 5 个断裂点修复
+
+| # | 断裂点 | 修复前 | 修复后 |
+|---|--------|--------|--------|
+| 1 | 导出端点 | `GET /api/config/export`（路径错 + 方法错） | `POST /api/v1/config/export` ✅ |
+| 2 | 导入预览 | 前端 js-yaml 本地解析（无后端验证） | `POST /api/v1/config/import/preview` ✅ |
+| 3 | 确认导入 | `POST /api/config/import` FormData（端点不存在） | `POST /api/v1/config/import/confirm` + preview_token ✅ |
+| 4 | 预览数据结构 | 使用不存在的 `changes` 字段 | 使用后端返回的 `summary`/`preview_data`/`conflicts`/`errors` ✅ |
+| 5 | Token 过期 | 无处理 | 5 分钟 TTL 检测 + 过期自动重置 ✅ |
+
+### 新增 API 方法（`web-front/src/api/config.ts`）
+
+| 方法 | 端点 | 类型 |
+|------|------|------|
+| `configApi.exportConfig()` | `POST /api/v1/config/export` | `ExportRequest → ExportResponse` |
+| `configApi.previewImport()` | `POST /api/v1/config/import/preview` | `ImportPreviewRequest → ImportPreviewResult` |
+| `configApi.confirmImport()` | `POST /api/v1/config/import/confirm` | `ImportConfirmRequest → ImportConfirmResponse` |
+
+### 新增类型定义
+
+- `ExportRequest` / `ExportResponse`
+- `ImportPreviewRequest` / `ImportPreviewResult`
+- `ImportConfirmRequest` / `ImportConfirmResponse`
+
+### BackupTab.tsx 核心改动
+
+- 移除前端 js-yaml 依赖和 `ImportPreview` 本地类型
+- 导入 `configApi` 和类型定义从 `../../api/config`
+- `handleExport`: 使用 `configApi.exportConfig()` + 后端返回的 `filename`
+- `handleUpload`: 读取文件内容 → 调用 `configApi.previewImport()` → 设置过期时间戳
+- `handleConfirmImport`: 检查 token 过期 → 调用 `configApi.confirmImport({ preview_token })`
+- 新增 `isPreviewExpired()` 检查函数（`PREVIEW_TOKEN_TTL_SECONDS = 300`）
+- 新增 `errors` 渲染（红色 Alert，列表展示）
+- 确认导入按钮在 `!valid` 或 token 过期时禁用
+- Table 组件增加 `rowKey` 属性避免 React warning
+- 完成页面展示 `snapshot_id`（如果后端返回）
+
+### TypeScript 编译验证
+
+- 修改文件零错误：`BackupTab.tsx` ✅, `config.ts` ✅
+- 全量 tsc 错误均为已有问题（e2e 测试、v3 组件等）
 
 ---
 

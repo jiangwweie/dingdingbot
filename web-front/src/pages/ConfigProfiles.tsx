@@ -32,7 +32,7 @@ import ImportProfileModal from '../components/profiles/ImportProfileModal';
 import RenameProfileModal from '../components/profiles/RenameProfileModal';
 import { StrategiesTab } from './config/StrategiesTab';
 import { BackupTab } from './config/BackupTab';
-import { SystemTab } from './config/SystemTab';
+import SystemSettings from './config/SystemSettings';
 import { cn } from '../lib/utils';
 
 export default function ConfigProfiles() {
@@ -464,7 +464,7 @@ export default function ConfigProfiles() {
         <StrategiesTab />
       ) : activeTab === 'system' ? (
         /* 系统配置 Tab */
-        <SystemTab />
+        <SystemSettings variant="tab" />
       ) : (
         /* 备份恢复 Tab */
         <BackupTab />

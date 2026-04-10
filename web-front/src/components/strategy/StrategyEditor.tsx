@@ -28,6 +28,7 @@ import {
 } from 'antd';
 import { SaveOutlined, RotateLeftOutlined } from '@ant-design/icons';
 import type { Strategy, CreateStrategyRequest, UpdateStrategyRequest } from '../../api/config';
+import { getTriggerDefaultParams, getTriggerSchema } from './triggerSchemas';
 
 // ============================================================
 // Type Definitions
@@ -112,24 +113,6 @@ const TIMEFRAME_OPTIONS = [
 // Default Values
 // ============================================================
 
-const DEFAULT_TRIGGER_PARAMS: Record<string, Record<string, number>> = {
-  pinbar: {
-    min_wick_ratio: 0.6,
-    max_body_ratio: 0.3,
-    body_position_tolerance: 0.1,
-  },
-  engulfing: {
-    min_body_ratio: 0.5,
-  },
-  doji: {
-    max_body_ratio: 0.1,
-  },
-  hammer: {
-    min_wick_ratio: 0.6,
-    max_upper_wick_ratio: 0.1,
-  },
-};
-
 const DEFAULT_FILTER_PARAMS: Record<string, Record<string, any>> = {
   ema: { period: 60 },
   mtf: { mapping: '15m->1h', ema_period: 60 },
@@ -157,12 +140,13 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
     if (visible) {
       if (strategy) {
         // 编辑模式：填充现有数据
+        const tt = strategy.trigger_config?.type || 'pinbar';
         form.setFieldsValue({
           name: strategy.name,
           description: strategy.description,
           is_active: strategy.is_active,
-          trigger_type: strategy.trigger_config?.type || 'pinbar',
-          trigger_params: strategy.trigger_config?.params || DEFAULT_TRIGGER_PARAMS.pinbar,
+          trigger_type: tt,
+          trigger_params: strategy.trigger_config?.params || getTriggerDefaultParams(tt),
           filter_logic: strategy.filter_logic || 'AND',
           symbols: strategy.symbols || [],
           timeframes: strategy.timeframes || [],
@@ -175,7 +159,7 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
           description: '',
           is_active: true,
           trigger_type: 'pinbar',
-          trigger_params: DEFAULT_TRIGGER_PARAMS.pinbar,
+          trigger_params: getTriggerDefaultParams('pinbar'),
           filter_logic: 'AND',
           symbols: ['BTC/USDT:USDT'],
           timeframes: ['1h'],
@@ -261,23 +245,32 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
 
   // 渲染触发器参数表单
   const renderTriggerParams = useMemo(() => {
-    const params = DEFAULT_TRIGGER_PARAMS[triggerType] || {};
+    const schema = getTriggerSchema(triggerType);
+    if (!schema) {
+      return (
+        <div className="text-sm text-gray-400 py-2">
+          未知触发器类型: {triggerType}，暂无参数配置
+        </div>
+      );
+    }
 
     return (
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
-        {Object.entries(params).map(([key, defaultValue]) => (
+        {schema.params.map((field) => (
           <Form.Item
-            key={key}
-            name={['trigger_params', key]}
-            label={getParamLabel(key)}
-            rules={[{ type: 'number', min: 0, max: 1 }]}
-            tooltip={getParamTooltip(key)}
-            initialValue={defaultValue}
+            key={field.key}
+            name={['trigger_params', field.key]}
+            label={field.label}
+            rules={[
+              { type: 'number', min: field.min, max: field.max, message: `${field.label} 范围为 ${field.min} ~ ${field.max}` },
+            ]}
+            tooltip={field.tooltip}
+            initialValue={field.defaultValue}
           >
             <InputNumber
-              min={0}
-              max={1}
-              step={0.05}
+              min={field.min}
+              max={field.max}
+              step={field.step}
               style={{ width: '100%' }}
               disabled={loading}
             />
@@ -515,31 +508,5 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
     </Drawer>
   );
 };
-
-// ============================================================
-// Helper Functions
-// ============================================================
-
-function getParamLabel(key: string): string {
-  const labels: Record<string, string> = {
-    min_wick_ratio: '最小影线比例',
-    max_body_ratio: '最大实体比例',
-    body_position_tolerance: '实体位置容差',
-    min_body_ratio: '最小实体比例',
-    max_upper_wick_ratio: '最大上影线比例',
-  };
-  return labels[key] || key;
-}
-
-function getParamTooltip(key: string): string {
-  const tooltips: Record<string, string> = {
-    min_wick_ratio: '影线长度占 K 线总长度的最小比例，默认 0.6 (60%)',
-    max_body_ratio: '实体长度占 K 线总长度的最大比例，默认 0.3 (30%)',
-    body_position_tolerance: '实体位置容差范围，默认 0.1 (10%)',
-    min_body_ratio: '吞没形态中实体部分的最小比例，默认 0.5 (50%)',
-    max_upper_wick_ratio: '锤头线上影线的最大比例，默认 0.1 (10%)',
-  };
-  return tooltips[key] || '';
-}
 
 export default StrategyEditorDrawer;

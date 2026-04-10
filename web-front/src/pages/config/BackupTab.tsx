@@ -5,9 +5,15 @@
  * 1. 选择文件 - 上传 YAML 文件或导出当前配置
  * 2. 预览变更 - 显示变更摘要、冲突警告、重启提示
  * 3. 完成 - 导入结果展示
+ *
+ * 数据流：
+ * - 导出：调用 POST /api/v1/config/export → 获取 yaml_content → Blob 下载
+ * - 导入预览：读取文件内容 → POST /api/v1/config/import/preview → 获取 preview_token
+ * - 确认导入：POST /api/v1/config/import/confirm { preview_token } → 完成
+ * - preview_token TTL：5 分钟，过期需重新预览
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   Card,
   Button,
@@ -28,69 +34,23 @@ import {
   CheckCircleOutlined,
   WarningOutlined,
   InfoCircleOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
-import type { StepsProps } from 'antd';
+import {
+  configApi,
+  type ImportPreviewResult,
+  type ImportConfirmResponse,
+} from '../../api/config';
 
 const { Title, Paragraph } = Typography;
 
 // ============================================================
-// Type Definitions
+// Constants
 // ============================================================
 
-/**
- * 导入预览结果类型
- */
-interface ImportPreview {
-  /** 是否有效 */
-  valid: boolean;
-  /** 预览令牌（用于确认导入） */
-  preview_token: string;
-  /** 过期时间（ISO 8601 格式） */
-  expires_at: string;
-  /** 变更摘要 */
-  summary: {
-    /** 策略变更 */
-    strategies: {
-      /** 新增数量 */
-      added: number;
-      /** 修改数量 */
-      modified: number;
-      /** 删除数量 */
-      deleted: number;
-    };
-    /** 风控配置变更 */
-    risk: {
-      /** 是否有修改 */
-      modified: boolean;
-    };
-    /** 币种变更 */
-    symbols: {
-      /** 新增数量 */
-      added: number;
-    };
-    /** 通知渠道变更 */
-    notifications: {
-      /** 新增数量 */
-      added: number;
-    };
-  };
-  /** 冲突列表 */
-  conflicts: string[];
-  /** 是否需要重启 */
-  requires_restart: boolean;
-  /** 预览详情数据 */
-  preview_data: {
-    /** 策略列表 */
-    strategies: any[];
-    /** 风控配置 */
-    risk: any;
-    /** 币种列表 */
-    symbols: any[];
-    /** 通知渠道列表 */
-    notifications: any[];
-  };
-}
+/** preview_token TTL（秒），与后端 TTLCache 保持一致 */
+const PREVIEW_TOKEN_TTL_SECONDS = 5 * 60;
 
 // ============================================================
 // Component
@@ -99,17 +59,66 @@ interface ImportPreview {
 export const BackupTab: React.FC = () => {
   // 当前步骤 (0: 选择文件，1: 预览变更，2: 完成)
   const [currentStep, setCurrentStep] = useState(0);
-  // 预览数据
-  const [previewData, setPreviewData] = useState<ImportPreview | null>(null);
+  // 预览数据（来自后端 preview API）
+  const [previewData, setPreviewData] = useState<ImportPreviewResult | null>(null);
+  // 确认导入结果
+  const [importResult, setImportResult] = useState<ImportConfirmResponse | null>(null);
   // 加载状态
   const [loading, setLoading] = useState(false);
-  // YAML 文件内容
+  // YAML 文件内容（用于导入流程）
   const [yamlContent, setYamlContent] = useState<string>('');
   // 上传的文件名
   const [fileName, setFileName] = useState<string>('');
+  // preview_token 过期时间戳
+  const [previewExpiresAt, setPreviewExpiresAt] = useState<number>(0);
+
+  // 检查 preview_token 是否过期
+  const isPreviewExpired = useCallback(() => {
+    if (!previewData || previewExpiresAt === 0) return true;
+    return Date.now() > previewExpiresAt;
+  }, [previewData, previewExpiresAt]);
 
   // ============================================================
-  // Step 1: 上传 YAML 文件并预览
+  // Step 1: 导出配置
+  // ============================================================
+  const handleExport = async () => {
+    try {
+      setLoading(true);
+
+      const response = await configApi.exportConfig({
+        include_strategies: true,
+        include_risk: true,
+        include_system: true,
+        include_symbols: true,
+        include_notifications: true,
+      });
+
+      const { yaml_content, filename } = response.data;
+
+      // 创建 Blob 并触发浏览器下载
+      const blob = new Blob([yaml_content], { type: 'application/x-yaml' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      message.success(`配置已导出：${filename}`);
+    } catch (error: unknown) {
+      console.error('Export error:', error);
+      const errMessage =
+        error instanceof Error ? error.message : '导出失败';
+      message.error(errMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============================================================
+  // Step 1: 上传 YAML 文件并调用预览 API
   // ============================================================
   const handleUpload = async (file: UploadFile) => {
     if (!file.originFileObj) {
@@ -122,43 +131,34 @@ export const BackupTab: React.FC = () => {
       setYamlContent(content);
       setFileName(file.name || 'unknown.yaml');
 
-      // 在本地解析 YAML 进行预览（不调用后端）
       setLoading(true);
 
-      // 简单 YAML 解析（前端）
-      const jsyaml = await import('js-yaml');
-      const parsed = jsyaml.load(content) as Record<string, unknown>;
+      // 调用后端 preview API
+      const response = await configApi.previewImport({
+        yaml_content: content,
+        filename: file.name || 'config.yaml',
+      });
 
-      // 构建预览数据
-      const preview: ImportPreview = {
-        preview_token: 'local',
-        changes: {
-          added: [],
-          modified: [],
-          removed: [],
-        },
-        conflicts: [],
-        requires_restart: true,
-        filename: file.name,
-      };
+      const preview = response.data;
 
-      // 简单对比当前配置和导入配置
-      if (parsed) {
-        Object.keys(parsed).forEach(key => {
-          preview.changes.modified.push({
-            path: key,
-            old: 'current',
-            new: String(parsed[key]),
-          });
-        });
-      }
-
+      // 设置预览数据和过期时间
       setPreviewData(preview);
-      setCurrentStep(1);
-      message.success('预览生成成功');
-    } catch (error: any) {
-      console.error('Upload error:', error);
-      message.error('预览生成失败：' + error.message);
+      setPreviewExpiresAt(Date.now() + PREVIEW_TOKEN_TTL_SECONDS * 1000);
+
+      // 如果预览无效（有 errors），展示错误并阻止进入下一步
+      if (!preview.valid) {
+        message.error(`YAML 验证失败，发现 ${preview.errors.length} 个错误`);
+        // 仍然展示预览让用户看到错误，但禁用确认导入按钮
+        setCurrentStep(1);
+      } else {
+        setCurrentStep(1);
+        message.success('预览生成成功');
+      }
+    } catch (error: unknown) {
+      console.error('Preview error:', error);
+      const errMessage =
+        error instanceof Error ? error.message : '预览生成失败';
+      message.error(errMessage);
     } finally {
       setLoading(false);
     }
@@ -167,75 +167,69 @@ export const BackupTab: React.FC = () => {
   };
 
   // ============================================================
-  // Step 2: 确认导入
+  // Step 2: 确认导入（使用 preview_token）
   // ============================================================
   const handleConfirmImport = async () => {
-    if (!yamlContent) return;
+    // 检查 preview_token 是否过期
+    if (isPreviewExpired()) {
+      message.warning('预览已过期（超过 5 分钟），请重新选择文件预览');
+      setCurrentStep(0);
+      setPreviewData(null);
+      setPreviewExpiresAt(0);
+      return;
+    }
+
+    if (!previewData?.preview_token) return;
 
     try {
       setLoading(true);
 
-      // 创建 FormData 上传文件
-      const formData = new FormData();
-      const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
-      formData.append('file', blob, fileName || 'config.yaml');
-      formData.append('description', `配置导入 - ${new Date().toISOString()}`);
-
-      const response = await fetch('/api/config/import', {
-        method: 'POST',
-        body: formData,
+      const response = await configApi.confirmImport({
+        preview_token: previewData.preview_token,
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || '导入失败');
-      }
-
-      const result = await response.json();
-      message.success(
-        '配置导入成功！' +
-          (result.requires_restart ? '请重启服务。' : '')
-      );
+      const result = response.data;
+      setImportResult(result);
       setCurrentStep(2);
-    } catch (error: any) {
-      console.error('Import error:', error);
-      message.error(error.message || '导入失败');
+
+      let successMsg = '配置导入成功！';
+      if (result.snapshot_id) {
+        successMsg += `（快照 ID: ${result.snapshot_id}）`;
+      }
+      if (previewData.requires_restart) {
+        successMsg += ' 请重启服务使配置生效。';
+      }
+      message.success(successMsg);
+    } catch (error: unknown) {
+      console.error('Confirm import error:', error);
+      const errMessage =
+        error instanceof Error
+          ? error.message
+          : '导入失败，preview_token 可能已过期';
+      message.error(errMessage);
+
+      // 如果是 400 错误（token 过期），重置到第一步
+      if (error instanceof Error && error.message?.includes('400')) {
+        setCurrentStep(0);
+        setPreviewData(null);
+        setPreviewExpiresAt(0);
+        message.warning('请重新选择文件预览');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   // ============================================================
-  // 导出配置
+  // 重置到第一步
   // ============================================================
-  const handleExport = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/config/export', {
-        method: 'GET',
-      });
-
-      if (!response.ok) {
-        throw new Error('导出失败');
-      }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `config_backup_${new Date().toISOString().slice(0, 10)}.yaml`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-
-      message.success('配置已导出');
-    } catch (error: any) {
-      console.error('Export error:', error);
-      message.error(error.message || '导出失败');
-    } finally {
-      setLoading(false);
-    }
+  const handleReset = () => {
+    setCurrentStep(0);
+    setPreviewData(null);
+    setImportResult(null);
+    setYamlContent('');
+    setFileName('');
+    setPreviewExpiresAt(0);
   };
 
   // ============================================================
@@ -244,10 +238,32 @@ export const BackupTab: React.FC = () => {
   const renderPreview = () => {
     if (!previewData) return null;
 
-    const { summary, conflicts, requires_restart } = previewData;
+    const { valid, summary, conflicts, requires_restart, errors } = previewData;
 
     return (
       <div>
+        {/* 验证错误 */}
+        {errors.length > 0 && (
+          <Alert
+            type="error"
+            message={
+              <Space>
+                <ExclamationCircleOutlined />
+                YAML 验证失败
+              </Space>
+            }
+            description={
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {errors.map((err, idx) => (
+                  <li key={idx}>{err}</li>
+                ))}
+              </ul>
+            }
+            style={{ marginBottom: 16 }}
+            showIcon
+          />
+        )}
+
         {/* 冲突警告 */}
         {conflicts.length > 0 && (
           <Alert
@@ -327,6 +343,19 @@ export const BackupTab: React.FC = () => {
           </Descriptions.Item>
         </Descriptions>
 
+        {/* Token 过期倒计时提示 */}
+        <Alert
+          type="info"
+          message={
+            <Space>
+              <InfoCircleOutlined />
+              预览 Token 将在 5 分钟内有效，请尽快确认导入
+            </Space>
+          }
+          style={{ marginTop: 16 }}
+          showIcon
+        />
+
         {/* 策略详情 */}
         {previewData.preview_data.strategies.length > 0 && (
           <div style={{ marginTop: 16 }}>
@@ -336,12 +365,14 @@ export const BackupTab: React.FC = () => {
               size="small"
               pagination={false}
               scroll={{ y: 300 }}
+              rowKey={(record) => record.name || record.id || Math.random()}
               columns={[
                 {
                   title: '名称',
                   dataIndex: 'name',
                   key: 'name',
                   width: 200,
+                  render: (value: string) => value || '-',
                 },
                 {
                   title: '触发器',
@@ -374,11 +405,13 @@ export const BackupTab: React.FC = () => {
               size="small"
               pagination={false}
               scroll={{ y: 200 }}
+              rowKey={(record) => record.symbol || record.id || Math.random()}
               columns={[
                 {
                   title: '交易对',
                   dataIndex: 'symbol',
                   key: 'symbol',
+                  render: (value: string) => value || '-',
                 },
               ]}
             />
@@ -477,21 +510,13 @@ export const BackupTab: React.FC = () => {
             }}
           >
             <Space>
-              <Button
-                onClick={() => {
-                  setCurrentStep(0);
-                  setPreviewData(null);
-                  setYamlContent('');
-                  setFileName('');
-                }}
-              >
-                返回
-              </Button>
+              <Button onClick={handleReset}>返回</Button>
               <Button
                 type="primary"
                 onClick={handleConfirmImport}
                 loading={loading}
                 icon={<CheckCircleOutlined />}
+                disabled={!previewData?.valid || isPreviewExpired()}
               >
                 确认导入
               </Button>
@@ -516,7 +541,15 @@ export const BackupTab: React.FC = () => {
             <Title level={4}>导入成功</Title>
             <Paragraph type="secondary">
               配置已成功导入
-              {previewData?.requires_restart && '，请重启服务使配置生效'}
+              {importResult?.snapshot_id && (
+                <>
+                  <br />
+                  快照 ID: {importResult.snapshot_id}
+                </>
+              )}
+              {previewData?.requires_restart && (
+                <>，请重启服务使配置生效</>
+              )}
             </Paragraph>
             {fileName && (
               <Paragraph style={{ marginTop: 8 }}>
@@ -526,15 +559,7 @@ export const BackupTab: React.FC = () => {
             )}
           </div>
           <div style={{ textAlign: 'center', marginTop: 24 }}>
-            <Button
-              onClick={() => {
-                setCurrentStep(0);
-                setPreviewData(null);
-                setYamlContent('');
-                setFileName('');
-              }}
-              type="primary"
-            >
+            <Button onClick={handleReset} type="primary">
               返回
             </Button>
           </div>
