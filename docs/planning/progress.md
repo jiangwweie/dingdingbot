@@ -25,7 +25,7 @@
 ### 待办
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
-| 5 | API 契约对齐修复（方案 A） | P0 | 进行中 |
+| 5 | API 契约对齐修复（方案 A） | P0 | ✅ 已完成 |
 | 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
 
 ---
@@ -62,87 +62,51 @@
 
 ---
 
-## 2026-04-10 进度核实 - ConfigManager 重构阶段 3 & 4 已完成
+## 2026-04-10 API 契约对齐 - Phase 2 后端系统配置端点完成
 
-**核实内容**: 通过 git 提交记录和代码确认 Provider 注册框架已完成
-**提交**: 阶段 3/4 于 2026-04-07 已完成（6 个提交）
+**提交**: `2c91cef`
 
-### 核实结果
-- **阶段 3**: 135 个单元测试通过，7 个 Provider 源文件存在，代码审查 A+
-- **阶段 4**: 50 个集成测试通过，覆盖率 92%，6 份交付文档齐全
-- task_plan.md 里程碑 M3/M4/M5 全部更新为已完成
+### 改动内容
+1. **`src/interfaces/api_v1_config.py`**:
+   - 新增嵌套 Pydantic 模型：`EmaConfig`, `QueueConfig`, `SignalPipelineConfig`, `WarmupConfig`
+   - `SystemConfigResponse` 重构为嵌套格式：`{ema: {period}, signal_pipeline: {cooldown_seconds, queue}, warmup}`
+   - `SystemConfigUpdateRequest` 重构为嵌套格式，匹配前端 `SystemConfigUpdateRequest`
+   - 新增 `_flat_to_nested()` 转换函数：DB 扁平格式 → 前端嵌套格式
+   - 新增 `_nested_to_flat()` 转换函数：前端嵌套格式 → DB 扁平格式
+   - `check_admin_permission()` 新增 `DISABLE_AUTH` 环境变量 bypass 机制（本地开发）
+   - `update_system_config()` 新增热重载通知 `notify_hot_reload("system")`
+
+2. **`tests/unit/test_system_config_api.py`** (新增 39 个测试):
+   - 嵌套模型测试：`EmaConfig`, `QueueConfig`, `SignalPipelineConfig`, `WarmupConfig`
+   - `SystemConfigResponse` / `SystemConfigUpdateRequest` 嵌套格式验证
+   - `_flat_to_nested` / `_nested_to_flat` 转换函数测试
+   - `DISABLE_AUTH` bypass 机制测试（true/TRUE/1/yes 均支持）
+   - GET /system 端点测试（正常/默认/503）
+   - PUT /system 端点测试（完整/部分/空/503/500）
+
+3. **`tests/unit/test_config_import_export.py`**:
+   - 修复 4 个测试使用新的嵌套格式
+   - GET /system 断言从 `data["ema_period"]` 改为 `data["ema"]["period"]`
+
+### 验证结果
+- 新增 39 个测试全部通过
+- 135 个配置相关测试全部通过
+- 98 个权限/快照/边界测试全部通过
+- 无回归（旧 `api.py` 中的模型不受影响）
+
+### API 契约对齐状态
+| 端点 | 前端格式 | 后端格式 | 状态 |
+|------|---------|---------|------|
+| GET /api/v1/config/system | `{ema: {period}, signal_pipeline: {...}}` | ✅ 已对齐 | ✅ 完成 |
+| PUT /api/v1/config/system | `{ema: {period}, signal_pipeline: {...}}` | ✅ 已对齐 | ✅ 完成 |
+| Admin 认证 | 需要 X-User-Role: admin | ✅ 支持 DISABLE_AUTH bypass | ✅ 完成 |
+| 热重载通知 | 期望收到通知 | ✅ 已添加 notify_hot_reload | ✅ 完成 |
 
 ### 当前待办
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
+| 7 | API 契约对齐 - Phase 3 端到端验证 | P0 | 待执行 |
 | 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
-
----
-
-## 2026-04-09 MVP 回测验证项目 - Task 2 & Task 3 完成
-
-**提交**: `12e4928`, `7c59ac6`
-
-### Task 2: Pinbar 集成测试 - 真实 K 线数据验证 ✅
-- 回测 3 品种 × 3 周期 = 445,500 根 K 线，5,406 个信号
-- 报告: `docs/reports/pinbar-backtest-report-20260409.md`
-
-**6 个核心发现**:
-1. 15m 是唯一全部正收益周期
-2. SOL 表现最优（15m +110%）
-3. 胜率 28%~41% + 盈亏比 1.7~2.25 = 正期望
-4. EMA 过滤器拒绝 82%（可能过严）
-5. 评分与胜率相关性弱
-6. 最大连亏 9~16 笔
-
-### Task 3: PMS 回测功能检查 ✅
-- 9 个后端 API + 11 个前端组件 + 7 个 API 函数
-- 综合评分：9.4/10（唯一缺失：归因分析前端页面）
-
----
-
-## 2026-04-09 MVP 回测验证项目启动
-
-**提交**: `85ce355`
-
-- ✅ 任务分解（4 个任务，定义依赖关系）
-- ✅ Task 1: Pinbar 单元测试补充（57 新增测试全部通过）
-- ✅ 本地 K 线数据检查（v3_dev.db: 11万+ 条）
-- ⏭ 多品种组合回测降级为 P2
-
----
-
-## 2026-04-08 系统优先级重新分析 ✅
-
-**执行者**: PM Agent（基于用户澄清）
-**提交**: `45ca8c3`
-
-### 核心决策
-1. **单人使用 + 1h/4h 中长线** → 不存在高并发问题
-2. **并发问题降级**: P1/P2 → P3（节省 10h 工时）
-3. **P0 升级**: 回测数据对齐优化 + Pinbar 单元测试补充
-4. **最小交付版本**: 仅支持 Pinbar 策略，总工时 33h
-
----
-
-## 2026-04-08 P0 缺陷修复实施 ✅
-
-**提交**: `a3ee2cd`, `9d4aa27`, `4ffd17f`
-
-### 修复 1: WebSocket K 线选择逻辑（P0）
-- 优先使用交易所 `x` 字段判断收盘状态
-- 后备使用时间戳推断
-
-### 修复 2: Pinbar 最小波幅检查（P0）
-- 动态 ATR 阈值替代固定百分比
-- 避免低波动品种产生无效信号
-
----
-
-## 历史归档
-
-2026-04-07 及更早的进度日志已归档至:
-`docs/planning/archive/completed-tasks/progress-history-20260407-and-earlier.md`
 
 ---
 
@@ -156,50 +120,6 @@
 
 **Git 提交**: `b3b9cb6`, `e2835fd`, `f293013`, `089ce73`
 
-### 文档结构现状
-```
-docs/
-├── arch/              32个活跃架构文档
-├── designs/           24个活跃设计文档
-├── v3/                4个核心文件 + 14个Phase契约
-├── planning/          task_plan.md(62行) + progress.md(92行) + findings.md(122行)
-├── reports/           按项目分5个子目录
-└── reviews/           按项目分4个子目录
-```
-
-### 当前待办
-| # | 任务 | 优先级 | 状态 |
-|---|------|--------|------|
-| 5 | API 契约对齐修复（方案 A）- Phase 1 前端 | P0 | ✅ 已完成 |
-| 6 | API 契约对齐修复（方案 A）- Phase 2 后端系统配置 | P0 | 待后端 |
-| 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
-
 ---
 
-## 2026-04-10 API 契约对齐 - Phase 1 前端迁移完成
-
-**提交**: `9df70eb`
-
-### 改动内容
-1. **`web-front/src/api/config.ts`**:
-   - `baseURL` 从 `/api` 改为 `/api/v1/config`
-   - 风险配置路径从 `/config` 改为 `/risk`
-   - 更新所有策略管理 API 注释路径
-   - 简化风险配置函数（移除嵌套解包逻辑）
-
-2. **`web-front/src/pages/config/StrategyConfig.tsx`**:
-   - `loadStrategies` 降级逻辑简化：`response.data || []`（移除 `.strategies` 兼容）
-   - 修复 `SimpleImage` 组件类型错误（`image={<SimpleImage />}`）
-
-### TypeScript 编译验证
-- `config.ts`: 无新增错误
-- `StrategyConfig.tsx`: 无新增错误
-- 全局预存错误（e2e/测试文件）不受影响
-
-### 已知限制（Phase 2 处理）
-- 系统配置接口（`/strategy/params`）随 baseURL 迁移后变为 `/api/v1/config/strategy/params`
-- 后端需补充 `GET/PUT /api/v1/config/system` 端点（Phase 2，预估 90 min）
-
----
-
-*最后更新：2026-04-10 15:30 - API 契约对齐 Phase 1 前端迁移完成*
+*最后更新：2026-04-10 16:30 - API 契约对齐 Phase 2 后端系统配置完成*
