@@ -188,7 +188,7 @@ class TestAtrFilterCheck:
         event = filter.check(pattern, context)
         assert event.passed is True
         assert event.reason == "volatility_sufficient"
-        assert event.metadata.get("ratio", 0) >= 0.5
+        assert event.metadata.get("volatility_ratio", 0) >= 0.5
 
     def test_filter_fails_low_volatility(self):
         """Test that filter fails when volatility is insufficient (十字星)."""
@@ -225,7 +225,7 @@ class TestAtrFilterCheck:
         event = filter.check(pattern, context)
         assert event.passed is False
         assert event.reason == "insufficient_volatility"
-        assert event.metadata.get("ratio", 1) < 0.5
+        assert event.metadata.get("volatility_ratio", 1) < 0.5
 
 
 class TestFilterFactoryIntegration:
@@ -317,7 +317,7 @@ class TestAtrFilterEndToEnd:
         event = filter.check(pattern, context)
         # 十字星 should be filtered: ratio = 116/400 = 0.29 < 0.5
         assert event.passed is False, f"十字星 should be filtered, got {event.reason}"
-        assert event.metadata.get("ratio", 1) < 0.5
+        assert event.metadata.get("volatility_ratio", 1) < 0.5
 
         # 22:00 真突破：波幅 527 USDT
         breakthrough_kline = create_kline(
@@ -339,4 +339,4 @@ class TestAtrFilterEndToEnd:
         event2 = filter.check(pattern2, context2)
         # 真突破 should pass: ratio = 527/400 = 1.32 > 0.5
         assert event2.passed is True, f"真突破 should pass, got {event2.reason}"
-        assert event2.metadata.get("ratio", 0) > 0.5
+        assert event2.metadata.get("volatility_ratio", 0) > 0.5

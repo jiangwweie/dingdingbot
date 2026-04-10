@@ -302,12 +302,12 @@ class TestNestedToFlat:
         assert flat["mtf_ema_period"] == 120
         assert flat["signal_cooldown_seconds"] == 7200
         assert flat["queue_batch_size"] == 20
-        assert flat["queue_flush_interval"] == Decimal("3.0")
+        assert flat["queue_flush_interval"] == 3.0
         assert flat["queue_max_size"] == 2000
         assert flat["warmup_history_bars"] == 200
         assert flat["atr_filter_enabled"] is False
         assert flat["atr_period"] == 10
-        assert flat["atr_min_ratio"] == Decimal("0.3")
+        assert flat["atr_min_ratio"] == 0.3
 
     def test_partial_conversion(self):
         from src.interfaces.api_v1_config import _nested_to_flat

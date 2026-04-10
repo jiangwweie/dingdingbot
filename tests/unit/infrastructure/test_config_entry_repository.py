@@ -751,11 +751,13 @@ class TestConfigEntryRepositoryBacktestConfig:
         """Test that get_backtest_configs returns defaults when no KV exists."""
         configs = await repository.get_backtest_configs(profile_name='default')
 
-        assert len(configs) == 4
+        assert len(configs) == 6
         assert configs['slippage_rate'] == Decimal('0.001')
         assert configs['fee_rate'] == Decimal('0.0004')
         assert configs['initial_balance'] == Decimal('10000')
         assert configs['tp_slippage_rate'] == Decimal('0.0005')
+        assert configs['funding_rate'] == Decimal('0.0001')
+        assert configs['funding_rate_enabled'] is True
 
     @pytest.mark.asyncio
     async def test_get_backtest_configs_overrides_with_stored_values(self, repository):

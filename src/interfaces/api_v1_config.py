@@ -881,18 +881,18 @@ def _nested_to_flat(update_data: Dict[str, Any]) -> Dict[str, Any]:
                     if "batch_size" in queue:
                         flat["queue_batch_size"] = queue["batch_size"]
                     if "flush_interval" in queue:
-                        flat["queue_flush_interval"] = Decimal(str(queue["flush_interval"]))
+                        flat["queue_flush_interval"] = float(queue["flush_interval"])
                     if "max_queue_size" in queue:
                         flat["queue_max_size"] = queue["max_queue_size"]
                 elif hasattr(queue, "batch_size"):
                     flat["queue_batch_size"] = queue.batch_size
-                    flat["queue_flush_interval"] = Decimal(str(queue.flush_interval))
+                    flat["queue_flush_interval"] = float(queue.flush_interval)
                     flat["queue_max_size"] = queue.max_queue_size
         elif hasattr(sp, "cooldown_seconds"):
             flat["signal_cooldown_seconds"] = sp.cooldown_seconds
             if hasattr(sp, "queue"):
                 flat["queue_batch_size"] = sp.queue.batch_size
-                flat["queue_flush_interval"] = Decimal(str(sp.queue.flush_interval))
+                flat["queue_flush_interval"] = float(sp.queue.flush_interval)
                 flat["queue_max_size"] = sp.queue.max_queue_size
 
     # warmup.history_bars -> warmup_history_bars
@@ -910,7 +910,7 @@ def _nested_to_flat(update_data: Dict[str, Any]) -> Dict[str, Any]:
     if "atr_period" in update_data and update_data["atr_period"] is not None:
         flat["atr_period"] = update_data["atr_period"]
     if "atr_min_ratio" in update_data and update_data["atr_min_ratio"] is not None:
-        flat["atr_min_ratio"] = Decimal(str(update_data["atr_min_ratio"]))
+        flat["atr_min_ratio"] = float(update_data["atr_min_ratio"])
 
     return flat
 
