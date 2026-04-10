@@ -1,21 +1,43 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-10 Task 11: StrategyForm 触发器参数表单补全完成
+> **最后更新**: 2026-04-10 Phase 2 前端修复全部完成 + Task 12 连接池进行中，今日收工
 
 ### 收工状态
 
 **今日完成工作**:
-1. Task 11: StrategyForm 触发器参数表单补全 ✅
-   - 新建 triggerSchemas.ts (SSOT 参数 Schema 定义)
-   - 新建 TriggerParamsForm.tsx (动态参数表单组件)
-   - 修改 StrategyForm.tsx (集成参数表单 + 回填 + 提交)
-   - 重构 StrategyEditor.tsx (统一使用共享 Schema)
-2. TypeScript 编译通过 + 生产构建成功 ✅
+1. Phase 2 Task 9 (P0): BackupTab 导入/导出完全重写 ✅
+   - config.ts 新增 exportConfig/previewImport/confirmImport 3 个 API 方法
+   - BackupTab.tsx 完全重写数据流，支持 preview_token 5 分钟 TTL 处理
+   - 对齐后端 /api/v1/config/export, /import/preview, /import/confirm 端点
+2. Phase 2 Task 10 (P1): 合并 SystemTab 重复组件 ✅
+   - SystemSettings 新增 variant prop 支持嵌入/页面两种模式
+   - ConfigProfiles 替换 <SystemTab /> 为 <SystemSettings variant="tab" />
+   - 删除 SystemTab.tsx (336 行)，测试更新为 SystemSettings
+3. Phase 2 Task 11 (P1): StrategyForm 触发器参数表单补全 ✅
+   - 新建 triggerSchemas.ts (4 种触发器 SSOT 参数定义)
+   - 新建 TriggerParamsForm.tsx (动态参数表单，Slider+InputNumber 联动)
+   - StrategyForm 集成 + 编辑模式回填 + 提交合并
+   - StrategyEditor.tsx 重构使用共享 Schema
+4. 架构分析文档：docs/designs/2026-04-10-phase2-tasks-analysis.md ✅
+5. Git 提交：17be8b5 feat: Phase 2 前端修复
+
+**测试验证**:
+- SystemTab.test.tsx: 16/16 ✅（修复 Collapse 展开问题）
+- TypeScript 编译：0 新增错误
+- 生产构建：npm run build 成功
+- 其他 10 个测试失败均为已有问题
+
+**进行中**:
+- Task 12 (P1): 共享 DB 连接池 — 后端 agent 正在修改 11 个 Repository 的构造函数，支持可选 connection 参数注入
 
 **遗留待办**:
-- 第二阶段任务：合并 SystemTab、共享连接池
-- MVP Task 4: Testnet 模拟盘验证
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 12 | 共享 DB 连接池 | P1 | ⏳ 进行中（agent 后台执行） |
+| 14 | 搁置：triggerSchemas 额外工作 | P2 | ⏸️ 已搁置 |
+| 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
+| 9 | BackupTab 修复后手动验证 | P0 | 📋 待验证 |
 
 ---
 
