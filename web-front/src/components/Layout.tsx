@@ -101,12 +101,26 @@ const colorClasses = {
     border: 'border-purple-200',
     active: 'bg-purple-100',
   },
+  cyan: {
+    bg: 'bg-cyan-50',
+    bgHover: 'hover:bg-cyan-50',
+    text: 'text-cyan-700',
+    border: 'border-cyan-200',
+    active: 'bg-cyan-100',
+  },
   gray: {
     bg: 'bg-gray-50',
     bgHover: 'hover:bg-gray-50',
     text: 'text-gray-700',
     border: 'border-gray-200',
     active: 'bg-gray-100',
+  },
+  orange: {
+    bg: 'bg-orange-50',
+    bgHover: 'hover:bg-orange-50',
+    text: 'text-orange-700',
+    border: 'border-orange-200',
+    active: 'bg-orange-100',
   },
 };
 

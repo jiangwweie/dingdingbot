@@ -39,6 +39,25 @@ const TIMEFRAME_OPTIONS = [
   { value: '1w', label: '1 周' },
 ];
 
+// Simple Empty Image Component (must be defined before use)
+const SimpleImage = () => (
+  <svg
+    width="64"
+    height="64"
+    viewBox="0 0 64 64"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <circle cx="32" cy="32" r="30" fill="#F5F5F5" />
+    <path
+      d="M32 18V32L42 42"
+      stroke="#D9D9D9"
+      strokeWidth="2"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 // ============================================================
 // Main Component
 // ============================================================
@@ -329,27 +348,5 @@ const StrategyConfigPage: React.FC = () => {
     </div>
   );
 };
-
-// ============================================================
-// Simple Empty Image Component
-// ============================================================
-
-const SimpleImage = () => (
-  <svg
-    width="64"
-    height="64"
-    viewBox="0 0 64 64"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <circle cx="32" cy="32" r="30" fill="#F5F5F5" />
-    <path
-      d="M32 18V32L42 42"
-      stroke="#D9D9D9"
-      strokeWidth="2"
-      strokeLinecap="round"
-    />
-  </svg>
-);
 
 export default StrategyConfigPage;
