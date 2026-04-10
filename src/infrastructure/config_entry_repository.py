@@ -26,15 +26,21 @@ class ConfigEntryRepository:
     - risk.max_loss_percent
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
         """
         Initialize ConfigEntryRepository.
 
         Args:
             db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
         """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock: Optional[asyncio.Lock] = None  # 延迟创建，避免事件循环冲突
 
     def _ensure_lock(self) -> asyncio.Lock:
@@ -71,13 +77,14 @@ class ConfigEntryRepository:
             return
 
         async with self._ensure_lock():
-            # Open database connection
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
+            # Create connection if not injected
+            if self._owns_connection and self._db is None:
+                self._db = await aiosqlite.connect(self.db_path)
+                self._db.row_factory = aiosqlite.Row
 
-            # Enable WAL mode for high concurrency write support
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
+                # Enable WAL mode for high concurrency write support
+                await self._db.execute("PRAGMA journal_mode=WAL")
+                await self._db.execute("PRAGMA synchronous=NORMAL")
 
             # Create config_entries_v2 table (Phase K design with Profile support)
             await self._db.execute("""
@@ -126,8 +133,8 @@ class ConfigEntryRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 

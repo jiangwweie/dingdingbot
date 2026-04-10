@@ -35,15 +35,21 @@ class BacktestReportRepository:
     - 策略快照序列化存储
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
         """
         Initialize BacktestReportRepository.
 
         Args:
             db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
         """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         logger.info(f"回测报告仓库初始化完成：{db_path}")
 
     async def initialize(self) -> None:
@@ -51,20 +57,22 @@ class BacktestReportRepository:
         Initialize database connection and create tables.
         Also creates the data/ directory if it doesn't exist.
         """
-        # Create data directory if not exists
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
+        # Create connection if not injected
+        if self._owns_connection and self._db is None:
+            # Create data directory if not exists
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
 
-        # Open database connection
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+            # Open database connection
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        # Enable WAL mode for high concurrency write support
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
+            # Enable WAL mode for high concurrency write support
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
 
         # Create backtest_reports table
         await self._db.execute("""
@@ -123,8 +131,8 @@ class BacktestReportRepository:
         logger.info("回测报告表初始化完成")
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
             logger.info("回测报告仓库连接已关闭")

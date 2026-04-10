@@ -43,6 +43,7 @@ class OrderRepository:
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
         exchange_gateway: Optional[Any] = None,
         audit_logger: Optional[Any] = None,
     ):
@@ -51,11 +52,13 @@ class OrderRepository:
 
         Args:
             db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
             exchange_gateway: ExchangeGateway instance for canceling orders (dependency injection)
             audit_logger: OrderAuditLogger instance for audit logging (dependency injection)
         """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         # ✅ 修复：使用字典存储每个事件循环专用的 Lock
         self._locks: Dict[int, asyncio.Lock] = {}
         self._global_lock = threading.Lock()  # 保护 _locks 字典
@@ -111,20 +114,22 @@ class OrderRepository:
             return
 
         async with self._ensure_lock():
-            # Create data directory if not exists
-            db_dir = os.path.dirname(self.db_path)
-            if db_dir and not os.path.exists(db_dir):
-                os.makedirs(db_dir, exist_ok=True)
+            # Create connection if not injected
+            if self._owns_connection and self._db is None:
+                # Create data directory if not exists
+                db_dir = os.path.dirname(self.db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
 
-            # Open database connection
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
+                # Open database connection
+                self._db = await aiosqlite.connect(self.db_path)
+                self._db.row_factory = aiosqlite.Row
 
-            # Enable WAL mode for high concurrency write support (P0-001)
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
+                # Enable WAL mode for high concurrency write support (P0-001)
+                await self._db.execute("PRAGMA journal_mode=WAL")
+                await self._db.execute("PRAGMA synchronous=NORMAL")
+                await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+                await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
 
             # Create orders table
             await self._db.execute("""
@@ -182,11 +187,13 @@ class OrderRepository:
             logger.info("订单仓库表创建完成")
 
     async def close(self) -> None:
-        """Close database connection"""
-        async with self._ensure_lock():
-            if self._db:
+        """Close database connection (only if self-owned)"""
+        if self._db and self._owns_connection:
+            async with self._ensure_lock():
                 await self._db.commit()
                 await self._db.close()
+                self._db = None
+                logger.info("订单仓库连接已关闭")
                 self._db = None
                 logger.info("订单仓库连接已关闭")
 

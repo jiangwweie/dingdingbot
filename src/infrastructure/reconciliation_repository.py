@@ -44,15 +44,21 @@ class ReconciliationRepository:
     3. 查询服务 - 支持按币种、类型、时间范围查询
     """
 
-    def __init__(self, db_path: str = "data/reconciliation.db"):
+    def __init__(
+        self,
+        db_path: str = "data/reconciliation.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
         """
         Initialize ReconciliationRepository.
 
         Args:
             db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
         """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock = asyncio.Lock()
         logger.info(f"对账仓库初始化完成：db_path={db_path}")
 
@@ -61,21 +67,23 @@ class ReconciliationRepository:
         Initialize database connection and create tables.
         Also creates the data/ directory if it doesn't exist.
         """
-        async with self._lock:
-            # Create data directory if not exists
-            db_dir = os.path.dirname(self.db_path)
-            if db_dir and not os.path.exists(db_dir):
-                os.makedirs(db_dir, exist_ok=True)
+        # Create connection if not injected
+        if self._owns_connection and self._db is None:
+            async with self._lock:
+                # Create data directory if not exists
+                db_dir = os.path.dirname(self.db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
 
-            # Open database connection
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
+                # Open database connection
+                self._db = await aiosqlite.connect(self.db_path)
+                self._db.row_factory = aiosqlite.Row
 
-            # Enable WAL mode for high concurrency write support (P0-001)
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
+                # Enable WAL mode for high concurrency write support (P0-001)
+                await self._db.execute("PRAGMA journal_mode=WAL")
+                await self._db.execute("PRAGMA synchronous=NORMAL")
+                await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+                await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
 
             # Create reconciliation_reports table
             await self._db.execute("""
@@ -163,9 +171,9 @@ class ReconciliationRepository:
             logger.info("对账仓库表创建完成")
 
     async def close(self) -> None:
-        """Close database connection"""
-        async with self._lock:
-            if self._db:
+        """Close database connection (only if self-owned)"""
+        if self._db and self._owns_connection:
+            async with self._lock:
                 await self._db.commit()
                 await self._db.close()
                 self._db = None

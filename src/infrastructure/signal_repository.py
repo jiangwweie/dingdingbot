@@ -25,15 +25,21 @@ class SignalRepository:
     SQLite repository for persisting trading signals.
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
         """
         Initialize SignalRepository.
 
         Args:
             db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
         """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock: Optional[asyncio.Lock] = None  # 延迟创建，避免事件循环冲突
         logger.info(f"数据库初始化完成：{db_path}")
 
@@ -69,14 +75,16 @@ class SignalRepository:
             return
 
         async with self._ensure_lock():
-            # Create data directory if not exists
-            db_dir = os.path.dirname(self.db_path)
-            if db_dir and not os.path.exists(db_dir):
-                os.makedirs(db_dir, exist_ok=True)
+            # Create connection if not injected
+            if self._owns_connection and self._db is None:
+                # Create data directory if not exists
+                db_dir = os.path.dirname(self.db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
 
-            # Open database connection
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
+                # Open database connection
+                self._db = await aiosqlite.connect(self.db_path)
+                self._db.row_factory = aiosqlite.Row
 
         # Enable WAL mode for high concurrency write support (P0-001)
         await self._db.execute("PRAGMA journal_mode=WAL")
@@ -1240,8 +1248,8 @@ class SignalRepository:
         }
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
 
     async def get_pending_signals(self, symbol: str) -> List[Dict[str, Any]]:

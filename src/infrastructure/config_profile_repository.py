@@ -70,15 +70,21 @@ class ConfigProfileRepository:
     - 复制 Profile 配置
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
         """
         Initialize ConfigProfileRepository.
 
         Args:
             db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
         """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
@@ -87,12 +93,14 @@ class ConfigProfileRepository:
 
         注意：迁移脚本应该已经创建了表，这里只做验证。
         """
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+        # Create connection if not injected
+        if self._owns_connection and self._db is None:
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        # Enable WAL mode
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
+            # Enable WAL mode
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
 
         # 验证 config_profiles 表是否存在
         async with self._db.execute(
@@ -116,8 +124,8 @@ class ConfigProfileRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 

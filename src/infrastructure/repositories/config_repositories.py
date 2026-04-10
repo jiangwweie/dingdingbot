@@ -50,30 +50,38 @@ class StrategyConfigRepository:
     Supports CRUD operations and toggle functionality.
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
         """
         Initialize StrategyConfigRepository.
 
         Args:
             db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
         """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None  # 标记是否自行管理生命周期
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
+        # 如果有注入的连接，跳过连接创建
+        if self._owns_connection and self._db is None:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
 
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS strategies (
@@ -102,8 +110,8 @@ class StrategyConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 
@@ -353,24 +361,37 @@ class RiskConfigRepository:
     Single instance pattern (id='global').
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        """
+        Initialize RiskConfigRepository.
+
+        Args:
+            db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
+        """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
+        if self._owns_connection and self._db is None:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
 
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS risk_configs (
@@ -391,8 +412,8 @@ class RiskConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 
@@ -499,24 +520,37 @@ class SystemConfigRepository:
     Single instance pattern (id='global').
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        """
+        Initialize SystemConfigRepository.
+
+        Args:
+            db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
+        """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
+        if self._owns_connection and self._db is None:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
 
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS system_configs (
@@ -542,8 +576,8 @@ class SystemConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 
@@ -653,24 +687,37 @@ class SymbolConfigRepository:
     Supports CRUD operations and toggle functionality.
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        """
+        Initialize SymbolConfigRepository.
+
+        Args:
+            db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
+        """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
+        if self._owns_connection and self._db is None:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
 
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS symbols (
@@ -688,8 +735,8 @@ class SymbolConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 
@@ -924,24 +971,37 @@ class NotificationConfigRepository:
     Supports CRUD operations and test functionality.
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        """
+        Initialize NotificationConfigRepository.
+
+        Args:
+            db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
+        """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
+        if self._owns_connection and self._db is None:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
 
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS notifications (
@@ -960,8 +1020,8 @@ class NotificationConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 
@@ -1202,24 +1262,37 @@ class ConfigSnapshotRepositoryExtended:
     additional methods for the new config management system.
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        """
+        Initialize ConfigSnapshotRepositoryExtended.
+
+        Args:
+            db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
+        """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
+        if self._owns_connection and self._db is None:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
 
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS config_snapshots (
@@ -1240,8 +1313,8 @@ class ConfigSnapshotRepositoryExtended:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 
@@ -1404,24 +1477,37 @@ class ConfigHistoryRepository:
     Provides audit trail and rollback information.
     """
 
-    def __init__(self, db_path: str = "data/v3_dev.db"):
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        """
+        Initialize ConfigHistoryRepository.
+
+        Args:
+            db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
+        """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
+        if self._owns_connection and self._db is None:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
 
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+            self._db = await aiosqlite.connect(self.db_path)
+            self._db.row_factory = aiosqlite.Row
 
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+            await self._db.execute("PRAGMA cache_size=-64000")
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS config_history (
@@ -1465,8 +1551,8 @@ class ConfigHistoryRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 
@@ -1791,13 +1877,13 @@ class ConfigDatabaseManager:
     Centralized manager for all configuration repositories.
     Provides unified initialization and cleanup.
 
-    Note: Uses a single shared database connection to avoid
-    SQLite locking issues with multiple connections.
+    Note: Uses the global ConnectionPool to get a shared database connection,
+    which is injected into all repositories to avoid SQLite locking issues.
     """
 
     def __init__(self, db_path: str = "data/v3_dev.db"):
         self.db_path = db_path
-        self._shared_db: Optional[aiosqlite.Connection] = None
+        self._owns_pool = False  # Whether this manager created the pool connection
         self.strategy_repo: Optional[StrategyConfigRepository] = None
         self.risk_repo: Optional[RiskConfigRepository] = None
         self.system_repo: Optional[SystemConfigRepository] = None
@@ -1807,32 +1893,28 @@ class ConfigDatabaseManager:
         self.history_repo: Optional[ConfigHistoryRepository] = None
 
     async def initialize(self) -> None:
-        """Initialize all repositories with a shared database connection."""
+        """Initialize all repositories with a shared database connection from the pool."""
+        # Get shared connection from the global connection pool
+        from src.infrastructure.connection_pool import get_connection as pool_get_connection
+        shared_conn = await pool_get_connection(self.db_path)
+        self._owns_pool = False  # Pool manages connection lifecycle
+
         # Create data directory if not exists
         db_dir = os.path.dirname(self.db_path)
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
 
-        # Create single shared database connection
-        self._shared_db = await aiosqlite.connect(self.db_path)
-        self._shared_db.row_factory = aiosqlite.Row
-
-        # Enable WAL mode and optimize settings
-        await self._shared_db.execute("PRAGMA journal_mode=WAL")
-        await self._shared_db.execute("PRAGMA synchronous=NORMAL")
-        await self._shared_db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._shared_db.execute("PRAGMA cache_size=-64000")
-
-        # Create repositories with shared db
-        self.strategy_repo = StrategyConfigRepository(self.db_path)
-        self.risk_repo = RiskConfigRepository(self.db_path)
-        self.system_repo = SystemConfigRepository(self.db_path)
-        self.symbol_repo = SymbolConfigRepository(self.db_path)
-        self.notification_repo = NotificationConfigRepository(self.db_path)
-        self.snapshot_repo = ConfigSnapshotRepositoryExtended(self.db_path)
-        self.history_repo = ConfigHistoryRepository(self.db_path)
+        # Create repositories with injected shared connection
+        self.strategy_repo = StrategyConfigRepository(self.db_path, connection=shared_conn)
+        self.risk_repo = RiskConfigRepository(self.db_path, connection=shared_conn)
+        self.system_repo = SystemConfigRepository(self.db_path, connection=shared_conn)
+        self.symbol_repo = SymbolConfigRepository(self.db_path, connection=shared_conn)
+        self.notification_repo = NotificationConfigRepository(self.db_path, connection=shared_conn)
+        self.snapshot_repo = ConfigSnapshotRepositoryExtended(self.db_path, connection=shared_conn)
+        self.history_repo = ConfigHistoryRepository(self.db_path, connection=shared_conn)
 
         # Initialize tables (sequentially to avoid locking issues)
+        # Repositories skip connection creation since connection is injected
         await self.strategy_repo.initialize()
         await self.risk_repo.initialize()
         await self.system_repo.initialize()
@@ -1842,17 +1924,21 @@ class ConfigDatabaseManager:
         await self.history_repo.initialize()
 
     async def close(self) -> None:
-        """Close the shared database connection."""
-        # Close individual repositories
-        await self.strategy_repo.close()
-        await self.risk_repo.close()
-        await self.system_repo.close()
-        await self.symbol_repo.close()
-        await self.notification_repo.close()
-        await self.snapshot_repo.close()
-        await self.history_repo.close()
-
-        # Close shared connection
-        if self._shared_db:
-            await self._shared_db.close()
-            self._shared_db = None
+        """Close repository connections (pool-managed, not closed here)."""
+        # Close individual repositories (they won't close the pool-managed connection)
+        if self.strategy_repo:
+            await self.strategy_repo.close()
+        if self.risk_repo:
+            await self.risk_repo.close()
+        if self.system_repo:
+            await self.system_repo.close()
+        if self.symbol_repo:
+            await self.symbol_repo.close()
+        if self.notification_repo:
+            await self.notification_repo.close()
+        if self.snapshot_repo:
+            await self.snapshot_repo.close()
+        if self.history_repo:
+            await self.history_repo.close()
+        # Note: Pool-managed connection is NOT closed here.
+        # Call close_all_connections() at application shutdown to close pool.

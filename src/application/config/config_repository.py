@@ -78,6 +78,7 @@ class ConfigRepository:
         """Initialize ConfigRepository."""
         self._db_path: Optional[str] = None
         self._db: Optional[aiosqlite.Connection] = None
+        self._owns_connection: bool = True  # Default: manages own connection
         self._lock: Optional[asyncio.Lock] = None
         self._init_lock: Optional[asyncio.Lock] = None
         self._init_event: Optional[asyncio.Event] = None
@@ -125,40 +126,49 @@ class ConfigRepository:
             self._lock = asyncio.Lock()
         return self._lock
     
-    async def initialize(self, db_path: Optional[str] = None, config_dir: Optional[str] = None) -> None:
+    async def initialize(
+        self,
+        db_path: Optional[str] = None,
+        config_dir: Optional[str] = None,
+        connection: Optional[aiosqlite.Connection] = None,
+    ) -> None:
         """
         Initialize database connection and create default configurations.
-        
+
         This method is idempotent - calling it multiple times has no effect
         after first initialization.
-        
+
         Args:
             db_path: Path to SQLite database file. Defaults to ./data/v3_dev.db
             config_dir: Directory containing YAML config files. Defaults to ./config
+            connection: Optional injected connection (if None, creates own connection)
         """
         # Fast path - already initialized
         if self._initialized:
             return
-        
+
         # Get lock and event for current event loop
         init_lock = self._ensure_init_lock()
         init_event = self._ensure_init_event()
-        
+
         async with init_lock:
             # Double-check after acquiring lock
             if self._initialized:
                 return
-            
+
             # If already initializing, wait for completion
             if self._initializing:
                 logger.debug("ConfigRepository: Waiting for concurrent initialization to complete")
                 await init_event.wait()
                 return
-            
+
             # Mark as initializing
             self._initializing = True
-            
+
             try:
+                # Set connection ownership
+                self._owns_connection = connection is None
+
                 # Set paths
                 if db_path:
                     self._db_path = db_path
@@ -167,25 +177,30 @@ class ConfigRepository:
                         "CONFIG_DB_PATH",
                         str(Path(__file__).parent.parent.parent / "data" / "v3_dev.db")
                     )
-                
+
                 if config_dir:
                     self._config_dir = Path(config_dir)
                 else:
                     self._config_dir = Path(__file__).parent.parent.parent / 'config'
-                
-                # Create data directory if not exists
-                db_dir = os.path.dirname(self._db_path)
-                if db_dir and not os.path.exists(db_dir):
-                    os.makedirs(db_dir, exist_ok=True)
-                
-                # Open database connection
-                self._db = await aiosqlite.connect(self._db_path)
-                self._db.row_factory = aiosqlite.Row
-                
-                # Enable WAL mode for high concurrency
-                await self._db.execute("PRAGMA journal_mode=WAL")
-                await self._db.execute("PRAGMA synchronous=NORMAL")
-                await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+
+                # Create connection if not injected
+                if self._owns_connection:
+                    # Create data directory if not exists
+                    db_dir = os.path.dirname(self._db_path)
+                    if db_dir and not os.path.exists(db_dir):
+                        os.makedirs(db_dir, exist_ok=True)
+
+                    # Open database connection
+                    self._db = await aiosqlite.connect(self._db_path)
+                    self._db.row_factory = aiosqlite.Row
+
+                    # Enable WAL mode for high concurrency
+                    await self._db.execute("PRAGMA journal_mode=WAL")
+                    await self._db.execute("PRAGMA synchronous=NORMAL")
+                    await self._db.execute("PRAGMA wal_autocheckpoint=1000")
+                else:
+                    # Use injected connection
+                    self._db = connection
                 
                 # Create tables if not exists
                 await self._create_tables()
@@ -214,8 +229,8 @@ class ConfigRepository:
         logger.info(f"ConfigRepository initialized from database: {self._db_path}")
     
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
+        """Close database connection (only if self-owned)."""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
         self._initialized = False
