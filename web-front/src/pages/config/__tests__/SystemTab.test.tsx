@@ -181,8 +181,8 @@ describe('SystemTab', () => {
     vi.mocked(configApi.getSystemConfig).mockResolvedValue(mockSystemResponse);
     vi.mocked(configApi.updateSystemConfig).mockResolvedValue({
       data: {
-        requires_restart: false,
-        config: mockSystemResponse.data,
+        restart_required: false,
+        ...mockSystemResponse.data,
       },
     });
 
@@ -208,12 +208,12 @@ describe('SystemTab', () => {
     expect(successCall?.message).toBe('系统配置已保存');
   });
 
-  it('shows restart required alert when server returns requires_restart=true', async () => {
+  it('shows restart required alert when server returns restart_required=true', async () => {
     vi.mocked(configApi.getSystemConfig).mockResolvedValue(mockSystemResponse);
     vi.mocked(configApi.updateSystemConfig).mockResolvedValue({
       data: {
-        requires_restart: true,
-        config: mockSystemResponse.data,
+        restart_required: true,
+        ...mockSystemResponse.data,
       },
     });
 
@@ -244,8 +244,8 @@ describe('SystemTab', () => {
     vi.mocked(configApi.getSystemConfig).mockResolvedValue(mockSystemResponse);
     vi.mocked(configApi.updateSystemConfig).mockResolvedValue({
       data: {
-        requires_restart: true,
-        config: mockSystemResponse.data,
+        restart_required: true,
+        ...mockSystemResponse.data,
       },
     });
 
@@ -279,8 +279,8 @@ describe('SystemTab', () => {
     vi.mocked(configApi.getSystemConfig).mockResolvedValue(mockSystemResponse);
     vi.mocked(configApi.updateSystemConfig).mockResolvedValue({
       data: {
-        requires_restart: true,
-        config: mockSystemResponse.data,
+        restart_required: true,
+        ...mockSystemResponse.data,
       },
     });
 

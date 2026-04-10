@@ -108,8 +108,8 @@ export const SystemTab: React.FC = () => {
       const response = await configApi.updateSystemConfig(updatePayload);
       message.success('系统配置已保存');
 
-      // 检查是否需要重启（后端返回 requires_restart 字段）
-      if (response.data.requires_restart) {
+      // 检查是否需要重启（后端返回 restart_required 字段）
+      if (response.data.restart_required) {
         setRestartRequired(true);
         message.warning('配置变更需要重启服务才能生效');
       }

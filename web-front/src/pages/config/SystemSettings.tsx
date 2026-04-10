@@ -170,7 +170,7 @@ const SystemSettingsPage: React.FC = () => {
       message.success('系统配置已保存');
 
       // 检查是否需要重启
-      if (response.data.requires_restart) {
+      if (response.data.restart_required) {
         setRestartRequired(true);
         message.warning('配置变更需要重启服务才能生效');
       }

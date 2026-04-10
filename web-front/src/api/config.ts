@@ -107,6 +107,10 @@ export interface RiskConfig {
  * 与后端 CoreConfig + SignalPipelineConfig 对应
  */
 export interface SystemConfigResponse {
+  // 后端内部字段
+  id?: string;
+  updated_at?: string;
+
   // 指标参数
   ema?: {
     period: number;
@@ -132,6 +136,9 @@ export interface SystemConfigResponse {
   atr_filter_enabled?: boolean;
   atr_period?: number;
   atr_min_ratio?: number;
+
+  // 重启标志（后端字段名为 restart_required）
+  restart_required?: boolean;
 }
 
 /**
@@ -176,7 +183,7 @@ export interface SystemConfigUpdateResponse {
 // 后端配置相关接口分布在以下路径：
 // - /api/v1/config/strategies - 策略管理（CRUD + Toggle）
 // - /api/v1/config/risk - 风险配置
-// - /api/v1/config/system - 系统配置（待后端补充）
+// - /api/v1/config/system - 系统配置（GET/PUT）
 // ============================================================
 
 // Axios 实例实例 1：配置管理（使用 /api/v1/config 前缀）
@@ -253,19 +260,17 @@ export const configApi = {
 
   /**
    * 获取系统配置
-   * GET /api/strategy/params (从策略参数中获取系统配置)
+   * GET /api/v1/config/system
    */
-  getSystemConfig: () => configApiClient.get<SystemConfigResponse>('/strategy/params'),
+  getSystemConfig: () => configApiClient.get<SystemConfigResponse>('/system'),
 
   /**
    * 更新系统配置
-   * PUT /api/strategy/params/preview (预览) + PUT /api/strategy/params (确认)
-   * 注意：后端不直接支持系统配置更新，需要通过策略参数接口
-   * @returns 返回更新后的配置和是否需要重启的标志
+   * PUT /api/v1/config/system
+   * 返回更新后的配置，restart_required 标志指示是否需要重启
    */
   updateSystemConfig: (data: SystemConfigUpdateRequest) =>
-    configApiClient.put('/strategy/params', data)
-      .then(res => ({ ...res, data: { requires_restart: true, config: res.data } })),
+    configApiClient.put<SystemConfigResponse>('/system', data),
 };
 
 // ============================================================

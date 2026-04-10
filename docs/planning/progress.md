@@ -25,8 +25,40 @@
 ### 待办
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
-| 5 | API 契约对齐修复（方案 A） | P0 | 📋 待确认 |
+| 5 | API 契约对齐修复（方案 A） | P0 | 进行中 |
 | 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
+
+---
+
+## 2026-04-10 前端 SystemSettings 数据适配（API 契约对齐）
+
+### 修改内容
+**目标**：将系统配置 API 从旧的 `/api/v1/config/strategy/params` 迁移到新的 `/api/v1/config/system`
+
+**文件变更**：
+1. `web-front/src/api/config.ts`
+   - `SystemConfigResponse` 类型：新增 `restart_required`、`id`、`updated_at` 字段
+   - `getSystemConfig()`: `GET /strategy/params` → `GET /system`
+   - `updateSystemConfig()`: `PUT /strategy/params`（带 wrapper） → `PUT /system`（直接返回）
+   - 更新注释：系统配置端点状态从"待后端补充"改为"GET/PUT"
+
+2. `web-front/src/pages/config/SystemSettings.tsx`
+   - `requires_restart` → `restart_required`（对齐后端字段名）
+
+3. `web-front/src/pages/config/SystemTab.tsx`
+   - `requires_restart` → `restart_required`（对齐后端字段名）
+
+4. `web-front/src/pages/config/__tests__/SystemTab.test.tsx`
+   - Mock 数据结构更新：从 `{ requires_restart, config: ... }` 改为 `{ restart_required, ...spread }`
+
+### 验证结果
+- TypeScript 编译：0 个新增错误（原有错误不受影响）
+- 生产构建：成功（`npm run build` 通过）
+- `requires_restart` 相关错误：0 个（已全部修复）
+
+### 后端对接确认
+- `GET /api/v1/config/system` → 返回 `SystemConfigResponse`（含 `restart_required` 字段）
+- `PUT /api/v1/config/system` → 接受 `SystemConfigUpdateRequest`（嵌套结构：`ema.period`, `signal_pipeline.cooldown_seconds.queue.*`）
 
 ---
 
@@ -138,8 +170,36 @@ docs/
 ### 当前待办
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
+| 5 | API 契约对齐修复（方案 A）- Phase 1 前端 | P0 | ✅ 已完成 |
+| 6 | API 契约对齐修复（方案 A）- Phase 2 后端系统配置 | P0 | 待后端 |
 | 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
 
 ---
 
-*最后更新：2026-04-10 10:30 - 文档精简与归档完成，收工*
+## 2026-04-10 API 契约对齐 - Phase 1 前端迁移完成
+
+**提交**: `9df70eb`
+
+### 改动内容
+1. **`web-front/src/api/config.ts`**:
+   - `baseURL` 从 `/api` 改为 `/api/v1/config`
+   - 风险配置路径从 `/config` 改为 `/risk`
+   - 更新所有策略管理 API 注释路径
+   - 简化风险配置函数（移除嵌套解包逻辑）
+
+2. **`web-front/src/pages/config/StrategyConfig.tsx`**:
+   - `loadStrategies` 降级逻辑简化：`response.data || []`（移除 `.strategies` 兼容）
+   - 修复 `SimpleImage` 组件类型错误（`image={<SimpleImage />}`）
+
+### TypeScript 编译验证
+- `config.ts`: 无新增错误
+- `StrategyConfig.tsx`: 无新增错误
+- 全局预存错误（e2e/测试文件）不受影响
+
+### 已知限制（Phase 2 处理）
+- 系统配置接口（`/strategy/params`）随 baseURL 迁移后变为 `/api/v1/config/strategy/params`
+- 后端需补充 `GET/PUT /api/v1/config/system` 端点（Phase 2，预估 90 min）
+
+---
+
+*最后更新：2026-04-10 15:30 - API 契约对齐 Phase 1 前端迁移完成*
