@@ -112,6 +112,21 @@ def _get_order_repo() -> OrderRepository:
 
 ---
 
+## 2026-04-10 MCP 占位符清理 + 文档版本收敛
+
+### 清理决策
+- MCP 占位符（telegram/ssh/sentry）使用 dummy 值，不在项目 enabled 列表中，直接删除
+- 12 个旧版 SKILL.md 残留文件（.backup / .v2 / .v3）全部删除，保留当前活跃版本
+- 重复的 phase-contracts 目录（docs/designs/archive/ 和 docs/v3/ 各 14 个相同文件）删除 archive 副本
+- 创建 SKILL_VERSIONS.md 版本追踪清单，避免未来再次积累残留文件
+
+### 用户画像洞察
+- 流程过重：10 人团队 + 三阶段工作流 + 5 个强制检查点，个人项目开销大
+- 建议引入"快速通道"模式（light mode）处理小修小补
+- Agent 定义去重：抽取公共规范为独立文件，各 Agent 仅引用而非复制
+
+---
+
 ## 2026-04-10 策略系统架构分析
 
 ### 两套策略 API 并存

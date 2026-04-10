@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-04-10 MCP 占位符清理 + 文档版本收敛
+
+### 清理结果
+| 类别 | 数量 | 说明 |
+|------|------|------|
+| MCP 占位符删除 | 3 个 | telegram/ssh/sentry 从 `~/.claude/mcp.json` 移除 |
+| SKILL.md 残留清理 | 12 个 | .backup / .v2 / .v3 文件全部删除 |
+| 过期/重复文档删除 | 24 个 | phase-contracts 重复(14) + 过期文件(10) |
+| 文档更新 | 4 个 | MCP-ENV-CONFIG, MCP-QUICKSTART, shougong.md, user-profile.md |
+| 新文件创建 | 2 个 | SKILL_VERSIONS.md, user-profile.md |
+
+**净减少 ~11,600 行代码**。提交 `6c7cb56`。
+
+### 修复项
+- `shougong.md` footer 版本号 v3.0 → v5.0
+- `user-profile.md` MCP 表格和风险分析标注已清理
+
+---
+
 ## 2026-04-10 API 契约对齐修复（方案 A）- 全部完成
 
 ### 修复摘要
