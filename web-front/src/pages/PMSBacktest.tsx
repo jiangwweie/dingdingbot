@@ -22,6 +22,7 @@ import {
   fetchBacktestSignals,
   type Signal,
 } from '../lib/api';
+import { configApi, type Strategy } from '../api/config';
 import StrategyBuilder from '../components/StrategyBuilder';
 import QuickDateRangePicker from '../components/QuickDateRangePicker';
 import StrategyTemplatePicker from '../components/StrategyTemplatePicker';
@@ -33,6 +34,7 @@ import {
   PnLDistributionHistogram,
   MonthlyReturnHeatmap,
 } from '../components/v3/backtest';
+import { Select } from 'antd';
 
 // Timeframe options
 const TIMEFRAMES = [
@@ -59,7 +61,6 @@ const SYMBOLS = [
 const DEFAULT_RISK_OVERRIDES: Partial<RiskConfig> = {
   max_loss_percent: 0.01,
   max_leverage: 10,
-  default_leverage: 5,
 };
 
 // Default initial balance for PMS backtest
@@ -98,6 +99,12 @@ export default function PMSBacktest() {
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [showDetailsDrawer, setShowDetailsDrawer] = useState(false);
 
+  // Quick strategy selector state
+  const [savedStrategies, setSavedStrategies] = useState<Strategy[]>([]);
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string | undefined>();
+  const [isLoadingSaved, setIsLoadingSaved] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   // Fetch templates on mount
   useEffect(() => {
     const loadTemplates = async () => {
@@ -113,6 +120,39 @@ export default function PMSBacktest() {
     };
     loadTemplates();
   }, []);
+
+  // Fetch saved strategies for quick selector on mount
+  useEffect(() => {
+    const loadSavedStrategies = async () => {
+      setIsLoadingSaved(true);
+      setLoadError(null);
+      try {
+        const { data } = await configApi.getStrategies();
+        setSavedStrategies(data);
+      } catch (err) {
+        console.error('Failed to fetch saved strategies:', err);
+        // Silent failure - doesn't affect backtest usage
+      } finally {
+        setIsLoadingSaved(false);
+      }
+    };
+    loadSavedStrategies();
+  }, []);
+
+  // Handle loading a saved strategy into the PMS backtest form
+  const handleLoadStrategy = useCallback(async () => {
+    if (!selectedStrategyId) return;
+    try {
+      const { data: strategy } = await configApi.getStrategy(selectedStrategyId);
+      const converted = mapStrategyToDefinition(strategy);
+      setStrategies([converted]);
+      setSelectedStrategyId(undefined);
+      setLoadError(null);
+    } catch (err) {
+      console.error('Failed to load strategy:', err);
+      setLoadError('加载策略失败，请重试');
+    }
+  }, [selectedStrategyId]);
 
   // Validate form
   const validateForm = useCallback((): boolean => {
@@ -250,7 +290,7 @@ export default function PMSBacktest() {
             className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
           >
             <Upload className="w-4 h-4" />
-            从策略工作台导入
+            从策略配置导入
           </button>
         </div>
       </div>
@@ -271,6 +311,46 @@ export default function PMSBacktest() {
           </div>
         </div>
       </div>
+
+      {/* Quick Strategy Selector */}
+      {savedStrategies.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Zap className="w-4 h-4 text-amber-500" />
+            <span className="text-sm font-medium text-gray-700">快捷加载已保存策略</span>
+          </div>
+          <Select
+            allowClear
+            showSearch
+            placeholder="选择策略"
+            value={selectedStrategyId}
+            onChange={setSelectedStrategyId}
+            options={savedStrategies.map((s) => ({
+              label: s.name,
+              value: s.id,
+            }))}
+            className="flex-1"
+            loading={isLoadingSaved}
+            disabled={isLoadingSaved}
+            optionFilterProp="label"
+          />
+          <button
+            onClick={handleLoadStrategy}
+            disabled={!selectedStrategyId || isLoadingSaved}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1',
+              !selectedStrategyId || isLoadingSaved
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-black text-white hover:bg-gray-800'
+            )}
+          >
+            加载
+          </button>
+          {loadError && (
+            <span className="text-xs text-red-500">{loadError}</span>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Control Panel */}
@@ -618,4 +698,51 @@ function translateStrategy(strategy?: string | null): string {
   if (key === 'pinbar') return 'Pinbar';
   if (key === 'engulfing') return 'Engulfing';
   return strategy;
+}
+
+/**
+ * Map Strategy (from config API) to StrategyDefinition (backtest format)
+ *
+ * Handles field name differences:
+ * - trigger_config → trigger
+ * - filter_configs → filters (with generated IDs)
+ * - symbols + timeframes → apply_to
+ */
+function mapStrategyToDefinition(strategy: Strategy): StrategyDefinition {
+  const id = crypto.randomUUID();
+
+  // Map trigger_config → trigger (add id + enabled)
+  const trigger = {
+    id: `${id}-trigger`,
+    type: strategy.trigger_config.type,
+    enabled: true,
+    params: strategy.trigger_config.params || {},
+  };
+
+  // Map filter_configs → filters (add id field if missing)
+  const filters = (strategy.filter_configs || []).map((f) => ({
+    id: `${id}-filter-${f.type}`,
+    type: f.type,
+    enabled: f.enabled,
+    params: f.params || {},
+  }));
+
+  // Map symbols + timeframes → apply_to
+  const applyTo: string[] = [];
+  for (const sym of strategy.symbols || []) {
+    for (const tf of strategy.timeframes || []) {
+      applyTo.push(`${sym}:${tf}`);
+    }
+  }
+
+  return {
+    id: strategy.id,
+    name: strategy.name,
+    trigger,
+    filters,
+    filter_logic: strategy.filter_logic,
+    is_global: applyTo.length === 0,
+    apply_to: applyTo,
+    logic_tree: undefined,
+  };
 }

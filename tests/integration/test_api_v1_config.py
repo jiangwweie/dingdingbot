@@ -198,19 +198,25 @@ class TestSystemConfigAPI:
 
     @pytest.mark.asyncio
     async def test_get_system_config_initially_empty(self, client):
-        """Test GET /system returns 404 when no config exists."""
+        """Test GET /system returns defaults when no config exists."""
         response = client.get("/api/v1/config/system")
-        assert response.status_code in [200, 404]
+        # Returns defaults (200) with nested format
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ema"]["period"] == 60
+        assert data["signal_pipeline"]["cooldown_seconds"] == 14400
 
     @pytest.mark.asyncio
     async def test_update_system_config(self, client):
-        """Test PUT /system updates configuration."""
+        """Test PUT /system updates configuration with nested format."""
         update_data = {
-            "core_symbols": ["BTC/USDT:USDT", "ETH/USDT:USDT"],
-            "ema_period": 50,
+            "ema": {"period": 50},
             "mtf_ema_period": 50,
-            "mtf_mapping": {"15m": "1h", "1h": "4h"},
-            "signal_cooldown_seconds": 7200,
+            "signal_pipeline": {
+                "cooldown_seconds": 7200,
+                "queue": {"batch_size": 20, "flush_interval": 3.0, "max_queue_size": 2000},
+            },
+            "warmup": {"history_bars": 200},
         }
 
         response = client.put(
@@ -221,15 +227,15 @@ class TestSystemConfigAPI:
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data["core_symbols"]) == 2
-        assert data["ema_period"] == 50
+        assert data["ema"]["period"] == 50
+        assert data["signal_pipeline"]["cooldown_seconds"] == 7200
 
     @pytest.mark.asyncio
     async def test_update_system_config_restart_required(self, client):
         """Test PUT /system marks restart_required for core changes."""
         update_data = {
-            "core_symbols": ["BTC/USDT:USDT"],
-            "ema_period": 100,
+            "ema": {"period": 100},
+            "mtf_ema_period": 100,
         }
 
         response = client.put(
@@ -241,6 +247,7 @@ class TestSystemConfigAPI:
         assert response.status_code == 200
         data = response.json()
         assert data["restart_required"] is True
+        assert data["ema"]["period"] == 100
 
     @pytest.mark.asyncio
     async def test_get_system_config_after_update(self, client):
@@ -249,8 +256,8 @@ class TestSystemConfigAPI:
         client.put(
             "/api/v1/config/system",
             json={
-                "core_symbols": ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"],
-                "ema_period": 55,
+                "ema": {"period": 55},
+                "mtf_ema_period": 55,
             },
             headers={"X-User-Role": "admin"}
         )
@@ -259,8 +266,8 @@ class TestSystemConfigAPI:
         response = client.get("/api/v1/config/system")
         assert response.status_code == 200
         data = response.json()
-        assert len(data["core_symbols"]) == 3
-        assert data["ema_period"] == 55
+        assert data["ema"]["period"] == 55
+        assert data["mtf_ema_period"] == 55
 
 
 # ============================================================
@@ -826,22 +833,24 @@ risk:
     @pytest.mark.asyncio
     async def test_preview_token_expires(self, client):
         """Test that preview token expires after 5 minutes."""
-        from datetime import timedelta
+        import time
+        from datetime import datetime, timezone, timedelta
 
         yaml_content = "risk:\n  max_loss_percent: 0.01"
 
         # Preview
         preview_response = client.post(
             "/api/v1/config/import/preview",
-            json={"yaml_content": yaml_content},
+            json={"yaml_content": yaml_content, "filename": "test.yaml"},
             headers={"X-User-Role": "admin"}
         )
         preview_token = preview_response.json()["preview_token"]
-        expires_at = preview_response.json()["expires_at"]
 
-        # Manually expire the token
-        from datetime import datetime, timezone, timedelta
-        _import_preview_cache[preview_token]["expires_at"] = datetime.now(timezone.utc) - timedelta(minutes=1)
+        # Verify token exists in cache
+        assert preview_token in _import_preview_cache
+
+        # Simulate expiration by deleting from cache (equivalent to TTL expiry)
+        del _import_preview_cache[preview_token]
 
         # Confirm should fail
         response = client.post(
@@ -851,6 +860,8 @@ risk:
         )
 
         assert response.status_code == 400
+        data = response.json()
+        assert "Invalid or expired" in data["detail"]
 
 
 # ============================================================
@@ -981,6 +992,8 @@ class TestPermissionAPI:
     @pytest.mark.asyncio
     async def test_update_risk_without_admin(self, client):
         """Test PUT /risk without admin role fails."""
+        # Ensure DISABLE_AUTH is not set for permission tests
+        os.environ.pop("DISABLE_AUTH", None)
         response = client.put(
             "/api/v1/config/risk",
             json={"max_loss_percent": "0.01"}
@@ -993,6 +1006,8 @@ class TestPermissionAPI:
     @pytest.mark.asyncio
     async def test_create_strategy_without_admin(self, client):
         """Test POST /strategies without admin role fails."""
+        # Ensure DISABLE_AUTH is not set for permission tests
+        os.environ.pop("DISABLE_AUTH", None)
         response = client.post(
             "/api/v1/config/strategies",
             json={

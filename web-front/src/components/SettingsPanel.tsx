@@ -70,7 +70,6 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [riskForm, setRiskForm] = useState<RiskConfig>({
     max_loss_percent: 0.01,
     max_leverage: 10,
-    default_leverage: 5,
   });
 
   // Local state for symbols
@@ -345,29 +344,6 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                             {validationErrors.max_leverage}
                           </p>
                         )}
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          默认杠杆倍数 (default_leverage)
-                        </label>
-                        <input
-                          type="number"
-                          step="1"
-                          min="1"
-                          max={riskForm.max_leverage}
-                          value={riskForm.default_leverage}
-                          onChange={(e) => {
-                            setRiskForm((prev) => ({
-                              ...prev,
-                              default_leverage: parseInt(e.target.value) || 1,
-                            }));
-                          }}
-                          className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-black transition-colors"
-                        />
-                        <p className="mt-1 text-xs text-gray-500">
-                          信号建议的默认杠杆倍数 (不能超过最大值)
-                        </p>
                       </div>
                     </div>
                   )}

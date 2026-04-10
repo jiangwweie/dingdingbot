@@ -11,11 +11,14 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Input, Select, Empty, Spin, Alert, Space, Popconfirm, message } from 'antd';
-import { PlusOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Input, Select, Empty, Spin, Alert, Space, Popconfirm, message, Modal } from 'antd';
+import { PlusOutlined, SearchOutlined, ReloadOutlined, ExperimentOutlined, UploadOutlined } from '@ant-design/icons';
 import { configApi, type Strategy, type CreateStrategyRequest, type UpdateStrategyRequest } from '../../api/config';
 import { StrategyCard } from '../../components/strategy/StrategyCard';
 import { StrategyEditorDrawer } from '../../components/strategy/StrategyEditor';
+import TraceTreeViewer from '../../components/TraceTreeViewer';
+import type { TraceNode, PreviewResponse } from '../../lib/api';
+import { cn } from '../../lib/utils';
 
 // ============================================================
 // Type Definitions
@@ -72,6 +75,20 @@ const StrategyConfigPage: React.FC = () => {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingStrategy, setEditingStrategy] = useState<Strategy | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Dry Run 预览状态
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewingStrategy, setPreviewingStrategy] = useState<Strategy | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<'idle' | 'previewing' | 'previewed' | 'error'>('idle');
+  const [previewResult, setPreviewResult] = useState<PreviewResponse | null>(null);
+  const [previewSymbol, setPreviewSymbol] = useState('BTC/USDT:USDT');
+  const [previewTimeframe, setPreviewTimeframe] = useState('15m');
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // 应用到实盘状态
+  const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [applyingStrategy, setApplyingStrategy] = useState<Strategy | null>(null);
+  const [applying, setApplying] = useState(false);
 
   // 筛选状态
   const [filters, setFilters] = useState<FilterState>({
@@ -160,6 +177,85 @@ const StrategyConfigPage: React.FC = () => {
     // 在实际实现中，应该打开编辑器并填充副本数据
     message.info('复制功能开发中...');
   }, []);
+
+  // 处理 Dry Run 预览
+  const handlePreview = useCallback((strategy: Strategy) => {
+    setPreviewingStrategy(strategy);
+    setPreviewModalOpen(true);
+    setPreviewStatus('idle');
+    setPreviewResult(null);
+    setPreviewError(null);
+  }, []);
+
+  // 执行 Dry Run 预览
+  const executePreview = useCallback(async () => {
+    if (!previewingStrategy) return;
+
+    setPreviewStatus('previewing');
+    setPreviewResult(null);
+    setPreviewError(null);
+
+    try {
+      // 构建 logic tree
+      const logicTree = {
+        gate: 'AND' as const,
+        children: [
+          {
+            type: 'trigger' as const,
+            id: previewingStrategy.trigger_config.type,
+            config: {
+              type: previewingStrategy.trigger_config.type,
+              params: previewingStrategy.trigger_config.params,
+            },
+          },
+          ...previewingStrategy.filter_configs.map((f: { type: string; enabled: boolean; params: Record<string, any> }) => ({
+            type: 'filter' as const,
+            id: f.type,
+            config: f,
+          })),
+        ],
+      };
+
+      const result = await configApi.previewStrategy({
+        logic_tree: logicTree,
+        symbol: previewSymbol,
+        timeframe: previewTimeframe,
+      });
+      setPreviewResult(result);
+      setPreviewStatus('previewed');
+    } catch (err: any) {
+      console.error('Preview failed:', err);
+      setPreviewError(err.info?.detail || err.message || '预览失败，请重试');
+      setPreviewStatus('error');
+    }
+  }, [previewingStrategy, previewSymbol, previewTimeframe]);
+
+  // 处理应用到实盘
+  const handleApply = useCallback((strategy: Strategy) => {
+    setApplyingStrategy(strategy);
+    setApplyModalOpen(true);
+  }, []);
+
+  // 执行应用到实盘
+  const executeApply = useCallback(async () => {
+    if (!applyingStrategy) return;
+
+    setApplying(true);
+    try {
+      await configApi.applyStrategy(applyingStrategy.id);
+      message.success(`策略 "${applyingStrategy.name}" 已应用到实盘引擎`);
+      setApplyModalOpen(false);
+      setApplyingStrategy(null);
+      // 刷新策略列表
+      loadStrategies();
+    } catch (err: any) {
+      console.error('Apply strategy failed:', err);
+      const errorMsg = err.info?.detail || err.message || '应用策略失败，请重试';
+      message.error('应用策略失败：' + errorMsg);
+    } finally {
+      setApplying(false);
+    }
+  }, [applyingStrategy, loadStrategies]);
 
   // 处理保存策略
   const handleSave = useCallback(async (data: CreateStrategyRequest | UpdateStrategyRequest) => {
@@ -332,6 +428,8 @@ const StrategyConfigPage: React.FC = () => {
               onToggleEnable={handleToggleEnable}
               onDelete={handleDelete}
               onDuplicate={handleDuplicate}
+              onPreview={handlePreview}
+              onApply={handleApply}
             />
           ))}
         </div>
@@ -345,6 +443,191 @@ const StrategyConfigPage: React.FC = () => {
         onSave={handleSave}
         loading={saving}
       />
+
+      {/* Dry Run 预览 Modal */}
+      <Modal
+        title={
+          <div className="flex items-center gap-2">
+            <ExperimentOutlined className="text-orange-600" />
+            <span>Dry Run 预览 - {previewingStrategy?.name}</span>
+          </div>
+        }
+        open={previewModalOpen}
+        onCancel={() => {
+          setPreviewModalOpen(false);
+          setPreviewingStrategy(null);
+          setPreviewResult(null);
+          setPreviewStatus('idle');
+          setPreviewError(null);
+        }}
+        footer={null}
+        width={720}
+        destroyOnClose
+      >
+        {/* 预览控制区 */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="text-sm font-medium text-gray-700">币种:</label>
+            <Select
+              value={previewSymbol}
+              onChange={setPreviewSymbol}
+              style={{ width: 180 }}
+              options={[
+                { value: 'BTC/USDT:USDT', label: 'BTC/USDT' },
+                { value: 'ETH/USDT:USDT', label: 'ETH/USDT' },
+                { value: 'SOL/USDT:USDT', label: 'SOL/USDT' },
+                { value: 'BNB/USDT:USDT', label: 'BNB/USDT' },
+              ]}
+            />
+
+            <label className="text-sm font-medium text-gray-700">周期:</label>
+            <Select
+              value={previewTimeframe}
+              onChange={setPreviewTimeframe}
+              style={{ width: 100 }}
+              options={[
+                { value: '5m', label: '5m' },
+                { value: '15m', label: '15m' },
+                { value: '1h', label: '1h' },
+                { value: '4h', label: '4h' },
+                { value: '1d', label: '1d' },
+              ]}
+            />
+
+            <Button
+              type="primary"
+              icon={<ExperimentOutlined />}
+              onClick={executePreview}
+              loading={previewStatus === 'previewing'}
+              disabled={previewStatus === 'previewing'}
+            >
+              {previewStatus === 'previewing' ? '预览中...' : previewStatus === 'previewed' ? '重新测试' : '立即测试'}
+            </Button>
+          </div>
+
+          {/* 提示信息 */}
+          {previewStatus === 'previewed' && (
+            <Alert
+              type="info"
+              showIcon
+              message="关于 Dry Run 预览"
+              description="仅评估当前最新一根 K 线，如果未检测到信号属于正常现象。Pinbar 等形态在市场中较为稀缺，通常需要等待合适的 K 线形态出现。"
+              className="mb-2"
+            />
+          )}
+
+          {/* 错误提示 */}
+          {previewError && (
+            <Alert
+              type="error"
+              showIcon
+              message="预览失败"
+              description={previewError}
+              className="mb-2"
+            />
+          )}
+
+          {/* 预览结果 */}
+          {previewStatus === 'previewed' && previewResult && (
+            <div className="space-y-4">
+              {/* 结果状态 */}
+              <div className={cn(
+                "rounded-lg p-3 border",
+                previewResult.signal_fired
+                  ? "bg-green-50 border-green-200"
+                  : "bg-gray-50 border-gray-200"
+              )}>
+                <p className={cn(
+                  "text-sm font-medium",
+                  previewResult.signal_fired ? "text-green-800" : "text-gray-600"
+                )}>
+                  {previewResult.signal_fired
+                    ? "当前 K 线满足策略条件，信号触发！"
+                    : "当前 K 线不满足策略条件，未检测到信号"}
+                </p>
+                {!previewResult.signal_fired && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    原因：{previewResult.trace_tree?.reason || '未知'}
+                  </p>
+                )}
+              </div>
+
+              {/* 评估报告 */}
+              {previewResult.evaluation_summary && (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">评估报告</h4>
+                  <pre className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap font-sans">
+                    {previewResult.evaluation_summary}
+                  </pre>
+                </div>
+              )}
+
+              {/* Trace Tree */}
+              <TraceTreeViewer
+                traceTree={previewResult.trace_tree}
+                signalFired={previewResult.signal_fired}
+              />
+            </div>
+          )}
+
+          {/* 空状态 */}
+          {previewStatus === 'idle' && (
+            <Empty description="选择币种和周期后，点击「立即测试」进行 Dry Run 预览" />
+          )}
+        </div>
+      </Modal>
+
+      {/* 应用到实盘确认 Modal */}
+      <Modal
+        title={
+          <div className="flex items-center gap-2">
+            <UploadOutlined className="text-cyan-600" />
+            <span>确认应用到实盘</span>
+          </div>
+        }
+        open={applyModalOpen}
+        onCancel={() => {
+          setApplyModalOpen(false);
+          setApplyingStrategy(null);
+        }}
+        footer={null}
+        width={480}
+      >
+        {applyingStrategy && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              确定要将策略 <span className="font-medium text-gray-900">"{applyingStrategy.name}"</span> 应用到实盘引擎吗？
+            </p>
+            <Alert
+              type="warning"
+              showIcon
+              message="注意"
+              description="此操作会将策略配置下发到实盘引擎，策略将立即对配置的币种和周期生效。"
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  setApplyModalOpen(false);
+                  setApplyingStrategy(null);
+                }}
+                disabled={applying}
+              >
+                取消
+              </Button>
+              <Button
+                type="primary"
+                danger
+                icon={<UploadOutlined />}
+                onClick={executeApply}
+                loading={applying}
+                disabled={applying}
+              >
+                {applying ? '应用中...' : '确认应用'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

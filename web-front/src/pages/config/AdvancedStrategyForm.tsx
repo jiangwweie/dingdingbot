@@ -112,13 +112,6 @@ const TIMEFRAME_OPTIONS = [
   { value: '1w', label: '周线' },
 ];
 
-const MTF_MAPPING_OPTIONS = [
-  { value: '15m->1h', label: '15m → 1h' },
-  { value: '1h->4h', label: '1h → 4h' },
-  { value: '4h->1d', label: '4h → 1d' },
-  { value: '1d->1w', label: '1d → 1w' },
-];
-
 // ============================================================
 // Trigger Config Panel Component
 // ============================================================
@@ -377,19 +370,9 @@ const FiltersConfigPanel: React.FC<FiltersConfigPanelProps> = ({
         );
       case 'mtf':
         return (
-          <Form.Item label="MTF 映射" tooltip="多周期共振映射关系">
-            <Select
-              value={filter.params.mapping || '15m->1h'}
-              onChange={(val) => updateFilterParam(index, 'mapping', val)}
-              style={{ width: '100%' }}
-            >
-              {MTF_MAPPING_OPTIONS.map((opt) => (
-                <Option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </Option>
-              ))}
-            </Select>
-          </Form.Item>
+          <div className="text-gray-400 text-sm">
+            MTF 映射由系统自动处理（15m→1h, 1h→4h, 4h→1d, 1d→1w）
+          </div>
         );
       case 'atr':
         return (

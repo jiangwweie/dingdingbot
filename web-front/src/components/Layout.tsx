@@ -52,7 +52,6 @@ const navCategories: NavCategory[] = [
     items: [
       { to: '/backtest', icon: FlaskConical, label: '回测沙箱' },
       { to: '/backtest-reports', icon: History, label: '回测报告' },
-      { to: '/strategies', icon: Zap, label: '策略工作台' },
     ],
   },
   {

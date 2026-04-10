@@ -9,9 +9,9 @@
  * @package components/strategy
  */
 
-import React from 'react';
-import { Card, Switch, Tag, Space, Button, Tooltip } from 'antd';
-import { EditOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
+import { Card, Switch, Tag, Space, Button, Tooltip, Modal, Collapse, Typography, Descriptions, Divider } from 'antd';
+import { EditOutlined, DeleteOutlined, CopyOutlined, EyeOutlined, ExperimentOutlined, UploadOutlined } from '@ant-design/icons';
 import { cn } from '../../lib/utils';
 import type { Strategy } from '../../api/config';
 
@@ -25,6 +25,8 @@ export interface StrategyCardProps {
   onToggleEnable: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onDuplicate?: (strategy: Strategy) => void;
+  onPreview?: (strategy: Strategy) => void;
+  onApply?: (strategy: Strategy) => void;
 }
 
 // ============================================================
@@ -58,6 +60,8 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
   onToggleEnable,
   onDelete,
   onDuplicate,
+  onPreview,
+  onApply,
 }) => {
   const {
     id,
@@ -73,7 +77,26 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
   const triggerType = trigger_config?.type || 'unknown';
   const filterCount = filter_configs?.length || 0;
 
+  const [previewVisible, setPreviewVisible] = useState(false);
+
+  const renderParams = (params: Record<string, any>) => {
+    if (!params || Object.keys(params).length === 0) {
+      return <span className="text-gray-400">无参数</span>;
+    }
+    return (
+      <div className="space-y-1">
+        {Object.entries(params).map(([key, value]) => (
+          <div key={key} className="flex items-center gap-2 text-sm">
+            <span className="text-gray-500 min-w-[80px]">{key}:</span>
+            <span className="font-mono text-gray-800">{String(value)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
+    <>
     <Card
       className={cn(
         'strategy-card transition-all duration-200 hover:shadow-lg',
@@ -82,6 +105,24 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
       bordered={true}
       size="small"
       actions={[
+        <Tooltip key="preview" title="查看详情">
+          <Button
+            type="text"
+            icon={<EyeOutlined className="text-green-600" />}
+            onClick={() => setPreviewVisible(true)}
+            size="small"
+          />
+        </Tooltip>,
+        onPreview ? (
+          <Tooltip key="dryrun" title="Dry Run 预览">
+            <Button
+              type="text"
+              icon={<ExperimentOutlined className="text-orange-600" />}
+              onClick={() => onPreview(strategy)}
+              size="small"
+            />
+          </Tooltip>
+        ) : null,
         <Tooltip key="edit" title="编辑策略">
           <Button
             type="text"
@@ -90,6 +131,16 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
             size="small"
           />
         </Tooltip>,
+        onApply ? (
+          <Tooltip key="apply" title="应用到实盘">
+            <Button
+              type="text"
+              icon={<UploadOutlined className="text-cyan-600" />}
+              onClick={() => onApply(strategy)}
+              size="small"
+            />
+          </Tooltip>
+        ) : null,
         onDuplicate ? (
           <Tooltip key="duplicate" title="复制策略">
             <Button
@@ -172,6 +223,119 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
         }
       />
     </Card>
+
+    {/* 策略详情预览 Modal */}
+    <Modal
+      title={
+        <div className="flex items-center gap-2">
+          <EyeOutlined className="text-green-600" />
+          <span>策略详情 - {name}</span>
+        </div>
+      }
+      open={previewVisible}
+      onCancel={() => setPreviewVisible(false)}
+      footer={null}
+      width={640}
+      destroyOnClose
+    >
+      <Collapse
+        defaultActiveKey={['trigger', 'filters', 'scope']}
+        items={[
+          {
+            key: 'trigger',
+            label: (
+              <span className="font-medium">
+                触发器: <Tag color={getTriggerColor(triggerType)}>{TRIGGER_LABELS[triggerType] || triggerType}</Tag>
+              </span>
+            ),
+            children: (
+              <div className="space-y-2">
+                <Typography.Text type="secondary" className="text-sm">
+                  触发器参数
+                </Typography.Text>
+                {renderParams(trigger_config?.params || {})}
+              </div>
+            ),
+          },
+          {
+            key: 'filters',
+            label: (
+              <span className="font-medium">
+                过滤器链 ({filterCount} 个) - 逻辑: <Tag color={strategy.filter_logic === 'AND' ? 'blue' : 'orange'}>{strategy.filter_logic}</Tag>
+              </span>
+            ),
+            children:
+              filter_configs?.length > 0 ? (
+                <div className="space-y-3">
+                  {filter_configs.map((filter, index) => (
+                    <div key={filter.type + index} className="border-l-2 border-purple-300 pl-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Tag color="purple">{filter.type}</Tag>
+                        <Tag color={filter.enabled ? 'green' : 'default'}>
+                          {filter.enabled ? '已启用' : '已禁用'}
+                        </Tag>
+                      </div>
+                      {renderParams(filter.params || {})}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Typography.Text type="secondary">无过滤器</Typography.Text>
+              ),
+          },
+          {
+            key: 'scope',
+            label: <span className="font-medium">作用域 (币种 & 周期)</span>,
+            children: (
+              <div className="space-y-3">
+                <div>
+                  <Typography.Text type="secondary" className="text-sm block mb-2">
+                    交易对
+                  </Typography.Text>
+                  <div className="flex flex-wrap gap-1">
+                    {symbols?.map((symbol) => (
+                      <Tag key={symbol} color="gray">
+                        {symbol}
+                      </Tag>
+                    ))}
+                  </div>
+                </div>
+                <Divider className="my-2" />
+                <div>
+                  <Typography.Text type="secondary" className="text-sm block mb-2">
+                    K 线周期
+                  </Typography.Text>
+                  <div className="flex flex-wrap gap-1">
+                    {timeframes?.map((tf) => (
+                      <Tag key={tf} color="green">
+                        {tf}
+                      </Tag>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ),
+          },
+          {
+            key: 'meta',
+            label: <span className="font-medium">元信息</span>,
+            children: (
+              <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label="策略 ID">{id}</Descriptions.Item>
+                <Descriptions.Item label="状态">
+                  <Tag color={is_active ? 'green' : 'default'}>
+                    {is_active ? '已启用' : '已禁用'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="创建时间">{strategy.created_at || '-'}</Descriptions.Item>
+                <Descriptions.Item label="更新时间">{strategy.updated_at || '-'}</Descriptions.Item>
+              </Descriptions>
+            ),
+          },
+        ]}
+      />
+    </Modal>
+    </>
   );
 };
 

@@ -30,11 +30,12 @@ import {
   fetchBacktestSignals,
   type Signal,
 } from '../lib/api';
+import { configApi, type Strategy } from '../api/config';
 import StrategyBuilder from '../components/StrategyBuilder';
 import QuickDateRangePicker from '../components/QuickDateRangePicker';
 import StrategyTemplatePicker from '../components/StrategyTemplatePicker';
 import SignalDetailsDrawer from '../components/SignalDetailsDrawer';
-import { Collapse } from 'antd';
+import { Collapse, Select } from 'antd';
 
 // Timeframe options
 const TIMEFRAMES = [
@@ -63,7 +64,6 @@ const SYMBOLS = [
 const DEFAULT_RISK_OVERRIDES: Partial<RiskConfig> = {
   max_loss_percent: 0.01,
   max_leverage: 10,
-  default_leverage: 5,
 };
 
 export default function Backtest() {
@@ -104,6 +104,12 @@ export default function Backtest() {
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [showDetailsDrawer, setShowDetailsDrawer] = useState(false);
 
+  // Quick strategy selector state
+  const [savedStrategies, setSavedStrategies] = useState<Strategy[]>([]);
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string | undefined>();
+  const [isLoadingSaved, setIsLoadingSaved] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   // Fetch templates on mount
   useEffect(() => {
     const loadTemplates = async () => {
@@ -119,6 +125,39 @@ export default function Backtest() {
     };
     loadTemplates();
   }, []);
+
+  // Fetch saved strategies for quick selector on mount
+  useEffect(() => {
+    const loadSavedStrategies = async () => {
+      setIsLoadingSaved(true);
+      setLoadError(null);
+      try {
+        const { data } = await configApi.getStrategies();
+        setSavedStrategies(data);
+      } catch (err) {
+        console.error('Failed to fetch saved strategies:', err);
+        // Silent failure - doesn't affect backtest usage
+      } finally {
+        setIsLoadingSaved(false);
+      }
+    };
+    loadSavedStrategies();
+  }, []);
+
+  // Handle loading a saved strategy into the backtest form
+  const handleLoadStrategy = useCallback(async () => {
+    if (!selectedStrategyId) return;
+    try {
+      const { data: strategy } = await configApi.getStrategy(selectedStrategyId);
+      const converted = mapStrategyToDefinition(strategy);
+      setStrategies([converted]);
+      setSelectedStrategyId(undefined);
+      setLoadError(null);
+    } catch (err) {
+      console.error('Failed to load strategy:', err);
+      setLoadError('加载策略失败，请重试');
+    }
+  }, [selectedStrategyId]);
 
   // Validate form
   const validateForm = useCallback((): boolean => {
@@ -282,12 +321,52 @@ export default function Backtest() {
         <div className="flex-1">
           <h3 className="text-sm font-semibold text-blue-900">如何使用回测沙箱</h3>
           <div className="mt-2 text-sm text-blue-700 space-y-1">
-            <p><strong>第 1 步：</strong> 前往 <button onClick={() => window.location.href = '/strategies'} className="text-blue-600 hover:underline font-medium">策略工作台</button> 创建或编辑策略组合</p>
+            <p><strong>第 1 步：</strong> 前往 <button onClick={() => window.location.href = '/config/strategies'} className="text-blue-600 hover:underline font-medium">策略配置</button> 创建或编辑策略组合</p>
             <p><strong>第 2 步：</strong> 使用"预览"功能快速验证策略逻辑（单根 K 线）</p>
             <p><strong>第 3 步：</strong> 点击右上角"从策略工作台导入"，选择已保存的策略执行历史回测</p>
           </div>
         </div>
       </div>
+
+      {/* Quick Strategy Selector */}
+      {savedStrategies.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Zap className="w-4 h-4 text-amber-500" />
+            <span className="text-sm font-medium text-gray-700">快捷加载已保存策略</span>
+          </div>
+          <Select
+            allowClear
+            showSearch
+            placeholder="选择策略"
+            value={selectedStrategyId}
+            onChange={setSelectedStrategyId}
+            options={savedStrategies.map((s) => ({
+              label: s.name,
+              value: s.id,
+            }))}
+            className="flex-1"
+            loading={isLoadingSaved}
+            disabled={isLoadingSaved}
+            optionFilterProp="label"
+          />
+          <button
+            onClick={handleLoadStrategy}
+            disabled={!selectedStrategyId || isLoadingSaved}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1',
+              !selectedStrategyId || isLoadingSaved
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-black text-white hover:bg-gray-800'
+            )}
+          >
+            加载
+          </button>
+          {loadError && (
+            <span className="text-xs text-red-500">{loadError}</span>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Control Panel */}
@@ -898,4 +977,51 @@ function translateStrategy(strategy?: string | null): string {
   if (key === 'pinbar') return 'Pinbar';
   if (key === 'engulfing') return 'Engulfing';
   return strategy;
+}
+
+/**
+ * Map Strategy (from config API) to StrategyDefinition (backtest format)
+ *
+ * Handles field name differences:
+ * - trigger_config → trigger
+ * - filter_configs → filters (with generated IDs)
+ * - symbols + timeframes → apply_to
+ */
+function mapStrategyToDefinition(strategy: Strategy): StrategyDefinition {
+  const id = crypto.randomUUID();
+
+  // Map trigger_config → trigger (add id + enabled)
+  const trigger = {
+    id: `${id}-trigger`,
+    type: strategy.trigger_config.type,
+    enabled: true,
+    params: strategy.trigger_config.params || {},
+  };
+
+  // Map filter_configs → filters (add id field if missing)
+  const filters = (strategy.filter_configs || []).map((f) => ({
+    id: `${id}-filter-${f.type}`,
+    type: f.type,
+    enabled: f.enabled,
+    params: f.params || {},
+  }));
+
+  // Map symbols + timeframes → apply_to
+  const applyTo: string[] = [];
+  for (const sym of strategy.symbols || []) {
+    for (const tf of strategy.timeframes || []) {
+      applyTo.push(`${sym}:${tf}`);
+    }
+  }
+
+  return {
+    id: strategy.id,
+    name: strategy.name,
+    trigger,
+    filters,
+    filter_logic: strategy.filter_logic,
+    is_global: applyTo.length === 0,
+    apply_to: applyTo,
+    logic_tree: undefined,
+  };
 }

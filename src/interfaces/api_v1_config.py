@@ -68,8 +68,13 @@ def _decimal_constructor(loader, node):
 
 
 # Register Decimal representer and constructor for YAML
+# Use custom !decimal tag to avoid hijacking all YAML string parsing.
+# Only values explicitly marked as !decimal in YAML will be converted to Decimal.
 yaml.add_representer(Decimal, _decimal_representer)
-yaml.add_constructor('tag:yaml.org,2002:str', _decimal_constructor)
+yaml.add_constructor('!decimal', _decimal_constructor)
+# Also register on SafeLoader for safe_dump/safe_load compatibility
+yaml.add_representer(Decimal, _decimal_representer, Dumper=yaml.SafeDumper)
+yaml.add_constructor('!decimal', _decimal_constructor, Loader=yaml.SafeLoader)
 
 
 def _convert_decimals_to_str(obj: Any) -> Any:
@@ -638,7 +643,16 @@ async def check_admin_permission(request: Request):
 
 
 async def notify_hot_reload(config_type: str):
-    """Notify observer for config hot-reload."""
+    """Notify observer for config hot-reload and refresh ConfigManager caches."""
+    # 1. Refresh ConfigManager internal caches (fix: cache not being invalidated)
+    if _config_manager and hasattr(_config_manager, "reload_all_configs_from_db"):
+        try:
+            await _config_manager.reload_all_configs_from_db()
+            logger.info(f"ConfigManager caches refreshed for config_type={config_type}")
+        except Exception as e:
+            logger.warning(f"ConfigManager cache refresh failed: {e}")
+
+    # 2. Notify Observer (SignalPipeline, etc.)
     if _observer and hasattr(_observer, "notify"):
         await _observer.notify(config_type)
         logger.info(f"Hot-reload notification sent for {config_type}")

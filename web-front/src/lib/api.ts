@@ -359,7 +359,6 @@ export interface StrategyDefinition {
 export interface RiskConfig {
   max_loss_percent: number;
   max_leverage: number;
-  default_leverage: number;
 }
 
 // ============================================================================
@@ -2032,7 +2031,6 @@ export interface ParameterSpace {
 
   // Risk 参数
   max_loss_percent?: FloatParameter;
-  default_leverage?: IntParameter;
 
   // 自定义参数
   [key: string]: ParameterDefinition | undefined;

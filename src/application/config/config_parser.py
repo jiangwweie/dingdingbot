@@ -60,10 +60,14 @@ def _decimal_constructor(loader, node) -> Decimal:
     return Decimal(value)
 
 
-# Register Decimal representer and constructor globally
-# This ensures all YAML operations preserve Decimal precision
+# Register Decimal representer and constructor for YAML
+# Use custom !decimal tag to avoid hijacking all YAML string parsing.
+# Only values explicitly marked as !decimal in YAML will be converted to Decimal.
 yaml.add_representer(Decimal, _decimal_representer)
-yaml.add_constructor('tag:yaml.org,2002:str', _decimal_constructor)
+yaml.add_constructor('!decimal', _decimal_constructor)
+# Also register on SafeLoader/SafeDumper for safe_dump/safe_load compatibility
+yaml.add_representer(Decimal, _decimal_representer, Dumper=yaml.SafeDumper)
+yaml.add_constructor('!decimal', _decimal_constructor, Loader=yaml.SafeLoader)
 
 
 def _convert_decimals_to_str(obj: Any) -> Any:

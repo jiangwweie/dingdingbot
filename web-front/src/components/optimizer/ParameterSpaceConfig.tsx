@@ -96,11 +96,6 @@ const PARAMETER_TEMPLATES: Record<string, { label: string; category: string; def
     category: 'Risk',
     defaultDef: { type: 'float', low: 0.005, high: 0.02, step: 0.001, log: true },
   },
-  default_leverage: {
-    label: '默认杠杆倍数',
-    category: 'Risk',
-    defaultDef: { type: 'int', low: 1, high: 20, step: 1 },
-  },
 };
 
 // ============================================================

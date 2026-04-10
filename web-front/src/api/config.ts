@@ -91,11 +91,19 @@ export interface ToggleStrategyRequest {
 
 /**
  * 风险配置
+ * 与后端 RiskConfigResponse (api_v1_config.py:153) 保持类型对齐
  */
 export interface RiskConfig {
+  id: string;
   max_loss_percent: number;
   max_leverage: number;
-  default_leverage: number;
+  max_total_exposure: number | null;
+  daily_max_trades: number | null;
+  daily_max_loss: number | null;
+  max_position_hold_time: number | null;
+  cooldown_minutes: number;
+  updated_at: string;
+  version: number;
 }
 
 // ============================================================
@@ -240,6 +248,56 @@ export const configApi = {
    */
   toggleStrategy: (id: string, enabled: boolean) =>
     configApiClient.post(`/strategies/${id}/toggle`, { enabled } as ToggleStrategyRequest),
+
+  /**
+   * 应用策略到实盘引擎
+   * POST /api/strategies/:id/apply
+   * 注意：此接口使用旧 API 路径 /api/strategies，因为 apply 是独立端点
+   */
+  applyStrategy: (id: string) =>
+    fetch(`/api/strategies/${id}/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }).then(async (res) => {
+      if (!res.ok) {
+        const error = new Error('Failed to apply strategy');
+        (error as any).status = res.status;
+        (error as any).info = await res.json().catch(() => ({}));
+        throw error;
+      }
+      return res.json();
+    }),
+
+  /**
+   * Dry Run 预览策略
+   * POST /api/strategies/preview
+   * 注意：此接口使用旧 API 路径 /api/strategies，因为 preview 是独立端点
+   */
+  previewStrategy: (payload: {
+    logic_tree: {
+      gate: string;
+      children: Array<{
+        type: string;
+        id: string;
+        config: any;
+      }>;
+    };
+    symbol: string;
+    timeframe: string;
+  }) =>
+    fetch('/api/strategies/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const error = new Error('Failed to preview strategy');
+        (error as any).status = res.status;
+        (error as any).info = await res.json().catch(() => ({}));
+        throw error;
+      }
+      return res.json();
+    }),
 
   // ---------- 风险配置 ----------
 

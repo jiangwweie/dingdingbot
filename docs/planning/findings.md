@@ -112,6 +112,72 @@ def _get_order_repo() -> OrderRepository:
 
 ---
 
+## 2026-04-10 策略系统架构分析
+
+### 两套策略 API 并存
+
+| 旧 API `/api/strategies` | 新 API `/api/v1/config/strategies` |
+|---|---|
+| id: number | id: string UUID |
+| strategy_json: JSON 字符串 | trigger_config/filter_configs 扁平字段 |
+| StrategyWorkbench 使用 | StrategyConfig / StrategiesTab 使用 |
+| 有 Dry Run 预览 + 下发实盘 | 无预览、无下发功能 |
+
+### 策略下发断裂根因
+
+```
+用户点"下发到实盘" → StrategyWorkbench 直接 PUT /api/config
+→ 写了配置文件但 ConfigManager 内存未更新（未触发热重载）
+→ 仪表盘 GET /api/config 读内存 → 显示空策略
+```
+
+**正确流程**: `POST /api/strategies/{id}/apply` 会写入 + 触发热重载 observer。
+
+### MTF 映射是固定规则，无需用户配置
+
+后端三处硬编码固定映射：
+```python
+MTF_MAPPING = {"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}
+```
+运行时根据 K 线自身的 timeframe 自动查找对应高一级周期。前端 MTF mapping 单选下拉框选了也不生效——"前端能选但后端不读"。
+
+### 回测页面策略数组初始为空
+
+Backtest.tsx 和 PMSBacktest.tsx 的 strategies 数组初始为空，用户必须手动组装或从工作台导入。没有"一键使用已保存策略"的快捷路径。
+
+### 配置管理审计报告（2026-04-10）
+
+#### P0 问题（阻断性）
+
+| # | 问题 | 文件 | 行号 |
+|---|------|------|------|
+| 1 | RiskConfig 类型与后端不匹配（前端有 default_leverage，后端没有） | web-front/src/api/config.ts | 95-99 |
+| 2 | BackupTab 导入/导出调用不存在的旧 API 路径 | web-front/src/pages/config/BackupTab.tsx | 184, 214 |
+| 3 | BackupTab preview 数据结构与后端 ImportPreview 类型不匹配 | web-front/src/pages/config/BackupTab.tsx | 133-143 |
+| 4 | YAML 全局 string 构造器被劫持为 Decimal，影响所有 YAML 解析 | src/interfaces/api_v1_config.py | 72 |
+
+#### P1 问题（重要）
+
+| # | 问题 | 文件 |
+|---|------|------|
+| 5 | 热重载通知只发给 Observer，ConfigManager 缓存未刷新 | api_v1_config.py:640-644 |
+| 6 | 两个 SystemTab 组件功能重复（SystemTab.tsx vs SystemSettings.tsx） | 两个文件 |
+| 7 | StrategyForm 提交 trigger_config.params 永远为空 | StrategyForm.tsx:116-118 |
+| 8 | lib/api.ts 包含大量死代码/过时接口 | lib/api.ts |
+| 9 | 多个 Repository 各自独立创建 DB 连接 | config_repositories.py |
+| 10 | ConfigSnapshotService 每次创建快照新建/关闭临时连接 | config_snapshot_service.py:157-162 |
+
+> 注：并发安全问题用户明确表示不考虑，已跳过 P1-3 (upsert 竞态)。
+
+### 旧 API 死代码清理策略
+
+**决定**: 渐进式清理，不是本轮目标。
+- `lib/api.ts` 被 30+ 个文件引用，不能整体删除
+- StrategyWorkbench 删除后，清理仅被其引用的旧函数
+- 其余旧函数标记 `@deprecated`，后续逐步迁移
+
+---
+
 ## 归档
 
 2026-04-07 及更早的技术发现已归档至:

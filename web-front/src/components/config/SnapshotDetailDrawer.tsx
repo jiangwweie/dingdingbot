@@ -89,7 +89,6 @@ export default function SnapshotDetailDrawer({
             <div className="flex justify-between text-xs text-gray-600">
               <span>最大亏损：{(config.risk.max_loss_percent * 100).toFixed(1)}%</span>
               <span>最大杠杆：{config.risk.max_leverage}x</span>
-              <span>默认杠杆：{config.risk.default_leverage}x</span>
             </div>
           </div>
         )}

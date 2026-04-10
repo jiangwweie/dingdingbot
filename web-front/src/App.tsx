@@ -7,7 +7,6 @@ import Account from './pages/Account';
 import Backtest from './pages/Backtest';
 import PMSBacktest from './pages/PMSBacktest';
 import BacktestReports from './pages/BacktestReports';
-import StrategyWorkbench from './pages/StrategyWorkbench';
 import Snapshots from './pages/Snapshots';
 import Orders from './pages/Orders';
 import Positions from './pages/Positions';
@@ -38,9 +37,6 @@ export default function App() {
           <Route path="backtest" element={<Backtest />} />
           <Route path="backtest-reports" element={<BacktestReports />} />
           <Route path="pms-backtest" element={<PMSBacktest />} />
-
-          {/* 策略工作台 (保留原有路由) */}
-          <Route path="strategies" element={<StrategyWorkbench />} />
 
           {/* 配置管理 - FE-01 新增路由 */}
           <Route path="config" element={<ConfigManagement />} />
