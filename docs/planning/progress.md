@@ -549,6 +549,40 @@ notify_hot_reload(config_type):
 
 ---
 
+*最后更新：2026-04-11 Phase 5 审查修复 + 推送完成 + 待办任务纳入规划*
+
+---
+
+## 2026-04-11 Phase 5 全部收工 + 项目待办规划
+
+### 完成情况
+
+**Phase 5 审查修复**：6/6 验证点全部通过（100%）
+- P0-1: `get_migration_status()` 残留修复 ✅
+- P0-2: `ExchangeConfigResponse` 缺 `api_secret` 修复 ✅
+- P0-3: `MigrationStatus` 类型不匹配修复 ✅
+- P1-4: `_use_yaml_fallback` 死变量删除 ✅
+- P1-5: `signal_pipeline.py` docstring 更新 ✅
+- P1-6: `SystemSettings.tsx` Profile 入口清理 ✅
+
+**待办任务规划**：11 个待办事项已全部纳入任务列表
+- P0（2项）: BackupTab 手动验证、Testnet 模拟盘验证
+- P1（3项）: Decimal 绑定加固、前端 TODO、后端 TODO
+- P2（6项）: 测试补充、死代码清理、格式统一、实盘集成
+- 已设置每日 9:15 自动提醒
+
+### Git 提交
+| Commit | 说明 |
+|--------|------|
+| `89036df` | Part A: YAML 运行时配置迁移到 DB |
+| `8fd136d` | Part B/C: 配置页面整合 + 生效配置总览 |
+| `25334fc` | Fix: PMS 回测导航入口修复 |
+| `3a62a82` | 审查修复: 4个后端问题 |
+| `8dde6b7` | Fix: MigrationStatus 类型不匹配 |
+| `f82472b` | docs: 更新规划进度 |
+
+---
+
 *最后更新：2026-04-11 Phase 5 审查修复 + 推送完成*
 
 ---
