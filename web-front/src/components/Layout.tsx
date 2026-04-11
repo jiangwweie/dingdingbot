@@ -51,6 +51,7 @@ const navCategories: NavCategory[] = [
     color: 'purple',
     items: [
       { to: '/backtest', icon: FlaskConical, label: '回测沙箱' },
+      { to: '/pms-backtest', icon: BarChart2, label: 'PMS 回测' },
       { to: '/backtest-reports', icon: History, label: '回测报告' },
     ],
   },
