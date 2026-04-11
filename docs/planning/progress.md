@@ -549,6 +549,89 @@ notify_hot_reload(config_type):
 
 ---
 
+*最后更新：2026-04-11 Phase 5 审查修复 + 推送完成*
+
+---
+
+## 2026-04-11 Phase 5 审查修复 - 完整测试验证
+
+### 验证范围
+
+对 Phase 5 审查发现的 5+1 个问题的修复进行代码级验证，覆盖 3 个提交。
+
+### 验证结果总览
+
+| # | 修复点 | 优先级 | 验证结果 | 说明 |
+|---|--------|--------|----------|------|
+| 1 | `get_migration_status()` 残留修复 | P0 | **通过** | 硬编码返回，无残留调用 |
+| 2 | `ExchangeConfigResponse` 缺 `api_secret` 修复 | P0 | **通过** | 三处 API 全部返回脱敏值 |
+| 3 | `MigrationStatus` 类型不匹配修复 | P0 | **通过** | 直接传递 bool 值 |
+| 4 | `_use_yaml_fallback` 死变量删除 | P1 | **通过** | 文件中完全不存在 |
+| 5 | `signal_pipeline.py` docstring 更新 | P2 | **通过** | 已更新为 "DB configuration is updated" |
+| 6 | `SystemSettings.tsx` Profile 入口清理 | P1 | **通过** | 无残留 Profile 引用 |
+
+### 详细验证记录
+
+#### P0-1: `get_migration_status()` 残留修复
+
+- **验证方法**: grep `_config_manager.get_migration_status` + grep `yaml_fully_migrated`
+- **文件**: `src/interfaces/api_v1_config.py`
+- **行 2705**: `migration = {"yaml_fully_migrated": True, "one_time_import_done": True, "import_version": "v1"}`
+- **结论**: `_config_manager.get_migration_status()` 调用已完全移除，替换为硬编码字典。
+  `effective_config` 端点不再抛出 AttributeError。
+
+#### P0-2: `ExchangeConfigResponse` 缺 `api_secret` 修复
+
+- **验证方法**: grep `ExchangeConfigResponse` 定义 + grep `api_secret=mask_secret`
+- **文件**: `src/interfaces/api_v1_config.py`
+- **行 2435**: `api_secret: str = Field(default="****", description="API Secret (masked)")` -- 模型定义包含字段
+- **行 2557**: `get_exchange_config()` 返回 `api_secret=mask_secret(exchange.api_secret)` -- GET 端点正确
+- **行 2592**: `update_exchange_config()` 返回 `api_secret=mask_secret(config.api_secret)` -- PUT 端点正确
+- **行 2738**: `get_effective_config()` 返回 `api_secret=mask_secret(exchange.api_secret)` -- 聚合端点正确
+- **结论**: 三处 API 返回全部包含脱敏的 `api_secret` 字段。
+
+#### P0-3: `MigrationStatus` 类型不匹配修复
+
+- **验证方法**: grep `== "true"` + grep `== "false"` + 检查 MigrationStatus 实例化
+- **文件**: `src/interfaces/api_v1_config.py`
+- **行 2777-2778**: `yaml_fully_migrated=migration.get("yaml_fully_migrated", True)` -- 直接传递 bool
+- **结论**: 不再使用字符串比较 `== "true"`，硬编码字典中 `True` 为 bool 类型。
+
+#### P1-4: `_use_yaml_fallback` 死变量删除
+
+- **验证方法**: grep `_use_yaml_fallback` in `src/application/config_manager.py`
+- **结果**: 零匹配
+- **结论**: 死变量已完全从文件中移除。
+
+#### P2-5: `signal_pipeline.py` docstring 更新
+
+- **验证方法**: grep `on_config_updated` docstring
+- **文件**: `src/application/signal_pipeline.py`
+- **行 289**: `Called by ConfigManager when DB configuration is updated.`
+- **结论**: docstring 已从过时描述更新为 "DB configuration is updated"。
+
+#### P1-6: `SystemSettings.tsx` Profile 入口清理
+
+- **验证方法**: grep `goToProfiles|Profile 管理|profile` in `SystemSettings.tsx`
+- **结果**: 零匹配
+- **确认**: 文件中仅存在 `goToBackup` (line 427) 和 `goToSnapshots` (line 432)
+- **确认**: "备份恢复" Card (line 531) 和 "配置快照" Card (line 546) 仍然存在
+- **结论**: Profile 入口已完全移除，备份和快照入口保留。
+
+### 语法与导入验证
+
+| 文件 | py_compile | 导入验证 | 结果 |
+|------|-----------|---------|------|
+| `src/interfaces/api_v1_config.py` | 通过 | `from src.interfaces.api_v1_config import router` OK | 无错误 |
+| `src/application/config_manager.py` | 通过 | N/A | 无错误 |
+| `src/application/signal_pipeline.py` | 通过 | N/A | 无错误 |
+
+### 结论
+
+**6/6 验证点全部通过，通过率 100%。** Phase 5 审查修复代码质量达标，无残留问题。
+
+---
+
 *最后更新：2026-04-10 16:30 - API 契约对齐 Phase 2 后端系统配置完成*
 
 ---

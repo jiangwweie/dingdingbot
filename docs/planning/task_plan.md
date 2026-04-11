@@ -87,31 +87,34 @@
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
 | 9 | 修复 BackupTab 导入/导出功能损坏 | P0 | ✅ 已完成 |
-| 10 | 合并两个重复的 SystemTab 组件 | P1 | 🔓 待规划 |
+| 10 | 合并两个重复的 SystemTab 组件 | P1 | ✅ 已完成 |
 | 11 | StrategyForm 触发器参数表单补全 | P1 | ✅ 已完成 |
-| 12 | 共享 DB 连接池 | P1 | 🔓 待规划 |
+| 12 | 共享 DB 连接池 | P1 | ✅ 已完成 |
 
-#### Task 9: BackupTab 修复计划
-
-**5 个断裂点诊断**:
-1. `handleExport`: 路径 `/api/config/export` → 应为 `POST /api/v1/config/export`
-2. `handleUpload`: 前端本地 js-yaml 解析 → 应调用后端 `/api/v1/config/import/preview`
-3. `handleConfirmImport`: 路径 `/api/config/import` FormData → 应为 `/api/v1/config/import/confirm` + preview_token
-4. 预览渲染: 使用错误的 `changes` 字段 → 应使用后端返回的 `summary`/`preview_data`/`conflicts`/`errors`
-5. 无 preview_token 过期处理 → 需添加 5 分钟 TTL 检测
-
-**修复步骤**:
-1. 在 `config.ts` 新增 3 个 API 方法 + 类型定义
-2. 重写 `handleExport` 使用正确的端点 + Blob 下载
-3. 重写 `handleUpload` 调用 preview API
-4. 重写 `handleConfirmImport` 使用 preview_token
-5. 添加错误展示和 token 过期处理
-
-### 第三阶段（渐进式清理 - 不现在做）
+### 第三阶段：YAML → DB 迁移 + 配置页面整合（2026-04-11 启动）
 
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
-| 13 | 旧 API 死代码清理（lib/api.ts 渐进式清理） | P2 | ⏳ 推迟 |
+| 13 | YAML 运行时配置迁移到 DB（后端） | P0 | ✅ 已完成 |
+| 14 | 配置页面整合（4 Tab 统一页面） | P0 | ✅ 已完成 |
+| 15 | 生效配置总览 API + 前端组件 | P0 | ✅ 已完成 |
+| 16 | 审查修复（5+1 问题） | P0/P1/P2 | ✅ 已完成 |
+
+#### Phase 5 提交记录
+
+| Commit | 说明 |
+|--------|------|
+| `89036df` | Part A: YAML 运行时配置迁移到 DB |
+| `8fd136d` | Part B/C: 配置页面整合 + 生效配置总览 + YAML 清理 |
+| `25334fc` | Fix: PMS 回测导航入口修复 |
+| `3a62a82` | 审查修复: get_migration_status/api_secret/死变量/docstring |
+| `8dde6b7` | Fix: MigrationStatus 类型不匹配 |
+
+### 第四阶段（渐进式清理 - 不现在做）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 14 | 旧 API 死代码清理（lib/api.ts 渐进式清理） | P2 | ⏳ 推迟 |
 
 ### 执行顺序
 
