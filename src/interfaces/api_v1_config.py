@@ -112,44 +112,9 @@ class ConfigImportError(CryptoMonitorError):
     pass
 
 # ============================================================
-# Global Dependencies (injected at startup)
+# Shared config globals (single source of truth with api.py)
 # ============================================================
-_strategy_repo: Optional[StrategyConfigRepository] = None
-_risk_repo: Optional[RiskConfigRepository] = None
-_system_repo: Optional[SystemConfigRepository] = None
-_symbol_repo: Optional[SymbolConfigRepository] = None
-_notification_repo: Optional[NotificationConfigRepository] = None
-_history_repo: Optional[ConfigHistoryRepository] = None
-_snapshot_repo: Optional[ConfigSnapshotRepositoryExtended] = None
-_config_manager: Optional[Any] = None  # ConfigManager for hot-reload
-_observer: Optional[Any] = None  # Observer for hot-reload notifications
-
-
-def set_config_dependencies(
-    strategy_repo: Optional[StrategyConfigRepository] = None,
-    risk_repo: Optional[RiskConfigRepository] = None,
-    system_repo: Optional[SystemConfigRepository] = None,
-    symbol_repo: Optional[SymbolConfigRepository] = None,
-    notification_repo: Optional[NotificationConfigRepository] = None,
-    history_repo: Optional[ConfigHistoryRepository] = None,
-    snapshot_repo: Optional[ConfigSnapshotRepositoryExtended] = None,
-    config_manager: Optional[Any] = None,
-    observer: Optional[Any] = None,
-):
-    """Inject repository and manager dependencies."""
-    global _strategy_repo, _risk_repo, _system_repo, _symbol_repo
-    global _notification_repo, _history_repo, _snapshot_repo
-    global _config_manager, _observer
-
-    _strategy_repo = strategy_repo
-    _risk_repo = risk_repo
-    _system_repo = system_repo
-    _symbol_repo = symbol_repo
-    _notification_repo = notification_repo
-    _history_repo = history_repo
-    _snapshot_repo = snapshot_repo
-    _config_manager = config_manager
-    _observer = observer
+from src.interfaces import api_config_globals as _cg
 
 
 # ============================================================
@@ -645,16 +610,16 @@ async def check_admin_permission(request: Request):
 async def notify_hot_reload(config_type: str):
     """Notify observer for config hot-reload and refresh ConfigManager caches."""
     # 1. Refresh ConfigManager internal caches (fix: cache not being invalidated)
-    if _config_manager and hasattr(_config_manager, "reload_all_configs_from_db"):
+    if _cg._config_manager and hasattr(_cg._config_manager, "reload_all_configs_from_db"):
         try:
-            await _config_manager.reload_all_configs_from_db()
+            await _cg._config_manager.reload_all_configs_from_db()
             logger.info(f"ConfigManager caches refreshed for config_type={config_type}")
         except Exception as e:
             logger.warning(f"ConfigManager cache refresh failed: {e}")
 
     # 2. Notify Observer (SignalPipeline, etc.)
-    if _observer and hasattr(_observer, "notify"):
-        await _observer.notify(config_type)
+    if _cg._observer and hasattr(_cg._observer, "notify"):
+        await _cg._observer.notify(config_type)
         logger.info(f"Hot-reload notification sent for {config_type}")
 
 
@@ -675,7 +640,7 @@ async def get_global_config():
     返回所有配置类型的摘要信息，用于概览。
     """
     # Get risk config
-    risk_data = await _risk_repo.get_global() if _risk_repo else None
+    risk_data = await _cg._risk_repo.get_global() if _cg._risk_repo else None
     if not risk_data:
         # Return default
         risk_data = {
@@ -689,7 +654,7 @@ async def get_global_config():
         }
 
     # Get system config
-    system_data = await _system_repo.get_global() if _system_repo else None
+    system_data = await _cg._system_repo.get_global() if _cg._system_repo else None
     if not system_data:
         # Return default
         system_data = {
@@ -715,14 +680,14 @@ async def get_global_config():
     symbols_count = 0
     notifications_count = 0
 
-    if _strategy_repo:
-        _, total = await _strategy_repo.get_list(limit=1, offset=0)
+    if _cg._strategy_repo:
+        _, total = await _cg._strategy_repo.get_list(limit=1, offset=0)
         strategies_count = total
 
-    if _symbol_repo:
-        symbols_count = len(await _symbol_repo.get_all())
+    if _cg._symbol_repo:
+        symbols_count = len(await _cg._symbol_repo.get_all())
 
-    if _notification_repo:
+    if _cg._notification_repo:
         # Count notifications
         pass  # TODO: Add count method to repository
 
@@ -748,10 +713,10 @@ async def get_global_config():
 @router.get("/risk", response_model=RiskConfigResponse)
 async def get_risk_config():
     """获取风控配置"""
-    if not _risk_repo:
+    if not _cg._risk_repo:
         raise HTTPException(status_code=503, detail="Risk repository not initialized")
 
-    risk_data = await _risk_repo.get_global()
+    risk_data = await _cg._risk_repo.get_global()
     if not risk_data:
         # Return default
         risk_data = {
@@ -777,7 +742,7 @@ async def update_risk_config(
 
     风控配置变更会立即生效，无需重启系统。
     """
-    if not _risk_repo:
+    if not _cg._risk_repo:
         raise HTTPException(status_code=503, detail="Risk repository not initialized")
 
     # Build update dict
@@ -793,19 +758,19 @@ async def update_risk_config(
         else:
             decimal_update_data[key] = value
 
-    success = await _risk_repo.update(decimal_update_data)
+    success = await _cg._risk_repo.update(decimal_update_data)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to update risk config")
 
     # Get updated config
-    updated_config = await _risk_repo.get_global()
+    updated_config = await _cg._risk_repo.get_global()
 
     # Notify hot-reload
     await notify_hot_reload("risk")
 
     # Record history (use JSON-serializable update_data)
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="risk_config",
             entity_id="global",
             action="UPDATE",
@@ -923,10 +888,10 @@ async def get_system_config():
     Returns system config in nested format matching frontend SystemConfigResponse.
     No admin permission required (read-only endpoint).
     """
-    if not _system_repo:
+    if not _cg._system_repo:
         raise HTTPException(status_code=503, detail="System repository not initialized")
 
-    system_data = await _system_repo.get_global()
+    system_data = await _cg._system_repo.get_global()
     if not system_data:
         # Return default in nested format
         return SystemConfigResponse()
@@ -946,7 +911,7 @@ async def update_system_config(
     Accepts nested format matching frontend SystemConfigUpdateRequest.
     Sends hot-reload notification after successful update.
     """
-    if not _system_repo:
+    if not _cg._system_repo:
         raise HTTPException(status_code=503, detail="System repository not initialized")
 
     # Convert nested request to flat database format
@@ -966,16 +931,16 @@ async def update_system_config(
     ]
     restart_required = any(key in flat_data for key in restart_required_fields)
 
-    success = await _system_repo.update(flat_data, restart_required=restart_required)
+    success = await _cg._system_repo.update(flat_data, restart_required=restart_required)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to update system config")
 
     # Get updated config
-    updated_config = await _system_repo.get_global()
+    updated_config = await _cg._system_repo.get_global()
 
     # Record history (use the nested update_data for audit trail)
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="system_config",
             entity_id="global",
             action="UPDATE",
@@ -1005,10 +970,10 @@ async def get_strategies(
     offset: int = Query(default=0, ge=0)
 ):
     """获取策略列表"""
-    if not _strategy_repo:
+    if not _cg._strategy_repo:
         raise HTTPException(status_code=503, detail="Strategy repository not initialized")
 
-    strategies, total = await _strategy_repo.get_list(
+    strategies, total = await _cg._strategy_repo.get_list(
         is_active=is_active,
         limit=limit,
         offset=offset
@@ -1035,16 +1000,16 @@ async def create_strategy(
     admin: bool = Depends(check_admin_permission)
 ):
     """创建策略"""
-    if not _strategy_repo:
+    if not _cg._strategy_repo:
         raise HTTPException(status_code=503, detail="Strategy repository not initialized")
 
     try:
         strategy_data = request.model_dump(mode='json')
-        strategy_id = await _strategy_repo.create(strategy_data)
+        strategy_id = await _cg._strategy_repo.create(strategy_data)
 
         # Record history
-        if _history_repo:
-            await _history_repo.record_change(
+        if _cg._history_repo:
+            await _cg._history_repo.record_change(
                 entity_type="strategy",
                 entity_id=strategy_id,
                 action="CREATE",
@@ -1070,10 +1035,10 @@ async def get_strategy(
     strategy_id: str,
 ):
     """获取策略详情"""
-    if not _strategy_repo:
+    if not _cg._strategy_repo:
         raise HTTPException(status_code=503, detail="Strategy repository not initialized")
 
-    strategy = await _strategy_repo.get_by_id(strategy_id)
+    strategy = await _cg._strategy_repo.get_by_id(strategy_id)
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found")
 
@@ -1091,11 +1056,11 @@ async def update_strategy(
 
     策略配置变更会立即生效，无需重启系统。
     """
-    if not _strategy_repo:
+    if not _cg._strategy_repo:
         raise HTTPException(status_code=503, detail="Strategy repository not initialized")
 
     # Check if strategy exists
-    existing = await _strategy_repo.get_by_id(strategy_id)
+    existing = await _cg._strategy_repo.get_by_id(strategy_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found")
 
@@ -1105,16 +1070,16 @@ async def update_strategy(
         raise HTTPException(status_code=400, detail="No fields to update")
 
     try:
-        success = await _strategy_repo.update(strategy_id, update_data)
+        success = await _cg._strategy_repo.update(strategy_id, update_data)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update strategy")
 
         # Get updated strategy
-        updated_strategy = await _strategy_repo.get_by_id(strategy_id)
+        updated_strategy = await _cg._strategy_repo.get_by_id(strategy_id)
 
         # Record history
-        if _history_repo:
-            await _history_repo.record_change(
+        if _cg._history_repo:
+            await _cg._history_repo.record_change(
                 entity_type="strategy",
                 entity_id=strategy_id,
                 action="UPDATE",
@@ -1138,21 +1103,21 @@ async def delete_strategy(
     admin: bool = Depends(check_admin_permission)
 ):
     """删除策略"""
-    if not _strategy_repo:
+    if not _cg._strategy_repo:
         raise HTTPException(status_code=503, detail="Strategy repository not initialized")
 
     # Check if strategy exists
-    existing = await _strategy_repo.get_by_id(strategy_id)
+    existing = await _cg._strategy_repo.get_by_id(strategy_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found")
 
-    success = await _strategy_repo.delete(strategy_id)
+    success = await _cg._strategy_repo.delete(strategy_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete strategy")
 
     # Record history
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="strategy",
             entity_id=strategy_id,
             action="DELETE",
@@ -1177,21 +1142,21 @@ async def toggle_strategy(
     admin: bool = Depends(check_admin_permission)
 ):
     """启用/禁用策略"""
-    if not _strategy_repo:
+    if not _cg._strategy_repo:
         raise HTTPException(status_code=503, detail="Strategy repository not initialized")
 
     # Check if strategy exists
-    existing = await _strategy_repo.get_by_id(strategy_id)
+    existing = await _cg._strategy_repo.get_by_id(strategy_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found")
 
-    new_status = await _strategy_repo.toggle(strategy_id)
+    new_status = await _cg._strategy_repo.toggle(strategy_id)
     if new_status is None:
         raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found")
 
     # Record history
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="strategy",
             entity_id=strategy_id,
             action="UPDATE",
@@ -1219,13 +1184,13 @@ async def get_symbols(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
 ):
     """获取币池列表"""
-    if not _symbol_repo:
+    if not _cg._symbol_repo:
         raise HTTPException(status_code=503, detail="Symbol repository not initialized")
 
     if is_active is not None:
-        symbols = await _symbol_repo.get_active() if is_active else await _symbol_repo.get_all()
+        symbols = await _cg._symbol_repo.get_active() if is_active else await _cg._symbol_repo.get_all()
     else:
-        symbols = await _symbol_repo.get_all()
+        symbols = await _cg._symbol_repo.get_all()
 
     return [
         SymbolListItem(
@@ -1247,7 +1212,7 @@ async def create_symbol(
     admin: bool = Depends(check_admin_permission)
 ):
     """添加币种"""
-    if not _symbol_repo:
+    if not _cg._symbol_repo:
         raise HTTPException(status_code=503, detail="Symbol repository not initialized")
 
     try:
@@ -1256,11 +1221,11 @@ async def create_symbol(
         if symbol_data.get("min_quantity"):
             symbol_data["min_quantity"] = Decimal(str(symbol_data["min_quantity"]))
 
-        success = await _symbol_repo.create(symbol_data)
+        success = await _cg._symbol_repo.create(symbol_data)
 
         # Record history
-        if _history_repo:
-            await _history_repo.record_change(
+        if _cg._history_repo:
+            await _cg._history_repo.record_change(
                 entity_type="symbol",
                 entity_id=request.symbol,
                 action="CREATE",
@@ -1292,11 +1257,11 @@ async def update_symbol(
 
     币池配置变更会立即生效，无需重启系统。
     """
-    if not _symbol_repo:
+    if not _cg._symbol_repo:
         raise HTTPException(status_code=503, detail="Symbol repository not initialized")
 
     # Check if symbol exists
-    existing = await _symbol_repo.get_by_symbol(symbol)
+    existing = await _cg._symbol_repo.get_by_symbol(symbol)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Symbol '{symbol}' not found")
 
@@ -1310,16 +1275,16 @@ async def update_symbol(
         if key == "min_quantity" and value is not None:
             update_data[key] = Decimal(str(value))
 
-    success = await _symbol_repo.update(symbol, update_data)
+    success = await _cg._symbol_repo.update(symbol, update_data)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to update symbol")
 
     # Get updated symbol
-    updated_symbol = await _symbol_repo.get_by_symbol(symbol)
+    updated_symbol = await _cg._symbol_repo.get_by_symbol(symbol)
 
     # Record history
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="symbol",
             entity_id=symbol,
             action="UPDATE",
@@ -1341,21 +1306,21 @@ async def toggle_symbol(
     admin: bool = Depends(check_admin_permission)
 ):
     """启用/禁用币种"""
-    if not _symbol_repo:
+    if not _cg._symbol_repo:
         raise HTTPException(status_code=503, detail="Symbol repository not initialized")
 
     # Check if symbol exists
-    existing = await _symbol_repo.get_by_symbol(symbol)
+    existing = await _cg._symbol_repo.get_by_symbol(symbol)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Symbol '{symbol}' not found")
 
-    new_status = await _symbol_repo.toggle(symbol)
+    new_status = await _cg._symbol_repo.toggle(symbol)
     if new_status is None:
         raise HTTPException(status_code=404, detail=f"Symbol '{symbol}' not found")
 
     # Record history
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="symbol",
             entity_id=symbol,
             action="UPDATE",
@@ -1381,22 +1346,22 @@ async def delete_symbol(
     admin: bool = Depends(check_admin_permission)
 ):
     """删除币种"""
-    if not _symbol_repo:
+    if not _cg._symbol_repo:
         raise HTTPException(status_code=503, detail="Symbol repository not initialized")
 
     # Check if symbol exists
-    existing = await _symbol_repo.get_by_symbol(symbol)
+    existing = await _cg._symbol_repo.get_by_symbol(symbol)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Symbol '{symbol}' not found")
 
     try:
-        success = await _symbol_repo.delete(symbol)
+        success = await _cg._symbol_repo.delete(symbol)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete symbol")
 
         # Record history
-        if _history_repo:
-            await _history_repo.record_change(
+        if _cg._history_repo:
+            await _cg._history_repo.record_change(
                 entity_type="symbol",
                 entity_id=symbol,
                 action="DELETE",
@@ -1425,11 +1390,11 @@ async def get_notifications(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
 ):
     """获取通知渠道列表"""
-    if not _notification_repo:
+    if not _cg._notification_repo:
         raise HTTPException(status_code=503, detail="Notification repository not initialized")
 
     # Use get_list method with optional filters
-    notifications = await _notification_repo.get_list(is_active=is_active)
+    notifications = await _cg._notification_repo.get_list(is_active=is_active)
 
     # Mask webhook URLs for security
     result = []
@@ -1449,15 +1414,15 @@ async def create_notification(
     admin: bool = Depends(check_admin_permission)
 ):
     """添加通知渠道"""
-    if not _notification_repo:
+    if not _cg._notification_repo:
         raise HTTPException(status_code=503, detail="Notification repository not initialized")
 
     notification_data = request.model_dump(mode='json')
-    notification_id = await _notification_repo.create(notification_data)
+    notification_id = await _cg._notification_repo.create(notification_data)
 
     # Record history
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="notification",
             entity_id=notification_id,
             action="CREATE",
@@ -1478,10 +1443,10 @@ async def get_notification(
     notification_id: str,
 ):
     """获取通知渠道详情"""
-    if not _notification_repo:
+    if not _cg._notification_repo:
         raise HTTPException(status_code=503, detail="Notification repository not initialized")
 
-    notification = await _notification_repo.get_by_id(notification_id)
+    notification = await _cg._notification_repo.get_by_id(notification_id)
     if not notification:
         raise HTTPException(status_code=404, detail=f"Notification '{notification_id}' not found")
 
@@ -1499,11 +1464,11 @@ async def update_notification(
     admin: bool = Depends(check_admin_permission)
 ):
     """更新通知渠道"""
-    if not _notification_repo:
+    if not _cg._notification_repo:
         raise HTTPException(status_code=503, detail="Notification repository not initialized")
 
     # Check if notification exists
-    existing = await _notification_repo.get_by_id(notification_id)
+    existing = await _cg._notification_repo.get_by_id(notification_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Notification '{notification_id}' not found")
 
@@ -1512,16 +1477,16 @@ async def update_notification(
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    success = await _notification_repo.update(notification_id, update_data)
+    success = await _cg._notification_repo.update(notification_id, update_data)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to update notification")
 
     # Get updated notification
-    updated_notification = await _notification_repo.get_by_id(notification_id)
+    updated_notification = await _cg._notification_repo.get_by_id(notification_id)
 
     # Record history
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="notification",
             entity_id=notification_id,
             action="UPDATE",
@@ -1544,21 +1509,21 @@ async def delete_notification(
     admin: bool = Depends(check_admin_permission)
 ):
     """删除通知渠道"""
-    if not _notification_repo:
+    if not _cg._notification_repo:
         raise HTTPException(status_code=503, detail="Notification repository not initialized")
 
     # Check if notification exists
-    existing = await _notification_repo.get_by_id(notification_id)
+    existing = await _cg._notification_repo.get_by_id(notification_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Notification '{notification_id}' not found")
 
-    success = await _notification_repo.delete(notification_id)
+    success = await _cg._notification_repo.delete(notification_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete notification")
 
     # Record history
-    if _history_repo:
-        await _history_repo.record_change(
+    if _cg._history_repo:
+        await _cg._history_repo.record_change(
             entity_type="notification",
             entity_id=notification_id,
             action="DELETE",
@@ -1581,11 +1546,11 @@ async def test_notification(
     admin: bool = Depends(check_admin_permission)
 ):
     """测试通知渠道"""
-    if not _notification_repo:
+    if not _cg._notification_repo:
         raise HTTPException(status_code=503, detail="Notification repository not initialized")
 
     # Check if notification exists
-    notification = await _notification_repo.get_by_id(notification_id)
+    notification = await _cg._notification_repo.get_by_id(notification_id)
     if not notification:
         raise HTTPException(status_code=404, detail=f"Notification '{notification_id}' not found")
 
@@ -1619,29 +1584,29 @@ async def export_config(
     export_data = {"version": "1.0", "exported_at": datetime.now(timezone.utc).isoformat()}
 
     # Export risk config
-    if request.include_risk and _risk_repo:
-        risk_data = await _risk_repo.get_global()
+    if request.include_risk and _cg._risk_repo:
+        risk_data = await _cg._risk_repo.get_global()
         if risk_data:
             export_data["risk"] = risk_data
 
     # Export system config
-    if request.include_system and _system_repo:
-        system_data = await _system_repo.get_global()
+    if request.include_system and _cg._system_repo:
+        system_data = await _cg._system_repo.get_global()
         if system_data:
             export_data["system"] = system_data
 
     # Export strategies
-    if request.include_strategies and _strategy_repo:
-        strategies, _ = await _strategy_repo.get_list(limit=1000, offset=0)
+    if request.include_strategies and _cg._strategy_repo:
+        strategies, _ = await _cg._strategy_repo.get_list(limit=1000, offset=0)
         export_data["strategies"] = strategies
 
     # Export symbols
-    if request.include_symbols and _symbol_repo:
-        symbols = await _symbol_repo.get_all()
+    if request.include_symbols and _cg._symbol_repo:
+        symbols = await _cg._symbol_repo.get_all()
         export_data["symbols"] = symbols
 
     # Export notifications
-    if request.include_notifications and _notification_repo:
+    if request.include_notifications and _cg._notification_repo:
         # TODO: Implement get_all method
         export_data["notifications"] = []
 
@@ -1659,7 +1624,7 @@ async def export_config(
     filename = f"config_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.yaml"
 
     # Record export operation to history
-    if _history_repo:
+    if _cg._history_repo:
         # Build change summary
         exported_sections = []
         if request.include_risk and "risk" in export_data:
@@ -1675,7 +1640,7 @@ async def export_config(
 
         change_summary = f"Exported config: {', '.join(exported_sections)}"
 
-        await _history_repo.record_change(
+        await _cg._history_repo.record_change(
             entity_type="config_bundle",
             entity_id="export",
             action="EXPORT",
@@ -1755,7 +1720,7 @@ async def preview_import(
                     strategy_names.add(name)
 
                     # Check existing strategies for name conflicts
-                    if _strategy_repo and name:
+                    if _cg._strategy_repo and name:
                         # TODO: Check existing strategies by name
                         pass
 
@@ -1840,7 +1805,7 @@ async def confirm_import(
 
     try:
         # Create snapshot before import
-        if _snapshot_repo:
+        if _cg._snapshot_repo:
             # Convert Decimals to strings for JSON serialization (preserve precision)
             import_data_serialized = _convert_decimals_to_str(import_data)
             snapshot = {
@@ -1849,19 +1814,19 @@ async def confirm_import(
                 "snapshot_data": import_data_serialized,
                 "created_by": "admin",
             }
-            snapshot_id = await _snapshot_repo.create(snapshot)
+            snapshot_id = await _cg._snapshot_repo.create(snapshot)
 
         # Apply import
         # 1. Risk config
-        if "risk" in import_data and _risk_repo:
-            await _risk_repo.update(import_data["risk"])
+        if "risk" in import_data and _cg._risk_repo:
+            await _cg._risk_repo.update(import_data["risk"])
 
         # 2. System config
-        if "system" in import_data and _system_repo:
-            await _system_repo.update(import_data["system"], restart_required=preview_data["requires_restart"])
+        if "system" in import_data and _cg._system_repo:
+            await _cg._system_repo.update(import_data["system"], restart_required=preview_data["requires_restart"])
 
         # 3. Strategies
-        if "strategies" in import_data and _strategy_repo:
+        if "strategies" in import_data and _cg._strategy_repo:
             for strategy in import_data["strategies"]:
                 # Convert legacy trigger/filters format to trigger_config/filter_configs
                 if "trigger" in strategy and "trigger_config" not in strategy:
@@ -1870,26 +1835,26 @@ async def confirm_import(
                     strategy["filter_configs"] = strategy.pop("filters")
                 # Check if exists by name
                 # For simplicity, create all as new
-                await _strategy_repo.create(strategy)
+                await _cg._strategy_repo.create(strategy)
 
         # 4. Symbols
-        if "symbols" in import_data and _symbol_repo:
+        if "symbols" in import_data and _cg._symbol_repo:
             for symbol in import_data["symbols"]:
                 try:
-                    await _symbol_repo.create(symbol)
+                    await _cg._symbol_repo.create(symbol)
                 except ConfigConflictError:
                     # Update existing
                     symbol_val = symbol["symbol"]
                     updates = {k: v for k, v in symbol.items() if k != "symbol"}
-                    await _symbol_repo.update(symbol_val, updates)
+                    await _cg._symbol_repo.update(symbol_val, updates)
 
         # 5. Notifications
-        if "notifications" in import_data and _notification_repo:
+        if "notifications" in import_data and _cg._notification_repo:
             for notification in import_data["notifications"]:
-                await _notification_repo.create(notification)
+                await _cg._notification_repo.create(notification)
 
         # Record import operation to history
-        if _history_repo:
+        if _cg._history_repo:
             summary = preview_data.get("summary", {})
             imported_sections = []
             if "risk" in import_data:
@@ -1905,7 +1870,7 @@ async def confirm_import(
 
             change_summary = f"Imported config from {preview_data['filename']}: {', '.join(imported_sections)}"
 
-            await _history_repo.record_change(
+            await _cg._history_repo.record_change(
                 entity_type="config_bundle",
                 entity_id="import",
                 action="IMPORT",
@@ -1977,11 +1942,11 @@ async def get_snapshots(
     Returns:
         快照列表，包含 id, name, description, created_at, created_by, config_types
     """
-    if not _snapshot_repo:
+    if not _cg._snapshot_repo:
         raise HTTPException(status_code=503, detail="Snapshot repository not initialized")
 
     # 调用 repository 获取数据
-    snapshots, total = await _snapshot_repo.get_list(limit=limit, offset=offset)
+    snapshots, total = await _cg._snapshot_repo.get_list(limit=limit, offset=offset)
 
     # 转换为响应模型
     result = []
@@ -2006,28 +1971,28 @@ async def create_snapshot(
     admin: bool = Depends(check_admin_permission)
 ):
     """创建配置快照"""
-    if not _snapshot_repo:
+    if not _cg._snapshot_repo:
         raise HTTPException(status_code=503, detail="Snapshot repository not initialized")
 
     # Collect current config
     config_data = {}
 
-    if _risk_repo:
-        risk_data = await _risk_repo.get_global()
+    if _cg._risk_repo:
+        risk_data = await _cg._risk_repo.get_global()
         if risk_data:
             config_data["risk"] = risk_data
 
-    if _system_repo:
-        system_data = await _system_repo.get_global()
+    if _cg._system_repo:
+        system_data = await _cg._system_repo.get_global()
         if system_data:
             config_data["system"] = system_data
 
-    if _strategy_repo:
-        strategies, _ = await _strategy_repo.get_list(limit=1000, offset=0)
+    if _cg._strategy_repo:
+        strategies, _ = await _cg._strategy_repo.get_list(limit=1000, offset=0)
         config_data["strategies"] = strategies
 
-    if _symbol_repo:
-        config_data["symbols"] = await _symbol_repo.get_all()
+    if _cg._symbol_repo:
+        config_data["symbols"] = await _cg._symbol_repo.get_all()
 
     # Convert Decimals to strings for JSON serialization (preserve precision)
     config_data = _convert_decimals_to_str(config_data)
@@ -2039,7 +2004,7 @@ async def create_snapshot(
         "snapshot_data": config_data,
         "created_by": "admin",
     }
-    snapshot_id = await _snapshot_repo.create(snapshot)
+    snapshot_id = await _cg._snapshot_repo.create(snapshot)
 
     return {
         "status": "created",
@@ -2053,10 +2018,10 @@ async def get_snapshot(
     snapshot_id: str,
 ):
     """获取快照详情"""
-    if not _snapshot_repo:
+    if not _cg._snapshot_repo:
         raise HTTPException(status_code=503, detail="Snapshot repository not initialized")
 
-    snapshot = await _snapshot_repo.get_by_id(snapshot_id)
+    snapshot = await _cg._snapshot_repo.get_by_id(snapshot_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail=f"Snapshot '{snapshot_id}' not found")
 
@@ -2073,10 +2038,10 @@ async def activate_snapshot(
 
     恢复配置到快照时的状态。
     """
-    if not _snapshot_repo:
+    if not _cg._snapshot_repo:
         raise HTTPException(status_code=503, detail="Snapshot repository not initialized")
 
-    snapshot = await _snapshot_repo.get_by_id(snapshot_id)
+    snapshot = await _cg._snapshot_repo.get_by_id(snapshot_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail=f"Snapshot '{snapshot_id}' not found")
 
@@ -2084,21 +2049,21 @@ async def activate_snapshot(
     requires_restart = False
 
     # Apply config from snapshot
-    if "risk" in config_data and _risk_repo:
-        await _risk_repo.update(config_data["risk"])
+    if "risk" in config_data and _cg._risk_repo:
+        await _cg._risk_repo.update(config_data["risk"])
 
-    if "system" in config_data and _system_repo:
+    if "system" in config_data and _cg._system_repo:
         system_config = config_data["system"]
         # Check if restart required
         restart_fields = ["core_symbols", "ema_period", "mtf_ema_period", "mtf_mapping"]
         requires_restart = any(field in system_config for field in restart_fields)
-        await _system_repo.update(system_config, restart_required=requires_restart)
+        await _cg._system_repo.update(system_config, restart_required=requires_restart)
 
-    if "strategies" in config_data and _strategy_repo:
+    if "strategies" in config_data and _cg._strategy_repo:
         # TODO: Handle strategies restoration
         pass
 
-    if "symbols" in config_data and _symbol_repo:
+    if "symbols" in config_data and _cg._symbol_repo:
         # TODO: Handle symbols restoration
         pass
 
@@ -2119,15 +2084,15 @@ async def delete_snapshot(
     admin: bool = Depends(check_admin_permission)
 ):
     """删除快照"""
-    if not _snapshot_repo:
+    if not _cg._snapshot_repo:
         raise HTTPException(status_code=503, detail="Snapshot repository not initialized")
 
     # Check if snapshot exists
-    snapshot = await _snapshot_repo.get_by_id(snapshot_id)
+    snapshot = await _cg._snapshot_repo.get_by_id(snapshot_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail=f"Snapshot '{snapshot_id}' not found")
 
-    success = await _snapshot_repo.delete(snapshot_id)
+    success = await _cg._snapshot_repo.delete(snapshot_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete snapshot")
 
@@ -2156,7 +2121,7 @@ async def get_history_list(
     - **limit**: Maximum number of results (0-500, 0 returns empty list)
     - **offset**: Number of results to skip
     """
-    if not _history_repo:
+    if not _cg._history_repo:
         raise HTTPException(status_code=503, detail="History repository not initialized")
 
     # Handle limit=0 case
@@ -2168,7 +2133,7 @@ async def get_history_list(
             offset=offset
         )
 
-    items, total = await _history_repo.get_history(
+    items, total = await _cg._history_repo.get_history(
         entity_type=entity_type,
         entity_id=entity_id,
         limit=limit,
@@ -2210,13 +2175,13 @@ async def get_rollback_candidates(
 
     Note: Returns empty list if entity_type or entity_id is not provided.
     """
-    if not _history_repo:
+    if not _cg._history_repo:
         raise HTTPException(status_code=503, detail="History repository not initialized")
 
     if not entity_type or not entity_id:
         return []
 
-    candidates = await _history_repo.get_rollback_candidates(
+    candidates = await _cg._history_repo.get_rollback_candidates(
         entity_type=entity_type,
         entity_id=entity_id
     )
@@ -2254,10 +2219,10 @@ async def get_entity_history(
     - **start_date**: Filter by start date (ISO format) - R10.1
     - **end_date**: Filter by end date (ISO format) - R10.1
     """
-    if not _history_repo:
+    if not _cg._history_repo:
         raise HTTPException(status_code=503, detail="History repository not initialized")
 
-    items = await _history_repo.get_entity_history(
+    items = await _cg._history_repo.get_entity_history(
         entity_type=entity_type,
         entity_id=entity_id,
         limit=limit,
@@ -2296,12 +2261,12 @@ async def get_history_detail(
 
     - **history_id**: History record ID
     """
-    if not _history_repo:
+    if not _cg._history_repo:
         raise HTTPException(status_code=503, detail="History repository not initialized")
 
     # Get all history and find the specific one
     # Note: This is inefficient, consider adding get_by_id method to repository
-    items, _ = await _history_repo.get_history(limit=1000, offset=0)
+    items, _ = await _cg._history_repo.get_history(limit=1000, offset=0)
 
     for item in items:
         if item["id"] == history_id:
@@ -2332,11 +2297,11 @@ async def rollback_to_version(
     - **entity_type**: Entity type
     - **entity_id**: Entity ID
     """
-    if not _history_repo:
+    if not _cg._history_repo:
         raise HTTPException(status_code=503, detail="History repository not initialized")
 
     # Get the history record
-    items, _ = await _history_repo.get_history(limit=1000, offset=0)
+    items, _ = await _cg._history_repo.get_history(limit=1000, offset=0)
     target_history = None
     for item in items:
         if item["id"] == request.history_id:
@@ -2369,15 +2334,15 @@ async def rollback_to_version(
     requires_restart = False
 
     if request.entity_type == "risk_config":
-        if _risk_repo:
-            await _risk_repo.update(values_to_restore)
+        if _cg._risk_repo:
+            await _cg._risk_repo.update(values_to_restore)
     elif request.entity_type == "system_config":
-        if _system_repo:
+        if _cg._system_repo:
             restart_fields = ["core_symbols", "ema_period", "mtf_ema_period", "mtf_mapping"]
             requires_restart = any(field in values_to_restore for field in restart_fields)
-            await _system_repo.update(values_to_restore, restart_required=requires_restart)
+            await _cg._system_repo.update(values_to_restore, restart_required=requires_restart)
     elif request.entity_type == "strategy":
-        if _strategy_repo:
+        if _cg._strategy_repo:
             # Map API field names to database field names
             update_data = {}
             for k, v in values_to_restore.items():
@@ -2390,20 +2355,20 @@ async def rollback_to_version(
                     update_data["filter_configs"] = v
                 else:
                     update_data[k] = v
-            await _strategy_repo.update(request.entity_id, update_data)
+            await _cg._strategy_repo.update(request.entity_id, update_data)
     elif request.entity_type == "symbol":
-        if _symbol_repo:
+        if _cg._symbol_repo:
             update_data = {k: v for k, v in values_to_restore.items() if k not in ["symbol", "created_at", "updated_at"]}
-            await _symbol_repo.update(request.entity_id, update_data)
+            await _cg._symbol_repo.update(request.entity_id, update_data)
     elif request.entity_type == "notification":
-        if _notification_repo:
+        if _cg._notification_repo:
             update_data = {k: v for k, v in values_to_restore.items() if k not in ["id", "created_at", "updated_at"]}
-            await _notification_repo.update(request.entity_id, update_data)
+            await _cg._notification_repo.update(request.entity_id, update_data)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported entity type: {request.entity_type}")
 
     # Record the rollback action in history
-    await _history_repo.record_change(
+    await _cg._history_repo.record_change(
         entity_type=request.entity_type,
         entity_id=request.entity_id,
         action="ROLLBACK",
@@ -2546,10 +2511,10 @@ async def get_exchange_config():
 
     API Key 经过脱敏处理。
     """
-    if not _config_manager:
+    if not _cg._config_manager:
         raise HTTPException(status_code=503, detail="Config manager not initialized")
 
-    exchange = await _config_manager.get_exchange_config()
+    exchange = await _cg._config_manager.get_exchange_config()
 
     return ExchangeConfigResponse(
         name=exchange.name,
@@ -2569,7 +2534,7 @@ async def update_exchange_config(
 
     更新后会触发 ExchangeGateway 重连。
     """
-    if not _config_manager:
+    if not _cg._config_manager:
         raise HTTPException(status_code=503, detail="Config manager not initialized")
 
     from src.application.config_manager import ExchangeConfig
@@ -2581,7 +2546,7 @@ async def update_exchange_config(
         testnet=request.testnet,
     )
 
-    await _config_manager.update_exchange_config(config)
+    await _cg._config_manager.update_exchange_config(config)
 
     # Notify hot-reload for exchange reconnection
     await notify_hot_reload("exchange")
@@ -2600,10 +2565,10 @@ async def update_exchange_config(
 @router.get("/timeframes", response_model=TimeframesResponse)
 async def get_timeframes():
     """获取监控时间周期列表"""
-    if not _config_manager:
+    if not _cg._config_manager:
         raise HTTPException(status_code=503, detail="Config manager not initialized")
 
-    timeframes = await _config_manager.get_timeframes()
+    timeframes = await _cg._config_manager.get_timeframes()
     return TimeframesResponse(timeframes=timeframes)
 
 
@@ -2615,12 +2580,12 @@ async def update_timeframes(
     """
     更新监控时间周期列表（热重载）
     """
-    if not _config_manager:
+    if not _cg._config_manager:
         raise HTTPException(status_code=503, detail="Config manager not initialized")
 
     from src.application.config_manager import AssetPollingConfig
 
-    await _config_manager.update_timeframes(request.timeframes)
+    await _cg._config_manager.update_timeframes(request.timeframes)
 
     await notify_hot_reload("timeframes")
 
@@ -2645,10 +2610,10 @@ class AssetPollingUpdateRequest(BaseModel):
 @router.get("/asset-polling", response_model=AssetPollingResponse)
 async def get_asset_polling():
     """获取资产轮询配置"""
-    if not _config_manager:
+    if not _cg._config_manager:
         raise HTTPException(status_code=503, detail="Config manager not initialized")
 
-    polling = await _config_manager.get_asset_polling_config()
+    polling = await _cg._config_manager.get_asset_polling_config()
     return AssetPollingResponse(
         enabled=polling.enabled,
         interval_seconds=polling.interval_seconds,
@@ -2663,7 +2628,7 @@ async def update_asset_polling(
     """
     更新资产轮询配置（热重载）
     """
-    if not _config_manager:
+    if not _cg._config_manager:
         raise HTTPException(status_code=503, detail="Config manager not initialized")
 
     from src.application.config_manager import AssetPollingConfig
@@ -2673,7 +2638,7 @@ async def update_asset_polling(
         interval_seconds=request.interval_seconds,
     )
 
-    await _config_manager.update_asset_polling_config(config)
+    await _cg._config_manager.update_asset_polling_config(config)
 
     await notify_hot_reload("asset_polling")
 
@@ -2693,19 +2658,19 @@ async def get_effective_config():
 
     返回所有配置的合并视图，敏感字段已脱敏。
     """
-    if not _config_manager:
+    if not _cg._config_manager:
         raise HTTPException(status_code=503, detail="Config manager not initialized")
 
     # Build response sections
-    exchange = await _config_manager.get_exchange_config()
-    system_data = await _config_manager.get_system_config()
-    risk_config = await _config_manager.get_risk_config()
-    notification_config = await _config_manager._build_notification_config()
-    polling = await _config_manager.get_asset_polling_config()
+    exchange = await _cg._config_manager.get_exchange_config()
+    system_data = await _cg._config_manager.get_system_config()
+    risk_config = await _cg._config_manager.get_risk_config()
+    notification_config = await _cg._config_manager._build_notification_config()
+    polling = await _cg._config_manager.get_asset_polling_config()
     migration = {"yaml_fully_migrated": True, "one_time_import_done": True, "import_version": "v1"}
 
     # Strategies summary
-    strategies = await _config_manager._load_strategies_from_db()
+    strategies = await _cg._config_manager._load_strategies_from_db()
     strategy_summaries = []
     for s in strategies:
         strategy_summaries.append(StrategySummary(
@@ -2720,8 +2685,8 @@ async def get_effective_config():
 
     # Symbols summary
     symbols_list = []
-    if _symbol_repo:
-        symbols = await _symbol_repo.get_all()
+    if _cg._symbol_repo:
+        symbols = await _cg._symbol_repo.get_all()
         symbols_list = [
             SymbolSummary(
                 symbol=s["symbol"],
@@ -2778,6 +2743,6 @@ async def get_effective_config():
             one_time_import_done=migration.get("one_time_import_done", True),
             import_version=migration.get("import_version", "v1"),
         ),
-        config_version=_config_manager.get_config_version(),
+        config_version=_cg._config_manager.get_config_version(),
         created_at=datetime.now(timezone.utc).isoformat(),
     )

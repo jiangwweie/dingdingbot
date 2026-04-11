@@ -847,27 +847,7 @@ class ConfigRepository:
             "mtf_ema_period": self._system_config_cache.get("mtf_ema_period", 60),
             "mtf_mapping": self._system_config_cache.get("mtf_mapping", {}),
         }
-    
-    def _load_user_config_from_yaml(self) -> UserConfig:
-        """Load user config from YAML file (fallback for backward compatibility)."""
-        user_path = self._config_dir / 'user.yaml' if self._config_dir else None
-        
-        if not user_path or not user_path.exists():
-            return self._create_default_user_config()
-        
-        try:
-            with open(user_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            logger.error(f"user.yaml 解析失败，使用默认配置：{e}")
-            return self._create_default_user_config()
-        
-        try:
-            return UserConfig(**data)
-        except ValidationError as e:
-            logger.error(f"user.yaml 配置验证失败，使用默认配置：{e}")
-            return self._create_default_user_config()
-    
+
     def _create_default_user_config(self) -> UserConfig:
         """Create a default user configuration."""
         return UserConfig(

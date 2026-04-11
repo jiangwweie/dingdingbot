@@ -244,6 +244,9 @@ _order_repo: Optional[Any] = None  # OrderRepository instance
 _audit_logger: Optional[Any] = None  # OrderAuditLogger instance
 _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
 
+# Config repositories - stored in shared module to avoid circular imports with api_v1_config.py
+from src.interfaces import api_config_globals as _config_globals
+
 
 def set_dependencies(
     repository: Optional[SignalRepository] = None,
@@ -256,6 +259,14 @@ def set_dependencies(
     order_repo: Optional[Any] = None,
     audit_logger: Optional[Any] = None,
     order_lifecycle_service: Optional[Any] = None,
+    # Config repositories (unified with api_v1_config.py)
+    strategy_repo: Optional[Any] = None,
+    risk_repo: Optional[Any] = None,
+    system_repo: Optional[Any] = None,
+    symbol_repo: Optional[Any] = None,
+    notification_repo: Optional[Any] = None,
+    history_repo: Optional[Any] = None,
+    snapshot_repo: Optional[Any] = None,
 ) -> None:
     """
     Inject dependencies for API endpoints.
@@ -271,6 +282,13 @@ def set_dependencies(
         order_repo: Optional OrderRepository instance
         audit_logger: Optional OrderAuditLogger instance
         order_lifecycle_service: Optional OrderLifecycleService instance
+        strategy_repo: Optional StrategyConfigRepository instance
+        risk_repo: Optional RiskConfigRepository instance
+        system_repo: Optional SystemConfigRepository instance
+        symbol_repo: Optional SymbolConfigRepository instance
+        notification_repo: Optional NotificationConfigRepository instance
+        history_repo: Optional ConfigHistoryRepository instance
+        snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
     global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _audit_logger, _order_lifecycle_service
     _repository = repository
@@ -283,6 +301,15 @@ def set_dependencies(
     _order_repo = order_repo
     _audit_logger = audit_logger
     _order_lifecycle_service = order_lifecycle_service
+    # Config repositories - stored in shared module (avoids circular imports)
+    _config_globals._strategy_repo = strategy_repo
+    _config_globals._risk_repo = risk_repo
+    _config_globals._system_repo = system_repo
+    _config_globals._symbol_repo = symbol_repo
+    _config_globals._notification_repo = notification_repo
+    _config_globals._history_repo = history_repo
+    _config_globals._snapshot_repo = snapshot_repo
+    _config_globals._config_manager = config_manager
 
 
 def _get_repository() -> SignalRepository:
@@ -358,16 +385,6 @@ async def lifespan(app: FastAPI):
     """
     from src.infrastructure.signal_repository import SignalRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
-    from src.infrastructure.repositories.config_repositories import (
-        StrategyConfigRepository,
-        RiskConfigRepository,
-        SystemConfigRepository,
-        SymbolConfigRepository,
-        NotificationConfigRepository,
-        ConfigHistoryRepository,
-        ConfigSnapshotRepositoryExtended,
-    )
-    from src.interfaces.api_v1_config import set_config_dependencies
 
     global _repository, _config_entry_repo, _order_repo
 
@@ -384,48 +401,6 @@ async def lifespan(app: FastAPI):
             _config_entry_repo = ConfigEntryRepository()
             await _config_entry_repo.initialize()
             logger.info("ConfigEntryRepository initialized in lifespan")
-
-        # 初始化配置管理 Repositories
-        strategy_repo = StrategyConfigRepository()
-        await strategy_repo.initialize()
-        logger.info("StrategyConfigRepository initialized")
-
-        risk_repo = RiskConfigRepository()
-        await risk_repo.initialize()
-        logger.info("RiskConfigRepository initialized")
-
-        system_repo = SystemConfigRepository()
-        await system_repo.initialize()
-        logger.info("SystemConfigRepository initialized")
-
-        symbol_repo = SymbolConfigRepository()
-        await symbol_repo.initialize()
-        logger.info("SymbolConfigRepository initialized")
-
-        notification_repo = NotificationConfigRepository()
-        await notification_repo.initialize()
-        logger.info("NotificationConfigRepository initialized")
-
-        history_repo = ConfigHistoryRepository()
-        await history_repo.initialize()
-        logger.info("ConfigHistoryRepository initialized")
-
-        snapshot_repo = ConfigSnapshotRepositoryExtended()
-        await snapshot_repo.initialize()
-        logger.info("ConfigSnapshotRepository initialized")
-
-        # 设置配置管理 API 依赖
-        set_config_dependencies(
-            strategy_repo=strategy_repo,
-            risk_repo=risk_repo,
-            system_repo=system_repo,
-            symbol_repo=symbol_repo,
-            notification_repo=notification_repo,
-            history_repo=history_repo,
-            snapshot_repo=snapshot_repo,
-            config_manager=_config_manager,
-            observer=None,  # TODO: Initialize observer when available
-        )
 
         # Initialize OrderAuditLogger global singleton (FIX-002)
         global _audit_logger, _order_lifecycle_service
@@ -492,16 +467,6 @@ async def lifespan(app: FastAPI):
         if _audit_logger is not None:
             await _audit_logger.stop()
             logger.info("OrderAuditLogger stopped")
-
-        # 清理配置管理 Repositories
-        await strategy_repo.close()
-        await risk_repo.close()
-        await system_repo.close()
-        await symbol_repo.close()
-        await notification_repo.close()
-        await history_repo.close()
-        await snapshot_repo.close()
-        logger.info("Config repositories closed")
 
 
 # ============================================================

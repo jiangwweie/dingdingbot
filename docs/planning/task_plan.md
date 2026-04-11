@@ -1,7 +1,7 @@
 # 任务计划
 
-> **最后更新**: 2026-04-10
-> **当前活跃项目**: MVP 回测验证
+> **最后更新**: 2026-04-12
+> **当前活跃项目**: `/api/v1/config/*` 503 修复
 
 ---
 
@@ -109,6 +109,29 @@
 | `25334fc` | Fix: PMS 回测导航入口修复 |
 | `3a62a82` | 审查修复: get_migration_status/api_secret/死变量/docstring |
 | `8dde6b7` | Fix: MigrationStatus 类型不匹配 |
+
+### 第六阶段：配置依赖注入统一修复（2026-04-12 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 29 | 统一配置依赖注入（方案 C） | P0 | ✅ 已完成 |
+
+**修复摘要**：
+- `lifespan="off"` 导致 7 个配置 Repository 未初始化，`/api/v1/config/*` 全线 503
+- 方案 C：将 7 个 Repository 初始化移入 `main.py` Phase 9，通过 `set_dependencies()` 统一注入
+- 新增 `api_config_globals.py` 打破 `api.py` ↔ `api_v1_config.py` 循环导入
+- 删除 `api_v1_config.py` 的 `set_config_dependencies()` 函数，改为从 `api_config_globals` 导入
+- 清理 `lifespan()` 中 40+ 行死代码
+- 验收：12 个 `/api/v1/config/*` 端点 11/12 返回 200（effective 端点 500 为独立 bug）
+
+**改动文件**：
+| 文件 | 改动 |
+|------|------|
+| `src/interfaces/api_config_globals.py` | 新增（打破循环导入） |
+| `src/interfaces/api.py` | `set_dependencies()` 扩容 + `lifespan()` 清理 |
+| `src/interfaces/api_v1_config.py` | 删除 `set_config_dependencies()` + 改为 import 全局变量 |
+| `src/main.py` | Phase 9 新增 7 个 Repository 初始化 + 传参 |
+| `tests/` | 3 个测试文件 import 路径更新 |
 
 ### 第四阶段：待办任务清单（2026-04-11 纳入规划）
 

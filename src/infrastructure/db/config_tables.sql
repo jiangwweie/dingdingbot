@@ -176,17 +176,3 @@ CREATE TABLE IF NOT EXISTS exchange_configs (
 
 CREATE INDEX IF NOT EXISTS idx_exchange_configs_updated ON exchange_configs(updated_at);
 
-
--- ============================================================
--- 9. migration_metadata - 迁移状态追踪表
--- ============================================================
-CREATE TABLE IF NOT EXISTS migration_metadata (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 初始状态
-INSERT OR IGNORE INTO migration_metadata (key, value) VALUES ('yaml_fully_migrated', 'false');
-INSERT OR IGNORE INTO migration_metadata (key, value) VALUES ('one_time_import_done', 'false');
-INSERT OR IGNORE INTO migration_metadata (key, value) VALUES ('import_version', 'v1');

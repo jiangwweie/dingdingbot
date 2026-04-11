@@ -1,7 +1,33 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-10
+> **最后更新**: 2026-04-12
+
+---
+
+## 2026-04-12 配置依赖注入统一修复
+
+### 根因：`lifespan="off"` 导致 FastAPI 生命周期钩子不执行
+
+**技术发现**:
+1. `main.py` 使用 `uvicorn.Config(lifespan="off")` 启动 uvicorn，导致 `api.py` 中定义的 `lifespan()` 函数**完全不执行**
+2. `lifespan()` 内负责初始化 7 个配置 Repository 并调用 `set_config_dependencies()`，全部被跳过
+3. 两条独立的依赖注入链路共存于同一代码库但互不关联：
+   - 旧链路：`set_dependencies()`（`main.py` Phase 9 调用）→ 正常
+   - 新链路：`set_config_dependencies()`（`lifespan()` 调用）→ 未执行
+4. **循环导入问题**：`api.py` 导入 `api_v1_config.py`（router），`api_v1_config.py` 需要从 `api.py` 读取全局变量 → 新增 `api_config_globals.py` 作为中间层打破循环
+
+### 方案 C 验证
+
+- 改动量极小（净增 ~30 行代码），影响范围仅限于启动流程
+- 不修改任何 Repository 内部逻辑、不修改 API 处理函数、不修改前端
+- 回滚成本极低（3 个文件，一个 `git revert`）
+
+### 独立问题发现
+
+1. `ConfigManager.get_system_config()` 方法不存在，`effective` 端点调用它直接 500
+2. `AssetPollingConfig` 导入缺失，`test_config_repository.py` 3 个测试失败
+3. `exchange_configs` 数据库表中 API Key/Secret 为空，testnet=1 → 无法连接交易所
 
 ---
 

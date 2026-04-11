@@ -304,6 +304,45 @@ async def run_application():
         await _config_entry_repo.initialize()
         logger.info("ConfigEntryRepository initialized")
 
+        # Initialize config repositories (unified dependency injection)
+        from src.infrastructure.repositories.config_repositories import (
+            StrategyConfigRepository,
+            RiskConfigRepository,
+            SystemConfigRepository,
+            SymbolConfigRepository,
+            NotificationConfigRepository,
+            ConfigHistoryRepository,
+            ConfigSnapshotRepositoryExtended,
+        )
+
+        _api_strategy_repo = StrategyConfigRepository()
+        await _api_strategy_repo.initialize()
+        logger.info("StrategyConfigRepository initialized")
+
+        _api_risk_repo = RiskConfigRepository()
+        await _api_risk_repo.initialize()
+        logger.info("RiskConfigRepository initialized")
+
+        _api_system_repo = SystemConfigRepository()
+        await _api_system_repo.initialize()
+        logger.info("SystemConfigRepository initialized")
+
+        _api_symbol_repo = SymbolConfigRepository()
+        await _api_symbol_repo.initialize()
+        logger.info("SymbolConfigRepository initialized")
+
+        _api_notification_repo = NotificationConfigRepository()
+        await _api_notification_repo.initialize()
+        logger.info("NotificationConfigRepository initialized")
+
+        _api_history_repo = ConfigHistoryRepository()
+        await _api_history_repo.initialize()
+        logger.info("ConfigHistoryRepository initialized")
+
+        _api_snapshot_repo_extended = ConfigSnapshotRepositoryExtended()
+        await _api_snapshot_repo_extended.initialize()
+        logger.info("ConfigSnapshotRepository initialized")
+
         set_dependencies(
             repository=signal_repository,
             account_getter=_exchange_gateway.get_account_snapshot,
@@ -312,6 +351,14 @@ async def run_application():
             signal_tracker=_status_tracker,
             snapshot_service=_snapshot_service,
             config_entry_repo=_config_entry_repo,
+            # Config repositories (unified with api_v1_config.py)
+            strategy_repo=_api_strategy_repo,
+            risk_repo=_api_risk_repo,
+            system_repo=_api_system_repo,
+            symbol_repo=_api_symbol_repo,
+            notification_repo=_api_notification_repo,
+            history_repo=_api_history_repo,
+            snapshot_repo=_api_snapshot_repo_extended,
         )
         logger.info("API dependencies initialized")
 
@@ -377,6 +424,17 @@ async def run_application():
         if _config_entry_repo:
             await _config_entry_repo.close()
             logger.info("ConfigEntryRepository closed")
+
+        # Close config repositories (unified dependency injection)
+        if '_api_strategy_repo' in locals():
+            await _api_strategy_repo.close()
+            await _api_risk_repo.close()
+            await _api_system_repo.close()
+            await _api_symbol_repo.close()
+            await _api_notification_repo.close()
+            await _api_history_repo.close()
+            await _api_snapshot_repo_extended.close()
+            logger.info("Config repositories closed")
 
         # Stop API server task
         if 'api_task' in locals():

@@ -27,7 +27,8 @@ from src.infrastructure.repositories.config_repositories import (
     RiskConfigRepository,
     ConfigDatabaseManager,
 )
-from src.interfaces.api_v1_config import router, set_config_dependencies
+from src.interfaces.api_v1_config import router
+from src.interfaces.api import set_dependencies
 
 
 # ============================================================
@@ -68,7 +69,7 @@ def app():
 @pytest.fixture
 def client(app, db_manager):
     """Create TestClient with injected dependencies."""
-    set_config_dependencies(
+    set_dependencies(
         risk_repo=db_manager.risk_repo,
         system_repo=db_manager.system_repo,
         strategy_repo=db_manager.strategy_repo,

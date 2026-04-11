@@ -1,37 +1,37 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-11 Phase 2 全部完成（9/10/11/12）
+> **最后更新**: 2026-04-12 配置依赖注入统一修复完成
 
 ### 收工状态
 
-**今日完成工作** (2026-04-11):
+**今日完成工作** (2026-04-12):
+1. Phase 6 (P0): 配置依赖注入统一修复（方案 C） ✅
+   - 根因：`lifespan="off"` 导致 7 个配置 Repository 未初始化
+   - 方案 C：统一两条依赖注入链路，`main.py` Phase 9 负责所有初始化
+   - 新增 `api_config_globals.py` 打破循环导入
+   - 删除 `set_config_dependencies()` 函数（15 行）
+   - 清理 `lifespan()` 死代码（40+ 行）
+   - 验收：12 个端点 11/12 返回 200
+
+**昨日完成工作** (2026-04-11):
 1. Phase 2 Task 12 (P1): 共享 DB 连接池 ✅
-   - 新建 connection_pool.py（按 db_path 分组的单例连接池）
-   - 修改 10 个 Repository 支持可选 connection 参数注入
-   - 向后兼容验证通过（不传参数仍独立工作）
-   - 所有模块导入验证通过
+2. Phase 5 审查修复全部完成 ✅
 
-**昨日完成工作** (2026-04-10):
-1. Task 9 (P0): BackupTab 导入/导出完全重写 ✅
-2. Task 10 (P1): SystemTab 合并（SystemSettings variant prop） ✅
-3. Task 11 (P1): StrategyForm 触发器参数表单补全 ✅
-4. 架构分析文档：docs/designs/2026-04-10-phase2-tasks-analysis.md ✅
-
-**Git 提交**:
+**Git 提交** (本次):
 | Commit | 说明 |
 |--------|------|
-| `17be8b5` | feat: Phase 2 前端修复 (13 files) |
-| `88b4b77` | docs: 收工日志 |
-| `c14d3a4` | feat: Phase 2 Task 12 - 共享 DB 连接池 |
+| 待提交 | feat: 统一配置依赖注入（修复 /api/v1/config/* 全线 503） |
 
-**遗留待办**:
-| # | 任务 | 优先级 | 状态 |
+**已知独立问题**（非本次修复引入）:
+| # | 问题 | 优先级 | 状态 |
 |---|------|--------|------|
-| 9 | BackupTab 手动验证 | P0 | 📋 待验证 |
-| 4 | Testnet 模拟盘验证 | P1 | 🔓 可启动 |
+| 1 | `/api/v1/config/effective` → 500（`ConfigManager.get_system_config()` 不存在） | P1 | 📋 待修复 |
+| 2 | `test_config_repository.py` 3 个测试失败（`AssetPollingConfig` NameError） | P1 | 📋 待修复 |
 
 ---
+
+## 2026-04-12 Phase 6: 配置依赖注入统一修复
 
 ## 2026-04-10 Task 11: StrategyForm 触发器参数表单补全
 
