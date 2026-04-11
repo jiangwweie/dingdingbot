@@ -4,7 +4,7 @@
  * 功能:
  * - Level 1 配置折叠显示 (全局系统配置)
  * - 修改系统配置提示重启
- * - 整合 Profile 管理和备份恢复入口
+ * - 整合备份恢复和配置快照入口
  *
  * @route /config/system
  *
@@ -32,7 +32,6 @@ import {
   ReloadOutlined,
   SaveOutlined,
   WarningOutlined,
-  DatabaseOutlined,
   FileTextOutlined,
 } from '@ant-design/icons';
 import { cn } from '../../lib/utils';
@@ -424,11 +423,6 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
     // await fetch('/api/v1/system/restart', { method: 'POST' });
   };
 
-  // 导航到 Profile 管理
-  const goToProfiles = () => {
-    navigate('/config/profiles');
-  };
-
   // 导航到备份恢复
   const goToBackup = () => {
     navigate('/config/backup');
@@ -456,7 +450,7 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
             <div>
               <h1 className="text-2xl font-bold text-gray-900">系统设置</h1>
               <p className="text-sm text-gray-500 mt-1">
-                配置全局系统参数、Profile 管理和备份恢复
+                配置全局系统参数、备份恢复和配置快照
               </p>
             </div>
           </div>
@@ -533,21 +527,6 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
 
           {/* 右侧：快捷入口 */}
           <div>
-            {/* Profile 管理 */}
-            <Card
-              title="Profile 管理"
-              className="mb-4 cursor-pointer hover:shadow-lg transition-shadow"
-              onClick={goToProfiles}
-              extra={<DatabaseOutlined className="text-blue-500" />}
-            >
-              <p className="text-sm text-gray-500 mb-3">
-                管理不同环境配置 Profile
-              </p>
-              <Button type="primary" block onClick={goToProfiles}>
-                进入 Profile 管理
-              </Button>
-            </Card>
-
             {/* 备份恢复 */}
             <Card
               title="备份恢复"
