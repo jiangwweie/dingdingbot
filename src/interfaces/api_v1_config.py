@@ -2429,9 +2429,10 @@ async def rollback_to_version(
 # Pydantic Models - Exchange Config (Task A-4)
 # ============================================================
 class ExchangeConfigResponse(BaseModel):
-    """Exchange configuration response (api_key masked)"""
+    """Exchange configuration response (api_key/api_secret masked)"""
     name: str
     api_key: str  # masked
+    api_secret: str = Field(default="****", description="API Secret (masked)")
     testnet: bool
 
 
@@ -2553,6 +2554,7 @@ async def get_exchange_config():
     return ExchangeConfigResponse(
         name=exchange.name,
         api_key=mask_secret(exchange.api_key),
+        api_secret=mask_secret(exchange.api_secret),
         testnet=exchange.testnet,
     )
 
@@ -2587,6 +2589,7 @@ async def update_exchange_config(
     return ExchangeConfigResponse(
         name=config.name,
         api_key=mask_secret(config.api_key),
+        api_secret=mask_secret(config.api_secret),
         testnet=config.testnet,
     )
 
@@ -2699,7 +2702,7 @@ async def get_effective_config():
     risk_config = await _config_manager.get_risk_config()
     notification_config = await _config_manager._build_notification_config()
     polling = await _config_manager.get_asset_polling_config()
-    migration = await _config_manager.get_migration_status()
+    migration = {"yaml_fully_migrated": True, "one_time_import_done": True, "import_version": "v1"}
 
     # Strategies summary
     strategies = await _config_manager._load_strategies_from_db()
@@ -2732,6 +2735,7 @@ async def get_effective_config():
         exchange=ExchangeConfigResponse(
             name=exchange.name,
             api_key=mask_secret(exchange.api_key),
+            api_secret=mask_secret(exchange.api_secret),
             testnet=exchange.testnet,
         ),
         system=SystemSummary(

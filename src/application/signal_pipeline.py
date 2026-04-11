@@ -286,7 +286,7 @@ class SignalPipeline:
         """
         Observer callback for configuration hot-reload.
 
-        Called by ConfigManager when user.yaml is updated.
+        Called by ConfigManager when DB configuration is updated.
         Rebuilds the strategy runner and warms up with cached K-line history.
         Updates _risk_config and _mtf_ema_period to reflect new configuration.
         """

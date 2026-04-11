@@ -272,9 +272,6 @@ class ConfigManager:
         self._config_entry_repo: Optional["ConfigEntryRepository"] = None
         self._config_profile_repo: Optional["ConfigProfileRepository"] = None
 
-        # YAML fallback flag (Task A-3: disabled - all runtime config from DB)
-        self._use_yaml_fallback = False
-
         # R9.3: Initialization state and lock for race condition prevention
         self._initialized = False
         self._initializing = False
@@ -330,134 +327,6 @@ class ConfigManager:
     def get_config_version(self) -> int:
         """Get current configuration version number (R3.2)."""
         return self._config_version
-
-    async def _get_migration_meta(self) -> Dict[str, str]:
-        """Read migration metadata key-value pairs."""
-        result = {}
-        try:
-            async with self._db.execute("SELECT key, value FROM migration_metadata") as cursor:
-                rows = await cursor.fetchall()
-                for row in rows:
-                    result[row["key"]] = row["value"]
-        except Exception:
-            pass  # Table may not exist yet
-        return result
-
-    async def _set_migration_meta(self, key: str, value: str) -> None:
-        """Set a migration metadata key-value pair."""
-        now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute("""
-            INSERT INTO migration_metadata (key, value, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?
-        """, (key, value, now, value, now))
-        await self._db.commit()
-
-    async def _perform_yaml_import(self) -> bool:
-        """
-        One-time YAML -> DB import.
-
-        Only executes when ALL conditions are met:
-        1. migration_metadata.one_time_import_done == 'false'
-        2. exchange_configs table is empty
-        3. config/user.yaml file exists
-
-        Returns:
-            True if import was performed, False if skipped
-        """
-        # Step 1: Check if already done
-        meta = await self._get_migration_meta()
-        if meta.get("one_time_import_done") == "true":
-            logger.info("YAML import: already completed, skipping")
-            return False
-
-        # Step 2: Check if exchange_configs already has data
-        try:
-            async with self._db.execute(
-                "SELECT COUNT(*) as cnt FROM exchange_configs WHERE id = 'primary'"
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row and row["cnt"] > 0:
-                    logger.info("YAML import: exchange_configs already populated, marking done")
-                    await self._set_migration_meta("one_time_import_done", "true")
-                    return False
-        except Exception:
-            pass  # Table may not exist yet
-
-        # Step 3: Check if user.yaml exists
-        user_yaml = self.config_dir / 'user.yaml'
-        if not user_yaml.exists():
-            logger.info("YAML import: user.yaml not found, skipping (using defaults)")
-            await self._set_migration_meta("one_time_import_done", "true")
-            await self._set_migration_meta("yaml_fully_migrated", "false")
-            return False
-
-        # Step 4: Parse and insert into DB
-        try:
-            with open(user_yaml, 'r', encoding='utf-8') as f:
-                yaml_data = yaml.safe_load(f)
-
-            if not yaml_data:
-                logger.info("YAML import: user.yaml is empty, skipping")
-                await self._set_migration_meta("one_time_import_done", "true")
-                return False
-
-            imported = []
-
-            # 4a. Insert exchange config
-            exchange = yaml_data.get('exchange', {})
-            if exchange:
-                await self._db.execute("""
-                    INSERT OR REPLACE INTO exchange_configs
-                    (id, exchange_name, api_key, api_secret, testnet)
-                    VALUES ('primary', ?, ?, ?, ?)
-                """, (
-                    exchange.get('name', 'binance'),
-                    exchange.get('api_key', ''),
-                    exchange.get('api_secret', ''),
-                    exchange.get('testnet', True),
-                ))
-                imported.append(f"exchange: {exchange.get('name', 'binance')}")
-
-            # 4b. Insert timeframes into system_configs
-            timeframes = yaml_data.get('timeframes')
-            if timeframes:
-                await self._db.execute("""
-                    UPDATE system_configs
-                    SET timeframes = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = 'global'
-                """, (json.dumps(timeframes),))
-                imported.append(f"timeframes: {timeframes}")
-
-            # 4c. Insert asset_polling into system_configs
-            polling = yaml_data.get('asset_polling')
-            if isinstance(polling, dict):
-                await self._db.execute("""
-                    UPDATE system_configs
-                    SET asset_polling_enabled = ?, asset_polling_interval = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = 'global'
-                """, (
-                    polling.get('enabled', True),
-                    polling.get('interval_seconds', 60),
-                ))
-                imported.append(f"asset_polling: enabled={polling.get('enabled', True)}, interval={polling.get('interval_seconds', 60)}s")
-
-            await self._db.commit()
-
-            # Step 5: Mark import complete
-            await self._set_migration_meta("one_time_import_done", "true")
-            await self._set_migration_meta("yaml_fully_migrated", "true")
-
-            if imported:
-                logger.info(f"YAML import: successfully imported {', '.join(imported)} to DB")
-            else:
-                logger.info("YAML import: no data found in user.yaml, marking done")
-            return True
-
-        except Exception as e:
-            logger.error(f"YAML import failed: {e}")
-            await self._db.rollback()
-            raise
 
     async def initialize_from_db(self) -> None:
         """
@@ -519,9 +388,6 @@ class ConfigManager:
 
                 # R4.3: Validate configuration integrity and apply defaults if empty
                 await self._validate_and_apply_default_configs()
-
-                # Task A-3: One-time YAML -> DB import
-                await self._perform_yaml_import()
 
                 # Populate _user_config_cache for sync access
                 user_config_dict = await self._build_user_config_dict()
@@ -653,12 +519,6 @@ class ConfigManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     version INTEGER DEFAULT 1
-                );
-
-                CREATE TABLE IF NOT EXISTS migration_metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS config_history (
@@ -1058,8 +918,8 @@ class ConfigManager:
                 raise RuntimeError("ConfigManager 初始化超时 (30 秒)")
 
         if self._db is None:
-            # Not initialized - fallback to YAML
-            config = self._load_user_config_from_yaml()
+            # Not initialized - fallback to defaults
+            config = self._create_default_user_config()
         else:
             # Build UserConfig from database with degradation support
             user_config_dict = await self._build_user_config_dict()
@@ -1229,27 +1089,6 @@ class ConfigManager:
 
             return NotificationConfig(channels=channels)
 
-    def _load_user_config_from_yaml(self) -> UserConfig:
-        """Load user config from YAML file (fallback for backward compatibility)."""
-        user_path = self.config_dir / 'user.yaml'
-
-        if not user_path.exists():
-            # Return minimal default config
-            return self._create_default_user_config()
-
-        try:
-            with open(user_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            logger.error(f"user.yaml 解析失败，使用默认配置：{e}")
-            return self._create_default_user_config()
-
-        try:
-            return UserConfig(**data)
-        except ValidationError as e:
-            logger.error(f"user.yaml 配置验证失败，使用默认配置：{e}")
-            return self._create_default_user_config()
-
     def _create_default_user_config(self) -> UserConfig:
         """
         Create a default user configuration.
@@ -1410,14 +1249,6 @@ class ConfigManager:
         if self._db:
             await self._db.close()
             self._db = None
-
-    # ============================================================
-    # Migration Status & Helpers (Task A-3)
-    # ============================================================
-
-    async def get_migration_status(self) -> Dict[str, str]:
-        """Get YAML migration status."""
-        return await self._get_migration_meta()
 
     async def get_exchange_config(self) -> ExchangeConfig:
         """Get exchange config from DB."""
@@ -1988,9 +1819,6 @@ class ConfigManager:
             imported.append("system")
 
         await self._db.commit()
-
-        # Mark migration as done
-        await self._set_migration_meta("yaml_fully_migrated", "true")
 
         # Refresh caches
         await self._load_system_config()
