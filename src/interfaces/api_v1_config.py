@@ -2774,8 +2774,8 @@ async def get_effective_config():
             interval_seconds=polling.interval_seconds,
         ),
         migration_status=MigrationStatus(
-            yaml_fully_migrated=migration.get("yaml_fully_migrated", "false") == "true",
-            one_time_import_done=migration.get("one_time_import_done", "false") == "true",
+            yaml_fully_migrated=migration.get("yaml_fully_migrated", True),
+            one_time_import_done=migration.get("one_time_import_done", True),
             import_version=migration.get("import_version", "v1"),
         ),
         config_version=_config_manager.get_config_version(),
