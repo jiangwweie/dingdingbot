@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp, ChevronDown, Monitor, Briefcase, Beaker, Settings2, History, Database, Sliders, Atom } from 'lucide-react';
+import { Activity, BarChart2, Wallet, Bug, Settings, FlaskConical, Zap, Save, FileText, TrendingUp, ChevronDown, Monitor, Briefcase, Beaker, History, Sliders, Atom } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 import SettingsPanel from './SettingsPanel';
@@ -56,22 +56,20 @@ const navCategories: NavCategory[] = [
   },
   {
     id: 'config',
-    label: '策略配置',
+    label: '配置管理',
     icon: Sliders,
     color: 'cyan',
     items: [
-      { to: '/config/strategies', icon: Atom, label: '策略配置' },
-      { to: '/config/system', icon: Settings2, label: '系统设置' },
+      { to: '/config', icon: Atom, label: '配置中心' },
+      { to: '/snapshots', icon: Save, label: '配置快照' },
     ],
   },
   {
     id: 'settings',
-    label: '系统设置 (下拉)',
+    label: '系统设置',
     icon: Settings,
     color: 'gray',
     items: [
-      { to: '/config/profiles', icon: Database, label: 'Profile 管理' },
-      { to: '/snapshots', icon: Save, label: '配置快照' },
       { to: '/account', icon: Wallet, label: '账户' },
     ],
   },

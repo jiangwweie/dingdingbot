@@ -11,10 +11,6 @@ import Snapshots from './pages/Snapshots';
 import Orders from './pages/Orders';
 import Positions from './pages/Positions';
 import ConfigManagement from './pages/ConfigManagement';
-import ConfigProfiles from './pages/ConfigProfiles';
-// 新增：FE-01 配置导航重构
-import StrategyConfig from './pages/config/StrategyConfig';
-import SystemSettings from './pages/config/SystemSettings';
 
 export default function App() {
   return (
@@ -38,18 +34,18 @@ export default function App() {
           <Route path="backtest-reports" element={<BacktestReports />} />
           <Route path="pms-backtest" element={<PMSBacktest />} />
 
-          {/* 配置管理 - FE-01 新增路由 */}
+          {/* 配置管理 - 统一页面（FE-01 页面整合） */}
           <Route path="config" element={<ConfigManagement />} />
-          <Route path="config/strategies" element={<StrategyConfig />} />
-          <Route path="config/system" element={<SystemSettings />} />
-          <Route path="config/profiles" element={<ConfigProfiles />} />
+
+          {/* 旧路由重定向（向后兼容） */}
+          <Route path="config/strategies" element={<Navigate to="/config?tab=strategies" replace />} />
+          <Route path="config/system" element={<Navigate to="/config?tab=system" replace />} />
+          <Route path="config/profiles" element={<Navigate to="/config?tab=backup" replace />} />
+          <Route path="profiles/*" element={<Navigate to="/config" replace />} />
 
           {/* 其他 */}
           <Route path="snapshots" element={<Snapshots />} />
           <Route path="account" element={<Account />} />
-
-          {/* 旧路由重定向 (向后兼容) */}
-          <Route path="profiles/*" element={<Navigate to="/config" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

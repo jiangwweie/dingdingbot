@@ -261,6 +261,96 @@ export interface ImportConfirmResponse {
 }
 
 // ============================================================
+// Effective Config Types (生效配置总览)
+// ============================================================
+
+/** 交易所配置（脱敏） */
+export interface ExchangeConfigMasked {
+  name: string;
+  api_key: string;          // masked: "sk***abc123"
+  api_secret: string;       // masked: "****"
+  testnet: boolean;
+}
+
+/** 系统配置摘要 */
+export interface SystemConfigSummary {
+  core_symbols: string[];
+  ema_period: number;
+  mtf_ema_period: number;
+  mtf_mapping: Record<string, string>;
+  signal_cooldown_seconds: number;
+  timeframes: string[];
+  atr_filter_enabled: boolean;
+  atr_period: number;
+  atr_min_ratio: string;
+}
+
+/** 风控配置摘要 */
+export interface RiskConfigSummary {
+  max_loss_percent: string;
+  max_leverage: number;
+  max_total_exposure: string;
+  daily_max_trades?: number;
+  daily_max_loss?: string;
+  cooldown_minutes: number;
+}
+
+/** 通知渠道（脱敏） */
+export interface NotificationChannelMasked {
+  id: string;
+  type: string;
+  webhook_url: string;      // masked URL
+  is_active: boolean;
+}
+
+/** 策略摘要 */
+export interface StrategySummary {
+  id: string;
+  name: string;
+  is_active: boolean;
+  trigger_type: string;
+  filter_count: number;
+  symbols: string[];
+  timeframes: string[];
+}
+
+/** 币种摘要 */
+export interface SymbolSummary {
+  symbol: string;
+  is_core: boolean;
+  is_active: boolean;
+}
+
+/** 资产轮询摘要 */
+export interface AssetPollingSummary {
+  enabled: boolean;
+  interval_seconds: number;
+}
+
+/** 迁移状态 */
+export interface MigrationStatus {
+  yaml_fully_migrated: boolean;
+  one_time_import_done: boolean;
+  import_version: string;
+}
+
+/** 生效配置总览响应 */
+export interface EffectiveConfigResponse {
+  exchange: ExchangeConfigMasked;
+  system: SystemConfigSummary;
+  risk: RiskConfigSummary;
+  notification: {
+    channels: NotificationChannelMasked[];
+  };
+  strategies: StrategySummary[];
+  symbols: SymbolSummary[];
+  asset_polling: AssetPollingSummary;
+  migration_status: MigrationStatus;
+  config_version: number;
+  created_at: string;
+}
+
+// ============================================================
 // API Client Configuration
 // ============================================================
 
@@ -440,6 +530,15 @@ export const configApi = {
    */
   confirmImport: (data: ImportConfirmRequest) =>
     configApiClient.post<ImportConfirmResponse>('/import/confirm', data),
+
+  // ---------- 生效配置总览 ----------
+
+  /**
+   * 获取生效配置总览（只读，脱敏）
+   * GET /api/v1/config/effective
+   */
+  getEffectiveConfig: () =>
+    configApiClient.get<EffectiveConfigResponse>('/effective'),
 };
 
 // ============================================================
