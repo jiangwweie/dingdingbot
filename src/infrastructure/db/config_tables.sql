@@ -2,8 +2,9 @@
 -- 盯盘狗 🐶 配置管理系统数据库表结构
 -- ============================================================
 -- 创建时间：2026-04-04
+-- 最后更新：2026-04-11
 -- 数据库：SQLite 3
--- 用途：配置管理系统 - 7 张核心配置表
+-- 用途：配置管理系统 - 9 张核心配置表
 -- ============================================================
 
 -- ============================================================
@@ -71,6 +72,9 @@ CREATE TABLE IF NOT EXISTS system_configs (
     atr_filter_enabled BOOLEAN DEFAULT TRUE,           -- ATR 过滤器开关
     atr_period INTEGER DEFAULT 14,                     -- ATR 周期
     atr_min_ratio DECIMAL(4,2) DEFAULT 0.5,            -- ATR 最小比率
+    timeframes TEXT NOT NULL DEFAULT '["15m","1h"]',   -- JSON: 监控时间周期列表
+    asset_polling_enabled BOOLEAN DEFAULT TRUE,        -- 资产轮询开关
+    asset_polling_interval INTEGER DEFAULT 60,         -- 资产轮询间隔 (秒)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,    -- 创建时间
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP     -- 最后更新时间
 );
@@ -151,3 +155,38 @@ CREATE TABLE IF NOT EXISTS config_history (
 CREATE INDEX IF NOT EXISTS idx_history_entity ON config_history(entity_type, entity_id);
 -- 索引：按时间倒序查询
 CREATE INDEX IF NOT EXISTS idx_history_time ON config_history(changed_at DESC);
+
+
+-- ============================================================
+-- 8. exchange_configs - 交易所连接配置表
+-- ============================================================
+-- 存储交易所连接凭证（单例模式，id='primary'）
+-- 设计原则：与 system_configs/risk_configs 一致的单例模式
+-- ============================================================
+CREATE TABLE IF NOT EXISTS exchange_configs (
+    id TEXT PRIMARY KEY DEFAULT 'primary',              -- 固定为'primary'（支持未来多交易所）
+    exchange_name TEXT NOT NULL DEFAULT 'binance',       -- CCXT 交易所 ID (binance/bybit/okx)
+    api_key TEXT NOT NULL,                               -- API Key
+    api_secret TEXT NOT NULL,                            -- API Secret
+    testnet BOOLEAN DEFAULT TRUE,                        -- 是否使用测试网
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    version INTEGER DEFAULT 1                            -- 乐观锁版本号
+);
+
+CREATE INDEX IF NOT EXISTS idx_exchange_configs_updated ON exchange_configs(updated_at);
+
+
+-- ============================================================
+-- 9. migration_metadata - 迁移状态追踪表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS migration_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 初始状态
+INSERT OR IGNORE INTO migration_metadata (key, value) VALUES ('yaml_fully_migrated', 'false');
+INSERT OR IGNORE INTO migration_metadata (key, value) VALUES ('one_time_import_done', 'false');
+INSERT OR IGNORE INTO migration_metadata (key, value) VALUES ('import_version', 'v1');

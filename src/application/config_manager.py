@@ -138,6 +138,7 @@ class StrategyConfig(BaseModel):
 
 
 class AssetPollingConfig(BaseModel):
+    enabled: bool = Field(default=True, description="Enable asset polling")
     interval_seconds: int = Field(default=60, ge=10, description="Asset polling interval")
 
 
@@ -271,8 +272,8 @@ class ConfigManager:
         self._config_entry_repo: Optional["ConfigEntryRepository"] = None
         self._config_profile_repo: Optional["ConfigProfileRepository"] = None
 
-        # YAML fallback flag
-        self._use_yaml_fallback = True
+        # YAML fallback flag (Task A-3: disabled - all runtime config from DB)
+        self._use_yaml_fallback = False
 
         # R9.3: Initialization state and lock for race condition prevention
         self._initialized = False
@@ -283,6 +284,9 @@ class ConfigManager:
         # R3.2: Configuration version for hot-reload consistency
         self._config_version = 0
         self._config_lock: Optional[asyncio.Lock] = None
+
+        # User config cache (populated after initialization for sync access)
+        self._user_config_cache: Optional[UserConfig] = None
 
     def _ensure_init_lock(self) -> asyncio.Lock:
         """Ensure init lock is created for current event loop (R9.3)."""
@@ -326,6 +330,134 @@ class ConfigManager:
     def get_config_version(self) -> int:
         """Get current configuration version number (R3.2)."""
         return self._config_version
+
+    async def _get_migration_meta(self) -> Dict[str, str]:
+        """Read migration metadata key-value pairs."""
+        result = {}
+        try:
+            async with self._db.execute("SELECT key, value FROM migration_metadata") as cursor:
+                rows = await cursor.fetchall()
+                for row in rows:
+                    result[row["key"]] = row["value"]
+        except Exception:
+            pass  # Table may not exist yet
+        return result
+
+    async def _set_migration_meta(self, key: str, value: str) -> None:
+        """Set a migration metadata key-value pair."""
+        now = datetime.now(timezone.utc).isoformat()
+        await self._db.execute("""
+            INSERT INTO migration_metadata (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?
+        """, (key, value, now, value, now))
+        await self._db.commit()
+
+    async def _perform_yaml_import(self) -> bool:
+        """
+        One-time YAML -> DB import.
+
+        Only executes when ALL conditions are met:
+        1. migration_metadata.one_time_import_done == 'false'
+        2. exchange_configs table is empty
+        3. config/user.yaml file exists
+
+        Returns:
+            True if import was performed, False if skipped
+        """
+        # Step 1: Check if already done
+        meta = await self._get_migration_meta()
+        if meta.get("one_time_import_done") == "true":
+            logger.info("YAML import: already completed, skipping")
+            return False
+
+        # Step 2: Check if exchange_configs already has data
+        try:
+            async with self._db.execute(
+                "SELECT COUNT(*) as cnt FROM exchange_configs WHERE id = 'primary'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row["cnt"] > 0:
+                    logger.info("YAML import: exchange_configs already populated, marking done")
+                    await self._set_migration_meta("one_time_import_done", "true")
+                    return False
+        except Exception:
+            pass  # Table may not exist yet
+
+        # Step 3: Check if user.yaml exists
+        user_yaml = self.config_dir / 'user.yaml'
+        if not user_yaml.exists():
+            logger.info("YAML import: user.yaml not found, skipping (using defaults)")
+            await self._set_migration_meta("one_time_import_done", "true")
+            await self._set_migration_meta("yaml_fully_migrated", "false")
+            return False
+
+        # Step 4: Parse and insert into DB
+        try:
+            with open(user_yaml, 'r', encoding='utf-8') as f:
+                yaml_data = yaml.safe_load(f)
+
+            if not yaml_data:
+                logger.info("YAML import: user.yaml is empty, skipping")
+                await self._set_migration_meta("one_time_import_done", "true")
+                return False
+
+            imported = []
+
+            # 4a. Insert exchange config
+            exchange = yaml_data.get('exchange', {})
+            if exchange:
+                await self._db.execute("""
+                    INSERT OR REPLACE INTO exchange_configs
+                    (id, exchange_name, api_key, api_secret, testnet)
+                    VALUES ('primary', ?, ?, ?, ?)
+                """, (
+                    exchange.get('name', 'binance'),
+                    exchange.get('api_key', ''),
+                    exchange.get('api_secret', ''),
+                    exchange.get('testnet', True),
+                ))
+                imported.append(f"exchange: {exchange.get('name', 'binance')}")
+
+            # 4b. Insert timeframes into system_configs
+            timeframes = yaml_data.get('timeframes')
+            if timeframes:
+                await self._db.execute("""
+                    UPDATE system_configs
+                    SET timeframes = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 'global'
+                """, (json.dumps(timeframes),))
+                imported.append(f"timeframes: {timeframes}")
+
+            # 4c. Insert asset_polling into system_configs
+            polling = yaml_data.get('asset_polling')
+            if isinstance(polling, dict):
+                await self._db.execute("""
+                    UPDATE system_configs
+                    SET asset_polling_enabled = ?, asset_polling_interval = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 'global'
+                """, (
+                    polling.get('enabled', True),
+                    polling.get('interval_seconds', 60),
+                ))
+                imported.append(f"asset_polling: enabled={polling.get('enabled', True)}, interval={polling.get('interval_seconds', 60)}s")
+
+            await self._db.commit()
+
+            # Step 5: Mark import complete
+            await self._set_migration_meta("one_time_import_done", "true")
+            await self._set_migration_meta("yaml_fully_migrated", "true")
+
+            if imported:
+                logger.info(f"YAML import: successfully imported {', '.join(imported)} to DB")
+            else:
+                logger.info("YAML import: no data found in user.yaml, marking done")
+            return True
+
+        except Exception as e:
+            logger.error(f"YAML import failed: {e}")
+            await self._db.rollback()
+            raise
 
     async def initialize_from_db(self) -> None:
         """
@@ -387,6 +519,17 @@ class ConfigManager:
 
                 # R4.3: Validate configuration integrity and apply defaults if empty
                 await self._validate_and_apply_default_configs()
+
+                # Task A-3: One-time YAML -> DB import
+                await self._perform_yaml_import()
+
+                # Populate _user_config_cache for sync access
+                user_config_dict = await self._build_user_config_dict()
+                try:
+                    self._user_config_cache = UserConfig(**user_config_dict)
+                except ValidationError as e:
+                    logger.warning(f"Failed to build user config cache: {e}, using default")
+                    self._user_config_cache = self._create_default_user_config()
 
                 # Mark as initialized
                 self._initialized = True
@@ -501,6 +644,23 @@ class ConfigManager:
                     is_auto BOOLEAN DEFAULT FALSE
                 );
 
+                CREATE TABLE IF NOT EXISTS exchange_configs (
+                    id TEXT PRIMARY KEY DEFAULT 'primary',
+                    exchange_name TEXT NOT NULL DEFAULT 'binance',
+                    api_key TEXT NOT NULL,
+                    api_secret TEXT NOT NULL,
+                    testnet BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    version INTEGER DEFAULT 1
+                );
+
+                CREATE TABLE IF NOT EXISTS migration_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS config_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     entity_type TEXT NOT NULL,
@@ -514,6 +674,20 @@ class ConfigManager:
                 );
             """)
 
+        # Handle ALTER TABLE for system_configs new columns (SQLite silent on duplicate column)
+        try:
+            await self._db.execute("ALTER TABLE system_configs ADD COLUMN timeframes TEXT NOT NULL DEFAULT '[\"15m\",\"1h\"]'")
+        except Exception:
+            pass
+        try:
+            await self._db.execute("ALTER TABLE system_configs ADD COLUMN asset_polling_enabled BOOLEAN DEFAULT TRUE")
+        except Exception:
+            pass
+        try:
+            await self._db.execute("ALTER TABLE system_configs ADD COLUMN asset_polling_interval INTEGER DEFAULT 60")
+        except Exception:
+            pass
+
         await self._db.commit()
 
     async def _initialize_default_configs(self) -> None:
@@ -523,18 +697,20 @@ class ConfigManager:
         R4.3: Notification channels are created by _validate_and_apply_default_configs()
         to ensure warning logs are generated when starting with empty database.
         """
-        # Initialize system config
+        # Initialize system config (with extended fields)
         async with self._db.execute(
             "SELECT id FROM system_configs WHERE id = 'global'"
         ) as cursor:
             if not await cursor.fetchone():
                 await self._db.execute("""
                     INSERT INTO system_configs
-                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds)
-                    VALUES ('global', ?, 60, 60, ?, 14400)
+                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds,
+                     timeframes, asset_polling_enabled, asset_polling_interval)
+                    VALUES ('global', ?, 60, 60, ?, 14400, ?, TRUE, 60)
                 """, (
                     json.dumps(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]),
                     json.dumps({"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
+                    json.dumps(["15m", "1h"]),
                 ))
 
         # Initialize risk config
@@ -564,6 +740,17 @@ class ConfigManager:
         # R4.3: Removed notification channel initialization from here
         # It is now handled by _validate_and_apply_default_configs() to generate warning logs
 
+        # Initialize exchange config
+        async with self._db.execute(
+            "SELECT id FROM exchange_configs WHERE id = 'primary'"
+        ) as cursor:
+            if not await cursor.fetchone():
+                await self._db.execute("""
+                    INSERT INTO exchange_configs
+                    (id, exchange_name, api_key, api_secret, testnet)
+                    VALUES ('primary', 'binance', '', '', TRUE)
+                """)
+
         await self._db.commit()
 
     async def _validate_and_apply_default_configs(self) -> None:
@@ -584,9 +771,22 @@ class ConfigManager:
         """
         Check if the database configuration is empty.
 
+        Task A-5: Also checks exchange_configs table.
+
         Returns:
             True if critical configurations are missing
         """
+        # Check for exchange config
+        try:
+            async with self._db.execute(
+                "SELECT COUNT(*) as cnt FROM exchange_configs WHERE id = 'primary'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row["cnt"] == 0:
+                    return True
+        except Exception:
+            return True  # Table doesn't exist yet
+
         # Check for notification channels
         async with self._db.execute(
             "SELECT COUNT(*) as cnt FROM notifications WHERE is_active = TRUE"
@@ -617,11 +817,28 @@ class ConfigManager:
         """
         R4.2/R4.3: Apply hard-coded default configurations to ensure system can start.
 
+        Task A-5: Also initializes exchange config defaults.
+
         This method inserts minimal required configurations for system startup.
         NOTE: These are hardcoded defaults. User should modify via Config UI.
         """
         # R4.2: Track which defaults were applied for startup warning
         applied_defaults = []
+
+        # Default exchange config (Task A-5)
+        try:
+            async with self._db.execute(
+                "SELECT id FROM exchange_configs WHERE id = 'primary'"
+            ) as cursor:
+                if not await cursor.fetchone():
+                    await self._db.execute("""
+                        INSERT INTO exchange_configs
+                        (id, exchange_name, api_key, api_secret, testnet)
+                        VALUES ('primary', 'binance', '', '', TRUE)
+                    """)
+                    applied_defaults.append("交易所配置：binance (测试网, 需配置 API Key)")
+        except Exception:
+            pass  # Table may not exist yet
 
         # Default risk config
         async with self._db.execute(
@@ -654,11 +871,13 @@ class ConfigManager:
             if not await cursor.fetchone():
                 await self._db.execute("""
                     INSERT INTO system_configs
-                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds)
-                    VALUES ('global', ?, 60, 60, ?, 14400)
+                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds,
+                     timeframes, asset_polling_enabled, asset_polling_interval)
+                    VALUES ('global', ?, 60, 60, ?, 14400, ?, TRUE, 60)
                 """, (
                     json.dumps(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]),
                     json.dumps({"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
+                    json.dumps(["15m", "1h"]),
                 ))
                 applied_defaults.append("系统配置: core_symbols=BTC/ETH/SOL/BNB, ema_period=60")
 
@@ -692,6 +911,10 @@ class ConfigManager:
                     "atr_filter_enabled": bool(row["atr_filter_enabled"]) if row["atr_filter_enabled"] is not None else True,
                     "atr_period": row["atr_period"] if row["atr_period"] is not None else 14,
                     "atr_min_ratio": str(row["atr_min_ratio"]) if row["atr_min_ratio"] is not None else "0.5",
+                    # Extended fields for timeframes and asset polling
+                    "timeframes": json.loads(row["timeframes"]) if row["timeframes"] is not None else ["15m", "1h"],
+                    "asset_polling_enabled": bool(row["asset_polling_enabled"]) if row["asset_polling_enabled"] is not None else True,
+                    "asset_polling_interval": row["asset_polling_interval"] if row["asset_polling_interval"] is not None else 60,
                 }
             else:
                 self._system_config_cache = {
@@ -704,6 +927,9 @@ class ConfigManager:
                     "atr_filter_enabled": True,
                     "atr_period": 14,
                     "atr_min_ratio": "0.5",
+                    "timeframes": ["15m", "1h"],
+                    "asset_polling_enabled": True,
+                    "asset_polling_interval": 60,
                 }
         return self._system_config_cache
 
@@ -849,21 +1075,21 @@ class ConfigManager:
 
     def get_user_config_sync(self) -> UserConfig:
         """
-        Get user configuration synchronously (fallback to YAML only).
+        Get user configuration synchronously (from memory cache).
 
         R3.1: Returns a deep copy to prevent external modification.
-
-        Note: This method only supports YAML fallback. For database-driven config,
-        use get_user_config() async method instead.
+        Task A-3: Now returns from _user_config_cache (populated during initialization)
+        instead of reading from YAML.
 
         Returns:
             UserConfig 配置副本（深拷贝），防止外部修改影响内部状态
         """
-        # Fallback to YAML - database access requires async
-        config = self._load_user_config_from_yaml()
+        if self._user_config_cache is not None:
+            return copy.deepcopy(self._user_config_cache)
 
-        # R3.1 fix: 返回配置副本，防止外部修改影响内部状态
-        return copy.deepcopy(config)
+        # Not yet initialized - create default
+        logger.warning("get_user_config_sync called before initialization, returning default")
+        return self._create_default_user_config()
 
     @property
     def is_initialized(self) -> bool:
@@ -878,10 +1104,12 @@ class ConfigManager:
         return self._initialized
 
     async def _build_user_config_dict(self) -> Dict[str, Any]:
-        """Build user config dictionary from database with degradation support."""
-        # Load from YAML for backward compatibility
-        # TODO: Migrate to full database storage
-        yaml_config = self._load_user_config_from_yaml()
+        """Build user config dictionary from database (pure DB, no YAML)."""
+        # Load from DB
+        exchange_config = await self._get_exchange_config_db()
+        timeframes = self._system_config_cache.get("timeframes", ["15m", "1h"])
+        polling_enabled = self._system_config_cache.get("asset_polling_enabled", True)
+        polling_interval = self._system_config_cache.get("asset_polling_interval", 60)
 
         # Override with database configs
         await self._load_system_config()
@@ -891,16 +1119,34 @@ class ConfigManager:
         strategies = await self._load_strategies_from_db()
 
         return {
-            "exchange": yaml_config.exchange,
+            "exchange": exchange_config,
             "user_symbols": [],  # Will be loaded from symbols table
-            "timeframes": yaml_config.timeframes,
+            "timeframes": timeframes,
             "active_strategies": strategies,
             "risk": self._risk_config_cache,
-            "asset_polling": yaml_config.asset_polling,
+            "asset_polling": AssetPollingConfig(
+                enabled=polling_enabled,
+                interval_seconds=polling_interval,
+            ),
             "notification": await self._build_notification_config(),
             "mtf_ema_period": self._system_config_cache.get("mtf_ema_period", 60),
             "mtf_mapping": self._system_config_cache.get("mtf_mapping", {}),
         }
+
+    async def _get_exchange_config_db(self) -> ExchangeConfig:
+        """从 DB 获取交易所配置。"""
+        async with self._db.execute(
+            "SELECT * FROM exchange_configs WHERE id = 'primary'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return ExchangeConfig(
+                    name=row["exchange_name"],
+                    api_key=row["api_key"],
+                    api_secret=row["api_secret"],
+                    testnet=bool(row["testnet"]),
+                )
+        return ExchangeConfig(name="binance", api_key="", api_secret="", testnet=True)
 
     async def _load_strategies_from_db(self) -> List[StrategyDefinition]:
         """Load strategies from database with degradation support."""
@@ -957,10 +1203,12 @@ class ConfigManager:
             return strategies
 
     async def _build_notification_config(self) -> NotificationConfig:
-        """Build notification config from database."""
+        """Build notification config from database (DB only, no YAML fallback)."""
         if self._db is None:
-            # Fallback to YAML
-            return self._load_user_config_from_yaml().notification
+            return NotificationConfig(channels=[NotificationChannel(
+                type="feishu",
+                webhook_url="https://placeholder",
+            )])
 
         async with self._db.execute(
             "SELECT * FROM notifications WHERE is_active = TRUE"
@@ -974,8 +1222,10 @@ class ConfigManager:
                 ))
 
             if not channels:
-                # Fallback to YAML
-                return self._load_user_config_from_yaml().notification
+                return NotificationConfig(channels=[NotificationChannel(
+                    type="feishu",
+                    webhook_url="https://placeholder",
+                )])
 
             return NotificationConfig(channels=channels)
 
@@ -1027,11 +1277,177 @@ class ConfigManager:
             ),
         )
 
+    # ============================================================
+    # Exchange / Timeframes / Asset Polling Updates (Task A-3)
+    # ============================================================
+
+    async def update_exchange_config(self, config: ExchangeConfig) -> None:
+        """Update exchange configuration and trigger hot reload."""
+        if self._db is None:
+            raise FatalStartupError("Database not initialized", "F-003")
+
+        async with self._ensure_lock():
+            now = datetime.now(timezone.utc).isoformat()
+
+            async with self._db.execute(
+                "SELECT id FROM exchange_configs WHERE id = 'primary'"
+            ) as cursor:
+                exists = await cursor.fetchone()
+
+            if exists:
+                await self._db.execute("""
+                    UPDATE exchange_configs
+                    SET exchange_name = ?, api_key = ?, api_secret = ?,
+                        testnet = ?, updated_at = ?, version = version + 1
+                    WHERE id = 'primary'
+                """, (config.name, config.api_key, config.api_secret, config.testnet, now))
+            else:
+                await self._db.execute("""
+                    INSERT INTO exchange_configs
+                    (id, exchange_name, api_key, api_secret, testnet)
+                    VALUES ('primary', ?, ?, ?, ?)
+                """, (config.name, config.api_key, config.api_secret, config.testnet))
+
+            await self._log_config_change(
+                entity_type="exchange_config",
+                entity_id="primary",
+                action="UPDATE",
+                new_values={
+                    "exchange_name": config.name,
+                    "api_key": mask_secret(config.api_key),
+                    "testnet": config.testnet,
+                },
+                changed_by="api",
+            )
+
+            await self._db.commit()
+
+            # Refresh user config cache
+            try:
+                user_config_dict = await self._build_user_config_dict()
+                self._user_config_cache = UserConfig(**user_config_dict)
+            except ValidationError as e:
+                logger.warning(f"Failed to rebuild user config cache: {e}")
+
+            logger.info(f"Exchange config updated: {config.name} (testnet={config.testnet})")
+            await self._notify_observers()
+
+    async def update_timeframes(self, timeframes: List[str]) -> None:
+        """Update timeframes and trigger hot reload."""
+        if self._db is None:
+            raise FatalStartupError("Database not initialized", "F-003")
+
+        async with self._ensure_lock():
+            now = datetime.now(timezone.utc).isoformat()
+
+            await self._db.execute("""
+                UPDATE system_configs
+                SET timeframes = ?, updated_at = ?
+                WHERE id = 'global'
+            """, (json.dumps(timeframes), now))
+
+            await self._log_config_change(
+                entity_type="system_config",
+                entity_id="global",
+                action="UPDATE",
+                new_values={"timeframes": timeframes},
+                changed_by="api",
+            )
+
+            await self._db.commit()
+
+            # Refresh caches
+            await self._load_system_config()
+            try:
+                user_config_dict = await self._build_user_config_dict()
+                self._user_config_cache = UserConfig(**user_config_dict)
+            except ValidationError as e:
+                logger.warning(f"Failed to rebuild user config cache: {e}")
+
+            logger.info(f"Timeframes updated: {timeframes}")
+            await self._notify_observers()
+
+    async def update_asset_polling_config(self, config: AssetPollingConfig) -> None:
+        """Update asset polling configuration and trigger hot reload."""
+        if self._db is None:
+            raise FatalStartupError("Database not initialized", "F-003")
+
+        async with self._ensure_lock():
+            now = datetime.now(timezone.utc).isoformat()
+
+            await self._db.execute("""
+                UPDATE system_configs
+                SET asset_polling_enabled = ?, asset_polling_interval = ?, updated_at = ?
+                WHERE id = 'global'
+            """, (config.enabled, config.interval_seconds, now))
+
+            await self._log_config_change(
+                entity_type="system_config",
+                entity_id="global",
+                action="UPDATE",
+                new_values={
+                    "asset_polling_enabled": config.enabled,
+                    "asset_polling_interval": config.interval_seconds,
+                },
+                changed_by="api",
+            )
+
+            await self._db.commit()
+
+            # Refresh caches
+            await self._load_system_config()
+            try:
+                user_config_dict = await self._build_user_config_dict()
+                self._user_config_cache = UserConfig(**user_config_dict)
+            except ValidationError as e:
+                logger.warning(f"Failed to rebuild user config cache: {e}")
+
+            logger.info(f"Asset polling config updated: enabled={config.enabled}, interval={config.interval_seconds}s")
+            await self._notify_observers()
+
     async def close(self) -> None:
         """Close database connection."""
         if self._db:
             await self._db.close()
             self._db = None
+
+    # ============================================================
+    # Migration Status & Helpers (Task A-3)
+    # ============================================================
+
+    async def get_migration_status(self) -> Dict[str, str]:
+        """Get YAML migration status."""
+        return await self._get_migration_meta()
+
+    async def get_exchange_config(self) -> ExchangeConfig:
+        """Get exchange config from DB."""
+        if self._db is None:
+            return ExchangeConfig(name="binance", api_key="", api_secret="", testnet=True)
+
+        async with self._db.execute(
+            "SELECT * FROM exchange_configs WHERE id = 'primary'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return ExchangeConfig(
+                    name=row["exchange_name"],
+                    api_key=row["api_key"],
+                    api_secret=row["api_secret"],
+                    testnet=bool(row["testnet"]),
+                )
+        return ExchangeConfig(name="binance", api_key="", api_secret="", testnet=True)
+
+    async def get_timeframes(self) -> List[str]:
+        """Get timeframes from DB."""
+        await self._load_system_config()
+        return self._system_config_cache.get("timeframes", ["15m", "1h"])
+
+    async def get_asset_polling_config(self) -> AssetPollingConfig:
+        """Get asset polling config from DB."""
+        await self._load_system_config()
+        enabled = self._system_config_cache.get("asset_polling_enabled", True)
+        interval = self._system_config_cache.get("asset_polling_interval", 60)
+        return AssetPollingConfig(enabled=enabled, interval_seconds=interval)
 
     # ============================================================
     # Cache Refresh (for Profile Switch)
@@ -1042,6 +1458,8 @@ class ConfigManager:
         Reload all configurations from database and refresh caches.
 
         用于 Profile 切换后刷新内存缓存，确保读取到新 Profile 的配置。
+
+        Task A-3: Also refreshes _user_config_cache.
 
         注意：此方法会刷新所有缓存并通知观察者。
         """
@@ -1055,6 +1473,13 @@ class ConfigManager:
 
             # 重新加载风控配置
             await self._load_risk_config()
+
+            # Task A-3: Refresh user config cache
+            try:
+                user_config_dict = await self._build_user_config_dict()
+                self._user_config_cache = UserConfig(**user_config_dict)
+            except ValidationError as e:
+                logger.warning(f"Failed to rebuild user config cache: {e}")
 
             logger.info("ConfigManager: All configs reloaded from database")
 
@@ -1471,15 +1896,112 @@ class ConfigManager:
     # ============================================================
 
     async def import_from_yaml(self, yaml_path: str, changed_by: str = "system") -> None:
-        """Import configuration from YAML file."""
+        """
+        Import configuration from YAML file into DB.
+
+        Task A-3: Now actually parses YAML and writes to DB tables.
+        """
         if not os.path.exists(yaml_path):
             raise FileNotFoundError(f"YAML file not found: {yaml_path}")
 
         with open(yaml_path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
 
-        # TODO: Parse and import into database
-        logger.info(f"Configuration imported from {yaml_path}")
+        if not data:
+            logger.warning(f"YAML file {yaml_path} is empty, skipping import")
+            return
+
+        if self._db is None:
+            raise FatalStartupError("Database not initialized", "F-003")
+
+        imported = []
+
+        # Import exchange config
+        if 'exchange' in data:
+            exchange = data['exchange']
+            await self._db.execute("""
+                INSERT OR REPLACE INTO exchange_configs
+                (id, exchange_name, api_key, api_secret, testnet)
+                VALUES ('primary', ?, ?, ?, ?)
+            """, (
+                exchange.get('name', 'binance'),
+                exchange.get('api_key', ''),
+                exchange.get('api_secret', ''),
+                exchange.get('testnet', True),
+            ))
+            imported.append("exchange")
+
+        # Import timeframes
+        if 'timeframes' in data:
+            await self._db.execute("""
+                UPDATE system_configs
+                SET timeframes = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = 'global'
+            """, (json.dumps(data['timeframes']),))
+            imported.append("timeframes")
+
+        # Import asset polling
+        if 'asset_polling' in data:
+            polling = data['asset_polling']
+            if isinstance(polling, dict):
+                await self._db.execute("""
+                    UPDATE system_configs
+                    SET asset_polling_enabled = ?, asset_polling_interval = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 'global'
+                """, (
+                    polling.get('enabled', True),
+                    polling.get('interval_seconds', 60),
+                ))
+                imported.append("asset_polling")
+
+        # Import risk config (direct DB)
+        if 'risk' in data:
+            risk = data['risk']
+            await self._db.execute("""
+                UPDATE risk_configs
+                SET max_loss_percent = ?, max_leverage = ?, max_total_exposure = ?,
+                    cooldown_minutes = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = 'global'
+            """, (
+                risk.get('max_loss_percent', 0.01),
+                risk.get('max_leverage', 10),
+                risk.get('max_total_exposure', 0.8),
+                risk.get('cooldown_minutes', 240),
+            ))
+            imported.append("risk")
+
+        # Import system config (direct DB)
+        if 'system' in data:
+            system = data['system']
+            await self._db.execute("""
+                UPDATE system_configs
+                SET core_symbols = ?, ema_period = ?, mtf_ema_period = ?,
+                    mtf_mapping = ?, signal_cooldown_seconds = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = 'global'
+            """, (
+                json.dumps(system.get('core_symbols', [])),
+                system.get('ema_period', 60),
+                system.get('mtf_ema_period', 60),
+                json.dumps(system.get('mtf_mapping', {})),
+                system.get('signal_cooldown_seconds', 14400),
+            ))
+            imported.append("system")
+
+        await self._db.commit()
+
+        # Mark migration as done
+        await self._set_migration_meta("yaml_fully_migrated", "true")
+
+        # Refresh caches
+        await self._load_system_config()
+        await self._load_risk_config()
+        try:
+            user_config_dict = await self._build_user_config_dict()
+            self._user_config_cache = UserConfig(**user_config_dict)
+        except ValidationError as e:
+            logger.warning(f"Failed to rebuild user config cache after import: {e}")
+
+        logger.info(f"Configuration imported from {yaml_path}: {', '.join(imported)}")
 
         # Log the import operation to config history
         await self._log_config_change(
@@ -1487,14 +2009,123 @@ class ConfigManager:
             entity_id="import_export",
             action="IMPORT",
             old_values=None,
-            new_values={"source_path": yaml_path, "data_keys": list(data.keys()) if data else []},
+            new_values={"source_path": yaml_path, "imported_sections": imported},
             changed_by=changed_by,
-            change_summary=f"Configuration imported from {yaml_path}",
+            change_summary=f"Configuration imported from {yaml_path}: {', '.join(imported)}",
         )
 
     async def export_to_yaml(self, yaml_path: str, changed_by: str = "system") -> None:
-        """Export current configuration to YAML file."""
-        # TODO: Export database config to YAML
+        """
+        Export current DB configuration to YAML file.
+
+        Task A-3: Now reads all config from DB tables.
+        """
+        if self._db is None:
+            raise FatalStartupError("Database not initialized", "F-003")
+
+        export_data = {
+            "version": "1.0",
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Export exchange config
+        try:
+            exchange = await self.get_exchange_config()
+            export_data["exchange"] = {
+                "name": exchange.name,
+                "api_key": exchange.api_key,
+                "api_secret": exchange.api_secret,
+                "testnet": exchange.testnet,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to export exchange config: {e}")
+
+        # Export timeframes
+        try:
+            export_data["timeframes"] = await self.get_timeframes()
+        except Exception as e:
+            logger.warning(f"Failed to export timeframes: {e}")
+
+        # Export asset polling
+        try:
+            polling = await self.get_asset_polling_config()
+            export_data["asset_polling"] = {
+                "enabled": polling.enabled,
+                "interval_seconds": polling.interval_seconds,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to export asset polling config: {e}")
+
+        # Export risk config (direct DB read)
+        try:
+            await self._load_risk_config()
+            risk = self._risk_config_cache
+            export_data["risk"] = {
+                "max_loss_percent": str(risk.max_loss_percent),
+                "max_leverage": risk.max_leverage,
+                "max_total_exposure": str(risk.max_total_exposure),
+                "cooldown_minutes": 240,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to export risk config: {e}")
+
+        # Export system config
+        try:
+            system_data = await self.get_system_config()
+            export_data["system"] = system_data
+        except Exception as e:
+            logger.warning(f"Failed to export system config: {e}")
+
+        # Export strategies
+        try:
+            strategies = await self._load_strategies_from_db()
+            export_data["strategies"] = [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "trigger": {"type": s.trigger.type, "params": s.trigger.params} if s.trigger else {},
+                    "filters": [{"type": f.type, "params": f.params} for f in s.filters],
+                    "filter_logic": s.filter_logic,
+                }
+                for s in strategies
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to export strategies: {e}")
+
+        # Export symbols
+        try:
+            async with self._db.execute("SELECT * FROM symbols") as cursor:
+                rows = await cursor.fetchall()
+                export_data["symbols"] = [
+                    {"symbol": r["symbol"], "is_active": bool(r["is_active"]), "is_core": bool(r["is_core"])}
+                    for r in rows
+                ]
+        except Exception as e:
+            logger.warning(f"Failed to export symbols: {e}")
+
+        # Convert Decimals to strings for YAML serialization
+        def convert_decimals(obj):
+            if isinstance(obj, Decimal):
+                return str(obj)
+            elif isinstance(obj, dict):
+                return {k: convert_decimals(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_decimals(item) for item in obj]
+            return obj
+
+        export_data = convert_decimals(export_data)
+
+        # Write YAML file
+        yaml_content = yaml.safe_dump(
+            export_data,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+
+        with open(yaml_path, 'w', encoding='utf-8') as f:
+            f.write(yaml_content)
+
         logger.info(f"Configuration exported to {yaml_path}")
 
         # Log the export operation to config history

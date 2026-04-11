@@ -2423,3 +2423,357 @@ async def rollback_to_version(
         entity_type=request.entity_type,
         entity_id=request.entity_id,
     )
+
+
+# ============================================================
+# Pydantic Models - Exchange Config (Task A-4)
+# ============================================================
+class ExchangeConfigResponse(BaseModel):
+    """Exchange configuration response (api_key masked)"""
+    name: str
+    api_key: str  # masked
+    testnet: bool
+
+
+class ExchangeConfigUpdateRequest(BaseModel):
+    """Exchange configuration update request"""
+    name: str = Field(default="binance", description="Exchange name (ccxt id)")
+    api_key: str = Field(default="", description="API Key")
+    api_secret: str = Field(default="", description="API Secret")
+    testnet: bool = Field(default=True, description="Use testnet")
+
+
+# ============================================================
+# Pydantic Models - Timeframes (Task A-4)
+# ============================================================
+class TimeframesResponse(BaseModel):
+    """Timeframes list response"""
+    timeframes: List[str]
+
+
+class TimeframesUpdateRequest(BaseModel):
+    """Timeframes update request"""
+    timeframes: List[str] = Field(..., min_length=1, description="List of timeframes (e.g., ['15m', '1h', '4h'])")
+
+
+# ============================================================
+# Pydantic Models - Migration Status (Task A-4)
+# ============================================================
+class MigrationStatus(BaseModel):
+    """YAML migration status"""
+    yaml_fully_migrated: bool = False
+    one_time_import_done: bool = False
+    import_version: str = "v1"
+
+
+# ============================================================
+# Pydantic Models - Effective Config (Task A-4)
+# ============================================================
+class AssetPollingSummary(BaseModel):
+    """Asset polling config summary"""
+    enabled: bool = True
+    interval_seconds: int = 60
+
+
+class SystemSummary(BaseModel):
+    """System config summary for effective config"""
+    core_symbols: List[str] = Field(default_factory=list)
+    ema_period: int = 60
+    mtf_ema_period: int = 60
+    mtf_mapping: Dict[str, str] = Field(default_factory=dict)
+    signal_cooldown_seconds: int = 14400
+    timeframes: List[str] = Field(default_factory=list)
+    atr_filter_enabled: bool = True
+    atr_period: int = 14
+    atr_min_ratio: str = "0.5"
+
+
+class RiskSummary(BaseModel):
+    """Risk config summary for effective config"""
+    max_loss_percent: str = "0.01"
+    max_leverage: int = 10
+    max_total_exposure: str = "0.8"
+    daily_max_trades: Optional[int] = None
+    daily_max_loss: Optional[str] = None
+    cooldown_minutes: int = 240
+
+
+class NotificationSummary(BaseModel):
+    """Notification config summary for effective config"""
+    channels: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class StrategySummary(BaseModel):
+    """Strategy summary for effective config"""
+    id: str
+    name: str
+    is_active: bool
+    trigger_type: str
+    filter_count: int
+    symbols: List[str] = Field(default_factory=list)
+    timeframes: List[str] = Field(default_factory=list)
+
+
+class SymbolSummary(BaseModel):
+    """Symbol summary for effective config"""
+    symbol: str
+    is_core: bool
+    is_active: bool
+
+
+class EffectiveConfigResponse(BaseModel):
+    """Complete merged runtime configuration"""
+    exchange: ExchangeConfigResponse
+    system: SystemSummary
+    risk: RiskSummary
+    notification: NotificationSummary
+    strategies: List[StrategySummary] = Field(default_factory=list)
+    symbols: List[SymbolSummary] = Field(default_factory=list)
+    asset_polling: AssetPollingSummary
+    migration_status: MigrationStatus
+    config_version: int = 0
+    created_at: str
+
+
+# ============================================================
+# Exchange Config Endpoints (Task A-4)
+# ============================================================
+@router.get("/exchange", response_model=ExchangeConfigResponse)
+async def get_exchange_config():
+    """
+    获取交易所连接配置
+
+    API Key 经过脱敏处理。
+    """
+    if not _config_manager:
+        raise HTTPException(status_code=503, detail="Config manager not initialized")
+
+    exchange = await _config_manager.get_exchange_config()
+
+    return ExchangeConfigResponse(
+        name=exchange.name,
+        api_key=mask_secret(exchange.api_key),
+        testnet=exchange.testnet,
+    )
+
+
+@router.put("/exchange", response_model=ExchangeConfigResponse)
+async def update_exchange_config(
+    request: ExchangeConfigUpdateRequest,
+    admin: bool = Depends(check_admin_permission)
+):
+    """
+    更新交易所连接配置（热重载）
+
+    更新后会触发 ExchangeGateway 重连。
+    """
+    if not _config_manager:
+        raise HTTPException(status_code=503, detail="Config manager not initialized")
+
+    from src.application.config_manager import ExchangeConfig
+
+    config = ExchangeConfig(
+        name=request.name,
+        api_key=request.api_key,
+        api_secret=request.api_secret,
+        testnet=request.testnet,
+    )
+
+    await _config_manager.update_exchange_config(config)
+
+    # Notify hot-reload for exchange reconnection
+    await notify_hot_reload("exchange")
+
+    return ExchangeConfigResponse(
+        name=config.name,
+        api_key=mask_secret(config.api_key),
+        testnet=config.testnet,
+    )
+
+
+# ============================================================
+# Timeframes Endpoints (Task A-4)
+# ============================================================
+@router.get("/timeframes", response_model=TimeframesResponse)
+async def get_timeframes():
+    """获取监控时间周期列表"""
+    if not _config_manager:
+        raise HTTPException(status_code=503, detail="Config manager not initialized")
+
+    timeframes = await _config_manager.get_timeframes()
+    return TimeframesResponse(timeframes=timeframes)
+
+
+@router.put("/timeframes", response_model=TimeframesResponse)
+async def update_timeframes(
+    request: TimeframesUpdateRequest,
+    admin: bool = Depends(check_admin_permission)
+):
+    """
+    更新监控时间周期列表（热重载）
+    """
+    if not _config_manager:
+        raise HTTPException(status_code=503, detail="Config manager not initialized")
+
+    from src.application.config_manager import AssetPollingConfig
+
+    await _config_manager.update_timeframes(request.timeframes)
+
+    await notify_hot_reload("timeframes")
+
+    return TimeframesResponse(timeframes=request.timeframes)
+
+
+# ============================================================
+# Asset Polling Endpoint (Task A-4)
+# ============================================================
+class AssetPollingResponse(BaseModel):
+    """Asset polling config response"""
+    enabled: bool
+    interval_seconds: int
+
+
+class AssetPollingUpdateRequest(BaseModel):
+    """Asset polling update request"""
+    enabled: bool = True
+    interval_seconds: int = Field(default=60, ge=10)
+
+
+@router.get("/asset-polling", response_model=AssetPollingResponse)
+async def get_asset_polling():
+    """获取资产轮询配置"""
+    if not _config_manager:
+        raise HTTPException(status_code=503, detail="Config manager not initialized")
+
+    polling = await _config_manager.get_asset_polling_config()
+    return AssetPollingResponse(
+        enabled=polling.enabled,
+        interval_seconds=polling.interval_seconds,
+    )
+
+
+@router.put("/asset-polling", response_model=AssetPollingResponse)
+async def update_asset_polling(
+    request: AssetPollingUpdateRequest,
+    admin: bool = Depends(check_admin_permission)
+):
+    """
+    更新资产轮询配置（热重载）
+    """
+    if not _config_manager:
+        raise HTTPException(status_code=503, detail="Config manager not initialized")
+
+    from src.application.config_manager import AssetPollingConfig
+
+    config = AssetPollingConfig(
+        enabled=request.enabled,
+        interval_seconds=request.interval_seconds,
+    )
+
+    await _config_manager.update_asset_polling_config(config)
+
+    await notify_hot_reload("asset_polling")
+
+    return AssetPollingResponse(
+        enabled=config.enabled,
+        interval_seconds=config.interval_seconds,
+    )
+
+
+# ============================================================
+# Effective Config Endpoint (Task A-4)
+# ============================================================
+@router.get("/effective", response_model=EffectiveConfigResponse)
+async def get_effective_config():
+    """
+    获取完整合并后的运行时配置总览
+
+    返回所有配置的合并视图，敏感字段已脱敏。
+    """
+    if not _config_manager:
+        raise HTTPException(status_code=503, detail="Config manager not initialized")
+
+    # Build response sections
+    exchange = await _config_manager.get_exchange_config()
+    system_data = await _config_manager.get_system_config()
+    risk_config = await _config_manager.get_risk_config()
+    notification_config = await _config_manager._build_notification_config()
+    polling = await _config_manager.get_asset_polling_config()
+    migration = await _config_manager.get_migration_status()
+
+    # Strategies summary
+    strategies = await _config_manager._load_strategies_from_db()
+    strategy_summaries = []
+    for s in strategies:
+        strategy_summaries.append(StrategySummary(
+            id=s.id,
+            name=s.name,
+            is_active=getattr(s, 'enabled', True),
+            trigger_type=s.trigger.type if s.trigger else "pinbar",
+            filter_count=len(s.filters),
+            symbols=getattr(s, 'apply_to', []) or [],
+            timeframes=[],
+        ))
+
+    # Symbols summary
+    symbols_list = []
+    if _symbol_repo:
+        symbols = await _symbol_repo.get_all()
+        symbols_list = [
+            SymbolSummary(
+                symbol=s["symbol"],
+                is_core=s.get("is_core", False),
+                is_active=s.get("is_active", True),
+            )
+            for s in symbols
+        ]
+
+    return EffectiveConfigResponse(
+        exchange=ExchangeConfigResponse(
+            name=exchange.name,
+            api_key=mask_secret(exchange.api_key),
+            testnet=exchange.testnet,
+        ),
+        system=SystemSummary(
+            core_symbols=system_data.get("core_symbols", []),
+            ema_period=system_data.get("ema_period", 60),
+            mtf_ema_period=system_data.get("mtf_ema_period", 60),
+            mtf_mapping=system_data.get("mtf_mapping", {}),
+            signal_cooldown_seconds=system_data.get("signal_cooldown_seconds", 14400),
+            timeframes=system_data.get("timeframes", ["15m", "1h"]),
+            atr_filter_enabled=system_data.get("atr_filter_enabled", True),
+            atr_period=system_data.get("atr_period", 14),
+            atr_min_ratio=str(system_data.get("atr_min_ratio", "0.5")),
+        ),
+        risk=RiskSummary(
+            max_loss_percent=str(risk_config.max_loss_percent),
+            max_leverage=risk_config.max_leverage,
+            max_total_exposure=str(risk_config.max_total_exposure),
+            daily_max_trades=risk_config.daily_max_trades,
+            daily_max_loss=str(risk_config.daily_max_loss) if risk_config.daily_max_loss else None,
+            cooldown_minutes=240,
+        ),
+        notification=NotificationSummary(
+            channels=[
+                {
+                    "type": c.type,
+                    "webhook_url": mask_secret(c.webhook_url),
+                    "is_active": True,
+                }
+                for c in notification_config.channels
+            ],
+        ),
+        strategies=strategy_summaries,
+        symbols=symbols_list,
+        asset_polling=AssetPollingSummary(
+            enabled=polling.enabled,
+            interval_seconds=polling.interval_seconds,
+        ),
+        migration_status=MigrationStatus(
+            yaml_fully_migrated=migration.get("yaml_fully_migrated", "false") == "true",
+            one_time_import_done=migration.get("one_time_import_done", "false") == "true",
+            import_version=migration.get("import_version", "v1"),
+        ),
+        config_version=_config_manager.get_config_version(),
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )

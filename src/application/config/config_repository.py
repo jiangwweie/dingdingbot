@@ -349,6 +349,23 @@ class ConfigRepository:
                     is_auto BOOLEAN DEFAULT FALSE
                 );
                 
+                CREATE TABLE IF NOT EXISTS exchange_configs (
+                    id TEXT PRIMARY KEY DEFAULT 'primary',
+                    exchange_name TEXT NOT NULL DEFAULT 'binance',
+                    api_key TEXT NOT NULL,
+                    api_secret TEXT NOT NULL,
+                    testnet BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    version INTEGER DEFAULT 1
+                );
+
+                CREATE TABLE IF NOT EXISTS migration_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS config_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     entity_type TEXT NOT NULL,
@@ -361,24 +378,40 @@ class ConfigRepository:
                     change_summary TEXT
                 );
             """)
-        
+
+        # Handle ALTER TABLE for system_configs new columns (SQLite silently fails on duplicate column)
+        try:
+            await self._db.execute("ALTER TABLE system_configs ADD COLUMN timeframes TEXT NOT NULL DEFAULT '[\"15m\",\"1h\"]'")
+        except Exception:
+            pass
+        try:
+            await self._db.execute("ALTER TABLE system_configs ADD COLUMN asset_polling_enabled BOOLEAN DEFAULT TRUE")
+        except Exception:
+            pass
+        try:
+            await self._db.execute("ALTER TABLE system_configs ADD COLUMN asset_polling_interval INTEGER DEFAULT 60")
+        except Exception:
+            pass
+
         await self._db.commit()
         logger.debug("Database tables created/verified")
     
     async def _initialize_default_configs(self) -> None:
         """Initialize default configurations if not exists."""
-        # Initialize system config
+        # Initialize system config (with extended fields)
         async with self._db.execute(
             "SELECT id FROM system_configs WHERE id = 'global'"
         ) as cursor:
             if not await cursor.fetchone():
                 await self._db.execute("""
                     INSERT INTO system_configs
-                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds)
-                    VALUES ('global', ?, 60, 60, ?, 14400)
+                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds,
+                     timeframes, asset_polling_enabled, asset_polling_interval)
+                    VALUES ('global', ?, 60, 60, ?, 14400, ?, TRUE, 60)
                 """, (
                     json.dumps(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]),
                     json.dumps({"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
+                    json.dumps(["15m", "1h"]),
                 ))
                 logger.info("Default system config initialized")
         
@@ -409,6 +442,18 @@ class ConfigRepository:
         
         await self._db.commit()
         logger.debug("Default core symbols initialized")
+
+        # Initialize exchange config
+        async with self._db.execute(
+            "SELECT id FROM exchange_configs WHERE id = 'primary'"
+        ) as cursor:
+            if not await cursor.fetchone():
+                await self._db.execute("""
+                    INSERT INTO exchange_configs
+                    (id, exchange_name, api_key, api_secret, testnet)
+                    VALUES ('primary', 'binance', '', '', TRUE)
+                """)
+                logger.info("Default exchange config initialized")
     
     async def _validate_and_apply_default_configs(self) -> None:
         """Validate configuration integrity and apply defaults if empty."""
@@ -419,7 +464,21 @@ class ConfigRepository:
             await self._apply_hardcoded_defaults()
     
     async def _is_empty_config(self) -> bool:
-        """Check if the database configuration is empty."""
+        """Check if the database configuration is empty.
+
+        Task A-5: Also checks exchange_configs table.
+        """
+        # Check for exchange config (Task A-5)
+        try:
+            async with self._db.execute(
+                "SELECT COUNT(*) as cnt FROM exchange_configs WHERE id = 'primary'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row["cnt"] == 0:
+                    return True
+        except Exception:
+            return True  # Table may not exist yet
+
         # Check for notification channels
         async with self._db.execute(
             "SELECT COUNT(*) as cnt FROM notifications WHERE is_active = TRUE"
@@ -427,7 +486,7 @@ class ConfigRepository:
             row = await cursor.fetchone()
             if row and row["cnt"] == 0:
                 return True
-        
+
         # Check for risk config
         async with self._db.execute(
             "SELECT COUNT(*) as cnt FROM risk_configs WHERE id = 'global'"
@@ -435,7 +494,7 @@ class ConfigRepository:
             row = await cursor.fetchone()
             if row and row["cnt"] == 0:
                 return True
-        
+
         # Check for system config
         async with self._db.execute(
             "SELECT COUNT(*) as cnt FROM system_configs WHERE id = 'global'"
@@ -443,13 +502,31 @@ class ConfigRepository:
             row = await cursor.fetchone()
             if row and row["cnt"] == 0:
                 return True
-        
+
         return False
     
     async def _apply_hardcoded_defaults(self) -> None:
-        """Apply hard-coded default configurations to ensure system can start."""
+        """Apply hard-coded default configurations to ensure system can start.
+
+        Task A-5: Also initializes exchange config defaults.
+        """
         applied_defaults = []
-        
+
+        # Default exchange config (Task A-5)
+        try:
+            async with self._db.execute(
+                "SELECT id FROM exchange_configs WHERE id = 'primary'"
+            ) as cursor:
+                if not await cursor.fetchone():
+                    await self._db.execute("""
+                        INSERT INTO exchange_configs
+                        (id, exchange_name, api_key, api_secret, testnet)
+                        VALUES ('primary', 'binance', '', '', TRUE)
+                    """)
+                    applied_defaults.append("交易所配置：binance (测试网, 需配置 API Key)")
+        except Exception:
+            pass  # Table may not exist yet
+
         # Default risk config
         async with self._db.execute(
             "SELECT id FROM risk_configs WHERE id = 'global'"
@@ -461,7 +538,7 @@ class ConfigRepository:
                     VALUES ('global', 0.01, 10, 0.8, 240)
                 """)
                 applied_defaults.append("风控配置：max_loss=1%, max_leverage=10x, max_exposure=80%")
-        
+
         # Default notification channel
         async with self._db.execute(
             "SELECT id FROM notifications LIMIT 1"
@@ -473,7 +550,7 @@ class ConfigRepository:
                     VALUES ('default', 'feishu', 'https://placeholder.feishu.cn/webhook', TRUE, TRUE, TRUE, TRUE)
                 """)
                 applied_defaults.append("通知渠道：飞书占位符 (需配置真实 webhook)")
-        
+
         # Default system config
         async with self._db.execute(
             "SELECT id FROM system_configs WHERE id = 'global'"
@@ -481,16 +558,18 @@ class ConfigRepository:
             if not await cursor.fetchone():
                 await self._db.execute("""
                     INSERT INTO system_configs
-                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds)
-                    VALUES ('global', ?, 60, 60, ?, 14400)
+                    (id, core_symbols, ema_period, mtf_ema_period, mtf_mapping, signal_cooldown_seconds,
+                     timeframes, asset_polling_enabled, asset_polling_interval)
+                    VALUES ('global', ?, 60, 60, ?, 14400, ?, TRUE, 60)
                 """, (
                     json.dumps(["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]),
                     json.dumps({"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
+                    json.dumps(["15m", "1h"]),
                 ))
                 applied_defaults.append("系统配置：core_symbols=BTC/ETH/SOL/BNB, ema_period=60")
-        
+
         await self._db.commit()
-        
+
         # Startup warning for hardcoded defaults
         if applied_defaults:
             logger.warning(
@@ -518,16 +597,18 @@ class ConfigRepository:
     async def update_system_config(self, config: Dict[str, Any]) -> None:
         """Update system configuration."""
         self.assert_initialized()
-        
+
         async with self._ensure_lock():
             now = datetime.now(timezone.utc).isoformat()
-            
+
             await self._db.execute("""
                 UPDATE system_configs
                 SET core_symbols = ?, ema_period = ?, mtf_ema_period = ?,
                     mtf_mapping = ?, signal_cooldown_seconds = ?,
                     warmup_history_bars = ?, atr_filter_enabled = ?,
-                    atr_period = ?, atr_min_ratio = ?, updated_at = ?
+                    atr_period = ?, atr_min_ratio = ?,
+                    timeframes = ?, asset_polling_enabled = ?, asset_polling_interval = ?,
+                    updated_at = ?
                 WHERE id = 'global'
             """, (
                 json.dumps(config.get("core_symbols", [])),
@@ -539,6 +620,9 @@ class ConfigRepository:
                 config.get("atr_filter_enabled", True),
                 config.get("atr_period", 14),
                 str(config.get("atr_min_ratio", "0.5")),
+                json.dumps(config.get("timeframes", ["15m", "1h"])),
+                config.get("asset_polling_enabled", True),
+                config.get("asset_polling_interval", 60),
                 now,
             ))
             
@@ -572,6 +656,10 @@ class ConfigRepository:
                     "atr_filter_enabled": bool(row["atr_filter_enabled"]) if row["atr_filter_enabled"] is not None else True,
                     "atr_period": row["atr_period"] if row["atr_period"] is not None else 14,
                     "atr_min_ratio": str(row["atr_min_ratio"]) if row["atr_min_ratio"] is not None else "0.5",
+                    # Extended fields
+                    "timeframes": json.loads(row["timeframes"]) if row["timeframes"] else ["15m", "1h"],
+                    "asset_polling_enabled": bool(row["asset_polling_enabled"]) if row["asset_polling_enabled"] is not None else True,
+                    "asset_polling_interval": row["asset_polling_interval"] if row["asset_polling_interval"] is not None else 60,
                 }
             else:
                 self._system_config_cache = {
@@ -584,6 +672,9 @@ class ConfigRepository:
                     "atr_filter_enabled": True,
                     "atr_period": 14,
                     "atr_min_ratio": "0.5",
+                    "timeframes": ["15m", "1h"],
+                    "asset_polling_enabled": True,
+                    "asset_polling_interval": 60,
                 }
         return self._system_config_cache
     
@@ -724,15 +815,18 @@ class ConfigRepository:
     
     async def get_user_config_dict(self) -> Dict[str, Any]:
         """
-        Get user configuration dictionary (with merged configs).
+        Get user configuration dictionary (pure DB, no YAML).
 
         Returns:
             Dictionary containing user configuration (all nested models converted to dict)
         """
         self.assert_initialized()
 
-        # Load from YAML for backward compatibility
-        yaml_config = self._load_user_config_from_yaml()
+        # Load from DB
+        exchange_config = await self.get_exchange_config()
+        timeframes = await self.get_timeframes()
+        asset_polling = await self.get_asset_polling_config()
+        notification = await self._build_notification_config()
 
         # Load system and risk configs
         await self._load_system_config()
@@ -743,13 +837,13 @@ class ConfigRepository:
 
         # Convert Pydantic models to dict for Provider compatibility
         return {
-            "exchange": yaml_config.exchange.model_dump(),
+            "exchange": exchange_config.model_dump(),
             "user_symbols": [],  # Will be loaded from symbols table
-            "timeframes": yaml_config.timeframes,
+            "timeframes": timeframes,
             "active_strategies": strategies,
             "risk": self._risk_config_cache.model_dump(),
-            "asset_polling": yaml_config.asset_polling.model_dump(),
-            "notification": (await self._build_notification_config()).model_dump(),
+            "asset_polling": asset_polling.model_dump(),
+            "notification": notification.model_dump(),
             "mtf_ema_period": self._system_config_cache.get("mtf_ema_period", 60),
             "mtf_mapping": self._system_config_cache.get("mtf_mapping", {}),
         }
@@ -798,10 +892,13 @@ class ConfigRepository:
         )
     
     async def _build_notification_config(self) -> NotificationConfig:
-        """Build notification config from database."""
+        """Build notification config from database (DB only, no YAML fallback)."""
         if self._db is None:
-            return self._load_user_config_from_yaml().notification
-        
+            return NotificationConfig(channels=[NotificationChannel(
+                type="feishu",
+                webhook_url="https://placeholder.feishu.cn/webhook",
+            )])
+
         async with self._db.execute(
             "SELECT * FROM notifications WHERE is_active = TRUE"
         ) as cursor:
@@ -812,9 +909,12 @@ class ConfigRepository:
                     type=row["channel_type"],
                     webhook_url=row["webhook_url"],
                 ))
-            
+
             if not channels:
-                return self._load_user_config_from_yaml().notification
+                return NotificationConfig(channels=[NotificationChannel(
+                    type="feishu",
+                    webhook_url="https://placeholder.feishu.cn/webhook",
+                )])
 
             return NotificationConfig(channels=channels)
 
@@ -823,44 +923,229 @@ class ConfigRepository:
         Update a single user config item (KV mode).
 
         Args:
-            key: Config key (e.g., 'user_symbols', 'timeframes', 'mtf_ema_period')
+            key: Config key (e.g., 'timeframes', 'mtf_ema_period', 'exchange.api_key')
             value: New value
 
         Note:
-            This method updates the user_config YAML file for backward compatibility.
-            User config is stored in user.yaml and loaded from there.
+            This method writes to the corresponding DB tables based on key.
+            YAML file is NOT modified (kept only for export/import backup).
         """
         self.assert_initialized()
-
-        # For now, user config is stored in YAML
-        # Read current user config
-        yaml_path = self._config_dir / 'user.yaml'
-
-        if yaml_path.exists():
-            with open(yaml_path, 'r', encoding='utf-8') as f:
-                import yaml
-                user_config = yaml.safe_load(f) or {}
-        else:
-            user_config = {}
 
         # Handle nested keys (e.g., 'exchange.api_key')
         if '.' in key:
             keys = key.split('.')
-            current = user_config
-            for k in keys[:-1]:
-                if k not in current:
-                    current[k] = {}
-                current = current[k]
-            current[keys[-1]] = value
+            if keys[0] == 'exchange' and len(keys) > 1:
+                field = keys[1]
+                exchange = await self.get_exchange_config()
+                if field == 'name':
+                    exchange.name = value
+                elif field == 'api_key':
+                    exchange.api_key = value
+                elif field == 'api_secret':
+                    exchange.api_secret = value
+                elif field == 'testnet':
+                    exchange.testnet = value
+                else:
+                    raise ValueError(f"Invalid exchange field: {field}")
+                await self.update_exchange_config(exchange)
+                logger.info(f"Exchange config updated: {field}")
+                return
+
+        # Handle top-level keys
+        if key == 'timeframes':
+            await self.update_timeframes(value)
+        elif key == 'mtf_ema_period':
+            current = await self.get_system_config()
+            current['mtf_ema_period'] = value
+            await self.update_system_config(current)
+        elif key == 'mtf_mapping':
+            current = await self.get_system_config()
+            current['mtf_mapping'] = value
+            await self.update_system_config(current)
+        elif key == 'user_symbols':
+            # Write to symbols table
+            async with self._ensure_lock():
+                for symbol in value:
+                    await self._db.execute("""
+                        INSERT OR IGNORE INTO symbols (symbol, is_active, is_core)
+                        VALUES (?, TRUE, FALSE)
+                    """, (symbol,))
+                await self._db.commit()
         else:
-            user_config[key] = value
+            logger.warning(f"Unknown user config key: {key}")
 
-        # Write back to YAML
-        with open(yaml_path, 'w', encoding='utf-8') as f:
-            import yaml
-            yaml.safe_dump(user_config, f, allow_unicode=True, default_flow_style=False)
+    # ============================================================
+    # Exchange Config CRUD (Task A-2)
+    # ============================================================
 
-        logger.info(f"User config updated: {key} = {value}")
+    async def get_exchange_config(self) -> ExchangeConfig:
+        """从 DB 获取交易所连接配置。"""
+        self.assert_initialized()
+
+        async with self._db.execute(
+            "SELECT * FROM exchange_configs WHERE id = 'primary'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return ExchangeConfig(
+                    name=row["exchange_name"],
+                    api_key=row["api_key"],
+                    api_secret=row["api_secret"],
+                    testnet=bool(row["testnet"]),
+                )
+
+        # Return default if not found
+        return ExchangeConfig(
+            name="binance",
+            api_key="",
+            api_secret="",
+            testnet=True,
+        )
+
+    async def update_exchange_config(self, config: ExchangeConfig) -> None:
+        """更新交易所连接配置。触发 config_history 记录。"""
+        self.assert_initialized()
+
+        async with self._ensure_lock():
+            now = datetime.now(timezone.utc).isoformat()
+
+            # Check if exists
+            async with self._db.execute(
+                "SELECT id FROM exchange_configs WHERE id = 'primary'"
+            ) as cursor:
+                exists = await cursor.fetchone()
+
+            if exists:
+                await self._db.execute("""
+                    UPDATE exchange_configs
+                    SET exchange_name = ?, api_key = ?, api_secret = ?,
+                        testnet = ?, updated_at = ?, version = version + 1
+                    WHERE id = 'primary'
+                """, (
+                    config.name,
+                    config.api_key,
+                    config.api_secret,
+                    config.testnet,
+                    now,
+                ))
+            else:
+                await self._db.execute("""
+                    INSERT INTO exchange_configs
+                    (id, exchange_name, api_key, api_secret, testnet)
+                    VALUES ('primary', ?, ?, ?, ?)
+                """, (
+                    config.name,
+                    config.api_key,
+                    config.api_secret,
+                    config.testnet,
+                ))
+
+            await self._log_config_change(
+                entity_type="exchange_config",
+                entity_id="primary",
+                action="UPDATE",
+                new_values={
+                    "exchange_name": config.name,
+                    "api_key": mask_secret(config.api_key),
+                    "testnet": config.testnet,
+                },
+                changed_by="api",
+            )
+
+            await self._db.commit()
+            logger.info(f"Exchange config updated: {config.name} (testnet={config.testnet})")
+
+    # ============================================================
+    # Timeframes CRUD (Task A-2)
+    # ============================================================
+
+    async def get_timeframes(self) -> List[str]:
+        """从 DB 获取监控时间周期列表。"""
+        self.assert_initialized()
+
+        await self._load_system_config()
+
+        return self._system_config_cache.get("timeframes", ["15m", "1h"])
+
+    async def update_timeframes(self, timeframes: List[str]) -> None:
+        """更新监控时间周期列表。"""
+        self.assert_initialized()
+
+        async with self._ensure_lock():
+            now = datetime.now(timezone.utc).isoformat()
+
+            # Get current config first
+            current = await self.get_system_config()
+
+            await self._db.execute("""
+                UPDATE system_configs
+                SET timeframes = ?, updated_at = ?
+                WHERE id = 'global'
+            """, (json.dumps(timeframes), now))
+
+            await self._log_config_change(
+                entity_type="system_config",
+                entity_id="global",
+                action="UPDATE",
+                new_values={"timeframes": timeframes},
+                changed_by="api",
+            )
+
+            await self._db.commit()
+
+            # Update cache
+            self._system_config_cache["timeframes"] = timeframes
+            logger.info(f"Timeframes updated: {timeframes}")
+
+    # ============================================================
+    # Asset Polling CRUD (Task A-2)
+    # ============================================================
+
+    async def get_asset_polling_config(self) -> AssetPollingConfig:
+        """从 DB 获取资产轮询配置。"""
+        self.assert_initialized()
+
+        await self._load_system_config()
+
+        enabled = self._system_config_cache.get("asset_polling_enabled", True)
+        interval = self._system_config_cache.get("asset_polling_interval", 60)
+
+        return AssetPollingConfig(
+            enabled=enabled,
+            interval_seconds=interval,
+        )
+
+    async def update_asset_polling_config(self, config: AssetPollingConfig) -> None:
+        """更新资产轮询配置。"""
+        self.assert_initialized()
+
+        async with self._ensure_lock():
+            now = datetime.now(timezone.utc).isoformat()
+
+            await self._db.execute("""
+                UPDATE system_configs
+                SET asset_polling_enabled = ?, asset_polling_interval = ?, updated_at = ?
+                WHERE id = 'global'
+            """, (config.enabled, config.interval_seconds, now))
+
+            await self._log_config_change(
+                entity_type="system_config",
+                entity_id="global",
+                action="UPDATE",
+                new_values={
+                    "asset_polling_enabled": config.enabled,
+                    "asset_polling_interval": config.interval_seconds,
+                },
+                changed_by="api",
+            )
+
+            await self._db.commit()
+
+            # Update cache
+            self._system_config_cache["asset_polling_enabled"] = config.enabled
+            self._system_config_cache["asset_polling_interval"] = config.interval_seconds
+            logger.info(f"Asset polling config updated: enabled={config.enabled}, interval={config.interval_seconds}s")
 
     # ============================================================
     # Strategy CRUD Operations
