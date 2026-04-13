@@ -132,8 +132,6 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
   loading = false,
 }) => {
   const [form] = Form.useForm();
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [autoSaveTimer, setAutoSaveTimer] = useState<NodeJS.Timeout | null>(null);
 
   // 初始化表单数据
   useEffect(() => {
@@ -167,38 +165,8 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
           max_leverage: 10,
         });
       }
-      setHasUnsavedChanges(false);
     }
   }, [visible, strategy, form]);
-
-  // 监听表单变化，标记未保存状态
-  const handleValuesChange = useCallback(() => {
-    setHasUnsavedChanges(true);
-
-    // 仅编辑模式自动保存，创建模式需手动点击"保存"
-    if (strategy) {
-      // 清除之前的定时器
-      if (autoSaveTimer) {
-        clearTimeout(autoSaveTimer);
-      }
-
-      // 设置新的自动保存定时器（1 秒防抖）
-      const timer = setTimeout(() => {
-        handleSubmit();
-      }, 1000);
-
-      setAutoSaveTimer(timer);
-    }
-  }, [autoSaveTimer, strategy]);
-
-  // 清理定时器
-  useEffect(() => {
-    return () => {
-      if (autoSaveTimer) {
-        clearTimeout(autoSaveTimer);
-      }
-    };
-  }, [autoSaveTimer]);
 
   // 处理提交
   const handleSubmit = useCallback(async () => {
@@ -219,7 +187,6 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
       };
 
       onSave(payload);
-      setHasUnsavedChanges(false);
 
       if (!strategy) {
         message.success('策略创建成功');
@@ -234,11 +201,6 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
 
   // 处理取消
   const handleCancel = () => {
-    if (hasUnsavedChanges) {
-      // 有未保存的更改，提示用户
-      const confirmed = window.confirm('有未保存的更改，确定要关闭吗？');
-      if (!confirmed) return;
-    }
     form.resetFields();
     onClose();
   };
@@ -301,9 +263,8 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
             icon={<SaveOutlined />}
             onClick={handleSubmit}
             loading={loading}
-            disabled={!hasUnsavedChanges || loading}
           >
-            {loading ? '保存中...' : hasUnsavedChanges ? '保存' : '已保存'}
+            {loading ? '保存中...' : '保存'}
           </Button>
         </Space>
       }
@@ -312,7 +273,6 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
         form={form}
         layout="vertical"
         requiredMark="optional"
-        onValuesChange={handleValuesChange}
         scrollToFirstError
       >
         {/* 基本信息 */}
@@ -491,22 +451,6 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
             </Space>
           </Collapse.Panel>
         </Collapse>
-
-        {/* 未保存更改提示 */}
-        {hasUnsavedChanges && !loading && (
-          <Alert
-            type="warning"
-            showIcon
-            message="有未保存的更改"
-            description='修改将在 1 秒后自动保存，或点击“保存”按钮立即保存'
-            className="mt-4"
-            action={
-              <Button size="small" type="primary" onClick={handleSubmit}>
-                立即保存
-              </Button>
-            }
-          />
-        )}
       </Form>
     </Drawer>
   );
