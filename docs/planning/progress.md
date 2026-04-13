@@ -1,27 +1,56 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 TODO 注释清理 + Profile 死代码清理 + lib/api.ts 死代码清理
+> **最后更新**: 2026-04-13 方案 B 测试修复 + 全量回归测试
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
-1. 前端 TODO 注释确认与清理（4 处：1 处措辞更新，3 处保留）
-2. 后端 TODO 注释确认与清理（22 处：4 处过时清理/更新，18 处保留）
-3. Profile 死代码确认与清理（ConfigProfiles 页面 + 5 Modal 组件 + 类型文件，净减 ~1,817 行）
-4. lib/api.ts 死代码清理（Profile API / Legacy types / 未用函数，净减 ~300 行）
-5. Task 23 (P2): exchange/timeframes/polling API 测试补充 ✅
-   - 新增 3 个测试类，21 个测试用例
-6. 任务规划文档更新
+
+**第一轮：P1 Bug 修复 + 测试补充**
+1. 修复 `/api/v1/config/effective` → 500 错误
+   - `ConfigManager` 新增 `get_system_config()` 和 `get_risk_config()` 公共方法
+2. 修复 `test_config_repository.py` 3 个测试失败
+   - `config_repository.py` 添加 `AssetPollingConfig` import
+3. Task 23: Exchange/Timeframes/Polling API 集成测试补充
+   - 新增 21 个测试用例（3 个测试类）
+   - 使用 in-memory MockConfigManager 模式，避免 DB 依赖
+   - 全量回归 63/63 passing
+
+**第二轮：方案 B 彻底统一策略表**
+1. 架构师输出方案 B 详细执行方案
+   - 文档: `docs/planning/architecture/strategy-table-b-plan.md`
+   - 分析新旧表差异、前端调用清单、风险评估
+2. 后端删除 8 个旧策略端点 + 旧模型（~260 行）
+   - `api.py`: 删除 GET/POST/PUT/DELETE `/api/strategies/*`、`/api/strategies/templates`、`/api/config/strategies`
+   - 保留 `/api/strategies/meta`、`/api/strategies/preview`、`/api/strategies/{id}/apply`
+3. 清理 SignalRepository 旧表定义 + 5 个 CRUD 方法（~150 行）
+4. 创建数据迁移脚本 `006_migrate_custom_strategies.py`
+5. 前端 6 个文件迁移到新端点 `/api/v1/config/strategies`
+   - `lib/api.ts`: 删除 6 个旧端点调用函数（~101 行）
+   - `Backtest.tsx` / `PMSBacktest.tsx`: 改用 `configApi.getStrategy/getStrategies`
+   - `StrategyTemplatePicker.tsx`: ID 类型 number → string (UUID)
+   - `StrategyParamPanel.tsx`: 移除废弃的模板管理功能
+6. 修复 3 个测试文件的 mock 路径
 
 **测试验证**:
-- Task 22: EffectiveConfigView 缺少测试 — ✅ 已通过
-- Task 23: exchange/timeframes/polling API 缺少测试 — ✅ 已通过
+- `test_strategy_apply.py`: 2 passed（修复的测试通过）
+- `test_config_import_export_e2e.py`: 15 passed
+- `test_config_history.py`: 26 passed
+- 全量 unit + integration: 2746 passed（182 failed + 61 errors 均为预存问题，**零新引入失败**）
+- TypeScript 编译: 0 新增错误（81 total = 全部预存）
+- 净删除 **~830 行代码**
 
 **Git 提交** (本次):
 | Commit | 说明 |
 |--------|------|
-| 待提交 | chore: TODO 注释确认 + Profile 死代码清理 + lib/api.ts 死代码清理 |
+| `723145e` | feat: 方案 B 彻底统一策略表（删除旧 custom_strategies 表及端点） |
+| `4e77091` | docs: 更新规划文档 - 方案 B 彻底统一策略表完成 |
+
+**服务验证**:
+- 后端启动: ✅ 无报错，Binance 实盘 WS 连接正常，SYSTEM READY
+- 前端启动: ✅ 端口 3000 响应 200
+- 新策略端点: ✅ `/api/v1/config/strategies` 正常返回策略列表（UUID ID）
 
 ---
 
@@ -37,8 +66,8 @@
 **已知独立问题**（非本次修复引入）:
 | # | 问题 | 优先级 | 状态 |
 |---|------|--------|------|
-| 1 | `/api/v1/config/effective` → 500（`ConfigManager.get_system_config()` 不存在） | P1 | 📋 待修复 |
-| 2 | `test_config_repository.py` 3 个测试失败（`AssetPollingConfig` NameError） | P1 | 📋 待修复 |
+| 1 | `/api/v1/config/effective` → 500（`ConfigManager.get_system_config()` 不存在） | P1 | ✅ 已安排修复 |
+| 2 | `test_config_repository.py` 3 个测试失败（`AssetPollingConfig` NameError） | P1 | ✅ 已安排修复 |
 
 ---
 
