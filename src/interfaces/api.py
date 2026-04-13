@@ -3243,88 +3243,34 @@ async def apply_strategy(strategy_id: str, request: StrategyApplyRequest = None)
         if request is None:
             request = StrategyApplyRequest(enabled=True, apply_to=None)
 
-        # Get config manager
-        config_manager = _get_config_manager()
-
         # Step 1: Load strategy from new strategies table (StrategyConfigRepository)
         strategy_record = await _config_globals._strategy_repo.get_by_id(strategy_id)
         if strategy_record is None:
             raise HTTPException(status_code=404, detail="Strategy not found")
 
-        # Step 2: Build StrategyDefinition from new repo format
-        import json
-        from src.domain.models import StrategyDefinition
-
-        try:
-            strategy_def = StrategyDefinition(
-                id=strategy_record["id"],
-                name=strategy_record["name"],
-                trigger_config=strategy_record["trigger_config"],
-                filters=strategy_record["filter_configs"] or [],
-                filter_logic=strategy_record["filter_logic"] or "AND",
-                symbols=strategy_record["symbols"] or [],
-                timeframes=strategy_record["timeframes"] or [],
-                is_global=True,
-                apply_to=[],
-            )
-        except Exception as validation_error:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid strategy definition: {str(validation_error)}"
+        # Step 2: Ensure strategy is active
+        if not strategy_record.get("is_active", False):
+            await _config_globals._strategy_repo.update(
+                strategy_id, {"is_active": True}
             )
 
-        # Step 3: Update strategy definition with apply options (use model_copy for immutability)
-        update_dict = {}
-        if request.apply_to is not None:
-            update_dict["apply_to"] = request.apply_to
-            update_dict["is_global"] = False
+        # Step 3: Notify hot-reload to rebuild strategy runner
+        from src.interfaces.api_v1_config import notify_hot_reload
+        await notify_hot_reload("strategy_apply")
 
-        if update_dict:
-            strategy_def = strategy_def.model_copy(update=update_dict)
+        # Directly trigger pipeline rebuild (observer not wired in current setup)
+        from src.main import get_signal_pipeline
+        pipeline = get_signal_pipeline()
+        if pipeline:
+            await pipeline.on_config_updated()
 
-        # Step 4: Get current active strategies and add/replace this strategy
-        config_manager = _get_config_manager()
-        current_config = await config_manager.get_user_config()
-        active_strategies = list(current_config.active_strategies)
-
-        # Check if strategy with same name already exists
-        existing_idx = None
-        for i, strat in enumerate(active_strategies):
-            if strat.name == strategy_def.name:
-                existing_idx = i
-                break
-
-        if existing_idx is not None:
-            # Replace existing strategy
-            active_strategies[existing_idx] = strategy_def
-            logger.info(f"Replaced existing strategy '{strategy_def.name}' (id={strategy_id})")
-        else:
-            # Add new strategy
-            active_strategies.append(strategy_def)
-            logger.info(f"Added new strategy '{strategy_def.name}' (id={strategy_id})")
-
-        # Step 5: Build config update payload
-        config_update = {
-            "active_strategies": [s.model_dump(mode='json') for s in active_strategies]
-        }
-
-        # Step 6: Call hot-reload method (validates + atomic swap + persist + notify observers)
-        try:
-            new_config = await config_manager.update_user_config(config_update)
-        except ValidationError as e:
-            logger.error(f"Config validation failed during apply: {e}")
-            raise HTTPException(
-                status_code=422,
-                detail=f"Config validation failed: {str(e)}"
-            )
-
-        logger.info(f"Strategy template {strategy_id} ('{strategy_def.name}') applied successfully")
+        logger.info(f"Strategy {strategy_id} ('{strategy_record['name']}') applied successfully")
 
         return StrategyApplyResponse(
             status="success",
-            message=f"Strategy '{strategy_def.name}' applied to live trading",
+            message=f"Strategy '{strategy_record['name']}' applied to live trading",
             strategy_id=strategy_id,
-            strategy_name=strategy_def.name,
+            strategy_name=strategy_record["name"],
         )
 
     except HTTPException:
