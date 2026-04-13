@@ -52,6 +52,39 @@
 - 前端启动: ✅ 端口 3000 响应 200
 - 新策略端点: ✅ `/api/v1/config/strategies` 正常返回策略列表（UUID ID）
 
+**第三轮：策略编辑器 + 策略下发实盘全流程修复**
+1. 完全删除策略编辑器自动保存功能
+   - 移除 debounce 定时器 + hasUnsavedChanges 状态 + 未保存确认弹窗
+   - 保存按钮始终可用，用户手动点击保存
+2. configApiClient 添加认证拦截器
+   - axios interceptor 全局注入 `X-User-Role: admin` 头
+   - 覆盖所有 `/api/v1/config/*` 写操作（create/update/delete/toggle）
+3. 补全过滤器参数表单 UI
+   - 新建 filterSchemas.ts：4 种过滤器（ema_trend/mtf/atr/volume_surge）Schema 定义
+   - 动态渲染：添加过滤器下拉 + 已添加列表（启用/禁用开关 + 参数 InputNumber + 删除按钮）
+   - FilterList 组件使用 useState 管理本地状态（Form.useWatch 不响应 setFieldsValue）
+4. 修复编辑模式参数回显不正确
+   - 删除 trigger_params Form.Item 的 initialValue（覆盖 form.setFieldsValue）
+   - 编辑模式正确回填 trigger_params 和 filter_configs 参数
+5. 修复 apply 端点 422 错误：strategy_id 类型 int → str（UUID 解析失败）
+6. 修复 apply 端点 404 错误：改用 _strategy_repo.get_by_id 查询新表 strategies
+7. 修复 apply 端点 500 错误：移除不存在的 update_user_config()，改为 is_active 更新 + notify_hot_reload + pipeline.on_config_updated()
+
+**测试验证**:
+- TypeScript 编译: 0 新增错误
+- 后端启动: ✅ 无报错，SYSTEM READY
+
+**Git 提交** (本次):
+| Commit | 说明 |
+|--------|------|
+| `0ae9c58` | fix: 下发实盘 500 — 重写 apply 端点适配新配置架构 |
+| `49a488f` | fix: 下发实盘 404 — apply 端点改用新 StrategyConfigRepository |
+| `12beebd` | fix: 策略下发 API strategy_id 类型从 int 改为 str |
+| `c713b09` | feat: 策略编辑器补全过滤器参数表单 + 修复编辑模式参数回显 |
+| `720f599` | fix: 过滤器添加后不显示（Form.useWatch 无法监听 setFieldsValue 变更） |
+| `ad4d6f4` | fix: 完全删除策略编辑器自动保存功能 |
+| `aebfadb` | fix: 创建策略自动提交 401 修复 + configApiClient 认证拦截器 |
+
 ---
 
 **昨日完成工作** (2026-04-12):

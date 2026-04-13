@@ -1,7 +1,7 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-13 TODO 注释清理 + Profile 死代码清理
+> **最后更新**: 2026-04-13 收工
 
 ---
 

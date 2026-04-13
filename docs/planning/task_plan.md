@@ -1,7 +1,7 @@
 # 任务计划
 
-> **最后更新**: 2026-04-13
-> **当前活跃项目**: TODO 注释清理 + Profile 死代码清理 + 测试验证
+> **最后更新**: 2026-04-13 收工
+> **当前活跃项目**: 策略编辑器 + 策略下发实盘全流程修复
 
 ---
 
@@ -173,7 +173,28 @@
 
 **提交**: `723145e`
 
-### 第四阶段：待办任务清单（2026-04-13 更新）
+### 第九阶段：策略编辑器 + 策略下发实盘全流程修复（2026-04-13 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 34 | 完全删除策略编辑器自动保存功能 | P0 | ✅ 已完成 |
+| 35 | configApiClient 添加认证拦截器（X-User-Role: admin） | P0 | ✅ 已完成 |
+| 36 | 修复 apply 端点 strategy_id 类型 int → str（422 错误） | P0 | ✅ 已完成 |
+| 37 | 补全过滤器参数表单 UI（4 种过滤器动态渲染） | P0 | ✅ 已完成 |
+| 38 | 修复编辑模式 trigger_params 回显不正确 | P0 | ✅ 已完成 |
+| 39 | 修复 apply 端点查询新表 strategies（404 错误） | P0 | ✅ 已完成 |
+| 40 | 修复 apply 端点 ConfigManager 不存在的方法（500 错误） | P0 | ✅ 已完成 |
+
+**修复摘要**：
+- 删除自动保存：移除 debounce + hasUnsavedChanges 状态，保存按钮始终可用
+- 认证拦截器：axios interceptor 全局注入 `X-User-Role: admin` 头
+- 过滤器表单：新建 filterSchemas.ts（4 种过滤器 Schema），动态渲染添加/删除/启用/参数配置
+- 编辑回显：删除 Form.Item initialValue 覆盖，正确 form.setFieldsValue 回填 trigger_params 和 filters
+- apply 端点 422：strategy_id: int → str（UUID 解析失败）
+- apply 端点 404：SignalRepository.get_custom_strategy_by_id → _strategy_repo.get_by_id（旧表已删除）
+- apply 端点 500：移除不存在的 update_user_config()，改为 is_active 更新 + notify_hot_reload + pipeline.on_config_updated()
+
+### 第四阶段：待办任务清单（2026-04-13 收工）
 
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
