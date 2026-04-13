@@ -120,53 +120,71 @@ const TIMEFRAME_OPTIONS = [
 interface FilterListProps {
   form: ReturnType<typeof Form.useForm>[0];
   loading: boolean;
+  initialFilters?: FilterConfig[];
 }
 
 /** 过滤器列表：添加 / 删除 / 启用 / 参数配置 */
-const FilterList: React.FC<FilterListProps> = ({ form, loading }) => {
-  const filters = Form.useWatch('filters', form) as FilterConfig[] | undefined;
-  const filterList = filters || [];
+const FilterList: React.FC<FilterListProps> = ({ form, loading, initialFilters }) => {
+  const [filters, setFilters] = useState<FilterConfig[]>([]);
+
+  /** 当 initialFilters 变化时（编辑模式回填），同步到本地状态 */
+  useEffect(() => {
+    if (initialFilters) {
+      setFilters(initialFilters);
+      form.setFieldsValue({ filters: initialFilters });
+    } else {
+      setFilters([]);
+      form.setFieldsValue({ filters: [] });
+    }
+  }, [initialFilters, form]);
+
+  /** 同步到父级 Form（隐藏字段） */
+  const syncToForm = useCallback((list: FilterConfig[]) => {
+    setFilters(list);
+    form.setFieldsValue({ filters: list });
+  }, [form]);
 
   /** 添加过滤器 */
   const handleAdd = (type: string) => {
-    const current = form.getFieldValue('filters') || [];
     const newFilter: FilterConfig = {
       type,
       enabled: true,
       params: getFilterDefaultParams(type),
     };
-    form.setFieldsValue({ filters: [...current, newFilter] });
+    syncToForm([...filters, newFilter]);
   };
 
   /** 删除过滤器 */
   const handleRemove = (index: number) => {
-    const current = form.getFieldValue('filters') || [];
-    form.setFieldsValue({ filters: current.filter((_: any, i: number) => i !== index) });
+    syncToForm(filters.filter((_, i) => i !== index));
   };
 
   /** 切换过滤器启用状态 */
   const handleToggle = (index: number, enabled: boolean) => {
-    const current = form.getFieldValue('filters') || [];
-    const updated = current.map((f: FilterConfig, i: number) =>
-      i === index ? { ...f, enabled } : f
+    syncToForm(
+      filters.map((f, i) => (i === index ? { ...f, enabled } : f))
     );
-    form.setFieldsValue({ filters: updated });
   };
 
   /** 更新过滤器参数 */
   const handleParamChange = (index: number, key: string, value: number) => {
-    const current = form.getFieldValue('filters') || [];
-    const updated = current.map((f: FilterConfig, i: number) =>
-      i === index ? { ...f, params: { ...f.params, [key]: value } } : f
+    syncToForm(
+      filters.map((f, i) =>
+        i === index ? { ...f, params: { ...f.params, [key]: value } } : f
+      )
     );
-    form.setFieldsValue({ filters: updated });
   };
 
-  // 已添加的过滤器类型集合（用于排除添加下拉中的选项）
-  const addedTypes = new Set(filterList.map((f) => f.type));
+  // 已添加的过滤器类型集合
+  const addedTypes = new Set(filters.map((f) => f.type));
 
   return (
     <div>
+      {/* 隐藏字段，让父级 handleSubmit 能拿到 filters */}
+      <Form.Item name="filters" noStyle>
+        <Input type="hidden" />
+      </Form.Item>
+
       {/* 添加过滤器按钮 */}
       <div className="mb-3">
         <Select
@@ -181,13 +199,13 @@ const FilterList: React.FC<FilterListProps> = ({ form, loading }) => {
       </div>
 
       {/* 已添加的过滤器列表 */}
-      {filterList.length === 0 ? (
+      {filters.length === 0 ? (
         <div className="text-center py-6 text-gray-400 text-sm">
           暂无过滤器，点击上方添加
         </div>
       ) : (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          {filterList.map((filter, index) => {
+          {filters.map((filter, index) => {
             const schema = getFilterSchema(filter.type);
             const label = schema?.label || filter.type;
             const colorMap: Record<string, string> = {
@@ -500,7 +518,15 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
                 </Select>
               </Form.Item>
 
-              <FilterList form={form} loading={loading} />
+              <FilterList
+                form={form}
+                loading={loading}
+                initialFilters={strategy?.filter_configs?.map((fc) => ({
+                  type: fc.type,
+                  enabled: fc.enabled,
+                  params: fc.params || getFilterDefaultParams(fc.type),
+                }))}
+              />
             </Space>
           </Collapse.Panel>
 
