@@ -801,6 +801,7 @@ class OptimizationHistoryRepository:
     def __init__(self, db_path: str = "data/optimization_history.db"):
         self._db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
+        self._owns_connection = True  # Marks whether this repo manages connection lifecycle
 
     async def initialize(self) -> None:
         """初始化数据库"""
@@ -809,13 +810,10 @@ class OptimizationHistoryRepository:
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
 
-        # 连接数据库
-        self._db = await aiosqlite.connect(self._db_path)
-        self._db.row_factory = aiosqlite.Row
-
-        # 配置
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
+        # 连接数据库 via connection pool (shared across repos)
+        from src.infrastructure.connection_pool import get_connection as pool_get_connection
+        self._db = await pool_get_connection(self._db_path)
+        # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         # 创建表
         await self._create_tables()
@@ -865,8 +863,8 @@ class OptimizationHistoryRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """关闭连接"""
-        if self._db:
+        """关闭连接（仅当自行管理连接时）"""
+        if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
 

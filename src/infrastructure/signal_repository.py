@@ -82,16 +82,10 @@ class SignalRepository:
                 if db_dir and not os.path.exists(db_dir):
                     os.makedirs(db_dir, exist_ok=True)
 
-                # Open database connection
-                self._db = await aiosqlite.connect(self.db_path)
-                self._db.row_factory = aiosqlite.Row
-
-        # Enable WAL mode for high concurrency write support (P0-001)
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-        await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
-        await self._db.execute("PRAGMA busy_timeout=5000")  # 5s retry on locked (fix database_is_locked errors)
+                # Open database connection via connection pool (shared across repos)
+                from src.infrastructure.connection_pool import get_connection as pool_get_connection
+                self._db = await pool_get_connection(self.db_path)
+                # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         # Create signals table
         await self._db.execute("""

@@ -1,11 +1,32 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-14 Float/Decimal 精度修复
+> **最后更新**: 2026-04-14 共享 DB 连接池统一改造
 
 ### 收工状态
 
 **今日完成工作** (2026-04-14):
+
+**第十一轮：共享 DB 连接池统一改造** ✅
+- 根因：17+ 个 Repository 各自独立创建 aiosqlite 连接，同 db_path 多个连接导致 "database is locked" 竞争
+- 已有基础：`connection_pool.py` 已实现按 db_path 分组的单例池，但普及率极低
+- 方案：方案 A（最小侵入）— 每个 Repository 的 `initialize()` 内将 `aiosqlite.connect()` 替换为 `pool.get_connection()`
+- 零时序风险：不改初始化顺序、不改 set_dependencies()、不改 main.py Phase 9 调用方式
+- 改造 10 个源文件（~20 处连接点）：
+  - `connection_pool.py`: 新增 `PRAGMA busy_timeout=10000`（10s 重试）
+  - `signal_repository.py`, `order_repository.py`, `backtest_repository.py`, `reconciliation_repository.py`, `config_snapshot_repository.py`, `config_entry_repository.py`, `config_profile_repository.py`
+  - `config_repositories.py` 中 7 个仓库类（Strategy/Risk/System/Symbol/Notification/Snapshot/History）
+  - `strategy_optimizer.py` 中 OptimizationHistoryRepository
+- 修复 2 个衍生问题：
+  - `config_entry_repository.py` 缺少 `import os`（原文件遗漏）
+  - `test_config_repositories.py` 中 `test_manager_close` 断言需适配池化模式
+- 不在改造范围：`historical_data_repository.py`（使用 SQLAlchemy create_async_engine，有独立连接池）
+- 测试：
+  - 新增 10 个集成测试（连接共享、并发写入无 locked、PRAGMA 验证、close 行为、双模式初始化）
+  - 原有 8 个连接池测试全部通过
+  - 核心 DB 回归 58 passed（config_repositories + connection_pool + integration）
+  - strategy_optimizer 22 passed，config_entry_repository 51 passed
+  - 全量回归 0 新增失败
 
 **第十轮：Float/Decimal 精度全面修复** ✅
 - 根因：审计发现 25+ 处 `float()` 转换分布在 10+ 个文件中，部分污染了决策链（score 比较、pnl_ratio 累积）

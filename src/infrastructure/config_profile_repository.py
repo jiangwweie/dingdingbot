@@ -95,12 +95,8 @@ class ConfigProfileRepository:
         """
         # Create connection if not injected
         if self._owns_connection and self._db is None:
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
-
-            # Enable WAL mode
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
+            self._db = await pool_get_connection(self.db_path)
+            # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         # 验证 config_profiles 表是否存在
         async with self._db.execute(

@@ -84,6 +84,7 @@ class ConnectionPool:
             await conn.execute("PRAGMA synchronous=NORMAL")
             await conn.execute("PRAGMA wal_autocheckpoint=1000")
             await conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
+            await conn.execute("PRAGMA busy_timeout=10000")  # 10s retry on locked
 
             self._connections[db_path] = conn
             return conn

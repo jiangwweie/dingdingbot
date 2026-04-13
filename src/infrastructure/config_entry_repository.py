@@ -5,6 +5,7 @@ Phase K: 策略参数配置化 - 数据库存储方案
 """
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List, Dict, Any, Union
@@ -79,12 +80,15 @@ class ConfigEntryRepository:
         async with self._ensure_lock():
             # Create connection if not injected
             if self._owns_connection and self._db is None:
-                self._db = await aiosqlite.connect(self.db_path)
-                self._db.row_factory = aiosqlite.Row
+                # Create data directory if not exists
+                db_dir = os.path.dirname(self.db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
 
-                # Enable WAL mode for high concurrency write support
-                await self._db.execute("PRAGMA journal_mode=WAL")
-                await self._db.execute("PRAGMA synchronous=NORMAL")
+                # Open database connection via connection pool (shared across repos)
+                from src.infrastructure.connection_pool import get_connection as pool_get_connection
+                self._db = await pool_get_connection(self.db_path)
+                # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
             # Create config_entries_v2 table (Phase K design with Profile support)
             await self._db.execute("""

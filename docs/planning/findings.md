@@ -1,7 +1,32 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-14 Float/Decimal 精度修复
+> **最后更新**: 2026-04-14 共享 DB 连接池统一改造
+
+---
+
+## 2026-04-14 共享 DB 连接池改造
+
+### 根因
+
+17+ 个 Repository 各自调用 `aiosqlite.connect()` 创建独立连接，即使指向同一 db_path（`data/v3_dev.db`），SQLite 在多连接写入时需要文件级锁，导致 "database is locked" 异常。仅 `signal_repository.py` 设置了 `busy_timeout`。
+
+### 方案 A（最小侵入）
+
+每个 Repository 的 `initialize()` 内将 `aiosqlite.connect()` 替换为 `pool.get_connection()`。不改初始化时序、不改 set_dependencies()、不改全局变量赋值。
+
+### 技术要点
+
+1. **PRAGMA 集中管理**：`connection_pool.py` 统一设置 WAL/synchronous/busy_timeout/cache_size，Repository 不再重复设置
+2. **`_owns_connection` 标志**：池化连接的 `_owns_connection=True`（因为 Repo 自己初始化时用 pool 获取连接，但仍视为"自有"），close() 时会关闭。但 `ConfigDatabaseManager` 注入的子仓库 `_owns_connection=False`，close() 不关闭池连接
+3. **`config_entry_repository.py` 缺少 `import os`**：原文件遗漏，本次修复补上
+4. **`historical_data_repository.py` 不改造**：使用 SQLAlchemy create_async_engine，有独立连接池机制
+
+### 验证结果
+
+- 18 个连接池测试 passed（8 原有 + 10 新增集成）
+- 58 个核心 DB 回归测试 passed
+- 0 新增回归失败
 
 ---
 

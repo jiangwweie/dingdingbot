@@ -75,13 +75,10 @@ class StrategyConfigRepository:
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
-
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")
+            # Open database connection via connection pool (shared across repos)
+            from src.infrastructure.connection_pool import get_connection as pool_get_connection
+            self._db = await pool_get_connection(self.db_path)
+            # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS strategies (
@@ -385,13 +382,10 @@ class RiskConfigRepository:
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
-
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")
+            # Open database connection via connection pool (shared across repos)
+            from src.infrastructure.connection_pool import get_connection as pool_get_connection
+            self._db = await pool_get_connection(self.db_path)
+            # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS risk_configs (
@@ -544,13 +538,10 @@ class SystemConfigRepository:
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
-
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")
+            # Open database connection via connection pool (shared across repos)
+            from src.infrastructure.connection_pool import get_connection as pool_get_connection
+            self._db = await pool_get_connection(self.db_path)
+            # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS system_configs (
@@ -717,13 +708,10 @@ class SymbolConfigRepository:
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
-
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")
+            # Open database connection via connection pool (shared across repos)
+            from src.infrastructure.connection_pool import get_connection as pool_get_connection
+            self._db = await pool_get_connection(self.db_path)
+            # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS symbols (
@@ -1001,13 +989,10 @@ class NotificationConfigRepository:
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
-
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")
+            # Open database connection via connection pool (shared across repos)
+            from src.infrastructure.connection_pool import get_connection as pool_get_connection
+            self._db = await pool_get_connection(self.db_path)
+            # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS notifications (
@@ -1292,13 +1277,10 @@ class ConfigSnapshotRepositoryExtended:
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
-
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")
+            # Open database connection via connection pool (shared across repos)
+            from src.infrastructure.connection_pool import get_connection as pool_get_connection
+            self._db = await pool_get_connection(self.db_path)
+            # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS config_snapshots (
@@ -1507,13 +1489,10 @@ class ConfigHistoryRepository:
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._db = await aiosqlite.connect(self.db_path)
-            self._db.row_factory = aiosqlite.Row
-
-            await self._db.execute("PRAGMA journal_mode=WAL")
-            await self._db.execute("PRAGMA synchronous=NORMAL")
-            await self._db.execute("PRAGMA wal_autocheckpoint=1000")
-            await self._db.execute("PRAGMA cache_size=-64000")
+            # Open database connection via connection pool (shared across repos)
+            from src.infrastructure.connection_pool import get_connection as pool_get_connection
+            self._db = await pool_get_connection(self.db_path)
+            # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS config_history (
