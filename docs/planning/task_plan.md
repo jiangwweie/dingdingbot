@@ -1,7 +1,7 @@
 # 任务计划
 
-> **最后更新**: 2026-04-13 aiosqlite executescript() 修复
-> **当前活跃项目**: YAML 降级清理 + 策略 timeframe 同步 + 风控配置前端
+> **最后更新**: 2026-04-13 回测数据加载修复 (19e2d1e)
+> **当前活跃项目**: 回测数据加载修复已完成，待重启后端验证
 
 ---
 
@@ -65,6 +65,7 @@
 | 回测 risk_overrides 消费断裂修复 | 2026-04-13 | ✅ |
 | lifespan 补充 Config Repositories 初始化 | 2026-04-13 | ✅ |
 | lifespan 补充 ConfigManager 初始化 | 2026-04-13 | ✅ |
+| 回测数据加载修复 (DB 绝对路径 + CCXT 分页) | 2026-04-13 | ✅ `19e2d1e` |
 
 ---
 
@@ -263,6 +264,40 @@
 - 策略详情接口：StrategyConfig.tsx handleEdit 改为 async，先调用 `configApi.getStrategy(id)` 获取完整详情
 - 风控配置前端：SystemSettings.tsx 新增 `RiskConfigSection` 组件（tab/page 模式共用），调用已有 `configApi.getRiskConfig()` / `updateRiskConfig()` API；修复 tab 模式不显示 + 表单提交未触发 API 两个 bug
 
+### 第十三阶段：回测数据加载修复（2026-04-13 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 53 | HistoricalDataRepository 默认路径改为 Path(__file__) 解析的绝对路径 | P0 | ✅ 已完成 |
+| 54 | _query_klines_from_db 改为 ORDER BY timestamp DESC + reverse，返回最新 N 条 | P0 | ✅ 已完成 |
+| 55 | fetch_historical_ohlcv 支持 since 参数，limit>1000 自动分页循环 | P0 | ✅ 已完成 |
+| 56 | _fetch_from_exchange 传递 since=start_time | P0 | ✅ 已完成 |
+| 57 | 3 个 backtest 端点的 finally 中关闭临时 gateway | P1 | ✅ 已完成 |
+| 58 | ConfigManager.get_instance()/set_instance() 单例支持 | P2 | ✅ 已完成 |
+| 59 | 新增 10 个单元测试验证以上修复 | P0 | ✅ 已完成 |
+
+**修复摘要**：
+- 根因链：后端 CWD = web-front/ → DB 相对路径指向空库 → fallback 到 CCXT → CCXT 无 since 参数返回"最近的 1000 条" → 时间范围过滤全部清除 → 0 条数据
+- P0: 数据库路径改为基于 `__file__` 的绝对路径，不受 CWD 影响
+- P0: SQL 查询改为 DESC 取最新 N 条，reverse 恢复升序
+- P1: CCXT 分页循环（每次 1000 条），since 参数控制起始时间
+- P2: Gateway 资源泄漏修复
+- P3: ConfigManager 单例支持，修复回测 KV 配置加载失败
+
+**改动文件**：
+| 文件 | 改动 |
+|------|------|
+| `src/infrastructure/historical_data_repository.py` | DB 绝对路径 + SQL DESC + since 传参 |
+| `src/infrastructure/exchange_gateway.py` | since 参数 + 分页循环 |
+| `src/interfaces/api.py` | Gateway 清理 + ConfigManager 注册 |
+| `src/application/config_manager.py` | get_instance/set_instance 类方法 |
+| `tests/unit/` | 3 个测试文件 +10 测试 |
+
+**测试验证**：
+- DB 路径 3/3 通过，SQL 排序 2/2 通过，CCXT 分页 5/5 通过，Config 单例 2/3 通过（1 个 fixture 旧方法名问题，无关本次修复）
+
+**提交**: `19e2d1e`
+
 ### 第四阶段：待办任务清单（2026-04-13 收工）
 
 | # | 任务 | 优先级 | 状态 |
@@ -273,6 +308,7 @@
 | 26 | YAML 导入格式统一 | P2 | 📋 待规划 |
 | 27 | v3 Phase 5 实盘集成 | P2 | ⏳ 待启动 |
 | 52 | 共享 DB 连接池：将 17+ 个独立 aiosqlite 连接统一到 connection_pool，彻底消除 database is locked | P1 | 📋 待规划 |
+| 60 | 重启后端验证回测数据加载修复 | P0 | 🔓 待验证 |
 
 ### 已知独立问题（非本次修复引入）
 

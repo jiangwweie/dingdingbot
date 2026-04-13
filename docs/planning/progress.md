@@ -1,15 +1,24 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 回测数据加载修复
+> **最后更新**: 2026-04-13 回测数据加载修复 (19e2d1e)
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
 
-**第九轮：回测数据加载修复（进行中）**
+**第九轮：回测数据加载修复** ✅
 - 根因链：后端 CWD = web-front/ → HistoricalDataRepository("data/v3_dev.db") 打开 web-front/data/v3_dev.db (空库) → fallback 到 CCXT → CCXT 无 since 参数返回"最近的 1000 条" → 时间范围过滤全部清除 → 0 条数据
-- 修复：DB 绝对路径 + CCXT 分页 + SQL ORDER BY DESC + Gateway 清理 + ConfigManager 单例
+- 修复 6 项：
+  - P0: HistoricalDataRepository 默认路径改为 Path(__file__) 解析的绝对路径 (`/Users/jiangwei/Documents/dingdingbot/data/v3_dev.db`)
+  - P0: _query_klines_from_db 改为 ORDER BY timestamp DESC + reverse，返回最新 N 条
+  - P1: fetch_historical_ohlcv 支持 since 参数，limit>1000 自动分页循环（每次 1000 条）
+  - P1: _fetch_from_exchange 传递 since=start_time，从指定时间开始获取
+  - P2: 3 个 backtest 端点的 finally 中关闭临时 gateway，修复 Unclosed client session
+  - P3: ConfigManager.get_instance()/set_instance() 单例，修复回测 KV 配置加载失败
+- 新增 10 个单元测试，全部通过
+- 提交：`19e2d1e`
+- 8 files changed, +511/-25
 
 **第八轮：aiosqlite executescript() 修复 + 策略数据恢复**
 - 根因：`ConfigManager._create_tables()` 使用 `aiosqlite.executescript()` 执行建表 SQL，该方法绕过 async 连接队列并执行隐式 COMMIT，破坏 WAL 模式事务状态，导致后续查询无法看到已提交的 strategies 数据
