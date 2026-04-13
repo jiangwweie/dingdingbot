@@ -781,7 +781,7 @@ class Backtester:
         klines: List[KlineData],
         request: BacktestRequest,
         risk_config: RiskConfig,
-    ) -> Tuple[float, float, float]:
+    ) -> Tuple[Decimal, Decimal, Decimal]:
         """
         Simulate win rate based on stop-loss distance.
 
@@ -796,7 +796,7 @@ class Backtester:
         fired_signals = [a for a in attempts if a.final_result == "SIGNAL_FIRED"]
 
         if not fired_signals:
-            return 0.0, 0.0, 0.0
+            return Decimal("0"), Decimal("0"), Decimal("0")
 
         wins = 0
         losses = 0
@@ -840,11 +840,11 @@ class Backtester:
 
         total_trades = wins + losses
         if total_trades == 0:
-            return 0.0, 0.0, 0.0
+            return Decimal("0"), Decimal("0"), Decimal("0")
 
-        win_rate = wins / total_trades
-        avg_gain = float(total_gain / wins) if wins > 0 else 0.0
-        avg_loss = float(total_loss / losses) if losses > 0 else 0.0
+        win_rate = Decimal(wins) / Decimal(total_trades)
+        avg_gain = total_gain / Decimal(wins) if wins > 0 else Decimal("0")
+        avg_loss = total_loss / Decimal(losses) if losses > 0 else Decimal("0")
 
         return win_rate, avg_gain, avg_loss
 
@@ -896,7 +896,7 @@ class Backtester:
         attempt: SignalAttempt,
         klines: List[KlineData],
         risk_config: RiskConfig,
-    ) -> Tuple[Optional[float], Optional[str]]:
+    ) -> Tuple[Optional[Decimal], Optional[str]]:
         """
         Calculate pnl_ratio and exit_reason for a fired signal.
 
@@ -942,11 +942,11 @@ class Backtester:
         )
 
         if outcome == "WIN":
-            return 2.0, "TAKE_PROFIT"  # 2R gain
+            return Decimal("2"), "TAKE_PROFIT"
         elif outcome == "LOSS":
-            return -1.0, "STOP_LOSS"   # 1R loss
+            return Decimal("-1"), "STOP_LOSS"
         else:
-            return 0.0, "TIME_EXIT"    # No clear outcome
+            return Decimal("0"), "TIME_EXIT"
 
     def _attempt_to_dict(self, attempt: SignalAttempt) -> Dict[str, Any]:
         """Convert SignalAttempt to dictionary for JSON serialization.

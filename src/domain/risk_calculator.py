@@ -315,7 +315,7 @@ class RiskCalculator:
         tags: List[Dict[str, str]] = None,
         kline_timestamp: int = 0,
         strategy_name: str = "unknown",
-        score: float = 0.0,
+        score: Decimal = Decimal("0.0"),
     ) -> SignalResult:
         """
         Calculate complete signal result with risk parameters.

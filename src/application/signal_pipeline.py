@@ -881,7 +881,7 @@ class SignalPipeline:
         self,
         kline: KlineData,
         attempt: SignalAttempt,
-        score: float,
+        score: Decimal,
     ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
         """
         Check if new signal should cover (supersede) existing active signal.

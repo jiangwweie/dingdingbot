@@ -149,7 +149,7 @@ class PatternStrategy(Strategy):
         self,
         pattern_ratio: Decimal,  # 形态质量比例 (0~1)
         atr_ratio: Optional[Decimal] = None,  # ATR 倍数 (可选)
-    ) -> float:
+    ) -> Decimal:
         """
         统一评分公式（所有形态策略共用）
 
@@ -160,16 +160,16 @@ class PatternStrategy(Strategy):
         Returns:
             最终评分（0~1）
         """
-        base_score = float(pattern_ratio)
+        base_score = pattern_ratio  # Keep as Decimal
 
         if atr_ratio and atr_ratio > 0:
             # ATR 加分（波幅质量），上限 2 倍
-            atr_bonus = min(float(atr_ratio), 2.0) * 0.3
-            score = base_score * 0.7 + atr_bonus
+            atr_bonus = min(atr_ratio, Decimal("2.0")) * Decimal("0.3")
+            score = base_score * Decimal("0.7") + atr_bonus
         else:
             score = base_score
 
-        return min(score, 1.0)
+        return min(score, Decimal("1.0"))
 
 
 # ============================================================
@@ -298,7 +298,7 @@ class PinbarStrategy(PatternStrategy):
             score = self.calculate_score(pattern_ratio, atr_ratio)
         else:
             # Fallback to legacy scoring when ATR not available
-            score = float(pattern_ratio)
+            score = pattern_ratio
 
         return PatternResult(
             strategy_name="pinbar",

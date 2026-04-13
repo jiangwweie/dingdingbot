@@ -1,7 +1,41 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-13 aiosqlite executescript() 修复
+> **最后更新**: 2026-04-14 Float/Decimal 精度修复
+
+---
+
+## 2026-04-14 Float/Decimal 精度污染
+
+### 根因
+
+Python 中 `float` 的 IEEE 754 双精度在金融计算中会引入舍入误差。代码中存在 25+ 处 `float()` 转换，部分污染了决策链：
+- `calculate_score()` 返回 `float` → 影响 `PatternResult.score` → 影响 `_check_cover` 的信号覆盖判断
+- `SignalResult.pnl_ratio: float` → 影响 API 累积 PnL 计算（浮点累加）
+- backtester 返回硬编码 float → 影响回测报告精度
+
+### 分类
+
+| 级别 | 数量 | 说明 |
+|------|------|------|
+| P0 | 0 | 核心金融计算（仓位、止损、风险额）已正确使用 Decimal |
+| P1 | 6 | Score/pnl_ratio 等决策影响字段被 float 污染 |
+| P2 | 6 | `details={}` 字典中 `float()` 仅用于 JSON 序列化，可接受 |
+
+### 修复
+
+删除计算链中的 `float()` 转换，保持 Decimal 贯穿始终。对 JSON 序列化场景（details dict、API 响应），保留 `float()` 或使用自定义 DecimalEncoder。
+
+### Pydantic 类型强制转换
+
+`SignalResult.score` 在 Pydantic 模型中声明为 `float`，即使传入 `Decimal("0.85")`，Pydantic 也会自动转换为 `float 0.85`。这是预期行为 — score 仅用于 UI 展示/排序，不参与金融计算。
+
+### 教训
+
+1. **金融计算中永远不要使用 `float()` 转换**，即使只是"显示用途" — 值可能意外流入计算链
+2. **Pydantic 模型字段类型会强制转换输入值** — 声明 Decimal 字段才能保护 Decimal 值
+3. **`details={}` 字典用于诊断元数据** — 可以接受 float（JSON 兼容性），但应明确标注
+4. **审计时应按数据流追踪** — 不能仅看单点 `float()` 调用，要追踪值最终流向哪里
 
 ---
 

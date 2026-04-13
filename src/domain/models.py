@@ -129,7 +129,7 @@ class SignalResult(BaseModel):
     tags: List[Dict[str, str]] = Field(default_factory=list)  # Dynamic filter tags e.g., [{"name": "EMA", "value": "Bullish"}, {"name": "MTF", "value": "Confirmed"}]
     risk_reward_info: str        # Risk summary (e.g., "Risk 1% = 200 USDT")
     status: str = "PENDING"      # Signal status: PENDING (monitoring), WON (profit), LOST (loss)
-    pnl_ratio: float = 0.0       # Profit/Loss ratio (positive for win e.g. 1.5, negative for loss e.g. -1.0)
+    pnl_ratio: Optional[Decimal] = None  # Profit/Loss ratio (positive for win e.g. Decimal("1.5"), negative for loss e.g. Decimal("-1.0"))
     kline_timestamp: int = 0     # K-line close timestamp in milliseconds (default 0 for legacy compatibility)
     strategy_name: str = "unknown"  # Strategy name that generated this signal (e.g., "pinbar", "engulfing")
     score: float = 0.0           # Pattern quality score (0.0 ~ 1.0). **NOTE**: This is for UI display and sorting only, NOT for financial calculations. Financial calculations use Decimal exclusively.
@@ -491,7 +491,7 @@ class PatternResult:
     """策略检测到的形态结果"""
     strategy_name: str             # 策略名称，如 "pinbar"
     direction: Direction           # 信号方向
-    score: float                   # 0~1，形态质量评分
+    score: Decimal                   # 0~1，形态质量评分
     details: dict                  # 策略特定的中间计算值（用于诊断）
 
 

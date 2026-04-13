@@ -1,7 +1,7 @@
 # 任务计划
 
-> **最后更新**: 2026-04-13 回测数据加载修复 (19e2d1e)
-> **当前活跃项目**: 回测数据加载修复已完成，待重启后端验证
+> **最后更新**: 2026-04-14 Float/Decimal 精度修复
+> **当前活跃项目**: Float→Decimal 精度修复已完成（192 测试通过 + 31 新增精度测试通过）
 
 ---
 
@@ -66,6 +66,7 @@
 | lifespan 补充 Config Repositories 初始化 | 2026-04-13 | ✅ |
 | lifespan 补充 ConfigManager 初始化 | 2026-04-13 | ✅ |
 | 回测数据加载修复 (DB 绝对路径 + CCXT 分页) | 2026-04-13 | ✅ `19e2d1e` |
+| Float/Decimal 精度修复（7 个核心文件 + 31 个测试） | 2026-04-14 | ✅ 待提交 |
 
 ---
 
@@ -298,7 +299,40 @@
 
 **提交**: `19e2d1e`
 
-### 第四阶段：待办任务清单（2026-04-13 收工）
+### 第十四阶段：Float/Decimal 精度修复（2026-04-14 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| P1-1 | `PatternStrategy.calculate_score()` 返回 Decimal | P1 | ✅ 已完成 |
+| P1-2 | `PatternResult.score` 改为 Decimal | P1 | ✅ 已完成 |
+| P1-3 | `SignalResult.pnl_ratio` 改为 Decimal | P1 | ✅ 已完成 |
+| P1-4 | backtester 回测结果改为 Decimal | P1 | ✅ 已完成 |
+| P1-5 | `RiskCalculator.score` 参数改为 Decimal | P1 | ✅ 已完成 |
+| P1-6 | `signal_pipeline._check_cover` score 参数改为 Decimal | P1 | ✅ 已完成 |
+| P1-7 | `EngulfingStrategy.score` 改为 Decimal | P1 | ✅ 已完成 |
+| 测试 | 新增 31 个 Decimal 精度测试（18 单元 + 7 集成 + 6 预存） | P1 | ✅ 已完成 |
+
+**修复摘要**：
+- 审计报告：全面排查 25+ 处 `float()` 转换，按 P0/P1/P2 分类
+- 核心修改 6 个文件：删除浮点转换，保持 Decimal 贯穿计算链
+- `strategy_engine.py`: `calculate_score()` 返回类型 `float` → `Decimal`，移除 4 处 `float()`
+- `models.py`: `PatternResult.score` 改为 `Decimal`，`SignalResult.pnl_ratio` 改为 `Optional[Decimal]`
+- `backtester.py`: `_simulate_win_rate` 和 `_calculate_attempt_outcome` 返回值改为 `Decimal`
+- `engulfing_strategy.py`: score 保持 `Decimal`，边界比较改用 `Decimal("0.5")` / `Decimal("1.0")`
+- `risk_calculator.py`: `score` 参数类型改为 `Decimal`
+- `signal_pipeline.py`: `_check_cover` score 参数改为 `Decimal`
+- P2 保留：`details={}` 字典中 `float()` 不变（仅 JSON 序列化用途）
+- 信号 `SignalResult.score` 保留 `float`（UI 展示/排序专用，非金融计算）
+
+**新增测试文件**：
+- `tests/unit/test_decimal_precision.py` — 23 个单元测试
+- `tests/integration/test_backtest_decimal_precision.py` — 7 个集成测试
+
+**测试验证**：
+- Decimal 精度相关 31 passed, 0 failed
+- 全量回归 192 passed（7 个 pre-existing failures 不相关）
+
+### 第四阶段：待办任务清单（2026-04-14 收工）
 
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|

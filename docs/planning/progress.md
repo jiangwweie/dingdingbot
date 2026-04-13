@@ -1,11 +1,27 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 回测数据加载修复 (19e2d1e)
+> **最后更新**: 2026-04-14 Float/Decimal 精度修复
 
 ### 收工状态
 
-**今日完成工作** (2026-04-13):
+**今日完成工作** (2026-04-14):
+
+**第十轮：Float/Decimal 精度全面修复** ✅
+- 根因：审计发现 25+ 处 `float()` 转换分布在 10+ 个文件中，部分污染了决策链（score 比较、pnl_ratio 累积）
+- 审计报告：按 P0/P1/P2 分类，P0 无（核心金融计算已正确使用 Decimal），P1 有 6 处决策影响，P2 有 6 处仅 JSON 用途
+- 修复 6 个核心文件（7 个 P1 任务）：
+  - `strategy_engine.py`: `calculate_score()` 返回类型 `float` → `Decimal`，移除 `float(pattern_ratio)` 等 4 处转换
+  - `models.py`: `PatternResult.score: float` → `Decimal`，`SignalResult.pnl_ratio: float` → `Optional[Decimal]`
+  - `backtester.py`: `_simulate_win_rate` 和 `_calculate_attempt_outcome` 返回值改为 `Decimal`
+  - `engulfing_strategy.py`: score 保持 `Decimal`，边界比较改用 `Decimal("0.5")` / `Decimal("1.0")`
+  - `risk_calculator.py`: `score` 参数类型 `float` → `Decimal`
+  - `signal_pipeline.py`: `_check_cover` score 参数类型 `float` → `Decimal`
+- P2 保留：`details={}` 字典中 `float()` 不变（仅 JSON 序列化用途）
+- `SignalResult.score` 保留 `float`（UI 展示/排序专用，非金融计算）
+- 测试修正：`test_pinbar_signal_output.py` 2 处 `pytest.approx()` → 精确 `Decimal` 比较
+- 新增 31 个精度测试：23 个单元 + 7 个集成 + 1 个预存修复
+- 测试验证：Decimal 相关 31 passed, 全量回归 192 passed
 
 **第九轮：回测数据加载修复** ✅
 - 根因链：后端 CWD = web-front/ → HistoricalDataRepository("data/v3_dev.db") 打开 web-front/data/v3_dev.db (空库) → fallback 到 CCXT → CCXT 无 since 参数返回"最近的 1000 条" → 时间范围过滤全部清除 → 0 条数据

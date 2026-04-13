@@ -243,7 +243,7 @@ class TestScoreLogic:
         result = strategy.detect(kline, atr_value=None)
 
         assert result is not None
-        assert result.score == pytest.approx(0.8, abs=1e-9)
+        assert result.score == Decimal("0.8")
 
     def test_boundary_wick_ratio_scoring(self, strategy):
         """C2-03: 边界影线比例评分（wick_ratio 刚好在阈值 0.6）"""
@@ -260,7 +260,7 @@ class TestScoreLogic:
 
         assert result is not None
         assert result.details["wick_ratio"] == pytest.approx(0.6, abs=1e-9)
-        assert result.score == pytest.approx(0.6, abs=1e-9)
+        assert result.score == Decimal("0.6")
 
     def test_score_never_exceeds_1_0(self, strategy):
         """C2-04: 评分不超过 1.0（即使 wick_ratio + ATR bonus 总和超过）"""
@@ -367,9 +367,9 @@ class TestRiskRewardInfo:
         result = strategy.detect(kline, atr_value=Decimal("5.12345678"))
 
         assert result is not None
-        # Score is float (not Decimal) - designed for UI display
-        assert isinstance(result.score, float)
-        assert 0 < result.score <= 1.0
+        # Score is Decimal for financial precision
+        assert isinstance(result.score, Decimal)
+        assert 0 < result.score <= 1
         # Details are also float
         assert isinstance(result.details["wick_ratio"], float)
         assert isinstance(result.details["body_ratio"], float)

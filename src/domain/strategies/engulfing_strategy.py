@@ -115,9 +115,9 @@ class EngulfingStrategy(PatternStrategy):
             score = self.calculate_score(pattern_ratio, atr_ratio)
         else:
             # Fallback to legacy scoring when ATR not available
-            score = float(pattern_ratio)
+            score = pattern_ratio
 
-        score = max(0.5, min(1.0, score))  # 确保在 [0.5, 1.0] 范围内
+        score = max(Decimal("0.5"), min(Decimal("1.0"), score))  # 确保在 [0.5, 1.0] 范围内
 
         # 确定方向
         direction = Direction.LONG if is_bullish_engulfing else Direction.SHORT
