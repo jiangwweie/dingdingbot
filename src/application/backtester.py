@@ -1029,7 +1029,7 @@ class Backtester:
             )
 
             # Calculate position size
-            position_size, leverage = calculator.calculate_position_size(
+            position_size, leverage = await calculator.calculate_position_size(
                 account_snapshot,
                 entry_kline.close,
                 stop_loss,
@@ -1280,7 +1280,7 @@ class Backtester:
                         positions=[],
                         timestamp=kline.timestamp,
                     )
-                    position_size, leverage = calculator.calculate_position_size(
+                    position_size, leverage = await calculator.calculate_position_size(
                         account_snapshot,
                         kline.close,
                         stop_loss,
