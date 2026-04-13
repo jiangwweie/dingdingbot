@@ -857,6 +857,16 @@ class ConfigManager:
         await self._load_system_config()
         return self.get_core_config()
 
+    async def get_system_config(self) -> Dict[str, Any]:
+        """Get system config from cache as a plain dict."""
+        await self._load_system_config()
+        return dict(self._system_config_cache)
+
+    async def get_risk_config(self) -> RiskConfig:
+        """Get risk config from cache."""
+        await self._load_risk_config()
+        return self._risk_config_cache
+
     def _load_core_config_from_yaml(self) -> CoreConfig:
         """Load core config from YAML file (fallback for backward compatibility)."""
         core_path = self.config_dir / 'core.yaml'

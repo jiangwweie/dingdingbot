@@ -53,6 +53,7 @@ from src.application.config.models import (
     WarmupConfig,
     SignalPipelineConfig,
     AtrConfig,
+    AssetPollingConfig,
 )
 
 
