@@ -1,6 +1,6 @@
 # 任务计划
 
-> **最后更新**: 2026-04-13 收工
+> **最后更新**: 2026-04-13 lifespan 补充 ConfigManager 初始化
 > **当前活跃项目**: YAML 降级清理 + 策略 timeframe 同步 + 风控配置前端
 
 ---
@@ -64,6 +64,7 @@
 | Profile 死代码清理 + lib/api.ts 清理 | 2026-04-13 | ✅ |
 | 回测 risk_overrides 消费断裂修复 | 2026-04-13 | ✅ |
 | lifespan 补充 Config Repositories 初始化 | 2026-04-13 | ✅ |
+| lifespan 补充 ConfigManager 初始化 | 2026-04-13 | ✅ |
 
 ---
 

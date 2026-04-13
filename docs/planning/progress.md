@@ -1,11 +1,19 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 lifespan 补充 Config Repositories 初始化
+> **最后更新**: 2026-04-13 lifespan 补充 ConfigManager 初始化
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
+
+**第七轮：lifespan 补充 ConfigManager 初始化 + 完整依赖审查**
+- 修复 `/api/v1/config/effective` 端点 503 — lifespan 补充 ConfigManager 的幂等初始化（`initialize_from_db`）+ close() 清理
+- 提交：`872399d`
+
+**完整依赖审查**：系统梳理了 api.py 中所有 13 个 503 检查点
+- Config Manager 页面依赖的 13 个全局依赖已全部在 lifespan 中初始化，无遗漏
+- 其余 503 检查点属于 main.py 嵌入模式的实盘模块（Phase 4），或已废弃功能，不需要修复
 
 **第六轮：lifespan 补充 Config Repositories 初始化**
 - 独立 uvicorn 模式下，7 个 Config Repositories 未初始化导致 503
