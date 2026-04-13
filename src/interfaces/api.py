@@ -496,6 +496,17 @@ async def lifespan(app: FastAPI):
             await _cg._snapshot_repo.initialize()
             logger.info("ConfigSnapshotRepositoryExtended initialized in lifespan")
 
+        # =============================================
+        # Initialize ConfigManager (独立 uvicorn 模式必需)
+        # effective 配置端点依赖 ConfigManager
+        # main.py 嵌入模式通过 set_dependencies() 注入，lifespan="off" 不执行此处
+        # =============================================
+        if _cg._config_manager is None:
+            from src.application.config_manager import ConfigManager
+            _cg._config_manager = ConfigManager()
+            await _cg._config_manager.initialize_from_db()
+            logger.info("ConfigManager initialized in lifespan")
+
         yield
 
     finally:
@@ -541,6 +552,9 @@ async def lifespan(app: FastAPI):
         if _cg._snapshot_repo is not None:
             await _cg._snapshot_repo.close()
             logger.info("ConfigSnapshotRepositoryExtended closed in lifespan")
+        if _cg._config_manager is not None:
+            await _cg._config_manager.close()
+            logger.info("ConfigManager closed in lifespan")
 
 
 # ============================================================
