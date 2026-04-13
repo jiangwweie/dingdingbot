@@ -152,6 +152,27 @@
 - 净减少 **~2,118 行代码**
 - TypeScript 编译无新增错误（77 个预存错误不变）
 
+### 第八阶段：方案 B 彻底统一策略表（2026-04-13 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 28 | 架构师输出方案 B 详细修复方案 | P0 | ✅ 已完成 |
+| 29 | 删除 api.py 中 8 个旧策略端点 + 旧模型 | P0 | ✅ 已完成 |
+| 30 | 清理 SignalRepository 旧表定义 + CRUD 方法 | P0 | ✅ 已完成 |
+| 31 | 前端 API 调用迁移到新端点 | P0 | ✅ 已完成 |
+| 32 | 数据库迁移脚本 006_migrate_custom_strategies | P0 | ✅ 已完成 |
+| 33 | 测试更新 + 全量回归 | P0 | ✅ 已完成 |
+
+**改动摘要**：
+- 后端删除 ~410 行（api.py 260 行 + signal_repository.py 150 行）
+- 前端删除 ~101 行 + 修改 6 个文件
+- 创建迁移脚本 006_migrate_custom_strategies.py
+- 修复 3 个测试文件（test_strategy_apply、config_import_export_e2e、config_history）
+- 后端 2746 passed（182 failed + 61 errors 均为预存问题）
+- 净删除 **~830 行代码**
+
+**提交**: `723145e`
+
 ### 第四阶段：待办任务清单（2026-04-13 更新）
 
 | # | 任务 | 优先级 | 状态 |
@@ -166,8 +187,8 @@
 
 | # | 问题 | 优先级 | 状态 |
 |---|------|--------|------|
-| 1 | `/api/v1/config/effective` → 500（`ConfigManager.get_system_config()` 不存在） | P1 | 📋 待修复 |
-| 2 | `test_config_repository.py` 3 个测试失败（`AssetPollingConfig` NameError） | P1 | 📋 待修复 |
+| 1 | `/api/v1/config/effective` → 500（`ConfigManager.get_system_config()` 不存在） | P1 | ✅ 已安排修复 |
+| 2 | `test_config_repository.py` 3 个测试失败（`AssetPollingConfig` NameError） | P1 | ✅ 已安排修复 |
 
 ### 执行顺序
 
