@@ -824,8 +824,8 @@ class ConfigManager:
         For database-driven config, use get_core_config_async().
         """
         if self._system_config_cache is None:
-            # Synchronous fallback - load from YAML
-            return self._load_core_config_from_yaml()
+            # DB not ready - use hardcoded defaults
+            return self._build_default_core_config()
 
         return CoreConfig(
             core_symbols=self._system_config_cache["core_symbols"],
@@ -851,8 +851,8 @@ class ConfigManager:
     async def get_core_config_async(self) -> CoreConfig:
         """Get core configuration from database asynchronously."""
         if self._db is None:
-            # Not initialized - fallback to YAML
-            return self._load_core_config_from_yaml()
+            # Not initialized - use hardcoded defaults
+            return self._build_default_core_config()
 
         await self._load_system_config()
         return self.get_core_config()
@@ -862,53 +862,85 @@ class ConfigManager:
         await self._load_system_config()
         return dict(self._system_config_cache)
 
+    async def merge_strategy_monitoring_config(
+        self,
+        strategy_timeframes: List[str],
+        strategy_symbols: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        将策略的监控配置合并到系统级 system_configs 中。
+
+        - timeframes: 取并集（sorted set）
+        - core_symbols: 取并集（sorted set）
+
+        如果未发生变化，不执行 DB 写入。
+
+        Returns:
+            {
+                "changed": bool,
+                "timeframes": List[str],
+                "symbols": List[str],
+            }
+        """
+        await self._load_system_config()
+        current_timeframes = self._system_config_cache.get("timeframes", ["15m", "1h"])
+        current_symbols = self._system_config_cache.get("core_symbols", [])
+
+        # 合并（取并集，排序去重）
+        merged_timeframes = sorted(set(current_timeframes) | set(strategy_timeframes))
+        merged_symbols = (
+            sorted(set(current_symbols) | set(strategy_symbols))
+            if strategy_symbols
+            else current_symbols
+        )
+
+        # 检查是否需要更新
+        changed = (merged_timeframes != current_timeframes) or (
+            merged_symbols != current_symbols
+        )
+
+        if changed and self._db is not None:
+            await self._db.execute(
+                "UPDATE system_configs SET timeframes = ?, core_symbols = ? WHERE id = 'global'",
+                (json.dumps(merged_timeframes), json.dumps(merged_symbols)),
+            )
+            await self._db.commit()
+
+            # 更新缓存
+            self._system_config_cache["timeframes"] = merged_timeframes
+            self._system_config_cache["core_symbols"] = merged_symbols
+
+        return {
+            "changed": changed,
+            "timeframes": merged_timeframes,
+            "symbols": merged_symbols,
+        }
+
     async def get_risk_config(self) -> RiskConfig:
         """Get risk config from cache."""
         await self._load_risk_config()
         return self._risk_config_cache
 
-    def _load_core_config_from_yaml(self) -> CoreConfig:
-        """Load core config from YAML file (fallback for backward compatibility)."""
-        core_path = self.config_dir / 'core.yaml'
+    def _build_default_core_config(self) -> CoreConfig:
+        """Build default core configuration (hardcoded defaults).
 
-        if not core_path.exists():
-            # Return default config
-            return CoreConfig(
-                core_symbols=["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"],
-                pinbar_defaults=PinbarDefaults(
-                    min_wick_ratio=Decimal("0.6"),
-                    max_body_ratio=Decimal("0.3"),
-                    body_position_tolerance=Decimal("0.1"),
-                ),
-                ema=EmaConfig(period=60),
-                mtf_mapping=MtfMapping(**{"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
-                mtf_ema_period=60,
-                warmup=WarmupConfig(history_bars=100),
-                signal_pipeline=SignalPipelineConfig(cooldown_seconds=14400),
-                atr=AtrConfig(enabled=True, period=14, min_ratio=Decimal("0.5")),
-            )
-
-        try:
-            with open(core_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            logger.error(f"core.yaml 解析失败，使用默认配置：{e}")
-            return CoreConfig(
-                core_symbols=["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"],
-                pinbar_defaults=PinbarDefaults(
-                    min_wick_ratio=Decimal("0.6"),
-                    max_body_ratio=Decimal("0.3"),
-                    body_position_tolerance=Decimal("0.1"),
-                ),
-                ema=EmaConfig(period=60),
-                mtf_mapping=MtfMapping(**{"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
-                mtf_ema_period=60,
-                warmup=WarmupConfig(history_bars=100),
-                signal_pipeline=SignalPipelineConfig(cooldown_seconds=14400),
-                atr=AtrConfig(enabled=True, period=14, min_ratio=Decimal("0.5")),
-            )
-
-        return CoreConfig(**data)
+        Used when DB is not yet initialized or unavailable.
+        No YAML file fallback — DB or defaults only.
+        """
+        return CoreConfig(
+            core_symbols=["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"],
+            pinbar_defaults=PinbarDefaults(
+                min_wick_ratio=Decimal("0.6"),
+                max_body_ratio=Decimal("0.3"),
+                body_position_tolerance=Decimal("0.1"),
+            ),
+            ema=EmaConfig(period=60),
+            mtf_mapping=MtfMapping(**{"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}),
+            mtf_ema_period=60,
+            warmup=WarmupConfig(history_bars=100),
+            signal_pipeline=SignalPipelineConfig(cooldown_seconds=14400),
+            atr=AtrConfig(enabled=True, period=14, min_ratio=Decimal("0.5")),
+        )
 
     async def get_user_config(self) -> UserConfig:
         """

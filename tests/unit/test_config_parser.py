@@ -479,23 +479,6 @@ class TestSerialization:
 class TestIntegration:
     """Integration tests for ConfigParser."""
 
-    def test_load_core_config_from_yaml_file(self, parser, fixtures_dir):
-        """Test loading core config from actual YAML file."""
-        config = parser.load_core_config_from_yaml(fixtures_dir)
-
-        assert isinstance(config, CoreConfig)
-        assert len(config.core_symbols) == 4
-        assert config.ema.period == 60
-
-    def test_load_user_config_from_yaml_fallback(self, parser, tmp_path):
-        """Test user config loading falls back to defaults when file missing."""
-        # Use empty directory
-        config = parser.load_user_config_from_yaml(tmp_path)
-
-        assert isinstance(config, UserConfig)
-        assert config.exchange.name == "binance"
-        assert config.exchange.testnet is True
-
     def test_create_default_core_config(self, parser):
         """Test default core config creation."""
         config = parser.create_default_core_config()
@@ -602,28 +585,6 @@ class TestEdgeCases:
         assert isinstance(config.max_total_exposure, Decimal)
         assert config.max_total_exposure == Decimal("0.85")
 
-    def test_load_core_config_from_yaml_file_not_found_fallback(self, parser, tmp_path):
-        """Test load_core_config_from_yaml falls back to defaults when file not found."""
-        # Use empty directory where core.yaml doesn't exist
-        config = parser.load_core_config_from_yaml(tmp_path)
-
-        assert isinstance(config, CoreConfig)
-        assert len(config.core_symbols) == 4
-        assert config.pinbar_defaults.min_wick_ratio == Decimal("0.6")
-
-    def test_load_core_config_from_yaml_invalid_fallback(self, parser, tmp_path):
-        """Test load_core_config_from_yaml falls back to defaults when file is invalid."""
-        # Create invalid core.yaml
-        yaml_path = tmp_path / "core.yaml"
-        with open(yaml_path, 'w') as f:
-            f.write("invalid:\n  [yaml syntax")
-
-        # Should fallback to defaults instead of raising
-        config = parser.load_core_config_from_yaml(tmp_path)
-
-        assert isinstance(config, CoreConfig)
-        assert len(config.core_symbols) == 4
-
     def test_parse_user_config_validation_error(self, parser):
         """Test parse_user_config raises on validation error."""
         invalid_data = {
@@ -652,19 +613,6 @@ class TestEdgeCases:
 
         # Verify error was logged
         assert any("RiskConfig validation failed" in record.message for record in caplog.records)
-
-    def test_load_user_config_from_yaml_invalid_fallback(self, parser, tmp_path):
-        """Test load_user_config_from_yaml falls back to defaults when file is invalid."""
-        # Create invalid user.yaml
-        yaml_path = tmp_path / "user.yaml"
-        with open(yaml_path, 'w') as f:
-            f.write("invalid:\n  [yaml syntax")
-
-        # Should fallback to defaults instead of raising
-        config = parser.load_user_config_from_yaml(tmp_path)
-
-        assert isinstance(config, UserConfig)
-        assert config.exchange.name == "binance"
 
 
 # ============================================================

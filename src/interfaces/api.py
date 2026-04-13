@@ -2661,6 +2661,9 @@ class StrategyApplyResponse(BaseModel):
     message: str = Field(..., description="Human-readable result message")
     strategy_id: str = Field(..., description="Applied strategy template ID")
     strategy_name: str = Field(..., description="Applied strategy name")
+    merged_timeframes: Optional[List[str]] = Field(default=None, description="合并后的监控周期")
+    merged_symbols: Optional[List[str]] = Field(default=None, description="合并后的监控币种")
+    monitoring_config_changed: bool = Field(default=False, description="监控配置是否变更")
 
 
 @app.post("/api/strategies/preview", response_model=StrategyPreviewResponse)
@@ -3016,6 +3019,23 @@ async def apply_strategy(strategy_id: str, request: StrategyApplyRequest = None)
                 strategy_id, {"is_active": True}
             )
 
+        # Step 2.5: 合并策略的 timeframes/symbols 到系统配置
+        merge_result: Optional[Dict[str, Any]] = None
+        strategy_timeframes = strategy_record.get("timeframes", [])
+        strategy_symbols = strategy_record.get("symbols", [])
+
+        if _config_globals._config_manager and (strategy_timeframes or strategy_symbols):
+            merge_result = await _config_globals._config_manager.merge_strategy_monitoring_config(
+                strategy_timeframes=strategy_timeframes,
+                strategy_symbols=strategy_symbols,
+            )
+
+            if merge_result["changed"]:
+                logger.info(
+                    f"Monitoring config merged: timeframes={merge_result['timeframes']}, "
+                    f"symbols={merge_result['symbols']}"
+                )
+
         # Step 3: Notify hot-reload to rebuild strategy runner
         from src.interfaces.api_v1_config import notify_hot_reload
         await notify_hot_reload("strategy_apply")
@@ -3033,6 +3053,9 @@ async def apply_strategy(strategy_id: str, request: StrategyApplyRequest = None)
             message=f"Strategy '{strategy_record['name']}' applied to live trading",
             strategy_id=strategy_id,
             strategy_name=strategy_record["name"],
+            merged_timeframes=merge_result.get("timeframes") if merge_result else None,
+            merged_symbols=merge_result.get("symbols") if merge_result else None,
+            monitoring_config_changed=merge_result.get("changed", False) if merge_result else False,
         )
 
     except HTTPException:
