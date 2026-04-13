@@ -1,11 +1,21 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 架构优化 + 风控配置前端 + 策略详情接口修复
+> **最后更新**: 2026-04-13 回测 risk_overrides 消费断裂修复
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
+
+**第五轮：回测 risk_overrides 消费断裂修复**
+- 架构师深入分析全链路数据流（16 处 RiskConfig 创建点逐一排查）
+- 出具 ADR 设计文档：`docs/planning/architecture/adr-risk-overrides-consumption.md`
+- 方案 B 实施（系统性修复）：
+  1. `RiskConfig` 增加 `model_validator(mode='before')` 自动 float→Decimal
+  2. `BacktestRequest.risk_overrides` 类型从 `Dict[str,Any]` 升级为 `Optional[RiskConfig]`
+  3. `backtester.py` 新增 `_build_risk_config()` 统一消费，替换 5 处硬编码
+- 测试验证：风控 + 回测相关 100 passed，0 failed，零回归
+- 提交：`44e9694`
 
 **第一轮：P1 Bug 修复 + 测试补充**
 1. 修复 `/api/v1/config/effective` → 500 错误

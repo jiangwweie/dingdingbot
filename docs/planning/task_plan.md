@@ -62,6 +62,7 @@
 | MVP Task 4: Testnet 模拟盘 | 待定 | 🔓 可启动 |
 | TODO 注释确认与清理 | 2026-04-13 | ✅ |
 | Profile 死代码清理 + lib/api.ts 清理 | 2026-04-13 | ✅ |
+| 回测 risk_overrides 消费断裂修复 | 2026-04-13 | ✅ |
 
 ---
 
@@ -204,6 +205,32 @@
 | 44 | SystemSettings 页面新增风控配置表单 | P0 | ✅ 已完成 |
 | 45 | 修复风控配置在 tab 模式下不显示 | P0 | ✅ 已完成 |
 | 46 | 修复风控配置表单提交未触发 API 请求 | P0 | ✅ 已完成 |
+
+### 第十一阶段：回测 risk_overrides 消费断裂修复（2026-04-13 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 47 | RiskConfig 增加 model_validator 自动 float→Decimal | P0 | ✅ 已完成 |
+| 48 | BacktestRequest.risk_overrides 类型升级为 Optional[RiskConfig] | P0 | ✅ 已完成 |
+| 49 | backtester.py 5 处硬编码替换为消费 risk_overrides | P0 | ✅ 已完成 |
+| 50 | 回归测试 + 新测试验证 | P0 | ✅ 已完成 |
+
+**修复摘要**：
+- `RiskConfig` 增加 `model_config = ConfigDict(extra='ignore')` 和 `model_validator(mode='before')` 自动将 float 类型的 max_loss_percent/max_total_exposure/daily_max_loss 转为 Decimal，对已是 Decimal 的值幂等
+- `BacktestRequest.risk_overrides` 类型从 `Dict[str,Any]` 升级为 `Optional[RiskConfig]`，在 API 入口层获得类型校验
+- `backtester.py` 新增 `_build_risk_config()` 统一消费 risk_overrides，替换 5 处硬编码（v2_classic + v3_pms 两种模式）
+- 前端无需改动，`Partial<RiskConfig>` 仍然兼容
+
+**改动文件**：
+| 文件 | 改动 |
+|------|------|
+| `src/domain/models.py` | RiskConfig 增加 validator + extra='ignore'；risk_overrides 类型变更 |
+| `src/application/backtester.py` | 新增 `_build_risk_config()` + 5 处替换 |
+| `docs/planning/architecture/adr-risk-overrides-consumption.md` | ADR 设计文档 |
+
+**测试验证**：
+- 风控相关测试 100 passed，0 failed
+- 零回归（182 failed + 61 errors 均为预存问题）
 
 **修复摘要**：
 - YAML 清理：删除 `_load_core_config_from_yaml()` + `load_core_config_from_yaml()` + `load_user_config_from_yaml()`，新增 `_build_default_core_config()` 返回 hardcoded 默认值；删除 5 个过时测试；core.yaml 重命名为 .reference
