@@ -333,6 +333,29 @@ def _get_exchange_gateway() -> Any:
     return _exchange_gateway
 
 
+async def _get_backtest_gateway() -> Any:
+    """Get exchange gateway, or create temporary one for standalone uvicorn backtest."""
+    if _exchange_gateway is not None:
+        return _exchange_gateway
+
+    # Standalone uvicorn: create temporary gateway from DB config
+    from src.infrastructure.exchange_gateway import ExchangeGateway
+    from src.interfaces import api_config_globals as _cg
+    if _cg._config_manager is None:
+        raise HTTPException(status_code=503, detail="Config manager not initialized")
+    exchange_cfg = await _cg._config_manager.get_exchange_config()
+    # 回测只需要历史 K 线（公开接口），使用匿名连接避免 API 密钥地域限制
+    gateway = ExchangeGateway(
+        exchange_name=exchange_cfg.name,
+        api_key="",
+        api_secret="",
+        testnet=exchange_cfg.testnet,
+    )
+    await gateway.initialize()
+    logger.info(f"Temporary anonymous ExchangeGateway created for backtest: {exchange_cfg.name}")
+    return gateway
+
+
 def _get_signal_tracker() -> Any:
     """Get signal tracker or raise error if not initialized."""
     if _signal_tracker is None:
@@ -386,7 +409,7 @@ async def lifespan(app: FastAPI):
     from src.infrastructure.signal_repository import SignalRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
 
-    global _repository, _config_entry_repo, _order_repo
+    global _repository, _config_entry_repo, _order_repo, _config_manager
 
     # Startup - 初始化所有 Repository
     try:
@@ -505,6 +528,8 @@ async def lifespan(app: FastAPI):
             from src.application.config_manager import ConfigManager
             _cg._config_manager = ConfigManager()
             await _cg._config_manager.initialize_from_db()
+            # Also set module-level variable so old API endpoints work
+            _config_manager = _cg._config_manager
             logger.info("ConfigManager initialized in lifespan")
 
         yield
@@ -1475,7 +1500,7 @@ async def run_signal_backtest(
         if request.mode != "v2_classic":
             logger.warning(f"Signal backtest called with mode={request.mode}, forcing v2_classic")
 
-        gateway = _get_exchange_gateway()
+        gateway = await _get_backtest_gateway()
 
         # Initialize historical data repository for local-first data access
         data_repo = HistoricalDataRepository()
@@ -1577,7 +1602,7 @@ async def run_pms_backtest(
         if request.mode != "v3_pms":
             logger.warning(f"PMS backtest called with mode={request.mode}, forcing v3_pms")
 
-        gateway = _get_exchange_gateway()
+        gateway = await _get_backtest_gateway()
 
         # Initialize historical data repository for local-first data access
         data_repo = HistoricalDataRepository()
@@ -1823,7 +1848,7 @@ async def run_backtest_deprecated(
         from src.infrastructure.historical_data_repository import HistoricalDataRepository
         from src.infrastructure.order_repository import OrderRepository
 
-        gateway = _get_exchange_gateway()
+        gateway = await _get_backtest_gateway()
 
         # Initialize historical data repository for local-first data access
         data_repo = HistoricalDataRepository()

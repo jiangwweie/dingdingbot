@@ -433,106 +433,38 @@ class ConfigManager:
                 )
 
     async def _create_tables(self) -> None:
-        """Create configuration tables if not exists."""
-        # Read schema from SQL file
+        """Create configuration tables if not exists.
+
+        Fix: Use individual execute() calls instead of executescript() to avoid
+        aiosqlite WAL transaction issues. executescript() bypasses the async
+        connection queue and does implicit COMMIT, breaking subsequent queries.
+        """
         sql_path = Path(__file__).parent.parent / "infrastructure" / "db" / "config_tables.sql"
 
         if sql_path.exists():
             with open(sql_path, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
-            await self._db.executescript(schema_sql)
+            # Execute each statement individually via async connection
+            for statement in schema_sql.split(';'):
+                stmt = statement.strip()
+                if stmt and not stmt.startswith('--'):
+                    try:
+                        await self._db.execute(stmt)
+                    except Exception:
+                        pass  # Ignore errors from CREATE INDEX IF table doesn't exist yet
         else:
-            # Inline schema (fallback)
-            await self._db.executescript("""
-                CREATE TABLE IF NOT EXISTS strategies (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    trigger_config TEXT NOT NULL,
-                    filter_configs TEXT NOT NULL,
-                    filter_logic TEXT DEFAULT 'AND',
-                    symbols TEXT NOT NULL,
-                    timeframes TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    version INTEGER DEFAULT 1
-                );
-
-                CREATE TABLE IF NOT EXISTS risk_configs (
-                    id TEXT PRIMARY KEY DEFAULT 'global',
-                    max_loss_percent DECIMAL(5,4) NOT NULL,
-                    max_leverage INTEGER NOT NULL,
-                    max_total_exposure DECIMAL(5,4),
-                    cooldown_minutes INTEGER DEFAULT 240,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS system_configs (
-                    id TEXT PRIMARY KEY DEFAULT 'global',
-                    core_symbols TEXT NOT NULL,
-                    ema_period INTEGER DEFAULT 60,
-                    mtf_ema_period INTEGER DEFAULT 60,
-                    mtf_mapping TEXT NOT NULL,
-                    signal_cooldown_seconds INTEGER DEFAULT 14400,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS symbols (
-                    symbol TEXT PRIMARY KEY,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    is_core BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS notifications (
-                    id TEXT PRIMARY KEY,
-                    channel_type TEXT NOT NULL,
-                    webhook_url TEXT NOT NULL,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    notify_on_signal BOOLEAN DEFAULT TRUE,
-                    notify_on_order BOOLEAN DEFAULT TRUE,
-                    notify_on_error BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS config_snapshots (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    snapshot_data TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_by TEXT,
-                    is_auto BOOLEAN DEFAULT FALSE
-                );
-
-                CREATE TABLE IF NOT EXISTS exchange_configs (
-                    id TEXT PRIMARY KEY DEFAULT 'primary',
-                    exchange_name TEXT NOT NULL DEFAULT 'binance',
-                    api_key TEXT NOT NULL,
-                    api_secret TEXT NOT NULL,
-                    testnet BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    version INTEGER DEFAULT 1
-                );
-
-                CREATE TABLE IF NOT EXISTS config_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    entity_type TEXT NOT NULL,
-                    entity_id TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    old_values TEXT,
-                    new_values TEXT,
-                    changed_by TEXT,
-                    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    change_summary TEXT
-                );
-            """)
+            # Fallback: execute each CREATE TABLE individually
+            for stmt in [
+                "CREATE TABLE IF NOT EXISTS strategies (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, is_active BOOLEAN DEFAULT TRUE, trigger_config TEXT NOT NULL, filter_configs TEXT NOT NULL, filter_logic TEXT DEFAULT 'AND', symbols TEXT NOT NULL, timeframes TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, version INTEGER DEFAULT 1)",
+                "CREATE TABLE IF NOT EXISTS risk_configs (id TEXT PRIMARY KEY DEFAULT 'global', max_loss_percent DECIMAL(5,4) NOT NULL, max_leverage INTEGER NOT NULL, max_total_exposure DECIMAL(5,4), cooldown_minutes INTEGER DEFAULT 240, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+                "CREATE TABLE IF NOT EXISTS system_configs (id TEXT PRIMARY KEY DEFAULT 'global', core_symbols TEXT NOT NULL, ema_period INTEGER DEFAULT 60, mtf_ema_period INTEGER DEFAULT 60, mtf_mapping TEXT NOT NULL, signal_cooldown_seconds INTEGER DEFAULT 14400, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+                "CREATE TABLE IF NOT EXISTS symbols (symbol TEXT PRIMARY KEY, is_active BOOLEAN DEFAULT TRUE, is_core BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+                "CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, channel_type TEXT NOT NULL, webhook_url TEXT NOT NULL, is_active BOOLEAN DEFAULT TRUE, notify_on_signal BOOLEAN DEFAULT TRUE, notify_on_order BOOLEAN DEFAULT TRUE, notify_on_error BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+                "CREATE TABLE IF NOT EXISTS config_snapshots (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, snapshot_data TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_by TEXT, is_auto BOOLEAN DEFAULT FALSE)",
+                "CREATE TABLE IF NOT EXISTS exchange_configs (id TEXT PRIMARY KEY DEFAULT 'primary', exchange_name TEXT NOT NULL DEFAULT 'binance', api_key TEXT NOT NULL, api_secret TEXT NOT NULL, testnet BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, version INTEGER DEFAULT 1)",
+                "CREATE TABLE IF NOT EXISTS config_history (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, action TEXT NOT NULL, old_values TEXT, new_values TEXT, changed_by TEXT, changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, change_summary TEXT)",
+            ]:
+                await self._db.execute(stmt)
 
         # Handle ALTER TABLE for system_configs new columns (SQLite silent on duplicate column)
         try:
