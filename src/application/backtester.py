@@ -121,6 +121,18 @@ class Backtester:
         report = await backtester.run_backtest(request)
     """
 
+    def _build_risk_config(self, request: BacktestRequest) -> RiskConfig:
+        """从 request.risk_overrides 构建 RiskConfig。
+        如果未提供，使用默认值。RiskConfig 的 model_validator 已自动处理 float→Decimal 转换。
+        """
+        if request.risk_overrides is not None:
+            # risk_overrides 已是 RiskConfig 类型（经 Pydantic 校验 + 自动转换）
+            return request.risk_overrides
+        return RiskConfig(
+            max_loss_percent=Decimal('0.01'),
+            max_leverage=20,
+        )
+
     # MTF mapping (same as StrategyEngine)
     MTF_MAPPING = {
         "15m": "1h",
@@ -246,13 +258,15 @@ class Backtester:
             )
             logger.info(f"Saved {saved_count} backtest signals to database")
 
-        # Step 6: Simulate win rate (simplified - based on stop-loss distance)
+        # Step 6: Build risk config for outcome analysis
+        risk_config = self._build_risk_config(request)
+
+        # Step 7: Simulate win rate (simplified - based on stop-loss distance)
         simulated_win_rate, avg_gain, avg_loss = await self._simulate_win_rate(
-            attempts, klines, request, RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=20)
+            attempts, klines, request, risk_config
         )
 
-        # Step 6.5: Calculate pnl_ratio and exit_reason for each attempt (BT-4)
-        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=20)
+        # Step 7.5: Calculate pnl_ratio and exit_reason for each attempt (BT-4)
         for attempt in attempts:
             pnl_ratio, exit_reason = self._calculate_attempt_outcome(
                 attempt, klines, risk_config
@@ -400,11 +414,8 @@ class Backtester:
         trend_filter = request.trend_filter_enabled if request.trend_filter_enabled is not None else True
         mtf_validation = request.mtf_validation_enabled if request.mtf_validation_enabled is not None else True
 
-        # Risk config for position sizing
-        risk_config = RiskConfig(
-            max_loss_percent=Decimal("0.01"),  # Default 1% risk per trade
-            max_leverage=20,  # Default max leverage
-        )
+        # Risk config for position sizing (consumes request.risk_overrides)
+        risk_config = self._build_risk_config(request)
 
         return IsolatedStrategyConfig(
             pinbar_config=pinbar_config,
@@ -988,7 +999,7 @@ class Backtester:
         from src.domain.models import SignalResult, AccountSnapshot
 
         saved_count = 0
-        risk_config = RiskConfig(max_loss_percent=Decimal("0.01"), max_leverage=20)
+        risk_config = self._build_risk_config(request)
         calculator = RiskCalculator(risk_config)
 
         # Create mock account for position sizing
@@ -1188,11 +1199,8 @@ class Backtester:
             frozen_margin=Decimal('0'),
         )
 
-        # Risk calculator for position sizing
-        risk_config = RiskConfig(
-            max_loss_percent=Decimal('0.01'),  # 1% risk per trade
-            max_leverage=20,
-        )
+        # Risk calculator for position sizing (consumes request.risk_overrides)
+        risk_config = self._build_risk_config(request)
         calculator = RiskCalculator(risk_config)
 
         # State tracking

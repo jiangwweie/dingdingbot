@@ -3,7 +3,7 @@ Global Pydantic models - shared contract between Dev A (Infrastructure) and Dev 
 DO NOT modify without architect approval.
 """
 import time
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
 from decimal import Decimal
 from typing import Optional, List, Dict, Any, Union, Annotated, Literal
 from enum import Enum
@@ -164,6 +164,8 @@ class SignalTrack(BaseModel):
 # ============================================================
 class RiskConfig(BaseModel):
     """Risk management configuration"""
+    model_config = ConfigDict(extra='ignore')
+
     max_loss_percent: Decimal = Field(..., description="Max loss per trade as % of balance")
     max_leverage: int = Field(..., ge=1, le=125, description="Maximum leverage allowed")
     max_total_exposure: Decimal = Field(
@@ -187,6 +189,29 @@ class RiskConfig(BaseModel):
         ge=1,
         description="Maximum position hold time in minutes (optional)"
     )
+
+    @model_validator(mode='before')
+    @classmethod
+    def convert_floats_to_decimal(cls, data: Any) -> Any:
+        """自动将 float 输入转换为 Decimal，防止类型混用。
+        对已是 Decimal/int 的值幂等（不重复转换）。"""
+        if isinstance(data, dict):
+            converted = {}
+            for key, value in data.items():
+                if key in ('max_loss_percent', 'max_total_exposure', 'daily_max_loss'):
+                    if value is not None and not isinstance(value, Decimal):
+                        converted[key] = Decimal(str(value))
+                    else:
+                        converted[key] = value
+                elif key == 'max_leverage':
+                    if value is not None and not isinstance(value, int):
+                        converted[key] = int(value)
+                    else:
+                        converted[key] = value
+                else:
+                    converted[key] = value
+            return converted
+        return data
 
     @field_validator('max_loss_percent')
     @classmethod
@@ -601,9 +626,9 @@ class BacktestRequest(BaseModel):
         default=None,
         description="Dynamic strategy definitions with filter chains (overrides legacy params)"
     )
-    risk_overrides: Optional[Dict[str, Any]] = Field(
+    risk_overrides: Optional['RiskConfig'] = Field(
         default=None,
-        description="Risk config overrides for this backtest"
+        description="Risk config overrides for this backtest (validated + auto-converted to Decimal)"
     )
 
     # v3.0 PMS mode (Phase 2)
