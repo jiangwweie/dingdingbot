@@ -272,6 +272,7 @@
 | 19 | Decimal 绑定 SQLite 加固 | P1 | 📋 待规划 |
 | 26 | YAML 导入格式统一 | P2 | 📋 待规划 |
 | 27 | v3 Phase 5 实盘集成 | P2 | ⏳ 待启动 |
+| 52 | 共享 DB 连接池：将 17+ 个独立 aiosqlite 连接统一到 connection_pool，彻底消除 database is locked | P1 | 📋 待规划 |
 
 ### 已知独立问题（非本次修复引入）
 

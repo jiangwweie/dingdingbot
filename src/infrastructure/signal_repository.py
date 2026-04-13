@@ -91,6 +91,7 @@ class SignalRepository:
         await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._db.execute("PRAGMA wal_autocheckpoint=1000")
         await self._db.execute("PRAGMA cache_size=-64000")  # 64MB cache
+        await self._db.execute("PRAGMA busy_timeout=5000")  # 5s retry on locked (fix database_is_locked errors)
 
         # Create signals table
         await self._db.execute("""
