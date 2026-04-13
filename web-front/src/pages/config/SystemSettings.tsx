@@ -318,6 +318,186 @@ function SystemConfigForm({
 }
 
 // ============================================================
+// Risk Config Section (shared between tab and page modes)
+// ============================================================
+
+interface RiskConfigSectionProps {
+  form: any;
+  saving: boolean;
+  onReset: () => void;
+  activeKey: string[];
+  onActiveKeyChange: (keys: string[]) => void;
+  isTab: boolean;
+}
+
+function RiskConfigSection({
+  form,
+  saving,
+  onReset,
+  activeKey,
+  onActiveKeyChange,
+  isTab,
+}: RiskConfigSectionProps) {
+  return (
+    <Form
+      form={form}
+      layout="vertical"
+      onFinish={(values) => {
+        // Parent handles submission via riskForm.submit()
+      }}
+      initialValues={DEFAULT_RISK_CONFIG}
+      size={isTab ? 'middle' : 'large'}
+    >
+      <Card
+        title={
+          <div className="flex items-center gap-2">
+            <SafetyOutlined className="text-blue-500" />
+            <span>风控配置</span>
+            <span className="text-xs text-gray-400 font-normal ml-2">
+              (修改后立即生效)
+            </span>
+          </div>
+        }
+        className={isTab ? 'mb-4 border-blue-200 bg-blue-50/30' : 'mb-4 border-blue-200 bg-blue-50/30'}
+      >
+        <Collapse
+          bordered={false}
+          activeKey={activeKey}
+          onChange={(keys) => onActiveKeyChange(keys as string[])}
+          expandIconPosition="right"
+          className="bg-transparent"
+        >
+          <Collapse.Panel header="点击展开高级配置" key="advanced">
+            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              <Divider orientation="left" className="my-2">
+                仓位风控
+              </Divider>
+
+              <Form.Item
+                name="max_loss_percent"
+                label="单笔最大损失 (%)"
+                rules={[{ required: true, type: 'number', min: 0.1, max: 10 }]}
+                tooltip="每笔交易的最大损失占账户余额的百分比"
+                extra="例如 1% 表示单笔交易最多亏损账户余额的 1%"
+              >
+                <InputNumber
+                  min={0.1}
+                  max={10}
+                  step={0.1}
+                  formatter={(value) => `${value}%`}
+                  parser={(value) => Number(value?.replace('%', ''))}
+                  className="w-full"
+                  disabled={saving}
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="max_leverage"
+                label="最大杠杆倍数"
+                rules={[{ required: true, type: 'number', min: 1, max: 125 }]}
+                tooltip="允许使用的最大杠杆倍数"
+                extra="较高的杠杆会增加风险，建议根据交易风格谨慎设置"
+              >
+                <InputNumber min={1} max={125} className="w-full" disabled={saving} />
+              </Form.Item>
+
+              <Form.Item
+                name="max_total_exposure"
+                label="最大总暴露 (倍)"
+                rules={[{ required: true, type: 'number', min: 0.1, max: 10 }]}
+                tooltip="所有持仓的总暴露占账户余额的倍数"
+                extra="例如 0.8 表示总持仓不超过账户余额的 80%"
+              >
+                <InputNumber min={0.1} max={10} step={0.1} className="w-full" disabled={saving} />
+              </Form.Item>
+
+              <Divider orientation="left" className="my-2">
+                日频风控
+              </Divider>
+
+              <Form.Item
+                name="daily_max_trades"
+                label="每日最大交易次数"
+                tooltip="每日允许的最大交易次数（可选，留空表示不限制）"
+              >
+                <InputNumber min={1} className="w-full" disabled={saving} />
+              </Form.Item>
+
+              <Form.Item
+                name="daily_max_loss"
+                label="每日最大损失 (%)"
+                tooltip="每日最大损失占账户余额的百分比（可选）"
+              >
+                <InputNumber
+                  min={0.1}
+                  max={50}
+                  step={0.5}
+                  formatter={(value) => `${value}%`}
+                  parser={(value) => Number(value?.replace('%', ''))}
+                  className="w-full"
+                  disabled={saving}
+                />
+              </Form.Item>
+
+              <Divider orientation="left" className="my-2">
+                时间与冷却
+              </Divider>
+
+              <Form.Item
+                name="max_position_hold_time"
+                label="最大持仓时间 (分钟)"
+                tooltip="单笔交易的最大持仓时间（可选）"
+              >
+                <InputNumber min={1} className="w-full" disabled={saving} />
+              </Form.Item>
+
+              <Form.Item
+                name="cooldown_minutes"
+                label="冷却时间 (分钟)"
+                rules={[{ required: true, type: 'number', min: 5, max: 1440 }]}
+                tooltip="交易失败后的冷却时间"
+              >
+                <InputNumber
+                  min={5}
+                  max={1440}
+                  step={5}
+                  formatter={(value) => `${value} 分钟`}
+                  parser={(value) => Number(value?.replace('分钟', ''))}
+                  className="w-full"
+                  disabled={saving}
+                />
+              </Form.Item>
+            </Space>
+          </Collapse.Panel>
+        </Collapse>
+
+        {/* 风控配置操作按钮 */}
+        <Form.Item className="mt-6">
+          <Space>
+            <Button
+              type="primary"
+              onClick={() => form.submit()}
+              loading={saving}
+              icon={<SaveOutlined />}
+              size="large"
+            >
+              保存风控配置
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={onReset}
+              size="large"
+            >
+              重置
+            </Button>
+          </Space>
+        </Form.Item>
+      </Card>
+    </Form>
+  );
+}
+
+// ============================================================
 // Main Component
 // ============================================================
 
@@ -586,16 +766,28 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
       )}
 
       {isTab ? (
-        /* Tab 模式：仅显示表单，无右侧面板 */
-        <SystemConfigForm
-          form={form}
-          saving={saving}
-          isTab={true}
-          onSubmit={handleSubmit}
-          onReset={handleReset}
-          activeKey={activeKey}
-          onActiveKeyChange={setActiveKey}
-        />
+        /* Tab 模式：表单，无右侧面板 */
+        <div>
+          <SystemConfigForm
+            form={form}
+            saving={saving}
+            isTab={true}
+            onSubmit={handleSubmit}
+            onReset={handleReset}
+            activeKey={activeKey}
+            onActiveKeyChange={setActiveKey}
+          />
+
+          {/* 风控配置（Tab 模式也显示） */}
+          <RiskConfigSection
+            form={riskForm}
+            saving={riskSaving}
+            onReset={handleRiskReset}
+            activeKey={riskActiveKey}
+            onActiveKeyChange={setRiskActiveKey}
+            isTab={true}
+          />
+        </div>
       ) : (
         /* Page 模式：左侧表单 + 右侧快捷入口 */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -612,159 +804,14 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
             />
 
             {/* 风控配置 */}
-            <Form
+            <RiskConfigSection
               form={riskForm}
-              layout="vertical"
-              onFinish={handleRiskSubmit}
-              initialValues={DEFAULT_RISK_CONFIG}
-              size="large"
-            >
-              <Card
-                title={
-                  <div className="flex items-center gap-2">
-                    <SafetyOutlined className="text-blue-500" />
-                    <span>风控配置</span>
-                    <span className="text-xs text-gray-400 font-normal ml-2">
-                      (修改后立即生效)
-                    </span>
-                  </div>
-                }
-                className="mb-4 border-blue-200 bg-blue-50/30"
-              >
-                <Collapse
-                  bordered={false}
-                  activeKey={riskActiveKey}
-                  onChange={(keys) => setRiskActiveKey(keys as string[])}
-                  expandIconPosition="right"
-                  className="bg-transparent"
-                >
-                  <Collapse.Panel header="点击展开高级配置" key="advanced">
-                    <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                      <Divider orientation="left" className="my-2">
-                        仓位风控
-                      </Divider>
-
-                      <Form.Item
-                        name="max_loss_percent"
-                        label="单笔最大损失 (%)"
-                        rules={[{ required: true, type: 'number', min: 0.1, max: 10 }]}
-                        tooltip="每笔交易的最大损失占账户余额的百分比"
-                        extra="例如 1% 表示单笔交易最多亏损账户余额的 1%"
-                      >
-                        <InputNumber
-                          min={0.1}
-                          max={10}
-                          step={0.1}
-                          formatter={(value) => `${value}%`}
-                          parser={(value) => Number(value?.replace('%', ''))}
-                          className="w-full"
-                          disabled={riskSaving}
-                        />
-                      </Form.Item>
-
-                      <Form.Item
-                        name="max_leverage"
-                        label="最大杠杆倍数"
-                        rules={[{ required: true, type: 'number', min: 1, max: 125 }]}
-                        tooltip="允许使用的最大杠杆倍数"
-                        extra="较高的杠杆会增加风险，建议根据交易风格谨慎设置"
-                      >
-                        <InputNumber min={1} max={125} className="w-full" disabled={riskSaving} />
-                      </Form.Item>
-
-                      <Form.Item
-                        name="max_total_exposure"
-                        label="最大总暴露 (倍)"
-                        rules={[{ required: true, type: 'number', min: 0.1, max: 10 }]}
-                        tooltip="所有持仓的总暴露占账户余额的倍数"
-                        extra="例如 0.8 表示总持仓不超过账户余额的 80%"
-                      >
-                        <InputNumber min={0.1} max={10} step={0.1} className="w-full" disabled={riskSaving} />
-                      </Form.Item>
-
-                      <Divider orientation="left" className="my-2">
-                        日频风控
-                      </Divider>
-
-                      <Form.Item
-                        name="daily_max_trades"
-                        label="每日最大交易次数"
-                        tooltip="每日允许的最大交易次数（可选，留空表示不限制）"
-                      >
-                        <InputNumber min={1} className="w-full" disabled={riskSaving} />
-                      </Form.Item>
-
-                      <Form.Item
-                        name="daily_max_loss"
-                        label="每日最大损失 (%)"
-                        tooltip="每日最大损失占账户余额的百分比（可选）"
-                      >
-                        <InputNumber
-                          min={0.1}
-                          max={50}
-                          step={0.5}
-                          formatter={(value) => `${value}%`}
-                          parser={(value) => Number(value?.replace('%', ''))}
-                          className="w-full"
-                          disabled={riskSaving}
-                        />
-                      </Form.Item>
-
-                      <Divider orientation="left" className="my-2">
-                        时间与冷却
-                      </Divider>
-
-                      <Form.Item
-                        name="max_position_hold_time"
-                        label="最大持仓时间 (分钟)"
-                        tooltip="单笔交易的最大持仓时间（可选）"
-                      >
-                        <InputNumber min={1} className="w-full" disabled={riskSaving} />
-                      </Form.Item>
-
-                      <Form.Item
-                        name="cooldown_minutes"
-                        label="冷却时间 (分钟)"
-                        rules={[{ required: true, type: 'number', min: 5, max: 1440 }]}
-                        tooltip="交易失败后的冷却时间"
-                      >
-                        <InputNumber
-                          min={5}
-                          max={1440}
-                          step={5}
-                          formatter={(value) => `${value} 分钟`}
-                          parser={(value) => Number(value?.replace('分钟', ''))}
-                          className="w-full"
-                          disabled={riskSaving}
-                        />
-                      </Form.Item>
-                    </Space>
-                  </Collapse.Panel>
-                </Collapse>
-
-                {/* 风控配置操作按钮 */}
-                <Form.Item className="mt-6">
-                  <Space>
-                    <Button
-                      type="primary"
-                      onClick={() => riskForm.submit()}
-                      loading={riskSaving}
-                      icon={<SaveOutlined />}
-                      size="large"
-                    >
-                      保存风控配置
-                    </Button>
-                    <Button
-                      icon={<ReloadOutlined />}
-                      onClick={handleRiskReset}
-                      size="large"
-                    >
-                      重置
-                    </Button>
-                  </Space>
-                </Form.Item>
-              </Card>
-            </Form>
+              saving={riskSaving}
+              onReset={handleRiskReset}
+              activeKey={riskActiveKey}
+              onActiveKeyChange={setRiskActiveKey}
+              isTab={false}
+            />
           </div>
 
           {/* 右侧：快捷入口 */}
