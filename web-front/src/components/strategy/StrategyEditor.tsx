@@ -23,12 +23,14 @@ import {
   InputNumber,
   Collapse,
   message,
-  Spin,
-  Alert,
+  Tag,
+  Card,
+  Divider,
 } from 'antd';
-import { SaveOutlined, RotateLeftOutlined } from '@ant-design/icons';
+import { SaveOutlined, RotateLeftOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { Strategy, CreateStrategyRequest, UpdateStrategyRequest } from '../../api/config';
 import { getTriggerDefaultParams, getTriggerSchema } from './triggerSchemas';
+import { getFilterDefaultParams, getFilterSchema, FILTER_SCHEMAS } from './filterSchemas';
 
 // ============================================================
 // Type Definitions
@@ -40,7 +42,7 @@ interface TriggerConfig {
 }
 
 interface FilterConfig {
-  type: 'ema' | 'mtf' | 'atr' | 'volume_surge';
+  type: string;
   enabled: boolean;
   params: Record<string, any>;
 }
@@ -82,12 +84,10 @@ const TRIGGER_OPTIONS = [
   { value: 'hammer', label: 'Hammer (倒锤子)' },
 ];
 
-const FILTER_TYPE_OPTIONS = [
-  { value: 'ema', label: 'EMA 趋势' },
-  { value: 'mtf', label: 'MTF 多周期' },
-  { value: 'atr', label: 'ATR 波动率' },
-  { value: 'volume_surge', label: '成交量激增' },
-];
+const FILTER_TYPE_OPTIONS = Object.entries(FILTER_SCHEMAS).map(([key, schema]) => ({
+  value: key,
+  label: schema.label,
+}));
 
 const FILTER_LOGIC_OPTIONS = [
   { value: 'AND', label: '全部满足 (AND)' },
@@ -113,11 +113,152 @@ const TIMEFRAME_OPTIONS = [
 // Default Values
 // ============================================================
 
-const DEFAULT_FILTER_PARAMS: Record<string, Record<string, any>> = {
-  ema: { period: 60 },
-  mtf: { mapping: '15m->1h', ema_period: 60 },
-  atr: { period: 14, min_atr_ratio: 0.5 },
-  volume_surge: { volume_multiplier: 2.0 },
+// ============================================================
+// FilterList Sub-Component
+// ============================================================
+
+interface FilterListProps {
+  form: ReturnType<typeof Form.useForm>[0];
+  loading: boolean;
+}
+
+/** 过滤器列表：添加 / 删除 / 启用 / 参数配置 */
+const FilterList: React.FC<FilterListProps> = ({ form, loading }) => {
+  const filters = Form.useWatch('filters', form) as FilterConfig[] | undefined;
+  const filterList = filters || [];
+
+  /** 添加过滤器 */
+  const handleAdd = (type: string) => {
+    const current = form.getFieldValue('filters') || [];
+    const newFilter: FilterConfig = {
+      type,
+      enabled: true,
+      params: getFilterDefaultParams(type),
+    };
+    form.setFieldsValue({ filters: [...current, newFilter] });
+  };
+
+  /** 删除过滤器 */
+  const handleRemove = (index: number) => {
+    const current = form.getFieldValue('filters') || [];
+    form.setFieldsValue({ filters: current.filter((_: any, i: number) => i !== index) });
+  };
+
+  /** 切换过滤器启用状态 */
+  const handleToggle = (index: number, enabled: boolean) => {
+    const current = form.getFieldValue('filters') || [];
+    const updated = current.map((f: FilterConfig, i: number) =>
+      i === index ? { ...f, enabled } : f
+    );
+    form.setFieldsValue({ filters: updated });
+  };
+
+  /** 更新过滤器参数 */
+  const handleParamChange = (index: number, key: string, value: number) => {
+    const current = form.getFieldValue('filters') || [];
+    const updated = current.map((f: FilterConfig, i: number) =>
+      i === index ? { ...f, params: { ...f.params, [key]: value } } : f
+    );
+    form.setFieldsValue({ filters: updated });
+  };
+
+  // 已添加的过滤器类型集合（用于排除添加下拉中的选项）
+  const addedTypes = new Set(filterList.map((f) => f.type));
+
+  return (
+    <div>
+      {/* 添加过滤器按钮 */}
+      <div className="mb-3">
+        <Select
+          placeholder="添加过滤器"
+          style={{ width: '100%' }}
+          onChange={handleAdd}
+          disabled={loading}
+          value={null as unknown as string}
+          options={FILTER_TYPE_OPTIONS.filter((opt) => !addedTypes.has(opt.value))}
+          suffixIcon={<PlusOutlined />}
+        />
+      </div>
+
+      {/* 已添加的过滤器列表 */}
+      {filterList.length === 0 ? (
+        <div className="text-center py-6 text-gray-400 text-sm">
+          暂无过滤器，点击上方添加
+        </div>
+      ) : (
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          {filterList.map((filter, index) => {
+            const schema = getFilterSchema(filter.type);
+            const label = schema?.label || filter.type;
+            const colorMap: Record<string, string> = {
+              ema_trend: 'blue',
+              mtf: 'purple',
+              atr: 'orange',
+              volume_surge: 'green',
+            };
+
+            return (
+              <Card
+                key={`${filter.type}-${index}`}
+                size="small"
+                className="border-gray-700 bg-gray-800/50"
+                extra={
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleRemove(index)}
+                    disabled={loading}
+                  />
+                }
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Tag color={colorMap[filter.type] || 'default'}>{label}</Tag>
+                    <span className="text-xs text-gray-400">
+                      {schema?.description || ''}
+                    </span>
+                  </div>
+                  <Switch
+                    size="small"
+                    checked={filter.enabled}
+                    onChange={(checked) => handleToggle(index, checked)}
+                    disabled={loading}
+                  />
+                </div>
+
+                {/* 过滤器参数表单 */}
+                {schema && schema.params.length > 0 && filter.enabled && (
+                  <>
+                    <Divider style={{ margin: '8px 0' }} />
+                    <Space direction="vertical" style={{ width: '100%' }} size="small">
+                      {schema.params.map((field) => (
+                        <div key={field.key} className="flex items-center gap-3">
+                          <label className="text-sm text-gray-300 min-w-[100px]">
+                            {field.label}
+                          </label>
+                          <InputNumber
+                            value={filter.params[field.key] ?? field.defaultValue}
+                            onChange={(val) => handleParamChange(index, field.key, val ?? field.defaultValue)}
+                            min={field.min}
+                            max={field.max}
+                            step={field.step}
+                            style={{ flex: 1 }}
+                            disabled={loading}
+                          />
+                        </div>
+                      ))}
+                    </Space>
+                  </>
+                )}
+              </Card>
+            );
+          })}
+        </Space>
+      )}
+    </div>
+  );
 };
 
 // ============================================================
@@ -145,6 +286,11 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
           is_active: strategy.is_active,
           trigger_type: tt,
           trigger_params: strategy.trigger_config?.params || getTriggerDefaultParams(tt),
+          filters: strategy.filter_configs?.map((fc) => ({
+            type: fc.type,
+            enabled: fc.enabled,
+            params: fc.params || getFilterDefaultParams(fc.type),
+          })) || [],
           filter_logic: strategy.filter_logic || 'AND',
           symbols: strategy.symbols || [],
           timeframes: strategy.timeframes || [],
@@ -158,6 +304,7 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
           is_active: true,
           trigger_type: 'pinbar',
           trigger_params: getTriggerDefaultParams('pinbar'),
+          filters: [],
           filter_logic: 'AND',
           symbols: ['BTC/USDT:USDT'],
           timeframes: ['1h'],
@@ -230,7 +377,6 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
               { type: 'number', min: field.min, max: field.max, message: `${field.label} 范围为 ${field.min} ~ ${field.max}` },
             ]}
             tooltip={field.tooltip}
-            initialValue={field.defaultValue}
           >
             <InputNumber
               min={field.min}
@@ -354,17 +500,7 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
                 </Select>
               </Form.Item>
 
-              <Alert
-                type="info"
-                showIcon
-                message="过滤器配置暂未开放"
-                description="当前支持 EMA 趋势、MTF 多周期、ATR 波动率、成交量激增等过滤器，将在后续版本开放配置。"
-                className="mb-2"
-              />
-
-              <Form.Item name="filters" noStyle>
-                <Input.TextArea style={{ display: 'none' }} />
-              </Form.Item>
+              <FilterList form={form} loading={loading} />
             </Space>
           </Collapse.Panel>
 
