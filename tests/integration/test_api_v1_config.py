@@ -11,9 +11,11 @@ Tests all REST endpoints in src/interfaces/api_v1_config.py:
 - POST /api/v1/config/import/preview - Preview import
 - POST /api/v1/config/import/confirm - Confirm import
 - /api/v1/config/snapshots/* - Snapshot management
+- GET/PUT /api/v1/config/exchange - Exchange config (Task 23)
+- GET/PUT /api/v1/config/timeframes - Timeframes (Task 23)
+- GET/PUT /api/v1/config/asset-polling - Asset polling (Task 23)
 
 Coverage target: >= 80%
-Test cases: >= 40
 """
 import json
 import os
@@ -40,9 +42,10 @@ from src.infrastructure.repositories.config_repositories import (
 )
 from src.interfaces.api_v1_config import (
     router,
-    set_config_dependencies,
     _import_preview_cache,
 )
+from src.interfaces import api_config_globals as _cg
+from src.interfaces.api import set_dependencies
 
 
 # ============================================================
@@ -86,8 +89,8 @@ def app():
 @pytest.fixture
 def client(app, db_manager):
     """Create TestClient with injected dependencies."""
-    # Set dependencies
-    set_config_dependencies(
+    # Set config repositories via unified set_dependencies
+    set_dependencies(
         strategy_repo=db_manager.strategy_repo,
         risk_repo=db_manager.risk_repo,
         system_repo=db_manager.system_repo,
@@ -97,11 +100,55 @@ def client(app, db_manager):
         snapshot_repo=db_manager.snapshot_repo,
     )
 
+    # Set a mock config manager for exchange/timeframes/polling endpoints
+    mock_config_manager = MockConfigManager()
+    _cg._config_manager = mock_config_manager
+
     # Clear preview cache before each test
     _import_preview_cache.clear()
 
     with TestClient(app) as c:
         yield c
+
+
+class MockConfigManager:
+    """Simple in-memory mock ConfigManager for API endpoint tests.
+
+    Keeps exchange, timeframes, and asset_polling config in memory.
+    GET requests see changes made by PUT requests within the same test.
+    """
+
+    def __init__(self):
+        from src.application.config_manager import ExchangeConfig, AssetPollingConfig
+        self._exchange_config = ExchangeConfig(
+            name="binance", api_key="", api_secret="", testnet=True
+        )
+        self._timeframes = ["15m", "1h"]
+        self._asset_polling = AssetPollingConfig(enabled=True, interval_seconds=60)
+
+    async def get_exchange_config(self):
+        return self._exchange_config
+
+    async def update_exchange_config(self, config):
+        self._exchange_config = config
+
+    async def get_timeframes(self):
+        return list(self._timeframes)
+
+    async def update_timeframes(self, timeframes):
+        self._timeframes = list(timeframes)
+
+    async def get_asset_polling_config(self):
+        return self._asset_polling
+
+    async def update_asset_polling_config(self, config):
+        self._asset_polling = config
+
+    async def reload_all_configs_from_db(self):
+        pass  # No-op for mock
+
+    def get_config_version(self):
+        return "test-v1"
 
 
 # ============================================================
@@ -1019,6 +1066,326 @@ class TestPermissionAPI:
         )
 
         assert response.status_code in [401, 403]
+
+
+# ============================================================
+# Exchange Config API Tests (Task 23)
+# ============================================================
+
+class TestExchangeConfigAPI:
+    """Tests for /api/v1/config/exchange endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_get_exchange_config_initially_defaults(self, client):
+        """Test GET /exchange returns defaults when no config exists."""
+        response = client.get("/api/v1/config/exchange")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "binance"
+        assert data["testnet"] is True
+        # mask_secret returns original value for short strings (< 8 chars)
+        assert data["api_key"] == ""
+        assert data["api_secret"] == ""
+
+    @pytest.mark.asyncio
+    async def test_update_exchange_config(self, client):
+        """Test PUT /exchange updates configuration."""
+        update_data = {
+            "name": "binance",
+            "api_key": "my_new_api_key_12345678",
+            "api_secret": "my_new_api_secret_abcd",
+            "testnet": False,
+        }
+
+        response = client.put(
+            "/api/v1/config/exchange",
+            json=update_data,
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "binance"
+        assert data["testnet"] is False
+        # API keys should be masked in response (mask_secret uses "..." pattern)
+        assert data["api_key"] != "my_new_api_key_12345678"
+        assert "..." in data["api_key"]
+        assert data["api_secret"] != "my_new_api_secret_abcd"
+        assert "..." in data["api_secret"]
+
+    @pytest.mark.asyncio
+    async def test_get_exchange_config_after_update(self, client):
+        """Test GET /exchange returns updated config."""
+        # Update first
+        client.put(
+            "/api/v1/config/exchange",
+            json={
+                "name": "bybit",
+                "api_key": "bybit_key_1234567890",
+                "api_secret": "bybit_secret_abcdefghij",
+                "testnet": True,
+            },
+            headers={"X-User-Role": "admin"}
+        )
+
+        # Get and verify
+        response = client.get("/api/v1/config/exchange")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "bybit"
+        assert data["testnet"] is True
+
+    @pytest.mark.asyncio
+    async def test_update_exchange_config_partial(self, client):
+        """Test PUT /exchange with default values."""
+        # Send empty body - should use defaults
+        response = client.put(
+            "/api/v1/config/exchange",
+            json={},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "binance"
+        assert data["testnet"] is True
+
+    @pytest.mark.asyncio
+    async def test_update_exchange_without_admin(self, client):
+        """Test PUT /exchange without admin role fails."""
+        os.environ.pop("DISABLE_AUTH", None)
+        response = client.put(
+            "/api/v1/config/exchange",
+            json={"name": "binance"}
+        )
+
+        assert response.status_code in [401, 403]
+
+
+# ============================================================
+# Timeframes API Tests (Task 23)
+# ============================================================
+
+class TestTimeframesAPI:
+    """Tests for /api/v1/config/timeframes endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_get_timeframes_initially_defaults(self, client):
+        """Test GET /timeframes returns defaults when no config exists."""
+        response = client.get("/api/v1/config/timeframes")
+        assert response.status_code == 200
+        data = response.json()
+        assert "timeframes" in data
+        assert isinstance(data["timeframes"], list)
+
+    @pytest.mark.asyncio
+    async def test_update_timeframes(self, client):
+        """Test PUT /timeframes updates configuration."""
+        update_data = {
+            "timeframes": ["5m", "15m", "1h", "4h"],
+        }
+
+        response = client.put(
+            "/api/v1/config/timeframes",
+            json=update_data,
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["timeframes"] == ["5m", "15m", "1h", "4h"]
+
+    @pytest.mark.asyncio
+    async def test_get_timeframes_after_update(self, client):
+        """Test GET /timeframes returns updated list."""
+        # Update first
+        client.put(
+            "/api/v1/config/timeframes",
+            json={"timeframes": ["1m", "5m", "15m"]},
+            headers={"X-User-Role": "admin"}
+        )
+
+        # Get and verify
+        response = client.get("/api/v1/config/timeframes")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["timeframes"] == ["1m", "5m", "15m"]
+
+    @pytest.mark.asyncio
+    async def test_update_timeframes_empty_list_rejected(self, client):
+        """Test PUT /timeframes with empty list returns 422."""
+        response = client.put(
+            "/api/v1/config/timeframes",
+            json={"timeframes": []},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_update_timeframes_single_value(self, client):
+        """Test PUT /timeframes with a single timeframe."""
+        response = client.put(
+            "/api/v1/config/timeframes",
+            json={"timeframes": ["1h"]},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["timeframes"] == ["1h"]
+
+    @pytest.mark.asyncio
+    async def test_update_timeframes_without_admin(self, client):
+        """Test PUT /timeframes without admin role fails."""
+        os.environ.pop("DISABLE_AUTH", None)
+        response = client.put(
+            "/api/v1/config/timeframes",
+            json={"timeframes": ["15m"]}
+        )
+
+        assert response.status_code in [401, 403]
+
+    @pytest.mark.asyncio
+    async def test_update_timeframes_missing_field(self, client):
+        """Test PUT /timeframes with missing timeframes field returns 422."""
+        response = client.put(
+            "/api/v1/config/timeframes",
+            json={},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 422
+
+
+# ============================================================
+# Asset Polling API Tests (Task 23)
+# ============================================================
+
+class TestAssetPollingAPI:
+    """Tests for /api/v1/config/asset-polling endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_get_asset_polling_initially_defaults(self, client):
+        """Test GET /asset-polling returns defaults when no config exists."""
+        response = client.get("/api/v1/config/asset-polling")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["enabled"] is True
+        assert data["interval_seconds"] == 60
+
+    @pytest.mark.asyncio
+    async def test_update_asset_polling(self, client):
+        """Test PUT /asset-polling updates configuration."""
+        update_data = {
+            "enabled": False,
+            "interval_seconds": 120,
+        }
+
+        response = client.put(
+            "/api/v1/config/asset-polling",
+            json=update_data,
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["enabled"] is False
+        assert data["interval_seconds"] == 120
+
+    @pytest.mark.asyncio
+    async def test_get_asset_polling_after_update(self, client):
+        """Test GET /asset-polling returns updated config."""
+        # Update first
+        client.put(
+            "/api/v1/config/asset-polling",
+            json={"enabled": True, "interval_seconds": 300},
+            headers={"X-User-Role": "admin"}
+        )
+
+        # Get and verify
+        response = client.get("/api/v1/config/asset-polling")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["enabled"] is True
+        assert data["interval_seconds"] == 300
+
+    @pytest.mark.asyncio
+    async def test_update_asset_polling_partial_enabled_only(self, client):
+        """Test PUT /asset-polling with only enabled field."""
+        response = client.put(
+            "/api/v1/config/asset-polling",
+            json={"enabled": False},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["enabled"] is False
+        assert data["interval_seconds"] == 60  # default
+
+    @pytest.mark.asyncio
+    async def test_update_asset_polling_partial_interval_only(self, client):
+        """Test PUT /asset-polling with only interval field."""
+        response = client.put(
+            "/api/v1/config/asset-polling",
+            json={"interval_seconds": 90},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["enabled"] is True  # default
+        assert data["interval_seconds"] == 90
+
+    @pytest.mark.asyncio
+    async def test_update_asset_polling_interval_too_low_rejected(self, client):
+        """Test PUT /asset-polling with interval < 10 returns 422."""
+        response = client.put(
+            "/api/v1/config/asset-polling",
+            json={"interval_seconds": 5},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_update_asset_polling_interval_minimum(self, client):
+        """Test PUT /asset-polling with minimum interval (10s)."""
+        response = client.put(
+            "/api/v1/config/asset-polling",
+            json={"interval_seconds": 10},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["interval_seconds"] == 10
+
+    @pytest.mark.asyncio
+    async def test_update_asset_polling_without_admin(self, client):
+        """Test PUT /asset-polling without admin role fails."""
+        os.environ.pop("DISABLE_AUTH", None)
+        response = client.put(
+            "/api/v1/config/asset-polling",
+            json={"enabled": False}
+        )
+
+        assert response.status_code in [401, 403]
+
+    @pytest.mark.asyncio
+    async def test_update_asset_polling_empty_body(self, client):
+        """Test PUT /asset-polling with empty body uses defaults."""
+        response = client.put(
+            "/api/v1/config/asset-polling",
+            json={},
+            headers={"X-User-Role": "admin"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["enabled"] is True
+        assert data["interval_seconds"] == 60
 
 
 # ============================================================

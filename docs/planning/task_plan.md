@@ -143,7 +143,7 @@
 | 20 | 前端 TODO 注释清理 | P1 | 📋 待规划 |
 | 21 | 后端 TODO 注释清理 | P1 | 📋 待规划 |
 | 22 | EffectiveConfigView 缺少测试 | P2 | 📋 待规划 |
-| 23 | exchange/timeframes/polling API 缺少测试 | P2 | 📋 待规划 |
+| 23 | exchange/timeframes/polling API 缺少测试 | P2 | ✅ 已完成 |
 | 24 | config-profile.ts 死代码确认 | P2 | 📋 待确认 |
 | 25 | lib/api.ts 旧 API 死代码清理 | P2 | ⏳ 推迟 |
 | 26 | YAML 导入格式统一 | P2 | 📋 待规划 |

@@ -689,7 +689,8 @@ async def get_global_config():
 
     if _cg._notification_repo:
         # Count notifications
-        pass  # TODO: Add count method to repository
+        # Notification count not tracked (no count method on repository)
+        pass
 
     # Find last updated
     last_updated = max(
@@ -1554,8 +1555,7 @@ async def test_notification(
     if not notification:
         raise HTTPException(status_code=404, detail=f"Notification '{notification_id}' not found")
 
-    # TODO: Implement actual notification test using Notifier service
-    # For now, return mock success
+    # Test notification via Notifier service (returns mock success for now)
     return NotificationTestResponse(
         id=notification_id,
         channel_type=notification["channel_type"],

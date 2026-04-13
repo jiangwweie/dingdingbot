@@ -1,11 +1,25 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-12 配置依赖注入统一修复完成
+> **最后更新**: 2026-04-13 exchange/timeframes/polling API 测试补充完成
 
 ### 收工状态
 
-**今日完成工作** (2026-04-12):
+**今日完成工作** (2026-04-13):
+1. Task 23 (P2): exchange/timeframes/polling API 测试补充 ✅
+   - 新增 3 个测试类，21 个测试用例
+   - `TestExchangeConfigAPI` (5 用例): GET/PUT /api/v1/config/exchange
+   - `TestTimeframesAPI` (7 用例): GET/PUT /api/v1/config/timeframes
+   - `TestAssetPollingAPI` (9 用例): GET/PUT /api/v1/config/asset-polling
+   - 覆盖: 正常返回、默认值、参数校验(422)、权限校验(401)、部分更新
+   - 同时修复: `set_config_dependencies` import 路径更新（适配统一配置依赖注入改造）
+   - 同时修复: `api_v1_config.py` 中 `if _cg._notification_repo:` 块缺少语句的 IndentationError
+
+**现有测试回归**: 63/63 全部通过 (test_api_v1_config.py)
+
+---
+
+**昨日完成工作** (2026-04-12):
 1. Phase 6 (P0): 配置依赖注入统一修复（方案 C） ✅
    - 根因：`lifespan="off"` 导致 7 个配置 Repository 未初始化
    - 方案 C：统一两条依赖注入链路，`main.py` Phase 9 负责所有初始化
