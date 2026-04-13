@@ -158,10 +158,23 @@ const StrategyConfigPage: React.FC = () => {
     }
   }, [strategies]);
 
-  // 处理编辑策略
-  const handleEdit = useCallback((strategy: Strategy) => {
-    setEditingStrategy(strategy);
-    setEditorOpen(true);
+  // 编辑器加载中状态
+  const [editLoading, setEditLoading] = useState(false);
+
+  // 处理编辑策略 — 先调用详情接口获取完整数据
+  const handleEdit = useCallback(async (strategy: Strategy) => {
+    setEditLoading(true);
+    try {
+      const response = await configApi.getStrategy(strategy.id);
+      setEditingStrategy(response.data);
+      setEditorOpen(true);
+    } catch (error: any) {
+      console.error('加载策略详情失败:', error);
+      const errorMsg = error.response?.data?.detail || error.message || '加载失败';
+      message.error('加载策略详情失败：' + errorMsg);
+    } finally {
+      setEditLoading(false);
+    }
   }, []);
 
   // 处理创建策略
