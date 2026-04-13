@@ -117,10 +117,25 @@ export const StrategiesTab: React.FC = () => {
     }
   };
 
+  // 编辑加载中状态
+  const [editLoading, setEditLoading] = useState(false);
+
   // 处理编辑策略 - 高级编辑模式
-  const handleEdit = (record: StrategyDisplay) => {
-    setEditingStrategy(record);
-    setAdvancedModalVisible(true);
+  // 修复：先调用详情接口获取完整数据（含 trigger_config 和 filter_configs）
+  const handleEdit = async (record: StrategyDisplay) => {
+    setEditLoading(true);
+    try {
+      const response = await configApi.getStrategy(record.id);
+      const fullStrategy = response.data;
+      setEditingStrategy(fullStrategy);
+      setAdvancedModalVisible(true);
+    } catch (error: any) {
+      console.error('加载策略详情失败:', error);
+      const errorMsg = error.response?.data?.detail || error.message || '加载失败';
+      message.error('加载策略详情失败：' + errorMsg);
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   // 处理创建策略 - 高级创建模式
@@ -263,6 +278,7 @@ export const StrategiesTab: React.FC = () => {
             size="small"
             icon={<Edit size={14} />}
             onClick={() => handleEdit(record)}
+            loading={editLoading && editingStrategy?.id === record.id}
           >
             高级编辑
           </Button>
