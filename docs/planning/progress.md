@@ -1,11 +1,49 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 方案 B 测试修复 + 全量回归测试
+> **最后更新**: 2026-04-13 架构优化 + 风控配置前端 + 策略详情接口修复
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
+
+**第一轮：P1 Bug 修复 + 测试补充**
+1. 修复 `/api/v1/config/effective` → 500 错误
+2. 修复 `test_config_repository.py` 3 个测试失败
+3. Task 23: Exchange/Timeframes/Polling API 集成测试补充（21 新测试）
+
+**第二轮：方案 B 彻底统一策略表**
+- 删除 8 个旧策略端点 + 旧表代码 + 迁移脚本 + 前端迁移
+- 净删除 ~830 行代码
+
+**第三轮：策略编辑器 + 策略下发实盘全流程修复**
+- 删除自动保存 + 认证拦截器 + 过滤器表单 + 编辑回显 + apply 端点三连修复
+
+**第四轮：架构优化 + 风控配置前端**
+1. YAML Fallback 清理
+   - 删除 `_load_core_config_from_yaml()` + config_parser 中的 2 个 YAML 加载方法
+   - 新增 `_build_default_core_config()` 返回 hardcoded 默认值
+   - 删除 5 个过时测试，core.yaml 重命名为 .reference
+2. 策略下发 timeframe 同步
+   - 新增 `merge_strategy_monitoring_config()` 方法（取并集，幂等）
+   - apply_strategy 端点增加 Step 2.5
+   - StrategyApplyResponse 扩展 3 个新字段
+3. 策略详情接口修复
+   - StrategiesTab.tsx + StrategyConfig.tsx handleEdit 改为 async，先调用详情接口
+4. 风控配置前端（SystemSettings 页面）
+   - 新增 RiskConfigSection 组件（tab/page 模式共用）
+   - 调用已有 `configApi.getRiskConfig()` / `updateRiskConfig()` API
+   - 修复 tab 模式下不显示 + 表单提交未触发 API 两个 bug
+- `config_manager.py`: 新增 `merge_strategy_monitoring_config()` 方法（~48 行）
+  - 将策略的 timeframes/core_symbols 合并到 system_configs（取并集，sorted set）
+  - 幂等设计：未变更时不执行 DB 写入
+  - 内存缓存同步更新
+- `api.py`: `apply_strategy` 端点新增 Step 2.5
+  - 在 hot-reload 之前合并监控配置
+  - `StrategyApplyResponse` 扩展 3 个可选字段
+  - 日志脱敏输出变更结果
+- 验证：`python3 -c "from src.interfaces.api import app"` 导入无错误
+- 回归测试：strategy_apply 测试 2 passed（3 个 pre-existing failure 不相关）
 
 **第一轮：P1 Bug 修复 + 测试补充**
 1. 修复 `/api/v1/config/effective` → 500 错误

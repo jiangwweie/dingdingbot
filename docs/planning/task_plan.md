@@ -1,7 +1,7 @@
 # 任务计划
 
 > **最后更新**: 2026-04-13 收工
-> **当前活跃项目**: 策略编辑器 + 策略下发实盘全流程修复
+> **当前活跃项目**: YAML 降级清理 + 策略 timeframe 同步 + 风控配置前端
 
 ---
 
@@ -193,6 +193,23 @@
 - apply 端点 422：strategy_id: int → str（UUID 解析失败）
 - apply 端点 404：SignalRepository.get_custom_strategy_by_id → _strategy_repo.get_by_id（旧表已删除）
 - apply 端点 500：移除不存在的 update_user_config()，改为 is_active 更新 + notify_hot_reload + pipeline.on_config_updated()
+
+### 第十阶段：架构优化 + 风控配置前端（2026-04-13 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 41 | YAML Fallback 清理：删除降级逻辑，改为默认配置 | P1 | ✅ 已完成 |
+| 42 | 策略下发 timeframe 同步：合并 symbols/timeframes 到系统配置 | P0 | ✅ 已完成 |
+| 43 | 编辑策略时调用详情接口（StrategyConfig 列表数据不完整） | P0 | ✅ 已完成 |
+| 44 | SystemSettings 页面新增风控配置表单 | P0 | ✅ 已完成 |
+| 45 | 修复风控配置在 tab 模式下不显示 | P0 | ✅ 已完成 |
+| 46 | 修复风控配置表单提交未触发 API 请求 | P0 | ✅ 已完成 |
+
+**修复摘要**：
+- YAML 清理：删除 `_load_core_config_from_yaml()` + `load_core_config_from_yaml()` + `load_user_config_from_yaml()`，新增 `_build_default_core_config()` 返回 hardcoded 默认值；删除 5 个过时测试；core.yaml 重命名为 .reference
+- Timeframe 同步：新增 `merge_strategy_monitoring_config()` 方法，apply_strategy 端点增加 Step 2.5 合并 symbols/timeframes 到 system_configs（取并集，幂等）
+- 策略详情接口：StrategyConfig.tsx handleEdit 改为 async，先调用 `configApi.getStrategy(id)` 获取完整详情
+- 风控配置前端：SystemSettings.tsx 新增 `RiskConfigSection` 组件（tab/page 模式共用），调用已有 `configApi.getRiskConfig()` / `updateRiskConfig()` API；修复 tab 模式不显示 + 表单提交未触发 API 两个 bug
 
 ### 第四阶段：待办任务清单（2026-04-13 收工）
 
