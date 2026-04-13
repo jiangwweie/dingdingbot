@@ -1,6 +1,6 @@
 # 任务计划
 
-> **最后更新**: 2026-04-13 lifespan 补充 ConfigManager 初始化
+> **最后更新**: 2026-04-13 aiosqlite executescript() 修复
 > **当前活跃项目**: YAML 降级清理 + 策略 timeframe 同步 + 风控配置前端
 
 ---

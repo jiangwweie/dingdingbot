@@ -1,11 +1,18 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 lifespan 补充 ConfigManager 初始化
+> **最后更新**: 2026-04-13 aiosqlite executescript() 修复
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
+
+**第八轮：aiosqlite executescript() 修复 + 策略数据恢复**
+- 根因：`ConfigManager._create_tables()` 使用 `aiosqlite.executescript()` 执行建表 SQL，该方法绕过 async 连接队列并执行隐式 COMMIT，破坏 WAL 模式事务状态，导致后续查询无法看到已提交的 strategies 数据
+- 修复：替换 `executescript()` 为逐条 `await self._db.execute()` 执行，保持 aiosqlite 连接的事务一致性
+- 策略数据恢复：从 `custom_strategies` 旧表恢复策略到 `strategies` 新表（UUID: 94213440-4ebc-47d2-8e42-e4e4c462cefb, name: "01"）
+- 验证：`/api/config` 返回 active_strategies 1 条，策略 runner 加载 1 条策略
+- 提交：`ce40586`
 
 **第七轮：lifespan 补充 ConfigManager 初始化 + 完整依赖审查**
 - 修复 `/api/v1/config/effective` 端点 503 — lifespan 补充 ConfigManager 的幂等初始化（`initialize_from_db`）+ close() 清理
