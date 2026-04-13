@@ -63,6 +63,7 @@
 | TODO 注释确认与清理 | 2026-04-13 | ✅ |
 | Profile 死代码清理 + lib/api.ts 清理 | 2026-04-13 | ✅ |
 | 回测 risk_overrides 消费断裂修复 | 2026-04-13 | ✅ |
+| lifespan 补充 Config Repositories 初始化 | 2026-04-13 | ✅ |
 
 ---
 
@@ -231,6 +232,29 @@
 **测试验证**：
 - 风控相关测试 100 passed，0 failed
 - 零回归（182 failed + 61 errors 均为预存问题）
+
+### 第十二阶段：lifespan 补充 Config Repositories 初始化（2026-04-13 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 51 | api.py lifespan 中补充 7 个 Config Repositories 初始化 + 关闭 | P0 | ✅ 已完成 |
+
+**修复摘要**：
+- 独立 uvicorn 模式下，lifespan 未初始化 Config Repositories → `/api/v1/config/strategies` 等返回 503
+- main.py 嵌入模式 `lifespan="off"`，通过 `set_dependencies()` 手动注入，不受影响
+- 在 lifespan startup 中幂等初始化 Strategy/Risk/System/Symbol/Notification/History/Snapshot repos
+- 在 lifespan shutdown 中添加对应的 close() 清理
+
+**改动文件**：
+| 文件 | 改动 |
+|------|------|
+| `src/interfaces/api.py` | lifespan 函数增加 74 行（初始化 + 关闭） |
+
+**验证结果**：
+- `/api/v1/config/strategies` → 200 OK ✅
+- `/api/v1/config/risk` → 200 OK ✅
+- `/api/v1/config/system` → 200 OK ✅
+- `/api/v1/config/symbols` → 200 OK ✅
 
 **修复摘要**：
 - YAML 清理：删除 `_load_core_config_from_yaml()` + `load_core_config_from_yaml()` + `load_user_config_from_yaml()`，新增 `_build_default_core_config()` 返回 hardcoded 默认值；删除 5 个过时测试；core.yaml 重命名为 .reference

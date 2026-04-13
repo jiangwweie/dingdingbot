@@ -1,11 +1,18 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 回测 risk_overrides 消费断裂修复
+> **最后更新**: 2026-04-13 lifespan 补充 Config Repositories 初始化
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
+
+**第六轮：lifespan 补充 Config Repositories 初始化**
+- 独立 uvicorn 模式下，7 个 Config Repositories 未初始化导致 503
+- 在 api.py lifespan startup 中补充 Strategy/Risk/System/Symbol/Notification/History/Snapshot 共 7 个 Config Repositories 的幂等初始化
+- 在 lifespan shutdown 中添加对应的 close() 清理
+- main.py 嵌入模式通过 set_dependencies() 注入，lifespan="off" 不执行，不受影响
+- 提交：`89f3b4c`
 
 **第五轮：回测 risk_overrides 消费断裂修复**
 - 架构师深入分析全链路数据流（16 处 RiskConfig 创建点逐一排查）
