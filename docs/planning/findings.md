@@ -1,7 +1,33 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-13 收工
+> **最后更新**: 2026-04-13 aiosqlite executescript() 修复
+
+---
+
+## 2026-04-13 aiosqlite executescript() WAL 事务破坏
+
+### 根因
+
+`aiosqlite.executescript()` 在底层绕过 async 连接队列，直接操作底层 sqlite3 连接并执行隐式 COMMIT。这破坏了 WAL 模式的事务状态，导致 ConfigManager 初始化后 `_load_strategies_from_db()` 查询返回 0 行，而独立的新连接能看到数据。
+
+### 症状
+
+```
+ConfigManager 的 aiosqlite 连接: SELECT * FROM strategies WHERE is_active = TRUE → 0 行
+独立新建 aiosqlite 连接: 同一条 SQL → 1 行
+独立 sqlite3 连接: 同一条 SQL → 1 行
+```
+
+### 修复
+
+将 `ConfigManager._create_tables()` 中的 `await self._db.executescript(schema_sql)` 替换为逐条 `await self._db.execute(stmt)` 执行。
+
+### 教训
+
+**aiosqlite 中永远不要使用 executescript()**，它在 async 连接中行为不一致，会破坏 WAL 事务状态。所有批量 SQL 应拆分为逐条 execute() 调用。
+
+---
 
 ---
 
