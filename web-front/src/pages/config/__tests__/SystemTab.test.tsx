@@ -2,7 +2,7 @@
  * SystemSettings 组件单元测试
  *
  * 测试覆盖场景：
- * 1. variant='tab' 模式渲染（嵌入 ConfigProfiles）
+ * 1. variant='tab' 模式渲染（嵌入统一配置页）
  * 2. variant='page' 模式渲染（独立页面）
  * 3. 参数修改保存
  * 4. 重启提示显示
@@ -94,7 +94,7 @@ describe('SystemSettings', () => {
     render(<SystemSettingsPage {...props} />);
 
   // ============================================================
-  // 1. variant='tab' 模式渲染测试（嵌入 ConfigProfiles）
+  // 1. variant='tab' 模式渲染测试
   // ============================================================
 
   it('renders loading state initially in tab mode', () => {

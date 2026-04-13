@@ -32,8 +32,7 @@ from src.domain.logic_tree import (
 )
 
 # Import from config_manager (original definition location)
-# These are kept here for backward compatibility during P1-5 refactoring
-# TODO(P1-5): Move these to domain/models.py after full refactoring
+# These are kept here for backward compatibility
 from src.application.config_manager import (
     PinbarDefaults,
     EmaConfig,

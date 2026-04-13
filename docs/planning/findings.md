@@ -1,7 +1,34 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-12
+> **最后更新**: 2026-04-13 TODO 注释清理 + Profile 死代码清理
+
+---
+
+## 2026-04-13 TODO 注释分布与清理
+
+### 前端 TODO 分布（4 处）
+
+| # | 文件:行 | 内容 | 状态 |
+|---|---------|------|------|
+| 1 | `Optimization.tsx:78` | 实现参数应用到策略 | 保留（优化功能未完成） |
+| 2 | `Optimization.tsx:175` | 实现历史记录 API 调用 | 保留（优化功能未完成） |
+| 3 | `StrategyForm.tsx:130` | 添加过滤器配置表单 | 保留（过滤器表单待实现） |
+| 4 | `SystemSettings.tsx:422` | 实际项目中应调用重启 API | 清理（措辞过时，已更新为"实现后端重启 API 调用"） |
+
+### 后端 TODO 分布（22 处）
+
+| 分类 | 数量 | 示例 | 状态 |
+|------|------|------|------|
+| 过时/占位 | 4 | `TODO(P1-5)`、mock 注释 | 清理 |
+| 未完成功能 | 12 | `TODO: 实现 PositionRepository`、`TODO: 从数据库获取本地订单` | 保留 |
+| 简化 TODO | 6 | 注释"简化版本" | 保留（记录简化决策） |
+
+### Profile 死代码发现
+
+- `ConfigProfiles.tsx` 页面（524 行）仍完整存在于磁盘，但 `commit 6f0145f` 已从 `SystemSettings.tsx` 移除 Profile 管理入口
+- 无路由引用、无其他文件 import、5 个 Profile Modal 组件仅被 `ConfigProfiles.tsx` 使用
+- **判定**: Profile 管理功能已被 DB 驱动配置管理取代，属于完全废弃功能
 
 ---
 

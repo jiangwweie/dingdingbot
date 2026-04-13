@@ -419,7 +419,7 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
   const handleRestart = () => {
     setRestartRequired(false);
     message.success('重启指令已发送，服务正在重启...');
-    // TODO: 实际项目中应调用重启 API
+    // TODO: 实现后端重启 API 调用
     // await fetch('/api/v1/system/restart', { method: 'POST' });
   };
 

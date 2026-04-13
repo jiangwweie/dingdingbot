@@ -1,21 +1,27 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 exchange/timeframes/polling API 测试补充完成
+> **最后更新**: 2026-04-13 TODO 注释清理 + Profile 死代码清理 + lib/api.ts 死代码清理
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
-1. Task 23 (P2): exchange/timeframes/polling API 测试补充 ✅
+1. 前端 TODO 注释确认与清理（4 处：1 处措辞更新，3 处保留）
+2. 后端 TODO 注释确认与清理（22 处：4 处过时清理/更新，18 处保留）
+3. Profile 死代码确认与清理（ConfigProfiles 页面 + 5 Modal 组件 + 类型文件，净减 ~1,817 行）
+4. lib/api.ts 死代码清理（Profile API / Legacy types / 未用函数，净减 ~300 行）
+5. Task 23 (P2): exchange/timeframes/polling API 测试补充 ✅
    - 新增 3 个测试类，21 个测试用例
-   - `TestExchangeConfigAPI` (5 用例): GET/PUT /api/v1/config/exchange
-   - `TestTimeframesAPI` (7 用例): GET/PUT /api/v1/config/timeframes
-   - `TestAssetPollingAPI` (9 用例): GET/PUT /api/v1/config/asset-polling
-   - 覆盖: 正常返回、默认值、参数校验(422)、权限校验(401)、部分更新
-   - 同时修复: `set_config_dependencies` import 路径更新（适配统一配置依赖注入改造）
-   - 同时修复: `api_v1_config.py` 中 `if _cg._notification_repo:` 块缺少语句的 IndentationError
+6. 任务规划文档更新
 
-**现有测试回归**: 63/63 全部通过 (test_api_v1_config.py)
+**测试验证**:
+- Task 22: EffectiveConfigView 缺少测试 — ✅ 已通过
+- Task 23: exchange/timeframes/polling API 缺少测试 — ✅ 已通过
+
+**Git 提交** (本次):
+| Commit | 说明 |
+|--------|------|
+| 待提交 | chore: TODO 注释确认 + Profile 死代码清理 + lib/api.ts 死代码清理 |
 
 ---
 
@@ -28,15 +34,6 @@
    - 清理 `lifespan()` 死代码（40+ 行）
    - 验收：12 个端点 11/12 返回 200
 
-**昨日完成工作** (2026-04-11):
-1. Phase 2 Task 12 (P1): 共享 DB 连接池 ✅
-2. Phase 5 审查修复全部完成 ✅
-
-**Git 提交** (本次):
-| Commit | 说明 |
-|--------|------|
-| 待提交 | feat: 统一配置依赖注入（修复 /api/v1/config/* 全线 503） |
-
 **已知独立问题**（非本次修复引入）:
 | # | 问题 | 优先级 | 状态 |
 |---|------|--------|------|
@@ -44,8 +41,6 @@
 | 2 | `test_config_repository.py` 3 个测试失败（`AssetPollingConfig` NameError） | P1 | 📋 待修复 |
 
 ---
-
-## 2026-04-12 Phase 6: 配置依赖注入统一修复
 
 ## 2026-04-10 Task 11: StrategyForm 触发器参数表单补全
 

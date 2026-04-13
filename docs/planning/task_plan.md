@@ -1,7 +1,7 @@
 # 任务计划
 
-> **最后更新**: 2026-04-12
-> **当前活跃项目**: `/api/v1/config/*` 503 修复
+> **最后更新**: 2026-04-13
+> **当前活跃项目**: TODO 注释清理 + Profile 死代码清理 + 测试验证
 
 ---
 
@@ -60,6 +60,8 @@
 | MVP Task 2: 集成测试 | 2026-04-09 | ✅ |
 | MVP Task 3: PMS 回测检查 | 2026-04-09 | ✅ |
 | MVP Task 4: Testnet 模拟盘 | 待定 | 🔓 可启动 |
+| TODO 注释确认与清理 | 2026-04-13 | ✅ |
+| Profile 死代码清理 + lib/api.ts 清理 | 2026-04-13 | ✅ |
 
 ---
 
@@ -133,27 +135,39 @@
 | `src/main.py` | Phase 9 新增 7 个 Repository 初始化 + 传参 |
 | `tests/` | 3 个测试文件 import 路径更新 |
 
-### 第四阶段：待办任务清单（2026-04-11 纳入规划）
+### 第七阶段：TODO 清理 + 死代码清理（2026-04-13 完成）
+
+| # | 任务 | 优先级 | 状态 |
+|---|------|--------|------|
+| 20 | 前端 TODO 注释确认与清理（1 处措辞更新，3 处保留） | P1 | ✅ 已完成 |
+| 21 | 后端 TODO 注释确认与清理（4 处过时清理，18 处保留） | P1 | ✅ 已完成 |
+| 24 | config-profile.ts 死代码确认 + 清理 | P2 | ✅ 已完成 |
+| 25 + 28 | lib/api.ts 死代码清理（Profile API / Legacy types / 未用函数） | P2 | ✅ 已完成 |
+
+**清理摘要**：
+- 前端 4 处 TODO：1 处措辞更新（"实际项目" → "实现后端重启 API"），3 处保留（功能未完成）
+- 后端 22 处 TODO：4 处过时清理/更新，18 处保留（真实待办）
+- 删除 `ConfigProfiles.tsx` (524 行) + `types/config-profile.ts` (283 行) + `components/profiles/` (5 文件, 1010 行)
+- `lib/api.ts` 删除 Profile API 10 函数 (~190 行)、LegacyStrategyConfig/LegacySystemConfig、`fetchConfig`/`updateConfig`/`fetchBacktestOrder`/`runReconciliation`
+- 净减少 **~2,118 行代码**
+- TypeScript 编译无新增错误（77 个预存错误不变）
+
+### 第四阶段：待办任务清单（2026-04-13 更新）
 
 | # | 任务 | 优先级 | 状态 |
 |---|------|--------|------|
 | 17 | BackupTab 手动验证 | P0 | 🔓 待验证 |
 | 18 | Testnet 模拟盘验证 | P0 | 🔓 可启动 |
 | 19 | Decimal 绑定 SQLite 加固 | P1 | 📋 待规划 |
-| 20 | 前端 TODO 注释清理 | P1 | 📋 待规划 |
-| 21 | 后端 TODO 注释清理 | P1 | 📋 待规划 |
-| 22 | EffectiveConfigView 缺少测试 | P2 | 📋 待规划 |
-| 23 | exchange/timeframes/polling API 缺少测试 | P2 | ✅ 已完成 |
-| 24 | config-profile.ts 死代码确认 | P2 | 📋 待确认 |
-| 25 | lib/api.ts 旧 API 死代码清理 | P2 | ⏳ 推迟 |
 | 26 | YAML 导入格式统一 | P2 | 📋 待规划 |
 | 27 | v3 Phase 5 实盘集成 | P2 | ⏳ 待启动 |
 
-### 第五阶段（渐进式清理 - 不现在做）
+### 已知独立问题（非本次修复引入）
 
-| # | 任务 | 优先级 | 状态 |
+| # | 问题 | 优先级 | 状态 |
 |---|------|--------|------|
-| 28 | 旧 API 死代码清理（lib/api.ts 渐进式清理） | P2 | ⏳ 推迟 |
+| 1 | `/api/v1/config/effective` → 500（`ConfigManager.get_system_config()` 不存在） | P1 | 📋 待修复 |
+| 2 | `test_config_repository.py` 3 个测试失败（`AssetPollingConfig` NameError） | P1 | 📋 待修复 |
 
 ### 执行顺序
 

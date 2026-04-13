@@ -20,28 +20,11 @@ import type {
   ClosePositionRequest,
   OrderCheckRequest,
   CapitalProtectionCheckResult,
-  ReconciliationReport,
-  ReconciliationRequest,
   OrdersResponse,
   OrderTreeResponse,
   OrderBatchDeleteRequest,
   OrderBatchDeleteResponse,
 } from '../types/order';
-
-// Import config profile types
-import type {
-  ConfigProfile,
-  ProfileListResponse,
-  CreateProfileRequest,
-  CreateProfileResponse,
-  SwitchProfileResponse,
-  DeleteProfileResponse,
-  ExportProfileResponse,
-  ImportProfileRequest,
-  ImportProfileResponse,
-  CompareProfilesResponse,
-  RenameProfileResponse,
-} from '../types/config-profile';
 
 export const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -458,27 +441,6 @@ export interface ConfigResponse {
 export interface DeleteResponse {
   status: 'success';
   message: string;
-}
-
-/**
- * Legacy strategy config for backward compatibility (deprecated)
- */
-export interface LegacyStrategyConfig {
-  pinbar_enabled: boolean;
-  min_wick_ratio: number;
-  max_body_ratio: number;
-  body_position_tolerance: number;
-  trend_filter_enabled: boolean;
-  mtf_validation_enabled: boolean;
-}
-
-/**
- * Legacy system config for backward compatibility (deprecated)
- */
-export interface LegacySystemConfig {
-  strategy: LegacyStrategyConfig;
-  risk: RiskConfig;
-  user_symbols: string[];
 }
 
 // ============================================================================
@@ -1723,24 +1685,6 @@ export async function deleteStrategyParamTemplate(templateId: number): Promise<{
 }
 
 /**
- * Run reconciliation for a specific symbol
- */
-export async function runReconciliation(symbol: string): Promise<ReconciliationReport> {
-  const res = await fetch('/api/v3/reconciliation', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbol } as ReconciliationRequest),
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to run reconciliation');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
  * Fetch order kline context for charting
  * Returns order details plus K-lines surrounding the order timestamp
  *
@@ -1780,63 +1724,9 @@ export async function fetchOrderKlineContext(orderId: string, symbol: string, in
   return res.json();
 }
 
-/**
- * Fetch backtest order details with kline data
- * Returns order details plus K-lines for chart visualization
- */
-export async function fetchBacktestOrder(reportId: string, orderId: string): Promise<{
-  order: OrderResponse;
-  klines: Array<{ timestamp: number; open: string; high: string; low: string; close: string; volume: string }>;
-}> {
-  const res = await fetch(`/api/v3/backtest/reports/${reportId}/orders/${orderId}`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to fetch backtest order');
-    (error as any).status = res.status;
-    throw error;
-  }
-  return res.json();
-}
-
 // ============================================================================
 // Config Snapshot Management API (版本化快照方案 B)
 // ============================================================================
-
-/**
- * 获取当前配置（脱敏后）
- */
-export async function fetchConfig(): Promise<ConfigResponse> {
-  const res = await fetch('/api/config', {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to fetch configuration');
-    (error as any).status = res.status;
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * 更新配置（会自动创建快照）
- */
-export async function updateConfig(config: Partial<SystemConfig>): Promise<ConfigResponse> {
-  const res = await fetch('/api/config', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to update configuration');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
 
 /**
  * 导出配置为 YAML 文件
@@ -2330,192 +2220,3 @@ export async function deleteOrderChain(
   return res.json();
 }
 
-// ============================================================================
-// Config Profile Management API
-// ============================================================================
-
-/**
- * Fetch all configuration profiles
- */
-export async function fetchProfiles(): Promise<ProfileListResponse> {
-  const res = await fetch('/api/config/profiles', {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to fetch profiles');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Fetch a single profile details
- */
-export async function fetchProfile(name: string): Promise<ConfigProfile> {
-  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to fetch profile');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Create a new configuration profile
- */
-export async function createProfile(
-  request: CreateProfileRequest
-): Promise<CreateProfileResponse> {
-  const res = await fetch('/api/config/profiles', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to create profile');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Switch to a different configuration profile
- */
-export async function switchProfile(name: string): Promise<SwitchProfileResponse> {
-  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}/activate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to switch profile');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Delete a configuration profile
- */
-export async function deleteProfile(name: string): Promise<DeleteProfileResponse> {
-  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to delete profile');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Export a profile to YAML format
- */
-export async function exportProfile(name: string): Promise<ExportProfileResponse> {
-  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}/export`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to export profile');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Download profile YAML file
- */
-export async function downloadProfileYaml(name: string): Promise<void> {
-  const response = await exportProfile(name);
-  const blob = new Blob([response.yaml_content], { type: 'text/yaml' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${name}_config_${new Date().toISOString().split('T')[0]}.yaml`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
-}
-
-/**
- * Import a profile from YAML
- */
-export async function importProfile(
-  request: ImportProfileRequest
-): Promise<ImportProfileResponse> {
-  const res = await fetch('/api/config/profiles/import', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to import profile');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Compare two profiles
- */
-export async function compareProfiles(
-  fromName: string,
-  toName: string
-): Promise<CompareProfilesResponse> {
-  const params = new URLSearchParams({
-    from_name: fromName,
-    to_name: toName,
-  });
-  const res = await fetch(`/api/config/profiles/compare?${params}`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to compare profiles');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Rename a configuration profile
- */
-export async function renameProfile(
-  name: string,
-  request: { name: string; description?: string | null }
-): Promise<RenameProfileResponse> {
-  const res = await fetch(`/api/config/profiles/${encodeURIComponent(name)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to rename profile');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
