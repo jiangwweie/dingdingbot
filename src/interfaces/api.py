@@ -446,6 +446,56 @@ async def lifespan(app: FastAPI):
             _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
             logger.info("ExchangeGateway global callback registered with OrderLifecycleService")
 
+        # =============================================
+        # Initialize Config Repositories (独立 uvicorn 模式必需)
+        # main.py 嵌入模式通过 set_dependencies() 注入，lifespan="off" 不执行此处
+        # =============================================
+        from src.interfaces import api_config_globals as _cg
+        from src.infrastructure.repositories.config_repositories import (
+            StrategyConfigRepository,
+            RiskConfigRepository,
+            SystemConfigRepository,
+            SymbolConfigRepository,
+            NotificationConfigRepository,
+            ConfigHistoryRepository,
+            ConfigSnapshotRepositoryExtended,
+        )
+
+        if _cg._strategy_repo is None:
+            _cg._strategy_repo = StrategyConfigRepository()
+            await _cg._strategy_repo.initialize()
+            logger.info("StrategyConfigRepository initialized in lifespan")
+
+        if _cg._risk_repo is None:
+            _cg._risk_repo = RiskConfigRepository()
+            await _cg._risk_repo.initialize()
+            logger.info("RiskConfigRepository initialized in lifespan")
+
+        if _cg._system_repo is None:
+            _cg._system_repo = SystemConfigRepository()
+            await _cg._system_repo.initialize()
+            logger.info("SystemConfigRepository initialized in lifespan")
+
+        if _cg._symbol_repo is None:
+            _cg._symbol_repo = SymbolConfigRepository()
+            await _cg._symbol_repo.initialize()
+            logger.info("SymbolConfigRepository initialized in lifespan")
+
+        if _cg._notification_repo is None:
+            _cg._notification_repo = NotificationConfigRepository()
+            await _cg._notification_repo.initialize()
+            logger.info("NotificationConfigRepository initialized in lifespan")
+
+        if _cg._history_repo is None:
+            _cg._history_repo = ConfigHistoryRepository()
+            await _cg._history_repo.initialize()
+            logger.info("ConfigHistoryRepository initialized in lifespan")
+
+        if _cg._snapshot_repo is None:
+            _cg._snapshot_repo = ConfigSnapshotRepositoryExtended()
+            await _cg._snapshot_repo.initialize()
+            logger.info("ConfigSnapshotRepositoryExtended initialized in lifespan")
+
         yield
 
     finally:
@@ -467,6 +517,30 @@ async def lifespan(app: FastAPI):
         if _audit_logger is not None:
             await _audit_logger.stop()
             logger.info("OrderAuditLogger stopped")
+
+        # Shutdown Config Repositories (独立 uvicorn 模式)
+        from src.interfaces import api_config_globals as _cg
+        if _cg._strategy_repo is not None:
+            await _cg._strategy_repo.close()
+            logger.info("StrategyConfigRepository closed in lifespan")
+        if _cg._risk_repo is not None:
+            await _cg._risk_repo.close()
+            logger.info("RiskConfigRepository closed in lifespan")
+        if _cg._system_repo is not None:
+            await _cg._system_repo.close()
+            logger.info("SystemConfigRepository closed in lifespan")
+        if _cg._symbol_repo is not None:
+            await _cg._symbol_repo.close()
+            logger.info("SymbolConfigRepository closed in lifespan")
+        if _cg._notification_repo is not None:
+            await _cg._notification_repo.close()
+            logger.info("NotificationConfigRepository closed in lifespan")
+        if _cg._history_repo is not None:
+            await _cg._history_repo.close()
+            logger.info("ConfigHistoryRepository closed in lifespan")
+        if _cg._snapshot_repo is not None:
+            await _cg._snapshot_repo.close()
+            logger.info("ConfigSnapshotRepositoryExtended closed in lifespan")
 
 
 # ============================================================
