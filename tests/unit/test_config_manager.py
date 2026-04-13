@@ -762,3 +762,105 @@ strategies:
 
         # Cleanup
         await manager._db.close()
+
+
+# ============================================================
+# Test ConfigManager Singleton (Backtest Data Loading Fixes)
+# ============================================================
+
+class TestConfigManagerSingleton:
+    """Tests for ConfigManager get_instance/set_instance class methods"""
+
+    @pytest.fixture
+    def temp_config_dir(self):
+        """Create temporary directory with test config files"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+
+            core_config = {
+                "core_symbols": ["BTC/USDT:USDT"],
+                "pinbar_defaults": {
+                    "min_wick_ratio": "0.6",
+                    "max_body_ratio": "0.3",
+                    "body_position_tolerance": "0.1",
+                },
+                "ema": {"period": 60},
+                "mtf_mapping": {"15m": "1h"},
+                "warmup": {"history_bars": 100},
+            }
+            with open(config_dir / "core.yaml", "w") as f:
+                yaml.dump(core_config, f)
+
+            user_config = {
+                "exchange": {
+                    "name": "binance",
+                    "api_key": "test_api_key",
+                    "api_secret": "test_api_secret",
+                    "testnet": True,
+                },
+                "user_symbols": ["ETH/USDT:USDT"],
+                "timeframes": ["15m", "1h"],
+                "strategy": {
+                    "trend_filter_enabled": True,
+                    "mtf_validation_enabled": True,
+                },
+                "risk": {
+                    "max_loss_percent": "0.01",
+                    "max_leverage": 10,
+                },
+                "asset_polling": {"interval_seconds": 60},
+                "notification": {
+                    "channels": [{
+                        "type": "feishu",
+                        "webhook_url": "https://test.feishu.cn/webhook",
+                    }],
+                },
+            }
+            with open(config_dir / "user.yaml", "w") as f:
+                yaml.dump(user_config, f)
+
+            yield config_dir
+
+    def test_singleton_get_set(self):
+        """Test basic singleton get/set lifecycle"""
+        # Initially None
+        assert ConfigManager.get_instance() is None
+
+        # Set an instance
+        cm = ConfigManager.__new__(ConfigManager)  # Create without __init__ to avoid DB init
+        ConfigManager.set_instance(cm)
+        assert ConfigManager.get_instance() is cm
+
+        # Clear it
+        ConfigManager.set_instance(None)
+        assert ConfigManager.get_instance() is None
+
+    def test_singleton_returns_same_instance(self, temp_config_dir):
+        """Test that set/get returns the exact same object reference"""
+        manager = ConfigManager(temp_config_dir)
+        manager.load_core_config()
+        manager.load_user_config()
+
+        ConfigManager.set_instance(manager)
+        retrieved = ConfigManager.get_instance()
+
+        assert retrieved is manager
+        assert retrieved.merged_symbols == manager.merged_symbols
+
+        # Cleanup
+        ConfigManager.set_instance(None)
+
+    def test_singleton_isolation_between_instances(self, temp_config_dir):
+        """Test that singleton tracks only one instance at a time"""
+        manager1 = ConfigManager(temp_config_dir)
+        manager2 = ConfigManager(temp_config_dir)
+
+        ConfigManager.set_instance(manager1)
+        assert ConfigManager.get_instance() is manager1
+
+        ConfigManager.set_instance(manager2)
+        assert ConfigManager.get_instance() is manager2
+        assert ConfigManager.get_instance() is not manager1
+
+        # Cleanup
+        ConfigManager.set_instance(None)

@@ -1454,3 +1454,197 @@ class TestWatchOrders:
             Decimal('1.0')
         )
         assert result == OrderStatus.FILLED
+
+
+# ============================================================
+# Test CCXT Pagination (Backtest Data Loading Fixes)
+# ============================================================
+
+class TestOhlcvPagination:
+    """Tests for P0 fix: fetch_historical_ohlcv supports since param and pagination when limit > 1000"""
+
+    @pytest.fixture
+    def mock_exchange_class(self):
+        """Create mock exchange class"""
+        mock_class = MagicMock()
+        mock_instance = AsyncMock()
+        mock_instance.fetch_ohlcv = AsyncMock()
+        mock_instance.load_markets = AsyncMock()
+        mock_instance.close = AsyncMock()
+        mock_instance.symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+        mock_class.return_value = mock_instance
+        return mock_class
+
+    @pytest.fixture
+    def gateway(self, mock_exchange_class):
+        """Create gateway with mocked exchange"""
+        with patch('src.infrastructure.exchange_gateway.ccxt_async') as mock_ccxt:
+            mock_ccxt.binance = mock_exchange_class
+            mock_ccxt.bybit = mock_exchange_class
+            mock_ccxt.okx = mock_exchange_class
+
+            gateway = ExchangeGateway(
+                exchange_name="binance",
+                api_key="test_key",
+                api_secret="test_secret",
+                testnet=True,
+            )
+            yield gateway
+
+    @pytest.mark.asyncio
+    async def test_pagination_with_since(self, gateway, mock_exchange_class):
+        """Test pagination: request limit=2500, verify 3 calls with advancing 'since' parameter"""
+        base_ts = 1704067200000
+        interval_ms = 3600000  # 1h candles
+
+        def make_candles(start, count):
+            return [
+                [start + i * interval_ms, 35000.0, 35500.0, 34800.0, 35200.0, 1000.0]
+                for i in range(count)
+            ]
+
+        call_count = [0]
+
+        async def mock_fetch_ohlcv(**kwargs):
+            call_count[0] += 1
+            since = kwargs.get('since')
+            if since is None:
+                since = base_ts
+            # Return 1000 candles per call
+            return make_candles(since, 1000)
+
+        gateway.rest_exchange.fetch_ohlcv = mock_fetch_ohlcv
+
+        result = await gateway.fetch_historical_ohlcv(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            limit=2500,
+        )
+
+        # Should return 2500 candles
+        assert len(result) == 2500
+
+        # Should have made 3 calls (1000 + 1000 + 500)
+        assert call_count[0] == 3
+
+        # Verify ascending order
+        for i in range(len(result) - 1):
+            assert result[i].timestamp <= result[i + 1].timestamp
+
+    @pytest.mark.asyncio
+    async def test_backward_compatible_single_call(self, gateway, mock_exchange_class):
+        """Test backward compatibility: limit=100 without since, verify single call with no 'since'"""
+        mock_data = [
+            [1700000000000, 35000.0, 35500.0, 34800.0, 35200.0, 1000.0],
+            [1700003600000, 35200.0, 35800.0, 35100.0, 35600.0, 1200.0],
+        ]
+        gateway.rest_exchange.fetch_ohlcv.return_value = mock_data
+
+        result = await gateway.fetch_historical_ohlcv(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            limit=100,
+        )
+
+        assert len(result) == 2
+
+        # Should be a single call without 'since' param (backward compatible path)
+        gateway.rest_exchange.fetch_ohlcv.assert_called_once()
+        call_kwargs = gateway.rest_exchange.fetch_ohlcv.call_args[1]
+        assert 'since' not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_pagination_with_since_param(self, gateway, mock_exchange_class):
+        """Test that since param triggers pagination even with small limit"""
+        base_ts = 1704067200000
+
+        def make_candles(start, count):
+            return [
+                [start + i * 3600000, 35000.0, 35500.0, 34800.0, 35200.0, 1000.0]
+                for i in range(count)
+            ]
+
+        call_count = [0]
+
+        async def mock_fetch_ohlcv(**kwargs):
+            call_count[0] += 1
+            # Return fewer than batch size to stop pagination
+            return make_candles(base_ts, 500)
+
+        gateway.rest_exchange.fetch_ohlcv = mock_fetch_ohlcv
+
+        result = await gateway.fetch_historical_ohlcv(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            limit=1000,
+            since=base_ts,
+        )
+
+        # Since is specified, should use pagination path
+        assert call_count[0] >= 1
+        assert len(result) == 500
+
+    @pytest.mark.asyncio
+    async def test_pagination_stops_on_partial_batch(self, gateway, mock_exchange_class):
+        """Test that pagination stops when a batch returns fewer than requested"""
+        base_ts = 1704067200000
+        interval_ms = 3600000
+
+        def make_candles(start, count):
+            return [
+                [start + i * interval_ms, 35000.0, 35500.0, 34800.0, 35200.0, 1000.0]
+                for i in range(count)
+            ]
+
+        call_count = [0]
+
+        async def mock_fetch_ohlcv(**kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return make_candles(base_ts, 1000)  # Full batch
+            elif call_count[0] == 2:
+                return make_candles(base_ts + 1000 * interval_ms, 300)  # Partial batch
+            return []
+
+        gateway.rest_exchange.fetch_ohlcv = mock_fetch_ohlcv
+
+        result = await gateway.fetch_historical_ohlcv(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            limit=5000,
+        )
+
+        # Should have made 2 calls (full + partial)
+        assert call_count[0] == 2
+        assert len(result) == 1300
+
+    @pytest.mark.asyncio
+    async def test_pagination_stops_on_empty_response(self, gateway, mock_exchange_class):
+        """Test that pagination stops when response is empty"""
+        base_ts = 1704067200000
+        interval_ms = 3600000
+
+        def make_candles(start, count):
+            return [
+                [start + i * interval_ms, 35000.0, 35500.0, 34800.0, 35200.0, 1000.0]
+                for i in range(count)
+            ]
+
+        call_count = [0]
+
+        async def mock_fetch_ohlcv(**kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return make_candles(base_ts, 1000)
+            return []  # Empty response stops pagination
+
+        gateway.rest_exchange.fetch_ohlcv = mock_fetch_ohlcv
+
+        result = await gateway.fetch_historical_ohlcv(
+            symbol="BTC/USDT:USDT",
+            timeframe="1h",
+            limit=10000,
+        )
+
+        assert call_count[0] == 2
+        assert len(result) == 1000

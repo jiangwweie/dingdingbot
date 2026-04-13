@@ -232,11 +232,18 @@ class ExchangeGateway:
     # ============================================================
     # REST API - Historical Data Warmup
     # ============================================================
+
+    # Timeframe to minutes mapping for pagination cursor advancement
+    TIMEFRAME_MAP: Dict[str, int] = {
+        "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080
+    }
+
     async def fetch_historical_ohlcv(
         self,
         symbol: str,
         timeframe: str,
         limit: int = 100,
+        since: Optional[int] = None,
     ) -> List[KlineData]:
         """
         Fetch historical K-line data via REST API.
@@ -245,21 +252,58 @@ class ExchangeGateway:
             symbol: Trading symbol (e.g., "BTC/USDT:USDT")
             timeframe: Timeframe (e.g., "1h", "4h")
             limit: Number of candles to fetch (default: 100)
+            since: Start timestamp in milliseconds (default: None, fetches latest)
 
         Returns:
             List of KlineData objects
         """
         try:
-            # Fetch OHLCV data
-            ohlcv_data = await self.rest_exchange.fetch_ohlcv(
-                symbol=symbol,
-                timeframe=timeframe,
-                limit=limit,
-            )
+            if limit <= 1000 and since is None:
+                # Original single-call behavior (backward compatible)
+                ohlcv_data = await self.rest_exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=limit,
+                )
+                result = []
+                for candle in ohlcv_data:
+                    kline = self._parse_ohlcv(candle, symbol, timeframe)
+                    if kline:
+                        result.append(kline)
 
-            # Convert to KlineData models
+                logger.debug(f"Fetched {len(result)} historical bars for {symbol} {timeframe}")
+                return result
+
+            # Pagination mode: limit > 1000 or since is specified
+            batch = min(limit, 1000)
+            current_since = since
+            all_candles: List = []
+
+            while True:
+                ohlcv_data = await self.rest_exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=batch,
+                    since=current_since,
+                )
+
+                if not ohlcv_data:
+                    break
+
+                all_candles.extend(ohlcv_data)
+
+                if len(ohlcv_data) < batch:
+                    break
+
+                if len(all_candles) >= limit:
+                    break
+
+                last_ts = ohlcv_data[-1][0]
+                minutes = self.TIMEFRAME_MAP.get(timeframe, 60)
+                current_since = last_ts + minutes * 60 * 1000
+
             result = []
-            for candle in ohlcv_data:
+            for candle in all_candles[:limit]:
                 kline = self._parse_ohlcv(candle, symbol, timeframe)
                 if kline:
                     result.append(kline)

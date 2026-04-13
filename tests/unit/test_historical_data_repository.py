@@ -14,6 +14,7 @@ import pytest
 from decimal import Decimal
 import asyncio
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.infrastructure.historical_data_repository import HistoricalDataRepository
@@ -655,3 +656,113 @@ class TestEdgeCases:
             assert original.close == saved.close
             assert original.volume == saved.volume
             assert original.is_closed == saved.is_closed
+
+
+# ============================================================
+# Test Backtest Data Loading Fixes
+# ============================================================
+
+class TestDBPathResolution:
+    """Tests for P0 fix: db_path defaults to absolute path computed from __file__"""
+
+    def test_default_db_path_is_absolute(self, mock_exchange_gateway):
+        """Test that default db_path resolves to an absolute path"""
+        repo = HistoricalDataRepository(
+            db_path=None,
+            exchange_gateway=mock_exchange_gateway,
+        )
+        assert Path(repo.db_path).is_absolute(), f"db_path should be absolute, got: {repo.db_path}"
+
+    def test_default_db_path_uses_project_data_dir(self, mock_exchange_gateway):
+        """Test that default db_path points to project_root/data/v3_dev.db"""
+        repo = HistoricalDataRepository(
+            db_path=None,
+            exchange_gateway=mock_exchange_gateway,
+        )
+        # The path should end with data/v3_dev.db
+        assert "data" in repo.db_path
+        assert "v3_dev.db" in repo.db_path
+
+    def test_explicit_db_path_respected(self, tmp_path, mock_exchange_gateway):
+        """Test that explicit db_path is used as-is"""
+        custom_path = str(tmp_path / "custom.db")
+        repo = HistoricalDataRepository(
+            db_path=custom_path,
+            exchange_gateway=mock_exchange_gateway,
+        )
+        assert repo.db_path == custom_path
+
+
+class TestQueryReturnsLatestN:
+    """Tests for P0 fix: _query_klines_from_db returns latest N, then reverses to ascending"""
+
+    async def test_query_returns_latest_n_ascending(self, data_repository):
+        """Test that querying with limit=N returns the N most recent klines in ascending order"""
+        # Insert 10 klines with different timestamps
+        klines = []
+        base_ts = 1704067200000
+        for i in range(10):
+            klines.append(KlineData(
+                symbol="BTC/USDT:USDT",
+                timeframe="15m",
+                timestamp=base_ts + i * 900000,  # 15min apart
+                open=Decimal("42000.00"),
+                high=Decimal("42500.00"),
+                low=Decimal("41800.00"),
+                close=Decimal("42300.00"),
+                volume=Decimal("1000.0"),
+                is_closed=True,
+            ))
+        await data_repository._save_klines(klines)
+        await asyncio.sleep(0.01)
+
+        # Query with limit=5
+        result = await data_repository.get_klines(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            limit=5,
+        )
+
+        # Should return exactly 5 klines
+        assert len(result) == 5
+
+        # Should be the 5 most recent (last 5 of the 10)
+        expected_start_ts = base_ts + 5 * 900000  # 6th kline timestamp
+        assert result[0].timestamp == expected_start_ts
+        assert result[-1].timestamp == base_ts + 9 * 900000  # Last kline
+
+        # Should be in ascending order
+        for i in range(len(result) - 1):
+            assert result[i].timestamp < result[i + 1].timestamp
+
+    async def test_query_all_data_ascending(self, data_repository):
+        """Test that querying with limit>=available returns all data in ascending order"""
+        # Insert 3 klines
+        klines = [
+            KlineData(
+                symbol="ETH/USDT:USDT",
+                timeframe="1h",
+                timestamp=1704067200000 + i * 3600000,
+                open=Decimal("2200.00"),
+                high=Decimal("2250.00"),
+                low=Decimal("2180.00"),
+                close=Decimal("2230.00"),
+                volume=Decimal("5000.0"),
+                is_closed=True,
+            )
+            for i in range(3)
+        ]
+        await data_repository._save_klines(klines)
+        await asyncio.sleep(0.01)
+
+        # Query with limit=3 (exact match to avoid exchange fallback)
+        result = await data_repository.get_klines(
+            symbol="ETH/USDT:USDT",
+            timeframe="1h",
+            limit=3,
+        )
+
+        assert len(result) == 3
+        # Ascending order
+        assert result[0].timestamp < result[1].timestamp < result[2].timestamp
+

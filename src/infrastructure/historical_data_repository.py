@@ -68,16 +68,19 @@ class HistoricalDataRepository:
 
     def __init__(
         self,
-        db_path: str = "data/v3_dev.db",
+        db_path: Optional[str] = None,
         exchange_gateway: Optional[ExchangeGateway] = None,
     ):
         """
         初始化数据仓库
 
         Args:
-            db_path: SQLite 数据库路径
+            db_path: SQLite 数据库路径（默认使用项目根目录下 data/v3_dev.db 的绝对路径）
             exchange_gateway: 交易所网关（用于数据补充）
         """
+        if db_path is None:
+            project_root = Path(__file__).parent.parent.parent
+            db_path = str(project_root / "data" / "v3_dev.db")
         self.db_path = db_path
         self._gateway = exchange_gateway
 
@@ -244,14 +247,14 @@ class HistoricalDataRepository:
         if end_time:
             conditions.append(KlineORM.timestamp <= end_time)
 
-        # 执行查询
-        query = select(KlineORM).where(*conditions).order_by(KlineORM.timestamp.asc()).limit(limit)
+        # 执行查询（先取最新 N 条，再反转为时间升序）
+        query = select(KlineORM).where(*conditions).order_by(KlineORM.timestamp.desc()).limit(limit)
 
         result = await session.execute(query)
         orm_records = result.scalars().all()
-
-        # 转换为领域模型
-        return [self._orm_to_domain(orm) for orm in orm_records]
+        klines = [self._orm_to_domain(orm) for orm in orm_records]
+        klines.reverse()  # Reverse to time-ascending order for consumer code
+        return klines
 
     async def _fetch_from_exchange(
         self,
@@ -283,6 +286,7 @@ class HistoricalDataRepository:
             symbol=symbol,
             timeframe=timeframe,
             limit=limit,
+            since=start_time,
         )
 
         # 按时间范围过滤

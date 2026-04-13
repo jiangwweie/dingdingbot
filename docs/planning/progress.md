@@ -1,11 +1,15 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-13 aiosqlite executescript() 修复
+> **最后更新**: 2026-04-13 回测数据加载修复
 
 ### 收工状态
 
 **今日完成工作** (2026-04-13):
+
+**第九轮：回测数据加载修复（进行中）**
+- 根因链：后端 CWD = web-front/ → HistoricalDataRepository("data/v3_dev.db") 打开 web-front/data/v3_dev.db (空库) → fallback 到 CCXT → CCXT 无 since 参数返回"最近的 1000 条" → 时间范围过滤全部清除 → 0 条数据
+- 修复：DB 绝对路径 + CCXT 分页 + SQL ORDER BY DESC + Gateway 清理 + ConfigManager 单例
 
 **第八轮：aiosqlite executescript() 修复 + 策略数据恢复**
 - 根因：`ConfigManager._create_tables()` 使用 `aiosqlite.executescript()` 执行建表 SQL，该方法绕过 async 连接队列并执行隐式 COMMIT，破坏 WAL 模式事务状态，导致后续查询无法看到已提交的 strategies 数据

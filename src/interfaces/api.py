@@ -31,7 +31,7 @@ Endpoints:
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, Callable, Any, List, Dict, Annotated, Literal
+from typing import Optional, Callable, Any, List, Dict, Annotated, Literal, Tuple
 import logging
 
 from fastapi import FastAPI, Query, HTTPException, Body, File, UploadFile, Form, Response
@@ -49,7 +49,7 @@ from src.domain.exceptions import (
 
 from src.infrastructure.signal_repository import SignalRepository
 from src.infrastructure.order_repository import OrderRepository
-from src.application.config_manager import UserConfig
+from src.application.config_manager import UserConfig, ConfigManager
 from src.domain.models import (
     SignalQuery, SignalDeleteRequest, SignalDeleteResponse,
     AttemptQuery, AttemptDeleteRequest, AttemptDeleteResponse,
@@ -294,6 +294,7 @@ def set_dependencies(
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
+    ConfigManager.set_instance(config_manager)
     _exchange_gateway = exchange_gateway
     _signal_tracker = signal_tracker
     _snapshot_service = snapshot_service
@@ -333,10 +334,14 @@ def _get_exchange_gateway() -> Any:
     return _exchange_gateway
 
 
-async def _get_backtest_gateway() -> Any:
-    """Get exchange gateway, or create temporary one for standalone uvicorn backtest."""
+async def _get_backtest_gateway() -> Tuple[Any, bool]:
+    """Get exchange gateway, or create temporary one for standalone uvicorn backtest.
+
+    Returns:
+        Tuple of (gateway, is_temporary). is_temporary is True if caller must close it.
+    """
     if _exchange_gateway is not None:
-        return _exchange_gateway
+        return _exchange_gateway, False
 
     # Standalone uvicorn: create temporary gateway from DB config
     from src.infrastructure.exchange_gateway import ExchangeGateway
@@ -353,7 +358,7 @@ async def _get_backtest_gateway() -> Any:
     )
     await gateway.initialize()
     logger.info(f"Temporary anonymous ExchangeGateway created for backtest: {exchange_cfg.name}")
-    return gateway
+    return gateway, True
 
 
 def _get_signal_tracker() -> Any:
@@ -1500,7 +1505,7 @@ async def run_signal_backtest(
         if request.mode != "v2_classic":
             logger.warning(f"Signal backtest called with mode={request.mode}, forcing v2_classic")
 
-        gateway = await _get_backtest_gateway()
+        gateway, gateway_is_temp = await _get_backtest_gateway()
 
         # Initialize historical data repository for local-first data access
         data_repo = HistoricalDataRepository()
@@ -1540,6 +1545,9 @@ async def run_signal_backtest(
                 "report": report.model_dump(),
             }
         finally:
+            if gateway_is_temp:
+                await gateway.close()
+                logger.info("Temporary backtest gateway closed")
             await backtest_repository.close()
             await order_repository.close()
             await data_repo.close()
@@ -1602,7 +1610,7 @@ async def run_pms_backtest(
         if request.mode != "v3_pms":
             logger.warning(f"PMS backtest called with mode={request.mode}, forcing v3_pms")
 
-        gateway = await _get_backtest_gateway()
+        gateway, gateway_is_temp = await _get_backtest_gateway()
 
         # Initialize historical data repository for local-first data access
         data_repo = HistoricalDataRepository()
@@ -1636,6 +1644,9 @@ async def run_pms_backtest(
                 "report": report.model_dump(),
             }
         finally:
+            if gateway_is_temp:
+                await gateway.close()
+                logger.info("Temporary backtest gateway closed")
             await backtest_repository.close()
             await order_repository.close()
             await data_repo.close()
@@ -1848,7 +1859,7 @@ async def run_backtest_deprecated(
         from src.infrastructure.historical_data_repository import HistoricalDataRepository
         from src.infrastructure.order_repository import OrderRepository
 
-        gateway = await _get_backtest_gateway()
+        gateway, gateway_is_temp = await _get_backtest_gateway()
 
         # Initialize historical data repository for local-first data access
         data_repo = HistoricalDataRepository()
@@ -1885,6 +1896,9 @@ async def run_backtest_deprecated(
                 "report": report.model_dump(),
             }
         finally:
+            if gateway_is_temp:
+                await gateway.close()
+                logger.info("Temporary backtest gateway closed")
             await backtest_repository.close()
             await order_repository.close()
             await data_repo.close()

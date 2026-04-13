@@ -227,6 +227,19 @@ class ConfigManager:
         await config_manager.update_risk_config(new_risk_config)
     """
 
+    # Class-level singleton for cross-module access (e.g. backtester)
+    _instance: Optional["ConfigManager"] = None
+
+    @classmethod
+    def get_instance(cls) -> Optional["ConfigManager"]:
+        """Get the global ConfigManager instance (set via set_instance)."""
+        return cls._instance
+
+    @classmethod
+    def set_instance(cls, instance: "ConfigManager") -> None:
+        """Set the global ConfigManager instance."""
+        cls._instance = instance
+
     def __init__(
         self,
         db_path: Optional[str] = None,
