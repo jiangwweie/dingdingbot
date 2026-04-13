@@ -107,6 +107,32 @@ export interface RiskConfig {
 }
 
 // ============================================================
+// Risk Config Form Types (前端表单专用)
+// ============================================================
+
+/** 风控配置表单值（前端展示用，格式化后） */
+export interface RiskConfigFormValues {
+  max_loss_percent: number;      // 显示为百分比数值（如 1 表示 1%）
+  max_leverage: number;
+  max_total_exposure: number;
+  daily_max_trades?: number;
+  daily_max_loss?: number;
+  max_position_hold_time?: number;
+  cooldown_minutes: number;
+}
+
+/** 风控配置更新请求（对齐后端 RiskConfigUpdateRequest） */
+export interface RiskConfigUpdateRequest {
+  max_loss_percent?: number;
+  max_leverage?: number;
+  max_total_exposure?: number;
+  daily_max_trades?: number;
+  daily_max_loss?: number;
+  max_position_hold_time?: number;
+  cooldown_minutes?: number;
+}
+
+// ============================================================
 // System Config Types
 // ============================================================
 

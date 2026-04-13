@@ -33,9 +33,10 @@ import {
   SaveOutlined,
   WarningOutlined,
   FileTextOutlined,
+  SafetyOutlined,
 } from '@ant-design/icons';
 import { cn } from '../../lib/utils';
-import { configApi, type SystemConfigResponse, type SystemConfigUpdateRequest } from '../../api/config';
+import { configApi, type SystemConfigResponse, type SystemConfigUpdateRequest, type RiskConfigFormValues, type RiskConfigUpdateRequest } from '../../api/config';
 
 // ============================================================
 // Type Definitions
@@ -87,6 +88,16 @@ const DEFAULT_CONFIG: SystemConfigFormValues = {
   atr_filter_enabled: true,
   atr_period: 14,
   atr_min_ratio: 0.5,
+};
+
+const DEFAULT_RISK_CONFIG: RiskConfigFormValues = {
+  max_loss_percent: 1,
+  max_leverage: 10,
+  max_total_exposure: 0.8,
+  daily_max_trades: undefined,
+  daily_max_loss: undefined,
+  max_position_hold_time: undefined,
+  cooldown_minutes: 30,
 };
 
 // ============================================================
@@ -314,6 +325,7 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
   const isTab = variant === 'tab';
   const navigate = useNavigate();
   const [form] = Form.useForm();
+  const [riskForm] = Form.useForm();
 
   // 状态
   const [loading, setLoading] = useState(false);
@@ -322,18 +334,29 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
   const [error, setError] = useState<string | null>(null);
   const [config, setConfig] = useState<SystemConfigFormValues | null>(null);
 
+  // 风控配置状态
+  const [riskLoading, setRiskLoading] = useState(false);
+  const [riskSaving, setRiskSaving] = useState(false);
+  const [riskError, setRiskError] = useState<string | null>(null);
+
   // 折叠面板展开状态
   const [activeKey, setActiveKey] = useState<string[]>([]);
+  const [riskActiveKey, setRiskActiveKey] = useState<string[]>([]);
 
-  // 加载系统配置
+  // 并行加载系统配置和风控配置
   const loadConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const response = await configApi.getSystemConfig();
-      const data = response.data;
+    setRiskError(null);
 
-      // 转换后端数据格式为前端表单格式
+    const [sysResult, riskResult] = await Promise.allSettled([
+      configApi.getSystemConfig(),
+      configApi.getRiskConfig(),
+    ]);
+
+    // 系统配置处理
+    if (sysResult.status === 'fulfilled') {
+      const data = sysResult.value.data;
       const sysConfig: SystemConfigFormValues = {
         queue_batch_size: data.signal_pipeline?.queue?.batch_size || DEFAULT_CONFIG.queue_batch_size,
         queue_flush_interval: data.signal_pipeline?.queue?.flush_interval || DEFAULT_CONFIG.queue_flush_interval,
@@ -346,18 +369,35 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
         atr_period: data.atr_period || DEFAULT_CONFIG.atr_period,
         atr_min_ratio: data.atr_min_ratio || DEFAULT_CONFIG.atr_min_ratio,
       };
-
       setConfig(sysConfig);
       form.setFieldsValue(sysConfig);
-    } catch (err: any) {
-      console.error('加载系统配置失败:', err);
-      const errorMsg = err.response?.data?.detail || err.message || '加载失败';
+    } else {
+      const errorMsg = sysResult.reason.response?.data?.detail || sysResult.reason.message || '加载失败';
       setError(errorMsg);
       message.error('加载系统配置失败：' + errorMsg);
-    } finally {
-      setLoading(false);
     }
-  }, [form]);
+
+    // 风控配置处理
+    if (riskResult.status === 'fulfilled') {
+      const data = riskResult.value.data;
+      const riskFormValues: RiskConfigFormValues = {
+        max_loss_percent: Number((data.max_loss_percent * 100).toFixed(2)), // 0.01 -> 1
+        max_leverage: data.max_leverage,
+        max_total_exposure: Number(data.max_total_exposure || 0.8),
+        daily_max_trades: data.daily_max_trades || undefined,
+        daily_max_loss: data.daily_max_loss ? Number(data.daily_max_loss) : undefined,
+        max_position_hold_time: data.max_position_hold_time || undefined,
+        cooldown_minutes: data.cooldown_minutes,
+      };
+      riskForm.setFieldsValue(riskFormValues);
+    } else {
+      const errorMsg = riskResult.reason.response?.data?.detail || riskResult.reason.message || '加载失败';
+      setRiskError(errorMsg);
+      message.error('加载风控配置失败：' + errorMsg);
+    }
+
+    setLoading(false);
+  }, [form, riskForm]);
 
   useEffect(() => {
     loadConfig();
@@ -413,6 +453,37 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
     if (config) {
       form.setFieldsValue(config);
     }
+  };
+
+  // 处理风控配置提交
+  const handleRiskSubmit = async (values: RiskConfigFormValues) => {
+    setRiskSaving(true);
+    try {
+      const payload: RiskConfigUpdateRequest = {
+        max_loss_percent: values.max_loss_percent / 100, // 1 -> 0.01
+        max_leverage: values.max_leverage,
+        max_total_exposure: values.max_total_exposure,
+        cooldown_minutes: values.cooldown_minutes,
+      };
+
+      if (values.daily_max_trades) payload.daily_max_trades = values.daily_max_trades;
+      if (values.daily_max_loss) payload.daily_max_loss = values.daily_max_loss;
+      if (values.max_position_hold_time) payload.max_position_hold_time = values.max_position_hold_time;
+
+      await configApi.updateRiskConfig(payload);
+      message.success('风控配置已保存，立即生效');
+    } catch (err: any) {
+      console.error('保存风控配置失败:', err);
+      const errorMsg = err.response?.data?.detail || err.message || '保存失败';
+      message.error('保存风控配置失败：' + errorMsg);
+    } finally {
+      setRiskSaving(false);
+    }
+  };
+
+  // 处理风控配置重置
+  const handleRiskReset = () => {
+    riskForm.resetFields();
   };
 
   // 处理重启
@@ -498,6 +569,22 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
         />
       )}
 
+      {/* 风控配置错误提示 */}
+      {riskError && (
+        <Alert
+          type="warning"
+          showIcon
+          message="风控配置加载失败"
+          description={riskError}
+          action={
+            <Button type="primary" size="small" onClick={loadConfig}>
+              重新加载
+            </Button>
+          }
+          className="mb-4"
+        />
+      )}
+
       {isTab ? (
         /* Tab 模式：仅显示表单，无右侧面板 */
         <SystemConfigForm
@@ -512,7 +599,7 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
       ) : (
         /* Page 模式：左侧表单 + 右侧快捷入口 */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 左侧：系统配置表单 */}
+          {/* 左侧：系统配置表单 + 风控配置 */}
           <div className="lg:col-span-2">
             <SystemConfigForm
               form={form}
@@ -523,6 +610,161 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
               activeKey={activeKey}
               onActiveKeyChange={setActiveKey}
             />
+
+            {/* 风控配置 */}
+            <Form
+              form={riskForm}
+              layout="vertical"
+              onFinish={handleRiskSubmit}
+              initialValues={DEFAULT_RISK_CONFIG}
+              size="large"
+            >
+              <Card
+                title={
+                  <div className="flex items-center gap-2">
+                    <SafetyOutlined className="text-blue-500" />
+                    <span>风控配置</span>
+                    <span className="text-xs text-gray-400 font-normal ml-2">
+                      (修改后立即生效)
+                    </span>
+                  </div>
+                }
+                className="mb-4 border-blue-200 bg-blue-50/30"
+              >
+                <Collapse
+                  bordered={false}
+                  activeKey={riskActiveKey}
+                  onChange={(keys) => setRiskActiveKey(keys as string[])}
+                  expandIconPosition="right"
+                  className="bg-transparent"
+                >
+                  <Collapse.Panel header="点击展开高级配置" key="advanced">
+                    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                      <Divider orientation="left" className="my-2">
+                        仓位风控
+                      </Divider>
+
+                      <Form.Item
+                        name="max_loss_percent"
+                        label="单笔最大损失 (%)"
+                        rules={[{ required: true, type: 'number', min: 0.1, max: 10 }]}
+                        tooltip="每笔交易的最大损失占账户余额的百分比"
+                        extra="例如 1% 表示单笔交易最多亏损账户余额的 1%"
+                      >
+                        <InputNumber
+                          min={0.1}
+                          max={10}
+                          step={0.1}
+                          formatter={(value) => `${value}%`}
+                          parser={(value) => Number(value?.replace('%', ''))}
+                          className="w-full"
+                          disabled={riskSaving}
+                        />
+                      </Form.Item>
+
+                      <Form.Item
+                        name="max_leverage"
+                        label="最大杠杆倍数"
+                        rules={[{ required: true, type: 'number', min: 1, max: 125 }]}
+                        tooltip="允许使用的最大杠杆倍数"
+                        extra="较高的杠杆会增加风险，建议根据交易风格谨慎设置"
+                      >
+                        <InputNumber min={1} max={125} className="w-full" disabled={riskSaving} />
+                      </Form.Item>
+
+                      <Form.Item
+                        name="max_total_exposure"
+                        label="最大总暴露 (倍)"
+                        rules={[{ required: true, type: 'number', min: 0.1, max: 10 }]}
+                        tooltip="所有持仓的总暴露占账户余额的倍数"
+                        extra="例如 0.8 表示总持仓不超过账户余额的 80%"
+                      >
+                        <InputNumber min={0.1} max={10} step={0.1} className="w-full" disabled={riskSaving} />
+                      </Form.Item>
+
+                      <Divider orientation="left" className="my-2">
+                        日频风控
+                      </Divider>
+
+                      <Form.Item
+                        name="daily_max_trades"
+                        label="每日最大交易次数"
+                        tooltip="每日允许的最大交易次数（可选，留空表示不限制）"
+                      >
+                        <InputNumber min={1} className="w-full" disabled={riskSaving} />
+                      </Form.Item>
+
+                      <Form.Item
+                        name="daily_max_loss"
+                        label="每日最大损失 (%)"
+                        tooltip="每日最大损失占账户余额的百分比（可选）"
+                      >
+                        <InputNumber
+                          min={0.1}
+                          max={50}
+                          step={0.5}
+                          formatter={(value) => `${value}%`}
+                          parser={(value) => Number(value?.replace('%', ''))}
+                          className="w-full"
+                          disabled={riskSaving}
+                        />
+                      </Form.Item>
+
+                      <Divider orientation="left" className="my-2">
+                        时间与冷却
+                      </Divider>
+
+                      <Form.Item
+                        name="max_position_hold_time"
+                        label="最大持仓时间 (分钟)"
+                        tooltip="单笔交易的最大持仓时间（可选）"
+                      >
+                        <InputNumber min={1} className="w-full" disabled={riskSaving} />
+                      </Form.Item>
+
+                      <Form.Item
+                        name="cooldown_minutes"
+                        label="冷却时间 (分钟)"
+                        rules={[{ required: true, type: 'number', min: 5, max: 1440 }]}
+                        tooltip="交易失败后的冷却时间"
+                      >
+                        <InputNumber
+                          min={5}
+                          max={1440}
+                          step={5}
+                          formatter={(value) => `${value} 分钟`}
+                          parser={(value) => Number(value?.replace('分钟', ''))}
+                          className="w-full"
+                          disabled={riskSaving}
+                        />
+                      </Form.Item>
+                    </Space>
+                  </Collapse.Panel>
+                </Collapse>
+
+                {/* 风控配置操作按钮 */}
+                <Form.Item className="mt-6">
+                  <Space>
+                    <Button
+                      type="primary"
+                      onClick={() => riskForm.submit()}
+                      loading={riskSaving}
+                      icon={<SaveOutlined />}
+                      size="large"
+                    >
+                      保存风控配置
+                    </Button>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      onClick={handleRiskReset}
+                      size="large"
+                    >
+                      重置
+                    </Button>
+                  </Space>
+                </Form.Item>
+              </Card>
+            </Form>
           </div>
 
           {/* 右侧：快捷入口 */}
