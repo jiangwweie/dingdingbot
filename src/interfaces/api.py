@@ -2897,7 +2897,7 @@ class StrategyApplyResponse(BaseModel):
     """Response model for strategy apply endpoint."""
     status: str = Field(..., description="Status of the apply operation")
     message: str = Field(..., description="Human-readable result message")
-    strategy_id: int = Field(..., description="Applied strategy template ID")
+    strategy_id: str = Field(..., description="Applied strategy template ID")
     strategy_name: str = Field(..., description="Applied strategy name")
 
 
@@ -3215,7 +3215,7 @@ async def preview_strategy(request: StrategyPreviewRequest):
 # S2-1: Strategy Apply Endpoint (一键下发实盘)
 # ============================================================
 @app.post("/api/strategies/{strategy_id}/apply", response_model=StrategyApplyResponse)
-async def apply_strategy(strategy_id: int, request: StrategyApplyRequest = None):
+async def apply_strategy(strategy_id: str, request: StrategyApplyRequest = None):
     """
     Apply a custom strategy template to live trading.
 
