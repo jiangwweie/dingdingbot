@@ -175,18 +175,21 @@ export const StrategyEditorDrawer: React.FC<StrategyEditorDrawerProps> = ({
   const handleValuesChange = useCallback(() => {
     setHasUnsavedChanges(true);
 
-    // 清除之前的定时器
-    if (autoSaveTimer) {
-      clearTimeout(autoSaveTimer);
+    // 仅编辑模式自动保存，创建模式需手动点击"保存"
+    if (strategy) {
+      // 清除之前的定时器
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+      }
+
+      // 设置新的自动保存定时器（1 秒防抖）
+      const timer = setTimeout(() => {
+        handleSubmit();
+      }, 1000);
+
+      setAutoSaveTimer(timer);
     }
-
-    // 设置新的自动保存定时器（1 秒防抖）
-    const timer = setTimeout(() => {
-      handleSubmit();
-    }, 1000);
-
-    setAutoSaveTimer(timer);
-  }, [autoSaveTimer]);
+  }, [autoSaveTimer, strategy]);
 
   // 清理定时器
   useEffect(() => {

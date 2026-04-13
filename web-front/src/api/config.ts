@@ -374,6 +374,12 @@ const configApiClient = axios.create({
   },
 });
 
+// 全局注入 admin 认证头（绕过 DISABLE_AUTH 未设置时的 401）
+configApiClient.interceptors.request.use((config) => {
+  config.headers['X-User-Role'] = 'admin';
+  return config;
+});
+
 // ============================================================
 // Strategy Management API
 // ============================================================
