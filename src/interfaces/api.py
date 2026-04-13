@@ -3245,19 +3245,28 @@ async def apply_strategy(strategy_id: str, request: StrategyApplyRequest = None)
 
         # Get config manager
         config_manager = _get_config_manager()
-        repo = _get_repository()
 
-        # Step 1: Load strategy template from database
-        strategy_record = await repo.get_custom_strategy_by_id(strategy_id)
+        # Step 1: Load strategy from new strategies table (StrategyConfigRepository)
+        strategy_record = await _config_globals._strategy_repo.get_by_id(strategy_id)
         if strategy_record is None:
-            raise HTTPException(status_code=404, detail="Strategy template not found")
+            raise HTTPException(status_code=404, detail="Strategy not found")
 
-        # Step 2: Parse and validate strategy definition
+        # Step 2: Build StrategyDefinition from new repo format
         import json
         from src.domain.models import StrategyDefinition
 
         try:
-            strategy_def = StrategyDefinition(**json.loads(strategy_record["strategy_json"]))
+            strategy_def = StrategyDefinition(
+                id=strategy_record["id"],
+                name=strategy_record["name"],
+                trigger_config=strategy_record["trigger_config"],
+                filters=strategy_record["filter_configs"] or [],
+                filter_logic=strategy_record["filter_logic"] or "AND",
+                symbols=strategy_record["symbols"] or [],
+                timeframes=strategy_record["timeframes"] or [],
+                is_global=True,
+                apply_to=[],
+            )
         except Exception as validation_error:
             raise HTTPException(
                 status_code=400,
