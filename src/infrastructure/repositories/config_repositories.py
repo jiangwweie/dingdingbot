@@ -573,6 +573,12 @@ class SystemConfigRepository:
             )
         """)
 
+        # Migration: add missing columns for existing databases
+        try:
+            await self._db.execute("ALTER TABLE system_configs ADD COLUMN restart_required BOOLEAN DEFAULT FALSE")
+        except Exception:
+            pass
+
         await self._db.commit()
 
     async def close(self) -> None:
