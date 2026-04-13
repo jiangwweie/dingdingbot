@@ -325,6 +325,7 @@ interface RiskConfigSectionProps {
   form: any;
   saving: boolean;
   onReset: () => void;
+  onSubmit: (values: RiskConfigFormValues) => void;
   activeKey: string[];
   onActiveKeyChange: (keys: string[]) => void;
   isTab: boolean;
@@ -334,6 +335,7 @@ function RiskConfigSection({
   form,
   saving,
   onReset,
+  onSubmit,
   activeKey,
   onActiveKeyChange,
   isTab,
@@ -342,9 +344,7 @@ function RiskConfigSection({
     <Form
       form={form}
       layout="vertical"
-      onFinish={(values) => {
-        // Parent handles submission via riskForm.submit()
-      }}
+      onFinish={onSubmit}
       initialValues={DEFAULT_RISK_CONFIG}
       size={isTab ? 'middle' : 'large'}
     >
@@ -783,6 +783,7 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
             form={riskForm}
             saving={riskSaving}
             onReset={handleRiskReset}
+            onSubmit={handleRiskSubmit}
             activeKey={riskActiveKey}
             onActiveKeyChange={setRiskActiveKey}
             isTab={true}
@@ -808,6 +809,7 @@ const SystemSettingsPage: React.FC<SystemSettingsProps> = ({ variant = 'page' })
               form={riskForm}
               saving={riskSaving}
               onReset={handleRiskReset}
+              onSubmit={handleRiskSubmit}
               activeKey={riskActiveKey}
               onActiveKeyChange={setRiskActiveKey}
               isTab={false}
