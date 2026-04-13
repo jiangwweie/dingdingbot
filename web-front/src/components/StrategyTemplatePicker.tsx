@@ -4,9 +4,9 @@ import { cn } from '../lib/utils';
 import { StrategyDefinition } from '../lib/api';
 
 interface StrategyTemplate {
-  id: number;
+  id: string;
   name: string;
-  description: string | null;
+  description?: string | null;
 }
 
 interface StrategyTemplatePickerProps {
@@ -39,7 +39,7 @@ export default function StrategyTemplatePicker({
       // Convert template to StrategyDefinition
       // The parent component will fetch full details and convert
       onSelect({
-        id: selectedTemplate.id.toString(),
+        id: selectedTemplate.id,
         name: selectedTemplate.name,
         trigger: {
           id: 'temp',

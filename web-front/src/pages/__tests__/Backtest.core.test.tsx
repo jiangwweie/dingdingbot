@@ -12,7 +12,6 @@ import Backtest from '../Backtest';
 // Mock API
 vi.mock('../../lib/api', () => ({
   runSignalBacktest: vi.fn(),
-  fetchStrategyTemplates: vi.fn(),
   fetchBacktestSignals: vi.fn(),
 }));
 

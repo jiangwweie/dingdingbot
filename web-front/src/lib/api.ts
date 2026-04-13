@@ -597,23 +597,6 @@ export interface BacktestSignalLog {
 }
 
 /**
- * Fetch strategy templates list for backtest sandbox
- */
-export async function fetchStrategyTemplates(): Promise<{ id: number; name: string; description: string | null }[]> {
-  const res = await fetch('/api/strategies/templates', {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to fetch strategy templates');
-    (error as any).status = res.status;
-    throw error;
-  }
-  const data = await res.json();
-  return data.templates || [];
-}
-
-/**
  * Fetch current system configuration
  */
 export async function fetchSystemConfig(): Promise<SystemConfig> {
@@ -1593,90 +1576,6 @@ export async function importStrategyParams(file: File, description?: string): Pr
   });
   if (!res.ok) {
     const error = new Error('Failed to import strategy parameters');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Strategy parameter template interface
- */
-export interface StrategyParamTemplate {
-  id: number;
-  name: string;
-  description: string | null;
-  params: StrategyParamsResponse;
-  created_at: string;
-  created_by: string;
-}
-
-/**
- * Fetch strategy parameter templates list
- */
-export async function fetchStrategyParamTemplates(): Promise<StrategyParamTemplate[]> {
-  const res = await fetch('/api/strategies/templates', {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to fetch strategy parameter templates');
-    (error as any).status = res.status;
-    throw error;
-  }
-  const data = await res.json();
-  return data.templates;
-}
-
-/**
- * Save current parameters as a template
- */
-export async function saveStrategyParamTemplate(
-  name: string,
-  description?: string
-): Promise<StrategyParamTemplate> {
-  const res = await fetch('/api/strategies/templates', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description }),
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to save strategy parameter template');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Load a strategy parameter template
- */
-export async function loadStrategyParamTemplate(templateId: number): Promise<StrategyParamsResponse> {
-  const res = await fetch(`/api/strategies/templates/${templateId}/load`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to load strategy parameter template');
-    (error as any).status = res.status;
-    (error as any).info = await res.json().catch(() => ({}));
-    throw error;
-  }
-  return res.json();
-}
-
-/**
- * Delete a strategy parameter template
- */
-export async function deleteStrategyParamTemplate(templateId: number): Promise<{ status: string; message: string }> {
-  const res = await fetch(`/api/strategies/templates/${templateId}`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const error = new Error('Failed to delete strategy parameter template');
     (error as any).status = res.status;
     (error as any).info = await res.json().catch(() => ({}));
     throw error;

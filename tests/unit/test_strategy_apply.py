@@ -9,7 +9,6 @@ Tests:
 5. Warmup K-line replay accuracy
 """
 import pytest
-import json
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -282,52 +281,52 @@ async def test_signal_pipeline_on_config_updated_uses_lock():
 async def test_apply_strategy_endpoint_integration():
     """Test apply strategy endpoint integration with ConfigManager."""
     from src.interfaces.api import StrategyApplyRequest, StrategyApplyResponse
+    from src.interfaces import api_config_globals as _config_globals
     from fastapi import HTTPException
+    import uuid
 
-    # Mock repository and config_manager
-    mock_repo = AsyncMock()
-    mock_config_manager = AsyncMock()
+    # Generate a UUID strategy ID
+    strategy_uuid = str(uuid.uuid4())
 
-    # Mock strategy record from database - use logic_tree format
-    strategy_json = json.dumps({
+    # Build a strategy record matching what StrategyConfigRepository.get_by_id returns
+    strategy_record = {
+        "id": strategy_uuid,
         "name": "my_pinbar",
+        "description": "Test strategy",
         "logic_tree": {
             "type": "trigger",
             "id": "trigger_0",
             "config": {"type": "pinbar", "enabled": True, "params": {"min_wick_ratio": 0.6}}
         },
-    })
+        "is_active": True,
+    }
 
-    mock_repo.get_custom_strategy_by_id = AsyncMock(return_value={
-        "id": 1,
-        "name": "my_pinbar",
-        "description": "Test strategy",
-        "strategy_json": strategy_json,
-    })
+    # Save original repo and inject mock
+    original_repo = _config_globals._strategy_repo
+    mock_repo = AsyncMock()
+    mock_repo.get_by_id = AsyncMock(return_value=strategy_record)
+    _config_globals._strategy_repo = mock_repo
 
-    # Mock config manager
-    mock_config_manager.user_config = MagicMock(
-        active_strategies=[]
-    )
+    try:
+        from src.interfaces.api import apply_strategy
 
-    updated_config = MagicMock()
-    mock_config_manager.update_user_config = AsyncMock(return_value=updated_config)
+        # Call endpoint with string UUID
+        request = StrategyApplyRequest(enabled=True, apply_to=None)
 
-    # Import and test apply_strategy function directly
-    import sys
-    sys.modules['src.interfaces.api']._repository = mock_repo
-    sys.modules['src.interfaces.api']._config_manager = mock_config_manager
+        # The endpoint also calls notify_hot_reload and get_signal_pipeline,
+        # so we patch those to avoid side effects
+        with patch('src.interfaces.api_v1_config.notify_hot_reload', new_callable=AsyncMock), \
+             patch('src.main.get_signal_pipeline', return_value=None):
 
-    from src.interfaces.api import apply_strategy
+            response = await apply_strategy(strategy_id=strategy_uuid, request=request)
 
-    # Call endpoint
-    request = StrategyApplyRequest(enabled=True, apply_to=None)
-    response = await apply_strategy(strategy_id=1, request=request)
+        # Verify response
+        assert response.status == "success"
+        assert response.strategy_id == strategy_uuid
+        assert response.strategy_name == "my_pinbar"
 
-    # Verify response
-    assert response.status == "success"
-    assert response.strategy_id == 1
-    assert response.strategy_name == "my_pinbar"
-
-    # Verify config_manager.update_user_config called
-    assert mock_config_manager.update_user_config.called
+        # Verify repository was called with the UUID
+        mock_repo.get_by_id.assert_awaited_once_with(strategy_uuid)
+    finally:
+        # Restore original repo
+        _config_globals._strategy_repo = original_repo

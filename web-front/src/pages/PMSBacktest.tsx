@@ -18,7 +18,6 @@ import {
   StrategyDefinition,
   RiskConfig,
   PMSBacktestReport,
-  fetchStrategyTemplates,
   fetchBacktestSignals,
   type Signal,
 } from '../lib/api';
@@ -87,7 +86,7 @@ export default function PMSBacktest() {
 
   // Strategy template picker state
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
-  const [templates, setTemplates] = useState<Array<{ id: number; name: string; description: string | null }>>([]);
+  const [templates, setTemplates] = useState<Strategy[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
 
   // Backtest signals history state
@@ -110,10 +109,10 @@ export default function PMSBacktest() {
     const loadTemplates = async () => {
       setIsLoadingTemplates(true);
       try {
-        const data = await fetchStrategyTemplates();
-        setTemplates(data);
+        const response = await configApi.getStrategies();
+        setTemplates(response.data);
       } catch (err) {
-        console.error('Failed to fetch strategy templates:', err);
+        console.error('Failed to fetch strategies:', err);
       } finally {
         setIsLoadingTemplates(false);
       }
@@ -233,12 +232,33 @@ export default function PMSBacktest() {
 
   // Handle strategy template import
   const handleImportTemplate = useCallback(async (templateStrategy: StrategyDefinition) => {
-    // Fetch full strategy details
+    // Fetch full strategy details from new config API
     try {
-      const res = await fetch(`/api/strategies/${templateStrategy.id}`);
-      const data = await res.json();
-      if (data.strategy) {
-        setStrategies([data.strategy]);
+      const response = await configApi.getStrategy(templateStrategy.id);
+      const strategy = response.data;
+      if (strategy) {
+        // Convert Strategy to StrategyDefinition format for backtest engine
+        setStrategies([{
+          id: strategy.id,
+          name: strategy.name,
+          trigger: {
+            id: `${strategy.id}-trigger`,
+            type: strategy.trigger_config.type,
+            enabled: true,
+            params: strategy.trigger_config.params,
+          },
+          filters: strategy.filter_configs.map((fc, i) => ({
+            id: `${strategy.id}-filter-${i}`,
+            type: fc.type,
+            enabled: fc.enabled,
+            params: fc.params,
+          })),
+          filter_logic: strategy.filter_logic,
+          is_global: true,
+          apply_to: [...new Set(
+            strategy.symbols.flatMap(s => strategy.timeframes.map(t => `${s}:${t}`))
+          )],
+        }]);
       }
     } catch (err) {
       console.error('Failed to fetch strategy details:', err);

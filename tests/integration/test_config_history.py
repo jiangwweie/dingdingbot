@@ -34,8 +34,8 @@ from src.infrastructure.repositories.config_repositories import (
 )
 from src.interfaces.api_v1_config import (
     router,
-    set_config_dependencies,
 )
+from src.interfaces import api_config_globals
 
 
 # ============================================================
@@ -78,15 +78,14 @@ def app():
 @pytest.fixture
 def client(app, db_manager):
     """Create TestClient with injected dependencies."""
-    set_config_dependencies(
-        strategy_repo=db_manager.strategy_repo,
-        risk_repo=db_manager.risk_repo,
-        system_repo=db_manager.system_repo,
-        symbol_repo=db_manager.symbol_repo,
-        notification_repo=db_manager.notification_repo,
-        history_repo=db_manager.history_repo,
-        snapshot_repo=db_manager.snapshot_repo,
-    )
+    # Inject dependencies directly into shared globals
+    api_config_globals._strategy_repo = db_manager.strategy_repo
+    api_config_globals._risk_repo = db_manager.risk_repo
+    api_config_globals._system_repo = db_manager.system_repo
+    api_config_globals._symbol_repo = db_manager.symbol_repo
+    api_config_globals._notification_repo = db_manager.notification_repo
+    api_config_globals._history_repo = db_manager.history_repo
+    api_config_globals._snapshot_repo = db_manager.snapshot_repo
 
     with TestClient(app) as c:
         yield c

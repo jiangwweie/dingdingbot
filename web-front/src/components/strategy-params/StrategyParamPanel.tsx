@@ -3,7 +3,6 @@ import { Save, RotateCcw, Download, Upload, Eye, CheckCircle, AlertCircle } from
 import PinbarParamForm from './PinbarParamForm';
 import EmaParamForm from './EmaParamForm';
 import FilterParamList from './FilterParamList';
-import TemplateManager from './TemplateManager';
 import ParamPreviewModal from './ParamPreviewModal';
 import {
   getStrategyParams,
@@ -11,14 +10,9 @@ import {
   previewStrategyParams,
   exportStrategyParams,
   importStrategyParams,
-  fetchStrategyParamTemplates,
-  saveStrategyParamTemplate,
-  loadStrategyParamTemplate,
-  deleteStrategyParamTemplate,
   type StrategyParamsResponse,
   type StrategyParamsUpdateRequest,
   type FilterConfig,
-  type StrategyParamTemplate,
 } from '../../lib/api';
 
 interface StrategyParamPanelProps {
@@ -54,10 +48,6 @@ export default function StrategyParamPanel({ onParamsChange }: StrategyParamPane
   const [previewData, setPreviewData] = useState<any>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
-  // 模板列表
-  const [templates, setTemplates] = useState<StrategyParamTemplate[]>([]);
-  const [isTemplateLoading, setIsTemplateLoading] = useState(false);
-
   // 加载参数
   const loadParams = useCallback(async () => {
     setIsLoading(true);
@@ -72,20 +62,9 @@ export default function StrategyParamPanel({ onParamsChange }: StrategyParamPane
     }
   }, []);
 
-  // 加载模板列表
-  const loadTemplates = useCallback(async () => {
-    try {
-      const data = await fetchStrategyParamTemplates();
-      setTemplates(data);
-    } catch (error) {
-      console.error('Failed to load templates:', error);
-    }
-  }, []);
-
   useEffect(() => {
     loadParams();
-    loadTemplates();
-  }, [loadParams, loadTemplates]);
+  }, [loadParams]);
 
   // 显示通知
   const showNotification = (type: 'success' | 'error', message: string) => {
@@ -226,46 +205,6 @@ export default function StrategyParamPanel({ onParamsChange }: StrategyParamPane
     event.target.value = '';
   };
 
-  // 保存为模板
-  const handleSaveTemplate = async (name: string, description?: string) => {
-    setIsTemplateLoading(true);
-    try {
-      await saveStrategyParamTemplate(name, description);
-      await loadTemplates();
-      showNotification('success', '模板保存成功');
-    } catch (error: any) {
-      showNotification('error', error.message || '保存模板失败');
-    } finally {
-      setIsTemplateLoading(false);
-    }
-  };
-
-  // 加载模板
-  const handleLoadTemplate = async (templateId: number) => {
-    setIsTemplateLoading(true);
-    try {
-      const result = await loadStrategyParamTemplate(templateId);
-      setParams(result);
-      setHasUnsavedChanges(true);
-      showNotification('success', '模板加载成功');
-    } catch (error: any) {
-      showNotification('error', error.message || '加载模板失败');
-    } finally {
-      setIsTemplateLoading(false);
-    }
-  };
-
-  // 删除模板
-  const handleDeleteTemplate = async (templateId: number) => {
-    try {
-      await deleteStrategyParamTemplate(templateId);
-      await loadTemplates();
-      showNotification('success', '模板删除成功');
-    } catch (error: any) {
-      showNotification('error', error.message || '删除模板失败');
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -376,15 +315,6 @@ export default function StrategyParamPanel({ onParamsChange }: StrategyParamPane
         filters={params.filters as FilterConfig[]}
         onChange={handleFiltersChange}
         disabled={isSaving}
-      />
-
-      {/* 模板管理 */}
-      <TemplateManager
-        templates={templates}
-        onLoadTemplate={handleLoadTemplate}
-        onSaveTemplate={handleSaveTemplate}
-        onDeleteTemplate={handleDeleteTemplate}
-        isLoading={isTemplateLoading}
       />
 
       {/* 预览对话框 */}

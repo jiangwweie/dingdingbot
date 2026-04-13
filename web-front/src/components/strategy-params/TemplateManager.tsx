@@ -1,6 +1,18 @@
 import React, { useState, useCallback } from 'react';
 import { Save, FolderOpen, Trash2, Clock, User, FileText, X } from 'lucide-react';
-import type { StrategyParamTemplate } from '../../lib/api';
+
+/**
+ * 策略参数模板接口（本地定义，后端 /api/strategies/templates 已废弃）
+ * @deprecated 此组件已不再使用，保留仅供历史参考
+ */
+interface StrategyParamTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  params: Record<string, unknown>;
+  created_at: string;
+  created_by: string;
+}
 
 interface TemplateManagerProps {
   templates: StrategyParamTemplate[];

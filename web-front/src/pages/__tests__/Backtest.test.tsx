@@ -24,11 +24,10 @@ import Backtest from '../Backtest';
 
 vi.mock('../../lib/api', () => ({
   runSignalBacktest: vi.fn(),
-  fetchStrategyTemplates: vi.fn().mockResolvedValue([]),
   fetchBacktestSignals: vi.fn().mockResolvedValue({ signals: [] }),
 }));
 
-const { runSignalBacktest, fetchStrategyTemplates, fetchBacktestSignals } = await import('../../lib/api');
+const { runSignalBacktest, fetchBacktestSignals } = await import('../../lib/api');
 
 // ============================================================
 // Mock 子组件
@@ -164,7 +163,6 @@ const mockBacktestReport = {
 describe('Backtest Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(fetchStrategyTemplates).mockResolvedValue([]);
   });
 
   afterEach(() => {
