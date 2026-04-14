@@ -134,6 +134,11 @@ class ExchangeGateway:
             'options': {
                 'defaultType': 'future',  # USDT-M Futures
                 'warnOnFetchOpenOrdersWithoutSymbol': False,
+                # R8: Binance Futures WS sends PING but never PONGs, so ccxt.pro's
+                # keepalive mechanism (which only updates lastPong on PONG frames)
+                # will always timeout. Setting keepAlive=0 disables this check.
+                # Connection health is instead monitored by continuous kline data flow.
+                'ws': {'keepAlive': 0},
             }
         }
         # Merge user-provided options
