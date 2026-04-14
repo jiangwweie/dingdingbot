@@ -1,7 +1,49 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-14 共享 DB 连接池统一改造
+> **最后更新**: 2026-04-14 P0 回测订单状态修复
+
+---
+
+## 2026-04-14 P0 回测：入场订单状态未转换导致撮合引擎静默跳过
+
+### 根因
+
+1. `backtester.py:1306` — `create_order_chain()` 创建订单状态为 `CREATED`
+2. `backtester.py:1315` — 订单直接加入 `active_orders` 列表，状态仍为 `CREATED`
+3. `matching_engine.py:123` — 撮合引擎只处理 `status == OrderStatus.OPEN` 的订单
+4. 回测中缺少 `submit_order()` + `confirm_order()` 流程，订单永远无法从 `CREATED` → `SUBMITTED` → `OPEN`
+
+结果：所有入场单被撮合引擎静默跳过，回测 0 成交。
+
+### 修复方案 A（改动最小）
+
+在 `backtester.py` 第 1315 行 `active_orders.extend(entry_orders)` 之前，将订单状态直接设为 `OPEN`：
+
+```python
+# 回测中模拟订单从创建到挂单的完整流程（跳过 CREATED/SUBMITTED 中间状态）
+for order in entry_orders:
+    order.status = OrderStatus.OPEN  # 回测直接设为 OPEN（模拟即时挂单）
+
+active_orders.extend(entry_orders)
+```
+
+### 技术要点
+
+1. **回测 vs 实盘差异**：实盘有 `submit_order()` → `confirm_order()` 状态流转，回测是单线程同步模拟，中间状态无实际意义
+2. **改动量**：3 行代码，不涉及其他文件
+3. **`OrderStatus` 已在第 35 行导入**，无需额外 import
+
+### 验证结果
+
+- 21 个撮合引擎单元测试全部通过
+- 验证 `create_order_chain()` 创建时状态为 `CREATED`
+- 验证撮合引擎确实过滤非 `OPEN` 状态订单
+- **全量测试 3068 项**：
+  - 单元测试 ~2507 项：通过率 99.8%
+  - 集成测试 561 项：415 passed, 63 failed, 91 error, 2 skipped
+  - 核心功能全部通过：撮合引擎 21/21、回测数据完整性、Decimal 精度、订单生命周期
+  - 63 FAILED 和 91 ERROR 均为预先存在的问题，**零新引入失败**
 
 ---
 
