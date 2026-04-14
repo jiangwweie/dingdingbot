@@ -1,5 +1,52 @@
 # Progress Log
 
+> Last updated: 2026-04-14 23:00
+
+---
+
+## 2026-04-14 23:00 -- 回测页面四连 Bug 修复（全部完成）
+
+### 本日工作摘要
+
+今日发现并修复了回测页面的 4 个独立 bug，全部已提交。
+
+| # | Bug | 严重度 | 根因 | 修复 | 提交 |
+|---|-----|--------|------|------|------|
+| 1 | 收益率 -1934.70% | P0 | 前端双乘 `* 100` | EquityComparisonChart.tsx L93 去掉 `* 100` | `904b415` |
+| 2 | 夏普比率 N/A | P1 | 硬编码 `sharpe_ratio=None` | 新增权益曲线法夏普计算 + 15个测试 | `904b415` |
+| 3 | 净盈亏未扣成本 | P0 | 前端净盈亏区域未做减法 | BacktestReportDetailModal.tsx 计算 netPnl | `904b415` |
+| 4 | 负收益报告无法保存 | P0 | SQLite TEXT 列 CHECK 约束字典序比较 | 删除 3 个数值 CHECK 约束 + Pydantic 验证 + 9个测试 | `19b2a67` |
+
+### 关键产出
+
+- **诊断报告**: `docs/diagnostic-reports/2026-04-14-backtest-page-data-issues.md` (DA-20260414-001)
+- **ADR 1**: `docs/arch/sharpe-ratio-calculation-plan.md` (夏普比率计算方案)
+- **ADR 2**: `docs/arch/sqlite-text-check-constraint-fix-plan.md` (SQLite CHECK 约束修复)
+- **发现记录**: `docs/planning/findings.md` (4 项技术发现)
+- **新增测试**: 24 个（15 夏普 + 9 回测仓库）
+
+### 代码变更
+
+```
+6 files changed, 911 insertions (+)    -- commit 904b415 (bug 1,2,3)
+4 files changed, 448 insertions (+)    -- commit 19b2a67 (bug 4)
+总计: 10 文件, 1359 行新增
+```
+
+### 经验教训
+
+1. **前后端语义一致性**: 后端返回小数 vs 百分比的语义必须统一文档化，前端所有组件应遵循同一约定
+2. **SQLite TEXT 列约束**: 永远不要在 TEXT 列上做数值比较的 CHECK 约束，字典序与数值序不一致
+3. **设计一致性价值**: SignalORM 已有"不使用数值 CHECK"注释，但 BacktestReportORM 未遵循，导致 P0 bug。已有设计原则应在团队文档中明确
+4. **Gross vs Net 语义**: 后端 `total_pnl` 应明确标注是 Gross PnL 还是 Net PnL，避免前端误解
+
+### 下一步
+
+- [ ] 推送代码到远程
+- [ ] 验证回测页面显示正确（负收益报告可保存、收益率百分比正确、夏普比率有值、净盈亏含成本）
+
+---
+
 > Last updated: 2026-04-14 22:45
 
 ---
