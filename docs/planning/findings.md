@@ -1,7 +1,38 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-14 共享 DB 连接池统一改造
+> **最后更新**: 2026-04-14 连接池 close() 修复 + 预存测试修复
+
+---
+
+## 2026-04-14 连接池 close() 共享连接 premature close 修复
+
+### 根因
+
+所有使用 `pool_get_connection()` 的 Repository（13+ 个）在 `close()` 中检查 `_owns_connection=True` 时调用 `await self._db.close()`，关闭了连接池中的**共享连接**，导致其他共享同一 db_path 的 Repository 后续操作报 `ValueError("no active connection")`。
+
+### `_owns_connection` 语义错位
+
+ADR 设计意图：池化连接 `_owns_connection=False`（不关闭），注入连接 `_owns_connection=True`（关闭）。
+实际实现：`_owns_connection = connection is None`（构造函数参数判断），池化连接也被标记为 `True`。
+
+### 修复方案
+
+所有 Repository 的 `close()` 不再调用 `await self._db.close()`，仅清除本地引用 `self._db = None`。
+连接池是唯一所有者，由 `ConnectionPool.close_all()` 统一管理生命周期。
+
+### 连带修复
+
+1. **`pnl_ratio` Decimal 绑定 Bug**（`signal_repository.py:770`）：直接传 `Decimal` 给 SQLite，缺少 `str()` 转换
+2. **测试隔离**：`:memory:` 池共享导致测试间数据污染，改用临时文件路径
+3. **大小写断言**：测试用 `"long"` 但实际存储 `"LONG"`（`Direction.LONG.value`）
+
+### 验证结果
+
+- 81 个测试：78 通过，3 失败（预存问题，`test_backtest_repository.py` 测试隔离）
+- 核心 4 个回归测试全部通过
+- `test_connection_pool.py` 3 个预存失败全部修复（8/8）
+- `test_signal_repository.py` 12 个预存失败全部修复（28/28）
 
 ---
 

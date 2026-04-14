@@ -1,11 +1,28 @@
 # 进度日志
 
 > **说明**: 仅保留最近 3 天详细日志，更早的已归档至 `archive/completed-tasks/`。
-> **最后更新**: 2026-04-14 共享 DB 连接池统一改造
+> **最后更新**: 2026-04-14 连接池 close() 修复 + 预存测试修复
 
 ### 收工状态
 
 **今日完成工作** (2026-04-14):
+
+**第十五轮：连接池 close() 共享连接 premature close 修复 + 预存测试修复** ✅
+- 根因：所有使用 `pool_get_connection()` 的 Repository 在 `close()` 中调用 `await self._db.close()` 关闭了共享池连接
+- `_owns_connection` 语义错位：池化连接也被标记为 `True`（ADR 设计应为 `False`）
+- 修复 9 个文件，15 个 `close()` 方法：移除 `await self._db.close()`，仅保留 `self._db = None`
+- 连带修复 3 个预存 Bug：
+  - `signal_repository.py:770` `pnl_ratio` Decimal 绑定修复（加 `str()` 转换）
+  - `test_signal_repository.py` 测试隔离修复（`:memory:` 改用临时文件路径）
+  - `test_signal_repository.py` 4 个大小写断言修复（`"long"` → `"LONG"`）
+  - `test_connection_pool.py` `fresh_pool` fixture 修复（重置 `_pool` 模块变量）
+  - `config_profile_repository.py` 缺失 `pool_get_connection` import 修复
+  - `order_repository.py` close() 重复代码清理
+- 测试：
+  - 新增 4 个回归测试（`test_connection_pool_close_fix.py`）全部通过
+  - 81 个测试：78 通过，3 失败（`test_backtest_repository.py` 预存测试隔离问题）
+  - `test_connection_pool.py` 3 个预存失败全部修复（8/8）
+  - `test_signal_repository.py` 12 个预存失败全部修复（28/28）
 
 **第十一轮：共享 DB 连接池统一改造** ✅
 - 根因：17+ 个 Repository 各自独立创建 aiosqlite 连接，同 db_path 多个连接导致 "database is locked" 竞争

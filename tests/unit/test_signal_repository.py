@@ -3,8 +3,13 @@ Test SignalRepository - SQLite persistence for trading signals.
 """
 import pytest
 import asyncio
+import os
+import tempfile
+import uuid
 from decimal import Decimal
 
+import src.infrastructure.connection_pool as pool_module
+from src.infrastructure.connection_pool import ConnectionPool, close_all_connections
 from src.infrastructure.signal_repository import SignalRepository
 from src.domain.models import SignalResult, Direction
 from src.domain.strategy_engine import SignalAttempt, PatternResult, FilterResult
@@ -12,11 +17,26 @@ from src.domain.strategy_engine import SignalAttempt, PatternResult, FilterResul
 
 @pytest.fixture
 async def repository():
-    """Create an in-memory repository for testing."""
-    repo = SignalRepository(":memory:")
+    """Create an isolated repository for each test."""
+    # Reset pool singleton to ensure fresh state
+    ConnectionPool._instance = None
+    pool_module._pool = ConnectionPool.get_instance()
+
+    # Use unique temp file to prevent data bleeding between tests
+    db_path = os.path.join(tempfile.gettempdir(), f"test_signal_repo_{uuid.uuid4().hex[:8]}.db")
+    repo = SignalRepository(db_path)
     await repo.initialize()
     yield repo
     await repo.close()
+    await close_all_connections()
+
+    # Cleanup temp file
+    if os.path.exists(db_path):
+        os.unlink(db_path)
+
+    # Reset pool to avoid stale state
+    ConnectionPool._instance = None
+    pool_module._pool = ConnectionPool.get_instance()
 
 
 class TestSignalRepository:
@@ -56,7 +76,7 @@ class TestSignalRepository:
         saved = signals[0]
         assert saved["symbol"] == "BTC/USDT:USDT"
         assert saved["timeframe"] == "1h"
-        assert saved["direction"] == "long"
+        assert saved["direction"] == "LONG"
         assert saved["entry_price"] == "35000.00"
         assert saved["stop_loss"] == "34500.00"
         assert saved["position_size"] == "1.5"
@@ -141,18 +161,18 @@ class TestSignalRepository:
         await repository.save_signal(signal_short)
 
         # Filter by LONG
-        result = await repository.get_signals(limit=10, direction="long")
+        result = await repository.get_signals(limit=10, direction="LONG")
         long_signals = result["data"]
         assert len(long_signals) == 1
         assert result["total"] == 1
-        assert long_signals[0]["direction"] == "long"
+        assert long_signals[0]["direction"] == "LONG"
 
         # Filter by SHORT
-        result = await repository.get_signals(limit=10, direction="short")
+        result = await repository.get_signals(limit=10, direction="SHORT")
         short_signals = result["data"]
         assert len(short_signals) == 1
         assert result["total"] == 1
-        assert short_signals[0]["direction"] == "short"
+        assert short_signals[0]["direction"] == "SHORT"
 
     @pytest.mark.asyncio
     async def test_stats_counts_correctly(self, repository):
@@ -346,7 +366,7 @@ class TestSignalAttempts:
             assert row["strategy_name"] == "pinbar"
             assert row["symbol"] == "ETH/USDT:USDT"
             assert row["timeframe"] == "4h"
-            assert row["direction"] == "long"
+            assert row["direction"] == "LONG"
             assert row["pattern_score"] == 0.85
             assert row["final_result"] == "FILTERED"
             assert row["filter_stage"] == "mtf_validation"
@@ -386,7 +406,7 @@ class TestSignalAttempts:
             assert row["strategy_name"] == "pinbar"
             assert row["symbol"] == "SOL/USDT:USDT"
             assert row["timeframe"] == "15m"
-            assert row["direction"] == "short"
+            assert row["direction"] == "SHORT"
             assert row["pattern_score"] == 0.92
             assert row["final_result"] == "SIGNAL_FIRED"
             assert row["filter_stage"] is None  # No filter failed
@@ -560,7 +580,7 @@ class TestSignalAttempts:
         assert len(result_eth["data"]) == 3
 
         # Get filtered by direction
-        result_long = await repository.get_signals(direction="long", limit=10)
+        result_long = await repository.get_signals(direction="LONG", limit=10)
         assert result_long["total"] == 5  # Only LONG signals
         assert len(result_long["data"]) == 5
 
@@ -577,28 +597,28 @@ class TestPerformanceTracking:
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "LONG", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
         )
         await repository._db.execute(
             """
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "WON", "38000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "SHORT", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "WON", "38000")
         )
         await repository._db.execute(
             """
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "LOST", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "LONG", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "LOST", "42000")
         )
         await repository._db.commit()
 
         pending = await repository.get_pending_signals("BTC/USDT:USDT")
 
         assert len(pending) == 1
-        assert pending[0]["direction"] == "long"
+        assert pending[0]["direction"] == "LONG"
         assert pending[0]["entry_price"] == Decimal("40000")
         assert pending[0]["stop_loss"] == Decimal("39000")
         assert pending[0]["take_profit_1"] == Decimal("42000")
@@ -618,7 +638,7 @@ class TestPerformanceTracking:
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", None)
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "LONG", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", None)
         )
         await repository._db.commit()
 
@@ -636,7 +656,7 @@ class TestPerformanceTracking:
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "LONG", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
         )
         await repository._db.commit()
 
@@ -660,7 +680,7 @@ class TestPerformanceTracking:
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "PENDING", "38000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "SHORT", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "PENDING", "38000")
         )
         await repository._db.commit()
 
@@ -682,7 +702,7 @@ class TestPerformanceTracking:
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "LONG", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
         )
         await repository._db.commit()
 
@@ -704,28 +724,28 @@ class TestPerformanceTracking:
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "WON", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "LONG", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "WON", "42000")
         )
         await repository._db.execute(
             """
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "WON", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "LONG", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "WON", "42000")
         )
         await repository._db.execute(
             """
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "short", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "LOST", "38000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "SHORT", "40000", "41000", "1.0", "5", "[]", "Risk 1%", "LOST", "38000")
         )
         await repository._db.execute(
             """
             INSERT INTO signals (created_at, symbol, timeframe, direction, entry_price, stop_loss, position_size, leverage, tags_json, risk_info, status, take_profit_1)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "long", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
+            ("2024-01-01T00:00:00Z", "BTC/USDT:USDT", "1h", "LONG", "40000", "39000", "1.0", "5", "[]", "Risk 1%", "PENDING", "42000")
         )
         await repository._db.commit()
 

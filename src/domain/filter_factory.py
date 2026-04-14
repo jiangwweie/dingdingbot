@@ -662,9 +662,12 @@ class FilterFactory:
                 timeframe_map=params.get('timeframe_map')
             )
         elif filter_type == "atr":
+            min_atr_ratio = params.get('min_atr_ratio', Decimal("0.001"))
+            if not isinstance(min_atr_ratio, Decimal):
+                min_atr_ratio = Decimal(str(min_atr_ratio))
             return filter_class(
                 period=params.get('period', 14),
-                min_atr_ratio=params.get('min_atr_ratio', Decimal("0.001")),
+                min_atr_ratio=min_atr_ratio,
                 enabled=enabled
             )
         elif filter_type in ["volume_surge", "volatility_filter", "time_filter", "price_action"]:

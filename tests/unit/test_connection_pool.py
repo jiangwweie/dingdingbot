@@ -11,6 +11,7 @@ import os
 import pytest
 import tempfile
 
+import src.infrastructure.connection_pool as pool_module
 from src.infrastructure.connection_pool import (
     ConnectionPool,
     get_connection,
@@ -27,10 +28,11 @@ from src.infrastructure.repositories.config_repositories import (
 def fresh_pool():
     """Provide a fresh ConnectionPool for each test."""
     ConnectionPool._instance = None
-    pool = ConnectionPool.get_instance()
-    yield pool
-    # Cleanup: reset singleton (connections will be GC'd)
+    pool_module._pool = ConnectionPool.get_instance()
+    yield
+    # Cleanup: reset singleton and module-level _pool
     ConnectionPool._instance = None
+    pool_module._pool = ConnectionPool.get_instance()
 
 
 @pytest.fixture

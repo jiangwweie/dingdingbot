@@ -863,9 +863,8 @@ class OptimizationHistoryRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """关闭连接（仅当自行管理连接时）"""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def save_trial(

@@ -98,9 +98,8 @@ class ConfigSnapshotRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def create(self, snapshot: Dict[str, Any]) -> int:

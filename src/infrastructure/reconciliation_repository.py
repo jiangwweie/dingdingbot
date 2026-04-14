@@ -166,13 +166,12 @@ class ReconciliationRepository:
             logger.info("对账仓库表创建完成")
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)"""
-        if self._db and self._owns_connection:
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             async with self._lock:
                 await self._db.commit()
-                await self._db.close()
                 self._db = None
-                logger.info("对账仓库连接已关闭")
+                logger.info("对账仓库本地引用已清除")
 
     # ============================================================
     # Write Operations

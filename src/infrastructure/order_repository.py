@@ -182,15 +182,12 @@ class OrderRepository:
             logger.info("订单仓库表创建完成")
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)"""
-        if self._db and self._owns_connection:
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             async with self._ensure_lock():
                 await self._db.commit()
-                await self._db.close()
                 self._db = None
-                logger.info("订单仓库连接已关闭")
-                self._db = None
-                logger.info("订单仓库连接已关闭")
+                logger.info("订单仓库本地引用已清除")
 
     # ============================================================
     # Write Operations

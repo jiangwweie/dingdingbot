@@ -95,6 +95,7 @@ class ConfigProfileRepository:
         """
         # Create connection if not injected
         if self._owns_connection and self._db is None:
+            from src.infrastructure.connection_pool import get_connection as pool_get_connection
             self._db = await pool_get_connection(self.db_path)
             # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
@@ -120,9 +121,8 @@ class ConfigProfileRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def list_profiles(self) -> List[ProfileInfo]:
