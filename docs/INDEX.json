@@ -1,0 +1,3751 @@
+{
+  "generated_at": "2026-04-14T05:55:08.210725+00:00",
+  "total_files": 124,
+  "active": [
+    {
+      "path": "active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+      "name": "2026-03-27-s3-1-mtf-data-alignment-design.md",
+      "category": "active",
+      "size_kb": 20.8,
+      "topics": [
+        "backtest",
+        "config",
+        "signal",
+        "kline",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/application/signal_pipeline.py"
+      ],
+      "headings": [
+        "S3-1 多周期数据对齐优化 - 设计文档",
+        "1. 背景与问题定义",
+        "1.1 核心问题",
+        "src/application/signal_pipeline.py:348-351",
+        "1.2 影响范围"
+      ],
+      "mtime": "2026-03-29T01:18:24.014163+00:00"
+    },
+    {
+      "path": "active/2026-03-27-s3-1-mtf-data-alignment.md",
+      "name": "2026-03-27-s3-1-mtf-data-alignment.md",
+      "category": "active",
+      "size_kb": 32.6,
+      "topics": [
+        "config",
+        "signal",
+        "kline",
+        "testing",
+        "architecture"
+      ],
+      "refs": [
+        "src/application/config_manager.py",
+        "src/domain/timeframe_utils.py",
+        "src/application/signal_pipeline.py"
+      ],
+      "headings": [
+        "S3-1 多周期数据对齐优化 Implementation Plan",
+        "File Structure",
+        "Task 1: 创建 timeframe_utils.py 工具函数",
+        "src/domain/timeframe_utils.py"
+      ],
+      "mtime": "2026-03-29T01:18:24.013525+00:00"
+    },
+    {
+      "path": "active/2026-04-02-backtest-data-localization-design.md",
+      "name": "2026-04-02-backtest-data-localization-design.md",
+      "category": "active",
+      "size_kb": 14.0,
+      "topics": [
+        "backtest",
+        "kline",
+        "database",
+        "api",
+        "testing",
+        "architecture",
+        "exchange"
+      ],
+      "refs": [
+        "src/infrastructure/v3_orm.py"
+      ],
+      "headings": [
+        "回测数据本地化方案设计",
+        "一、背景与目标",
+        "1.1 当前问题",
+        "1.2 已完成准备",
+        "1.3 设计目标"
+      ],
+      "mtime": "2026-04-02T00:35:53.536762+00:00"
+    },
+    {
+      "path": "active/2026-04-10-api-contract-fix-verification.md",
+      "name": "2026-04-10-api-contract-fix-verification.md",
+      "category": "active",
+      "size_kb": 3.6,
+      "topics": [
+        "config",
+        "database",
+        "api",
+        "frontend",
+        "testing",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "API 契约对齐修复 - 验证报告",
+        "测试结果总览",
+        "各套件明细",
+        "关键路径验证",
+        "⚠️ 已知 P1 Bug"
+      ],
+      "mtime": "2026-04-10T05:21:50.078617+00:00"
+    },
+    {
+      "path": "active/2026-04-10-phase2-tasks-analysis.md",
+      "name": "2026-04-10-phase2-tasks-analysis.md",
+      "category": "active",
+      "size_kb": 28.6,
+      "topics": [
+        "config",
+        "risk",
+        "database",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy",
+        "notification",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 2 Tasks 架构分析: BackupTab / SystemTab / StrategyForm / DB Pool",
+        "目录",
+        "1. 现状分析",
+        "1.1 Task 9: BackupTab 导入/导出修复 (P0)",
+        "1.2 Task 10: 合并两个重复的 SystemTab 组件 (P1)"
+      ],
+      "mtime": "2026-04-10T11:03:08.003262+00:00"
+    },
+    {
+      "path": "active/2026-04-11-config-page-consolidation.md",
+      "name": "2026-04-11-config-page-consolidation.md",
+      "category": "active",
+      "size_kb": 36.2,
+      "topics": [
+        "config",
+        "risk",
+        "signal",
+        "database",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy",
+        "notification",
+        "exchange"
+      ],
+      "refs": [
+        "src/application/config_manager.py"
+      ],
+      "headings": [
+        "配置页面整合与 YAML 全面迁移设计文档",
+        "目录",
+        "1. 现状分析",
+        "1.1 当前配置数据流总览",
+        "1.2 当前 YAML 读取位置清单"
+      ],
+      "mtime": "2026-04-11T10:34:28.261712+00:00"
+    },
+    {
+      "path": "active/BT-2-backend-implementation-status.md",
+      "name": "BT-2-backend-implementation-status.md",
+      "category": "active",
+      "size_kb": 6.3,
+      "topics": [
+        "backtest",
+        "database",
+        "api",
+        "frontend",
+        "testing"
+      ],
+      "refs": [
+        "src/interfaces/api.py"
+      ],
+      "headings": [
+        "BT-2 后端实现状态确认报告",
+        "1. 用户要求确认",
+        "2. 实现状态确认",
+        "2.1 接口返回确认",
+        "2.2 数据库迁移确认"
+      ],
+      "mtime": "2026-04-07T03:01:52.860774+00:00"
+    },
+    {
+      "path": "active/P1-5-project-delivery-report.md",
+      "name": "P1-5-project-delivery-report.md",
+      "category": "active",
+      "size_kb": 8.4,
+      "topics": [
+        "config",
+        "risk",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "P1-5 Provider 注册模式实施项目交付报告",
+        "一、项目概述",
+        "1.1 项目目标",
+        "1.2 交付成果",
+        "二、技术架构决策"
+      ],
+      "mtime": "2026-04-07T08:45:31.158936+00:00"
+    },
+    {
+      "path": "active/S5-1-1-ccxtpro-research.md",
+      "name": "S5-1-1-ccxtpro-research.md",
+      "category": "active",
+      "size_kb": 2.4,
+      "topics": [
+        "websocket",
+        "api",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "S5-1-1 CCXT Pro WebSocket 调研报告",
+        "1. CCXT Pro watch_balance 方法",
+        "1.1 方法说明",
+        "1.2 使用方法",
+        "1.3 返回值结构"
+      ],
+      "mtime": "2026-03-29T01:18:24.014262+00:00"
+    },
+    {
+      "path": "active/T010-integration-test-acceptance-report.md",
+      "name": "T010-integration-test-acceptance-report.md",
+      "category": "active",
+      "size_kb": 7.9,
+      "topics": [
+        "order",
+        "risk",
+        "api",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "T010 集成测试与验证 - 验收报告",
+        "1. 执行摘要",
+        "1.1 测试结果概览",
+        "1.2 验收结论",
+        "2. 端到端订单生命周期测试"
+      ],
+      "mtime": "2026-04-07T05:15:38.265308+00:00"
+    },
+    {
+      "path": "active/adr-risk-overrides-consumption.md",
+      "name": "adr-risk-overrides-consumption.md",
+      "category": "active",
+      "size_kb": 15.3,
+      "topics": [
+        "backtest",
+        "config",
+        "risk",
+        "signal",
+        "api",
+        "frontend",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/application/backtester.py"
+      ],
+      "headings": [
+        "ADR: Risk Overrides 消费断裂 + Decimal/float 类型不匹配修复",
+        "1. 问题陈述",
+        "1.1 配置消费断裂",
+        "1.2 Decimal/float 类型不匹配",
+        "当前定义（L604-607）"
+      ],
+      "mtime": "2026-04-13T11:40:02.689595+00:00"
+    },
+    {
+      "path": "active/config-management-report.md",
+      "name": "config-management-report.md",
+      "category": "active",
+      "size_kb": 3.4,
+      "topics": [
+        "config",
+        "database",
+        "api",
+        "frontend",
+        "testing"
+      ],
+      "refs": [
+        "src/domain/config_snapshot.py",
+        "src/interfaces/api.py",
+        "src/application/config_manager.py",
+        "src/application/config_snapshot_service.py",
+        "src/infrastructure/config_snapshot_repository.py"
+      ],
+      "headings": [
+        "配置管理功能 - 交付报告",
+        "✅ 已完成任务",
+        "📦 交付物",
+        "后端代码",
+        "前端代码"
+      ],
+      "mtime": "2026-04-02T10:09:33.910663+00:00"
+    },
+    {
+      "path": "active/connection-pool-close-fix-plan.md",
+      "name": "connection-pool-close-fix-plan.md",
+      "category": "active",
+      "size_kb": 8.4,
+      "topics": [
+        "backtest",
+        "order",
+        "risk",
+        "database",
+        "api",
+        "testing",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "Connection Pool Shared Connection Premature Close -- Fix Plan",
+        "Root Cause",
+        "Fix Principle",
+        "Before / After Fix Pattern",
+        "Pattern A: Simple close (most repos)"
+      ],
+      "mtime": "2026-04-14T02:12:25.542378+00:00"
+    },
+    {
+      "path": "active/feishu-mention-test.md",
+      "name": "feishu-mention-test.md",
+      "category": "active",
+      "size_kb": 3.1,
+      "topics": [
+        "signal",
+        "api",
+        "testing",
+        "notification"
+      ],
+      "refs": [
+        "src/infrastructure/notifier_feishu.py"
+      ],
+      "headings": [
+        "验证测试：飞书 Webhook @机器人触发事件订阅",
+        "测试方案",
+        "飞书 @机制说明",
+        "测试步骤",
+        "通过飞书 API 获取机器人信息"
+      ],
+      "mtime": "2026-04-03T04:38:10.324196+00:00"
+    },
+    {
+      "path": "active/ord-5-order-audit-log-integration.md",
+      "name": "ord-5-order-audit-log-integration.md",
+      "category": "active",
+      "size_kb": 7.4,
+      "topics": [
+        "order",
+        "signal",
+        "database",
+        "exchange"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/application/order_audit_logger.py",
+        "src/infrastructure/order_audit_repository.py"
+      ],
+      "headings": [
+        "ORD-5: 订单审计日志集成指南",
+        "一、文件位置",
+        "二、数据库表结构",
+        "三、事件类型枚举（与 ORD-1 对齐）"
+      ],
+      "mtime": "2026-04-07T00:43:28.692680+00:00"
+    },
+    {
+      "path": "active/order-klines-test-report.md",
+      "name": "order-klines-test-report.md",
+      "category": "active",
+      "size_kb": 7.7,
+      "topics": [
+        "order",
+        "kline",
+        "api",
+        "frontend",
+        "testing"
+      ],
+      "refs": [],
+      "headings": [
+        "订单详情页 K 线渲染升级 - 测试报告",
+        "测试结果摘要",
+        "后端测试结果",
+        "测试文件 1: `tests/unit/test_order_klines_api.py`",
+        "测试用例清单"
+      ],
+      "mtime": "2026-04-02T14:20:42.937597+00:00"
+    },
+    {
+      "path": "active/p0-002-log-rotation.md",
+      "name": "p0-002-log-rotation.md",
+      "category": "active",
+      "size_kb": 37.3,
+      "topics": [
+        "config",
+        "testing",
+        "architecture"
+      ],
+      "refs": [
+        "src/infrastructure/logger.py"
+      ],
+      "headings": [
+        "P0-002: 日志轮转配置设计",
+        "修订记录",
+        "一、问题分析",
+        "1.1 当前状态",
+        "当前日志配置"
+      ],
+      "mtime": "2026-04-01T04:27:43.491941+00:00"
+    },
+    {
+      "path": "active/p0-003-reconciliation.md",
+      "name": "p0-003-reconciliation.md",
+      "category": "active",
+      "size_kb": 34.9,
+      "topics": [
+        "order",
+        "database",
+        "architecture",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "P0-003: 完善重启对账流程设计",
+        "修订记录",
+        "一、问题分析",
+        "1.1 幽灵订单（Ghost Orders）",
+        "1.2 孤儿订单（Orphan Orders）"
+      ],
+      "mtime": "2026-04-01T04:30:23.900172+00:00"
+    },
+    {
+      "path": "active/p0-005-3-window3-test-report.md",
+      "name": "p0-005-3-window3-test-report.md",
+      "category": "active",
+      "size_kb": 7.6,
+      "topics": [
+        "websocket",
+        "order",
+        "testing",
+        "exchange",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "P0-005-3: 对账服务验证测试报告",
+        "测试结果摘要",
+        "详细测试结果",
+        "✅ Test-3.1: WebSocket 连接建立",
+        "⚠️ Test-3.2: 订单实时推送"
+      ],
+      "mtime": "2026-04-01T09:10:44.805102+00:00"
+    },
+    {
+      "path": "active/phase5-contract-review-report.md",
+      "name": "phase5-contract-review-report.md",
+      "category": "active",
+      "size_kb": 5.9,
+      "topics": [
+        "websocket"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 5 契约表审查报告",
+        "审查摘要",
+        "Gemini 提出的关键问题 (v1.2 修复)",
+        "G-001: CCXT.Pro 依赖包废弃问题 ✅ 已修复",
+        "❌ 废弃"
+      ],
+      "mtime": "2026-04-10T02:23:18.907798+00:00"
+    },
+    {
+      "path": "active/phase5-development-checklist.md",
+      "name": "phase5-development-checklist.md",
+      "category": "active",
+      "size_kb": 3.1,
+      "topics": [
+        "websocket",
+        "order",
+        "database",
+        "api",
+        "testing",
+        "architecture",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 5 开发准备清单",
+        "✅ 已完成准备",
+        "1. 技术文档",
+        "2. 用户确认事项",
+        "3. 核心设计"
+      ],
+      "mtime": "2026-04-10T02:23:18.908396+00:00"
+    },
+    {
+      "path": "active/phase5-e2e-test-plan.md",
+      "name": "phase5-e2e-test-plan.md",
+      "category": "active",
+      "size_kb": 5.1,
+      "topics": [
+        "websocket",
+        "config",
+        "order",
+        "database",
+        "api",
+        "testing",
+        "strategy",
+        "notification",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 5 E2E 集成测试计划",
+        "一、测试目标",
+        "二、测试环境配置",
+        "2.1 环境变量",
+        ".env"
+      ],
+      "mtime": "2026-04-10T02:23:18.908584+00:00"
+    },
+    {
+      "path": "active/phase5-real-exchange-integration-contract.md",
+      "name": "phase5-real-exchange-integration-contract.md",
+      "category": "active",
+      "size_kb": 14.0,
+      "topics": [
+        "config",
+        "api",
+        "architecture",
+        "notification"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 5: 实盘集成 - 契约表 (v1.3)",
+        "修订记录",
+        "v1.3 新增内容",
+        "17. 资金安全限制设计（v1.3 新增）",
+        "17.1 配置参数"
+      ],
+      "mtime": "2026-04-10T02:23:18.908772+00:00"
+    },
+    {
+      "path": "active/phase6-code-review.md",
+      "name": "phase6-code-review.md",
+      "category": "active",
+      "size_kb": 10.5,
+      "topics": [
+        "order",
+        "api",
+        "frontend"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/interfaces/api.py"
+      ],
+      "headings": [
+        "Phase 6: v3.0 前端适配 - 代码审查报告",
+        "执行摘要",
+        "1. 审查问题清单",
+        "1.1 严重问题 (Critical)",
+        "1.2 一般问题 (Major)"
+      ],
+      "mtime": "2026-04-01T01:06:27.540789+00:00"
+    },
+    {
+      "path": "active/phase8-optimizer-contract.md",
+      "name": "phase8-optimizer-contract.md",
+      "category": "active",
+      "size_kb": 15.2,
+      "topics": [
+        "config",
+        "database",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 8: 自动化调参 (Optuna 集成) - API 契约与设计文档",
+        "一、功能概述",
+        "1.1 核心功能",
+        "1.2 用户故事",
+        "二、架构设计"
+      ],
+      "mtime": "2026-04-10T02:23:18.909410+00:00"
+    },
+    {
+      "path": "active/phase8-test-plan.md",
+      "name": "phase8-test-plan.md",
+      "category": "active",
+      "size_kb": 23.6,
+      "topics": [
+        "backtest",
+        "database",
+        "api",
+        "testing",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 8: 自动化调参 - 测试计划",
+        "一、测试概述",
+        "1.1 测试范围",
+        "1.2 测试环境",
+        "1.3 测试前置条件"
+      ],
+      "mtime": "2026-04-10T02:23:18.909599+00:00"
+    },
+    {
+      "path": "active/phase8-test-report.md",
+      "name": "phase8-test-report.md",
+      "category": "active",
+      "size_kb": 7.6,
+      "topics": [
+        "testing",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 8: 自动化调参 - 测试报告",
+        "一、测试概述",
+        "1.1 测试范围",
+        "1.2 测试环境",
+        "二、测试结果汇总"
+      ],
+      "mtime": "2026-04-02T10:52:06.556584+00:00"
+    },
+    {
+      "path": "active/risk-config-form-plan.md",
+      "name": "risk-config-form-plan.md",
+      "category": "active",
+      "size_kb": 21.7,
+      "topics": [
+        "config",
+        "risk",
+        "api",
+        "frontend"
+      ],
+      "refs": [
+        "src/interfaces/api_v1_config.py"
+      ],
+      "headings": [
+        "SystemSettings 页面新增风控配置表单 — 实施方案",
+        "一、前端类型确认",
+        "1.1 `RiskConfig` 类型对齐情况",
+        "1.2 需要新增的类型"
+      ],
+      "mtime": "2026-04-13T07:37:27.811330+00:00"
+    },
+    {
+      "path": "active/system-architecture-risk-analysis.md",
+      "name": "system-architecture-risk-analysis.md",
+      "category": "active",
+      "size_kb": 22.9,
+      "topics": [
+        "websocket",
+        "order",
+        "signal",
+        "kline",
+        "architecture",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "系统架构深度风险分析报告",
+        "一、执行摘要",
+        "1.1 审查背景",
+        "1.2 核心发现",
+        "1.3 关键结论"
+      ],
+      "mtime": "2026-04-07T13:29:35.792796+00:00"
+    },
+    {
+      "path": "active/t2-take-profit-slippage-fix.md",
+      "name": "t2-take-profit-slippage-fix.md",
+      "category": "active",
+      "size_kb": 11.3,
+      "topics": [
+        "backtest",
+        "order",
+        "kline",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/domain/matching_engine.py"
+      ],
+      "headings": [
+        "T2 - 修复止盈撮合过于理想问题 (添加滑点)",
+        "1. 问题分析",
+        "1.1 现状描述",
+        "src/domain/matching_engine.py:156-168 (当前代码)",
+        "1.2 影响范围"
+      ],
+      "mtime": "2026-04-02T00:35:53.534929+00:00"
+    },
+    {
+      "path": "active/v0.1.0-phase1-release-notes.md",
+      "name": "v0.1.0-phase1-release-notes.md",
+      "category": "active",
+      "size_kb": 6.5,
+      "topics": [
+        "config",
+        "frontend",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/domain/logic_tree.py",
+        "src/domain/recursive_engine.py"
+      ],
+      "headings": [
+        "盯盘狗 v0.1.0 - 第一阶段发布说明",
+        "版本概述",
+        "新增功能",
+        "后端实现",
+        "示例：Pinbar + EMA + MTF 组合策略"
+      ],
+      "mtime": "2026-03-26T13:20:05.878628+00:00"
+    },
+    {
+      "path": "active/v0.4.0-phase4-release-notes.md",
+      "name": "v0.4.0-phase4-release-notes.md",
+      "category": "active",
+      "size_kb": 7.7,
+      "topics": [
+        "config",
+        "api",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "v0.4.0-phase4 发布说明",
+        "概述",
+        "新功能",
+        "1. 配置快照版本化（Rollback）"
+      ],
+      "mtime": "2026-03-29T01:18:24.012868+00:00"
+    },
+    {
+      "path": "active/v0.6.0-phase4-5-integration.md",
+      "name": "v0.6.0-phase4-5-integration.md",
+      "category": "active",
+      "size_kb": 5.0,
+      "topics": [
+        "websocket",
+        "config",
+        "signal",
+        "testing",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "v0.6.0 - Phase 4+5 集成测试发布说明",
+        "概述",
+        "核心功能验证",
+        "Phase 4: 工业化调优",
+        "Phase 5: 状态增强"
+      ],
+      "mtime": "2026-03-29T01:18:24.013084+00:00"
+    },
+    {
+      "path": "active/v3-phase2-complete-report.md",
+      "name": "v3-phase2-complete-report.md",
+      "category": "active",
+      "size_kb": 6.3,
+      "topics": [
+        "backtest",
+        "order",
+        "testing"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/application/backtester.py",
+        "src/domain/matching_engine.py"
+      ],
+      "headings": [
+        "Phase 2: 撮合引擎 - 完成报告",
+        "执行摘要",
+        "交付成果",
+        "1. 新增文件",
+        "2. 修改文件"
+      ],
+      "mtime": "2026-03-30T08:56:41.198289+00:00"
+    },
+    {
+      "path": "active/v3-phase4-complete-report.md",
+      "name": "v3-phase4-complete-report.md",
+      "category": "active",
+      "size_kb": 8.8,
+      "topics": [
+        "backtest",
+        "config",
+        "order",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/domain/order_manager.py",
+        "src/application/backtester.py"
+      ],
+      "headings": [
+        "Phase 4: 订单编排 - 完成报告",
+        "执行摘要",
+        "交付成果",
+        "1. 新增文件",
+        "2. 修改文件"
+      ],
+      "mtime": "2026-03-30T11:35:15.331736+00:00"
+    },
+    {
+      "path": "active/websocket-kline-defect-review.md",
+      "name": "websocket-kline-defect-review.md",
+      "category": "active",
+      "size_kb": 21.5,
+      "topics": [
+        "websocket",
+        "signal",
+        "kline",
+        "architecture",
+        "exchange"
+      ],
+      "refs": [
+        "src/infrastructure/exchange_gateway.py"
+      ],
+      "headings": [
+        "架构审查报告 - WebSocket K 线处理与形态检测缺陷",
+        "一、问题概述",
+        "二、问题详细分析",
+        "🔴 问题 1: WebSocket 未正确过滤未收盘 K 线"
+      ],
+      "mtime": "2026-04-07T12:48:24.423681+00:00"
+    }
+  ],
+  "constraints": [
+    {
+      "path": "constraints/2026-03-27-lite 版设计.md",
+      "name": "2026-03-27-lite 版设计.md",
+      "category": "constraints",
+      "size_kb": 10.8,
+      "topics": [
+        "websocket",
+        "backtest",
+        "config",
+        "risk",
+        "signal",
+        "kline",
+        "database",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy",
+        "notification",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "盯盘狗 Lite 版设计文档",
+        "一、系统定位",
+        "二、功能范围",
+        "保留功能 ✅",
+        "移除功能 ❌"
+      ],
+      "mtime": "2026-03-29T01:18:24.013906+00:00"
+    },
+    {
+      "path": "constraints/2026-03-29-今日工作总结.md",
+      "name": "2026-03-29-今日工作总结.md",
+      "category": "constraints",
+      "size_kb": 4.7,
+      "topics": [
+        "backtest",
+        "risk",
+        "signal",
+        "kline",
+        "database",
+        "testing"
+      ],
+      "refs": [
+        "src/infrastructure/logger.py",
+        "src/application/backtester.py"
+      ],
+      "headings": [
+        "2026-03-29 工作总结",
+        "📊 完成的主要功能",
+        "1. 日志系统完善 ✅",
+        "2. MTF 过滤问题修复 ✅",
+        "3. 信号数据库修复 ✅"
+      ],
+      "mtime": "2026-03-29T06:07:01.303947+00:00"
+    },
+    {
+      "path": "constraints/2026-04-06-系统架构全面分析报告.md",
+      "name": "2026-04-06-系统架构全面分析报告.md",
+      "category": "constraints",
+      "size_kb": 5.4,
+      "topics": [
+        "backtest",
+        "config",
+        "order",
+        "signal",
+        "database",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "盯盘狗量化系统架构分析报告",
+        "一、系统是否满足基本量化系统要求？",
+        "✅ 回测完整度评估：**85%**",
+        "✅ 策略分析能力评估：**80%**",
+        "✅ 持续改进机制评估：**75%**"
+      ],
+      "mtime": "2026-04-06T09:12:54.251363+00:00"
+    },
+    {
+      "path": "constraints/2026-04-10-api-contract-mismatch-fix-plan.md",
+      "name": "2026-04-10-api-contract-mismatch-fix-plan.md",
+      "category": "constraints",
+      "size_kb": 4.3,
+      "topics": [
+        "config",
+        "api",
+        "frontend",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "API 契约不匹配修复方案",
+        "一、问题根因",
+        "二、问题清单",
+        "三、方案对比",
+        "方案 A：前端路由迁移（推荐）"
+      ],
+      "mtime": "2026-04-10T04:08:38.147576+00:00"
+    },
+    {
+      "path": "constraints/5why-analysis.md",
+      "name": "5why-analysis.md",
+      "category": "constraints",
+      "size_kb": 2.4,
+      "topics": [
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "5 Why 根因分析模板",
+        "问题描述",
+        "问题现象",
+        "期望行为",
+        "5 Why 分析"
+      ],
+      "mtime": "2026-04-03T00:31:32.941611+00:00"
+    },
+    {
+      "path": "constraints/ADR-20260404-001-config-architecture-refactor.md",
+      "name": "ADR-20260404-001-config-architecture-refactor.md",
+      "category": "constraints",
+      "size_kb": 21.5,
+      "topics": [
+        "config",
+        "risk",
+        "signal",
+        "database",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "ADR-2026-004-001: 配置管理系统架构重构设计",
+        "更新记录",
+        "1. 确认后的 API 设计",
+        "1.1 API 路径版本规范",
+        "1.2 完整 API 端点列表"
+      ],
+      "mtime": "2026-04-04T15:59:05.379837+00:00"
+    },
+    {
+      "path": "constraints/ADR-20260404-001-frontend-fix.md",
+      "name": "ADR-20260404-001-frontend-fix.md",
+      "category": "constraints",
+      "size_kb": 6.0,
+      "topics": [
+        "order",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "架构决策记录：前端三错误修复方案",
+        "背景",
+        "决策",
+        "具体决策",
+        "技术契约"
+      ],
+      "mtime": "2026-04-04T09:37:13.636984+00:00"
+    },
+    {
+      "path": "constraints/ADR-20260407-001-p1-implementation-strategy.md",
+      "name": "ADR-20260407-001-p1-implementation-strategy.md",
+      "category": "constraints",
+      "size_kb": 6.1,
+      "topics": [
+        "config",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "ADR-20260407-001: P1 问题实施策略决策",
+        "状态",
+        "背景",
+        "决策",
+        "决策 1: 实施顺序"
+      ],
+      "mtime": "2026-04-07T05:01:58.163062+00:00"
+    },
+    {
+      "path": "constraints/AR-20260404-003-review.md",
+      "name": "AR-20260404-003-review.md",
+      "category": "constraints",
+      "size_kb": 4.6,
+      "topics": [
+        "config",
+        "order",
+        "api",
+        "frontend",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "架构评审报告：前端修复方案完整性检查",
+        "评审结论",
+        "详细评审",
+        "1. Config 页面 toFixed 错误修复 ✅",
+        "修复前（错误）"
+      ],
+      "mtime": "2026-04-04T12:07:14.089051+00:00"
+    },
+    {
+      "path": "constraints/DEBT-3-architecture-review-result.md",
+      "name": "DEBT-3-architecture-review-result.md",
+      "category": "constraints",
+      "size_kb": 11.3,
+      "topics": [
+        "config",
+        "order",
+        "signal",
+        "api",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "DEBT-3 架构评审结果",
+        "评审结论",
+        "详细评审",
+        "1. 架构一致性"
+      ],
+      "mtime": "2026-04-03T03:57:31.697964+00:00"
+    },
+    {
+      "path": "constraints/P0-005-1-验证报告.md",
+      "name": "P0-005-1-验证报告.md",
+      "category": "constraints",
+      "size_kb": 4.6,
+      "topics": [
+        "config",
+        "order",
+        "api",
+        "testing",
+        "exchange",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "P0-005-1: Binance Testnet 连接与基础接口验证报告",
+        "一、验证目标",
+        "二、配置信息",
+        "三、验证结果",
+        "3.1 测试结果汇总"
+      ],
+      "mtime": "2026-04-01T07:51:32.889124+00:00"
+    },
+    {
+      "path": "constraints/P0-acceptance-report.md",
+      "name": "P0-acceptance-report.md",
+      "category": "constraints",
+      "size_kb": 6.6,
+      "topics": [
+        "websocket",
+        "kline",
+        "testing",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "P0 缺陷修复验收报告",
+        "一、验收范围",
+        "修复项清单",
+        "二、功能性验收",
+        "2.1 修复 1: WebSocket K 线选择逻辑（P0）"
+      ],
+      "mtime": "2026-04-08T07:52:37.388496+00:00"
+    },
+    {
+      "path": "constraints/P0-implementation-checklist.md",
+      "name": "P0-implementation-checklist.md",
+      "category": "constraints",
+      "size_kb": 13.8,
+      "topics": [
+        "websocket",
+        "config",
+        "kline",
+        "testing",
+        "architecture",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [
+        "src/domain/strategy_engine.py",
+        "src/domain/models.py",
+        "src/infrastructure/exchange_gateway.py",
+        "src/domain/filter_factory.py"
+      ],
+      "headings": [
+        "P0 WebSocket K 线选择逻辑修复 - 实施清单",
+        "一、修改文件总览",
+        "1.1 核心修改文件 (必须修改)",
+        "1.2 测试文件 (新增/更新)",
+        "二、详细实施步骤"
+      ],
+      "mtime": "2026-04-08T07:28:50.363352+00:00"
+    },
+    {
+      "path": "constraints/P0-test-checklist.md",
+      "name": "P0-test-checklist.md",
+      "category": "constraints",
+      "size_kb": 19.0,
+      "topics": [
+        "websocket",
+        "kline",
+        "testing",
+        "architecture",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "P0 WebSocket K 线选择逻辑修复 - 测试清单",
+        "一、测试总览",
+        "1.1 测试类型分布",
+        "1.2 测试文件清单",
+        "二、单元测试用例"
+      ],
+      "mtime": "2026-04-08T07:30:50.104194+00:00"
+    },
+    {
+      "path": "constraints/P0-websocket-kline-fix-design.md",
+      "name": "P0-websocket-kline-fix-design.md",
+      "category": "constraints",
+      "size_kb": 14.9,
+      "topics": [
+        "websocket",
+        "signal",
+        "kline",
+        "architecture",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "ADR-P0: WebSocket K 线选择逻辑修复设计",
+        "摘要",
+        "1. 问题背景",
+        "1.1 WebSocket 推送机制",
+        "❌ 错误逻辑"
+      ],
+      "mtime": "2026-04-08T07:25:56.737595+00:00"
+    },
+    {
+      "path": "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+      "name": "P1-5-config-manager-refactor-impact-analysis.md",
+      "category": "constraints",
+      "size_kb": 24.7,
+      "topics": [
+        "backtest",
+        "config",
+        "risk",
+        "database",
+        "architecture",
+        "strategy",
+        "notification",
+        "connection"
+      ],
+      "refs": [
+        "src/application/config_manager.py"
+      ],
+      "headings": [
+        "P1-5: ConfigManager 职责拆分影响分析报告",
+        "1. 执行摘要",
+        "1.1 问题陈述",
+        "1.2 重构目标"
+      ],
+      "mtime": "2026-04-07T05:01:11.297188+00:00"
+    },
+    {
+      "path": "constraints/P1-5-day5-service-layer-design.md",
+      "name": "P1-5-day5-service-layer-design.md",
+      "category": "constraints",
+      "size_kb": 30.2,
+      "topics": [
+        "config",
+        "risk",
+        "database",
+        "architecture",
+        "strategy",
+        "notification"
+      ],
+      "refs": [],
+      "headings": [
+        "P1-5 Day 5: ConfigService 服务层架构设计文档",
+        "1. 执行摘要",
+        "1.1 设计目标",
+        "1.2 三层架构定位"
+      ],
+      "mtime": "2026-04-07T06:55:39.088574+00:00"
+    },
+    {
+      "path": "constraints/P1-5-provider-code-review-report.md",
+      "name": "P1-5-provider-code-review-report.md",
+      "category": "constraints",
+      "size_kb": 20.2,
+      "topics": [
+        "config",
+        "testing",
+        "architecture"
+      ],
+      "refs": [
+        "src/application/config/providers/base.py",
+        "src/application/config/providers/registry.py"
+      ],
+      "headings": [
+        "P1-5 Provider 注册模式实施项目 - 代码审查报告",
+        "执行摘要",
+        "审查结果总览",
+        "测试验证结果",
+        "问题分级汇总"
+      ],
+      "mtime": "2026-04-07T08:52:43.457575+00:00"
+    },
+    {
+      "path": "constraints/P1-5-provider-registration-design.md",
+      "name": "P1-5-provider-registration-design.md",
+      "category": "constraints",
+      "size_kb": 32.8,
+      "topics": [
+        "websocket",
+        "config",
+        "risk",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "P1-5 Day 5: Provider 注册模式架构设计",
+        "0. 修订历史",
+        "1. 执行摘要",
+        "1.1 设计目标",
+        "1.2 核心技术方案"
+      ],
+      "mtime": "2026-04-07T07:30:04.008930+00:00"
+    },
+    {
+      "path": "constraints/README.md",
+      "name": "README.md",
+      "category": "constraints",
+      "size_kb": 5.0,
+      "topics": [
+        "websocket",
+        "order",
+        "risk",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "盯盘狗项目文档导航",
+        "📚 文档分类索引",
+        "核心文档",
+        "v3.0 PMS 系统（当前重点）",
+        "Phase 5 实盘集成"
+      ],
+      "mtime": "2026-03-31T08:13:03.869858+00:00"
+    },
+    {
+      "path": "constraints/TEST-2-fixture-refactor-adr.md",
+      "name": "TEST-2-fixture-refactor-adr.md",
+      "category": "constraints",
+      "size_kb": 9.4,
+      "topics": [
+        "config",
+        "order",
+        "signal",
+        "api",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "TEST-2 集成测试 Fixture 重构 ADR",
+        "1. 决策背景和问题陈述",
+        "问题现象",
+        "根因分析",
+        "影响评估"
+      ],
+      "mtime": "2026-04-03T09:18:16.316311+00:00"
+    },
+    {
+      "path": "constraints/adr-001-backtest-data-integrity-fix.md",
+      "name": "adr-001-backtest-data-integrity-fix.md",
+      "category": "constraints",
+      "size_kb": 31.1,
+      "topics": [
+        "backtest",
+        "order",
+        "signal",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/domain/matching_engine.py"
+      ],
+      "headings": [
+        "ADR-001: 回测数据完整性修复设计",
+        "1. 问题分析",
+        "1.1 背景",
+        "1.2 问题详情"
+      ],
+      "mtime": "2026-04-07T00:43:28.692033+00:00"
+    },
+    {
+      "path": "constraints/adr-002-bt4-review-fixes.md",
+      "name": "adr-002-bt4-review-fixes.md",
+      "category": "constraints",
+      "size_kb": 25.9,
+      "topics": [
+        "backtest",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/application/attribution_analyzer.py"
+      ],
+      "headings": [
+        "BT-4 策略归因分析功能代码审查修复方案设计",
+        "一、背景与概述",
+        "二、问题清单与修复方案",
+        "Critical 问题（必须修复）",
+        "原代码 (第 118-119 行)"
+      ],
+      "mtime": "2026-04-07T00:43:28.692170+00:00"
+    },
+    {
+      "path": "constraints/adr-002-funding-rate-simulation.md",
+      "name": "adr-002-funding-rate-simulation.md",
+      "category": "constraints",
+      "size_kb": 22.0,
+      "topics": [
+        "backtest",
+        "architecture",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "ADR-002: BT-2 资金费率模拟架构设计",
+        "1. 需求分析",
+        "1.1 业务背景",
+        "1.2 简化模型设计理由",
+        "1.3 计算模型"
+      ],
+      "mtime": "2026-04-07T02:47:13.031243+00:00"
+    },
+    {
+      "path": "constraints/adr-shared-db-connection-pool.md",
+      "name": "adr-shared-db-connection-pool.md",
+      "category": "constraints",
+      "size_kb": 4.1,
+      "topics": [
+        "backtest",
+        "config",
+        "order",
+        "signal",
+        "database",
+        "api",
+        "testing",
+        "architecture",
+        "strategy",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "架构设计方案：共享 DB 连接池统一改造",
+        "方案选择：方案 A（最小侵入）",
+        "需要改造的文件清单（13 个文件，~20 处连接点）",
+        "具体改动",
+        "1. connection_pool.py 新增 busy_timeout"
+      ],
+      "mtime": "2026-04-14T00:29:52.898019+00:00"
+    },
+    {
+      "path": "constraints/api-config-review-20260407.md",
+      "name": "api-config-review-20260407.md",
+      "category": "constraints",
+      "size_kb": 10.7,
+      "topics": [
+        "config",
+        "api",
+        "testing",
+        "architecture",
+        "strategy",
+        "notification"
+      ],
+      "refs": [
+        "src/interfaces/api_v1_config.py",
+        "src/interfaces/api.py"
+      ],
+      "headings": [
+        "配置管理 API 层代码审查报告",
+        "1. 总体评价：B+",
+        "2. 问题清单",
+        "❌ P0 级 - 阻止性问题（必须修复后才能合并）",
+        "⚠️ P1 级 - 重要问题（建议 2 周内修复）"
+      ],
+      "mtime": "2026-04-07T03:09:49.770257+00:00"
+    },
+    {
+      "path": "constraints/architecture-feedback-flow.md",
+      "name": "architecture-feedback-flow.md",
+      "category": "constraints",
+      "size_kb": 11.0,
+      "topics": [
+        "order",
+        "signal",
+        "database",
+        "api",
+        "testing",
+        "architecture",
+        "notification"
+      ],
+      "refs": [],
+      "headings": [
+        "架构问题反馈流程详细说明",
+        "🎯 流程概览",
+        "🔴 架构问题识别标准详解",
+        "1. 接口契约不一致",
+        "OpenAPI Spec 定义"
+      ],
+      "mtime": "2026-04-07T08:06:26.527016+00:00"
+    },
+    {
+      "path": "constraints/auto-pipeline.md",
+      "name": "auto-pipeline.md",
+      "category": "constraints",
+      "size_kb": 17.0,
+      "topics": [
+        "frontend",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "盯盘狗全自动复杂任务交付流水线 v2.0",
+        "流水线总览",
+        "状态看板 (Task Status Board)",
+        "看板文件格式",
+        "任务状态看板 - [项目名称]"
+      ],
+      "mtime": "2026-04-03T00:31:32.942246+00:00"
+    },
+    {
+      "path": "constraints/backtest-order-lifecycle.md",
+      "name": "backtest-order-lifecycle.md",
+      "category": "constraints",
+      "size_kb": 8.9,
+      "topics": [
+        "backtest",
+        "order",
+        "kline",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "回测订单生命周期流程图",
+        "一、订单状态流转图"
+      ],
+      "mtime": "2026-04-02T02:12:23.048869+00:00"
+    },
+    {
+      "path": "constraints/boundary-checklist.md",
+      "name": "boundary-checklist.md",
+      "category": "constraints",
+      "size_kb": 5.7,
+      "topics": [
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "边界情况检查清单",
+        "📋 通用边界检查 (所有角色)",
+        "数据边界",
+        "集合边界",
+        "时间边界"
+      ],
+      "mtime": "2026-04-03T00:31:32.941760+00:00"
+    },
+    {
+      "path": "constraints/code-commit-statistics-report.md",
+      "name": "code-commit-statistics-report.md",
+      "category": "constraints",
+      "size_kb": 5.2,
+      "topics": [
+        "backtest",
+        "config",
+        "frontend",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "📊 盯盘狗项目代码提交统计分析报告",
+        "🎯 核心统计指标",
+        "最近一个月总体概况",
+        "最近一周活跃度",
+        "📁 文件类型分布分析"
+      ],
+      "mtime": "2026-04-07T10:45:13.400152+00:00"
+    },
+    {
+      "path": "constraints/config-management-architecture-review.md",
+      "name": "config-management-architecture-review.md",
+      "category": "constraints",
+      "size_kb": 12.7,
+      "topics": [
+        "config",
+        "risk",
+        "api",
+        "testing",
+        "architecture",
+        "strategy",
+        "notification"
+      ],
+      "refs": [
+        "src/interfaces/api_v1_config.py"
+      ],
+      "headings": [
+        "配置管理模块架构一致性审查报告",
+        "1. 总体评价",
+        "评分理由",
+        "2. 架构问题清单",
+        "P0 级问题 (阻止合并)"
+      ],
+      "mtime": "2026-04-07T03:09:27.941849+00:00"
+    },
+    {
+      "path": "constraints/config-management-p0p1-fix-design.md",
+      "name": "config-management-p0p1-fix-design.md",
+      "category": "constraints",
+      "size_kb": 25.8,
+      "topics": [
+        "config",
+        "api",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "配置管理模块 P0/P1 级问题修复方案设计",
+        "目录",
+        "执行摘要",
+        "问题概览",
+        "影响分析"
+      ],
+      "mtime": "2026-04-07T03:28:19.075983+00:00"
+    },
+    {
+      "path": "constraints/config-management-p1-implementation-strategy.md",
+      "name": "config-management-p1-implementation-strategy.md",
+      "category": "constraints",
+      "size_kb": 13.5,
+      "topics": [
+        "config",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "配置管理模块 P1 问题实施策略",
+        "1. 执行摘要",
+        "问题概览",
+        "实施优先级",
+        "预计工时"
+      ],
+      "mtime": "2026-04-07T04:10:36.094528+00:00"
+    },
+    {
+      "path": "constraints/config-management-p1-testing-plan.md",
+      "name": "config-management-p1-testing-plan.md",
+      "category": "constraints",
+      "size_kb": 11.7,
+      "topics": [
+        "config",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "P1-8 并发测试补充计划",
+        "1. 测试目标",
+        "1.1 核心目标",
+        "1.2 验收目标",
+        "2. 测试用例设计"
+      ],
+      "mtime": "2026-04-07T04:11:42.406457+00:00"
+    },
+    {
+      "path": "constraints/config-management-review.md",
+      "name": "config-management-review.md",
+      "category": "constraints",
+      "size_kb": 18.8,
+      "topics": [
+        "config",
+        "database",
+        "api",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "配置管理后端代码审查报告",
+        "1. 总体评价",
+        "评分维度",
+        "核心亮点",
+        "主要问题"
+      ],
+      "mtime": "2026-04-07T03:11:47.605063+00:00"
+    },
+    {
+      "path": "constraints/config-management-versioned-snapshots.md",
+      "name": "config-management-versioned-snapshots.md",
+      "category": "constraints",
+      "size_kb": 29.1,
+      "topics": [
+        "config",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "配置管理功能 - 版本化快照方案 B - 技术设计文档",
+        "1. 产品需求概述",
+        "1.1 MVP 范围",
+        "1.2 自动快照策略",
+        "2. 架构设计"
+      ],
+      "mtime": "2026-04-02T09:31:43.076450+00:00"
+    },
+    {
+      "path": "constraints/contract-template.md",
+      "name": "contract-template.md",
+      "category": "constraints",
+      "size_kb": 6.6,
+      "topics": [
+        "api",
+        "frontend"
+      ],
+      "refs": [],
+      "headings": [
+        "{{功能名称}} - 接口契约表",
+        "1. API 端点定义",
+        "2. 请求 Schema",
+        "2.1 请求头（Headers）",
+        "2.2 请求参数（Query Params）"
+      ],
+      "mtime": "2026-04-01T01:06:27.541039+00:00"
+    },
+    {
+      "path": "constraints/dependency-graph.md",
+      "name": "dependency-graph.md",
+      "category": "constraints",
+      "size_kb": 8.3,
+      "topics": [
+        "config",
+        "signal",
+        "database",
+        "notification",
+        "exchange",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "系统模块依赖关系图",
+        "启动顺序依赖图"
+      ],
+      "mtime": "2026-04-05T09:53:09.727803+00:00"
+    },
+    {
+      "path": "constraints/fe-001-frontend-config-navigation-redesign.md",
+      "name": "fe-001-frontend-config-navigation-redesign.md",
+      "category": "constraints",
+      "size_kb": 16.3,
+      "topics": [
+        "websocket",
+        "backtest",
+        "config",
+        "api",
+        "frontend",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "FE-001 前端配置导航重构 - 架构设计文档",
+        "一、架构概述",
+        "1.1 设计目标",
+        "1.2 核心原则",
+        "二、路由设计"
+      ],
+      "mtime": "2026-04-07T00:43:28.692289+00:00"
+    },
+    {
+      "path": "constraints/feishu-claudecode-guide.md",
+      "name": "feishu-claudecode-guide.md",
+      "category": "constraints",
+      "size_kb": 10.1,
+      "topics": [
+        "websocket",
+        "config",
+        "api",
+        "testing",
+        "architecture",
+        "notification",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "飞书远程控制 Claude Code — 安装与使用指南",
+        "概述",
+        "技术架构",
+        "前置条件",
+        "飞书开放平台配置"
+      ],
+      "mtime": "2026-04-10T05:52:06.704551+00:00"
+    },
+    {
+      "path": "constraints/findings.md",
+      "name": "findings.md",
+      "category": "constraints",
+      "size_kb": 16.1,
+      "topics": [
+        "backtest",
+        "signal",
+        "database",
+        "testing",
+        "architecture",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "技术发现",
+        "2026-04-14 连接池 close() 共享连接 premature close 修复",
+        "根因",
+        "`_owns_connection` 语义错位",
+        "修复方案"
+      ],
+      "mtime": "2026-04-14T02:50:43.532706+00:00"
+    },
+    {
+      "path": "constraints/kline-signal-flow.md",
+      "name": "kline-signal-flow.md",
+      "category": "constraints",
+      "size_kb": 33.2,
+      "topics": [
+        "websocket",
+        "signal",
+        "kline",
+        "database",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "K 线信号完整业务流程演示",
+        "概述",
+        "1. 虚拟 K 线数据构造",
+        "1.1 输入 K 线（15 分钟周期）",
+        "1.2 账户快照（实时状态）"
+      ],
+      "mtime": "2026-03-29T01:18:24.010095+00:00"
+    },
+    {
+      "path": "constraints/logging-system-spec.md",
+      "name": "logging-system-spec.md",
+      "category": "constraints",
+      "size_kb": 15.2,
+      "topics": [
+        "api",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "日志系统架构规范",
+        "一、日志系统架构",
+        "1.1 整体架构"
+      ],
+      "mtime": "2026-03-29T05:14:14.795492+00:00"
+    },
+    {
+      "path": "constraints/openapi-contract-mechanism-summary.md",
+      "name": "openapi-contract-mechanism-summary.md",
+      "category": "constraints",
+      "size_kb": 11.6,
+      "topics": [
+        "api",
+        "frontend",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "工作流优化总结 - 强制 OpenAPI 契约机制",
+        "📋 优化内容概览",
+        "核心改进",
+        "🔧 详细改进内容",
+        "1. 阶段 2 工作流增强"
+      ],
+      "mtime": "2026-04-07T08:15:41.106268+00:00"
+    },
+    {
+      "path": "constraints/openapi-template.md",
+      "name": "openapi-template.md",
+      "category": "constraints",
+      "size_kb": 9.1,
+      "topics": [
+        "config",
+        "api",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "OpenAPI Spec 模板与示例",
+        "📋 最小化模板（必须包含）"
+      ],
+      "mtime": "2026-04-07T08:05:09.003007+00:00"
+    },
+    {
+      "path": "constraints/ord-6-code-review-report.md",
+      "name": "ord-6-code-review-report.md",
+      "category": "constraints",
+      "size_kb": 18.4,
+      "topics": [
+        "config",
+        "order",
+        "database",
+        "api",
+        "frontend",
+        "testing",
+        "architecture",
+        "exchange"
+      ],
+      "refs": [
+        "src/infrastructure/order_repository.py"
+      ],
+      "headings": [
+        "ORD-6: 批量删除集成交易所 API - 代码审查报告",
+        "执行摘要",
+        "总体评价",
+        "P0 问题 (阻塞性，必须修复)",
+        "P0-1: ExchangeGateway 未初始化，交易所取消功能实际不可用"
+      ],
+      "mtime": "2026-04-07T00:43:28.695212+00:00"
+    },
+    {
+      "path": "constraints/ord-6-fix-plan.md",
+      "name": "ord-6-fix-plan.md",
+      "category": "constraints",
+      "size_kb": 28.0,
+      "topics": [
+        "websocket",
+        "config",
+        "order",
+        "architecture",
+        "exchange"
+      ],
+      "refs": [
+        "src/infrastructure/order_repository.py"
+      ],
+      "headings": [
+        "ORD-6: 批量删除功能 - P0/P1/P2 问题修复方案",
+        "一、问题总览",
+        "二、P0 问题修复方案 (阻塞交付)",
+        "P0-1: ExchangeGateway 未初始化",
+        "行 1174-1190"
+      ],
+      "mtime": "2026-04-07T00:43:28.692890+00:00"
+    },
+    {
+      "path": "constraints/order-lifecycle.md",
+      "name": "order-lifecycle.md",
+      "category": "constraints",
+      "size_kb": 22.3,
+      "topics": [
+        "websocket",
+        "order",
+        "exchange"
+      ],
+      "refs": [
+        "src/domain/models.py"
+      ],
+      "headings": [
+        "订单完整生命周期文档",
+        "1. 订单状态流转图 (State Diagram)",
+        "1.1 状态枚举定义",
+        "1.2 状态流转触发条件"
+      ],
+      "mtime": "2026-04-01T02:30:07.188359+00:00"
+    },
+    {
+      "path": "constraints/order-management-fix-design.md",
+      "name": "order-management-fix-design.md",
+      "category": "constraints",
+      "size_kb": 88.1,
+      "topics": [
+        "order",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/domain/order_manager.py",
+        "src/infrastructure/order_repository.py"
+      ],
+      "headings": [
+        "订单管理模块 P1/P2 问题修复实施设计",
+        "执行摘要",
+        "问题统计",
+        "实施估算",
+        "1. 问题分析"
+      ],
+      "mtime": "2026-04-07T03:58:06.388185+00:00"
+    },
+    {
+      "path": "constraints/order-repository-fix-recommendations.md",
+      "name": "order-repository-fix-recommendations.md",
+      "category": "constraints",
+      "size_kb": 19.0,
+      "topics": [
+        "websocket",
+        "order",
+        "database",
+        "testing",
+        "exchange",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "OrderRepository 测试覆盖率修复建议",
+        "一、关键问题总结",
+        "1.1 风险概览",
+        "1.2 极高风险方法（2 个）"
+      ],
+      "mtime": "2026-04-07T01:39:38.096270+00:00"
+    },
+    {
+      "path": "constraints/p0-001-wal-mode.md",
+      "name": "p0-001-wal-mode.md",
+      "category": "constraints",
+      "size_kb": 11.9,
+      "topics": [
+        "config",
+        "order",
+        "database",
+        "architecture",
+        "connection"
+      ],
+      "refs": [
+        "src/infrastructure/order_repository.py"
+      ],
+      "headings": [
+        "P0-001: SQLite WAL 模式设计",
+        "一、问题分析",
+        "1.1 当前状态",
+        "1.2 标准模式的问题",
+        "1.3 性能对比"
+      ],
+      "mtime": "2026-04-01T04:24:44.486280+00:00"
+    },
+    {
+      "path": "constraints/p0-004-order-validation.md",
+      "name": "p0-004-order-validation.md",
+      "category": "constraints",
+      "size_kb": 45.0,
+      "topics": [
+        "order",
+        "signal",
+        "api",
+        "testing",
+        "architecture",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "P0-004: 订单参数合理性检查设计",
+        "修订记录",
+        "一、问题分析",
+        "1.1 粉尘订单（Dust Orders）",
+        "1.2  Binance 最小订单金额限制"
+      ],
+      "mtime": "2026-04-01T05:16:09.830989+00:00"
+    },
+    {
+      "path": "constraints/p1_5_parser_layer_review.md",
+      "name": "p1_5_parser_layer_review.md",
+      "category": "constraints",
+      "size_kb": 7.1,
+      "topics": [
+        "config",
+        "risk",
+        "api",
+        "testing"
+      ],
+      "refs": [
+        "src/application/config/config_parser.py",
+        "src/application/config/__init__.py",
+        "src/application/config/models.py"
+      ],
+      "headings": [
+        "P1-5 Parser 层代码审查报告",
+        "🔴 红线检查结果",
+        "🟡 边界情况检查结果",
+        "P1-001: 冗余导入"
+      ],
+      "mtime": "2026-04-07T06:06:36.469676+00:00"
+    },
+    {
+      "path": "constraints/p2-improvements-and-known-issues-fix-design.md",
+      "name": "p2-improvements-and-known-issues-fix-design.md",
+      "category": "constraints",
+      "size_kb": 25.6,
+      "topics": [
+        "order",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/infrastructure/order_repository.py"
+      ],
+      "headings": [
+        "P2 改进建议和已知问题修复方案设计",
+        "执行摘要",
+        "问题清单",
+        "实施估算",
+        "1. 问题分析"
+      ],
+      "mtime": "2026-04-07T06:09:33.810358+00:00"
+    },
+    {
+      "path": "constraints/phase1-5-comprehensive-review-report.md",
+      "name": "phase1-5-comprehensive-review-report.md",
+      "category": "constraints",
+      "size_kb": 17.5,
+      "topics": [
+        "order",
+        "risk",
+        "testing",
+        "architecture"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/infrastructure/v3_orm.py"
+      ],
+      "headings": [
+        "Phase 1-5 系统性代码审查报告",
+        "一、审查摘要",
+        "审查概览",
+        "测试验证",
+        "二、Phase 1: 核心数据模型审查"
+      ],
+      "mtime": "2026-03-31T06:07:25.059836+00:00"
+    },
+    {
+      "path": "constraints/phase2-matching-engine-contract.md",
+      "name": "phase2-matching-engine-contract.md",
+      "category": "constraints",
+      "size_kb": 15.6,
+      "topics": [
+        "order",
+        "kline",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 2: 撮合引擎 - 接口契约表",
+        "一、核心设计原则",
+        "1.1 撮合优先级法则",
+        "1.2 滑点计算原则",
+        "二、MockMatchingEngine 类定义"
+      ],
+      "mtime": "2026-04-10T02:23:18.906775+00:00"
+    },
+    {
+      "path": "constraints/phase3-risk-state-machine-contract.md",
+      "name": "phase3-risk-state-machine-contract.md",
+      "category": "constraints",
+      "size_kb": 15.9,
+      "topics": [
+        "backtest",
+        "order",
+        "risk",
+        "kline",
+        "api",
+        "architecture",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 3: 风控状态机 - 接口契约表",
+        "一、核心设计原则",
+        "1.1 触发时机",
+        "1.2 状态转移",
+        "1.3 核心红线"
+      ],
+      "mtime": "2026-04-10T02:23:18.907103+00:00"
+    },
+    {
+      "path": "constraints/phase4-contract-v1.1-changes.md",
+      "name": "phase4-contract-v1.1-changes.md",
+      "category": "constraints",
+      "size_kb": 7.9,
+      "topics": [
+        "config",
+        "order",
+        "risk",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 4 契约表 v1.1 修订报告",
+        "修订摘要",
+        "问题与修复对照表",
+        "🔴 高优先级问题",
+        "🟡 中优先级问题"
+      ],
+      "mtime": "2026-04-10T02:23:18.907362+00:00"
+    },
+    {
+      "path": "constraints/phase4-order-orchestration-contract.md",
+      "name": "phase4-order-orchestration-contract.md",
+      "category": "constraints",
+      "size_kb": 23.4,
+      "topics": [
+        "config",
+        "order",
+        "risk",
+        "signal",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 4: 订单编排 - 接口契约表",
+        "修订历史 (v1.1)",
+        "一、核心设计原则",
+        "1.1 订单编排层次"
+      ],
+      "mtime": "2026-04-10T02:23:18.907554+00:00"
+    },
+    {
+      "path": "constraints/phase5-code-review.md",
+      "name": "phase5-code-review.md",
+      "category": "constraints",
+      "size_kb": 12.5,
+      "topics": [
+        "order",
+        "api",
+        "frontend",
+        "testing",
+        "architecture"
+      ],
+      "refs": [
+        "src/domain/models.py"
+      ],
+      "headings": [
+        "Phase 5: 实盘集成 - 代码审查报告",
+        "一、审查摘要",
+        "审查概览",
+        "二、详细审查结果",
+        "2.1 API 字段命名对齐审查"
+      ],
+      "mtime": "2026-03-31T03:19:57.919944+00:00"
+    },
+    {
+      "path": "constraints/phase5-contract.md",
+      "name": "phase5-contract.md",
+      "category": "constraints",
+      "size_kb": 36.1,
+      "topics": [
+        "order",
+        "api"
+      ],
+      "refs": [
+        "src/domain/models.py"
+      ],
+      "headings": [
+        "Phase 5: 实盘集成 - 接口契约表",
+        "1. API 端点定义",
+        "2. 请求 Schema",
+        "2.1 请求头（Headers）",
+        "3. 核心模型定义"
+      ],
+      "mtime": "2026-04-10T02:23:18.908035+00:00"
+    },
+    {
+      "path": "constraints/phase5-detailed-design.md",
+      "name": "phase5-detailed-design.md",
+      "category": "constraints",
+      "size_kb": 32.9,
+      "topics": [
+        "websocket",
+        "backtest",
+        "order",
+        "signal",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy",
+        "notification",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 5: 实盘集成 - 详细设计文档",
+        "修订记录 (v1.1)",
+        "一、设计目标",
+        "二、系统架构图"
+      ],
+      "mtime": "2026-04-10T02:23:18.908228+00:00"
+    },
+    {
+      "path": "constraints/phase5-environment-compatibility-brainstorm.md",
+      "name": "phase5-environment-compatibility-brainstorm.md",
+      "category": "constraints",
+      "size_kb": 10.5,
+      "topics": [
+        "config",
+        "database",
+        "testing",
+        "strategy",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 5 环境兼容性头脑风暴",
+        "环境矩阵",
+        "兼容性议题",
+        "1. 数据库兼容性问题",
+        "alembic/env.py"
+      ],
+      "mtime": "2026-03-30T12:27:40.228488+00:00"
+    },
+    {
+      "path": "constraints/phase6-v3-api-contract.md",
+      "name": "phase6-v3-api-contract.md",
+      "category": "constraints",
+      "size_kb": 16.7,
+      "topics": [
+        "order",
+        "signal",
+        "api",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "Phase 6: v3.0 API 契约表",
+        "1. API 端点定义",
+        "2. 请求/响应 Schema",
+        "2.1 订单创建"
+      ],
+      "mtime": "2026-04-10T02:23:18.908995+00:00"
+    },
+    {
+      "path": "constraints/phase6-v3-api-detailed-design.md",
+      "name": "phase6-v3-api-detailed-design.md",
+      "category": "constraints",
+      "size_kb": 11.2,
+      "topics": [
+        "order",
+        "api",
+        "frontend",
+        "architecture",
+        "exchange"
+      ],
+      "refs": [
+        "src/interfaces/api.py"
+      ],
+      "headings": [
+        "Phase 6: v3.0 REST API 详细设计",
+        "一、设计目标",
+        "二、系统架构"
+      ],
+      "mtime": "2026-04-10T02:23:18.909209+00:00"
+    },
+    {
+      "path": "constraints/phaseB-code-review.md",
+      "name": "phaseB-code-review.md",
+      "category": "constraints",
+      "size_kb": 13.7,
+      "topics": [
+        "backtest",
+        "order",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/infrastructure/order_repository.py",
+        "src/infrastructure/v3_orm.py",
+        "src/infrastructure/backtest_repository.py"
+      ],
+      "headings": [
+        "阶段 B 代码审查报告 (T3-T6) - 数据持久化",
+        "审查文件清单",
+        "审查结果",
+        "✅ 通过项",
+        "✅ order_repository.py - 正确导入领域模型"
+      ],
+      "mtime": "2026-04-02T00:35:53.536634+00:00"
+    },
+    {
+      "path": "constraints/pinbar-backtest-report-20260409.md",
+      "name": "pinbar-backtest-report-20260409.md",
+      "category": "constraints",
+      "size_kb": 5.0,
+      "topics": [
+        "backtest",
+        "config",
+        "signal",
+        "kline",
+        "database",
+        "testing",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "Pinbar 集成测试报告 - 真实 K 线数据验证",
+        "一、跨品种/跨周期汇总表",
+        "二、核心发现",
+        "发现 1：15m 是唯一正收益的周期级别",
+        "发现 2：SOL 表现最优，BTC 居中"
+      ],
+      "mtime": "2026-04-09T09:07:10.395847+00:00"
+    },
+    {
+      "path": "constraints/pms-backtest-feature-check-20260409.md",
+      "name": "pms-backtest-feature-check-20260409.md",
+      "category": "constraints",
+      "size_kb": 6.4,
+      "topics": [
+        "backtest",
+        "config",
+        "order",
+        "signal",
+        "kline",
+        "api",
+        "frontend",
+        "testing",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "PMS 回测功能检查报告",
+        "一、功能清单检查结果",
+        "二、前端页面检查",
+        "三、前端 API 函数检查"
+      ],
+      "mtime": "2026-04-09T09:12:10.174002+00:00"
+    },
+    {
+      "path": "constraints/progress.md",
+      "name": "progress.md",
+      "category": "constraints",
+      "size_kb": 43.9,
+      "topics": [
+        "backtest",
+        "config",
+        "order",
+        "risk",
+        "signal",
+        "database",
+        "testing",
+        "architecture",
+        "strategy",
+        "notification",
+        "connection"
+      ],
+      "refs": [],
+      "headings": [
+        "进度日志",
+        "收工状态"
+      ],
+      "mtime": "2026-04-14T02:50:38.851296+00:00"
+    },
+    {
+      "path": "constraints/skills-trigger-guide.md",
+      "name": "skills-trigger-guide.md",
+      "category": "constraints",
+      "size_kb": 7.4,
+      "topics": [
+        "config",
+        "api",
+        "frontend",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "技能触发完整指南",
+        "🎯 快速答案",
+        "❌ 不需要特别注意（自动触发）",
+        "⚠️ 关键词触发（需要提及特定词汇）",
+        "✅ 必须明确触发（slash 命令或直接指示）"
+      ],
+      "mtime": "2026-04-04T13:48:24.153321+00:00"
+    },
+    {
+      "path": "constraints/strategy-and-risk.md",
+      "name": "strategy-and-risk.md",
+      "category": "constraints",
+      "size_kb": 20.9,
+      "topics": [
+        "config",
+        "risk",
+        "signal",
+        "kline",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "策略与风控完整文档",
+        "目录",
+        "1. 策略引擎架构",
+        "1.1 系统分层"
+      ],
+      "mtime": "2026-04-01T03:03:18.658096+00:00"
+    },
+    {
+      "path": "constraints/strategy-table-b-plan.md",
+      "name": "strategy-table-b-plan.md",
+      "category": "constraints",
+      "size_kb": 18.5,
+      "topics": [
+        "websocket",
+        "backtest",
+        "config",
+        "api",
+        "frontend",
+        "testing",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "方案 B：彻底统一策略表 - 详细执行方案",
+        "一、前端调用方清单",
+        "1.1 使用旧端点的文件（必须修改）",
+        "1.2 已使用新端点的文件（无需修改）",
+        "1.3 前端改动详细步骤"
+      ],
+      "mtime": "2026-04-13T04:30:54.582479+00:00"
+    },
+    {
+      "path": "constraints/strategy-table-migration-plan.md",
+      "name": "strategy-table-migration-plan.md",
+      "category": "constraints",
+      "size_kb": 18.2,
+      "topics": [
+        "backtest",
+        "config",
+        "signal",
+        "api",
+        "frontend",
+        "testing",
+        "strategy"
+      ],
+      "refs": [
+        "src/infrastructure/repositories/config_repositories.py",
+        "src/interfaces/api.py",
+        "src/infrastructure/signal_repository.py"
+      ],
+      "headings": [
+        "Strategy Table Migration Plan",
+        "1. 影响范围排查",
+        "1.1 旧表 `custom_strategies` 引用清单",
+        "1.2 新表 `strategies` 引用清单"
+      ],
+      "mtime": "2026-04-13T04:16:46.876065+00:00"
+    },
+    {
+      "path": "constraints/system-priority-reanalysis-20260408.md",
+      "name": "system-priority-reanalysis-20260408.md",
+      "category": "constraints",
+      "size_kb": 6.6,
+      "topics": [
+        "backtest",
+        "config",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "系统优先级重新分析 - 基于用户实际使用场景",
+        "一、用户约束条件",
+        "1.1 使用场景",
+        "1.2 阶段目标",
+        "二、原待办事项重新评估"
+      ],
+      "mtime": "2026-04-14T00:29:52.897872+00:00"
+    },
+    {
+      "path": "constraints/t1-mtf-future-function-fix.md",
+      "name": "t1-mtf-future-function-fix.md",
+      "category": "constraints",
+      "size_kb": 10.3,
+      "topics": [
+        "backtest",
+        "signal",
+        "kline",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/application/backtester.py"
+      ],
+      "headings": [
+        "T1 - MTF 未来函数问题修复设计文档",
+        "1. 问题分析",
+        "1.1 核心问题",
+        "1.2 影响范围",
+        "1.3 根本原因定位"
+      ],
+      "mtime": "2026-04-02T00:35:53.534788+00:00"
+    },
+    {
+      "path": "constraints/task_plan.md",
+      "name": "task_plan.md",
+      "category": "constraints",
+      "size_kb": 19.0,
+      "topics": [
+        "backtest",
+        "config",
+        "order",
+        "signal",
+        "kline",
+        "database",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "任务计划",
+        "已完成项目摘要",
+        "MVP 回测验证项目（2026-04-09 启动）",
+        "任务清单",
+        "回测核心发现"
+      ],
+      "mtime": "2026-04-14T02:50:30.686612+00:00"
+    },
+    {
+      "path": "constraints/test-architecture-refactor-design.md",
+      "name": "test-architecture-refactor-design.md",
+      "category": "constraints",
+      "size_kb": 24.1,
+      "topics": [
+        "order",
+        "database",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [],
+      "headings": [
+        "测试架构重构设计文档 (方案 C)",
+        "一、背景与目标",
+        "1.1 问题陈述",
+        "1.2 重构目标",
+        "二、已确认的架构决策"
+      ],
+      "mtime": "2026-04-07T00:43:28.692405+00:00"
+    },
+    {
+      "path": "constraints/user-profile.md",
+      "name": "user-profile.md",
+      "category": "constraints",
+      "size_kb": 12.6,
+      "topics": [
+        "backtest",
+        "config",
+        "database",
+        "api",
+        "frontend",
+        "testing",
+        "architecture"
+      ],
+      "refs": [],
+      "headings": [
+        "用户画像：AI-Driven 量化系统架构师",
+        "基本信息",
+        "工具链配置",
+        "MCP 服务器（8 个）",
+        "已安装插件（17 个）"
+      ],
+      "mtime": "2026-04-10T06:43:16.484886+00:00"
+    },
+    {
+      "path": "constraints/v0.3.0-phase3-release-notes.md",
+      "name": "v0.3.0-phase3-release-notes.md",
+      "category": "constraints",
+      "size_kb": 4.5,
+      "topics": [
+        "config",
+        "risk",
+        "signal",
+        "testing",
+        "architecture"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/domain/risk_calculator.py"
+      ],
+      "headings": [
+        "v0.3.0-phase3 发布说明",
+        "概述",
+        "新功能",
+        "1. 动态风险头寸计算（方案 B）"
+      ],
+      "mtime": "2026-03-29T01:18:24.012477+00:00"
+    },
+    {
+      "path": "constraints/v0.5.0-phase5-release-notes.md",
+      "name": "v0.5.0-phase5-release-notes.md",
+      "category": "constraints",
+      "size_kb": 5.0,
+      "topics": [
+        "websocket",
+        "config",
+        "signal",
+        "api",
+        "exchange"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/infrastructure/exchange_gateway.py"
+      ],
+      "headings": [
+        "v0.5.0-phase5 发布说明",
+        "概述",
+        "新功能",
+        "1. WebSocket 实时资产推送（S5-1）",
+        "订阅 WebSocket 资产更新"
+      ],
+      "mtime": "2026-03-29T01:18:24.012987+00:00"
+    },
+    {
+      "path": "constraints/v3-evolution-roadmap.md",
+      "name": "v3-evolution-roadmap.md",
+      "category": "constraints",
+      "size_kb": 33.1,
+      "topics": [
+        "websocket",
+        "order",
+        "risk",
+        "signal",
+        "frontend",
+        "testing",
+        "architecture",
+        "exchange"
+      ],
+      "refs": [],
+      "headings": [
+        "盯盘狗系统 v3.0 演进路线图",
+        "一、演进步骤总览",
+        "二、架构评审技术定调（已确认）",
+        "2.1 SignalToOrderAdapter 设计模式"
+      ],
+      "mtime": "2026-04-02T00:35:53.537082+00:00"
+    },
+    {
+      "path": "constraints/v3-phase1-complete-report.md",
+      "name": "v3-phase1-complete-report.md",
+      "category": "constraints",
+      "size_kb": 6.5,
+      "topics": [
+        "order",
+        "signal",
+        "database",
+        "frontend",
+        "testing",
+        "architecture",
+        "strategy"
+      ],
+      "refs": [
+        "src/infrastructure/v3_orm.py"
+      ],
+      "headings": [
+        "Phase 1: 模型筑基 - 完成报告",
+        "任务完成概览",
+        "交付成果",
+        "1. ORM 模型层",
+        "2. 数据库迁移"
+      ],
+      "mtime": "2026-03-30T08:08:53.306965+00:00"
+    },
+    {
+      "path": "constraints/v3-phase2-handoff-report.md",
+      "name": "v3-phase2-handoff-report.md",
+      "category": "constraints",
+      "size_kb": 5.9,
+      "topics": [
+        "backtest",
+        "database",
+        "testing",
+        "architecture"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/application/backtester.py",
+        "src/domain/matching_engine.py"
+      ],
+      "headings": [
+        "Phase 2 完成报告 - Phase 3 会话交接文档",
+        "一、当前项目状态",
+        "已完成阶段",
+        "Phase 3 准备状态",
+        "二、Phase 2 交付成果"
+      ],
+      "mtime": "2026-03-30T09:35:29.918123+00:00"
+    },
+    {
+      "path": "constraints/v3-phase3-complete-report.md",
+      "name": "v3-phase3-complete-report.md",
+      "category": "constraints",
+      "size_kb": 8.9,
+      "topics": [
+        "backtest",
+        "order",
+        "risk",
+        "testing",
+        "architecture"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/application/backtester.py",
+        "src/infrastructure/v3_orm.py",
+        "src/domain/risk_manager.py"
+      ],
+      "headings": [
+        "Phase 3: 风控状态机 - 完成报告",
+        "执行摘要",
+        "交付成果",
+        "1. 新增文件",
+        "2. 修改文件"
+      ],
+      "mtime": "2026-03-30T10:26:31.382930+00:00"
+    },
+    {
+      "path": "constraints/v3-phases-1-4-verification-report.md",
+      "name": "v3-phases-1-4-verification-report.md",
+      "category": "constraints",
+      "size_kb": 7.7,
+      "topics": [
+        "order",
+        "risk",
+        "database",
+        "testing"
+      ],
+      "refs": [
+        "src/domain/models.py",
+        "src/infrastructure/v3_orm.py"
+      ],
+      "headings": [
+        "Phase 1-4 验证报告",
+        "执行摘要",
+        "问题修复记录",
+        "2026-03-31 修复",
+        "Phase 1: 模型筑基"
+      ],
+      "mtime": "2026-03-31T02:40:58.847887+00:00"
+    },
+    {
+      "path": "constraints/workflow-v3-summary.md",
+      "name": "workflow-v3-summary.md",
+      "category": "constraints",
+      "size_kb": 6.0,
+      "topics": [
+        "testing",
+        "architecture",
+        "notification"
+      ],
+      "refs": [],
+      "headings": [
+        "工作流重构 v3.0 - 实施总结",
+        "一、问题汇总与解决方案",
+        "二、新工作流核心设计",
+        "2.1 会话切割",
+        "2.2 规划会话强制交互式头脑风暴"
+      ],
+      "mtime": "2026-04-03T02:01:49.456827+00:00"
+    },
+    {
+      "path": "constraints/修复方案 -20260403-配置管理页 500 错误修复.md",
+      "name": "修复方案 -20260403-配置管理页 500 错误修复.md",
+      "category": "constraints",
+      "size_kb": 13.8,
+      "topics": [
+        "config",
+        "order",
+        "database",
+        "api",
+        "frontend",
+        "architecture",
+        "strategy",
+        "connection"
+      ],
+      "refs": [
+        "src/interfaces/api.py"
+      ],
+      "headings": [
+        "架构设计文档：配置管理页 500 错误修复方案",
+        "1. 问题背景与诊断摘要",
+        "1.1 问题症状汇总",
+        "1.2 根因分析"
+      ],
+      "mtime": "2026-04-04T11:08:16.282680+00:00"
+    }
+  ],
+  "search_index": {
+    "by_topic": {
+      "backtest": [
+        "active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+        "active/2026-04-02-backtest-data-localization-design.md",
+        "active/BT-2-backend-implementation-status.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/connection-pool-close-fix-plan.md",
+        "active/phase8-test-plan.md",
+        "active/t2-take-profit-slippage-fix.md",
+        "active/v3-phase2-complete-report.md",
+        "active/v3-phase4-complete-report.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-03-29-今日工作总结.md",
+        "constraints/2026-04-06-系统架构全面分析报告.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+        "constraints/adr-001-backtest-data-integrity-fix.md",
+        "constraints/adr-002-bt4-review-fixes.md",
+        "constraints/adr-002-funding-rate-simulation.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/backtest-order-lifecycle.md",
+        "constraints/code-commit-statistics-report.md",
+        "constraints/fe-001-frontend-config-navigation-redesign.md",
+        "constraints/findings.md",
+        "constraints/phase3-risk-state-machine-contract.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/phaseB-code-review.md",
+        "constraints/pinbar-backtest-report-20260409.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/progress.md",
+        "constraints/strategy-table-b-plan.md",
+        "constraints/strategy-table-migration-plan.md",
+        "constraints/system-priority-reanalysis-20260408.md",
+        "constraints/t1-mtf-future-function-fix.md",
+        "constraints/task_plan.md",
+        "constraints/user-profile.md",
+        "constraints/v3-phase2-handoff-report.md",
+        "constraints/v3-phase3-complete-report.md"
+      ],
+      "config": [
+        "active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+        "active/2026-03-27-s3-1-mtf-data-alignment.md",
+        "active/2026-04-10-api-contract-fix-verification.md",
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/P1-5-project-delivery-report.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/config-management-report.md",
+        "active/p0-002-log-rotation.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/phase5-real-exchange-integration-contract.md",
+        "active/phase8-optimizer-contract.md",
+        "active/risk-config-form-plan.md",
+        "active/v0.1.0-phase1-release-notes.md",
+        "active/v0.4.0-phase4-release-notes.md",
+        "active/v0.6.0-phase4-5-integration.md",
+        "active/v3-phase4-complete-report.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-04-06-系统架构全面分析报告.md",
+        "constraints/2026-04-10-api-contract-mismatch-fix-plan.md",
+        "constraints/ADR-20260404-001-config-architecture-refactor.md",
+        "constraints/ADR-20260407-001-p1-implementation-strategy.md",
+        "constraints/AR-20260404-003-review.md",
+        "constraints/DEBT-3-architecture-review-result.md",
+        "constraints/P0-005-1-验证报告.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+        "constraints/P1-5-day5-service-layer-design.md",
+        "constraints/P1-5-provider-code-review-report.md",
+        "constraints/P1-5-provider-registration-design.md",
+        "constraints/TEST-2-fixture-refactor-adr.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/api-config-review-20260407.md",
+        "constraints/code-commit-statistics-report.md",
+        "constraints/config-management-architecture-review.md",
+        "constraints/config-management-p0p1-fix-design.md",
+        "constraints/config-management-p1-implementation-strategy.md",
+        "constraints/config-management-p1-testing-plan.md",
+        "constraints/config-management-review.md",
+        "constraints/config-management-versioned-snapshots.md",
+        "constraints/dependency-graph.md",
+        "constraints/fe-001-frontend-config-navigation-redesign.md",
+        "constraints/feishu-claudecode-guide.md",
+        "constraints/openapi-template.md",
+        "constraints/ord-6-code-review-report.md",
+        "constraints/ord-6-fix-plan.md",
+        "constraints/p0-001-wal-mode.md",
+        "constraints/p1_5_parser_layer_review.md",
+        "constraints/phase4-contract-v1.1-changes.md",
+        "constraints/phase4-order-orchestration-contract.md",
+        "constraints/phase5-environment-compatibility-brainstorm.md",
+        "constraints/pinbar-backtest-report-20260409.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/progress.md",
+        "constraints/skills-trigger-guide.md",
+        "constraints/strategy-and-risk.md",
+        "constraints/strategy-table-b-plan.md",
+        "constraints/strategy-table-migration-plan.md",
+        "constraints/system-priority-reanalysis-20260408.md",
+        "constraints/task_plan.md",
+        "constraints/user-profile.md",
+        "constraints/v0.3.0-phase3-release-notes.md",
+        "constraints/v0.5.0-phase5-release-notes.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ],
+      "signal": [
+        "active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+        "active/2026-03-27-s3-1-mtf-data-alignment.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/feishu-mention-test.md",
+        "active/ord-5-order-audit-log-integration.md",
+        "active/system-architecture-risk-analysis.md",
+        "active/v0.6.0-phase4-5-integration.md",
+        "active/websocket-kline-defect-review.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-03-29-今日工作总结.md",
+        "constraints/2026-04-06-系统架构全面分析报告.md",
+        "constraints/ADR-20260404-001-config-architecture-refactor.md",
+        "constraints/DEBT-3-architecture-review-result.md",
+        "constraints/P0-websocket-kline-fix-design.md",
+        "constraints/TEST-2-fixture-refactor-adr.md",
+        "constraints/adr-001-backtest-data-integrity-fix.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/architecture-feedback-flow.md",
+        "constraints/dependency-graph.md",
+        "constraints/findings.md",
+        "constraints/kline-signal-flow.md",
+        "constraints/p0-004-order-validation.md",
+        "constraints/phase4-order-orchestration-contract.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/phase6-v3-api-contract.md",
+        "constraints/pinbar-backtest-report-20260409.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/progress.md",
+        "constraints/strategy-and-risk.md",
+        "constraints/strategy-table-migration-plan.md",
+        "constraints/t1-mtf-future-function-fix.md",
+        "constraints/task_plan.md",
+        "constraints/v0.3.0-phase3-release-notes.md",
+        "constraints/v0.5.0-phase5-release-notes.md",
+        "constraints/v3-evolution-roadmap.md",
+        "constraints/v3-phase1-complete-report.md"
+      ],
+      "kline": [
+        "active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+        "active/2026-03-27-s3-1-mtf-data-alignment.md",
+        "active/2026-04-02-backtest-data-localization-design.md",
+        "active/order-klines-test-report.md",
+        "active/system-architecture-risk-analysis.md",
+        "active/t2-take-profit-slippage-fix.md",
+        "active/websocket-kline-defect-review.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-03-29-今日工作总结.md",
+        "constraints/P0-acceptance-report.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/P0-test-checklist.md",
+        "constraints/P0-websocket-kline-fix-design.md",
+        "constraints/backtest-order-lifecycle.md",
+        "constraints/kline-signal-flow.md",
+        "constraints/phase2-matching-engine-contract.md",
+        "constraints/phase3-risk-state-machine-contract.md",
+        "constraints/pinbar-backtest-report-20260409.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/strategy-and-risk.md",
+        "constraints/t1-mtf-future-function-fix.md",
+        "constraints/task_plan.md"
+      ],
+      "architecture": [
+        "active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+        "active/2026-03-27-s3-1-mtf-data-alignment.md",
+        "active/2026-04-02-backtest-data-localization-design.md",
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/P1-5-project-delivery-report.md",
+        "active/T010-integration-test-acceptance-report.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/p0-002-log-rotation.md",
+        "active/p0-003-reconciliation.md",
+        "active/phase5-development-checklist.md",
+        "active/phase5-real-exchange-integration-contract.md",
+        "active/phase8-optimizer-contract.md",
+        "active/system-architecture-risk-analysis.md",
+        "active/t2-take-profit-slippage-fix.md",
+        "active/v0.1.0-phase1-release-notes.md",
+        "active/v3-phase4-complete-report.md",
+        "active/websocket-kline-defect-review.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-04-06-系统架构全面分析报告.md",
+        "constraints/2026-04-10-api-contract-mismatch-fix-plan.md",
+        "constraints/5why-analysis.md",
+        "constraints/ADR-20260404-001-config-architecture-refactor.md",
+        "constraints/ADR-20260404-001-frontend-fix.md",
+        "constraints/ADR-20260407-001-p1-implementation-strategy.md",
+        "constraints/AR-20260404-003-review.md",
+        "constraints/DEBT-3-architecture-review-result.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/P0-test-checklist.md",
+        "constraints/P0-websocket-kline-fix-design.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+        "constraints/P1-5-day5-service-layer-design.md",
+        "constraints/P1-5-provider-code-review-report.md",
+        "constraints/P1-5-provider-registration-design.md",
+        "constraints/README.md",
+        "constraints/TEST-2-fixture-refactor-adr.md",
+        "constraints/adr-001-backtest-data-integrity-fix.md",
+        "constraints/adr-002-bt4-review-fixes.md",
+        "constraints/adr-002-funding-rate-simulation.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/api-config-review-20260407.md",
+        "constraints/architecture-feedback-flow.md",
+        "constraints/auto-pipeline.md",
+        "constraints/boundary-checklist.md",
+        "constraints/code-commit-statistics-report.md",
+        "constraints/config-management-architecture-review.md",
+        "constraints/config-management-p0p1-fix-design.md",
+        "constraints/config-management-p1-implementation-strategy.md",
+        "constraints/config-management-p1-testing-plan.md",
+        "constraints/config-management-review.md",
+        "constraints/config-management-versioned-snapshots.md",
+        "constraints/fe-001-frontend-config-navigation-redesign.md",
+        "constraints/feishu-claudecode-guide.md",
+        "constraints/findings.md",
+        "constraints/logging-system-spec.md",
+        "constraints/openapi-contract-mechanism-summary.md",
+        "constraints/openapi-template.md",
+        "constraints/ord-6-code-review-report.md",
+        "constraints/ord-6-fix-plan.md",
+        "constraints/order-management-fix-design.md",
+        "constraints/p0-001-wal-mode.md",
+        "constraints/p0-004-order-validation.md",
+        "constraints/p2-improvements-and-known-issues-fix-design.md",
+        "constraints/phase1-5-comprehensive-review-report.md",
+        "constraints/phase2-matching-engine-contract.md",
+        "constraints/phase3-risk-state-machine-contract.md",
+        "constraints/phase4-contract-v1.1-changes.md",
+        "constraints/phase4-order-orchestration-contract.md",
+        "constraints/phase5-code-review.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/phase6-v3-api-contract.md",
+        "constraints/phase6-v3-api-detailed-design.md",
+        "constraints/phaseB-code-review.md",
+        "constraints/progress.md",
+        "constraints/skills-trigger-guide.md",
+        "constraints/strategy-and-risk.md",
+        "constraints/t1-mtf-future-function-fix.md",
+        "constraints/task_plan.md",
+        "constraints/test-architecture-refactor-design.md",
+        "constraints/user-profile.md",
+        "constraints/v0.3.0-phase3-release-notes.md",
+        "constraints/v3-evolution-roadmap.md",
+        "constraints/v3-phase1-complete-report.md",
+        "constraints/v3-phase2-handoff-report.md",
+        "constraints/v3-phase3-complete-report.md",
+        "constraints/workflow-v3-summary.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ],
+      "strategy": [
+        "active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+        "active/2026-04-10-api-contract-fix-verification.md",
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/T010-integration-test-acceptance-report.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/p0-003-reconciliation.md",
+        "active/phase5-development-checklist.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/phase8-optimizer-contract.md",
+        "active/phase8-test-plan.md",
+        "active/phase8-test-report.md",
+        "active/system-architecture-risk-analysis.md",
+        "active/t2-take-profit-slippage-fix.md",
+        "active/v0.1.0-phase1-release-notes.md",
+        "active/v0.4.0-phase4-release-notes.md",
+        "active/v0.6.0-phase4-5-integration.md",
+        "active/v3-phase4-complete-report.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-04-06-系统架构全面分析报告.md",
+        "constraints/2026-04-10-api-contract-mismatch-fix-plan.md",
+        "constraints/ADR-20260404-001-config-architecture-refactor.md",
+        "constraints/ADR-20260404-001-frontend-fix.md",
+        "constraints/ADR-20260407-001-p1-implementation-strategy.md",
+        "constraints/AR-20260404-003-review.md",
+        "constraints/P0-acceptance-report.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/P0-test-checklist.md",
+        "constraints/P0-websocket-kline-fix-design.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+        "constraints/P1-5-day5-service-layer-design.md",
+        "constraints/P1-5-provider-registration-design.md",
+        "constraints/TEST-2-fixture-refactor-adr.md",
+        "constraints/adr-001-backtest-data-integrity-fix.md",
+        "constraints/adr-002-bt4-review-fixes.md",
+        "constraints/adr-002-funding-rate-simulation.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/api-config-review-20260407.md",
+        "constraints/config-management-architecture-review.md",
+        "constraints/config-management-p1-implementation-strategy.md",
+        "constraints/config-management-versioned-snapshots.md",
+        "constraints/fe-001-frontend-config-navigation-redesign.md",
+        "constraints/kline-signal-flow.md",
+        "constraints/order-management-fix-design.md",
+        "constraints/p0-004-order-validation.md",
+        "constraints/p2-improvements-and-known-issues-fix-design.md",
+        "constraints/phase4-contract-v1.1-changes.md",
+        "constraints/phase4-order-orchestration-contract.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/phase5-environment-compatibility-brainstorm.md",
+        "constraints/phase6-v3-api-contract.md",
+        "constraints/phaseB-code-review.md",
+        "constraints/pinbar-backtest-report-20260409.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/progress.md",
+        "constraints/strategy-and-risk.md",
+        "constraints/strategy-table-b-plan.md",
+        "constraints/strategy-table-migration-plan.md",
+        "constraints/system-priority-reanalysis-20260408.md",
+        "constraints/t1-mtf-future-function-fix.md",
+        "constraints/task_plan.md",
+        "constraints/test-architecture-refactor-design.md",
+        "constraints/v3-phase1-complete-report.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ],
+      "testing": [
+        "active/2026-03-27-s3-1-mtf-data-alignment.md",
+        "active/2026-04-02-backtest-data-localization-design.md",
+        "active/2026-04-10-api-contract-fix-verification.md",
+        "active/BT-2-backend-implementation-status.md",
+        "active/P1-5-project-delivery-report.md",
+        "active/T010-integration-test-acceptance-report.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/config-management-report.md",
+        "active/connection-pool-close-fix-plan.md",
+        "active/feishu-mention-test.md",
+        "active/order-klines-test-report.md",
+        "active/p0-002-log-rotation.md",
+        "active/p0-005-3-window3-test-report.md",
+        "active/phase5-development-checklist.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/phase8-test-plan.md",
+        "active/phase8-test-report.md",
+        "active/v0.6.0-phase4-5-integration.md",
+        "active/v3-phase2-complete-report.md",
+        "active/v3-phase4-complete-report.md",
+        "constraints/2026-03-29-今日工作总结.md",
+        "constraints/2026-04-06-系统架构全面分析报告.md",
+        "constraints/2026-04-10-api-contract-mismatch-fix-plan.md",
+        "constraints/5why-analysis.md",
+        "constraints/ADR-20260407-001-p1-implementation-strategy.md",
+        "constraints/AR-20260404-003-review.md",
+        "constraints/DEBT-3-architecture-review-result.md",
+        "constraints/P0-005-1-验证报告.md",
+        "constraints/P0-acceptance-report.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/P0-test-checklist.md",
+        "constraints/P1-5-provider-code-review-report.md",
+        "constraints/P1-5-provider-registration-design.md",
+        "constraints/TEST-2-fixture-refactor-adr.md",
+        "constraints/adr-001-backtest-data-integrity-fix.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/api-config-review-20260407.md",
+        "constraints/architecture-feedback-flow.md",
+        "constraints/auto-pipeline.md",
+        "constraints/boundary-checklist.md",
+        "constraints/code-commit-statistics-report.md",
+        "constraints/config-management-architecture-review.md",
+        "constraints/config-management-p0p1-fix-design.md",
+        "constraints/config-management-p1-implementation-strategy.md",
+        "constraints/config-management-p1-testing-plan.md",
+        "constraints/fe-001-frontend-config-navigation-redesign.md",
+        "constraints/feishu-claudecode-guide.md",
+        "constraints/findings.md",
+        "constraints/openapi-contract-mechanism-summary.md",
+        "constraints/ord-6-code-review-report.md",
+        "constraints/order-management-fix-design.md",
+        "constraints/order-repository-fix-recommendations.md",
+        "constraints/p0-004-order-validation.md",
+        "constraints/p1_5_parser_layer_review.md",
+        "constraints/p2-improvements-and-known-issues-fix-design.md",
+        "constraints/phase1-5-comprehensive-review-report.md",
+        "constraints/phase4-contract-v1.1-changes.md",
+        "constraints/phase5-code-review.md",
+        "constraints/phase5-environment-compatibility-brainstorm.md",
+        "constraints/phaseB-code-review.md",
+        "constraints/pinbar-backtest-report-20260409.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/progress.md",
+        "constraints/skills-trigger-guide.md",
+        "constraints/strategy-table-b-plan.md",
+        "constraints/strategy-table-migration-plan.md",
+        "constraints/t1-mtf-future-function-fix.md",
+        "constraints/task_plan.md",
+        "constraints/test-architecture-refactor-design.md",
+        "constraints/user-profile.md",
+        "constraints/v0.3.0-phase3-release-notes.md",
+        "constraints/v3-evolution-roadmap.md",
+        "constraints/v3-phase1-complete-report.md",
+        "constraints/v3-phase2-handoff-report.md",
+        "constraints/v3-phase3-complete-report.md",
+        "constraints/v3-phases-1-4-verification-report.md",
+        "constraints/workflow-v3-summary.md"
+      ],
+      "database": [
+        "active/2026-04-02-backtest-data-localization-design.md",
+        "active/2026-04-10-api-contract-fix-verification.md",
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/BT-2-backend-implementation-status.md",
+        "active/config-management-report.md",
+        "active/connection-pool-close-fix-plan.md",
+        "active/ord-5-order-audit-log-integration.md",
+        "active/p0-003-reconciliation.md",
+        "active/phase5-development-checklist.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/phase8-optimizer-contract.md",
+        "active/phase8-test-plan.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-03-29-今日工作总结.md",
+        "constraints/2026-04-06-系统架构全面分析报告.md",
+        "constraints/ADR-20260404-001-config-architecture-refactor.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+        "constraints/P1-5-day5-service-layer-design.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/architecture-feedback-flow.md",
+        "constraints/config-management-review.md",
+        "constraints/dependency-graph.md",
+        "constraints/findings.md",
+        "constraints/kline-signal-flow.md",
+        "constraints/ord-6-code-review-report.md",
+        "constraints/order-repository-fix-recommendations.md",
+        "constraints/p0-001-wal-mode.md",
+        "constraints/phase5-environment-compatibility-brainstorm.md",
+        "constraints/pinbar-backtest-report-20260409.md",
+        "constraints/progress.md",
+        "constraints/task_plan.md",
+        "constraints/test-architecture-refactor-design.md",
+        "constraints/user-profile.md",
+        "constraints/v3-phase1-complete-report.md",
+        "constraints/v3-phase2-handoff-report.md",
+        "constraints/v3-phases-1-4-verification-report.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ],
+      "api": [
+        "active/2026-04-02-backtest-data-localization-design.md",
+        "active/2026-04-10-api-contract-fix-verification.md",
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/BT-2-backend-implementation-status.md",
+        "active/S5-1-1-ccxtpro-research.md",
+        "active/T010-integration-test-acceptance-report.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/config-management-report.md",
+        "active/connection-pool-close-fix-plan.md",
+        "active/feishu-mention-test.md",
+        "active/order-klines-test-report.md",
+        "active/phase5-development-checklist.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/phase5-real-exchange-integration-contract.md",
+        "active/phase6-code-review.md",
+        "active/phase8-optimizer-contract.md",
+        "active/phase8-test-plan.md",
+        "active/risk-config-form-plan.md",
+        "active/v0.4.0-phase4-release-notes.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-04-10-api-contract-mismatch-fix-plan.md",
+        "constraints/ADR-20260404-001-config-architecture-refactor.md",
+        "constraints/ADR-20260404-001-frontend-fix.md",
+        "constraints/AR-20260404-003-review.md",
+        "constraints/DEBT-3-architecture-review-result.md",
+        "constraints/P0-005-1-验证报告.md",
+        "constraints/TEST-2-fixture-refactor-adr.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/api-config-review-20260407.md",
+        "constraints/architecture-feedback-flow.md",
+        "constraints/config-management-architecture-review.md",
+        "constraints/config-management-p0p1-fix-design.md",
+        "constraints/config-management-review.md",
+        "constraints/config-management-versioned-snapshots.md",
+        "constraints/contract-template.md",
+        "constraints/fe-001-frontend-config-navigation-redesign.md",
+        "constraints/feishu-claudecode-guide.md",
+        "constraints/logging-system-spec.md",
+        "constraints/openapi-contract-mechanism-summary.md",
+        "constraints/openapi-template.md",
+        "constraints/ord-6-code-review-report.md",
+        "constraints/p0-004-order-validation.md",
+        "constraints/p1_5_parser_layer_review.md",
+        "constraints/phase3-risk-state-machine-contract.md",
+        "constraints/phase5-code-review.md",
+        "constraints/phase5-contract.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/phase6-v3-api-contract.md",
+        "constraints/phase6-v3-api-detailed-design.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/skills-trigger-guide.md",
+        "constraints/strategy-table-b-plan.md",
+        "constraints/strategy-table-migration-plan.md",
+        "constraints/user-profile.md",
+        "constraints/v0.5.0-phase5-release-notes.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ],
+      "exchange": [
+        "active/2026-04-02-backtest-data-localization-design.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/S5-1-1-ccxtpro-research.md",
+        "active/ord-5-order-audit-log-integration.md",
+        "active/p0-003-reconciliation.md",
+        "active/p0-005-3-window3-test-report.md",
+        "active/phase5-development-checklist.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/system-architecture-risk-analysis.md",
+        "active/websocket-kline-defect-review.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/P0-005-1-验证报告.md",
+        "constraints/P0-acceptance-report.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/P0-test-checklist.md",
+        "constraints/P0-websocket-kline-fix-design.md",
+        "constraints/adr-002-funding-rate-simulation.md",
+        "constraints/backtest-order-lifecycle.md",
+        "constraints/dependency-graph.md",
+        "constraints/ord-6-code-review-report.md",
+        "constraints/ord-6-fix-plan.md",
+        "constraints/order-lifecycle.md",
+        "constraints/order-repository-fix-recommendations.md",
+        "constraints/p0-004-order-validation.md",
+        "constraints/phase3-risk-state-machine-contract.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/phase5-environment-compatibility-brainstorm.md",
+        "constraints/phase6-v3-api-detailed-design.md",
+        "constraints/v0.5.0-phase5-release-notes.md",
+        "constraints/v3-evolution-roadmap.md"
+      ],
+      "frontend": [
+        "active/2026-04-10-api-contract-fix-verification.md",
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/BT-2-backend-implementation-status.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/config-management-report.md",
+        "active/order-klines-test-report.md",
+        "active/phase6-code-review.md",
+        "active/phase8-optimizer-contract.md",
+        "active/risk-config-form-plan.md",
+        "active/v0.1.0-phase1-release-notes.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-04-10-api-contract-mismatch-fix-plan.md",
+        "constraints/ADR-20260404-001-config-architecture-refactor.md",
+        "constraints/ADR-20260404-001-frontend-fix.md",
+        "constraints/AR-20260404-003-review.md",
+        "constraints/auto-pipeline.md",
+        "constraints/code-commit-statistics-report.md",
+        "constraints/config-management-versioned-snapshots.md",
+        "constraints/contract-template.md",
+        "constraints/fe-001-frontend-config-navigation-redesign.md",
+        "constraints/openapi-contract-mechanism-summary.md",
+        "constraints/ord-6-code-review-report.md",
+        "constraints/phase5-code-review.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/phase6-v3-api-detailed-design.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/skills-trigger-guide.md",
+        "constraints/strategy-table-b-plan.md",
+        "constraints/strategy-table-migration-plan.md",
+        "constraints/user-profile.md",
+        "constraints/v3-evolution-roadmap.md",
+        "constraints/v3-phase1-complete-report.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ],
+      "risk": [
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/P1-5-project-delivery-report.md",
+        "active/T010-integration-test-acceptance-report.md",
+        "active/adr-risk-overrides-consumption.md",
+        "active/connection-pool-close-fix-plan.md",
+        "active/risk-config-form-plan.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/2026-03-29-今日工作总结.md",
+        "constraints/ADR-20260404-001-config-architecture-refactor.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+        "constraints/P1-5-day5-service-layer-design.md",
+        "constraints/P1-5-provider-registration-design.md",
+        "constraints/README.md",
+        "constraints/config-management-architecture-review.md",
+        "constraints/p1_5_parser_layer_review.md",
+        "constraints/phase1-5-comprehensive-review-report.md",
+        "constraints/phase3-risk-state-machine-contract.md",
+        "constraints/phase4-contract-v1.1-changes.md",
+        "constraints/phase4-order-orchestration-contract.md",
+        "constraints/progress.md",
+        "constraints/strategy-and-risk.md",
+        "constraints/v0.3.0-phase3-release-notes.md",
+        "constraints/v3-evolution-roadmap.md",
+        "constraints/v3-phase3-complete-report.md",
+        "constraints/v3-phases-1-4-verification-report.md"
+      ],
+      "notification": [
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/feishu-mention-test.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/phase5-real-exchange-integration-contract.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+        "constraints/P1-5-day5-service-layer-design.md",
+        "constraints/api-config-review-20260407.md",
+        "constraints/architecture-feedback-flow.md",
+        "constraints/config-management-architecture-review.md",
+        "constraints/dependency-graph.md",
+        "constraints/feishu-claudecode-guide.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/progress.md",
+        "constraints/workflow-v3-summary.md"
+      ],
+      "connection": [
+        "active/2026-04-10-phase2-tasks-analysis.md",
+        "active/connection-pool-close-fix-plan.md",
+        "active/p0-005-3-window3-test-report.md",
+        "constraints/P0-005-1-验证报告.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/dependency-graph.md",
+        "constraints/feishu-claudecode-guide.md",
+        "constraints/findings.md",
+        "constraints/order-repository-fix-recommendations.md",
+        "constraints/p0-001-wal-mode.md",
+        "constraints/progress.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ],
+      "websocket": [
+        "active/S5-1-1-ccxtpro-research.md",
+        "active/p0-005-3-window3-test-report.md",
+        "active/phase5-contract-review-report.md",
+        "active/phase5-development-checklist.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/system-architecture-risk-analysis.md",
+        "active/v0.6.0-phase4-5-integration.md",
+        "active/websocket-kline-defect-review.md",
+        "constraints/2026-03-27-lite 版设计.md",
+        "constraints/P0-acceptance-report.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/P0-test-checklist.md",
+        "constraints/P0-websocket-kline-fix-design.md",
+        "constraints/P1-5-provider-registration-design.md",
+        "constraints/README.md",
+        "constraints/fe-001-frontend-config-navigation-redesign.md",
+        "constraints/feishu-claudecode-guide.md",
+        "constraints/kline-signal-flow.md",
+        "constraints/ord-6-fix-plan.md",
+        "constraints/order-lifecycle.md",
+        "constraints/order-repository-fix-recommendations.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/strategy-table-b-plan.md",
+        "constraints/v0.5.0-phase5-release-notes.md",
+        "constraints/v3-evolution-roadmap.md"
+      ],
+      "order": [
+        "active/T010-integration-test-acceptance-report.md",
+        "active/connection-pool-close-fix-plan.md",
+        "active/ord-5-order-audit-log-integration.md",
+        "active/order-klines-test-report.md",
+        "active/p0-003-reconciliation.md",
+        "active/p0-005-3-window3-test-report.md",
+        "active/phase5-development-checklist.md",
+        "active/phase5-e2e-test-plan.md",
+        "active/phase6-code-review.md",
+        "active/system-architecture-risk-analysis.md",
+        "active/t2-take-profit-slippage-fix.md",
+        "active/v3-phase2-complete-report.md",
+        "active/v3-phase4-complete-report.md",
+        "constraints/2026-04-06-系统架构全面分析报告.md",
+        "constraints/ADR-20260404-001-frontend-fix.md",
+        "constraints/AR-20260404-003-review.md",
+        "constraints/DEBT-3-architecture-review-result.md",
+        "constraints/P0-005-1-验证报告.md",
+        "constraints/README.md",
+        "constraints/TEST-2-fixture-refactor-adr.md",
+        "constraints/adr-001-backtest-data-integrity-fix.md",
+        "constraints/adr-shared-db-connection-pool.md",
+        "constraints/architecture-feedback-flow.md",
+        "constraints/backtest-order-lifecycle.md",
+        "constraints/ord-6-code-review-report.md",
+        "constraints/ord-6-fix-plan.md",
+        "constraints/order-lifecycle.md",
+        "constraints/order-management-fix-design.md",
+        "constraints/order-repository-fix-recommendations.md",
+        "constraints/p0-001-wal-mode.md",
+        "constraints/p0-004-order-validation.md",
+        "constraints/p2-improvements-and-known-issues-fix-design.md",
+        "constraints/phase1-5-comprehensive-review-report.md",
+        "constraints/phase2-matching-engine-contract.md",
+        "constraints/phase3-risk-state-machine-contract.md",
+        "constraints/phase4-contract-v1.1-changes.md",
+        "constraints/phase4-order-orchestration-contract.md",
+        "constraints/phase5-code-review.md",
+        "constraints/phase5-contract.md",
+        "constraints/phase5-detailed-design.md",
+        "constraints/phase6-v3-api-contract.md",
+        "constraints/phase6-v3-api-detailed-design.md",
+        "constraints/phaseB-code-review.md",
+        "constraints/pms-backtest-feature-check-20260409.md",
+        "constraints/progress.md",
+        "constraints/task_plan.md",
+        "constraints/test-architecture-refactor-design.md",
+        "constraints/v3-evolution-roadmap.md",
+        "constraints/v3-phase1-complete-report.md",
+        "constraints/v3-phase3-complete-report.md",
+        "constraints/v3-phases-1-4-verification-report.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ]
+    },
+    "by_file": {
+      "src/application/signal_pipeline.py": [
+        "active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+        "active/2026-03-27-s3-1-mtf-data-alignment.md"
+      ],
+      "src/application/config_manager.py": [
+        "active/2026-03-27-s3-1-mtf-data-alignment.md",
+        "active/2026-04-11-config-page-consolidation.md",
+        "active/config-management-report.md",
+        "constraints/P1-5-config-manager-refactor-impact-analysis.md"
+      ],
+      "src/domain/timeframe_utils.py": [
+        "active/2026-03-27-s3-1-mtf-data-alignment.md"
+      ],
+      "src/infrastructure/v3_orm.py": [
+        "active/2026-04-02-backtest-data-localization-design.md",
+        "constraints/phase1-5-comprehensive-review-report.md",
+        "constraints/phaseB-code-review.md",
+        "constraints/v3-phase1-complete-report.md",
+        "constraints/v3-phase3-complete-report.md",
+        "constraints/v3-phases-1-4-verification-report.md"
+      ],
+      "src/interfaces/api.py": [
+        "active/BT-2-backend-implementation-status.md",
+        "active/config-management-report.md",
+        "active/phase6-code-review.md",
+        "constraints/api-config-review-20260407.md",
+        "constraints/phase6-v3-api-detailed-design.md",
+        "constraints/strategy-table-migration-plan.md",
+        "constraints/修复方案 -20260403-配置管理页 500 错误修复.md"
+      ],
+      "src/domain/models.py": [
+        "active/adr-risk-overrides-consumption.md",
+        "active/ord-5-order-audit-log-integration.md",
+        "active/phase6-code-review.md",
+        "active/v3-phase2-complete-report.md",
+        "active/v3-phase4-complete-report.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/order-lifecycle.md",
+        "constraints/phase1-5-comprehensive-review-report.md",
+        "constraints/phase5-code-review.md",
+        "constraints/phase5-contract.md",
+        "constraints/v0.3.0-phase3-release-notes.md",
+        "constraints/v0.5.0-phase5-release-notes.md",
+        "constraints/v3-phase2-handoff-report.md",
+        "constraints/v3-phase3-complete-report.md",
+        "constraints/v3-phases-1-4-verification-report.md"
+      ],
+      "src/application/backtester.py": [
+        "active/adr-risk-overrides-consumption.md",
+        "active/v3-phase2-complete-report.md",
+        "active/v3-phase4-complete-report.md",
+        "constraints/2026-03-29-今日工作总结.md",
+        "constraints/t1-mtf-future-function-fix.md",
+        "constraints/v3-phase2-handoff-report.md",
+        "constraints/v3-phase3-complete-report.md"
+      ],
+      "src/domain/config_snapshot.py": [
+        "active/config-management-report.md"
+      ],
+      "src/application/config_snapshot_service.py": [
+        "active/config-management-report.md"
+      ],
+      "src/infrastructure/config_snapshot_repository.py": [
+        "active/config-management-report.md"
+      ],
+      "src/infrastructure/notifier_feishu.py": [
+        "active/feishu-mention-test.md"
+      ],
+      "src/application/order_audit_logger.py": [
+        "active/ord-5-order-audit-log-integration.md"
+      ],
+      "src/infrastructure/order_audit_repository.py": [
+        "active/ord-5-order-audit-log-integration.md"
+      ],
+      "src/infrastructure/logger.py": [
+        "active/p0-002-log-rotation.md",
+        "constraints/2026-03-29-今日工作总结.md"
+      ],
+      "src/interfaces/api_v1_config.py": [
+        "active/risk-config-form-plan.md",
+        "constraints/api-config-review-20260407.md",
+        "constraints/config-management-architecture-review.md"
+      ],
+      "src/domain/matching_engine.py": [
+        "active/t2-take-profit-slippage-fix.md",
+        "active/v3-phase2-complete-report.md",
+        "constraints/adr-001-backtest-data-integrity-fix.md",
+        "constraints/v3-phase2-handoff-report.md"
+      ],
+      "src/domain/logic_tree.py": [
+        "active/v0.1.0-phase1-release-notes.md"
+      ],
+      "src/domain/recursive_engine.py": [
+        "active/v0.1.0-phase1-release-notes.md"
+      ],
+      "src/domain/order_manager.py": [
+        "active/v3-phase4-complete-report.md",
+        "constraints/order-management-fix-design.md"
+      ],
+      "src/infrastructure/exchange_gateway.py": [
+        "active/websocket-kline-defect-review.md",
+        "constraints/P0-implementation-checklist.md",
+        "constraints/v0.5.0-phase5-release-notes.md"
+      ],
+      "src/domain/strategy_engine.py": [
+        "constraints/P0-implementation-checklist.md"
+      ],
+      "src/domain/filter_factory.py": [
+        "constraints/P0-implementation-checklist.md"
+      ],
+      "src/application/config/providers/base.py": [
+        "constraints/P1-5-provider-code-review-report.md"
+      ],
+      "src/application/config/providers/registry.py": [
+        "constraints/P1-5-provider-code-review-report.md"
+      ],
+      "src/application/attribution_analyzer.py": [
+        "constraints/adr-002-bt4-review-fixes.md"
+      ],
+      "src/infrastructure/order_repository.py": [
+        "constraints/ord-6-code-review-report.md",
+        "constraints/ord-6-fix-plan.md",
+        "constraints/order-management-fix-design.md",
+        "constraints/p0-001-wal-mode.md",
+        "constraints/p2-improvements-and-known-issues-fix-design.md",
+        "constraints/phaseB-code-review.md"
+      ],
+      "src/application/config/config_parser.py": [
+        "constraints/p1_5_parser_layer_review.md"
+      ],
+      "src/application/config/__init__.py": [
+        "constraints/p1_5_parser_layer_review.md"
+      ],
+      "src/application/config/models.py": [
+        "constraints/p1_5_parser_layer_review.md"
+      ],
+      "src/infrastructure/backtest_repository.py": [
+        "constraints/phaseB-code-review.md"
+      ],
+      "src/infrastructure/repositories/config_repositories.py": [
+        "constraints/strategy-table-migration-plan.md"
+      ],
+      "src/infrastructure/signal_repository.py": [
+        "constraints/strategy-table-migration-plan.md"
+      ],
+      "src/domain/risk_calculator.py": [
+        "constraints/v0.3.0-phase3-release-notes.md"
+      ],
+      "src/domain/risk_manager.py": [
+        "constraints/v3-phase3-complete-report.md"
+      ]
+    }
+  }
+}
