@@ -35,7 +35,8 @@
 | 阶段 4 | 基准对比 + Monte Carlo | 8h | 阶段 1 |
 | 阶段 5 | 策略归因分析 | 4h | 阶段 1 |
 | 阶段 6 | 月度收益热力图 | 2h | 阶段 1 |
-| **总计** | | **~35h** | |
+| 阶段 7 | 分批止盈模拟 + 实盘止盈追踪 | 6h | 阶段 1 |
+| **总计** | | **~41h** | |
 
 ---
 
@@ -341,6 +342,48 @@ def _calculate_monthly_returns(equity_curve: list[tuple[int, Decimal]]) -> dict[
 
 ---
 
+## 阶段 7: 分批止盈模拟 + 实盘止盈追踪（6h）
+
+### 任务清单
+
+| # | 任务 | 工时 | 优先级 | 状态 |
+|---|------|------|--------|------|
+| 7.1 | TP-1: 回测分批止盈模拟 | 2h | 低 | 待启动 |
+| 7.2 | TP-2: 实盘止盈追踪逻辑 | 4h | 中 | 待启动 |
+
+### 7.1 TP-1: 回测分批止盈模拟
+
+**问题**: 回测中未模拟分批止盈（TP1 部分平仓 + TP2 剩余平仓 + TP3 尾仓），只有 TP1 部分平仓 + SL 剩余平仓。回测结果无法反映真实分批止盈的收益。
+
+**修复方案**:
+- `matching_engine.py` 新增 TP2/TP3 触发逻辑
+- `PositionSummary` 新增 `tp2_pnl`、`tp3_pnl` 字段
+- 回测主循环中按配置的多级止盈比例触发
+- 前端报告展示各级止盈盈亏明细
+
+**影响文件**:
+- `src/domain/matching_engine.py` — TP2/TP3 触发逻辑
+- `src/domain/models.py` — PositionSummary 新增字段
+- `src/application/backtester.py` — 回测主循环集成
+- 前端报告组件 — 分批止盈明细展示
+
+### 7.2 TP-2: 实盘止盈追踪逻辑
+
+**问题**: 实盘模式下未实现止盈追踪逻辑（trailing stop），无法跟随行情移动止盈价位。
+
+**修复方案**:
+- `matching_engine.py` 新增 `update_trailing_tp()` 方法
+- 每次 K 线更新时检查最高/最低价是否触发新的更高止盈位
+- 支持固定步长（step）和回撤比例（pullback）两种模式
+- 实盘信号管道集成止盈更新
+
+**影响文件**:
+- `src/domain/matching_engine.py` — trailing TP 逻辑
+- `src/application/signal_pipeline.py` — 实盘集成
+- 前端配置界面 — trailing TP 参数配置
+
+---
+
 ## 依赖关系图
 
 ```
@@ -349,7 +392,9 @@ def _calculate_monthly_returns(equity_curve: list[tuple[int, Decimal]]) -> dict[
   │     └── 阶段 3 (Walk-Forward) — 依赖参数优化的 grid_search
   ├── 阶段 4 (基准对比 + Monte Carlo)
   ├── 阶段 5 (策略归因)
-  └── 阶段 6 (月度收益热力图)
+  ├── 阶段 6 (月度收益热力图)
+  └── 阶段 7 (分批止盈 + 实盘追踪)
+       └── 阶段 3 (Walk-Forward) — 止盈准确性影响 Walk-Forward 结果
 
 可并行: 阶段 2、4、5、6 在阶段 1 完成后可独立开发
         但建议串行执行以减少上下文切换
@@ -361,11 +406,12 @@ def _calculate_monthly_returns(equity_curve: list[tuple[int, Decimal]]) -> dict[
 
 | 文件 | 阶段 1 | 阶段 2 | 阶段 3 | 阶段 4 | 阶段 5 | 阶段 6 |
 |------|--------|--------|--------|--------|--------|--------|
-| `src/domain/models.py` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `src/domain/matching_engine.py` | ✅ | — | — | — | — | — |
-| `src/application/backtester.py` | ✅ | ✅ | ✅ | ✅ | — | ✅ |
-| `src/interfaces/api.py` | — | ✅ | ✅ | — | — | — |
-| `web-front/.../BacktestReportDetailModal.tsx` | ✅ | — | — | — | — | — |
-| `web-front/.../MonthlyReturnHeatmap.tsx` | — | — | — | — | — | ✅ |
-| 新文件（前端组件） | — | ✅ | ✅ | ✅ | ✅ | — |
-| 测试文件 | ✅ | ✅ | ✅ | ✅ | — | — |
+| `src/domain/models.py` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `src/domain/matching_engine.py` | ✅ | — | — | — | — | — | ✅ |
+| `src/application/backtester.py` | ✅ | ✅ | ✅ | ✅ | — | ✅ | — |
+| `src/application/signal_pipeline.py` | — | — | — | — | — | — | ✅ |
+| `src/interfaces/api.py` | — | ✅ | ✅ | — | — | — | — |
+| `web-front/.../BacktestReportDetailModal.tsx` | ✅ | — | — | — | — | — | — |
+| `web-front/.../MonthlyReturnHeatmap.tsx` | — | — | — | — | — | ✅ | — |
+| 新文件（前端组件） | — | ✅ | ✅ | ✅ | ✅ | — | — |
+| 测试文件 | ✅ | ✅ | ✅ | ✅ | — | — | ✅ |
