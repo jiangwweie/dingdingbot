@@ -1,6 +1,24 @@
 # Findings Log
 
-> Last updated: 2026-04-14 21:00
+> Last updated: 2026-04-15
+
+---
+
+## 2026-04-15 -- 回测系统优化规划
+
+### 规划方向
+
+基于对回测系统代码的深入分析，确定 6 个优化阶段（~35h），详见 `docs/planning/task_plan.md`。
+
+### 关键发现
+
+1. **多时间框架对齐**：已正确实现。`_get_closest_higher_tf_trends()` 使用严格 `<` 比较确保只使用已收盘的高周期 K 线，防止前视偏差。8 个单元测试覆盖边界场景。
+
+2. **测试覆盖**：已充分覆盖。Sharpe Ratio（15 个）、Max Drawdown（5 个）、Funding Cost（13 个）共 33 个测试用例。
+
+3. **部分平仓 PnL 归因**：`realized_pnl` 是累计值（`+= net_pnl`），PositionSummary 只记录最终 exit_price，导致 partial-close 场景下数据看起来矛盾。需在报告中拆分 tp1_pnl / sl_pnl。
+
+4. **净盈亏语义混淆**：前端文字"总盈亏 - 手续费 - 滑点 - 资金费用"与实际展示不符。需前端计算真实净盈亏。
 
 ---
 
