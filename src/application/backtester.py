@@ -558,6 +558,7 @@ class Backtester:
                     symbol=request.symbol,
                     timeframe=higher_tf,
                     limit=limit,
+                    since=request.start_time,
                 )
 
                 # Build a map of timestamp -> trend
@@ -653,6 +654,7 @@ class Backtester:
                     symbol=request.symbol,
                     timeframe=higher_tf,
                     limit=limit,
+                    since=request.start_time,
                 )
 
                 # Build a map of timestamp -> trend
@@ -1231,6 +1233,7 @@ class Backtester:
                     symbol=request.symbol,
                     timeframe=higher_tf,
                     limit=limit,
+                    since=request.start_time,
                 )
                 for kline in higher_tf_klines_list:
                     higher_tf_data[kline.timestamp] = {
