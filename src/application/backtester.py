@@ -38,7 +38,7 @@ from src.domain.models import (
 )
 from src.domain.matching_engine import MockMatchingEngine
 from src.domain.risk_manager import DynamicRiskManager
-from src.domain.models import RiskManagerConfig, AccountSnapshot, RiskConfig
+from src.domain.models import RiskManagerConfig, AccountSnapshot, RiskConfig, PositionInfo
 from src.domain.order_manager import OrderManager
 from src.domain.strategy_engine import (
     StrategyEngine,
@@ -132,6 +132,46 @@ class Backtester:
         return RiskConfig(
             max_loss_percent=Decimal('0.01'),
             max_leverage=20,
+        )
+
+    def _build_account_snapshot(
+        self,
+        account: Account,
+        positions_map: Dict[str, Position],
+        timestamp: int,
+    ) -> AccountSnapshot:
+        """
+        从 positions_map 构建 AccountSnapshot，包含真实持仓信息。
+
+        修复前 positions=[] 导致 RiskCalculator 计算暴露限制时 current_exposure_ratio=0，
+        从而仓位规模失控（见 docs/planning/architecture/backtest-accounting-fix-arch.md）。
+
+        Args:
+            account: 当前账户状态
+            positions_map: {signal_id: Position} 仓位映射
+            timestamp: 当前 K 线时间戳
+
+        Returns:
+            包含真实持仓的 AccountSnapshot
+        """
+        position_infos = []
+        for pos in positions_map.values():
+            if not pos.is_closed and pos.current_qty > Decimal('0'):
+                position_infos.append(PositionInfo(
+                    symbol=pos.symbol,
+                    side=pos.direction.value.lower(),  # "long" or "short"
+                    size=pos.current_qty,
+                    entry_price=pos.entry_price,
+                    unrealized_pnl=Decimal('0'),  # 回测中无浮动盈亏概念
+                    leverage=1,  # 回测不涉及真实杠杆
+                ))
+
+        return AccountSnapshot(
+            total_balance=account.total_balance,
+            available_balance=account.available_balance,
+            unrealized_pnl=Decimal('0'),
+            positions=position_infos,
+            timestamp=timestamp,
         )
 
     # MTF mapping (same as StrategyEngine)
@@ -1262,6 +1302,10 @@ class Backtester:
             # Create ENTRY orders for fired signals
             for attempt in attempts:
                 if attempt.final_result == "SIGNAL_FIRED" and attempt.pattern:
+                    logger.debug(f"[BACKTEST_DIRECTION] 信号创建：direction={attempt.pattern.direction.value}, "
+                                 f"strategy={attempt.strategy_name}, symbol={request.symbol}, "
+                                 f"timestamp={kline.timestamp}")
+
                     # Create signal
                     signal_id = f"sig_{uuid.uuid4().hex[:8]}"
                     stop_loss = calculator.calculate_stop_loss(kline, attempt.pattern.direction)
@@ -1279,11 +1323,9 @@ class Backtester:
                     )
 
                     # Calculate position size
-                    account_snapshot = AccountSnapshot(
-                        total_balance=account.total_balance,
-                        available_balance=account.available_balance,
-                        unrealized_pnl=Decimal('0'),
-                        positions=[],
+                    account_snapshot = self._build_account_snapshot(
+                        account=account,
+                        positions_map=positions_map,
                         timestamp=kline.timestamp,
                     )
                     position_size, leverage = await calculator.calculate_position_size(
@@ -1377,6 +1419,8 @@ class Backtester:
                     # New position opened
                     position = positions_map.get(order.signal_id)
                     if position:
+                        logger.debug(f"[BACKTEST_DIRECTION] PositionSummary创建：direction={position.direction.value}, "
+                                     f"entry={position.entry_price}, signal_id={order.signal_id}")
                         position_summaries.append(PositionSummary(
                             position_id=position.id,
                             signal_id=position.signal_id,
@@ -1445,15 +1489,16 @@ class Backtester:
         total_return = ((final_balance - initial_balance) / initial_balance)
         win_rate = (Decimal(winning_trades) / Decimal(total_trades)) if total_trades > 0 else Decimal('0')
 
-        # Calculate max drawdown (simplified)
+        # Calculate max drawdown (fixed: use cumulative balance instead of per-trade from initial)
         max_drawdown = Decimal('0')
         peak = initial_balance
+        cumulative_balance = initial_balance
         for summary in position_summaries:
             if summary.exit_price:
-                current_balance = initial_balance + summary.realized_pnl
-                if current_balance > peak:
-                    peak = current_balance
-                drawdown = (peak - current_balance) / peak
+                cumulative_balance += summary.realized_pnl
+                if cumulative_balance > peak:
+                    peak = cumulative_balance
+                drawdown = (peak - cumulative_balance) / peak
                 if drawdown > max_drawdown:
                     max_drawdown = drawdown
 

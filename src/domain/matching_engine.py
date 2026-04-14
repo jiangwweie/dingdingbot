@@ -24,6 +24,7 @@ from src.domain.models import (
     OrderRole,
     Direction,
 )
+from src.infrastructure.logger import logger
 
 
 # ============================================================
@@ -339,6 +340,10 @@ class MockMatchingEngine:
                 gross_pnl = (exec_price - position.entry_price) * actual_filled
             else:
                 gross_pnl = (position.entry_price - exec_price) * actual_filled
+
+            logger.debug(f"[MATCHING_PNL] PnL计算：direction={position.direction.value}, "
+                         f"exec={exec_price}, entry={position.entry_price}, "
+                         f"qty={actual_filled}, gross_pnl={gross_pnl}")
 
             net_pnl = gross_pnl - fee_paid
 

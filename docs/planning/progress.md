@@ -1,6 +1,46 @@
 # Progress Log
 
-> Last updated: 2026-04-14 23:00
+> Last updated: 2026-04-14
+
+---
+
+## 2026-04-14 -- 回测财务记账修复（方案 A + B + max_drawdown）
+
+### 任务背景
+
+PMS 回测财务记账严重不平衡（盈利 +6,426 USDT 但余额亏到 7,899 USDT）。
+架构文档 `docs/planning/architecture/backtest-accounting-fix-arch.md` 已确认根因。
+
+### Completed
+
+**方案 A: 修复 account_snapshot.positions=[]**
+- 文件: `src/application/backtester.py`
+- 新增 `_build_account_snapshot()` 辅助方法（~35 行）
+- 从 positions_map 遍历未平仓 Position，映射为 PositionInfo 列表
+- 替换原来的 `positions=[]` 硬编码为调用新方法
+- 新增 import: `PositionInfo`
+
+**方案 B: 添加调试日志（3 处）**
+- `backtester.py` 信号创建处: `[BACKTEST_DIRECTION]` 前缀
+- `backtester.py` PositionSummary 创建处: `[BACKTEST_DIRECTION]` 前缀
+- `matching_engine.py` PnL 计算处: `[MATCHING_PNL]` 前缀（需新增 logger import）
+
+**附加修复: max_drawdown 计算逻辑错误**
+- 文件: `src/application/backtester.py`
+- 原来每笔交易从 initial_balance 开始计算，改为 cumulative_balance 累计
+- 修复后 max_drawdown 反映真实的账户回撤
+
+### 测试结果
+
+- 79 passed, 3 failed（全部 pre-existing，非本次引入）
+- Import 验证通过
+
+### 修改文件清单
+
+| 文件 | 修改内容 |
+|------|---------|
+| `src/application/backtester.py` | 新增 _build_account_snapshot() 方法 + 替换 positions=[] + 3 处 debug 日志 + max_drawdown 修复 |
+| `src/domain/matching_engine.py` | 新增 logger import + 1 处 PnL debug 日志 |
 
 ---
 
