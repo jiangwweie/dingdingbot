@@ -1,6 +1,83 @@
 # Findings Log
 
-> Last updated: 2026-04-14 23:00
+> Last updated: 2026-04-14 21:00
+
+---
+
+## 2026-04-14 -- PMS 回测财务记账不平衡完整诊断（DA-20260414-001）
+
+### 诊断背景
+
+PMS 回测（SOL/USDT 15m/4h 等）报告策略盈利 +6,426 USDT 但最终余额亏损至 7,899 USDT。
+期望: 10,000 + 6,426 - 入场费 ≈ 16,000 USDT，实际: 7,899 USDT，差额约 8,527 USDT。
+
+### Bug #1: account_snapshot.positions=[] 导致仓位规模失控（已确认 ✅ 已修复）
+
+**根因**: `backtester.py:1286` 中 `account_snapshot.positions=[]` 硬编码空列表，导致 RiskCalculator 无法感知已开仓位，每笔交易按"零暴露"计算，仓位规模远超预期的 1% 风险（可达 7%+）。
+
+**修复**: 提交 `cb06ea0` — 新增 `_build_account_snapshot()` 方法从 positions_map 构建真实持仓信息。
+
+### Bug #2: 11 笔"LONG"仓位 PnL 匹配 SHORT 公式（未能复现 ❌ 不是 bug）
+
+**诊断报告声称**: 11 笔 direction=LONG 的仓位在 exit<entry 时 PnL 为正数，数学上只有 SHORT 公式能解释。
+
+**RCA 逐行代码追踪结论**:
+- `position.direction` 从创建到 PnL 计算到报告生成全程引用同一对象，不可变
+- PnL 公式（matching_engine.py:339-342）自初始提交以来从未被修改
+- 序列化/反序列化路径无方向转换 bug
+- 代码层面不存在方向矛盾的可能路径
+
+**QA 实际数据验证结论**:
+- 检查现有数据库回测报告（44 笔仓位）
+- 16 个仓位看起来"价格反向变动但 PnL>0"
+- 根因: `PositionSummary.realized_pnl` 是**累计值**（`+= net_pnl`），不是单次平仓值
+- 仓位经历 TP1 部分平仓（锁定利润）+ SL 剩余平仓（亏损），累计 PnL 仍为正
+- PositionSummary 只记录最终 exit_price（SL 价格），但 PnL 包含了 TP1 利润
+- 这是 partial-close 场景的正常行为，**不是 bug**
+
+**最终判定**: 诊断报告的数据来源于对回测结果的数学逆向推导，但没有考虑 realized_pnl 是累计值这一语义，导致误判。
+
+### 附加发现: max_drawdown 计算错误（已修复 ✅）
+
+每笔交易从 initial_balance 开始计算而非累计余额，改为正确的累计计算。
+
+### 输出文档
+
+| 文档 | 路径 | 说明 |
+|------|------|------|
+| 诊断报告 | `docs/diagnostic-reports/DA-20260414-001-pms-backtest-accounting-bug.md` | 初始诊断（含 Bug #1 确认 + Bug #2 假设） |
+| 架构分析 A | `docs/planning/architecture/backtest-accounting-fix-arch.md` (ARCH-20260414-002) | 方案 A/B/C 架构设计 |
+| 架构分析 B | `docs/planning/architecture/bug2-direction-analysis.md` | Bug #2 数据流追踪 |
+| RCA 报告 | `docs/diagnostic-reports/RCA-20260414-003-bug2-direction-analysis.md` | 七步法根因分析 |
+| 验证测试 | `tests/integration/test_direction_pnl_consistency.py` | Direction/PnL 一致性集成测试 |
+
+---
+
+## 2026-04-14 -- PMS 回测 Direction/PnL 一致性验证
+
+**现象**: 16 个仓位显示"方向矛盾"——价格反向变动但 realized_pnl > 0
+**根因**: `realized_pnl` 字段在 matching_engine.py 中是累加的（`+= net_pnl`）
+**影响**: PositionSummary 只记录最终 exit_price（SL 价格），但 realized_pnl 包含之前 TP1 的利润
+**建议**: PositionSummary 应增加 `tp1_pnl` 和 `sl_pnl` 字段，或者在 `exit_reason` 中注明是否为部分平仓后止损
+
+### 代码追踪（matching_engine.py）
+
+```python
+# line 279 (TP1/SL 平仓逻辑)
+position.realized_pnl += net_pnl  # 累加，不是覆盖
+
+# line 351 (同上)
+position.realized_pnl += net_pnl
+```
+
+### 验证数据
+
+```
+示例: SHORT 仓位
+  entry=88411.5, exit(SL)=90269.91, pnl=+413.50
+  价格变动: -2.10%（反向）
+  解释: 部分 TP1 平仓锁定利润 + SL 平仓亏损 = 累计 PnL > 0
+```
 
 ---
 

@@ -1,46 +1,48 @@
 # Progress Log
 
-> Last updated: 2026-04-14
+> Last updated: 2026-04-14 21:00
 
 ---
 
-## 2026-04-14 -- 回测财务记账修复（方案 A + B + max_drawdown）
+## 2026-04-14 21:00 -- PMS 回测财务记账不平衡完整诊断与验证
 
-### 任务背景
+### 任务链
 
-PMS 回测财务记账严重不平衡（盈利 +6,426 USDT 但余额亏到 7,899 USDT）。
-架构文档 `docs/planning/architecture/backtest-accounting-fix-arch.md` 已确认根因。
+```
+用户报告财务不平衡 → 诊断分析 → 架构分析 → 方案 A 修复 → 方向矛盾 RCA → QA 验证
+```
 
-### Completed
+### 完成的工作
 
-**方案 A: 修复 account_snapshot.positions=[]**
-- 文件: `src/application/backtester.py`
-- 新增 `_build_account_snapshot()` 辅助方法（~35 行）
-- 从 positions_map 遍历未平仓 Position，映射为 PositionInfo 列表
-- 替换原来的 `positions=[]` 硬编码为调用新方法
-- 新增 import: `PositionInfo`
+| # | 任务 | 状态 | 提交 |
+|---|------|------|------|
+| 1 | 诊断报告 DA-20260414-001 | ✅ 完成 | — |
+| 2 | 架构分析 backtest-accounting-fix-arch.md | ✅ 完成 | — |
+| 3 | 方案 A: 修复 account_snapshot.positions=[] | ✅ 已修复 | `cb06ea0` |
+| 4 | 方案 B: 添加 3 处 debug 日志 | ✅ 已添加 | `cb06ea0` |
+| 5 | max_drawdown 累计计算修复 | ✅ 已修复 | `cb06ea0` |
+| 6 | Bug #2 方向矛盾 RCA 七步法分析 | ✅ 完成 | — |
+| 7 | Bug #2 QA Direction/PnL 一致性验证 | ✅ 结论: 不是 bug | — |
+| 8 | 创建集成测试 test_direction_pnl_consistency.py | ✅ 完成 | — |
 
-**方案 B: 添加调试日志（3 处）**
-- `backtester.py` 信号创建处: `[BACKTEST_DIRECTION]` 前缀
-- `backtester.py` PositionSummary 创建处: `[BACKTEST_DIRECTION]` 前缀
-- `matching_engine.py` PnL 计算处: `[MATCHING_PNL]` 前缀（需新增 logger import）
+### 变更文件
 
-**附加修复: max_drawdown 计算逻辑错误**
-- 文件: `src/application/backtester.py`
-- 原来每笔交易从 initial_balance 开始计算，改为 cumulative_balance 累计
-- 修复后 max_drawdown 反映真实的账户回撤
+```
+ src/application/backtester.py        | 67 +++++++++++++++++++++++-------
+ src/domain/matching_engine.py         |  5 +++
+ docs/planning/progress.md             | 80 ++++++++++++++++++++++++++++++
+ docs/planning/findings.md             | 90 ++++++++++++++++++++++++++++++++++
+ tests/integration/test_direction_pnl_consistency.py | new file
+ docs/planning/architecture/backtest-accounting-fix-arch.md | new file
+ docs/planning/architecture/bug2-direction-analysis.md | new file
+ docs/diagnostic-reports/RCA-20260414-003-bug2-direction-analysis.md | new file
+```
 
-### 测试结果
+### 关键结论
 
-- 79 passed, 3 failed（全部 pre-existing，非本次引入）
-- Import 验证通过
+**Bug #1（仓位规模失控）**: 确认存在，已修复。`_build_account_snapshot()` 从 positions_map 构建真实持仓信息，RiskCalculator 现能正确限制暴露。
 
-### 修改文件清单
-
-| 文件 | 修改内容 |
-|------|---------|
-| `src/application/backtester.py` | 新增 _build_account_snapshot() 方法 + 替换 positions=[] + 3 处 debug 日志 + max_drawdown 修复 |
-| `src/domain/matching_engine.py` | 新增 logger import + 1 处 PnL debug 日志 |
+**Bug #2（方向矛盾）**: **不存在**。`PositionSummary.realized_pnl` 是累计值（`+= net_pnl`），当仓位经历 TP1 部分平仓 + SL 剩余平仓时，累计 PnL 为正但最终 exit_price 显示亏损方向。诊断报告未考虑 partial-close 语义，导致误判。
 
 ---
 
