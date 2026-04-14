@@ -1335,6 +1335,11 @@ class Backtester:
                         attempt.pattern.direction,
                     )
 
+                    # Bug #3 防护：position_size=0 时跳过该信号
+                    if position_size <= Decimal('0'):
+                        logger.info(f"[BACKTEST_SKIP] 跳过信号 {signal_id}：position_size={position_size}")
+                        continue
+
                     # Create ENTRY order using OrderManager (Phase 4)
                     # Note: TP/SL orders will be generated dynamically after ENTRY is filled
                     order_manager = OrderManager()
@@ -1489,6 +1494,12 @@ class Backtester:
         total_return = ((final_balance - initial_balance) / initial_balance)
         win_rate = (Decimal(winning_trades) / Decimal(total_trades)) if total_trades > 0 else Decimal('0')
 
+        # Bug #2 修复：total_pnl 语义修正
+        # total_pnl 累计值仅含出场净 PnL（不含入场费），与 final_balance 不一致
+        # 真净盈亏 = final_balance - initial_balance（包含所有费用和滑点）
+        gross_pnl = total_pnl  # 保留原值用于交易统计日志
+        total_pnl = final_balance - initial_balance  # 真净盈亏
+
         # Calculate max drawdown (fixed: use cumulative balance instead of per-trade from initial)
         max_drawdown = Decimal('0')
         peak = initial_balance
@@ -1538,7 +1549,8 @@ class Backtester:
                 )
                 logger.info(f"Saved backtest report to database: {report.strategy_id}")
             except Exception as e:
-                logger.warning(f"Failed to save backtest report: {e}")
+                logger.error(f"Failed to save backtest report: {e}")
+                raise  # 不再静默吞掉异常
 
         logger.info(
             f"v3 PMS backtest completed: {request.symbol} {request.timeframe}, "

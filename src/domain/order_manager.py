@@ -168,6 +168,10 @@ class OrderManager:
         import uuid
         from datetime import datetime, timezone
 
+        # Bug #3 防护：total_qty <= 0 时返回空订单列表
+        if total_qty is None or total_qty <= Decimal('0'):
+            return []
+
         # strategy 为 None 时使用默认单 TP 配置
         if strategy is None:
             # 默认策略：单 TP 级别，100% 比例

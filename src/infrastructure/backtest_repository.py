@@ -125,6 +125,9 @@ class BacktestReportRepository:
         await self._db.commit()
         logger.info("回测报告表初始化完成")
 
+        # Migrate existing table if old CHECK constraints are present
+        await self._migrate_existing_table()
+
     async def close(self) -> None:
         """Clear local connection reference (pool-managed connections are never closed by repos)."""
         if self._db:
@@ -654,3 +657,105 @@ class BacktestReportRepository:
             "page": page,
             "pageSize": page_size
         }
+
+    async def _migrate_existing_table(self) -> None:
+        """
+        迁移 backtest_reports 表，移除旧 CHECK 约束。
+
+        旧表有 win_rate CHECK 约束（0~1），但代码传入百分比（0~100）导致 INSERT 失败。
+        此方法为幂等操作：无旧约束时跳过。
+        """
+        try:
+            # 1. Check if table exists
+            cursor = await self._db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='backtest_reports'"
+            )
+            row = await cursor.fetchone()
+            if not row:
+                logger.info("[MIGRATE] backtest_reports 表不存在，跳过迁移")
+                return
+
+            table_sql = row["sql"]
+
+            # 2. Check for old CHECK constraints
+            has_old_constraint = "CHECK" in table_sql.upper() and (
+                "win_rate" in table_sql or "max_drawdown" in table_sql
+            )
+
+            if not has_old_constraint:
+                logger.info("[MIGRATE] backtest_reports 表无旧 CHECK 约束，跳过迁移")
+                return
+
+            logger.info("[MIGRATE] 检测到旧 CHECK 约束，开始迁移...")
+
+            # 3. Rename old table to _old
+            await self._db.execute("ALTER TABLE backtest_reports RENAME TO backtest_reports_old")
+
+            # 4. Create new table (without CHECK constraints - CREATE TABLE IF NOT EXISTS will create fresh)
+            await self._db.execute("""
+                CREATE TABLE backtest_reports (
+                    id                  TEXT PRIMARY KEY,
+                    strategy_id         TEXT NOT NULL,
+                    strategy_name       TEXT NOT NULL,
+                    strategy_version    TEXT NOT NULL DEFAULT '1.0.0',
+                    strategy_snapshot   TEXT NOT NULL,
+                    parameters_hash     TEXT NOT NULL,
+                    symbol              TEXT NOT NULL,
+                    timeframe           TEXT NOT NULL,
+                    backtest_start      INTEGER NOT NULL,
+                    backtest_end        INTEGER NOT NULL,
+                    created_at          INTEGER NOT NULL,
+                    initial_balance     TEXT NOT NULL,
+                    final_balance       TEXT NOT NULL,
+                    total_return        TEXT NOT NULL DEFAULT '0',
+                    total_trades        INTEGER NOT NULL DEFAULT 0,
+                    winning_trades      INTEGER NOT NULL DEFAULT 0,
+                    losing_trades       INTEGER NOT NULL DEFAULT 0,
+                    win_rate            TEXT NOT NULL DEFAULT '0',
+                    total_pnl           TEXT NOT NULL DEFAULT '0',
+                    total_fees_paid     TEXT NOT NULL DEFAULT '0',
+                    total_slippage_cost TEXT NOT NULL DEFAULT '0',
+                    max_drawdown        TEXT NOT NULL DEFAULT '0',
+                    sharpe_ratio        TEXT,
+                    positions_summary   TEXT,
+                    monthly_returns     TEXT
+                )
+            """)
+
+            # 5. Copy data from old table
+            await self._db.execute("""
+                INSERT INTO backtest_reports
+                SELECT * FROM backtest_reports_old
+            """)
+
+            # 6. Drop old table
+            await self._db.execute("DROP TABLE backtest_reports_old")
+
+            # 7. Recreate indexes
+            await self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_backtest_reports_strategy_id
+                ON backtest_reports(strategy_id)
+            """)
+            await self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_backtest_reports_symbol
+                ON backtest_reports(symbol)
+            """)
+            await self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_backtest_reports_timeframe
+                ON backtest_reports(timeframe)
+            """)
+            await self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_backtest_reports_created_at
+                ON backtest_reports(created_at)
+            """)
+            await self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_backtest_reports_parameters_hash
+                ON backtest_reports(parameters_hash)
+            """)
+
+            await self._db.commit()
+            logger.info("[MIGRATE] backtest_reports 表迁移完成（旧 CHECK 约束已移除）")
+
+        except Exception as e:
+            logger.error(f"[MIGRATE] backtest_reports 表迁移失败: {e}")
+            # 不重新抛出异常，允许系统继续运行（降级为无迁移模式）
