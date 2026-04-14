@@ -302,6 +302,10 @@ async def run_application():
         # Initialize ConfigEntryRepository for strategy params API
         _config_entry_repo = ConfigEntryRepository()
         await _config_entry_repo.initialize()
+
+        # Inject into ConfigManager (required for backtest config KV storage)
+        config_manager.set_config_entry_repository(_config_entry_repo)
+
         logger.info("ConfigEntryRepository initialized")
 
         # Initialize config repositories (unified dependency injection)
