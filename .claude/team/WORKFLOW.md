@@ -46,7 +46,7 @@
    - 开工时仅读取相关发现（智能匹配标签）
    - **效果**: 82K → 10K（减少 72K）
 
-**违反处理**: Code Reviewer 在审查时必须检查是否使用了 `planning-with-files-zh`，未使用则标记为 P0 问题。
+**违反处理**: QA 在测试时必须检查是否使用了 `planning-with-files-zh`，未使用则标记为 P0 问题。
 
 **相关技能**:
 - `/kaigong` (v8.0 Memory MCP 混合版) - 开工时读取 Memory MCP + progress + findings
@@ -87,7 +87,7 @@
                     └──────────────────────────┼──────────────────┘
                                                ▼
                                       ┌─────────────────┐
-                                      │  Code Reviewer  │
+                                      │  QA (含代码审查) │
                                       │    (审查员)     │
                                       └─────────────────┘
                                                │
@@ -120,13 +120,7 @@
                         ▼
                 ┌───────────────┐
                 │   QA Tester   │
-                │  专属规范     │
-                └───────────────┘
-                        │
-                        ▼
-                ┌───────────────┐
-                │  Code Reviewer│
-                │  专属规范     │
+                │ (含代码审查)  │
                 └───────────────┘
 ```
 
@@ -407,41 +401,26 @@ st run docs/contracts/api-spec.yaml --base-url http://localhost:8000
 
 ---
 
-### Code Reviewer 专属
+### QA Tester 附加：代码质量审查
 
-**文件位置**: `.claude/team/code-reviewer/SKILL.md`
+QA 在测试通过后，附带执行以下审查检查：
 
-#### 🟢 开工前检查清单
+#### 🟢 审查检查清单
 ```markdown
-- [ ] **契约阅读**: 已阅读 API 契约表和变更范围
-- [ ] **OpenAPI Spec 阅读确认**: 已阅读 docs/contracts/api-spec.yaml ⭐
-- [ ] **审查重点**: 明确需要重点关注的风险区域
-- [ ] **工具准备**: 准备好审查工具和测试命令
-```
-
-#### 🔴 收工时检查清单
-```markdown
-- [ ] **审查报告**: 已生成正式审查报告
-- [ ] **问题标注**: 所有问题已标注优先级 (P0/P1/P2)
 - [ ] **架构检查**: Clean Architecture 分层验证通过
-- [ ] **契约一致性检查**: 实现与 OpenAPI Spec 一致 ⭐
+- [ ] **契约一致性**: 实现与 OpenAPI Spec 一致 ⭐
 - [ ] **安全检查**: 无安全隐患 (命令注入、SQL 注入等)
-- [ ] **批准决定**: 明确批准/拒绝/需改进
+- [ ] **类型检查**: Pydantic 类型定义完整，无 Dict[str, Any]
+- [ ] **Decimal 精度**: 金额计算使用 Decimal
+- [ ] **异步规范**: 无 time.sleep() 阻塞
 ```
 
 **验证命令**:
 ```bash
 # 运行测试验证
 pytest tests/unit/ -v --tb=short
-
-# 类型检查 (如已配置)
-mypy src/
-
 # 代码风格检查
 flake8 src/ tests/
-
-# 验证 OpenAPI Spec 完整性 ⭐
-openapi-spec-validator docs/contracts/api-spec.yaml
 ```
 
 ---
@@ -520,7 +499,7 @@ openapi-spec-validator docs/contracts/api-spec.yaml
         - 后端单元测试（pytest）
         - 前端组件测试（React Testing Library）
 
-    2.7 Reviewer 实时审查（每个模块完成后）
+    2.7 QA 实时审查（每个模块完成后）
         - 检查接口是否符合 OpenAPI Spec ⭐
 
   用户确认点：测试前确认（耗时 30-60 分钟）⭐
@@ -550,7 +529,7 @@ openapi-spec-validator docs/contracts/api-spec.yaml
     3.2 QA E2E 测试（Playwright）
         - 关键路径覆盖
 
-    3.3 Reviewer 最终审查
+    3.3 QA 最终审查
         - 架构一致性检查
         - 安全隐患识别（OWASP Top 10）
         - 代码质量评估

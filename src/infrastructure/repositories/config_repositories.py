@@ -107,9 +107,8 @@ class StrategyConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def create(self, strategy: Dict[str, Any]) -> str:
@@ -406,9 +405,8 @@ class RiskConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def get_global(self) -> Optional[Dict[str, Any]]:
@@ -573,9 +571,8 @@ class SystemConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def get_global(self) -> Optional[Dict[str, Any]]:
@@ -729,9 +726,8 @@ class SymbolConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def get_all(self) -> List[Dict[str, Any]]:
@@ -1011,9 +1007,8 @@ class NotificationConfigRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def create(self, notification: Dict[str, Any]) -> str:
@@ -1301,9 +1296,8 @@ class ConfigSnapshotRepositoryExtended:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def create(self, snapshot: Dict[str, Any]) -> str:
@@ -1536,9 +1530,8 @@ class ConfigHistoryRepository:
         await self._db.commit()
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._db:
             self._db = None
 
     async def record_change(

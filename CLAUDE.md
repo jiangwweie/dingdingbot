@@ -572,23 +572,20 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ### 🎭 角色分工（Project Skills）
 
-#### Agent Team（5 人_full stack 团队）
+#### Agent Team（6 人_full stack 团队）
 | 角色 | 命令 | 职责 | 技术栈 |
 |------|------|------|------|
-| 团队协调器 | `/coordinator` | 任务分解、角色调度、结果整合 | - |
+| 项目经理 | `/pm` | 任务分解、角色调度、进度追踪 | - |
+| 产品经理 | `/product-manager` | 需求收集、优先级排序 | - |
+| 架构师 | `/architect` | 架构设计、契约设计、技术选型 | - |
 | 后端开发 | `/backend` | Python + FastAPI + asyncio | Python 3.11, FastAPI, Pydantic v2 |
 | 前端开发 | `/frontend` | React + TypeScript + TailwindCSS | React 18, TS 5, TailwindCSS 3 |
-| 测试专家 | `/qa` | 单元测试、集成测试、E2E 测试 | pytest, vitest |
-| 代码审查员 | `/reviewer` | 独立代码审查、架构一致性检查 | Clean Architecture, OWASP |
-
-### 使用 Agent Team
-
-### 使用 Agent Team
+| QA 测试 | `/qa` | 测试 + 代码审查 | pytest, vitest, flake8 |
 
 **方式 1: 使用 Slash Commands（推荐）**
 在项目目录下运行：
 ```bash
-/coordinator   # 团队协调器（完整功能开发）
+/pm            # 项目经理（统一入口）
 /frontend      # 前端开发专家
 /backend       # 后端开发专家
 /qa            # 质量保障专家
@@ -597,7 +594,7 @@ pytest tests/unit/test_strategy_engine.py -v
 **方式 2: 直接描述需求（自动分解）**
 ```
 用户：添加策略预览功能
-→ Coordinator 自动分解为前端/后端/测试任务并并行执行
+→ PM 自动分解为前端/后端/测试任务并并行执行
 ```
 
 **方式 3: 并行调度（使用 Agent 工具）**

@@ -1,0 +1,1032 @@
+{
+  "timestamp": "2026-04-14T05:48:22.293045+00:00",
+  "counts": {
+    "active": 36,
+    "constraints": 88,
+    "archive": 46,
+    "skipped": 98,
+    "error": 0
+  },
+  "moves": [
+    {
+      "path": "docs/user-profile.md",
+      "status": "moved",
+      "destination": "docs/constraints/user-profile.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/README.md",
+      "status": "moved",
+      "destination": "docs/constraints/README.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/feishu-claudecode-guide.md",
+      "status": "moved",
+      "destination": "docs/constraints/feishu-claudecode-guide.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/releases/v1.0.0-official-release.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/v1.0.0-official-release.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/releases/v0.6.0-phase4-5-integration.md",
+      "status": "moved",
+      "destination": "docs/active/v0.6.0-phase4-5-integration.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/releases/v0.4.0-phase4-release-notes.md",
+      "status": "moved",
+      "destination": "docs/active/v0.4.0-phase4-release-notes.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/releases/v0.1.0-phase1-release-notes.md",
+      "status": "moved",
+      "destination": "docs/active/v0.1.0-phase1-release-notes.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/releases/config-manager-db-refactor-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/config-manager-db-refactor-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/releases/v0.3.0-phase3-release-notes.md",
+      "status": "moved",
+      "destination": "docs/constraints/v0.3.0-phase3-release-notes.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/releases/v0.5.0-phase5-release-notes.md",
+      "status": "moved",
+      "destination": "docs/constraints/v0.5.0-phase5-release-notes.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/tasks/BT-2-backend-implementation-status.md",
+      "status": "moved",
+      "destination": "docs/active/BT-2-backend-implementation-status.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/tasks/BT-2-funding-cost-implementation-complete.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/BT-2-funding-cost-implementation-complete.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/products/config-profile-management-prd.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/config-profile-management-prd.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/products/frontend-config-optimization-prd.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/frontend-config-optimization-prd.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/products/openclaw-integration-brief.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/openclaw-integration-brief.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/products/p1-tasks-analysis-brief.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/p1-tasks-analysis-brief.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/products/config-management-brief.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/config-management-brief.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/2026-03-27-lite 版设计.md",
+      "status": "moved",
+      "destination": "docs/constraints/2026-03-27-lite 版设计.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/designs/p0-004-order-validation.md",
+      "status": "moved",
+      "destination": "docs/constraints/p0-004-order-validation.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/designs/v3-phase0-tech-stack-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/v3-phase0-tech-stack-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/p0-003-reconciliation.md",
+      "status": "moved",
+      "destination": "docs/active/p0-003-reconciliation.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/config-management-versioned-snapshots.md",
+      "status": "moved",
+      "destination": "docs/constraints/config-management-versioned-snapshots.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/designs/order-kline-upgrade-contract.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-kline-upgrade-contract.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/ord-6-batch-delete-integration.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/ord-6-batch-delete-integration.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/2026-04-11-config-page-consolidation.md",
+      "status": "moved",
+      "destination": "docs/active/2026-04-11-config-page-consolidation.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/order-chain-tree-contract.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-chain-tree-contract.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/t1-mtf-future-function-fix.md",
+      "status": "moved",
+      "destination": "docs/constraints/t1-mtf-future-function-fix.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/designs/2026-03-27-s3-1-mtf-data-alignment.md",
+      "status": "moved",
+      "destination": "docs/active/2026-03-27-s3-1-mtf-data-alignment.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/ord-5-order-audit-log-integration.md",
+      "status": "moved",
+      "destination": "docs/active/ord-5-order-audit-log-integration.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/phase5-environment-compatibility-brainstorm.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase5-environment-compatibility-brainstorm.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/designs/window4-flow-test-design.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/window4-flow-test-design.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/p0-002-log-rotation.md",
+      "status": "moved",
+      "destination": "docs/active/p0-002-log-rotation.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/ord-6-fix-plan.md",
+      "status": "moved",
+      "destination": "docs/constraints/ord-6-fix-plan.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/designs/phase4-pending-dca-feature.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/phase4-pending-dca-feature.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/2026-03-27-s3-1-mtf-data-alignment-design.md",
+      "status": "moved",
+      "destination": "docs/active/2026-03-27-s3-1-mtf-data-alignment-design.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/2026-04-10-phase2-tasks-analysis.md",
+      "status": "moved",
+      "destination": "docs/active/2026-04-10-phase2-tasks-analysis.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/S5-1-1-ccxtpro-research.md",
+      "status": "moved",
+      "destination": "docs/active/S5-1-1-ccxtpro-research.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/2026-03-29-s6-3-multi-level-take-profit-design.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/2026-03-29-s6-3-multi-level-take-profit-design.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/v3-phase1-models-contract.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/v3-phase1-models-contract.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/t2-take-profit-slippage-fix.md",
+      "status": "moved",
+      "destination": "docs/active/t2-take-profit-slippage-fix.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/designs/p0-001-wal-mode.md",
+      "status": "moved",
+      "destination": "docs/constraints/p0-001-wal-mode.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/designs/openclaw-integration-architecture.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/openclaw-integration-architecture.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/designs/2026-04-02-backtest-data-localization-design.md",
+      "status": "moved",
+      "destination": "docs/active/2026-04-02-backtest-data-localization-design.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/contracts/fe-001-config-api-contracts.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/fe-001-config-api-contracts.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/contracts/BT-2-funding-cost-api-contract.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/BT-2-funding-cost-api-contract.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/planning/2026-03-29-今日工作总结.md",
+      "status": "moved",
+      "destination": "docs/constraints/2026-03-29-今日工作总结.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/planning/progress.md",
+      "status": "moved",
+      "destination": "docs/constraints/progress.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/planning/task_plan.md",
+      "status": "moved",
+      "destination": "docs/constraints/task_plan.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/planning/board.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/board.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/planning/findings.md",
+      "status": "moved",
+      "destination": "docs/constraints/findings.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/workflows/auto-pipeline.md",
+      "status": "moved",
+      "destination": "docs/constraints/auto-pipeline.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/workflows/architecture-feedback-flow.md",
+      "status": "moved",
+      "destination": "docs/constraints/architecture-feedback-flow.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/workflows/workflow-v3-summary.md",
+      "status": "moved",
+      "destination": "docs/constraints/workflow-v3-summary.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/workflows/openapi-contract-mechanism-summary.md",
+      "status": "moved",
+      "destination": "docs/constraints/openapi-contract-mechanism-summary.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/qa/order-repository-p1-regression-suite.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-repository-p1-regression-suite.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/qa/order-repository-regression-suite.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-repository-regression-suite.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/qa/order-repository-test-checklist.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-repository-test-checklist.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/qa/test-quality-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/test-quality-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/qa/order-repository-p1-checklist.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-repository-p1-checklist.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/qa/p1-verification-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/p1-verification-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/qa/order-repository-qa-summary.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-repository-qa-summary.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/testing/Backtest.test.tsx.test-design.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/Backtest.test.tsx.test-design.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/testing/feishu-mention-test.md",
+      "status": "moved",
+      "destination": "docs/active/feishu-mention-test.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/testing/PMSBacktest.test.tsx.test-design.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/PMSBacktest.test.tsx.test-design.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/testing/order-klines-test-report.md",
+      "status": "moved",
+      "destination": "docs/active/order-klines-test-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/testing/p0-005-3-window3-test-report.md",
+      "status": "moved",
+      "destination": "docs/active/p0-005-3-window3-test-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/testing/test-report-backtest-data-integrity.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/test-report-backtest-data-integrity.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/testing/ORD-6-batch-delete-test-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/ORD-6-batch-delete-test-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/testing/test_config_import_export_e2e.test-design.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/test_config_import_export_e2e.test-design.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/v3/v3-migration-analysis-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/v3-migration-analysis-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/v3/v3-evolution-roadmap.md",
+      "status": "moved",
+      "destination": "docs/constraints/v3-evolution-roadmap.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/P0-005-1-验证报告.md",
+      "status": "moved",
+      "destination": "docs/constraints/P0-005-1-验证报告.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/v3-migration-decision-log.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/v3-migration-decision-log.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/arch/config-management-p0p1-fix-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/config-management-p0p1-fix-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/ADR-20260404-001-frontend-fix.md",
+      "status": "moved",
+      "destination": "docs/constraints/ADR-20260404-001-frontend-fix.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/P0-test-checklist.md",
+      "status": "moved",
+      "destination": "docs/constraints/P0-test-checklist.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/order-management-fix-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/order-management-fix-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/skills-trigger-guide.md",
+      "status": "moved",
+      "destination": "docs/constraints/skills-trigger-guide.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/AR-20260404-003-review.md",
+      "status": "moved",
+      "destination": "docs/constraints/AR-20260404-003-review.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/adr-002-bt4-review-fixes.md",
+      "status": "moved",
+      "destination": "docs/constraints/adr-002-bt4-review-fixes.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/logging-system-spec.md",
+      "status": "moved",
+      "destination": "docs/constraints/logging-system-spec.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/ADR-20260407-001-p1-implementation-strategy.md",
+      "status": "moved",
+      "destination": "docs/constraints/ADR-20260407-001-p1-implementation-strategy.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/kline-signal-flow.md",
+      "status": "moved",
+      "destination": "docs/constraints/kline-signal-flow.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/P1-5-day5-service-layer-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/P1-5-day5-service-layer-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/backtest-order-lifecycle.md",
+      "status": "moved",
+      "destination": "docs/constraints/backtest-order-lifecycle.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/adr-001-backtest-data-integrity-fix.md",
+      "status": "moved",
+      "destination": "docs/constraints/adr-001-backtest-data-integrity-fix.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/config-management-p1-testing-plan.md",
+      "status": "moved",
+      "destination": "docs/constraints/config-management-p1-testing-plan.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/修复方案 -20260403-配置管理页 500 错误修复.md",
+      "status": "moved",
+      "destination": "docs/constraints/修复方案 -20260403-配置管理页 500 错误修复.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/TEST-2-fixture-refactor-adr.md",
+      "status": "moved",
+      "destination": "docs/constraints/TEST-2-fixture-refactor-adr.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/test-architecture-refactor-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/test-architecture-refactor-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/ADR-20260404-001-config-architecture-refactor.md",
+      "status": "moved",
+      "destination": "docs/constraints/ADR-20260404-001-config-architecture-refactor.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/strategy-and-risk.md",
+      "status": "moved",
+      "destination": "docs/constraints/strategy-and-risk.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/dependency-graph.md",
+      "status": "moved",
+      "destination": "docs/constraints/dependency-graph.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/fe-001-frontend-config-navigation-redesign.md",
+      "status": "moved",
+      "destination": "docs/constraints/fe-001-frontend-config-navigation-redesign.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/adr-002-funding-rate-simulation.md",
+      "status": "moved",
+      "destination": "docs/constraints/adr-002-funding-rate-simulation.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/config-management-p1-implementation-strategy.md",
+      "status": "moved",
+      "destination": "docs/constraints/config-management-p1-implementation-strategy.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/P0-implementation-checklist.md",
+      "status": "moved",
+      "destination": "docs/constraints/P0-implementation-checklist.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/p2-improvements-and-known-issues-fix-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/p2-improvements-and-known-issues-fix-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/P0-websocket-kline-fix-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/P0-websocket-kline-fix-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/order-lifecycle.md",
+      "status": "moved",
+      "destination": "docs/constraints/order-lifecycle.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/P1-5-config-manager-refactor-impact-analysis.md",
+      "status": "moved",
+      "destination": "docs/constraints/P1-5-config-manager-refactor-impact-analysis.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/2026-04-06-系统架构全面分析报告.md",
+      "status": "moved",
+      "destination": "docs/constraints/2026-04-06-系统架构全面分析报告.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/system-priority-reanalysis-20260408.md",
+      "status": "moved",
+      "destination": "docs/constraints/system-priority-reanalysis-20260408.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/arch/P1-5-provider-registration-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/P1-5-provider-registration-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/templates/contract-template.md",
+      "status": "moved",
+      "destination": "docs/constraints/contract-template.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/templates/openapi-template.md",
+      "status": "moved",
+      "destination": "docs/constraints/openapi-template.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/templates/5why-analysis.md",
+      "status": "moved",
+      "destination": "docs/constraints/5why-analysis.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/templates/boundary-checklist.md",
+      "status": "moved",
+      "destination": "docs/constraints/boundary-checklist.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-10-api-contract-mismatch-fix-plan.md",
+      "status": "moved",
+      "destination": "docs/constraints/2026-04-10-api-contract-mismatch-fix-plan.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-10-api-contract-fix-verification.md",
+      "status": "moved",
+      "destination": "docs/active/2026-04-10-api-contract-fix-verification.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/reviews/2026-04-config-manager/config-management-architecture-review.md",
+      "status": "moved",
+      "destination": "docs/constraints/config-management-architecture-review.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-config-manager/P1-5-provider-code-review-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/P1-5-provider-code-review-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-config-manager/api-config-review-20260407.md",
+      "status": "moved",
+      "destination": "docs/constraints/api-config-review-20260407.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-config-manager/p1_5_provider_design_qa_review.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/p1_5_provider_design_qa_review.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reviews/2026-04-config-manager/config-management-review.md",
+      "status": "moved",
+      "destination": "docs/constraints/config-management-review.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-config-manager/p1_5_parser_layer_review.md",
+      "status": "moved",
+      "destination": "docs/constraints/p1_5_parser_layer_review.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-config-manager/fe-001-frontend-design-review.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/fe-001-frontend-design-review.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reviews/2026-04-architecture/DEBT-3-architecture-review-request.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/DEBT-3-architecture-review-request.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reviews/2026-04-architecture/DEBT-3-architecture-review-result.md",
+      "status": "moved",
+      "destination": "docs/constraints/DEBT-3-architecture-review-result.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-architecture/system-architecture-risk-analysis.md",
+      "status": "moved",
+      "destination": "docs/active/system-architecture-risk-analysis.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/reviews/2026-04-architecture/websocket-kline-defect-review.md",
+      "status": "moved",
+      "destination": "docs/active/websocket-kline-defect-review.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/reviews/2026-04-phase-reviews/phase7-etl-data-validation-fix.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/phase7-etl-data-validation-fix.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reviews/2026-04-phase-reviews/phaseB-code-review.md",
+      "status": "moved",
+      "destination": "docs/constraints/phaseB-code-review.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-phase-reviews/phase6-code-review.md",
+      "status": "moved",
+      "destination": "docs/active/phase6-code-review.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/reviews/2026-04-phase-reviews/phase1-5-comprehensive-review-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase1-5-comprehensive-review-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-phase-reviews/phase5-code-review.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase5-code-review.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-order-management/order-repository-test-coverage-review.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-repository-test-coverage-review.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reviews/2026-04-order-management/ord-6-code-review-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/ord-6-code-review-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-order-management/order-repository-fix-recommendations.md",
+      "status": "moved",
+      "destination": "docs/constraints/order-repository-fix-recommendations.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reviews/2026-04-order-management/order-repository-p1-fix-plan.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/order-repository-p1-fix-plan.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reports/2026-04-config-manager/config-management-p0p1-fix-acceptance.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/config-management-p0p1-fix-acceptance.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reports/2026-04-config-manager/config-management-p1-week1-acceptance.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/config-management-p1-week1-acceptance.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reports/2026-04-config-manager/config-management-report.md",
+      "status": "moved",
+      "destination": "docs/active/config-management-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/reports/2026-04-config-manager/config-frontend-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/config-frontend-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reports/2026-04-mvp-backtest/pms-backtest-feature-check-20260409.md",
+      "status": "moved",
+      "destination": "docs/constraints/pms-backtest-feature-check-20260409.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reports/2026-04-mvp-backtest/pinbar-backtest-report-20260409.md",
+      "status": "moved",
+      "destination": "docs/constraints/pinbar-backtest-report-20260409.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reports/2026-04-phase-reviews/P1-5-project-delivery-report.md",
+      "status": "moved",
+      "destination": "docs/active/P1-5-project-delivery-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/reports/2026-04-phase-reviews/P1-5-provider-acceptance-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/P1-5-provider-acceptance-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reports/2026-04-phase-reviews/phase8-test-report.md",
+      "status": "moved",
+      "destination": "docs/active/phase8-test-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/reports/2026-04-order-management/code-commit-statistics-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/code-commit-statistics-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reports/2026-04-order-management/T010-integration-test-acceptance-report.md",
+      "status": "moved",
+      "destination": "docs/active/T010-integration-test-acceptance-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/reports/2026-04-order-management/fe-01-e2e-test-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/fe-01-e2e-test-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/reports/2026-04-p0-fixes/P0-acceptance-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/P0-acceptance-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/reports/2026-04-p0-fixes/p0-document-optimization-report.md",
+      "status": "moved",
+      "destination": "docs/archive/2026-04-14/p0-document-optimization-report.md",
+      "classification": "archive"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase4-contract-v1.1-changes.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase4-contract-v1.1-changes.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase6-v3-api-detailed-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase6-v3-api-detailed-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase5-contract-review-report.md",
+      "status": "moved",
+      "destination": "docs/active/phase5-contract-review-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase5-e2e-test-plan.md",
+      "status": "moved",
+      "destination": "docs/active/phase5-e2e-test-plan.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase2-matching-engine-contract.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase2-matching-engine-contract.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase5-contract.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase5-contract.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase4-order-orchestration-contract.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase4-order-orchestration-contract.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase5-development-checklist.md",
+      "status": "moved",
+      "destination": "docs/active/phase5-development-checklist.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase6-v3-api-contract.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase6-v3-api-contract.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase5-real-exchange-integration-contract.md",
+      "status": "moved",
+      "destination": "docs/active/phase5-real-exchange-integration-contract.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase5-detailed-design.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase5-detailed-design.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase3-risk-state-machine-contract.md",
+      "status": "moved",
+      "destination": "docs/constraints/phase3-risk-state-machine-contract.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase8-test-plan.md",
+      "status": "moved",
+      "destination": "docs/active/phase8-test-plan.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/v3/phase-contracts/phase8-optimizer-contract.md",
+      "status": "moved",
+      "destination": "docs/active/phase8-optimizer-contract.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/v3/reports/v3-phase2-complete-report.md",
+      "status": "moved",
+      "destination": "docs/active/v3-phase2-complete-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/v3/reports/v3-phases-1-4-verification-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/v3-phases-1-4-verification-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/reports/v3-phase1-complete-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/v3-phase1-complete-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/reports/v3-phase4-complete-report.md",
+      "status": "moved",
+      "destination": "docs/active/v3-phase4-complete-report.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/v3/reports/v3-phase2-handoff-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/v3-phase2-handoff-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/v3/reports/v3-phase3-complete-report.md",
+      "status": "moved",
+      "destination": "docs/constraints/v3-phase3-complete-report.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/planning/architecture/risk-config-form-plan.md",
+      "status": "moved",
+      "destination": "docs/active/risk-config-form-plan.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/planning/architecture/adr-shared-db-connection-pool.md",
+      "status": "moved",
+      "destination": "docs/constraints/adr-shared-db-connection-pool.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/planning/architecture/strategy-table-b-plan.md",
+      "status": "moved",
+      "destination": "docs/constraints/strategy-table-b-plan.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/planning/architecture/adr-risk-overrides-consumption.md",
+      "status": "moved",
+      "destination": "docs/active/adr-risk-overrides-consumption.md",
+      "classification": "active"
+    },
+    {
+      "path": "docs/planning/architecture/strategy-table-migration-plan.md",
+      "status": "moved",
+      "destination": "docs/constraints/strategy-table-migration-plan.md",
+      "classification": "constraints"
+    },
+    {
+      "path": "docs/planning/architecture/connection-pool-close-fix-plan.md",
+      "status": "moved",
+      "destination": "docs/active/connection-pool-close-fix-plan.md",
+      "classification": "active"
+    }
+  ]
+}

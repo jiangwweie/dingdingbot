@@ -405,7 +405,7 @@ class SignalRepository:
         # Final result
         lines.append("【评估结果】")
         if attempt.final_result == "SIGNAL_FIRED":
-            direction_str = "看涨" if attempt.direction == "long" else "看跌" if attempt.direction == "short" else "未知"
+            direction_str = "看涨" if attempt.direction == "LONG" else "看跌" if attempt.direction == "SHORT" else "未知"
             lines.append(f"最终结果：信号触发 ({direction_str})")
         elif attempt.final_result == "NO_PATTERN":
             lines.append("最终结果：未检测到有效形态")
@@ -418,7 +418,7 @@ class SignalRepository:
         # Pattern detection
         lines.append("【形态检测】")
         if attempt.pattern:
-            direction_str = "看涨" if attempt.pattern.direction == "long" else "看跌" if attempt.pattern.direction == "short" else "未知"
+            direction_str = "看涨" if attempt.pattern.direction == "LONG" else "看跌" if attempt.pattern.direction == "SHORT" else "未知"
             lines.append(f"检测到形态：{attempt.pattern.strategy_name} ({direction_str})")
             lines.append(f"形态评分：{attempt.pattern.score:.2f}")
             # Add pattern details if available
@@ -767,7 +767,7 @@ class SignalRepository:
                 tags_json,
                 signal.risk_reward_info,
                 status,
-                signal.pnl_ratio,
+                str(signal.pnl_ratio) if signal.pnl_ratio is not None else None,
                 signal.kline_timestamp,
                 signal.strategy_name,
                 signal.score,
@@ -895,7 +895,7 @@ class SignalRepository:
             Signal dict if found, None otherwise
         """
         # Determine opposing direction
-        opposing_direction = "short" if direction == "long" else "long"
+        opposing_direction = "SHORT" if direction == "LONG" else "LONG"
 
         async with self._db.execute(
             """
@@ -1184,7 +1184,7 @@ class SignalRepository:
         # Get long count
         async with self._db.execute(
             "SELECT COUNT(*) as count FROM signals WHERE direction = ?",
-            ("long",)
+            ("LONG",)
         ) as cursor:
             row = await cursor.fetchone()
             long_count = row["count"]
@@ -1192,7 +1192,7 @@ class SignalRepository:
         # Get short count
         async with self._db.execute(
             "SELECT COUNT(*) as count FROM signals WHERE direction = ?",
-            ("short",)
+            ("SHORT",)
         ) as cursor:
             row = await cursor.fetchone()
             short_count = row["count"]
@@ -1226,9 +1226,8 @@ class SignalRepository:
         }
 
     async def close(self) -> None:
-        """Close database connection (only if self-owned)."""
-        if self._db and self._owns_connection:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        self._db = None
 
     async def get_pending_signals(self, symbol: str) -> List[Dict[str, Any]]:
         """
