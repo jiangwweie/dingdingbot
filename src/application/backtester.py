@@ -8,6 +8,7 @@ Key Design Principles:
 4. **Dynamic Rule Engine Support**: Supports both legacy and new dynamic strategy definitions.
 """
 import asyncio
+import math
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -1211,6 +1212,7 @@ class Backtester:
         active_orders: List[Order] = []  # All open orders
         position_summaries: List[PositionSummary] = []
         all_executed_orders: List[Order] = []
+        equity_curve: List[Tuple[int, Decimal]] = []  # [(timestamp_ms, total_balance), ...]
 
         # Statistics tracking
         total_trades = 0
@@ -1435,6 +1437,9 @@ class Backtester:
             # Remove executed/cancelled orders from active list
             active_orders = [o for o in active_orders if o.status == OrderStatus.OPEN]
 
+            # Record equity curve for Sharpe ratio calculation
+            equity_curve.append((kline.timestamp, account.total_balance))
+
         # Step 9: Build PMSBacktestReport
         final_balance = account.total_balance
         total_return = ((final_balance - initial_balance) / initial_balance)
@@ -1469,7 +1474,7 @@ class Backtester:
             total_slippage_cost=total_slippage_cost,
             total_funding_cost=total_funding_cost,  # BT-2: 总资金费用
             max_drawdown=max_drawdown,
-            sharpe_ratio=None,
+            sharpe_ratio=self._calculate_sharpe_ratio(equity_curve, request.timeframe),
             positions=position_summaries,
         )
 
@@ -1536,6 +1541,66 @@ class Backtester:
             return funding_cost
         else:
             return -funding_cost
+
+    # Bars per year mapping for annualization
+    BARS_PER_YEAR: Dict[str, int] = {
+        "15m": 35040,  # 365 * 24 * 4
+        "1h": 8760,    # 365 * 24
+        "4h": 2190,    # 365 * 6
+        "1d": 365,
+        "1w": 52,
+    }
+
+    def _calculate_sharpe_ratio(
+        self,
+        equity_curve: List[Tuple[int, Decimal]],
+        timeframe: str,
+    ) -> Optional[Decimal]:
+        """
+        基于权益曲线计算年化夏普比率
+
+        Args:
+            equity_curve: [(timestamp_ms, equity_value), ...]
+            timeframe: K 线周期 (15m/1h/4h/1d/1w)
+
+        Returns:
+            年化夏普比率，数据不足时返回 None
+        """
+        if len(equity_curve) < 2:
+            return None
+
+        # 计算逐期收益率
+        returns: List[Decimal] = []
+        for i in range(1, len(equity_curve)):
+            prev_equity = equity_curve[i - 1][1]
+            curr_equity = equity_curve[i][1]
+            if prev_equity == Decimal('0'):
+                continue
+            r = (curr_equity - prev_equity) / prev_equity
+            returns.append(r)
+
+        if len(returns) < 2:
+            return None
+
+        # 计算均值和样本标准差
+        n = Decimal(len(returns))
+        mean_return = sum(returns) / n
+        variance = sum((r - mean_return) ** 2 for r in returns) / (n - Decimal('1'))
+        # 防止浮点误差导致负值
+        variance = max(Decimal('0'), variance)
+        std_return = variance.sqrt()
+
+        if std_return == Decimal('0'):
+            return Decimal('0')
+
+        # 周期夏普
+        sharpe_per_period = mean_return / std_return
+
+        # 年化
+        bars_per_year = self.BARS_PER_YEAR.get(timeframe, 8760)
+        annualization_factor = Decimal(str(math.sqrt(bars_per_year)))
+
+        return sharpe_per_period * annualization_factor
 
 
 # ============================================================

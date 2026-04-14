@@ -201,12 +201,20 @@ export default function BacktestReportDetailModal({
                     总盈亏 - 手续费 - 滑点 - 资金费用
                   </span>
                 </div>
-                <p className={cn(
-                  'text-xl font-bold mt-2 text-center',
-                  getPositiveNegativeColor(report.total_pnl)
-                )}>
-                  {formatCurrency(report.total_pnl, true)}
-                </p>
+                {(() => {
+                  const netPnl = parseFloat(report.total_pnl)
+                    - parseFloat(report.total_fees_paid)
+                    - parseFloat(report.total_slippage_cost)
+                    - parseFloat(report.total_funding_cost);
+                  return (
+                    <p className={cn(
+                      'text-xl font-bold mt-2 text-center',
+                      getPositiveNegativeColor(String(netPnl))
+                    )}>
+                      {formatCurrency(String(netPnl), true)}
+                    </p>
+                  );
+                })()}
               </div>
             </div>
           </div>

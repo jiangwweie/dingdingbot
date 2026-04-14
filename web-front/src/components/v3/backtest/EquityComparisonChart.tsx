@@ -90,7 +90,7 @@ export function EquityComparisonChart({ report, className, title }: EquityCompar
 
   const initialBalance = parseFloat(report.initial_balance || '10000');
   const finalBalance = parseFloat(report.final_balance || initialBalance);
-  const totalReturn = ((finalBalance - initialBalance) / initialBalance) * 100;
+  const totalReturn = (finalBalance - initialBalance) / initialBalance;
 
   return (
     <div className={cn('bg-white rounded-xl border border-gray-200 p-6', className)}>
