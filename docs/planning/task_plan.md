@@ -45,7 +45,7 @@
 
 | # | 任务 | 工时 | 状态 |
 |---|------|------|------|
-| 1.1 | 修复部分平仓 PnL 归因 | 2h | 待启动 |
+| 1.1 | 修复部分平仓 PnL 归因 | 2h | ✅ 架构设计完成 |
 | 1.2 | 修复净盈亏语义混淆 | 1h | 待启动 |
 | 1.3 | 推送代码 + 验证回测页面显示正确 | — | 待启动 |
 | 1.4 | TP-1: 回测分批止盈模拟（TP1/TP2/TP3） | 2h | 待启动 |
@@ -55,17 +55,26 @@
 
 **问题**: `PositionSummary.realized_pnl` 是累计值（`+= net_pnl`），当仓位经历 TP1 部分平仓 + SL 剩余平仓时，累计 PnL 为正但最终 `exit_price` 显示亏损方向，用户易误解。
 
-**修复方案**:
-- `PositionSummary` 新增 `tp1_pnl: Optional[Decimal]` 字段（TP1 部分平仓盈亏）
-- `PositionSummary` 新增 `sl_pnl: Optional[Decimal]` 字段（SL 平仓盈亏）
-- `exit_reason` 注明是否为部分平仓后止损（如 `"PARTIAL_TP1_THEN_SL"`）
-- 前端报告展示拆分盈亏
+**修复方案**: 采用一对多事件列表设计（PositionCloseEvent），每次出场记录为独立事件。
+
+**设计文档**: `docs/arch/position-summary-close-event-implementation.md`
+**审查报告**: `docs/arch/position-summary-close-event-implementation-review.md`
+**ADR 文档**: `docs/arch/position-summary-close-event-design.md`
+
+**核心设计**:
+- 新增 `PositionCloseEvent` 模型：记录每次出场的事件（position_id, order_id, event_type, close_price, close_qty, close_pnl, close_fee, close_time, exit_reason）
+- `PositionSummary` 新增 `close_events: List[PositionCloseEvent]` 字段
+- `Order` 模型新增 `close_pnl`/`close_fee` 字段（用于 backtester 从 order 读取 PnL）
+- 数据流：matching_engine._execute_fill 计算 PnL → 写入 order.close_pnl/close_fee → backtester 从 order 读取并创建 PositionCloseEvent → 序列化 JSON 存入 backtest_reports
+- 前端：BacktestReportDetailModal 展开子行展示每次出场明细
 
 **影响文件**:
-- `src/domain/models.py` — PositionSummary 模型
-- `src/domain/matching_engine.py` — TP1/SL 结算时记录分项 PnL
-- `src/application/backtester.py` — 报告生成时填充新字段
-- `web-front/src/components/v3/backtest/` — 前端展示
+- `src/domain/models.py` — 新增 PositionCloseEvent 模型，PositionSummary 新增 close_events，Order 新增 close_pnl/close_fee
+- `src/domain/matching_engine.py` — _execute_fill 中写入 order.close_pnl/close_fee
+- `src/application/backtester.py` — 从 order 读取 close_pnl/close_fee 并创建 PositionCloseEvent
+- `src/infrastructure/backtest_repository.py` — 序列化/反序列化支持嵌套 close_events 列表
+- `web-front/src/lib/api.ts` — TS 接口新增
+- `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` — 事件列表展开渲染
 
 ### 1.2 净盈亏语义混淆
 

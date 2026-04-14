@@ -1,6 +1,59 @@
 # Progress Log
 
-> Last updated: 2026-04-15 00:10
+> Last updated: 2026-04-15 01:30
+
+---
+
+## 2026-04-15 01:30 -- PMS 回测 PnL 归因一对多事件列表架构设计完成
+
+### 任务链
+
+```
+用户提出 P0 问题 → PM 任务分解 → 架构师输出详细设计 → QA 审查发现 4 个 P0 问题
+→ 架构师修复所有 P0 问题 → 更新规划文档 → 待启动开发
+```
+
+### 完成的工作
+
+| # | 任务 | 状态 |
+|---|------|------|
+| 1 | PnL 归因详细设计文档编写 | ✅ 完成 |
+| 2 | QA 审查设计文档 | ✅ 完成（发现 4 P0 + 5 P1 + 4 P2） |
+| 3 | 架构师修复所有 P0 问题 | ✅ 完成 |
+| 4 | 更新 task_plan.md 阶段 1.1 状态 | ✅ 完成 |
+| 5 | 更新 progress.md 进度日志 | ✅ 完成 |
+
+### 产出文档
+
+| 文档 | 路径 |
+|------|------|
+| ADR 决策文档 | `docs/arch/position-summary-close-event-design.md` |
+| 详细设计文档 | `docs/arch/position-summary-close-event-implementation.md` |
+| QA 审查报告 | `docs/arch/position-summary-close-event-implementation-review.md` |
+
+### 核心设计要点
+
+1. **PositionCloseEvent 模型**：记录每次出场事件（position_id, order_id, event_type, close_price, close_qty, close_pnl, close_fee, close_time, exit_reason, original_sl_price, modified_sl_price）
+2. **数据传递方案**：Order 模型新增 `close_pnl`/`close_fee` 字段，matching_engine._execute_fill 计算后写入 order 对象，backtester 从 executed order 直接读取
+3. **数据不变量**：`sum(e.close_pnl) == position.realized_pnl`（完全平仓时）
+4. **向后兼容**：旧回测报告反序列化时 close_events 默认空列表
+
+### QA 审查发现的问题及修复
+
+| 编号 | 问题 | 级别 | 修复方案 |
+|------|------|------|---------|
+| P0-1 | 数据流图结构性错误（backtester 不直接调用 _execute_fill） | P0 | Order 新增 close_pnl/close_fee 字段 |
+| P0-2 | SL 触发后 TP 被撤销的边界未覆盖 | P0 | 边界表补充说明：被撤销 TP 不产生 close_event |
+| P0-3 | close_pnl 语义不变量未声明 | P0 | 新增数据不变量章节 |
+| P0-4 | 统计重复计算风险 | P0 | 重新设计统计逻辑：仅完全平仓时更新总量统计 |
+
+### 下一步
+
+- [ ] 用户确认设计文档是否可以启动开发
+- [ ] 如确认，PM 分解任务 → 前后端并行开发
+- [ ] 开发完成后编写单元测试 + 集成测试
+
+---
 
 ---
 
