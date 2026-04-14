@@ -470,6 +470,7 @@ class Backtester:
                 symbol=request.symbol,
                 timeframe=request.timeframe,
                 limit=limit,
+                since=request.start_time,
             )
 
             # 按时间范围过滤
