@@ -1312,6 +1312,11 @@ class Backtester:
                         initial_sl_rr=Decimal('-1.0'),
                         tp_targets=strategy.tp_targets,  # 使用 strategy 配置的 tp_targets
                     )
+
+                    # 回测中模拟订单从创建到挂单的完整流程（跳过 CREATED/SUBMITTED 中间状态）
+                    for order in entry_orders:
+                        order.status = OrderStatus.OPEN  # 回测直接设为 OPEN（模拟即时挂单）
+
                     active_orders.extend(entry_orders)
 
                     # T4: Save ENTRY orders to database
