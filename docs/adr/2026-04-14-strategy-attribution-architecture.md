@@ -42,7 +42,7 @@
 | 组件 | 现状 | 归因相关能力 |
 |------|------|-------------|
 | `PatternStrategy.calculate_score()` | `pattern_ratio × 0.7 + atr_ratio × 0.3` | 已有形态评分 |
-| `FilterBase.check()` | 返回 `TraceEvent(passed: bool)` | 仅布尔决策，无评分贡献 |
+| `FilterBase.check()` | 返回 `FilterResult(passed: bool, reason: str, metadata: Dict)` | 仅布尔决策，无评分贡献 |
 | `SignalAttempt` | 记录 `filter_results: List[Tuple[str, FilterResult]]` | 有记录但仅用于日志 |
 | `AttributionAnalyzer` | 回测后四维分析（形态/过滤器/趋势/RR） | 群体统计，非单信号级 |
 | `SignalResult` | 有 `score: float` 字段 | 仅形态评分，不含过滤器贡献 |
@@ -292,14 +292,23 @@ class AttributionEngine:
         pattern_weight = Decimal(str(self.config.weights["pattern"]))
         pattern_contrib = pattern_score * pattern_weight
 
-        # Step 2: 过滤器信心评分
+        # Step 2: 过滤器信心评分（处理所有过滤器，包括被拒绝的）
         filter_scores = []
-        for filter_name, filter_result in attempt.filter_results:
-            if filter_result.passed:
-                # 从 metadata 中提取信心强度（数学可验证）
-                confidence = self._calculate_filter_confidence(
-                    filter_name, filter_result
-                )
+        for filter_name, filter_result in attempt_dict.get("filter_results", []):
+            if isinstance(filter_result, dict):
+                # 从 dict 读取
+                passed = filter_result.get("passed", False)
+                metadata = filter_result.get("metadata", {})
+                reason = filter_result.get("reason", "")
+            else:
+                # 兼容 FilterResult 对象
+                passed = filter_result.passed
+                metadata = filter_result.metadata or {}
+                reason = filter_result.reason
+
+            if passed:
+                # 通过的过滤器：计算信心评分
+                confidence = self._calculate_filter_confidence(filter_name, metadata)
                 weight = Decimal(str(
                     self.config.weights.get(filter_name, 0.10)
                 ))
@@ -308,11 +317,24 @@ class AttributionEngine:
                     score=confidence,
                     weight=weight,
                     contribution=confidence * weight,
-                    reason=filter_result.reason,
-                    metadata=filter_result.metadata or {},
+                    reason=reason,
+                    metadata=metadata,
                     confidence_basis=self._explain_confidence(
-                        filter_name, filter_result
-                    )
+                        filter_name, metadata
+                    ),
+                    status="passed"
+                ))
+            else:
+                # 被拒绝的过滤器：score=0，贡献为 0，标记为 rejected
+                filter_scores.append(FilterScore(
+                    filter_name=filter_name,
+                    score=Decimal("0"),
+                    weight=Decimal("0"),
+                    contribution=Decimal("0"),
+                    reason=reason,
+                    metadata=metadata,
+                    confidence_basis=f"REJECTED: {reason}",
+                    status="rejected"
                 ))
 
         # Step 3: 聚合
@@ -327,10 +349,12 @@ class AttributionEngine:
                 **{
                     fs.filter_name: float(fs.contribution / final_score * 100)
                     for fs in filter_scores
+                    if fs.status == "passed"
                 }
             }
         else:
-            percentages = {"pattern": 100.0}
+            # 最终评分为 0 时不伪造百分比（0 贡献 ≠ 100%）
+            percentages = {}
 
         return SignalAttribution(
             final_score=float(final_score),
@@ -340,16 +364,16 @@ class AttributionEngine:
         )
 
     def _calculate_filter_confidence(
-        self, filter_name: str, result: FilterResult
+        self, filter_name: str, metadata: Dict[str, Any]
     ) -> Decimal:
         """
         根据过滤器类型和 metadata 计算信心强度。
         每个信心函数都是数学可验证的确定性函数。
 
         信心值范围: 0.0 ~ 1.0
-        """
-        metadata = result.metadata or {}
 
+        当 metadata 缺少必需字段时，返回默认值并记录日志告警。
+        """
         if filter_name in ("ema_trend", "ema"):
             # EMA 信心: 价格偏离 EMA 的百分比（线性映射）
             # 公式: confidence = min(distance_pct / 0.05, 1.0)
@@ -359,6 +383,7 @@ class AttributionEngine:
             if price and ema:
                 distance = abs(Decimal(str(price)) - Decimal(str(ema))) / Decimal(str(ema))
                 return min(distance / Decimal("0.05"), Decimal("1.0"))
+            logger.warning(f"EMA metadata incomplete for attribution, default confidence=0.5")
             return Decimal("0.5")  # 默认中等信心
 
         elif filter_name == "mtf":
@@ -367,7 +392,10 @@ class AttributionEngine:
             # 含义: 所有高周期趋势一致 = 满分信心
             aligned = metadata.get("aligned_count", 0)
             total = metadata.get("total_count", 1)
-            return Decimal(str(aligned / total)) if total > 0 else Decimal("0.5")
+            if total > 0:
+                return Decimal(str(aligned)) / Decimal(str(total))
+            logger.warning(f"MTF metadata incomplete for attribution, default confidence=0.5")
+            return Decimal("0.5")
 
         elif filter_name == "atr":
             # ATR 信心: K 线范围相对于 ATR 的倍数（capped at 2.0）
@@ -375,19 +403,18 @@ class AttributionEngine:
             atr_ratio = metadata.get("atr_ratio")
             if atr_ratio:
                 return min(Decimal(str(atr_ratio)) / Decimal("2.0"), Decimal("1.0"))
+            logger.warning(f"ATR metadata incomplete for attribution, default confidence=0.5")
             return Decimal("0.5")
 
         else:
             # 未知过滤器: 默认中等信心
             return Decimal("0.5")
 
-    def _explain_confidence(self, filter_name: str, result: FilterResult) -> str:
+    def _explain_confidence(self, filter_name: str, metadata: Dict[str, Any]) -> str:
         """
         生成信心评分的人类可读解释（数学可验证）。
         用户可以看到"这个数字怎么来的"。
         """
-        metadata = result.metadata or {}
-
         if filter_name in ("ema_trend", "ema"):
             price = metadata.get("price")
             ema = metadata.get("ema_value")
@@ -405,9 +432,70 @@ class AttributionEngine:
         return "confidence function not defined for this filter"
 ```
 
-#### 3.2.2 信心函数数学表
+#### 3.2.2 与 AttributionAnalyzer 的关系
 
-每个信心函数都是确定性的数学公式，可追溯可验证：
+本项目已有一个 `AttributionAnalyzer`（`src/application/attribution_analyzer.py`），两者的关系如下：
+
+| | `AttributionAnalyzer`（已有） | `AttributionEngine`（新增） |
+|---|---|---|
+| 分析级别 | 回测报告级（群体统计） | 单信号级（个体归因） |
+| 输入 | 完整的 BacktestReport | 单个 SignalAttempt |
+| 输出 | 四维度归因（形态/过滤器/趋势/RR） | 每个组件的 score × weight 贡献 |
+| 使用时机 | 回测完成后查看整体表现 | 查看单个信号时看具体贡献 |
+
+两者互补，不冲突。
+
+#### 3.2.3 数据契约
+
+**P0 注意**：`SignalAttempt` 在回测引擎中被序列化为 `dict`（`_attempt_to_dict()`），不存在直接的反序列化方法。
+
+归因引擎接受 `dict` 作为输入，而非 `SignalAttempt` 对象：
+
+```python
+class AttributionEngine:
+    def attribute(self, attempt_dict: Dict[str, Any]) -> SignalAttribution:
+        """
+        从回测引擎序列化的 attempt dict 计算归因。
+
+        attempt_dict 结构:
+        {
+            "strategy_name": "pinbar",
+            "pattern": {"score": 0.72, "direction": "LONG", ...} | None,
+            "filter_results": [(filter_name, {"passed": bool, "reason": str, "metadata": {...}}), ...],
+            "final_result": "SIGNAL_FIRED" | "NO_PATTERN" | "FILTERED",
+            "kline_timestamp": 1234567890
+        }
+        """
+```
+
+在回测报告中，归因通过以下方式集成：
+```python
+# 在 _run_v3_pms_backtest() 结束时
+from src.application.config_manager import ConfigManager
+from src.application.attribution_engine import AttributionEngine, AttributionConfig
+
+# Step 1: 从 KV 加载归因配置
+kv_configs = await config_manager.get_backtest_configs()
+config = AttributionConfig.from_kv(kv_configs)
+
+# Step 2: 对所有 attempts 批量计算归因
+engine = AttributionEngine(config)
+signal_attributions = [
+    engine.attribute(_attempt_to_dict(a))
+    for a in attempts
+    if a.final_result == "SIGNAL_FIRED"
+]
+
+# Step 3: 填充到报告
+report.signal_attributions = signal_attributions
+report.aggregate_attribution = engine.get_aggregate_attribution(signal_attributions)
+```
+
+#### 3.2.4 元数据契约
+
+每个信心函数都是确定性的数学公式，可追溯可验证。
+
+**信心函数表**:
 
 | 过滤器 | 公式 | 参数 | 范围 |
 |--------|------|------|------|
@@ -415,52 +503,24 @@ class AttributionEngine:
 | mtf | `aligned_count / total_count` | 高周期趋势对齐比例 | 0 ~ 1 |
 | atr | `min(atr_ratio / 2.0, 1.0)` | atr_ratio = candle_range / ATR | 0 ~ 1 |
 
-#### 3.2.2 增强 `FilterResult.metadata`
+**必需元数据表**:
 
-为使方案 B 工作，需要确保各过滤器在 `TraceEvent.metadata` 中携带足够的诊断数据：
+| 过滤器 | 必需字段 | 类型 | 示例 |
+|--------|---------|------|------|
+| ema_trend | `price` | float | `65432.10` |
+| ema_trend | `ema_value` | float | `64200.00` |
+| ema_trend | `trend_direction` | str | `"bullish"` |
+| mtf | `higher_tf_trends` | Dict | `{"1h": "bullish", "4h": "bearish"}` |
+| mtf | `aligned_count` | int | `1` |
+| mtf | `total_count` | int | `2` |
+| atr | `atr_ratio` | float | `1.5` |
 
-```python
-# EmaTrendFilterDynamic.check() 返回的 metadata 需要包含:
-metadata={
-    "trend_direction": "bullish",
-    "price": float(close),
-    "ema_value": float(ema),
-    "distance_pct": float(distance),
-}
+当 metadata 缺少必需字段时，归因引擎会：
+1. 记录 WARNING 日志
+2. 使用默认信心值 `0.5`
+3. `confidence_basis` 中标注 "metadata incomplete"
 
-# MtfFilterDynamic.check() 返回的 metadata 需要包含:
-metadata={
-    "higher_tf_trends": {"1h": "bullish", "4h": "bearish"},
-    "aligned_count": 1,
-    "total_count": 2,
-}
-```
-
-这些 metadata **大部分已存在**，只需补充少量字段。
-
-#### 3.2.3 API 扩展
-
-```python
-# 在 signal_pipeline.py 或新建 attribution_api.py
-class AttributionApi:
-    """归因 API，供前端调用"""
-
-    @staticmethod
-    def get_signal_attribution(signal_id: str) -> SignalAttribution:
-        """获取指定信号的归因分析"""
-        attempt = repository.get_signal_attempt(signal_id)
-        engine = AttributionEngine()
-        return engine.attribute(attempt)
-
-    @staticmethod
-    def get_batch_attribution(report_id: str) -> List[SignalAttribution]:
-        """批量获取回测报告中所有信号的归因"""
-        attempts = repository.get_backtest_attempts(report_id)
-        engine = AttributionEngine()
-        return [engine.attribute(a) for a in attempts]
-```
-
-#### 3.2.4 前端展示数据结构
+#### 3.2.5 前端展示数据结构
 
 ```json
 {
@@ -554,12 +614,15 @@ Phase B-3 (0.5天): 前端适配
 
 **校验层** (`AttributionConfig`):
 ```python
+from pydantic import BaseModel, field_validator
+
 class AttributionConfig(BaseModel):
     """归因配置校验模型 — 从 KV 配置加载并校验"""
     weights: Dict[str, float]
 
-    @validator('weights')
-    def validate_weights(cls, v):
+    @field_validator('weights')
+    @classmethod
+    def validate_weights(cls, v: Dict[str, float]) -> Dict[str, float]:
         # 1. 必须包含必需的 key
         required = {"pattern", "ema_trend", "mtf"}
         missing = required - set(v.keys())
@@ -601,6 +664,14 @@ class AttributionConfig(BaseModel):
 - 信号触发由过滤器布尔决策决定（保持确定性）
 - 归因是事后分析，不改变决策逻辑
 - 避免引入新的复杂性（如"评分低于阈值不触发"）
+
+### 决策 4: 权重范围（P2-2）
+
+**选择**: 全局权重，不按策略配置
+
+**理由**: 归因权重是"解释工具"而非"优化参数"，全局权重确保不同策略间的归因结果可对比。
+当前只有 pinbar/engulfing 两种策略，过滤器集合重叠度高，不需要按策略配置。
+未来如果策略差异变大，可以引入 `attribution_weight_{strategy}_{filter}` 命名空间。
 
 ### 决策 3: 归因引擎放置位置
 
@@ -647,6 +718,20 @@ class AttributionComponent(BaseModel):
     contribution: float  # score × weight
     percentage: float    # contribution / final_score × 100
     confidence_basis: str  # 信心评分的依据描述
+    status: str = "passed"  # "passed" 或 "rejected"，标记过滤器是否通过
+
+
+@dc_dataclass
+class FilterScore:
+    """过滤器评分（内部使用，不序列化）"""
+    filter_name: str
+    score: Decimal
+    weight: Decimal
+    contribution: Decimal
+    reason: str
+    metadata: Dict[str, Any]
+    confidence_basis: str
+    status: str = "passed"  # "passed" 或 "rejected"
 
 
 class AggregateAttribution(BaseModel):
@@ -694,4 +779,39 @@ GET /api/backtests/{report_id}/attribution/signals
 
 ---
 
-*本 ADR 由 Architect 生成，等待用户评审确认方向后进入 PM 任务分解阶段。*
+---
+
+## 10. QA 审查修复记录
+
+> **审查日期**: 2026-04-15
+> **审查人**: QA Agent
+> **修复状态**: ✅ 已完成
+
+### P0 修复
+
+| # | 问题 | 修复 |
+|---|------|------|
+| P0-1 | `FilterBase.check()` 返回类型写错为 `TraceEvent` | 修正为 `FilterResult(passed: bool, reason: str, metadata: Dict)` |
+| P0-2 | API 扩展中 `get_signal_attempt()` / `get_backtest_attempts()` 方法不存在 | 改为接受 `dict` 输入，归因在 `_run_v3_pms_backtest()` 中直接调用 |
+
+### P1 修复
+
+| # | 问题 | 修复 |
+|---|------|------|
+| P1-1 | `SignalAttempt.filter_results` 类型注解为 bare `list` | 已在 task_plan 中标注为实施任务 |
+| P1-2 | Pydantic v1 `@validator` 语法 | 改为 Pydantic v2 `@field_validator` + `@classmethod` |
+| P1-3 | MTF 信心函数 `Decimal(str(aligned / total))` float 混用 | 改为 `Decimal(str(aligned)) / Decimal(str(total))` |
+| P1-4 | `AttributionEngine` 与 `AttributionAnalyzer` 命名关系不明 | 新增 3.2.2 节"与 AttributionAnalyzer 的关系"对比表 |
+| P1-5 | FILTERED 信号的被拒绝过滤器被忽略 | 所有过滤器都处理，被拒绝的标记 `status="rejected"`，score=0 |
+| P1-6 | metadata 缺失时无告警 | 信心函数中增加 `logger.warning()` 告警 |
+
+### P2 修复
+
+| # | 问题 | 修复 |
+|---|------|------|
+| P2-1 | `SignalResult` 模型变更未指定 | 新增 `FilterScore` 和 `AttributionComponent.status` 字段定义 |
+| P2-2 | 全局权重按策略配置问题 | 新增决策 4，文档说明全局权重是按设计 |
+| P2-3 | zero-score 时 percentages 显示 `{"pattern": 100.0}` | 改为 `{}`，不伪造百分比 |
+
+---
+
