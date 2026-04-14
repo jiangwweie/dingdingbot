@@ -1,7 +1,32 @@
 # 技术发现
 
 > **说明**: 仅保留当前活跃的技术发现，已归档的见 `archive/completed-tasks/findings-history-20260407-and-earlier.md`。
-> **最后更新**: 2026-04-14 P0 回测订单状态修复 + 连接池 close() 修复
+> **最后更新**: 2026-04-14 SQLite TEXT 列 CHECK 约束字典序比较 Bug
+
+---
+
+## 2026-04-14 SQLite TEXT 列 CHECK 约束字典序比较 Bug
+
+### 根因
+
+1. `DecimalField` = `DecimalString`，在 SQLite 中以 TEXT 存储 Decimal 值
+2. `BacktestReportORM` 的 `check_total_return_range` 约束使用数值比较：`total_return >= -1.0`
+3. SQLite 对 TEXT 列做字典序比较：`'-0.1787' >= '-1.0'` 为 False（因为 `'0' < '1'`）
+4. 负收益率报告 INSERT 被拒绝，正数和零可以通过
+
+### 影响范围
+
+- **P0 已触发**: `total_return` 约束 -- 负收益合法，无法保存
+- **P2 潜在**: 另有 6 处 DecimalString 数值 CHECK 约束（`win_rate`, `max_drawdown`, `requested_qty`, `filled_qty`, `current_qty`, `entry_price`）
+- **无问题**: 9 处枚举值 `IN (...)` CHECK 约束（字符串字面量匹配，完全正确）
+
+### 推荐方案
+
+方案 A：删除所有 DecimalString 数值 CHECK 约束，改由应用层 Pydantic 验证。与 SignalORM 已有设计一致。
+
+### ADR
+
+`docs/arch/sqlite-text-check-constraint-fix-plan.md`
 
 ---
 
