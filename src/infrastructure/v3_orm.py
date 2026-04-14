@@ -111,9 +111,9 @@ DIRECTION_CHECK = CheckConstraint(
     name="check_direction"
 )
 
-# OrderStatus 枚举约束
+# OrderStatus 枚举约束（9 种状态，与 OrderStatus 枚举完全对齐）
 ORDER_STATUS_CHECK = CheckConstraint(
-    "status IN ('PENDING', 'OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED')",
+    "status IN ('CREATED', 'SUBMITTED', 'PENDING', 'OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED')",
     name="check_order_status"
 )
 
