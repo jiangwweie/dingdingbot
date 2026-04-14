@@ -498,3 +498,364 @@ class TestParametersHashClustering:
         assert hash1 != hash2  # Different strategy params
         assert hash1 != hash3  # Different symbol
         assert hash1 != hash4  # Different timeframe
+
+
+# ============================================================
+# Test SQLite TEXT CHECK Constraint Fix (ADR-2026-0414)
+# ============================================================
+
+class TestPydanticRangeValidation:
+    """
+    Tests for PMSBacktestReport Pydantic range validators.
+
+    ADR-2026-0414: Removed numeric CHECK constraints from BacktestReportORM
+    because SQLite TEXT columns use lexicographic comparison, not numeric.
+    Range validation is now exclusively handled by Pydantic models.
+    """
+
+    def test_negative_total_return_is_valid(self):
+        """负收益率报告应能通过 Pydantic 验证（核心 bug 修复验证）。"""
+        report = PMSBacktestReport(
+            strategy_id="test_v1",
+            strategy_name="TestStrategy",
+            backtest_start=1700000000000,
+            backtest_end=1700100000000,
+            initial_balance=Decimal("10000"),
+            final_balance=Decimal("8213"),
+            total_return=Decimal("-0.1787"),
+            total_trades=41,
+            winning_trades=20,
+            losing_trades=21,
+            win_rate=Decimal("48.78"),
+            total_pnl=Decimal("-1787"),
+            total_fees_paid=Decimal("50"),
+            total_slippage_cost=Decimal("10"),
+            max_drawdown=Decimal("20.0"),
+        )
+        assert report.total_return == Decimal("-0.1787")
+
+    def test_total_return_boundary_minimum(self):
+        """total_return 最小边界值 -1.0 应能通过验证。"""
+        report = PMSBacktestReport(
+            strategy_id="test_v1",
+            strategy_name="TestStrategy",
+            backtest_start=1700000000000,
+            backtest_end=1700100000000,
+            initial_balance=Decimal("10000"),
+            final_balance=Decimal("0"),
+            total_return=Decimal("-1.0"),
+            total_trades=10,
+            winning_trades=0,
+            losing_trades=10,
+            win_rate=Decimal("0"),
+            total_pnl=Decimal("-10000"),
+            total_fees_paid=Decimal("50"),
+            total_slippage_cost=Decimal("10"),
+            max_drawdown=Decimal("100.0"),
+        )
+        assert report.total_return == Decimal("-1.0")
+
+    def test_total_return_boundary_maximum(self):
+        """total_return 最大边界值 10.0 应能通过验证。"""
+        report = PMSBacktestReport(
+            strategy_id="test_v1",
+            strategy_name="TestStrategy",
+            backtest_start=1700000000000,
+            backtest_end=1700100000000,
+            initial_balance=Decimal("10000"),
+            final_balance=Decimal("110000"),
+            total_return=Decimal("10.0"),
+            total_trades=5,
+            winning_trades=5,
+            losing_trades=0,
+            win_rate=Decimal("100"),
+            total_pnl=Decimal("100000"),
+            total_fees_paid=Decimal("50"),
+            total_slippage_cost=Decimal("10"),
+            max_drawdown=Decimal("0"),
+        )
+        assert report.total_return == Decimal("10.0")
+
+    def test_total_return_below_minimum_raises_error(self):
+        """total_return < -1.0 应抛出 Pydantic 验证错误。"""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            PMSBacktestReport(
+                strategy_id="test_v1",
+                strategy_name="TestStrategy",
+                backtest_start=1700000000000,
+                backtest_end=1700100000000,
+                initial_balance=Decimal("10000"),
+                final_balance=Decimal("0"),
+                total_return=Decimal("-1.01"),
+                total_trades=10,
+                winning_trades=0,
+                losing_trades=10,
+                win_rate=Decimal("0"),
+                total_pnl=Decimal("-10000"),
+                total_fees_paid=Decimal("50"),
+                total_slippage_cost=Decimal("10"),
+                max_drawdown=Decimal("100.0"),
+            )
+
+    def test_total_return_above_maximum_raises_error(self):
+        """total_return > 10.0 应抛出 Pydantic 验证错误。"""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            PMSBacktestReport(
+                strategy_id="test_v1",
+                strategy_name="TestStrategy",
+                backtest_start=1700000000000,
+                backtest_end=1700100000000,
+                initial_balance=Decimal("10000"),
+                final_balance=Decimal("120000"),
+                total_return=Decimal("11.0"),
+                total_trades=5,
+                winning_trades=5,
+                losing_trades=0,
+                win_rate=Decimal("100"),
+                total_pnl=Decimal("110000"),
+                total_fees_paid=Decimal("50"),
+                total_slippage_cost=Decimal("10"),
+                max_drawdown=Decimal("0"),
+            )
+
+    def test_win_rate_boundary_values(self):
+        """win_rate 边界值 0 和 100 应能通过验证。"""
+        from pydantic import ValidationError
+
+        # win_rate = 0
+        report_zero = PMSBacktestReport(
+            strategy_id="test_v1",
+            strategy_name="TestStrategy",
+            backtest_start=1700000000000,
+            backtest_end=1700100000000,
+            initial_balance=Decimal("10000"),
+            final_balance=Decimal("9000"),
+            total_return=Decimal("-0.1"),
+            total_trades=10,
+            winning_trades=0,
+            losing_trades=10,
+            win_rate=Decimal("0"),
+            total_pnl=Decimal("-1000"),
+            total_fees_paid=Decimal("50"),
+            total_slippage_cost=Decimal("10"),
+            max_drawdown=Decimal("15.0"),
+        )
+        assert report_zero.win_rate == Decimal("0")
+
+        # win_rate = 100
+        report_full = PMSBacktestReport(
+            strategy_id="test_v1",
+            strategy_name="TestStrategy",
+            backtest_start=1700000000000,
+            backtest_end=1700100000000,
+            initial_balance=Decimal("10000"),
+            final_balance=Decimal("11000"),
+            total_return=Decimal("1.0"),
+            total_trades=10,
+            winning_trades=10,
+            losing_trades=0,
+            win_rate=Decimal("100"),
+            total_pnl=Decimal("1000"),
+            total_fees_paid=Decimal("50"),
+            total_slippage_cost=Decimal("10"),
+            max_drawdown=Decimal("5.0"),
+        )
+        assert report_full.win_rate == Decimal("100")
+
+        # win_rate > 100 should fail
+        with pytest.raises(ValidationError):
+            PMSBacktestReport(
+                strategy_id="test_v1",
+                strategy_name="TestStrategy",
+                backtest_start=1700000000000,
+                backtest_end=1700100000000,
+                initial_balance=Decimal("10000"),
+                final_balance=Decimal("11000"),
+                total_return=Decimal("1.0"),
+                total_trades=10,
+                winning_trades=10,
+                losing_trades=0,
+                win_rate=Decimal("100.01"),
+                total_pnl=Decimal("1000"),
+                total_fees_paid=Decimal("50"),
+                total_slippage_cost=Decimal("10"),
+                max_drawdown=Decimal("5.0"),
+            )
+
+    def test_max_drawdown_boundary_values(self):
+        """max_drawdown 边界值 0 和 100 应能通过验证。"""
+        from pydantic import ValidationError
+
+        # max_drawdown = 0
+        report_zero_dd = PMSBacktestReport(
+            strategy_id="test_v1",
+            strategy_name="TestStrategy",
+            backtest_start=1700000000000,
+            backtest_end=1700100000000,
+            initial_balance=Decimal("10000"),
+            final_balance=Decimal("10500"),
+            total_return=Decimal("0.5"),
+            total_trades=10,
+            winning_trades=10,
+            losing_trades=0,
+            win_rate=Decimal("100"),
+            total_pnl=Decimal("500"),
+            total_fees_paid=Decimal("50"),
+            total_slippage_cost=Decimal("10"),
+            max_drawdown=Decimal("0"),
+        )
+        assert report_zero_dd.max_drawdown == Decimal("0")
+
+        # max_drawdown = 100
+        report_full_dd = PMSBacktestReport(
+            strategy_id="test_v1",
+            strategy_name="TestStrategy",
+            backtest_start=1700000000000,
+            backtest_end=1700100000000,
+            initial_balance=Decimal("10000"),
+            final_balance=Decimal("0"),
+            total_return=Decimal("-1.0"),
+            total_trades=10,
+            winning_trades=0,
+            losing_trades=10,
+            win_rate=Decimal("0"),
+            total_pnl=Decimal("-10000"),
+            total_fees_paid=Decimal("50"),
+            total_slippage_cost=Decimal("10"),
+            max_drawdown=Decimal("100"),
+        )
+        assert report_full_dd.max_drawdown == Decimal("100")
+
+        # max_drawdown > 100 should fail
+        with pytest.raises(ValidationError):
+            PMSBacktestReport(
+                strategy_id="test_v1",
+                strategy_name="TestStrategy",
+                backtest_start=1700000000000,
+                backtest_end=1700100000000,
+                initial_balance=Decimal("10000"),
+                final_balance=Decimal("0"),
+                total_return=Decimal("-1.0"),
+                total_trades=10,
+                winning_trades=0,
+                losing_trades=10,
+                win_rate=Decimal("0"),
+                total_pnl=Decimal("-10000"),
+                total_fees_paid=Decimal("50"),
+                total_slippage_cost=Decimal("10"),
+                max_drawdown=Decimal("100.01"),
+            )
+
+
+@pytest.mark.asyncio
+class TestNegativeReturnReportPersistence:
+    """
+    Integration test: 负收益率报告应能正常保存到 SQLite 数据库。
+
+    直接验证 ADR-2026-0414 修复效果：删除 TEXT 列数值 CHECK 约束后，
+    负收益率报告不再被 SQLite 字典序比较错误拒绝。
+    """
+
+    @pytest.fixture(autouse=True)
+    async def setup_repository(self):
+        """Set up and tear down repository for each test."""
+        import os
+        db_path = "data/test_negative_return.db"
+        if os.path.exists(db_path):
+            os.remove(db_path)
+
+        self.repo = BacktestReportRepository(db_path=db_path)
+        await self.repo.initialize()
+        yield
+        await self.repo.close()
+
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        if os.path.exists(db_path + "-wal"):
+            os.remove(db_path + "-wal")
+        if os.path.exists(db_path + "-shm"):
+            os.remove(db_path + "-shm")
+
+    async def test_negative_return_report_can_be_saved(self):
+        """核心测试：total_return = -0.1787 的报告应能正常保存并读取。"""
+        strategy_snapshot = '{"triggers": [{"type": "pinbar"}], "filters": []}'
+        symbol = "BTC/USDT:USDT"
+        timeframe = "15m"
+
+        report = PMSBacktestReport(
+            strategy_id="pinbar_v1",
+            strategy_name="Pinbar",
+            backtest_start=1700000000000,
+            backtest_end=1700100000000,
+            initial_balance=Decimal("10000"),
+            final_balance=Decimal("8213"),
+            total_return=Decimal("-0.1787"),
+            total_trades=41,
+            winning_trades=20,
+            losing_trades=21,
+            win_rate=Decimal("48.78"),
+            total_pnl=Decimal("-1787"),
+            total_fees_paid=Decimal("50"),
+            total_slippage_cost=Decimal("10"),
+            max_drawdown=Decimal("20.0"),
+        )
+
+        # Save report -- this previously failed due to CHECK constraint
+        await self.repo.save_report(report, strategy_snapshot, symbol, timeframe)
+
+        # Verify it was saved
+        cursor = await self.repo._db.execute(
+            "SELECT id, total_return FROM backtest_reports WHERE strategy_id = ?",
+            (report.strategy_id,)
+        )
+        row = await cursor.fetchone()
+        assert row is not None, "Report should have been saved to the database"
+        # Database stores Decimal as string, convert back for comparison
+        stored_return = Decimal(row["total_return"])
+        assert stored_return == Decimal("-0.1787")
+
+    async def test_boundary_return_values(self):
+        """边界值测试：total_return = -1.0, 0, 10.0 均应能正常保存。"""
+        strategy_snapshot = '{"triggers": [{"type": "pinbar"}], "filters": []}'
+        symbol = "ETH/USDT:USDT"
+        timeframe = "1h"
+
+        test_values = [
+            Decimal("-1.0"),   # 最小值（亏光）
+            Decimal("0"),      # 盈亏平衡
+            Decimal("10.0"),   # 最大值（10 倍收益）
+        ]
+
+        for i, ret_value in enumerate(test_values):
+            report = PMSBacktestReport(
+                strategy_id=f"boundary_test_{i}",
+                strategy_name="BoundaryTest",
+                backtest_start=1700000000000 + (i * 1000),
+                backtest_end=1700100000000,
+                initial_balance=Decimal("10000"),
+                final_balance=Decimal("10000") * (1 + ret_value),
+                total_return=ret_value,
+                total_trades=5,
+                winning_trades=3,
+                losing_trades=2,
+                win_rate=Decimal("60.0"),
+                total_pnl=Decimal("10000") * ret_value,
+                total_fees_paid=Decimal("50"),
+                total_slippage_cost=Decimal("10"),
+                max_drawdown=Decimal("10.0"),
+            )
+
+            await self.repo.save_report(report, strategy_snapshot, symbol, timeframe)
+
+        # Verify all three reports were saved
+        cursor = await self.repo._db.execute(
+            "SELECT total_return FROM backtest_reports WHERE strategy_id LIKE 'boundary_test_%'"
+        )
+        rows = await cursor.fetchall()
+        assert len(rows) == 3
+        stored_returns = sorted([Decimal(r["total_return"]) for r in rows])
+        assert stored_returns == [Decimal("-1.0"), Decimal("0"), Decimal("10.0")]

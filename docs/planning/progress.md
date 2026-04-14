@@ -1,10 +1,76 @@
 # Progress Log
 
-> Last updated: 2026-04-14 22:30
+> Last updated: 2026-04-14 22:45
 
 ---
 
-## 2026-04-14 22:30 -- ADR: SQLite TEXT 列 CHECK 约束字典序比较 Bug 修复
+## 2026-04-14 22:45 -- 修复 SQLite TEXT 列 CHECK 约束字典序比较 Bug（方案 A 实施完成）
+
+### Completed
+
+**Step 1: 删除 BacktestReportORM 的 3 个数值 CHECK 约束**
+- 文件: `src/infrastructure/v3_orm.py` (行 1164-1182)
+- 删除 `check_total_return_range`、`check_win_rate_range`、`check_max_drawdown_range`
+- 补充注释：说明为什么不在 SQLite TEXT 列上使用数值 CHECK 约束（与 SignalORM 设计一致）
+- 保留 4 个 Index 索引不变
+
+**Step 2: 补充 PMSBacktestReport Pydantic 范围验证**
+- 文件: `src/domain/models.py` (行 1287-1296)
+- `total_return`: Field(ge=Decimal('-1.0'), le=Decimal('10.0'))
+- `win_rate`: Field(ge=Decimal('0'), le=Decimal('100')) -- 注意是百分比 (0~100)
+- `max_drawdown`: Field(ge=Decimal('0'), le=Decimal('100')) -- 注意是百分比 (0~100)
+
+**Step 3: 编写测试**
+- 文件: `tests/unit/test_backtest_repository.py` (末尾新增 2 个测试类)
+- `TestPydanticRangeValidation`: 7 个单元测试
+  - 负收益率报告应能通过验证
+  - total_return 最小边界 -1.0
+  - total_return 最大边界 10.0
+  - total_return < -1.0 应抛出 ValidationError
+  - total_return > 10.0 应抛出 ValidationError
+  - win_rate 边界值 0/100 及越界错误
+  - max_drawdown 边界值 0/100 及越界错误
+- `TestNegativeReturnReportPersistence`: 2 个集成测试
+  - total_return = -0.1787 的报告应能正常保存和读取
+  - total_return = -1.0, 0, 10.0 三个边界值均应能正常保存
+
+### 测试结果
+
+```
+25 tests collected
+- 22 PASSED（包括全部 9 个新增测试）
+- 3 FAILED（pre-existing UNIQUE constraint 冲突，与本次修改无关）
+```
+
+新增测试 9/9 全部通过：
+- ✅ `test_negative_total_return_is_valid`
+- ✅ `test_total_return_boundary_minimum`
+- ✅ `test_total_return_boundary_maximum`
+- ✅ `test_total_return_below_minimum_raises_error`
+- ✅ `test_total_return_above_maximum_raises_error`
+- ✅ `test_win_rate_boundary_values`
+- ✅ `test_max_drawdown_boundary_values`
+- ✅ `test_negative_return_report_can_be_saved`
+- ✅ `test_boundary_return_values`
+
+### 验收标准核对
+
+- [x] 3 个 CHECK 约束已删除（git diff 证明）
+- [x] Pydantic 范围验证已补充（total_return / win_rate / max_drawdown）
+- [x] 负收益率报告可以正常保存（集成测试证明）
+- [x] 新增测试全部通过（9/9 PASSED）
+- [x] 现有测试未被破坏（原有 16 个测试中 13 个通过，3 个 pre-existing 失败与本次无关）
+- [x] progress.md 已更新
+
+### 修改文件清单
+
+| 文件 | 修改内容 |
+|------|---------|
+| `src/infrastructure/v3_orm.py` | 删除 3 个 CheckConstraint，补充注释 |
+| `src/domain/models.py` | 为 PMSBacktestReport 添加 Field 范围验证 |
+| `tests/unit/test_backtest_repository.py` | 新增 2 个测试类，9 个测试用例 |
+
+---
 
 ### Completed
 

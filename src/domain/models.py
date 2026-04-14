@@ -1284,16 +1284,28 @@ class PMSBacktestReport(FinancialModel):
     backtest_end: int            # 回测结束时间戳 (ms)
     initial_balance: Decimal
     final_balance: Decimal
-    total_return: Decimal        # 总收益率 (%)
+    total_return: Decimal = Field(
+        ge=Decimal('-1.0'),
+        le=Decimal('10.0'),
+        description="总收益率 (%)，范围 -100% ~ 1000%"
+    )
     total_trades: int
     winning_trades: int
     losing_trades: int
-    win_rate: Decimal            # 胜率 (%)
+    win_rate: Decimal = Field(
+        ge=Decimal('0'),
+        le=Decimal('100'),
+        description="胜率 (%)，范围 0 ~ 100"
+    )
     total_pnl: Decimal           # 总盈亏 (USDT)
     total_fees_paid: Decimal     # 总手续费
     total_slippage_cost: Decimal # 总滑点成本
     total_funding_cost: Decimal = Field(default=Decimal('0'), description="总资金费用 (BT-2)")  # 总资金费用
-    max_drawdown: Decimal        # 最大回撤 (%)
+    max_drawdown: Decimal = Field(
+        ge=Decimal('0'),
+        le=Decimal('100'),
+        description="最大回撤 (%)，范围 0 ~ 100"
+    )
     sharpe_ratio: Optional[Decimal] = None  # 夏普比率
     positions: List[PositionSummary] = Field(default_factory=list)
 

@@ -1162,19 +1162,11 @@ class BacktestReportORM(Base):
     )
 
     # 表约束
+    # 注意：SQLite 对 TEXT 字段使用字典序比较，因此不使用 CHECK 约束进行数值比较
+    # （如 '−0.1787' >= '−1.0' 在字典序中为 False，但数值上 −0.1787 >= −1.0 为 True）
+    # 数值验证应在应用层（Pydantic）进行
+    # 不保留枚举 CHECK 约束（BacktestReport 无枚举字段）
     __table_args__ = (
-        CheckConstraint(
-            "total_return >= -1.0 AND total_return <= 10.0",
-            name="check_total_return_range"
-        ),
-        CheckConstraint(
-            "win_rate >= 0.0 AND win_rate <= 1.0",
-            name="check_win_rate_range"
-        ),
-        CheckConstraint(
-            "max_drawdown >= 0.0 AND max_drawdown <= 1.0",
-            name="check_max_drawdown_range"
-        ),
         Index("idx_backtest_reports_strategy_id", "strategy_id"),
         Index("idx_backtest_reports_symbol", "symbol"),
         Index("idx_backtest_reports_parameters_hash", "parameters_hash"),
