@@ -1,8 +1,8 @@
 # Task Plan: 回测系统优化
 
 > Created: 2026-04-15
-> Last updated: 2026-04-15
-> Status: 规划阶段，待启动
+> Last updated: 2026-04-14
+> Status: 阶段 5 架构设计已完成，待启动开发
 
 ---
 
@@ -317,36 +317,171 @@ async def run_monte_carlo(
 
 ## 阶段 5: 策略归因分析（4h）
 
+> **架构决策**: 详见 `docs/adr/2026-04-14-strategy-attribution-architecture.md`
+> **方案选择**: 方案 B（归因解释层）— 非侵入式，新增 AttributionEngine
+
+### 头脑风暴决策记录
+
+| 决策项 | 结论 |
+|--------|------|
+| 使用场景 | 回测报告（离线批量计算） |
+| 权重配置 | KV 配置 + AttributionConfig Pydantic 校验层 + 前端受控表单 |
+| 精确度 | 数学可验证，每个贡献值可追溯到 score × weight 计算过程 |
+| 推荐方案 | 方案 B（归因解释层），非侵入式 |
+
 ### 任务清单
 
 | # | 任务 | 工时 | 状态 |
 |---|------|------|------|
-| 5.1 | 形态质量归因 | 1.5h | 待启动 |
-| 5.2 | 过滤器归因 | 1.5h | 待启动 |
-| 5.3 | 市场趋势归因 | 0.5h | 待启动 |
-| 5.4 | 前端归因可视化 | 0.5h | 待启动 |
+| 5.1 | 新增 AttributionConfig 模型 + Pydantic 校验 | 0.5h | 待启动 |
+| 5.2 | 新增 AttributionEngine（单信号归因 + 批量归因） | 1.5h | 待启动 |
+| 5.3 | 补充过滤器 metadata（EMA distance, MTF alignment） | 0.5h | 待启动 |
+| 5.4 | 集成到回测报告输出 + KV 权重读取 | 0.5h | 待启动 |
+| 5.5 | 前端归因可视化（回测报告信号详情页） | 1h | 待启动 |
 
-### 5.1 形态质量归因
+### 5.1 AttributionConfig 模型
 
-按 Pinbar 评分分组统计：
-- B 维度（形态质量）：[0.0-0.3), [0.3-0.6), [0.6-1.0] 三组
-- 每组：胜率、平均盈亏、交易次数
+**职责**: 归因权重配置的校验与加载
 
-### 5.2 过滤器归因
+```python
+class AttributionConfig(BaseModel):
+    """归因配置校验模型 — 从 KV 配置加载并校验"""
+    weights: Dict[str, float]
 
-按过滤器拦截率/通过率统计：
-- C 维度（过滤器链）：每个过滤器的拦截次数、通过率、通过后的胜率
+    @validator('weights')
+    def validate_weights(cls, v):
+        required = {"pattern", "ema_trend", "mtf"}
+        missing = required - set(v.keys())
+        if missing:
+            raise ValueError(f"缺少必需的归因权重: {missing}")
+        total = sum(v.values())
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(f"权重之和必须接近 1.0，当前: {total}")
+        for k, val in v.items():
+            if not 0 <= val <= 1:
+                raise ValueError(f"权重 {k}={val} 超出 [0, 1] 范围")
+        return v
 
-### 5.3 市场趋势归因
+    @classmethod
+    def from_kv(cls, kv_configs: Dict[str, Any]) -> "AttributionConfig":
+        weights = {
+            "pattern": float(kv_configs.get("attribution_weight_pattern", 0.55)),
+            "ema_trend": float(kv_configs.get("attribution_weight_ema_trend", 0.25)),
+            "mtf": float(kv_configs.get("attribution_weight_mtf", 0.20)),
+        }
+        return cls(weights=weights)
+```
 
-按牛熊市分组统计：
-- D 维度（市场趋势）：Bullish / Bearish / Neutral
-- 每组：胜率、平均盈亏、交易次数
+**KV Key 列表**:
+- `attribution_weight_pattern` (default: 0.55)
+- `attribution_weight_ema_trend` (default: 0.25)
+- `attribution_weight_mtf` (default: 0.20)
 
-### 5.4 前端展示
+**影响文件**: `src/domain/models.py` 或新建 `src/domain/attribution_config.py`
 
-- 三维度归因表格
-- 过滤器拦截率柱状图
+### 5.2 AttributionEngine
+
+**职责**: 基于 SignalAttempt 数据，计算单信号和批量归因
+
+```python
+class AttributionEngine:
+    def attribute(self, attempt: SignalAttempt, config: AttributionConfig) -> SignalAttribution:
+        """单信号归因分析"""
+
+    def attribute_batch(self, attempts: List[SignalAttempt], config: AttributionConfig) -> List[SignalAttribution]:
+        """批量归因"""
+
+    def get_aggregate_attribution(self, attributions: List[SignalAttribution]) -> AggregateAttribution:
+        """聚合归因（回测报告摘要级别）"""
+
+    def _calculate_filter_confidence(self, filter_name: str, result: FilterResult) -> Decimal:
+        """根据过滤器 metadata 计算信心强度（数学可验证）"""
+```
+
+**信心函数**（数学可验证）:
+
+| 过滤器 | 信心函数 | 公式 |
+|--------|---------|------|
+| ema_trend | 价格偏离 EMA 的线性函数 | `min(distance_pct / 0.05, 1.0)` |
+| mtf | 高周期对齐比例 | `aligned_count / total_count` |
+| atr | ATR 比率 capped | `min(atr_ratio / 2.0, 1.0)` |
+
+**响应模型**:
+```python
+class SignalAttribution(BaseModel):
+    final_score: float
+    components: List[AttributionComponent]
+    percentages: Dict[str, float]  # {"pattern": 54.4, "ema_trend": 27.5, "mtf": 18.1}
+    explanation: str  # "Pinbar 形态(54.4%) + EMA 趋势确认(27.5%) + 多周期对齐(18.1%)"
+
+class AttributionComponent(BaseModel):
+    name: str
+    score: float       # 0~1 组件评分
+    weight: float      # 预设权重
+    contribution: float  # score × weight
+    percentage: float    # contribution / final_score × 100
+    confidence_basis: str  # "price 2.3% above EMA20, distance/5%=0.46"
+
+class AggregateAttribution(BaseModel):
+    avg_pattern_contribution: float
+    avg_filter_contributions: Dict[str, float]
+    top_performing_filters: List[str]
+    worst_performing_filters: List[str]
+```
+
+**影响文件**: `src/application/attribution_engine.py`（新文件）
+
+### 5.3 补充过滤器 metadata
+
+确保各过滤器在 `TraceEvent.metadata` 中携带归因所需的诊断数据：
+
+**EmaTrendFilterDynamic.check()** 需补充:
+```python
+metadata={
+    "trend_direction": "bullish",
+    "price": float(close),
+    "ema_value": float(ema),
+    "distance_pct": float(distance),  # 新增
+}
+```
+
+**MtfFilterDynamic.check()** 需补充:
+```python
+metadata={
+    "higher_tf_trends": {"1h": "bullish", "4h": "bearish"},
+    "aligned_count": 1,
+    "total_count": 2,
+}
+```
+
+**影响文件**: `src/domain/filter_factory.py`
+
+### 5.4 集成到回测报告
+
+在 `_run_v3_pms_backtest()` 或动态规则引擎回测结束时：
+1. 从 ConfigManager 读取 KV 归因权重 → `AttributionConfig.from_kv()`
+2. 对所有 `attempts` 调用 `AttributionEngine.attribute_batch()`
+3. 将 `SignalAttribution` 列表填充到回测报告的新字段中
+4. 聚合归因填入报告摘要
+
+**回测报告新增字段**:
+```python
+class BacktestReport(BaseModel):
+    # ... 现有字段 ...
+    signal_attributions: Optional[List[SignalAttribution]] = None
+    aggregate_attribution: Optional[AggregateAttribution] = None
+```
+
+**影响文件**: `src/application/backtester.py`, `src/domain/models.py`
+
+### 5.5 前端归因可视化
+
+**回测报告信号详情页** 新增:
+- 单信号归因瀑布图/饼图（展示 pattern/ema/mtf 各自的百分比贡献）
+- 人类可读解释文本："Pinbar 形态(54.4%) + EMA 趋势确认(27.5%) + 多周期对齐(18.1%)"
+- 展开后可查看每个组件的 score、weight、contribution、confidence_basis
+
+**影响文件**: `web-front/src/components/v3/backtest/`
 
 ---
 

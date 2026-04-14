@@ -60,12 +60,12 @@ export function EquityComparisonChart({ report, className, title }: EquityCompar
       }
     });
 
-    // End point
-    const finalBalance = parseFloat(report.final_balance || initialBalance);
+    // End point: total_pnl is now net PnL (includes all costs), so equity = initial + net_pnl = final_balance
+    const netPnl = parseFloat(report.total_pnl || '0');
     dataPoints.push({
       timestamp: report.backtest_end,
       date: formatDate(report.backtest_end),
-      strategyEquity: finalBalance,
+      strategyEquity: initialBalance + netPnl,
       benchmark: initialBalance,
     });
 

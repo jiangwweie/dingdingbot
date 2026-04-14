@@ -196,25 +196,17 @@ export default function BacktestReportDetailModal({
               {/* Net PnL Calculation */}
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-600">净盈亏计算</span>
+                  <span className="text-sm font-medium text-gray-600">净盈亏</span>
                   <span className="text-sm text-gray-500">
-                    总盈亏 - 手续费 - 滑点 - 资金费用
+                    = 最终余额 - 初始资金（已含所有费用）
                   </span>
                 </div>
-                {(() => {
-                  const netPnl = parseFloat(report.total_pnl)
-                    - parseFloat(report.total_fees_paid)
-                    - parseFloat(report.total_slippage_cost)
-                    - parseFloat(report.total_funding_cost);
-                  return (
-                    <p className={cn(
-                      'text-xl font-bold mt-2 text-center',
-                      getPositiveNegativeColor(String(netPnl))
-                    )}>
-                      {formatCurrency(String(netPnl), true)}
-                    </p>
-                  );
-                })()}
+                <p className={cn(
+                  'text-xl font-bold mt-2 text-center',
+                  getPositiveNegativeColor(report.total_pnl)
+                )}>
+                  {formatCurrency(report.total_pnl, true)}
+                </p>
               </div>
             </div>
           </div>

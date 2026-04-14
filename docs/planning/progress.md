@@ -1,6 +1,193 @@
 # Progress Log
 
-> Last updated: 2026-04-15
+> Last updated: 2026-04-15 00:10
+
+---
+
+## 2026-04-15 00:10 -- 回测三 Bug 修复完成（RCA 诊断 + 架构设计 + 全栈修复）
+
+### 任务链
+
+```
+用户报告 3 个问题 → RCA 诊断（3 Agent 并行） → 架构师出方案 → PM 任务分解
+→ 后端修复（3 Bug 并行） → 测试验证 → 前端修复（依赖后端） → 文档更新 → 提交
+```
+
+### 完成的工作
+
+| # | 任务 | 状态 |
+|---|------|------|
+| 1 | RCA Bug #1 回测报告未保存诊断 | ✅ 完成 |
+| 2 | RCA Bug #2 前端数据不一致诊断 | ✅ 完成 |
+| 3 | RCA Bug #3 CHECK constraint 失败诊断 | ✅ 完成 |
+| 4 | 架构师方案设计（3 Bug） | ✅ 完成 |
+| 5 | PM 任务分解 + 4 任务创建 | ✅ 完成 |
+| 6 | Bug #1: DB 迁移 + 异常处理增强 | ✅ 已修复 + 测试通过 |
+| 7 | Bug #2: 后端 total_pnl 语义修正 | ✅ 已修复 + 测试通过 |
+| 8 | Bug #3: position_size=0 双向防护 | ✅ 已修复 + 测试通过 |
+| 9 | Bug #2: 前端数据展示修正 | ✅ 已修复 + TS 检查通过 |
+
+### Bug #1 修复详情 — 回测报告未保存
+
+**根因**: `backtest_reports` 表残留旧 CHECK 约束（win_rate 0~1, max_drawdown 0~1），代码传入百分比 0~100 导致 INSERT 失败，异常被静默吞掉。
+
+| 文件 | 修改内容 |
+|------|---------|
+| `src/infrastructure/backtest_repository.py` | 新增 `_migrate_existing_table()` 方法：检测旧 CHECK → RENAME → CREATE → COPY → DROP。`initialize()` 中调用。幂等操作。 |
+| `src/application/backtester.py` | `logger.warning` → `logger.error` + `raise`，不再静默吞异常 |
+
+### Bug #2 修复详情 — total_pnl 语义修正
+
+**根因**: `total_pnl = Σ(position.realized_pnl)` 只含出场净 PnL（扣出场费），不含入场费，与 `final_balance` 不一致。
+
+| 文件 | 修改内容 |
+|------|---------|
+| `src/application/backtester.py` | 保留 `gross_pnl` 用于统计，设置 `total_pnl = final_balance - initial_balance`（真净盈亏） |
+| `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` | 删除双重扣费 IIFE，直接使用 `report.total_pnl`，标签改为"净盈亏 = 最终余额 - 初始资金（已含所有费用）" |
+| `web-front/src/components/v3/backtest/EquityComparisonChart.tsx` | 曲线终点改为 `initialBalance + parseFloat(report.total_pnl)`，与 `finalBalance` 一致 |
+
+### Bug #3 修复详情 — position_size=0 防护
+
+**根因**: RiskCalculator 返回 0，backtester 创建 requested_qty=0 的订单，违反 CHECK 约束。
+
+| 文件 | 修改内容 |
+|------|---------|
+| `src/application/backtester.py` | `calculate_position_size()` 后添加 `if position_size <= 0: continue` |
+| `src/domain/order_manager.py` | `create_order_chain()` 入口添加 `if total_qty <= 0: return []` |
+
+### 测试结果
+
+| 测试集 | 结果 | 备注 |
+|--------|------|------|
+| `test_backtest_repository.py` | 22/25 PASSED | 3 个 pre-existing UNIQUE constraint 失败（共享 test DB） |
+| `test_risk_calculator.py` | 42/42 PASSED | 全部通过 |
+| `test_order_manager.py` | 56/56 PASSED | 全部通过 |
+| 迁移验证 | PASSED | 旧 CHECK 约束检测 + 迁移 + 数据保留验证通过 |
+| position_size=0 防护 | PASSED | 0/None/负数返回空列表，正数正常返回 |
+| TypeScript 类型检查 | PASSED | 前端无新增错误 |
+
+### 代码变更
+
+```
+src/infrastructure/backtest_repository.py  | +_migrate_existing_table()
+src/application/backtester.py               | total_pnl 语义 + 异常处理 + position_size 防护
+src/domain/order_manager.py                 | total_qty 入口防护
+web-front/src/components/v3/backtest/       | 2 个组件修正
+总计: 6 文件变更
+```
+
+### 产出文档
+
+| 文档 | 路径 |
+|------|------|
+| 诊断报告 #1 | Agent 分析结果 |
+| 诊断报告 #2 | Agent 分析结果 |
+| 诊断报告 #3 | Agent 分析结果 |
+| 架构设计 | Agent 分析结果（3 方案对比） |
+| findings.md | 待更新 |
+| progress.md | 已更新（本条目） |
+
+---
+
+## 2026-04-14 -- 前端回测数据展示 Bug #2 修复
+
+### 完成的工作
+
+| # | 任务 | 状态 |
+|---|------|------|
+| 1 | BacktestReportDetailModal.tsx — 删除净盈亏双重扣费 | ✅ 完成 |
+| 2 | EquityComparisonChart.tsx — 曲线终点一致性修复 | ✅ 完成 |
+| 3 | TypeScript 类型检查验证 | ✅ 通过（无新增错误） |
+
+### 修复详情
+
+| 文件 | Bug | 修改内容 |
+|------|-----|---------|
+| `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` | 双重扣费 | 删除 IIFE 中的 `total_pnl - fees - slippage - funding` 手动计算，直接使用 `report.total_pnl`，标签改为"净盈亏 = 最终余额 - 初始资金（已含所有费用）" |
+| `web-front/src/components/v3/backtest/EquityComparisonChart.tsx` | 终点跳变 | 曲线终点从 `finalBalance` 改为 `initialBalance + parseFloat(report.total_pnl)`，与后端净盈亏语义一致 |
+
+### 验收标准核对
+
+- [x] 所有修改使用 Edit 工具
+- [x] TypeScript 类型检查通过（无新增错误）
+- [x] progress.md 已更新
+
+---
+
+## 2026-04-14 -- 策略归因功能头脑风暴 + 架构设计
+
+### 完成的工作
+
+| # | 任务 | 状态 |
+|---|------|------|
+| 1 | 架构师分析：策略归因功能架构设计 | ✅ 完成 |
+| 2 | 用户头脑风暴：逐项确认 3 个核心决策 | ✅ 完成 |
+| 3 | 更新 ADR 文档标记决策已确认 | ✅ 完成 |
+| 4 | 更新 task_plan.md 阶段 5 详细任务清单 | ✅ 完成 |
+
+### 头脑风暴决策记录
+
+| 决策项 | 结论 |
+|--------|------|
+| 使用场景 | 回测报告（离线批量计算） |
+| 权重配置 | KV 配置 + AttributionConfig Pydantic 校验层 + 前端受控表单 |
+| 精确度 | 数学可验证 |
+| 推荐方案 | 方案 B（归因解释层），非侵入式 |
+
+### 产出文档
+
+| 文档 | 路径 |
+|------|------|
+| ADR | `docs/adr/2026-04-14-strategy-attribution-architecture.md` |
+| 任务计划 | `docs/planning/task_plan.md`（阶段 5 已更新） |
+
+### 阶段 5 任务清单（更新后）
+
+| # | 任务 | 工时 |
+|---|------|------|
+| 5.1 | 新增 AttributionConfig 模型 + Pydantic 校验 | 0.5h |
+| 5.2 | 新增 AttributionEngine（单信号归因 + 批量归因） | 1.5h |
+| 5.3 | 补充过滤器 metadata（EMA distance, MTF alignment） | 0.5h |
+| 5.4 | 集成到回测报告输出 + KV 权重读取 | 0.5h |
+| 5.5 | 前端归因可视化（回测报告信号详情页） | 1h |
+
+### 下一步
+
+- [ ] 用户确认是否启动阶段 5 开发
+- [ ] 如确认，PM 分解任务 → 前后端并行开发
+
+---
+
+## 2026-04-15 -- 回测系统优化规划
+
+### 修改文件
+
+| 文件 | Bug | 修改内容 |
+|------|-----|---------|
+| `src/infrastructure/backtest_repository.py` | #1 PMS 回测报告未保存 | `initialize()` 调用 `_migrate_existing_table()`，新增迁移方法移除旧 CHECK 约束 |
+| `src/application/backtester.py` | #1 异常静默吞 | `logger.warning` → `logger.error` + `raise` |
+| `src/application/backtester.py` | #2 total_pnl 语义 | `total_pnl = final_balance - initial_balance`（真净盈亏） |
+| `src/application/backtester.py` | #3 position_size=0 | 添加 `if position_size <= 0: continue` 防护 |
+| `src/domain/order_manager.py` | #3 total_qty=0 | `create_order_chain()` 入口添加 `total_qty <= 0` 返回空列表 |
+
+### 测试结果
+
+| 测试集 | 结果 | 备注 |
+|--------|------|------|
+| `test_backtest_repository.py` | 22/25 PASSED | 3 个 pre-existing UNIQUE constraint 失败（共享 test DB） |
+| `test_risk_calculator.py` | 42/42 PASSED | 全部通过 |
+| `test_order_manager.py` | 56/56 PASSED | 全部通过 |
+| 迁移验证 | PASSED | 旧 CHECK 约束检测 + 迁移 + 数据保留验证通过 |
+| position_size=0 防护 | PASSED | 0/None/负数返回空列表，正数正常返回 |
+
+### 验收标准核对
+
+- [x] Bug #1: 回测报告 DB 迁移 + 异常不再静默吞
+- [x] Bug #2: total_pnl = final_balance - initial_balance（真净盈亏）
+- [x] Bug #3: position_size=0 双向防护（backtester + order_manager）
+- [x] 所有修改使用 Edit 工具
+- [x] 核心测试通过（risk 42/42, order_manager 56/56, backtest_repository 22/25）
+- [x] progress.md 已更新
 
 ---
 

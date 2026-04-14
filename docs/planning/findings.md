@@ -1,6 +1,48 @@
 # Findings Log
 
-> Last updated: 2026-04-15
+> Last updated: 2026-04-15 00:10
+
+---
+
+## 2026-04-15 -- 回测三 Bug RCA 诊断 + 全栈修复
+
+### 发现 5: ORM 定义删除 ≠ 数据库表约束删除
+
+**教训**: `v3_orm.py` 中删除了 CHECK 约束定义，但 `CREATE TABLE IF NOT EXISTS` 对已有表无效。SQLite 表的物理结构与 ORM 定义不同步，需要主动迁移。
+
+**修复方案**: `BacktestReportRepository.initialize()` 中增加 `_migrate_existing_table()` 主动检测并移除旧约束，确保幂等。
+
+---
+
+### 发现 6: `total_pnl` 资金流语义歧义
+
+**完整资金流追踪** (`matching_engine.py`):
+
+```
+入场: account.total_balance -= entry_fee, position.realized_pnl = 0
+出场: position.realized_pnl += (gross_pnl - exit_fee), account.total_balance += net_pnl
+报告: total_pnl = Σ(position.realized_pnl)  ← 只含出场净 PnL，不含入场费！
+```
+
+导致 `total_pnl = +$705` 看起来盈利，但 `final_balance = $9851`（扣了入场费后亏损）。
+
+**修复**: `total_pnl = final_balance - initial_balance`（真净盈亏），确保恒等式成立。
+
+---
+
+### 发现 7: 异常静默吞掉比异常本身更危险
+
+`backtester.py:1540` 的 `except Exception: logger.warning(...)` 让 INSERT 失败对用户不可见，API 返回 "status: success" 但实际未保存。
+
+**修复**: 改为 `logger.error` + `raise`，让调用方明确知道失败。
+
+---
+
+### 发现 8: position_size=0 需要双向防护
+
+RiskCalculator 在暴露限制耗尽时返回 0，下游如果没有防护会创建无效订单。
+
+**最佳实践**: 在 `backtester.py` 调用方和 `order_manager.py` 入口处都加防护（防御性编程）。
 
 ---
 
