@@ -6,7 +6,202 @@
 import { useState } from 'react';
 import { XCircle, TrendingUp, TrendingDown, DollarSign, Percent, Activity, Calendar, Layers, BarChart3, ChevronDown, ChevronRight, CheckCircle, XCircle as XIcon, Info } from 'lucide-react';
 import { cn } from '../../../lib/utils';
-import type { BacktestReportDetail, SignalAttribution, AttributionComponent } from '../../../types/backtest';
+import type { BacktestReportDetail, SignalAttribution, AttributionComponent, PositionCloseEvent } from '../../../types/backtest';
+
+/**
+ * 出场事件类型 Badge 样式映射
+ */
+function getEventTypeBadgeClass(eventType: string): string {
+  if (eventType === 'SL') {
+    return 'bg-red-100 text-red-700 border-red-200';
+  }
+  // TP1~TP5 及其他止盈类事件
+  if (eventType.startsWith('TP')) {
+    return 'bg-green-100 text-green-700 border-green-200';
+  }
+  // 其他类型（如 TRAILING 等）
+  return 'bg-gray-100 text-gray-700 border-gray-200';
+}
+
+/**
+ * 出场事件类型显示名称
+ */
+function getEventTypeName(eventType: string): string {
+  const nameMap: Record<string, string> = {
+    TP1: '止盈 1',
+    TP2: '止盈 2',
+    TP3: '止盈 3',
+    TP4: '止盈 4',
+    TP5: '止盈 5',
+    SL: '止损',
+  };
+  return nameMap[eventType] || eventType;
+}
+
+/**
+ * CloseEventsTable - 出场事件明细表格
+ *
+ * 支持两种数据源：
+ * 1. 报告级别的 close_events（扁平列表，按 position_id 分组）
+ * 2. 仓位级别的 close_events（单个仓位的出场事件）
+ */
+function CloseEventsTable({
+  events,
+  title = '出场事件明细',
+}: {
+  events: PositionCloseEvent[];
+  title?: string;
+}) {
+  if (!events || events.length === 0) {
+    return (
+      <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200 text-center">
+        <p className="text-sm text-gray-500">暂无出场事件</p>
+      </div>
+    );
+  }
+
+  // 格式化时间
+  const formatTime = (timestamp: number) => {
+    return new Date(timestamp).toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  };
+
+  // 格式化数值（Decimal 字符串转数字展示）
+  const formatDecimal = (value: string | null, decimals = 2) => {
+    if (!value) return '-';
+    const num = parseFloat(value);
+    if (isNaN(num)) return '-';
+    return num.toFixed(decimals);
+  };
+
+  // 盈亏颜色
+  const getPnlColor = (value: string | null) => {
+    if (!value) return 'text-gray-400';
+    const num = parseFloat(value);
+    if (isNaN(num)) return 'text-gray-400';
+    if (num > 0) return 'text-green-600';
+    if (num < 0) return 'text-red-600';
+    return 'text-gray-400';
+  };
+
+  // 按 position_id 分组
+  const groupedByPosition = events.reduce<Record<string, PositionCloseEvent[]>>((acc, event) => {
+    if (!acc[event.position_id]) {
+      acc[event.position_id] = [];
+    }
+    acc[event.position_id].push(event);
+    return acc;
+  }, {});
+
+  const positionIds = Object.keys(groupedByPosition);
+
+  return (
+    <div className="mt-4">
+      <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+        <Activity className="w-4 h-4 text-orange-500" />
+        {title}
+        <span className="text-xs text-gray-400 font-normal">
+          ({events.length} 笔出场)
+        </span>
+      </h4>
+
+      {positionIds.length > 1 ? (
+        // 多个仓位：显示分组
+        <div className="space-y-4">
+          {positionIds.map((positionId) => (
+            <div key={positionId} className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+              <div className="px-4 py-2 bg-gray-100 border-b border-gray-200">
+                <span className="text-xs font-mono text-gray-600">仓位 {positionId.slice(0, 8)}...</span>
+              </div>
+              <CloseEventList events={groupedByPosition[positionId]} formatTime={formatTime} formatDecimal={formatDecimal} getPnlColor={getPnlColor} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        // 单个仓位或报告级别：直接显示表格
+        <CloseEventList events={events} formatTime={formatTime} formatDecimal={formatDecimal} getPnlColor={getPnlColor} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 出场事件列表（内部组件）
+ */
+function CloseEventList({
+  events,
+  formatTime,
+  formatDecimal,
+  getPnlColor,
+}: {
+  events: PositionCloseEvent[];
+  formatTime: (ts: number) => string;
+  formatDecimal: (val: string | null, decimals?: number) => string;
+  getPnlColor: (val: string | null) => string;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">出场类型</th>
+            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">成交价</th>
+            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">成交量</th>
+            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">盈亏</th>
+            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">手续费</th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">出场时间</th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">原因</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 bg-white">
+          {events.map((event, idx) => (
+            <tr key={event.order_id || idx} className="hover:bg-gray-50/50 transition-colors">
+              <td className="px-3 py-2">
+                <span className={cn(
+                  'inline-flex px-2 py-0.5 rounded-full text-xs font-medium border',
+                  getEventTypeBadgeClass(event.event_type)
+                )}>
+                  {getEventTypeName(event.event_type)}
+                </span>
+              </td>
+              <td className="px-3 py-2 text-right text-gray-700 font-mono text-xs">
+                {formatDecimal(event.close_price, 2)}
+              </td>
+              <td className="px-3 py-2 text-right text-gray-700 font-mono text-xs">
+                {formatDecimal(event.close_qty, 4)}
+              </td>
+              <td className={cn(
+                'px-3 py-2 text-right font-mono text-xs font-medium',
+                getPnlColor(event.close_pnl)
+              )}>
+                {event.close_pnl ? (
+                  <>${parseFloat(event.close_pnl) >= 0 ? '+' : ''}{formatDecimal(event.close_pnl, 2)}</>
+                ) : (
+                  '-'
+                )}
+              </td>
+              <td className="px-3 py-2 text-right text-gray-700 font-mono text-xs">
+                {formatDecimal(event.close_fee, 4)}
+              </td>
+              <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
+                {formatTime(event.close_time)}
+              </td>
+              <td className="px-3 py-2 text-gray-500 text-xs max-w-[120px] truncate">
+                {event.exit_reason || '-'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 /**
  * Signal Attribution Card - 单信号归因卡片
@@ -685,6 +880,14 @@ export default function BacktestReportDetailModal({
                 </p>
               )}
             </div>
+          )}
+
+          {/* Close Events - 出场事件明细 */}
+          {report.close_events && report.close_events.length > 0 && (
+            <CloseEventsTable
+              events={report.close_events}
+              title="出场事件明细（分批止盈 / 止损）"
+            />
           )}
         </div>
 

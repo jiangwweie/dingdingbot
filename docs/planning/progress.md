@@ -1,6 +1,66 @@
 # Progress Log
 
-> Last updated: 2026-04-15 19:30
+> Last updated: 2026-04-15 21:00
+
+---
+
+## 2026-04-15 21:00 -- close_events 前端可视化完成
+
+### 完成内容
+
+**任务**: 为回测报告新增 close_events 可视化展示（TP1~TP5/SL 出场明细）
+
+**改动文件**:
+1. `web-front/src/types/backtest.ts` — 新增 `PositionCloseEvent` 接口 + `close_events` 字段
+   - `BacktestReportDetail` 新增 `close_events: PositionCloseEvent[]`
+   - `PositionSummary` 新增 `close_events: PositionCloseEvent[]`
+
+2. `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` — 新增 205 行
+   - `CloseEventsTable` 组件：展示所有出场事件，按 position_id 分组
+   - `CloseEventList` 组件：表格渲染（出场类型/成交价/成交量/盈亏/手续费/时间/原因）
+   - `getEventTypeBadgeClass()`: TP 绿色 Badge，SL 红色 Badge
+   - `getEventTypeName()`: TP1→"止盈 1", SL→"止损"
+   - 空列表时显示"暂无出场事件"
+   - 盈亏颜色：正数绿色，负数红色
+   - 时间格式化为可读格式
+
+### 验证结果
+
+- TypeScript 编译：本次新增文件零错误（26 个 pre-existing 错误，与本次无关）
+- 改动统计：2 个文件，+235 行
+
+### 下一步
+
+- [ ] 提交代码变更
+- [ ] 启动 dev server 验证前端展示效果
+
+---
+
+## 2026-04-15 20:30 -- 任务 1.1+1.4 + 阶段 5 集成测试案例设计完成
+
+### 完成内容
+
+**架构师完成测试案例设计**，识别出 5 个新增集成测试用例：
+
+| 编号 | 测试名称 | 覆盖范围 | 预估行数 |
+|------|---------|---------|---------|
+| IT-NEW-1 | close_events 非零验证 | 端到端验证撮合引擎写入 order.close_pnl/close_fee | ~50 |
+| IT-NEW-2 | 分批止盈完整场景 | TP1+TP2+SL 三段式出场的 PnL 不变量验证 | ~70 |
+| IT-NEW-3 | 回测归因字段非空 | 验证 backtester 集成 AttributionEngine 输出 | ~45 |
+| IT-NEW-4 | 归因数学可验证性 | contribution = score×weight, sum(percentages)≈100 | ~55 |
+| IT-NEW-5 | 前端数据契约匹配 | API 响应结构与前端 TypeScript 接口对齐 | ~40 |
+
+**测试缺口分析**：
+- 现有 `test_backtest_tp_events.py` 使用 MockMatchingEngine，未走真实 backtester → API → DB 全链路
+- 现有 `test_attribution_api.py` 使用 Mock data，未经过真实过滤器 metadata 路径
+- `close_pnl` 非零验证是本次最关键的新增覆盖（撮合引擎修复后必须验证）
+
+**执行计划**：3 批次，预计 70 分钟
+
+### 下一步
+
+- [ ] 团队执行 5 个集成测试
+- [ ] 全量回归验证
 
 ---
 

@@ -148,6 +148,34 @@ export interface BacktestReportDetail extends BacktestReportSummary {
   signal_attributions?: SignalAttribution[] | null;
   /** 聚合归因（可选，后端可能不返回） */
   aggregate_attribution?: AggregateAttribution | null;
+  /** 出场事件明细列表（报告级别，与 position.close_events 二选一或同时存在） */
+  close_events?: PositionCloseEvent[];
+}
+
+/**
+ * 仓位出场事件明细（分批止盈 TP1~TP5 + 止损 SL）
+ */
+export interface PositionCloseEvent {
+  /** 仓位 ID */
+  position_id: string;
+  /** 订单 ID */
+  order_id: string;
+  /** 出场类型: TP1 | TP2 | TP3 | TP4 | TP5 | SL */
+  event_type: string;
+  /** 事件分类: "exit" */
+  event_category: string;
+  /** 成交价（Decimal 字符串） */
+  close_price: string | null;
+  /** 成交量（Decimal 字符串） */
+  close_qty: string | null;
+  /** 盈亏（USDT，Decimal 字符串） */
+  close_pnl: string | null;
+  /** 手续费（USDT，Decimal 字符串） */
+  close_fee: string | null;
+  /** 出场时间戳（毫秒） */
+  close_time: number;
+  /** 出场原因 */
+  exit_reason: string | null;
 }
 
 /**
@@ -174,4 +202,6 @@ export interface PositionSummary {
   realized_pnl: string;
   /** 平仓原因（TP1/SL/TRAILING 等） */
   exit_reason: string | null;
+  /** 该仓位的出场事件明细列表 */
+  close_events?: PositionCloseEvent[];
 }
