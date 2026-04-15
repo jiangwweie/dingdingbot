@@ -75,6 +75,54 @@ export interface ListBacktestReportsResponse {
 }
 
 /**
+ * 归因组件详情（单信号归因的每个组件）
+ */
+export interface AttributionComponent {
+  /** 组件名称: "pattern" | "ema_trend" | "mtf" | "atr" */
+  name: string;
+  /** 组件评分 (0~1) */
+  score: number;
+  /** 预设权重 */
+  weight: number;
+  /** 贡献值 = score × weight */
+  contribution: number;
+  /** 贡献百分比 = contribution / final_score × 100 */
+  percentage: number;
+  /** 信心评分依据 */
+  confidence_basis: string;
+  /** 状态: "passed" | "rejected" */
+  status: 'passed' | 'rejected';
+}
+
+/**
+ * 单信号归因结果
+ */
+export interface SignalAttribution {
+  /** 最终归因总分 */
+  final_score: number;
+  /** 归因组件列表 */
+  components: AttributionComponent[];
+  /** 各组件贡献百分比 {"pattern": 54.4, "ema_trend": 27.5, "mtf": 18.1} */
+  percentages: Record<string, number>;
+  /** 人类可读解释文本 */
+  explanation: string;
+}
+
+/**
+ * 聚合归因（报告摘要级别）
+ */
+export interface AggregateAttribution {
+  /** 平均形态贡献 */
+  avg_pattern_contribution: number;
+  /** 平均过滤器贡献（按过滤器分组） */
+  avg_filter_contributions: Record<string, number>;
+  /** Top 表现最好的过滤器 */
+  top_performing_filters: string[];
+  /** Bottom 表现最差的过滤器 */
+  worst_performing_filters: string[];
+}
+
+/**
  * 回测报告详情（完整报告）
  */
 export interface BacktestReportDetail extends BacktestReportSummary {
@@ -96,6 +144,10 @@ export interface BacktestReportDetail extends BacktestReportSummary {
   sharpe_ratio?: string | null;
   /** 仓位历史摘要列表 */
   positions: PositionSummary[];
+  /** 单信号归因列表（可选，后端可能不返回） */
+  signal_attributions?: SignalAttribution[] | null;
+  /** 聚合归因（可选，后端可能不返回） */
+  aggregate_attribution?: AggregateAttribution | null;
 }
 
 /**
