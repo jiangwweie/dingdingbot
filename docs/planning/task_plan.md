@@ -358,8 +358,8 @@ async def run_monte_carlo(
 
 | # | 任务 | 工时 | 状态 | 依赖 |
 |---|------|------|------|------|
-| **5.3** | 补充过滤器 metadata（EMA distance, MTF alignment） | 0.5h | 待启动 | **无**（最先执行） |
-| 5.1 | 新增 AttributionConfig 模型 + Pydantic 校验 | 0.5h | 🔄 开发中 | 无 |
+| **5.3** | 补充过滤器 metadata（EMA distance, MTF alignment） | 0.5h | ✅ 已完成 | **无**（最先执行） |
+| 5.1 | 新增 AttributionConfig 模型 + Pydantic 校验 | 0.5h | ✅ 已完成 | 无 |
 | 5.2 | 新增 AttributionEngine（单信号归因 + 批量归因） | 1.5h | 待启动 | 5.3 |
 | 5.4 | 集成到回测报告输出 + KV 权重读取 | 0.5h | 待启动 | 5.2 |
 | 5.5 | 前端归因可视化（回测报告信号详情页） | 1h | 待启动 | 5.4 |

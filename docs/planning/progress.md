@@ -1,6 +1,62 @@
 # Progress Log
 
-> Last updated: 2026-04-15 11:00
+> Last updated: 2026-04-15 12:00
+
+---
+
+## 2026-04-15 12:00 -- 阶段 5 任务 5.1: AttributionConfig 模型完成
+
+### 完成内容
+
+**任务**: 创建 `AttributionConfig` Pydantic 模型，用于归因权重配置的校验与加载。
+
+**新建文件**:
+1. `src/domain/attribution_config.py` — 归因配置校验模型
+   - `AttributionConfig(weights: Dict[str, float])` — Pydantic 模型
+   - `validate_weights()` — Pydantic v2 `@field_validator` 校验
+     - 必需 key: pattern, ema_trend, mtf
+     - 权重和容差: abs(total - 1.0) <= 0.01
+     - 权重范围: [0, 1]
+   - `from_kv(kv_configs)` — 从 KV 配置加载
+   - `default()` — 返回默认配置 (pattern=0.55, ema_trend=0.25, mtf=0.20)
+
+2. `tests/unit/test_attribution_config.py` — 单元测试 (20 个用例)
+   - 正常场景: 默认配置、from_kv 完整/空/部分覆盖、直接创建
+   - 校验失败: 权重和超限、负权重、超范围、缺少 key
+   - 边界场景: 容差边界、零权重、单位权重、额外 key、字符串数字
+
+**测试结果**: 20/20 passed
+
+**技术发现**:
+- IEEE 754 浮点数精度导致恰好边界值 (1.01/0.99) 测试不稳定，需使用明确安全值
+- `from_kv` 部分覆盖（只改一个权重）会导致总和超限，这是预期行为
+
+**下一步**:
+- [ ] 任务 5.2: AttributionEngine（依赖 5.3 metadata 补充已完成）
+
+---
+
+## 2026-04-15 13:00 -- 阶段 5 任务 5.3: 补充过滤器 metadata 完成
+
+### 完成内容
+
+**任务**: 补充 EmaTrendFilterDynamic 和 MtfFilterDynamic 的 TraceEvent.metadata，供归因引擎使用。
+
+**改动文件**:
+1. `src/domain/filter_factory.py` — FilterContext 新增 `current_price` 字段
+2. `src/domain/filter_factory.py` — EmaTrendFilterDynamic.check() 所有分支新增 `price`、`ema_value`、`distance_pct`
+3. `src/domain/filter_factory.py` — MtfFilterDynamic.check() 所有分支新增 `higher_tf_trends`、`aligned_count`、`total_count`
+4. `src/domain/strategy_engine.py` — 2 处 FilterContext 调用新增 `current_price=kline.close`
+5. `src/interfaces/api.py` — 预览 API FilterContext 调用新增 `current_price=kline_data.close`
+
+**测试验证**:
+- 106 个相关单元测试全部通过
+- 3 个 pre-existing 集成测试失败（与本次改动无关）
+
+**下一步**:
+- [x] 任务 5.1: AttributionConfig 模型
+- [ ] 任务 5.2: AttributionEngine（依赖 5.3 已完成）
+- [ ] 任务 5.4: 集成到回测报告输出
 
 ---
 

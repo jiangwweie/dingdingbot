@@ -1,6 +1,70 @@
 # Findings Log
 
-> Last updated: 2026-04-15 10:30
+> Last updated: 2026-04-15 12:00
+
+---
+
+## 2026-04-15 -- 阶段 5 任务 5.1: AttributionConfig 模型开发
+
+### 发现: 浮点数精度影响容差边界测试
+
+**问题**: `0.56 + 0.25 + 0.20` 在 IEEE 754 浮点数中表示为 `1.0100000000000002`，
+导致 `abs(1.0100000000000002 - 1.0) = 0.0100000000000002 > 0.01` 为 True，校验失败。
+
+**教训**: 容差边界测试不能使用恰好等于边界值的浮点数，应选择明确在容差内的值。
+例如使用 `0.555 + 0.25 + 0.20 = 1.005`（明确在 0.01 容差内）。
+
+### 发现: 部分覆盖 KV 导致权重和超限
+
+`from_kv` 的部分覆盖场景（只设置 pattern=0.60，ema_trend/mtf 用默认值）
+导致 `0.60 + 0.25 + 0.20 = 1.05 > 1.01`，校验失败。这是预期行为——
+用户需要同时调整多个权重以保持总和接近 1.0。
+
+**设计决策**: `from_kv` 不自动归一化权重，而是让 Pydantic 校验层拒绝不合法的配置。
+这符合"快速失败"原则，避免隐藏配置错误。
+
+---
+
+## 2026-04-15 -- 阶段 5 任务 5.3: 补充过滤器 metadata 用于策略归因
+
+### 背景
+策略归因引擎（AttributionEngine）需要通过过滤器的 TraceEvent.metadata 计算信心强度。
+经逐行代码验证，发现 3 个核心过滤器中 2 个的 metadata 不满足归因需求。
+
+### 改动摘要
+
+| 文件 | 改动 |
+|------|------|
+| `src/domain/filter_factory.py` | FilterContext 新增 `current_price` 字段 |
+| `src/domain/filter_factory.py` | EmaTrendFilterDynamic.check() 所有分支新增 `price`、`ema_value`、`distance_pct` |
+| `src/domain/filter_factory.py` | MtfFilterDynamic.check() 所有分支新增 `higher_tf_trends`、`aligned_count`、`total_count` |
+| `src/domain/strategy_engine.py` | 2 处 FilterContext 调用新增 `current_price=kline.close` |
+| `src/interfaces/api.py` | 预览 API FilterContext 调用新增 `current_price=kline_data.close` |
+
+### 关键发现
+
+**发现 1: EMA 过滤器的 EMA 值需要动态推导 key**
+- `EmaTrendFilterDynamic` 内部使用 `f"{symbol}:{timeframe}"` 作为 EMA 计算器 key
+- `check()` 方法不直接接收 symbol，需要通过 `context.kline.symbol` + `context.current_timeframe` 推导
+- 需要防御性处理 `context.kline is None` 的情况（测试中常见）
+
+**发现 2: MTF 过滤器的 aligned_count 计算需要遍历所有高周期趋势**
+- `context.higher_tf_trends` 是一个包含多个高周期趋势的字典
+- `aligned_count` = 有多少个高周期趋势与信号方向一致
+- `total_count` = 高周期趋势总数
+- 信心函数 = `aligned_count / total_count`
+
+**发现 3: FilterContext 所有新增字段都有默认值**
+- `current_price: Optional[Decimal] = None` 确保向后兼容
+- 所有现有测试无需修改即可通过
+
+### 测试验证
+- `test_filter_factory.py`: 43/43 passed
+- `test_recursive_engine.py`: all passed
+- `test_atr_filter.py`: all passed
+- `test_pinbar_filter_combinations.py`: all passed
+- `test_pinbar_signal_output.py`: all passed
+- 总计 106 个单元测试全部通过
 
 ---
 
