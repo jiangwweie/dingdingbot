@@ -1,6 +1,198 @@
 # Findings Log
 
-> Last updated: 2026-04-15 18:00
+> Last updated: 2026-04-15 20:30
+
+---
+
+## 2026-04-15 20:30 -- 任务 1.1+1.4 + 阶段 5 集成测试案例设计
+
+### 测试现状盘点
+
+| 测试文件 | 覆盖范围 | 状态 | 备注 |
+|---|---|---|---|
+| `test_backtest_tp_events.py` | TP 事件撮合 + DB 持久化 + SL 优先 | ✅ 已有 5 个测试 | 使用 MockMatchingEngine，覆盖 IT-1~IT-4 |
+| `test_backtest_user_story.py` | 端到端回测流程 (API → DB) | ✅ 已有 | 验证 4 (收益率正确性) 已包含 |
+| `test_backtest_repository.py` | Repository 层 close_events 序列化 | ✅ 已有 | TestCloseEventsPersistence + TestMigrationLogic |
+| `test_attribution_engine.py` | AttributionEngine 单元逻辑 | ✅ 35 个 UT | 单信号/批量/聚合/边界场景 |
+| `test_attribution_config.py` | AttributionConfig 校验 | ✅ 20 个 UT | 权重校验/边界/from_kv |
+| `test_attribution_api.py` | 归因 API 端点 | ✅ 已有 8 个 | 但使用 Mock repo，未走真实回测 |
+
+### 测试缺口分析
+
+**任务 1.1+1.4 缺失覆盖**：
+1. **端到端 close_events 数据流**：现有 `test_backtest_tp_events.py` 使用 MockMatchingEngine + 手动收集 close_events，未走真实 backtester.py → API → DB 全链路
+2. **close_pnl 非零验证**：撮合引擎已修复 `_execute_fill` 写入 order.close_pnl/close_fee，但无集成测试验证此值非零
+3. **分批止盈完整场景**：TP1+TP2+SL 组合场景的 end-to-end 数据流（一个仓位经历 TP1 部分平仓 + TP2 部分平仓 + SL 完全平仓）
+4. **PnL 不变量验证**：`sum(close_pnl) == position.realized_pnl` 在端到端回测中是否成立
+
+**阶段 5 缺失覆盖**：
+1. **回测报告包含归因字段**：backtester.py 已集成 AttributionEngine，但无集成测试验证 report 中 signal_attributions / aggregate_attribution 非空
+2. **真实过滤器 metadata 路径**：test_attribution_api.py 使用 Mock data，未经过真实 FilterContext → TraceEvent.metadata → AttributionEngine 路径
+3. **前端归因数据契约**：API 返回的归因数据结构是否与前端 TypeScript 接口匹配
+
+### 新增测试案例设计 — 用户故事串联模式
+
+> **设计原则**：模拟真实用户操作路径，用 `_flow3_state` 跨步骤传递 `report_id`，
+> 步骤 N 依赖步骤 N-1 的真实数据，不使用 Mock 孤立验证。
+
+---
+
+### 用户故事: "我跑了一个回测，想验证分批止盈和归因分析"
+
+**测试文件**: `tests/integration/test_backtest_close_attribution_flow.py`
+
+**共享状态**: `_flow3_state: dict = {}` （同 test_backtest_user_story.py 模式）
+
+---
+
+#### 步骤 1: 用户发起 PMS 回测（含多级止盈配置）
+
+| 属性 | 值 |
+|------|------|
+| **测试名称** | `test_step1_run_pms_backtest_with_multi_tp` |
+| **API** | `POST /api/backtest/orders` |
+| **输出到 flow_state** | `report_id`, `report_json`, `total_trades` |
+
+**测试逻辑**:
+- 发起 PMS 回测，strategy 配置多级止盈（order_strategy 包含 TP1/TP2/TP3 比例）
+- 断言：`status == "success"`, `report` 存在
+- 断言：`report["close_events"]` 是列表（即使为空也必须有该字段）
+- 断言：`report["signal_attributions"]` 非 None
+- 断言：`report["aggregate_attribution"]` 非 None
+- 存储 `report_id` 和完整 `report_json` 到 `_flow3_state`
+
+---
+
+#### 步骤 2: 用户查看回测报告列表，确认报告已保存
+
+| 属性 | 值 |
+|------|------|
+| **测试名称** | `test_step2_query_report_list_sees_saved_report` |
+| **API** | `GET /api/v3/backtest/reports` |
+| **依赖** | 步骤 1 的 `report_id` |
+| **输出到 flow_state** | `retrieved_report_id` |
+
+**测试逻辑**:
+- 用步骤 1 的 `report_id` 对应的 symbol 查询报告列表
+- 断言：列表中包含步骤 1 创建的报告
+- 断言：报告摘要字段一致（strategy_id, total_trades, total_pnl）
+- 存储查询到的 report_id 到 `_flow3_state`
+
+---
+
+#### 步骤 3: 用户查看订单列表，验证 TP 订单存在
+
+| 属性 | 值 |
+|------|------|
+| **测试名称** | `test_step3_query_orders_has_tp_entries` |
+| **API** | `GET /api/v3/backtest/reports/{report_id}/orders` |
+| **依赖** | 步骤 2 的 `report_id` |
+| **输出到 flow_state** | `order_list`, `tp_order_ids` |
+
+**测试逻辑**:
+- 查询步骤 2 的报告订单列表
+- 断言：订单列表中存在 `order_role` 为 TP1/TP2/TP3 的订单
+- 断言：成交的 TP 订单数 >= 1（至少有 1 个止盈被执行）
+- 存储所有成交的 TP 订单 ID 到 `_flow3_state`
+
+---
+
+#### 步骤 4: 用户验证 close_events 数据完整性和非零值
+
+| 属性 | 值 |
+|------|------|
+| **测试名称** | `test_step4_close_events_nonzero_and_consistent` |
+| **数据源** | 步骤 1 的 `report_json["close_events"]` |
+| **依赖** | 步骤 1 + 步骤 3 |
+
+**测试逻辑**:
+- 从步骤 1 报告的 `close_events` 中验证：
+  1. `close_events` 长度 > 0（有出场事件）
+  2. 每个事件 `close_pnl ≠ 0`（撮合引擎正确写入，不是默认的 0）
+  3. 每个事件 `close_fee > 0`（手续费计算正确）
+  4. 每个事件 `close_qty > 0`、`close_price > 0`
+  5. `event_type` 在 {"TP1", "TP2", "TP3", "SL"} 中
+- **跨步骤一致性验证**:
+  6. `close_events` 的 order_id 集合与步骤 3 的成交 TP 订单 ID 集合一致
+  7. `sum(e.close_qty) == 对应仓位的初始 qty`（从 positions 反推）
+  8. `sum(e.close_pnl) == 对应 position 的 realized_pnl`（PnL 不变量）
+
+---
+
+#### 步骤 5: 用户查看归因分析，验证归因数据正确
+
+| 属性 | 值 |
+|------|------|
+| **测试名称** | `test_step5_attribution_analysis_valid` |
+| **API** | `POST /api/backtest/{report_id}/attribution` |
+| **依赖** | 步骤 2 的 `report_id` |
+
+**测试逻辑**:
+- 对步骤 2 的报告调用归因分析 API
+- 断言：`status == "success"`, `attribution` 存在
+- 断言：所有维度都存在：`shape_quality`, `filter_attribution`, `trend_attribution`, `rr_attribution`
+- **数学可验证性**:
+  - 从 `signal_attributions` 中取一个 attribution
+  - 验证 `contribution = score × weight`（精确到 1e-6）
+  - 验证 `sum(percentages.values()) ≈ 100`（容差 1%）
+  - 验证 `final_score = sum(contribution for all components)`
+- **前端契约验证**:
+  - 所有 float 字段不为 None
+  - 列表字段为空时返回 `[]` 而非 `null`
+  - component name 映射正确（pattern/ema_trend/mtf）
+
+---
+
+#### 步骤 6: 用户交叉验证 — 回测报告内嵌归因与独立归因分析一致
+
+| 属性 | 值 |
+|------|------|
+| **测试名称** | `test_step6_embedded_attribution_matches_analysis_api` |
+| **依赖** | 步骤 1（内嵌归因）+ 步骤 5（独立归因 API） |
+
+**测试逻辑**:
+- 比较步骤 1 报告中的 `signal_attributions` 和步骤 5 归因分析 API 的结果
+- 断言：`final_score` 一致（同一信号两次计算结果相同）
+- 断言：`percentages` 各组件值一致
+- 断言：`aggregate_attribution` 的 `avg_pattern_contribution` 一致
+- **验证幂等性**：同一报告多次归因分析结果相同
+
+---
+
+### 测试执行流程
+
+```python
+_flow3_state = {}  # 跨步骤共享
+
+class TestCloseAndAttributionFlow:
+    """用户故事串联测试：回测 → 报告 → 订单 → close_events → 归因"""
+
+    def test_step1_run_pms_backtest_with_multi_tp(self, test_client, mock_gateway):
+        # POST /api/backtest/orders → store report_id, report_json
+
+    def test_step2_query_report_list(self, test_client):
+        # GET /api/v3/backtest/reports → verify report saved
+
+    def test_step3_query_orders(self, test_client):
+        # GET /api/v3/backtest/reports/{report_id}/orders → verify TP orders
+
+    def test_step4_close_events_nonzero(self, test_client):
+        # Verify close_events from step 1 report: non-zero, consistent
+
+    def test_step5_attribution_analysis(self, test_client):
+        # POST /api/backtest/{report_id}/attribution → verify attribution
+
+    def test_step6_embedded_vs_api_consistency(self, test_client):
+        # Compare embedded attribution with analysis API result
+```
+
+### 关键设计点
+
+1. **数据串联**：步骤 2/3/5 都使用步骤 1 产生的 `report_id`，模拟用户在 UI 上点击不同 tab 的真实行为
+2. **非 Mock 验证**：close_events 和 attribution 数据来自真实回测引擎，不是 Mock
+3. **PnL 不变量**：`sum(close_pnl) == realized_pnl` 是最核心的业务规则验证
+4. **前端契约**：步骤 5 验证 API 返回结构与前端 TypeScript 接口一致
+5. **幂等性**：步骤 6 验证同一报告归因分析结果可重复
 
 ---
 

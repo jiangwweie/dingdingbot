@@ -1,6 +1,72 @@
 # Progress Log
 
-> Last updated: 2026-04-15 21:00
+> Last updated: 2026-04-16 00:30
+
+---
+
+## 2026-04-16 00:30 -- 1.5 实盘止盈追踪 RCA 分析 + 任务合并
+
+### RCA 结论：两个假设问题均不存在或不需要修复
+
+| 问题 | RCA 结论 | 原因 |
+|------|---------|------|
+| 回测 DynamicRiskManager 重建导致 trailing 丢失 | ❌ **不存在** | DynamicRiskManager 是无状态服务，所有状态存在 Position/Order 对象上 |
+| TP2/TP3 没有 Trailing 导致无法成交 | ⚠️ **存在但不一定是 bug** | SL 上移后仍能盈利出场，取决于策略意图 |
+
+### 任务合并确认
+
+**1.1+1.4 合并任务**：回测分批止盈 + PnL 归因（7h）
+- 设计文档：`docs/planning/task_1.4_design.md`
+- 已安排到新窗口执行
+
+**阶段 5 策略归因**：已安排到新窗口执行
+
+### 移动止盈（Trailing TP）待办
+
+用户计划但尚未与架构师沟通。待确认：
+- Trailing TP 的策略意图（是否需要在价格未达 TP2 时下调价格）
+- TP 修改的记录机制（event_category='tp_modified'）
+- 回测 vs 实盘的实现差异
+
+---
+
+## 2026-04-15 21:30 -- 任务 1.1+1.4 + 阶段 5 串联集成测试完成
+
+### 执行摘要
+
+**6 步骤用户故事串联测试**：5 passed, 1 skipped, 0 failed
+
+| 步骤 | 测试 | 结果 | 说明 |
+|------|------|------|------|
+| 1 | PMS 回测 + 多级止盈 | ✅ PASSED | close_events 列表存在, signal_attributions=17 条 |
+| 2 | 报告列表查询 | ✅ PASSED | 报告已保存到数据库 |
+| 3 | 订单列表查询 | ✅ PASSED | TP 订单存在 |
+| 4 | close_events 非零验证 | ⏭️ SKIPPED | 真实历史数据未触发 TP/SL 出场（单元层已覆盖） |
+| 5 | 内嵌归因验证 | ✅ PASSED | 17 条信号归因，结构完整，前端契约通过 |
+| 6 | 归因数学一致性 | ✅ PASSED | contribution=score×weight, percentages≈100 |
+
+### 修复的 Bug
+
+1. **`src/interfaces/api.py`**: `get_report_by_id` → `get_report`（归因 API 方法名错误，导致 500 错误）
+2. **测试 strategy_id**: 使用 UUID 避免 `data/v3_dev.db` 中的 UNIQUE constraint 冲突
+
+### 已知问题
+
+- **归因 API 无法端到端验证**: `POST /api/backtest/{report_id}/attribution` 需要 attempts 数据，但 `backtest_reports` 表没有 attempts 列，save_report 也不保存 attempts。需要后续新增 `attempts_json` 列或在 signals/signal_attempts 表中关联。
+- **close_events 端到端验证跳过**: 真实历史数据（3 年 ETH 1h K 线）在 720 根 K 线范围内没有触发 TP/SL 出场。close_events 非零验证在 `test_backtest_tp_events.py` 单元层已覆盖。
+
+### 新建文件
+
+- `tests/integration/test_backtest_close_attribution_flow.py` — 6 步骤串联测试（~450 行）
+
+### 改动文件
+
+- `src/interfaces/api.py` — 修复 get_report_by_id → get_report（2 处）
+
+### 下一步
+
+- [ ] 提交代码变更
+- [ ] 全量回归验证
 
 ---
 

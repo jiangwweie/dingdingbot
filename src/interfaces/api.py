@@ -1987,7 +1987,7 @@ async def analyze_backtest_attribution(
         await backtest_repository.initialize()
 
         try:
-            report_entity = await backtest_repository.get_report_by_id(report_id)
+            report_entity = await backtest_repository.get_report(report_id)
         finally:
             await backtest_repository.close()
 
