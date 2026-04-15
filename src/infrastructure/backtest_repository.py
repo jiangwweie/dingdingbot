@@ -18,7 +18,7 @@ from typing import Optional, List, Dict, Any
 
 import aiosqlite
 
-from src.domain.models import PMSBacktestReport, PositionSummary, Direction
+from src.domain.models import PMSBacktestReport, PositionSummary, Direction, PositionCloseEvent
 from src.domain.models import StrategyDefinition
 from src.infrastructure.logger import setup_logger
 
@@ -120,6 +120,36 @@ class BacktestReportRepository:
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_backtest_reports_parameters_hash
             ON backtest_reports(parameters_hash)
+        """)
+
+        # Create position_close_events table (任务 1.4)
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS position_close_events (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id       TEXT NOT NULL,
+                position_id     TEXT NOT NULL,
+                order_id        TEXT,
+                event_type      TEXT NOT NULL,
+                event_category  TEXT NOT NULL,
+                close_price     TEXT NOT NULL,
+                close_qty       TEXT NOT NULL,
+                close_pnl       TEXT NOT NULL,
+                close_fee       TEXT NOT NULL,
+                close_time      INTEGER NOT NULL,
+                exit_reason     TEXT NOT NULL,
+                FOREIGN KEY (report_id) REFERENCES backtest_reports(id) ON DELETE CASCADE,
+                FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE CASCADE
+            )
+        """)
+
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_close_events_report_id
+            ON position_close_events(report_id)
+        """)
+
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_close_events_position_id
+            ON position_close_events(position_id)
         """)
 
         await self._db.commit()
@@ -371,6 +401,30 @@ class BacktestReportRepository:
             None,  # monthly_returns (暂不使用)
         ))
 
+        # 保存 close_events (任务 1.4)
+        if report.close_events:
+            for event in report.close_events:
+                await self._db.execute("""
+                    INSERT INTO position_close_events (
+                        report_id, position_id, order_id,
+                        event_type, event_category,
+                        close_price, close_qty, close_pnl, close_fee,
+                        close_time, exit_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    report_id,
+                    event.position_id,
+                    event.order_id,
+                    event.event_type,
+                    event.event_category,
+                    self._decimal_to_str(event.close_price),
+                    self._decimal_to_str(event.close_qty),
+                    self._decimal_to_str(event.close_pnl),
+                    self._decimal_to_str(event.close_fee),
+                    event.close_time,
+                    event.exit_reason,
+                ))
+
         await self._db.commit()
         logger.info(f"已保存回测报告：{report_id}")
 
@@ -392,6 +446,26 @@ class BacktestReportRepository:
         if not row:
             return None
 
+        # 加载 close_events (任务 1.4)
+        close_events = []
+        close_cursor = await self._db.execute("""
+            SELECT * FROM position_close_events WHERE report_id = ?
+            ORDER BY close_time ASC
+        """, (report_id,))
+        for close_row in await close_cursor.fetchall():
+            close_events.append(PositionCloseEvent(
+                position_id=close_row["position_id"],
+                order_id=close_row["order_id"],
+                event_type=close_row["event_type"],
+                event_category=close_row["event_category"],
+                close_price=self._str_to_decimal(close_row["close_price"]),
+                close_qty=self._str_to_decimal(close_row["close_qty"]),
+                close_pnl=self._str_to_decimal(close_row["close_pnl"]),
+                close_fee=self._str_to_decimal(close_row["close_fee"]),
+                close_time=close_row["close_time"],
+                exit_reason=close_row["exit_reason"],
+            ))
+
         return PMSBacktestReport(
             strategy_id=row["strategy_id"],
             strategy_name=row["strategy_name"],
@@ -410,6 +484,7 @@ class BacktestReportRepository:
             max_drawdown=self._str_to_decimal(row["max_drawdown"]),
             sharpe_ratio=self._str_to_decimal(row["sharpe_ratio"]) if row["sharpe_ratio"] else None,
             positions=self._deserialize_positions_summary(row["positions_summary"]),
+            close_events=close_events,
         )
 
     async def get_reports_by_strategy(

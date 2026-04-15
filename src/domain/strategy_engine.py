@@ -502,6 +502,7 @@ class StrategyRunner:
             context = FilterContext(
                 higher_tf_trends=higher_tf_trends,
                 current_trend=current_trend,
+                current_price=kline.close,
             )
 
             filter_results = []
@@ -769,6 +770,7 @@ class DynamicStrategyRunner:
                 current_trend=effective_current_trend,
                 current_timeframe=kline.timeframe,
                 kline=kline,
+                current_price=kline.close,
             )
 
             # Run filter chain with short-circuit

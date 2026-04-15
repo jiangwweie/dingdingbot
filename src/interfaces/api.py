@@ -2870,7 +2870,8 @@ async def preview_strategy(request: StrategyPreviewRequest):
             higher_tf_trends={},  # Preview mode: no higher timeframe trends
             current_trend=None,
             current_timeframe=request.timeframe,
-            kline=kline_data
+            kline=kline_data,
+            current_price=kline_data.close,
         )
 
         # Evaluate the logic tree

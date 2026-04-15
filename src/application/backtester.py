@@ -29,6 +29,7 @@ from src.domain.models import (
     StrategyDefinition,
     PMSBacktestReport,
     PositionSummary,
+    PositionCloseEvent,
     Account,
     Position,
     Order,
@@ -1253,6 +1254,8 @@ class Backtester:
         position_summaries: List[PositionSummary] = []
         all_executed_orders: List[Order] = []
         equity_curve: List[Tuple[int, Decimal]] = []  # [(timestamp_ms, total_balance), ...]
+        all_close_events: List[PositionCloseEvent] = []  # 【任务 1.4】平仓事件收集
+        all_attempts: List[SignalAttempt] = []  # 阶段 5.4: 收集所有 attempts 用于归因
 
         # Statistics tracking
         total_trades = 0
@@ -1298,6 +1301,9 @@ class Backtester:
             else:
                 attempt = runner.run(kline, higher_tf_trends)
                 attempts = [attempt]
+
+            # 阶段 5.4: 收集所有 attempts 用于归因分析
+            all_attempts.extend(attempts)
 
             # Create ENTRY orders for fired signals
             for attempt in attempts:
@@ -1435,9 +1441,26 @@ class Backtester:
                             entry_time=kline.timestamp,
                         ))
 
-                elif order.order_role in [OrderRole.TP1, OrderRole.SL]:
+                elif order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5, OrderRole.SL]:
                     # Position closed (partially or fully)
                     position = positions_map.get(order.signal_id)
+
+                    # 【任务 1.4 新增】记录所有 TP/SL 成交事件（独立追加，不影响现有统计）
+                    if position and order.actual_filled and order.actual_filled > 0:
+                        close_event = PositionCloseEvent(
+                            position_id=position.id,
+                            order_id=order.id,
+                            event_type=order.order_role.value,
+                            event_category='exit',
+                            close_price=order.average_exec_price,
+                            close_qty=order.actual_filled,
+                            close_pnl=order.close_pnl if order.close_pnl is not None else Decimal('0'),
+                            close_fee=order.close_fee if order.close_fee is not None else Decimal('0'),
+                            close_time=kline.timestamp,
+                            exit_reason=order.exit_reason or order.order_role.value,
+                        )
+                        all_close_events.append(close_event)
+
                     if position and position.is_closed:
                         # Update position summary
                         for summary in position_summaries:
@@ -1448,7 +1471,7 @@ class Backtester:
                                 summary.exit_reason = order.exit_reason or order.order_role.value
                                 break
 
-                        # Update statistics
+                        # Update statistics（仅完全平仓时更新累计统计）
                         total_trades += 1
                         if position.realized_pnl > 0:
                             winning_trades += 1
@@ -1513,6 +1536,46 @@ class Backtester:
                 if drawdown > max_drawdown:
                     max_drawdown = drawdown
 
+        # 阶段 5.4: 计算策略归因分析（仅 SIGNAL_FIRED attempts）
+        signal_attributions = None
+        aggregate_attribution = None
+        try:
+            from src.domain.attribution_config import AttributionConfig
+            from src.application.attribution_engine import AttributionEngine
+
+            # 从 KV 配置加载归因权重，失败时回退到默认配置
+            try:
+                attribution_config = AttributionConfig.from_kv(kv_configs)
+            except Exception:
+                logger.warning("[ATTRIBUTION] 归因配置加载失败，使用默认配置")
+                attribution_config = AttributionConfig.default()
+
+            # 筛选 SIGNAL_FIRED 的 attempts 并序列化为 dict
+            signal_attempts = [
+                self._attempt_to_dict(a)
+                for a in all_attempts
+                if a.final_result == "SIGNAL_FIRED"
+            ]
+
+            if signal_attempts:
+                engine = AttributionEngine(attribution_config)
+                attributions = engine.attribute_batch(signal_attempts)
+                aggregate = engine.get_aggregate_attribution(attributions)
+
+                # 序列化为 dict（Pydantic 模型 extra="forbid"，不能存对象）
+                signal_attributions = [a.to_dict() for a in attributions]
+                aggregate_attribution = aggregate.to_dict()
+
+                logger.info(
+                    f"[ATTRIBUTION] 归因分析完成: {len(signal_attempts)} 个信号, "
+                    f"avg_pattern={aggregate.avg_pattern_contribution:.3f}, "
+                    f"top_filters={aggregate.top_performing_filters}"
+                )
+            else:
+                logger.info("[ATTRIBUTION] 无 SIGNAL_FIRED 信号，跳过归因分析")
+        except Exception as e:
+            logger.warning(f"[ATTRIBUTION] 归因计算失败（不影响回测结果）: {e}")
+
         report = PMSBacktestReport(
             strategy_id=strategy_id,
             strategy_name=strategy_name,
@@ -1532,6 +1595,9 @@ class Backtester:
             max_drawdown=max_drawdown,
             sharpe_ratio=self._calculate_sharpe_ratio(equity_curve, request.timeframe),
             positions=position_summaries,
+            close_events=all_close_events,  # 【任务 1.4】平仓事件列表
+            signal_attributions=signal_attributions,  # 阶段 5.4: 归因分析结果
+            aggregate_attribution=aggregate_attribution,  # 阶段 5.4: 聚合归因
         )
 
         # Step 10: Save report to database (if backtest_repository is provided)

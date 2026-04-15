@@ -1,6 +1,51 @@
 # Progress Log
 
-> Last updated: 2026-04-15 12:00
+> Last updated: 2026-04-15 18:00
+
+---
+
+## 2026-04-15 18:00 -- 阶段 5 任务 5.2: AttributionEngine 核心引擎完成
+
+### 完成内容
+
+**任务**: 创建 `AttributionEngine` 非侵入式归因引擎，基于 SignalAttempt dict 数据计算组件贡献。
+
+**新建文件**:
+1. `src/application/attribution_engine.py` — 归因引擎核心实现
+   - `AttributionEngine(config)` — 引擎初始化，接受 AttributionConfig
+   - `attribute(attempt_dict)` — 单信号归因分析
+   - `attribute_batch(attempts)` — 批量归因
+   - `get_aggregate_attribution(attributions)` — 聚合归因（回测报告级别）
+   - `_extract_pattern_score()` — 兼容回测引擎格式（pattern_score 标量）和直接格式（pattern dict）
+   - `_parse_filter_results()` — 兼容回测引擎格式（dict 列表）和直接格式（tuple 列表）
+   - `_calc_percentages()` — final_score=0 时返回 {}，contribution=0 的组件不计入
+   - `_calculate_filter_confidence()` — EMA distance / MTF alignment / ATR ratio 信心函数
+   - `_explain_confidence()` — 人类可读的信心评分解释
+
+2. `tests/unit/test_attribution_engine.py` — 单元测试 (35 个用例)
+   - 正常场景: 基本归因、回测格式兼容、直接格式兼容
+   - 异常场景: 过滤器被拒绝、所有过滤器被拒绝、空 pattern
+   - 边界场景: zero-score percentages={}、final_score 上限 1.0、仅有 pattern 无过滤器
+   - 批量/聚合: 批量归因、聚合归因、空列表处理
+   - metadata 不完整: EMA/MTF/ATR 降级为默认值 0.5
+   - 信心函数: EMA 阈值边界、MTF 对齐比例、ATR 上限
+   - 序列化: to_dict() 可序列化验证
+
+**测试结果**: 35/35 passed
+
+**技术发现**:
+- 回测引擎 `_attempt_to_dict()` 使用 `pattern_score` 标量格式，而非 `pattern: {score}` 格式
+- filter_results 使用 `{"filter": name, ...}` 格式而非 `(name, FilterResult)` tuple 格式
+- pattern_score=0 但有通过的过滤器时，pattern 不应出现在 percentages 中
+
+**回归验证**:
+- `test_attribution_config.py`: 20/20 passed
+- `test_attribution_analyzer.py`: 20/20 passed
+- Import 验证: 无循环导入
+
+**下一步**:
+- [ ] 任务 5.4: 集成到回测报告输出
+- [ ] 任务 5.5: API 扩展（归因查询端点）
 
 ---
 
@@ -55,7 +100,7 @@
 
 **下一步**:
 - [x] 任务 5.1: AttributionConfig 模型
-- [ ] 任务 5.2: AttributionEngine（依赖 5.3 已完成）
+- [x] 任务 5.2: AttributionEngine（依赖 5.3 已完成）
 - [ ] 任务 5.4: 集成到回测报告输出
 
 ---
@@ -114,13 +159,13 @@ PM 协调了架构师 + QA 团队对 commit 9c5e3e6 的 7 项 P0 修复执行了
 
 | 验证项 | 测试文件 | 结果 |
 |--------|---------|------|
-| 1 | test_backtest_user_story.py:584 | 断言已存在 ✅ |
-| 2 | 代码审查 (git diff) | 审查通过 ✅ |
-| 3 | TestNegativeReturnReportPersistence | 2/2 passed ✅ |
-| 4 | TestTotalReturnCorrectness | 代码审查通过 ✅ |
-| 5 | TestMigrationLogic | 3/3 passed ✅ |
-| 6 | TestExceptionPropagation | 2/2 passed ✅ |
-| 7 | TestPositionSizeZeroSkip + TestZeroQtyOrderChain | 4/4 passed ✅ |
+| 1 | test_backtest_user_story.py:584 | 断言已存在 |
+| 2 | 代码审查 (git diff) | 审查通过 |
+| 3 | TestNegativeReturnReportPersistence | 2/2 passed |
+| 4 | TestTotalReturnCorrectness | 代码审查通过 |
+| 5 | TestMigrationLogic | 3/3 passed |
+| 6 | TestExceptionPropagation | 2/2 passed |
+| 7 | TestPositionSizeZeroSkip + TestZeroQtyOrderChain | 4/4 passed |
 
 ### 新增测试文件
 
@@ -167,10 +212,10 @@ PM 协调了架构师 + QA 团队对 commit 9c5e3e6 的 7 项 P0 修复执行了
 
 | P0 问题 | 状态 |
 |---------|------|
-| P0-1: `_execute_fill` 私有方法无法直接调用 | ✅ 已修复（Order 新增 close_pnl/close_fee 字段） |
-| P0-2: SL 触发后 TP 被撤销未覆盖 | ✅ 已修复（Section 7.1 补充边界说明） |
-| P0-3: `close_pnl` 语义不变量未声明 | ✅ 已修复（Section 2.5 声明 4 个不变量） |
-| P0-4: 部分平仓 total_pnl 重复累计 | ✅ 已修复（Section 4.3 拆分部分/完全平仓统计） |
+| P0-1: `_execute_fill` 私有方法无法直接调用 | 已修复（Order 新增 close_pnl/close_fee 字段） |
+| P0-2: SL 触发后 TP 被撤销未覆盖 | 已修复（Section 7.1 补充边界说明） |
+| P0-3: `close_pnl` 语义不变量未声明 | 已修复（Section 2.5 声明 4 个不变量） |
+| P0-4: 部分平仓 total_pnl 重复累计 | 已修复（Section 4.3 拆分部分/完全平仓统计） |
 
 ### 下一步
 

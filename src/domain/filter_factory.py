@@ -119,6 +119,7 @@ class FilterContext:
     current_trend: Optional[TrendDirection] = None  # Current timeframe EMA trend
     current_timeframe: str = ""  # Current timeframe being processed
     kline: Optional[KlineData] = None  # Current K-line (for advanced filters)
+    current_price: Optional[Decimal] = None  # Current K-line close price (for attribution)
 
 
 # ============================================================
@@ -189,8 +190,22 @@ class EmaTrendFilterDynamic(FilterBase):
                     "period": self._period,
                     "ema_value": None,
                     "trend_direction": None,
+                    # Attribution fields
+                    "price": float(context.current_price) if context.current_price is not None else None,
+                    "distance_pct": None,
                 }
             )
+
+        # Get EMA value and compute distance for attribution metadata
+        ema_value = None
+        current_price = context.current_price
+        if current_price is None and context.kline is not None:
+            current_price = context.kline.close
+        if context.kline is not None and context.current_timeframe:
+            key = f"{context.kline.symbol}:{context.current_timeframe}"
+            if key in self._ema_calculators:
+                ema_value = self._ema_calculators[key].value
+        distance_pct = abs(current_price - ema_value) / ema_value if ema_value is not None and current_price is not None else None
 
         # Check if pattern direction matches trend
         if pattern.direction == Direction.LONG:
@@ -207,6 +222,10 @@ class EmaTrendFilterDynamic(FilterBase):
                         "period": self._period,
                         "trend_direction": current_trend.value,
                         "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "price": float(current_price) if current_price is not None else None,
+                        "ema_value": float(ema_value) if ema_value is not None else None,
+                        "distance_pct": float(distance_pct) if distance_pct is not None else None,
                     }
                 )
             else:
@@ -222,6 +241,10 @@ class EmaTrendFilterDynamic(FilterBase):
                         "period": self._period,
                         "trend_direction": current_trend.value,
                         "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "price": float(current_price) if current_price is not None else None,
+                        "ema_value": float(ema_value) if ema_value is not None else None,
+                        "distance_pct": float(distance_pct) if distance_pct is not None else None,
                     }
                 )
         else:  # SHORT
@@ -238,6 +261,10 @@ class EmaTrendFilterDynamic(FilterBase):
                         "period": self._period,
                         "trend_direction": current_trend.value,
                         "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "price": float(current_price) if current_price is not None else None,
+                        "ema_value": float(ema_value) if ema_value is not None else None,
+                        "distance_pct": float(distance_pct) if distance_pct is not None else None,
                     }
                 )
             else:
@@ -253,6 +280,10 @@ class EmaTrendFilterDynamic(FilterBase):
                         "period": self._period,
                         "trend_direction": current_trend.value,
                         "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "price": float(current_price) if current_price is not None else None,
+                        "ema_value": float(ema_value) if ema_value is not None else None,
+                        "distance_pct": float(distance_pct) if distance_pct is not None else None,
                     }
                 )
 
@@ -311,6 +342,17 @@ class MtfFilterDynamic(FilterBase):
         current_tf = context.current_timeframe
         higher_tf = self._timeframe_map.get(current_tf)
 
+        # Compute attribution fields from higher timeframe trends
+        higher_tf_trends = context.higher_tf_trends
+        pattern_dir = pattern.direction
+        if pattern_dir == Direction.LONG:
+            aligned_count = sum(1 for t in higher_tf_trends.values() if t == TrendDirection.BULLISH)
+        else:
+            aligned_count = sum(1 for t in higher_tf_trends.values() if t == TrendDirection.BEARISH)
+        total_count = len(higher_tf_trends)
+        # Serialize trends for JSON compatibility
+        higher_tf_trends_serialized = {k: v.value for k, v in higher_tf_trends.items()}
+
         if higher_tf is None:
             # No higher timeframe available (e.g., 1w)
             return TraceEvent(
@@ -323,6 +365,10 @@ class MtfFilterDynamic(FilterBase):
                     "current_timeframe": current_tf,
                     "higher_timeframe": None,
                     "higher_trend": None,
+                    # Attribution fields
+                    "higher_tf_trends": higher_tf_trends_serialized,
+                    "aligned_count": aligned_count,
+                    "total_count": total_count,
                 }
             )
 
@@ -340,6 +386,10 @@ class MtfFilterDynamic(FilterBase):
                     "current_timeframe": current_tf,
                     "higher_timeframe": higher_tf,
                     "higher_trend": None,
+                    # Attribution fields
+                    "higher_tf_trends": higher_tf_trends_serialized,
+                    "aligned_count": aligned_count,
+                    "total_count": total_count,
                 }
             )
 
@@ -359,6 +409,10 @@ class MtfFilterDynamic(FilterBase):
                         "higher_timeframe": higher_tf,
                         "higher_trend": higher_tf_trend.value,
                         "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "higher_tf_trends": higher_tf_trends_serialized,
+                        "aligned_count": aligned_count,
+                        "total_count": total_count,
                     }
                 )
             else:
@@ -375,6 +429,10 @@ class MtfFilterDynamic(FilterBase):
                         "higher_timeframe": higher_tf,
                         "higher_trend": higher_tf_trend.value,
                         "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "higher_tf_trends": higher_tf_trends_serialized,
+                        "aligned_count": aligned_count,
+                        "total_count": total_count,
                     }
                 )
         else:  # SHORT
@@ -392,6 +450,10 @@ class MtfFilterDynamic(FilterBase):
                         "higher_timeframe": higher_tf,
                         "higher_trend": higher_tf_trend.value,
                         "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "higher_tf_trends": higher_tf_trends_serialized,
+                        "aligned_count": aligned_count,
+                        "total_count": total_count,
                     }
                 )
             else:
@@ -408,6 +470,10 @@ class MtfFilterDynamic(FilterBase):
                         "higher_timeframe": higher_tf,
                         "higher_trend": higher_tf_trend.value,
                         "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "higher_tf_trends": higher_tf_trends_serialized,
+                        "aligned_count": aligned_count,
+                        "total_count": total_count,
                     }
                 )
 

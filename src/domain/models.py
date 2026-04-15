@@ -1029,6 +1029,11 @@ class Order(FinancialModel):
     # T4 - 订单持久化扩展
     filled_at: Optional[int] = None  # 成交时间戳（毫秒），用于回测记录订单实际成交时间
 
+    # 任务 1.1 新增：订单级成交明细（不修改 filled_qty 语义）
+    actual_filled: Optional[Decimal] = None    # 本次实际成交量（防超卖截断后的真实值）
+    close_pnl: Optional[Decimal] = None        # 本次出场的净 PnL（gross_pnl - fee）
+    close_fee: Optional[Decimal] = None        # 本次出场的手续费
+
 
 # ============================================================
 # Phase 5: 订单操作结果模型
@@ -1249,6 +1254,29 @@ class PositionSummary(FinancialModel):
     exit_reason: Optional[str] = None  # 平仓原因 (TP1/SL/TRAILING)
 
 
+class PositionCloseEvent(FinancialModel):
+    """单笔平仓成交事件（用于记录分批止盈的每一笔成交）
+
+    每次 TP1/TP2/TP3/TP4/TP5/SL 平仓都会在 position_close_events 表中产生一条记录，
+    用于精确归因和时间序列分析。
+
+    设计考量:
+    - close_pnl = gross_pnl - fee（与 matching_engine net_pnl 语义一致）
+    - event_type 使用字符串（支持未来扩展，不限制枚举）
+    - close_qty = actual_filled（实际成交量，非请求成交量）
+    """
+    position_id: str
+    order_id: str
+    event_type: str                    # TP1/TP2/TP3/TP4/TP5/SL
+    event_category: str                # "exit"
+    close_price: Decimal
+    close_qty: Decimal
+    close_pnl: Decimal
+    close_fee: Decimal
+    close_time: int                    # 毫秒时间戳
+    exit_reason: str
+
+
 class PMSBacktestReport(FinancialModel):
     """
     v3.0 PMS 模式回测报告
@@ -1308,6 +1336,17 @@ class PMSBacktestReport(FinancialModel):
     )
     sharpe_ratio: Optional[Decimal] = None  # 夏普比率
     positions: List[PositionSummary] = Field(default_factory=list)
+    close_events: List["PositionCloseEvent"] = Field(default_factory=list)  # 任务 1.4 新增
+
+    # 阶段 5.4: 策略归因分析结果
+    signal_attributions: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="每个 SIGNAL_FIRED 信号的归因分析结果列表"
+    )
+    aggregate_attribution: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="聚合归因分析（回测报告摘要级别）"
+    )
 
 
 # ============================================================
