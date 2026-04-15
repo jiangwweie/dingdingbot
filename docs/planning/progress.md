@@ -1,6 +1,38 @@
 # Progress Log
 
-> Last updated: 2026-04-15 18:00
+> Last updated: 2026-04-15 19:30
+
+---
+
+## 2026-04-15 19:30 -- 修复 Code Review P1-1: PositionCloseEvent 字段改为 Optional
+
+### 修复内容
+
+**问题**: PositionCloseEvent 模型与设计文档不一致。设计文档要求部分字段为 Optional（为 trailing stop 未来扩展预留 NULL 能力），但实现中全部为必填。
+
+**改动文件**:
+1. `src/domain/models.py` — PositionCloseEvent 模型
+   - `close_price: Decimal` → `Optional[Decimal] = None`
+   - `close_qty: Decimal` → `Optional[Decimal] = None`
+   - `close_pnl: Decimal` → `Optional[Decimal] = None`
+   - `close_fee: Decimal` → `Optional[Decimal] = None`
+   - `exit_reason: str` → `Optional[str] = None`
+
+2. `src/infrastructure/backtest_repository.py` — DDL + save_report
+   - `position_close_events` 表 DDL: NOT NULL → 允许 NULL
+   - 新增 CHECK 约束: `exit` 事件必须有成交数据
+   - `save_report` 中 `_decimal_to_str` 前加 None 检查
+
+### 验证结果
+
+- **模型验证**: PositionCloseEvent 可正常创建（全部字段 / None 字段 / 部分 None）
+- **_str_to_decimal None 处理**: 已验证 `_str_to_decimal(None)` 返回 `None`（line 264-268）
+- **backtester.py**: 已有 None 安全兜底（`close_pnl/close_fee` 为 None 时用 `Decimal('0')`）
+- **单元测试**: test_backtest_repository.py 25/28 passed（3 个失败为 pre-existing fixture 隔离问题，非本次改动导致）
+
+### 下一步
+
+- [ ] 提交代码变更
 
 ---
 
