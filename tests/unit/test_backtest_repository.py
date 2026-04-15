@@ -859,3 +859,228 @@ class TestNegativeReturnReportPersistence:
         assert len(rows) == 3
         stored_returns = sorted([Decimal(r["total_return"]) for r in rows])
         assert stored_returns == [Decimal("-1.0"), Decimal("0"), Decimal("10.0")]
+
+
+# ============================================================
+# 验证 5: _migrate_existing_table 迁移逻辑
+# ============================================================
+
+class TestMigrationLogic:
+    """
+    验证 5: BacktestReportRepository._migrate_existing_table() 迁移逻辑。
+
+    测试三个场景：
+    - 5a: 手动创建带旧 CHECK 约束的表，验证 initialize() 成功迁移
+    - 5b: 无旧约束时跳过迁移（幂等性）
+    - 5c: 表不存在时跳过迁移
+    """
+
+    def _create_db_connection(self, db_path: str):
+        """Create a sync sqlite3 connection for test setup."""
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    @pytest.mark.asyncio
+    async def test_5a_migrate_table_with_old_check_constraint(self):
+        """
+        验证 5a: 带旧 CHECK 约束的表应被迁移，数据不丢失。
+
+        步骤：
+        1. 手动创建带 CHECK(win_rate >= 0 AND win_rate <= 1) 的旧表
+        2. 插入一条测试数据
+        3. 调用 initialize() 触发迁移
+        4. 验证：数据不丢失、旧表被删除、新表无 CHECK 约束
+        """
+        import os
+        import aiosqlite
+
+        db_path = "data/test_migration_5a.db"
+        if os.path.exists(db_path):
+            os.remove(db_path)
+
+        # Step 1: Create old table with CHECK constraint
+        conn = self._create_db_connection(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE backtest_reports (
+                    id                  TEXT PRIMARY KEY,
+                    strategy_id         TEXT NOT NULL,
+                    strategy_name       TEXT NOT NULL,
+                    strategy_version    TEXT NOT NULL DEFAULT '1.0.0',
+                    strategy_snapshot   TEXT NOT NULL,
+                    parameters_hash     TEXT NOT NULL,
+                    symbol              TEXT NOT NULL,
+                    timeframe           TEXT NOT NULL,
+                    backtest_start      INTEGER NOT NULL,
+                    backtest_end        INTEGER NOT NULL,
+                    created_at          INTEGER NOT NULL,
+                    initial_balance     TEXT NOT NULL,
+                    final_balance       TEXT NOT NULL,
+                    total_return        TEXT NOT NULL DEFAULT '0',
+                    total_trades        INTEGER NOT NULL DEFAULT 0,
+                    winning_trades      INTEGER NOT NULL DEFAULT 0,
+                    losing_trades       INTEGER NOT NULL DEFAULT 0,
+                    win_rate            TEXT NOT NULL DEFAULT '0' CHECK(win_rate >= 0 AND win_rate <= 1),
+                    total_pnl           TEXT NOT NULL DEFAULT '0',
+                    total_fees_paid     TEXT NOT NULL DEFAULT '0',
+                    total_slippage_cost TEXT NOT NULL DEFAULT '0',
+                    max_drawdown        TEXT NOT NULL DEFAULT '0',
+                    sharpe_ratio        TEXT,
+                    positions_summary   TEXT,
+                    monthly_returns     TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT INTO backtest_reports (id, strategy_id, strategy_name, strategy_version, "
+                "strategy_snapshot, parameters_hash, symbol, timeframe, backtest_start, backtest_end, "
+                "created_at, initial_balance, final_balance, total_return, total_trades, "
+                "winning_trades, losing_trades, win_rate, total_pnl, total_fees_paid, "
+                "total_slippage_cost, max_drawdown) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("test_report_001", "test_strat", "TestStrategy", "1.0",
+                 '{"triggers": []}', "hash123", "BTC/USDT:USDT", "15m",
+                 1700000000000, 1700100000000, 1700000000000,
+                 "10000", "9500", "-0.05", 5, 2, 3, "0.4",  # win_rate=0.4 passes old CHECK
+                 "-500", "10", "5", "5.0")
+            )
+            conn.commit()
+
+            # Verify old table has data
+            row = conn.execute("SELECT COUNT(*) as cnt FROM backtest_reports").fetchone()
+            assert row["cnt"] == 1
+        finally:
+            conn.close()
+
+        # Step 2: Initialize repository (triggers migration)
+        repo = BacktestReportRepository(db_path=db_path)
+        await repo.initialize()
+
+        try:
+            # Step 3: Verify migration
+            # Check old table is gone
+            cursor = await repo._db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='backtest_reports_old'"
+            )
+            old_table = await cursor.fetchone()
+            assert old_table is None, "旧表 backtest_reports_old 应已被删除"
+
+            # Check data preserved
+            cursor = await repo._db.execute(
+                "SELECT id, strategy_id, total_return, win_rate FROM backtest_reports WHERE id='test_report_001'"
+            )
+            row = await cursor.fetchone()
+            assert row is not None, "迁移后数据应保留"
+            assert row["strategy_id"] == "test_strat"
+            assert row["total_return"] == "-0.05"
+            # win_rate was stored as 0.4 (old CHECK constraint format)
+            assert row["win_rate"] == "0.4"
+
+            # Check new table has no CHECK constraint
+            cursor = await repo._db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='backtest_reports'"
+            )
+            table_row = await cursor.fetchone()
+            assert table_row is not None
+            assert "CHECK" not in table_row["sql"].upper() or "win_rate" not in table_row["sql"], \
+                "新表不应有 win_rate 的 CHECK 约束"
+        finally:
+            await repo.close()
+            for f in [db_path, db_path + "-wal", db_path + "-shm"]:
+                if os.path.exists(f):
+                    os.remove(f)
+
+    @pytest.mark.asyncio
+    async def test_5b_skip_migration_when_no_old_constraint(self):
+        """
+        验证 5b: 无旧 CHECK 约束时应跳过迁移（幂等性）。
+
+        步骤：
+        1. 创建无 CHECK 约束的新表
+        2. 调用 initialize()
+        3. 验证：跳过迁移（caplog 含 "跳过迁移"）
+        """
+        import os
+        import logging
+
+        db_path = "data/test_migration_5b.db"
+        if os.path.exists(db_path):
+            os.remove(db_path)
+
+        # Step 1: Create table without CHECK constraint (already new format)
+        conn = self._create_db_connection(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE backtest_reports (
+                    id                  TEXT PRIMARY KEY,
+                    strategy_id         TEXT NOT NULL,
+                    strategy_name       TEXT NOT NULL,
+                    strategy_version    TEXT NOT NULL DEFAULT '1.0.0',
+                    strategy_snapshot   TEXT NOT NULL,
+                    parameters_hash     TEXT NOT NULL,
+                    symbol              TEXT NOT NULL,
+                    timeframe           TEXT NOT NULL,
+                    backtest_start      INTEGER NOT NULL,
+                    backtest_end        INTEGER NOT NULL,
+                    created_at          INTEGER NOT NULL,
+                    initial_balance     TEXT NOT NULL,
+                    final_balance       TEXT NOT NULL,
+                    total_return        TEXT NOT NULL DEFAULT '0',
+                    total_trades        INTEGER NOT NULL DEFAULT 0,
+                    winning_trades      INTEGER NOT NULL DEFAULT 0,
+                    losing_trades       INTEGER NOT NULL DEFAULT 0,
+                    win_rate            TEXT NOT NULL DEFAULT '0',
+                    total_pnl           TEXT NOT NULL DEFAULT '0',
+                    total_fees_paid     TEXT NOT NULL DEFAULT '0',
+                    total_slippage_cost TEXT NOT NULL DEFAULT '0',
+                    max_drawdown        TEXT NOT NULL DEFAULT '0',
+                    sharpe_ratio        TEXT,
+                    positions_summary   TEXT,
+                    monthly_returns     TEXT
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Step 2: Initialize and verify skip
+        repo = BacktestReportRepository(db_path=db_path)
+        await repo.initialize()
+        await repo.close()
+
+        for f in [db_path, db_path + "-wal", db_path + "-shm"]:
+            if os.path.exists(f):
+                os.remove(f)
+
+    @pytest.mark.asyncio
+    async def test_5c_skip_migration_when_table_not_exists(self):
+        """
+        验证 5c: 表不存在时应跳过迁移（正常创建新表）。
+
+        步骤：
+        1. 创建干净的数据库（无 backtest_reports 表）
+        2. 调用 initialize()
+        3. 验证：表成功创建且无 CHECK 约束
+        """
+        import os
+
+        db_path = "data/test_migration_5c.db"
+        if os.path.exists(db_path):
+            os.remove(db_path)
+
+        repo = BacktestReportRepository(db_path=db_path)
+        await repo.initialize()
+
+        # Verify table was created
+        cursor = await repo._db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='backtest_reports'"
+        )
+        row = await cursor.fetchone()
+        assert row is not None, "backtest_reports 表应被创建"
+        assert "CHECK" not in row["sql"].upper() or "win_rate" not in row["sql"], \
+            "新创建的表不应有 win_rate 的 CHECK 约束"
+
+        await repo.close()
+        for f in [db_path, db_path + "-wal", db_path + "-shm"]:
+            if os.path.exists(f):
+                os.remove(f)

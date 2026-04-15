@@ -2511,6 +2511,46 @@ class TestIMP002_DecimalPrecision:
 
 
 # ============================================================
+# 验证 7b: position_size=0 跳过 — OrderManager.create_order_chain 边界
+# ============================================================
+
+class TestZeroQtyOrderChain:
+    """
+    验证 7b: OrderManager.create_order_chain 在 total_qty 无效时返回空列表。
+
+    对应 backtester.py line 1338-1341 的防护逻辑：
+    position_size <= 0 时跳过信号，不会创建订单。
+    本测试直接在 OrderManager 层验证 total_qty=0/None/-1 均返回空订单列表。
+    """
+
+    @pytest.mark.skipif(not ORDER_MANAGER_AVAILABLE, reason="OrderManager 尚未实现")
+    @pytest.mark.parametrize("total_qty,description", [
+        (Decimal('0'), "zero"),
+        (None, "None"),
+        (Decimal('-1'), "negative"),
+    ])
+    def test_create_order_chain_returns_empty_for_invalid_qty(self, total_qty, description):
+        """
+        验证 7b: total_qty=0/None/-1 时 create_order_chain 返回空列表。
+
+        这是 Bug #3 防护的核心断言：无效仓位量不会产生任何订单。
+        """
+        manager = OrderManager()
+
+        orders = manager.create_order_chain(
+            strategy=None,
+            signal_id=f"sig_zero_{description}",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=total_qty,
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        assert orders == [], f"total_qty={description} 时应返回空订单列表，实际返回 {len(orders)} 个订单"
+
+
+# ============================================================
 # 主入口 (用于直接运行测试)
 # ============================================================
 if __name__ == "__main__":

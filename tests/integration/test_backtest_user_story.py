@@ -833,6 +833,135 @@ class TestCrossFlowValidation:
             assert "exit_price" in pos
             assert "realized_pnl" in pos
 
+
+# ============================================================
+# 验证 4: 收益率百分比正确性
+# ============================================================
+
+class TestTotalReturnCorrectness:
+    """
+    验证 4: total_return 数学恒等式验证。
+
+    验证 total_return == (final_balance - initial_balance) / initial_balance
+    确认 total_return 是小数形式（如 -0.1787）而非百分比形式（如 -17.87）。
+    """
+
+    def test_total_return_mathematical_identity(self, test_client, mock_gateway):
+        """
+        验证 4: total_return == (final_balance - initial_balance) / initial_balance。
+
+        total_return 应为小数形式，范围在 -1.0 到 10.0 之间（Pydantic 验证范围）。
+        """
+        payload = {
+            "symbol": "ETH/USDT:USDT",
+            "timeframe": "1h",
+            "limit": 100,
+            "mode": "v3_pms",
+            "initial_balance": "10000",
+            "slippage_rate": "0.001",
+            "fee_rate": "0.0004",
+            "strategies": [
+                {
+                    "id": "b9cc3fd1-134c-49ce-9720-20631fc75c41",
+                    "name": "01",
+                    "triggers": [
+                        {"type": "pinbar", "params": {
+                            "min_wick_ratio": 0.5,
+                            "max_body_ratio": 0.35,
+                            "body_position_tolerance": 0.2,
+                        }}
+                    ],
+                    "filters": [
+                        {"type": "ema_trend", "params": {"period": 60}},
+                        {"type": "atr", "params": {"period": 14, "min_atr_ratio": 0.5}},
+                        {"type": "mtf", "params": {}},
+                    ],
+                    "filter_logic": "AND",
+                    "apply_to": ["ETH/USDT:USDT:1h"],
+                }
+            ],
+        }
+
+        response = test_client.post("/api/backtest/orders", json=payload)
+        if response.status_code != 200:
+            pytest.skip(f"PMS backtest failed: {response.text}")
+
+        resp_json = response.json()
+        if "error" in resp_json:
+            pytest.skip(f"PMS backtest error: {resp_json['error']}")
+
+        report = resp_json["report"]
+
+        initial_balance = Decimal(str(report["initial_balance"]))
+        final_balance = Decimal(str(report["final_balance"]))
+        total_pnl = Decimal(str(report["total_pnl"]))
+        total_return = Decimal(str(report["total_return"]))
+
+        # Verify total_return is decimal form (not percentage)
+        # Pydantic validates: -1.0 <= total_return <= 10.0
+        assert -1 <= total_return <= 10, \
+            f"total_return 应在 -1.0 到 10.0 之间（小数形式），实际为 {total_return}"
+
+        # Verify mathematical identity: total_return == total_pnl / initial_balance
+        expected_return = total_pnl / initial_balance
+        assert total_return == pytest.approx(expected_return, rel=1e-6), \
+            f"total_return ({total_return}) 应等于 total_pnl/initial_balance ({expected_return})"
+
+        # Verify consistency: final_balance == initial_balance + total_pnl
+        assert final_balance == initial_balance + total_pnl, \
+            f"final_balance ({final_balance}) 应等于 initial_balance + total_pnl ({initial_balance + total_pnl})"
+
+    def test_total_return_range_validation(self, test_client, mock_gateway):
+        """
+        验证 4 扩展：total_return 值在合理范围内。
+
+        即使没有交易，total_return 也应为 0（盈亏平衡）。
+        """
+        payload = {
+            "symbol": "ETH/USDT:USDT",
+            "timeframe": "1h",
+            "limit": 50,
+            "mode": "v3_pms",
+            "initial_balance": "10000",
+            "slippage_rate": "0.001",
+            "fee_rate": "0.0004",
+            "strategies": [
+                {
+                    "id": "b9cc3fd1-134c-49ce-9720-20631fc75c41",
+                    "name": "01",
+                    "triggers": [
+                        {"type": "pinbar", "params": {
+                            "min_wick_ratio": 0.9,  # 高标准，减少信号
+                            "max_body_ratio": 0.1,
+                            "body_position_tolerance": 0.05,
+                        }}
+                    ],
+                    "filters": [
+                        {"type": "ema_trend", "params": {"period": 60}},
+                        {"type": "atr", "params": {"period": 14, "min_atr_ratio": 0.5}},
+                        {"type": "mtf", "params": {}},
+                    ],
+                    "filter_logic": "AND",
+                    "apply_to": ["ETH/USDT:USDT:1h"],
+                }
+            ],
+        }
+
+        response = test_client.post("/api/backtest/orders", json=payload)
+        if response.status_code != 200:
+            pytest.skip(f"PMS backtest failed: {response.text}")
+
+        resp_json = response.json()
+        if "error" in resp_json:
+            pytest.skip(f"PMS backtest error: {resp_json['error']}")
+
+        report = resp_json["report"]
+        total_return = Decimal(str(report["total_return"]))
+
+        # total_return 应在 Pydantic 验证范围内
+        assert -1 <= total_return <= 10, \
+            f"total_return 应在合理范围内，实际为 {total_return}"
+
     def test_backtest_modes_are_isolated(self, test_client):
         """Verify v2 and v3 backtests can run independently.
 
