@@ -1264,17 +1264,19 @@ class PositionCloseEvent(FinancialModel):
     - close_pnl = gross_pnl - fee（与 matching_engine net_pnl 语义一致）
     - event_type 使用字符串（支持未来扩展，不限制枚举）
     - close_qty = actual_filled（实际成交量，非请求成交量）
+    - 部分字段为 Optional：为 trailing stop 未来扩展预留 NULL 能力
+      （sl_modified 事件尚无成交价/量/盈亏/手续费）
     """
     position_id: str
     order_id: str
     event_type: str                    # TP1/TP2/TP3/TP4/TP5/SL
     event_category: str                # "exit"
-    close_price: Decimal
-    close_qty: Decimal
-    close_pnl: Decimal
-    close_fee: Decimal
+    close_price: Optional[Decimal] = None  # sl_modified 时为 None
+    close_qty: Optional[Decimal] = None    # sl_modified 时为 None
+    close_pnl: Optional[Decimal] = None    # sl_modified 时为 None
+    close_fee: Optional[Decimal] = None    # sl_modified 时为 None
     close_time: int                    # 毫秒时间戳
-    exit_reason: str
+    exit_reason: Optional[str] = None  # 人类可读的平仓原因
 
 
 class PMSBacktestReport(FinancialModel):

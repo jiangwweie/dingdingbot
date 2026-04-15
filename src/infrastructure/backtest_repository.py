@@ -131,14 +131,20 @@ class BacktestReportRepository:
                 order_id        TEXT,
                 event_type      TEXT NOT NULL,
                 event_category  TEXT NOT NULL,
-                close_price     TEXT NOT NULL,
-                close_qty       TEXT NOT NULL,
-                close_pnl       TEXT NOT NULL,
-                close_fee       TEXT NOT NULL,
+                close_price     TEXT,                         -- NULL 允许（sl_modified 时无成交价）
+                close_qty       TEXT,                         -- NULL 允许（sl_modified 时无成交量）
+                close_pnl       TEXT,                         -- NULL 允许（sl_modified 时无盈亏）
+                close_fee       TEXT,                         -- NULL 允许（sl_modified 时无手续费）
                 close_time      INTEGER NOT NULL,
-                exit_reason     TEXT NOT NULL,
+                exit_reason     TEXT,                         -- NULL 允许
                 FOREIGN KEY (report_id) REFERENCES backtest_reports(id) ON DELETE CASCADE,
-                FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE CASCADE
+                FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE CASCADE,
+                CHECK (event_category != 'exit' OR (
+                    close_price IS NOT NULL AND
+                    close_qty IS NOT NULL AND
+                    close_pnl IS NOT NULL AND
+                    close_fee IS NOT NULL
+                ))
             )
         """)
 
@@ -417,10 +423,10 @@ class BacktestReportRepository:
                     event.order_id,
                     event.event_type,
                     event.event_category,
-                    self._decimal_to_str(event.close_price),
-                    self._decimal_to_str(event.close_qty),
-                    self._decimal_to_str(event.close_pnl),
-                    self._decimal_to_str(event.close_fee),
+                    self._decimal_to_str(event.close_price) if event.close_price is not None else None,
+                    self._decimal_to_str(event.close_qty) if event.close_qty is not None else None,
+                    self._decimal_to_str(event.close_pnl) if event.close_pnl is not None else None,
+                    self._decimal_to_str(event.close_fee) if event.close_fee is not None else None,
                     event.close_time,
                     event.exit_reason,
                 ))
