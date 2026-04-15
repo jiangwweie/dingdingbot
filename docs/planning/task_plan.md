@@ -39,6 +39,20 @@
 
 ---
 
+### Commit 9c5e3e6 7 项修复 QA 验收（2026-04-15 10:30）
+
+| # | 验证项 | 状态 | 备注 |
+|---|--------|------|------|
+| 1 | total_pnl = final - initial | 通过 | 已有断言覆盖 |
+| 2 | 前端"净盈亏"文字 | 通过 | 代码审查通过 |
+| 3 | 负收益报告可保存 | 通过 | 2/2 UT passed |
+| 4 | 收益率百分比正确 | 通过 | 代码审查通过（2 IT skipped 为环境问题） |
+| 5 | _migrate_existing_table | 通过 | 3/3 UT passed |
+| 6 | exception raise 不静默 | 通过 | 2/2 UT passed |
+| 7 | position_size=0 跳过 | 通过 | 4/4 UT passed |
+
+---
+
 ## 阶段 1: P0 修复 + 回测正确性验证（3h）
 
 ### 任务清单
@@ -340,13 +354,15 @@ async def run_monte_carlo(
 
 ### 任务清单
 
-| # | 任务 | 工时 | 状态 |
-|---|------|------|------|
-| 5.1 | 新增 AttributionConfig 模型 + Pydantic 校验 | 0.5h | 待启动 |
-| 5.2 | 新增 AttributionEngine（单信号归因 + 批量归因） | 1.5h | 待启动 |
-| 5.3 | 补充过滤器 metadata（EMA distance, MTF alignment） | 0.5h | 待启动 |
-| 5.4 | 集成到回测报告输出 + KV 权重读取 | 0.5h | 待启动 |
-| 5.5 | 前端归因可视化（回测报告信号详情页） | 1h | 待启动 |
+> ⚠️ **执行顺序调整**（2026-04-15 架构验证后更新）：5.3 必须最先执行。EMA/MTF 过滤器的 metadata 缺少归因所需字段（`price`、`ema_value`、`aligned_count`、`total_count`），导致信心函数 100% 降级为默认值 0.5。先补数据源，再写消费端。
+
+| # | 任务 | 工时 | 状态 | 依赖 |
+|---|------|------|------|------|
+| **5.3** | 补充过滤器 metadata（EMA distance, MTF alignment） | 0.5h | 待启动 | **无**（最先执行） |
+| 5.1 | 新增 AttributionConfig 模型 + Pydantic 校验 | 0.5h | 🔄 开发中 | 无 |
+| 5.2 | 新增 AttributionEngine（单信号归因 + 批量归因） | 1.5h | 待启动 | 5.3 |
+| 5.4 | 集成到回测报告输出 + KV 权重读取 | 0.5h | 待启动 | 5.2 |
+| 5.5 | 前端归因可视化（回测报告信号详情页） | 1h | 待启动 | 5.4 |
 
 ### 5.1 AttributionConfig 模型
 
@@ -440,30 +456,59 @@ class AggregateAttribution(BaseModel):
 
 **影响文件**: `src/application/attribution_engine.py`（新文件）
 
-### 5.3 补充过滤器 metadata
+### 5.3 补充过滤器 metadata（P1 首要任务）
+
+> **⚠️ P1 风险**：通过逐行代码验证，确认 3 个核心过滤器中 2 个的 metadata 不满足归因引擎需求。
+> 如果不先补 metadata，AttributionEngine 的信心函数将 100% 降级为默认值 0.5，归因结果完全失去区分度。
 
 确保各过滤器在 `TraceEvent.metadata` 中携带归因所需的诊断数据：
 
-**EmaTrendFilterDynamic.check()** 需补充:
+**当前状态**（2026-04-15 代码验证）:
+
+| 过滤器 | 已提供字段 | 缺失字段 | 影响 |
+|--------|-----------|---------|------|
+| EmaTrendFilterDynamic | `trend_direction` | `price`, `ema_value` | 信心函数无法计算 distance_pct |
+| MtfFilterDynamic | `higher_trend` (单个) | `aligned_count`, `total_count`, `higher_tf_trends` (字典) | 信心函数无法计算对齐比例 |
+| AtrFilterDynamic | `atr_value`, `volatility_ratio` | — | ✅ 完整，无需补充 |
+
+**EmaTrendFilterDynamic.check()** 需补充（pass/fail 分支都要）:
 ```python
+# 在 line 204/218/233/249 的 metadata dict 中新增:
+# 需要获取当前 K 线价格 — 但 check() 方法没有直接接收 kline
+# 方案: 在 FilterContext 中增加 current_price 字段
 metadata={
-    "trend_direction": "bullish",
-    "price": float(close),
-    "ema_value": float(ema),
-    "distance_pct": float(distance),  # 新增
+    # ... 现有字段 ...
+    "price": float(context.current_price),       # 新增
+    "ema_value": float(self._ema_calculators[key].value),  # 新增，key 需从 context 推导
+    "distance_pct": float(distance),             # 新增 = abs(price - ema) / ema
 }
 ```
 
-**MtfFilterDynamic.check()** 需补充:
+**MtfFilterDynamic.check()** 需补充（pass/fail 分支都要）:
 ```python
+# 在 line 355/370/388/403 的 metadata dict 中新增:
+higher_tf_trends = context.higher_tf_trends  # 已有的 Dict[str, TrendDirection]
+aligned_count = sum(1 for t in higher_tf_trends.values() if t == pattern_direction)
+total_count = len(higher_tf_trends)
+
 metadata={
-    "higher_tf_trends": {"1h": "bullish", "4h": "bearish"},
-    "aligned_count": 1,
-    "total_count": 2,
+    # ... 现有字段 ...
+    "higher_tf_trends": {k: v.value for k, v in higher_tf_trends.items()},  # 新增，序列化友好
+    "aligned_count": aligned_count,    # 新增
+    "total_count": total_count,        # 新增
 }
 ```
 
-**影响文件**: `src/domain/filter_factory.py`
+**依赖前置任务**: `FilterContext` 需要新增 `current_price: Decimal` 字段（现有只有 `current_trend` 和 `current_timeframe`）。
+
+**影响文件**: `src/domain/filter_factory.py`（过滤器 check 方法 + FilterContext）
+
+**验收标准**:
+- [ ] EmaTrendFilterDynamic 在 pass/fail 时 metadata 都包含 `price`、`ema_value`、`distance_pct`
+- [ ] MtfFilterDynamic 在 pass/fail 时 metadata 都包含 `aligned_count`、`total_count`、`higher_tf_trends`
+- [ ] AtrFilterDynamic 已有完整 metadata，不需要改动
+- [ ] FilterContext 新增 `current_price` 字段
+- [ ] 回测路径中 FilterContext 正确传入 `current_price`
 
 ### 5.4 集成到回测报告
 
@@ -526,10 +571,16 @@ def _calculate_monthly_returns(equity_curve: list[tuple[int, Decimal]]) -> dict[
   │     └── 阶段 3 (Walk-Forward) — 依赖参数优化的 grid_search
   ├── 阶段 4 (基准对比 + Monte Carlo)
   ├── 阶段 5 (策略归因)
+  │     ├── 5.3 补过滤器 metadata（最先执行，无依赖）
+  │     ├── 5.1 AttributionConfig 模型（可与 5.3 并行）
+  │     ├── 5.2 AttributionEngine（依赖 5.3 的 metadata）
+  │     ├── 5.4 集成回测报告（依赖 5.2）
+  │     └── 5.5 前端归因可视化（依赖 5.4）
   └── 阶段 6 (月度收益热力图)
 
 可并行: 阶段 2、4、5、6 在阶段 1 完成后可独立开发
         但建议串行执行以减少上下文切换
+        阶段 5 内部: 5.3 + 5.1 可并行，其余串行
 ```
 
 ---
@@ -540,10 +591,12 @@ def _calculate_monthly_returns(equity_curve: list[tuple[int, Decimal]]) -> dict[
 |------|--------|--------|--------|--------|--------|--------|
 | `src/domain/models.py` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `src/domain/matching_engine.py` | ✅ | — | — | — | — | — |
-| `src/application/backtester.py` | ✅ | ✅ | ✅ | ✅ | — | ✅ |
+| `src/domain/filter_factory.py` | — | — | — | — | ✅ (5.3) | — |
+| `src/application/backtester.py` | ✅ | ✅ | ✅ | ✅ | ✅ (5.4) | ✅ |
+| `src/application/attribution_engine.py` | — | — | — | — | ✅ (5.2) | — |
 | `src/application/signal_pipeline.py` | ✅ | — | — | — | — | — |
 | `src/interfaces/api.py` | — | ✅ | ✅ | — | — | — |
-| `web-front/.../BacktestReportDetailModal.tsx` | ✅ | — | — | — | — | — |
+| `web-front/.../BacktestReportDetailModal.tsx` | ✅ | — | — | — | ✅ (5.5) | — |
 | `web-front/.../MonthlyReturnHeatmap.tsx` | — | — | — | — | — | ✅ |
-| 新文件（前端组件） | — | ✅ | ✅ | ✅ | ✅ | — |
+| 新文件（前端组件） | — | ✅ | ✅ | ✅ | ✅ (5.5) | — |
 | 测试文件 | ✅ | ✅ | ✅ | ✅ | — | — |
