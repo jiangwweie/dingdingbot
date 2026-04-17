@@ -61,7 +61,7 @@
 |---|------|------|------|
 | 1.1 | 修复部分平仓 PnL 归因 | 2h | ✅ 已完成（18 测试通过） |
 | 1.2 | 修复净盈亏语义混淆 | 1h | ✅ 已完成 + 7 项验证通过 |
-| 1.3 | 推送代码 + 验证回测页面显示正确 | — | 待启动 |
+| 1.3 | 推送代码 + 验证回测页面显示正确 | 0.5h | ⏳ 验证已通过，待推送 |
 | 1.4 | TP-1: 回测分批止盈模拟（TP1/TP2/TP3） | 2h | ✅ 已完成（18 测试通过） |
 | 1.5 | TP-2: 实盘止盈追踪逻辑（trailing stop） | 4h | 待启动 |
 
@@ -101,8 +101,17 @@
 
 ### 1.3 推送 + 验证
 
-- 推送 dev 分支到 origin（610 个 commit）
-- 验证回测页面：负收益报告可保存、收益率百分比正确、夏普比率有值、净盈亏含成本
+- 推送 dev 分支到 origin（本地领先 2 commits: e70d13d + 4968c34）
+- 验证回测页面：✅ **全部通过**（commit 9c5e3e6 QA 验收 7/7 通过）
+
+| 验证项 | 状态 | 证据 |
+|--------|------|------|
+| 负收益报告可保存 | ✅ | TestNegativeReturnReportPersistence 2/2 UT passed |
+| 收益率百分比正确 | ✅ | 代码审查通过 + TestTotalReturnCorrectness |
+| 夏普比率有值 | ✅ | test_sharpe_ratio.py 15 个测试用例 |
+| 净盈亏含成本 | ✅ | 前端代码审查通过 |
+
+**剩余动作**: 仅需 `git push` 推送代码（前端人工目视确认可选）
 
 ### 1.4 TP-1: 回测分批止盈模拟
 
@@ -120,20 +129,20 @@
 - `src/application/backtester.py` — 回测主循环集成
 - 前端报告组件 — 分批止盈明细展示
 
-### 1.5 TP-2: 实盘止盈追踪逻辑
+### 1.5 TP-2: 实盘止盈追踪逻辑 (Virtual TTP)
 
-**问题**: 实盘模式下未实现止盈追踪逻辑（trailing stop），无法跟随行情移动止盈价位。
+**前提**: 经 2026-04-16 架构沟通确认，采用**纯虚拟止盈（Virtual TTP 影子追踪模式）**，交易所不进行实际的 TP 挂单。
 
-**修复方案**:
-- `matching_engine.py` 新增 `update_trailing_tp()` 方法
-- 每次 K 线更新时检查最高/最低价是否触发新的更高止盈位
-- 支持固定步长（step）和回撤比例（pullback）两种模式
-- 实盘信号管道集成止盈更新
+**任务分解 (识别的并行簇)**:
+- [ ] **1.5.1 [Backend] 模型与风控层**:
+  - `models.py`: `RiskManagerConfig` 新增 `tp_trailing_percent` 配置。
+  - `dynamic_risk_manager.py`: 建立 Virtual TP 本地内存状态跟踪，利用现价与 `watermark_price` 的落差触发 MARKET 信号出场。
+- [ ] **1.5.2 [Backend] 撮合支持与状态跟踪**:
+  - `matching_engine.py`: 修改回测模型和实盘管道的订单支持，满足即使不抛撤单挂单也不被阻塞的清仓事件。
+- [ ] **1.5.3 [Frontend] 参数界面**:
+  - `web-front/`: 针对 TTP 配置提供表单输入参数绑定及预览反馈。
 
-**影响文件**:
-- `src/domain/matching_engine.py` — trailing TP 逻辑
-- `src/application/signal_pipeline.py` — 实盘集成
-- 前端配置界面 — trailing TP 参数配置
+（当前设计阶段状态已确立，待启动并行研发管道）
 
 ### 已确认完成项（无需处理）
 
