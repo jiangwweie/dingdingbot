@@ -28,6 +28,12 @@ from src.infrastructure.logger import logger
 
 
 # ============================================================
+# TP 订单角色集合（支持 TP1-TP5）
+# ============================================================
+TP_ROLES = {OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5}
+
+
+# ============================================================
 # 订单优先级枚举 (内部使用)
 # ============================================================
 @dataclass
@@ -156,9 +162,9 @@ class MockMatchingEngine:
                     continue  # 该仓位在这根 K 线已死，跳过后续判定
 
             # =====================================================
-            # 2. 处理止盈单 (LIMIT + OrderRole.TP1) - T2 修复
+            # 2. 处理止盈单 (LIMIT + OrderRole.TP1-TP5) - T2 修复 + TTP 扩展
             # =====================================================
-            elif order.order_type == OrderType.LIMIT and order.order_role == OrderRole.TP1:
+            elif order.order_type == OrderType.LIMIT and order.order_role in TP_ROLES:
                 is_triggered = False
                 exec_price = Decimal('0')
 
@@ -205,7 +211,7 @@ class MockMatchingEngine:
 
         排序规则:
         1. STOP_MARKET / TRAILING_STOP (优先级最高)
-        2. LIMIT + OrderRole.TP1
+        2. LIMIT + OrderRole.TP1-TP5 (中等优先级)
         3. MARKET + OrderRole.ENTRY (优先级最低)
 
         Args:
@@ -219,7 +225,7 @@ class MockMatchingEngine:
             if order.order_type in [OrderType.STOP_MARKET, OrderType.TRAILING_STOP]:
                 return OrderPriority.SL
             # 止盈类订单 - 中等优先级
-            elif order.order_type == OrderType.LIMIT and order.order_role == OrderRole.TP1:
+            elif order.order_type == OrderType.LIMIT and order.order_role in TP_ROLES:
                 return OrderPriority.TP
             # 入场类订单 - 最低优先级
             elif order.order_type == OrderType.MARKET and order.order_role == OrderRole.ENTRY:
@@ -264,8 +270,8 @@ class MockMatchingEngine:
                 position.entry_price = exec_price
                 account.total_balance -= fee_paid  # 只扣除手续费
 
-            # 平仓单 (TP1/SL): 平仓逻辑
-            elif order.order_role in [OrderRole.TP1, OrderRole.SL]:
+            # 平仓单 (TP1-TP5/SL): 平仓逻辑
+            elif order.order_role in TP_ROLES or order.order_role == OrderRole.SL:
                 actual_filled = min(filled_qty, position.current_qty)  # 防超卖保护
                 position.current_qty -= actual_filled
 
@@ -323,7 +329,7 @@ class MockMatchingEngine:
             # 只扣除手续费
             account.total_balance -= fee_paid
 
-        elif order.order_role in [OrderRole.TP1, OrderRole.SL]:
+        elif order.order_role in TP_ROLES or order.order_role == OrderRole.SL:
             # ===== 平仓单：平仓逻辑 =====
             if position is None:
                 # 理论上不应该发生，但做防御性处理
@@ -332,20 +338,21 @@ class MockMatchingEngine:
             # 防超卖保护：截断成交数量
             actual_filled = min(order.requested_qty, position.current_qty)
 
-            # 更新仓位数量
-            position.current_qty -= actual_filled
-
             # 计算盈亏
             if position.direction == Direction.LONG:
                 gross_pnl = (exec_price - position.entry_price) * actual_filled
             else:
                 gross_pnl = (position.entry_price - exec_price) * actual_filled
 
-            logger.debug(f"[MATCHING_PNL] PnL计算：direction={position.direction.value}, "
-                         f"exec={exec_price}, entry={position.entry_price}, "
-                         f"qty={actual_filled}, gross_pnl={gross_pnl}")
-
             net_pnl = gross_pnl - fee_paid
+
+            # 设置订单成交明细（用于 close_events 收集）
+            order.actual_filled = actual_filled
+            order.close_pnl = net_pnl
+            order.close_fee = fee_paid
+
+            # 更新仓位数量
+            position.current_qty -= actual_filled
 
             # 更新 Position
             position.realized_pnl += net_pnl

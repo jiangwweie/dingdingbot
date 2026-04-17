@@ -1,6 +1,50 @@
 # Findings Log
 
-> Last updated: 2026-04-16 10:00
+> Last updated: 2026-04-17 11:30
+
+---
+
+## 2026-04-17 -- Trailing TP Phase 5 单元测试发现
+
+### 技术发现
+
+**发现 1: 水位线更新与 TTP 激活时序**
+- `evaluate_and_mutate()` 的 Step 2 更新水位线，Step 4 执行 TTP
+- 这意味着 TTP 在同一根 K 线内使用的是**更新后**的水位线
+- 测试 `test_tp_trailing_watermark_none` 验证了这个行为：初始 watermark=None 时，Step 2 会先更新，Step 4 使用新值
+
+**发现 2: original_tp_prices 初始化时机**
+- 在 `_apply_trailing_tp()` 中，首次遇到某 TP 级别时会记录原始价格
+- 使用 dict 字典存储：`position.original_tp_prices["TP1"] = order.price`
+- 这确保了 floor protection 有正确的原始价格基准
+
+**发现 3: 阶梯阈值计算方向**
+- LONG: `min_required = current_tp * (1 + step_threshold)`，新价格必须高于当前价
+- SHORT: `min_required = current_tp * (1 - step_threshold)`，新价格必须低于当前价
+- 方向性确保了频控逻辑在两个方向上都正确工作
+
+**发现 4: TP 价格 floor protection 方向**
+- LONG: `new_tp = max(original_tp_price, theoretical_tp)`，不低于原始价格
+- SHORT: `new_tp = min(original_tp_price, theoretical_tp)`，不高于原始价格
+- 确保 TTP 不会把止盈价格往不利方向移动
+
+**发现 5: 激活阈值计算**
+- LONG: `activation_price = entry + activation_rr * (tp_price - entry)`
+- SHORT: `activation_price = entry - activation_rr * (entry - tp_price)`
+- activation_rr=0.5 表示价格需要走完入场到 TP 目标的一半距离才激活追踪
+
+### 测试覆盖统计
+
+| 类别 | 测试数量 | 覆盖内容 |
+|------|----------|----------|
+| 基础功能 | 4 | 启用/禁用、激活阈值、LONG/SHORT 激活 |
+| 调价逻辑 | 5 | 水位线跟随、阶梯阈值、floor protection |
+| 多级别 | 2 | 启用级别过滤、TP2/TP3 独立追踪 |
+| 事件记录 | 3 | 事件生成、字段验证、无事件场景 |
+| 边界条件 | 6 | 已平仓、None 水位线、Decimal 精度、零仓位、激活状态持久、多 K 线追踪 |
+| 集成验证 | 2 | 设计文档示例、返回值类型 |
+
+**总计**: 22 个测试全部通过
 
 ---
 

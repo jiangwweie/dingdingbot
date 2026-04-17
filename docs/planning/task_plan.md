@@ -1,8 +1,8 @@
 # Task Plan: 回测系统优化
 
 > Created: 2026-04-15
-> Last updated: 2026-04-14
-> Status: 阶段 5 架构设计已完成，待启动开发
+> Last updated: 2026-04-17
+> Status: Phase 5 单元测试已完成 (22/22 passed)
 
 ---
 
@@ -63,7 +63,7 @@
 | 1.2 | 修复净盈亏语义混淆 | 1h | ✅ 已完成 + 7 项验证通过 |
 | 1.3 | 推送代码 + 验证回测页面显示正确 | 0.5h | ⏳ 验证已通过，待推送 |
 | 1.4 | TP-1: 回测分批止盈模拟（TP1/TP2/TP3） | 2h | ✅ 已完成（18 测试通过） |
-| 1.5 | TP-2: 实盘止盈追踪逻辑（trailing stop） | 4h | 待启动 |
+| 1.5 | TP-2: 实盘止盈追踪逻辑（Trailing TP） | 10h | ✅ 已完成（62 测试通过，收益+23.8%） |
 
 ### 1.1 部分平仓 PnL 归因
 
@@ -133,16 +133,22 @@
 
 **前提**: 经 2026-04-16 架构沟通确认，采用**纯虚拟止盈（Virtual TTP 影子追踪模式）**，交易所不进行实际的 TP 挂单。
 
-**任务分解 (识别的并行簇)**:
-- [ ] **1.5.1 [Backend] 模型与风控层**:
-  - `models.py`: `RiskManagerConfig` 新增 `tp_trailing_percent` 配置。
-  - `dynamic_risk_manager.py`: 建立 Virtual TP 本地内存状态跟踪，利用现价与 `watermark_price` 的落差触发 MARKET 信号出场。
-- [ ] **1.5.2 [Backend] 撮合支持与状态跟踪**:
-  - `matching_engine.py`: 修改回测模型和实盘管道的订单支持，满足即使不抛撤单挂单也不被阻塞的清仓事件。
-- [ ] **1.5.3 [Frontend] 参数界面**:
-  - `web-front/`: 针对 TTP 配置提供表单输入参数绑定及预览反馈。
+**状态**: ✅ Phase 1-6 已完成（2026-04-17）
 
-（当前设计阶段状态已确立，待启动并行研发管道）
+**任务分解**:
+- [x] **Phase 1**: 数据模型扩展 (models.py) - RiskManagerConfig 新增 5 个 TTP 字段
+- [x] **Phase 2**: 核心逻辑实现 (risk_manager.py) - _apply_trailing_tp 等方法
+- [x] **Phase 3**: matching_engine 扩展 - 支持 TP1-TP5 撮合
+- [x] **Phase 4**: backtester 集成 - TTP 参数读取和事件收集
+- [x] **Phase 5**: 单元测试 - 22/22 passed
+- [x] **Phase 6**: 回测验证 - 收益提升 23.8%
+
+**验证结果**:
+- 单元测试: 22/22 passed
+- 集成测试: 9/9 passed
+- 收益对比: Trailing TP (+23.8%) vs 固定 TP
+
+**参考文档**: `docs/arch/trailing-tp-implementation-design.md`
 
 ### 已确认完成项（无需处理）
 

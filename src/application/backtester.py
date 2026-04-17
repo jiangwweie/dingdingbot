@@ -1411,6 +1411,14 @@ class Backtester:
                         await order_repository.save_batch(new_orders)
                         logger.debug(f"已保存 {len(new_orders)} 个 TP/SL 订单到数据库")
 
+                    # TTP: 记录原始 TP 价格到 Position（用于 Trailing TP 底线保护）
+                    position = positions_map.get(order.signal_id)
+                    if position:
+                        for new_order in new_orders:
+                            if new_order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3,
+                                                        OrderRole.TP4, OrderRole.TP5] and new_order.price is not None:
+                                position.original_tp_prices[new_order.order_role.value] = new_order.price
+
             # Track executed orders
             for order in executed:
                 all_executed_orders.append(order)
@@ -1483,15 +1491,48 @@ class Backtester:
             # 【新增】Step 8: 风控状态机评估与状态突变
             # 在撮合引擎撮合订单后，对每个活跃仓位执行风控状态评估
             # T+1 时序声明：TP1 引发的 SL 修改在下一根 K 线生效
+            # TTP: 从 kv_configs 读取 Trailing TP 参数
+            tp_trailing_enabled = (
+                kv_configs.get('tp_trailing_enabled', False)
+                if kv_configs else False
+            )
+            tp_trailing_percent = (
+                Decimal(str(kv_configs.get('tp_trailing_percent', '0.01')))
+                if kv_configs and kv_configs.get('tp_trailing_percent') is not None
+                else Decimal('0.01')
+            )
+            tp_step_threshold = (
+                Decimal(str(kv_configs.get('tp_step_threshold', '0.003')))
+                if kv_configs and kv_configs.get('tp_step_threshold') is not None
+                else Decimal('0.003')
+            )
+            tp_trailing_enabled_levels = (
+                kv_configs.get('tp_trailing_enabled_levels', ['TP1'])
+                if kv_configs and kv_configs.get('tp_trailing_enabled_levels') is not None
+                else ['TP1']
+            )
+            tp_trailing_activation_rr = (
+                Decimal(str(kv_configs.get('tp_trailing_activation_rr', '0.5')))
+                if kv_configs and kv_configs.get('tp_trailing_activation_rr') is not None
+                else Decimal('0.5')
+            )
+
             dynamic_risk_manager = DynamicRiskManager(
                 config=RiskManagerConfig(
                     trailing_percent=Decimal('0.02'),      # 默认 2%
                     step_threshold=Decimal('0.005'),       # 默认 0.5%
+                    tp_trailing_enabled=tp_trailing_enabled,
+                    tp_trailing_percent=tp_trailing_percent,
+                    tp_step_threshold=tp_step_threshold,
+                    tp_trailing_enabled_levels=tp_trailing_enabled_levels,
+                    tp_trailing_activation_rr=tp_trailing_activation_rr,
                 ),
             )
             for position in positions_map.values():
                 if not position.is_closed and position.current_qty > 0:
-                    dynamic_risk_manager.evaluate_and_mutate(kline, position, active_orders)
+                    # TTP: 收集 TP 调价事件
+                    tp_events = dynamic_risk_manager.evaluate_and_mutate(kline, position, active_orders)
+                    all_close_events.extend(tp_events)
 
             # ===== BT-2: 资金费用计算 =====
             # 在动态风险管理之后，对每个未平仓的持仓计算资金费用

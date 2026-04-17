@@ -1109,6 +1109,16 @@ class Position(FinancialModel):
     # SHORT: 追踪入场后的最低价 (Low Watermark)
     watermark_price: Optional[Decimal] = None
 
+    # Trailing Take Profit 状态追踪
+    tp_trailing_activated: bool = Field(
+        default=False,
+        description="Trailing TP 是否已激活 (价格达到激活阈值后标记为 True)"
+    )
+    original_tp_prices: Dict[str, Decimal] = Field(
+        default_factory=dict,
+        description="各 TP 级别的原始价格快照 (如 {'TP1': Decimal('65000')})"
+    )
+
     # 业绩追踪
     realized_pnl: Decimal = Field(default=Decimal('0'), description="已实现盈亏 (落袋为安)")
     total_fees_paid: Decimal = Field(default=Decimal('0'), description="累计支付的手续费")
@@ -1890,7 +1900,9 @@ class RiskManagerConfig(BaseModel):
     动态风控管理器配置
 
     P2-1: 魔法数字配置化 - 将硬编码的 trailing_percent 和 step_threshold 提取到配置类
+    TTP: Trailing Take Profit 配置扩展
     """
+    # ===== Trailing Stop Loss 配置 =====
     trailing_percent: Decimal = Field(
         default=Decimal('0.02'),
         description="移动止损回撤容忍度 (默认 2%)"
@@ -1898,6 +1910,28 @@ class RiskManagerConfig(BaseModel):
     step_threshold: Decimal = Field(
         default=Decimal('0.005'),
         description="阶梯阈值 (默认 0.5%)"
+    )
+
+    # ===== Trailing Take Profit 配置 =====
+    tp_trailing_enabled: bool = Field(
+        default=False,
+        description="是否启用 Trailing TP (默认关闭，需显式开启)"
+    )
+    tp_trailing_percent: Decimal = Field(
+        default=Decimal('0.01'),
+        description="TP 回撤容忍度 (默认 1%，比 SL 更敏感)"
+    )
+    tp_step_threshold: Decimal = Field(
+        default=Decimal('0.003'),
+        description="TP 阶梯阈值 (默认 0.3%，比 SL 更敏感)"
+    )
+    tp_trailing_enabled_levels: List[str] = Field(
+        default_factory=lambda: ["TP1"],
+        description="启用 trailing 的 TP 级别列表 (如 ['TP1', 'TP2'])"
+    )
+    tp_trailing_activation_rr: Decimal = Field(
+        default=Decimal('0.5'),
+        description="Trailing TP 激活阈值 (RR 倍数)：价格达到 TP 价格的 50% 时才开始追踪"
     )
 
 
