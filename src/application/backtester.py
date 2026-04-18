@@ -1580,68 +1580,64 @@ class Backtester:
                 if drawdown > max_drawdown:
                     max_drawdown = drawdown
 
-        # ── 反填 pnl_ratio：从 close_events → position → attempt ──
+        # ── 反填 pnl_ratio：从 close_events 金额维度计算 R-multiple ──
         # v3_pms 不调用 _calculate_attempt_outcome()，需要从实际成交数据反填
+        # 使用金额维度：R = 累计 PnL / 初始风险金额（正确处理多级止盈场景）
         if all_close_events and all_attempts:
-            # 1. 构建 position_id → 累计 close_pnl 映射 + 最终出场原因
-            position_pnl_map: Dict[str, Decimal] = {}  # {position_id: total_close_pnl}
-            position_exit_reason_map: Dict[str, str] = {}  # {position_id: last_exit_reason}
+            # 1. 构建 signal_id → (累计 PnL, 初始风险金额) 映射
+            sig_pnl_map: Dict[str, Decimal] = {}    # {signal_id: total_pnl}
+            sig_risk_map: Dict[str, Decimal] = {}   # {signal_id: risk_amount}
+            sig_exit_reason_map: Dict[str, str] = {} # {signal_id: last_exit_reason}
+
             for event in all_close_events:
                 pid = event.position_id
-                if pid not in position_pnl_map:
-                    position_pnl_map[pid] = Decimal('0')
+                # 通过 position_summaries 桥接 position_id → signal_id
+                signal_id = None
+                for ps in position_summaries:
+                    if ps.position_id == pid:
+                        signal_id = ps.signal_id
+                        break
+                if not signal_id:
+                    continue
+
+                # 首次遇到该 signal，记录初始风险金额
+                if signal_id not in sig_risk_map:
+                    position = positions_map.get(signal_id)
+                    expected_sl = signal_sl_map.get(signal_id)
+                    if position and expected_sl and abs(position.entry_price - expected_sl) > 0:
+                        risk_per_unit = abs(position.entry_price - expected_sl)
+                        sig_risk_map[signal_id] = risk_per_unit * position.quantity
+                    else:
+                        sig_risk_map[signal_id] = Decimal('0')
+
+                if signal_id not in sig_pnl_map:
+                    sig_pnl_map[signal_id] = Decimal('0')
                 if event.close_pnl is not None:
-                    position_pnl_map[pid] += event.close_pnl
+                    sig_pnl_map[signal_id] += event.close_pnl
                 if event.exit_reason:
-                    position_exit_reason_map[pid] = event.exit_reason
+                    sig_exit_reason_map[signal_id] = event.exit_reason
 
-            # 2. 构建 signal_id → pnl_ratio (R-multiple) 映射
-            #    通过 PositionSummary (含 position_id + signal_id + exit_price) 作为桥接
-            sid_to_pnl_ratio: Dict[str, float] = {}
-            sid_to_exit_reason: Dict[str, str] = {}
-            for ps in position_summaries:
-                if ps.exit_price is None:
-                    continue
-                # 只处理有平仓事件的 position
-                if ps.position_id not in position_pnl_map:
-                    continue
-                position = positions_map.get(ps.signal_id)
-                if not position:
-                    continue
-                expected_sl = signal_sl_map.get(ps.signal_id)
-                risk_per_unit = abs(position.entry_price - expected_sl) if expected_sl else Decimal('0')
-
-                if risk_per_unit > Decimal('0'):
-                    # 价格维度 R-multiple: (方向性价差) / 每单位风险
-                    if position.direction == Direction.LONG:
-                        price_gain = ps.exit_price - position.entry_price
-                    else:
-                        price_gain = position.entry_price - ps.exit_price
-                    sid_to_pnl_ratio[ps.signal_id] = float(price_gain / risk_per_unit)
-                else:
-                    # 无法计算 R-multiple（entry == sl 或无 sl），用 PnL 符号退化为 ±1/0
-                    total_pnl = position_pnl_map[ps.position_id]
-                    if total_pnl > Decimal('0'):
-                        sid_to_pnl_ratio[ps.signal_id] = 1.0
-                    elif total_pnl < Decimal('0'):
-                        sid_to_pnl_ratio[ps.signal_id] = -1.0
-                    else:
-                        sid_to_pnl_ratio[ps.signal_id] = 0.0
-
-                if ps.position_id in position_exit_reason_map:
-                    sid_to_exit_reason[ps.signal_id] = position_exit_reason_map[ps.position_id]
-
-            # 3. 反填到 all_attempts
+            # 2. 反填到 all_attempts
             backfill_count = 0
             for attempt in all_attempts:
                 if attempt.final_result == "SIGNAL_FIRED" and attempt.pnl_ratio is None:
                     sid = attempt.signal_id
-                    if sid and sid in sid_to_pnl_ratio:
-                        attempt._pnl_ratio = sid_to_pnl_ratio[sid]
-                        attempt._exit_reason = sid_to_exit_reason.get(sid)
+                    if sid and sid in sig_risk_map:
+                        risk = sig_risk_map[sid]
+                        pnl = sig_pnl_map.get(sid, Decimal('0'))
+                        if risk > Decimal('0'):
+                            # 金额维度 R-multiple: 累计 PnL / 初始风险金额
+                            attempt._pnl_ratio = float(pnl / risk)
+                        elif pnl > Decimal('0'):
+                            attempt._pnl_ratio = 1.0
+                        elif pnl < Decimal('0'):
+                            attempt._pnl_ratio = -1.0
+                        else:
+                            attempt._pnl_ratio = 0.0
+                        attempt._exit_reason = sig_exit_reason_map.get(sid)
                         backfill_count += 1
             if backfill_count > 0:
-                logger.info(f"[BACKTEST_PNL_RATIO] 反填 pnl_ratio 完成: {backfill_count} 个 attempts")
+                logger.info(f"[BACKTEST_PNL_RATIO] 反填 pnl_ratio 完成: {backfill_count} 个 attempts (金额维度)")
 
         # 阶段 5.4: 计算策略归因分析（仅 SIGNAL_FIRED attempts）
         signal_attributions = None

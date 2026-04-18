@@ -93,6 +93,7 @@ class BacktestReportRepository:
                 total_pnl           TEXT NOT NULL DEFAULT '0',
                 total_fees_paid     TEXT NOT NULL DEFAULT '0',
                 total_slippage_cost TEXT NOT NULL DEFAULT '0',
+                total_funding_cost  TEXT NOT NULL DEFAULT '0',
                 max_drawdown        TEXT NOT NULL DEFAULT '0',
                 sharpe_ratio        TEXT,
                 positions_summary   TEXT,
@@ -175,6 +176,9 @@ class BacktestReportRepository:
 
         # Migrate existing table if old CHECK constraints are present
         await self._migrate_existing_table()
+
+        # 确保旧表有 total_funding_cost 列（CREATE TABLE IF NOT EXISTS 不会加列）
+        await self._ensure_total_funding_cost_column()
 
     async def close(self) -> None:
         """Clear local connection reference (pool-managed connections are never closed by repos)."""
@@ -388,9 +392,10 @@ class BacktestReportRepository:
                 backtest_start, backtest_end, created_at,
                 initial_balance, final_balance, total_return,
                 total_trades, winning_trades, losing_trades, win_rate,
-                total_pnl, total_fees_paid, total_slippage_cost, max_drawdown,
+                total_pnl, total_fees_paid, total_slippage_cost,
+                total_funding_cost, max_drawdown,
                 sharpe_ratio, positions_summary, monthly_returns
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             report_id,
             report.strategy_id,
@@ -413,6 +418,7 @@ class BacktestReportRepository:
             self._decimal_to_str(report.total_pnl),
             self._decimal_to_str(report.total_fees_paid),
             self._decimal_to_str(report.total_slippage_cost),
+            self._decimal_to_str(report.total_funding_cost),
             self._decimal_to_str(report.max_drawdown),
             self._decimal_to_str(report.sharpe_ratio) if report.sharpe_ratio else None,
             positions_summary,
@@ -515,12 +521,22 @@ class BacktestReportRepository:
         """, (report_id,))
         attr_row = await attr_cursor.fetchone()
         if attr_row:
-            if attr_row["signal_attributions"]:
-                signal_attributions = json.loads(attr_row["signal_attributions"])
-            if attr_row["aggregate_attribution"]:
-                aggregate_attribution = json.loads(attr_row["aggregate_attribution"])
-            if attr_row["analysis_dimensions"]:
-                analysis_dimensions = json.loads(attr_row["analysis_dimensions"])
+            for col_name, attr_val in [
+                ("signal_attributions", attr_row["signal_attributions"]),
+                ("aggregate_attribution", attr_row["aggregate_attribution"]),
+                ("analysis_dimensions", attr_row["analysis_dimensions"]),
+            ]:
+                if attr_val:
+                    try:
+                        parsed = json.loads(attr_val)
+                        if col_name == "signal_attributions":
+                            signal_attributions = parsed
+                        elif col_name == "aggregate_attribution":
+                            aggregate_attribution = parsed
+                        else:
+                            analysis_dimensions = parsed
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"归因数据 {col_name} JSON 解析失败，已忽略: {e}")
 
         return PMSBacktestReport(
             strategy_id=row["strategy_id"],
@@ -537,6 +553,7 @@ class BacktestReportRepository:
             total_pnl=self._str_to_decimal(row["total_pnl"]),
             total_fees_paid=self._str_to_decimal(row["total_fees_paid"]),
             total_slippage_cost=self._str_to_decimal(row["total_slippage_cost"]),
+            total_funding_cost=self._str_to_decimal(row["total_funding_cost"]) if "total_funding_cost" in row.keys() else Decimal('0'),
             max_drawdown=self._str_to_decimal(row["max_drawdown"]),
             sharpe_ratio=self._str_to_decimal(row["sharpe_ratio"]) if row["sharpe_ratio"] else None,
             positions=self._deserialize_positions_summary(row["positions_summary"]),
@@ -792,6 +809,20 @@ class BacktestReportRepository:
             "pageSize": page_size
         }
 
+    async def _ensure_total_funding_cost_column(self) -> None:
+        """确保 backtest_reports 表有 total_funding_cost 列（旧表升级兼容）。"""
+        try:
+            cursor = await self._db.execute("PRAGMA table_info(backtest_reports)")
+            columns = {row["name"] for row in await cursor.fetchall()}
+            if "total_funding_cost" not in columns:
+                await self._db.execute(
+                    "ALTER TABLE backtest_reports ADD COLUMN total_funding_cost TEXT NOT NULL DEFAULT '0'"
+                )
+                await self._db.commit()
+                logger.info("[MIGRATE] backtest_reports 表已添加 total_funding_cost 列")
+        except Exception as e:
+            logger.warning(f"[MIGRATE] 添加 total_funding_cost 列失败（可能已存在）: {e}")
+
     async def _migrate_existing_table(self) -> None:
         """
         迁移 backtest_reports 表，移除旧 CHECK 约束。
@@ -849,6 +880,7 @@ class BacktestReportRepository:
                     total_pnl           TEXT NOT NULL DEFAULT '0',
                     total_fees_paid     TEXT NOT NULL DEFAULT '0',
                     total_slippage_cost TEXT NOT NULL DEFAULT '0',
+                    total_funding_cost  TEXT NOT NULL DEFAULT '0',
                     max_drawdown        TEXT NOT NULL DEFAULT '0',
                     sharpe_ratio        TEXT,
                     positions_summary   TEXT,
@@ -856,11 +888,37 @@ class BacktestReportRepository:
                 )
             """)
 
-            # 5. Copy data from old table
-            await self._db.execute("""
-                INSERT INTO backtest_reports
-                SELECT * FROM backtest_reports_old
-            """)
+            # 5. Copy data from old table (handle column count mismatch)
+            # 旧表可能没有 total_funding_cost 列，需要逐列映射
+            try:
+                await self._db.execute("""
+                    INSERT INTO backtest_reports (
+                        id, strategy_id, strategy_name, strategy_version,
+                        strategy_snapshot, parameters_hash, symbol, timeframe,
+                        backtest_start, backtest_end, created_at,
+                        initial_balance, final_balance, total_return,
+                        total_trades, winning_trades, losing_trades, win_rate,
+                        total_pnl, total_fees_paid, total_slippage_cost,
+                        total_funding_cost, max_drawdown,
+                        sharpe_ratio, positions_summary, monthly_returns
+                    )
+                    SELECT
+                        id, strategy_id, strategy_name, strategy_version,
+                        strategy_snapshot, parameters_hash, symbol, timeframe,
+                        backtest_start, backtest_end, created_at,
+                        initial_balance, final_balance, total_return,
+                        total_trades, winning_trades, losing_trades, win_rate,
+                        total_pnl, total_fees_paid, total_slippage_cost,
+                        '0', max_drawdown,
+                        sharpe_ratio, positions_summary, monthly_returns
+                    FROM backtest_reports_old
+                """)
+            except Exception:
+                # 旧表已有 total_funding_cost 列时，直接 SELECT *
+                await self._db.execute("""
+                    INSERT INTO backtest_reports
+                    SELECT * FROM backtest_reports_old
+                """)
 
             # 6. Drop old table
             await self._db.execute("DROP TABLE backtest_reports_old")
