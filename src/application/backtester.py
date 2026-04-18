@@ -1606,7 +1606,7 @@ class Backtester:
                     expected_sl = signal_sl_map.get(signal_id)
                     if position and expected_sl and abs(position.entry_price - expected_sl) > 0:
                         risk_per_unit = abs(position.entry_price - expected_sl)
-                        sig_risk_map[signal_id] = risk_per_unit * position.quantity
+                        sig_risk_map[signal_id] = risk_per_unit * position.current_qty
                     else:
                         sig_risk_map[signal_id] = Decimal('0')
 
