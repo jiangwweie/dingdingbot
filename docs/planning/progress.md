@@ -1,6 +1,36 @@
 # Progress Log
 
-> Last updated: 2026-04-18 12:00
+> Last updated: 2026-04-18 12:30
+
+---
+
+## 2026-04-18 12:30 -- 代码审查修复（3 个问题）
+
+### 完成内容
+
+- **问题 1（高）**：`total_funding_cost` 未持久化
+  - `backtest_repository.py:96` — 表定义加 `total_funding_cost TEXT NOT NULL DEFAULT '0'`
+  - `backtest_repository.py:392,415` — save_report() 写入该字段
+  - `backtest_repository.py:540` — get_report() 读取该字段（兼容旧表）
+  - `backtest_repository.py:181-193` — 新增 `_ensure_total_funding_cost_column()` 迁移兜底
+  - `backtest_repository.py:866,874-896` — 迁移逻辑中处理列数不匹配
+
+- **问题 2（中）**：`json.loads` 无异常处理
+  - `backtest_repository.py:518-531` — 归因数据解析失败时 warning 日志，不阻塞报告读取
+
+- **问题 3（中）**：R-multiple 改用金额维度
+  - `backtester.py:1583-1636` — 从价格维度 `(exit-entry)/|entry-sl|` 改为金额维度 `累计PnL/初始风险金额`
+  - 修复多级止盈场景（TP1+TP2+SL）下价格维度偏离实际的问题
+
+### 审查报告
+
+- models.py：无问题（SignalAttempt 是 dataclass，非 Pydantic；analysis_dimensions 显式声明）
+- backtest_repository.py：3 个问题（已修复）
+- backtester.py：1 个设计缺陷（已修复）
+
+### 提交
+
+- `72a984d` fix(attribution): 代码审查修复 — funding_cost持久化 + JSON安全 + R-multiple金额维度
 
 ---
 
