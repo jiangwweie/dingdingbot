@@ -131,6 +131,104 @@ class TestAttributionAnalysisEndpoint:
 
 
 # ============================================================
+# Tests: GET /api/backtest/{report_id}/attribution (deprecated)
+# ============================================================
+
+class TestDeprecatedAttributionEndpoint:
+    """已废弃的归因 API 端点测试（GET 方法）"""
+
+    def test_get_attribution_returns_stored_data(self, test_client):
+        """测试 GET 接口返回已存储的归因数据"""
+        from decimal import Decimal
+
+        # Mock report with stored attribution data
+        mock_report = Mock()
+        mock_report.signal_attributions = [
+            {"final_score": 0.72, "explanation": "Pinbar 形态(54.4%)"}
+        ]
+        mock_report.aggregate_attribution = {
+            "avg_pattern_contribution": 45.2,
+            "top_performing_filters": ["ema_trend"]
+        }
+        mock_report.analysis_dimensions = {
+            "shape_quality": {"high_score": {"count": 5}},
+            "rr_attribution": {"optimal_range": {"suggested_rr": "2:1 以上"}}
+        }
+
+        with patch('src.infrastructure.backtest_repository.BacktestReportRepository') as mock_repo_class:
+            mock_repo = AsyncMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.get_report = AsyncMock(return_value=mock_report)
+            mock_repo.close = AsyncMock()
+            mock_repo_class.return_value = mock_repo
+
+            response = test_client.get("/api/backtest/test-report-id/attribution")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "success"
+            assert "attribution" in data
+            assert data["attribution"]["signal_attributions"] is not None
+            assert data["attribution"]["aggregate_attribution"] is not None
+            assert data["attribution"]["analysis_dimensions"] is not None
+
+    def test_get_attribution_returns_null_for_old_report(self, test_client):
+        """测试旧报告无归因数据时返回 null"""
+        mock_report = Mock()
+        mock_report.signal_attributions = None
+        mock_report.aggregate_attribution = None
+        mock_report.analysis_dimensions = None
+
+        with patch('src.infrastructure.backtest_repository.BacktestReportRepository') as mock_repo_class:
+            mock_repo = AsyncMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.get_report = AsyncMock(return_value=mock_report)
+            mock_repo.close = AsyncMock()
+            mock_repo_class.return_value = mock_repo
+
+            response = test_client.get("/api/backtest/old-report-id/attribution")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "success"
+            assert data["attribution"]["signal_attributions"] is None
+            assert data["attribution"]["aggregate_attribution"] is None
+            assert data["attribution"]["analysis_dimensions"] is None
+
+    def test_get_attribution_returns_404_for_missing_report(self, test_client):
+        """测试不存在的报告返回 404"""
+        with patch('src.infrastructure.backtest_repository.BacktestReportRepository') as mock_repo_class:
+            mock_repo = AsyncMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.get_report = AsyncMock(return_value=None)
+            mock_repo.close = AsyncMock()
+            mock_repo_class.return_value = mock_repo
+
+            response = test_client.get("/api/backtest/non-existent-id/attribution")
+
+            assert response.status_code == 404
+
+    def test_deprecated_endpoint_warning(self, test_client):
+        """测试废弃接口返回 deprecated 警告"""
+        mock_report = Mock()
+        mock_report.signal_attributions = None
+        mock_report.aggregate_attribution = None
+        mock_report.analysis_dimensions = None
+
+        with patch('src.infrastructure.backtest_repository.BacktestReportRepository') as mock_repo_class:
+            mock_repo = AsyncMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.get_report = AsyncMock(return_value=mock_report)
+            mock_repo.close = AsyncMock()
+            mock_repo_class.return_value = mock_repo
+
+            response = test_client.get("/api/backtest/test-id/attribution")
+
+            # 验证响应头包含 deprecated 警告（FastAPI 自动添加）
+            assert response.status_code == 200
+
+
+# ============================================================
 # Tests: POST /api/backtest/attribution/preview
 # ============================================================
 

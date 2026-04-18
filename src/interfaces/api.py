@@ -1932,92 +1932,50 @@ class AttributionAnalysisResponse(BaseModel):
     attribution: AttributionReport
 
 
-@app.post("/api/backtest/{report_id}/attribution", response_model=AttributionAnalysisResponse)
-async def analyze_backtest_attribution(
-    report_id: str,
-):
+@app.get(
+    "/api/backtest/{report_id}/attribution",
+    deprecated=True,
+    summary="[已废弃] 请使用 GET /api/v3/backtest/reports/{report_id}"
+)
+async def get_backtest_attribution(report_id: str):
     """
-    对回测报告进行策略归因分析
+    获取回测报告归因分析数据
 
-    **BT-4 策略归因分析** - 四个维度：
-    - B: 形态质量归因（Pinbar 评分与表现关系）
-    - C: 过滤器归因（各过滤器对胜率/回撤的影响）
-    - D: 市场趋势归因（顺势/逆势交易表现）
-    - F: 盈亏比归因（最优盈亏比区间识别）
+    **已废弃**: 归因数据已包含在报告详情 API 响应中，请使用：
+    GET /api/v3/backtest/reports/{report_id}
 
-    ## 请求参数
-    - `report_id`: 回测报告 ID（从 `/api/v3/backtest/reports` 获取）
-
-    ## 返回示例
-    ```json
-    {
-      "status": "success",
-      "attribution": {
-        "shape_quality": {
-          "high_score": {"count": 10, "win_rate": 0.65, "avg_pnl_ratio": 1.8},
-          "medium_score": {"count": 15, "win_rate": 0.53, "avg_pnl_ratio": 1.2},
-          "low_score": {"count": 8, "win_rate": 0.38, "avg_pnl_ratio": 0.5}
-        },
-        "filter_attribution": {
-          "ema_filter": {"enabled_trades": 25, "passed_trades": 20, "win_rate_with_ema": 0.60},
-          "mtf_filter": {"enabled_trades": 25, "passed_trades": 18, "win_rate_with_mtf": 0.61},
-          "rejection_stats": {"ema_trend": 5, "mtf": 7}
-        },
-        "trend_attribution": {
-          "bullish_trend": {"trade_count": 15, "win_rate": 0.67, "avg_pnl": 1.5},
-          "bearish_trend": {"trade_count": 18, "win_rate": 0.56, "avg_pnl": 1.2},
-          "alignment_stats": {"aligned_trades": 28, "against_trend_trades": 5}
-        },
-        "rr_attribution": {
-          "high_rr": {"count": 8, "win_rate": 0.75},
-          "medium_rr": {"count": 12, "win_rate": 0.58},
-          "low_rr": {"count": 5, "win_rate": 0.40},
-          "optimal_range": {"suggested_rr": "high", "reasoning": "高盈亏比区间胜率最高"}
-        }
-      }
-    }
-    ```
+    返回数据结构：
+    - signal_attributions: 信号级归因列表
+    - aggregate_attribution: 聚合归因摘要
+    - analysis_dimensions: 四维度分析结果
     """
-    from src.application.attribution_analyzer import AttributionAnalyzer
     from src.infrastructure.backtest_repository import BacktestReportRepository
 
     try:
-        # 1. 从数据库加载回测报告
-        backtest_repository = BacktestReportRepository()
-        await backtest_repository.initialize()
+        repository = BacktestReportRepository()
+        await repository.initialize()
 
         try:
-            report_entity = await backtest_repository.get_report(report_id)
+            report = await repository.get_report(report_id)
+
+            if not report:
+                raise HTTPException(status_code=404, detail="回测报告不存在")
+
+            return {
+                "status": "success",
+                "attribution": {
+                    "signal_attributions": report.signal_attributions,
+                    "aggregate_attribution": report.aggregate_attribution,
+                    "analysis_dimensions": report.analysis_dimensions,
+                }
+            }
         finally:
-            await backtest_repository.close()
-
-        if not report_entity:
-            raise HTTPException(status_code=404, detail=f"Backtest report {report_id} not found")
-
-        # 2. 将报告实体转换为字典格式
-        # 注意：report_entity 是 ORM 对象，attempts 存储为 JSON 字符串
-        import json
-        attempts = report_entity.attempts
-        if isinstance(attempts, str):
-            attempts = json.loads(attempts)
-
-        backtest_report_dict = {
-            "attempts": attempts or [],
-        }
-
-        # 3. 执行归因分析
-        analyzer = AttributionAnalyzer()
-        attribution_report = analyzer.analyze(backtest_report_dict)
-
-        return {
-            "status": "success",
-            "attribution": attribution_report,
-        }
+            await repository.close()
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Attribution analysis failed for report_id={report_id}: {type(e).__name__} - {str(e)}")
+        logger.error(f"获取归因数据失败 report_id={report_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

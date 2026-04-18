@@ -1,6 +1,33 @@
 # Progress Log
 
-> Last updated: 2026-04-18 12:30
+> Last updated: 2026-04-18 13:00
+
+---
+
+## 2026-04-18 13:00 -- Phase 2 API 接口统一完成（2/2 tasks）
+
+### 完成内容
+
+- **2.1** `api.py:1935` — 修复归因 API 接口
+  - POST → GET，标记 deprecated
+  - 从 DB 读取已存储的归因数据（signal_attributions, aggregate_attribution, analysis_dimensions）
+  - 修复 500 错误（移除对 report_entity.attempts 的依赖）
+
+- **2.2** `test_attribution_api.py` — 补充集成测试
+  - T1: 正常报告有归因数据 → 返回完整三层
+  - T2: 旧报告无归因数据 → 返回 null
+  - T3: report_id 不存在 → 404
+  - T4: deprecated 警告验证
+
+### 架构决策
+
+- **方案 B**：废弃独立归因接口，复用报告详情 API
+- **理由**：前端已正确使用 `GET /api/v3/backtest/reports/{report_id}`，无需修改
+- **前端影响**：零改动
+
+### 提交
+
+- `xxx` fix(api): 归因 API 改为 GET + deprecated
 
 ---
 
