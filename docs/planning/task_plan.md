@@ -1,8 +1,8 @@
 # Task Plan: 回测系统优化
 
 > Created: 2026-04-15
-> Last updated: 2026-04-17
-> Status: Phase 5 单元测试已完成 (22/22 passed)
+> Last updated: 2026-04-18
+> Status: Phase 1 归因数据持久化修复已完成（6/6 tasks）
 
 ---
 
@@ -375,8 +375,8 @@ async def run_monte_carlo(
 |---|------|------|------|------|
 | **5.3** | 补充过滤器 metadata（EMA distance, MTF alignment） | 0.5h | ✅ 已完成 | **无**（最先执行） |
 | 5.1 | 新增 AttributionConfig 模型 + Pydantic 校验 | 0.5h | ✅ 已完成 | 无 |
-| 5.2 | 新增 AttributionEngine（单信号归因 + 批量归因） | 1.5h | 待启动 | 5.3 |
-| 5.4 | 集成到回测报告输出 + KV 权重读取 | 0.5h | 待启动 | 5.2 |
+| 5.2 | 新增 AttributionEngine（单信号归因 + 批量归因） | 1.5h | ✅ 已完成 | 5.3 |
+| 5.4 | 集成到回测报告输出 + KV 权重读取 | 0.5h | ✅ 已完成 | 5.2 |
 | 5.5 | 前端归因可视化（回测报告信号详情页） | 1h | 待启动 | 5.4 |
 
 ### 5.1 AttributionConfig 模型
@@ -615,3 +615,51 @@ def _calculate_monthly_returns(equity_curve: list[tuple[int, Decimal]]) -> dict[
 | `web-front/.../MonthlyReturnHeatmap.tsx` | — | — | — | — | — | ✅ |
 | 新文件（前端组件） | — | ✅ | ✅ | ✅ | ✅ (5.5) | — |
 | 测试文件 | ✅ | ✅ | ✅ | ✅ | — | — |
+
+---
+
+## 阶段 5.6: 归因数据持久化修复（P0, 4h）— ✅ 已完成
+
+> **架构决策**: 独立 `backtest_attributions` 表（Option C），与 `position_close_events` 同模式（FK + CASCADE）
+> **诊断报告**: `docs/diagnostic-reports/DA-20260418-001-backtest-loss-analysis.md`
+
+### 问题
+
+归因数据在内存中计算后，`save_report()` 不写入 DB，`get_report()` 不读取。`AttributionAnalyzer` 四维度分析因 `pnl_ratio` 全为 None 而输出全 0。
+
+### 任务清单
+
+| # | 任务 | 文件 | 状态 | 依赖 |
+|---|------|------|------|------|
+| 1.1 | PMSBacktestReport 加 analysis_dimensions 字段 | `models.py` | ✅ | - |
+| 1.2 | 新建 backtest_attributions 表 | `backtest_repository.py` | ✅ | - |
+| 1.3 | save_report() 写入归因 JSON | `backtest_repository.py` | ✅ | 1.2 |
+| 1.4 | get_report() JOIN 读取归因 JSON | `backtest_repository.py` | ✅ | 1.2 |
+| 1.5 | 从 close_events 反填 pnl_ratio 到 all_attempts | `backtester.py` | ✅ | - |
+| 1.6 | 调用 AttributionAnalyzer.analyze() | `backtester.py` | ✅ | 1.1, 1.5 |
+
+### 关键修改
+
+- `models.py`: `PMSBacktestReport.analysis_dimensions` + `SignalAttempt._signal_id`
+- `backtest_repository.py`: `backtest_attributions` 表 + save/read 归因 JSON
+- `backtester.py`: `signal_sl_map` 追踪 + R-multiple 反填 + AttributionAnalyzer 集成
+
+### 待完成（Phase 2/3）
+
+- 2.1: `api.py` — POST /attribution → GET /attribution
+- 2.2: `api.py` — 统一三层响应
+- 3.1: `backtest.ts` — 类型定义
+- 3.2: 前端四维度面板组件
+
+---
+
+## 附：Claude Code + Codex 双端工作流/skills 兼容（工具链）
+
+### 目标
+
+- Claude Code 与 Codex 两端都能使用 `/pm`、`/architect`、`/backend`、`/kaigong`、`/shougong` 等入口，并共享同一套规范与工作流约束
+
+### 方案（已选）
+
+- `.claude/**` 作为单一真源（SSOT）
+- Codex 侧入口 skills 统一放在 `.agents/skills/**`，入口仅做路由与约束加载，不复制核心规范

@@ -158,6 +158,18 @@ class BacktestReportRepository:
             ON position_close_events(position_id)
         """)
 
+        # Create backtest_attributions table (归因分析独立表)
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS backtest_attributions (
+                report_id           TEXT PRIMARY KEY,
+                signal_attributions TEXT,
+                aggregate_attribution TEXT,
+                analysis_dimensions TEXT,
+                created_at          INTEGER NOT NULL,
+                FOREIGN KEY (report_id) REFERENCES backtest_reports(id) ON DELETE CASCADE
+            )
+        """)
+
         await self._db.commit()
         logger.info("回测报告表初始化完成")
 
@@ -431,6 +443,26 @@ class BacktestReportRepository:
                     event.exit_reason,
                 ))
 
+        # 保存归因分析数据到 backtest_attributions 表
+        attribution_data = {
+            "signal_attributions": json.dumps(report.signal_attributions, ensure_ascii=False) if report.signal_attributions else None,
+            "aggregate_attribution": json.dumps(report.aggregate_attribution, ensure_ascii=False) if report.aggregate_attribution else None,
+            "analysis_dimensions": json.dumps(report.analysis_dimensions, ensure_ascii=False) if report.analysis_dimensions else None,
+        }
+        if any(v is not None for v in attribution_data.values()):
+            await self._db.execute("""
+                INSERT OR REPLACE INTO backtest_attributions (
+                    report_id, signal_attributions, aggregate_attribution,
+                    analysis_dimensions, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+            """, (
+                report_id,
+                attribution_data["signal_attributions"],
+                attribution_data["aggregate_attribution"],
+                attribution_data["analysis_dimensions"],
+                int(datetime.now(timezone.utc).timestamp() * 1000),
+            ))
+
         await self._db.commit()
         logger.info(f"已保存回测报告：{report_id}")
 
@@ -472,6 +504,24 @@ class BacktestReportRepository:
                 exit_reason=close_row["exit_reason"],
             ))
 
+        # 读取归因分析数据
+        signal_attributions = None
+        aggregate_attribution = None
+        analysis_dimensions = None
+        attr_cursor = await self._db.execute("""
+            SELECT signal_attributions, aggregate_attribution, analysis_dimensions
+            FROM backtest_attributions
+            WHERE report_id = ?
+        """, (report_id,))
+        attr_row = await attr_cursor.fetchone()
+        if attr_row:
+            if attr_row["signal_attributions"]:
+                signal_attributions = json.loads(attr_row["signal_attributions"])
+            if attr_row["aggregate_attribution"]:
+                aggregate_attribution = json.loads(attr_row["aggregate_attribution"])
+            if attr_row["analysis_dimensions"]:
+                analysis_dimensions = json.loads(attr_row["analysis_dimensions"])
+
         return PMSBacktestReport(
             strategy_id=row["strategy_id"],
             strategy_name=row["strategy_name"],
@@ -491,6 +541,9 @@ class BacktestReportRepository:
             sharpe_ratio=self._str_to_decimal(row["sharpe_ratio"]) if row["sharpe_ratio"] else None,
             positions=self._deserialize_positions_summary(row["positions_summary"]),
             close_events=close_events,
+            signal_attributions=signal_attributions,
+            aggregate_attribution=aggregate_attribution,
+            analysis_dimensions=analysis_dimensions,
         )
 
     async def get_reports_by_strategy(

@@ -519,6 +519,7 @@ class SignalAttempt:
     # BT-4 归因分析扩展字段
     _pnl_ratio: Optional[float] = None
     _exit_reason: Optional[str] = None
+    _signal_id: Optional[str] = None      # v3_pms 回测时反填 signal_id
 
     @property
     def direction(self) -> Optional[Direction]:
@@ -533,6 +534,11 @@ class SignalAttempt:
     def exit_reason(self) -> Optional[str]:
         """出场原因 (仅 SIGNAL_FIRED 信号)"""
         return self._exit_reason
+
+    @property
+    def signal_id(self) -> Optional[str]:
+        """v3_pms 回测时关联的 signal_id"""
+        return self._signal_id
 
 
 # ============================================================
@@ -1358,6 +1364,10 @@ class PMSBacktestReport(FinancialModel):
     aggregate_attribution: Optional[Dict[str, Any]] = Field(
         default=None,
         description="聚合归因分析（回测报告摘要级别）"
+    )
+    analysis_dimensions: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="四维度归因分析结果（B 形态质量 / C 过滤器 / D 趋势 / F 盈亏比）"
     )
 
 

@@ -1256,6 +1256,7 @@ class Backtester:
         equity_curve: List[Tuple[int, Decimal]] = []  # [(timestamp_ms, total_balance), ...]
         all_close_events: List[PositionCloseEvent] = []  # 【任务 1.4】平仓事件收集
         all_attempts: List[SignalAttempt] = []  # 阶段 5.4: 收集所有 attempts 用于归因
+        signal_sl_map: Dict[str, Decimal] = {}  # {signal_id: expected_sl} 用于反填 pnl_ratio
 
         # Statistics tracking
         total_trades = 0
@@ -1314,7 +1315,9 @@ class Backtester:
 
                     # Create signal
                     signal_id = f"sig_{uuid.uuid4().hex[:8]}"
+                    attempt._signal_id = signal_id  # 反填 signal_id 用于归因分析
                     stop_loss = calculator.calculate_stop_loss(kline, attempt.pattern.direction)
+                    signal_sl_map[signal_id] = stop_loss  # 记录止损用于反填 pnl_ratio
 
                     signal = Signal(
                         id=signal_id,
@@ -1577,6 +1580,69 @@ class Backtester:
                 if drawdown > max_drawdown:
                     max_drawdown = drawdown
 
+        # ── 反填 pnl_ratio：从 close_events → position → attempt ──
+        # v3_pms 不调用 _calculate_attempt_outcome()，需要从实际成交数据反填
+        if all_close_events and all_attempts:
+            # 1. 构建 position_id → 累计 close_pnl 映射 + 最终出场原因
+            position_pnl_map: Dict[str, Decimal] = {}  # {position_id: total_close_pnl}
+            position_exit_reason_map: Dict[str, str] = {}  # {position_id: last_exit_reason}
+            for event in all_close_events:
+                pid = event.position_id
+                if pid not in position_pnl_map:
+                    position_pnl_map[pid] = Decimal('0')
+                if event.close_pnl is not None:
+                    position_pnl_map[pid] += event.close_pnl
+                if event.exit_reason:
+                    position_exit_reason_map[pid] = event.exit_reason
+
+            # 2. 构建 signal_id → pnl_ratio (R-multiple) 映射
+            #    通过 PositionSummary (含 position_id + signal_id + exit_price) 作为桥接
+            sid_to_pnl_ratio: Dict[str, float] = {}
+            sid_to_exit_reason: Dict[str, str] = {}
+            for ps in position_summaries:
+                if ps.exit_price is None:
+                    continue
+                # 只处理有平仓事件的 position
+                if ps.position_id not in position_pnl_map:
+                    continue
+                position = positions_map.get(ps.signal_id)
+                if not position:
+                    continue
+                expected_sl = signal_sl_map.get(ps.signal_id)
+                risk_per_unit = abs(position.entry_price - expected_sl) if expected_sl else Decimal('0')
+
+                if risk_per_unit > Decimal('0'):
+                    # 价格维度 R-multiple: (方向性价差) / 每单位风险
+                    if position.direction == Direction.LONG:
+                        price_gain = ps.exit_price - position.entry_price
+                    else:
+                        price_gain = position.entry_price - ps.exit_price
+                    sid_to_pnl_ratio[ps.signal_id] = float(price_gain / risk_per_unit)
+                else:
+                    # 无法计算 R-multiple（entry == sl 或无 sl），用 PnL 符号退化为 ±1/0
+                    total_pnl = position_pnl_map[ps.position_id]
+                    if total_pnl > Decimal('0'):
+                        sid_to_pnl_ratio[ps.signal_id] = 1.0
+                    elif total_pnl < Decimal('0'):
+                        sid_to_pnl_ratio[ps.signal_id] = -1.0
+                    else:
+                        sid_to_pnl_ratio[ps.signal_id] = 0.0
+
+                if ps.position_id in position_exit_reason_map:
+                    sid_to_exit_reason[ps.signal_id] = position_exit_reason_map[ps.position_id]
+
+            # 3. 反填到 all_attempts
+            backfill_count = 0
+            for attempt in all_attempts:
+                if attempt.final_result == "SIGNAL_FIRED" and attempt.pnl_ratio is None:
+                    sid = attempt.signal_id
+                    if sid and sid in sid_to_pnl_ratio:
+                        attempt._pnl_ratio = sid_to_pnl_ratio[sid]
+                        attempt._exit_reason = sid_to_exit_reason.get(sid)
+                        backfill_count += 1
+            if backfill_count > 0:
+                logger.info(f"[BACKTEST_PNL_RATIO] 反填 pnl_ratio 完成: {backfill_count} 个 attempts")
+
         # 阶段 5.4: 计算策略归因分析（仅 SIGNAL_FIRED attempts）
         signal_attributions = None
         aggregate_attribution = None
@@ -1617,6 +1683,31 @@ class Backtester:
         except Exception as e:
             logger.warning(f"[ATTRIBUTION] 归因计算失败（不影响回测结果）: {e}")
 
+        # BT-4: 四维度归因分析（AttributionAnalyzer）
+        analysis_dimensions = None
+        try:
+            from src.application.attribution_analyzer import AttributionAnalyzer
+            analyzer = AttributionAnalyzer()
+
+            # 构建 analyzer 需要的 attempts 数据（包含 pnl_ratio）
+            analyzer_attempts = [
+                self._attempt_to_dict(a)
+                for a in all_attempts
+            ]
+
+            if any(a.get("pnl_ratio") is not None for a in analyzer_attempts if a.get("final_result") == "SIGNAL_FIRED"):
+                analysis_report = analyzer.analyze({"attempts": analyzer_attempts})
+                analysis_dimensions = analysis_report.model_dump(mode="json")
+                logger.info(
+                    f"[ATTRIBUTION_ANALYZER] 四维度分析完成: "
+                    f"shape_quality={list(analysis_dimensions.get('shape_quality', {}).keys())}, "
+                    f"filter_attribution={list(analysis_dimensions.get('filter_attribution', {}).keys())}"
+                )
+            else:
+                logger.info("[ATTRIBUTION_ANALYZER] 无有效 pnl_ratio 数据，跳过四维度分析")
+        except Exception as e:
+            logger.warning(f"[ATTRIBUTION_ANALYZER] 四维度分析失败（不影响回测结果）: {e}")
+
         report = PMSBacktestReport(
             strategy_id=strategy_id,
             strategy_name=strategy_name,
@@ -1639,6 +1730,7 @@ class Backtester:
             close_events=all_close_events,  # 【任务 1.4】平仓事件列表
             signal_attributions=signal_attributions,  # 阶段 5.4: 归因分析结果
             aggregate_attribution=aggregate_attribution,  # 阶段 5.4: 聚合归因
+            analysis_dimensions=analysis_dimensions,  # BT-4: 四维度归因分析
         )
 
         # Step 10: Save report to database (if backtest_repository is provided)

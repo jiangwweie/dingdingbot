@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-04-18 -- Claude Code + Codex 双端工作流/skills 兼容（SSOT 选型）
+
+### 技术决策
+
+- 目标是“双端都能用”：Claude Code CLI 与 Codex 都要支持同一套工作流/skills 与角色入口（/pm /architect /backend 等）
+- 选择方案：以 `.claude/**` 作为单一真源（SSOT），Codex 侧在 `.agents/skills/**` 提供等价入口 skills
+- 关键原则：不复制核心规范内容，Codex 入口 skill 直接读取 `.claude/team/**/SKILL.md` 与 `.claude/team/WORKFLOW.md`，避免双端漂移
+
+### 环境约束记录
+
+- 当前环境不允许创建名为 `.Codex` 的目录（`mkdir .Codex` 返回 Operation not permitted）；因此避免在仓库内依赖 `.Codex` 目录路径
+
 ## 2026-04-17 -- Trailing TP Phase 5 单元测试发现
 
 ### 技术发现

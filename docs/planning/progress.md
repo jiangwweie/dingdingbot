@@ -1,6 +1,64 @@
 # Progress Log
 
-> Last updated: 2026-04-17 14:35
+> Last updated: 2026-04-18 12:00
+
+---
+
+## 2026-04-18 12:00 -- 归因数据持久化修复 Phase 1 完成（6/6 tasks）
+
+### 完成内容
+
+- **1.1** `models.py:1368` — PMSBacktestReport 新增 `analysis_dimensions: Optional[Dict[str, Any]]` 字段
+- **1.2** `backtest_repository.py:161-171` — 新建 `backtest_attributions` 独立表（FK + CASCADE）
+- **1.3** `backtest_repository.py:446-464` — `save_report()` 写入归因 JSON 到 `backtest_attributions`
+- **1.4** `backtest_repository.py:507-546` — `get_report()` JOIN 读取归因 JSON 反序列化
+- **1.5** `backtester.py:1583-1644` — 从 close_events 反填 pnl_ratio（R-multiple 计算），修复 v3_pms 模式 pnl_ratio 全 None 问题
+- **1.6** `backtester.py:1686-1733` — 调用 AttributionAnalyzer.analyze()，结果赋值 report.analysis_dimensions
+
+### 额外修改（1.5 依赖）
+
+- `models.py:522,538-541` — SignalAttempt 新增 `_signal_id` 字段 + `signal_id` 属性
+- `backtester.py:1259,1318,1320` — `signal_sl_map` 状态追踪 + attempt 反填 signal_id
+
+### 验证
+
+- ✅ import 验证通过（PMSBacktestReport 字段、SignalAttempt.signal_id）
+- ✅ AttributionAnalyzer 四维度分析端到端验证通过
+- ⏳ 单元测试待用户运行确认
+
+### 待完成
+
+- Phase 2: API 接口统一（POST → GET + 三层响应）
+- Phase 3: 前端四维度面板
+
+---
+
+## 2026-04-18 10:20 -- Claude Code + Codex 双端工作流/skills 兼容（方案 1：`.claude` 为 SSOT，Codex 入口在 `.agents/skills`）
+
+### 完成内容
+
+- 明确目标：Claude Code 与 Codex 两端都要可用，同一套工作流/skills 均需支持
+- 采用方案 1：`.claude/**` 作为单一真源（SSOT），Codex 侧新增等价入口 skills（不复制核心规范，统一读取 `.claude/team/**`）
+- Codex 入口 skills（新增）：
+  - `.agents/skills/pm`
+  - `.agents/skills/product-manager`
+  - `.agents/skills/architect`
+  - `.agents/skills/backend`
+  - `.agents/skills/frontend`
+  - `.agents/skills/qa`
+  - `.agents/skills/reviewer`
+  - `.agents/skills/diagnostic`
+  - `.agents/skills/kaigong`
+  - `.agents/skills/shougong`
+- 修正仓库内对 `.Codex` 目录路径的引用（避免指向不存在路径）：
+  - `AGENTS.md`：团队/工作流文档指向 `.claude/team/...`；补充 `.agents/skills/` 为 Codex skills 入口
+  - `.agents/skills/doc-manager/SKILL.md`：脚本路径改为 `.agents/skills/...`
+  - `.agents/skills/pua-skill/SKILL.md`：引用 `.claude/team/...`；配置示例路径改为 `.agents/skills/...`
+
+### 备注
+
+- `start.sh` 的改动由用户完成，本次不触碰
+- 未运行测试（按红线：测试前需用户确认）
 
 ---
 
