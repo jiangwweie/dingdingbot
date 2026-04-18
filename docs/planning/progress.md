@@ -1,6 +1,55 @@
 # Progress Log
 
-> Last updated: 2026-04-18 13:00
+> Last updated: 2026-04-18 23:30
+
+---
+
+## 2026-04-18 23:30 -- 归因分数诊断 + 参数优化计划确定
+
+### 完成内容
+
+**数据清理**：
+- 清空所有回测相关表数据（backtest_reports, position_close_events, backtest_attributions, orders, positions, signals, signal_take_profits）
+
+**深度诊断**：
+- 分析 11 个回测报告（4 币种 × 3 周期）
+- 发现归因分数与胜率负相关（高分 28.4% < 中分 45.4%）
+- 发现 TP2/TP3 从未触发（双级止盈失效）
+- 发现实际盈亏比 1.23 < 理论值 1.5
+- 15m 周期严重亏损（-27.77%）
+
+**Opus 分析**：
+- `docs/arch/opus-revised_diagnosis.md` — 根因分析
+- `docs/arch/opus-optimization_task_plan.md` — 任务计划
+- 核心发现：评分公式奖励"陷阱形态"（长影线+大波幅）
+
+**任务计划确定**：
+- 三工作线并行：评分验证 + TP 实验 + TP2 排查
+- 回测范围：BTC/ETH/SOL/BNB × 1h/4h（放弃 15m）
+- 执行方式：模拟 API
+- TP 实验：1.5R/1.2R/1.0R/部分止盈
+
+### 关键决策
+
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| 15m 周期 | 放弃 | 严重亏损，信噪比差 |
+| TP 实验 | 包含 1.0R | 寻找最优触发率 |
+| 回测方式 | 模拟 API | 更正规 |
+| 评分修复 | 先验证再改 | 避免盲目修改 |
+
+### 待办事项
+
+- [ ] 工作线 1：评分公式验证（提取数据 → 精细分组 → 模拟 v2）
+- [ ] 工作线 2：TP 参数实验（实现脚本 → 跑回测 → 对比结果）
+- [ ] 工作线 3：TP2 Bug 排查（确认配置 → 检查逻辑）
+
+### 文档更新
+
+- `docs/diagnostic-reports/DA-20260418-002-attribution-score-analysis.md` — 诊断报告
+- `docs/arch/opus-revised_diagnosis.md` — Opus 根因分析
+- `docs/arch/opus-optimization_task_plan.md` — Opus 任务计划
+- `docs/planning/task_plan.md` — 阶段 5.7 更新
 
 ---
 

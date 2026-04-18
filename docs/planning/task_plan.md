@@ -1,8 +1,8 @@
 # Task Plan: 回测系统优化
 
 > Created: 2026-04-15
-> Last updated: 2026-04-18
-> Status: Phase 1 归因数据持久化修复已完成（6/6 tasks）
+> Last updated: 2026-04-18 23:30
+> Status: 阶段 5.7 启动中（归因分数修复 + 参数优化）
 
 ---
 
@@ -11,6 +11,12 @@
 回测功能已基本正常（PMS 回测 + 四连 Bug 修复完成），现需系统性提升回测系统的**正确性**、**参数优化能力**、**策略鲁棒性验证**和**可解释性**。
 
 已有 3 年本地历史数据，足够支撑参数优化和 Walk-Forward 分析。
+
+**最新诊断**（2026-04-18）：
+- ❌ 归因分数与胜率负相关（高分信号胜率 28.4% < 中分信号 45.4%）
+- ❌ TP2/TP3 从未触发（双级止盈策略失效）
+- ❌ 实际盈亏比 1.23 < 理论值 1.5
+- ⚠️  15m 周期严重亏损（-27.77%），先放弃，专注 1h/4h
 
 ---
 
@@ -650,6 +656,145 @@ def _calculate_monthly_returns(equity_curve: list[tuple[int, Decimal]]) -> dict[
 - 2.2: `api.py` — 统一三层响应
 - 3.1: `backtest.ts` — 类型定义
 - 3.2: 前端四维度面板组件
+
+---
+
+## 阶段 5.7: 归因分数修复 + 参数优化（P0, 3-5 天）— ⏳ 进行中
+
+> **诊断报告**: `docs/diagnostic-reports/DA-20260418-002-attribution-score-analysis.md`
+> **Opus 分析**: `docs/arch/opus-revised_diagnosis.md`, `docs/arch/opus-optimization_task_plan.md`
+> **核心问题**: 归因分数与胜率负相关（高分信号胜率 28.4% < 中分信号 45.4%）
+
+### 问题诊断
+
+| 问题 | 严重性 | 数据证据 |
+|------|--------|---------|
+| 归因分数是反向指标 | 🔴 严重 | 高分胜率 28.4% < 中分 45.4% |
+| TP2/TP3 从未触发 | 🔴 严重 | 95 次 TP1，0 次 TP2/TP3 |
+| 实际盈亏比 < 理论值 | 🟡 警告 | 1.23 vs 1.5 |
+| 15m 周期严重亏损 | 🟡 警告 | -27.77%，先放弃 |
+
+### 根因分析
+
+**根因 1：评分公式奖励"陷阱形态"**
+- 长影线 + 大波幅 = 高分
+- 但在加密市场，这往往是清算瀑布，不是真实反转
+- 代码位置：`strategy_engine.py:291-301`
+
+**根因 2：EMA 过滤器过于简单**
+- 只看方向，不看距离
+- 价格在 EMA 上方 0.01% 就算 bullish
+- 代码位置：`strategy_engine.py:347-365`
+
+**根因 3：TP/SL 结构在 38.6% 胜率下不可能盈利**
+- EV = 0.386 × 1.5R - 0.614 × 1.0R = -0.035R
+- 每笔交易在成本前就是负期望
+
+### 任务清单（三工作线并行）
+
+| 工作线 | 任务 | 工时 | 状态 | 依赖 |
+|--------|------|------|------|------|
+| **工作线 1** | 评分公式验证（诊断，不改代码） | 1-2h | ⏳ 待启动 | - |
+| 1.1 | 从数据库提取原始数据（signals 表） | 0.5h | 待启动 | - |
+| 1.2 | 精细分组分析（0.05 间隔，20 档） | 0.5h | 待启动 | 1.1 |
+| 1.3 | 拆解评分成分（wick_ratio, body_ratio, atr_ratio） | 0.5h | 待启动 | 1.1 |
+| 1.4 | 模拟新评分公式 v2，验证相关性 | 0.5h | 待启动 | 1.2, 1.3 |
+| **工作线 2** | TP 参数实验（改参数，跑回测） | 1-2h | ⏳ 待启动 | - |
+| 2.1 | 实现参数优化脚本（模拟 API） | 1h | 待启动 | - |
+| 2.2 | 实验 A: TP=1.5R（基准） | 0.5h | 待启动 | 2.1 |
+| 2.3 | 实验 B: TP=1.2R（提高触发率） | 0.5h | 待启动 | 2.1 |
+| 2.4 | 实验 C: TP=1.0R（激进提高触发率） | 0.5h | 待启动 | 2.1 |
+| 2.5 | 实验 D: 部分 TP（TP1=1.0R, TP2=2.5R） | 0.5h | 待启动 | 工作线 3 |
+| **工作线 3** | TP2 Bug 排查 | 0.5-1h | ⏳ 待启动 | - |
+| 3.1 | 确认 OrderManager.create_order_chain() 行为 | 0.5h | 待启动 | - |
+| 3.2 | 检查 OCO 逻辑 | 0.5h | 待启动 | - |
+| 3.3 | 检查 MockMatchingEngine 对 LIMIT 订单撮合 | 0.5h | 待启动 | - |
+| 3.4 | 构造最小复现 | 0.5h | 待启动 | 3.1-3.3 |
+
+### 评分公式改进方案
+
+**当前公式（有害）**:
+```python
+score = wick_ratio × 0.7 + min(atr_ratio, 2.0) × 0.3
+```
+
+**方案 v2（Opus 建议）**:
+```python
+def calculate_score_v2(self, wick_ratio, body_ratio, body_position, atr_ratio=None):
+    """
+    新评分逻辑：
+    1. 影线占比：0.6-0.75 是最佳区间，超过 0.85 反而减分
+    2. 实体位置：收盘越接近极端位置，加分越多
+    3. 波幅：适度波幅加分，超大波幅减分
+    """
+    # 影线质量：bell curve centered at 0.7
+    wick_score = Decimal('1.0') - abs(wick_ratio - Decimal('0.7')) * Decimal('3')
+    wick_score = max(Decimal('0'), min(wick_score, Decimal('1.0')))
+
+    # 实体位置质量（body_position 0=bottom, 1=top）
+    position_score = body_position  # 对 LONG；SHORT 需要 1-body_position
+
+    # 波幅质量：0.5-1.5 ATR 是最佳区间
+    if atr_ratio and atr_ratio > 0:
+        if atr_ratio < Decimal('0.5'):
+            vol_score = atr_ratio / Decimal('0.5')
+        elif atr_ratio <= Decimal('1.5'):
+            vol_score = Decimal('1.0')
+        else:
+            vol_score = Decimal('1.5') / atr_ratio
+    else:
+        vol_score = Decimal('0.5')
+
+    # 综合评分
+    score = (wick_score * Decimal('0.4')
+             + position_score * Decimal('0.3')
+             + vol_score * Decimal('0.3'))
+
+    return min(score, Decimal('1.0'))
+```
+
+**关键改变**：
+- 影线占比：从"越长越好"改为"0.7 附近最好"（钟形曲线）
+- 极端波幅：从"加分"改为"减分"（超过 1.5x ATR 开始打折）
+- 新增维度：实体位置（body_position）反映收盘力度
+
+### TP 参数实验设计
+
+| 实验 | TP 目标 | tp_levels | tp_ratios | 假设 |
+|------|---------|-----------|-----------|------|
+| A（基准）| 1.5R | 1 | [1.0] | 当前配置，作为对比基准 |
+| B | 1.2R | 1 | [1.0] | 提高触发率 |
+| C | 1.0R | 1 | [1.0] | 激进提高触发率 |
+| D | 1.0R + 2.5R | 2 | [0.6, 0.4] | 部分止盈 + trailing |
+
+**回测范围**: BTC/ETH/SOL/BNB × 1h/4h = 8 次回测
+**执行方式**: 模拟 API（更正规）
+
+### 执行顺序
+
+```
+Phase 1（今天）: 工作线 1 + 工作线 3 并行
+  → 评分公式验证（纯分析）
+  → TP2 Bug 排查
+
+Phase 2（明天）: 工作线 2 实验 A/B/C
+  → TP 参数回测
+  → 找到最优 TP
+
+Phase 3（后天）: 根据结果决定是否跑实验 D
+  → 部分止盈回测
+
+Phase 4: 合并所有结论
+  → 输出最终优化方案
+```
+
+### 验收标准
+
+- [ ] 评分公式 v2 相关性 > 0.1 且方向正确
+- [ ] TP2 Bug 排查完成，确认原因
+- [ ] 找到最优 TP 目标（期望收益最大）
+- [ ] 实验对比报告生成
+- [ ] 最终优化方案确定
 
 ---
 
