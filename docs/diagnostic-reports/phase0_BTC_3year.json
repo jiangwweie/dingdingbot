@@ -1,0 +1,33 @@
+{
+  "symbol": "BTC/USDT:USDT",
+  "total_trades": 0,
+  "total_pnl": 0.0,
+  "avg_pnl": 0,
+  "win_rate": 0,
+  "by_year": [
+    {
+      "year": "2023",
+      "trades": 0,
+      "pnl": 0.0,
+      "wins": 0,
+      "win_rate": 0,
+      "batches": 11
+    },
+    {
+      "year": "2024",
+      "trades": 0,
+      "pnl": 0.0,
+      "wins": 0,
+      "win_rate": 0,
+      "batches": 11
+    },
+    {
+      "year": "2025",
+      "trades": 0,
+      "pnl": 0.0,
+      "wins": 0,
+      "win_rate": 0,
+      "batches": 3
+    }
+  ]
+}

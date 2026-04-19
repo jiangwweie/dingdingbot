@@ -617,7 +617,7 @@ class BacktestRequest(BaseModel):
     timeframe: str = Field(..., description="Timeframe (e.g., '15m', '1h', '4h')")
     start_time: Union[str, int, None] = Field(default=None, description="Start time (ISO 8601 or timestamp)")
     end_time: Union[str, int, None] = Field(default=None, description="End time (ISO 8601 or timestamp)")
-    limit: int = Field(default=100, ge=10, le=1000, description="Number of candles to fetch")
+    limit: int = Field(default=100, ge=10, le=30000, description="Number of candles to fetch")
 
     # Legacy parameters (for backward compatibility)
     min_wick_ratio: Optional[Decimal] = Field(default=None, ge=0, le=1, description="Override pinbar min_wick_ratio")
