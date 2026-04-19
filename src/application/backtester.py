@@ -53,7 +53,7 @@ from src.domain.strategy_engine import (
     StrategyWithFilters,
     create_dynamic_runner,
 )
-from src.domain.filter_factory import FilterFactory
+from src.domain.filter_factory import FilterFactory, EmaTrendFilterDynamic
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.historical_data_repository import HistoricalDataRepository
 from src.infrastructure.logger import logger
@@ -85,8 +85,14 @@ class IsolatedStrategyRunner:
 
         # Build strategy and filters
         self._pinbar_strategy = PinbarStrategy(config.pinbar_config)
-        self._ema_filter = EmaTrendFilter(period=config.ema_period, enabled=config.trend_filter_enabled)
+        # EMA 过滤器（方向匹配）
+        self._ema_filter = EmaTrendFilter(
+            period=config.ema_period,
+            enabled=config.trend_filter_enabled,
+        )
         self._mtf_filter = MtfFilter(enabled=config.mtf_validation_enabled)
+        # EMA 距离阈值（横盘过滤）
+        self._min_distance_pct = Decimal('0.005')  # 0.5%
 
         self._runner = StrategyRunner(
             strategies=[self._pinbar_strategy],
@@ -98,6 +104,20 @@ class IsolatedStrategyRunner:
         """Update internal state (EMA) for each kline."""
         self._ema_filter.update(kline, kline.symbol, kline.timeframe)
 
+    def _check_ema_distance(self, kline: KlineData) -> bool:
+        """检查价格与 EMA 的距离是否足够（横盘过滤）"""
+        if self._min_distance_pct <= 0:
+            return True  # 未启用
+
+        key = f"{kline.symbol}:{kline.timeframe}"
+        ema_calc = self._ema_filter._ema_calculators.get(key)
+        if ema_calc is None or ema_calc.value is None:
+            return True  # EMA 未就绪，跳过检查
+
+        ema_value = ema_calc.value
+        distance_pct = abs(kline.close - ema_value) / ema_value
+        return distance_pct >= self._min_distance_pct
+
     def run(
         self,
         kline: KlineData,
@@ -107,8 +127,25 @@ class IsolatedStrategyRunner:
         # Get current trend
         current_trend = self._ema_filter.get_trend(kline, kline.symbol, kline.timeframe)
 
+        # 检查 EMA 距离（横盘过滤）
+        distance_ok = self._check_ema_distance(kline)
+
         # Run strategy
-        return self._runner.run(kline, higher_tf_trends, current_trend)
+        attempt = self._runner.run(kline, higher_tf_trends, current_trend)
+
+        # 如果距离不足，标记为过滤
+        if not distance_ok and attempt.pattern is not None:
+            # 修改 filter_results 添加距离过滤结果
+            from src.domain.models import FilterResult
+            distance_result = FilterResult(
+                passed=False,
+                reason="ema_distance_too_small",
+                metadata={"min_distance_pct": float(self._min_distance_pct)}
+            )
+            attempt.filter_results.append(("ema_distance", distance_result))
+            attempt.final_result = "FILTERED"
+
+        return attempt
 
 
 # ============================================================
@@ -417,7 +454,7 @@ class Backtester:
                 }
             }]
             snapshot["filters"] = [
-                {"type": "ema_trend", "params": {"enabled": request.trend_filter_enabled if request.trend_filter_enabled is not None else True}},
+                {"type": "ema_trend", "params": {"enabled": request.trend_filter_enabled if request.trend_filter_enabled is not None else True, "min_distance_pct": 0.005}},
                 {"type": "mtf", "params": {"enabled": request.mtf_validation_enabled if request.mtf_validation_enabled is not None else True}},
             ]
 
@@ -1353,13 +1390,14 @@ class Backtester:
                     # Note: TP/SL orders will be generated dynamically after ENTRY is filled
                     order_manager = OrderManager()
 
-                    # 使用 request 中的 order_strategy，如果未提供则使用默认单 TP 策略
+                    # 使用 request 中的 order_strategy，如果未提供则使用双 TP 策略
+                    # 实验验证：双 TP (1.0R/2.5R) 是唯一盈利配置 (DA-20260419-002)
                     strategy = request.order_strategy or OrderStrategy(
-                        id="default_single_tp",
-                        name="Default Single TP",
-                        tp_levels=1,
-                        tp_ratios=[Decimal('1.0')],
-                        tp_targets=[Decimal('1.5')],  # 默认 1.5R 止盈
+                        id="default_dual_tp",
+                        name="Default Dual TP",
+                        tp_levels=2,
+                        tp_ratios=[Decimal('0.6'), Decimal('0.4')],
+                        tp_targets=[Decimal('1.0'), Decimal('2.5')],  # TP1=1.0R, TP2=2.5R
                         initial_stop_loss_rr=Decimal('-1.0'),
                         trailing_stop_enabled=True,
                         oco_enabled=True,

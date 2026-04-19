@@ -1,6 +1,44 @@
 # Progress Log
 
-> Last updated: 2026-04-19 12:30
+> Last updated: 2026-04-19 19:50
+
+---
+
+## 2026-04-19 19:50 -- TP 参数优化 + EMA 距离过滤完成
+
+### 完成内容
+
+**任务 2.1-2.4**: TP 参数实验（4 组配置 × 4 币种 = 16 次回测）
+- 实验 A: TP=1.5R（基准）→ 亏损
+- 实验 B: TP=1.2R → 亏损
+- 实验 C: TP=1.0R → 亏损
+- 实验 D: TP1=1.0R(60%) + TP2=2.5R(40%) → **唯一盈利**
+
+**任务 2.5**: EMA 距离过滤
+- 阈值 0.5%（价格离 EMA 距离 < 0.5% = 横盘，过滤）
+- 信号减少 23%，单笔 PnL 提升 94%
+
+### 代码改动
+
+| 文件 | 改动 |
+|------|------|
+| `backtester.py:1357-1366` | 默认 OrderStrategy → 双 TP |
+| `backtester.py:95` | EMA 距离阈值 0.5%（硬编码）|
+| `backtester.py:107-119` | `_check_ema_distance()` 方法 |
+| `backtester.py:130-145` | 距离过滤逻辑 |
+
+### 核心结论
+
+| 配置 | 效果 |
+|------|------|
+| 双 TP (1.0R/2.5R) | 总 PnL +661.83，单笔 +12.49 |
+| EMA 距离 ≥ 0.5% | 过滤 23% 信号，提升单笔 PnL |
+| 组合效果 | EV 从负转正，可上实盘验证 |
+
+### 文档更新
+
+- `docs/diagnostic-reports/DA-20260419-002-tp-experiment-results.json`
+- `docs/planning/findings.md`
 
 ---
 

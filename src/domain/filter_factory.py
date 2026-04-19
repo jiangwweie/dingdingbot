@@ -132,9 +132,10 @@ class EmaTrendFilterDynamic(FilterBase):
     Stateful: Maintains EMA calculators per symbol/timeframe.
     """
 
-    def __init__(self, period: int = 60, enabled: bool = True):
+    def __init__(self, period: int = 60, enabled: bool = True, min_distance_pct: Decimal = Decimal('0')):
         self._period = period
         self._enabled = enabled
+        self._min_distance_pct = min_distance_pct  # 最小距离阈值（横盘过滤）
         self._ema_calculators: Dict[str, EMACalculator] = {}  # key: "symbol:timeframe"
 
     @property
@@ -206,6 +207,29 @@ class EmaTrendFilterDynamic(FilterBase):
             if key in self._ema_calculators:
                 ema_value = self._ema_calculators[key].value
         distance_pct = abs(current_price - ema_value) / ema_value if ema_value is not None and current_price is not None else None
+
+        # 距离阈值检查（横盘过滤）
+        # 价格与 EMA 距离过近 = 横盘震荡，信号无效
+        if (self._min_distance_pct > 0
+            and distance_pct is not None
+            and Decimal(str(distance_pct)) < self._min_distance_pct):
+            return TraceEvent(
+                node_name=self.name,
+                passed=False,
+                reason="ema_distance_too_small",
+                expected=f"distance >= {self._min_distance_pct}",
+                actual=f"distance = {distance_pct:.4f}",
+                metadata={
+                    "filter_name": "ema_trend",
+                    "filter_type": "ema_trend",
+                    "period": self._period,
+                    "trend_direction": current_trend.value if current_trend else None,
+                    "price": float(current_price) if current_price is not None else None,
+                    "ema_value": float(ema_value) if ema_value is not None else None,
+                    "distance_pct": float(distance_pct),
+                    "min_distance_pct": float(self._min_distance_pct),
+                }
+            )
 
         # Check if pattern direction matches trend
         if pattern.direction == Direction.LONG:
@@ -718,9 +742,13 @@ class FilterFactory:
 
         # Extract relevant params based on filter class
         if filter_type in ("ema", "ema_trend"):
+            min_dist = params.get('min_distance_pct', 0)
+            if not isinstance(min_dist, Decimal):
+                min_dist = Decimal(str(min_dist))
             return filter_class(
                 period=params.get('period', 60),
-                enabled=enabled
+                enabled=enabled,
+                min_distance_pct=min_dist,
             )
         elif filter_type == "mtf":
             return filter_class(

@@ -1,0 +1,339 @@
+{
+  "timestamp": "2026-04-19T11:42:35.337905+00:00",
+  "experiments": {
+    "A": {
+      "name": "\u57fa\u51c6 (TP=1.5R)",
+      "tp_levels": 1,
+      "tp_ratios": [
+        "1.0"
+      ],
+      "tp_targets": [
+        "1.5"
+      ]
+    },
+    "B": {
+      "name": "\u63d0\u9ad8\u89e6\u53d1\u7387 (TP=1.2R)",
+      "tp_levels": 1,
+      "tp_ratios": [
+        "1.0"
+      ],
+      "tp_targets": [
+        "1.2"
+      ]
+    },
+    "C": {
+      "name": "\u6fc0\u8fdb (TP=1.0R)",
+      "tp_levels": 1,
+      "tp_ratios": [
+        "1.0"
+      ],
+      "tp_targets": [
+        "1.0"
+      ]
+    },
+    "D": {
+      "name": "\u90e8\u5206\u6b62\u76c8 (TP1=1.0R, TP2=2.5R)",
+      "tp_levels": 2,
+      "tp_ratios": [
+        "0.6",
+        "0.4"
+      ],
+      "tp_targets": [
+        "1.0",
+        "2.5"
+      ]
+    }
+  },
+  "summary": {
+    "A": {
+      "name": "\u57fa\u51c6 (TP=1.5R)",
+      "total_trades": 56,
+      "total_wins": 35,
+      "win_rate": 0.625,
+      "total_pnl": -160.33361627088738,
+      "avg_pnl_per_trade": -2.8631002905515603,
+      "tp1_count": 19,
+      "tp2_count": 0,
+      "sl_count": 59,
+      "tp_trigger_rate": 0.3392857142857143
+    },
+    "B": {
+      "name": "\u63d0\u9ad8\u89e6\u53d1\u7387 (TP=1.2R)",
+      "total_trades": 58,
+      "total_wins": 39,
+      "win_rate": 0.6724137931034483,
+      "total_pnl": -609.2055834072228,
+      "avg_pnl_per_trade": -10.50354454150384,
+      "tp1_count": 21,
+      "tp2_count": 0,
+      "sl_count": 57,
+      "tp_trigger_rate": 0.3620689655172414
+    },
+    "C": {
+      "name": "\u6fc0\u8fdb (TP=1.0R)",
+      "total_trades": 60,
+      "total_wins": 43,
+      "win_rate": 0.7166666666666667,
+      "total_pnl": -361.2193495311924,
+      "avg_pnl_per_trade": -6.02032249218654,
+      "tp1_count": 23,
+      "tp2_count": 0,
+      "sl_count": 55,
+      "tp_trigger_rate": 0.38333333333333336
+    },
+    "D": {
+      "name": "\u90e8\u5206\u6b62\u76c8 (TP1=1.0R, TP2=2.5R)",
+      "total_trades": 53,
+      "total_wins": 36,
+      "win_rate": 0.6792452830188679,
+      "total_pnl": 661.8293542469823,
+      "avg_pnl_per_trade": 12.487346306546836,
+      "tp1_count": 22,
+      "tp2_count": 12,
+      "sl_count": 47,
+      "tp_trigger_rate": 0.6415094339622641
+    }
+  },
+  "details": [
+    {
+      "experiment": "A",
+      "symbol": "BTC/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 13,
+      "winning_trades": 9,
+      "win_rate": 0.6923076923076923,
+      "total_pnl": 555.345483573245,
+      "avg_pnl": 42.71888335178808,
+      "max_drawdown": 0.04467276575461871,
+      "sharpe_ratio": 1.4083817182649363,
+      "tp1_count": 6,
+      "tp2_count": 0,
+      "sl_count": 12
+    },
+    {
+      "experiment": "A",
+      "symbol": "ETH/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 13,
+      "winning_trades": 8,
+      "win_rate": 0.6153846153846154,
+      "total_pnl": -233.8510455764998,
+      "avg_pnl": -17.988541967423064,
+      "max_drawdown": 0.07167120367710032,
+      "sharpe_ratio": -1.00472689329435,
+      "tp1_count": 4,
+      "tp2_count": 0,
+      "sl_count": 14
+    },
+    {
+      "experiment": "A",
+      "symbol": "SOL/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 15,
+      "winning_trades": 10,
+      "win_rate": 0.6666666666666666,
+      "total_pnl": 8.996591992301935,
+      "avg_pnl": 0.5997727994867957,
+      "max_drawdown": 0.0761770504042843,
+      "sharpe_ratio": 0.13032224520482222,
+      "tp1_count": 5,
+      "tp2_count": 0,
+      "sl_count": 15
+    },
+    {
+      "experiment": "A",
+      "symbol": "BNB/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 15,
+      "winning_trades": 8,
+      "win_rate": 0.5333333333333333,
+      "total_pnl": -490.8246462599345,
+      "avg_pnl": -32.72164308399564,
+      "max_drawdown": 0.07428568512077534,
+      "sharpe_ratio": -1.2564002475827218,
+      "tp1_count": 4,
+      "tp2_count": 0,
+      "sl_count": 18
+    },
+    {
+      "experiment": "B",
+      "symbol": "BTC/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 13,
+      "winning_trades": 9,
+      "win_rate": 0.6923076923076923,
+      "total_pnl": 142.31360159751392,
+      "avg_pnl": 10.947200122885686,
+      "max_drawdown": 0.051794462704592745,
+      "sharpe_ratio": 0.5389688096953541,
+      "tp1_count": 6,
+      "tp2_count": 0,
+      "sl_count": 12
+    },
+    {
+      "experiment": "B",
+      "symbol": "ETH/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 15,
+      "winning_trades": 12,
+      "win_rate": 0.8,
+      "total_pnl": 230.54195728255252,
+      "avg_pnl": 15.369463818836834,
+      "max_drawdown": 0.03159437010196127,
+      "sharpe_ratio": 1.2585859485640383,
+      "tp1_count": 6,
+      "tp2_count": 0,
+      "sl_count": 12
+    },
+    {
+      "experiment": "B",
+      "symbol": "SOL/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 15,
+      "winning_trades": 10,
+      "win_rate": 0.6666666666666666,
+      "total_pnl": -175.95707348049507,
+      "avg_pnl": -11.730471565366338,
+      "max_drawdown": 0.07617505013111585,
+      "sharpe_ratio": -0.9778900750202407,
+      "tp1_count": 5,
+      "tp2_count": 0,
+      "sl_count": 15
+    },
+    {
+      "experiment": "B",
+      "symbol": "BNB/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 15,
+      "winning_trades": 8,
+      "win_rate": 0.5333333333333333,
+      "total_pnl": -806.1040688067941,
+      "avg_pnl": -53.740271253786275,
+      "max_drawdown": 0.08155706112524241,
+      "sharpe_ratio": -2.5370559539348347,
+      "tp1_count": 4,
+      "tp2_count": 0,
+      "sl_count": 18
+    },
+    {
+      "experiment": "C",
+      "symbol": "BTC/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 13,
+      "winning_trades": 9,
+      "win_rate": 0.6923076923076923,
+      "total_pnl": -126.87817146847017,
+      "avg_pnl": -9.759859343728476,
+      "max_drawdown": 0.060473090018894754,
+      "sharpe_ratio": -0.24485936439264896,
+      "tp1_count": 6,
+      "tp2_count": 0,
+      "sl_count": 12
+    },
+    {
+      "experiment": "C",
+      "symbol": "ETH/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 15,
+      "winning_trades": 12,
+      "win_rate": 0.8,
+      "total_pnl": 55.60916224854643,
+      "avg_pnl": 3.707277483236429,
+      "max_drawdown": 0.03519014325255118,
+      "sharpe_ratio": 0.39179195881133877,
+      "tp1_count": 6,
+      "tp2_count": 0,
+      "sl_count": 12
+    },
+    {
+      "experiment": "C",
+      "symbol": "SOL/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 15,
+      "winning_trades": 10,
+      "win_rate": 0.6666666666666666,
+      "total_pnl": -297.75216916683183,
+      "avg_pnl": -19.850144611122122,
+      "max_drawdown": 0.07617369676039934,
+      "sharpe_ratio": -1.8583589470855155,
+      "tp1_count": 5,
+      "tp2_count": 0,
+      "sl_count": 15
+    },
+    {
+      "experiment": "C",
+      "symbol": "BNB/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 17,
+      "winning_trades": 12,
+      "win_rate": 0.7058823529411765,
+      "total_pnl": 7.801828855563145,
+      "avg_pnl": 0.45893110915077323,
+      "max_drawdown": 0.05717994682983411,
+      "sharpe_ratio": 0.19185609390719913,
+      "tp1_count": 6,
+      "tp2_count": 0,
+      "sl_count": 16
+    },
+    {
+      "experiment": "D",
+      "symbol": "BTC/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 13,
+      "winning_trades": 9,
+      "win_rate": 0.6923076923076923,
+      "total_pnl": 598.5380355464051,
+      "avg_pnl": 46.04138734972347,
+      "max_drawdown": 0.04429559533277991,
+      "sharpe_ratio": 1.7513807065816853,
+      "tp1_count": 5,
+      "tp2_count": 4,
+      "sl_count": 9
+    },
+    {
+      "experiment": "D",
+      "symbol": "ETH/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 12,
+      "winning_trades": 9,
+      "win_rate": 0.75,
+      "total_pnl": 7.110889455213418,
+      "avg_pnl": 0.5925741212677849,
+      "max_drawdown": 0.0420938813433881,
+      "sharpe_ratio": 0.11763490887248394,
+      "tp1_count": 6,
+      "tp2_count": 2,
+      "sl_count": 11
+    },
+    {
+      "experiment": "D",
+      "symbol": "SOL/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 15,
+      "winning_trades": 10,
+      "win_rate": 0.6666666666666666,
+      "total_pnl": -13.008940350151573,
+      "avg_pnl": -0.8672626900101048,
+      "max_drawdown": 0.07617474097529538,
+      "sharpe_ratio": -0.0013425442630387674,
+      "tp1_count": 5,
+      "tp2_count": 4,
+      "sl_count": 13
+    },
+    {
+      "experiment": "D",
+      "symbol": "BNB/USDT:USDT",
+      "timeframe": "1h",
+      "total_trades": 13,
+      "winning_trades": 8,
+      "win_rate": 0.6153846153846154,
+      "total_pnl": 69.18936959551533,
+      "avg_pnl": 5.322259199655026,
+      "max_drawdown": 0.06076156048514273,
+      "sharpe_ratio": 0.4158335753020236,
+      "tp1_count": 6,
+      "tp2_count": 2,
+      "sl_count": 14
+    }
+  ]
+}

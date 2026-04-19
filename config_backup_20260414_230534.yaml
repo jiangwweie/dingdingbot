@@ -1,0 +1,111 @@
+version: '1.0'
+exported_at: '2026-04-14T15:05:34.835836+00:00'
+risk:
+  id: global
+  max_loss_percent: '0.02'
+  max_leverage: 10
+  max_total_exposure: '0.8'
+  daily_max_trades: 5
+  daily_max_loss: null
+  max_position_hold_time: null
+  cooldown_minutes: 240
+  created_at: '2026-04-06 09:19:23'
+  updated_at: '2026-04-13T15:19:32.837403+00:00'
+  version: 2
+system:
+  id: global
+  core_symbols:
+  - BNB/USDT:USDT
+  - BTC/USDT:USDT
+  - ETH/USDT:USDT
+  - SOL/USDT:USDT
+  ema_period: 60
+  mtf_ema_period: 60
+  mtf_mapping:
+    15m: 1h
+    1h: 4h
+    4h: 1d
+    1d: 1w
+  signal_cooldown_seconds: 14400
+  queue_batch_size: 10
+  queue_flush_interval: '5'
+  queue_max_size: 1000
+  warmup_history_bars: 100
+  atr_filter_enabled: true
+  atr_period: 14
+  atr_min_ratio: '0.5'
+  restart_required: false
+  created_at: '2026-04-06 09:19:23'
+  updated_at: '2026-04-06 09:19:23'
+strategies:
+- id: 94213440-4ebc-47d2-8e42-e4e4c462cefb
+  name: '01'
+  description: PINBAR策略
+  is_active: true
+  trigger_config:
+    type: pinbar
+    params:
+      min_wick_ratio: 0.6
+      max_body_ratio: 0.3
+      body_position_tolerance: 0.1
+  filter_configs:
+  - type: ema_trend
+    enabled: true
+    params:
+      period: 60
+  - type: atr
+    enabled: true
+    params:
+      period: 14
+      min_atr_ratio: 0.5
+  - type: mtf
+    enabled: true
+    params: {}
+  filter_logic: AND
+  symbols:
+  - BTC/USDT:USDT
+  - ETH/USDT:USDT
+  - SOL/USDT:USDT
+  - BNB/USDT:USDT
+  timeframes:
+  - 15m
+  - 1h
+  - 4h
+  - 1d
+  created_at: '2026-04-03 14:44:39'
+  updated_at: '2026-04-14T15:05:20.271077+00:00'
+  version: 3
+symbols:
+- symbol: BNB/USDT:USDT
+  is_active: true
+  is_core: true
+  min_quantity: null
+  price_precision: null
+  quantity_precision: null
+  created_at: '2026-04-06 09:19:23'
+  updated_at: '2026-04-06 09:19:23'
+- symbol: BTC/USDT:USDT
+  is_active: true
+  is_core: true
+  min_quantity: null
+  price_precision: null
+  quantity_precision: null
+  created_at: '2026-04-06 09:19:23'
+  updated_at: '2026-04-06 09:19:23'
+- symbol: ETH/USDT:USDT
+  is_active: true
+  is_core: true
+  min_quantity: null
+  price_precision: null
+  quantity_precision: null
+  created_at: '2026-04-06 09:19:23'
+  updated_at: '2026-04-06 09:19:23'
+- symbol: SOL/USDT:USDT
+  is_active: true
+  is_core: true
+  min_quantity: null
+  price_precision: null
+  quantity_precision: null
+  created_at: '2026-04-06 09:19:23'
+  updated_at: '2026-04-06 09:19:23'
+notifications: []

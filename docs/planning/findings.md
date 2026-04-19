@@ -1,6 +1,54 @@
 # Findings Log
 
-> Last updated: 2026-04-19 12:30
+> Last updated: 2026-04-19 19:50
+
+---
+
+## 2026-04-19 -- TP 参数优化 + EMA 距离过滤（任务 2.1-2.5）
+
+### 核心发现
+
+**双 TP 策略是唯一盈利配置**：
+- 实验 D（TP1=1.0R 60% + TP2=2.5R 40%）总 PnL = +661.83 USDT
+- 单 TP 配置（A/B/C）全部亏损
+
+**EMA 距离过滤有效减少横盘信号**：
+- 阈值 0.5% 过滤掉约 23% 信号
+- 单笔 PnL 从 +6.43 提升到 +12.49（+94%）
+
+### 实验结果对比
+
+| 实验 | TP 配置 | 交易数 | 胜率 | 总PnL | 单笔PnL | TP触发率 |
+|------|---------|--------|------|--------|----------|-----------|
+| A | TP=1.5R | 56 | 62.5% | -160.33 | -2.86 | 33.9% |
+| B | TP=1.2R | 58 | 67.2% | -609.21 | -10.50 | 36.2% |
+| C | TP=1.0R | 60 | 71.7% | -361.22 | -6.02 | 38.3% |
+| **D** | **TP1=1.0R + TP2=2.5R** | **53** | **67.9%** | **+661.83** | **+12.49** | **64.2%** |
+
+### 已落地配置
+
+**默认 OrderStrategy**（`backtester.py:1357-1366`）：
+```python
+OrderStrategy(
+    id="default_dual_tp",
+    tp_levels=2,
+    tp_ratios=[Decimal('0.6'), Decimal('0.4')],
+    tp_targets=[Decimal('1.0'), Decimal('2.5')],
+)
+```
+
+**EMA 距离过滤**（`backtester.py:95`）：
+- 阈值：0.5%（硬编码）
+- 生效路径：IsolatedStrategyRunner
+
+### 遗留问题
+
+- EMA 距离阈值硬编码在 `IsolatedStrategyRunner`，不可通过 API 配置
+- 后续需迁移到 `EmaTrendFilterDynamic`，让动态引擎路径也生效
+
+### 详细报告
+
+`docs/diagnostic-reports/DA-20260419-002-tp-experiment-results.json`
 
 ---
 
