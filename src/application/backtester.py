@@ -1312,16 +1312,29 @@ class Backtester:
         if higher_tf:
             try:
                 limit = max(request.limit, 1000)
-                higher_tf_klines_list = await self._gateway.fetch_historical_ohlcv(
-                    symbol=request.symbol,
-                    timeframe=higher_tf,
-                    limit=limit,
-                    since=request.start_time,
-                )
+                # 优先使用本地数据仓库
+                if self._data_repo is not None:
+                    higher_tf_klines_list = await self._data_repo.get_klines(
+                        symbol=request.symbol,
+                        timeframe=higher_tf,
+                        start_time=request.start_time,
+                        limit=limit,
+                    )
+                elif self._gateway is not None:
+                    higher_tf_klines_list = await self._gateway.fetch_historical_ohlcv(
+                        symbol=request.symbol,
+                        timeframe=higher_tf,
+                        limit=limit,
+                        since=request.start_time,
+                    )
+                else:
+                    higher_tf_klines_list = []
+                    logger.warning("No gateway or data_repo available for MTF data")
                 for kline in higher_tf_klines_list:
                     higher_tf_data[kline.timestamp] = {
                         higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
                     }
+                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
