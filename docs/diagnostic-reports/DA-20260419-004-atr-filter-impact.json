@@ -1,0 +1,78 @@
+[
+  {
+    "name": "不含 ATR",
+    "include_atr": false,
+    "total_trades": 52,
+    "avg_win_rate": 0.6522435897435898,
+    "total_pnl": -143.68445493047443,
+    "avg_pnl": -2.763162594816816,
+    "details": [
+      {
+        "symbol": "BTC/USDT:USDT",
+        "trades": 13,
+        "win_rate": 0.6923076923076923,
+        "total_pnl": 598.5380355464051,
+        "avg_pnl": 46.04138734972347
+      },
+      {
+        "symbol": "ETH/USDT:USDT",
+        "trades": 12,
+        "win_rate": 0.75,
+        "total_pnl": 7.110889455213418,
+        "avg_pnl": 0.5925741212677849
+      },
+      {
+        "symbol": "SOL/USDT:USDT",
+        "trades": 15,
+        "win_rate": 0.6666666666666666,
+        "total_pnl": -13.008940350151573,
+        "avg_pnl": -0.8672626900101048
+      },
+      {
+        "symbol": "BNB/USDT:USDT",
+        "trades": 12,
+        "win_rate": 0.5,
+        "total_pnl": -736.3244395819414,
+        "avg_pnl": -61.36036996516179
+      }
+    ]
+  },
+  {
+    "name": "含 ATR",
+    "include_atr": true,
+    "total_trades": 52,
+    "avg_win_rate": 0.6522435897435898,
+    "total_pnl": -143.68445493047443,
+    "avg_pnl": -2.763162594816816,
+    "details": [
+      {
+        "symbol": "BTC/USDT:USDT",
+        "trades": 13,
+        "win_rate": 0.6923076923076923,
+        "total_pnl": 598.5380355464051,
+        "avg_pnl": 46.04138734972347
+      },
+      {
+        "symbol": "ETH/USDT:USDT",
+        "trades": 12,
+        "win_rate": 0.75,
+        "total_pnl": 7.110889455213418,
+        "avg_pnl": 0.5925741212677849
+      },
+      {
+        "symbol": "SOL/USDT:USDT",
+        "trades": 15,
+        "win_rate": 0.6666666666666666,
+        "total_pnl": -13.008940350151573,
+        "avg_pnl": -0.8672626900101048
+      },
+      {
+        "symbol": "BNB/USDT:USDT",
+        "trades": 12,
+        "win_rate": 0.5,
+        "total_pnl": -736.3244395819414,
+        "avg_pnl": -61.36036996516179
+      }
+    ]
+  }
+]
