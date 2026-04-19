@@ -1,6 +1,54 @@
 # Progress Log
 
-> Last updated: 2026-04-19 19:50
+> Last updated: 2026-04-19 20:30
+
+---
+
+## 2026-04-19 20:30 -- EMA 距离过滤验证完成（DynamicStrategyRunner 路径）
+
+### 背景
+
+之前 EMA 距离过滤只在 `IsolatedStrategyRunner` 路径生效，生产环境使用 `DynamicStrategyRunner` 路径未生效。
+
+### 修复内容
+
+1. **MTF 数据获取修复**（`backtester.py:1310-1327`）：
+   - 优先使用 `_data_repo` 获取 MTF 数据（本地 SQLite）
+   - 无需 gateway 即可运行回测
+
+2. **EMA 距离过滤验证**：
+   - 使用真实生产配置：pinbar + ema_trend + atr + mtf
+   - 通过 `strategies` 参数传入 `min_distance_pct`
+   - 双 TP 配置：TP1=1.0R (60%), TP2=2.5R (40%)
+
+### 实验结果
+
+| 实验 | min_distance | 交易数 | 胜率 | 总PnL | 单笔PnL |
+|------|-------------|--------|------|--------|----------|
+| 无距离过滤 | 0.0 | 68 | 60.5% | -323.71 | -4.76 |
+| 有距离过滤 (0.5%) | 0.005 | 52 | 65.2% | -143.68 | -2.76 |
+
+**效果**：
+- 信号过滤数：16（23.5%）
+- PnL 改善：+180.03 USDT
+- 胜率提升：+4.7%
+- 单笔 PnL 改善：+42%
+
+### 代码改动
+
+| 文件 | 改动 |
+|------|------|
+| `backtester.py:1310-1327` | MTF 数据获取优先使用 `_data_repo` |
+| `scripts/ema_distance_validation.py` | 验证脚本 |
+
+### 核心结论
+
+**EMA 距离过滤在 DynamicStrategyRunner 路径生效**，可通过 API 参数 `min_distance_pct` 配置。
+
+### 文档更新
+
+- `docs/diagnostic-reports/DA-20260419-003-ema-distance-validation.json`
+- `docs/planning/findings.md`
 
 ---
 
@@ -22,10 +70,8 @@
 
 | 文件 | 改动 |
 |------|------|
-| `backtester.py:1357-1366` | 默认 OrderStrategy → 双 TP |
-| `backtester.py:95` | EMA 距离阈值 0.5%（硬编码）|
-| `backtester.py:107-119` | `_check_ema_distance()` 方法 |
-| `backtester.py:130-145` | 距离过滤逻辑 |
+| `backtester.py:1395-1404` | 默认 OrderStrategy → 双 TP |
+| `filter_factory.py:135, 211-232` | EMA 距离过滤（可配置）|
 
 ### 核心结论
 
