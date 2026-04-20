@@ -1338,7 +1338,45 @@ class Backtester:
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
-        # Step 6: Main backtest loop
+        # Step 6.5: Initialize DynamicRiskManager once (outside the loop for performance)
+        # Performance: Avoid creating 26,000+ instances in the loop
+        tp_trailing_enabled = (
+            kv_configs.get('tp_trailing_enabled', False)
+            if kv_configs else False
+        )
+        tp_trailing_percent = (
+            Decimal(str(kv_configs.get('tp_trailing_percent', '0.01')))
+            if kv_configs and kv_configs.get('tp_trailing_percent') is not None
+            else Decimal('0.01')
+        )
+        tp_step_threshold = (
+            Decimal(str(kv_configs.get('tp_step_threshold', '0.003')))
+            if kv_configs and kv_configs.get('tp_step_threshold') is not None
+            else Decimal('0.003')
+        )
+        tp_trailing_enabled_levels = (
+            kv_configs.get('tp_trailing_enabled_levels', ['TP1'])
+            if kv_configs and kv_configs.get('tp_trailing_enabled_levels') is not None
+            else ['TP1']
+        )
+        tp_trailing_activation_rr = (
+            Decimal(str(kv_configs.get('tp_trailing_activation_rr', '0.5')))
+            if kv_configs and kv_configs.get('tp_trailing_activation_rr') is not None
+            else Decimal('0.5')
+        )
+        dynamic_risk_manager = DynamicRiskManager(
+            config=RiskManagerConfig(
+                trailing_percent=Decimal('0.02'),      # 默认 2%
+                step_threshold=Decimal('0.005'),       # 默认 0.5%
+                tp_trailing_enabled=tp_trailing_enabled,
+                tp_trailing_percent=tp_trailing_percent,
+                tp_step_threshold=tp_step_threshold,
+                tp_trailing_enabled_levels=tp_trailing_enabled_levels,
+                tp_trailing_activation_rr=tp_trailing_activation_rr,
+            ),
+        )
+
+        # Step 7: Main backtest loop
         for kline in klines:
             # Update strategy state
             runner.update_state(kline)
@@ -1542,46 +1580,9 @@ class Backtester:
                         total_pnl += position.realized_pnl
                         total_fees_paid += position.total_fees_paid
 
-            # 【新增】Step 8: 风控状态机评估与状态突变
+            # Step 8: 风控状态机评估与状态突变
             # 在撮合引擎撮合订单后，对每个活跃仓位执行风控状态评估
             # T+1 时序声明：TP1 引发的 SL 修改在下一根 K 线生效
-            # TTP: 从 kv_configs 读取 Trailing TP 参数
-            tp_trailing_enabled = (
-                kv_configs.get('tp_trailing_enabled', False)
-                if kv_configs else False
-            )
-            tp_trailing_percent = (
-                Decimal(str(kv_configs.get('tp_trailing_percent', '0.01')))
-                if kv_configs and kv_configs.get('tp_trailing_percent') is not None
-                else Decimal('0.01')
-            )
-            tp_step_threshold = (
-                Decimal(str(kv_configs.get('tp_step_threshold', '0.003')))
-                if kv_configs and kv_configs.get('tp_step_threshold') is not None
-                else Decimal('0.003')
-            )
-            tp_trailing_enabled_levels = (
-                kv_configs.get('tp_trailing_enabled_levels', ['TP1'])
-                if kv_configs and kv_configs.get('tp_trailing_enabled_levels') is not None
-                else ['TP1']
-            )
-            tp_trailing_activation_rr = (
-                Decimal(str(kv_configs.get('tp_trailing_activation_rr', '0.5')))
-                if kv_configs and kv_configs.get('tp_trailing_activation_rr') is not None
-                else Decimal('0.5')
-            )
-
-            dynamic_risk_manager = DynamicRiskManager(
-                config=RiskManagerConfig(
-                    trailing_percent=Decimal('0.02'),      # 默认 2%
-                    step_threshold=Decimal('0.005'),       # 默认 0.5%
-                    tp_trailing_enabled=tp_trailing_enabled,
-                    tp_trailing_percent=tp_trailing_percent,
-                    tp_step_threshold=tp_step_threshold,
-                    tp_trailing_enabled_levels=tp_trailing_enabled_levels,
-                    tp_trailing_activation_rr=tp_trailing_activation_rr,
-                ),
-            )
             for position in positions_map.values():
                 if not position.is_closed and position.current_qty > 0:
                     # TTP: 收集 TP 调价事件

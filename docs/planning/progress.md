@@ -1,6 +1,43 @@
 # Progress Log
 
-> Last updated: 2026-04-20 11:00
+> Last updated: 2026-04-20 11:30
+
+---
+
+## 2026-04-20 11:30 -- DynamicRiskManager 实例化外提性能优化
+
+### 任务状态
+
+**结论**: 性能优化已完成，DynamicRiskManager 从循环内移至循环前，避免 26,000+ 次重复实例化。
+
+### 修改内容
+
+**文件**: `src/application/backtester.py`
+
+**修改位置**:
+- L1341-L1377: 在 `for kline in klines:` 循环前创建 DynamicRiskManager 实例
+- L1583-L1590: 循环内删除重复创建代码，直接使用外部创建的实例
+
+**性能收益**: 26,000+ 次 `DynamicRiskManager()` 构造函数调用 → 1 次
+
+### 验收清单
+
+- [x] DynamicRiskManager 实例化已外提到循环前
+- [x] Python import 验证通过
+- [x] 单元测试通过（32/32 passed）
+- [x] TTP 集成测试通过（4/4 passed）
+- [x] 代码已提交
+
+### 技术说明
+
+DynamicRiskManager 的配置参数（TTP 相关）在循环执行期间保持不变：
+- `tp_trailing_enabled`
+- `tp_trailing_percent`
+- `tp_step_threshold`
+- `tp_trailing_enabled_levels`
+- `tp_trailing_activation_rr`
+
+这些参数均从 `kv_configs` 读取，不依赖 `kline`，因此可在循环前一次性创建实例。
 
 ---
 
