@@ -372,9 +372,13 @@ class StrategyOptimizer:
 
             # 保存最佳结果
             if study.best_trial:
-                job.best_trial = study.best_trial.number
-                job.best_params = study.best_trial.params
-                job.best_objective_value = study.best_value
+                from src.domain.models import OptimizationTrialResult
+                job.best_trial = OptimizationTrialResult(
+                    trial_number=study.best_trial.number,
+                    params=study.best_trial.params,
+                    objective_value=study.best_value or 0.0,
+                )
+                job.best_value = study.best_value
                 logger.info(f"任务 {job_id}: 优化完成，最佳目标值={study.best_value:.4f}")
 
         except asyncio.CancelledError:
@@ -607,6 +611,30 @@ class StrategyOptimizer:
         Returns:
             回测请求
         """
+        # 默认策略配置（pinbar + EMA trend + MTF）
+        strategies = [{
+            "name": "pinbar",
+            "triggers": [{"type": "pinbar", "enabled": True}],
+            "filters": [
+                {"type": "ema_trend", "enabled": True, "params": {}},
+                {"type": "mtf", "enabled": True, "params": {}},
+                {"type": "atr", "enabled": True, "params": {}},
+            ]
+        }]
+
+        # 默认订单策略（锁定 TP 配置）
+        from src.domain.models import OrderStrategy
+        order_strategy = OrderStrategy(
+            id="optuna_locked",
+            name="Optuna Locked TP",
+            tp_levels=2,
+            tp_ratios=[Decimal("0.6"), Decimal("0.4")],
+            tp_targets=[Decimal("1.0"), Decimal("2.5")],
+            initial_stop_loss_rr=Decimal("-1.0"),
+            trailing_stop_enabled=False,
+            oco_enabled=True,
+        )
+
         return BacktestRequest(
             symbol=opt_request.symbol,
             timeframe=opt_request.timeframe,
@@ -616,6 +644,8 @@ class StrategyOptimizer:
             initial_balance=opt_request.initial_balance,
             slippage_rate=opt_request.slippage_rate,
             fee_rate=opt_request.fee_rate,
+            strategies=strategies,
+            order_strategy=order_strategy,
         )
 
     async def _run_backtest(
@@ -722,20 +752,27 @@ class StrategyOptimizer:
         Returns:
             优化历史记录
         """
+        import json
+
+        # 构建指标字典
+        metrics = {
+            "total_return": float(report.total_return),
+            "sharpe_ratio": float(report.sharpe_ratio) if report.sharpe_ratio else 0.0,
+            "sortino_ratio": 0.0,  # 待实现
+            "max_drawdown": float(report.max_drawdown),
+            "win_rate": float(report.win_rate),
+            "total_trades": report.total_trades,
+            "total_pnl": float(report.total_pnl),
+            "total_fees": float(report.total_fees_paid),
+        }
+
         return OptimizationHistory(
             job_id=job_id,
             trial_number=trial_number,
-            params=params,
+            params_json=json.dumps(params),
             objective_value=objective_value,
-            total_return=float(report.total_return),
-            sharpe_ratio=float(report.sharpe_ratio) if report.sharpe_ratio else 0.0,
-            sortino_ratio=0.0,  # 待实现
-            max_drawdown=float(report.max_drawdown),
-            win_rate=float(report.win_rate),
-            total_trades=report.total_trades,
-            total_pnl=float(report.total_pnl),
-            total_fees=float(report.total_fees_paid),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            metrics_json=json.dumps(metrics),
+            created_at=datetime.now(timezone.utc),
         )
 
     # ============================================================
@@ -805,26 +842,32 @@ class StrategyOptimizer:
         Returns:
             试验结果列表
         """
+        import json
+
         if not self._history_repo:
             return []
 
         trials = await self._history_repo.get_trials_by_job(job_id, limit)
 
-        return [
-            OptimizationTrialResult(
+        results = []
+        for t in trials:
+            # 解析 JSON 字符串
+            params = json.loads(t.params_json) if t.params_json else {}
+            metrics = json.loads(t.metrics_json) if t.metrics_json else {}
+
+            results.append(OptimizationTrialResult(
                 trial_number=t.trial_number,
-                params=t.params,
+                params=params,
                 objective_value=t.objective_value,
-                total_return=t.total_return,
-                sharpe_ratio=t.sharpe_ratio,
-                sortino_ratio=t.sortino_ratio,
-                max_drawdown=t.max_drawdown,
-                win_rate=t.win_rate,
-                total_trades=t.total_trades,
-                datetime=t.created_at,
-            )
-            for t in trials
-        ]
+                total_return=metrics.get("total_return", 0.0),
+                sharpe_ratio=metrics.get("sharpe_ratio", 0.0),
+                sortino_ratio=metrics.get("sortino_ratio", 0.0),
+                max_drawdown=metrics.get("max_drawdown", 0.0),
+                win_rate=metrics.get("win_rate", 0.0),
+                total_trades=metrics.get("total_trades", 0),
+                datetime=t.created_at.isoformat() if hasattr(t.created_at, 'isoformat') else str(t.created_at),
+            ))
+        return results
 
 
 # ============================================================
@@ -923,6 +966,9 @@ class OptimizationHistoryRepository:
         """
         import json
 
+        # 解析 metrics_json 获取详细指标
+        metrics = json.loads(history.metrics_json)
+
         await self._db.execute("""
             INSERT OR REPLACE INTO optimization_history (
                 job_id, trial_number, params,
@@ -933,17 +979,17 @@ class OptimizationHistoryRepository:
         """, (
             history.job_id,
             history.trial_number,
-            json.dumps(history.params),
+            history.params_json,
             history.objective_value,
-            history.total_return,
-            history.sharpe_ratio,
-            history.sortino_ratio,
-            history.max_drawdown,
-            history.win_rate,
-            history.total_trades,
-            history.total_pnl,
-            history.total_fees,
-            history.created_at,
+            metrics.get("total_return", 0.0),
+            metrics.get("sharpe_ratio", 0.0),
+            metrics.get("sortino_ratio", 0.0),
+            metrics.get("max_drawdown", 0.0),
+            metrics.get("win_rate", 0.0),
+            metrics.get("total_trades", 0),
+            metrics.get("total_pnl", 0.0),
+            metrics.get("total_fees", 0.0),
+            history.created_at.isoformat() if hasattr(history.created_at, 'isoformat') else str(history.created_at),
         ))
         await self._db.commit()
 
@@ -972,25 +1018,29 @@ class OptimizationHistoryRepository:
         """, (job_id, limit))
 
         rows = await cursor.fetchall()
-        return [
-            OptimizationHistory(
+        results = []
+        for row in rows:
+            # 构建指标 JSON
+            metrics = {
+                "total_return": row["total_return"],
+                "sharpe_ratio": row["sharpe_ratio"],
+                "sortino_ratio": row["sortino_ratio"],
+                "max_drawdown": row["max_drawdown"],
+                "win_rate": row["win_rate"],
+                "total_trades": row["total_trades"],
+                "total_pnl": row["total_pnl"],
+                "total_fees": row["total_fees"],
+            }
+            results.append(OptimizationHistory(
                 id=row["id"],
                 job_id=row["job_id"],
                 trial_number=row["trial_number"],
-                params=json.loads(row["params"]),
+                params_json=row["params"],
                 objective_value=row["objective_value"],
-                total_return=row["total_return"],
-                sharpe_ratio=row["sharpe_ratio"],
-                sortino_ratio=row["sortino_ratio"],
-                max_drawdown=row["max_drawdown"],
-                win_rate=row["win_rate"],
-                total_trades=row["total_trades"],
-                total_pnl=row["total_pnl"],
-                total_fees=row["total_fees"],
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
+                metrics_json=json.dumps(metrics),
+                created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"],
+            ))
+        return results
 
     async def get_best_trial(
         self,
