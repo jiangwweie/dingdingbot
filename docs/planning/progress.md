@@ -1,6 +1,47 @@
 # Progress Log
 
-> Last updated: 2026-04-19 22:15
+> Last updated: 2026-04-20 09:15
+
+---
+
+## 2026-04-20 09:15 -- TTP Phase 1 数据模型扩展验证完成
+
+### 任务状态
+
+**结论**: TTP Phase 1 数据模型扩展已在 commit `97806a6` (2026-04-17) 中完成。
+
+### 验证结果
+
+**RiskManagerConfig 新增字段** (5 个):
+| 字段 | 类型 | 默认值 | 状态 |
+|------|------|--------|------|
+| `tp_trailing_enabled` | bool | False | ✅ 已实现 |
+| `tp_trailing_percent` | Decimal | 0.01 | ✅ 已实现 |
+| `tp_step_threshold` | Decimal | 0.003 | ✅ 已实现 |
+| `tp_trailing_enabled_levels` | List[str] | ["TP1"] | ✅ 已实现 |
+| `tp_trailing_activation_rr` | Decimal | 0.5 | ✅ 已实现 |
+
+**Position 新增字段** (2 个):
+| 字段 | 类型 | 默认值 | 状态 |
+|------|------|--------|------|
+| `tp_trailing_activated` | bool | False | ✅ 已实现 |
+| `original_tp_prices` | Dict[str, Decimal] | {} | ✅ 已实现 |
+
+### Import 验证
+
+```
+python3 -c "from src.domain.models import RiskManagerConfig, Position"
+```
+结果: ✅ 成功
+
+### 相关 Commit
+
+- `97806a6` feat(trailing-tp): 完整实现 Trailing TP 功能
+
+### 文件位置
+
+- `src/domain/models.py` lines 1908-1945 (RiskManagerConfig TTP 字段)
+- `src/domain/models.py` lines 1119-1126 (Position TTP 字段)
 
 ---
 
