@@ -1,6 +1,50 @@
 # Progress Log
 
-> Last updated: 2026-04-20 09:15
+> Last updated: 2026-04-20 09:30
+
+---
+
+## 2026-04-20 09:30 -- TTP Phase 2 核心逻辑实现验证完成
+
+### 任务状态
+
+**结论**: TTP Phase 2 核心逻辑已在 commit `97806a6` (2026-04-17) 中完成。
+
+### 验证结果
+
+**新增方法** (4 个):
+
+| 方法 | 行号 | 功能 | 状态 |
+|------|------|------|------|
+| `evaluate_and_mutate()` | L57-113 | 返回值改为 `List[PositionCloseEvent]`，新增 Step 4 | ✅ 已实现 |
+| `_apply_trailing_tp()` | L251-328 | 遍历 TP 订单，执行追踪调价 | ✅ 已实现 |
+| `_check_tp_trailing_activation()` | L330-366 | 检查激活条件 (watermark 达到 activation_rr 阈值) | ✅ 已实现 |
+| `_calculate_and_apply_tp_trailing()` | L368-456 | 计算理论 TP 价格，执行阶梯判定，应用底线保护 | ✅ 已实现 |
+
+**新增代码行数**: ~210 行
+
+### Import 验证
+
+```
+python3 -c "from src.domain.risk_manager import DynamicRiskManager"
+```
+结果: ✅ 成功
+
+### 现有测试结果
+
+```
+pytest tests/unit/test_risk_manager.py -v
+```
+结果: **21/21 passed** (0.05s)
+
+### 相关 Commit
+
+- `97806a6` feat(trailing-tp): 完整实现 Trailing TP 功能
+
+### 文件位置
+
+- `src/domain/risk_manager.py` L57-113 (evaluate_and_mutate 修改)
+- `src/domain/risk_manager.py` L251-456 (TTP 方法实现)
 
 ---
 
