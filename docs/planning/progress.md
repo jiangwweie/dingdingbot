@@ -1,6 +1,73 @@
 # Progress Log
 
-> Last updated: 2026-04-20 10:30
+> Last updated: 2026-04-20 10:35
+
+---
+
+## 2026-04-20 10:35 -- TTP Phase 4 backtester 集成验证完成
+
+### 任务状态
+
+**结论**: TTP Phase 4 backtester 集成已在之前 commit 中完成，本次验证无需修改。
+
+### 验证结果
+
+**任务 4.1: RiskManagerConfig 初始化扩展**:
+- 已完成 (`backtester.py` L1548-1583)
+- 从 `kv_configs` 读取 TTP 参数:
+  - `tp_trailing_enabled`
+  - `tp_trailing_percent`
+  - `tp_step_threshold`
+  - `tp_trailing_enabled_levels`
+  - `tp_trailing_activation_rr`
+
+**任务 4.2: TP 调价事件收集**:
+- 已完成 (`backtester.py` L1585-1589)
+- `evaluate_and_mutate()` 返回的事件被收集到 `all_close_events`
+
+**任务 4.3: original_tp_prices 初始化**:
+- 已完成 (`backtester.py` L1468-1474)
+- 在 TP 订单创建后记录原始价格到 `position.original_tp_prices`
+
+### Import 验证
+
+```
+python3 -c "from src.application.backtester import Backtester"
+python3 -c "from src.domain.risk_manager import DynamicRiskManager; from src.domain.models import RiskManagerConfig"
+```
+结果: 成功
+
+TTP 配置字段验证:
+- `tp_trailing_enabled`: False (默认关闭)
+- `tp_trailing_percent`: 0.01
+- `tp_step_threshold`: 0.003
+- `tp_trailing_enabled_levels`: ['TP1']
+- `tp_trailing_activation_rr`: 0.5
+
+### 现有测试结果
+
+```
+pytest tests/unit/test_risk_manager.py -v
+```
+结果: **21/21 passed** (0.02s)
+
+```
+pytest tests/unit/test_trailing_tp.py -v
+```
+结果: **22/22 passed** (1.92s)
+
+```
+pytest tests/integration/test_trailing_tp_backtest.py -v
+```
+结果: **4/4 passed** (0.12s)
+
+### 验收清单
+
+- [x] RiskManagerConfig 初始化已扩展（已确认现有逻辑支持）
+- [x] TP 调价事件收集已实现（已确认现有逻辑支持）
+- [x] original_tp_prices 初始化已确认（已确认现有逻辑支持）
+- [x] Python import 验证通过
+- [x] 现有测试未破坏
 
 ---
 
