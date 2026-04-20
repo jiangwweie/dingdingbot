@@ -1,6 +1,83 @@
 # Findings Log
 
-> Last updated: 2026-04-20 17:30
+> Last updated: 2026-04-20 18:00
+
+---
+
+## 2026-04-20 -- 回测参数配置全景审计
+
+### 结论
+
+当前回测器有 **三级配置优先级**：BacktestRequest (最高) → KV Store (config_entries_v2) → 代码硬编码 (最低)。
+
+### 已支持 KV 配置（16 个参数）
+
+全部存储在 `config_entries_v2` 表，`backtest.*` 前缀，定义于 `config_entry_repository.py:455-475`。
+
+| 参数 | 默认值 | Request 可覆盖 | 读取位置 |
+|------|--------|:---:|----------|
+| `slippage_rate` | 0.1% | ✅ | backtester.py:1224 (3-way merge) |
+| `fee_rate` | 0.04% | ✅ | backtester.py:1225 |
+| `initial_balance` | 10000 | ✅ | backtester.py:1226 |
+| `tp_slippage_rate` | 0.05% | ✅ | backtester.py:1227 |
+| `funding_rate_enabled` | True | ✅ | backtester.py:1228 |
+| `funding_rate` | 0.01%/8h | ❌ | backtester.py:1232 |
+| `tp_trailing_enabled` | False | ❌ | backtester.py:1343 |
+| `tp_trailing_percent` | 1% | ❌ | backtester.py:1347 |
+| `tp_step_threshold` | 0.3% | ❌ | backtester.py:1348 |
+| `tp_trailing_enabled_levels` | ["TP1"] | ❌ | backtester.py:1349 |
+| `tp_trailing_activation_rr` | 0.5 | ❌ | backtester.py:1350 |
+| `trailing_exit_enabled` | False | ❌ | backtester.py:1367 |
+| `trailing_exit_percent` | 1.5% | ❌ | backtester.py:1371 |
+| `trailing_exit_activation_rr` | 0.3 | ❌ | backtester.py:1375 |
+| `trailing_exit_slippage_rate` | 0.1% | ❌ | backtester.py:1379 |
+| `breakeven_enabled` | True | ❌ | backtester.py:1388 |
+
+### 硬编码参数（待后续提升为可配置）
+
+**高优先级**（影响策略收益，Optuna 优化必须改动）：
+
+| 参数 | 硬编码值 | 位置 | 影响 |
+|------|---------|------|------|
+| EMA 周期 | `60` | `_build_strategy_config()` L503 | 趋势判断灵敏度 |
+| EMA 距离阈值 | `0.5%` | `IsolatedStrategyRunner` L95 | 信号过滤强度 |
+| Pinbar 默认参数 | `0.6/0.3/0.1` | L487-489 fallback | 形态检测灵敏度 |
+| Trailing SL 参数 | `2% / 0.5%` | `DynamicRiskManager` L1394-1395 | 止损追踪行为 |
+| 默认双 TP | `1.0R×60%, 2.5R×40%` | L1477-1486 fallback | 止盈结构 |
+| MTF 映射 | `15m→1h→4h→1d→1w` | class constant L216-221 | 多周期对齐 |
+
+**中优先级**：
+
+| 参数 | 硬编码值 | 位置 | 影响 |
+|------|---------|------|------|
+| 风控默认值 | `max_loss=1%, leverage=20` | L171-172 | 仓位计算（leverage 与 DB 默认 10 不一致） |
+| v2 默认余额 | `10000` | L311 | v2 模式起始资金 |
+| 简单回测 TP | `2R` | L905-908 `_simulate_win_rate` | v2 简单回测固定 RR |
+
+### 已知 Bug（已修复）
+
+- ~~`validate_breakeven_off.py`~~: `run_single(be_enabled)` 的 `be_enabled` 参数是 dead code，未写入 KV，ON/OFF 对比两端都是 ON。**已删除此脚本**。实际 +5607 USDT 结论来自 `run_breakeven_yearly.py`（L30 正确写入 `breakeven_enabled` 到 KV），结论有效。
+
+### 配置管道架构
+
+```
+[BacktestRequest] ----+
+                      |
+[config_entries_v2] --+--> [_run_v3_pms_backtest()]
+  (KV store)          |       |
+                      |       +-- slippage/fee/balance (3-way merge: request > KV > code)
+                      |       +-- TTP / Trailing Exit / BE (KV only, 无 request 覆盖)
+                      |       +-- DynamicRiskManager(config)
+                      |       +-- MockMatchingEngine(slippage, fee, tp_slippage)
+                      |
+[Code Defaults] ------+
+  (backtester.py) — EMA period, distance, pinbar params, default TP, trailing SL
+```
+
+### 行动
+
+- **当前阶段**：不改配置管道，先跑通盈利模式
+- **后续 Optuna 阶段**：必须将 6 个高优先级硬编码参数提升为 KV 可配置，否则无法搜索最优参数组合
 
 ---
 

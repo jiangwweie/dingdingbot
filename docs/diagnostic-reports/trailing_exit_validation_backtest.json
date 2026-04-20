@@ -1,0 +1,86 @@
+{
+  "experiment_a": {
+    "trailing_exit_enabled": false,
+    "symbols": {
+      "BTC/USDT:USDT": {
+        "trades": 189,
+        "pnl": -6959.250930365106,
+        "win_rate": 0.5026455026455027,
+        "trailing_exit_count": 0,
+        "trailing_activated_count": 0
+      },
+      "ETH/USDT:USDT": {
+        "trades": 182,
+        "pnl": -4767.7420614768735,
+        "win_rate": 0.5384615384615384,
+        "trailing_exit_count": 0,
+        "trailing_activated_count": 0
+      },
+      "SOL/USDT:USDT": {
+        "trades": 187,
+        "pnl": -3996.2440504317083,
+        "win_rate": 0.5347593582887701,
+        "trailing_exit_count": 0,
+        "trailing_activated_count": 0
+      }
+    },
+    "total_trades": 558,
+    "total_pnl": -15723.237042273688,
+    "total_wins": 293,
+    "by_period": [],
+    "trailing_exit_count": 0,
+    "trailing_activated_count": 0,
+    "overall_win_rate": 0.525089605734767,
+    "overall_pnl": -15723.237042273688,
+    "avg_pnl_per_trade": -28.177844161780804
+  },
+  "experiment_b": {
+    "trailing_exit_enabled": true,
+    "symbols": {
+      "BTC/USDT:USDT": {
+        "trades": 129,
+        "pnl": -9798.847328354374,
+        "win_rate": 0.3643410852713178,
+        "trailing_exit_count": 45,
+        "trailing_activated_count": 100
+      },
+      "ETH/USDT:USDT": {
+        "trades": 133,
+        "pnl": -7144.956245488809,
+        "win_rate": 0.40601503759398494,
+        "trailing_exit_count": 35,
+        "trailing_activated_count": 97
+      },
+      "SOL/USDT:USDT": {
+        "trades": 80,
+        "pnl": -4251.262293433268,
+        "win_rate": 0.4125,
+        "trailing_exit_count": 41,
+        "trailing_activated_count": 57
+      }
+    },
+    "total_trades": 342,
+    "total_pnl": -21195.06586727645,
+    "total_wins": 134,
+    "by_period": [],
+    "trailing_exit_count": 121,
+    "trailing_activated_count": 254,
+    "overall_win_rate": 0.391812865497076,
+    "overall_pnl": -21195.06586727645,
+    "avg_pnl_per_trade": -61.9738768049019
+  },
+  "trailing_exit_params": {
+    "trailing_exit_enabled": true,
+    "trailing_exit_percent": "0.015",
+    "trailing_exit_activation_rr": "0.3",
+    "trailing_exit_slippage_rate": "0.001"
+  },
+  "timestamp": "2026-04-20T15:41:19.576573",
+  "symbols": [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT"
+  ],
+  "timeframe": "1h",
+  "range": "2023-01-01 ~ 2025-01-01"
+}
