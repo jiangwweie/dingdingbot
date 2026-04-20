@@ -9,8 +9,9 @@ DB_PATH = "data/v3_dev.db"
 OUT_FILE = "/tmp/slippage_compare_result.json"
 
 SLIPPAGE_CONFIGS = [
-    {"id": "pessimistic", "slippage": Decimal("0.001"), "tp_slippage": Decimal("0.0005"), "label": "悲观(0.1%/0.05%)"},
-    {"id": "realistic",   "slippage": Decimal("0.0002"), "tp_slippage": Decimal("0.0002"), "label": "真实(0.02%/0.02%)"},
+    {"id": "pessimistic", "slippage": Decimal("0.001"),  "tp_slippage": Decimal("0.0005"), "fee": Decimal("0.0004"),  "label": "悲观(0.1%/0.05%/0.04%)"},
+    {"id": "realistic",   "slippage": Decimal("0.0002"), "tp_slippage": Decimal("0.0002"), "fee": Decimal("0.0004"),  "label": "真实(0.02%/0.02%/0.04%)"},
+    {"id": "bnb9",        "slippage": Decimal("0.0001"), "tp_slippage": Decimal("0"),      "fee": Decimal("0.000405"),"label": "BNB9折(0.01%/0%/0.0405%)"},
 ]
 
 SYMBOLS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
@@ -25,7 +26,7 @@ MIN_DISTANCE = 0.005
 MAX_ATR_RATIO = 0.010
 
 
-async def run_one(symbol, start, end, slippage, tp_slippage):
+async def run_one(symbol, start, end, slippage, tp_slippage, fee):
     """跑单个币种"""
     from src.infrastructure.historical_data_repository import HistoricalDataRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
@@ -83,6 +84,7 @@ async def run_one(symbol, start, end, slippage, tp_slippage):
         strategies=strategies,
         slippage_rate=slippage,
         tp_slippage_rate=tp_slippage,
+        fee_rate=fee,
         order_strategy=OrderStrategy(
             id="sweep", name="Sweep", tp_levels=2,
             tp_ratios=[0.6, 0.4], tp_targets=[1.0, 2.5],
@@ -117,7 +119,7 @@ async def main():
             for symbol in SYMBOLS:
                 sym_short = symbol.split("/")[0]
                 print(f"    {sym_short} ...", end=" ", flush=True)
-                r = await run_one(symbol, start, end, sl_cfg["slippage"], sl_cfg["tp_slippage"])
+                r = await run_one(symbol, start, end, sl_cfg["slippage"], sl_cfg["tp_slippage"], sl_cfg["fee"])
                 print(f"trades={r['trades']} wr={r['win_rate']:.1%} pnl={r['pnl']:.2f}")
                 cfg_data[sym_short] = r
             year_data[cfg_id] = {"config": sl_cfg, "symbols": cfg_data}
@@ -128,7 +130,7 @@ async def main():
     print(f"  滑点对比 — 悲观(0.1%/0.05%) vs 真实(0.02%/0.02%) (Group 2: ATR=1%, BE=OFF)")
     print(f"{'='*100}")
 
-    for cfg_id, label in [("pessimistic", "悲观 0.1%/0.05%"), ("realistic", "真实 0.02%/0.02%")]:
+    for cfg_id, label in [("pessimistic", "悲观 0.1%/0.05%/0.04%"), ("realistic", "真实 0.02%/0.02%/0.04%"), ("bnb9", "BNB9折 0.01%/0%/0.0405%")]:
         print(f"\n  --- {label} ---")
         header = f"  {'年份':<6} {'BTC PnL':<12} {'ETH PnL':<12} {'SOL PnL':<12} {'总PnL':<12} {'总Trades':<10}"
         print(header)
