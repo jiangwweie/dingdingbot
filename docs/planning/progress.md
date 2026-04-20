@@ -1,6 +1,153 @@
 # Progress Log
 
-> Last updated: 2026-04-20 09:30
+> Last updated: 2026-04-20 10:30
+
+---
+
+## 2026-04-20 10:30 -- TTP Phase 5 单元测试验证完成
+
+### 任务状态
+
+**结论**: TTP Phase 5 单元测试已存在且全部通过，无需修改。
+
+### 验证结果
+
+**测试文件**: `tests/unit/test_trailing_tp.py`
+**测试行数**: 968 行
+**测试用例数**: 22 个
+
+### 测试通过情况
+
+```
+pytest tests/unit/test_trailing_tp.py -v
+```
+结果: **22/22 passed** (0.03s)
+
+### 测试覆盖详情
+
+| 分类 | 测试数 | 状态 |
+|------|--------|------|
+| 基础功能测试 | 4 | PASS |
+| 调价逻辑测试 | 5 | PASS |
+| 多级别测试 | 2 | PASS |
+| 事件记录测试 | 3 | PASS |
+| 边界条件测试 | 6 | PASS |
+| 集成风格测试 | 2 | PASS |
+
+### 覆盖率报告
+
+**单独覆盖率**: 74% (未达标)
+**合并覆盖率**: **95%** (远超 80% 要求)
+
+```
+pytest tests/unit/test_trailing_tp.py tests/unit/test_risk_manager.py --cov=src.domain.risk_manager
+```
+
+未覆盖行 (6 行):
+- L196: watermark 更新条件分支
+- L291, L298, L300, L304, L355: 防御性检查/边缘分支
+
+### 回归测试
+
+```
+pytest tests/unit/test_risk_manager.py -v
+```
+结果: **21/21 passed** (0.03s)
+
+### 验收清单
+
+- [x] 测试文件已存在 (`tests/unit/test_trailing_tp.py`)
+- [x] 22 个测试用例已实现
+- [x] pytest 测试通过 (22/22)
+- [x] 覆盖率 >= 80% (合并后 95%)
+- [x] 回归测试通过 (21/21)
+
+### 测试文件结构
+
+```
+tests/unit/test_trailing_tp.py
+├── TestTrailingTPBasic (4 tests)
+│   ├── test_tp_trailing_disabled_by_default
+│   ├── test_tp_trailing_activation_threshold
+│   ├── test_tp_trailing_activation_long
+│   └── test_tp_trailing_activation_short
+├── TestTrailingTPPriceAdjustment (5 tests)
+│   ├── test_tp_price_moves_up_with_watermark_long
+│   ├── test_tp_price_moves_down_with_watermark_short
+│   ├── test_tp_step_threshold_prevents_small_updates
+│   ├── test_tp_floor_protection_long
+│   └── test_tp_floor_protection_short
+├── TestTrailingTPMultiLevel (2 tests)
+│   ├── test_only_enabled_levels_are_trailed
+│   └── test_tp2_tp3_trailing_independent
+├── TestTrailingTPEventRecording (3 tests)
+│   ├── test_tp_modified_event_generated
+│   ├── test_tp_modified_event_fields
+│   └── test_no_event_when_no_update
+├── TestTrailingTPEdgeCases (6 tests)
+│   ├── test_tp_trailing_with_closed_position
+│   ├── test_tp_trailing_watermark_none
+│   ├── test_tp_trailing_decimal_precision
+│   ├── test_tp_trailing_with_zero_qty_position
+│   ├── test_tp_trailing_activated_state_persists
+│   └── test_multiple_klines_progressive_trailing
+└── TestTrailingTPIntegration (2 tests)
+    ├── test_design_doc_example_long
+    └── test_return_value_is_event_list
+```
+
+---
+
+## 2026-04-20 10:15 -- TTP Phase 3 matching_engine 扩展验证完成
+
+### 任务状态
+
+**结论**: TTP Phase 3 matching_engine 扩展已在之前 commit 中完成，本次验证无需修改。
+
+### 验证结果
+
+**任务 3.1: TP 撮合逻辑扩展**:
+- `TP_ROLES` 常量已定义（L33）: `{OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5}`
+- 撮合逻辑已支持（L167）: `order.order_role in TP_ROLES`
+- 平仓逻辑已支持（L332）: `order.order_role in TP_ROLES or order.order_role == OrderRole.SL`
+
+**任务 3.2: 优先级排序扩展**:
+- 优先级排序已正确实现（L223-236）
+- 排序规则: SL (1) > TP (2) > ENTRY (3)
+- TP 内部按创建顺序排序（实际触发由价格决定，不需要 TP1 > TP2 硬编码）
+
+### Import 验证
+
+```
+python3 -c "from src.domain.matching_engine import MockMatchingEngine"
+```
+结果: 成功
+
+### 现有测试结果
+
+```
+pytest tests/unit/test_matching_engine.py -v
+```
+结果: **21/21 passed** (0.03s)
+
+### 设计文档分析
+
+根据设计文档 Section 5.2:
+- 核心原则是"止损优先于止盈"（SL > TP），当前实现正确
+- TP1-TP5 的价格通常按策略设计（TP1 < TP2 < TP3），价格决定触发顺序
+- 不需要在排序中硬编码 TP1 > TP2 > TP3
+
+### 验收清单
+
+- [x] TP1-TP5 撮合逻辑已扩展（已确认现有逻辑支持）
+- [x] 优先级排序已扩展（已确认现有逻辑支持）
+- [x] Python import 验证通过
+- [x] 现有测试未破坏（21/21 passed）
+- [x] 无需代码修改
+
+### 文件位置
+
+- `src/domain/matching_engine.py` L33, L167, L228, L332
 
 ---
 
