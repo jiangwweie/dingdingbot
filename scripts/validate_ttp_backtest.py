@@ -6,7 +6,8 @@ TTP Phase 6: Trailing TP 回测验证脚本
 - 实验 A: TTP off（当前双 TP 方案）
 - 实验 B: TTP on（TP1 固定 + TP2 追踪）
 
-使用 BTC/ETH/SOL 三种币，1h 周期，3 年数据（2022-01-01 ~ 2025-01-01）
+使用 BTC/ETH/SOL 三种币，1h 周期，2 年数据（2023-01-01 ~ 2025-01-01）
+注：2022 年数据缺失，仅回测 2023-2025 年
 
 用法:
     python scripts/validate_ttp_backtest.py
@@ -36,9 +37,9 @@ DB_PATH = "data/v3_dev.db"
 SYMBOLS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
 TIMEFRAME = "1h"
 
-# 按年份划分
+# 按年份划分（2022 年数据缺失，仅跑 2023-2025）
 YEAR_CHUNKS = [
-    {"name": "2022", "start": "2022-01-01", "end": "2023-01-01"},
+    # {"name": "2022", "start": "2022-01-01", "end": "2023-01-01"},  # 数据缺失
     {"name": "2023", "start": "2023-01-01", "end": "2024-01-01"},
     {"name": "2024", "start": "2024-01-01", "end": "2025-01-01"},
 ]
@@ -64,13 +65,13 @@ STRATEGY_CONFIG = [{
     ]
 }]
 
-# TTP 参数（用户建议）
+# TTP 参数（调整后：追踪 TP1，降低激活阈值）
 TTP_PARAMS = {
     "tp_trailing_enabled": True,
-    "tp_trailing_percent": "0.015",  # 1.5%
+    "tp_trailing_percent": "0.008",  # 0.8% 回撤容忍（收紧）
     "tp_step_threshold": "0.003",    # 0.3%
-    "tp_trailing_enabled_levels": ["TP2"],  # 仅 TP2 追踪
-    "tp_trailing_activation_rr": "0.6",  # 0.6
+    "tp_trailing_enabled_levels": ["TP1"],  # 追踪 TP1（60% 仓位）
+    "tp_trailing_activation_rr": "0.3",  # 0.3R 激活（降低门槛）
 }
 
 
@@ -130,8 +131,21 @@ async def run_backtest(
         回测结果字典
     """
     from src.infrastructure.historical_data_repository import HistoricalDataRepository
+    from src.infrastructure.config_entry_repository import ConfigEntryRepository
     from src.application.backtester import Backtester
     from src.domain.models import BacktestRequest, OrderStrategy
+    from src.application.config_manager import ConfigManager
+
+    # Initialize ConfigManager to read KV configs
+    config_manager = ConfigManager(DB_PATH)
+    await config_manager.initialize_from_db()
+
+    # ✅ 关键修复：注入 ConfigEntryRepository，否则 get_backtest_configs() 抛 RuntimeError
+    config_entry_repo = ConfigEntryRepository(DB_PATH)
+    await config_entry_repo.initialize()
+    config_manager.set_config_entry_repository(config_entry_repo)
+
+    ConfigManager.set_instance(config_manager)
 
     repo = HistoricalDataRepository(DB_PATH)
     await repo.initialize()
@@ -156,6 +170,7 @@ async def run_backtest(
         "symbol": symbol,
         "total_trades": report.total_trades,
         "win_rate": float(report.win_rate),
+
         "total_pnl": float(report.total_pnl),
         "avg_pnl": float(report.total_pnl / report.total_trades) if report.total_trades > 0 else 0,
         "sharpe_ratio": float(report.sharpe_ratio) if report.sharpe_ratio else 0,
@@ -375,8 +390,17 @@ async def main():
     }
 
     output_file = "docs/diagnostic-reports/ttp_validation_backtest.json"
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    class DecimalEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, Decimal):
+                return float(obj)
+            return super().default(obj)
+
     with open(output_file, "w") as f:
-        json.dump(output, f, indent=2, ensure_ascii=False)
+        json.dump(output, f, indent=2, ensure_ascii=False, cls=DecimalEncoder)
+
 
     print(f"\n结果已保存: {output_file}")
 

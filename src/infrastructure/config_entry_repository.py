@@ -459,6 +459,12 @@ class ConfigEntryRepository:
             'backtest.tp_slippage_rate': Decimal('0.0005'),
             'backtest.funding_rate_enabled': True,
             'backtest.funding_rate': Decimal('0.0001'),  # BT-2: 资金费率 0.01%
+            # TTP: Trailing Take Profit 配置（默认关闭）
+            'backtest.tp_trailing_enabled': False,
+            'backtest.tp_trailing_percent': Decimal('0.01'),
+            'backtest.tp_step_threshold': Decimal('0.003'),
+            'backtest.tp_trailing_enabled_levels': ['TP1'],
+            'backtest.tp_trailing_activation_rr': Decimal('0.5'),
         }
 
         # Get stored configs with prefix and profile

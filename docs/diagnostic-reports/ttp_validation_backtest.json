@@ -1,0 +1,81 @@
+{
+  "experiment_a": {
+    "ttp_enabled": false,
+    "symbols": {
+      "BTC/USDT:USDT": {
+        "trades": 189,
+        "pnl": -6959.250930365106,
+        "win_rate": 0.5026455026455027,
+        "tp_modified": 0
+      },
+      "ETH/USDT:USDT": {
+        "trades": 182,
+        "pnl": -4767.7420614768735,
+        "win_rate": 0.5384615384615384,
+        "tp_modified": 0
+      },
+      "SOL/USDT:USDT": {
+        "trades": 187,
+        "pnl": -3996.2440504317083,
+        "win_rate": 0.5347593582887701,
+        "tp_modified": 0
+      }
+    },
+    "total_trades": 558,
+    "total_pnl": -15723.237042273688,
+    "total_wins": 293,
+    "by_period": [],
+    "tp_modified_count": 0,
+    "overall_win_rate": 0.525089605734767,
+    "overall_pnl": -15723.237042273688,
+    "avg_pnl_per_trade": -28.177844161780804
+  },
+  "experiment_b": {
+    "ttp_enabled": true,
+    "symbols": {
+      "BTC/USDT:USDT": {
+        "trades": 189,
+        "pnl": -6959.250930365106,
+        "win_rate": 0.5026455026455027,
+        "tp_modified": 0
+      },
+      "ETH/USDT:USDT": {
+        "trades": 182,
+        "pnl": -4767.7420614768735,
+        "win_rate": 0.5384615384615384,
+        "tp_modified": 0
+      },
+      "SOL/USDT:USDT": {
+        "trades": 187,
+        "pnl": -3996.2440504317083,
+        "win_rate": 0.5347593582887701,
+        "tp_modified": 0
+      }
+    },
+    "total_trades": 558,
+    "total_pnl": -15723.237042273688,
+    "total_wins": 293,
+    "by_period": [],
+    "tp_modified_count": 0,
+    "overall_win_rate": 0.525089605734767,
+    "overall_pnl": -15723.237042273688,
+    "avg_pnl_per_trade": -28.177844161780804
+  },
+  "ttp_params": {
+    "tp_trailing_enabled": true,
+    "tp_trailing_percent": "0.008",
+    "tp_step_threshold": "0.003",
+    "tp_trailing_enabled_levels": [
+      "TP1"
+    ],
+    "tp_trailing_activation_rr": "0.3"
+  },
+  "timestamp": "2026-04-20T10:49:46.664788",
+  "symbols": [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT"
+  ],
+  "timeframe": "1h",
+  "range": "2022-01-01 ~ 2025-01-01"
+}
