@@ -1364,6 +1364,31 @@ class Backtester:
             if kv_configs and kv_configs.get('tp_trailing_activation_rr') is not None
             else Decimal('0.5')
         )
+        # Trailing Exit 配置 (ADR-2026-04-20)
+        trailing_exit_enabled = (
+            kv_configs.get('trailing_exit_enabled', False)
+            if kv_configs else False
+        )
+        trailing_exit_percent = (
+            Decimal(str(kv_configs.get('trailing_exit_percent', '0.015')))
+            if kv_configs and kv_configs.get('trailing_exit_percent') is not None
+            else Decimal('0.015')
+        )
+        trailing_exit_activation_rr = (
+            Decimal(str(kv_configs.get('trailing_exit_activation_rr', '0.3')))
+            if kv_configs and kv_configs.get('trailing_exit_activation_rr') is not None
+            else Decimal('0.3')
+        )
+        trailing_exit_slippage_rate = (
+            Decimal(str(kv_configs.get('trailing_exit_slippage_rate', '0.001')))
+            if kv_configs and kv_configs.get('trailing_exit_slippage_rate') is not None
+            else Decimal('0.001')
+        )
+        # Breakeven 配置
+        breakeven_enabled = (
+            kv_configs.get('breakeven_enabled', True)
+            if kv_configs else True
+        )
         dynamic_risk_manager = DynamicRiskManager(
             config=RiskManagerConfig(
                 trailing_percent=Decimal('0.02'),      # 默认 2%
@@ -1373,6 +1398,11 @@ class Backtester:
                 tp_step_threshold=tp_step_threshold,
                 tp_trailing_enabled_levels=tp_trailing_enabled_levels,
                 tp_trailing_activation_rr=tp_trailing_activation_rr,
+                trailing_exit_enabled=trailing_exit_enabled,
+                trailing_exit_percent=trailing_exit_percent,
+                trailing_exit_activation_rr=trailing_exit_activation_rr,
+                trailing_exit_slippage_rate=trailing_exit_slippage_rate,
+                breakeven_enabled=breakeven_enabled,
             ),
         )
 
@@ -1443,6 +1473,7 @@ class Backtester:
 
                     # 使用 request 中的 order_strategy，如果未提供则使用双 TP 策略
                     # 实验验证：双 TP (1.0R/2.5R) 是唯一盈利配置 (DA-20260419-002)
+                    # trailing_stop_enabled=False: BE=OFF 回测验证净改善 +5607 USDT
                     strategy = request.order_strategy or OrderStrategy(
                         id="default_dual_tp",
                         name="Default Dual TP",
@@ -1450,7 +1481,7 @@ class Backtester:
                         tp_ratios=[Decimal('0.6'), Decimal('0.4')],
                         tp_targets=[Decimal('1.0'), Decimal('2.5')],  # TP1=1.0R, TP2=2.5R
                         initial_stop_loss_rr=Decimal('-1.0'),
-                        trailing_stop_enabled=True,
+                        trailing_stop_enabled=False,
                         oco_enabled=True,
                     )
 
@@ -1585,9 +1616,21 @@ class Backtester:
             # T+1 时序声明：TP1 引发的 SL 修改在下一根 K 线生效
             for position in positions_map.values():
                 if not position.is_closed and position.current_qty > 0:
-                    # TTP: 收集 TP 调价事件
-                    tp_events = dynamic_risk_manager.evaluate_and_mutate(kline, position, active_orders)
-                    all_close_events.extend(tp_events)
+                    # TTP + Trailing Exit: 收集风控事件
+                    risk_events = dynamic_risk_manager.evaluate_and_mutate(kline, position, active_orders)
+                    all_close_events.extend(risk_events)
+
+                    # 处理 trailing_exit 事件：执行市价平仓
+                    for event in risk_events:
+                        if event.event_category == 'trailing_exit':
+                            self._execute_trailing_exit(
+                                position=position,
+                                event=event,
+                                kline=kline,
+                                active_orders=active_orders,
+                                account=account,
+                                risk_manager_config=dynamic_risk_manager._config,
+                            )
 
             # ===== BT-2: 资金费用计算 =====
             # 在动态风险管理之后，对每个未平仓的持仓计算资金费用
@@ -1805,6 +1848,55 @@ class Backtester:
         )
 
         return report
+
+    def _execute_trailing_exit(
+        self,
+        position: Position,
+        event: PositionCloseEvent,
+        kline: KlineData,
+        active_orders: List[Order],
+        account: Any,
+        risk_manager_config: RiskManagerConfig,
+    ) -> None:
+        """执行追踪退出平仓
+
+        1. 取消所有未成交订单
+        2. 计算平仓价（含滑点）
+        3. 计算平仓 PnL
+        4. 更新仓位和账户状态
+        """
+
+        # 1. 取消所有未成交订单
+        for order in active_orders:
+            if order.status == OrderStatus.OPEN:
+                order.status = OrderStatus.CANCELED
+
+        # 2. 计算平仓价（保守：trailing_exit_price ± slippage）
+        slippage_rate = risk_manager_config.trailing_exit_slippage_rate
+        if position.direction == Direction.LONG:
+            # LONG: 卖出，滑点向下
+            exit_price = event.close_price * (Decimal('1') - slippage_rate)
+        else:
+            # SHORT: 买回，滑点向上
+            exit_price = event.close_price * (Decimal('1') + slippage_rate)
+
+        # 3. 计算平仓 PnL
+        qty = position.current_qty
+        if position.direction == Direction.LONG:
+            close_pnl = (exit_price - position.entry_price) * qty
+        else:
+            close_pnl = (position.entry_price - exit_price) * qty
+
+        # 4. 更新仓位状态
+        position.is_closed = True
+        position.realized_pnl += close_pnl
+        position.current_qty = Decimal('0')
+
+        # 5. 更新账户余额
+        account.total_balance += close_pnl
+
+        # 6. 更新事件 PnL
+        event.close_pnl = close_pnl
 
     def _calculate_funding_cost(
         self,

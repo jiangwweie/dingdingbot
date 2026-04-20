@@ -1,6 +1,43 @@
 # Progress Log
 
-> Last updated: 2026-04-20 11:30
+> Last updated: 2026-04-20 17:40
+
+---
+
+## 2026-04-20 17:40 -- Breakeven Stop 回测验证与关闭
+
+### 任务状态
+
+**结论**: 关闭 BE 净改善 +5607 USDT（策略 PnL 改善 36%），已落地代码。
+
+### 修改内容
+
+**文件**:
+- `src/domain/models.py` — `OrderStrategy.trailing_stop_enabled` 默认 `True` → `False`
+- `src/domain/models.py` — `RiskManagerConfig` 新增 `breakeven_enabled` 字段
+- `src/domain/risk_manager.py` — breakeven guard 条件
+- `src/infrastructure/config_entry_repository.py` — `breakeven_enabled` KV 默认值
+- `src/application/backtester.py` — 默认策略 `trailing_stop_enabled=False`
+- `docs/planning/findings.md` — 回测结论存档
+
+### 回测数据
+
+| 币种 | BE=ON PnL | BE=OFF PnL | 差异 | BE数 | 变TP2 | 被击穿 |
+|------|-----------|------------|------|------|-------|--------|
+| BTC | -6959 | -6651 | +309 | 36 | 9 | 27 |
+| ETH | -4768 | +354 | +1122 | 26 | 7 | 17 |
+| SOL | -3996 | -3819 | +177 | 23 | 8 | 16 |
+| **合计** | **-15723** | **-10116** | **+5607** | 85 | 24 | 60 |
+
+### 验收清单
+
+- [x] RiskManagerConfig.breakeven_enabled 字段已添加
+- [x] risk_manager.py breakeven guard 已添加
+- [x] OrderStrategy.trailing_stop_enabled 默认改为 False
+- [x] backtester.py 默认策略已更新
+- [x] config_entry_repository.py 默认值已注册
+- [x] findings.md 回测结论已存档
+- [x] 单元测试需验证
 
 ---
 

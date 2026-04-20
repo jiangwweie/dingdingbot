@@ -82,21 +82,24 @@ class DynamicRiskManager:
             TP 调价在本 K 线撮合之后、下一根 K 线开始之前执行
             matching_engine 在下一根 K 线使用修改后的 TP 价格进行撮合判定
         """
+        # 初始化事件列表
+        events: List[PositionCloseEvent] = []
+
         # 防御性检查：已平仓仓位不处理
         if position.is_closed or position.current_qty <= 0:
-            return []
+            return events
 
         # 查找 SL 订单
         sl_order = self._find_order_by_role(active_orders, OrderRole.SL)
         if sl_order is None:
             # 无 SL 订单，风控裸奔，直接返回
-            return []
+            return events
 
         # 查找 TP1 订单
         tp1_order = self._find_order_by_role(active_orders, OrderRole.TP1)
 
         # Step 1: 检查 TP1 是否成交，执行 Breakeven 逻辑
-        if tp1_order and tp1_order.status == OrderStatus.FILLED:
+        if tp1_order and tp1_order.status == OrderStatus.FILLED and self._config.breakeven_enabled:
             self._apply_breakeven(position, sl_order)
 
         # Step 2: 更新水位线
@@ -108,9 +111,18 @@ class DynamicRiskManager:
 
         # Step 4: 执行 Trailing Take Profit 逻辑 (如果已启用)
         if self._config.tp_trailing_enabled:
-            return self._apply_trailing_tp(kline, position, active_orders)
+            tp_events = self._apply_trailing_tp(kline, position, active_orders)
+            events.extend(tp_events)
 
-        return []
+        # Step 5: 执行 Trailing Exit 逻辑 (如果已启用)
+        if self._config.trailing_exit_enabled:
+            trailing_exit_events = self._apply_trailing_exit(kline, position, active_orders)
+            events.extend(trailing_exit_events)
+            # 如果追踪退出已触发，优先返回（不再执行其他逻辑）
+            if trailing_exit_events:
+                return events
+
+        return events
 
     def _apply_breakeven(
         self,
@@ -454,3 +466,177 @@ class DynamicRiskManager:
                 )
 
         return None
+
+    # ============================================================
+    # Trailing Exit 方法 (ADR-2026-04-20: 追踪退出机制)
+    # ============================================================
+
+    def _apply_trailing_exit(
+        self,
+        kline: KlineData,
+        position: Position,
+        active_orders: List[Order],
+    ) -> List[PositionCloseEvent]:
+        """
+        应用追踪退出逻辑
+
+        核心机制:
+        1. 激活条件: watermark 超过 entry + activation_rr × sl_distance
+        2. 追踪退出价: watermark × (1 - trailing_exit_percent) for LONG
+        3. 平仓触发: K 线最低价跌破追踪退出价 (LONG)
+
+        Args:
+            kline: 当前 K 线数据
+            position: 关联的仓位
+            active_orders: 活跃订单列表
+
+        Returns:
+            List[PositionCloseEvent]: 追踪退出事件列表
+                - event_category='trailing_activated': 追踪激活
+                - event_category='trailing_exit': 追踪退出触发
+        """
+        events = []
+
+        # 1. 检查是否启用追踪退出
+        if not self._config.trailing_exit_enabled:
+            return events
+
+        # 2. 检查激活条件
+        if not position.trailing_exit_activated:
+            sl_order = self._find_order_by_role(active_orders, OrderRole.SL)
+            sl_price = sl_order.trigger_price if sl_order else None
+            if sl_price and self._check_trailing_activation(position, sl_price):
+                position.trailing_exit_activated = True
+                position.trailing_activation_time = kline.timestamp
+                events.append(self._create_trailing_activated_event(position, kline.timestamp))
+
+        # 3. 如果已激活，更新追踪退出价
+        if position.trailing_exit_activated:
+            if position.direction == Direction.LONG:
+                # LONG: watermark 上涨时更新追踪退出价
+                new_trailing_exit = position.watermark_price * (Decimal('1') - self._config.trailing_exit_percent)
+                if new_trailing_exit > (position.trailing_exit_price or Decimal('0')):
+                    position.trailing_exit_price = new_trailing_exit
+            else:  # SHORT
+                # SHORT: watermark 下跌时更新追踪退出价
+                new_trailing_exit = position.watermark_price * (Decimal('1') + self._config.trailing_exit_percent)
+                if position.trailing_exit_price is None or new_trailing_exit < position.trailing_exit_price:
+                    position.trailing_exit_price = new_trailing_exit
+
+        # 4. 检查是否触发平仓
+        if position.trailing_exit_price:
+            if position.direction == Direction.LONG:
+                if kline.low <= position.trailing_exit_price:
+                    events.append(self._create_trailing_exit_event(
+                        position, position.trailing_exit_price, kline.timestamp
+                    ))
+            else:  # SHORT
+                if kline.high >= position.trailing_exit_price:
+                    events.append(self._create_trailing_exit_event(
+                        position, position.trailing_exit_price, kline.timestamp
+                    ))
+
+        return events
+
+    def _check_trailing_activation(
+        self,
+        position: Position,
+        sl_price: Decimal,
+    ) -> bool:
+        """
+        检查追踪退出激活条件
+
+        激活阈值 = entry + activation_rr × sl_distance
+        其中 sl_distance = |entry - sl_price|
+
+        示例 (LONG, entry=50000, sl=49500, activation_rr=0.3):
+            sl_distance = 500
+            activation_threshold = 50000 + 0.3 × 500 = 50150
+            当 watermark >= 50150 时激活
+
+        Args:
+            position: 仓位对象
+            sl_price: 止损订单触发价（用于计算 R 距离）
+
+        Returns:
+            True: 满足激活条件
+        """
+        if position.trailing_exit_activated:
+            return True  # 已激活，无需再检查
+
+        if position.watermark_price is None or not sl_price:
+            return False
+
+        # 计算 SL 距离（R 的基准）
+        sl_distance = abs(position.entry_price - sl_price)
+
+        # 激活阈值：entry + activation_rr × sl_distance
+        activation_rr = self._config.trailing_exit_activation_rr
+
+        if position.direction == Direction.LONG:
+            activation_threshold = position.entry_price + activation_rr * sl_distance
+            return position.watermark_price >= activation_threshold
+        else:  # SHORT
+            activation_threshold = position.entry_price - activation_rr * sl_distance
+            return position.watermark_price <= activation_threshold
+
+    def _create_trailing_activated_event(
+        self,
+        position: Position,
+        timestamp: int,
+    ) -> PositionCloseEvent:
+        """
+        创建追踪退出激活事件
+
+        Args:
+            position: 仓位对象
+            timestamp: 激活时间戳
+
+        Returns:
+            PositionCloseEvent: 激活事件
+        """
+        return PositionCloseEvent(
+            position_id=position.id,
+            order_id="trailing_exit",
+            event_type='TRAILING_EXIT',
+            event_category='trailing_activated',
+            close_price=position.watermark_price,
+            close_qty=None,
+            close_pnl=None,
+            close_fee=None,
+            close_time=timestamp,
+            exit_reason=f"Trailing exit activated at {position.watermark_price} "
+                       f"(threshold: entry + {self._config.trailing_exit_activation_rr}R)",
+        )
+
+    def _create_trailing_exit_event(
+        self,
+        position: Position,
+        exit_price: Decimal,
+        timestamp: int,
+    ) -> PositionCloseEvent:
+        """
+        创建追踪退出事件
+
+        Args:
+            position: 仓位对象
+            exit_price: 退出价格
+            timestamp: 退出时间戳
+
+        Returns:
+            PositionCloseEvent: 退出事件
+        """
+        return PositionCloseEvent(
+            position_id=position.id,
+            order_id="trailing_exit",
+            event_type='TRAILING_EXIT',
+            event_category='trailing_exit',
+            close_price=exit_price,
+            close_qty=position.current_qty,
+            close_pnl=None,  # 由调用方计算
+            close_fee=None,
+            close_time=timestamp,
+            exit_reason=f"Trailing exit triggered at {exit_price} "
+                       f"(watermark: {position.watermark_price}, "
+                       f"retracement: {self._config.trailing_exit_percent})",
+        )

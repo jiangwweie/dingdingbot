@@ -1125,6 +1125,20 @@ class Position(FinancialModel):
         description="各 TP 级别的原始价格快照 (如 {'TP1': Decimal('65000')})"
     )
 
+    # Virtual TTP 状态 (ADR-2026-04-20: 追踪退出机制)
+    trailing_exit_activated: bool = Field(
+        default=False,
+        description="追踪退出是否已激活 (价格达到激活阈值后标记为 True)"
+    )
+    trailing_exit_price: Optional[Decimal] = Field(
+        default=None,
+        description="当前追踪退出价格 (动态更新)"
+    )
+    trailing_activation_time: Optional[int] = Field(
+        default=None,
+        description="追踪退出激活时间戳 (毫秒)"
+    )
+
     # 业绩追踪
     realized_pnl: Decimal = Field(default=Decimal('0'), description="已实现盈亏 (落袋为安)")
     total_fees_paid: Decimal = Field(default=Decimal('0'), description="累计支付的手续费")
@@ -1157,7 +1171,7 @@ class OrderStrategy(FinancialModel):
 
     # 风控配置
     initial_stop_loss_rr: Optional[Decimal] = Field(default=None, description="初始止损 RR 倍数 (如 -1.0 表示亏损 1R)")
-    trailing_stop_enabled: bool = Field(default=True, description="是否启用移动止损")
+    trailing_stop_enabled: bool = Field(default=False, description="是否启用移动止损 (TP1 后将 SL 移至入场价，默认关闭：回测验证 BE=OFF 净改善 +5607 USDT)")
 
     # OCO 配置
     oco_enabled: bool = Field(default=True, description="是否启用 OCO 逻辑")
@@ -1286,7 +1300,7 @@ class PositionCloseEvent(FinancialModel):
     position_id: str
     order_id: str
     event_type: str                    # TP1/TP2/TP3/TP4/TP5/SL
-    event_category: str                # "exit"
+    event_category: str                # "exit", "trailing_exit", "trailing_activated"
     close_price: Optional[Decimal] = None  # sl_modified 时为 None
     close_qty: Optional[Decimal] = None    # sl_modified 时为 None
     close_pnl: Optional[Decimal] = None    # sl_modified 时为 None
@@ -1942,6 +1956,30 @@ class RiskManagerConfig(BaseModel):
     tp_trailing_activation_rr: Decimal = Field(
         default=Decimal('0.5'),
         description="Trailing TP 激活阈值 (RR 倍数)：价格达到 TP 价格的 50% 时才开始追踪"
+    )
+
+    # ===== Breakeven 配置 =====
+    breakeven_enabled: bool = Field(
+        default=True,
+        description="是否启用 Breakeven 止损 (TP1 成交后将 SL 移至入场价，默认开启)"
+    )
+
+    # ===== Trailing Exit 配置 (ADR-2026-04-20: 追踪退出机制) =====
+    trailing_exit_enabled: bool = Field(
+        default=False,
+        description="是否启用追踪退出 (默认关闭)"
+    )
+    trailing_exit_percent: Decimal = Field(
+        default=Decimal('0.015'),
+        description="追踪退出回撤容忍度 (默认 1.5%)"
+    )
+    trailing_exit_activation_rr: Decimal = Field(
+        default=Decimal('0.3'),
+        description="追踪退出激活阈值 (RR 倍数, 默认 0.3R)"
+    )
+    trailing_exit_slippage_rate: Decimal = Field(
+        default=Decimal('0.001'),
+        description="追踪退出平仓滑点率 (默认 0.1%)"
     )
 
 

@@ -465,6 +465,13 @@ class ConfigEntryRepository:
             'backtest.tp_step_threshold': Decimal('0.003'),
             'backtest.tp_trailing_enabled_levels': ['TP1'],
             'backtest.tp_trailing_activation_rr': Decimal('0.5'),
+            # Trailing Exit: 追踪退出配置 (ADR-2026-04-20, 默认关闭)
+            'backtest.trailing_exit_enabled': False,
+            'backtest.trailing_exit_percent': Decimal('0.015'),
+            'backtest.trailing_exit_activation_rr': Decimal('0.3'),
+            'backtest.trailing_exit_slippage_rate': Decimal('0.001'),
+            # Breakeven: TP1 成交后将 SL 移至入场价（默认开启）
+            'backtest.breakeven_enabled': True,
         }
 
         # Get stored configs with prefix and profile
