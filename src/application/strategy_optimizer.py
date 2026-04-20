@@ -32,6 +32,7 @@ from src.domain.models import (
     ParameterType,
     BacktestRequest,
     PMSBacktestReport,
+    BacktestRuntimeOverrides,
 )
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.application.backtester import Backtester
@@ -472,11 +473,14 @@ class StrategyOptimizer:
             # 从参数空间采样
             params = self._sample_params(trial, request.parameter_space)
 
+            # Phase 8.2: 构建 runtime_overrides，不再写 KV
+            runtime_overrides = self._build_runtime_overrides(params)
+
             # 构建回测请求
             backtest_request = self._build_backtest_request(request, params)
 
-            # 运行回测
-            report = await self._run_backtest(backtest_request)
+            # 运行回测（注入 runtime_overrides）
+            report = await self._run_backtest(backtest_request, runtime_overrides)
 
             # 计算目标值
             objective_value = self._calculate_objective(
@@ -553,6 +557,41 @@ class StrategyOptimizer:
 
         return params
 
+    def _build_runtime_overrides(
+        self,
+        params: Dict[str, Any]
+    ) -> BacktestRuntimeOverrides:
+        """
+        从采样参数构建 BacktestRuntimeOverrides
+
+        Phase 8.2: Optuna 接入参数链路
+        - 支持 max_atr_ratio, min_distance_pct, ema_period
+        - 不再依赖 SQLite KV 写入
+
+        Args:
+            params: 采样得到的参数字典
+
+        Returns:
+            BacktestRuntimeOverrides 对象
+        """
+        overrides = BacktestRuntimeOverrides()
+
+        # 映射参数名到 runtime_overrides 字段
+        if "max_atr_ratio" in params:
+            overrides.max_atr_ratio = Decimal(str(params["max_atr_ratio"]))
+        if "min_distance_pct" in params:
+            overrides.min_distance_pct = Decimal(str(params["min_distance_pct"]))
+        if "ema_period" in params:
+            overrides.ema_period = int(params["ema_period"])
+
+        # TP 参数（第一批不搜索，但支持传入）
+        if "tp_ratios" in params:
+            overrides.tp_ratios = [Decimal(str(v)) for v in params["tp_ratios"]]
+        if "tp_targets" in params:
+            overrides.tp_targets = [Decimal(str(v)) for v in params["tp_targets"]]
+
+        return overrides
+
     def _build_backtest_request(
         self,
         opt_request: OptimizationRequest,
@@ -581,18 +620,23 @@ class StrategyOptimizer:
 
     async def _run_backtest(
         self,
-        request: BacktestRequest
+        request: BacktestRequest,
+        runtime_overrides: Optional[BacktestRuntimeOverrides] = None
     ) -> PMSBacktestReport:
         """
         运行回测
 
         Args:
             request: 回测请求
+            runtime_overrides: 运行时参数覆盖（Phase 8.2）
 
         Returns:
             PMS 回测报告
         """
-        report = await self._backtester.run_backtest(request)
+        report = await self._backtester.run_backtest(
+            request,
+            runtime_overrides=runtime_overrides,
+        )
         return report
 
     def _calculate_objective(
