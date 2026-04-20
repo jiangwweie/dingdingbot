@@ -1,25 +1,19 @@
 #!/usr/bin/env python3
-"""BTC 4h 时间周期测试 — Group 2 基础配置"""
+"""滑点对比测试 — 悲观(0.1%) vs 真实(0.02%)"""
 import asyncio, sys, os, sqlite3, json
 from datetime import datetime
+from decimal import Decimal
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 DB_PATH = "data/v3_dev.db"
-OUT_FILE = "/tmp/btc_4h_result.json"
+OUT_FILE = "/tmp/slippage_compare_result.json"
 
-# BTC=4h, ETH/SOL=1h 对照
-CONFIGS = [
-    {"id": "btc_4h", "symbols": [
-        {"symbol": "BTC/USDT:USDT", "timeframe": "4h"},
-        {"symbol": "ETH/USDT:USDT", "timeframe": "1h"},
-        {"symbol": "SOL/USDT:USDT", "timeframe": "1h"},
-    ], "label": "BTC-4h Group2"},
-    {"id": "baseline", "symbols": [
-        {"symbol": "BTC/USDT:USDT", "timeframe": "1h"},
-        {"symbol": "ETH/USDT:USDT", "timeframe": "1h"},
-        {"symbol": "SOL/USDT:USDT", "timeframe": "1h"},
-    ], "label": "全部1h 基线"},
+SLIPPAGE_CONFIGS = [
+    {"id": "pessimistic", "slippage": Decimal("0.001"), "tp_slippage": Decimal("0.0005"), "label": "悲观(0.1%/0.05%)"},
+    {"id": "realistic",   "slippage": Decimal("0.0002"), "tp_slippage": Decimal("0.0002"), "label": "真实(0.02%/0.02%)"},
 ]
+
+SYMBOLS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
 
 YEARS = [
     ("2023", "2023-01-01", "2024-01-01"),
@@ -31,7 +25,7 @@ MIN_DISTANCE = 0.005
 MAX_ATR_RATIO = 0.010
 
 
-async def run_one(symbol, timeframe, start, end):
+async def run_one(symbol, start, end, slippage, tp_slippage):
     """跑单个币种"""
     from src.infrastructure.historical_data_repository import HistoricalDataRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
@@ -60,7 +54,6 @@ async def run_one(symbol, timeframe, start, end):
     conn.commit()
     conn.close()
 
-    # 策略配置：EMA + MTF + ATR
     filters = [
         {"type": "ema_trend", "enabled": True, "params": {"min_distance_pct": MIN_DISTANCE}},
         {"type": "mtf", "enabled": True, "params": {}},
@@ -84,13 +77,12 @@ async def run_one(symbol, timeframe, start, end):
     st = int(datetime.strptime(start, "%Y-%m-%d").timestamp() * 1000)
     et = int(datetime.strptime(end, "%Y-%m-%d").timestamp() * 1000)
 
-    # 4h 用 limit=8000, 1h 用 limit=30000
-    limit = 8000 if timeframe == "4h" else 30000
-
     req = BacktestRequest(
-        symbol=symbol, timeframe=timeframe, limit=limit,
+        symbol=symbol, timeframe="1h", limit=30000,
         start_time=st, end_time=et,
         strategies=strategies,
+        slippage_rate=slippage,
+        tp_slippage_rate=tp_slippage,
         order_strategy=OrderStrategy(
             id="sweep", name="Sweep", tp_levels=2,
             tp_ratios=[0.6, 0.4], tp_targets=[1.0, 2.5],
@@ -118,64 +110,66 @@ async def main():
         print(f"{'#'*60}")
 
         year_data = {}
-        for cfg in CONFIGS:
-            cfg_id = cfg["id"]
-            print(f"\n  {cfg['label']}:")
+        for sl_cfg in SLIPPAGE_CONFIGS:
+            cfg_id = sl_cfg["id"]
+            print(f"\n  {sl_cfg['label']}:")
             cfg_data = {}
-            for sym_cfg in cfg["symbols"]:
-                sym_short = sym_cfg["symbol"].split("/")[0]
-                tf = sym_cfg["timeframe"]
-                print(f"    {sym_short}({tf}) ...", end=" ", flush=True)
-                r = await run_one(sym_cfg["symbol"], tf, start, end)
+            for symbol in SYMBOLS:
+                sym_short = symbol.split("/")[0]
+                print(f"    {sym_short} ...", end=" ", flush=True)
+                r = await run_one(symbol, start, end, sl_cfg["slippage"], sl_cfg["tp_slippage"])
                 print(f"trades={r['trades']} wr={r['win_rate']:.1%} pnl={r['pnl']:.2f}")
                 cfg_data[sym_short] = r
-            year_data[cfg_id] = {"config": cfg, "symbols": cfg_data}
+            year_data[cfg_id] = {"config": sl_cfg, "symbols": cfg_data}
         all_results[year_label] = year_data
 
-    # 汇总表
-    print(f"\n{'='*90}")
-    print(f"  汇总 — BTC 4h vs 全部1h (Group 2: ATR=1%, BE=OFF)")
-    print(f"{'='*90}")
+    # 汇总
+    print(f"\n{'='*100}")
+    print(f"  滑点对比 — 悲观(0.1%/0.05%) vs 真实(0.02%/0.02%) (Group 2: ATR=1%, BE=OFF)")
+    print(f"{'='*100}")
 
-    for cfg_id, label in [("baseline", "全部1h 基线"), ("btc_4h", "BTC-4h Group2")]:
+    for cfg_id, label in [("pessimistic", "悲观 0.1%/0.05%"), ("realistic", "真实 0.02%/0.02%")]:
         print(f"\n  --- {label} ---")
-        header = f"  {'年份':<6} {'BTC PnL':<12} {'BTC WR':<10} {'ETH PnL':<12} {'SOL PnL':<12} {'总PnL':<12} {'总Trades':<10}"
+        header = f"  {'年份':<6} {'BTC PnL':<12} {'ETH PnL':<12} {'SOL PnL':<12} {'总PnL':<12} {'总Trades':<10}"
         print(header)
         print("  " + "-" * (len(header) - 2))
         for year_label in [y[0] for y in YEARS]:
             syms = all_results.get(year_label, {}).get(cfg_id, {}).get("symbols", {})
             btc = syms.get("BTC", {}).get("pnl", 0)
-            btc_wr = syms.get("BTC", {}).get("win_rate", 0)
             eth = syms.get("ETH", {}).get("pnl", 0)
             sol = syms.get("SOL", {}).get("pnl", 0)
             total = btc + eth + sol
             trades = sum(s.get("trades", 0) for s in syms.values())
-            print(f"  {year_label:<6} {btc:<12.2f} {btc_wr:<10.1%} {eth:<12.2f} {sol:<12.2f} {total:<12.2f} {trades:<10}")
+            print(f"  {year_label:<6} {btc:<12.2f} {eth:<12.2f} {sol:<12.2f} {total:<12.2f} {trades:<10}")
 
-        # 3年累计
         total_btc = sum(all_results.get(y[0], {}).get(cfg_id, {}).get("symbols", {}).get("BTC", {}).get("pnl", 0) for y in YEARS)
         total_eth = sum(all_results.get(y[0], {}).get(cfg_id, {}).get("symbols", {}).get("ETH", {}).get("pnl", 0) for y in YEARS)
         total_sol = sum(all_results.get(y[0], {}).get(cfg_id, {}).get("symbols", {}).get("SOL", {}).get("pnl", 0) for y in YEARS)
         total_all = total_btc + total_eth + total_sol
-        total_trades = sum(sum(all_results.get(y[0], {}).get(cfg_id, {}).get("symbols", {}).get(s.split("/")[0], {}).get("trades", 0) for s in ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]) for y in YEARS)
-        print(f"  {'合计':<6} {total_btc:<12.2f} {'':10} {total_eth:<12.2f} {total_sol:<12.2f} {total_all:<12.2f} {total_trades:<10}")
+        total_trades = sum(sum(all_results.get(y[0], {}).get(cfg_id, {}).get("symbols", {}).get(s.split("/")[0], {}).get("trades", 0) for s in SYMBOLS) for y in YEARS)
+        print(f"  {'合计':<6} {total_btc:<12.2f} {total_eth:<12.2f} {total_sol:<12.2f} {total_all:<12.2f} {total_trades:<10}")
 
-    # 直接对比
-    print(f"\n  --- BTC 对比 ---")
-    print(f"  {'年份':<6} {'BTC 1h':<12} {'BTC 4h':<12} {'Δ':<12}")
-    print(f"  {'-'*42}")
+    # 逐项对比
+    print(f"\n  --- 滑点改善 Δ (真实 - 悲观) ---")
+    header = f"  {'年份':<6} {'BTC Δ':<12} {'ETH Δ':<12} {'SOL Δ':<12} {'总 Δ':<12}"
+    print(header)
+    print("  " + "-" * (len(header) - 2))
     for year_label in [y[0] for y in YEARS]:
-        r1h = all_results.get(year_label, {}).get("baseline", {}).get("symbols", {}).get("BTC", {}).get("pnl", 0)
-        r4h = all_results.get(year_label, {}).get("btc_4h", {}).get("symbols", {}).get("BTC", {}).get("pnl", 0)
-        delta = r4h - r1h
-        sign = "+" if delta >= 0 else ""
-        print(f"  {year_label:<6} {r1h:<12.2f} {r4h:<12.2f} {sign}{delta:<11.2f}")
+        diffs = {}
+        for sym in ["BTC", "ETH", "SOL"]:
+            p = all_results.get(year_label, {}).get("pessimistic", {}).get("symbols", {}).get(sym, {}).get("pnl", 0)
+            r = all_results.get(year_label, {}).get("realistic", {}).get("symbols", {}).get(sym, {}).get("pnl", 0)
+            diffs[sym] = r - p
+        total_diff = sum(diffs.values())
+        print(f"  {year_label:<6} {diffs['BTC']:<+12.2f} {diffs['ETH']:<+12.2f} {diffs['SOL']:<+12.2f} {total_diff:<+12.2f}")
 
-    r1h_total = sum(all_results.get(y[0], {}).get("baseline", {}).get("symbols", {}).get("BTC", {}).get("pnl", 0) for y in YEARS)
-    r4h_total = sum(all_results.get(y[0], {}).get("btc_4h", {}).get("symbols", {}).get("BTC", {}).get("pnl", 0) for y in YEARS)
-    delta_total = r4h_total - r1h_total
-    sign = "+" if delta_total >= 0 else ""
-    print(f"  {'合计':<6} {r1h_total:<12.2f} {r4h_total:<12.2f} {sign}{delta_total:<11.2f}")
+    # 3年累计
+    for sym in ["BTC", "ETH", "SOL"]:
+        p_total = sum(all_results.get(y[0], {}).get("pessimistic", {}).get("symbols", {}).get(sym, {}).get("pnl", 0) for y in YEARS)
+        r_total = sum(all_results.get(y[0], {}).get("realistic", {}).get("symbols", {}).get(sym, {}).get("pnl", 0) for y in YEARS)
+        diffs[sym] = r_total - p_total
+    total_diff = sum(diffs.values())
+    print(f"  {'合计':<6} {diffs['BTC']:<+12.2f} {diffs['ETH']:<+12.2f} {diffs['SOL']:<+12.2f} {total_diff:<+12.2f}")
 
     with open(OUT_FILE, "w") as f:
         json.dump(all_results, f, indent=2, default=float)
