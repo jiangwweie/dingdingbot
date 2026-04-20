@@ -512,9 +512,10 @@ class AtrFilterDynamic(FilterBase):
     Stateful: Maintains ATR calculation per symbol/timeframe using Wilder's smoothing method.
     """
 
-    def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"), enabled: bool = False):
+    def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"), max_atr_ratio: Optional[Decimal] = None, enabled: bool = False):
         self._period = period
         self._min_atr_ratio = min_atr_ratio
+        self._max_atr_ratio = max_atr_ratio
         self._enabled = enabled
         # key: "symbol:timeframe", value: {"tr_values": List[Decimal], "atr": Optional[Decimal], "prev_close": Optional[Decimal]}
         self._atr_state: Dict[str, Dict[str, Any]] = {}
@@ -649,6 +650,23 @@ class AtrFilterDynamic(FilterBase):
                 }
             )
 
+        # 新增：过滤高 ATR 环境（ATR/price 超过阈值 → 噪声比 SL 大，止损无效）
+        if self._max_atr_ratio is not None:
+            atr_pct = atr / kline.close
+            if atr_pct > self._max_atr_ratio:
+                return TraceEvent(
+                    node_name=self.name,
+                    passed=False,
+                    reason="atr_too_high",
+                    metadata={
+                        "filter_name": "atr_volatility",
+                        "filter_type": "atr_volatility",
+                        "atr_value": float(atr),
+                        "atr_pct_of_price": float(atr_pct),
+                        "max_atr_ratio": float(self._max_atr_ratio),
+                    }
+                )
+
         return TraceEvent(
             node_name=self.name,
             passed=True,
@@ -759,9 +777,13 @@ class FilterFactory:
             min_atr_ratio = params.get('min_atr_ratio', Decimal("0.001"))
             if not isinstance(min_atr_ratio, Decimal):
                 min_atr_ratio = Decimal(str(min_atr_ratio))
+            max_atr_ratio = params.get('max_atr_ratio', None)
+            if max_atr_ratio is not None and not isinstance(max_atr_ratio, Decimal):
+                max_atr_ratio = Decimal(str(max_atr_ratio))
             return filter_class(
                 period=params.get('period', 14),
                 min_atr_ratio=min_atr_ratio,
+                max_atr_ratio=max_atr_ratio,
                 enabled=enabled
             )
         elif filter_type in ["volume_surge", "volatility_filter", "time_filter", "price_action"]:
