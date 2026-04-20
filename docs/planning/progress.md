@@ -1,8 +1,152 @@
 # Progress Log
 
-> Last updated: 2026-04-20 22:30
+> Last updated: 2026-04-20 23:45
 
 ---
+
+## 2026-04-20 23:45 -- 已将“悲观回测 vs 实盘预期映射”写入 planning-with-files
+
+### 本次补充的核心共识
+
+- 用户明确了当前适用边界：
+  - 小资金（3w U 以内）
+  - 单品种起步
+  - 加密货币 24h
+  - 只做主流币
+- 在该边界下，当前回测系统已足够支持测试盘前决策
+- 但“悲观回测”应被定义为 **stress 口径**，不直接等同于实盘收益预期中枢
+- 当前更需要优先修正的是 **回测语义一致性**，而不是继续扩展复杂撮合
+
+### 已写入的后续规划
+
+1. **A0：回测语义修正**
+   - 修正信号生成与 ENTRY 成交的时间顺序
+   - 修复 funding 进入净值闭环
+
+2. **A1：双口径回测**
+   - 显式拆分 `stress` / `expected`
+   - 以后测试盘 KPI 使用 `expected` 口径
+
+3. **A2：ETH 单币种测试盘**
+   - 保留为高 ROI 路线
+   - 但放在 A0/A1 之后执行
+
+### 文档同步
+
+- 已更新 `docs/planning/task_plan.md`
+- 已更新 `docs/planning/findings.md`
+- 已更新 `docs/planning/progress.md`
+
+### 备注
+
+- 本次仅同步规划与结论，没有修改业务代码
+- 未执行测试
+
+---
+
+## 2026-04-20 23:25 -- 回测参数链路收口完成（方案 A）✅
+
+### 核心成果
+
+**统一回测参数优先级链**：`runtime overrides > request > profile KV > code default`
+
+### 新增模型
+
+| 模型 | 用途 |
+|------|------|
+| `BacktestRuntimeOverrides` | 运行时参数覆盖（最高优先级，用于 Optuna） |
+| `ResolvedBacktestParams` | 解析后的参数对象（回测主流程唯一消费） |
+| `BACKTEST_PARAM_DEFAULTS` | 已验证锁定的默认值常量 |
+
+### 已验证锁定的参数
+
+| 参数 | 锁定值 | 证据 |
+|------|--------|------|
+| `breakeven_enabled` | `False` | +5607 (36%) |
+| `tp_ratios` | `[0.6, 0.4]` | 当前最优 |
+| `tp_targets` | `[1.0, 2.5]` | 1.5R 恶化 41% |
+| `max_atr_ratio` | `0.01` | +11420 (52%) |
+
+### 修复的 4 个问题（审查反馈）
+
+1. ✅ `runtime_overrides` 对 TP 参数的最高优先级落地
+2. ✅ 动态策略路径接入 `resolved_params`
+3. ✅ snapshot 硬编码 `min_distance_pct=0.005` 清理
+4. ✅ `ResolvedBacktestParams.to_risk_manager_config()` 错误字段修复
+
+### 代码改动
+
+| 文件 | 改动 |
+|------|------|
+| `src/domain/models.py` | +100 行（新模型 + 常量） |
+| `src/application/backtester.py` | +180 行（resolver + 参数统一） |
+| `src/domain/strategy_engine.py` | `create_dynamic_runner` 支持 `resolved_params` |
+| `src/domain/filter_factory.py` | `FilterFactory.create` 支持 `resolved_params` 注入 |
+| `tests/unit/test_backtest_params_resolution.py` | 新增 9 个保护测试 |
+
+### Optuna 使用示例
+
+```python
+from src.application.backtester import run_backtest, BacktestRuntimeOverrides
+from decimal import Decimal
+
+overrides = BacktestRuntimeOverrides(
+    max_atr_ratio=Decimal("0.015"),
+    min_distance_pct=Decimal("0.008"),
+)
+
+report = await run_backtest(
+    gateway=gateway,
+    request=request,
+    runtime_overrides=overrides,
+)
+```
+
+### 测试结果
+
+```
+tests/unit/test_backtest_params_resolution.py: 9 passed
+tests/unit/test_backtester_kv_config.py: 17 passed
+tests/unit/test_backtester_mtf.py: 10 passed
+```
+
+---
+
+## 2026-04-20 23:10 -- 参数系统演进决策已确认并写入 planning-with-files
+
+### 本次决策
+
+- 确认采用 **方案 A 先行**：先做回测参数链路收口，不做全量参数系统重构
+- 明确后续可演进到 **方案 B**：统一参数树；当前实现需保留适配层，避免返工
+- 确认参数优先级：
+  - `runtime overrides > request > profile KV > model/code default`
+- 确认 Optuna 方向：
+  - 使用运行时注入，不再依赖写全局 SQLite KV
+- 确认协作分工：
+  - `Codex / GPT` 负责架构审查、分析、决策、review
+  - `Claude Code / GLM` 负责实现、测试、执行
+
+### 第一批收口范围
+
+- 锁定默认值（当前优化 preset，不进 Optuna 搜索）
+  - `breakeven_enabled = False`
+  - `tp_ratios = [0.6, 0.4]`
+  - `tp_targets = [1.0, 2.5]`
+- 纳入正式参数链 + 可搜索
+  - `strategy.atr.max_atr_ratio`
+  - `strategy.ema.min_distance_pct`
+  - `strategy.ema.period`
+
+### 文档同步
+
+- 已更新 `docs/planning/task_plan.md`
+- 已更新 `docs/planning/findings.md`
+- 已更新 `docs/planning/progress.md`
+
+### 备注
+
+- 此次更新目的是为双电脑切换保留稳定上下文
+- 未执行测试；本次仅为架构/决策文档同步
 
 ## 2026-04-20 22:30 -- BNB9折滑点测试完成 + 最终收工
 
@@ -1691,4 +1835,3 @@ PM 协调了架构师 + QA 团队对 commit 9c5e3e6 的 7 项 P0 修复执行了
 - **设计文档**: `docs/arch/trailing-tp-implementation-design.md`
 
 ---
-

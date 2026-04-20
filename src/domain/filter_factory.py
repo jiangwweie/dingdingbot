@@ -729,12 +729,13 @@ class FilterFactory:
     }
 
     @classmethod
-    def create(cls, filter_config: Any) -> FilterBase:
+    def create(cls, filter_config: Any, resolved_params: Optional[Any] = None) -> FilterBase:
         """
         Create a filter instance from config.
 
         Args:
             filter_config: FilterConfig Pydantic model or dict with 'type' key
+            resolved_params: Optional ResolvedBacktestParams for parameter injection (Phase 8.1)
 
         Returns:
             FilterBase instance
@@ -758,13 +759,32 @@ class FilterFactory:
 
         filter_class = cls._registry[filter_type]
 
+        # Phase 8.1: resolved_params 可覆盖过滤器参数
+        # 优先级：resolved_params > filter_config.params > 默认值
+        def get_param(key: str, default, resolved_key: str = None):
+            """获取参数，支持 resolved_params 覆盖"""
+            if resolved_params:
+                # 映射 key 到 resolved_params 字段
+                key_mapping = {
+                    'min_distance_pct': 'min_distance_pct',
+                    'period': 'ema_period',  # EMA period
+                    'max_atr_ratio': 'max_atr_ratio',
+                    'min_atr_ratio': 'min_atr_ratio',  # 注意：resolved_params 没有 min_atr_ratio
+                }
+                resolved_key = key_mapping.get(key, key)
+                resolved_val = getattr(resolved_params, resolved_key, None)
+                if resolved_val is not None:
+                    return resolved_val
+            return params.get(key, default)
+
         # Extract relevant params based on filter class
         if filter_type in ("ema", "ema_trend"):
-            min_dist = params.get('min_distance_pct', 0)
+            min_dist = get_param('min_distance_pct', 0)
             if not isinstance(min_dist, Decimal):
                 min_dist = Decimal(str(min_dist))
+            period = get_param('period', 60)
             return filter_class(
-                period=params.get('period', 60),
+                period=period,
                 enabled=enabled,
                 min_distance_pct=min_dist,
             )
@@ -777,7 +797,8 @@ class FilterFactory:
             min_atr_ratio = params.get('min_atr_ratio', Decimal("0.001"))
             if not isinstance(min_atr_ratio, Decimal):
                 min_atr_ratio = Decimal(str(min_atr_ratio))
-            max_atr_ratio = params.get('max_atr_ratio', None)
+            # max_atr_ratio 可被 resolved_params 覆盖
+            max_atr_ratio = get_param('max_atr_ratio', None)
             if max_atr_ratio is not None and not isinstance(max_atr_ratio, Decimal):
                 max_atr_ratio = Decimal(str(max_atr_ratio))
             return filter_class(
@@ -792,17 +813,18 @@ class FilterFactory:
         raise ValueError(f"Failed to create filter of type: {filter_type}")
 
     @classmethod
-    def create_chain(cls, filter_configs: List[Any]) -> List[FilterBase]:
+    def create_chain(cls, filter_configs: List[Any], resolved_params: Optional[Any] = None) -> List[FilterBase]:
         """
         Create a chain of filters from config list.
 
         Args:
             filter_configs: List of FilterConfig models or dicts
+            resolved_params: Optional ResolvedBacktestParams for parameter injection (Phase 8.1)
 
         Returns:
             List of FilterBase instances
         """
-        return [cls.create(config) for config in filter_configs]
+        return [cls.create(config, resolved_params=resolved_params) for config in filter_configs]
 
     @classmethod
     def register_filter(cls, name: str, filter_class: type):

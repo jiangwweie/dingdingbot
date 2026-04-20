@@ -208,7 +208,7 @@ class TestBacktesterMtfAlignment:
             create_kline(timeframe="1h", timestamp=hour_to_ms(11), close="50200"), # 11:00-12:00
         ]
 
-        async def mock_fetch(symbol, timeframe, limit=1000):
+        async def mock_fetch(symbol, timeframe, limit=1000, since=None):
             if timeframe == "15m":
                 return klines_15m
             elif timeframe == "1h":

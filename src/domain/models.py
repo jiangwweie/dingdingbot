@@ -2580,3 +2580,101 @@ class OrderAuditLogQuery(BaseModel):
     offset: int = Field(default=0, ge=0, description="偏移量")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, use_enum_values=True)
+
+
+# ============================================================
+# 回测参数链路收口 (Phase 8.1)
+# ============================================================
+
+class BacktestRuntimeOverrides(BaseModel):
+    """
+    回测运行时参数覆盖（最高优先级）
+
+    用于 Optuna/实验脚本直接传参，绕过 SQLite KV 写入。
+
+    优先级：runtime overrides > request > profile KV > code default
+    """
+    # 策略参数
+    max_atr_ratio: Optional[Decimal] = Field(None, description="ATR 最大波幅比率")
+    min_distance_pct: Optional[Decimal] = Field(None, description="EMA 最小距离百分比")
+    ema_period: Optional[int] = Field(None, ge=5, le=200, description="EMA 周期")
+
+    # 订单参数
+    tp_ratios: Optional[List[Decimal]] = Field(None, description="各级止盈比例")
+    tp_targets: Optional[List[Decimal]] = Field(None, description="各级 TP 目标 RR 倍数")
+
+    # 风控参数
+    breakeven_enabled: Optional[bool] = Field(None, description="是否启用 Breakeven 止损")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class ResolvedBacktestParams(BaseModel):
+    """
+    解析后的回测参数（最终消费对象）
+
+    回测主流程只消费这一份参数对象，不再散落默认值判断。
+
+    所有字段都有确定值，由 resolver 统一解析。
+    """
+    # ===== 策略参数 =====
+    max_atr_ratio: Decimal = Field(..., description="ATR 最大波幅比率")
+    min_distance_pct: Decimal = Field(..., description="EMA 最小距离百分比")
+    ema_period: int = Field(..., description="EMA 周期")
+
+    # ===== 订单参数 =====
+    tp_ratios: List[Decimal] = Field(..., description="各级止盈比例")
+    tp_targets: List[Decimal] = Field(..., description="各级 TP 目标 RR 倍数")
+
+    # ===== 风控参数 =====
+    breakeven_enabled: bool = Field(..., description="是否启用 Breakeven 止损")
+
+    # ===== 成本参数 =====
+    slippage_rate: Decimal = Field(..., description="入场滑点率")
+    tp_slippage_rate: Decimal = Field(..., description="止盈滑点率")
+    fee_rate: Decimal = Field(..., description="手续费率")
+    initial_balance: Decimal = Field(..., description="初始资金")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def to_order_strategy(self) -> "OrderStrategy":
+        """转换为 OrderStrategy（v3 回测执行真源）"""
+        return OrderStrategy(
+            id="resolved",
+            name="Resolved Strategy",
+            tp_levels=len(self.tp_ratios),
+            tp_ratios=self.tp_ratios,
+            tp_targets=self.tp_targets,
+            trailing_stop_enabled=False,  # 已锁定：BE=OFF
+        )
+
+    def to_risk_manager_config(self) -> "RiskManagerConfig":
+        """转换为 RiskManagerConfig"""
+        return RiskManagerConfig(
+            breakeven_enabled=self.breakeven_enabled,
+        )
+
+
+# ============================================================
+# 参数默认值常量（已验证锁定）
+# ============================================================
+
+BACKTEST_PARAM_DEFAULTS = {
+    # 策略参数
+    "max_atr_ratio": Decimal("0.01"),      # ATR=1% 已验证 +11420 (52%)
+    "min_distance_pct": Decimal("0.005"),  # 0.5%
+    "ema_period": 60,
+
+    # 订单参数（已验证锁定）
+    "tp_ratios": [Decimal("0.6"), Decimal("0.4")],
+    "tp_targets": [Decimal("1.0"), Decimal("2.5")],
+
+    # 风控参数（已验证锁定）
+    "breakeven_enabled": False,  # BE=OFF 已验证 +5607 (36%)
+
+    # 成本参数
+    "slippage_rate": Decimal("0.001"),
+    "tp_slippage_rate": Decimal("0.0005"),
+    "fee_rate": Decimal("0.0004"),
+    "initial_balance": Decimal("10000"),
+}

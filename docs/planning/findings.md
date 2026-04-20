@@ -1,8 +1,115 @@
 # Findings Log
 
-> Last updated: 2026-04-20 22:30
+> Last updated: 2026-04-20 23:45
 
 ---
+
+## 2026-04-20 -- 回测系统语义评估（围绕实盘预期映射）
+
+### 适用边界（用户已确认）
+
+- 小资金：**3w U 以内**
+- 起步阶段：**单品种**
+- 市场：**加密货币 24h**
+- 标的：**只做主流币**
+
+### 总体判断
+
+- 当前回测系统已经具备 **策略筛选价值** 和 **测试盘前决策价值**
+- 当前“悲观撮合”更适合作为 **stress 口径**，而不是直接拿来当实盘收益中枢
+- 当前“真实 / BNB9”更接近 **expected 口径**
+- 在上述边界下，**容量/深度冲击不是当前阶段第一矛盾**
+- 当前最值得优先修正的问题，是少数 **撮合语义不一致会扭曲对实盘预期的解释**
+
+### 关键发现
+
+1. **时间语义问题仍是最高优先级**
+   - 当前主循环是 `runner.run(kline)` 后立即让 ENTRY 按同一根 K 线 `open` 成交
+   - 这会产生“看到了本 bar 收盘信息，却按本 bar 开盘价成交”的前视偏差
+   - 该问题与资金规模无关，是当前最影响回测到实盘映射的点
+
+2. **资金费率已统计，但净值闭环未完成**
+   - `total_funding_cost` 有统计，`position.total_funding_paid` 也有累计
+   - 但未同步扣减 `account.total_balance`
+   - 会导致最终 `final_balance - initial_balance` 高估真实净收益
+
+3. **止损模型当前是“中度保守”，但不等于最坏情况**
+   - 加密 24h + 主流币下，股票式隔夜 gap 风险显著降低
+   - 但当前 SL 仍主要围绕 `trigger_price ± fixed slippage` 成交
+   - 若后续扩大资金或做更极端行情压力测试，仍应补充 gap-through 建模
+
+4. **当前成本模型更适合压力测试，不适合单独作为收益预测**
+   - ENTRY / TP / SL 的 fee 与 slippage 已拆开基础字段
+   - 但 `TP` 仍偏“统一保守”，适合 stress，不适合直接当 expected 中枢
+   - 后续应显式分成 `stress` / `expected` 两档口径
+
+### 决策含义
+
+- **ETH 单币种测试盘仍然成立**
+  - 但测试盘 KPI 应基于 `expected` 口径，而不是直接引用悲观值
+- **Optuna 仍可继续推进**
+  - 但必须优先修正时间语义，避免把前视偏差放大成“最优参数”
+- **BTC 不急着继续深挖**
+  - 应先确保撮合语义收敛，再判断是策略硬伤还是执行建模误差
+
+### 后续优先级
+
+| 优先级 | 项目 | 结论 |
+|------|------|------|
+| P0 | 信号/成交时间顺序修正 | 必须先做 |
+| P0 | Funding 进入净值闭环 | 必须先做 |
+| P1 | `stress` / `expected` 双口径回测 | 强烈建议 |
+| P1 | 重写 slippage 成本归因 | 强烈建议 |
+| P2 | SL gap-through 强化 | 当前阶段可后置 |
+
+## 2026-04-20 -- 参数系统演进决策（方案 A 先行，保留向方案 B 演进）
+
+### 决策背景
+
+- 今天的回测结论已经足够强，问题不再是“要不要继续调参”，而是“如何把已验证有效的参数结论收口到正式参数链”
+- 关键证据：
+  - `breakeven_enabled=False` 改善 +5607（36%）
+  - `max_atr_ratio=0.01` 改善 +11420（52%）
+  - `TP2=1.5R` 恶化 41%，应否决
+  - Optuna 并发会被全局 KV 覆盖机制阻塞，需支持运行时注入
+
+### 已确认的架构决策
+
+- **演进路线**：先做方案 A（参数链路收口），后续再演进到方案 B（统一参数树）
+- **优先级规则**：`runtime overrides > request > profile KV > model/code default`
+- **Optuna 方向**：支持运行时注入，不再依赖写全局 SQLite KV
+- **当前协作分工**：
+  - `Codex / GPT`：架构审查、证据分析、沟通决策、代码 review
+  - `Claude Code / GLM`：代码实现、测试执行、脚本运行、交付推进
+
+### 方案 A 的边界
+
+- 不做全量配置系统重构
+- 新增一层统一解析对象（如 `ResolvedBacktestParams` / `BacktestRuntimeOverrides`）
+- 回测主流程统一从解析对象取值，消除 `backtester.py` 内部散落的业务默认值
+- 保留向方案 B 演进的适配层，不把过渡实现焊死在 `backtester.py`
+
+### 真源判断（当前阶段）
+
+- `OrderStrategy` 作为 **v3 回测执行真源**
+- `TakeProfitConfig` 暂时保留，不删除、不继续扩散，后续在方案 B 中再统一
+- `max_atr_ratio`、`min_distance_pct`、`ema_period` 属于 **strategy 参数**
+- `slippage_rate`、`fee_rate`、`tp_slippage_rate`、`initial_balance`、`funding_rate` 属于 **backtest 环境参数**
+
+### 第一批收口范围
+
+- **锁定默认值（当前优化 preset，不进 Optuna 搜索）**
+  - `breakeven_enabled = False`
+  - `tp_ratios = [0.6, 0.4]`
+  - `tp_targets = [1.0, 2.5]`
+- **纳入正式参数链 + 可搜索**
+  - `strategy.atr.max_atr_ratio`
+  - `strategy.ema.min_distance_pct`
+  - `strategy.ema.period`
+- **第二阶段再考虑扩展**
+  - `strategy.pinbar.min_wick_ratio`
+  - `strategy.pinbar.max_body_ratio`
+  - `strategy.pinbar.body_position_tolerance`
 
 ## 2026-04-20 -- BNB9折手续费滑点测试：3年总PnL转正 +1282 USDT
 

@@ -198,7 +198,7 @@ class TestConfigPriority:
         # Mock _run_v3_pms_backtest to capture the kv_configs passed
         captured_kv_configs = {}
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             captured_kv_configs.update(kv_configs or {})
             # Return minimal valid report structure
             from src.domain.models import PMSBacktestReport
@@ -255,7 +255,7 @@ class TestConfigPriority:
         # Capture configs passed to _run_v3_pms_backtest
         captured_kv_configs = {}
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             captured_kv_configs.update(kv_configs or {})
             from src.domain.models import PMSBacktestReport
             return PMSBacktestReport(
@@ -306,7 +306,7 @@ class TestConfigPriority:
         actual_fee = None
         actual_balance = None
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             nonlocal actual_slippage, actual_fee, actual_balance
             # Simulate the merge logic
             actual_slippage = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
@@ -365,7 +365,7 @@ class TestConfigPriority:
         # Mock _run_v3_pms_backtest to verify merged configs
         actual_configs = {}
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             # Use the same merge logic as actual code
             actual_configs['slippage'] = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
             actual_configs['fee'] = request.fee_rate or (kv_configs.get('fee_rate') if kv_configs else None) or Decimal('0.0004')
@@ -492,7 +492,7 @@ class TestMockMatchingEngineIntegration:
         # Capture configs passed to MockMatchingEngine
         captured_engine_configs = {}
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             # Simulate merge logic
             slippage_rate = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
             fee_rate = request.fee_rate or (kv_configs.get('fee_rate') if kv_configs else None) or Decimal('0.0004')
@@ -557,7 +557,7 @@ class TestMockMatchingEngineIntegration:
 
         captured_engine_configs = {}
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             slippage_rate = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
             fee_rate = request.fee_rate or (kv_configs.get('fee_rate') if kv_configs else None) or Decimal('0.0004')
             tp_slippage_rate = (kv_configs.get('tp_slippage_rate') if kv_configs else None) or Decimal('0.0005')
@@ -617,7 +617,7 @@ class TestMockMatchingEngineIntegration:
         # Capture initial_balance used
         captured_initial_balance = None
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             nonlocal captured_initial_balance
             initial_balance = request.initial_balance or (kv_configs.get('initial_balance') if kv_configs else None) or Decimal('10000')
             captured_initial_balance = initial_balance
@@ -670,7 +670,7 @@ class TestMockMatchingEngineIntegration:
 
         captured_initial_balance = None
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             nonlocal captured_initial_balance
             initial_balance = request.initial_balance or (kv_configs.get('initial_balance') if kv_configs else None) or Decimal('10000')
             captured_initial_balance = initial_balance
@@ -729,7 +729,7 @@ class TestConfigPriorityBoundaryCases:
 
         captured_slippage = None
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             nonlocal captured_slippage
             # Note: Using 'or' logic, zero will be overridden by default
             # This is a known limitation of the current implementation
@@ -783,7 +783,7 @@ class TestConfigPriorityBoundaryCases:
 
         captured_slippage = None
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             nonlocal captured_slippage
             slippage_rate = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
             captured_slippage = slippage_rate
@@ -838,7 +838,7 @@ class TestConfigPriorityBoundaryCases:
 
         captured_tp_slippage = None
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             nonlocal captured_tp_slippage
             captured_tp_slippage = (
                 request.tp_slippage_rate
@@ -890,7 +890,7 @@ class TestConfigPriorityBoundaryCases:
 
         captured_configs = {}
 
-        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs):
+        async def mock_run_v3_pms(request, repo, bt_repo, order_repo, kv_configs, runtime_overrides=None):
             captured_configs['slippage'] = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
             captured_configs['fee'] = request.fee_rate or (kv_configs.get('fee_rate') if kv_configs else None) or Decimal('0.0004')
             captured_configs['balance'] = request.initial_balance or (kv_configs.get('initial_balance') if kv_configs else None) or Decimal('10000')

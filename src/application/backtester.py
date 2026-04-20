@@ -36,6 +36,10 @@ from src.domain.models import (
     Signal,
     OrderStatus,
     OrderStrategy,
+    # 回测参数链路收口
+    BacktestRuntimeOverrides,
+    ResolvedBacktestParams,
+    BACKTEST_PARAM_DEFAULTS,
 )
 from src.domain.matching_engine import MockMatchingEngine
 from src.domain.risk_manager import DynamicRiskManager
@@ -60,6 +64,157 @@ from src.infrastructure.logger import logger
 
 
 # ============================================================
+# 回测参数解析器 (Phase 8.1)
+# ============================================================
+
+def resolve_backtest_params(
+    runtime_overrides: Optional[BacktestRuntimeOverrides] = None,
+    request: Optional[BacktestRequest] = None,
+    kv_configs: Optional[Dict[str, Any]] = None,
+) -> ResolvedBacktestParams:
+    """
+    统一回测参数解析器。
+
+    优先级：runtime overrides > request > profile KV > code default
+
+    Args:
+        runtime_overrides: 运行时参数覆盖（最高优先级，用于 Optuna/实验脚本）
+        request: BacktestRequest 对象
+        kv_configs: SQLite KV 配置字典
+
+    Returns:
+        ResolvedBacktestParams: 解析后的参数对象（所有字段都有确定值）
+    """
+    defaults = BACKTEST_PARAM_DEFAULTS
+    overrides = runtime_overrides or BacktestRuntimeOverrides()
+
+    def resolve_decimal(
+        key: str,
+        override_val: Optional[Decimal],
+        request_val: Optional[Decimal] = None,
+        kv_key: Optional[str] = None,
+    ) -> Decimal:
+        """解析 Decimal 参数"""
+        if override_val is not None:
+            return override_val
+        if request_val is not None:
+            return request_val
+        if kv_configs and kv_key and kv_configs.get(kv_key) is not None:
+            return Decimal(str(kv_configs[kv_key]))
+        return defaults[key]
+
+    def resolve_int(
+        key: str,
+        override_val: Optional[int],
+        request_val: Optional[int] = None,
+        kv_key: Optional[str] = None,
+    ) -> int:
+        """解析 int 参数"""
+        if override_val is not None:
+            return override_val
+        if request_val is not None:
+            return request_val
+        if kv_configs and kv_key and kv_configs.get(kv_key) is not None:
+            return int(kv_configs[kv_key])
+        return defaults[key]
+
+    def resolve_bool(
+        key: str,
+        override_val: Optional[bool],
+        request_val: Optional[bool] = None,
+        kv_key: Optional[str] = None,
+    ) -> bool:
+        """解析 bool 参数"""
+        if override_val is not None:
+            return override_val
+        if request_val is not None:
+            return request_val
+        if kv_configs and kv_key and kv_configs.get(kv_key) is not None:
+            return bool(kv_configs[kv_key])
+        return defaults[key]
+
+    def resolve_list_decimal(
+        key: str,
+        override_val: Optional[List[Decimal]],
+        request_val: Optional[List[Decimal]] = None,
+        kv_key: Optional[str] = None,
+    ) -> List[Decimal]:
+        """解析 List[Decimal] 参数"""
+        if override_val is not None:
+            return override_val
+        if request_val is not None:
+            return request_val
+        if kv_configs and kv_key and kv_configs.get(kv_key) is not None:
+            val = kv_configs[kv_key]
+            if isinstance(val, list):
+                return [Decimal(str(v)) for v in val]
+        return defaults[key]
+
+    # 解析各参数
+    return ResolvedBacktestParams(
+        # 策略参数
+        max_atr_ratio=resolve_decimal(
+            "max_atr_ratio",
+            overrides.max_atr_ratio,
+            kv_key="strategy.atr.max_atr_ratio",
+        ),
+        min_distance_pct=resolve_decimal(
+            "min_distance_pct",
+            overrides.min_distance_pct,
+            kv_key="strategy.ema.min_distance_pct",
+        ),
+        ema_period=resolve_int(
+            "ema_period",
+            overrides.ema_period,
+            kv_key="strategy.ema.period",
+        ),
+
+        # 订单参数
+        tp_ratios=resolve_list_decimal(
+            "tp_ratios",
+            overrides.tp_ratios,
+        ),
+        tp_targets=resolve_list_decimal(
+            "tp_targets",
+            overrides.tp_targets,
+        ),
+
+        # 风控参数
+        breakeven_enabled=resolve_bool(
+            "breakeven_enabled",
+            overrides.breakeven_enabled,
+            kv_key="backtest.breakeven_enabled",
+        ),
+
+        # 成本参数
+        slippage_rate=resolve_decimal(
+            "slippage_rate",
+            None,
+            request.slippage_rate if request else None,
+            "backtest.slippage_rate",
+        ),
+        tp_slippage_rate=resolve_decimal(
+            "tp_slippage_rate",
+            None,
+            request.tp_slippage_rate if request else None,
+            "backtest.tp_slippage_rate",
+        ),
+        fee_rate=resolve_decimal(
+            "fee_rate",
+            None,
+            request.fee_rate if request else None,
+            "backtest.fee_rate",
+        ),
+        initial_balance=resolve_decimal(
+            "initial_balance",
+            None,
+            request.initial_balance if request else None,
+            "backtest.initial_balance",
+        ),
+    )
+
+
+# ============================================================
 # Isolated Strategy Runner for Backtesting (Legacy Support)
 # ============================================================
 @dataclass
@@ -70,6 +225,8 @@ class IsolatedStrategyConfig:
     mtf_validation_enabled: bool
     ema_period: int
     risk_config: RiskConfig
+    # Phase 8.1: 参数链路收口
+    min_distance_pct: Decimal = Decimal('0.005')  # 默认值，可被覆盖
 
 
 class IsolatedStrategyRunner:
@@ -91,8 +248,8 @@ class IsolatedStrategyRunner:
             enabled=config.trend_filter_enabled,
         )
         self._mtf_filter = MtfFilter(enabled=config.mtf_validation_enabled)
-        # EMA 距离阈值（横盘过滤）
-        self._min_distance_pct = Decimal('0.005')  # 0.5%
+        # EMA 距离阈值（横盘过滤）- 从 config 读取，不再硬编码
+        self._min_distance_pct = config.min_distance_pct
 
         self._runner = StrategyRunner(
             strategies=[self._pinbar_strategy],
@@ -243,6 +400,7 @@ class Backtester:
         repository = None,  # SignalRepository for saving signals (always saved if provided)
         backtest_repository = None,  # BacktestReportRepository for saving reports
         order_repository = None,  # OrderRepository for saving orders (T4)
+        runtime_overrides: Optional[BacktestRuntimeOverrides] = None,  # Phase 8.1: 运行时参数覆盖
     ) -> Union[BacktestReport, PMSBacktestReport]:
         """
         Run backtest with isolated config sandbox.
@@ -264,6 +422,7 @@ class Backtester:
             repository: SignalRepository instance for saving signals
             backtest_repository: BacktestReportRepository for saving reports
             order_repository: OrderRepository for saving orders
+            runtime_overrides: Optional runtime parameter overrides (Phase 8.1, for Optuna/scripts)
 
         Returns:
             BacktestReport (v2_classic mode) or PMSBacktestReport (v3_pms mode)
@@ -289,14 +448,22 @@ class Backtester:
 
         if use_v3_pms:
             # v3 PMS mode: Use MockMatchingEngine for position-level backtesting
-            return await self._run_v3_pms_backtest(request, repository, backtest_repository, order_repository, kv_configs)
+            return await self._run_v3_pms_backtest(
+                request, repository, backtest_repository, order_repository, kv_configs, runtime_overrides
+            )
 
         if use_dynamic:
             # Step 1: Build dynamic strategy runner from strategy definitions
             runner = self._build_dynamic_runner(request.strategies)
         else:
             # Step 1: Build isolated strategy config (legacy mode)
-            strategy_config = self._build_strategy_config(request)
+            # Phase 8.1: 为 legacy mode 也解析参数
+            resolved_params = resolve_backtest_params(
+                runtime_overrides=runtime_overrides,
+                request=request,
+                kv_configs=kv_configs,
+            )
+            strategy_config = self._build_strategy_config(request, resolved_params)
             runner = IsolatedStrategyRunner(strategy_config)
 
         # Step 2: Fetch historical K-line data
@@ -380,6 +547,7 @@ class Backtester:
         request: BacktestRequest,
         strategy_id: str,
         strategy_name: str,
+        resolved_params: Optional[ResolvedBacktestParams] = None,  # Phase 8.1: 参数收口
     ) -> str:
         """
         Serialize strategy configuration to JSON snapshot for storage.
@@ -388,6 +556,7 @@ class Backtester:
             request: Backtest request
             strategy_id: Strategy ID
             strategy_name: Strategy name
+            resolved_params: Resolved backtest parameters (Phase 8.1)
 
         Returns:
             JSON string of strategy snapshot
@@ -454,14 +623,24 @@ class Backtester:
                 }
             }]
             snapshot["filters"] = [
-                {"type": "ema_trend", "params": {"enabled": request.trend_filter_enabled if request.trend_filter_enabled is not None else True, "min_distance_pct": 0.005}},
+                {"type": "ema_trend", "params": {
+                    "enabled": request.trend_filter_enabled if request.trend_filter_enabled is not None else True,
+                    "min_distance_pct": float(resolved_params.min_distance_pct) if resolved_params else 0.005,
+                }},
                 {"type": "mtf", "params": {"enabled": request.mtf_validation_enabled if request.mtf_validation_enabled is not None else True}},
             ]
 
         return json.dumps(snapshot, ensure_ascii=False)
 
-    def _build_dynamic_runner(self, strategy_definitions: List[StrategyDefinition]) -> DynamicStrategyRunner:
-        """Build DynamicStrategyRunner from strategy definitions."""
+    def _build_dynamic_runner(
+        self,
+        strategy_definitions: List[StrategyDefinition],
+        resolved_params: Optional[ResolvedBacktestParams] = None,
+    ) -> DynamicStrategyRunner:
+        """Build DynamicStrategyRunner from strategy definitions.
+
+        Phase 8.1: 支持 resolved_params 注入过滤器参数。
+        """
         from src.domain.models import StrategyDefinition
 
         # 手动反序列化为 StrategyDefinition 对象
@@ -478,9 +657,13 @@ class Backtester:
                     logger.warning(f"Failed to deserialize strategy: {e}")
                     continue
 
-        return create_dynamic_runner(strategies)
+        return create_dynamic_runner(strategies, resolved_params=resolved_params)
 
-    def _build_strategy_config(self, request: BacktestRequest) -> IsolatedStrategyConfig:
+    def _build_strategy_config(
+        self,
+        request: BacktestRequest,
+        resolved_params: Optional[ResolvedBacktestParams] = None,
+    ) -> IsolatedStrategyConfig:
         """Build isolated strategy config from request."""
         # Default pinbar config
         pinbar_config = PinbarConfig(
@@ -496,12 +679,20 @@ class Backtester:
         # Risk config for position sizing (consumes request.risk_overrides)
         risk_config = self._build_risk_config(request)
 
+        # Phase 8.1: 从 resolved_params 获取 min_distance_pct
+        min_distance_pct = (
+            resolved_params.min_distance_pct
+            if resolved_params
+            else BACKTEST_PARAM_DEFAULTS["min_distance_pct"]
+        )
+
         return IsolatedStrategyConfig(
             pinbar_config=pinbar_config,
             trend_filter_enabled=trend_filter,
             mtf_validation_enabled=mtf_validation,
-            ema_period=60,  # EMA60
+            ema_period=resolved_params.ema_period if resolved_params else 60,
             risk_config=risk_config,
+            min_distance_pct=min_distance_pct,
         )
 
     async def _fetch_klines(self, request: BacktestRequest) -> List[KlineData]:
@@ -1188,6 +1379,7 @@ class Backtester:
         backtest_repository = None,
         order_repository = None,  # T4: OrderRepository for persisting orders
         kv_configs: Optional[Dict[str, Any]] = None,  # KV configs as defaults
+        runtime_overrides: Optional[BacktestRuntimeOverrides] = None,  # Phase 8.1: 运行时参数覆盖
     ) -> PMSBacktestReport:
         """
         Run v3 PMS mode backtest with MockMatchingEngine.
@@ -1200,16 +1392,18 @@ class Backtester:
         5. Generate PMSBacktestReport with detailed position-level statistics
         6. T4: Persist all orders to database if order_repository is provided
 
-        Config Priority:
-        1. API request parameters (highest priority)
-        2. KV configs (config_entries_v2)
-        3. Code defaults (lowest priority)
+        Config Priority (Phase 8.1):
+        1. runtime_overrides (highest priority, for Optuna/scripts)
+        2. API request parameters
+        3. KV configs (config_entries_v2)
+        4. Code defaults (lowest priority)
 
         Args:
             request: Backtest request with v3_pms mode
             repository: Optional SignalRepository for saving signals
             order_repository: Optional OrderRepository for saving orders
             kv_configs: Optional KV configs dict with backtest defaults
+            runtime_overrides: Optional runtime parameter overrides (Phase 8.1)
 
         Returns:
             PMSBacktestReport with detailed position-level statistics
@@ -1220,16 +1414,20 @@ class Backtester:
         from src.domain.order_manager import OrderManager
         import uuid
 
-        # Step 1: Merge configs with priority: request > KV > code defaults
-        slippage_rate = request.slippage_rate or (kv_configs.get('slippage_rate') if kv_configs else None) or Decimal('0.001')
-        fee_rate = request.fee_rate or (kv_configs.get('fee_rate') if kv_configs else None) or Decimal('0.0004')
-        initial_balance = request.initial_balance or (kv_configs.get('initial_balance') if kv_configs else None) or Decimal('10000')
-        tp_slippage_rate = (
-            request.tp_slippage_rate
-            or (kv_configs.get('tp_slippage_rate') if kv_configs else None)
-            or Decimal('0.0005')
-        )  # 0.05% default
-        # BT-2: 资金费率配置
+        # Phase 8.1: 统一参数解析
+        resolved_params = resolve_backtest_params(
+            runtime_overrides=runtime_overrides,
+            request=request,
+            kv_configs=kv_configs,
+        )
+
+        # 从 resolved_params 获取成本参数
+        slippage_rate = resolved_params.slippage_rate
+        fee_rate = resolved_params.fee_rate
+        initial_balance = resolved_params.initial_balance
+        tp_slippage_rate = resolved_params.tp_slippage_rate
+
+        # BT-2: 资金费率配置（保留原有逻辑，不在本次收口范围）
         funding_rate_enabled = (
             request.funding_rate_enabled
             if request.funding_rate_enabled is not None
@@ -1247,7 +1445,10 @@ class Backtester:
             f"Running v3 PMS backtest with config: "
             f"slippage={slippage_rate}, fee={fee_rate}, "
             f"initial_balance={initial_balance}, tp_slippage={tp_slippage_rate}, "
-            f"funding_enabled={funding_rate_enabled}, funding_rate={funding_rate}"
+            f"funding_enabled={funding_rate_enabled}, funding_rate={funding_rate}, "
+            f"min_distance_pct={resolved_params.min_distance_pct}, "
+            f"max_atr_ratio={resolved_params.max_atr_ratio}, "
+            f"breakeven_enabled={resolved_params.breakeven_enabled}"
         )
 
         # Step 2: Initialize MockMatchingEngine with merged configs
@@ -1265,11 +1466,11 @@ class Backtester:
         # Step 3: Build strategy runner (same as dynamic mode)
         use_dynamic = request.strategies is not None and len(request.strategies) > 0
         if use_dynamic:
-            runner = self._build_dynamic_runner(request.strategies)
+            runner = self._build_dynamic_runner(request.strategies, resolved_params)
             strategy_id = request.strategies[0].get('id', 'unknown')
             strategy_name = request.strategies[0].get('name', 'unknown')
         else:
-            strategy_config = self._build_strategy_config(request)
+            strategy_config = self._build_strategy_config(request, resolved_params)
             runner = IsolatedStrategyRunner(strategy_config)
             strategy_id = 'pinbar'
             strategy_name = 'pinbar'
@@ -1384,11 +1585,8 @@ class Backtester:
             if kv_configs and kv_configs.get('trailing_exit_slippage_rate') is not None
             else Decimal('0.001')
         )
-        # Breakeven 配置
-        breakeven_enabled = (
-            kv_configs.get('breakeven_enabled', True)
-            if kv_configs else True
-        )
+        # Phase 8.1: breakeven_enabled 从 resolved_params 获取
+        breakeven_enabled = resolved_params.breakeven_enabled
         dynamic_risk_manager = DynamicRiskManager(
             config=RiskManagerConfig(
                 trailing_percent=Decimal('0.02'),      # 默认 2%
@@ -1471,19 +1669,45 @@ class Backtester:
                     # Note: TP/SL orders will be generated dynamically after ENTRY is filled
                     order_manager = OrderManager()
 
-                    # 使用 request 中的 order_strategy，如果未提供则使用双 TP 策略
-                    # 实验验证：双 TP (1.0R/2.5R) 是唯一盈利配置 (DA-20260419-002)
-                    # trailing_stop_enabled=False: BE=OFF 回测验证净改善 +5607 USDT
-                    strategy = request.order_strategy or OrderStrategy(
-                        id="default_dual_tp",
-                        name="Default Dual TP",
-                        tp_levels=2,
-                        tp_ratios=[Decimal('0.6'), Decimal('0.4')],
-                        tp_targets=[Decimal('1.0'), Decimal('2.5')],  # TP1=1.0R, TP2=2.5R
-                        initial_stop_loss_rr=Decimal('-1.0'),
-                        trailing_stop_enabled=False,
-                        oco_enabled=True,
-                    )
+                    # Phase 8.1: 使用 resolved_params 中的订单参数
+                    # 优先级：runtime_overrides > request.order_strategy > 默认值
+                    # 语义：局部字段覆写，保留其他编排字段
+                    if runtime_overrides and (runtime_overrides.tp_ratios or runtime_overrides.tp_targets):
+                        # runtime_overrides 最高优先级，但保留 request.order_strategy 的其他字段
+                        base_strategy = request.order_strategy or OrderStrategy(
+                            id="default_base",
+                            name="Default Base",
+                            tp_levels=2,
+                            tp_ratios=BACKTEST_PARAM_DEFAULTS["tp_ratios"],
+                            tp_targets=BACKTEST_PARAM_DEFAULTS["tp_targets"],
+                            initial_stop_loss_rr=Decimal('-1.0'),
+                            trailing_stop_enabled=False,
+                            oco_enabled=True,
+                        )
+                        # 仅覆写 tp_ratios/tp_targets，保留其他字段
+                        strategy = OrderStrategy(
+                            id=base_strategy.id,
+                            name=base_strategy.name,
+                            tp_levels=len(resolved_params.tp_ratios),
+                            tp_ratios=resolved_params.tp_ratios,
+                            tp_targets=resolved_params.tp_targets,
+                            initial_stop_loss_rr=base_strategy.initial_stop_loss_rr,
+                            trailing_stop_enabled=base_strategy.trailing_stop_enabled,
+                            oco_enabled=base_strategy.oco_enabled,
+                        )
+                    elif request.order_strategy:
+                        strategy = request.order_strategy
+                    else:
+                        strategy = OrderStrategy(
+                            id="resolved_strategy",
+                            name="Resolved Strategy",
+                            tp_levels=len(resolved_params.tp_ratios),
+                            tp_ratios=resolved_params.tp_ratios,
+                            tp_targets=resolved_params.tp_targets,
+                            initial_stop_loss_rr=Decimal('-1.0'),
+                            trailing_stop_enabled=False,  # 已锁定：BE=OFF
+                            oco_enabled=True,
+                        )
 
                     entry_orders = order_manager.create_order_chain(
                         strategy=strategy,
@@ -1829,7 +2053,7 @@ class Backtester:
             try:
                 # Serialize strategy snapshot
                 strategy_snapshot = await self._serialize_strategy_snapshot_for_report(
-                    request, strategy_id, strategy_name
+                    request, strategy_id, strategy_name, resolved_params
                 )
                 await backtest_repository.save_report(
                     report,
@@ -2008,6 +2232,7 @@ async def run_backtest(
     account_snapshot: Optional[AccountSnapshot] = None,
     repository = None,  # Optional SignalRepository for saving signals
     backtest_repository = None,  # Optional BacktestReportRepository for saving reports
+    runtime_overrides: Optional[BacktestRuntimeOverrides] = None,  # Phase 8.1: 运行时参数覆盖
 ) -> BacktestReport:
     """
     Run a backtest with isolated sandbox.
@@ -2021,6 +2246,7 @@ async def run_backtest(
         account_snapshot: Optional account snapshot
         repository: Optional SignalRepository for saving signals
         backtest_repository: Optional BacktestReportRepository for saving reports
+        runtime_overrides: Optional runtime parameter overrides (Phase 8.1, for Optuna/scripts)
 
     Returns:
         BacktestReport with detailed statistics
@@ -2030,5 +2256,6 @@ async def run_backtest(
         request,
         account_snapshot,
         repository=repository,
-        backtest_repository=backtest_repository
+        backtest_repository=backtest_repository,
+        runtime_overrides=runtime_overrides,
     )

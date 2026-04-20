@@ -1096,6 +1096,7 @@ class StrategyEngine:
 def create_dynamic_runner(
     strategy_definitions: List[Any],
     core_config: Optional[Any] = None,
+    resolved_params: Optional[Any] = None,  # Phase 8.1: 回测参数收口
 ) -> DynamicStrategyRunner:
     """
     Create a DynamicStrategyRunner from strategy definitions.
@@ -1105,6 +1106,7 @@ def create_dynamic_runner(
     Args:
         strategy_definitions: List of StrategyDefinition from config
         core_config: Optional CoreConfig for default parameters
+        resolved_params: Optional ResolvedBacktestParams for filter parameter injection (Phase 8.1)
 
     Returns:
         DynamicStrategyRunner ready for execution
@@ -1136,8 +1138,8 @@ def create_dynamic_runner(
         is_global = getattr(strat_def, "is_global", True)
         apply_to = getattr(strat_def, "apply_to", [])
 
-        # Create filter chain from config
-        filters = FilterFactory.create_chain(filters_config)
+        # Create filter chain from config (Phase 8.1: 传入 resolved_params)
+        filters = FilterFactory.create_chain(filters_config, resolved_params=resolved_params)
 
         # Handle OR logic by expanding to multiple independent runners
         # (AND logic for morphological patterns is rare, treated as OR for now)
