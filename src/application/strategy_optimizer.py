@@ -227,6 +227,9 @@ class StrategyOptimizer:
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._stop_flags: Dict[str, bool] = {}
 
+        # 固定参数存储（用于 Optuna 脚本传入）
+        self._fixed_params: Dict[str, Dict[str, Any]] = {}
+
         # 性能计算器
         self._perf_calculator = PerformanceCalculator()
 
@@ -344,8 +347,10 @@ class StrategyOptimizer:
             # if request.resume_from_trial is not None and self._history_repo:
             #     await self._resume_study(study, job_id, request.resume_from_trial)
 
-            # 定义目标函数
-            objective_func = self._create_objective_function(request, job_id)
+            # 定义目标函数（传入 fixed_params）
+            objective_func = self._create_objective_function(
+                request, job_id, fixed_params=request.fixed_params
+            )
 
             # 运行优化（在线程中运行，避免与异步事件循环冲突）
             logger.info(f"任务 {job_id}: 开始优化，共 {request.n_trials} 次试验")
@@ -461,7 +466,8 @@ class StrategyOptimizer:
     def _create_objective_function(
         self,
         request: OptimizationRequest,
-        job_id: str
+        job_id: str,
+        fixed_params: Optional[Dict[str, Any]] = None,
     ) -> Callable[[Trial], float]:
         """
         创建目标函数
@@ -469,6 +475,7 @@ class StrategyOptimizer:
         Args:
             request: 优化请求
             job_id: 任务 ID
+            fixed_params: 固定参数（如 tp_ratios, tp_targets, breakeven_enabled）
 
         Returns:
             Optuna 目标函数
@@ -478,10 +485,10 @@ class StrategyOptimizer:
             params = self._sample_params(trial, request.parameter_space)
 
             # Phase 8.2: 构建 runtime_overrides，不再写 KV
-            runtime_overrides = self._build_runtime_overrides(params)
+            runtime_overrides = self._build_runtime_overrides(params, fixed_params)
 
             # 构建回测请求
-            backtest_request = self._build_backtest_request(request, params)
+            backtest_request = self._build_backtest_request(request, params, fixed_params)
 
             # 运行回测（注入 runtime_overrides）
             report = await self._run_backtest(backtest_request, runtime_overrides)
@@ -563,7 +570,8 @@ class StrategyOptimizer:
 
     def _build_runtime_overrides(
         self,
-        params: Dict[str, Any]
+        params: Dict[str, Any],
+        fixed_params: Optional[Dict[str, Any]] = None,
     ) -> BacktestRuntimeOverrides:
         """
         从采样参数构建 BacktestRuntimeOverrides
@@ -574,6 +582,7 @@ class StrategyOptimizer:
 
         Args:
             params: 采样得到的参数字典
+            fixed_params: 固定参数（如 tp_ratios, tp_targets, breakeven_enabled）
 
         Returns:
             BacktestRuntimeOverrides 对象
@@ -594,12 +603,26 @@ class StrategyOptimizer:
         if "tp_targets" in params:
             overrides.tp_targets = [Decimal(str(v)) for v in params["tp_targets"]]
 
+        # Breakeven 参数
+        if "breakeven_enabled" in params:
+            overrides.breakeven_enabled = bool(params["breakeven_enabled"])
+
+        # 应用固定参数（覆盖采样参数）
+        if fixed_params:
+            if "tp_ratios" in fixed_params:
+                overrides.tp_ratios = [Decimal(str(v)) for v in fixed_params["tp_ratios"]]
+            if "tp_targets" in fixed_params:
+                overrides.tp_targets = [Decimal(str(v)) for v in fixed_params["tp_targets"]]
+            if "breakeven_enabled" in fixed_params:
+                overrides.breakeven_enabled = bool(fixed_params["breakeven_enabled"])
+
         return overrides
 
     def _build_backtest_request(
         self,
         opt_request: OptimizationRequest,
-        params: Dict[str, Any]
+        params: Dict[str, Any],
+        fixed_params: Optional[Dict[str, Any]] = None,
     ) -> BacktestRequest:
         """
         构建回测请求
@@ -607,11 +630,13 @@ class StrategyOptimizer:
         Args:
             opt_request: 优化请求
             params: 采样得到的参数
+            fixed_params: 固定参数（如 tp_ratios, tp_targets, breakeven_enabled, slippage_rate）
 
         Returns:
             回测请求
         """
-        # 默认策略配置（pinbar + EMA trend + MTF）
+        # 默认策略配置（pinbar + EMA trend + MTF + ATR）
+        # 注意：过滤器参数通过 resolved_params 注入，这里只声明启用哪些过滤器
         strategies = [{
             "name": "pinbar",
             "triggers": [{"type": "pinbar", "enabled": True}],
@@ -622,31 +647,47 @@ class StrategyOptimizer:
             ]
         }]
 
-        # 默认订单策略（锁定 TP 配置）
+        # 从固定参数或默认值构建订单策略
+        if fixed_params:
+            tp_ratios = fixed_params.get("tp_ratios", [Decimal("0.6"), Decimal("0.4")])
+            tp_targets = fixed_params.get("tp_targets", [Decimal("1.0"), Decimal("2.5")])
+        else:
+            tp_ratios = [Decimal("0.6"), Decimal("0.4")]
+            tp_targets = [Decimal("1.0"), Decimal("2.5")]
+
+        # 默认订单策略
         from src.domain.models import OrderStrategy
         order_strategy = OrderStrategy(
             id="optuna_locked",
             name="Optuna Locked TP",
-            tp_levels=2,
-            tp_ratios=[Decimal("0.6"), Decimal("0.4")],
-            tp_targets=[Decimal("1.0"), Decimal("2.5")],
+            tp_levels=len(tp_ratios),
+            tp_ratios=[Decimal(str(v)) for v in tp_ratios],
+            tp_targets=[Decimal(str(v)) for v in tp_targets],
             initial_stop_loss_rr=Decimal("-1.0"),
             trailing_stop_enabled=False,
             oco_enabled=True,
         )
 
-        return BacktestRequest(
-            symbol=opt_request.symbol,
-            timeframe=opt_request.timeframe,
-            start_time=opt_request.start_time,
-            end_time=opt_request.end_time,
-            mode="v3_pms",
-            initial_balance=opt_request.initial_balance,
-            slippage_rate=opt_request.slippage_rate,
-            fee_rate=opt_request.fee_rate,
-            strategies=strategies,
-            order_strategy=order_strategy,
-        )
+        # 构建请求，支持自定义滑点
+        request_kwargs = {
+            "symbol": opt_request.symbol,
+            "timeframe": opt_request.timeframe,
+            "start_time": opt_request.start_time,
+            "end_time": opt_request.end_time,
+            "limit": opt_request.limit,  # ⭐ 关键修复：传递 limit 参数，确保 MTF 数据充足
+            "mode": "v3_pms",
+            "initial_balance": opt_request.initial_balance,
+            "slippage_rate": opt_request.slippage_rate,
+            "fee_rate": opt_request.fee_rate,
+            "strategies": strategies,
+            "order_strategy": order_strategy,
+        }
+
+        # 支持自定义 tp_slippage_rate
+        if fixed_params and "tp_slippage_rate" in fixed_params:
+            request_kwargs["tp_slippage_rate"] = Decimal(str(fixed_params["tp_slippage_rate"]))
+
+        return BacktestRequest(**request_kwargs)
 
     async def _run_backtest(
         self,

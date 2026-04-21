@@ -1536,6 +1536,7 @@ class Backtester:
                         symbol=request.symbol,
                         timeframe=higher_tf,
                         start_time=request.start_time,
+                        end_time=request.end_time,
                         limit=limit,
                     )
                 elif self._gateway is not None:
