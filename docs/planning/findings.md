@@ -1,6 +1,95 @@
 # Findings Log
 
-> Last updated: 2026-04-20 23:45
+> Last updated: 2026-04-21 13:40
+
+---
+
+## 2026-04-21 -- MTF 数据加载修复 + Pinbar 与 MTF 过滤器的"顺大逆小"逻辑
+
+### 核心发现
+
+1. **MTF 数据加载问题**（v3_pms 模式）✅ 已修复
+   - 问题：固定加载 1000 bars，不足覆盖 1 年时间范围
+   - 修复：根据 `start_time/end_time` 动态计算所需 bars
+   - 结果：2200 bars for 1 year（之前 1000 bars）
+
+2. **Pinbar + MTF 过滤器的"顺大逆小"逻辑** ✅ 逻辑正确
+   - **看涨 Pinbar（LONG）**：1h 下跌末端反转（逆小）+ 4h 上涨趋势（顺大）→ MTF 要求 4h BULLISH ✅
+   - **看跌 Pinbar（SHORT）**：1h 上涨末端反转（逆小）+ 4h 下跌趋势（顺大）→ MTF 要求 4h BEARISH ✅
+   - **结论**：MTF 过滤器逻辑正确，符合"顺大逆小"原则
+
+3. **v2_classic 模式下 MTF 数据加载失败** ❌
+   - 原因：`gateway = None`，无法获取 MTF 数据
+   - 结果：所有信号被 MTF 过滤器过滤（reason: "higher_tf_data_unavailable"）
+
+4. **v3_pms 模式下仍需诊断** ⚠️
+   - MTF 数据已加载（2200 bars），但仍 0 trades
+   - 需要进一步诊断 MTF 数据是否正确传递到过滤器
+
+### 技术细节
+
+**MTF 数据加载修复**（`src/application/backtester.py` line 1520-1532）：
+
+```python
+# 修复前
+limit = max(request.limit, 1000)
+
+# 修复后
+if request.start_time and request.end_time:
+    higher_tf_minutes = self._parse_timeframe(higher_tf)
+    duration_ms = request.end_time - request.start_time
+    calculated_bars = int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 10
+    limit = max(calculated_bars, request.limit, 1000)
+else:
+    limit = max(request.limit, 1000)
+```
+
+**MTF 过滤器逻辑**（`src/domain/filter_factory.py` line 420-461）：
+
+```python
+if pattern.direction == Direction.LONG:
+    if higher_tf_trend == TrendDirection.BULLISH:
+        passed = True  # 顺大：4h 上涨 + LONG 信号
+    else:
+        passed = False
+else:  # SHORT
+    if higher_tf_trend == TrendDirection.BEARISH:
+        passed = True  # 顺大：4h 下跌 + SHORT 信号
+    else:
+        passed = False
+```
+
+### 诊断数据
+
+**ETH 1h 2024-01-01 ~ 2024-03-31 回测**：
+
+```
+pinbar（无过滤器）: 123 个形态
+pinbar + EMA trend: 44 个信号（30 LONG + 14 SHORT）
+pinbar + EMA trend + MTF: 0 个信号 ❌
+
+4h 趋势分布: 507 BULLISH (50.7%), 493 BEARISH (49.3%)
+```
+
+**理论预期**（如果 MTF 数据正确传递）：
+- 30 LONG × 50.7% ≈ 15 个信号通过
+- 14 SHORT × 49.3% ≈ 7 个信号通过
+- 总计 ≈ 22 个信号
+
+**实际结果**：0 个信号 ❌
+
+### 待解决问题
+
+v3_pms 模式下 MTF 数据已加载，但仍 0 trades，需要进一步诊断：
+1. MTF 数据是否正确传递到过滤器
+2. `_get_closest_higher_tf_trends()` 是否正确返回趋势
+3. 时间戳对齐问题
+
+### 决策含义
+
+- **MTF 数据加载修复已完成**，不影响模型契约
+- **Pinbar + MTF 组合逻辑正确**，符合"顺大逆小"原则
+- **v3_pms 模式需要进一步诊断**，可能是数据传递或时间对齐问题
 
 ---
 

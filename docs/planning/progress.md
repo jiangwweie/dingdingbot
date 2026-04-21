@@ -1,10 +1,81 @@
 # Progress Log
 
-> Last updated: 2026-04-20 23:45
+> Last updated: 2026-04-21 13:40
 
 ---
 
-## 2026-04-20 23:45 -- 已将“悲观回测 vs 实盘预期映射”写入 planning-with-files
+## 2026-04-21 13:40 -- MTF 数据加载修复 + 0 trades 根因分析
+
+### 核心成果
+
+1. **MTF 数据加载修复**（v3_pms 模式）✅
+   - 修复前：固定加载 1000 bars
+   - 修复后：根据时间范围动态计算（2200 bars for 1 year）
+   - 修改文件：`src/application/backtester.py` line 1520-1532
+
+2. **OptimizationRequest.limit 契约保持** ✅
+   - 未修改模型契约（default=100, ge=10, le=1000）
+   - MTF 数据加载逻辑独立于模型约束
+
+### 发现的问题
+
+**ETH 1h 2024-01-01 ~ 2024-12-31 回测 0 trades 根因**：
+
+1. **v2_classic 模式**：MTF 数据加载失败（gateway = None）
+   - 日志：`Failed to fetch higher TF data for MTF: 'NoneType' object has no attribute 'fetch_historical_ohlcv'`
+   - 所有信号被 MTF 过滤器过滤（reason: “higher_tf_data_unavailable”）
+
+2. **v3_pms 模式**：MTF 数据已加载（2200 bars），但仍 0 trades
+   - 需要进一步诊断
+   - 可能原因：Pinbar 反转形态与 MTF 顺势过滤器的”顺大逆小”逻辑
+
+### 诊断脚本
+
+创建了多个诊断脚本：
+- `scripts/verify_mtf_fix.py`：验证 MTF 数据加载修复
+- `scripts/diagnose_zero_trades.py`：诊断 0 trades 原因
+- `scripts/diagnose_filters.py`：逐步添加过滤器诊断
+- `scripts/diagnose_atr_distribution_eth.py`：ATR 分布分析
+- `scripts/diagnose_mtf_data.py`：MTF 数据传递诊断
+- `scripts/diagnose_mtf_alignment.py`：MTF 方向匹配诊断
+- `scripts/final_verification_mtf.py`：最终验证脚本
+
+### 关键发现
+
+**Pinbar + MTF 过滤器的”顺大逆小”逻辑**：
+
+1. **看涨 Pinbar（LONG）**：
+   - 小周期（1h）：下跌趋势末端，反转形态 → 逆小 ✅
+   - 大周期（4h）：期望上涨趋势 → 顺大 ✅
+   - MTF 要求：4h BULLISH ✅
+
+2. **看跌 Pinbar（SHORT）**：
+   - 小周期（1h）：上涨趋势末端，反转形态 → 逆小 ✅
+   - 大周期（4h）：期望下跌趋势 → 顺大 ✅
+   - MTF 要求：4h BEARISH ✅
+
+**MTF 过滤器逻辑正确，符合”顺大逆小”原则。**
+
+### 待解决问题
+
+v3_pms 模式下 MTF 数据已加载，但仍 0 trades，需要进一步诊断：
+- MTF 数据是否正确传递到过滤器
+- Pinbar 信号方向与 4h 趋势方向的匹配情况
+
+### 文档同步
+
+- 已更新 `docs/planning/progress.md`
+- 已更新 `docs/planning/findings.md`（待更新）
+
+### Git 提交
+
+- 修改文件：`src/application/backtester.py`
+- 新增脚本：`scripts/verify_mtf_fix.py` 等 7 个诊断脚本
+- 提交信息：`fix(backtest): MTF 数据加载修复（v3_pms 模式）`
+
+---
+
+## 2026-04-20 23:45 -- 已将”悲观回测 vs 实盘预期映射”写入 planning-with-files
 
 ### 本次补充的核心共识
 

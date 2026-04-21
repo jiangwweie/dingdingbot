@@ -454,7 +454,13 @@ class Backtester:
 
         if use_dynamic:
             # Step 1: Build dynamic strategy runner from strategy definitions
-            runner = self._build_dynamic_runner(request.strategies)
+            # Phase 8.1: 解析参数并注入过滤器
+            resolved_params = resolve_backtest_params(
+                runtime_overrides=runtime_overrides,
+                request=request,
+                kv_configs=kv_configs,
+            )
+            runner = self._build_dynamic_runner(request.strategies, resolved_params)
         else:
             # Step 1: Build isolated strategy config (legacy mode)
             # Phase 8.1: 为 legacy mode 也解析参数
@@ -1489,12 +1495,14 @@ class Backtester:
         # State tracking
         positions_map: Dict[str, Position] = {}  # {signal_id: Position}
         active_orders: List[Order] = []  # All open orders
+        pending_entry_orders: List[Order] = []  # ENTRY orders waiting for the next bar
         position_summaries: List[PositionSummary] = []
         all_executed_orders: List[Order] = []
         equity_curve: List[Tuple[int, Decimal]] = []  # [(timestamp_ms, total_balance), ...]
         all_close_events: List[PositionCloseEvent] = []  # 【任务 1.4】平仓事件收集
         all_attempts: List[SignalAttempt] = []  # 阶段 5.4: 收集所有 attempts 用于归因
         signal_sl_map: Dict[str, Decimal] = {}  # {signal_id: expected_sl} 用于反填 pnl_ratio
+        signal_strategy_map: Dict[str, OrderStrategy] = {}  # {signal_id: strategy} 用于 ENTRY 成交后生成 TP/SL
 
         # Statistics tracking
         total_trades = 0
@@ -1512,7 +1520,16 @@ class Backtester:
         higher_tf = self.MTF_MAPPING.get(request.timeframe)
         if higher_tf:
             try:
-                limit = max(request.limit, 1000)
+                # Calculate limit for higher timeframe data based on time range
+                if request.start_time and request.end_time:
+                    # Calculate required bars from time range
+                    higher_tf_minutes = self._parse_timeframe(higher_tf)
+                    duration_ms = request.end_time - request.start_time
+                    calculated_bars = int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 10  # +10 buffer
+                    limit = max(calculated_bars, request.limit, 1000)
+                else:
+                    # Fallback to conservative logic when time range not available
+                    limit = max(request.limit, 1000)
                 # 优先使用本地数据仓库
                 if self._data_repo is not None:
                     higher_tf_klines_list = await self._data_repo.get_klines(
@@ -1606,129 +1623,9 @@ class Backtester:
 
         # Step 7: Main backtest loop
         for kline in klines:
-            # Update strategy state
-            runner.update_state(kline)
-
-            # Get higher TF trends
-            higher_tf_trends = self._get_closest_higher_tf_trends(kline.timestamp, higher_tf_data)
-
-            # Run strategy to generate signals
-            if use_dynamic:
-                attempts = runner.run_all(kline, higher_tf_trends)
-            else:
-                attempt = runner.run(kline, higher_tf_trends)
-                attempts = [attempt]
-
-            # 阶段 5.4: 收集所有 attempts 用于归因分析
-            all_attempts.extend(attempts)
-
-            # Create ENTRY orders for fired signals
-            for attempt in attempts:
-                if attempt.final_result == "SIGNAL_FIRED" and attempt.pattern:
-                    logger.debug(f"[BACKTEST_DIRECTION] 信号创建：direction={attempt.pattern.direction.value}, "
-                                 f"strategy={attempt.strategy_name}, symbol={request.symbol}, "
-                                 f"timestamp={kline.timestamp}")
-
-                    # Create signal
-                    signal_id = f"sig_{uuid.uuid4().hex[:8]}"
-                    attempt._signal_id = signal_id  # 反填 signal_id 用于归因分析
-                    stop_loss = calculator.calculate_stop_loss(kline, attempt.pattern.direction)
-                    signal_sl_map[signal_id] = stop_loss  # 记录止损用于反填 pnl_ratio
-
-                    signal = Signal(
-                        id=signal_id,
-                        strategy_id=attempt.strategy_name,
-                        symbol=request.symbol,
-                        direction=attempt.pattern.direction,
-                        timestamp=kline.timestamp,
-                        expected_entry=kline.close,
-                        expected_sl=stop_loss,
-                        pattern_score=attempt.pattern.score,
-                        is_active=True,
-                    )
-
-                    # Calculate position size
-                    account_snapshot = self._build_account_snapshot(
-                        account=account,
-                        positions_map=positions_map,
-                        timestamp=kline.timestamp,
-                    )
-                    position_size, leverage = await calculator.calculate_position_size(
-                        account_snapshot,
-                        kline.close,
-                        stop_loss,
-                        attempt.pattern.direction,
-                    )
-
-                    # Bug #3 防护：position_size=0 时跳过该信号
-                    if position_size <= Decimal('0'):
-                        logger.info(f"[BACKTEST_SKIP] 跳过信号 {signal_id}：position_size={position_size}")
-                        continue
-
-                    # Create ENTRY order using OrderManager (Phase 4)
-                    # Note: TP/SL orders will be generated dynamically after ENTRY is filled
-                    order_manager = OrderManager()
-
-                    # Phase 8.1: 使用 resolved_params 中的订单参数
-                    # 优先级：runtime_overrides > request.order_strategy > 默认值
-                    # 语义：局部字段覆写，保留其他编排字段
-                    if runtime_overrides and (runtime_overrides.tp_ratios or runtime_overrides.tp_targets):
-                        # runtime_overrides 最高优先级，但保留 request.order_strategy 的其他字段
-                        base_strategy = request.order_strategy or OrderStrategy(
-                            id="default_base",
-                            name="Default Base",
-                            tp_levels=2,
-                            tp_ratios=BACKTEST_PARAM_DEFAULTS["tp_ratios"],
-                            tp_targets=BACKTEST_PARAM_DEFAULTS["tp_targets"],
-                            initial_stop_loss_rr=Decimal('-1.0'),
-                            trailing_stop_enabled=False,
-                            oco_enabled=True,
-                        )
-                        # 仅覆写 tp_ratios/tp_targets，保留其他字段
-                        strategy = OrderStrategy(
-                            id=base_strategy.id,
-                            name=base_strategy.name,
-                            tp_levels=len(resolved_params.tp_ratios),
-                            tp_ratios=resolved_params.tp_ratios,
-                            tp_targets=resolved_params.tp_targets,
-                            initial_stop_loss_rr=base_strategy.initial_stop_loss_rr,
-                            trailing_stop_enabled=base_strategy.trailing_stop_enabled,
-                            oco_enabled=base_strategy.oco_enabled,
-                        )
-                    elif request.order_strategy:
-                        strategy = request.order_strategy
-                    else:
-                        strategy = OrderStrategy(
-                            id="resolved_strategy",
-                            name="Resolved Strategy",
-                            tp_levels=len(resolved_params.tp_ratios),
-                            tp_ratios=resolved_params.tp_ratios,
-                            tp_targets=resolved_params.tp_targets,
-                            initial_stop_loss_rr=Decimal('-1.0'),
-                            trailing_stop_enabled=False,  # 已锁定：BE=OFF
-                            oco_enabled=True,
-                        )
-
-                    entry_orders = order_manager.create_order_chain(
-                        strategy=strategy,
-                        signal_id=signal_id,
-                        symbol=request.symbol,
-                        direction=attempt.pattern.direction,
-                        total_qty=position_size,
-                        initial_sl_rr=Decimal('-1.0'),
-                        tp_targets=strategy.tp_targets,  # 使用 strategy 配置的 tp_targets
-                    )
-
-                    # 回测中模拟订单从创建到挂单的完整流程（跳过 CREATED/SUBMITTED 中间状态）
-                    for order in entry_orders:
-                        order.status = OrderStatus.OPEN  # 回测直接设为 OPEN（模拟即时挂单）
-
-                    active_orders.extend(entry_orders)
-
-                    # T4: Save ENTRY orders to database
-                    if order_repository is not None:
-                        await order_repository.save_batch(entry_orders)
-                        logger.debug(f"已保存 {len(entry_orders)} 个入场订单到数据库")
+            if pending_entry_orders:
+                active_orders.extend(pending_entry_orders)
+                pending_entry_orders = []
 
             # Step 7: Run MockMatchingEngine
             executed = engine.match_orders_for_kline(
@@ -1743,6 +1640,10 @@ class Backtester:
             order_manager = OrderManager()
             for order in list(active_orders):  # Use list() to avoid modification during iteration
                 if order.status == OrderStatus.FILLED and order.order_role == OrderRole.ENTRY:
+                    strategy = signal_strategy_map.get(order.signal_id)
+                    if strategy is None:
+                        logger.warning(f"[BACKTEST] Missing strategy for filled ENTRY order {order.signal_id}, skip TP/SL generation")
+                        continue
                     # ENTRY filled: dynamically generate TP and SL orders based on actual_exec_price
                     new_orders = await order_manager.handle_order_filled(
                         filled_order=order,
@@ -1817,6 +1718,7 @@ class Backtester:
                         all_close_events.append(close_event)
 
                     if position and position.is_closed:
+                        signal_strategy_map.pop(order.signal_id, None)
                         # Update position summary
                         for summary in position_summaries:
                             if summary.position_id == position.id:
@@ -1868,12 +1770,128 @@ class Backtester:
                         )
                         position.total_funding_paid += funding_cost
                         total_funding_cost += funding_cost
+                        account.total_balance -= funding_cost
 
             # Remove executed/cancelled orders from active list
             active_orders = [o for o in active_orders if o.status == OrderStatus.OPEN]
 
             # Record equity curve for Sharpe ratio calculation
             equity_curve.append((kline.timestamp, account.total_balance))
+
+            # The closed bar can generate a signal, but the resulting ENTRY order
+            # should only become active on the next bar to avoid same-bar lookahead.
+            runner.update_state(kline)
+
+            # Get higher TF trends
+            higher_tf_trends = self._get_closest_higher_tf_trends(kline.timestamp, higher_tf_data)
+
+            # Run strategy to generate signals
+            if use_dynamic:
+                attempts = runner.run_all(kline, higher_tf_trends)
+            else:
+                attempt = runner.run(kline, higher_tf_trends)
+                attempts = [attempt]
+
+            # 阶段 5.4: 收集所有 attempts 用于归因分析
+            all_attempts.extend(attempts)
+
+            # Create ENTRY orders for fired signals
+            for attempt in attempts:
+                if attempt.final_result == "SIGNAL_FIRED" and attempt.pattern:
+                    logger.debug(f"[BACKTEST_DIRECTION] 信号创建：direction={attempt.pattern.direction.value}, "
+                                 f"strategy={attempt.strategy_name}, symbol={request.symbol}, "
+                                 f"timestamp={kline.timestamp}")
+
+                    signal_id = f"sig_{uuid.uuid4().hex[:8]}"
+                    attempt._signal_id = signal_id
+                    stop_loss = calculator.calculate_stop_loss(kline, attempt.pattern.direction)
+                    signal_sl_map[signal_id] = stop_loss
+
+                    signal = Signal(
+                        id=signal_id,
+                        strategy_id=attempt.strategy_name,
+                        symbol=request.symbol,
+                        direction=attempt.pattern.direction,
+                        timestamp=kline.timestamp,
+                        expected_entry=kline.close,
+                        expected_sl=stop_loss,
+                        pattern_score=attempt.pattern.score,
+                        is_active=True,
+                    )
+
+                    account_snapshot = self._build_account_snapshot(
+                        account=account,
+                        positions_map=positions_map,
+                        timestamp=kline.timestamp,
+                    )
+                    position_size, leverage = await calculator.calculate_position_size(
+                        account_snapshot,
+                        kline.close,
+                        stop_loss,
+                        attempt.pattern.direction,
+                    )
+
+                    if position_size <= Decimal('0'):
+                        logger.info(f"[BACKTEST_SKIP] 跳过信号 {signal_id}：position_size={position_size}")
+                        continue
+
+                    order_manager = OrderManager()
+
+                    if runtime_overrides and (runtime_overrides.tp_ratios or runtime_overrides.tp_targets):
+                        base_strategy = request.order_strategy or OrderStrategy(
+                            id="default_base",
+                            name="Default Base",
+                            tp_levels=2,
+                            tp_ratios=BACKTEST_PARAM_DEFAULTS["tp_ratios"],
+                            tp_targets=BACKTEST_PARAM_DEFAULTS["tp_targets"],
+                            initial_stop_loss_rr=Decimal('-1.0'),
+                            trailing_stop_enabled=False,
+                            oco_enabled=True,
+                        )
+                        strategy = OrderStrategy(
+                            id=base_strategy.id,
+                            name=base_strategy.name,
+                            tp_levels=len(resolved_params.tp_ratios),
+                            tp_ratios=resolved_params.tp_ratios,
+                            tp_targets=resolved_params.tp_targets,
+                            initial_stop_loss_rr=base_strategy.initial_stop_loss_rr,
+                            trailing_stop_enabled=base_strategy.trailing_stop_enabled,
+                            oco_enabled=base_strategy.oco_enabled,
+                        )
+                    elif request.order_strategy:
+                        strategy = request.order_strategy
+                    else:
+                        strategy = OrderStrategy(
+                            id="resolved_strategy",
+                            name="Resolved Strategy",
+                            tp_levels=len(resolved_params.tp_ratios),
+                            tp_ratios=resolved_params.tp_ratios,
+                            tp_targets=resolved_params.tp_targets,
+                            initial_stop_loss_rr=Decimal('-1.0'),
+                            trailing_stop_enabled=False,
+                            oco_enabled=True,
+                        )
+
+                    signal_strategy_map[signal_id] = strategy
+
+                    entry_orders = order_manager.create_order_chain(
+                        strategy=strategy,
+                        signal_id=signal_id,
+                        symbol=request.symbol,
+                        direction=attempt.pattern.direction,
+                        total_qty=position_size,
+                        initial_sl_rr=Decimal('-1.0'),
+                        tp_targets=strategy.tp_targets,
+                    )
+
+                    for order in entry_orders:
+                        order.status = OrderStatus.OPEN
+
+                    pending_entry_orders.extend(entry_orders)
+
+                    if order_repository is not None:
+                        await order_repository.save_batch(entry_orders)
+                        logger.debug(f"已保存 {len(entry_orders)} 个入场订单到数据库")
 
         # Step 9: Build PMSBacktestReport
         final_balance = account.total_balance
@@ -1886,16 +1904,14 @@ class Backtester:
         gross_pnl = total_pnl  # 保留原值用于交易统计日志
         total_pnl = final_balance - initial_balance  # 真净盈亏
 
-        # Calculate max drawdown (fixed: use cumulative balance instead of per-trade from initial)
+        # Calculate max drawdown from realized equity so funding and fees stay in the same curve.
         max_drawdown = Decimal('0')
         peak = initial_balance
-        cumulative_balance = initial_balance
-        for summary in position_summaries:
-            if summary.exit_price:
-                cumulative_balance += summary.realized_pnl
-                if cumulative_balance > peak:
-                    peak = cumulative_balance
-                drawdown = (peak - cumulative_balance) / peak
+        for _, equity in equity_curve:
+            if equity > peak:
+                peak = equity
+            if peak > 0:
+                drawdown = (peak - equity) / peak
                 if drawdown > max_drawdown:
                     max_drawdown = drawdown
 
