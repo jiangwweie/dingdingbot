@@ -1,6 +1,119 @@
 # Progress Log
 
-> Last updated: 2026-04-21 22:10
+> Last updated: 2026-04-22 00:05
+
+---
+
+## 2026-04-22 00:05 -- 大区间三参数搜索完成 + 最优配置确认
+
+### 本次完成
+
+1. **大区间三参数搜索（跨币种/跨周期）**
+   - ETH 1h: 48 组合，可行解 15+，最优 ema=50, dist=0.005
+   - ETH 4h: 48 组合，可行解 0（交易太少）
+   - ETH 15m: 48 组合，可行解 0（信号质量差）
+   - BTC 1h: 48 组合，可行解 0（2024 全负）
+   - SOL 1h: 48 组合，可行解 0（两年皆负）
+
+2. **ATR 过滤器冗余验证**
+   - 对比有/无 ATR 过滤，结果完全相同
+   - 结论：max_atr_ratio 可安全移除
+
+3. **最优配置 + BNB9 成本验证**
+   - 2023: -4437, 2024: +5952, 2025: +4399
+   - 3年总计: +5913 USDT
+   - Sharpe 2024: 1.91, 2025: 2.01
+
+4. **系统默认参数对比**
+   - ema_period: 60→50
+   - tp_ratios: [0.6,0.4]→[0.5,0.5]
+   - tp_targets: [1.0,2.5]→[1.0,3.5]
+
+### 核心结论
+
+**ETH 1h LONG-only 是唯一可行路径，最优配置已锁定。**
+
+### 新增脚本
+
+- `scripts/run_wide_search.py` - ETH 1h 大区间搜索
+- `scripts/run_eth_4h_wide_search.py` - ETH 4h 搜索
+- `scripts/run_eth_15m_wide_search.py` - ETH 15m 搜索
+- `scripts/run_btc_wide_search.py` - BTC 1h 搜索
+- `scripts/run_sol_wide_search.py` - SOL 1h 搜索
+- `scripts/verify_atr_removal.py` - ATR 冗余验证
+- `scripts/run_optimal_bnb9.py` - 最优配置 + BNB9 验证
+
+---
+
+## 2026-04-21 23:05 -- ETH 1h 小规模搜索完成 + 条件冻结阶段
+
+### 本次完成
+
+1. **最小验证矩阵执行**
+   - ETH 2024: +1812, sharpe=0.72, max_dd=23.24%
+   - ETH 2025: +563, sharpe=0.39, max_dd=15.45%
+   - BTC 2024: -6451, sharpe=-3.57（降级为弱先验）
+   - BTC 2025: +3576, sharpe=1.35（单年有效，但跨年不稳定）
+
+2. **ETH 小规模搜索（两轮）**
+   - 第一轮：ema=120 最优（窄搜索）
+   - 第二轮：ema=120, dist=0.007 确认
+   - EMA 60-100 探索：ema=60 显著优于 120
+   - 稳健性测试：ema=55 可能更优
+
+3. **防过拟合确认**
+   - 2023：ema=60 (-4890) > ema=120 (-6105)，两者均亏损
+   - 2026Q1：ema=60 (+731) > ema=120 (+92)
+   - 结论：ema=60 在新窗口仍占优，但 2023 年策略失效
+
+4. **max_drawdown 显示 bug 修复**
+   - 问题：脚本除以 100 导致显示 0.15% 而非 15.45%
+   - 已修复：validate_long_only.py, validate_btc_long_only.py, run_eth_small_search.py
+
+### 当前状态
+
+- 主线：ETH 1h LONG-only 成立
+- 参数：条件冻结候选（ema=55~60, dist=0.007, atr=0.006）
+- 风险：2023 年失效，不能宣称全局有效
+
+### 新增脚本
+
+- `scripts/run_eth_small_search.py` - ETH 双窗口小规模搜索
+- `scripts/run_eth_round2_search.py` - ETH 二轮确认性搜索
+- `scripts/run_eth_ema_60_100.py` - EMA 60-100 探索
+- `scripts/run_eth_robustness_check.py` - 防过拟合 + 稳健性测试
+- `scripts/diagnose_max_dd.py` - max_drawdown 诊断
+
+### 下一步
+
+1. 交易级重叠分析
+2. 条件冻结草案
+3. 最小补充验证清单
+
+---
+
+## 2026-04-21 00:25 -- 已按”渐进式”方式记录实盘执行风险
+
+### 本次处理方式
+
+- 按当前阶段定位，**不把实盘执行风险大段塞入主规划正文**
+- 仅在 `task_plan.md` / `findings.md` 中写入摘要级备忘
+- 单独新增详细文档，供后续进入测试盘/实盘阶段时读取
+
+### 新增详细文档
+
+- [docs/planning/architecture/2026-04-21-live-execution-gap-analysis.md](/Users/jiangwei/Documents/dingdingbot/docs/planning/architecture/2026-04-21-live-execution-gap-analysis.md)
+
+### 记录的核心结论
+
+- 当前系统已具备实盘组件雏形，但自动执行主链尚未完全收口
+- 当前主要风险集中在集成缝隙，而非策略逻辑
+- 这些问题暂记为后续架构债，不改变当前“回测优化优先”的主节奏
+
+### 备注
+
+- 本次仅更新文档，没有修改代码
+- 未执行测试
 
 ---
 
