@@ -57,6 +57,7 @@ from src.domain.strategy_engine import (
     StrategyWithFilters,
     create_dynamic_runner,
 )
+from src.domain.indicators import EMACalculator
 from src.domain.filter_factory import FilterFactory, EmaTrendFilterDynamic
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.historical_data_repository import HistoricalDataRepository
@@ -150,6 +151,20 @@ def resolve_backtest_params(
                 return [Decimal(str(v)) for v in val]
         return defaults[key]
 
+    def resolve_dict_str_str(
+        key: str,
+        override_val: Optional[Dict[str, str]],
+        kv_key: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """解析 Dict[str, str] 参数"""
+        if override_val is not None:
+            return override_val
+        if kv_configs and kv_key and kv_configs.get(kv_key) is not None:
+            val = kv_configs[kv_key]
+            if isinstance(val, dict):
+                return val
+        return defaults[key]
+
     # 解析各参数
     return ResolvedBacktestParams(
         # 策略参数
@@ -167,6 +182,18 @@ def resolve_backtest_params(
             "ema_period",
             overrides.ema_period,
             kv_key="strategy.ema.period",
+        ),
+
+        # MTF 参数（P0 修复：统一回测/实盘真源）
+        mtf_ema_period=resolve_int(
+            "mtf_ema_period",
+            overrides.mtf_ema_period,
+            kv_key="system.mtf_ema_period",
+        ),
+        mtf_mapping=resolve_dict_str_str(
+            "mtf_mapping",
+            overrides.mtf_mapping,
+            kv_key="system.mtf_mapping",
         ),
 
         # 订单参数
@@ -211,6 +238,9 @@ def resolve_backtest_params(
             request.initial_balance if request else None,
             "backtest.initial_balance",
         ),
+
+        # 诊断参数
+        allowed_directions=overrides.allowed_directions,
     )
 
 
@@ -369,14 +399,6 @@ class Backtester:
             timestamp=timestamp,
         )
 
-    # MTF mapping (same as StrategyEngine)
-    MTF_MAPPING = {
-        "15m": "1h",
-        "1h": "4h",
-        "4h": "1d",
-        "1d": "1w",
-    }
-
     def __init__(
         self,
         exchange_gateway: ExchangeGateway,
@@ -491,11 +513,11 @@ class Backtester:
         # Step 4: Run backtest
         if use_dynamic:
             attempts, higher_tf_data = await self._run_dynamic_strategy_loop(
-                runner, klines, request
+                runner, klines, request, resolved_params
             )
         else:
             attempts, higher_tf_data = await self._run_strategy_loop(
-                runner, klines, request
+                runner, klines, request, resolved_params
             )
 
         # Step 5: Calculate statistics
@@ -773,6 +795,7 @@ class Backtester:
         runner: IsolatedStrategyRunner,
         klines: List[KlineData],
         request: BacktestRequest,
+        resolved_params: ResolvedBacktestParams,
     ) -> Tuple[List[SignalAttempt], Dict[str, Dict[str, TrendDirection]]]:
         """
         Run strategy on all K-lines.
@@ -785,11 +808,17 @@ class Backtester:
 
         # We need to simulate higher timeframe data
         # For simplicity, we'll fetch it separately
-        higher_tf = self.MTF_MAPPING.get(request.timeframe)
+        higher_tf = resolved_params.mtf_mapping.get(request.timeframe)
         higher_tf_klines = {}
 
         if higher_tf:
             try:
+                # Calculate warmup window for EMA pre-start initialization
+                higher_tf_minutes = self._parse_timeframe(higher_tf)
+                ema_warmup_bars = 2 * resolved_params.mtf_ema_period  # 2x EMA period for warmup safety
+                warmup_ms = higher_tf_minutes * 60 * 1000 * ema_warmup_bars
+                warmup_start = int(request.start_time) - warmup_ms if request.start_time else None
+
                 # Calculate limit for higher timeframe data
                 # Must ensure coverage of the klines time range
                 if klines:
@@ -800,7 +829,6 @@ class Backtester:
                     # But we also need to ensure the OLDEST 4h candle <= min_kline_ts
                     # Since exchange returns from "now" backwards, we need to calculate:
                     # limit = (max_kline_ts - min_kline_ts) / (higher_tf_interval) + buffer
-                    higher_tf_minutes = self._parse_timeframe(higher_tf)
                     duration_ms = max_kline_ts - min_kline_ts
                     expected_higher_tf_bars = max(
                         int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,  # +5 for edge cases
@@ -834,17 +862,21 @@ class Backtester:
                     symbol=request.symbol,
                     timeframe=higher_tf,
                     limit=limit,
-                    since=request.start_time,
+                    since=warmup_start,
                 )
 
-                # Build a map of timestamp -> trend
+                # Build a map of timestamp -> trend using higher TF EMA
+                # Single pass: warmup EMA then record trend once ready
+                mtf_ema = EMACalculator(period=resolved_params.mtf_ema_period)
                 for kline in higher_tf_klines_list:
-                    ts = kline.timestamp
-                    higher_tf_data[ts] = {
-                        higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
-                    }
+                    mtf_ema.update(kline.close)
+                    if mtf_ema.is_ready and mtf_ema.value is not None:
+                        ts = kline.timestamp
+                        higher_tf_data[ts] = {
+                            higher_tf: TrendDirection.BULLISH if kline.close > mtf_ema.value else TrendDirection.BEARISH
+                        }
 
-                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
+                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation (EMA{resolved_params.mtf_ema_period} warmup={ema_warmup_bars} bars)")
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
@@ -870,6 +902,7 @@ class Backtester:
         runner: DynamicStrategyRunner,
         klines: List[KlineData],
         request: BacktestRequest,
+        resolved_params: ResolvedBacktestParams,
     ) -> Tuple[List[SignalAttempt], Dict[str, Dict[str, TrendDirection]]]:
         """
         Run dynamic strategy runner on all K-lines.
@@ -881,11 +914,17 @@ class Backtester:
         higher_tf_data = {}  # {timestamp: {timeframe: TrendDirection}}
 
         # Fetch higher timeframe data for MTF
-        higher_tf = self.MTF_MAPPING.get(request.timeframe)
+        higher_tf = resolved_params.mtf_mapping.get(request.timeframe)
         higher_tf_klines = {}
 
         if higher_tf:
             try:
+                # Calculate warmup window for EMA pre-start initialization
+                higher_tf_minutes = self._parse_timeframe(higher_tf)
+                ema_warmup_bars = 2 * resolved_params.mtf_ema_period  # 2x EMA period for warmup safety
+                warmup_ms = higher_tf_minutes * 60 * 1000 * ema_warmup_bars
+                warmup_start = int(request.start_time) - warmup_ms if request.start_time else None
+
                 # Calculate limit for higher timeframe data
                 # Must ensure coverage of the klines time range
                 if klines:
@@ -896,7 +935,6 @@ class Backtester:
                     # But we also need to ensure the OLDEST 4h candle <= min_kline_ts
                     # Since exchange returns from "now" backwards, we need to calculate:
                     # limit = (max_kline_ts - min_kline_ts) / (higher_tf_interval) + buffer
-                    higher_tf_minutes = self._parse_timeframe(higher_tf)
                     duration_ms = max_kline_ts - min_kline_ts
                     expected_higher_tf_bars = max(
                         int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 5,  # +5 for edge cases
@@ -930,17 +968,21 @@ class Backtester:
                     symbol=request.symbol,
                     timeframe=higher_tf,
                     limit=limit,
-                    since=request.start_time,
+                    since=warmup_start,
                 )
 
-                # Build a map of timestamp -> trend
+                # Build a map of timestamp -> trend using higher TF EMA
+                # Single pass: warmup EMA then record trend once ready
+                mtf_ema = EMACalculator(period=resolved_params.mtf_ema_period)
                 for kline in higher_tf_klines_list:
-                    ts = kline.timestamp
-                    higher_tf_data[ts] = {
-                        higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
-                    }
+                    mtf_ema.update(kline.close)
+                    if mtf_ema.is_ready and mtf_ema.value is not None:
+                        ts = kline.timestamp
+                        higher_tf_data[ts] = {
+                            higher_tf: TrendDirection.BULLISH if kline.close > mtf_ema.value else TrendDirection.BEARISH
+                        }
 
-                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
+                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation (EMA{resolved_params.mtf_ema_period} warmup={ema_warmup_bars} bars)")
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
@@ -1517,25 +1559,27 @@ class Backtester:
         higher_tf_data = {}  # For MTF validation
 
         # Fetch higher timeframe data if needed
-        higher_tf = self.MTF_MAPPING.get(request.timeframe)
+        higher_tf = resolved_params.mtf_mapping.get(request.timeframe)
         if higher_tf:
             try:
                 # Calculate limit for higher timeframe data based on time range
+                higher_tf_minutes = self._parse_timeframe(higher_tf)
+                ema_warmup_bars = 2 * resolved_params.mtf_ema_period  # 2x EMA period for warmup safety
+                warmup_ms = higher_tf_minutes * 60 * 1000 * ema_warmup_bars
                 if request.start_time and request.end_time:
-                    # Calculate required bars from time range
-                    higher_tf_minutes = self._parse_timeframe(higher_tf)
-                    duration_ms = request.end_time - request.start_time
-                    calculated_bars = int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 10  # +10 buffer
+                    # Include warmup window before start_time for EMA calculation
+                    duration_ms = request.end_time - request.start_time + warmup_ms
+                    calculated_bars = int(duration_ms / (higher_tf_minutes * 60 * 1000)) + 10
                     limit = max(calculated_bars, request.limit, 1000)
                 else:
-                    # Fallback to conservative logic when time range not available
                     limit = max(request.limit, 1000)
+                warmup_start = int(request.start_time) - warmup_ms if request.start_time else None
                 # 优先使用本地数据仓库
                 if self._data_repo is not None:
                     higher_tf_klines_list = await self._data_repo.get_klines(
                         symbol=request.symbol,
                         timeframe=higher_tf,
-                        start_time=request.start_time,
+                        start_time=warmup_start,
                         end_time=request.end_time,
                         limit=limit,
                     )
@@ -1544,16 +1588,20 @@ class Backtester:
                         symbol=request.symbol,
                         timeframe=higher_tf,
                         limit=limit,
-                        since=request.start_time,
+                        since=warmup_start,
                     )
                 else:
                     higher_tf_klines_list = []
                     logger.warning("No gateway or data_repo available for MTF data")
+                # Single pass: build EMA trend map from higher TF klines
+                mtf_ema = EMACalculator(period=resolved_params.mtf_ema_period)
                 for kline in higher_tf_klines_list:
-                    higher_tf_data[kline.timestamp] = {
-                        higher_tf: TrendDirection.BULLISH if kline.close > kline.open else TrendDirection.BEARISH
-                    }
-                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation")
+                    mtf_ema.update(kline.close)
+                    if mtf_ema.is_ready and mtf_ema.value is not None:
+                        higher_tf_data[kline.timestamp] = {
+                            higher_tf: TrendDirection.BULLISH if kline.close > mtf_ema.value else TrendDirection.BEARISH
+                        }
+                logger.info(f"Loaded {len(higher_tf_data)} {higher_tf} candles for MTF validation (EMA{resolved_params.mtf_ema_period} warmup={ema_warmup_bars} bars)")
             except Exception as e:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
@@ -1799,6 +1847,11 @@ class Backtester:
             # Create ENTRY orders for fired signals
             for attempt in attempts:
                 if attempt.final_result == "SIGNAL_FIRED" and attempt.pattern:
+                    # Direction filter for diagnostic (LONG-only / SHORT-only)
+                    if resolved_params.allowed_directions is not None:
+                        if attempt.pattern.direction.value not in resolved_params.allowed_directions:
+                            continue
+
                     logger.debug(f"[BACKTEST_DIRECTION] 信号创建：direction={attempt.pattern.direction.value}, "
                                  f"strategy={attempt.strategy_name}, symbol={request.symbol}, "
                                  f"timestamp={kline.timestamp}")

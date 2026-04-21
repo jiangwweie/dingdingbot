@@ -2602,12 +2602,19 @@ class BacktestRuntimeOverrides(BaseModel):
     min_distance_pct: Optional[Decimal] = Field(None, description="EMA 最小距离百分比")
     ema_period: Optional[int] = Field(None, ge=5, le=200, description="EMA 周期")
 
+    # MTF 参数（P0 修复：统一回测/实盘真源）
+    mtf_ema_period: Optional[int] = Field(None, ge=5, le=200, description="MTF EMA 周期")
+    mtf_mapping: Optional[Dict[str, str]] = Field(None, description="MTF 时间框架映射")
+
     # 订单参数
     tp_ratios: Optional[List[Decimal]] = Field(None, description="各级止盈比例")
     tp_targets: Optional[List[Decimal]] = Field(None, description="各级 TP 目标 RR 倍数")
 
     # 风控参数
     breakeven_enabled: Optional[bool] = Field(None, description="是否启用 Breakeven 止损")
+
+    # 诊断参数
+    allowed_directions: Optional[List[str]] = Field(None, description="允许的方向过滤（如 ['LONG'] 或 ['SHORT']），None=全部")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -2625,6 +2632,10 @@ class ResolvedBacktestParams(BaseModel):
     min_distance_pct: Decimal = Field(..., description="EMA 最小距离百分比")
     ema_period: int = Field(..., description="EMA 周期")
 
+    # ===== MTF 参数（P0 修复：统一回测/实盘真源）=====
+    mtf_ema_period: int = Field(..., description="MTF EMA 周期")
+    mtf_mapping: Dict[str, str] = Field(..., description="MTF 时间框架映射")
+
     # ===== 订单参数 =====
     tp_ratios: List[Decimal] = Field(..., description="各级止盈比例")
     tp_targets: List[Decimal] = Field(..., description="各级 TP 目标 RR 倍数")
@@ -2637,6 +2648,9 @@ class ResolvedBacktestParams(BaseModel):
     tp_slippage_rate: Decimal = Field(..., description="止盈滑点率")
     fee_rate: Decimal = Field(..., description="手续费率")
     initial_balance: Decimal = Field(..., description="初始资金")
+
+    # ===== 诊断参数 =====
+    allowed_directions: Optional[List[str]] = Field(None, description="允许的方向过滤，None=全部")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -2667,6 +2681,15 @@ BACKTEST_PARAM_DEFAULTS = {
     "max_atr_ratio": Decimal("0.01"),      # ATR=1% 已验证 +11420 (52%)
     "min_distance_pct": Decimal("0.005"),  # 0.5%
     "ema_period": 60,
+
+    # MTF 参数（P0 修复：统一回测/实盘真源）
+    "mtf_ema_period": 60,
+    "mtf_mapping": {
+        "15m": "1h",
+        "1h": "4h",
+        "4h": "1d",
+        "1d": "1w",
+    },
 
     # 订单参数（已验证锁定）
     "tp_ratios": [Decimal("0.6"), Decimal("0.4")],
