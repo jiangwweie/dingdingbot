@@ -1618,6 +1618,15 @@ class ConfigManager:
 
         # 使用 ConfigEntryRepository 读取配置
         configs = await self._config_entry_repo.get_backtest_configs(profile_name=profile_name)
+
+        # P0/P1: Overlay live system MTF config so backtest and live share the
+        # same effective mtf_ema_period / mtf_mapping source of truth.
+        await self._load_system_config()
+        configs["system.mtf_ema_period"] = self._system_config_cache.get("mtf_ema_period", 60)
+        configs["system.mtf_mapping"] = self._system_config_cache.get(
+            "mtf_mapping",
+            {"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"},
+        )
         return configs
 
     async def save_backtest_configs(

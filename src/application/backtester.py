@@ -1824,8 +1824,19 @@ class Backtester:
             # Remove executed/cancelled orders from active list
             active_orders = [o for o in active_orders if o.status == OrderStatus.OPEN]
 
-            # Record equity curve for Sharpe ratio calculation
-            equity_curve.append((kline.timestamp, account.total_balance))
+            # Calculate unrealized PnL for all open positions
+            unrealized_pnl = Decimal('0')
+            for pos in positions_map.values():
+                if not pos.is_closed and pos.current_qty > 0:
+                    # Calculate unrealized PnL using current K-line close price
+                    if pos.direction == Direction.LONG:
+                        unrealized_pnl += (kline.close - pos.entry_price) * pos.current_qty
+                    else:  # SHORT
+                        unrealized_pnl += (pos.entry_price - kline.close) * pos.current_qty
+
+            # Record true equity curve (including unrealized PnL) for Sharpe ratio calculation
+            true_equity = account.total_balance + unrealized_pnl
+            equity_curve.append((kline.timestamp, true_equity))
 
             # The closed bar can generate a signal, but the resulting ENTRY order
             # should only become active on the next bar to avoid same-bar lookahead.
@@ -1961,13 +1972,29 @@ class Backtester:
         # Calculate max drawdown from realized equity so funding and fees stay in the same curve.
         max_drawdown = Decimal('0')
         peak = initial_balance
-        for _, equity in equity_curve:
+        peak_ts = klines[0].timestamp if klines else 0
+        trough = initial_balance
+        trough_ts = peak_ts
+
+        # 记录触发最大 drawdown 的那一对 peak/trough
+        max_dd_peak = peak
+        max_dd_peak_ts = peak_ts
+        max_dd_trough = trough
+        max_dd_trough_ts = trough_ts
+
+        for ts, equity in equity_curve:
             if equity > peak:
                 peak = equity
+                peak_ts = ts
             if peak > 0:
                 drawdown = (peak - equity) / peak
                 if drawdown > max_drawdown:
                     max_drawdown = drawdown
+                    # 记录触发这次最大 drawdown 的 peak 和 trough
+                    max_dd_peak = peak
+                    max_dd_peak_ts = peak_ts
+                    max_dd_trough = equity
+                    max_dd_trough_ts = ts
 
         # ── 反填 pnl_ratio：从 close_events 金额维度计算 R-multiple ──
         # v3_pms 不调用 _calculate_attempt_outcome()，需要从实际成交数据反填
@@ -2116,6 +2143,18 @@ class Backtester:
             signal_attributions=signal_attributions,  # 阶段 5.4: 归因分析结果
             aggregate_attribution=aggregate_attribution,  # 阶段 5.4: 聚合归因
             analysis_dimensions=analysis_dimensions,  # BT-4: 四维度归因分析
+            # 临时调试字段
+            debug_equity_curve=[
+                {"timestamp": int(ts), "equity": float(eq)}
+                for ts, eq in equity_curve
+            ],
+            debug_max_drawdown_detail={
+                "peak": float(max_dd_peak),
+                "peak_ts": int(max_dd_peak_ts),
+                "trough": float(max_dd_trough),
+                "trough_ts": int(max_dd_trough_ts),
+                "drawdown": float(max_drawdown),
+            },
         )
 
         # Step 10: Save report to database (if backtest_repository is provided)

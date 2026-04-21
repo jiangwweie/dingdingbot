@@ -1384,6 +1384,16 @@ class PMSBacktestReport(FinancialModel):
         description="四维度归因分析结果（B 形态质量 / C 过滤器 / D 趋势 / F 盈亏比）"
     )
 
+    # 临时调试字段（用于 max_drawdown 对账）
+    debug_equity_curve: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="调试用：equity_curve 原始数据 [{timestamp, equity}, ...]"
+    )
+    debug_max_drawdown_detail: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="调试用：max_drawdown 峰谷明细 {peak, peak_ts, trough, trough_ts, drawdown}"
+    )
+
 
 # ============================================================
 # BT-4: Strategy Attribution Analysis Models
