@@ -104,7 +104,7 @@ class PgExecutionIntentRepository:
     def _to_orm(intent: ExecutionIntent) -> PGExecutionIntentORM:
         return PGExecutionIntentORM(
             id=intent.id,
-            signal_id=intent.signal.id,
+            signal_id=intent.signal_id,
             symbol=intent.signal.symbol,
             status=str(intent.status),
             signal_payload=intent.signal.model_dump(mode="json"),
@@ -128,6 +128,7 @@ class PgExecutionIntentRepository:
         )
         return ExecutionIntent(
             id=orm.id,
+            signal_id=orm.signal_id,
             signal=signal,
             status=ExecutionIntentStatus(orm.status),
             strategy=strategy,

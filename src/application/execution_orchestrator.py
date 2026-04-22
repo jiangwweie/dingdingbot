@@ -128,11 +128,13 @@ class ExecutionOrchestrator:
         """
         # 1. 创建 ExecutionIntent
         intent_id = f"intent_{uuid.uuid4().hex[:12]}"
+        signal_id = f"sig_{uuid.uuid4().hex[:12]}"
         # P1 修复：深拷贝 strategy，确保 intent 内的快照不受原对象后续修改影响
         # 这样 partial-fill 回调读取的是创建意图时的策略内容，而非变更后的配置
         strategy_snapshot = strategy.model_copy(deep=True) if strategy else None
         intent = ExecutionIntent(
             id=intent_id,
+            signal_id=signal_id,
             signal=signal,
             status=ExecutionIntentStatus.PENDING,
             strategy=strategy_snapshot,

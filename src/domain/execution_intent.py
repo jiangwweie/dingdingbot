@@ -40,6 +40,7 @@ class ExecutionIntent(BaseModel):
     记录信号到订单的执行意图和状态
     """
     id: str = Field(..., description="执行意图 ID")
+    signal_id: str = Field(..., description="信号 ID（用于关联 SignalResult）")
     signal: SignalResult = Field(..., description="原始信号")
     status: ExecutionIntentStatus = Field(
         default=ExecutionIntentStatus.PENDING,
