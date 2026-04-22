@@ -2,14 +2,15 @@
 v3.0 数据库基础设施
 
 提供异步数据库连接和 Session 管理。
-支持 SQLite（开发）和 PostgreSQL（生产）。
+当前同时支持：
+- 旧链路默认数据库（保留 SQLite 兼容）
+- PG 核心链路新增实现（双轨迁移）
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
-from typing import AsyncGenerator, Optional, Union
+from typing import AsyncGenerator, Optional
 import os
 
 
@@ -26,8 +27,10 @@ DATABASE_URL = os.getenv(
     "sqlite+aiosqlite:///./data/v3_dev.db"
 )
 
+PG_DATABASE_URL = os.getenv("PG_DATABASE_URL")
 
-def create_engine(db_url: Optional[str] = None):
+
+def create_engine(db_url: Optional[str] = None) -> AsyncEngine:
     """
     创建异步数据库引擎
 
@@ -61,15 +64,43 @@ def create_engine(db_url: Optional[str] = None):
 
 
 # 全局引擎实例（延迟初始化）
-_engine: Optional[create_async_engine] = None
+_engine: Optional[AsyncEngine] = None
+_pg_engine: Optional[AsyncEngine] = None
+_pg_async_session_maker: Optional[async_sessionmaker[AsyncSession]] = None
 
 
-def get_engine() -> create_async_engine:
+def get_engine() -> AsyncEngine:
     """获取全局引擎实例"""
     global _engine
     if _engine is None:
         _engine = create_engine()
     return _engine
+
+
+def create_pg_engine(db_url: Optional[str] = None) -> AsyncEngine:
+    """创建 PG 专用引擎。
+
+    双轨迁移阶段，核心表的新实现统一走 PG_DATABASE_URL。
+    """
+    resolved_url = db_url or PG_DATABASE_URL
+    if not resolved_url:
+        raise ValueError("PG_DATABASE_URL 未配置，无法初始化 PostgreSQL 核心链路")
+    if not resolved_url.startswith("postgresql"):
+        raise ValueError(f"PG_DATABASE_URL 必须是 PostgreSQL DSN，当前为: {resolved_url}")
+    return create_async_engine(
+        resolved_url,
+        echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+        pool_size=10,
+        max_overflow=20,
+    )
+
+
+def get_pg_engine() -> AsyncEngine:
+    """获取 PG 核心链路全局引擎。"""
+    global _pg_engine
+    if _pg_engine is None:
+        _pg_engine = create_pg_engine()
+    return _pg_engine
 
 
 # Session Factory
@@ -110,7 +141,35 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 
 
+async def init_pg_core_db() -> None:
+    """初始化 PG 核心表。
+
+    仅创建迁移阶段新增 PG 真源需要的核心表。
+    """
+    from src.infrastructure.pg_models import PGCoreBase
+
+    engine = get_pg_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(PGCoreBase.metadata.create_all)
+
+
+def get_pg_session_maker() -> async_sessionmaker[AsyncSession]:
+    """返回 PG 核心链路 sessionmaker。"""
+    global _pg_async_session_maker
+    if _pg_async_session_maker is None:
+        _pg_async_session_maker = async_sessionmaker(
+            get_pg_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+    return _pg_async_session_maker
+
+
 async def close_db():
     """关闭数据库连接"""
     engine = get_engine()
     await engine.dispose()
+    if _pg_engine is not None:
+        await _pg_engine.dispose()

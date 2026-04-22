@@ -31,7 +31,7 @@ from src.domain.models import (
 )
 from src.domain.order_state_machine import OrderStateMachine, OrderTransitionError
 from src.domain.exceptions import InvalidOrderStateTransition
-from src.infrastructure.order_repository import OrderRepository
+from src.infrastructure.repository_ports import OrderRepositoryPort
 from src.application.order_audit_logger import OrderAuditLogger, OrderAuditEventType, OrderAuditTriggerSource
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ class OrderLifecycleService:
 
     def __init__(
         self,
-        repository: OrderRepository,
+        repository: OrderRepositoryPort,
         audit_logger: Optional[OrderAuditLogger] = None,
     ):
         """

@@ -1,6 +1,81 @@
 # Progress Log
 
-> Last updated: 2026-04-22 20:35
+> Last updated: 2026-04-22 22:55
+
+---
+
+## 2026-04-22 22:55 -- PG 最小骨架已写入：接口、核心模型、仓储初版、惰性 DB 入口
+
+### 本次完成
+
+1. **新增 PG 核心仓储协议**
+   - `OrderRepositoryPort`
+   - `ExecutionIntentRepositoryPort`
+   - `PositionRepositoryPort`
+
+2. **新增 PG 核心模型**
+   - `PGOrderORM`
+   - `PGExecutionIntentORM`
+   - `PGPositionORM`
+
+3. **新增 PG 仓储骨架**
+   - `PgOrderRepository`
+   - `PgExecutionIntentRepository`
+   - `PgPositionRepository`
+
+4. **补齐 PG 数据库入口**
+   - 在 `database.py` 中新增 PG engine / sessionmaker / core init 能力
+   - 使用惰性初始化，避免未配置 `PG_DATABASE_URL` 时破坏旧 SQLite 启动链路
+
+5. **最小服务层边界调整**
+   - `OrderLifecycleService` 改为依赖 `OrderRepositoryPort` 类型边界
+
+6. **轻量验证**
+   - 对新增/修改文件完成 AST 级语法检查
+
+### 当前状态
+
+- 设计文档已完成
+- 测试计划已完成
+- PG 最小骨架已完成
+- 还未开始接入具体业务链路
+- 还未执行测试
+
+### 备注
+
+- 本次未执行单元测试/集成测试（按项目红线，测试前需用户确认）
+- 下一步更适合把 `ExecutionOrchestrator` 和 `ExecutionIntentRepositoryPort` 先接上
+
+---
+
+## 2026-04-22 22:25 -- PG 双轨迁移先做设计与测试计划，不先写骨架
+
+### 本次完成
+
+1. **确认数据库迁移方向**
+   - SQLite 不删除，继续保证旧业务链路可用
+   - PostgreSQL 以新增实现方式接入
+   - 核心表先切 PG，采取双轨并行、渐进迁移
+
+2. **完成架构设计稿**
+   - 新增核心 PG 双轨迁移设计稿
+   - 明确核心表范围：`orders / execution_intents / positions`
+   - 明确新增组件与服务层依赖切换边界
+
+3. **完成测试计划**
+   - 新增开发前测试用例清单
+   - 固定 PG 基建、仓储、服务层、双轨切换的最低验证范围
+
+### 当前状态
+
+- 目前还没有开始写 PG 骨架代码
+- 已先把架构边界与测试边界固定住
+- 下一步应进入“PG 基础设施 + 仓储接口 + 核心表 schema”的最小骨架开发
+
+### 备注
+
+- 本次仅产出设计文档和测试计划
+- 未执行测试（按项目红线，测试前需用户确认）
 
 ---
 

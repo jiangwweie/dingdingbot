@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-22 20:35
-> **Status**: ETH 1h LONG-only 主线已冻结，实盘执行链 MVP 已进入实现闭环阶段（WS 回写、对账、编排、TP/SL 挂载已落地）
+> **Last updated**: 2026-04-22 22:55
+> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，同时已完成“SQLite 保留可用 + PG 新增实现 + 核心表先切 PG”的设计与最小骨架
 
 ---
 
@@ -160,6 +160,51 @@
 3. P1：unknown_submitted（place_order 超时未知态）+ 对账接管
 4. P1：保护单提交集幂等（跳过已成功子单）+ recovery_required + circuit breaker（停开新仓）
 5. P1：定期对账 / 订单超时查询
+
+### 数据库迁移方向（新增，2026-04-22 22:25）
+
+已确认数据库迁移采用以下方向：
+
+1. **SQLite 不删除**
+   - 保留现有实现，保证旧业务链路可继续运行
+2. **PostgreSQL 以新增实现方式接入**
+   - 不直接改写旧 SQLite Repository
+   - 通过新增 PG 基础设施与仓储实现承接核心链路
+3. **核心表先切 PG**
+   - 第一批核心表：`orders / execution_intents / positions`
+4. **双轨并行、渐进迁移**
+   - 核心执行链逐步切 PG
+   - signals/config/backtest 等旧模块暂留 SQLite
+5. **开发顺序**
+   - 先设计文档
+   - 再测试计划
+   - 再骨架代码
+   - 最后由执行开发补具体实现与测试
+
+### PG 骨架进度（新增，2026-04-22 22:55）
+
+当前已完成：
+
+1. `database.py` 已补 PG 核心链路入口（惰性初始化，不影响旧 SQLite 默认链路）
+2. 已新增核心仓储协议：
+   - `OrderRepositoryPort`
+   - `ExecutionIntentRepositoryPort`
+   - `PositionRepositoryPort`
+3. 已新增 PG 核心模型：
+   - `orders`
+   - `execution_intents`
+   - `positions`
+4. 已新增 PG 仓储骨架：
+   - `PgOrderRepository`
+   - `PgExecutionIntentRepository`
+   - `PgPositionRepository`
+5. `OrderLifecycleService` 已改为面向订单仓储协议类型，而不是写死 SQLite 具体类
+
+当前未做：
+
+1. 尚未把 `ExecutionOrchestrator` 正式接到 PG intent repo
+2. 尚未把 `StartupReconciliationService` 正式切到 PG order repo
+3. 尚未执行测试（仅做了语法级检查）
 
 ### 执行层设计决策（新增）
 
