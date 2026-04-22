@@ -437,3 +437,108 @@ class TestIMP002_OrderStrategyDecimalPrecision:
 
         # Assert: 空列表应返回 False
         assert is_valid is False
+
+
+# ============================================================
+# P1: ExecutionIntent strategy snapshot immutability test
+# ============================================================
+
+class TestExecutionIntentStrategySnapshot:
+    """
+    P1 修复测试：验证 ExecutionIntent.strategy 是真正的不可变快照
+
+    场景：原 strategy 后续被修改，不影响 intent 内快照
+    """
+
+    def test_strategy_snapshot_isolation(self):
+        """
+        测试：修改原始 strategy 不影响 intent 内的快照
+
+        背景：
+        - ExecutionOrchestrator 创建 ExecutionIntent 时保存 strategy
+        - partial-fill 回调读取 intent.strategy 生成 TP/SL
+        - 如果 strategy 是引用而非深拷贝，后续修改会影响 partial-fill 语义
+
+        验证：
+        - intent.strategy 应该是原始 strategy 的深拷贝
+        - 修改原始 strategy 的字段，intent.strategy 不受影响
+        """
+        from src.domain.models import OrderStrategy
+        from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
+        from src.domain.models import SignalResult, Direction
+
+        # Arrange: 创建原始 strategy
+        original_strategy = OrderStrategy(
+            id="strategy_001",
+            name="Test Strategy",
+            tp_levels=2,
+            tp_ratios=[Decimal("0.5"), Decimal("0.5")],
+            tp_targets=[Decimal("1.5"), Decimal("3.0")],
+            initial_stop_loss_rr=Decimal("-1.0"),
+        )
+
+        # 创建 signal
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65000"),
+            suggested_stop_loss=Decimal("64000"),
+            suggested_position_size=Decimal("0.1"),
+            current_leverage=10,
+            tags=[],
+            risk_reward_info="Test",
+            strategy_name="test",
+        )
+
+        # Act: 创建 intent（模拟 ExecutionOrchestrator 的深拷贝行为）
+        strategy_snapshot = original_strategy.model_copy(deep=True)
+        intent = ExecutionIntent(
+            id="intent_001",
+            signal=signal,
+            status=ExecutionIntentStatus.PENDING,
+            strategy=strategy_snapshot,
+        )
+
+        # 修改原始 strategy
+        original_strategy.tp_ratios = [Decimal("0.7"), Decimal("0.3")]
+        original_strategy.tp_targets = [Decimal("2.0"), Decimal("4.0")]
+        original_strategy.name = "Modified Strategy"
+
+        # Assert: intent 内的快照不受影响
+        assert intent.strategy.tp_ratios == [Decimal("0.5"), Decimal("0.5")], \
+            f"intent.strategy.tp_ratios 应为原始值 [0.5, 0.5]，实际为 {intent.strategy.tp_ratios}"
+        assert intent.strategy.tp_targets == [Decimal("1.5"), Decimal("3.0")], \
+            f"intent.strategy.tp_targets 应为原始值 [1.5, 3.0]，实际为 {intent.strategy.tp_targets}"
+        assert intent.strategy.name == "Test Strategy", \
+            f"intent.strategy.name 应为原始值 'Test Strategy'，实际为 {intent.strategy.name}"
+
+    def test_strategy_deep_copy_nested_fields(self):
+        """
+        测试：深拷贝对嵌套字段（如列表）的隔离效果
+
+        验证 tp_ratios 和 tp_targets 列表是独立副本，而非共享引用
+        """
+        from src.domain.models import OrderStrategy
+
+        # Arrange
+        original = OrderStrategy(
+            id="strategy_001",
+            name="Test",
+            tp_levels=2,
+            tp_ratios=[Decimal("0.5"), Decimal("0.5")],
+            tp_targets=[Decimal("1.5"), Decimal("3.0")],
+        )
+
+        # Act: 深拷贝
+        copy = original.model_copy(deep=True)
+
+        # 修改原始对象的列表
+        original.tp_ratios[0] = Decimal("0.8")
+        original.tp_targets.append(Decimal("5.0"))
+
+        # Assert: 副本不受影响
+        assert copy.tp_ratios == [Decimal("0.5"), Decimal("0.5")], \
+            f"副本的 tp_ratios 应为 [0.5, 0.5]，实际为 {copy.tp_ratios}"
+        assert copy.tp_targets == [Decimal("1.5"), Decimal("3.0")], \
+            f"副本的 tp_targets 应为 [1.5, 3.0]，实际为 {copy.tp_targets}"

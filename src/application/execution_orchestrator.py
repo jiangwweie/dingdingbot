@@ -22,7 +22,7 @@ ExecutionOrchestrator MVP 第一步：最小主链
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 import logging
 
 from src.domain.models import (
@@ -105,11 +105,14 @@ class ExecutionOrchestrator:
         """
         # 1. 创建 ExecutionIntent
         intent_id = f"intent_{uuid.uuid4().hex[:12]}"
+        # P1 修复：深拷贝 strategy，确保 intent 内的快照不受原对象后续修改影响
+        # 这样 partial-fill 回调读取的是创建意图时的策略内容，而非变更后的配置
+        strategy_snapshot = strategy.model_copy(deep=True) if strategy else None
         intent = ExecutionIntent(
             id=intent_id,
             signal=signal,
             status=ExecutionIntentStatus.PENDING,
-            strategy=strategy,
+            strategy=strategy_snapshot,
         )
         self._intents[intent_id] = intent
 
@@ -562,9 +565,17 @@ class ExecutionOrchestrator:
         entry_order: Order,
     ) -> None:
         """
-        处理 ENTRY 部分成交后的保护单挂载
+        处理 ENTRY 部分成交后的保护单挂载（增量补挂机制）
 
-        MVP-Protected-Position-Step2: ENTRY 部分成交后立即挂载最小保护单
+        核心逻辑：
+        1. 计算 filled_qty_total（ENTRY 已成交量）
+        2. 计算 protected_qty_total（已存在保护单覆盖的数量）
+        3. delta_qty = filled_qty_total - protected_qty_total
+        4. 只有 delta_qty > 0 时，才为新增成交量补挂 TP/SL
+
+        幂等保证：
+        - 相同 filled_qty 的重复回调，delta_qty = 0，直接返回
+        - 已存在保护单不修改、不撤单，只补缺口
 
         Args:
             entry_order: ENTRY 订单（已部分成交）
@@ -592,7 +603,7 @@ class ExecutionOrchestrator:
             )
             return
 
-        # 检查是否已有保护单（避免重复挂载）
+        # 获取当前 ENTRY 的所有子保护单
         all_orders = await self._order_lifecycle._repository.get_orders_by_signal(
             entry_order.signal_id
         )
@@ -600,51 +611,122 @@ class ExecutionOrchestrator:
         existing_protection_orders = [
             o for o in all_orders
             if o.parent_order_id == entry_order.id
-            and o.order_role in [OrderRole.SL, OrderRole.TP1, OrderRole.TP2]
+            and o.order_role in [OrderRole.SL, OrderRole.TP1, OrderRole.TP2,
+                                  OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]
         ]
 
-        if existing_protection_orders:
+        # P1 修复：只统计"仍然有效"的保护单
+        # 可计入的状态：SUBMITTED, OPEN, PARTIALLY_FILLED, FILLED
+        # 不计入的状态：CREATED（尚未提交）, CANCELED, REJECTED, EXPIRED
+        # FILLED 计入理由：已成交的保护单已完成保护职责，其 requested_qty 已生效
+        valid_protection_statuses = {
+            OrderStatus.SUBMITTED,
+            OrderStatus.OPEN,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.FILLED,
+        }
+        valid_protection_orders = [
+            o for o in existing_protection_orders
+            if o.status in valid_protection_statuses
+        ]
+
+        # 计算 protected_qty_total：已保护数量
+        # 优先使用 SL 订单的 requested_qty 总和（SL 覆盖全部仓位）
+        # 如果没有 SL，则用 TP 订单的 requested_qty 总和作为兜底
+        sl_orders = [o for o in valid_protection_orders if o.order_role == OrderRole.SL]
+        tp_orders = [o for o in valid_protection_orders if o.order_role != OrderRole.SL]
+
+        if sl_orders:
+            # SL 订单的 requested_qty 总和作为主口径
+            protected_qty_total = sum(
+                (o.requested_qty for o in sl_orders),
+                Decimal("0")
+            )
+        elif tp_orders:
+            # 没有 SL 时，用 TP 订单的 requested_qty 总和作为兜底
+            protected_qty_total = sum(
+                (o.requested_qty for o in tp_orders),
+                Decimal("0")
+            )
+        else:
+            protected_qty_total = Decimal("0")
+
+        # 计算 delta_qty：新增成交量
+        filled_qty_total = entry_order.filled_qty
+        delta_qty = filled_qty_total - protected_qty_total
+
+        logger.info(
+            f"[ExecutionOrchestrator] 增量补挂计算: "
+            f"filled_qty_total={filled_qty_total}, "
+            f"protected_qty_total={protected_qty_total}, "
+            f"delta_qty={delta_qty}"
+        )
+
+        # 幂等判断：delta_qty <= 0 时直接返回，不补挂
+        if delta_qty <= Decimal("0"):
             logger.info(
-                f"[ExecutionOrchestrator] 已存在保护单，跳过挂载: "
-                f"order_id={entry_order.id}, "
-                f"existing_count={len(existing_protection_orders)}"
+                f"[ExecutionOrchestrator] 无新增成交量，跳过补挂: "
+                f"order_id={entry_order.id}, delta_qty={delta_qty}"
             )
             return
 
-        # 挂载最小保护单（基于已成交数量）
+        # 为新增成交量补挂保护单
         try:
             # 创建临时 Position 对象（用于生成保护单）
+            # 注意：current_qty 使用 delta_qty，只为新增部分生成保护单
             position = Position(
                 id=f"pos_{entry_order.signal_id}",
                 signal_id=entry_order.signal_id,
                 symbol=entry_order.symbol,
                 direction=entry_order.direction,
                 entry_price=entry_order.average_exec_price or entry_order.price,
-                current_qty=entry_order.filled_qty,  # 使用已成交数量
+                current_qty=delta_qty,  # 只为新增成交量生成保护单
             )
 
             positions_map = {entry_order.signal_id: position}
 
+            # 创建临时 ENTRY 订单对象（用于生成保护单）
+            # 只包含新增成交量部分
+            # P1 修复：price 使用 average_exec_price or price fallback，保留原有语义
+            entry_price_anchor = entry_order.average_exec_price or entry_order.price
+            delta_entry = Order(
+                id=entry_order.id,
+                signal_id=entry_order.signal_id,
+                symbol=entry_order.symbol,
+                direction=entry_order.direction,
+                order_type=entry_order.order_type,
+                order_role=entry_order.order_role,
+                requested_qty=delta_qty,
+                filled_qty=delta_qty,
+                average_exec_price=entry_order.average_exec_price,
+                price=entry_price_anchor,
+                created_at=entry_order.created_at,
+                updated_at=entry_order.updated_at,
+            )
+
             # 使用 OrderManager 生成保护单
             order_manager = OrderManager()
             protection_orders = order_manager._generate_tp_sl_orders(
-                filled_entry=entry_order,
+                filled_entry=delta_entry,
                 positions_map=positions_map,
-                # Use the same strategy snapshot as full-fill path.
+                # 使用 intent 中冻结的 strategy snapshot
                 strategy=intent.strategy,
                 tp_targets=intent.strategy.tp_targets if intent.strategy else None,
             )
 
             logger.info(
-                f"[ExecutionOrchestrator] 生成保护单（基于已成交数量）: "
+                f"[ExecutionOrchestrator] 生成增量保护单: "
                 f"intent_id={intent.id}, "
                 f"总计={len(protection_orders)} 个, "
-                f"filled_qty={entry_order.filled_qty}"
+                f"delta_qty={delta_qty}"
             )
 
             # 提交保护单到交易所
             for prot_order in protection_orders:
                 try:
+                    # 设置 parent_order_id，关联到 ENTRY
+                    prot_order.parent_order_id = entry_order.id
+
                     # 修改订单状态为 CREATED
                     prot_order.status = OrderStatus.CREATED
 
@@ -661,7 +743,7 @@ class ExecutionOrchestrator:
                         symbol=prot_order.symbol,
                         order_type="limit" if prot_order.order_type == OrderType.LIMIT else "stop_market",
                         side=side,
-                        amount=prot_order.requested_qty,  # 使用已成交数量
+                        amount=prot_order.requested_qty,
                         price=prot_order.price,
                         trigger_price=prot_order.trigger_price,
                         reduce_only=True,
@@ -678,7 +760,7 @@ class ExecutionOrchestrator:
                         await self._order_lifecycle.confirm_order(prot_order.id)
 
                         logger.info(
-                            f"[ExecutionOrchestrator] 保护单提交成功: "
+                            f"[ExecutionOrchestrator] 增量保护单提交成功: "
                             f"order_id={prot_order.id}, "
                             f"role={prot_order.order_role}, "
                             f"exchange_order_id={placement_result.exchange_order_id}, "
@@ -686,7 +768,7 @@ class ExecutionOrchestrator:
                         )
                     else:
                         logger.error(
-                            f"[ExecutionOrchestrator] 保护单提交失败: "
+                            f"[ExecutionOrchestrator] 增量保护单提交失败: "
                             f"order_id={prot_order.id}, "
                             f"role={prot_order.order_role}, "
                             f"error={placement_result.error_code}"
@@ -694,7 +776,7 @@ class ExecutionOrchestrator:
 
                 except Exception as e:
                     logger.error(
-                        f"[ExecutionOrchestrator] 保护单提交异常: "
+                        f"[ExecutionOrchestrator] 增量保护单提交异常: "
                         f"order_id={prot_order.id}, "
                         f"role={prot_order.order_role}, "
                         f"error={e}",
@@ -706,13 +788,14 @@ class ExecutionOrchestrator:
             intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
 
             logger.info(
-                f"[ExecutionOrchestrator] ENTRY 部分成交保护单挂载完成: "
-                f"intent_id={intent.id}, status={intent.status}"
+                f"[ExecutionOrchestrator] ENTRY 部分成交增量保护单挂载完成: "
+                f"intent_id={intent.id}, status={intent.status}, "
+                f"delta_qty={delta_qty}"
             )
 
         except Exception as e:
             logger.error(
-                f"[ExecutionOrchestrator] 保护单挂载异常: "
+                f"[ExecutionOrchestrator] 增量保护单挂载异常: "
                 f"intent_id={intent.id}, error={e}",
                 exc_info=True
             )
