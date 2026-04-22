@@ -29,6 +29,7 @@ class ExecutionIntentStatus(str, Enum):
     SUBMITTED = "submitted"      # 已提交到交易所
     FAILED = "failed"            # 提交失败
     PROTECTING = "protecting"    # ENTRY 成交，正在挂载保护单（TP/SL）
+    PARTIALLY_PROTECTED = "partially_protected"  # ENTRY 部分成交，已对已成交部分挂载保护单
     COMPLETED = "completed"      # 执行完成（订单已创建且保护单已挂载）
 
 

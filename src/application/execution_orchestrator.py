@@ -75,6 +75,11 @@ class ExecutionOrchestrator:
         # 后续可迁移到数据库持久化
         self._intents: Dict[str, ExecutionIntent] = {}
 
+        # MVP-Protected-Position-Step2: 注册 ENTRY 部分成交回调
+        self._order_lifecycle.set_entry_partially_filled_callback(
+            self._handle_entry_partially_filled
+        )
+
     async def execute_signal(
         self,
         signal: SignalResult,
@@ -550,6 +555,165 @@ class ExecutionOrchestrator:
                 "sl_order": None,
                 "error": str(e),
             }
+
+    async def _handle_entry_partially_filled(
+        self,
+        entry_order: Order,
+    ) -> None:
+        """
+        处理 ENTRY 部分成交后的保护单挂载
+
+        MVP-Protected-Position-Step2: ENTRY 部分成交后立即挂载最小保护单
+
+        Args:
+            entry_order: ENTRY 订单（已部分成交）
+        """
+        from src.domain.order_manager import OrderManager
+        from src.domain.models import Position
+
+        logger.info(
+            f"[ExecutionOrchestrator] 开始处理 ENTRY 部分成交: "
+            f"order_id={entry_order.id}, filled_qty={entry_order.filled_qty}, "
+            f"average_exec_price={entry_order.average_exec_price}"
+        )
+
+        # 查找对应的 ExecutionIntent
+        intent = None
+        for stored_intent in self._intents.values():
+            if stored_intent.order_id == entry_order.id:
+                intent = stored_intent
+                break
+
+        if not intent:
+            logger.warning(
+                f"[ExecutionOrchestrator] 未找到对应的 ExecutionIntent: "
+                f"order_id={entry_order.id}"
+            )
+            return
+
+        # 检查是否已有保护单（避免重复挂载）
+        all_orders = await self._order_lifecycle._repository.get_orders_by_signal(
+            entry_order.signal_id
+        )
+
+        existing_protection_orders = [
+            o for o in all_orders
+            if o.parent_order_id == entry_order.id
+            and o.order_role in [OrderRole.SL, OrderRole.TP1, OrderRole.TP2]
+        ]
+
+        if existing_protection_orders:
+            logger.info(
+                f"[ExecutionOrchestrator] 已存在保护单，跳过挂载: "
+                f"order_id={entry_order.id}, "
+                f"existing_count={len(existing_protection_orders)}"
+            )
+            return
+
+        # 挂载最小保护单（基于已成交数量）
+        try:
+            # 创建临时 Position 对象（用于生成保护单）
+            position = Position(
+                id=f"pos_{entry_order.signal_id}",
+                signal_id=entry_order.signal_id,
+                symbol=entry_order.symbol,
+                direction=entry_order.direction,
+                entry_price=entry_order.average_exec_price or entry_order.price,
+                current_qty=entry_order.filled_qty,  # 使用已成交数量
+            )
+
+            positions_map = {entry_order.signal_id: position}
+
+            # 使用 OrderManager 生成保护单
+            order_manager = OrderManager()
+            protection_orders = order_manager._generate_tp_sl_orders(
+                filled_entry=entry_order,
+                positions_map=positions_map,
+                strategy=None,  # MVP 阶段使用默认策略（单 TP）
+                tp_targets=None,
+            )
+
+            logger.info(
+                f"[ExecutionOrchestrator] 生成保护单（基于已成交数量）: "
+                f"intent_id={intent.id}, "
+                f"总计={len(protection_orders)} 个, "
+                f"filled_qty={entry_order.filled_qty}"
+            )
+
+            # 提交保护单到交易所
+            for prot_order in protection_orders:
+                try:
+                    # 修改订单状态为 CREATED
+                    prot_order.status = OrderStatus.CREATED
+
+                    # 使用 OrderLifecycleService 正式链保存订单
+                    await self._order_lifecycle._repository.save(prot_order)
+
+                    # 创建状态机
+                    self._order_lifecycle._get_or_create_state_machine(prot_order)
+
+                    # 提交到交易所
+                    side = "sell" if entry_order.direction == Direction.LONG else "buy"
+
+                    placement_result = await self._gateway.place_order(
+                        symbol=prot_order.symbol,
+                        order_type="limit" if prot_order.order_type == OrderType.LIMIT else "stop_market",
+                        side=side,
+                        amount=prot_order.requested_qty,  # 使用已成交数量
+                        price=prot_order.price,
+                        trigger_price=prot_order.trigger_price,
+                        reduce_only=True,
+                        client_order_id=prot_order.id,
+                    )
+
+                    if placement_result.is_success:
+                        # 使用 OrderLifecycleService 正式链提交订单
+                        await self._order_lifecycle.submit_order(
+                            prot_order.id,
+                            exchange_order_id=placement_result.exchange_order_id,
+                        )
+
+                        await self._order_lifecycle.confirm_order(prot_order.id)
+
+                        logger.info(
+                            f"[ExecutionOrchestrator] 保护单提交成功: "
+                            f"order_id={prot_order.id}, "
+                            f"role={prot_order.order_role}, "
+                            f"exchange_order_id={placement_result.exchange_order_id}, "
+                            f"amount={prot_order.requested_qty}"
+                        )
+                    else:
+                        logger.error(
+                            f"[ExecutionOrchestrator] 保护单提交失败: "
+                            f"order_id={prot_order.id}, "
+                            f"role={prot_order.order_role}, "
+                            f"error={placement_result.error_code}"
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"[ExecutionOrchestrator] 保护单提交异常: "
+                        f"order_id={prot_order.id}, "
+                        f"role={prot_order.order_role}, "
+                        f"error={e}",
+                        exc_info=True
+                    )
+
+            # 更新 ExecutionIntent 状态为 PARTIALLY_PROTECTED
+            intent.status = ExecutionIntentStatus.PARTIALLY_PROTECTED
+            intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+            logger.info(
+                f"[ExecutionOrchestrator] ENTRY 部分成交保护单挂载完成: "
+                f"intent_id={intent.id}, status={intent.status}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[ExecutionOrchestrator] 保护单挂载异常: "
+                f"intent_id={intent.id}, error={e}",
+                exc_info=True
+            )
 
     def get_intent(self, intent_id: str) -> Optional[ExecutionIntent]:
         """

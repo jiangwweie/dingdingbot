@@ -383,16 +383,20 @@ class OrderManager:
                 direction=filled_entry.direction,
             )
 
+            # MVP-Protected-Position-Step2: 使用已成交数量生成保护单
+            # 对于部分成交场景，使用 filled_qty；对于完全成交，使用 requested_qty
+            base_qty = filled_entry.filled_qty if filled_entry.filled_qty > 0 else filled_entry.requested_qty
+
             # 计算 TP 数量：最后一个级别使用剩余数量 (防止精度误差)
             if level == tp_levels:
-                tp_qty = filled_entry.requested_qty - sum(
+                tp_qty = base_qty - sum(
                     o.requested_qty for o in new_orders if 'TP' in str(o.order_role)
                 )
             else:
-                tp_qty = filled_entry.requested_qty * tp_ratio
+                tp_qty = base_qty * tp_ratio
 
             if tp_qty <= 0:
-                tp_qty = filled_entry.requested_qty * tp_ratio
+                tp_qty = base_qty * tp_ratio
 
             tp_role = self._get_tp_role(level)
             tp_order = Order(
@@ -413,7 +417,11 @@ class OrderManager:
             )
             new_orders.append(tp_order)
 
-        # 生成 SL 订单 (数量为总开仓数量)
+        # MVP-Protected-Position-Step2: 使用已成交数量生成 SL 订单
+        # 对于部分成交场景，使用 filled_qty；对于完全成交，使用 requested_qty
+        base_qty = filled_entry.filled_qty if filled_entry.filled_qty > 0 else filled_entry.requested_qty
+
+        # 生成 SL 订单 (数量为已成交数量)
         sl_order = Order(
             id=f"ord_sl_{uuid.uuid4().hex[:8]}",
             signal_id=filled_entry.signal_id,
@@ -422,7 +430,7 @@ class OrderManager:
             order_type=OrderType.STOP_MARKET,
             order_role=OrderRole.SL,
             trigger_price=stop_loss_price,
-            requested_qty=filled_entry.requested_qty,
+            requested_qty=base_qty,
             status=OrderStatus.OPEN,
             created_at=current_time,
             updated_at=current_time,
