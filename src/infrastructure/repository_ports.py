@@ -52,6 +52,19 @@ class OrderRepositoryPort(Protocol):
     async def get_open_orders(self, symbol: Optional[str] = None) -> List[Order]:
         ...
 
+    async def update_status(
+        self,
+        order_id: str,
+        status: OrderStatus,
+        filled_qty: Optional[Decimal] = None,
+        average_exec_price: Optional[Decimal] = None,
+        filled_at: Optional[int] = None,
+        exchange_order_id: Optional[str] = None,
+        exit_reason: Optional[str] = None,
+    ) -> None:
+        """更新订单状态（部分更新，避免完整 save）。"""
+        ...
+
 
 @runtime_checkable
 class ExecutionIntentRepositoryPort(Protocol):
@@ -94,7 +107,7 @@ class PositionRepositoryPort(Protocol):
     """仓位仓储协议。
 
     第一阶段仅为 PG 核心表骨架预留边界。
-    暂不强制绑定领域模型或 ORM 模型，由具体实现自行决定。
+    使用 Any 类型避免领域模型与 ORM 的强耦合，由具体实现自行决定。
     """
 
     async def initialize(self) -> None:
@@ -104,10 +117,13 @@ class PositionRepositoryPort(Protocol):
         ...
 
     async def save(self, position: Any) -> None:
+        """保存仓位（接收领域模型或 ORM，由实现决定转换）。"""
         ...
 
     async def get(self, position_id: str) -> Optional[Any]:
+        """获取仓位（返回领域模型或 ORM，由实现决定）。"""
         ...
 
     async def get_by_signal_id(self, signal_id: str) -> List[Any]:
+        """按信号 ID 获取仓位列表。"""
         ...

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -26,6 +26,16 @@ class PgOrderRepository:
         session_maker: Optional[async_sessionmaker[AsyncSession]] = None,
     ) -> None:
         self._session_maker = session_maker or get_pg_session_maker()
+        self._exchange_gateway: Optional[Any] = None  # 依赖注入：交易所网关
+        self._audit_logger: Optional[Any] = None  # 依赖注入：审计日志器
+
+    def set_exchange_gateway(self, gateway: Any) -> None:
+        """设置交易所网关（依赖注入）。"""
+        self._exchange_gateway = gateway
+
+    def set_audit_logger(self, logger_instance: Any) -> None:
+        """设置审计日志器（依赖注入）。"""
+        self._audit_logger = logger_instance
 
     async def initialize(self) -> None:
         await init_pg_core_db()
@@ -102,6 +112,49 @@ class PgOrderRepository:
             stmt = stmt.order_by(PGOrderORM.created_at.desc())
             result = await session.execute(stmt)
             return [self._to_domain(orm) for orm in result.scalars().all()]
+
+    async def update_status(
+        self,
+        order_id: str,
+        status: OrderStatus,
+        filled_qty: Optional[Decimal] = None,
+        average_exec_price: Optional[Decimal] = None,
+        filled_at: Optional[int] = None,
+        exchange_order_id: Optional[str] = None,
+        exit_reason: Optional[str] = None,
+    ) -> None:
+        """
+        更新订单状态和可选字段。
+
+        Args:
+            order_id: 订单 ID
+            status: 新状态
+            filled_qty: 成交数量（可选）
+            average_exec_price: 平均成交价（可选）
+            filled_at: 成交时间戳（可选）
+            exchange_order_id: 交易所订单 ID（可选）
+            exit_reason: 退出原因（可选）
+        """
+        async with self._session_maker() as session:
+            orm = await session.get(PGOrderORM, order_id)
+            if orm is None:
+                return
+
+            orm.status = status.value
+            orm.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+            if filled_qty is not None:
+                orm.filled_qty = filled_qty
+            if average_exec_price is not None:
+                orm.average_exec_price = average_exec_price
+            if filled_at is not None:
+                orm.filled_at = filled_at
+            if exchange_order_id is not None:
+                orm.exchange_order_id = exchange_order_id
+            if exit_reason is not None:
+                orm.exit_reason = exit_reason
+
+            await session.commit()
 
     @staticmethod
     def _to_orm(order: Order) -> PGOrderORM:
