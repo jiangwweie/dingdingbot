@@ -1,8 +1,30 @@
 # Progress Log
 
-> Last updated: 2026-04-23 00:40
+> Last updated: 2026-04-23 00:55
 
 ---
+
+## 2026-04-23 00:55 -- 已明确 core backend 小范围实切策略，并将默认切法收口到 execution_intent
+
+### 本次完成
+
+1. 在 `database.py` 中固化当前推荐策略：
+   - 配置了 `PG_DATABASE_URL` 时
+   - `CORE_EXECUTION_INTENT_BACKEND` 默认切到 `postgres`
+   - `CORE_ORDER_BACKEND` / `CORE_POSITION_BACKEND` 继续默认 `sqlite`
+2. 更新 `docs/local-pg.md`
+   - 不再默认引导三条核心链一起切到 PG
+   - 改为明确推荐“先切 execution_intent，再评估 order，position 保持过渡态”
+
+### 当前状态
+
+- 当前推荐实切策略已不再只是口头约定，而是进入代码默认值和本地文档
+- 这意味着后续只要配置 `PG_DATABASE_URL`，execution intent 会优先进入 PG 真源路径
+- order / position 默认不会被顺手一起切过去
+
+### 备注
+
+- 本次未执行测试（按项目红线，测试前需用户确认）
 
 ## 2026-04-23 00:40 -- ExecutionIntent 已切到 PG 优先读写，内存 `_intents` 降级为热缓存
 

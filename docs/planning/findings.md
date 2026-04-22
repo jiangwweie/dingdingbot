@@ -1,8 +1,29 @@
 # Findings Log
 
-> Last updated: 2026-04-23 00:40
+> Last updated: 2026-04-23 00:55
 
 ---
+
+## 2026-04-23 00:55 -- Core backend 小范围实切策略确认：先切 execution_intent，暂不默认切 order/position
+
+### 新增结论
+
+1. **当前最稳的第一刀是 `CORE_EXECUTION_INTENT_BACKEND=postgres`**
+   - `ExecutionIntent` 已完成 schema/ORM/repository/CRUD 收口
+   - 现在又已切到 PG 优先读写，具备先成为 PG 主真源的条件
+
+2. **`CORE_ORDER_BACKEND=postgres` 现在不应作为默认切法**
+   - `orders` 虽已完成 PG schema、repo 与最小 CRUD 验证
+   - 但订单事实层直接连接主执行链，切换面仍大于 `execution_intents`
+   - 因此当前阶段应继续保守评估，而不是默认实切
+
+3. **`CORE_POSITION_BACKEND` 继续保持过渡态**
+   - `positions` 目前仍是“稳定核心列 + payload”的过渡 schema
+   - 尚未进入完整领域模型映射与 `PositionManager` 切换阶段
+
+4. **推荐默认策略应体现在代码与文档中**
+   - 配置了 `PG_DATABASE_URL` 时，可默认让 `execution_intent` 走 postgres
+   - `order / position` 继续默认 sqlite，避免误把三条链同时切过去
 
 ## 2026-04-23 00:40 -- ExecutionIntent 已开始切向 PG 主真源：repo 优先，内存降级为热缓存
 

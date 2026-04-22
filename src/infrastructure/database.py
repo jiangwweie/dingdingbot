@@ -28,8 +28,22 @@ DATABASE_URL = os.getenv(
 )
 
 PG_DATABASE_URL = os.getenv("PG_DATABASE_URL")
+
+
+def _default_execution_intent_backend() -> str:
+    """
+    当前推荐的小范围实切策略：
+    - 配置了 PG_DATABASE_URL 时，ExecutionIntent 默认走 postgres
+    - orders / positions 仍保持 sqlite，避免一次性扩大切换面
+    """
+    return "postgres" if PG_DATABASE_URL else "sqlite"
+
+
 CORE_ORDER_BACKEND = os.getenv("CORE_ORDER_BACKEND", "sqlite").lower()
-CORE_EXECUTION_INTENT_BACKEND = os.getenv("CORE_EXECUTION_INTENT_BACKEND", "sqlite").lower()
+CORE_EXECUTION_INTENT_BACKEND = os.getenv(
+    "CORE_EXECUTION_INTENT_BACKEND",
+    _default_execution_intent_backend(),
+).lower()
 CORE_POSITION_BACKEND = os.getenv("CORE_POSITION_BACKEND", "sqlite").lower()
 
 
