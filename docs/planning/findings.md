@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-22 23:58
+> Last updated: 2026-04-23 00:10
 
 ---
 
@@ -46,6 +46,23 @@
 
 3. **`SignalResult.take_profit_levels` 足以派生最小执行策略**
    可以从 `position_ratio` 和 `risk_reward` 生成 `tp_ratios / tp_targets`，在不额外改配置模型的情况下，为 orchestrator 构造一份最小 `OrderStrategy` 快照。
+
+---
+
+## 2026-04-23 00:10 -- 风控配置收口：先从 risk 真源派生，不新开 capital_protection 表
+
+### 新增结论
+
+1. **当前最小正确做法是复用 `ConfigManager.risk`**
+   项目里已有稳定的 risk 配置真源与热加载机制，单独再开 `capital_protection` 配置表会扩大迁移面；当前阶段优先做派生转换即可。
+
+2. **`daily_max_loss` 应按金额口径落到资金保护层**
+   现有 `RiskConfig.daily_max_loss` 更接近金额语义，因此在 `CapitalProtectionManager` 中应优先支持 `max_loss_amount`，而不是强行映射成百分比。
+
+3. **单笔最大损失与杠杆上限可以安全映射**
+   - `risk.max_loss_percent` -> `single_trade.max_loss_percent`（乘 100 转百分比）
+   - `risk.max_leverage` -> `account.max_leverage`
+   - `risk.daily_max_trades` -> `daily.max_trade_count`
 
 ---
 

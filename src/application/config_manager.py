@@ -28,6 +28,7 @@ from pydantic import BaseModel, ValidationError
 
 from src.domain.exceptions import FatalStartupError, DependencyNotReadyError
 from src.domain.models import (
+    CapitalProtectionConfig,
     RiskConfig,
     StrategyDefinition,
     TriggerConfig,
@@ -340,6 +341,40 @@ class ConfigManager:
     def get_config_version(self) -> int:
         """Get current configuration version number (R3.2)."""
         return self._config_version
+
+    def build_capital_protection_config(self) -> CapitalProtectionConfig:
+        """从当前 risk 配置派生 CapitalProtectionConfig。
+
+        当前阶段不新增独立 capital_protection 配置表，先复用已有 risk 真源：
+        - `risk.max_loss_percent` -> 单笔最大损失百分比
+        - `risk.max_leverage` -> 账户最大杠杆
+        - `risk.daily_max_trades` -> 每日最大交易次数
+        - `risk.daily_max_loss` -> 每日最大亏损金额（USDT）
+        """
+        risk = self.get_user_config_sync().risk
+        base = CapitalProtectionConfig()
+
+        single_trade = dict(base.single_trade)
+        single_trade["max_loss_percent"] = risk.max_loss_percent * Decimal("100")
+
+        daily = dict(base.daily)
+        if risk.daily_max_trades is not None:
+            daily["max_trade_count"] = risk.daily_max_trades
+        if risk.daily_max_loss is not None:
+            daily["max_loss_amount"] = risk.daily_max_loss
+
+        account = dict(base.account)
+        account["max_leverage"] = risk.max_leverage
+
+        return CapitalProtectionConfig(
+            enabled=base.enabled,
+            min_notional=base.min_notional,
+            price_deviation_threshold=base.price_deviation_threshold,
+            extreme_price_deviation_threshold=base.extreme_price_deviation_threshold,
+            single_trade=single_trade,
+            daily=daily,
+            account=account,
+        )
 
     async def initialize_from_db(self) -> None:
         """

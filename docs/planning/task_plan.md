@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-22 23:58
-> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成主进程执行链接线（SignalPipeline -> ExecutionOrchestrator -> core repos）
+> **Last updated**: 2026-04-23 00:10
+> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成主进程执行链接线，并开始把风控配置切到 ConfigManager 真源
 
 ---
 
@@ -229,13 +229,17 @@
    - `ExecutionOrchestrator`
    - `ExecutionIntentRepository`（按配置启用）
 8. `SignalPipeline` 已新增执行 hook，fired signal 可直接进入 orchestrator 执行链
+9. `CapitalProtectionManager` 已开始使用 `ConfigManager` 派生配置：
+   - 不再依赖默认 `CapitalProtectionConfig()`
+   - `risk.max_loss_percent / max_leverage / daily_max_trades / daily_max_loss` 已进入风控派生链
 
 当前仍未做：
 
 1. `ExecutionOrchestrator.get_intent()/list_intents()` 仍主要面向本地缓存
 2. 独立 uvicorn 模式尚未自动构建 `CapitalProtectionManager + ExecutionOrchestrator`
 3. 尚未把 `StartupReconciliationService` / 更多核心服务正式切到 PG
-4. 尚未执行测试（仅完成语法级检查）
+4. 风控派生配置尚未接入热更新后的运行时刷新
+5. 尚未执行测试（仅完成语法级检查）
 
 ### 执行层设计决策（新增）
 

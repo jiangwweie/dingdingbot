@@ -29,7 +29,7 @@ from src.infrastructure.core_repository_factory import (
 )
 from src.application.signal_pipeline import SignalPipeline
 from src.domain.risk_calculator import RiskConfig
-from src.domain.models import CapitalProtectionConfig, KlineData
+from src.domain.models import KlineData
 from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, ConnectionLostError
 from src.infrastructure.logger import logger, setup_logger, register_secret
 from src.infrastructure.database import validate_pg_core_configuration
@@ -240,7 +240,7 @@ async def run_application():
         account_service = BinanceAccountService(_exchange_gateway)
         capital_notifier = _CapitalProtectionNotifierAdapter(_notification_service)
         _capital_protection = CapitalProtectionManager(
-            config=CapitalProtectionConfig(),
+            config=config_manager.build_capital_protection_config(),
             account_service=account_service,
             notifier=capital_notifier,
             gateway=_exchange_gateway,

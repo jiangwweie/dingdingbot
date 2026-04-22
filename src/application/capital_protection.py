@@ -573,7 +573,9 @@ class CapitalProtectionManager:
         检查每日最大亏损
 
         公式：daily_pnl = daily_stats.realized_pnl
-        限制：daily_pnl >= -balance * (max_loss_percent / 100)
+        限制：
+        - 优先使用 max_loss_amount: daily_pnl >= -max_loss_amount
+        - 否则使用百分比: daily_pnl >= -balance * (max_loss_percent / 100)
 
         Returns:
             (passed, daily_pnl)
@@ -581,9 +583,13 @@ class CapitalProtectionManager:
         async with self._stats_lock:
             daily_pnl = self._daily_stats.realized_pnl
 
-        # 计算每日最大允许亏损
-        max_loss_percent = Decimal(str(self._config.daily["max_loss_percent"]))
-        max_daily_loss = balance * (max_loss_percent / Decimal("100"))
+        # 优先使用显式金额上限；否则回退到百分比口径
+        max_loss_amount = self._config.daily.get("max_loss_amount")
+        if max_loss_amount is not None:
+            max_daily_loss = Decimal(str(max_loss_amount))
+        else:
+            max_loss_percent = Decimal(str(self._config.daily["max_loss_percent"]))
+            max_daily_loss = balance * (max_loss_percent / Decimal("100"))
 
         passed = daily_pnl >= -max_daily_loss
         return passed, daily_pnl

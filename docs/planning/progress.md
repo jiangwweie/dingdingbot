@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-22 23:58
+> Last updated: 2026-04-23 00:10
 
 ---
 
@@ -105,6 +105,41 @@
 - 自动执行主链已从“通知后结束”推进到“通知后进入执行编排”
 - PG execution intent repo 在主进程模式下也已能参与 orchestrator 持久化
 - 手工下单 API 仍保持原路径，未被这轮强行改造
+
+### 备注
+
+- 本次仍未执行单元测试/集成测试（按项目红线，测试前需用户确认）
+
+---
+
+## 2026-04-23 00:10 -- CapitalProtection 已切到 ConfigManager 派生配置
+
+### 本次完成
+
+1. **新增 `ConfigManager.build_capital_protection_config()`**
+   - 从当前 `risk` 配置派生 `CapitalProtectionConfig`
+   - 映射：
+     - `risk.max_loss_percent` -> 单笔最大损失百分比
+     - `risk.max_leverage` -> 账户最大杠杆
+     - `risk.daily_max_trades` -> 每日最大交易次数
+     - `risk.daily_max_loss` -> 每日最大亏损金额
+
+2. **`main.py` 已改为使用派生配置**
+   - 不再直接 `CapitalProtectionConfig()`
+   - 主进程执行运行时改为读取 `ConfigManager` 真源
+
+3. **`CapitalProtectionManager` 已支持每日亏损金额口径**
+   - 新增 `daily.max_loss_amount`
+   - 检查顺序：金额优先，百分比兜底
+
+4. **轻量验证**
+   - 对 `models.py`、`capital_protection.py`、`config_manager.py`、`main.py` 完成 AST 级语法检查
+
+### 当前状态
+
+- 自动执行主链已不再依赖默认风控配置
+- 风控阈值开始从系统真实配置派生
+- 但当前变更尚未提交，因为 `src/domain/models.py` 存在同文件的其他本地改动，需要避免误带无关内容
 
 ### 备注
 

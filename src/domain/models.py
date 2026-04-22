@@ -171,8 +171,8 @@ class RiskConfig(BaseModel):
     max_total_exposure: Decimal = Field(
         default=Decimal('0.8'),
         ge=0,
-        le=1,
-        description="Maximum total exposure as % of balance (e.g., 0.8 = 80%)"
+        le=10,  # 允许最大 1000%（支持杠杆仓位）
+        description="Maximum total exposure as % of balance (e.g., 0.8 = 80%, 2.5 = 250%)"
     )
     # Extended fields from database (optional, for future features)
     daily_max_trades: Optional[int] = Field(
@@ -223,8 +223,8 @@ class RiskConfig(BaseModel):
     @field_validator('max_total_exposure')
     @classmethod
     def validate_total_exposure(cls, v):
-        if v < 0 or v > Decimal('1'):
-            raise ValueError("Max total exposure must be between 0 and 1")
+        if v < 0 or v > Decimal('10'):
+            raise ValueError("Max total exposure must be between 0 and 10 (1000%)")
         return v
 
 
@@ -1899,6 +1899,7 @@ class CapitalProtectionConfig(BaseModel):
     daily: Dict[str, Any] = Field(
         default_factory=lambda: {
             "max_loss_percent": Decimal("5.0"),    # 每日最大回撤 5% of balance
+            "max_loss_amount": None,               # 每日最大亏损金额 (USDT)，优先于百分比
             "max_trade_count": 50,                 # 每日最大交易次数
         },
         description="每日限制配置"
