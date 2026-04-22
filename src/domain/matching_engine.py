@@ -112,6 +112,15 @@ class MockMatchingEngine:
         else:
             self.rng = random.Random()
 
+        # 冲突统计（用于业务验证）
+        self.conflict_stats = {
+            "total_klines": 0,           # 总 K 线数
+            "klines_with_conflicts": 0,  # 有冲突的 K 线数
+            "total_conflicts": 0,        # 总冲突次数（signal 维度）
+            "conflicts_tp_first": 0,     # TP 优先的冲突次数
+            "conflicts_sl_first": 0,     # SL 优先的冲突次数
+        }
+
     def match_orders_for_kline(
         self,
         kline: KlineData,
@@ -241,8 +250,16 @@ class MockMatchingEngine:
         Returns:
             按优先级排序后的订单列表
         """
+        # 更新统计：总 K 线数
+        self.conflict_stats["total_klines"] += 1
+
         # 检测 same-bar 冲突：同一 signal_id 的 TP 和 SL 都会被触发
         signal_conflicts = self._detect_same_bar_conflicts(orders, kline)
+
+        # 更新统计：冲突 K 线数和冲突次数
+        if signal_conflicts:
+            self.conflict_stats["klines_with_conflicts"] += 1
+            self.conflict_stats["total_conflicts"] += len(signal_conflicts)
 
         # 为每个冲突 signal 预先抽签一次（仅 random 策略）
         # signal_id -> True(TP优先) / False(SL优先)
@@ -252,6 +269,15 @@ class MockMatchingEngine:
                 # 每个 signal 只抽签一次
                 tp_first = self.rng.random() < float(self.same_bar_tp_first_prob)
                 signal_tp_first[signal_id] = tp_first
+
+                # 更新统计：TP/SL 优先次数
+                if tp_first:
+                    self.conflict_stats["conflicts_tp_first"] += 1
+                else:
+                    self.conflict_stats["conflicts_sl_first"] += 1
+        elif self.same_bar_policy == "pessimistic" and signal_conflicts:
+            # pessimistic 策略下所有冲突都是 SL 优先
+            self.conflict_stats["conflicts_sl_first"] += len(signal_conflicts)
 
         def get_priority(order: Order) -> int:
             # 止损类订单

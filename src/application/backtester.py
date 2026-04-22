@@ -1537,6 +1537,9 @@ class Backtester:
             random_seed=resolved_params.random_seed,
         )
 
+        # 保存 engine 引用（用于冲突统计）
+        self._last_matching_engine = engine
+
         # Step 2: Fetch historical K-line data
         klines = await self._fetch_klines(request)
         if not klines:
