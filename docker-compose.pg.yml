@@ -1,0 +1,24 @@
+# Local PostgreSQL for Development
+# Usage: docker compose -f docker-compose.pg.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dingdingbot-pg
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: dingdingbot
+      POSTGRES_USER: dingdingbot
+      POSTGRES_PASSWORD: dingdingbot_dev
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dingdingbot -d dingdingbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:
