@@ -165,6 +165,21 @@ def resolve_backtest_params(
                 return val
         return defaults[key]
 
+    def resolve_str(
+        key: str,
+        override_val: Optional[str],
+        request_val: Optional[str] = None,
+        kv_key: Optional[str] = None,
+    ) -> str:
+        """解析 str 参数"""
+        if override_val is not None:
+            return override_val
+        if request_val is not None:
+            return request_val
+        if kv_configs and kv_key and kv_configs.get(kv_key) is not None:
+            return str(kv_configs[kv_key])
+        return defaults[key]
+
     # 解析各参数
     return ResolvedBacktestParams(
         # 策略参数
@@ -241,6 +256,19 @@ def resolve_backtest_params(
 
         # 诊断参数
         allowed_directions=overrides.allowed_directions,
+
+        # 撮合参数
+        same_bar_policy=resolve_str(
+            "same_bar_policy",
+            overrides.same_bar_policy,
+            kv_key="backtest.same_bar_policy",
+        ),
+        same_bar_tp_first_prob=resolve_decimal(
+            "same_bar_tp_first_prob",
+            overrides.same_bar_tp_first_prob,
+            kv_key="backtest.same_bar_tp_first_prob",
+        ),
+        random_seed=overrides.random_seed,
     )
 
 
@@ -1504,6 +1532,9 @@ class Backtester:
             slippage_rate=slippage_rate,
             fee_rate=fee_rate,
             tp_slippage_rate=tp_slippage_rate,
+            same_bar_policy=resolved_params.same_bar_policy,
+            same_bar_tp_first_prob=resolved_params.same_bar_tp_first_prob,
+            random_seed=resolved_params.random_seed,
         )
 
         # Step 2: Fetch historical K-line data

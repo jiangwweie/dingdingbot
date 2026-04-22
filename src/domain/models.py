@@ -2626,6 +2626,11 @@ class BacktestRuntimeOverrides(BaseModel):
     # 诊断参数
     allowed_directions: Optional[List[str]] = Field(None, description="允许的方向过滤（如 ['LONG'] 或 ['SHORT']），None=全部")
 
+    # 撮合参数（同 bar 冲突处理）
+    same_bar_policy: Optional[str] = Field(None, description="同 bar TP/SL 冲突策略: pessimistic(默认) / random")
+    same_bar_tp_first_prob: Optional[Decimal] = Field(None, ge=Decimal("0"), le=Decimal("1"), description="random 策略下 TP 优先概率，默认 0.5")
+    random_seed: Optional[int] = Field(None, description="随机种子（用于 random 策略可复现）")
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
@@ -2661,6 +2666,11 @@ class ResolvedBacktestParams(BaseModel):
 
     # ===== 诊断参数 =====
     allowed_directions: Optional[List[str]] = Field(None, description="允许的方向过滤，None=全部")
+
+    # ===== 撮合参数 =====
+    same_bar_policy: str = Field("pessimistic", description="同 bar TP/SL 冲突策略")
+    same_bar_tp_first_prob: Decimal = Field(Decimal("0.5"), description="random 策略下 TP 优先概率")
+    random_seed: Optional[int] = Field(None, description="随机种子")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -2713,4 +2723,9 @@ BACKTEST_PARAM_DEFAULTS = {
     "tp_slippage_rate": Decimal("0.0005"),
     "fee_rate": Decimal("0.0004"),
     "initial_balance": Decimal("10000"),
+
+    # 撮合参数（同 bar 冲突处理）
+    "same_bar_policy": "pessimistic",  # 默认悲观策略（SL > TP）
+    "same_bar_tp_first_prob": Decimal("0.5"),  # random 策略下 TP 优先概率
+    "random_seed": None,  # 随机种子（None = 不固定）
 }
