@@ -264,6 +264,265 @@ async def test_exchange_submission_failed():
         os.unlink(db_path)
 
 
+async def test_place_order_returns_error():
+    """场景 4: place_order() 返回失败结果（不抛异常）"""
+    print("\n=== 场景 4: place_order() 返回失败结果（不抛异常） ===")
+
+    fd, db_path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
+
+    try:
+        repository = OrderRepository(db_path)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+        await order_lifecycle.start()
+
+        # Mock CapitalProtection（允许通过）
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock(
+            return_value=OrderCheckResult(
+                allowed=True,
+                reason=None,
+                reason_message="所有检查通过",
+            )
+        )
+
+        # Mock ExchangeGateway（返回失败结果，但不抛异常）
+        gateway = MagicMock(spec=ExchangeGateway)
+        gateway.place_order = AsyncMock(
+            return_value=OrderPlacementResult(
+                order_id="local_123",
+                exchange_order_id=None,
+                symbol="BTC/USDT:USDT",
+                order_type=OrderType.MARKET,
+                direction=Direction.LONG,
+                side="buy",
+                amount=Decimal("0.01"),
+                status=OrderStatus.REJECTED,
+                error_code="INSUFFICIENT_MARGIN",
+                error_message="Insufficient margin for this order",
+            )
+        )
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=gateway,
+        )
+
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65000"),
+            suggested_stop_loss=Decimal("64000"),
+            suggested_position_size=Decimal("0.01"),
+            current_leverage=10,
+            tags=[],
+            risk_reward_info="Risk 1% = 100 USDT",
+            strategy_name="pinbar",
+        )
+
+        strategy = OrderStrategy(id="strategy_004", name="test_strategy")
+
+        # 执行信号
+        intent = await orchestrator.execute_signal(signal, strategy)
+
+        # 验证结果
+        print(f"✅ ExecutionIntent 状态:")
+        print(f"   ID: {intent.id}")
+        print(f"   状态: {intent.status}")
+        print(f"   本地订单 ID: {intent.order_id}")
+        print(f"   失败原因: {intent.failed_reason}")
+
+        assert intent.status == ExecutionIntentStatus.FAILED, \
+            f"期望 FAILED，实际 {intent.status}"
+        assert intent.order_id is not None, "本地订单应已创建"
+        assert "INSUFFICIENT_MARGIN" in intent.failed_reason, \
+            f"期望包含 'INSUFFICIENT_MARGIN'，实际 {intent.failed_reason}"
+
+        print("✅ 场景 4 验证通过: place_order() 返回失败结果（不抛异常）")
+
+    finally:
+        os.unlink(db_path)
+
+
+async def test_place_order_returns_filled():
+    """场景 5: place_order() 返回 status=FILLED"""
+    print("\n=== 场景 5: place_order() 返回 status=FILLED ===")
+
+    fd, db_path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
+
+    try:
+        repository = OrderRepository(db_path)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+        await order_lifecycle.start()
+
+        # Mock CapitalProtection（允许通过）
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock(
+            return_value=OrderCheckResult(
+                allowed=True,
+                reason=None,
+                reason_message="所有检查通过",
+            )
+        )
+
+        # Mock ExchangeGateway（返回 FILLED 状态）
+        gateway = MagicMock(spec=ExchangeGateway)
+        gateway.place_order = AsyncMock(
+            return_value=OrderPlacementResult(
+                order_id="local_123",
+                exchange_order_id="binance_filled_123",
+                symbol="BTC/USDT:USDT",
+                order_type=OrderType.MARKET,
+                direction=Direction.LONG,
+                side="buy",
+                amount=Decimal("0.01"),
+                price=Decimal("65000"),
+                status=OrderStatus.FILLED,
+            )
+        )
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=gateway,
+        )
+
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65000"),
+            suggested_stop_loss=Decimal("64000"),
+            suggested_position_size=Decimal("0.01"),
+            current_leverage=10,
+            tags=[],
+            risk_reward_info="Risk 1% = 100 USDT",
+            strategy_name="pinbar",
+        )
+
+        strategy = OrderStrategy(id="strategy_005", name="test_strategy")
+
+        # 执行信号
+        intent = await orchestrator.execute_signal(signal, strategy)
+
+        # 验证结果
+        print(f"✅ ExecutionIntent 状态:")
+        print(f"   ID: {intent.id}")
+        print(f"   状态: {intent.status}")
+        print(f"   本地订单 ID: {intent.order_id}")
+        print(f"   交易所订单 ID: {intent.exchange_order_id}")
+
+        assert intent.status == ExecutionIntentStatus.COMPLETED, \
+            f"期望 COMPLETED，实际 {intent.status}"
+
+        # 验证本地订单状态
+        order = await repository.get_order(intent.order_id)
+        print(f"   本地订单最终状态: {order.status}")
+
+        assert order.status == OrderStatus.FILLED, \
+            f"期望 FILLED，实际 {order.status}"
+
+        print("✅ 场景 5 验证通过: place_order() 返回 status=FILLED")
+
+    finally:
+        os.unlink(db_path)
+
+
+async def test_place_order_returns_partially_filled():
+    """场景 6: place_order() 返回 status=PARTIALLY_FILLED"""
+    print("\n=== 场景 6: place_order() 返回 status=PARTIALLY_FILLED ===")
+
+    fd, db_path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
+
+    try:
+        repository = OrderRepository(db_path)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+        await order_lifecycle.start()
+
+        # Mock CapitalProtection（允许通过）
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock(
+            return_value=OrderCheckResult(
+                allowed=True,
+                reason=None,
+                reason_message="所有检查通过",
+            )
+        )
+
+        # Mock ExchangeGateway（返回 PARTIALLY_FILLED 状态）
+        # 注意：OrderPlacementResult 没有 filled_qty 字段
+        # 实际场景中，部分成交信息会通过 WebSocket 推送获取
+        gateway = MagicMock(spec=ExchangeGateway)
+        gateway.place_order = AsyncMock(
+            return_value=OrderPlacementResult(
+                order_id="local_123",
+                exchange_order_id="binance_partial_123",
+                symbol="BTC/USDT:USDT",
+                order_type=OrderType.MARKET,
+                direction=Direction.LONG,
+                side="buy",
+                amount=Decimal("0.01"),
+                price=Decimal("64995"),
+                status=OrderStatus.PARTIALLY_FILLED,
+            )
+        )
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=gateway,
+        )
+
+        signal = SignalResult(
+            symbol="BTC/USDT:USDT",
+            timeframe="15m",
+            direction=Direction.LONG,
+            entry_price=Decimal("65000"),
+            suggested_stop_loss=Decimal("64000"),
+            suggested_position_size=Decimal("0.01"),
+            current_leverage=10,
+            tags=[],
+            risk_reward_info="Risk 1% = 100 USDT",
+            strategy_name="pinbar",
+        )
+
+        strategy = OrderStrategy(id="strategy_006", name="test_strategy")
+
+        # 执行信号
+        intent = await orchestrator.execute_signal(signal, strategy)
+
+        # 验证结果
+        print(f"✅ ExecutionIntent 状态:")
+        print(f"   ID: {intent.id}")
+        print(f"   状态: {intent.status}")
+        print(f"   本地订单 ID: {intent.order_id}")
+        print(f"   交易所订单 ID: {intent.exchange_order_id}")
+
+        assert intent.status == ExecutionIntentStatus.COMPLETED, \
+            f"期望 COMPLETED，实际 {intent.status}"
+
+        # 验证本地订单状态
+        order = await repository.get_order(intent.order_id)
+        print(f"   本地订单最终状态: {order.status}")
+
+        # 注意：由于 OrderPlacementResult 没有 filled_qty 字段，
+        # 订单会停留在 OPEN 状态，等待 WebSocket 推送更新
+        assert order.status == OrderStatus.OPEN, \
+            f"期望 OPEN（等待 WebSocket 推送），实际 {order.status}"
+
+        print("✅ 场景 6 验证通过: place_order() 返回 status=PARTIALLY_FILLED（等待 WebSocket 推送）")
+
+    finally:
+        os.unlink(db_path)
+
+
 async def main():
     """运行所有验证场景"""
     print("=" * 70)
@@ -274,6 +533,9 @@ async def main():
         await test_normal_flow()
         await test_blocked_by_capital_protection()
         await test_exchange_submission_failed()
+        await test_place_order_returns_error()
+        await test_place_order_returns_filled()
+        await test_place_order_returns_partially_filled()
 
         print("\n" + "=" * 70)
         print("✅ 所有验证场景通过！")

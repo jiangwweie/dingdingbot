@@ -187,9 +187,30 @@ class ExecutionOrchestrator:
                 client_order_id=order.id,  # 使用本地订单 ID 作为客户端订单 ID
             )
 
+            # P1 修复 1: 检查 placement_result.is_success
+            if not placement_result.is_success:
+                # 提交失败（但未抛异常）
+                intent.status = ExecutionIntentStatus.FAILED
+                intent.order_id = order.id
+                intent.failed_reason = (
+                    f"交易所返回失败: {placement_result.error_code} - "
+                    f"{placement_result.error_message}"
+                )
+                intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+                logger.error(
+                    f"[ExecutionOrchestrator] 交易所返回失败: "
+                    f"intent_id={intent_id}, order_id={order.id}, "
+                    f"error_code={placement_result.error_code}, "
+                    f"error_message={placement_result.error_message}"
+                )
+
+                return intent
+
             logger.info(
                 f"[ExecutionOrchestrator] 交易所订单提交成功: "
-                f"intent_id={intent_id}, exchange_order_id={placement_result.exchange_order_id}"
+                f"intent_id={intent_id}, exchange_order_id={placement_result.exchange_order_id}, "
+                f"status={placement_result.status}"
             )
 
             # 5. 回填 exchange_order_id
@@ -198,8 +219,66 @@ class ExecutionOrchestrator:
                 exchange_order_id=placement_result.exchange_order_id,
             )
 
-            # 6. 确认订单（推进到 OPEN 状态）
-            await self._order_lifecycle.confirm_order(order.id)
+            # P1 修复 2: 按 placement_result.status 推进本地订单
+            # 不要无条件 confirm_order() -> OPEN
+            from src.domain.models import OrderStatus
+
+            if placement_result.status == OrderStatus.OPEN:
+                # 订单挂单成功，推进到 OPEN
+                await self._order_lifecycle.confirm_order(order.id)
+
+            elif placement_result.status == OrderStatus.FILLED:
+                # 市价单直接完全成交
+                # 需要先推进到 OPEN，再推进到 FILLED
+                await self._order_lifecycle.confirm_order(order.id)
+                await self._order_lifecycle.update_order_filled(
+                    order.id,
+                    filled_qty=placement_result.amount,
+                    average_exec_price=placement_result.price or Decimal("0"),
+                )
+
+            elif placement_result.status == OrderStatus.PARTIALLY_FILLED:
+                # 市价单部分成交
+                # 需要先推进到 OPEN，再推进到 PARTIALLY_FILLED
+                await self._order_lifecycle.confirm_order(order.id)
+
+                # TODO: OrderPlacementResult 没有 filled_qty 和 average_exec_price 字段
+                # 实际场景中，部分成交信息会通过 WebSocket 推送获取
+                # 这里暂时无法推进到 PARTIALLY_FILLED，需要等待 WebSocket 推送更新
+                logger.warning(
+                    f"[ExecutionOrchestrator] 订单部分成交，等待 WebSocket 推送更新成交信息: "
+                    f"intent_id={intent_id}, order_id={order.id}, "
+                    f"exchange_order_id={placement_result.exchange_order_id}"
+                )
+
+            elif placement_result.status in (OrderStatus.CANCELED, OrderStatus.REJECTED):
+                # 订单被取消或拒绝
+                if placement_result.status == OrderStatus.CANCELED:
+                    await self._order_lifecycle.cancel_order(
+                        order.id,
+                        reason="Exchange canceled the order"
+                    )
+                else:
+                    # REJECTED: 标记为失败
+                    intent.status = ExecutionIntentStatus.FAILED
+                    intent.order_id = order.id
+                    intent.failed_reason = "交易所拒绝订单"
+                    intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+                    logger.error(
+                        f"[ExecutionOrchestrator] 交易所拒绝订单: "
+                        f"intent_id={intent_id}, order_id={order.id}"
+                    )
+
+                    return intent
+
+            else:
+                # 其他状态（如 PENDING），记录警告但不推进
+                logger.warning(
+                    f"[ExecutionOrchestrator] 未处理的订单状态: "
+                    f"intent_id={intent_id}, order_id={order.id}, "
+                    f"status={placement_result.status}"
+                )
 
             # 更新 ExecutionIntent 状态
             intent.status = ExecutionIntentStatus.COMPLETED
@@ -210,7 +289,8 @@ class ExecutionOrchestrator:
             logger.info(
                 f"[ExecutionOrchestrator] 执行完成: "
                 f"intent_id={intent_id}, order_id={order.id}, "
-                f"exchange_order_id={placement_result.exchange_order_id}"
+                f"exchange_order_id={placement_result.exchange_order_id}, "
+                f"final_status={placement_result.status}"
             )
 
             return intent
