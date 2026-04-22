@@ -109,6 +109,7 @@ class ExecutionOrchestrator:
             id=intent_id,
             signal=signal,
             status=ExecutionIntentStatus.PENDING,
+            strategy=strategy,
         )
         self._intents[intent_id] = intent
 
@@ -629,8 +630,9 @@ class ExecutionOrchestrator:
             protection_orders = order_manager._generate_tp_sl_orders(
                 filled_entry=entry_order,
                 positions_map=positions_map,
-                strategy=None,  # MVP 阶段使用默认策略（单 TP）
-                tp_targets=None,
+                # Use the same strategy snapshot as full-fill path.
+                strategy=intent.strategy,
+                tp_targets=intent.strategy.tp_targets if intent.strategy else None,
             )
 
             logger.info(

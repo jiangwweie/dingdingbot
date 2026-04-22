@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-22 19:05
-> **Status**: ETH 1h LONG-only 主线已冻结，已进入实盘执行链设计阶段
+> **Last updated**: 2026-04-22 20:35
+> **Status**: ETH 1h LONG-only 主线已冻结，实盘执行链 MVP 已进入实现闭环阶段（WS 回写、对账、编排、TP/SL 挂载已落地）
 
 ---
 
@@ -136,6 +136,30 @@
 1. 将当前主线定版为“阶段性实盘候选基线”
 2. 按最小执行主链设计收口实盘执行层
 3. 第一优先级先做：WS 回写契约核对 -> ExecutionOrchestrator -> ENTRY/TP/SL 闭环
+
+### 执行链实现进度（新增，2026-04-22 20:35）
+
+本阶段已从“设计收口”进入“可运行闭环”的实现期，当前落地情况：
+
+1. ✅ WS 回写契约闭环（P0）
+   已修复 WS 回写契约错位（参数/类型），并补齐 `exchange_order_id -> local order` 的映射闭环，避免 WS 回写断链。
+2. ✅ ExecutionOrchestrator MVP（信号 -> ENTRY 下单）（P0/P1）
+   已处理“交易所返回失败但不抛异常”的失败分支，并对齐“市价单直接 FILLED / PARTIALLY_FILLED”的返回状态语义。
+3. ✅ WS 业务回调异常保护（P0）
+   回调异常不会中断消费循环；失败订单进入 pending recovery，供对账兜底。
+4. ✅ 启动对账最小版（P0）
+   启动时扫描 `SUBMITTED/OPEN/PARTIALLY_FILLED` + pending recovery；`fetch_order -> 推进本地状态 -> 清除 pending recovery`。
+5. ✅ 受保护持仓闭环 Step1（ENTRY FILLED -> 自动挂载 TP/SL）（P0）
+6. ✅ 受保护持仓闭环 Step2（ENTRY PARTIALLY_FILLED -> 按已成交数量挂载保护单）（P1）
+   重要语义修正：partial-fill 保护单与 full-fill 使用同一份策略快照（`tp_ratios/tp_targets/SL RR`），不再退化为默认单 TP。
+
+当前剩余的高优先级缺口（下一阶段）：
+
+1. P0：ExecutionIntent 持久化（进程重启可恢复）
+2. P0：partial fill 多次增量成交的“补挂 / 调整保护单”机制（幂等）
+3. P1：unknown_submitted（place_order 超时未知态）+ 对账接管
+4. P1：保护单提交集幂等（跳过已成功子单）+ recovery_required + circuit breaker（停开新仓）
+5. P1：定期对账 / 订单超时查询
 
 ### 执行层设计决策（新增）
 

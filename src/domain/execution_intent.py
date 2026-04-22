@@ -19,7 +19,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from src.domain.models import SignalResult, Order
+from src.domain.models import SignalResult, Order, OrderStrategy
 
 
 class ExecutionIntentStatus(str, Enum):
@@ -44,6 +44,14 @@ class ExecutionIntent(BaseModel):
     status: ExecutionIntentStatus = Field(
         default=ExecutionIntentStatus.PENDING,
         description="执行状态"
+    )
+
+    # Execution semantics snapshot (MVP: in-memory only)
+    # Needed so async callbacks (e.g., partial fill) can generate TP/SL
+    # using the exact same strategy definition as the original signal.
+    strategy: Optional[OrderStrategy] = Field(
+        default=None,
+        description="订单策略快照（用于后续 TP/SL 保护单生成）",
     )
 
     # 关联订单（执行成功后填充）

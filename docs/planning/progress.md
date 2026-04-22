@@ -1,6 +1,43 @@
 # Progress Log
 
-> Last updated: 2026-04-22 19:40
+> Last updated: 2026-04-22 20:35
+
+---
+
+## 2026-04-22 20:35 -- 实盘执行链 MVP 进入实现闭环：WS 回写/对账/编排/保护单（含 partial fill）
+
+### 本次完成
+
+1. **WS 回写链关键 P0 闭环**
+   - 回写契约错位已修复（ExchangeGateway -> OrderLifecycleService）
+   - exchange_order_id -> local order 的映射闭环已修复（避免 WS 回写“订单不存在”断链）
+
+2. **ExecutionOrchestrator MVP（信号 -> ENTRY 下单）**
+   - place_order() 返回失败（不抛异常）的失败分支已补齐
+   - 市价单可能直接 FILLED / PARTIALLY_FILLED 的返回状态语义已对齐
+
+3. **WS 业务回调异常保护 + pending recovery**
+   - 业务回调异常不会中断 watch_orders 消费循环
+   - 失败订单标记为 pending recovery，供对账兜底
+
+4. **启动对账最小版**
+   - 启动时扫描未完成订单（SUBMITTED/OPEN/PARTIALLY_FILLED）+ pending recovery
+   - REST fetch_order -> 推进本地状态 -> 清除 pending recovery
+
+5. **受保护持仓闭环**
+   - Step1：ENTRY FILLED 后自动生成并提交 TP/SL（基于真实成交价）
+   - Step2：ENTRY PARTIALLY_FILLED 后对已成交数量挂载保护单
+   - 语义修正：partial-fill 保护单与 full-fill 使用同一份策略快照（不再默认单 TP）
+
+### 当前状态
+
+- 实盘执行链已经具备“能跑起来”的最小闭环：`Signal -> Orchestrator -> ENTRY -> WS 回写 -> Protection ->（启动对账兜底）`
+- 但距离“可稳定无人值守”还有关键缺口：ExecutionIntent 持久化、partial fill 多次增量成交的补挂/调整保护单（幂等）、unknown_submitted + 对账接管、protection 提交集幂等/recovery_required/circuit breaker、定期对账/订单超时查询。
+
+### 备注
+
+- 本次为实现与语义修正
+- 未运行完整测试套件（需下次按红线在跑测试前先确认）
 
 ---
 

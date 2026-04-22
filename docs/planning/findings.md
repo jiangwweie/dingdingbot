@@ -1,6 +1,21 @@
 # Findings Log
 
-> Last updated: 2026-04-22 19:05
+> Last updated: 2026-04-22 20:35
+
+---
+
+## 2026-04-22 20:35 -- 实盘执行链 MVP 已落地：WS 真源 + 启动对账 + 受保护持仓闭环（含 partial fill）
+
+### 新增结论
+
+1. **WS 是首选真源，但必须有兜底对账**
+   `ccxt.pro watch_orders()` 延迟低，适合作为首选；但 WS 消费失败、断连、重启都可能丢事件，因此必须有 `fetch_order()` 的对账兜底（启动对账已落地，定期对账待做）。
+
+2. **partial fill 保护单必须严格沿用同一份 exit 语义**
+   full fill 与 partial fill 的 TP/SL 必须共享同一份策略快照（`tp_ratios/tp_targets/initial_stop_loss_rr`）。禁止在部分成交分支静默退化为默认“单 TP/默认 RR”，否则会造成订单链 exit 语义分叉（实盘/回测解释困难）以及 OCO 行为与仓位风险口径污染。
+
+3. **最小闭环的 SSOT 层级更清晰**
+   `ExecutionOrchestrator` 负责执行编排（信号 -> ENTRY -> 保护单挂载），不吞并订单事实；`OrderLifecycleService` 负责订单事实与状态机（含 WS 回写）；`ExchangeGateway` 负责交易所 I/O + WS/REST 真源入口。
 
 ---
 
