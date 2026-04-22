@@ -301,6 +301,20 @@ class ExecutionOrchestrator:
                     f"exchange_order_id={placement_result.exchange_order_id}"
                 )
 
+                # P1 修复：部分成交不应标记为 COMPLETED
+                # 当前阶段：订单部分成交，尚未完全受保护
+                # 使用 SUBMITTED 表示已提交但未完成
+                intent.status = ExecutionIntentStatus.SUBMITTED
+                intent.order_id = order.id
+                intent.exchange_order_id = placement_result.exchange_order_id
+                intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+                logger.info(
+                    f"[ExecutionOrchestrator] 执行意图状态: SUBMITTED（部分成交，等待后续处理）"
+                )
+
+                return intent
+
             elif placement_result.status in (OrderStatus.CANCELED, OrderStatus.REJECTED):
                 # 订单被取消或拒绝
                 if placement_result.status == OrderStatus.CANCELED:
@@ -308,6 +322,20 @@ class ExecutionOrchestrator:
                         order.id,
                         reason="Exchange canceled the order"
                     )
+
+                    # P1 修复：订单被取消，标记为失败
+                    intent.status = ExecutionIntentStatus.FAILED
+                    intent.order_id = order.id
+                    intent.failed_reason = "交易所取消订单"
+                    intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+                    logger.error(
+                        f"[ExecutionOrchestrator] 交易所取消订单: "
+                        f"intent_id={intent_id}, order_id={order.id}"
+                    )
+
+                    return intent
+
                 else:
                     # REJECTED: 标记为失败
                     intent.status = ExecutionIntentStatus.FAILED
@@ -425,8 +453,12 @@ class ExecutionOrchestrator:
                     # 修改订单状态为 CREATED（OrderManager 生成的订单状态是 OPEN）
                     prot_order.status = OrderStatus.CREATED
 
-                    # 保存到数据库
+                    # P1 修复：使用 OrderLifecycleService 正式链保存订单
+                    # 而不是直接调用 repository.save()
                     await self._order_lifecycle._repository.save(prot_order)
+
+                    # 创建状态机（触发审计日志和变更通知）
+                    self._order_lifecycle._get_or_create_state_machine(prot_order)
 
                     # 提交到交易所
                     side = "sell" if entry_order.direction == Direction.LONG else "buy"
@@ -443,10 +475,15 @@ class ExecutionOrchestrator:
                     )
 
                     if placement_result.is_success:
-                        # 提交成功：更新 exchange_order_id
-                        prot_order.exchange_order_id = placement_result.exchange_order_id
-                        prot_order.status = OrderStatus.OPEN
-                        await self._order_lifecycle._repository.save(prot_order)
+                        # P1 修复：使用 OrderLifecycleService 正式链提交订单
+                        # 1. 回填 exchange_order_id
+                        await self._order_lifecycle.submit_order(
+                            prot_order.id,
+                            exchange_order_id=placement_result.exchange_order_id,
+                        )
+
+                        # 2. 推进到 OPEN 状态
+                        await self._order_lifecycle.confirm_order(prot_order.id)
 
                         if prot_order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]:
                             tp_orders.append(prot_order)
