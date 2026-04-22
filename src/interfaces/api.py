@@ -426,6 +426,8 @@ async def lifespan(app: FastAPI):
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
 
     global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
+    global _capital_protection, _account_service, _execution_orchestrator, _exchange_gateway
+    _standalone_gateway_created = False  # 标记是否在 lifespan 中创建了 gateway
 
     # Startup - 初始化所有 Repository
     try:
@@ -557,9 +559,96 @@ async def lifespan(app: FastAPI):
             _config_manager = _cg._config_manager
             logger.info("ConfigManager initialized in lifespan")
 
+        # =============================================
+        # Initialize Execution Runtime (独立 uvicorn 模式必需)
+        # main.py 嵌入模式通过 set_v3_dependencies() 注入，lifespan="off" 不执行此处
+        # =============================================
+        # 独立 uvicorn 模式下需要创建 ExchangeGateway 和执行运行时
+        if _exchange_gateway is None and _cg._config_manager is not None:
+            from src.infrastructure.exchange_gateway import ExchangeGateway
+            from src.application.account_service import BinanceAccountService
+            from src.application.capital_protection import CapitalProtectionManager
+            from src.application.execution_orchestrator import ExecutionOrchestrator
+            from src.infrastructure.notifier import get_notification_service
+
+            # 获取配置
+            user_config = await _cg._config_manager.get_user_config()
+            exchange_cfg = user_config.exchange
+
+            # 初始化 ExchangeGateway
+            _standalone_gateway = ExchangeGateway(
+                exchange_name=exchange_cfg.name,
+                api_key=exchange_cfg.api_key,
+                api_secret=exchange_cfg.api_secret,
+                testnet=exchange_cfg.testnet,
+            )
+            await _standalone_gateway.initialize()
+            _exchange_gateway = _standalone_gateway
+            _standalone_gateway_created = True  # 标记为 lifespan 创建，需要在 shutdown 时关闭
+            logger.info(f"ExchangeGateway initialized in lifespan (standalone uvicorn mode): {exchange_cfg.name}")
+
+            # 注入到 OrderRepository（如果支持）
+            if hasattr(_order_repo, "set_exchange_gateway"):
+                _order_repo.set_exchange_gateway(_standalone_gateway)
+
+            # 初始化 NotificationService (用于告警)
+            _standalone_notifier = get_notification_service()
+            _standalone_notifier.setup_channels(
+                [{"type": ch.type, "webhook_url": ch.webhook_url}
+                 for ch in user_config.notification.channels]
+            )
+
+            # Notifier adapter for CapitalProtectionManager
+            class _NotifierAdapter:
+                def __init__(self, notifier):
+                    self._notifier = notifier
+                async def send_alert(self, title: str, message: str) -> None:
+                    await self._notifier.send_system_alert(title, message)
+
+            # 初始化 AccountService
+            _standalone_account_service = BinanceAccountService(_standalone_gateway)
+
+            # 初始化 CapitalProtectionManager
+            _standalone_capital_protection = CapitalProtectionManager(
+                config=_cg._config_manager.build_capital_protection_config(),
+                account_service=_standalone_account_service,
+                notifier=_NotifierAdapter(_standalone_notifier),
+                gateway=_standalone_gateway,
+            )
+
+            # 初始化 ExecutionOrchestrator
+            _standalone_orchestrator = ExecutionOrchestrator(
+                capital_protection=_standalone_capital_protection,
+                order_lifecycle=_order_lifecycle_service,
+                gateway=_standalone_gateway,
+                intent_repository=_execution_intent_repo,
+            )
+
+            # 注册订单更新回调
+            _standalone_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
+
+            # 注入到全局变量
+            _capital_protection = _standalone_capital_protection
+            _account_service = _standalone_account_service
+            _execution_orchestrator = _standalone_orchestrator
+
+            logger.info("Execution runtime initialized in lifespan (standalone uvicorn mode)")
+
         yield
 
     finally:
+        # Shutdown - 清理独立 uvicorn 模式创建的执行运行时
+        # 注意：只清理 lifespan 自己创建的对象，不影响 main.py 嵌入模式注入的依赖
+        if _standalone_gateway_created and _exchange_gateway is not None:
+            await _exchange_gateway.close()
+            logger.info("ExchangeGateway closed (standalone uvicorn mode)")
+            # 重置全局变量，避免下次 startup 时误判为已初始化
+            _exchange_gateway = None
+            _capital_protection = None
+            _account_service = None
+            _execution_orchestrator = None
+            logger.info("Standalone execution runtime globals reset to None")
+
         # Shutdown - 清理所有 Repository
         if _repository is not None:
             await _repository.close()
