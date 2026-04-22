@@ -28,7 +28,8 @@ class ExecutionIntentStatus(str, Enum):
     BLOCKED = "blocked"          # 被 CapitalProtection 拦截
     SUBMITTED = "submitted"      # 已提交到交易所
     FAILED = "failed"            # 提交失败
-    COMPLETED = "completed"      # 执行完成（订单已创建）
+    PROTECTING = "protecting"    # ENTRY 成交，正在挂载保护单（TP/SL）
+    COMPLETED = "completed"      # 执行完成（订单已创建且保护单已挂载）
 
 
 class ExecutionIntent(BaseModel):

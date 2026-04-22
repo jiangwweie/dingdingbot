@@ -32,6 +32,7 @@ from src.domain.models import (
     OrderRole,
     Direction,
     OrderStrategy,
+    OrderStatus,
 )
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.application.capital_protection import CapitalProtectionManager
@@ -237,6 +238,49 @@ class ExecutionOrchestrator:
                     average_exec_price=placement_result.price or Decimal("0"),
                 )
 
+                # MVP-Protected-Position: ENTRY 成交后挂载保护单
+                logger.info(
+                    f"[ExecutionOrchestrator] ENTRY 成交，开始挂载保护单: "
+                    f"intent_id={intent_id}, order_id={order.id}"
+                )
+
+                # 更新状态为 PROTECTING
+                intent.status = ExecutionIntentStatus.PROTECTING
+                intent.order_id = order.id
+                intent.exchange_order_id = placement_result.exchange_order_id
+                intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+                # 从数据库重新加载订单（获取最新的 average_exec_price）
+                entry_order_filled = await self._order_lifecycle._repository.get_order(order.id)
+
+                # 挂载保护单
+                protection_result = await self._mount_protection_orders(
+                    intent=intent,
+                    entry_order=entry_order_filled,
+                    signal=signal,
+                    strategy=strategy,
+                )
+
+                if protection_result["success"]:
+                    # 所有保护单成功
+                    intent.status = ExecutionIntentStatus.COMPLETED
+                    logger.info(
+                        f"[ExecutionOrchestrator] 保护单挂载成功: "
+                        f"intent_id={intent_id}, "
+                        f"tp_orders={len(protection_result['tp_orders'])}, "
+                        f"sl_order={protection_result['sl_order']}"
+                    )
+                else:
+                    # 保护单部分失败
+                    intent.status = ExecutionIntentStatus.FAILED
+                    intent.failed_reason = f"保护单挂载失败: {protection_result['error']}"
+                    logger.error(
+                        f"[ExecutionOrchestrator] 保护单挂载失败: "
+                        f"intent_id={intent_id}, error={protection_result['error']}"
+                    )
+
+                return intent
+
             elif placement_result.status == OrderStatus.PARTIALLY_FILLED:
                 # 市价单部分成交
                 # 需要先推进到 OPEN，再推进到 PARTIALLY_FILLED
@@ -314,6 +358,161 @@ class ExecutionOrchestrator:
             )
 
             return intent
+
+    async def _mount_protection_orders(
+        self,
+        intent: ExecutionIntent,
+        entry_order: Order,
+        signal: SignalResult,
+        strategy: OrderStrategy,
+    ) -> Dict[str, Any]:
+        """
+        挂载保护单（TP/SL）
+
+        MVP-Protected-Position: ENTRY 成交后自动挂载保护单
+
+        Args:
+            intent: 执行意图
+            entry_order: ENTRY 订单（已成交）
+            signal: 信号
+            strategy: 订单策略
+
+        Returns:
+            Dict[str, Any]: 挂载结果
+                - success: 是否全部成功
+                - tp_orders: TP 订单列表
+                - sl_order: SL 订单（或 None）
+                - error: 错误信息（如果失败）
+        """
+        from src.domain.order_manager import OrderManager
+        from src.domain.models import Position
+
+        try:
+            # 创建临时 Position 对象（用于生成 TP/SL 订单）
+            position = Position(
+                id=f"pos_{entry_order.signal_id}",
+                signal_id=entry_order.signal_id,
+                symbol=entry_order.symbol,
+                direction=entry_order.direction,
+                entry_price=entry_order.average_exec_price or entry_order.price,
+                current_qty=entry_order.filled_qty,
+            )
+
+            positions_map = {entry_order.signal_id: position}
+
+            # 使用 OrderManager 生成 TP/SL 订单
+            order_manager = OrderManager()
+            protection_orders = order_manager._generate_tp_sl_orders(
+                filled_entry=entry_order,
+                positions_map=positions_map,
+                strategy=strategy,
+                tp_targets=strategy.tp_targets if strategy else None,
+            )
+
+            logger.info(
+                f"[ExecutionOrchestrator] 生成保护单: "
+                f"intent_id={intent.id}, "
+                f"总计={len(protection_orders)} 个"
+            )
+
+            # 提交保护单到交易所
+            tp_orders = []
+            sl_order = None
+            failed_orders = []
+
+            for prot_order in protection_orders:
+                try:
+                    # 修改订单状态为 CREATED（OrderManager 生成的订单状态是 OPEN）
+                    prot_order.status = OrderStatus.CREATED
+
+                    # 保存到数据库
+                    await self._order_lifecycle._repository.save(prot_order)
+
+                    # 提交到交易所
+                    side = "sell" if entry_order.direction == Direction.LONG else "buy"
+
+                    placement_result = await self._gateway.place_order(
+                        symbol=prot_order.symbol,
+                        order_type="limit" if prot_order.order_type == OrderType.LIMIT else "stop_market",
+                        side=side,
+                        amount=prot_order.requested_qty,
+                        price=prot_order.price,
+                        trigger_price=prot_order.trigger_price,
+                        reduce_only=True,  # 保护单必须设置 reduce_only
+                        client_order_id=prot_order.id,
+                    )
+
+                    if placement_result.is_success:
+                        # 提交成功：更新 exchange_order_id
+                        prot_order.exchange_order_id = placement_result.exchange_order_id
+                        prot_order.status = OrderStatus.OPEN
+                        await self._order_lifecycle._repository.save(prot_order)
+
+                        if prot_order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]:
+                            tp_orders.append(prot_order)
+                        elif prot_order.order_role == OrderRole.SL:
+                            sl_order = prot_order
+
+                        logger.info(
+                            f"[ExecutionOrchestrator] 保护单提交成功: "
+                            f"order_id={prot_order.id}, "
+                            f"role={prot_order.order_role}, "
+                            f"exchange_order_id={placement_result.exchange_order_id}"
+                        )
+                    else:
+                        # 提交失败
+                        failed_orders.append({
+                            "order": prot_order,
+                            "error": f"{placement_result.error_code}: {placement_result.error_message}",
+                        })
+                        logger.error(
+                            f"[ExecutionOrchestrator] 保护单提交失败: "
+                            f"order_id={prot_order.id}, "
+                            f"role={prot_order.order_role}, "
+                            f"error={placement_result.error_code}"
+                        )
+
+                except Exception as e:
+                    failed_orders.append({
+                        "order": prot_order,
+                        "error": str(e),
+                    })
+                    logger.error(
+                        f"[ExecutionOrchestrator] 保护单提交异常: "
+                        f"order_id={prot_order.id}, "
+                        f"role={prot_order.order_role}, "
+                        f"error={e}"
+                    )
+
+            # 判断是否全部成功
+            if failed_orders:
+                return {
+                    "success": False,
+                    "tp_orders": tp_orders,
+                    "sl_order": sl_order,
+                    "error": f"{len(failed_orders)} 个保护单失败: " + "; ".join(
+                        f"{f['order'].order_role}: {f['error']}" for f in failed_orders
+                    ),
+                }
+            else:
+                return {
+                    "success": True,
+                    "tp_orders": tp_orders,
+                    "sl_order": sl_order,
+                    "error": None,
+                }
+
+        except Exception as e:
+            logger.error(
+                f"[ExecutionOrchestrator] 挂载保护单异常: "
+                f"intent_id={intent.id}, error={e}"
+            )
+            return {
+                "success": False,
+                "tp_orders": [],
+                "sl_order": None,
+                "error": str(e),
+            }
 
     def get_intent(self, intent_id: str) -> Optional[ExecutionIntent]:
         """
