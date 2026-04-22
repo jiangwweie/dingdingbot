@@ -54,6 +54,9 @@ from src.infrastructure.core_repository_factory import (
 )
 from src.infrastructure.database import validate_pg_core_configuration
 from src.application.config_manager import UserConfig, ConfigManager
+from src.application.execution_orchestrator import ExecutionOrchestrator
+from src.application.capital_protection import CapitalProtectionManager
+from src.application.account_service import AccountService
 from src.domain.models import (
     SignalQuery, SignalDeleteRequest, SignalDeleteResponse,
     AttemptQuery, AttemptDeleteRequest, AttemptDeleteResponse,
@@ -4310,14 +4313,16 @@ def _get_account_service() -> Any:
 # Extended Dependencies
 # ------------------------------------------------------------
 _position_manager: Optional[Any] = None  # PositionManager instance
-_capital_protection: Optional[Any] = None  # CapitalProtectionManager instance
-_account_service: Optional[Any] = None  # AccountService instance
+_capital_protection: Optional[CapitalProtectionManager] = None  # CapitalProtectionManager instance
+_account_service: Optional[AccountService] = None  # AccountService instance
+_execution_orchestrator: Optional[ExecutionOrchestrator] = None  # ExecutionOrchestrator instance
 
 
 def set_v3_dependencies(
     position_manager: Optional[Any] = None,
-    capital_protection: Optional[Any] = None,
-    account_service: Optional[Any] = None,
+    capital_protection: Optional[CapitalProtectionManager] = None,
+    account_service: Optional[AccountService] = None,
+    execution_orchestrator: Optional[ExecutionOrchestrator] = None,
 ) -> None:
     """
     Inject v3 API dependencies.
@@ -4326,11 +4331,13 @@ def set_v3_dependencies(
         position_manager: PositionManager instance
         capital_protection: CapitalProtectionManager instance
         account_service: AccountService instance
+        execution_orchestrator: ExecutionOrchestrator instance
     """
-    global _position_manager, _capital_protection, _account_service
+    global _position_manager, _capital_protection, _account_service, _execution_orchestrator
     _position_manager = position_manager
     _capital_protection = capital_protection
     _account_service = account_service
+    _execution_orchestrator = execution_orchestrator
 
 
 # ------------------------------------------------------------

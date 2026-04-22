@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-22 23:45
-> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成首批启动装配接线（order repo 工厂生效，execution_intent repo 启动位已接）
+> **Last updated**: 2026-04-22 23:58
+> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成主进程执行链接线（SignalPipeline -> ExecutionOrchestrator -> core repos）
 
 ---
 
@@ -223,13 +223,19 @@
    - 仅当核心后端明确配置为 `postgres` 时才触发
    - `PG_DATABASE_URL` 缺失/非法时，启动阶段直接按 `F-003` 失败
    - 默认 SQLite 链路不受影响
+7. 主进程 `main.py` 已完成核心执行运行时初始化：
+   - `OrderLifecycleService`
+   - `CapitalProtectionManager`
+   - `ExecutionOrchestrator`
+   - `ExecutionIntentRepository`（按配置启用）
+8. `SignalPipeline` 已新增执行 hook，fired signal 可直接进入 orchestrator 执行链
 
 当前仍未做：
 
-1. `ExecutionOrchestrator` 仍未进入当前运行时装配链，因此 `execution_intents` 还没形成真正的主链真源
-2. `ExecutionOrchestrator.get_intent()/list_intents()` 仍主要面向本地缓存
-3. `main.py` 嵌入模式尚未复用同一套核心仓储工厂
-4. 尚未把 `StartupReconciliationService` / 更多核心服务正式切到 PG
+1. `ExecutionOrchestrator.get_intent()/list_intents()` 仍主要面向本地缓存
+2. 独立 uvicorn 模式尚未自动构建 `CapitalProtectionManager + ExecutionOrchestrator`
+3. 尚未把 `StartupReconciliationService` / 更多核心服务正式切到 PG
+4. 尚未执行测试（仅完成语法级检查）
 
 ### 执行层设计决策（新增）
 

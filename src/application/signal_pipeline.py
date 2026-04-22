@@ -11,11 +11,11 @@ import asyncio
 import copy
 import time
 import json
-from typing import Optional, Dict, List, Any, Tuple
+from typing import Optional, Dict, List, Any, Tuple, Callable, Awaitable
 from decimal import Decimal
 
 from src.domain.models import (
-    KlineData, SignalResult, AccountSnapshot, Direction, TrendDirection,
+    KlineData, SignalResult, AccountSnapshot, Direction, TrendDirection, OrderStrategy,
     StrategyDefinition, SignalAttempt, SignalStatus,
 )
 from src.domain.strategy_engine import create_dynamic_runner
@@ -49,6 +49,7 @@ class SignalPipeline:
         risk_config: RiskConfig,
         notification_service: Optional[NotificationService] = None,
         signal_repository: Optional[SignalRepository] = None,
+        signal_executor: Optional[Callable[[SignalResult, OrderStrategy], Awaitable[Any]]] = None,
         cooldown_seconds: int = 14400,  # Signal deduplication cooldown in seconds (default 4 hours)
     ):
         """
@@ -59,12 +60,14 @@ class SignalPipeline:
             risk_config: Risk configuration
             notification_service: Notification service instance
             signal_repository: Optional signal repository for persistence
+            signal_executor: Optional execution hook for fired signals
             cooldown_seconds: Signal deduplication cooldown period in seconds
         """
         self._config_manager = config_manager
         self._risk_config = risk_config
         self._notification_service = notification_service or get_notification_service()
         self._repository = signal_repository
+        self._signal_executor = signal_executor
         self._cooldown_seconds = cooldown_seconds
         self._status_tracker = SignalStatusTracker(signal_repository)
 
@@ -452,6 +455,34 @@ class SignalPipeline:
         self._account_snapshot = snapshot
         logger.debug(f"Account snapshot updated: balance={snapshot.total_balance}")
 
+    def _build_execution_strategy(self, signal: SignalResult) -> OrderStrategy:
+        """从 SignalResult 派生最小执行策略快照。"""
+        tp_ratios: List[Decimal] = []
+        tp_targets: List[Decimal] = []
+
+        for level in signal.take_profit_levels:
+            position_ratio = level.get("position_ratio")
+            risk_reward = level.get("risk_reward")
+            if position_ratio is None or risk_reward is None:
+                continue
+            tp_ratios.append(Decimal(str(position_ratio)))
+            tp_targets.append(Decimal(str(risk_reward)))
+
+        if not tp_ratios:
+            tp_ratios = [Decimal("1.0")]
+            tp_targets = [Decimal("1.5")]
+
+        return OrderStrategy(
+            id=f"exec_{signal.strategy_name or 'signal'}",
+            name=signal.strategy_name or "Signal Execution Strategy",
+            tp_levels=len(tp_ratios),
+            tp_ratios=tp_ratios,
+            tp_targets=tp_targets,
+            initial_stop_loss_rr=Decimal("-1.0"),
+            trailing_stop_enabled=False,
+            oco_enabled=True,
+        )
+
     async def process_kline(self, kline: KlineData) -> None:
         """
         Process a single closed K-line.
@@ -585,6 +616,17 @@ class SignalPipeline:
                             logger.info(f"Signal persisted: {kline.symbol} {kline.timeframe} [{attempt.strategy_name}]")
                         except Exception as e:
                             logger.error(f"Failed to persist signal: {e}")
+
+                    if self._signal_executor is not None:
+                        try:
+                            strategy = self._build_execution_strategy(signal)
+                            await self._signal_executor(signal, strategy)
+                            logger.info(
+                                f"Signal execution dispatched: {kline.symbol} {kline.timeframe} "
+                                f"{attempt.pattern.direction.value} [{attempt.strategy_name}]"
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to dispatch signal execution: {e}")
 
         except Exception as e:
             logger.error(f"Error processing K-line: {e}")

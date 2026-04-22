@@ -17,11 +17,19 @@ import signal as sys_signal
 from typing import Optional
 
 from src.application.config_manager import ConfigManager, load_all_configs
+from src.application.account_service import BinanceAccountService
+from src.application.capital_protection import CapitalProtectionManager
+from src.application.execution_orchestrator import ExecutionOrchestrator
+from src.application.order_lifecycle_service import OrderLifecycleService
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.notifier import NotificationService, get_notification_service
+from src.infrastructure.core_repository_factory import (
+    create_execution_intent_repository,
+    create_order_repository,
+)
 from src.application.signal_pipeline import SignalPipeline
 from src.domain.risk_calculator import RiskConfig
-from src.domain.models import KlineData
+from src.domain.models import CapitalProtectionConfig, KlineData
 from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, ConnectionLostError
 from src.infrastructure.logger import logger, setup_logger, register_secret
 from src.infrastructure.database import validate_pg_core_configuration
@@ -34,6 +42,21 @@ _shutdown_event: Optional[asyncio.Event] = None  # Created in run_application()
 _exchange_gateway: Optional[ExchangeGateway] = None
 _notification_service: Optional[NotificationService] = None
 _config_entry_repo = None  # Initialized in Phase 9
+_order_repo = None
+_execution_intent_repo = None
+_order_lifecycle_service: Optional[OrderLifecycleService] = None
+_capital_protection: Optional[CapitalProtectionManager] = None
+_execution_orchestrator: Optional[ExecutionOrchestrator] = None
+
+
+class _CapitalProtectionNotifierAdapter:
+    """把 NotificationService 适配为 CapitalProtectionManager 需要的告警接口。"""
+
+    def __init__(self, notification_service: NotificationService):
+        self._notification_service = notification_service
+
+    async def send_alert(self, title: str, message: str) -> None:
+        await self._notification_service.send_system_alert(title, message)
 
 
 # ============================================================
@@ -64,6 +87,15 @@ async def graceful_shutdown():
 
     if _exchange_gateway:
         await _exchange_gateway.close()
+
+    if _order_lifecycle_service:
+        await _order_lifecycle_service.stop()
+
+    if _execution_intent_repo:
+        await _execution_intent_repo.close()
+
+    if _order_repo:
+        await _order_repo.close()
 
     logger.info("Shutdown complete")
 
@@ -107,6 +139,8 @@ async def run_application():
     Orchestrates the complete startup and runtime flow.
     """
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
+    global _order_repo, _execution_intent_repo, _order_lifecycle_service
+    global _capital_protection, _execution_orchestrator
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -188,6 +222,39 @@ async def run_application():
         logger.info("Exchange gateway initialized")
 
         # =============================================
+        # Phase 4.2: Initialize Core Execution Runtime
+        # =============================================
+        logger.info("Phase 4.2: Initializing core execution runtime...")
+        _order_repo = create_order_repository()
+        await _order_repo.initialize()
+        if hasattr(_order_repo, "set_exchange_gateway"):
+            _order_repo.set_exchange_gateway(_exchange_gateway)
+
+        _execution_intent_repo = create_execution_intent_repository()
+        if _execution_intent_repo is not None:
+            await _execution_intent_repo.initialize()
+
+        _order_lifecycle_service = OrderLifecycleService(repository=_order_repo)
+        await _order_lifecycle_service.start()
+
+        account_service = BinanceAccountService(_exchange_gateway)
+        capital_notifier = _CapitalProtectionNotifierAdapter(_notification_service)
+        _capital_protection = CapitalProtectionManager(
+            config=CapitalProtectionConfig(),
+            account_service=account_service,
+            notifier=capital_notifier,
+            gateway=_exchange_gateway,
+        )
+        _execution_orchestrator = ExecutionOrchestrator(
+            capital_protection=_capital_protection,
+            order_lifecycle=_order_lifecycle_service,
+            gateway=_exchange_gateway,
+            intent_repository=_execution_intent_repo,
+        )
+        _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
+        logger.info("Core execution runtime ready")
+
+        # =============================================
         # Phase 4.5: Check API Key Permissions
         # =============================================
         logger.info("Phase 4.5: Checking API key permissions...")
@@ -210,6 +277,7 @@ async def run_application():
             risk_config=risk_config,
             notification_service=_notification_service,
             signal_repository=signal_repository,
+            signal_executor=_execution_orchestrator.execute_signal if _execution_orchestrator else None,
             cooldown_seconds=core_config.signal_pipeline.cooldown_seconds,
         )
         logger.info("Signal pipeline ready")
@@ -289,7 +357,7 @@ async def run_application():
         # =============================================
         import os
         import uvicorn
-        from src.interfaces.api import app as api_app, set_dependencies
+        from src.interfaces.api import app as api_app, set_dependencies, set_v3_dependencies
 
         api_port = int(os.environ.get("BACKEND_PORT", 8000))
         logger.info(f"Phase 9: Starting REST API server on port {api_port}...")
@@ -364,6 +432,9 @@ async def run_application():
             signal_tracker=_status_tracker,
             snapshot_service=_snapshot_service,
             config_entry_repo=_config_entry_repo,
+            order_repo=_order_repo,
+            execution_intent_repo=_execution_intent_repo,
+            order_lifecycle_service=_order_lifecycle_service,
             # Config repositories (unified with api_v1_config.py)
             strategy_repo=_api_strategy_repo,
             risk_repo=_api_risk_repo,
@@ -372,6 +443,11 @@ async def run_application():
             notification_repo=_api_notification_repo,
             history_repo=_api_history_repo,
             snapshot_repo=_api_snapshot_repo_extended,
+        )
+        set_v3_dependencies(
+            capital_protection=_capital_protection,
+            account_service=account_service,
+            execution_orchestrator=_execution_orchestrator,
         )
         logger.info("API dependencies initialized")
 

@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-22 23:45
+> Last updated: 2026-04-22 23:58
 
 ---
 
@@ -65,6 +65,46 @@
 - `CORE_ORDER_BACKEND=postgres` 已开始真正生效于 API 启动装配
 - `ExecutionIntentRepository` 已有启动位，但 `ExecutionOrchestrator` 仍未进入当前运行时装配链
 - 因此 `execution_intents` 目前属于“repo 与生命周期已准备好，主链注入待下一步”
+
+### 备注
+
+- 本次仍未执行单元测试/集成测试（按项目红线，测试前需用户确认）
+
+---
+
+## 2026-04-22 23:58 -- ExecutionOrchestrator 已真正接入主进程信号执行链
+
+### 本次完成
+
+1. **`SignalPipeline` 新增可选执行 hook**
+   - fired signal 在通知、落库后可继续触发执行
+   - 执行 hook 不直接绑定具体 orchestrator 类型，保持应用层边界清晰
+
+2. **`SignalResult -> OrderStrategy` 最小派生已落地**
+   - 从 `take_profit_levels` 提取 `position_ratio / risk_reward`
+   - 生成最小 `OrderStrategy` 快照
+   - 无 TP 配置时退回单 TP 默认值
+
+3. **`main.py` 已初始化核心执行运行时**
+   - order repo
+   - execution intent repo（若启用 PG）
+   - `OrderLifecycleService`
+   - `CapitalProtectionManager`
+   - `ExecutionOrchestrator`
+
+4. **主进程已把 orchestrator 注入到 signal pipeline**
+   - `SignalPipeline` 现在可直接调用 `execute_signal`
+   - `ExecutionOrchestrator` 已从“可注入”进入“主链真用”
+
+5. **API 嵌入模式依赖同步**
+   - `set_dependencies()` 现可接收主进程初始化的 order repo / intent repo / lifecycle service
+   - `set_v3_dependencies()` 已可注入 typed 的 capital protection / account service / execution orchestrator
+
+### 当前状态
+
+- 自动执行主链已从“通知后结束”推进到“通知后进入执行编排”
+- PG execution intent repo 在主进程模式下也已能参与 orchestrator 持久化
+- 手工下单 API 仍保持原路径，未被这轮强行改造
 
 ### 备注
 

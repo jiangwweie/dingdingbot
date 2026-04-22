@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-22 23:45
+> Last updated: 2026-04-22 23:58
 
 ---
 
@@ -31,6 +31,21 @@
 
 3. **`execution_intents` 当前先做到“启动期可初始化”，不急着强塞进主链**
    `ExecutionOrchestrator` 还没有正式接到当前运行时装配路径里，因此这一步先把 repo 初始化和生命周期托管接上即可，后续再做 orchestrator 的真实注入，不会把边界揉乱。
+
+---
+
+## 2026-04-22 23:58 -- 自动执行主链选择：接 SignalPipeline hook，而不是改手工下单 API
+
+### 新增结论
+
+1. **当前真正的自动化入口是 `SignalPipeline`**
+   运行时是“行情 -> 信号 -> 通知/落库”，不是“API 手工下单”。因此要让 `ExecutionOrchestrator` 真正进入主链，应该挂到 `SignalPipeline`，而不是强行改 `/api/v3/orders`。
+
+2. **`OrderRequest` 不适合作为 orchestrator 主输入**
+   它缺少完整 `OrderStrategy` 语义，适合手工订单接口，但不适合作为自动执行主链的契约真源。
+
+3. **`SignalResult.take_profit_levels` 足以派生最小执行策略**
+   可以从 `position_ratio` 和 `risk_reward` 生成 `tp_ratios / tp_targets`，在不额外改配置模型的情况下，为 orchestrator 构造一份最小 `OrderStrategy` 快照。
 
 ---
 
