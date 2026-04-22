@@ -118,6 +118,9 @@ class ExchangeGateway:
         # P5-011: Global order update callback (for order persistence)
         self._global_order_callback: Optional[Callable[[Order], Awaitable[None]]] = None
 
+        # P0-WS-Exception-Protection: 待恢复订单集合（WS 回调失败时标记）
+        self._pending_recovery_orders: Dict[str, Dict[str, Any]] = {}
+
     def _build_exchange_config(self, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         构建通用交易所配置
@@ -1627,8 +1630,27 @@ class ExchangeGateway:
                         if order:
                             # P5-011: 先调用全局回调（订单入库）
                             await self._notify_global_order_callback(order)
-                            # 再调用业务回调
-                            await callback(order)
+
+                            # P0-WS-Exception-Protection: 业务回调异常保护
+                            try:
+                                await callback(order)
+                            except Exception as e:
+                                # 记录高优错误日志
+                                logger.error(
+                                    f"⚠️ 订单回调失败，订单已标记为待恢复: "
+                                    f"exchange_order_id={order.exchange_order_id}, "
+                                    f"symbol={order.symbol}, status={order.status}, "
+                                    f"error={e}"
+                                )
+
+                                # 标记为待恢复对象
+                                self._pending_recovery_orders[order.exchange_order_id] = {
+                                    "order": order,
+                                    "error": str(e),
+                                    "failed_at": int(time.time() * 1000),
+                                }
+
+                                # 继续处理后续订单事件（不中断消费循环）
 
                 except asyncio.CancelledError:
                     logger.info(f"WebSocket 订单监听被取消：{symbol}")
@@ -1657,3 +1679,23 @@ class ExchangeGateway:
             self._ws_running = False
             if self.ws_exchange:
                 await self.ws_exchange.close()
+
+    def get_pending_recovery_orders(self) -> Dict[str, Dict[str, Any]]:
+        """
+        获取待恢复订单列表（P0-WS-Exception-Protection）
+
+        Returns:
+            Dict[str, Dict[str, Any]]: 待恢复订单字典，key 为 exchange_order_id
+        """
+        return self._pending_recovery_orders
+
+    def clear_pending_recovery_order(self, exchange_order_id: str) -> None:
+        """
+        清除待恢复订单标记（P0-WS-Exception-Protection）
+
+        Args:
+            exchange_order_id: 交易所订单 ID
+        """
+        if exchange_order_id in self._pending_recovery_orders:
+            del self._pending_recovery_orders[exchange_order_id]
+            logger.info(f"已清除待恢复订单标记: {exchange_order_id}")
