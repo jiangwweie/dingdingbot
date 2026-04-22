@@ -52,7 +52,7 @@ from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
     create_order_repository,
 )
-from src.infrastructure.database import validate_pg_core_configuration
+from src.infrastructure.database import close_db, validate_pg_core_configuration
 from src.application.config_manager import UserConfig, ConfigManager
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.capital_protection import CapitalProtectionManager
@@ -653,51 +653,73 @@ async def lifespan(app: FastAPI):
         if _repository is not None:
             await _repository.close()
             logger.info("SignalRepository closed")
+            _repository = None
 
         if _config_entry_repo is not None:
             await _config_entry_repo.close()
             logger.info("ConfigEntryRepository closed")
+            _config_entry_repo = None
 
         if _execution_intent_repo is not None:
             await _execution_intent_repo.close()
             logger.info("ExecutionIntentRepository closed")
+            _execution_intent_repo = None
 
         # Shutdown OrderLifecycleService (ORD-1-T5)
         if _order_lifecycle_service is not None:
             await _order_lifecycle_service.stop()
             logger.info("OrderLifecycleService stopped")
+            _order_lifecycle_service = None
+
+        if _order_repo is not None:
+            await _order_repo.close()
+            logger.info("OrderRepository closed")
+            _order_repo = None
 
         # Shutdown audit logger (FIX-002)
         if _audit_logger is not None:
             await _audit_logger.stop()
             logger.info("OrderAuditLogger stopped")
+            _audit_logger = None
 
         # Shutdown Config Repositories (独立 uvicorn 模式)
         from src.interfaces import api_config_globals as _cg
         if _cg._strategy_repo is not None:
             await _cg._strategy_repo.close()
             logger.info("StrategyConfigRepository closed in lifespan")
+            _cg._strategy_repo = None
         if _cg._risk_repo is not None:
             await _cg._risk_repo.close()
             logger.info("RiskConfigRepository closed in lifespan")
+            _cg._risk_repo = None
         if _cg._system_repo is not None:
             await _cg._system_repo.close()
             logger.info("SystemConfigRepository closed in lifespan")
+            _cg._system_repo = None
         if _cg._symbol_repo is not None:
             await _cg._symbol_repo.close()
             logger.info("SymbolConfigRepository closed in lifespan")
+            _cg._symbol_repo = None
         if _cg._notification_repo is not None:
             await _cg._notification_repo.close()
             logger.info("NotificationConfigRepository closed in lifespan")
+            _cg._notification_repo = None
         if _cg._history_repo is not None:
             await _cg._history_repo.close()
             logger.info("ConfigHistoryRepository closed in lifespan")
+            _cg._history_repo = None
         if _cg._snapshot_repo is not None:
             await _cg._snapshot_repo.close()
             logger.info("ConfigSnapshotRepositoryExtended closed in lifespan")
+            _cg._snapshot_repo = None
         if _cg._config_manager is not None:
             await _cg._config_manager.close()
             logger.info("ConfigManager closed in lifespan")
+            _cg._config_manager = None
+            _config_manager = None
+
+        await close_db()
+        logger.info("Database engines closed in lifespan")
 
 
 # ============================================================

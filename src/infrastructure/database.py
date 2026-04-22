@@ -222,8 +222,21 @@ def get_pg_session_maker() -> async_sessionmaker[AsyncSession]:
 
 
 async def close_db():
-    """关闭数据库连接"""
-    engine = get_engine()
-    await engine.dispose()
+    """关闭数据库连接并复位可重建的全局 PG 资源。
+
+    迁移阶段需要支持同进程内多次 startup/shutdown：
+    - 不在 shutdown 时隐式创建新的 engine
+    - PG dispose 后显式清空 engine/sessionmaker，下一次 startup 可重新初始化
+    - SQLite 旧链路继续复用模块级 sessionmaker，不在本轮扩大 reset 范围
+    """
+    global _pg_engine, _pg_async_session_maker
+
+    if _engine is not None:
+        await _engine.dispose()
+
     if _pg_engine is not None:
         await _pg_engine.dispose()
+        _pg_engine = None
+
+    if _pg_async_session_maker is not None:
+        _pg_async_session_maker = None

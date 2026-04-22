@@ -32,7 +32,7 @@ from src.domain.risk_calculator import RiskConfig
 from src.domain.models import KlineData
 from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, ConnectionLostError
 from src.infrastructure.logger import logger, setup_logger, register_secret
-from src.infrastructure.database import validate_pg_core_configuration
+from src.infrastructure.database import close_db, validate_pg_core_configuration
 
 
 # ============================================================
@@ -82,20 +82,27 @@ async def graceful_shutdown():
     """
     logger.info("Graceful shutdown initiated...")
 
-    global _shutdown_event
+    global _shutdown_event, _exchange_gateway, _order_lifecycle_service
+    global _execution_intent_repo, _order_repo
     _shutdown_event.set()
 
     if _exchange_gateway:
         await _exchange_gateway.close()
+        _exchange_gateway = None
 
     if _order_lifecycle_service:
         await _order_lifecycle_service.stop()
+        _order_lifecycle_service = None
 
     if _execution_intent_repo:
         await _execution_intent_repo.close()
+        _execution_intent_repo = None
 
     if _order_repo:
         await _order_repo.close()
+        _order_repo = None
+
+    await close_db()
 
     logger.info("Shutdown complete")
 
@@ -508,11 +515,13 @@ async def run_application():
         # Cleanup
         if _exchange_gateway:
             await _exchange_gateway.close()
+            _exchange_gateway = None
 
         # Close ConfigEntryRepository
         if _config_entry_repo:
             await _config_entry_repo.close()
             logger.info("ConfigEntryRepository closed")
+            _config_entry_repo = None
 
         # Close config repositories (unified dependency injection)
         if '_api_strategy_repo' in locals():
@@ -534,6 +543,12 @@ async def run_application():
             except asyncio.CancelledError:
                 pass
             logger.info("API server shutdown complete")
+
+        await close_db()
+        logger.info("Database engines closed")
+
+        _capital_protection = None
+        _execution_orchestrator = None
 
         logger.info("Application shutdown complete")
 

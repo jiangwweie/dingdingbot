@@ -1,8 +1,32 @@
 # Progress Log
 
-> Last updated: 2026-04-23 00:55
+> Last updated: 2026-04-23 01:25
 
 ---
+
+## 2026-04-23 01:25 -- PG shutdown / lifecycle 已收口：engine 与 sessionmaker 在 shutdown 后可重建
+
+### 本次完成
+
+1. 收口 `src/infrastructure/database.py`：
+   - `close_db()` 不再通过 `get_engine()` 隐式新建 engine
+   - PG dispose 后显式将 `_pg_engine` 置空
+   - PG dispose 后显式将 `_pg_async_session_maker` 置空
+2. 将数据库关闭接入实际 shutdown 路径：
+   - `src/interfaces/api.py` 的 `lifespan()` finally
+   - `src/main.py` 的 `graceful_shutdown()`
+   - `src/main.py` 的 `run_application()` finally
+3. 对本轮核心变更文件完成 `python3 -m py_compile` 语法检查
+
+### 当前状态
+
+- PG engine / sessionmaker 不再停留在“dispose 但仍保留全局引用”的半关闭状态
+- 同进程内重复 startup/shutdown 时，PG 初始化链可以重新创建新的 engine/sessionmaker
+- 当前收口仍刻意只覆盖 PG 生命周期；SQLite 旧链路的模块级 sessionmaker 不在本轮扩大 reset 范围
+
+### 备注
+
+- 本次未执行测试（按项目红线，测试前需用户确认）
 
 ## 2026-04-23 00:55 -- 已明确 core backend 小范围实切策略，并将默认切法收口到 execution_intent
 

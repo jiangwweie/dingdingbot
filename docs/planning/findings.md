@@ -1,8 +1,29 @@
 # Findings Log
 
-> Last updated: 2026-04-23 00:55
+> Last updated: 2026-04-23 01:25
 
 ---
+
+## 2026-04-23 01:25 -- PG 生命周期收口原则确认：dispose 不够，必须显式复位可重建全局对象
+
+### 新增结论
+
+1. **PG 双轨迁移阶段，shutdown 不能只做 `dispose()`**
+   - 如果 `_pg_engine` / `_pg_async_session_maker` 仍保留在模块全局里，下一个同进程 startup 很容易误复用“已关闭但仍被引用”的对象
+   - 对 repeated startup/shutdown 来说，这和没有真正关闭几乎一样危险
+
+2. **`close_db()` 不应在 shutdown 路径里隐式创建 engine**
+   - 旧实现通过 `get_engine()` 拿 SQLite engine，会在 `_engine is None` 时顺手创建一个新对象
+   - shutdown 阶段这样做会把“清理资源”变成“顺手新建资源”，语义错误
+
+3. **本轮最稳的修法是只把 PG 生命周期彻底收干净**
+   - `_pg_engine` 在 dispose 后显式置空
+   - `_pg_async_session_maker` 在 shutdown 后显式置空
+   - SQLite 旧链路的模块级 sessionmaker 暂不扩大 reset 范围，避免把本轮从 PG 收口扩成整套 DB 重构
+
+4. **数据库 shutdown 必须接入实际运行时 finally 路径**
+   - 只改 `database.py` 不够
+   - `api.py` standalone lifespan 和 `main.py` 主进程 shutdown / finally 都需要实际调用，PG 生命周期收口才会生效
 
 ## 2026-04-23 00:55 -- Core backend 小范围实切策略确认：先切 execution_intent，暂不默认切 order/position
 

@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 00:55
-> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成主进程执行链接线，并开始把风控配置切到 ConfigManager 真源；`backtest-studio` 作为低优先级并行线进入设计准备
+> **Last updated**: 2026-04-23 01:25
+> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成主进程执行链接线、ExecutionIntent PG 主真源切换与 PG 生命周期收口；`backtest-studio` 作为低优先级并行线进入设计准备
 
 ---
 
@@ -378,7 +378,10 @@
    - `CORE_EXECUTION_INTENT_BACKEND=postgres`：当前推荐先切
    - `CORE_ORDER_BACKEND=postgres`：后续单独评估，不作为当前默认切法
    - `CORE_POSITION_BACKEND`：继续保持过渡态
-3. 独立 uvicorn 模式虽已补齐执行运行时装配，但同进程反复 startup/shutdown 的 PG 生命周期收口仍可继续加强
+3. PG shutdown / lifecycle 已完成最小收口：
+   - `close_db()` 不再隐式创建新 engine
+   - `_pg_engine` / `_pg_async_session_maker` 在 shutdown 后显式复位
+   - `api.py` 与 `main.py` 的 finally 路径已接入数据库关闭
 4. 尚未把 `StartupReconciliationService` / 更多核心服务正式切到 PG
 5. 风控派生配置尚未接入热更新后的运行时刷新
 6. 尚未执行测试（仅完成语法级检查）
