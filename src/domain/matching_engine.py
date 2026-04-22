@@ -232,7 +232,7 @@ class MockMatchingEngine:
 
         排序规则:
         1. 默认（pessimistic）: SL > TP > ENTRY
-        2. random: 检测 same-bar 冲突，随机决定 TP/SL 优先级
+        2. random: 检测 same-bar 冲突，为每个冲突 signal 抽签一次决定 TP/SL 优先级
 
         Args:
             orders: 待排序订单列表
@@ -244,15 +244,23 @@ class MockMatchingEngine:
         # 检测 same-bar 冲突：同一 signal_id 的 TP 和 SL 都会被触发
         signal_conflicts = self._detect_same_bar_conflicts(orders, kline)
 
+        # 为每个冲突 signal 预先抽签一次（仅 random 策略）
+        # signal_id -> True(TP优先) / False(SL优先)
+        signal_tp_first = {}
+        if self.same_bar_policy == "random" and signal_conflicts:
+            for signal_id in signal_conflicts:
+                # 每个 signal 只抽签一次
+                tp_first = self.rng.random() < float(self.same_bar_tp_first_prob)
+                signal_tp_first[signal_id] = tp_first
+
         def get_priority(order: Order) -> int:
             # 止损类订单
             if order.order_type in [OrderType.STOP_MARKET, OrderType.TRAILING_STOP]:
                 # 如果该 signal_id 存在冲突且使用 random 策略
-                if (order.signal_id in signal_conflicts and
-                    self.same_bar_policy == "random"):
-                    # 随机决定：TP 优先或 SL 优先
-                    if self.rng.random() < float(self.same_bar_tp_first_prob):
-                        return OrderPriority.TP  # TP 优先
+                if order.signal_id in signal_tp_first:
+                    # 使用预先抽签的结果
+                    if signal_tp_first[order.signal_id]:
+                        return OrderPriority.TP  # TP 优先，SL 降级
                     else:
                         return OrderPriority.SL  # SL 优先
                 else:
@@ -262,13 +270,12 @@ class MockMatchingEngine:
             # 止盈类订单
             elif order.order_type == OrderType.LIMIT and order.order_role in TP_ROLES:
                 # 如果该 signal_id 存在冲突且使用 random 策略
-                if (order.signal_id in signal_conflicts and
-                    self.same_bar_policy == "random"):
-                    # 随机决定：TP 优先或 SL 优先
-                    if self.rng.random() < float(self.same_bar_tp_first_prob):
-                        return OrderPriority.SL  # SL 优先级降低
+                if order.signal_id in signal_tp_first:
+                    # 使用预先抽签的结果（与 SL 相反）
+                    if signal_tp_first[order.signal_id]:
+                        return OrderPriority.SL  # TP 优先，TP 提升到最高
                     else:
-                        return OrderPriority.TP  # TP 优先级提升
+                        return OrderPriority.TP  # SL 优先，TP 保持中等
                 else:
                     # 默认：TP 中等优先级
                     return OrderPriority.TP
