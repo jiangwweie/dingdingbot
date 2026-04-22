@@ -242,11 +242,17 @@ class ExecutionOrchestrator:
                 # 需要先推进到 OPEN，再推进到 PARTIALLY_FILLED
                 await self._order_lifecycle.confirm_order(order.id)
 
-                # TODO: OrderPlacementResult 没有 filled_qty 和 average_exec_price 字段
-                # 实际场景中，部分成交信息会通过 WebSocket 推送获取
-                # 这里暂时无法推进到 PARTIALLY_FILLED，需要等待 WebSocket 推送更新
-                logger.warning(
-                    f"[ExecutionOrchestrator] 订单部分成交，等待 WebSocket 推送更新成交信息: "
+                # P1 修复：推进到 PARTIALLY_FILLED 状态
+                # 注意：OrderPlacementResult 没有 filled_qty 和 average_exec_price 字段
+                # 使用默认值（0 成交数量）推进状态，后续通过 WebSocket 推送更新真实成交信息
+                await self._order_lifecycle.update_order_partially_filled(
+                    order.id,
+                    filled_qty=Decimal("0"),
+                    average_exec_price=placement_result.price or Decimal("0"),
+                )
+
+                logger.info(
+                    f"[ExecutionOrchestrator] 订单部分成交（等待 WebSocket 推送更新成交数量）: "
                     f"intent_id={intent_id}, order_id={order.id}, "
                     f"exchange_order_id={placement_result.exchange_order_id}"
                 )

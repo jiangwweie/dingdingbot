@@ -458,7 +458,7 @@ async def test_place_order_returns_partially_filled():
 
         # Mock ExchangeGateway（返回 PARTIALLY_FILLED 状态）
         # 注意：OrderPlacementResult 没有 filled_qty 字段
-        # 实际场景中，部分成交信息会通过 WebSocket 推送获取
+        # P1 修复：使用默认值推进到 PARTIALLY_FILLED 状态
         gateway = MagicMock(spec=ExchangeGateway)
         gateway.place_order = AsyncMock(
             return_value=OrderPlacementResult(
@@ -511,13 +511,14 @@ async def test_place_order_returns_partially_filled():
         # 验证本地订单状态
         order = await repository.get_order(intent.order_id)
         print(f"   本地订单最终状态: {order.status}")
+        print(f"   已成交数量: {order.filled_qty}")
+        print(f"   平均成交价: {order.average_exec_price}")
 
-        # 注意：由于 OrderPlacementResult 没有 filled_qty 字段，
-        # 订单会停留在 OPEN 状态，等待 WebSocket 推送更新
-        assert order.status == OrderStatus.OPEN, \
-            f"期望 OPEN（等待 WebSocket 推送），实际 {order.status}"
+        # P1 修复：本地订单状态应为 PARTIALLY_FILLED
+        assert order.status == OrderStatus.PARTIALLY_FILLED, \
+            f"期望 PARTIALLY_FILLED，实际 {order.status}"
 
-        print("✅ 场景 6 验证通过: place_order() 返回 status=PARTIALLY_FILLED（等待 WebSocket 推送）")
+        print("✅ 场景 6 验证通过: place_order() 返回 status=PARTIALLY_FILLED")
 
     finally:
         os.unlink(db_path)
