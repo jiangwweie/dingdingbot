@@ -1,8 +1,38 @@
 # Progress Log
 
-> Last updated: 2026-04-23 00:12
+> Last updated: 2026-04-23 00:40
 
 ---
+
+## 2026-04-23 00:40 -- ExecutionIntent 已切到 PG 优先读写，内存 `_intents` 降级为热缓存
+
+### 本次完成
+
+1. 扩展 `ExecutionIntentRepositoryPort`：
+   - 新增 `get_by_signal_id()`
+   - 新增 `list(status=None)`
+2. 扩展 `PgExecutionIntentRepository`：
+   - 支持按 `signal_id` 查询
+   - 支持按状态列出 intents
+3. 收口 `ExecutionOrchestrator`：
+   - 新增 repo-first 的 `_load_intent()` / `_load_intent_by_signal_id()` / `_load_intent_by_order_id()`
+   - `get_intent()` / `list_intents()` 改为异步且优先走仓储
+   - `_intents` 继续保留，但仅作为热缓存/回退
+4. 修复主链关联问题：
+   - 创建 `ExecutionIntent` 时生成的 `signal_id`
+   - 现在会复用到 `OrderLifecycleService.create_order()`
+   - 避免 `execution_intents.signal_id` 与 `orders.signal_id` 断裂
+5. 对本轮核心文件完成 `python3 -m py_compile` 语法检查
+
+### 当前状态
+
+- `ExecutionIntent` 已不再是“写 PG、读内存”的半切换状态
+- PG execution intent repo 已开始承担查询、恢复、状态筛选的主真源职责
+- 内存 `_intents` 仍保留，但定位已降级为当前进程热缓存
+
+### 备注
+
+- 本次未执行测试（按项目红线，测试前需用户确认）
 
 ## 2026-04-23 00:12 -- 已按批准基线收口 `pg_models.py`，并修正初版基线与领域模型的不一致
 

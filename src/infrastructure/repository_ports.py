@@ -82,10 +82,19 @@ class ExecutionIntentRepositoryPort(Protocol):
     async def get(self, intent_id: str) -> Optional[ExecutionIntent]:
         ...
 
+    async def get_by_signal_id(self, signal_id: str) -> Optional[ExecutionIntent]:
+        ...
+
     async def get_by_order_id(self, order_id: str) -> Optional[ExecutionIntent]:
         ...
 
     async def list_unfinished(self) -> List[ExecutionIntent]:
+        ...
+
+    async def list(
+        self,
+        status: Optional[ExecutionIntentStatus] = None,
+    ) -> List[ExecutionIntent]:
         ...
 
     async def update_status(

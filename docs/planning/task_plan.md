@@ -1,7 +1,7 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 00:12
+> **Last updated**: 2026-04-23 00:40
 > **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成主进程执行链接线，并开始把风控配置切到 ConfigManager 真源；`backtest-studio` 作为低优先级并行线进入设计准备
 
 ---
@@ -370,8 +370,11 @@
 
 当前仍未做：
 
-1. `ExecutionOrchestrator.get_intent()/list_intents()` 仍主要面向本地缓存
-2. 独立 uvicorn 模式尚未自动构建 `CapitalProtectionManager + ExecutionOrchestrator`
+1. `ExecutionIntent` 已开始切到 PG 主真源：
+   - `get_intent()/list_intents()` 已改为 repo-first
+   - `_intents` 降级为热缓存/回退
+   - intent 与 order 现已复用同一 `signal_id`
+2. 独立 uvicorn 模式虽已补齐执行运行时装配，但同进程反复 startup/shutdown 的 PG 生命周期收口仍可继续加强
 3. 尚未把 `StartupReconciliationService` / 更多核心服务正式切到 PG
 4. 风控派生配置尚未接入热更新后的运行时刷新
 5. 尚未执行测试（仅完成语法级检查）

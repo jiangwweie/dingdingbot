@@ -49,6 +49,13 @@ class PgExecutionIntentRepository:
             orm = await session.get(PGExecutionIntentORM, intent_id)
             return self._to_domain(orm) if orm else None
 
+    async def get_by_signal_id(self, signal_id: str) -> Optional[ExecutionIntent]:
+        async with self._session_maker() as session:
+            stmt = select(PGExecutionIntentORM).where(PGExecutionIntentORM.signal_id == signal_id)
+            result = await session.execute(stmt)
+            orm = result.scalar_one_or_none()
+            return self._to_domain(orm) if orm else None
+
     async def get_by_order_id(self, order_id: str) -> Optional[ExecutionIntent]:
         async with self._session_maker() as session:
             stmt = select(PGExecutionIntentORM).where(PGExecutionIntentORM.order_id == order_id)
@@ -63,6 +70,18 @@ class PgExecutionIntentRepository:
                 .where(PGExecutionIntentORM.status.not_in(self._TERMINAL_STATUSES))
                 .order_by(PGExecutionIntentORM.created_at.asc())
             )
+            result = await session.execute(stmt)
+            return [self._to_domain(orm) for orm in result.scalars().all()]
+
+    async def list(
+        self,
+        status: Optional[ExecutionIntentStatus] = None,
+    ) -> List[ExecutionIntent]:
+        async with self._session_maker() as session:
+            stmt = select(PGExecutionIntentORM)
+            if status is not None:
+                stmt = stmt.where(PGExecutionIntentORM.status == status.value)
+            stmt = stmt.order_by(PGExecutionIntentORM.created_at.asc())
             result = await session.execute(stmt)
             return [self._to_domain(orm) for orm in result.scalars().all()]
 

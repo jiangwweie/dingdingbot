@@ -23,7 +23,6 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Dict, List, Any
-import logging
 
 from src.domain.models import (
     SignalResult,
@@ -75,8 +74,7 @@ class ExecutionOrchestrator:
         self._gateway = gateway
         self._intent_repository = intent_repository
 
-        # MVP 阶段：内存存储 ExecutionIntent
-        # 后续可迁移到数据库持久化
+        # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
 
         # MVP-Protected-Position-Step2: 注册 ENTRY 部分成交回调
@@ -90,13 +88,38 @@ class ExecutionOrchestrator:
         if self._intent_repository is not None:
             await self._intent_repository.save(intent)
 
+    def _cache_intent(self, intent: ExecutionIntent) -> ExecutionIntent:
+        """将 ExecutionIntent 写入热缓存并返回自身。"""
+        self._intents[intent.id] = intent
+        return intent
+
+    async def _load_intent(self, intent_id: str) -> Optional[ExecutionIntent]:
+        """按意图 ID 获取执行意图，优先仓储，回退本地缓存。"""
+        if self._intent_repository is not None:
+            intent = await self._intent_repository.get(intent_id)
+            if intent is not None:
+                return self._cache_intent(intent)
+
+        return self._intents.get(intent_id)
+
+    async def _load_intent_by_signal_id(self, signal_id: str) -> Optional[ExecutionIntent]:
+        """按信号 ID 获取执行意图，优先仓储，回退本地缓存。"""
+        if self._intent_repository is not None:
+            intent = await self._intent_repository.get_by_signal_id(signal_id)
+            if intent is not None:
+                return self._cache_intent(intent)
+
+        for stored_intent in self._intents.values():
+            if stored_intent.signal_id == signal_id:
+                return stored_intent
+        return None
+
     async def _load_intent_by_order_id(self, order_id: str) -> Optional[ExecutionIntent]:
         """按订单 ID 获取执行意图，优先仓储，回退本地缓存。"""
         if self._intent_repository is not None:
             intent = await self._intent_repository.get_by_order_id(order_id)
             if intent is not None:
-                self._intents[intent.id] = intent
-                return intent
+                return self._cache_intent(intent)
 
         for stored_intent in self._intents.values():
             if stored_intent.order_id == order_id:
@@ -180,7 +203,7 @@ class ExecutionOrchestrator:
         try:
             order = await self._order_lifecycle.create_order(
                 strategy=strategy,
-                signal_id=f"sig_{uuid.uuid4().hex[:12]}",
+                signal_id=signal_id,
                 symbol=signal.symbol,
                 direction=signal.direction,
                 total_qty=signal.suggested_position_size,
@@ -831,7 +854,7 @@ class ExecutionOrchestrator:
                 exc_info=True
             )
 
-    def get_intent(self, intent_id: str) -> Optional[ExecutionIntent]:
+    async def get_intent(self, intent_id: str) -> Optional[ExecutionIntent]:
         """
         获取执行意图
 
@@ -841,9 +864,9 @@ class ExecutionOrchestrator:
         Returns:
             ExecutionIntent 或 None
         """
-        return self._intents.get(intent_id)
+        return await self._load_intent(intent_id)
 
-    def list_intents(
+    async def list_intents(
         self,
         status: Optional[ExecutionIntentStatus] = None,
     ) -> List[ExecutionIntent]:
@@ -856,6 +879,12 @@ class ExecutionOrchestrator:
         Returns:
             执行意图列表
         """
+        if self._intent_repository is not None:
+            intents = await self._intent_repository.list(status=status)
+            for intent in intents:
+                self._cache_intent(intent)
+            return intents
+
         if status:
             return [
                 intent for intent in self._intents.values()

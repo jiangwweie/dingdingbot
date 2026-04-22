@@ -1,8 +1,28 @@
 # Findings Log
 
-> Last updated: 2026-04-23 00:12
+> Last updated: 2026-04-23 00:40
 
 ---
+
+## 2026-04-23 00:40 -- ExecutionIntent 已开始切向 PG 主真源：repo 优先，内存降级为热缓存
+
+### 新增结论
+
+1. **ExecutionIntent 不能停留在“写 PG、读内存”的半切换状态**
+   - 如果查询/恢复仍优先依赖 `_intents`，PG 只会变成写后备份，无法真正承担重启恢复与状态查询真源
+
+2. **最小正确做法是“repo 优先，内存只做热缓存/回退”**
+   - `get(intent_id)`、`get_by_signal_id(signal_id)`、`get_by_order_id(order_id)`、`list(status)` 都应优先走仓储
+   - 读取到的结果再回灌本地缓存，保证当前进程的热路径性能
+
+3. **`ExecutionIntent.signal_id` 与 `Order.signal_id` 必须统一**
+   - 之前 orchestrator 创建 intent 用一份 `signal_id`，创建 order 又重新生成另一份 `signal_id`
+   - 这会让 `execution_intents`、`orders`、后续 `positions` 三条链上的关联语义断裂
+   - 已确认为需要优先修正的主链问题
+
+4. **当前阶段不需要强行删除 `_intents`**
+   - 内存缓存仍可保留，用于当前进程内快速回读和故障回退
+   - 但它不再应作为查询与恢复的第一真源
 
 ## 2026-04-23 00:12 -- PG ORM 基线对齐时确认：合法值集合必须向当前领域模型收正
 
