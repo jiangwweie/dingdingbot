@@ -32,11 +32,13 @@ from src.infrastructure.logger import logger
 
 DB_PATH = "data/v3_dev.db"
 BASE_URL = "https://data.binance.vision/data/futures/um/monthly/klines"
-MONTH = "2026-03"
 
-# 4 币种 × 4 周期 = 16 个文件
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
-TIMEFRAMES = ["15m", "1h", "4h", "1d"]
+# 下载月份列表（可配置多个）
+MONTHS = ["2026-01", "2026-02", "2026-03"]
+
+# 币种和周期配置
+SYMBOLS = ["XAUUSDT"]  # 黄金合约
+TIMEFRAMES = ["1h", "4h"]
 
 # 本地 symbol 格式（与 ExchangeGateway 一致）
 SYMBOL_MAP = {
@@ -44,6 +46,9 @@ SYMBOL_MAP = {
     "ETHUSDT": "ETH/USDT:USDT",
     "SOLUSDT": "SOL/USDT:USDT",
     "BNBUSDT": "BNB/USDT:USDT",
+    "XAUUSDT": "XAU/USDT:USDT",  # 黄金
+    "XAUTUSDT": "XAUT/USDT:USDT",
+    "PAXGUSDT": "PAXG/USDT:USDT",
 }
 
 
@@ -205,7 +210,7 @@ async def insert_klines(
 async def main():
     logger.info("=" * 60)
     logger.info("Binance 历史 K 线数据导入")
-    logger.info(f"  月份: {MONTH}")
+    logger.info(f"  月份: {MONTHS}")
     logger.info(f"  币种: {SYMBOLS}")
     logger.info(f"  周期: {TIMEFRAMES}")
     logger.info(f"  数据库: {DB_PATH}")
@@ -227,58 +232,63 @@ async def main():
     await ensure_klines_table(db)
 
     try:
-        for symbol in SYMBOLS:
-            for timeframe in TIMEFRAMES:
-                url = build_url(symbol, timeframe, MONTH)
-                local_symbol = SYMBOL_MAP[symbol]
+        for month in MONTHS:
+            for symbol in SYMBOLS:
+                for timeframe in TIMEFRAMES:
+                    url = build_url(symbol, timeframe, month)
+                    local_symbol = SYMBOL_MAP[symbol]
 
-                logger.info(f"\n--- {symbol} {timeframe} -> {local_symbol} ---")
+                    logger.info(f"\n--- {symbol} {timeframe} {month} -> {local_symbol} ---")
 
-                # 1. 下载
-                zip_path = await download_file(url, tmp_dir)
-                total_downloaded += 1
+                    # 1. 下载
+                    try:
+                        zip_path = await download_file(url, tmp_dir)
+                    except Exception as e:
+                        logger.warning(f"  下载失败: {e}（可能数据尚未发布）")
+                        continue
+                    total_downloaded += 1
 
-                # 2. 解析
-                rows = parse_csv(zip_path, local_symbol, timeframe)
-                total_parsed += len(rows)
+                    # 2. 解析
+                    rows = parse_csv(zip_path, local_symbol, timeframe)
+                    total_parsed += len(rows)
 
-                if not rows:
-                    logger.warning(f"  跳过: 无数据")
-                    continue
+                    if not rows:
+                        logger.warning(f"  跳过: 无数据")
+                        continue
 
-                # 3. 导入（通过 COUNT 差值计算实际插入数）
-                cursor = await db.execute(
-                    "SELECT COUNT(*) FROM klines WHERE symbol=? AND timeframe=?",
-                    (local_symbol, timeframe),
-                )
-                count_before = (await cursor.fetchone())[0]
+                    # 3. 导入（通过 COUNT 差值计算实际插入数）
+                    cursor = await db.execute(
+                        "SELECT COUNT(*) FROM klines WHERE symbol=? AND timeframe=?",
+                        (local_symbol, timeframe),
+                    )
+                    count_before = (await cursor.fetchone())[0]
 
-                await insert_klines(db, rows)
+                    await insert_klines(db, rows)
 
-                cursor = await db.execute(
-                    "SELECT COUNT(*) FROM klines WHERE symbol=? AND timeframe=?",
-                    (local_symbol, timeframe),
-                )
-                count_after = (await cursor.fetchone())[0]
-                inserted_count = count_after - count_before
-                total_inserted += inserted_count
-                total_skipped += len(rows) - inserted_count
+                    cursor = await db.execute(
+                        "SELECT COUNT(*) FROM klines WHERE symbol=? AND timeframe=?",
+                        (local_symbol, timeframe),
+                    )
+                    count_after = (await cursor.fetchone())[0]
+                    inserted_count = count_after - count_before
+                    total_inserted += inserted_count
+                    total_skipped += len(rows) - inserted_count
 
-                # 4. 验证
-                cursor = await db.execute(
-                    "SELECT MIN(timestamp), MAX(timestamp), COUNT(*) FROM klines WHERE symbol=? AND timeframe=?",
-                    (local_symbol, timeframe),
-                )
-                min_ts, max_ts, count = await cursor.fetchone()
+                    # 4. 验证
+                    cursor = await db.execute(
+                        "SELECT MIN(timestamp), MAX(timestamp), COUNT(*) FROM klines WHERE symbol=? AND timeframe=?",
+                        (local_symbol, timeframe),
+                    )
+                    min_ts, max_ts, count = await cursor.fetchone()
 
-                from datetime import datetime, timezone
+                    from datetime import datetime, timezone
 
-                min_dt = datetime.fromtimestamp(min_ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-                max_dt = datetime.fromtimestamp(max_ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+                    min_dt = datetime.fromtimestamp(min_ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+                    max_dt = datetime.fromtimestamp(max_ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 
-                logger.info(f"  导入: {inserted_count} 新 / {len(rows)} 总，"
-                            f"跳过 {len(rows) - inserted_count} 重复")
-                logger.info(f"  范围: {min_dt} ~ {max_dt} (UTC)，共 {count} 条")
+                    logger.info(f"  导入: {inserted_count} 新 / {len(rows)} 总，"
+                                f"跳过 {len(rows) - inserted_count} 重复")
+                    logger.info(f"  范围: {min_dt} ~ {max_dt} (UTC)，共 {count} 条")
 
         # 汇总
         logger.info("\n" + "=" * 60)

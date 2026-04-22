@@ -120,13 +120,15 @@ class RiskCalculator:
             max_leverage = self._config.max_leverage
             max_total_exposure = self._config.max_total_exposure
 
-        logger.debug(f"仓位计算：balance={account.total_balance}, risk={max_loss_percent}")
+        logger.debug(f"仓位计算：balance={account.total_balance}, available={account.available_balance}, risk={max_loss_percent}")
 
         # Handle zero/negative balance
         if account.total_balance <= Decimal(0):
+            logger.warning(f"[RISK_CALC] position_size=0: total_balance <= 0 ({account.total_balance})")
             return Decimal(0), 1
 
         if account.available_balance <= Decimal(0):
+            logger.warning(f"[RISK_CALC] position_size=0: available_balance <= 0 ({account.available_balance})")
             return Decimal(0), 1
 
         # Step 1: Calculate current total exposure from all positions
@@ -147,6 +149,10 @@ class RiskCalculator:
             max_total_exposure - current_exposure_ratio
         )
 
+        # 诊断日志：追踪敞口状态
+        if len(account.positions) > 0 or available_exposure == 0:
+            logger.info(f"[RISK_CALC_EXPOSURE] positions={len(account.positions)}, total_value={total_position_value:.2f}, balance={account.total_balance:.2f}, ratio={current_exposure_ratio:.4f}, max={max_total_exposure}, available={available_exposure}")
+
         # Step 4: Calculate base risk amount using available balance
         base_risk_amount = account.available_balance * max_loss_percent
 
@@ -156,6 +162,7 @@ class RiskCalculator:
 
         # If no risk budget available, return zero position
         if risk_amount <= Decimal(0):
+            logger.warning(f"[RISK_CALC] position_size=0: risk_amount <= 0 (base={base_risk_amount}, exposure_limited={exposure_limited_risk}, available_exposure={available_exposure})")
             return Decimal(0), 1
 
         # Step 6: Calculate stop-loss distance (absolute price difference)

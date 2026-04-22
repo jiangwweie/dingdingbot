@@ -31,6 +31,7 @@ from src.domain.models import (
     OptimizationJobStatus,
     OptimizationJob,
     PMSBacktestReport,
+    RiskConfig,
 )
 
 
@@ -352,6 +353,41 @@ class TestBuildBacktestRequest:
         assert backtest_request.timeframe == "1h"
         assert backtest_request.initial_balance == Decimal('50000')
         assert backtest_request.slippage_rate == Decimal('0.002')
+
+    def test_build_backtest_request_injects_sampled_risk_overrides(self, optimizer, sample_optimization_request):
+        """采样得到的风控参数应注入到 request.risk_overrides"""
+        backtest_request = optimizer._build_backtest_request(
+            sample_optimization_request,
+            {
+                "max_loss_percent": 0.02,
+                "max_total_exposure": 2.5,
+            }
+        )
+
+        assert isinstance(backtest_request.risk_overrides, RiskConfig)
+        assert backtest_request.risk_overrides.max_loss_percent == Decimal("0.02")
+        assert backtest_request.risk_overrides.max_total_exposure == Decimal("2.5")
+        assert backtest_request.risk_overrides.max_leverage == 20
+
+    def test_build_backtest_request_fixed_risk_overrides_override_sampled(self, optimizer, sample_optimization_request):
+        """fixed_params 中的风控参数应覆盖采样值"""
+        backtest_request = optimizer._build_backtest_request(
+            sample_optimization_request,
+            {
+                "max_loss_percent": 0.02,
+                "max_total_exposure": 2.5,
+            },
+            fixed_params={
+                "max_loss_percent": 0.015,
+                "max_total_exposure": 2.0,
+                "max_leverage": 10,
+            }
+        )
+
+        assert isinstance(backtest_request.risk_overrides, RiskConfig)
+        assert backtest_request.risk_overrides.max_loss_percent == Decimal("0.015")
+        assert backtest_request.risk_overrides.max_total_exposure == Decimal("2.0")
+        assert backtest_request.risk_overrides.max_leverage == 10
 
 
 # ============================================================

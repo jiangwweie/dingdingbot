@@ -33,6 +33,7 @@ from src.domain.models import (
     BacktestRequest,
     PMSBacktestReport,
     BacktestRuntimeOverrides,
+    RiskConfig,
 )
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.application.backtester import Backtester
@@ -668,6 +669,28 @@ class StrategyOptimizer:
             oco_enabled=True,
         )
 
+        # 风控参数通过 request.risk_overrides 注入
+        # 语义：策略过滤参数走 runtime_overrides，风控参数走 RiskConfig
+        risk_kwargs: Dict[str, Any] = {}
+        if "max_loss_percent" in params:
+            risk_kwargs["max_loss_percent"] = Decimal(str(params["max_loss_percent"]))
+        if "max_total_exposure" in params:
+            risk_kwargs["max_total_exposure"] = Decimal(str(params["max_total_exposure"]))
+
+        if fixed_params:
+            if "max_loss_percent" in fixed_params:
+                risk_kwargs["max_loss_percent"] = Decimal(str(fixed_params["max_loss_percent"]))
+            if "max_total_exposure" in fixed_params:
+                risk_kwargs["max_total_exposure"] = Decimal(str(fixed_params["max_total_exposure"]))
+            if "max_leverage" in fixed_params:
+                risk_kwargs["max_leverage"] = int(fixed_params["max_leverage"])
+
+        risk_overrides = None
+        if risk_kwargs:
+            # 回测当前默认 leverage=20；fixed_params 可显式覆写
+            risk_kwargs.setdefault("max_leverage", 20)
+            risk_overrides = RiskConfig(**risk_kwargs)
+
         # 构建请求，支持自定义滑点
         request_kwargs = {
             "symbol": opt_request.symbol,
@@ -682,6 +705,9 @@ class StrategyOptimizer:
             "strategies": strategies,
             "order_strategy": order_strategy,
         }
+
+        if risk_overrides is not None:
+            request_kwargs["risk_overrides"] = risk_overrides
 
         # 支持自定义 tp_slippage_rate
         if fixed_params and "tp_slippage_rate" in fixed_params:
