@@ -443,6 +443,9 @@ class OrderLifecycleService:
         P0 修复：统一契约，直接接收 Order 对象
         ExchangeGateway._handle_order_update() 已经解析了 CCXT 原始数据为 Order 对象
 
+        P0 修复（第二步）：使用 exchange_order_id 查询本地订单
+        ExchangeGateway 推送的 Order.id 是交易所订单 ID，不是本地订单 ID
+
         Args:
             order: 交易所推送的订单对象（已解析）
 
@@ -453,13 +456,17 @@ class OrderLifecycleService:
             OrderTransitionError: 状态转换失败
             ValueError: 订单不存在
         """
-        # P0 修复：ExchangeGateway 传入的是已解析的 Order 对象
-        order_id = order.id
+        # P0 修复（第二步）：使用 exchange_order_id 查询本地订单
+        # ExchangeGateway 推送的 Order.id 是交易所订单 ID
+        exchange_order_id = order.exchange_order_id
+
+        if not exchange_order_id:
+            raise ValueError(f"交易所订单 ID 为空，无法查询本地订单")
 
         # 从数据库获取本地订单
-        local_order = await self._get_order(order_id)
+        local_order = await self._repository.get_order_by_exchange_id(exchange_order_id)
         if not local_order:
-            raise ValueError(f"订单不存在：{order_id}")
+            raise ValueError(f"订单不存在：exchange_order_id={exchange_order_id}")
 
         # 直接从 Order 对象读取字段（已经是 Decimal 类型）
         target_status = order.status
@@ -508,7 +515,7 @@ class OrderLifecycleService:
                 await state_machine.confirm_open()
 
         await self._repository.save(local_order)
-        logger.info(f"订单根据交易所数据更新：{order_id} -> {target_status.value}")
+        logger.info(f"订单根据交易所数据更新：{local_order.id} (exchange_id={exchange_order_id}) -> {target_status.value}")
         return local_order
 
     async def cancel_order(

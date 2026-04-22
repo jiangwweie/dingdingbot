@@ -440,6 +440,30 @@ class OrderRepository:
                 return self._row_to_order(row)
             return None
 
+    async def get_order_by_exchange_id(self, exchange_order_id: str) -> Optional[Order]:
+        """
+        Get a single order by exchange order ID.
+
+        P0 修复：用于 WebSocket 订单回写时，根据交易所订单 ID 查询本地订单
+
+        Args:
+            exchange_order_id: Exchange order ID to query
+
+        Returns:
+            Order object or None if not found
+        """
+        async with self._ensure_lock():
+            cursor = await self._db.execute(
+                "SELECT * FROM orders WHERE exchange_order_id = ?",
+                (exchange_order_id,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+
+            if row:
+                return self._row_to_order(row)
+            return None
+
     async def get_orders_by_signal(self, signal_id: str) -> List[Order]:
         """
         Get all orders for a specific signal.
