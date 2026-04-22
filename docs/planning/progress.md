@@ -69,6 +69,8 @@
 4. **max_drawdown 显示 bug 修复**
    - 问题：脚本除以 100 导致显示 0.15% 而非 15.45%
    - 已修复：validate_long_only.py, validate_btc_long_only.py, run_eth_small_search.py
+   - 补充：峰谷输出曾经会乱序（peak 全局最大值 + trough 仅在刷新 max_dd 时更新，导致输出不是同一对），已在 backtester 中修正为“刷新 max_dd 时同步记录 peak/trough”。
+   - 补充：`true_equity` 下“平仓 close_pnl 与 equity 变化不一致”并不一定是 bug，通常是因为平仓前 equity 已计入浮动盈亏，平仓只是把浮动转已实现。
 
 ### 当前状态
 

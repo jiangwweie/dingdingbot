@@ -191,6 +191,11 @@
    - 主值可复算一致
    - peak/trough 输出现在保证是触发最大 drawdown 的那一对
 
+3. **为什么前几天看到的 max_drawdown 总是 0.x%（以及“峰谷时间戳乱序”的根因）** ✅
+   - 低到 `0.x%` 的核心原因是“展示口径 bug”：部分验证脚本把 `drawdown_ratio`（0~1）又除以 `100`，导致 `15.45%` 被显示成 `0.15%`（已修复）。
+   - 峰谷时间戳乱序的根因是“调试输出追踪逻辑 bug”：peak 用的是全局最大值，但 trough 只在刷新 max_dd 时更新，导致输出的 peak/trough 不是同一对；现已改为在刷新 max_dd 时同步记录该次 peak/trough。
+   - “平仓 close_pnl=-444 但 equity 只跌 -89”的现象在 `true_equity` 口径下可能是正常的：平仓前 equity 已经包含了大部分浮亏（unrealized_pnl 为负），平仓只是把浮亏转成已实现，净变化约为 `close_pnl - unrealized_before_close`。
+
 ### 新基线（可复现）
 
 > 注：该基线用于最小验证矩阵与先验分层，不代表最终最优。
