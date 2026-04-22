@@ -102,12 +102,13 @@ class PgExecutionIntentRepository:
 
     @staticmethod
     def _to_orm(intent: ExecutionIntent) -> PGExecutionIntentORM:
-        strategy_json = intent.strategy.model_dump_json() if intent.strategy else None
         return PGExecutionIntentORM(
             id=intent.id,
+            signal_id=intent.signal.id,
+            symbol=intent.signal.symbol,
             status=str(intent.status),
-            signal_json=intent.signal.model_dump_json(),
-            strategy_json=strategy_json,
+            signal_payload=intent.signal.model_dump(mode="json"),
+            strategy_payload=intent.strategy.model_dump(mode="json") if intent.strategy else None,
             order_id=intent.order_id,
             exchange_order_id=intent.exchange_order_id,
             blocked_reason=intent.blocked_reason,
@@ -119,10 +120,10 @@ class PgExecutionIntentRepository:
 
     @staticmethod
     def _to_domain(orm: PGExecutionIntentORM) -> ExecutionIntent:
-        signal = SignalResult.model_validate_json(orm.signal_json)
+        signal = SignalResult.model_validate(orm.signal_payload)
         strategy = (
-            OrderStrategy.model_validate_json(orm.strategy_json)
-            if orm.strategy_json
+            OrderStrategy.model_validate(orm.strategy_payload)
+            if orm.strategy_payload
             else None
         )
         return ExecutionIntent(

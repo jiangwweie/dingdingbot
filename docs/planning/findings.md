@@ -1,8 +1,87 @@
 # Findings Log
 
-> Last updated: 2026-04-22 10:35
+> Last updated: 2026-04-23 00:12
 
 ---
+
+## 2026-04-23 00:12 -- PG ORM 基线对齐时确认：合法值集合必须向当前领域模型收正
+
+### 新增结论
+
+1. **`orders` 的类型/状态集合必须以当前领域枚举为准**
+   - `OrderType` 当前真实值为：`MARKET / LIMIT / STOP_MARKET / STOP_LIMIT / TRAILING_STOP`
+   - `OrderStatus` 当前真实值为：`CREATED / SUBMITTED / PENDING / OPEN / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED / EXPIRED`
+   - 初版基线里混入了更通用但并非当前系统真实使用的值，已在 ORM/脚本对齐时修正
+
+2. **`execution_intents` 当前仍应保留小写状态集合**
+   - 领域模型当前真实状态为：
+     `pending / blocked / submitted / failed / protecting / partially_protected / completed`
+   - 本轮不能只改表设计、不改领域模型就强切成另一套状态体系
+
+3. **`blocked_message` 需要作为过渡兼容字段保留**
+   - 当前执行链拦截路径会同时写入 `blocked_reason` 与 `blocked_message`
+   - 若 PG 基线直接删掉 `blocked_message`，迁移时会丢失拦截上下文
+
+4. **`positions` 仍按过渡 schema 推进**
+   - 当前 PG ORM 已切到 `quantity / mark_price / unrealized_pnl / opened_at / closed_at / position_payload`
+   - 但这不等于 `PositionManager` 已迁完；这一步只是先把目标真源 schema 收口
+
+## 2026-04-22 23:58 -- PG 迁移原则收口：迁移不是搬表，必须同步修表
+
+### 新增结论
+
+1. **PG 双轨迁移不能做成 SQLite 表结构的机械复制**
+   - 如果只是把旧表 1:1 搬到 PG，会把 `TEXT` 数值字段、时间口径混乱、约束缺失这些历史包袱一起固化下来
+   - 那样虽然“迁过去了”，但并没有形成新的核心真源
+
+2. **迁移过程本身就是清理核心表设计债的窗口**
+   - 当前主线就是把 `orders / execution_intents / positions` 收口为 PG 真源
+   - 因此每迁一张核心表，都应顺手统一字段类型、时间口径、最小约束和查询索引
+
+3. **需要把这条原则写成硬约束，而不是口头约定**
+   - 后续给 Claude 的每轮迁移任务都应继承这条执行约束
+   - 若某项设计债本轮不修，必须在输出里明确说明原因
+
+4. **当前三张核心表的收口优先级不同**
+   - `orders`：必须强收口，不能继续宽松设计
+   - `execution_intents`：应一次成型，避免继续内存补丁化
+   - `positions`：先落稳定核心列 + 扩展载荷，不急于一次映射完整复杂模型
+
+## 2026-04-22 23:40 -- 后续部署候选确认：可裁出 signal-only + 飞书 webhook 轻量形态
+
+### 新增结论
+
+1. **当前系统已经具备“只做信号建议”的大部分能力**
+   - 行情输入、策略检测、过滤器链、止损/仓位试算、飞书通知能力都已存在
+   - 真正复杂的是执行链：订单编排、状态机、对账、成交回填
+
+2. **如果只保留“检测信号 + 推荐止盈止损仓位 + 飞书推送”，整体改动不大**
+   - 这更像一次系统裁剪，而不是另起一套全新系统
+   - 工作量显著小于完整订单链与对账主线
+
+3. **最合适的方向是作为后续独立分支/工作区的候选任务**
+   - 当前主线仍应聚焦执行链与对账
+   - `signal-only advisory deployment` 适合后续并行推进，不抢当前主线资源
+
+### 推荐方案
+
+- **方案 A（推荐）**：在现有系统中增加 `signal-only` / `advisory` 运行模式
+  - 保留：
+    - 行情输入
+    - 策略检测
+    - 风控试算
+    - 飞书 webhook 推送
+  - 显式关闭：
+    - 订单编排
+    - 下单执行
+    - 对账
+    - 订单状态跟踪
+    - 前端 / REST 工作台依赖
+
+### 工作量判断
+
+- 第一版落地预计 **1 ~ 3 天**
+- 若同时清理模式边界并为长期维护做结构整理，预计 **3 ~ 5 天**
 
 ## 2026-04-22 10:35 -- 回测前端方向收口：不再沿用 `web-front` 主模块，改走独立 `backtest-studio`
 

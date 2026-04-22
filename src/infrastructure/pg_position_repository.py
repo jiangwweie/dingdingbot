@@ -76,7 +76,7 @@ class PgPositionRepository:
             stmt = (
                 select(PGPositionORM)
                 .where(PGPositionORM.signal_id == signal_id)
-                .order_by(PGPositionORM.created_at.asc())
+                .order_by(PGPositionORM.opened_at.asc())
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())
