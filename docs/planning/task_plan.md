@@ -148,6 +148,17 @@
    - `signal_take_profits` 继续表示信号层建议目标位
    - 真实执行的 `TP1 / TP2 / SL` 统一进入 `orders` 订单链
    - 不新增执行层 TP 独立事实表
+7. **低频个人量化取舍**：
+   - 按低频、个人量化、加密货币场景收口
+   - 第一版保留关键真源与危险状态识别
+   - 但不引入机构级多实例协同与默认自动强平复杂度
+8. **新增必须补的边界**：
+   - `PARTIALLY_FILLED` 的保护单策略
+   - `unknown_submitted` 超时未知态
+   - 保护单提交集幂等 / 跳过已成功子单
+   - `asyncio.Lock(symbol)` 串行化执行编排
+   - `recovery_required` 后停止该币种新开仓
+   - `WS` 回写契约错位为 `P0` 前置任务
 
 > 详细设计稿：
 > [2026-04-22-minimal-live-execution-chain-design.md](/Users/jiangwei/Documents/final/docs/planning/architecture/2026-04-22-minimal-live-execution-chain-design.md)

@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-22 19:05
+> Last updated: 2026-04-22 19:40
 
 ---
 
@@ -23,6 +23,40 @@
 - 设计边界已明确：
   - `signal_take_profits` = 建议目标位
   - `orders(order_role=TP1/TP2/SL)` = 真实执行保护单
+
+### 备注
+
+- 本次仅更新文档
+- 未修改业务代码
+- 未执行测试
+
+## 2026-04-22 19:40 -- 执行层设计已按“低频个人量化”前提收敛
+
+### 本次完成
+
+1. **按目标场景收缩执行设计复杂度**
+   - 明确目标场景为：低频、个人量化、加密货币
+   - 设计原则收敛为：少功能，但关键状态必须可靠
+
+2. **补齐执行层关键边界**
+   - `PARTIALLY_FILLED` 的保护单策略
+   - `unknown_submitted` 提交超时未知态
+   - 保护单提交集幂等 / 跳过已成功子单
+   - `asyncio.Lock(symbol)` 串行化执行编排
+   - `recovery_required` 后停止对应币种新开仓
+   - `WS` 回写契约列为 `P0` 前置任务
+
+3. **同步到设计稿与 planning**
+   - 执行设计稿已补入上述边界
+   - `task_plan / findings / progress` 已同步摘要
+
+### 当前状态
+
+- 执行链设计已从抽象方案收缩为更贴近低频个人量化的 MVP 版本
+- 下一步若进入实现，优先级应为：
+  1. `WS` 回写契约修复
+  2. `ExecutionOrchestrator`
+  3. `ENTRY / PARTIAL FILL / TP/SL` 闭环
 
 ### 备注
 

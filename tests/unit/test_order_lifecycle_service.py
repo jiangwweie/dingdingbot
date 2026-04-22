@@ -20,6 +20,7 @@ Order Lifecycle Service 单元测试
 """
 import pytest
 import asyncio
+import time
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 import tempfile
@@ -335,18 +336,23 @@ class TestOrderUpdateFromExchange:
 
         await lifecycle_service.submit_order(order.id)
 
-        # 模拟交易所推送 OPEN 状态
-        exchange_data = {
-            "id": "binance_exchange_789",
-            "status": "open",
-            "filled": 0,
-            "average": None,
-        }
-
-        updated_order = await lifecycle_service.update_order_from_exchange(
-            order_id=order.id,
-            exchange_order_data=exchange_data
+        # P0 修复：模拟交易所推送 Order 对象（而非字典）
+        exchange_order = Order(
+            id=order.id,
+            signal_id=order.signal_id,
+            exchange_order_id="binance_exchange_789",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('0.5'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
         )
+
+        updated_order = await lifecycle_service.update_order_from_exchange(exchange_order)
 
         assert updated_order.status == OrderStatus.OPEN
         assert updated_order.exchange_order_id == "binance_exchange_789"
@@ -367,18 +373,24 @@ class TestOrderUpdateFromExchange:
         await lifecycle_service.submit_order(order.id)
         await lifecycle_service.confirm_order(order.id)
 
-        # 模拟交易所推送部分成交
-        exchange_data = {
-            "id": "binance_exchange_012",
-            "status": "open",
-            "filled": 0.5,
-            "average": 65000,
-        }
-
-        updated_order = await lifecycle_service.update_order_from_exchange(
-            order_id=order.id,
-            exchange_order_data=exchange_data
+        # P0 修复：模拟交易所推送 Order 对象（部分成交）
+        exchange_order = Order(
+            id=order.id,
+            signal_id=order.signal_id,
+            exchange_order_id="binance_exchange_012",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0.5'),
+            average_exec_price=Decimal('65000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
         )
+
+        updated_order = await lifecycle_service.update_order_from_exchange(exchange_order)
 
         assert updated_order.status == OrderStatus.PARTIALLY_FILLED
         assert updated_order.filled_qty == Decimal('0.5')
@@ -659,11 +671,22 @@ class TestOrderNonexistentErrors:
     @pytest.mark.asyncio
     async def test_update_from_exchange_nonexistent_order_raises_error(self, lifecycle_service):
         """测试交易所更新不存在订单抛 ValueError"""
+        # P0 修复：使用 Order 对象
+        fake_order = Order(
+            id="nonexistent_order",
+            signal_id="sig_fake",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.OPEN,
+            created_at=int(time.time() * 1000),
+            updated_at=int(time.time() * 1000),
+        )
         with pytest.raises(ValueError, match="订单不存在"):
-            await lifecycle_service.update_order_from_exchange(
-                order_id="nonexistent_order",
-                exchange_order_data={"status": "open"}
-            )
+            await lifecycle_service.update_order_from_exchange(fake_order)
 
     @pytest.mark.asyncio
     async def test_partial_fill_nonexistent_order_raises_error(self, lifecycle_service):
@@ -701,40 +724,6 @@ class TestOrderUpdateFromExchangeBranches:
     """测试 update_order_from_exchange 分支覆盖"""
 
     @pytest.mark.asyncio
-    async def test_update_from_exchange_unknown_status_logs_warning(
-        self, lifecycle_service, sample_strategy, caplog
-    ):
-        """测试未知交易所状态记录 warning"""
-        import logging
-
-        order = await lifecycle_service.create_order(
-            strategy=sample_strategy,
-            signal_id="sig_test_unknown",
-            symbol="BTC/USDT:USDT",
-            direction=Direction.LONG,
-            total_qty=Decimal('1.0'),
-            initial_sl_rr=Decimal('-1.0'),
-            tp_targets=[Decimal('1.5')],
-        )
-
-        # 模拟未知状态
-        exchange_data = {
-            "id": "binance_unknown",
-            "status": "UNKNOWN_STATUS",  # 未知状态
-        }
-
-        with caplog.at_level(logging.WARNING):
-            updated_order = await lifecycle_service.update_order_from_exchange(
-                order_id=order.id,
-                exchange_order_data=exchange_data
-            )
-
-        # 验证订单状态未变（保持 CREATED）
-        assert updated_order.status == OrderStatus.CREATED
-        # 验证记录了警告日志
-        assert "未知交易所状态" in caplog.text
-
-    @pytest.mark.asyncio
     async def test_update_from_exchange_filled_partial_qty(
         self, lifecycle_service, sample_strategy
     ):
@@ -752,18 +741,24 @@ class TestOrderUpdateFromExchangeBranches:
         await lifecycle_service.submit_order(order.id)
         await lifecycle_service.confirm_order(order.id)
 
-        # 交易所推送 FILLED 状态但只有 0.5 成交量
-        exchange_data = {
-            "id": "binance_filled_partial",
-            "status": "closed",  # closed → FILLED
-            "filled": 0.5,  # 只成交了 0.5
-            "average": 65000,
-        }
-
-        updated_order = await lifecycle_service.update_order_from_exchange(
-            order_id=order.id,
-            exchange_order_data=exchange_data
+        # P0 修复：交易所推送 PARTIALLY_FILLED 状态
+        exchange_order = Order(
+            id=order.id,
+            signal_id=order.signal_id,
+            exchange_order_id="binance_filled_partial",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0.5'),
+            average_exec_price=Decimal('65000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
         )
+
+        updated_order = await lifecycle_service.update_order_from_exchange(exchange_order)
 
         # 应该转为部分成交状态
         assert updated_order.status == OrderStatus.PARTIALLY_FILLED
@@ -787,18 +782,24 @@ class TestOrderUpdateFromExchangeBranches:
         await lifecycle_service.submit_order(order.id)
         await lifecycle_service.confirm_order(order.id)
 
-        # 交易所推送 FILLED 状态且成交量等于请求量
-        exchange_data = {
-            "id": "binance_filled_full",
-            "status": "closed",  # closed → FILLED
-            "filled": 1.0,  # 成交了 1.0
-            "average": 65000,
-        }
-
-        updated_order = await lifecycle_service.update_order_from_exchange(
-            order_id=order.id,
-            exchange_order_data=exchange_data
+        # P0 修复：交易所推送 FILLED 状态
+        exchange_order = Order(
+            id=order.id,
+            signal_id=order.signal_id,
+            exchange_order_id="binance_filled_full",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('1.0'),
+            average_exec_price=Decimal('65000'),
+            status=OrderStatus.FILLED,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
         )
+
+        updated_order = await lifecycle_service.update_order_from_exchange(exchange_order)
 
         # 应该转为完全成交状态
         assert updated_order.status == OrderStatus.FILLED
@@ -821,17 +822,23 @@ class TestOrderUpdateFromExchangeBranches:
 
         await lifecycle_service.submit_order(order.id)
 
-        # 交易所推送 CANCELED 状态
-        exchange_data = {
-            "id": "binance_canceled",
-            "status": "canceled",
-            "filled": 0,
-        }
-
-        updated_order = await lifecycle_service.update_order_from_exchange(
-            order_id=order.id,
-            exchange_order_data=exchange_data
+        # P0 修复：交易所推送 CANCELED 状态
+        exchange_order = Order(
+            id=order.id,
+            signal_id=order.signal_id,
+            exchange_order_id="binance_canceled",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.CANCELED,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
         )
+
+        updated_order = await lifecycle_service.update_order_from_exchange(exchange_order)
 
         assert updated_order.status == OrderStatus.CANCELED
 
@@ -852,17 +859,23 @@ class TestOrderUpdateFromExchangeBranches:
 
         await lifecycle_service.submit_order(order.id)
 
-        # 交易所推送 REJECTED 状态
-        exchange_data = {
-            "id": "binance_rejected",
-            "status": "rejected",
-            "info": {"msg": "Insufficient balance"}
-        }
-
-        updated_order = await lifecycle_service.update_order_from_exchange(
-            order_id=order.id,
-            exchange_order_data=exchange_data
+        # P0 修复：交易所推送 REJECTED 状态
+        exchange_order = Order(
+            id=order.id,
+            signal_id=order.signal_id,
+            exchange_order_id="binance_rejected",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0'),
+            status=OrderStatus.REJECTED,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
         )
+
+        updated_order = await lifecycle_service.update_order_from_exchange(exchange_order)
 
         assert updated_order.status == OrderStatus.REJECTED
 
@@ -870,7 +883,7 @@ class TestOrderUpdateFromExchangeBranches:
     async def test_update_from_exchange_partially_filled_explicit_status(
         self, lifecycle_service, sample_strategy
     ):
-        """测试通过 OPEN 状态 + filled_qty 触发部分成交 (覆盖行 512-516)"""
+        """测试通过 PARTIALLY_FILLED 状态触发部分成交"""
         order = await lifecycle_service.create_order(
             strategy=sample_strategy,
             signal_id="sig_test_partial_open",
@@ -884,18 +897,24 @@ class TestOrderUpdateFromExchangeBranches:
         await lifecycle_service.submit_order(order.id)
         await lifecycle_service.confirm_order(order.id)
 
-        # 交易所推送 OPEN 状态且有成交量（部分成交）
-        exchange_data = {
-            "id": "binance_partial_open",
-            "status": "open",
-            "filled": 0.3,
-            "average": 65000,
-        }
-
-        updated_order = await lifecycle_service.update_order_from_exchange(
-            order_id=order.id,
-            exchange_order_data=exchange_data
+        # P0 修复：交易所推送 PARTIALLY_FILLED 状态
+        exchange_order = Order(
+            id=order.id,
+            signal_id=order.signal_id,
+            exchange_order_id="binance_partial_open",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal('1.0'),
+            filled_qty=Decimal('0.3'),
+            average_exec_price=Decimal('65000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
         )
+
+        updated_order = await lifecycle_service.update_order_from_exchange(exchange_order)
 
         assert updated_order.status == OrderStatus.PARTIALLY_FILLED
         assert updated_order.filled_qty == Decimal('0.3')

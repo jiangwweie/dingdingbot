@@ -435,15 +435,16 @@ class OrderLifecycleService:
 
     async def update_order_from_exchange(
         self,
-        order_id: str,
-        exchange_order_data: Dict[str, Any]
+        order: Order
     ) -> Order:
         """
         根据交易所推送更新订单状态
 
+        P0 修复：统一契约，直接接收 Order 对象
+        ExchangeGateway._handle_order_update() 已经解析了 CCXT 原始数据为 Order 对象
+
         Args:
-            order_id: 订单 ID
-            exchange_order_data: 交易所订单数据（CCXT 格式）
+            order: 交易所推送的订单对象（已解析）
 
         Returns:
             更新后的订单对象
@@ -452,75 +453,63 @@ class OrderLifecycleService:
             OrderTransitionError: 状态转换失败
             ValueError: 订单不存在
         """
-        order = await self._get_order(order_id)
-        if not order:
+        # P0 修复：ExchangeGateway 传入的是已解析的 Order 对象
+        order_id = order.id
+
+        # 从数据库获取本地订单
+        local_order = await self._get_order(order_id)
+        if not local_order:
             raise ValueError(f"订单不存在：{order_id}")
 
-        # 解析交易所数据
-        exchange_status = exchange_order_data.get("status", "").upper()
-        filled_qty = Decimal(str(exchange_order_data.get("filled", 0)))
-        average_exec_price = Decimal(str(exchange_order_data.get("average", exchange_order_data.get("price", 0)))) if exchange_order_data.get("average") or exchange_order_data.get("price") else None
+        # 直接从 Order 对象读取字段（已经是 Decimal 类型）
+        target_status = order.status
+        filled_qty = order.filled_qty
+        average_exec_price = order.average_exec_price
 
-        # 映射交易所状态到系统状态
-        status_map = {
-            "OPEN": OrderStatus.OPEN,
-            "PENDING": OrderStatus.PENDING,
-            "CLOSED": OrderStatus.FILLED,
-            "CANCELED": OrderStatus.CANCELED,
-            "REJECTED": OrderStatus.REJECTED,
-            "EXPIRED": OrderStatus.EXPIRED,
-        }
+        # 获取状态机
+        state_machine = self._get_or_create_state_machine(local_order)
 
-        target_status = status_map.get(exchange_status)
-        if not target_status:
-            logger.warning(f"未知交易所状态：{exchange_status}，订单：{order_id}")
-            return order
-
-        state_machine = self._get_or_create_state_machine(order)
-
-        # 更新订单数据
-        if exchange_order_data.get("id"):
-            order.exchange_order_id = exchange_order_data["id"]
+        # 更新本地订单数据
+        if order.exchange_order_id:
+            local_order.exchange_order_id = order.exchange_order_id
         if filled_qty > 0:
-            order.filled_qty = filled_qty
+            local_order.filled_qty = filled_qty
         if average_exec_price:
-            order.average_exec_price = average_exec_price
+            local_order.average_exec_price = average_exec_price
 
         # 执行状态转换
         if target_status == OrderStatus.FILLED:
-            if filled_qty < order.requested_qty:
-                await state_machine.mark_partially_filled(
-                    filled_qty=str(filled_qty),
-                    average_exec_price=str(average_exec_price) if average_exec_price else "0"
-                )
-            else:
-                await state_machine.mark_filled(
-                    filled_qty=str(filled_qty),
-                    average_exec_price=str(average_exec_price) if average_exec_price else "0"
-                )
-        elif target_status == OrderStatus.CANCELED:
-            await state_machine.mark_canceled(oco_triggered=False)
-        elif target_status == OrderStatus.REJECTED:
-            await state_machine.mark_rejected(reason=exchange_order_data.get("info", {}).get("msg", "Unknown"))
+            # 完全成交
+            await state_machine.mark_filled(
+                filled_qty=str(filled_qty),
+                average_exec_price=str(average_exec_price) if average_exec_price else "0"
+            )
         elif target_status == OrderStatus.PARTIALLY_FILLED:
+            # 部分成交
             await state_machine.mark_partially_filled(
                 filled_qty=str(filled_qty),
                 average_exec_price=str(average_exec_price) if average_exec_price else "0"
             )
+        elif target_status == OrderStatus.CANCELED:
+            # 取消订单
+            await state_machine.mark_canceled(oco_triggered=False)
+        elif target_status == OrderStatus.REJECTED:
+            # 拒绝订单
+            await state_machine.mark_rejected(reason="Exchange rejected")
         elif target_status == OrderStatus.OPEN:
             # 订单开放但有成交量 → 部分成交
-            if filled_qty > 0 and filled_qty < order.requested_qty:
+            if filled_qty > 0 and filled_qty < local_order.requested_qty:
                 await state_machine.mark_partially_filled(
                     filled_qty=str(filled_qty),
                     average_exec_price=str(average_exec_price) if average_exec_price else "0"
                 )
             # 订单开放且无成交量 → 确认挂单
-            elif order.status != OrderStatus.OPEN:
+            elif local_order.status != OrderStatus.OPEN:
                 await state_machine.confirm_open()
 
-        await self._repository.save(order)
+        await self._repository.save(local_order)
         logger.info(f"订单根据交易所数据更新：{order_id} -> {target_status.value}")
-        return order
+        return local_order
 
     async def cancel_order(
         self,

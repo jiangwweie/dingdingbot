@@ -12,6 +12,16 @@
 
 当前策略研究阶段已经基本收口，后续重点不再是继续加参数，而是把执行链整理成**单入口、可追踪、可恢复、可告警**的最小闭环。
 
+本设计稿默认服务于以下场景：
+
+- **低频**
+- **个人量化**
+- **加密货币**
+
+因此第一版执行链的设计原则不是“机构级全自动自愈”，而是：
+
+**低频、强约束、宁可少做，也不能做错。**
+
 本设计稿的目标是：
 
 1. 明确自动执行的唯一主链
@@ -27,6 +37,8 @@
 2. 不把 API 下单链改造成自动执行入口
 3. 不在第一版默认加入“保护单失败后自动强平”
 4. 不试图一次性解决所有高级恢复与自愈逻辑
+5. 不引入机构级多实例分布式协调复杂度
+6. 不把复杂挂单型 ENTRY 策略作为 MVP 目标
 
 ---
 
@@ -70,6 +82,17 @@
 - 存在“先打交易所、后补本地状态”的风险
 - API 更适合作为人工控制与调试接口，而不是内部自动执行主控链
 
+### 2.5 场景驱动的复杂度约束
+
+**决策**：第一版执行链按“低频个人量化”标准收口，不追求过度自动化。
+
+具体体现为：
+
+1. 默认使用 `Market ENTRY` 以尽量降低挂起单复杂度
+2. 仍然必须兼容 `PARTIALLY_FILLED`，但不把复杂挂单型 ENTRY 编排作为 MVP 目标
+3. 第一版先做“重试 + 告警 + 停止新开仓”，不默认自动强平
+4. 第一版只做单进程 `asyncio.Lock(symbol)` 串行化，不做多实例分布式协调
+
 ---
 
 ## 三、模块职责边界
@@ -102,6 +125,8 @@
 7. 监听 `ENTRY filled`
 8. 生成并提交 TP/SL
 9. 管理 `entry_filled_unprotected -> protected / recovery_required` 流程
+10. 在单进程内按 `symbol` 串行化执行编排
+11. 当某个 `symbol` 进入 `recovery_required` 时，拒绝该 `symbol` 后续新信号进入执行链
 
 不负责：
 
@@ -180,6 +205,25 @@
 
 因此，后续 PG first scope 应迁移/重建的是执行层 `orders` 事实链，而不是额外设计一张重复语义的 TP 专表。
 
+### 3.7 单进程锁与币种级熔断
+
+考虑到当前目标是低频个人量化，第一版采用以下最小并发与熔断策略：
+
+1. **`asyncio.Lock(symbol)`**
+   - `ExecutionOrchestrator` 为每个 `symbol` 持有一把内存锁
+   - 保证同一币种同一时刻只存在一条执行编排链
+   - 这是第一道并发保护，但不替代数据库真源和对账修复
+
+2. **symbol 级熔断**
+   - 当某个币种进入 `recovery_required`
+   - orchestrator 必须拒绝该币种新的 `SignalResult`
+   - 同时发出高优先级告警
+
+设计意图：
+
+- 先控制低级并发和风险扩散
+- 不在第一版引入复杂的全局熔断矩阵
+
 ---
 
 ## 四、最小状态流
@@ -192,6 +236,7 @@
 - `blocked`
 - `submitting`
 - `submitted`
+- `unknown_submitted`
 - `handed_off`
 - `failed`
 
@@ -201,8 +246,9 @@
 - `blocked`：保护检查未通过，不进入交易所
 - `submitting`：正在向交易所发 ENTRY
 - `submitted`：交易所已接受 / 已拿到订单标识
+- `unknown_submitted`：提交请求已发起，但因超时/网络异常无法确认交易所是否已接收
 - `handed_off`：已交给订单生命周期和后续保护单闭环
-- `failed`：提交阶段失败
+- `failed`：明确知道未发出或已被明确拒绝
 
 ### 4.2 主链事件流
 
@@ -215,13 +261,32 @@
 5. 调 `OrderLifecycleService.create_order()` 创建本地主单
 6. `ExecutionIntent -> submitting`
 7. 调 `ExchangeGateway.place_order()` 提交 ENTRY
-8. 回填 `exchange_order_id`
+8. 若收到明确提交成功结果：回填 `exchange_order_id`
 9. 推进订单到 `submitted/open`
-10. 监听 `ENTRY filled`
-11. 进入 `entry_filled_unprotected`
-12. 基于真实成交价和成交量，生成 `orders` 子单（`TP1 / TP2 / SL`）并提交
-13. 若保护单全部确认挂单，状态转为 `protected`
-14. 若失败且短时重试后仍未完成，转为 `recovery_required`
+10. 若提交超时 / 网络异常且无法确认是否已接收：转入 `unknown_submitted`
+11. `unknown_submitted` 必须交给专项确认 / `ReconciliationService`，不得直接标记为 `failed`
+12. 监听 `ENTRY filled` / `ENTRY partially_filled`
+13. 进入 `entry_filled_unprotected`
+14. 基于真实成交价和**当前已成交量**，生成 `orders` 子单（`TP1 / TP2 / SL`）并提交
+15. 若后续继续成交，按增量成交量补挂剩余保护单
+16. 若保护单全部确认挂单，状态转为 `protected`
+17. 若失败且短时重试后仍未完成，转为 `recovery_required`
+
+### 4.3 Partial Fill 原则
+
+第一版默认使用 `Market ENTRY` 来尽量减少挂起单复杂度，但**执行链仍必须兼容 `PARTIALLY_FILLED`**。
+
+原因：
+
+- `Market` 并不从工程上保证永远不会出现部分成交
+- `IOC` 也天然可能出现“部分成交 + 剩余取消”
+
+因此，MVP 的明确原则是：
+
+1. 一旦 ENTRY 出现 `PARTIALLY_FILLED`
+2. 必须立刻针对**已成交部分**挂出等比例保护单
+3. 若后续继续成交，必须按新增成交量补挂剩余保护单
+4. 不允许让已成交仓位长期处于“无保护单覆盖”状态
 
 ---
 
@@ -256,7 +321,27 @@
 3. 必须支持短时重试
 4. 未退出前不能把该笔交易标记为“执行完成”
 
-### 5.3 超时处理原则
+### 5.3 保护单“跛脚”状态与幂等要求
+
+第一版必须考虑保护单部分成功的场景，例如：
+
+- `SL` 已成功挂单
+- `TP1` 因频控或网络错误提交失败
+- `TP2` 尚未提交
+
+此时系统不能：
+
+- 把状态误判为“全部失败”
+- 或在重试时重复提交已经成功的保护单
+
+因此，`ExecutionOrchestrator` 对保护单提交集必须具备最小幂等跟踪能力：
+
+1. 按 `order_role` 记录本地保护单是否已经创建
+2. 按 `order_role` 记录是否已经拿到 `exchange_order_id`
+3. 重试时跳过已成功挂单的保护单，只补失败部分
+4. 只有在“所有必须保护单均成功”后，才能进入 `protected`
+
+### 5.4 超时处理原则
 
 第一版建议采用：
 
@@ -269,6 +354,13 @@
 - 自动强平会引入新的复杂失败分支
 - 当前阶段应先把危险状态识别、重试、告警做好
 - 强平策略可作为第二阶段能力单独设计
+
+但对于提交超时的 `ENTRY`，必须额外区分：
+
+- **明确失败**：才能进入 `failed`
+- **超时未知**：必须进入 `unknown_submitted`
+
+不能把“网络超时、不知道交易所是否已接收”的场景直接落成 `failed`，否则可能制造真实幽灵仓位
 
 ---
 
@@ -295,6 +387,20 @@
 这意味着现有 WS 回写协议可能并未完全对齐。
 
 **这应作为第一优先级核对项。**
+
+更进一步，这个问题应被视为执行链实现前的 **P0 前置任务**：
+
+1. 统一 WS 全局回写契约
+2. 修正 `ExchangeGateway -> OrderLifecycleService` 参数适配
+3. 补最小单测，验证：
+   - `OPEN -> PARTIALLY_FILLED`
+   - `PARTIALLY_FILLED -> FILLED`
+   - `OPEN/PARTIALLY_FILLED -> CANCELED`
+
+理由：
+
+- 这是异步状态推进的基石
+- 若契约错位，后续 orchestrator 的状态编排都会建立在不稳定回写之上
 
 ### 6.3 CapitalProtection 不能只挂在 API 前置检查
 
@@ -324,10 +430,11 @@
 
 ### P2：保护单闭环
 
-1. 监听 `ENTRY filled`
+1. 监听 `ENTRY filled / partially_filled`
 2. 生成并提交 TP/SL
 3. 明确 `entry_filled_unprotected`
-4. 完成 `protected / recovery_required` 状态流
+4. 处理保护单幂等与补挂
+5. 完成 `protected / recovery_required` 状态流
 
 ### P3：恢复与验收
 
@@ -343,10 +450,13 @@
 
 1. 自动执行不经过 API
 2. 每笔执行先有本地执行意图和本地主单
-3. ENTRY 成交后能自动挂 TP/SL
+3. ENTRY 成交或部分成交后能自动挂 TP/SL
 4. `entry_filled_unprotected` 可见、可告警、可重试
 5. 保护单挂载失败会进入 `recovery_required`
-6. 整条链路有可追踪日志与审计记录
+6. `unknown_submitted` 会触发专项确认，而非直接失败
+7. 同一 `symbol` 在单进程内不会并发进入两条执行编排链
+8. `recovery_required` 后会拒绝该币种新开仓
+9. 整条链路有可追踪日志与审计记录
 
 ---
 
