@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-22 22:55
-> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，同时已完成“SQLite 保留可用 + PG 新增实现 + 核心表先切 PG”的设计与最小骨架
+> **Last updated**: 2026-04-22 23:45
+> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成首批启动装配接线（order repo 工厂生效，execution_intent repo 启动位已接）
 
 ---
 
@@ -205,6 +205,31 @@
 1. 尚未把 `ExecutionOrchestrator` 正式接到 PG intent repo
 2. 尚未把 `StartupReconciliationService` 正式切到 PG order repo
 3. 尚未执行测试（仅做了语法级检查）
+
+### 核心接线进度（更新，2026-04-22 23:45）
+
+当前已完成：
+
+1. `ExecutionOrchestrator` 已支持注入 `ExecutionIntentRepositoryPort`
+2. `ExecutionIntent` 新建、状态推进、partial-fill 回调后的状态更新，均可通过统一 helper 落到仓储
+3. partial-fill 路径已支持通过 `order_id` 从仓储恢复 `ExecutionIntent`
+4. 已新增 `core_repository_factory.py`：
+   - `CORE_ORDER_BACKEND` 现在可真正选择 SQLite / PG 订单仓储实现
+   - `CORE_EXECUTION_INTENT_BACKEND` 可决定是否初始化 PG 执行意图仓储
+5. API `lifespan()` 已开始托管：
+   - order repo 工厂装配
+   - `ExecutionIntentRepository` 的初始化与关闭
+6. PG 严格模式已补上：
+   - 仅当核心后端明确配置为 `postgres` 时才触发
+   - `PG_DATABASE_URL` 缺失/非法时，启动阶段直接按 `F-003` 失败
+   - 默认 SQLite 链路不受影响
+
+当前仍未做：
+
+1. `ExecutionOrchestrator` 仍未进入当前运行时装配链，因此 `execution_intents` 还没形成真正的主链真源
+2. `ExecutionOrchestrator.get_intent()/list_intents()` 仍主要面向本地缓存
+3. `main.py` 嵌入模式尚未复用同一套核心仓储工厂
+4. 尚未把 `StartupReconciliationService` / 更多核心服务正式切到 PG
 
 ### 执行层设计决策（新增）
 

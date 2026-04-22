@@ -39,6 +39,7 @@ from src.application.capital_protection import CapitalProtectionManager
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
+from src.infrastructure.repository_ports import ExecutionIntentRepositoryPort
 
 
 class ExecutionOrchestrator:
@@ -58,6 +59,7 @@ class ExecutionOrchestrator:
         capital_protection: CapitalProtectionManager,
         order_lifecycle: OrderLifecycleService,
         gateway: ExchangeGateway,
+        intent_repository: Optional[ExecutionIntentRepositoryPort] = None,
     ):
         """
         初始化执行编排器
@@ -66,10 +68,12 @@ class ExecutionOrchestrator:
             capital_protection: 资金保护管理器
             order_lifecycle: 订单生命周期服务
             gateway: 交易所网关
+            intent_repository: 执行意图仓储（可选，未提供时退回内存态）
         """
         self._capital_protection = capital_protection
         self._order_lifecycle = order_lifecycle
         self._gateway = gateway
+        self._intent_repository = intent_repository
 
         # MVP 阶段：内存存储 ExecutionIntent
         # 后续可迁移到数据库持久化
@@ -79,6 +83,25 @@ class ExecutionOrchestrator:
         self._order_lifecycle.set_entry_partially_filled_callback(
             self._handle_entry_partially_filled
         )
+
+    async def _save_intent(self, intent: ExecutionIntent) -> None:
+        """保存执行意图到本地缓存，并按需持久化到仓储。"""
+        self._intents[intent.id] = intent
+        if self._intent_repository is not None:
+            await self._intent_repository.save(intent)
+
+    async def _load_intent_by_order_id(self, order_id: str) -> Optional[ExecutionIntent]:
+        """按订单 ID 获取执行意图，优先仓储，回退本地缓存。"""
+        if self._intent_repository is not None:
+            intent = await self._intent_repository.get_by_order_id(order_id)
+            if intent is not None:
+                self._intents[intent.id] = intent
+                return intent
+
+        for stored_intent in self._intents.values():
+            if stored_intent.order_id == order_id:
+                return stored_intent
+        return None
 
     async def execute_signal(
         self,
@@ -114,7 +137,7 @@ class ExecutionOrchestrator:
             status=ExecutionIntentStatus.PENDING,
             strategy=strategy_snapshot,
         )
-        self._intents[intent_id] = intent
+        await self._save_intent(intent)
 
         logger.info(
             f"[ExecutionOrchestrator] 开始执行信号: "
@@ -144,6 +167,7 @@ class ExecutionOrchestrator:
                 f"message={check_result.reason_message}"
             )
 
+            await self._save_intent(intent)
             return intent
 
         logger.info(
@@ -178,6 +202,7 @@ class ExecutionOrchestrator:
                 f"intent_id={intent_id}, error={e}"
             )
 
+            await self._save_intent(intent)
             return intent
 
         # 4. 提交 ENTRY 到交易所
@@ -215,6 +240,7 @@ class ExecutionOrchestrator:
                     f"error_message={placement_result.error_message}"
                 )
 
+                await self._save_intent(intent)
                 return intent
 
             logger.info(
@@ -288,6 +314,7 @@ class ExecutionOrchestrator:
                         f"intent_id={intent_id}, error={protection_result['error']}"
                     )
 
+                await self._save_intent(intent)
                 return intent
 
             elif placement_result.status == OrderStatus.PARTIALLY_FILLED:
@@ -322,6 +349,7 @@ class ExecutionOrchestrator:
                     f"[ExecutionOrchestrator] 执行意图状态: SUBMITTED（部分成交，等待后续处理）"
                 )
 
+                await self._save_intent(intent)
                 return intent
 
             elif placement_result.status in (OrderStatus.CANCELED, OrderStatus.REJECTED):
@@ -343,6 +371,7 @@ class ExecutionOrchestrator:
                         f"intent_id={intent_id}, order_id={order.id}"
                     )
 
+                    await self._save_intent(intent)
                     return intent
 
                 else:
@@ -357,6 +386,7 @@ class ExecutionOrchestrator:
                         f"intent_id={intent_id}, order_id={order.id}"
                     )
 
+                    await self._save_intent(intent)
                     return intent
 
             else:
@@ -380,6 +410,7 @@ class ExecutionOrchestrator:
                 f"final_status={placement_result.status}"
             )
 
+            await self._save_intent(intent)
             return intent
 
         except Exception as e:
@@ -394,6 +425,7 @@ class ExecutionOrchestrator:
                 f"intent_id={intent_id}, order_id={order.id}, error={e}"
             )
 
+            await self._save_intent(intent)
             return intent
 
     async def _mount_protection_orders(
@@ -590,11 +622,7 @@ class ExecutionOrchestrator:
         )
 
         # 查找对应的 ExecutionIntent
-        intent = None
-        for stored_intent in self._intents.values():
-            if stored_intent.order_id == entry_order.id:
-                intent = stored_intent
-                break
+        intent = await self._load_intent_by_order_id(entry_order.id)
 
         if not intent:
             logger.warning(
@@ -792,6 +820,7 @@ class ExecutionOrchestrator:
                 f"intent_id={intent.id}, status={intent.status}, "
                 f"delta_qty={delta_qty}"
             )
+            await self._save_intent(intent)
 
         except Exception as e:
             logger.error(

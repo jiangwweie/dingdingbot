@@ -24,6 +24,7 @@ from src.domain.risk_calculator import RiskConfig
 from src.domain.models import KlineData
 from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, ConnectionLostError
 from src.infrastructure.logger import logger, setup_logger, register_secret
+from src.infrastructure.database import validate_pg_core_configuration
 
 
 # ============================================================
@@ -119,6 +120,14 @@ async def run_application():
     setup_signal_handlers(loop)
 
     try:
+        # =============================================
+        # Preflight: Validate PG core backend configuration
+        # =============================================
+        try:
+            validate_pg_core_configuration()
+        except ValueError as e:
+            raise FatalStartupError(str(e), "F-003")
+
         # =============================================
         # Phase 1: Load Configuration
         # =============================================

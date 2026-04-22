@@ -39,6 +39,9 @@ class OrderRepositoryPort(Protocol):
     async def get_orders_by_signal(self, signal_id: str) -> List[Order]:
         ...
 
+    async def get_orders_by_symbol(self, symbol: str, limit: int = 100) -> List[Order]:
+        ...
+
     async def get_orders_by_status(
         self,
         status: OrderStatus,

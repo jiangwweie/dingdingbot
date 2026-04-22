@@ -1,6 +1,74 @@
 # Progress Log
 
-> Last updated: 2026-04-22 22:55
+> Last updated: 2026-04-22 23:45
+
+---
+
+## 2026-04-22 23:20 -- ExecutionOrchestrator 已接入 intent repo 协议，PG 严格模式已前置
+
+### 本次完成
+
+1. **ExecutionOrchestrator 接入 `ExecutionIntentRepositoryPort`**
+   - 新增可选 `intent_repository` 注入
+   - 新建 intent、状态推进、partial-fill 状态更新可统一持久化
+   - 仓储未注入时仍回退到原有内存缓存
+
+2. **partial-fill 路径支持按 `order_id` 从仓储恢复 intent**
+   - 不再只依赖本地 `_intents` 遍历查找
+   - 为后续重启恢复和 PG 真源接线打底
+
+3. **PG 严格模式前置校验**
+   - 新增核心后端配置校验
+   - 仅当 `CORE_*_BACKEND=postgres` 时才要求 `PG_DATABASE_URL`
+   - 主程序与 API lifespan 启动阶段均会触发该校验
+   - 缺失/非法配置按 `F-003` 启动失败
+
+4. **轻量验证**
+   - 对本次修改文件完成 AST 级语法检查
+
+### 当前状态
+
+- PG 双轨迁移已从“纯骨架”进入“核心依赖接线”阶段
+- 但还未真正把运行时 wiring 切到 `PgExecutionIntentRepository`
+- 也还未开始测试执行
+
+### 备注
+
+- 本次未执行单元测试/集成测试（按项目红线，测试前需用户确认）
+- 下一步最自然的是：启动阶段正式注入 `PgExecutionIntentRepository`
+
+---
+
+## 2026-04-22 23:45 -- PG 双轨启动装配已补到 API lifespan
+
+### 本次完成
+
+1. **新增核心仓储工厂**
+   - 新增 `src/infrastructure/core_repository_factory.py`
+   - `CORE_ORDER_BACKEND` 现在可真正选择 `OrderRepository` 或 `PgOrderRepository`
+   - `CORE_EXECUTION_INTENT_BACKEND` 可决定是否初始化 `PgExecutionIntentRepository`
+
+2. **API 启动阶段开始托管 PG 核心仓储**
+   - `lifespan()` 现在通过工厂初始化 order repo
+   - `ExecutionIntentRepository` 会在启用 PG 时一并初始化、关闭
+   - SQLite 链路继续可跑，不受 PG 未启用场景影响
+
+3. **双实现兼容细节已处理**
+   - 只在仓储具备对应 setter 时才注入 `exchange_gateway` / `audit_logger`
+   - 避免把 SQLite 专属注入逻辑强塞给 PG repo
+
+4. **轻量验证**
+   - 对 `core_repository_factory.py`、`database.py`、`api.py`、`main.py`、`execution_orchestrator.py` 完成 AST 级语法检查
+
+### 当前状态
+
+- `CORE_ORDER_BACKEND=postgres` 已开始真正生效于 API 启动装配
+- `ExecutionIntentRepository` 已有启动位，但 `ExecutionOrchestrator` 仍未进入当前运行时装配链
+- 因此 `execution_intents` 目前属于“repo 与生命周期已准备好，主链注入待下一步”
+
+### 备注
+
+- 本次仍未执行单元测试/集成测试（按项目红线，测试前需用户确认）
 
 ---
 

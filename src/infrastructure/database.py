@@ -28,6 +28,9 @@ DATABASE_URL = os.getenv(
 )
 
 PG_DATABASE_URL = os.getenv("PG_DATABASE_URL")
+CORE_ORDER_BACKEND = os.getenv("CORE_ORDER_BACKEND", "sqlite").lower()
+CORE_EXECUTION_INTENT_BACKEND = os.getenv("CORE_EXECUTION_INTENT_BACKEND", "sqlite").lower()
+CORE_POSITION_BACKEND = os.getenv("CORE_POSITION_BACKEND", "sqlite").lower()
 
 
 def create_engine(db_url: Optional[str] = None) -> AsyncEngine:
@@ -93,6 +96,43 @@ def create_pg_engine(db_url: Optional[str] = None) -> AsyncEngine:
         pool_size=10,
         max_overflow=20,
     )
+
+
+def get_core_backend_settings() -> dict[str, str]:
+    """获取核心链路后端配置。"""
+    return {
+        "order": CORE_ORDER_BACKEND,
+        "execution_intent": CORE_EXECUTION_INTENT_BACKEND,
+        "position": CORE_POSITION_BACKEND,
+    }
+
+
+def validate_pg_core_configuration() -> None:
+    """严格校验 PG 核心链路配置。
+
+    仅当任一核心后端明确设置为 `postgres` 时才要求 `PG_DATABASE_URL`。
+    默认 SQLite 链路不受影响。
+    """
+    backends = get_core_backend_settings()
+    invalid = {name: backend for name, backend in backends.items() if backend not in {"sqlite", "postgres"}}
+    if invalid:
+        raise ValueError(
+            "核心后端配置非法，允许值仅为 sqlite/postgres: "
+            + ", ".join(f"{name}={backend}" for name, backend in invalid.items())
+        )
+
+    if "postgres" not in backends.values():
+        return
+
+    if not PG_DATABASE_URL:
+        raise ValueError(
+            "PG_DATABASE_URL 未配置，但核心后端已选择 postgres；请显式配置 PostgreSQL DSN"
+        )
+
+    if not PG_DATABASE_URL.startswith("postgresql"):
+        raise ValueError(
+            f"PG_DATABASE_URL 必须是 PostgreSQL DSN，当前为: {PG_DATABASE_URL}"
+        )
 
 
 def get_pg_engine() -> AsyncEngine:

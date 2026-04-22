@@ -695,7 +695,7 @@ class OrderLifecycleService:
         Returns:
             订单列表
         """
-        return await self._repository.get_by_signal_id(signal_id)
+        return await self._repository.get_orders_by_signal(signal_id)
 
     async def get_orders_by_symbol(self, symbol: str) -> List[Order]:
         """
@@ -707,7 +707,7 @@ class OrderLifecycleService:
         Returns:
             订单列表
         """
-        return await self._repository.get_by_symbol(symbol)
+        return await self._repository.get_orders_by_symbol(symbol)
 
     async def get_orders_by_status(self, status: OrderStatus) -> List[Order]:
         """
@@ -719,7 +719,7 @@ class OrderLifecycleService:
         Returns:
             订单列表
         """
-        return await self._repository.get_by_status(status.value)
+        return await self._repository.get_orders_by_status(status)
 
     async def get_open_orders(self) -> List[Order]:
         """

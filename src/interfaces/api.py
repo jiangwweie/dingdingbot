@@ -48,7 +48,11 @@ from src.domain.exceptions import (
 )
 
 from src.infrastructure.signal_repository import SignalRepository
-from src.infrastructure.order_repository import OrderRepository
+from src.infrastructure.core_repository_factory import (
+    create_execution_intent_repository,
+    create_order_repository,
+)
+from src.infrastructure.database import validate_pg_core_configuration
 from src.application.config_manager import UserConfig, ConfigManager
 from src.domain.models import (
     SignalQuery, SignalDeleteRequest, SignalDeleteResponse,
@@ -241,6 +245,7 @@ _signal_tracker: Optional[Any] = None  # SignalStatusTracker instance
 _snapshot_service: Optional[Any] = None  # ConfigSnapshotService instance
 _config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
 _order_repo: Optional[Any] = None  # OrderRepository instance
+_execution_intent_repo: Optional[Any] = None  # ExecutionIntentRepository instance
 _audit_logger: Optional[Any] = None  # OrderAuditLogger instance
 _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
 
@@ -257,6 +262,7 @@ def set_dependencies(
     snapshot_service: Optional[Any] = None,
     config_entry_repo: Optional[Any] = None,
     order_repo: Optional[Any] = None,
+    execution_intent_repo: Optional[Any] = None,
     audit_logger: Optional[Any] = None,
     order_lifecycle_service: Optional[Any] = None,
     # Config repositories (unified with api_v1_config.py)
@@ -280,6 +286,7 @@ def set_dependencies(
         snapshot_service: Optional ConfigSnapshotService instance
         config_entry_repo: Optional ConfigEntryRepository instance
         order_repo: Optional OrderRepository instance
+        execution_intent_repo: Optional ExecutionIntentRepository instance
         audit_logger: Optional OrderAuditLogger instance
         order_lifecycle_service: Optional OrderLifecycleService instance
         strategy_repo: Optional StrategyConfigRepository instance
@@ -290,7 +297,7 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _audit_logger, _order_lifecycle_service
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _audit_logger, _order_lifecycle_service
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
@@ -300,6 +307,7 @@ def set_dependencies(
     _snapshot_service = snapshot_service
     _config_entry_repo = config_entry_repo
     _order_repo = order_repo
+    _execution_intent_repo = execution_intent_repo
     _audit_logger = audit_logger
     _order_lifecycle_service = order_lifecycle_service
     # Config repositories - stored in shared module (avoids circular imports)
@@ -414,10 +422,15 @@ async def lifespan(app: FastAPI):
     from src.infrastructure.signal_repository import SignalRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
 
-    global _repository, _config_entry_repo, _order_repo, _config_manager
+    global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
 
     # Startup - 初始化所有 Repository
     try:
+        try:
+            validate_pg_core_configuration()
+        except ValueError as e:
+            raise FatalStartupError(str(e), "F-003")
+
         # 初始化 SignalRepository（幂等）
         if _repository is None:
             _repository = SignalRepository()
@@ -446,18 +459,22 @@ async def lifespan(app: FastAPI):
         _audit_logger = OrderAuditLogger(audit_repo)
         logger.info("OrderAuditLogger initialized as global singleton")
 
-        # Initialize OrderRepository if not already set (ORD-1-T5)
-        # This ensures we have an order repo for the lifecycle service
+        # Initialize core repositories if not already set
         if _order_repo is None:
-            from src.infrastructure.order_repository import OrderRepository
-            _order_repo = OrderRepository()
+            _order_repo = create_order_repository()
             await _order_repo.initialize()
             # Auto-inject dependencies
-            if _exchange_gateway:
+            if _exchange_gateway and hasattr(_order_repo, "set_exchange_gateway"):
                 _order_repo.set_exchange_gateway(_exchange_gateway)
-            if _audit_logger:
+            if _audit_logger and hasattr(_order_repo, "set_audit_logger"):
                 _order_repo.set_audit_logger(_audit_logger)
             logger.info("OrderRepository initialized in lifespan")
+
+        if _execution_intent_repo is None:
+            _execution_intent_repo = create_execution_intent_repository()
+            if _execution_intent_repo is not None:
+                await _execution_intent_repo.initialize()
+                logger.info("ExecutionIntentRepository initialized in lifespan")
 
         # Initialize OrderLifecycleService (ORD-1-T5)
         from src.application.order_lifecycle_service import OrderLifecycleService
@@ -548,6 +565,10 @@ async def lifespan(app: FastAPI):
         if _config_entry_repo is not None:
             await _config_entry_repo.close()
             logger.info("ConfigEntryRepository closed")
+
+        if _execution_intent_repo is not None:
+            await _execution_intent_repo.close()
+            logger.info("ExecutionIntentRepository closed")
 
         # Shutdown OrderLifecycleService (ORD-1-T5)
         if _order_lifecycle_service is not None:

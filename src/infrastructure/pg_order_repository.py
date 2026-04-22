@@ -66,6 +66,17 @@ class PgOrderRepository:
             result = await session.execute(stmt)
             return [self._to_domain(orm) for orm in result.scalars().all()]
 
+    async def get_orders_by_symbol(self, symbol: str, limit: int = 100) -> List[Order]:
+        async with self._session_maker() as session:
+            stmt = (
+                select(PGOrderORM)
+                .where(PGOrderORM.symbol == symbol)
+                .order_by(PGOrderORM.created_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [self._to_domain(orm) for orm in result.scalars().all()]
+
     async def get_orders_by_status(
         self,
         status: OrderStatus,

@@ -1,6 +1,36 @@
 # Findings Log
 
-> Last updated: 2026-04-22 22:55
+> Last updated: 2026-04-22 23:45
+
+---
+
+## 2026-04-22 23:20 -- 核心接线原则确认：先让 orchestrator 认 repo，再让启动 wiring 认 PG
+
+### 新增结论
+
+1. **核心依赖切换要分两步**
+   先让应用服务支持协议/仓储注入，再在启动阶段绑定具体 PG 实现。不能反过来先改 wiring，否则会把 SQLite/PG 双轨混接得很难排查。
+
+2. **`ExecutionIntent` 是最适合先接线的核心真源**
+   因为它当前历史包袱最少，又直接影响 partial-fill、重启恢复和执行链上下文延续。
+
+3. **PG 严格模式必须是“显式启用才生效”**
+   迁移期内，如果核心后端还是 SQLite，就不应该因为缺少 `PG_DATABASE_URL` 影响启动；只有明确把某个核心后端切到 `postgres`，才应按 `F-003` 严格失败。
+
+---
+
+## 2026-04-22 23:45 -- 双轨装配收口：先让工厂接管 order repo，再预留 execution_intent repo 启动位
+
+### 新增结论
+
+1. **核心后端开关不能只校验、不生效**
+   如果已经引入 `CORE_ORDER_BACKEND` / `CORE_EXECUTION_INTENT_BACKEND`，启动阶段就必须真正根据配置实例化对应实现；否则会出现“配置看起来切了 PG，实际仍在跑 SQLite”的隐性错配。
+
+2. **`orders` 比 `execution_intents` 更适合先完成工厂接线**
+   因为 `OrderLifecycleService` 已经运行在主链上，先让 `CORE_ORDER_BACKEND` 真正控制仓储实现，能立即验证双轨工厂设计是否站得住。
+
+3. **`execution_intents` 当前先做到“启动期可初始化”，不急着强塞进主链**
+   `ExecutionOrchestrator` 还没有正式接到当前运行时装配路径里，因此这一步先把 repo 初始化和生命周期托管接上即可，后续再做 orchestrator 的真实注入，不会把边界揉乱。
 
 ---
 
