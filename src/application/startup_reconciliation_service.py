@@ -239,10 +239,27 @@ class StartupReconciliationService:
                         f"P0-4: 跳过已对账订单: order_id={order_id} "
                         f"（已在阶段 2 对账成功）"
                     )
-                    # 仍然需要清除 pending_recovery 记录
-                    self._orchestrator.clear_pending_recovery(order_id)
-                    orchestrator_recovery_cleared_count += 1
-                    logger.info(f"P0-4: ✅ 清除待恢复记录: order_id={order_id}")
+                    # P0-4.1：检查本地订单状态，只有终态才清除 pending_recovery
+                    local_order = await self._repository.get_order(order_id)
+                    if local_order:
+                        terminal_statuses = {
+                            OrderStatus.CANCELED,
+                            OrderStatus.FILLED,
+                            OrderStatus.REJECTED,
+                            OrderStatus.EXPIRED,
+                        }
+                        if local_order.status in terminal_statuses:
+                            self._orchestrator.clear_pending_recovery(order_id)
+                            orchestrator_recovery_cleared_count += 1
+                            logger.info(
+                                f"P0-4.1: ✅ 清除待恢复记录（终态）: order_id={order_id}, "
+                                f"status={local_order.status}"
+                            )
+                        else:
+                            logger.info(
+                                f"P0-4.1: ⏸️ 保留待恢复记录（非终态）: order_id={order_id}, "
+                                f"status={local_order.status}"
+                            )
                     continue
 
                 try:
@@ -290,10 +307,26 @@ class StartupReconciliationService:
                         f"本地状态={local_order.status} -> {updated_order.status}"
                     )
 
-                    # 清除 pending_recovery 记录
-                    self._orchestrator.clear_pending_recovery(order_id)
-                    orchestrator_recovery_cleared_count += 1
-                    logger.info(f"P0-4: ✅ 清除待恢复记录: order_id={order_id}")
+                    # P0-4.1：只有终态才清除 pending_recovery 记录
+                    terminal_statuses = {
+                        OrderStatus.CANCELED,
+                        OrderStatus.FILLED,
+                        OrderStatus.REJECTED,
+                        OrderStatus.EXPIRED,
+                    }
+
+                    if exchange_order_result.status in terminal_statuses:
+                        self._orchestrator.clear_pending_recovery(order_id)
+                        orchestrator_recovery_cleared_count += 1
+                        logger.info(
+                            f"P0-4.1: ✅ 清除待恢复记录（终态）: order_id={order_id}, "
+                            f"status={exchange_order_result.status}"
+                        )
+                    else:
+                        logger.info(
+                            f"P0-4.1: ⏸️ 保留待恢复记录（非终态）: order_id={order_id}, "
+                            f"status={exchange_order_result.status}"
+                        )
 
                 except Exception as e:
                     logger.error(

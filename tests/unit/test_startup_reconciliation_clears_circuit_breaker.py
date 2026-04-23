@@ -327,6 +327,104 @@ if __name__ == "__main__":
         await test_startup_reconciliation_keeps_circuit_breaker_if_pending_recovery_remains()
         print("✅ test_startup_reconciliation_keeps_circuit_breaker_if_pending_recovery_remains passed\n")
 
+        print("Running test_startup_reconciliation_does_not_clear_pending_or_breaker_when_open...")
+        await test_startup_reconciliation_does_not_clear_pending_or_breaker_when_open()
+        print("✅ test_startup_reconciliation_does_not_clear_pending_or_breaker_when_open passed\n")
+
         print("All tests passed! ✅")
 
     asyncio.run(run_tests())
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_does_not_clear_pending_or_breaker_when_open():
+    """
+    P0-4.1 测试：交易所返回 OPEN 状态时，不清除 pending_recovery 和熔断
+
+    场景：
+    1. orchestrator 有 pending_recovery 记录
+    2. symbol 已被熔断
+    3. mock gateway.fetch_order 返回 OPEN 状态（非终态）
+    断言：
+    - pending_recovery 仍存在
+    - symbol 熔断仍存在
+    - summary 的 orchestrator_recovery_cleared_count 为 0
+    """
+    # 准备：创建 fake repos
+    fake_order_repo = FakeOrderRepository()
+    fake_intent_repo = FakeExecutionIntentRepository()
+
+    # 准备：创建 orchestrator
+    capital_protection = MagicMock(spec=CapitalProtectionManager)
+    gateway = MagicMock(spec=ExchangeGateway)
+
+    order_lifecycle = OrderLifecycleService(repository=fake_order_repo)
+
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=capital_protection,
+        order_lifecycle=order_lifecycle,
+        gateway=gateway,
+        intent_repository=fake_intent_repo,
+    )
+
+    # 准备：创建本地订单
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+    local_order = Order(
+        id="order_test_001",
+        signal_id="sig_test_001",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        requested_qty=Decimal("0.05"),
+        exchange_order_id="ex_order_001",
+        status=OrderStatus.OPEN,
+        created_at=current_time,
+        updated_at=current_time,
+    )
+    await fake_order_repo.save(local_order)
+
+    # P0-2：手动添加 pending_recovery 记录
+    orchestrator._pending_recovery["order_test_001"] = {
+        "order_id": "order_test_001",
+        "exchange_order_id": "ex_order_001",
+        "symbol": "BTC/USDT:USDT",
+        "error": "交易所撤销订单失败",
+    }
+
+    # P0-2：手动触发熔断
+    orchestrator._circuit_breaker_symbols.add("BTC/USDT:USDT")
+
+    # 验证初始状态
+    assert len(orchestrator.list_pending_recovery()) == 1
+    assert orchestrator.is_symbol_blocked("BTC/USDT:USDT") is True
+
+    # 准备：mock gateway.fetch_order 返回 OPEN 状态（非终态）
+    fetch_result = MagicMock()
+    fetch_result.amount = Decimal("0.05")
+    fetch_result.price = Decimal("50000")
+    fetch_result.status = OrderStatus.OPEN  # 非终态
+    gateway.fetch_order = AsyncMock(return_value=fetch_result)
+
+    # 准备：创建 StartupReconciliationService（注入 orchestrator）
+    reconciliation_service = StartupReconciliationService(
+        gateway=gateway,
+        repository=fake_order_repo,
+        lifecycle=order_lifecycle,
+        orchestrator=orchestrator,
+    )
+
+    # 执行：运行启动对账
+    summary = await reconciliation_service.run_startup_reconciliation()
+
+    # P0-4.1 验证：pending_recovery 仍存在（未清除）
+    assert len(orchestrator.list_pending_recovery()) == 1
+    assert summary["orchestrator_recovery_cleared_count"] == 0
+
+    # P0-4.1 验证：symbol 熔断仍存在（未清除）
+    assert orchestrator.is_symbol_blocked("BTC/USDT:USDT") is True
+    assert summary["orchestrator_circuit_breaker_cleared_count"] == 0
+
+    # P0-4.1 验证：本地订单状态未变化（仍是 OPEN）
+    updated_order = await fake_order_repo.get_order("order_test_001")
+    assert updated_order.status == OrderStatus.OPEN
