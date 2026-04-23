@@ -149,13 +149,18 @@
 
 ### 下一暂停点后的第一任务
 
-修复 `SignalPipeline` attempt flush 的 Decimal JSON 序列化问题。
+✅ 已修复 `SignalPipeline` attempt flush 的 Decimal JSON 序列化问题。
 
-原因：
+修复结果：
 
-1. 已在真实 runtime 中复现
-2. 不阻断下单主链，但影响信号尝试记录和诊断完整性
-3. 修完后更适合进入自然模拟盘观察窗口
+1. `SignalRepository` 新增 Decimal/Enum 安全 JSON 序列化 helper
+2. `signal_attempts.details` / `trace_tree` 可保存真实策略诊断里的 Decimal
+3. `signals.tags_json` 也复用同一序列化入口
+4. 新增回归用例覆盖 Decimal pattern details / score
+
+下一步：
+
+进入自然模拟盘观察窗口，重点看真实 K 线信号、WS 订单回写、保护单状态、PG recovery tasks 与 breaker 是否保持干净。
 
 ---
 

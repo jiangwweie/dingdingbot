@@ -48,7 +48,24 @@
 
 1. Sim-0 已阶段性通过
 2. testnet 验证仓位/保护单已清理
-3. 下一步先修 attempt flush 的 Decimal JSON 序列化问题，再进入自然模拟盘观察窗口
+3. attempt flush 的 Decimal JSON 序列化问题已修复
+4. 下一步进入自然模拟盘观察窗口
+
+### 2026-04-23 -- Sim-0 后置缺口修复
+
+1. ✅ 修复 `SignalPipeline` attempt flush 失败
+   - 问题：真实 runtime 中 `SignalRepository.save_attempt()` 遇到 `Decimal` 诊断字段时报 `Object of type Decimal is not JSON serializable`
+   - 影响：不阻断 ENTRY / TP / SL，但会丢失信号尝试诊断记录
+   - 修复：`SignalRepository` 增加 Decimal/Enum 安全 JSON 序列化 helper
+   - 覆盖：`details`、`trace_tree`、`tags_json`
+
+2. ✅ 补充回归测试
+   - 新增用例：`test_save_attempt_serializes_decimal_diagnostics`
+   - 验证 Decimal pattern details 和 Decimal score 可正常落库
+
+3. ✅ 验证结果
+   - `./venv/bin/python3 -m pytest tests/unit/test_signal_repository.py -v`
+   - 结果：26 passed
 
 ### 2026-04-23 -- 第二阶段第一步完成
 

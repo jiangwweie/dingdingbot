@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+from enum import Enum
 from typing import Optional, List, Dict, Any
 
 import aiosqlite
@@ -62,6 +63,19 @@ class SignalRepository:
             self._lock = asyncio.Lock()
 
         return self._lock
+
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        """Serialize domain values commonly embedded in signal diagnostics."""
+        if isinstance(value, Decimal):
+            return str(value)
+        if isinstance(value, Enum):
+            return value.value
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+    def _json_dumps(self, value: Any) -> str:
+        """Dump JSON for observability payloads without losing Decimal precision."""
+        return json.dumps(value, ensure_ascii=False, default=self._json_default)
 
     async def initialize(self) -> None:
         """
@@ -558,7 +572,7 @@ class SignalRepository:
 
         # Extract fields from attempt
         direction = attempt.pattern.direction.value if attempt.pattern else None
-        pattern_score = attempt.pattern.score if attempt.pattern else None
+        pattern_score = float(attempt.pattern.score) if attempt.pattern else None
         final_result = attempt.final_result
         kline_timestamp = attempt.kline_timestamp
 
@@ -579,14 +593,14 @@ class SignalRepository:
                 for f_name, f_result in attempt.filter_results
             ]
         }
-        details_json = json.dumps(details_dict)
+        details_json = self._json_dumps(details_dict)
 
         # Generate evaluation summary report
         evaluation_summary = self._generate_evaluation_summary(attempt, symbol, timeframe)
 
         # Build trace tree structure
         trace_tree = self._build_trace_tree(attempt)
-        trace_tree_json = json.dumps(trace_tree)
+        trace_tree_json = self._json_dumps(trace_tree)
 
         await self._db.execute(
             """
@@ -740,7 +754,7 @@ class SignalRepository:
             signal_id: The database signal ID or provided tracker ID
         """
         created_at = datetime.now(timezone.utc).isoformat()
-        tags_json = json.dumps(signal.tags)
+        tags_json = self._json_dumps(signal.tags)
 
         # Use signal_id if provided, otherwise use created_at as signal_id
         signal_id_value = signal_id or created_at

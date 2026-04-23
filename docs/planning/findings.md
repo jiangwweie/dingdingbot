@@ -164,11 +164,13 @@
    - 验证完成后必须取消保护单并 reduce-only 平仓
    - 本次已完成清理，交易所侧 open orders / position 均为空
 
-5. 当前残余 P1：attempt flush Decimal JSON 序列化
+5. attempt flush Decimal JSON 序列化已闭合
    - 真实 runtime 日志中复现：`Object of type Decimal is not JSON serializable`
    - 不阻断 ENTRY / TP / SL 主链
    - 但影响 signal attempt 诊断记录完整性
-   - 建议作为自然模拟盘观察前的第一修复任务
+   - 根因：`SignalRepository.save_attempt()` 直接 `json.dumps()` 策略诊断 payload，真实策略计算会携带 `Decimal`
+   - 修复：仓储层统一使用 Decimal/Enum 安全 JSON helper，覆盖 `details` / `trace_tree` / `tags_json`
+   - 验证：`tests/unit/test_signal_repository.py` 全部通过
 
 ---
 

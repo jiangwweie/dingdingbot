@@ -3,6 +3,7 @@ Test SignalRepository - SQLite persistence for trading signals.
 """
 import pytest
 import asyncio
+import json
 import os
 import tempfile
 import uuid
@@ -411,6 +412,50 @@ class TestSignalAttempts:
             assert row["final_result"] == "SIGNAL_FIRED"
             assert row["filter_stage"] is None  # No filter failed
             assert row["filter_reason"] is None
+
+    @pytest.mark.asyncio
+    async def test_save_attempt_serializes_decimal_diagnostics(self, repository):
+        """Signal attempt diagnostics may contain Decimal values from live strategy calculations."""
+        pattern = PatternResult(
+            strategy_name="pinbar",
+            direction=Direction.LONG,
+            score=Decimal("0.875"),
+            details={
+                "wick_ratio": Decimal("0.72"),
+                "body_ratio": Decimal("0.18"),
+                "entry_price": Decimal("35000.25"),
+            },
+        )
+
+        filter_results = [
+            ("ema_trend", FilterResult(passed=True, reason="trend_match")),
+        ]
+
+        attempt = SignalAttempt(
+            strategy_name="pinbar",
+            pattern=pattern,
+            filter_results=filter_results,
+            final_result="SIGNAL_FIRED",
+        )
+
+        await repository.save_attempt(attempt, "BTC/USDT:USDT", "15m")
+
+        async with repository._db.execute(
+            "SELECT pattern_score, details, trace_tree FROM signal_attempts WHERE symbol = ?",
+            ("BTC/USDT:USDT",),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row["pattern_score"] == 0.875
+
+        details = json.loads(row["details"])
+        assert details["pattern"]["wick_ratio"] == "0.72"
+        assert details["pattern"]["entry_price"] == "35000.25"
+
+        trace_tree = json.loads(row["trace_tree"])
+        trigger_node = trace_tree["children"][0]
+        assert trigger_node["metadata"]["score"] == "0.875"
+        assert trigger_node["metadata"]["details"]["body_ratio"] == "0.18"
 
     @pytest.mark.asyncio
     async def test_diagnostics_summary(self, repository):
