@@ -252,11 +252,18 @@ async def run_application():
             notifier=capital_notifier,
             gateway=_exchange_gateway,
         )
+
+        # P0-6：为 ExecutionOrchestrator 创建告警适配函数
+        async def _orchestrator_notifier_adapter(title: str, message: str) -> None:
+            """复用现有 notification service 发送飞书告警"""
+            await _notification_service.send_system_alert(title, message)
+
         _execution_orchestrator = ExecutionOrchestrator(
             capital_protection=_capital_protection,
             order_lifecycle=_order_lifecycle_service,
             gateway=_exchange_gateway,
             intent_repository=_execution_intent_repo,
+            notifier=_orchestrator_notifier_adapter,  # P0-6: 注入告警回调
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
         logger.info("Core execution runtime ready")

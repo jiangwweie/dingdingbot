@@ -22,7 +22,7 @@ ExecutionOrchestrator MVP 第一步：最小主链
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Callable
 
 from src.domain.models import (
     SignalResult,
@@ -59,6 +59,7 @@ class ExecutionOrchestrator:
         order_lifecycle: OrderLifecycleService,
         gateway: ExchangeGateway,
         intent_repository: Optional[ExecutionIntentRepositoryPort] = None,
+        notifier: Optional[Callable[[str, str], Any]] = None,  # P0-6: 可选告警回调
     ):
         """
         初始化执行编排器
@@ -68,11 +69,13 @@ class ExecutionOrchestrator:
             order_lifecycle: 订单生命周期服务
             gateway: 交易所网关
             intent_repository: 执行意图仓储（可选，未提供时退回内存态）
+            notifier: P0-6 告警回调函数（可选），签名 async (title: str, message: str) -> None
         """
         self._capital_protection = capital_protection
         self._order_lifecycle = order_lifecycle
         self._gateway = gateway
         self._intent_repository = intent_repository
+        self._notifier = notifier  # P0-6: 保存告警回调
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
@@ -851,6 +854,26 @@ class ExecutionOrchestrator:
                             f"[ExecutionOrchestrator] 已触发熔断: symbol={existing_sl.symbol}, "
                             f"待恢复订单={existing_sl.id}"
                         )
+
+                        # P0-6：发送告警通知
+                        if self._notifier:
+                            try:
+                                title = "[P0] Pending Recovery Triggered"
+                                message = (
+                                    f"symbol={existing_sl.symbol}\n"
+                                    f"order_id={existing_sl.id}\n"
+                                    f"exchange_order_id={existing_sl.exchange_order_id}\n"
+                                    f"error={str(e)}\n"
+                                    f"action=circuit_breaker_triggered"
+                                )
+                                await self._notifier(title, message)
+                                logger.info(f"[ExecutionOrchestrator] P0-6 告警已发送: {title}")
+                            except Exception as notify_error:
+                                logger.error(
+                                    f"[ExecutionOrchestrator] P0-6 告警发送失败（不影响主流程）: "
+                                    f"error={notify_error}",
+                                    exc_info=True
+                                )
 
                         # P0-2：停止继续动作（不撤销本地 SL，不创建新 SL）
                         return
