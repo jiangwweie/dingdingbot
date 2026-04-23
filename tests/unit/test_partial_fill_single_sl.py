@@ -295,6 +295,7 @@ async def test_single_sl_on_second_partial_fill():
         order_role=OrderRole.SL,
         requested_qty=Decimal("0.05"),  # 第一次成交量
         parent_order_id="order_test_002",
+        exchange_order_id="ex_order_sl_002",  # P0-1：添加交易所订单 ID
         status=OrderStatus.OPEN,
         created_at=current_time,
         updated_at=current_time,
@@ -317,16 +318,27 @@ async def test_single_sl_on_second_partial_fill():
     )
     await fake_order_repo.save(existing_tp1)
 
-    # 准备：mock gateway.place_order
+    # 准备：mock gateway.cancel_order 和 place_order
+    gateway.cancel_order = AsyncMock()
     gateway.place_order = AsyncMock()
     gateway.place_order.return_value = MagicMock(
         is_success=True,
-        exchange_order_id="ex_order_tp2_002",
+        exchange_order_id="ex_order_new_sl_002",
         status=OrderStatus.OPEN,
     )
 
     # 执行：触发第二次 partial-fill 回调
     await orchestrator._handle_entry_partially_filled(entry_order)
+
+    # P0-1 验证：gateway.cancel_order 被调用（撤销旧 SL）
+    gateway.cancel_order.assert_called_once_with(
+        exchange_order_id="ex_order_sl_002",
+        symbol="BTC/USDT:USDT",
+    )
+
+    # P0-1 验证：旧 SL 状态变为 CANCELED
+    canceled_sl = await fake_order_repo.get_order("order_sl_002")
+    assert canceled_sl.status == OrderStatus.CANCELED
 
     # 验证：有效 SL 数量仍为 1
     all_orders = await fake_order_repo.get_orders_by_signal("sig_test_002")
@@ -342,11 +354,15 @@ async def test_single_sl_on_second_partial_fill():
     ]
     assert len(sl_orders) == 1
 
-    # 验证：SL 数量已调整为 0.08（覆盖全仓）
-    assert sl_orders[0].requested_qty == Decimal("0.08")
+    # P0-1 验证：新 SL 数量为 0.08（覆盖全仓）
+    new_sl = sl_orders[0]
+    assert new_sl.requested_qty == Decimal("0.08")
 
-    # 验证：SL 订单 ID 未变（仍是第一次创建的 SL）
-    assert sl_orders[0].id == "order_sl_002"
+    # P0-1 验证：新 SL 不是旧 SL（是新创建的）
+    assert new_sl.id != "order_sl_002"
+
+    # P0-1 验证：新 SL 有新的 exchange_order_id
+    assert new_sl.exchange_order_id == "ex_order_new_sl_002"
 
 
 @pytest.mark.asyncio

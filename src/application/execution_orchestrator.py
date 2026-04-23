@@ -791,20 +791,60 @@ class ExecutionOrchestrator:
                 f"delta_qty={delta_qty}"
             )
 
-            # P1-6 修复：处理 SL 订单（保证单一 SL 覆盖全仓）
+            # P0-1 修复：处理 SL 订单（撤旧挂新，保证交易所侧覆盖全仓）
             if sl_orders:
-                # 已有 SL：调整数量为 filled_qty_total（覆盖全仓）
+                # 已有 SL：撤掉旧 SL（交易所 + 本地），创建新 SL 覆盖全仓
                 existing_sl = sl_orders[0]
-                await self._order_lifecycle.update_order_requested_qty(
-                    existing_sl.id,
-                    filled_qty_total
-                )
-                logger.info(
-                    f"[ExecutionOrchestrator] 已有 SL 订单数量已调整: "
-                    f"order_id={existing_sl.id}, "
-                    f"old_qty={existing_sl.requested_qty}, "
-                    f"new_qty={filled_qty_total}"
-                )
+
+                # P0-1：撤销交易所侧旧 SL
+                if existing_sl.exchange_order_id:
+                    try:
+                        await self._gateway.cancel_order(
+                            exchange_order_id=existing_sl.exchange_order_id,
+                            symbol=existing_sl.symbol,
+                        )
+                        logger.info(
+                            f"[ExecutionOrchestrator] 已撤销交易所侧旧 SL: "
+                            f"order_id={existing_sl.id}, "
+                            f"exchange_order_id={existing_sl.exchange_order_id}"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"[ExecutionOrchestrator] 撤销交易所侧旧 SL 失败: "
+                            f"order_id={existing_sl.id}, "
+                            f"exchange_order_id={existing_sl.exchange_order_id}, "
+                            f"error={e}",
+                            exc_info=True
+                        )
+                        # 继续执行：即使交易所撤销失败，也要更新本地状态并创建新 SL
+
+                # P0-1：撤销本地旧 SL
+                try:
+                    await self._order_lifecycle.cancel_order(
+                        existing_sl.id,
+                        reason="P0: replace SL to cover increased fill"
+                    )
+                    logger.info(
+                        f"[ExecutionOrchestrator] 已撤销本地旧 SL: "
+                        f"order_id={existing_sl.id}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[ExecutionOrchestrator] 撤销本地旧 SL 失败: "
+                        f"order_id={existing_sl.id}, error={e}",
+                        exc_info=True
+                    )
+
+                # P0-1：创建新 SL（数量=filled_qty_total，覆盖全仓）
+                if sl_order_generated:
+                    sl_order_generated.requested_qty = filled_qty_total
+                    tp_orders_to_submit.append(sl_order_generated)
+                    logger.info(
+                        f"[ExecutionOrchestrator] 创建新 SL 订单（替换旧 SL）: "
+                        f"order_id={sl_order_generated.id}, "
+                        f"qty={filled_qty_total}（覆盖全仓）"
+                    )
+
             elif sl_order_generated:
                 # 没有 SL：创建新的 SL（数量=filled_qty_total）
                 sl_order_generated.requested_qty = filled_qty_total  # 覆盖全仓
