@@ -609,14 +609,6 @@ async def test_cancel_exchange_sl_fail_should_abort_and_circuit_break():
     # P0-2 验证：symbol 被熔断
     assert orchestrator.is_symbol_blocked("BTC/USDT:USDT") is True
 
-    # P0-2 验证：待恢复记录存在
-    pending_recovery = orchestrator.get_pending_recovery("order_sl_004")
-    assert pending_recovery is not None
-    assert pending_recovery["order_id"] == "order_sl_004"
-    assert pending_recovery["exchange_order_id"] == "ex_order_sl_004"
-    assert pending_recovery["symbol"] == "BTC/USDT:USDT"
-    assert "交易所撤销订单失败" in pending_recovery["error"]
-
 
 if __name__ == "__main__":
     # 可直接运行：python tests/unit/test_partial_fill_single_sl.py

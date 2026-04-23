@@ -4,10 +4,11 @@ Startup Reconciliation Service - 启动对账最小版
 职责：
 1. 程序启动时执行一次性对账
 2. 扫描本地未完成订单（SUBMITTED / OPEN / PARTIALLY_FILLED）
-3. 读取待恢复订单（_pending_recovery_orders）
+3. 读取交易所 WS 失败恢复队列（_pending_recovery_orders）
 4. 通过 REST API 查询交易所真实状态
 5. 推进本地订单状态
-6. 清除待恢复标记
+6. 清除恢复队列标记
+7. 扫描 PG recovery tasks 并推进状态
 
 范围控制：
 - 不做定期对账
@@ -56,7 +57,7 @@ class StartupReconciliationService:
             gateway: ExchangeGateway 实例
             repository: OrderRepository 实例
             lifecycle: OrderLifecycleService 实例
-            orchestrator: ExecutionOrchestrator 实例（可选，用于处理 pending_recovery）
+            orchestrator: ExecutionOrchestrator 实例（可选，用于 breaker 管理）
             execution_recovery_repository: PG 正式恢复表仓储（可选）
         """
         self._gateway = gateway
@@ -71,11 +72,12 @@ class StartupReconciliationService:
 
         对账流程：
         1. 扫描本地未完成订单（SUBMITTED / OPEN / PARTIALLY_FILLED）
-        2. 读取待恢复订单（_pending_recovery_orders）
+        2. 读取交易所 WS 失败恢复队列（_pending_recovery_orders）
         3. 对每笔候选订单：
            - 通过 fetch_order() 查询交易所真实状态
            - 用 update_order_from_exchange() 推进本地状态
-           - 如果在待恢复列表，清除标记
+           - 如果在恢复队列，清除标记
+        4. 扫描 PG recovery tasks 并推进状态
 
         Returns:
             Dict[str, Any]: 对账结果摘要

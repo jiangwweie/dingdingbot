@@ -103,7 +103,6 @@ async def graceful_shutdown():
         await _order_repo.close()
         _order_repo = None
 
-    # P0-7: 关闭 pending_recovery_repo（SQLite 过渡版）
     # PG 正式恢复表
     if _execution_recovery_repo:
         await _execution_recovery_repo.close()
