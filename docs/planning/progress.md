@@ -1,11 +1,40 @@
 # Progress Log
 
-> Last updated: 2026-04-24 00:48
+> Last updated: 2026-04-24 01:02
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-24 -- Runtime Config execution 已接入 SignalPipeline
+
+1. ✅ execution `OrderStrategy` 已由 runtime execution module 构建
+   - `tp_levels=2`
+   - `tp_ratios=[0.5, 0.5]`
+   - `tp_targets=[1.0, 3.5]`
+   - `initial_stop_loss_rr=-1.0`
+   - `trailing_stop_enabled=False`
+   - `oco_enabled=True`
+
+2. ✅ `SignalPipeline._build_execution_strategy()` 已优先返回 runtime strategy 快照
+   - 不再从 `SignalResult.take_profit_levels` 派生实盘保护单策略
+   - 每次 dispatch 前 `model_copy(deep=True)`，避免后续对象复用污染
+
+3. ✅ 执行链冻结语义
+   - `ExecutionOrchestrator.execute_signal()` 仍会在创建 `ExecutionIntent` 时再次深拷贝 strategy
+   - full-fill / partial-fill / recovery 路径都继续依赖 `ExecutionIntent.strategy`
+
+4. ✅ 已做轻量验证
+   - `python3 -m py_compile` 通过
+   - `scripts/verify_sim1_runtime_config.py` 通过
+   - 未执行 pytest
+
+### 当前边界
+
+- `CapitalProtectionManager` 账户级熔断仍未切 runtime risk
+- `SignalResult.take_profit_levels` 仍可用于展示/通知/研究，但不再作为执行保护单策略入口
+- 下一步应做代码审查与启动级冒烟，不继续扩大配置面
 
 ### 2026-04-24 -- Runtime Config strategy 已接入 SignalPipeline
 

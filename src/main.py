@@ -395,12 +395,14 @@ async def run_application():
         runtime_strategy_definitions = None
         runtime_allowed_directions = None
         runtime_mtf_ema_period = None
+        runtime_execution_strategy = None
         runtime_risk_locked = False
 
         if _runtime_config_provider is not None:
             runtime_config = _runtime_config_provider.resolved_config
             runtime_risk = runtime_config.risk
             runtime_strategy = runtime_config.strategy
+            runtime_execution = runtime_config.execution
             runtime_market = runtime_config.market
             risk_config = runtime_risk.to_risk_config()
             runtime_strategy_definitions = [
@@ -411,6 +413,9 @@ async def run_application():
             ]
             runtime_allowed_directions = runtime_strategy.allowed_directions
             runtime_mtf_ema_period = runtime_strategy.get_mtf_ema_period()
+            runtime_execution_strategy = runtime_execution.to_order_strategy(
+                strategy_id=f"{runtime_config.profile_name}_execution"
+            )
             runtime_risk_locked = True
             logger.info(
                 "SignalPipeline risk config driven by runtime profile: "
@@ -428,6 +433,16 @@ async def run_application():
                 f"trigger={runtime_strategy.trigger.type}, "
                 f"filters={[filter_config.type for filter_config in runtime_strategy.filters]}, "
                 f"mtf_ema_period={runtime_mtf_ema_period}"
+            )
+            logger.info(
+                "SignalPipeline execution strategy driven by runtime profile: "
+                f"profile={runtime_config.profile_name}, "
+                f"tp_levels={runtime_execution_strategy.tp_levels}, "
+                f"tp_ratios={runtime_execution_strategy.tp_ratios}, "
+                f"tp_targets={runtime_execution_strategy.tp_targets}, "
+                f"initial_stop_loss_rr={runtime_execution_strategy.initial_stop_loss_rr}, "
+                f"trailing_stop_enabled={runtime_execution_strategy.trailing_stop_enabled}, "
+                f"oco_enabled={runtime_execution_strategy.oco_enabled}"
             )
         else:
             risk_config = RiskConfig(
@@ -451,6 +466,7 @@ async def run_application():
             runtime_strategy_definitions=runtime_strategy_definitions,
             runtime_allowed_directions=runtime_allowed_directions,
             runtime_mtf_ema_period=runtime_mtf_ema_period,
+            runtime_execution_strategy=runtime_execution_strategy,
             runtime_risk_locked=runtime_risk_locked,
         )
         logger.info("Signal pipeline ready")

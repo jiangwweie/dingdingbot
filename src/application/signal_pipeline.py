@@ -54,6 +54,7 @@ class SignalPipeline:
         runtime_strategy_definitions: Optional[List[StrategyDefinition]] = None,
         runtime_allowed_directions: Optional[List[Direction]] = None,
         runtime_mtf_ema_period: Optional[int] = None,
+        runtime_execution_strategy: Optional[OrderStrategy] = None,
         runtime_risk_locked: bool = False,
     ):
         """
@@ -69,6 +70,7 @@ class SignalPipeline:
             runtime_strategy_definitions: Optional frozen runtime strategy definitions
             runtime_allowed_directions: Optional runtime direction allowlist
             runtime_mtf_ema_period: Optional frozen MTF EMA period
+            runtime_execution_strategy: Optional frozen execution OrderStrategy
             runtime_risk_locked: If True, ConfigManager hot reload cannot replace risk_config
         """
         self._config_manager = config_manager
@@ -76,6 +78,7 @@ class SignalPipeline:
         self._runtime_risk_locked = runtime_risk_locked
         self._runtime_strategy_definitions = runtime_strategy_definitions
         self._runtime_allowed_directions = set(runtime_allowed_directions or [])
+        self._runtime_execution_strategy = runtime_execution_strategy
         self._notification_service = notification_service or get_notification_service()
         self._repository = signal_repository
         self._signal_executor = signal_executor
@@ -483,6 +486,9 @@ class SignalPipeline:
 
     def _build_execution_strategy(self, signal: SignalResult) -> OrderStrategy:
         """从 SignalResult 派生最小执行策略快照。"""
+        if self._runtime_execution_strategy is not None:
+            return self._runtime_execution_strategy.model_copy(deep=True)
+
         tp_ratios: List[Decimal] = []
         tp_targets: List[Decimal] = []
 

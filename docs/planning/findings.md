@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-24 00:48
+> Last updated: 2026-04-24 01:02
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -75,7 +75,13 @@
    - runtime strategy 已切入时，ConfigManager 热重载不能覆盖 runner strategy / MTF EMA period
    - 如果未来要支持运行中变更 runtime profile，应通过新 profile + 重启或显式 reload 流程，而不是复用旧 ConfigManager observer 静默覆盖
 
-9. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
+9. execution 切换必须只保留一个实盘保护单策略入口。
+   - runtime execution module 已转成 `OrderStrategy`
+   - `SignalPipeline._build_execution_strategy()` 优先返回 runtime `OrderStrategy` 深拷贝
+   - `SignalResult.take_profit_levels` 降级为展示/通知/研究语义，不再作为实盘 TP/SL 策略来源
+   - `ExecutionIntent.strategy` 仍是后续 full-fill / partial-fill / recovery 保护单语义的一致性锚点
+
+10. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
    - 本轮没有修改 `.env`
    - PG 示例继续以 `docs/local-pg.md` / 示例文件为准
    - 若后续要彻底治理，需要单独安排 secret rotation + `.env` 脱离版本控制，不应混在 runtime config 接入任务中顺手做
