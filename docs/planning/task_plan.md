@@ -85,6 +85,14 @@
 2. 比回测/前端/更多 PG 迁移更贴当前主线
 3. 比直接退役 SQLite `pending_recovery` 更适合作为第二阶段起点
 
+#### 入口议题当前结论
+
+已完成架构判断：
+
+1. `circuit_breaker` 不建议单独新增 PG 表
+2. 更合理的方案是让它作为 `execution_recovery_tasks` 的派生保护状态
+3. 第二阶段后续实现应围绕“由 PG active recovery tasks 重建/驱动 breaker”展开
+
 ### 近期候选事项（按优先级）
 
 1. **`circuit_breaker` 是否 PG 真源化**

@@ -342,6 +342,17 @@ async def run_application():
             # 继续启动（可用性优先）
 
         # =============================================
+        # Phase 4.4: Rebuild Circuit Breakers from PG Recovery Tasks
+        # =============================================
+        logger.info("Phase 4.4: Rebuilding circuit breakers from PG recovery tasks...")
+        try:
+            breaker_count = await _execution_orchestrator.rebuild_circuit_breakers_from_recovery_tasks()
+            logger.info(f"Circuit breaker 重建完成: {breaker_count} 个 symbol 被熔断")
+        except Exception as e:
+            logger.error(f"Circuit breaker 重建失败（不影响主进程启动）: {e}", exc_info=True)
+            # 继续启动（可用性优先）
+
+        # =============================================
         # Phase 4.5: Check API Key Permissions
         # =============================================
         logger.info("Phase 4.5: Checking API key permissions...")

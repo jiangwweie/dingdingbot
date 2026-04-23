@@ -92,6 +92,19 @@
 2. 后续设计默认先判断是否应进入 PG 主线
 3. 第二阶段现阶段只锁方向，不提前展开实现
 
+### 第二阶段入口议题结论（已分析）
+
+`circuit_breaker` 当前最合理的收敛方式不是单独新增 PG 表，而是：
+
+1. 继续以 `execution_recovery_tasks` 作为恢复真源
+2. 把 `circuit_breaker` 定位为 active recovery tasks 的派生保护状态
+3. 运行时保留内存 breaker 集合作为快速判断缓存
+4. 启动后由 PG active recovery tasks 重建 breaker
+
+对应设计稿：
+
+- `docs/planning/architecture/2026-04-23-circuit-breaker-pg-analysis.md`
+
 ---
 
 ## 历史说明

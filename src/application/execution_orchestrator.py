@@ -1098,6 +1098,43 @@ class ExecutionOrchestrator:
         """
         return symbol in self._circuit_breaker_symbols
 
+    async def rebuild_circuit_breakers_from_recovery_tasks(self) -> int:
+        """
+        从 PG 恢复任务重建 circuit breaker 缓存。
+
+        第二阶段第一步：让 breaker 来源收敛为 PG active recovery tasks 驱动。
+
+        Returns:
+            int: 重建后的 symbol 数量（PG repo 不可用时返回 0）
+        """
+        if self._execution_recovery_repository is None:
+            logger.info("PG execution recovery repository 不可用，跳过 circuit breaker 重建")
+            return 0
+
+        try:
+            # 读取 PG 活跃恢复任务（status in ('pending', 'retrying')）
+            active_tasks = await self._execution_recovery_repository.list_active()
+
+            # 提取 symbol 并重建 breaker 集合
+            old_count = len(self._circuit_breaker_symbols)
+            self._circuit_breaker_symbols = {task["symbol"] for task in active_tasks}
+            new_count = len(self._circuit_breaker_symbols)
+
+            logger.info(
+                f"Circuit breaker 重建完成: "
+                f"重建前 {old_count} 个 → 重建后 {new_count} 个，"
+                f"PG active tasks={len(active_tasks)}"
+            )
+
+            return new_count
+
+        except Exception as e:
+            logger.error(
+                f"从 PG 恢复任务重建 circuit breaker 失败: {e}",
+                exc_info=True
+            )
+            return 0
+
     def get_pending_recovery(self, order_id: str) -> Optional[Dict[str, Any]]:
         """
         P0-2/P0-7：获取待恢复记录
