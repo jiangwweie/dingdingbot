@@ -317,10 +317,35 @@ class ExecutionOrchestrator:
                 # 市价单直接完全成交
                 # 需要先推进到 OPEN，再推进到 FILLED
                 await self._order_lifecycle.confirm_order(order.id)
+
+                filled_qty = placement_result.filled_qty or placement_result.amount
+                average_exec_price = placement_result.average_exec_price or placement_result.price
+
+                # Binance futures market orders may return FILLED before the
+                # create_order response contains a reliable average price. Pull
+                # the exchange snapshot before recording a fill fact or
+                # generating protection orders.
+                if average_exec_price is None and placement_result.exchange_order_id:
+                    fetched_order = await self._gateway.fetch_order(
+                        placement_result.exchange_order_id,
+                        signal.symbol,
+                    )
+                    filled_qty = fetched_order.filled_qty or fetched_order.amount or filled_qty
+                    average_exec_price = fetched_order.average_exec_price or fetched_order.price
+
+                if average_exec_price is None:
+                    intent.status = ExecutionIntentStatus.FAILED
+                    intent.order_id = order.id
+                    intent.exchange_order_id = placement_result.exchange_order_id
+                    intent.failed_reason = "交易所未返回真实成交均价，拒绝挂载保护单"
+                    intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+                    await self._save_intent(intent)
+                    return intent
+
                 await self._order_lifecycle.update_order_filled(
                     order.id,
-                    filled_qty=placement_result.amount,
-                    average_exec_price=placement_result.price or Decimal("0"),
+                    filled_qty=filled_qty,
+                    average_exec_price=average_exec_price,
                 )
 
                 # MVP-Protected-Position: ENTRY 成交后挂载保护单

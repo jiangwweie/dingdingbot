@@ -129,8 +129,33 @@
 ### 当前执行状态
 
 - 模拟盘准入冒烟已通过
-- 真实模拟盘全链路尚未实证
-- 下一步进入 Sim-0，不再继续扩功能
+- Sim-0.2 ~ Sim-0.5 真实 runtime 链路已阶段性通过
+- 受控验证仓位/保护单已清理
+- 下一步进入分阶段自然模拟盘观察，不再连续无停顿推进
+
+### Sim-0 阶段性结果
+
+1. ✅ 主程序真实启动通过
+2. ✅ 受控 K 线触发真实信号
+3. ✅ testnet ENTRY 市价成交
+4. ✅ TP1 / TP2 / SL 保护单挂载成功
+5. ✅ PG intent 落 `completed`
+6. ✅ 重启对账通过：候选订单 0，对账失败 0
+7. ✅ PG active recovery tasks 0，breaker 为空
+
+报告：
+
+- `docs/reports/2026-04-23-sim-0-real-chain-validation.md`
+
+### 下一暂停点后的第一任务
+
+修复 `SignalPipeline` attempt flush 的 Decimal JSON 序列化问题。
+
+原因：
+
+1. 已在真实 runtime 中复现
+2. 不阻断下单主链，但影响信号尝试记录和诊断完整性
+3. 修完后更适合进入自然模拟盘观察窗口
 
 ---
 

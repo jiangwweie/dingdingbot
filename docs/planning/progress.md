@@ -7,6 +7,49 @@
 
 ## 近期完成
 
+### 2026-04-23 -- Sim-0 真实链路阶段性通过
+
+1. ✅ 完成 Sim-0.2 主程序真实启动验证
+   - PG execution intent/recovery 初始化成功
+   - Phase 4.3 启动对账通过
+   - Phase 4.4 breaker 重建通过
+   - SignalPipeline warmup 成功
+
+2. ✅ 完成 Sim-0.3 信号到 testnet ENTRY 验证
+   - 受控 K 线进入真实 runtime
+   - 冻结策略触发 `LONG` 信号
+   - CapitalProtection 通过
+   - testnet ENTRY 市价成交
+
+3. ✅ 完成 Sim-0.4 ENTRY 后保护单验证
+   - TP1 / TP2 / SL 均提交成功
+   - PG intent 最终状态为 `completed`
+   - 未产生 active recovery task
+   - breaker 为空
+
+4. ✅ 完成 Sim-0.5 重启对账验证
+   - 清理受控验证仓位和保护单后重启
+   - 启动对账候选订单 0
+   - 对账失败 0
+   - PG active recovery tasks 0
+   - breaker 重建为空
+
+5. ✅ 验证期间修复 4 个真实链路问题
+   - `SignalPipeline._calculate_risk()` 未 await
+   - 市价 ENTRY 缺失成交均价时保护单挂载失败
+   - PG intent 状态枚举写入格式错误
+   - PG intent/order 跨库外键与当前双轨配置冲突
+
+报告：
+
+- `docs/reports/2026-04-23-sim-0-real-chain-validation.md`
+
+当前暂停点：
+
+1. Sim-0 已阶段性通过
+2. testnet 验证仓位/保护单已清理
+3. 下一步先修 attempt flush 的 Decimal JSON 序列化问题，再进入自然模拟盘观察窗口
+
 ### 2026-04-23 -- 第二阶段第一步完成
 
 1. ✅ 实现 PG 驱动的 circuit breaker 重建

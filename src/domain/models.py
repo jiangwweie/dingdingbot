@@ -1058,6 +1058,8 @@ class OrderPlacementResult(FinancialModel):
     side: str                            # "buy" | "sell"
     amount: Decimal
     price: Optional[Decimal] = None
+    filled_qty: Optional[Decimal] = None
+    average_exec_price: Optional[Decimal] = None
     trigger_price: Optional[Decimal] = None
     reduce_only: bool = False
     client_order_id: Optional[str] = None

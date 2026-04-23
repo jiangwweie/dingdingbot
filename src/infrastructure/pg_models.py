@@ -118,7 +118,6 @@ class PGExecutionIntentORM(PGCoreBase):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     order_id: Mapped[Optional[str]] = mapped_column(
         String(64),
-        ForeignKey("orders.id", deferrable=True, initially="DEFERRED"),
         nullable=True,
     )
     exchange_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -210,7 +209,6 @@ class PGExecutionRecoveryTaskORM(PGCoreBase):
     )
     related_order_id: Mapped[Optional[str]] = mapped_column(
         String(64),
-        ForeignKey("orders.id", deferrable=True, initially="DEFERRED"),
         nullable=True,
     )
     related_exchange_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -240,4 +238,3 @@ class PGExecutionRecoveryTaskORM(PGCoreBase):
         Index("idx_execution_recovery_tasks_intent_id", "intent_id"),
         Index("idx_execution_recovery_tasks_next_retry_at", "next_retry_at"),
     )
-

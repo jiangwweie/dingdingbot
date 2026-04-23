@@ -124,11 +124,7 @@ CREATE TABLE IF NOT EXISTS execution_intents (
     signal_payload      JSONB NOT NULL,
     strategy_payload    JSONB,
     created_at          BIGINT NOT NULL,
-    updated_at          BIGINT NOT NULL,
-    CONSTRAINT fk_execution_intents_order
-        FOREIGN KEY (order_id)
-        REFERENCES orders(id)
-        DEFERRABLE INITIALLY DEFERRED
+    updated_at          BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_execution_intents_status
@@ -215,10 +211,6 @@ CREATE TABLE IF NOT EXISTS execution_recovery_tasks (
     CONSTRAINT fk_execution_recovery_tasks_intent
         FOREIGN KEY (intent_id)
         REFERENCES execution_intents(id)
-        DEFERRABLE INITIALLY DEFERRED,
-    CONSTRAINT fk_execution_recovery_tasks_order
-        FOREIGN KEY (related_order_id)
-        REFERENCES orders(id)
         DEFERRABLE INITIALLY DEFERRED
 );
 

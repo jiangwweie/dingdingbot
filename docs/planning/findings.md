@@ -142,6 +142,34 @@
 
 - `docs/planning/sim-0-real-chain-validation-plan.md`
 
+### Sim-0 真实 runtime 验证新增发现
+
+1. `SignalPipeline._calculate_risk()` 必须是 async
+   - 真实信号触发后会进入 `RiskCalculator.calculate_signal_result()`
+   - 该方法是 async，未 await 会让后续 executor 拿到 coroutine
+   - 已修复
+
+2. 市价单 `create_order()` 返回 `FILLED` 不等于一定有成交均价
+   - Binance testnet 中 ENTRY 直接成交，但响应可能缺少 `average`
+   - 保护单生成必须基于真实成交均价
+   - 已补充 `fetch_order()` 兜底
+
+3. `ExecutionIntent` PG 真源与 `Order` SQLite 真源并行时，不能对 `order_id` 建 PG 外键
+   - 当前冻结配置是 `CORE_EXECUTION_INTENT_BACKEND=postgres` + `CORE_ORDER_BACKEND=sqlite`
+   - 因此 PG `execution_intents.order_id` 只能是跨库逻辑引用
+   - 已移除对应 PG 外键
+
+4. 受控验证后必须清理 testnet 仓位
+   - Sim-0 runtime check 会真实下 testnet ENTRY 和保护单
+   - 验证完成后必须取消保护单并 reduce-only 平仓
+   - 本次已完成清理，交易所侧 open orders / position 均为空
+
+5. 当前残余 P1：attempt flush Decimal JSON 序列化
+   - 真实 runtime 日志中复现：`Object of type Decimal is not JSON serializable`
+   - 不阻断 ENTRY / TP / SL 主链
+   - 但影响 signal attempt 诊断记录完整性
+   - 建议作为自然模拟盘观察前的第一修复任务
+
 ---
 
 ## 历史说明

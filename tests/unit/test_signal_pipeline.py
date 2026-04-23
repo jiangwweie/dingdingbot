@@ -368,7 +368,8 @@ class TestDynamicTags:
         assert len(tags) == 1
         assert tags[0] == {"name": "EMA", "value": "Bullish"}
 
-    def test_signal_result_contains_tags(self, pipeline):
+    @pytest.mark.asyncio
+    async def test_signal_result_contains_tags(self, pipeline):
         """Test that SignalResult contains dynamic tags."""
         kline = create_kline(close=Decimal("150"))
 
@@ -389,7 +390,7 @@ class TestDynamicTags:
         )
 
         # Manually call _calculate_risk to get SignalResult
-        signal = pipeline._calculate_risk(kline, Direction.LONG, mock_attempt, "pinbar", 0.8)
+        signal = await pipeline._calculate_risk(kline, Direction.LONG, mock_attempt, "pinbar", 0.8)
 
         assert isinstance(signal, SignalResult)
         assert len(signal.tags) == 2

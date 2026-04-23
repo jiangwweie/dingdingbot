@@ -981,6 +981,8 @@ class ExchangeGateway:
 
             # 解析订单响应
             order_status = self._parse_order_status(order.get('status', 'open'))
+            filled_qty = Decimal(str(order['filled'])) if order.get('filled') else None
+            average_exec_price = Decimal(str(order['average'])) if order.get('average') else None
 
             return OrderPlacementResult(
                 order_id=system_order_id,
@@ -991,6 +993,8 @@ class ExchangeGateway:
                 side=side,
                 amount=amount,
                 price=price,
+                filled_qty=filled_qty,
+                average_exec_price=average_exec_price,
                 trigger_price=trigger_price,
                 reduce_only=reduce_only,
                 client_order_id=client_order_id,
@@ -1114,6 +1118,7 @@ class ExchangeGateway:
 
             # 解析订单数据
             amount = Decimal(str(order.get('amount', 0))) if order.get('amount') else Decimal('0')
+            filled_qty = Decimal(str(order['filled'])) if order.get('filled') else None
             price = Decimal(str(order['price'])) if order.get('price') else None
             average_exec_price = Decimal(str(order['average'])) if order.get('average') else None
 
@@ -1126,6 +1131,8 @@ class ExchangeGateway:
                 side=order.get('side', 'buy'),
                 amount=amount,
                 price=price,
+                filled_qty=filled_qty,
+                average_exec_price=average_exec_price,
                 reduce_only=order.get('reduceOnly', False),
                 status=order_status,
             )

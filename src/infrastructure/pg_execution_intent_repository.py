@@ -121,11 +121,12 @@ class PgExecutionIntentRepository:
 
     @staticmethod
     def _to_orm(intent: ExecutionIntent) -> PGExecutionIntentORM:
+        status_value = intent.status.value if hasattr(intent.status, "value") else str(intent.status)
         return PGExecutionIntentORM(
             id=intent.id,
             signal_id=intent.signal_id,
             symbol=intent.signal.symbol,
-            status=str(intent.status),
+            status=status_value,
             signal_payload=intent.signal.model_dump(mode="json"),
             strategy_payload=intent.strategy.model_dump(mode="json") if intent.strategy else None,
             order_id=intent.order_id,

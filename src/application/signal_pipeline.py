@@ -575,7 +575,7 @@ class SignalPipeline:
                         continue
 
                     # Calculate complete signal result with risk
-                    signal = self._calculate_risk(kline, attempt.pattern.direction, attempt, attempt.strategy_name, score)
+                    signal = await self._calculate_risk(kline, attempt.pattern.direction, attempt, attempt.strategy_name, score)
 
                     # Start tracking signal status
                     signal_id = await self._status_tracker.track_signal(signal)
@@ -747,7 +747,7 @@ class SignalPipeline:
 
         return result
 
-    def _calculate_risk(self, kline: KlineData, direction: Direction, attempt: SignalAttempt, strategy_name: str = "unknown", score: float = 0.0) -> SignalResult:
+    async def _calculate_risk(self, kline: KlineData, direction: Direction, attempt: SignalAttempt, strategy_name: str = "unknown", score: float = 0.0) -> SignalResult:
         """
         Calculate complete signal result with risk parameters.
 
@@ -776,7 +776,7 @@ class SignalPipeline:
         tags = self._generate_tags_from_filters(attempt.filter_results)
 
         # Use risk_calculator's calculate_signal_result with tags
-        return self._risk_calculator.calculate_signal_result(
+        return await self._risk_calculator.calculate_signal_result(
             kline=kline,
             account=self._account_snapshot,
             direction=direction,

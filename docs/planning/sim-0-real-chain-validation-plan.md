@@ -1,7 +1,7 @@
 # Sim-0 真实模拟盘全链路验证计划
 
 > 日期：2026-04-23
-> 状态：待执行
+> 状态：Sim-0.2 ~ Sim-0.5 阶段性通过
 > 目标：验证真实模拟盘链路是否从行情/信号管道一路闭合到下单、WS 回写、对账、PG recovery 与 breaker
 
 ---
@@ -104,6 +104,8 @@ Sim-0 只回答：
 
 - Sim-0 启动配置清单
 
+状态：已完成。配置源明确为 `.env`，并同步到当前兼容配置库供主程序读取。
+
 ---
 
 ### Sim-0.2 主程序真实启动
@@ -124,6 +126,8 @@ Sim-0 只回答：
 
 - 启动日志摘要
 
+状态：已完成。主程序真实启动通过，PG recovery repo、启动对账、breaker 重建、SignalPipeline warmup 均成功。
+
 ---
 
 ### Sim-0.3 信号到下单链路验证
@@ -142,6 +146,8 @@ Sim-0 只回答：
 产出：
 
 - 一笔真实 testnet ENTRY 的链路记录
+
+状态：已完成。受控 K 线进入真实 runtime 后触发信号，ENTRY 市价单提交并成交。
 
 ---
 
@@ -163,6 +169,8 @@ Sim-0 只回答：
 
 - ENTRY + TP/SL 订单链记录
 
+状态：已完成。ENTRY 成交后 TP1 / TP2 / SL 均提交成功，PG intent 最终落 `completed`。
+
 ---
 
 ### Sim-0.5 对账与恢复验证
@@ -181,6 +189,8 @@ Sim-0 只回答：
 产出：
 
 - 重启后对账摘要
+
+状态：已完成。清理受控验证仓位/保护单后，重启探针通过：候选订单 0，对账失败 0，active recovery tasks 0，breaker 为空。
 
 ---
 
@@ -218,6 +228,21 @@ Sim-0 通过后再决定：
 1. 是否进入 24h 稳定观察
 2. 是否扩大 symbol
 3. 是否启动 Sim-1
+
+---
+
+## 8. 阶段性验证报告
+
+真实 runtime 验证报告：
+
+- `docs/reports/2026-04-23-sim-0-real-chain-validation.md`
+
+当前阶段性结论：
+
+1. Sim-0.2 ~ Sim-0.5 已通过。
+2. 受控验证产生的 testnet 仓位和保护单已清理。
+3. 下一步进入分阶段观察，不再连续无停顿推进。
+4. 观察前建议先修 `SignalPipeline` attempt flush 的 Decimal JSON 序列化问题。
 4. 是否把离线优化候选带入下一轮模拟盘
 5. 是否评估 `CORE_ORDER_BACKEND=postgres`
 
