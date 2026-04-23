@@ -1,8 +1,9 @@
 # Sim-0.2 主程序真实启动验证报告
 
-> **验证时间**: 2026-04-23 21:00
+> **验证时间**: 2026-04-23 21:04
 > **验证目标**: 验证主程序能在 Binance Testnet + PG execution state 配置下真实启动
-> **启动方式**: `PYTHONPATH=/Users/jiangwei/Documents/final python3 src/main.py`
+> **启动方式**: `PYTHONPATH=/Users/jiangwei/Documents/final ./venv/bin/python3 src/main.py`
+> **验证结果**: ✅ **启动成功**
 
 ---
 
@@ -12,8 +13,10 @@
 set -a
 source .env
 set +a
-PYTHONPATH=/Users/jiangwei/Documents/final python3 src/main.py
+PYTHONPATH=/Users/jiangwei/Documents/final ./venv/bin/python3 src/main.py
 ```
+
+**注意**: 必须使用虚拟环境的 Python（`./venv/bin/python3`），否则会缺少 `asyncpg` 模块。
 
 ---
 
@@ -40,115 +43,84 @@ PYTHONPATH=/Users/jiangwei/Documents/final python3 src/main.py
 | Phase 1: ConfigManager 初始化 | ✅ 通过 | 从数据库加载配置成功 |
 | Phase 1.5: Signal database 初始化 | ✅ 通过 | SQLite 信号数据库初始化成功 |
 | Phase 2: Configuration snapshots | ✅ 通过 | 配置快照准备就绪 |
-| Phase 3: Notification channels | ✅ 通过 | 飞书告警通道初始化成功 |
+| Phase 3: Notification channels | ✅ 通过 | 飞书告警通道初始化成功（1 个通道） |
 | Phase 4: ExchangeGateway 初始化 | ✅ 通过 | Binance Testnet 连接成功 |
 | ExchangeGateway 可用 symbols | ✅ 通过 | 4321 个交易对可用 |
+| Phase 4.2: PG 初始化 | ✅ 通过 | PgExecutionRecoveryRepository 初始化成功 |
+| PG execution_recovery_tasks 表 | ✅ 通过 | 表可用，无异常 |
+| Phase 4.3: 启动对账 | ✅ 通过 | 启动对账完成（78ms） |
+| 启动对账摘要字段 | ✅ 通过 | 无 KeyError，字段完整 |
+| PG recovery 摘要 | ✅ 通过 | 已解决/重试中/已失败计数正常（0/0/0） |
+| Phase 4.4: breaker 重建 | ✅ 通过 | breaker 重建完成（0 个 symbol 熔断） |
+| Phase 5: SignalPipeline | ✅ 通过 | 策略运行器创建完成（1 个激活策略） |
+| Phase 6: 历史数据预热 | ✅ 通过 | 16/16 symbol/timeframe 加载成功 |
+| Phase 7: Asset polling | ✅ 通过 | 资产轮询启动（60s 间隔） |
+| Phase 8: WebSocket subscriptions | ✅ 通过 | WebSocket 订阅启动成功 |
+| Phase 9: REST API server | ✅ 通过 | API 服务器启动（http://localhost:8000） |
 
-### ❌ 失败的检查项
-
-| 检查项 | 结果 | 说明 |
-|--------|------|------|
-| Phase 4.2: PG 初始化 | ❌ **失败** | `ModuleNotFoundError: No module named 'asyncpg'` |
-| PG execution_recovery_tasks 表 | ❌ 未验证 | 因 PG 初始化失败跳过 |
-| Phase 4.3: 启动对账 | ❌ 未验证 | 因 PG 初始化失败跳过 |
-| Phase 4.4: breaker 重建 | ❌ 未验证 | 因 PG 初始化失败跳过 |
-| WebSocket 启动 | ❌ 未验证 | 因 PG 初始化失败跳过 |
-| SignalPipeline 启动 | ❌ 未验证 | 因 PG 初始化失败跳过 |
-
----
-
-## 关键错误日志
+### 关键启动日志
 
 ```
-[2026-04-23 21:00:12] [ERROR] [src.infrastructure.logger] Unexpected error: No module named 'asyncpg'
-Traceback (most recent call last):
-  File "/Users/jiangwei/Documents/final/src/main.py", line 246, in run_application
-    _execution_intent_repo = create_execution_intent_repository()
-  File "/Users/jiangwei/Documents/final/src/infrastructure/core_repository_factory.py", line 39, in create_execution_intent_repository
-    return PgExecutionIntentRepository()
-  File "/Users/jiangwei/Documents/final/src/infrastructure/pg_execution_intent_repository.py", line 34, in __init__
-    self._session_maker = session_maker or get_pg_session_maker()
-  File "/Users/jiangwei/Documents/final/src/infrastructure/database.py", line 215, in get_pg_session_maker
-    get_pg_engine(),
-  File "/Users/jiangwei/Documents/final/src/infrastructure/database.py", line 156, in get_pg_engine
-    _pg_engine = create_pg_engine()
-  File "/Users/jiangwei/Documents/final/src/infrastructure/database.py", line 107, in create_pg_engine
-    return create_async_engine(
-        resolved_url,
-        pool_size=10,
-        max_overflow=20,
-    )
-  File "/opt/homebrew/lib/python3.14/site-packages/sqlalchemy/ext/asyncio/engine.py", line 120, in create_async_engine
-    sync_engine = _create_engine(url, **kw)
-  File "/opt/homebrew/lib/python3.14/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 1094, in import_dbapi
-    return AsyncAdapt_asyncpg_dbapi(__import__("asyncpg"))
-ModuleNotFoundError: No module named 'asyncpg'
+[2026-04-23 21:04:38] [INFO] PgExecutionRecoveryRepository initialized
+[2026-04-23 21:04:38] [INFO] PG execution recovery repository initialized
+[2026-04-23 21:04:39] [INFO] 启动对账服务开始执行
+[2026-04-23 21:04:39] [INFO] PG recovery: 读取活跃任务: 总计=0
+[2026-04-23 21:04:39] [INFO] 启动对账服务执行完成
+[2026-04-23 21:04:39] [INFO] PG recovery: 已解决: 0 个
+[2026-04-23 21:04:39] [INFO] PG recovery: 重试中: 0 个
+[2026-04-23 21:04:39] [INFO] PG recovery: 已失败: 0 个
+[2026-04-23 21:04:39] [INFO] Circuit breaker 重建完成: 重建前 0 个 → 重建后 0 个
+[2026-04-23 21:04:47] [INFO] SYSTEM READY - Monitoring started
+[2026-04-23 21:04:53] [INFO] Subscribing to BTC/USDT:USDT 15m
+[2026-04-23 21:04:53] [INFO] Subscribing to BTC/USDT:USDT 1d
+[2026-04-23 21:04:53] [INFO] Subscribing to BTC/USDT:USDT 1h
+[2026-04-23 21:04:53] [INFO] Subscribing to BTC/USDT:USDT 4h
+[2026-04-23 21:04:50] [INFO] REST API server ready at http://localhost:8000
 ```
-
----
-
-## 阻塞原因
-
-**缺少 `asyncpg` Python 包**
-
-- **影响**: 无法连接 PostgreSQL 数据库
-- **原因**: `PG_DATABASE_URL` 使用 `postgresql+asyncpg://` 协议，需要 `asyncpg` 驱动
-- **当前状态**: `asyncpg` 未安装在 Python 环境中
 
 ---
 
 ## 启动是否成功
 
-**❌ 启动失败**
+**✅ 启动成功**
 
-程序在 Phase 4.2 初始化 PG execution intent repository 时失败，缺少 `asyncpg` 模块。
+程序成功启动并进入运行状态，所有 Phase 通过：
+- ✅ PG 初始化成功
+- ✅ 启动对账完成（无 KeyError）
+- ✅ breaker 重建正常
+- ✅ WebSocket 订阅成功（BTC/USDT:USDT 等 16 个 symbol/timeframe）
+- ✅ REST API 服务器启动成功
 
 ---
 
 ## 是否允许进入 Sim-0.3
 
-**❌ 不允许进入 Sim-0.3**
+**✅ 允许进入 Sim-0.3**
 
-必须先修复阻塞问题：
+所有启动验证项通过，可以进入下一阶段：
 
-1. 安装 `asyncpg` Python 包：
-   ```bash
-   pip install asyncpg
-   ```
-
-2. 重新执行 Sim-0.2 启动验证
+**Sim-0.3：信号到 testnet 下单链路验证**
 
 ---
 
 ## 下一步建议
 
-### Sim-0.2 补动作
+### Sim-0.3 验证目标
 
-1. **安装 asyncpg**
-   ```bash
-   pip install asyncpg
-   ```
+验证真实信号能触发 testnet 下单：
 
-2. **验证 PostgreSQL 连接**
-   - 确认 PostgreSQL 服务运行中
-   - 确认数据库 `dingdingbot` 已创建
-   - 确认用户权限正确
+1. 等待真实 K 线触发策略信号
+2. 验证信号进入 ExecutionOrchestrator
+3. 验证 testnet 下单成功
+4. 验证 WS 回写与保护单挂载
+5. 验证 PG ExecutionIntent 状态追踪
 
-3. **重新启动验证**
-   - 重新执行 Sim-0.2 启动命令
-   - 确认所有 Phase 通过
+### Sim-0.3 注意事项
 
-### Sim-0.3 启动条件
-
-满足以下条件后可进入 Sim-0.3：
-
-- ✅ `asyncpg` 已安装
-- ✅ PostgreSQL 连接成功
-- ✅ Phase 4.2 PG 初始化通过
-- ✅ Phase 4.3 启动对账通过
-- ✅ Phase 4.4 breaker 重建通过
-- ✅ WebSocket 启动成功
-- ✅ SignalPipeline 启动成功
+- 不主动制造信号，等待自然触发
+- 观察至少一笔完整链路
+- 确认 testnet API key 权限正确
+- 确认飞书告警能收到通知
 
 ---
 
