@@ -532,7 +532,7 @@
 
 4. ✅ 小范围验证通过
    - `python3 -m pytest tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py tests/unit/test_backtest_config_resolver.py -q`
-   - 结果：56 passed
+   - 结果：58 passed
    - `python3 -m compileall -q src/application/strategy_optimizer.py src/application/backtest_config.py`
 
 5. ⏭️ 后续事项
@@ -553,7 +553,38 @@
 
 3. ✅ 验证
    - `python3 -m pytest tests/unit/test_api_lifespan_runtime.py tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py tests/unit/test_backtest_config_resolver.py -q`
-   - 结果：66 passed
+   - 结果：68 passed
+
+### 2026-04-24 -- Optuna QA 二次审查修复
+
+1. ✅ 删除 dead code
+   - 移除 `StrategyOptimizer._build_backtest_request()`
+   - 清除 `StrategyOptimizer` 对 `BACKTEST_ETH_BASELINE_PROFILE` 的直接依赖
+
+2. ✅ Trial resolver 解析次数收口
+   - `_build_trial_backtest_inputs()` 每个 trial 只调用一次 `BacktestConfigResolver.resolve()`
+   - 风控覆盖在已解析出的 `BacktestRequest` 上叠加，不再二次 resolve
+
+3. ✅ `BacktestRuntimeOverrides` 构建 DRY 化
+   - 删除手写 if-else 梯子
+   - 使用 `BacktestRuntimeOverrides.model_fields` 过滤后交给 Pydantic 构造
+   - fixed params 仍高于 sampled params
+
+4. ✅ engine fixed params 补齐
+   - `initial_balance`
+   - `slippage_rate`
+   - `tp_slippage_rate`
+   - `fee_rate`
+
+5. ✅ 风控 fallback 强制来自当前 profile
+   - `_build_risk_overrides()` 不再回退 ETH baseline 常量
+   - 未传当前 profile fallback 时直接报错
+
+6. ✅ 验证
+   - `python3 -m pytest tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py tests/unit/test_backtest_config_resolver.py -q`
+   - 结果：58 passed
+   - `python3 -m pytest tests/unit/test_api_lifespan_runtime.py tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py tests/unit/test_backtest_config_resolver.py -q`
+   - 结果：68 passed
 
 ---
 

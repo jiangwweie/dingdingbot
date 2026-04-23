@@ -10,6 +10,7 @@ import pytest
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from src.application.backtest_config import BacktestConfigResolver, DEFAULT_BACKTEST_PROFILE_PROVIDER
 from src.application.strategy_optimizer import StrategyOptimizer
 from src.domain.models import (
     OptimizationRequest,
@@ -283,6 +284,46 @@ class TestParameterInjectionToBacktest:
         assert request.risk_overrides.max_loss_percent == Decimal("0.02")
         assert request.risk_overrides.max_total_exposure == Decimal("0.6")
         assert request.risk_overrides.max_leverage == 12
+
+    @pytest.mark.asyncio
+    async def test_build_trial_inputs_resolves_profile_once(self, mock_exchange_gateway, mock_backtester):
+        """每个 trial 只解析一次 profile，避免 Optuna 搜索时重复 I/O。"""
+        class CountingResolver(BacktestConfigResolver):
+            def __init__(self):
+                super().__init__(DEFAULT_BACKTEST_PROFILE_PROVIDER)
+                self.calls = 0
+
+            async def resolve(self, *args, **kwargs):
+                self.calls += 1
+                return await super().resolve(*args, **kwargs)
+
+        resolver = CountingResolver()
+        optimizer = StrategyOptimizer(
+            mock_exchange_gateway,
+            mock_backtester,
+            backtest_config_resolver=resolver,
+        )
+        opt_request = OptimizationRequest(
+            symbol="ETH/USDT:USDT",
+            timeframe="1h",
+            objective=OptimizationObjective.SHARPE,
+            n_trials=10,
+            parameter_space=ParameterSpace(parameters=[]),
+        )
+
+        await optimizer._build_trial_backtest_inputs(
+            opt_request,
+            params={"max_loss_percent": 0.02},
+            fixed_params=None,
+            runtime_overrides=optimizer._build_runtime_overrides({}),
+        )
+
+        assert resolver.calls == 1
+
+    def test_build_risk_overrides_requires_profile_fallback(self, optimizer):
+        """风控覆盖必须使用当前 profile fallback，不能偷偷回退到 ETH baseline 常量。"""
+        with pytest.raises(ValueError, match="risk fallback is required"):
+            optimizer._build_risk_overrides({"max_loss_percent": 0.02})
 
 
 # ============================================================

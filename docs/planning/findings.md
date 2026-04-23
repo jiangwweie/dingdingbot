@@ -311,6 +311,8 @@
 7. `StrategyOptimizer` 已接入 `BacktestConfigResolver`，trial request / strategy / risk / execution 不再由 Optuna 内部硬编码。
 8. Optuna parameter space 必须命中 `optimizer_safe=True` 字段；fixed params 必须命中可注入参数契约。
 9. Optuna 不写 runtime DB，不自动应用模拟盘。
+10. Optuna trial 每次只允许解析一次 backtest profile；风控覆盖在已解析 request 上叠加，避免搜索阶段重复 I/O。
+11. `StrategyOptimizer` 不允许直接 import 具体 baseline profile 常量，所有 baseline fallback 必须来自当前 resolver 结果。
 
 后续接线：
 

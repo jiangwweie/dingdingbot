@@ -322,11 +322,17 @@
      - `tests/unit/test_strategy_optimizer.py`
      - `tests/unit/test_optuna_runtime_overrides.py`
      - `tests/unit/test_backtest_config_resolver.py`
-     - 56 passed
+     - 58 passed
+   - Optuna QA 二次审查问题已收口：
+     - 删除 `_build_backtest_request()` dead code
+     - 每个 trial 只执行一次 resolver
+     - `BacktestRuntimeOverrides` 使用 Pydantic 字段过滤构造
+     - engine fixed params 已覆盖 `initial_balance/slippage_rate/tp_slippage_rate/fee_rate`
+     - 风控 fallback 强制来自当前 profile，不再 import ETH baseline 常量
    - 两个 P1 已收口：
      - `.env` 已移除本地 PG 连接串和 backend 切换值
      - `api.py` standalone shutdown reset 防线已由 `test_api_lifespan_runtime.py` 覆盖
-     - 合并验证：66 passed
+     - 合并验证：68 passed
    - 执行配置边界已加固：
      - `tp_ratios` 必须全部为正数
      - `tp_targets` 必须全部为正数

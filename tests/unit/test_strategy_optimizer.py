@@ -302,11 +302,11 @@ class TestObjectiveCalculation:
 
 
 # ============================================================
-# Tests: Build Backtest Request
+# Tests: Build Trial Backtest Inputs
 # ============================================================
 
-class TestBuildBacktestRequest:
-    """回测请求构建测试"""
+class TestBuildTrialBacktestInputs:
+    """Optuna trial 回测输入构建测试"""
 
     @pytest.fixture
     def optimizer(self):
@@ -317,21 +317,29 @@ class TestBuildBacktestRequest:
         optimizer._jobs = {}
         return optimizer
 
-    def test_build_backtest_request(self, optimizer, sample_optimization_request):
-        """测试构建回测请求"""
+    @pytest.mark.asyncio
+    async def test_build_trial_backtest_inputs(self, optimizer, sample_optimization_request):
+        """测试通过 profile resolver 构建回测请求"""
         params = {"ema_period": 50, "min_wick_ratio": 0.6}
+        runtime_overrides = optimizer._build_runtime_overrides(params)
 
-        request = optimizer._build_backtest_request(
+        request, returned_overrides = await optimizer._build_trial_backtest_inputs(
             sample_optimization_request,
-            params
+            params,
+            fixed_params=None,
+            runtime_overrides=runtime_overrides,
         )
 
+        assert returned_overrides == runtime_overrides
         assert request.symbol == "BTC/USDT:USDT"
         assert request.timeframe == "15m"
         assert request.mode == "v3_pms"
         assert request.initial_balance == Decimal('10000')
+        assert request.strategies is not None
+        assert request.order_strategy is not None
 
-    def test_build_backtest_request_custom_params(self, optimizer):
+    @pytest.mark.asyncio
+    async def test_build_trial_backtest_inputs_custom_engine_params(self, optimizer):
         """测试自定义配置的回测请求"""
         request = OptimizationRequest(
             symbol="ETH/USDT:USDT",
@@ -343,25 +351,36 @@ class TestBuildBacktestRequest:
             slippage_rate=Decimal('0.002'),
             fee_rate=Decimal('0.0005'),
         )
+        runtime_overrides = optimizer._build_runtime_overrides({"ema_period": 50})
 
-        backtest_request = optimizer._build_backtest_request(
+        backtest_request, _ = await optimizer._build_trial_backtest_inputs(
             request,
-            {"ema_period": 50}
+            {"ema_period": 50},
+            fixed_params={"tp_slippage_rate": Decimal("0.0007")},
+            runtime_overrides=runtime_overrides,
         )
 
         assert backtest_request.symbol == "ETH/USDT:USDT"
         assert backtest_request.timeframe == "1h"
         assert backtest_request.initial_balance == Decimal('50000')
         assert backtest_request.slippage_rate == Decimal('0.002')
+        assert backtest_request.fee_rate == Decimal('0.0005')
+        assert backtest_request.tp_slippage_rate == Decimal("0.0007")
 
-    def test_build_backtest_request_injects_sampled_risk_overrides(self, optimizer, sample_optimization_request):
+    @pytest.mark.asyncio
+    async def test_build_trial_inputs_injects_sampled_risk_overrides(self, optimizer, sample_optimization_request):
         """采样得到的风控参数应注入到 request.risk_overrides"""
-        backtest_request = optimizer._build_backtest_request(
+        params = {
+            "max_loss_percent": 0.02,
+            "max_total_exposure": 2.5,
+        }
+        runtime_overrides = optimizer._build_runtime_overrides(params)
+
+        backtest_request, _ = await optimizer._build_trial_backtest_inputs(
             sample_optimization_request,
-            {
-                "max_loss_percent": 0.02,
-                "max_total_exposure": 2.5,
-            }
+            params,
+            fixed_params=None,
+            runtime_overrides=runtime_overrides,
         )
 
         assert isinstance(backtest_request.risk_overrides, RiskConfig)
@@ -369,19 +388,25 @@ class TestBuildBacktestRequest:
         assert backtest_request.risk_overrides.max_total_exposure == Decimal("2.5")
         assert backtest_request.risk_overrides.max_leverage == 20
 
-    def test_build_backtest_request_fixed_risk_overrides_override_sampled(self, optimizer, sample_optimization_request):
+    @pytest.mark.asyncio
+    async def test_build_trial_inputs_fixed_risk_overrides_override_sampled(self, optimizer, sample_optimization_request):
         """fixed_params 中的风控参数应覆盖采样值"""
-        backtest_request = optimizer._build_backtest_request(
+        params = {
+            "max_loss_percent": 0.02,
+            "max_total_exposure": 2.5,
+        }
+        fixed_params = {
+            "max_loss_percent": 0.015,
+            "max_total_exposure": 2.0,
+            "max_leverage": 10,
+        }
+        runtime_overrides = optimizer._build_runtime_overrides(params, fixed_params)
+
+        backtest_request, _ = await optimizer._build_trial_backtest_inputs(
             sample_optimization_request,
-            {
-                "max_loss_percent": 0.02,
-                "max_total_exposure": 2.5,
-            },
-            fixed_params={
-                "max_loss_percent": 0.015,
-                "max_total_exposure": 2.0,
-                "max_leverage": 10,
-            }
+            params,
+            fixed_params=fixed_params,
+            runtime_overrides=runtime_overrides,
         )
 
         assert isinstance(backtest_request.risk_overrides, RiskConfig)
