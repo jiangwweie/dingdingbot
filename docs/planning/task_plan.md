@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-24 00:32
-> **Status**: Sim-0 受控链路通过，Runtime Resolver 已接入 main.py，market/risk 已小范围实切
+> **Last updated**: 2026-04-24 00:48
+> **Status**: Sim-0 受控链路通过，Runtime Resolver 已接入 main.py，market/risk/strategy 已小范围实切
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
@@ -277,12 +277,18 @@
      - `max_leverage=20`
      - `max_total_exposure=1.0`
      - `daily_max_trades=10`
-   - 尚未让 `strategy/execution` 消费 runtime config
+   - SignalPipeline strategy 已实切：
+     - `trigger=pinbar`
+     - `filters=ema,mtf,atr(disabled)`
+     - `allowed_directions=LONG`
+     - `scope=ETH/USDT:USDT:1h`
+     - `mtf_ema_period=60`
+   - 尚未让 `execution` 消费 runtime config
    - `CapitalProtectionManager` 账户级熔断仍暂用原 ConfigManager 派生配置
 7. 下一步切换边界：
    - 先让启动日志和 API 可观测 runtime hash
-   - 再评估 strategy module 是否接入 `SignalPipeline`
    - 最后把 execution module 转为实盘 `OrderStrategy` 唯一入口
+   - execution 切换前必须重点审 partial-fill / full-fill / recovery 三条保护单路径是否都使用同一 frozen strategy
 
 ---
 

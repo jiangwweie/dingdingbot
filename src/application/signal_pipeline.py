@@ -51,6 +51,10 @@ class SignalPipeline:
         signal_repository: Optional[SignalRepository] = None,
         signal_executor: Optional[Callable[[SignalResult, OrderStrategy], Awaitable[Any]]] = None,
         cooldown_seconds: int = 14400,  # Signal deduplication cooldown in seconds (default 4 hours)
+        runtime_strategy_definitions: Optional[List[StrategyDefinition]] = None,
+        runtime_allowed_directions: Optional[List[Direction]] = None,
+        runtime_mtf_ema_period: Optional[int] = None,
+        runtime_risk_locked: bool = False,
     ):
         """
         Initialize Signal Pipeline.
@@ -62,9 +66,16 @@ class SignalPipeline:
             signal_repository: Optional signal repository for persistence
             signal_executor: Optional execution hook for fired signals
             cooldown_seconds: Signal deduplication cooldown period in seconds
+            runtime_strategy_definitions: Optional frozen runtime strategy definitions
+            runtime_allowed_directions: Optional runtime direction allowlist
+            runtime_mtf_ema_period: Optional frozen MTF EMA period
+            runtime_risk_locked: If True, ConfigManager hot reload cannot replace risk_config
         """
         self._config_manager = config_manager
         self._risk_config = risk_config
+        self._runtime_risk_locked = runtime_risk_locked
+        self._runtime_strategy_definitions = runtime_strategy_definitions
+        self._runtime_allowed_directions = set(runtime_allowed_directions or [])
         self._notification_service = notification_service or get_notification_service()
         self._repository = signal_repository
         self._signal_executor = signal_executor
@@ -99,7 +110,7 @@ class SignalPipeline:
         # S3-1: MTF EMA indicators (one per symbol:timeframe combination)
         self._mtf_ema_indicators: Dict[str, EMACalculator] = {}
         # R3.1 fix: 使用同步方法获取配置副本
-        self._mtf_ema_period = config_manager.get_user_config_sync().mtf_ema_period or 60
+        self._mtf_ema_period = runtime_mtf_ema_period or config_manager.get_user_config_sync().mtf_ema_period or 60
 
         # Build dynamic strategy runner from config (uses _kline_history for warmup)
         self._runner = self._build_and_warmup_runner()
@@ -305,18 +316,28 @@ class SignalPipeline:
             # R3.1 fix: 使用 await 获取配置副本，而非直接引用
             user_config = await self._config_manager.get_user_config()
 
-            # Step 1: Reload risk configuration (R1.2 fix: _risk_config was stale on hot-reload)
-            old_max_loss = self._risk_config.max_loss_percent
-            old_max_leverage = self._risk_config.max_leverage
-            self._risk_config = copy.deepcopy(user_config.risk)
-            logger.info(
-                f"[热重载] Risk config 更新：max_loss_percent={old_max_loss}->{self._risk_config.max_loss_percent}, "
-                f"max_leverage={old_max_leverage}->{self._risk_config.max_leverage}"
-            )
+            # Step 1: Reload risk configuration (unless runtime profile owns it)
+            if self._runtime_risk_locked:
+                logger.info(
+                    "[热重载] Risk config 由 runtime profile 锁定，跳过 ConfigManager 覆盖"
+                )
+            else:
+                old_max_loss = self._risk_config.max_loss_percent
+                old_max_leverage = self._risk_config.max_leverage
+                self._risk_config = copy.deepcopy(user_config.risk)
+                logger.info(
+                    f"[热重载] Risk config 更新：max_loss_percent={old_max_loss}->{self._risk_config.max_loss_percent}, "
+                    f"max_leverage={old_max_leverage}->{self._risk_config.max_leverage}"
+                )
 
             # Step 2: Reload MTF EMA period (S3-1 fix: _mtf_ema_period was stale on hot-reload)
             old_mtf_ema_period = self._mtf_ema_period
-            self._mtf_ema_period = user_config.mtf_ema_period or 60
+            if self._runtime_strategy_definitions is None:
+                self._mtf_ema_period = user_config.mtf_ema_period or 60
+            else:
+                logger.info(
+                    "[热重载] MTF EMA 周期由 runtime strategy 锁定，跳过 ConfigManager 覆盖"
+                )
             if old_mtf_ema_period != self._mtf_ema_period:
                 logger.info(f"[热重载] MTF EMA 周期更新：{old_mtf_ema_period} -> {self._mtf_ema_period}")
             else:
@@ -360,12 +381,17 @@ class SignalPipeline:
         """
         # R3.1 fix: 使用 get_user_config() 和 get_core_config() 获取副本
         # 注意：这些是同步方法，在初始化时使用
-        active_strategies = self._config_manager.get_user_config_sync().active_strategies
+        active_strategies = (
+            self._runtime_strategy_definitions
+            if self._runtime_strategy_definitions is not None
+            else self._config_manager.get_user_config_sync().active_strategies
+        )
         core_config = self._config_manager.get_core_config()
 
         # Build runner using factory function
         runner = create_dynamic_runner(active_strategies, core_config)
-        logger.info(f"Strategy runner 创建完成，激活策略数：{len(active_strategies)}")
+        source = "runtime profile" if self._runtime_strategy_definitions is not None else "ConfigManager"
+        logger.info(f"Strategy runner 创建完成，来源={source}，激活策略数：{len(active_strategies)}")
 
         # Warmup: replay cached K-lines to restore EMA and other stateful indicators
         if self._kline_history:
@@ -550,6 +576,17 @@ class SignalPipeline:
             # Process all SIGNAL_FIRED attempts
             for attempt in attempts:
                 if attempt.final_result == "SIGNAL_FIRED" and attempt.pattern:
+                    if (
+                        self._runtime_allowed_directions
+                        and attempt.pattern.direction not in self._runtime_allowed_directions
+                    ):
+                        logger.info(
+                            f"Signal skipped by runtime direction policy: {kline.symbol} "
+                            f"{kline.timeframe} {attempt.pattern.direction.value} "
+                            f"[{attempt.strategy_name}]"
+                        )
+                        continue
+
                     # Signal deduplication: check cooldown period
                     # Key includes strategy_name to allow concurrent strategies to fire independently
                     dedup_key = f"{kline.symbol}:{kline.timeframe}:{attempt.pattern.direction.value}:{attempt.strategy_name}"

@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-24 00:32
+> Last updated: 2026-04-24 00:48
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -66,10 +66,16 @@
    - 已让预热、订阅、资产轮询间隔从 `ResolvedRuntimeConfig.market` 获取
    - 第二刀只切 `SignalPipeline` 的 `RiskConfig`
    - `CapitalProtectionManager` 账户级熔断不随本刀切换，避免把仓位试算和账户保护混成一个变更
-   - strategy/execution 暂不切，避免一次性改变信号判断和保护单语义
+   - 第三刀切 `SignalPipeline` strategy runner，但必须同时锁定 ConfigManager 热重载回退路径
+   - execution 暂不切，避免一次性改变保护单语义
    - 每切一个模块都应在日志中明确标记来源，便于 Sim-1 观察回溯
 
-8. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
+8. Runtime strategy 接入后，热重载必须遵守冻结 profile 边界。
+   - runtime risk 已切入时，ConfigManager 热重载不能覆盖 `_risk_config`
+   - runtime strategy 已切入时，ConfigManager 热重载不能覆盖 runner strategy / MTF EMA period
+   - 如果未来要支持运行中变更 runtime profile，应通过新 profile + 重启或显式 reload 流程，而不是复用旧 ConfigManager observer 静默覆盖
+
+9. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
    - 本轮没有修改 `.env`
    - PG 示例继续以 `docs/local-pg.md` / 示例文件为准
    - 若后续要彻底治理，需要单独安排 secret rotation + `.env` 脱离版本控制，不应混在 runtime config 接入任务中顺手做

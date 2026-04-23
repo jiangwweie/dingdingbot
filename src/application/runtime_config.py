@@ -17,7 +17,7 @@ from typing import Any, Mapping, Optional
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from src.domain.logic_tree import FilterConfig, TriggerConfig
-from src.domain.models import Direction, OrderStrategy, RiskConfig
+from src.domain.models import Direction, OrderStrategy, RiskConfig, StrategyDefinition
 
 
 class EnvironmentRuntimeConfig(BaseModel):
@@ -93,6 +93,38 @@ class StrategyRuntimeConfig(BaseModel):
         if self.atr_enabled:
             raise ValueError("Sim-1 strategy requires ATR disabled")
         return self
+
+    def to_strategy_definition(
+        self,
+        *,
+        strategy_id: str = "sim1_eth_runtime_strategy",
+        name: str = "sim1_eth_runtime_strategy",
+        primary_symbol: Optional[str] = None,
+        primary_timeframe: Optional[str] = None,
+    ) -> StrategyDefinition:
+        """Build the dynamic strategy definition consumed by SignalPipeline."""
+        apply_to = []
+        is_global = True
+        if primary_symbol and primary_timeframe:
+            apply_to = [f"{primary_symbol}:{primary_timeframe}"]
+            is_global = False
+
+        return StrategyDefinition(
+            id=strategy_id,
+            name=name,
+            trigger=self.trigger,
+            filters=self.filters,
+            is_global=is_global,
+            apply_to=apply_to,
+        )
+
+    def get_mtf_ema_period(self, default: int = 60) -> int:
+        """Return the runtime MTF EMA period, falling back to the legacy default."""
+        for filter_config in self.filters:
+            if filter_config.type == "mtf" and filter_config.enabled:
+                value = filter_config.params.get("ema_period", default)
+                return int(value)
+        return default
 
 
 class RiskRuntimeConfig(BaseModel):

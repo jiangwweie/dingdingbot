@@ -1,11 +1,39 @@
 # Progress Log
 
-> Last updated: 2026-04-24 00:32
+> Last updated: 2026-04-24 00:48
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-24 -- Runtime Config strategy 已接入 SignalPipeline
+
+1. ✅ `SignalPipeline` 已支持 runtime strategy definitions
+   - 从 `ResolvedRuntimeConfig.strategy` 构建 `StrategyDefinition`
+   - 策略作用域限定为 `ETH/USDT:USDT:1h`
+   - `4h` 仍作为 MTF 辅助周期，只用于状态与过滤
+
+2. ✅ Sim-1 strategy 当前生效口径
+   - trigger: `pinbar`
+   - filters: `ema`, `mtf`, `atr(disabled)`
+   - allowed directions: `LONG`
+   - MTF EMA period: `60`
+
+3. ✅ 补齐热重载边界
+   - runtime risk 已锁定，ConfigManager 热重载不会覆盖 `_risk_config`
+   - runtime strategy 已锁定，ConfigManager 热重载不会覆盖 runner strategy / MTF EMA period
+
+4. ✅ 已做轻量验证
+   - `python3 -m py_compile` 通过
+   - `scripts/verify_sim1_runtime_config.py` 通过
+   - 未执行 pytest
+
+### 当前边界
+
+- execution `OrderStrategy` 尚未从 runtime execution module 派生
+- `_build_execution_strategy()` 仍从 `SignalResult.take_profit_levels` 派生保护单策略
+- 下一刀应单独切 execution，因为它会直接改变 TP/SL 保护单语义
 
 ### 2026-04-24 -- Runtime Config risk 已接入 SignalPipeline
 

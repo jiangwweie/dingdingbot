@@ -392,17 +392,42 @@ async def run_application():
         # =============================================
         logger.info("Phase 5: Creating signal pipeline...")
         # 配置重构后：SignalPipeline 需要 config_manager 作为第一个参数
+        runtime_strategy_definitions = None
+        runtime_allowed_directions = None
+        runtime_mtf_ema_period = None
+        runtime_risk_locked = False
+
         if _runtime_config_provider is not None:
-            runtime_risk = _runtime_config_provider.resolved_config.risk
+            runtime_config = _runtime_config_provider.resolved_config
+            runtime_risk = runtime_config.risk
+            runtime_strategy = runtime_config.strategy
+            runtime_market = runtime_config.market
             risk_config = runtime_risk.to_risk_config()
+            runtime_strategy_definitions = [
+                runtime_strategy.to_strategy_definition(
+                    primary_symbol=runtime_market.primary_symbol,
+                    primary_timeframe=runtime_market.primary_timeframe,
+                )
+            ]
+            runtime_allowed_directions = runtime_strategy.allowed_directions
+            runtime_mtf_ema_period = runtime_strategy.get_mtf_ema_period()
+            runtime_risk_locked = True
             logger.info(
                 "SignalPipeline risk config driven by runtime profile: "
-                f"profile={_runtime_config_provider.resolved_config.profile_name}, "
+                f"profile={runtime_config.profile_name}, "
                 f"hash={_runtime_config_provider.config_hash}, "
                 f"max_loss_percent={risk_config.max_loss_percent}, "
                 f"max_leverage={risk_config.max_leverage}, "
                 f"max_total_exposure={risk_config.max_total_exposure}, "
                 f"daily_max_trades={risk_config.daily_max_trades}"
+            )
+            logger.info(
+                "SignalPipeline strategy driven by runtime profile: "
+                f"profile={runtime_config.profile_name}, "
+                f"allowed_directions={[direction.value for direction in runtime_allowed_directions]}, "
+                f"trigger={runtime_strategy.trigger.type}, "
+                f"filters={[filter_config.type for filter_config in runtime_strategy.filters]}, "
+                f"mtf_ema_period={runtime_mtf_ema_period}"
             )
         else:
             risk_config = RiskConfig(
@@ -423,6 +448,10 @@ async def run_application():
             signal_repository=signal_repository,
             signal_executor=_execution_orchestrator.execute_signal if _execution_orchestrator else None,
             cooldown_seconds=core_config.signal_pipeline.cooldown_seconds,
+            runtime_strategy_definitions=runtime_strategy_definitions,
+            runtime_allowed_directions=runtime_allowed_directions,
+            runtime_mtf_ema_period=runtime_mtf_ema_period,
+            runtime_risk_locked=runtime_risk_locked,
         )
         logger.info("Signal pipeline ready")
 
