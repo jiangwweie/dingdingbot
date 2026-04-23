@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-04-23 12:30 -- P0-7 pending_recovery 恢复闭环修复：启动对账必须清除 SQLite 真源
+
+### 新增结论
+
+1. **启动对账清除 pending_recovery 时，必须同时清除内存和 SQLite 真源**
+   - 旧实现只调 `orchestrator.clear_pending_recovery()`（只清内存）
+   - 新实现改为 `await orchestrator.clear_pending_recovery_async()`（既清内存，也清 SQLite）
+   - 否则脚本 `manage_execution_recovery.py` 会读到"已清除"的僵尸记录
+
+2. **graceful_shutdown 必须显式关闭 pending_recovery_repo**
+   - 否则 SQLite 连接泄漏，影响后续进程启动
+   - 已提升 `_pending_recovery_repo` 为模块级全局，在 shutdown 中显式 close
+
+3. **执行状态 PG 优先原则已写入约束**
+   - 执行、恢复、对账、熔断等强执行语义状态，默认优先纳入 PG 主线
+   - 若暂落 SQLite，必须明确标注为过渡态并说明原因
+   - 当前 `pending_recovery` 为过渡态（SQLite），后续应迁至 PG
+
+---
+
 ## 2026-04-23 10:23 -- ExecutionIntent PG 真源验证通过：可进入 execution_intent-only 小范围实切
 
 ### 新增结论

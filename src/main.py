@@ -47,6 +47,7 @@ _execution_intent_repo = None
 _order_lifecycle_service: Optional[OrderLifecycleService] = None
 _capital_protection: Optional[CapitalProtectionManager] = None
 _execution_orchestrator: Optional[ExecutionOrchestrator] = None
+_pending_recovery_repo = None  # P0-7: 全局 pending_recovery_repo
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -83,7 +84,7 @@ async def graceful_shutdown():
     logger.info("Graceful shutdown initiated...")
 
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
-    global _execution_intent_repo, _order_repo
+    global _execution_intent_repo, _order_repo, _pending_recovery_repo
     _shutdown_event.set()
 
     if _exchange_gateway:
@@ -101,6 +102,11 @@ async def graceful_shutdown():
     if _order_repo:
         await _order_repo.close()
         _order_repo = None
+
+    # P0-7: 关闭 pending_recovery_repo
+    if _pending_recovery_repo:
+        await _pending_recovery_repo.close()
+        _pending_recovery_repo = None
 
     await close_db()
 
@@ -147,7 +153,7 @@ async def run_application():
     """
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _order_lifecycle_service
-    global _capital_protection, _execution_orchestrator
+    global _capital_protection, _execution_orchestrator, _pending_recovery_repo
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()

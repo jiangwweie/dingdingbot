@@ -208,7 +208,7 @@ class StartupReconciliationService:
         orchestrator_circuit_breaker_cleared_count = 0
 
         if self._orchestrator:
-            pending_recovery_list = self._orchestrator.list_pending_recovery()
+            pending_recovery_list = await self._orchestrator.list_pending_recovery_async()
             logger.info(f"P0-4: 读取 orchestrator 待恢复记录: 总计={len(pending_recovery_list)}")
 
             # 按 symbol 分组，用于后续检查是否可以解除熔断
@@ -249,7 +249,7 @@ class StartupReconciliationService:
                             OrderStatus.EXPIRED,
                         }
                         if local_order.status in terminal_statuses:
-                            self._orchestrator.clear_pending_recovery(order_id)
+                            await self._orchestrator.clear_pending_recovery_async(order_id)
                             orchestrator_recovery_cleared_count += 1
                             logger.info(
                                 f"P0-4.1: ✅ 清除待恢复记录（终态）: order_id={order_id}, "
@@ -316,7 +316,7 @@ class StartupReconciliationService:
                     }
 
                     if exchange_order_result.status in terminal_statuses:
-                        self._orchestrator.clear_pending_recovery(order_id)
+                        await self._orchestrator.clear_pending_recovery_async(order_id)
                         orchestrator_recovery_cleared_count += 1
                         logger.info(
                             f"P0-4.1: ✅ 清除待恢复记录（终态）: order_id={order_id}, "
@@ -337,7 +337,7 @@ class StartupReconciliationService:
             # 检查每个 symbol 是否还有 pending_recovery，如果没有则解除熔断
             for symbol, order_ids in symbol_to_order_ids.items():
                 # 检查该 symbol 是否还有未清除的 pending_recovery
-                remaining_records = self._orchestrator.list_pending_recovery()
+                remaining_records = await self._orchestrator.list_pending_recovery_async()
                 symbol_still_has_pending = any(
                     r.get("symbol") == symbol for r in remaining_records
                 )
