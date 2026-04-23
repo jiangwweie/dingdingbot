@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-23 23:50
+> Last updated: 2026-04-24 00:08
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -54,6 +54,17 @@
    - DB DSN、backend port、repo backend switches 不进入 hash
    - `exchange_name / exchange_testnet` 会影响交易所执行环境，保留在 hash
    - secret 永远不进入 hash
+
+6. `main.py` 的第一阶段接入必须先 observe-only。
+   - 当前只在启动期解析 `sim1_eth_runtime`
+   - 只保存 `RuntimeConfigProvider` 并打印脱敏 summary/hash
+   - 不直接替换现有 `ConfigManager` 消费路径
+   - 这样可以先证明 runtime profile 可解析、可审计、可追踪，再分模块切换消费方
+
+7. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
+   - 本轮没有修改 `.env`
+   - PG 示例继续以 `docs/local-pg.md` / 示例文件为准
+   - 若后续要彻底治理，需要单独安排 secret rotation + `.env` 脱离版本控制，不应混在 runtime config 接入任务中顺手做
 
 ### 1. 执行恢复状态已完全进入 PG 主线
 

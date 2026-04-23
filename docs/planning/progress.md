@@ -1,11 +1,40 @@
 # Progress Log
 
-> Last updated: 2026-04-23 23:50
+> Last updated: 2026-04-24 00:08
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-24 -- Runtime Config 已接入 main.py 启动期（observe-only）
+
+1. ✅ 新增 `RuntimeConfigProvider`
+   - 作为进程内只读 holder 保存 `ResolvedRuntimeConfig`
+   - 当前只暴露 `resolved_config`、`config_hash`、`to_safe_summary()`
+
+2. ✅ `main.py` 启动期新增 Phase 1.1
+   - 默认解析 `RUNTIME_PROFILE=sim1_eth_runtime`
+   - 成功后打印 profile / version / config_hash
+   - 打印脱敏 safe summary
+   - 明确日志标记为 observe-only，不改变现有执行消费路径
+
+3. ✅ 已 seed 本地 `data/v3_dev.db`
+   - 写入 `sim1_eth_runtime`
+   - 当前 profile version: `1`
+   - 当前 config hash: `0279ca9c45b37fad`
+
+4. ✅ 已做轻量验证
+   - `python3 -m py_compile` 通过
+   - `scripts/verify_sim1_runtime_config.py` 通过
+   - 未执行 pytest
+
+### 当前边界
+
+- `RuntimeConfigProvider` 尚未注入 `SignalPipeline`
+- execution `OrderStrategy` 尚未从 runtime execution module 派生
+- exchange secret / webhook 仍由现有 `ConfigManager` 路径消费
+- 现有 `.env` 没有新增提交；后续不要再把本地 PG 示例或 secret 改动提交进 `.env`
 
 ### 2026-04-23 -- Runtime Config 骨架审查问题已修复
 

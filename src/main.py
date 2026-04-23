@@ -12,11 +12,14 @@ Orchestrates the complete startup flow:
 Zero Execution Policy: This system is READ-ONLY. No trading operations.
 """
 import asyncio
+import json
+import os
 import sys
 import signal as sys_signal
 from typing import Optional
 
 from src.application.config_manager import ConfigManager, load_all_configs
+from src.application.runtime_config import RuntimeConfigProvider, RuntimeConfigResolver
 from src.application.account_service import BinanceAccountService
 from src.application.capital_protection import CapitalProtectionManager
 from src.application.execution_orchestrator import ExecutionOrchestrator
@@ -27,6 +30,7 @@ from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
     create_order_repository,
 )
+from src.infrastructure.runtime_profile_repository import RuntimeProfileRepository
 from src.application.signal_pipeline import SignalPipeline
 from src.domain.risk_calculator import RiskConfig
 from src.domain.models import KlineData
@@ -48,6 +52,7 @@ _order_lifecycle_service: Optional[OrderLifecycleService] = None
 _capital_protection: Optional[CapitalProtectionManager] = None
 _execution_orchestrator: Optional[ExecutionOrchestrator] = None
 _execution_recovery_repo = None  # PG 正式版
+_runtime_config_provider: Optional[RuntimeConfigProvider] = None
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -85,6 +90,7 @@ async def graceful_shutdown():
 
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
     global _execution_intent_repo, _order_repo, _execution_recovery_repo
+    global _runtime_config_provider
     _shutdown_event.set()
 
     if _exchange_gateway:
@@ -109,6 +115,7 @@ async def graceful_shutdown():
         _execution_recovery_repo = None
 
     await close_db()
+    _runtime_config_provider = None
 
     logger.info("Shutdown complete")
 
@@ -154,6 +161,7 @@ async def run_application():
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator
+    global _runtime_config_provider
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -185,6 +193,41 @@ async def run_application():
 
         # R7.1: Explicit marker - ConfigManager initialization complete
         logger.info("[启动顺序] Phase 1 完成：ConfigManager 已初始化")
+
+        # =============================================
+        # Phase 1.1: Resolve Runtime Config Snapshot
+        # =============================================
+        logger.info("Phase 1.1: Resolving runtime config snapshot...")
+        runtime_profile_name = os.environ.get("RUNTIME_PROFILE", "sim1_eth_runtime")
+        runtime_profile_repo = RuntimeProfileRepository()
+        try:
+            await runtime_profile_repo.initialize()
+            runtime_resolver = RuntimeConfigResolver(runtime_profile_repo)
+            resolved_runtime_config = await runtime_resolver.resolve(runtime_profile_name)
+            _runtime_config_provider = RuntimeConfigProvider(resolved_runtime_config)
+            logger.info(
+                "Runtime config resolved: "
+                f"profile={resolved_runtime_config.profile_name}, "
+                f"version={resolved_runtime_config.version}, "
+                f"hash={resolved_runtime_config.config_hash}"
+            )
+            logger.info(
+                "Runtime config safe summary: "
+                + json.dumps(
+                    _runtime_config_provider.to_safe_summary(),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+            )
+            logger.info(
+                "Runtime config is in observe-only mode: existing ConfigManager "
+                "paths still drive execution until the next cutover step"
+            )
+        except ValueError as e:
+            raise FatalStartupError(f"Runtime config resolution failed: {e}", "F-003")
+        finally:
+            await runtime_profile_repo.close()
 
         # =============================================
         # Phase 1.5: Initialize Signal Database
@@ -439,7 +482,6 @@ async def run_application():
         # =============================================
         # Phase 9: Start REST API Server (embedded)
         # =============================================
-        import os
         import uvicorn
         from src.interfaces.api import app as api_app, set_dependencies, set_v3_dependencies
 
@@ -626,6 +668,7 @@ async def run_application():
 
         _capital_protection = None
         _execution_orchestrator = None
+        _runtime_config_provider = None
 
         logger.info("Application shutdown complete")
 

@@ -209,6 +209,29 @@ class ResolvedRuntimeConfig(BaseModel):
         }
 
 
+class RuntimeConfigProvider:
+    """Process-local holder for the resolved runtime config.
+
+    The provider is intentionally tiny: it gives startup code a stable place to
+    store and expose the resolved profile before execution modules start
+    consuming it directly.
+    """
+
+    def __init__(self, resolved_config: ResolvedRuntimeConfig) -> None:
+        self._resolved_config = resolved_config
+
+    @property
+    def resolved_config(self) -> ResolvedRuntimeConfig:
+        return self._resolved_config
+
+    @property
+    def config_hash(self) -> str:
+        return self._resolved_config.config_hash
+
+    def to_safe_summary(self) -> dict[str, Any]:
+        return self._resolved_config.to_safe_summary()
+
+
 class RuntimeConfigResolver:
     """Resolve environment + SQLite runtime profile into ResolvedRuntimeConfig."""
 
