@@ -278,6 +278,82 @@ async def test_rejected_not_overwritten():
     assert intent.failed_reason == "交易所拒绝订单"
 
 
+@pytest.mark.asyncio
+async def test_circuit_breaker_blocks_execute_signal():
+    """
+    P0-3 测试：熔断机制阻止 execute_signal
+
+    场景：
+    1. symbol 被熔断（is_symbol_blocked 返回 True）
+    2. 触发 execute_signal
+    3. 断言：intent.status == BLOCKED，gateway.place_order 未被调用
+    """
+    # 准备：创建 orchestrator
+    capital_protection = MagicMock(spec=CapitalProtectionManager)
+    capital_protection.pre_order_check = AsyncMock(return_value=MagicMock(allowed=True))
+
+    order_lifecycle = MagicMock(spec=OrderLifecycleService)
+    order_lifecycle.create_order = AsyncMock(return_value=Order(
+        id="order_test_004",
+        signal_id="sig_test_004",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal("0.1"),
+        created_at=int(datetime.now(timezone.utc).timestamp() * 1000),
+        updated_at=int(datetime.now(timezone.utc).timestamp() * 1000),
+    ))
+
+    gateway = MagicMock(spec=ExchangeGateway)
+    gateway.place_order = AsyncMock()
+
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=capital_protection,
+        order_lifecycle=order_lifecycle,
+        gateway=gateway,
+    )
+
+    # P0-3：手动触发熔断
+    orchestrator._circuit_breaker_symbols.add("BTC/USDT:USDT")
+
+    # 准备：创建测试信号
+    signal = SignalResult(
+        symbol="BTC/USDT:USDT",
+        timeframe="15m",
+        direction=Direction.LONG,
+        entry_price=Decimal("50000"),
+        suggested_stop_loss=Decimal("48000"),
+        suggested_position_size=Decimal("0.1"),
+        current_leverage=1,
+        tags=[],
+        risk_reward_info="1R",
+        strategy_name="test",
+        score=0.8,
+    )
+
+    strategy = OrderStrategy(
+        id="test_strategy",
+        name="Test Strategy",
+        tp_levels=1,
+        tp_ratios=[Decimal("1.0")],
+        tp_targets=[Decimal("1.5")],
+        initial_stop_loss_rr=Decimal("-1.0"),
+    )
+
+    # 执行：execute_signal
+    intent = await orchestrator.execute_signal(signal, strategy)
+
+    # P0-3 验证：intent.status == BLOCKED
+    assert intent.status == ExecutionIntentStatus.BLOCKED
+    assert intent.blocked_reason == "CIRCUIT_BREAKER"
+    assert "熔断中" in intent.blocked_message
+    assert "BTC/USDT:USDT" in intent.blocked_message
+
+    # P0-3 验证：gateway.place_order 未被调用
+    gateway.place_order.assert_not_called()
+
+
 if __name__ == "__main__":
     # 可直接运行：python tests/unit/test_execute_signal_status_fix.py
     import asyncio
@@ -294,6 +370,10 @@ if __name__ == "__main__":
         print("Running test_rejected_not_overwritten...")
         await test_rejected_not_overwritten()
         print("✅ test_rejected_not_overwritten passed\n")
+
+        print("Running test_circuit_breaker_blocks_execute_signal...")
+        await test_circuit_breaker_blocks_execute_signal()
+        print("✅ test_circuit_breaker_blocks_execute_signal passed\n")
 
         print("All tests passed! ✅")
 

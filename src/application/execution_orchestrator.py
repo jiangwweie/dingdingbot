@@ -173,6 +173,21 @@ class ExecutionOrchestrator:
             f"intent_id={intent_id}, symbol={signal.symbol}, direction={signal.direction}"
         )
 
+        # P0-3：熔断检查（在 CapitalProtection 前置检查前）
+        if self.is_symbol_blocked(signal.symbol):
+            intent.status = ExecutionIntentStatus.BLOCKED
+            intent.blocked_reason = "CIRCUIT_BREAKER"
+            intent.blocked_message = f"symbol 熔断中，拒绝新信号: {signal.symbol}"
+            intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+            logger.warning(
+                f"[ExecutionOrchestrator] 信号被熔断拦截: "
+                f"intent_id={intent_id}, symbol={signal.symbol}"
+            )
+
+            await self._save_intent(intent)
+            return intent
+
         # 2. CapitalProtection 前置检查
         check_result = await self._capital_protection.pre_order_check(
             symbol=signal.symbol,
