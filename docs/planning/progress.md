@@ -49,7 +49,8 @@
 1. Sim-0 已阶段性通过
 2. testnet 验证仓位/保护单已清理
 3. attempt flush 的 Decimal JSON 序列化问题已修复
-4. 下一步进入自然模拟盘观察窗口
+4. 暂不直接进入自然模拟盘观察窗口
+5. 下一步新开窗口，专门梳理 `config module` 与配置真源
 
 ### 2026-04-23 -- Sim-0 后置缺口修复
 
@@ -66,6 +67,30 @@
 3. ✅ 验证结果
    - `./venv/bin/python3 -m pytest tests/unit/test_signal_repository.py -v`
    - 结果：26 passed
+
+### 2026-04-23 -- 下一阶段入口调整：config module 梳理
+
+1. ✅ 已确认问题重心
+   - 表面问题是“模拟盘参数不知道怎么配”
+   - 实际问题是 config module 的真源边界不清
+   - 需要先梳理 `.env`、SQLite 配置库、历史 YAML、代码默认值、回测 runtime overrides、执行参数之间的职责
+
+2. ✅ 已形成新窗口背景
+   - 新窗口不是继续修执行链代码
+   - 也不是先讨论哪套交易参数更优
+   - 目标是系统分析 config module：哪些配置归 `.env`，哪些归 DB，哪些只应作为代码默认值，哪些应废弃
+
+3. ✅ 当前初步事实
+   - `.env` 已确定为运行入口
+   - YAML 已废弃，不应作为运行配置依据
+   - 主程序当前仍通过 `ConfigManager` 从 `data/v3_dev.db` 读取 exchange / notification / system / risk / strategies
+   - Sim-0 验证脚本曾将 `.env` 同步进 SQLite 兼容配置库
+   - 配置库中的真实参数与研究文档中的历史基准存在不一致
+
+4. 下一步
+   - 新开专门窗口做 config module 架构梳理
+   - 先输出配置真源矩阵和分层原则
+   - 再决定 Sim-1 前最小收口方案与中期 PG config 方案
 
 ### 2026-04-23 -- 第二阶段第一步完成
 

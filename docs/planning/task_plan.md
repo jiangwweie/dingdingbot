@@ -160,7 +160,7 @@
 
 下一步：
 
-进入自然模拟盘观察窗口，重点看真实 K 线信号、WS 订单回写、保护单状态、PG recovery tasks 与 breaker 是否保持干净。
+暂不直接进入自然模拟盘观察窗口。先新开窗口梳理 `config module`，明确 `.env`、SQLite 配置库、历史 YAML、代码默认值、回测 runtime overrides、执行参数之间的真源边界。
 
 ---
 
@@ -169,8 +169,10 @@
 ### A. 执行链方向
 
 1. Sim-0 真实链路验证
-2. Sim-0 24h 观察复盘
-3. 根据 Sim-0 暴露问题决定是否补执行链或运维能力
+2. Config module 真源梳理
+3. Sim-1 前配置收口
+4. Sim-0/Sim-1 自然观察复盘
+5. 根据观察暴露问题决定是否补执行链或运维能力
 
 ### B. PG 迁移方向
 
@@ -186,6 +188,33 @@
 3. `backtest-studio` 独立前端
 
 这些事项保留 backlog，不进入当前阶段执行。
+
+### D. Config module 方向（下一主线入口）
+
+1. 梳理当前配置来源：
+   - `.env`
+   - SQLite config tables
+   - 历史 YAML
+   - 代码默认值
+   - 回测 runtime overrides / KV
+   - PG execution state
+2. 梳理配置读取路径：
+   - exchange
+   - notification
+   - system symbols/timeframes
+   - strategy definitions
+   - risk config
+   - execution order strategy / TP/SL
+   - backtest params
+   - recovery / breaker
+3. 输出近期最小收口：
+   - 明确哪些配置只看 `.env`
+   - 哪些配置继续暂存 SQLite
+   - 哪些配置只允许代码默认值兜底
+   - YAML 只作为废弃技术债处理
+4. 输出中期方案：
+   - 是否迁移 config module 到 PG
+   - 如迁移，表设计和阶段切换顺序
 
 ---
 

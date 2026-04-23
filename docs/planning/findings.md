@@ -124,8 +124,9 @@
 
 ### Sim-0 当前结论
 
-1. 可以开始模拟盘，但只能按 **Sim-0 小范围灰度** 启动
-2. Sim-0 不是策略优化阶段，而是执行系统稳定性验证阶段
+1. Sim-0 受控 runtime 链路已阶段性跑通
+2. 但暂不应直接进入自然模拟盘观察窗口
+3. Sim-0 不是策略优化阶段，而是执行系统稳定性验证阶段
 3. 建议范围：
    - testnet / 模拟盘
    - 单 symbol：`BTC/USDT:USDT`
@@ -141,6 +142,25 @@
 对应计划：
 
 - `docs/planning/sim-0-real-chain-validation-plan.md`
+
+### Config module 已成为下一阶段首要梳理对象
+
+当前发现的核心问题不是“某个参数该取多少”，而是系统配置真源没有被清晰分层：
+
+1. `.env` 已被确定为当前运行入口
+2. YAML 已废弃，不应再作为运行配置来源
+3. 但主程序仍从 SQLite 配置库读取 exchange / notification / system / risk / strategies
+4. Sim-0 为了跑通，会把 `.env` 同步进 SQLite 兼容配置库
+5. 策略参数、风控参数、执行 TP/SL 参数、回测参数、研究文档基准之间存在多套口径
+6. PG 迁移原则已经明确用于强执行语义状态，但 config module 是否迁移 PG、如何迁移，尚未设计
+
+下一阶段应先输出：
+
+1. 配置真源矩阵
+2. 配置分层原则
+3. Sim-1 前最小收口方案
+4. 中期 PG config 方案
+5. YAML / SQLite 兼容路径的退役边界
 
 ### Sim-0 真实 runtime 验证新增发现
 
