@@ -244,6 +244,11 @@ async def run_application():
         _order_lifecycle_service = OrderLifecycleService(repository=_order_repo)
         await _order_lifecycle_service.start()
 
+        # P0-7: 初始化 PendingRecoveryRepository
+        from src.infrastructure.pending_recovery_repository import PendingRecoveryRepository
+        _pending_recovery_repo = PendingRecoveryRepository()
+        await _pending_recovery_repo.initialize()
+
         account_service = BinanceAccountService(_exchange_gateway)
         capital_notifier = _CapitalProtectionNotifierAdapter(_notification_service)
         _capital_protection = CapitalProtectionManager(
@@ -264,6 +269,7 @@ async def run_application():
             gateway=_exchange_gateway,
             intent_repository=_execution_intent_repo,
             notifier=_orchestrator_notifier_adapter,  # P0-6: 注入告警回调
+            pending_recovery_repository=_pending_recovery_repo,  # P0-7: 注入持久化仓储
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
         logger.info("Core execution runtime ready")
