@@ -77,6 +77,10 @@ class ExecutionOrchestrator:
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
 
+        # P0-2：熔断机制 + 待恢复记录
+        self._circuit_breaker_symbols: set = set()  # 熔断的 symbol 集合
+        self._pending_recovery: Dict[str, Dict[str, Any]] = {}  # order_id -> error info
+
         # MVP-Protected-Position-Step2: 注册 ENTRY 部分成交回调
         self._order_lifecycle.set_entry_partially_filled_callback(
             self._handle_entry_partially_filled
@@ -810,13 +814,31 @@ class ExecutionOrchestrator:
                         )
                     except Exception as e:
                         logger.error(
-                            f"[ExecutionOrchestrator] 撤销交易所侧旧 SL 失败: "
+                            f"[ExecutionOrchestrator] 撤销交易所侧旧 SL 失败，停止继续动作: "
                             f"order_id={existing_sl.id}, "
                             f"exchange_order_id={existing_sl.exchange_order_id}, "
-                            f"error={e}",
+                            f"symbol={existing_sl.symbol}, error={e}",
                             exc_info=True
                         )
-                        # 继续执行：即使交易所撤销失败，也要更新本地状态并创建新 SL
+
+                        # P0-2：标记待恢复
+                        self._pending_recovery[existing_sl.id] = {
+                            "order_id": existing_sl.id,
+                            "exchange_order_id": existing_sl.exchange_order_id,
+                            "symbol": existing_sl.symbol,
+                            "error": str(e),
+                            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                        }
+
+                        # P0-2：触发熔断（该 symbol）
+                        self._circuit_breaker_symbols.add(existing_sl.symbol)
+                        logger.error(
+                            f"[ExecutionOrchestrator] 已触发熔断: symbol={existing_sl.symbol}, "
+                            f"待恢复订单={existing_sl.id}"
+                        )
+
+                        # P0-2：停止继续动作（不撤销本地 SL，不创建新 SL）
+                        return
 
                 # P0-1：撤销本地旧 SL
                 try:
@@ -972,3 +994,48 @@ class ExecutionOrchestrator:
                 if intent.status == status
             ]
         return list(self._intents.values())
+
+    def is_symbol_blocked(self, symbol: str) -> bool:
+        """
+        P0-2：检查 symbol 是否被熔断
+
+        Args:
+            symbol: 交易对符号
+
+        Returns:
+            True 表示被熔断，False 表示正常
+        """
+        return symbol in self._circuit_breaker_symbols
+
+    def get_pending_recovery(self, order_id: str) -> Optional[Dict[str, Any]]:
+        """
+        P0-2：获取待恢复记录
+
+        Args:
+            order_id: 订单 ID
+
+        Returns:
+            待恢复记录，不存在返回 None
+        """
+        return self._pending_recovery.get(order_id)
+
+    def clear_circuit_breaker(self, symbol: str) -> None:
+        """
+        P0-2：清除 symbol 的熔断状态
+
+        Args:
+            symbol: 交易对符号
+        """
+        self._circuit_breaker_symbols.discard(symbol)
+        logger.info(f"[ExecutionOrchestrator] 已清除熔断: symbol={symbol}")
+
+    def clear_pending_recovery(self, order_id: str) -> None:
+        """
+        P0-2：清除待恢复记录
+
+        Args:
+            order_id: 订单 ID
+        """
+        if order_id in self._pending_recovery:
+            del self._pending_recovery[order_id]
+            logger.info(f"[ExecutionOrchestrator] 已清除待恢复记录: order_id={order_id}")

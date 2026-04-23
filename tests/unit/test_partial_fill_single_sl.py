@@ -486,6 +486,138 @@ async def test_multiple_sl_error_handling():
     gateway.place_order.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_cancel_exchange_sl_fail_should_abort_and_circuit_break():
+    """
+    P0-2 测试：撤销交易所侧 SL 失败时，停止继续动作并触发熔断
+
+    场景：
+    1. ENTRY 第二次部分成交（filled_qty=0.08）
+    2. 已有 SL（exchange_order_id 存在）
+    3. gateway.cancel_order 抛异常
+    4. 断言：不创建新 SL，不撤销本地 SL，触发熔断，标记待恢复
+    """
+    # 准备：创建 fake repos
+    fake_order_repo = FakeOrderRepository()
+    fake_intent_repo = FakeExecutionIntentRepository()
+
+    # 准备：创建 orchestrator
+    capital_protection = MagicMock(spec=CapitalProtectionManager)
+    gateway = MagicMock(spec=ExchangeGateway)
+
+    order_lifecycle = OrderLifecycleService(repository=fake_order_repo)
+
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=capital_protection,
+        order_lifecycle=order_lifecycle,
+        gateway=gateway,
+        intent_repository=fake_intent_repo,
+    )
+
+    # 准备：创建测试数据
+    signal = SignalResult(
+        symbol="BTC/USDT:USDT",
+        timeframe="15m",
+        direction=Direction.LONG,
+        entry_price=Decimal("50000"),
+        suggested_stop_loss=Decimal("48000"),
+        suggested_position_size=Decimal("0.1"),
+        current_leverage=1,
+        tags=[],
+        risk_reward_info="1R",
+        strategy_name="test",
+        score=0.8,
+    )
+
+    strategy = OrderStrategy(
+        id="test_strategy",
+        name="Test Strategy",
+        tp_levels=2,
+        tp_ratios=[Decimal("0.5"), Decimal("0.5")],
+        tp_targets=[Decimal("1.0"), Decimal("2.0")],
+        initial_stop_loss_rr=Decimal("-1.0"),
+    )
+
+    # 准备：创建 ExecutionIntent
+    intent = ExecutionIntent(
+        id="intent_test_004",
+        signal_id="sig_test_004",
+        signal=signal,
+        status=ExecutionIntentStatus.SUBMITTED,
+        strategy=strategy,
+        order_id="order_test_004",
+    )
+    await fake_intent_repo.save(intent)
+
+    # 准备：创建 ENTRY 订单（第二次部分成交）
+    current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+    entry_order = Order(
+        id="order_test_004",
+        signal_id="sig_test_004",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal("0.1"),
+        filled_qty=Decimal("0.08"),  # 第二次部分成交（累计）
+        average_exec_price=Decimal("50000"),
+        status=OrderStatus.PARTIALLY_FILLED,
+        created_at=current_time,
+        updated_at=current_time,
+    )
+    await fake_order_repo.save(entry_order)
+
+    # 准备：创建已有的 SL 订单（第一次部分成交时创建）
+    existing_sl = Order(
+        id="order_sl_004",
+        signal_id="sig_test_004",
+        symbol="BTC/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        requested_qty=Decimal("0.05"),  # 第一次成交量
+        parent_order_id="order_test_004",
+        exchange_order_id="ex_order_sl_004",  # 交易所订单 ID
+        status=OrderStatus.OPEN,
+        created_at=current_time,
+        updated_at=current_time,
+    )
+    await fake_order_repo.save(existing_sl)
+
+    # 准备：mock gateway.cancel_order 抛异常
+    gateway.cancel_order = AsyncMock(side_effect=Exception("交易所撤销订单失败"))
+
+    # 准备：mock gateway.place_order（不应该被调用）
+    gateway.place_order = AsyncMock()
+
+    # 执行：触发第二次 partial-fill 回调
+    await orchestrator._handle_entry_partially_filled(entry_order)
+
+    # P0-2 验证：gateway.cancel_order 被调用
+    gateway.cancel_order.assert_called_once_with(
+        exchange_order_id="ex_order_sl_004",
+        symbol="BTC/USDT:USDT",
+    )
+
+    # P0-2 验证：gateway.place_order 未被调用（停止继续动作）
+    gateway.place_order.assert_not_called()
+
+    # P0-2 验证：本地旧 SL 状态未变（不是 CANCELED）
+    local_sl = await fake_order_repo.get_order("order_sl_004")
+    assert local_sl.status == OrderStatus.OPEN  # 状态未变
+
+    # P0-2 验证：symbol 被熔断
+    assert orchestrator.is_symbol_blocked("BTC/USDT:USDT") is True
+
+    # P0-2 验证：待恢复记录存在
+    pending_recovery = orchestrator.get_pending_recovery("order_sl_004")
+    assert pending_recovery is not None
+    assert pending_recovery["order_id"] == "order_sl_004"
+    assert pending_recovery["exchange_order_id"] == "ex_order_sl_004"
+    assert pending_recovery["symbol"] == "BTC/USDT:USDT"
+    assert "交易所撤销订单失败" in pending_recovery["error"]
+
+
 if __name__ == "__main__":
     # 可直接运行：python tests/unit/test_partial_fill_single_sl.py
     import asyncio
