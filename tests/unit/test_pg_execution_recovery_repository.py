@@ -21,23 +21,64 @@ async def test_initialize_calls_init_pg_core_db():
     测试 initialize() 会调用 init_pg_core_db()
 
     场景：
-    1. 创建 repository
+    1. 创建 repository（默认构造）
     2. 调用 initialize()
     断言：
     - init_pg_core_db() 被调用一次
     """
-    # Mock session_maker
-    mock_session_maker = MagicMock()
+    # Mock get_pg_session_maker
+    with patch('src.infrastructure.pg_execution_recovery_repository.get_pg_session_maker') as mock_get_session_maker:
+        mock_session_maker = MagicMock()
+        mock_get_session_maker.return_value = mock_session_maker
 
-    # Mock init_pg_core_db
-    with patch('src.infrastructure.pg_execution_recovery_repository.init_pg_core_db', new_callable=AsyncMock) as mock_init:
-        mock_init.return_value = None
+        # Mock init_pg_core_db
+        with patch('src.infrastructure.pg_execution_recovery_repository.init_pg_core_db', new_callable=AsyncMock) as mock_init:
+            mock_init.return_value = None
 
-        repo = PgExecutionRecoveryRepository(session_maker=mock_session_maker)
-        await repo.initialize()
+            repo = PgExecutionRecoveryRepository()  # 默认构造
+            await repo.initialize()
 
-        # 验证 init_pg_core_db 被调用
-        mock_init.assert_called_once()
+            # 验证 init_pg_core_db 被调用
+            mock_init.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_default_constructor_uses_global_session_maker():
+    """
+    测试默认构造使用全局 session_maker
+
+    场景：
+    1. 不传 session_maker 参数
+    断言：
+    - get_pg_session_maker() 被调用
+    """
+    with patch('src.infrastructure.pg_execution_recovery_repository.get_pg_session_maker') as mock_get_session_maker:
+        mock_session_maker = MagicMock()
+        mock_get_session_maker.return_value = mock_session_maker
+
+        repo = PgExecutionRecoveryRepository()
+
+        # 验证 get_pg_session_maker 被调用
+        mock_get_session_maker.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_custom_session_maker_injection():
+    """
+    测试可以注入自定义 session_maker
+
+    场景：
+    1. 传入自定义 session_maker
+    断言：
+    - 使用注入的 session_maker，不调用 get_pg_session_maker()
+    """
+    with patch('src.infrastructure.pg_execution_recovery_repository.get_pg_session_maker') as mock_get_session_maker:
+        custom_session_maker = MagicMock()
+
+        repo = PgExecutionRecoveryRepository(session_maker=custom_session_maker)
+
+        # 验证 get_pg_session_maker 没有被调用
+        mock_get_session_maker.assert_not_called()
 
 
 @pytest.mark.asyncio

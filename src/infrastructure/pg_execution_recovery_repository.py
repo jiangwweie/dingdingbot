@@ -16,21 +16,24 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.infrastructure.pg_models import PGExecutionRecoveryTaskORM
-from src.infrastructure.database import init_pg_core_db
+from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
 from src.infrastructure.logger import logger
 
 
 class PgExecutionRecoveryRepository:
     """PG 执行恢复任务仓库。"""
 
-    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+    def __init__(
+        self,
+        session_maker: Optional[async_sessionmaker[AsyncSession]] = None,
+    ) -> None:
         """
         初始化仓库。
 
         Args:
-            session_maker: async_sessionmaker 实例
+            session_maker: async_sessionmaker 实例（可选，默认使用全局 PG session maker）
         """
-        self._session_maker = session_maker
+        self._session_maker = session_maker or get_pg_session_maker()
 
     async def initialize(self) -> None:
         """
