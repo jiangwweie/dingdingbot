@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 18:30
-> **Status**: 模拟盘准入冒烟通过，准备 Sim-0 真实全链路验证
+> **Last updated**: 2026-04-23 22:45
+> **Status**: Sim-0 受控链路通过，进入 Sim-1 ETH runtime config 收口规划
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
@@ -160,7 +160,11 @@
 
 下一步：
 
-暂不直接进入自然模拟盘观察窗口。先新开窗口梳理 `config module`，明确 `.env`、SQLite 配置库、历史 YAML、代码默认值、回测 runtime overrides、执行参数之间的真源边界。
+暂不直接进入自然模拟盘观察窗口。先完成 `config module` 收口，明确 `.env`、SQLite 配置库、历史 YAML、代码默认值、回测 runtime overrides、执行参数之间的真源边界，并将 Sim-1 目标切换为 ETH runtime profile。
+
+新增规划：
+
+- `docs/planning/sim-1-eth-runtime-config-plan.md`
 
 ---
 
@@ -215,6 +219,25 @@
 4. 输出中期方案：
    - 是否迁移 config module 到 PG
    - 如迁移，表设计和阶段切换顺序
+
+### E. Sim-1 ETH runtime config 方向（当前规划）
+
+1. 使用五模块模型整理配置：
+   - `environment`
+   - `market`
+   - `strategy`
+   - `risk`
+   - `execution`
+2. Sim-1 标的切换为 `ETH/USDT:USDT`
+3. 主周期为 `1h`，MTF 辅助订阅 `4h`
+4. ETH baseline 以 `docs/planning/backtest-parameters.md` 为主真源
+5. 当前 BTC 配置仅作为 `sim0_controlled_btc` 归档
+6. 模拟盘期间禁止热改 strategy / risk / execution config
+7. Optuna 只输出 candidate，不自动应用 runtime
+
+详细规划：
+
+- `docs/planning/sim-1-eth-runtime-config-plan.md`
 
 ---
 

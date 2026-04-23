@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-23 18:30
+> Last updated: 2026-04-23 22:45
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -161,6 +161,37 @@
 3. Sim-1 前最小收口方案
 4. 中期 PG config 方案
 5. YAML / SQLite 兼容路径的退役边界
+
+### Sim-1 ETH runtime config 已形成规划口径
+
+1. Sim-1 不沿用当前 SQLite BTC 受控配置；该配置只作为 `sim0_controlled_btc` 归档。
+2. ETH 1h LONG-only 是当前研究基准，主真源为 `docs/planning/backtest-parameters.md`。
+3. 配置应先按模块划分，再按场景加载：
+   - `environment`
+   - `market`
+   - `strategy`
+   - `risk`
+   - `execution`
+4. Sim-1 已确认参数：
+   - `symbol=ETH/USDT:USDT`
+   - 主周期 `1h`
+   - MTF 辅助周期 `4h`
+   - `direction=LONG-only`
+   - EMA50 + MTF
+   - ATR 保留字段但 `enabled=false`
+   - `max_loss_percent=0.01`
+   - `max_leverage=20`
+   - `max_total_exposure=1.0`
+   - `daily_max_loss_percent=0.10`
+   - TP ratio `[0.5, 0.5]`
+   - TP target `[1.0, 3.5]`
+   - BE off / trailing off / OCO on
+5. `.env` 负责 secret/env/backend；DB 负责非 secret business config；PG 继续负责 execution state / recovery / breaker。
+6. Sim-1 前不做 PG config SSOT 大迁移，不做热改能力，不做 Optuna 一键应用。
+
+规划文档：
+
+- `docs/planning/sim-1-eth-runtime-config-plan.md`
 
 ### Sim-0 真实 runtime 验证新增发现
 

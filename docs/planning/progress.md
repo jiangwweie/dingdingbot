@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-23 18:30
+> Last updated: 2026-04-23 22:45
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
@@ -91,6 +91,42 @@
    - 新开专门窗口做 config module 架构梳理
    - 先输出配置真源矩阵和分层原则
    - 再决定 Sim-1 前最小收口方案与中期 PG config 方案
+
+### 2026-04-23 -- Sim-1 ETH runtime config 规划
+
+1. ✅ 明确 Sim-1 使用 ETH，而非 Sim-0 BTC 受控配置
+   - 当前 BTC 配置标记为 `sim0_controlled_btc`
+   - ETH baseline 以 `docs/planning/backtest-parameters.md` 为主真源
+
+2. ✅ 明确五模块配置模型
+   - `environment`
+   - `market`
+   - `strategy`
+   - `risk`
+   - `execution`
+
+3. ✅ 明确 Sim-1 关键参数
+   - `ETH/USDT:USDT`
+   - 主周期 `1h`
+   - MTF 辅助订阅 `4h`
+   - LONG-only
+   - EMA50 + MTF
+   - ATR disabled
+   - `max_loss_percent=0.01`
+   - `max_leverage=20`
+   - `max_total_exposure=1.0`
+   - `daily_max_loss_percent=0.10`
+   - TP `[1.0, 3.5]` / ratio `[0.5, 0.5]`
+   - BE off / trailing off / OCO on
+
+4. ✅ 明确任务边界
+   - Sim-1 前不做 PG config 大迁移
+   - 模拟盘期间不允许热改 strategy / risk / execution
+   - Optuna 只输出 candidate，不自动应用 runtime
+   - `.env` 管 secret/env/backend，DB 管非 secret business config
+
+5. ✅ 新增规划文档
+   - `docs/planning/sim-1-eth-runtime-config-plan.md`
 
 ### 2026-04-23 -- 第二阶段第一步完成
 
