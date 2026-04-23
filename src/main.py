@@ -262,6 +262,37 @@ async def run_application():
         logger.info("Core execution runtime ready")
 
         # =============================================
+        # Phase 4.3: Run Startup Reconciliation
+        # =============================================
+        logger.info("Phase 4.3: Running startup reconciliation...")
+        try:
+            from src.application.startup_reconciliation_service import StartupReconciliationService
+
+            reconciliation_service = StartupReconciliationService(
+                gateway=_exchange_gateway,
+                repository=_order_repo,
+                lifecycle=_order_lifecycle_service,
+                orchestrator=_execution_orchestrator,
+            )
+
+            reconciliation_summary = await reconciliation_service.run_startup_reconciliation()
+
+            logger.info("=" * 70)
+            logger.info("启动对账完成")
+            logger.info(f"候选订单: {reconciliation_summary['total_candidates']} 个")
+            logger.info(f"对账成功: {reconciliation_summary['success_count']} 个")
+            logger.info(f"对账失败: {reconciliation_summary['failure_count']} 个")
+            logger.info(f"清除待恢复标记: {reconciliation_summary['recovery_cleared_count']} 个")
+            logger.info(f"P0-4: 清除 orchestrator 待恢复记录: {reconciliation_summary['orchestrator_recovery_cleared_count']} 个")
+            logger.info(f"P0-4: 清除 orchestrator 熔断: {reconciliation_summary['orchestrator_circuit_breaker_cleared_count']} 个")
+            logger.info(f"执行耗时: {reconciliation_summary['duration_ms']} ms")
+            logger.info("=" * 70)
+
+        except Exception as e:
+            logger.error(f"启动对账失败（不影响主进程启动）: {e}", exc_info=True)
+            # 继续启动（可用性优先）
+
+        # =============================================
         # Phase 4.5: Check API Key Permissions
         # =============================================
         logger.info("Phase 4.5: Checking API key permissions...")
