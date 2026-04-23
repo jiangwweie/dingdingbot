@@ -1,11 +1,42 @@
 # Progress Log
 
-> Last updated: 2026-04-23 23:35
+> Last updated: 2026-04-23 23:50
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-23 -- Runtime Config 骨架审查问题已修复
+
+1. ✅ 收紧 strategy 契约
+   - `StrategyRuntimeConfig.trigger` 改为 `TriggerConfig`
+   - `StrategyRuntimeConfig.filters` 改为 `list[FilterConfig]`
+
+2. ✅ 修复 config hash 污染
+   - hash 中移除 `backend_port`
+   - hash 中移除 repo backend switches
+   - hash 只保留会影响业务执行语义的 `exchange_name / exchange_testnet` 与 profile payload
+
+3. ✅ 修复 readonly profile 防覆盖
+   - `RuntimeProfileRepository.upsert_profile()` 默认拒绝覆盖 `is_readonly=True` 的 profile
+   - seed 脚本使用显式 `allow_readonly_update=True` 作为初始化/维护入口
+
+4. ✅ 修复 active profile 切换事务问题
+   - upsert 全流程包入 repo lock
+   - active reset + upsert 使用 `BEGIN IMMEDIATE` / commit / rollback
+
+5. ✅ 已做最小自检
+   - 验证 `BACKEND_PORT` 变化不影响 `config_hash`
+   - 验证 readonly profile 默认不可覆盖
+   - 验证 trigger/filter 已解析为强类型模型
+   - `python3 -m py_compile` 通过
+
+### 当前边界
+
+- 仍未接入 `main.py`
+- 仍未写入正式 `data/v3_dev.db`
+- 仍未执行 pytest
 
 ### 2026-04-23 -- Runtime Config 骨架已实现，尚未接入主程序
 

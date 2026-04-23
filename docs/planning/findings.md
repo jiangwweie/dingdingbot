@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-23 23:35
+> Last updated: 2026-04-23 23:50
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -44,6 +44,16 @@
 3. 一次性脚本使用共享 SQLite 连接池时，必须在脚本结束前调用 `close_all_connections()`。
    - 否则 aiosqlite 后台线程可能导致脚本不退出
    - seed/verify 脚本已显式关闭连接池
+
+4. Runtime profile 的 readonly 与 active 语义必须在仓储层强制。
+   - `is_readonly=True` 不能只作为 UI/文档标记
+   - 默认 upsert 必须拒绝覆盖 readonly profile
+   - seed/维护脚本如需更新 readonly profile，必须显式传入 override 参数
+
+5. `config_hash` 只应表达业务执行基准，不应混入纯基础设施变量。
+   - DB DSN、backend port、repo backend switches 不进入 hash
+   - `exchange_name / exchange_testnet` 会影响交易所执行环境，保留在 hash
+   - secret 永远不进入 hash
 
 ### 1. 执行恢复状态已完全进入 PG 主线
 

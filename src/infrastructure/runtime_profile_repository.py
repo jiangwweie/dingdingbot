@@ -95,43 +95,55 @@ class RuntimeProfileRepository:
         is_active: bool = False,
         is_readonly: bool = False,
         version: Optional[int] = None,
+        allow_readonly_update: bool = False,
     ) -> RuntimeProfile:
         """Create or update a runtime profile."""
         self._ensure_initialized()
         now_ms = self._now_ms()
-        existing = await self.get_profile(name)
-        next_version = version or ((existing.version + 1) if existing else 1)
 
-        if is_active:
-            await self._db.execute("UPDATE runtime_profiles SET is_active = FALSE")
+        async with self._ensure_lock():
+            await self._db.execute("BEGIN IMMEDIATE")
+            try:
+                existing = await self._get_profile_unlocked(name)
+                if existing and existing.is_readonly and not allow_readonly_update:
+                    raise ValueError(f"Cannot modify readonly runtime profile: {name}")
 
-        await self._db.execute(
-            """
-            INSERT INTO runtime_profiles (
-                name, description, profile_json, is_active, is_readonly,
-                created_at, updated_at, version
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(name) DO UPDATE SET
-                description = excluded.description,
-                profile_json = excluded.profile_json,
-                is_active = excluded.is_active,
-                is_readonly = excluded.is_readonly,
-                updated_at = excluded.updated_at,
-                version = excluded.version
-            """,
-            (
-                name,
-                description,
-                json.dumps(profile_payload, ensure_ascii=False, sort_keys=True, default=str),
-                bool(is_active),
-                bool(is_readonly),
-                existing.created_at if existing else now_ms,
-                now_ms,
-                next_version,
-            ),
-        )
-        await self._db.commit()
+                next_version = version or ((existing.version + 1) if existing else 1)
+
+                if is_active:
+                    await self._db.execute("UPDATE runtime_profiles SET is_active = FALSE")
+
+                await self._db.execute(
+                    """
+                    INSERT INTO runtime_profiles (
+                        name, description, profile_json, is_active, is_readonly,
+                        created_at, updated_at, version
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        description = excluded.description,
+                        profile_json = excluded.profile_json,
+                        is_active = excluded.is_active,
+                        is_readonly = excluded.is_readonly,
+                        updated_at = excluded.updated_at,
+                        version = excluded.version
+                    """,
+                    (
+                        name,
+                        description,
+                        json.dumps(profile_payload, ensure_ascii=False, sort_keys=True, default=str),
+                        bool(is_active),
+                        bool(is_readonly),
+                        existing.created_at if existing else now_ms,
+                        now_ms,
+                        next_version,
+                    ),
+                )
+                await self._db.commit()
+            except Exception:
+                await self._db.rollback()
+                raise
+
         profile = await self.get_profile(name)
         if profile is None:
             raise RuntimeError(f"failed to upsert runtime profile: {name}")
@@ -190,6 +202,21 @@ class RuntimeProfileRepository:
         if self._db is None:
             raise RuntimeError("RuntimeProfileRepository not initialized")
 
+    async def _get_profile_unlocked(self, name: str) -> Optional[RuntimeProfile]:
+        async with self._db.execute(
+            """
+            SELECT name, description, profile_json, is_active, is_readonly,
+                   created_at, updated_at, version
+            FROM runtime_profiles
+            WHERE name = ?
+            """,
+            (name,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return self._from_row(row)
+
     @staticmethod
     def _from_row(row: aiosqlite.Row) -> RuntimeProfile:
         return RuntimeProfile(
@@ -206,4 +233,3 @@ class RuntimeProfileRepository:
     @staticmethod
     def _now_ms() -> int:
         return int(datetime.now(timezone.utc).timestamp() * 1000)
-

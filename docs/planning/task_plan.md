@@ -1,7 +1,7 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 23:35
+> **Last updated**: 2026-04-23 23:50
 > **Status**: Sim-0 受控链路通过，Config Module SSOT / Runtime Resolver 骨架已实现，尚未接入主程序
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
@@ -264,6 +264,7 @@
    - `SignalResult.take_profit_levels` 降级为 preview / notification / research 语义
 6. 当前实现状态：
    - Runtime Config 骨架已完成
+   - 审查提出的 hash / readonly / transaction / strategy 契约问题已修复
    - 仅做临时 SQLite + fake env 自检
    - 尚未写入本地正式 `data/v3_dev.db`
    - 尚未接入 `main.py`

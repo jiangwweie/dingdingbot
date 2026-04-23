@@ -16,6 +16,7 @@ from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
+from src.domain.logic_tree import FilterConfig, TriggerConfig
 from src.domain.models import Direction, OrderStrategy, RiskConfig
 
 
@@ -81,8 +82,8 @@ class StrategyRuntimeConfig(BaseModel):
     """Strategy trigger and filter contract for runtime execution."""
 
     allowed_directions: list[Direction]
-    trigger: dict[str, Any]
-    filters: list[dict[str, Any]]
+    trigger: TriggerConfig
+    filters: list[FilterConfig]
     atr_enabled: bool = False
 
     @model_validator(mode="after")
@@ -274,16 +275,14 @@ class RuntimeConfigResolver:
         hash_payload = {
             "profile_name": profile_name,
             "version": version,
+            # Only execution-affecting environment semantics belong in the business hash.
+            # Infra details such as DB DSN, backend port, and repository backend switches
+            # stay out so operational changes do not fork the strategy/risk baseline.
             "environment": {
-                "core_execution_intent_backend": environment.core_execution_intent_backend,
-                "core_order_backend": environment.core_order_backend,
-                "core_position_backend": environment.core_position_backend,
                 "exchange_name": environment.exchange_name,
                 "exchange_testnet": environment.exchange_testnet,
-                "backend_port": environment.backend_port,
             },
             "profile": profile_payload,
         }
         raw = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-
