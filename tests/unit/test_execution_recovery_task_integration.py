@@ -69,8 +69,9 @@ async def test_orchestrator_creates_pg_recovery_task(recovery_repo: PgExecutionR
     测试 orchestrator 在 replace_sl_failed 时会创建 PG recovery task
 
     场景：
-    1. 模拟撤销交易所旧 SL 失败
-    2. orchestrator 应创建 PG recovery task
+    1. ENTRY 部分成交，已有 SL 订单
+    2. 撤销交易所旧 SL 失败
+    3. orchestrator 应创建 PG recovery task
     断言：
     - PG 中有对应的 recovery task
     - task 的字段正确
@@ -82,14 +83,6 @@ async def test_orchestrator_creates_pg_recovery_task(recovery_repo: PgExecutionR
 
     # Mock cancel_order 抛出异常
     gateway.cancel_order = AsyncMock(side_effect=Exception("交易所撤销失败"))
-
-    # 准备：创建 orchestrator
-    orchestrator = ExecutionOrchestrator(
-        capital_protection=capital_protection,
-        order_lifecycle=order_lifecycle,
-        gateway=gateway,
-        execution_recovery_repository=recovery_repo,
-    )
 
     # 准备：创建测试订单
     current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -122,20 +115,64 @@ async def test_orchestrator_creates_pg_recovery_task(recovery_repo: PgExecutionR
         updated_at=current_time,
     )
 
-    # 执行：触发撤销失败场景
-    # 注意：这里需要根据实际的 orchestrator 方法来触发
-    # 由于 _handle_entry_partially_filled 是私有方法，这里只是示意
-    # 实际测试可能需要通过其他方式触发
+    # 准备：mock order_lifecycle._repository
+    mock_order_repo = MagicMock()
+    mock_order_repo.get_orders_by_signal = AsyncMock(return_value=[entry_order, existing_sl])
+    order_lifecycle._repository = mock_order_repo
+
+    # 准备：创建 ExecutionIntent
+    from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
+    from src.domain.models import SignalResult, OrderStrategy
+
+    # 创建策略快照
+    strategy = OrderStrategy(
+        stop_loss=Decimal("49000"),
+        tp_targets=[Decimal("51000")],
+    )
+
+    intent = ExecutionIntent(
+        id="intent_001",
+        signal_id="signal_001",
+        symbol="BTC/USDT:USDT",
+        status=ExecutionIntentStatus.PROTECTING,
+        strategy=strategy,
+    )
+
+    # 准备：创建 orchestrator 并注入 intent
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=capital_protection,
+        order_lifecycle=order_lifecycle,
+        gateway=gateway,
+        execution_recovery_repository=recovery_repo,
+    )
+
+    # 手动注入 intent 到内存缓存
+    orchestrator._intents["intent_001"] = intent
+
+    # 执行：触发 _handle_entry_partially_filled
+    await orchestrator._handle_entry_partially_filled(entry_order)
 
     # 验证：检查 PG 中是否有 recovery task
-    # 这里需要根据实际的实现来验证
-    # 示例：
-    # tasks = await recovery_repo.list_active()
-    # assert len(tasks) > 0
-    # assert tasks[0]["recovery_type"] == "replace_sl_failed"
+    tasks = await recovery_repo.list_active()
+    assert len(tasks) == 1
 
-    # 由于实际触发逻辑较复杂，这里只验证 repository 可用
-    assert recovery_repo is not None
+    task = tasks[0]
+    assert task["recovery_type"] == "replace_sl_failed"
+    assert task["intent_id"] == "intent_001"
+    assert task["related_order_id"] == "sl_001"
+    assert task["related_exchange_order_id"] == "ex_sl_001"
+    assert task["symbol"] == "BTC/USDT:USDT"
+    assert task["status"] == "pending"
+
+    # 验证 context_payload 包含必要字段
+    context = task["context_payload"]
+    assert "entry_order_id" in context
+    assert "filled_qty_total" in context
+    assert "protected_qty_total" in context
+    assert "delta_qty" in context
+    assert context["entry_order_id"] == "entry_001"
+    assert context["existing_sl_order_id"] == "sl_001"
+    assert context["existing_sl_exchange_order_id"] == "ex_sl_001"
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.infrastructure.pg_models import PGExecutionRecoveryTaskORM
+from src.infrastructure.database import init_pg_core_db
 from src.infrastructure.logger import logger
 
 
@@ -32,7 +33,12 @@ class PgExecutionRecoveryRepository:
         self._session_maker = session_maker
 
     async def initialize(self) -> None:
-        """初始化仓库（当前为空实现，表由迁移脚本创建）。"""
+        """
+        初始化仓库。
+
+        确保表结构已创建。
+        """
+        await init_pg_core_db()
         logger.info("PgExecutionRecoveryRepository initialized")
 
     async def close(self) -> None:
