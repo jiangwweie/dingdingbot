@@ -165,6 +165,19 @@ def resolve_backtest_params(
                 return val
         return defaults[key]
 
+    def resolve_list_str(
+        override_val: Optional[List[str]],
+        kv_key: Optional[str] = None,
+    ) -> Optional[List[str]]:
+        """解析 Optional[List[str]] 参数"""
+        if override_val is not None:
+            return override_val
+        if kv_configs and kv_key and kv_configs.get(kv_key) is not None:
+            val = kv_configs[kv_key]
+            if isinstance(val, list):
+                return [str(v) for v in val]
+        return None
+
     def resolve_str(
         key: str,
         override_val: Optional[str],
@@ -215,10 +228,12 @@ def resolve_backtest_params(
         tp_ratios=resolve_list_decimal(
             "tp_ratios",
             overrides.tp_ratios,
+            kv_key="execution.tp_ratios",
         ),
         tp_targets=resolve_list_decimal(
             "tp_targets",
             overrides.tp_targets,
+            kv_key="execution.tp_targets",
         ),
 
         # 风控参数
@@ -255,7 +270,10 @@ def resolve_backtest_params(
         ),
 
         # 诊断参数
-        allowed_directions=overrides.allowed_directions,
+        allowed_directions=resolve_list_str(
+            overrides.allowed_directions,
+            kv_key="backtest.allowed_directions",
+        ),
 
         # 撮合参数
         same_bar_policy=resolve_str(
@@ -268,7 +286,11 @@ def resolve_backtest_params(
             overrides.same_bar_tp_first_prob,
             kv_key="backtest.same_bar_tp_first_prob",
         ),
-        random_seed=overrides.random_seed,
+        random_seed=resolve_int(
+            "random_seed",
+            overrides.random_seed,
+            kv_key="backtest.random_seed",
+        ),
     )
 
 

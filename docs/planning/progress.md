@@ -479,6 +479,39 @@
 1. 少量 P2 级初始化/注入一致性收尾
 2. 真实模拟盘全链路验证尚未执行
 
+### 2026-04-24 -- Backtest config 抽象层完成
+
+1. ✅ 新增回测配置抽象层
+   - 文件：`src/application/backtest_config.py`
+   - 新增 `BacktestConfigResolver`
+   - 新增 `ResolvedBacktestConfig`
+   - 新增 `BacktestProfileProvider` / `StaticBacktestProfileProvider`
+   - 新增独立 profile：`backtest_eth_baseline`
+
+2. ✅ 回测配置边界明确
+   - Backtest 不直接读取 `sim1_eth_runtime`
+   - Backtest 使用独立基线 profile
+   - 优先级保持：`runtime_overrides > request > backtest profile > code defaults`
+   - Backtest engine 参数不进入 Sim/Live runtime
+
+3. ✅ 可注入参数契约已显式化
+   - 新增 `BACKTEST_INJECTABLE_PARAMS`
+   - 当前共 22 个可注入参数
+   - 模块：`market / strategy / risk / execution / engine / diagnostic`
+   - 已标记 `optimizer_safe`，供 Optuna/前端回测后续消费
+
+4. ✅ 小范围验证通过
+   - `python3 -m pytest tests/unit/test_backtest_config_resolver.py tests/unit/test_backtest_params_resolution.py -q`
+   - 结果：20 passed
+   - `python3 scripts/verify_backtest_config_resolver.py`
+   - 结果：解析 `backtest_eth_baseline` 成功，无 exchange / PG / historical data I/O
+
+5. ⏭️ 后续事项
+   - 将 `BacktestConfigResolver` 接入回测 API 和脚本默认入口
+   - 将 Optuna search space 改为读取 `optimizer_safe` 参数契约
+   - 前端回测重构时读取同一份可注入参数契约
+   - 真实回测执行前再单独确认是否跑耗时测试
+
 ---
 
 ## 下一步

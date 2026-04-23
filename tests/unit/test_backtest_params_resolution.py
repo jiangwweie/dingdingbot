@@ -196,6 +196,8 @@ class TestDynamicPathResolvedParams:
             max_atr_ratio=Decimal("0.015"),
             min_distance_pct=Decimal("0.008"),
             ema_period=50,
+            mtf_ema_period=60,
+            mtf_mapping={"1h": "4h"},
             tp_ratios=[Decimal("0.6"), Decimal("0.4")],
             tp_targets=[Decimal("1.0"), Decimal("2.5")],
             breakeven_enabled=False,

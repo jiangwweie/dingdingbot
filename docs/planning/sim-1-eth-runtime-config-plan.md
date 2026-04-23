@@ -255,11 +255,14 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 
 ### Phase F: Backtest 隔离
 
-1. 新增或整理 `ResolvedBacktestConfig`。
-2. Backtest 默认选用 `backtest_eth_baseline`。
-3. Request 覆盖只影响本次回测。
-4. Backtest engine 参数只存在于回测配置，不进入 Sim/Live runtime。
-5. 回测可以显式选择 `use_runtime_snapshot`，但默认不跟随 mutable runtime。
+1. ✅ 新增 `ResolvedBacktestConfig`。
+2. ✅ 新增独立 `backtest_eth_baseline` profile。
+3. ✅ Request 覆盖只影响本次回测。
+4. ✅ Backtest engine 参数只存在于回测配置，不进入 Sim/Live runtime。
+5. ✅ 新增 `BACKTEST_INJECTABLE_PARAMS`，显式声明可注入参数边界。
+6. ✅ 标记 `optimizer_safe` 参数，供 Optuna search space 后续读取。
+7. ⏳ 回测 API / 脚本入口默认接入 `BacktestConfigResolver`。
+8. ⏳ 回测可以显式选择 `use_runtime_snapshot`，但默认不跟随 mutable runtime。
 
 ### Phase G: Optuna 隔离
 
@@ -318,4 +321,3 @@ Sim-1 前不做：
 3. 再完成 Phase D / E：ETH market/strategy/risk runtime 适配。
 4. 再完成 Phase H：Sim-1 启动前验收。
 5. 最后处理 Phase F / G：Backtest 和 Optuna 规范化，避免研究链反向污染 runtime。
-

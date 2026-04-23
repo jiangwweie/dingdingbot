@@ -256,7 +256,6 @@
 4. 当前不做：
    - 不迁 Config 到 PG
    - 不扩前端
-   - 不扩回测/Optuna
    - 不允许模拟盘期间热改 strategy / risk / execution
 5. 关键后续收口：
    - `.env` 成为 exchange secret / webhook 真源
@@ -299,14 +298,28 @@
    - Runtime cutover 非 I/O 冒烟已补齐：
      - `scripts/verify_sim1_runtime_cutover.py`
      - 验证 market/risk/strategy/execution 四模块可按 main.py 切换语义组装
+   - Backtest config 抽象层已补齐：
+     - 新增 `src/application/backtest_config.py`
+     - 新增独立 `backtest_eth_baseline` profile，不直接读取 `sim1_eth_runtime`
+     - 保留优先级：`runtime_overrides > request > backtest profile > code defaults`
+     - 新增 `ResolvedBacktestConfig`
+     - 新增显式可注入参数契约 `BACKTEST_INJECTABLE_PARAMS`
+     - 当前可注入参数 22 个，覆盖 market / strategy / risk / execution / engine / diagnostic
+     - 标记 `optimizer_safe` 参数，供 Optuna/前端回测后续使用
+   - Backtest config 小范围验证已通过：
+     - `tests/unit/test_backtest_config_resolver.py`
+     - 10 passed
+     - `scripts/verify_backtest_config_resolver.py`
+     - 无 exchange / PG / historical data I/O
    - 执行配置边界已加固：
      - `tp_ratios` 必须全部为正数
      - `tp_targets` 必须全部为正数
    - `CapitalProtectionManager` 账户级熔断仍暂用原 ConfigManager 派生配置
 7. 下一步切换边界：
-   - 先做 runtime config 切换后的代码审查
+   - 将 `BacktestConfigResolver` 接入回测 API / 脚本入口的默认 profile 选择
+   - 将 Optuna search space 改为读取 `optimizer_safe` 参数契约
    - 再做真实启动级冒烟验证
-   - 不继续扩大配置面，避免把账户级熔断、API、前端一起卷入
+   - 暂不卷入前端重构；前端后续只消费同一份可注入参数契约
 
 ---
 

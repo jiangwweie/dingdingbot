@@ -291,6 +291,30 @@
 
 - `docs/planning/sim-1-eth-runtime-config-plan.md`
 
+### Backtest config 不应直接跟随 Sim/Live runtime profile
+
+回测链路当前可以独立运行，但在 Sim-1 runtime config 收口后，必须避免把回测默认值直接绑定到 `sim1_eth_runtime`。原因：
+
+1. Sim/Live runtime profile 是模拟盘/实盘冻结快照，强调启动一致性和审计。
+2. Backtest profile 是实验基线，允许 request / Optuna / runtime_overrides 做单次覆盖。
+3. Backtest engine 参数如 slippage、fee、same-bar policy 只存在于回测域，不应进入 Sim/Live runtime。
+4. 若回测默认直接读取 mutable runtime profile，会导致历史研究结果随运行配置漂移。
+
+已落地决策：
+
+1. 新增独立 `backtest_eth_baseline` profile。
+2. 新增 `ResolvedBacktestConfig` 作为回测配置消费对象。
+3. 保留优先级：`runtime_overrides > request > backtest profile > code defaults`。
+4. 新增显式可注入参数契约 `BACKTEST_INJECTABLE_PARAMS`，当前 22 个参数。
+5. 将可注入参数按模块划分为 `market / strategy / risk / execution / engine / diagnostic`。
+6. 通过 `optimizer_safe` 标记 Optuna 可搜索参数，防止搜索空间误覆盖 secret、backend、runtime profile 等非回测参数。
+
+后续接线：
+
+1. 回测 API 默认 profile 改为 `backtest_eth_baseline`。
+2. Optuna search space 从 `optimizer_safe` 参数契约派生。
+3. 前端回测重构时只展示该契约允许注入的字段。
+
 ### Sim-0 真实 runtime 验证新增发现
 
 1. `SignalPipeline._calculate_risk()` 必须是 async
