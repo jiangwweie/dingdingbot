@@ -139,6 +139,7 @@ class TestPartialFillIncrementalProtection:
         # 创建 ExecutionIntent
         intent = ExecutionIntent(
             id="intent_001",
+            signal_id="signal_001",  # P1 修复：添加必填字段
             signal=sample_signal,
             status=ExecutionIntentStatus.SUBMITTED,
             strategy=sample_strategy,
@@ -263,6 +264,7 @@ class TestPartialFillIncrementalProtection:
         # 创建 ExecutionIntent
         intent = ExecutionIntent(
             id="intent_002",
+            signal_id="signal_002",  # P1 修复：添加必填字段
             signal=sample_signal,
             status=ExecutionIntentStatus.PARTIALLY_PROTECTED,
             strategy=sample_strategy,
@@ -364,6 +366,7 @@ class TestPartialFillIncrementalProtection:
         # 创建 ExecutionIntent
         intent = ExecutionIntent(
             id="intent_003",
+            signal_id="signal_003",  # P1 修复：添加必填字段
             signal=sample_signal,
             status=ExecutionIntentStatus.PARTIALLY_PROTECTED,
             strategy=sample_strategy,
@@ -449,6 +452,7 @@ class TestPartialFillIncrementalProtection:
         # 创建 ExecutionIntent
         intent = ExecutionIntent(
             id="intent_004",
+            signal_id="signal_004",  # P1 修复：添加必填字段
             signal=sample_signal,
             status=ExecutionIntentStatus.PARTIALLY_PROTECTED,
             strategy=sample_strategy,
@@ -539,6 +543,7 @@ class TestPartialFillIncrementalProtection:
         # 创建 ExecutionIntent
         intent = ExecutionIntent(
             id="intent_005",
+            signal_id="signal_005",  # P1 修复：添加必填字段
             signal=sample_signal,
             status=ExecutionIntentStatus.PARTIALLY_PROTECTED,
             strategy=sample_strategy,
@@ -629,6 +634,7 @@ class TestPartialFillIncrementalProtection:
         # 创建 ExecutionIntent
         intent = ExecutionIntent(
             id="intent_006",
+            signal_id="signal_006",  # P1 修复：添加必填字段
             signal=sample_signal,
             status=ExecutionIntentStatus.PARTIALLY_PROTECTED,
             strategy=sample_strategy,
@@ -704,6 +710,7 @@ class TestPartialFillIncrementalProtection:
         # 创建 ExecutionIntent
         intent = ExecutionIntent(
             id="intent_007",
+            signal_id="signal_007",  # P1 修复：添加必填字段
             signal=sample_signal,
             status=ExecutionIntentStatus.SUBMITTED,
             strategy=sample_strategy,
@@ -801,6 +808,7 @@ class TestPartialFillIncrementalProtection:
         # 创建 ExecutionIntent
         intent = ExecutionIntent(
             id="intent_008",
+            signal_id="signal_008",  # P1 修复：添加必填字段
             signal=sample_signal,
             status=ExecutionIntentStatus.PARTIALLY_PROTECTED,
             strategy=sample_strategy,

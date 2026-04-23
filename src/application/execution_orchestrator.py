@@ -375,7 +375,7 @@ class ExecutionOrchestrator:
                 )
 
                 await self._save_intent(intent)
-                return intent
+                return intent  # P1-1 修复：必须 return，避免落入通用尾部覆盖状态
 
             elif placement_result.status in (OrderStatus.CANCELED, OrderStatus.REJECTED):
                 # 订单被取消或拒绝
@@ -397,7 +397,7 @@ class ExecutionOrchestrator:
                     )
 
                     await self._save_intent(intent)
-                    return intent
+                    return intent  # P1-1 修复：必须 return，避免落入通用尾部覆盖状态
 
                 else:
                     # REJECTED: 标记为失败
@@ -412,7 +412,7 @@ class ExecutionOrchestrator:
                     )
 
                     await self._save_intent(intent)
-                    return intent
+                    return intent  # P1-1 修复：必须 return，避免落入通用尾部覆盖状态
 
             else:
                 # 其他状态（如 PENDING），记录警告但不推进
@@ -646,7 +646,7 @@ class ExecutionOrchestrator:
             f"average_exec_price={entry_order.average_exec_price}"
         )
 
-        # 查找对应的 ExecutionIntent
+        # P1-2 修复：使用 repo-first 查找对应的 ExecutionIntent
         intent = await self._load_intent_by_order_id(entry_order.id)
 
         if not intent:
@@ -725,6 +725,14 @@ class ExecutionOrchestrator:
 
         # 为新增成交量补挂保护单
         try:
+            # P1-3 修复：检查 intent.strategy，严禁退化默认 exit
+            if intent.strategy is None:
+                logger.warning(
+                    f"[ExecutionOrchestrator] intent 无策略快照，跳过保护单生成: "
+                    f"intent_id={intent.id}, order_id={entry_order.id}"
+                )
+                return
+
             # 创建临时 Position 对象（用于生成保护单）
             # 注意：current_qty 使用 delta_qty，只为新增部分生成保护单
             position = Position(
@@ -758,13 +766,13 @@ class ExecutionOrchestrator:
             )
 
             # 使用 OrderManager 生成保护单
+            # P1-3 修复：必须使用 intent.strategy（已在上文检查非空）
             order_manager = OrderManager()
             protection_orders = order_manager._generate_tp_sl_orders(
                 filled_entry=delta_entry,
                 positions_map=positions_map,
-                # 使用 intent 中冻结的 strategy snapshot
-                strategy=intent.strategy,
-                tp_targets=intent.strategy.tp_targets if intent.strategy else None,
+                strategy=intent.strategy,  # 使用 intent 中冻结的 strategy snapshot
+                tp_targets=intent.strategy.tp_targets,  # P1-3 修复：必须从 strategy 获取
             )
 
             logger.info(
