@@ -1,11 +1,33 @@
 # Findings Log
 
-> Last updated: 2026-04-23 22:45
+> Last updated: 2026-04-23 23:20
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
 
 ## 当前有效结论
+
+### 0. Config Module 短中期保留 SQLite，Runtime 通过 Resolver 收口
+
+新增结论：
+
+1. Config 保留在 SQLite 问题不大，后续即使迁 PG，主要也是 repository adapter 的实现层迁移。
+2. 当前不应为了 Sim-1 把 config 迁入 PG；PG 主线继续只承载强执行语义状态：
+   - `execution_intents`
+   - `execution_recovery_tasks`
+   - breaker 派生状态
+3. Sim-1 前真正需要解决的是 runtime config 真源分散，而不是数据库介质。
+4. 推荐方案：
+   - 新增 SQLite `runtime_profiles` 窄表
+   - 新增 `ResolvedRuntimeConfig`
+   - 新增 `RuntimeConfigResolver`
+   - 启动时解析 `sim1_eth_runtime` 并生成 hash/snapshot
+5. 当前执行 TP/SL 必须从 execution module 生成 `OrderStrategy`，不能继续以 `SignalResult.take_profit_levels` 作为实盘保护单真源。
+
+对应设计稿：
+
+- `docs/planning/architecture/2026-04-23-config-module-ssot-runtime-resolver-design.md`
+- `docs/planning/architecture/2026-04-23-runtime-config-implementation-skeleton.md`
 
 ### 1. 执行恢复状态已完全进入 PG 主线
 

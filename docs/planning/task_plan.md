@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 22:45
-> **Status**: Sim-0 受控链路通过，进入 Sim-1 ETH runtime config 收口规划
+> **Last updated**: 2026-04-23 23:20
+> **Status**: Sim-0 受控链路通过，Config Module SSOT / Runtime Resolver 架构设计已启动，下一步进入 SQLite runtime profile 骨架实现
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
@@ -238,6 +238,30 @@
 详细规划：
 
 - `docs/planning/sim-1-eth-runtime-config-plan.md`
+
+### F. Config Module SSOT / Runtime Resolver 方向（当前执行）
+
+1. 已确认架构决策：
+   - Config 短中期继续保留 SQLite
+   - PG 继续只管 execution state / recovery / breaker
+   - 后续 config 迁 PG 不是 Sim-1 前置条件
+2. 已新增设计文档：
+   - `docs/planning/architecture/2026-04-23-config-module-ssot-runtime-resolver-design.md`
+   - `docs/planning/architecture/2026-04-23-runtime-config-implementation-skeleton.md`
+3. 推荐下一步实现骨架：
+   - 新增 SQLite `runtime_profiles` 窄表
+   - 新增 `ResolvedRuntimeConfig` Pydantic 模型
+   - 新增 `RuntimeConfigResolver`
+   - 新增 `sim1_eth_runtime` seed / verify 脚本
+4. 当前不做：
+   - 不迁 Config 到 PG
+   - 不扩前端
+   - 不扩回测/Optuna
+   - 不允许模拟盘期间热改 strategy / risk / execution
+5. 关键后续收口：
+   - `.env` 成为 exchange secret / webhook 真源
+   - execution 模块成为实盘 TP/SL 的唯一真源
+   - `SignalResult.take_profit_levels` 降级为 preview / notification / research 语义
 
 ---
 

@@ -1,11 +1,43 @@
 # Progress Log
 
-> Last updated: 2026-04-23 22:45
+> Last updated: 2026-04-23 23:20
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-23 -- Config Module SSOT / Runtime Resolver 架构设计已启动
+
+1. ✅ 已审查 Sim-1 ETH runtime config 规划
+   - 确认 Sim-1 目标为 `ETH/USDT:USDT`
+   - 主周期 `1h`
+   - MTF 辅助周期 `4h`
+   - LONG-only / EMA50 / MTF / ATR disabled
+   - Execution TP `[1.0, 3.5]`、ratio `[0.5, 0.5]`
+
+2. ✅ 已核验当前代码配置事实
+   - `ConfigManager` 仍以 SQLite 为主配置库
+   - exchange key/secret 与 webhook 当前仍能从 SQLite 被读取
+   - `SignalPipeline._build_execution_strategy()` 当前仍从 `SignalResult.take_profit_levels` 派生执行策略
+   - Backtest / Optuna / runtime 参数仍存在多套默认与覆盖路径
+
+3. ✅ 已确认架构决策
+   - Config 短中期继续保留 SQLite
+   - PG 继续只承载 execution state / recovery / breaker
+   - Config 后续即使迁 PG，也属于 repository adapter 实现层迁移，不阻塞 Sim-1
+
+4. ✅ 已新增架构文档
+   - `docs/planning/architecture/2026-04-23-config-module-ssot-runtime-resolver-design.md`
+   - `docs/planning/architecture/2026-04-23-runtime-config-implementation-skeleton.md`
+
+5. 下一步
+   - 进入 Runtime Config 骨架实现：
+     - SQLite `runtime_profiles` 仓储
+     - `ResolvedRuntimeConfig` 模型
+     - `RuntimeConfigResolver`
+     - `sim1_eth_runtime` seed / verify 脚本
+   - 暂不改完整运行逻辑，先完成可解析、可 hash、可审计的配置骨架
 
 ### 2026-04-23 -- Sim-0 真实链路阶段性通过
 
