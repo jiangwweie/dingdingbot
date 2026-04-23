@@ -206,150 +206,6 @@ class StartupReconciliationService:
                 failure_count += 1
                 # 继续处理后续订单（不中断整轮对账）
 
-        # ===== 阶段 2.5: P0-4 处理 orchestrator 的 pending_recovery =====
-        orchestrator_recovery_cleared_count = 0
-        orchestrator_circuit_breaker_cleared_count = 0
-
-        if self._orchestrator:
-            pending_recovery_list = await self._orchestrator.list_pending_recovery_async()
-            logger.info(f"P0-4: 读取 orchestrator 待恢复记录: 总计={len(pending_recovery_list)}")
-
-            # 按 symbol 分组，用于后续检查是否可以解除熔断
-            symbol_to_order_ids: Dict[str, List[str]] = {}
-            for record in pending_recovery_list:
-                symbol = record.get("symbol")
-                if symbol:
-                    if symbol not in symbol_to_order_ids:
-                        symbol_to_order_ids[symbol] = []
-                    symbol_to_order_ids[symbol].append(record["order_id"])
-
-            # 对每条 pending_recovery 记录执行对账
-            for record in pending_recovery_list:
-                order_id = record["order_id"]
-                exchange_order_id = record.get("exchange_order_id")
-                symbol = record.get("symbol")
-
-                if not exchange_order_id or not symbol:
-                    logger.warning(
-                        f"P0-4: 跳过待恢复记录（缺少 exchange_order_id 或 symbol）: "
-                        f"order_id={order_id}"
-                    )
-                    continue
-
-                # P0-4：跳过已在阶段 2 成功对账的订单
-                if order_id in successfully_reconciled_order_ids:
-                    logger.info(
-                        f"P0-4: 跳过已对账订单: order_id={order_id} "
-                        f"（已在阶段 2 对账成功）"
-                    )
-                    # P0-4.1：检查本地订单状态，只有终态才清除 pending_recovery
-                    local_order = await self._repository.get_order(order_id)
-                    if local_order:
-                        terminal_statuses = {
-                            OrderStatus.CANCELED,
-                            OrderStatus.FILLED,
-                            OrderStatus.REJECTED,
-                            OrderStatus.EXPIRED,
-                        }
-                        if local_order.status in terminal_statuses:
-                            await self._orchestrator.clear_pending_recovery_async(order_id)
-                            orchestrator_recovery_cleared_count += 1
-                            logger.info(
-                                f"P0-4.1: ✅ 清除待恢复记录（终态）: order_id={order_id}, "
-                                f"status={local_order.status}"
-                            )
-                        else:
-                            logger.info(
-                                f"P0-4.1: ⏸️ 保留待恢复记录（非终态）: order_id={order_id}, "
-                                f"status={local_order.status}"
-                            )
-                    continue
-
-                try:
-                    logger.info(
-                        f"P0-4: 对账待恢复订单: order_id={order_id}, "
-                        f"exchange_order_id={exchange_order_id}, symbol={symbol}"
-                    )
-
-                    # 查询交易所真实状态
-                    exchange_order_result = await self._gateway.fetch_order(
-                        exchange_order_id,
-                        symbol
-                    )
-
-                    # 查找本地订单对象
-                    local_order = await self._repository.get_order(order_id)
-                    if not local_order:
-                        logger.warning(
-                            f"P0-4: 本地订单不存在，跳过: order_id={order_id}"
-                        )
-                        continue
-
-                    # 构建 Order 对象
-                    exchange_order = Order(
-                        id=order_id,
-                        signal_id=local_order.signal_id,
-                        exchange_order_id=exchange_order_id,
-                        symbol=symbol,
-                        direction=local_order.direction,
-                        order_type=local_order.order_type,
-                        order_role=local_order.order_role,
-                        requested_qty=exchange_order_result.amount,
-                        filled_qty=exchange_order_result.amount,
-                        average_exec_price=exchange_order_result.price or Decimal("0"),
-                        status=exchange_order_result.status,
-                        created_at=local_order.created_at,
-                        updated_at=int(time.time() * 1000),
-                    )
-
-                    # 推进本地订单状态
-                    updated_order = await self._lifecycle.update_order_from_exchange(exchange_order)
-
-                    logger.info(
-                        f"P0-4: ✅ 对账成功: order_id={order_id}, "
-                        f"本地状态={local_order.status} -> {updated_order.status}"
-                    )
-
-                    # P0-4.1：只有终态才清除 pending_recovery 记录
-                    terminal_statuses = {
-                        OrderStatus.CANCELED,
-                        OrderStatus.FILLED,
-                        OrderStatus.REJECTED,
-                        OrderStatus.EXPIRED,
-                    }
-
-                    if exchange_order_result.status in terminal_statuses:
-                        await self._orchestrator.clear_pending_recovery_async(order_id)
-                        orchestrator_recovery_cleared_count += 1
-                        logger.info(
-                            f"P0-4.1: ✅ 清除待恢复记录（终态）: order_id={order_id}, "
-                            f"status={exchange_order_result.status}"
-                        )
-                    else:
-                        logger.info(
-                            f"P0-4.1: ⏸️ 保留待恢复记录（非终态）: order_id={order_id}, "
-                            f"status={exchange_order_result.status}"
-                        )
-
-                except Exception as e:
-                    logger.error(
-                        f"P0-4: ❌ 对账失败: order_id={order_id}, error={e}"
-                    )
-                    # 继续处理后续记录（不中断整轮对账）
-
-            # 检查每个 symbol 是否还有 pending_recovery，如果没有则解除熔断
-            for symbol, order_ids in symbol_to_order_ids.items():
-                # 检查该 symbol 是否还有未清除的 pending_recovery
-                remaining_records = await self._orchestrator.list_pending_recovery_async()
-                symbol_still_has_pending = any(
-                    r.get("symbol") == symbol for r in remaining_records
-                )
-
-                if not symbol_still_has_pending:
-                    self._orchestrator.clear_circuit_breaker(symbol)
-                    orchestrator_circuit_breaker_cleared_count += 1
-                    logger.info(f"P0-4: ✅ 清除熔断: symbol={symbol}")
-
 
         # ===== 阶段 2.6: PG recovery task 扫描 =====
         pg_recovery_resolved_count = 0
@@ -456,8 +312,6 @@ class StartupReconciliationService:
             "failure_count": failure_count,
             "recovery_cleared_count": recovery_cleared_count,
             "duration_ms": duration_ms,
-            "orchestrator_recovery_cleared_count": orchestrator_recovery_cleared_count,
-            "orchestrator_circuit_breaker_cleared_count": orchestrator_circuit_breaker_cleared_count,
             "pg_recovery_resolved_count": pg_recovery_resolved_count,
             "pg_recovery_retrying_count": pg_recovery_retrying_count,
             "pg_recovery_failed_count": pg_recovery_failed_count,
@@ -469,8 +323,6 @@ class StartupReconciliationService:
         logger.info(f"对账成功: {summary['success_count']} 个")
         logger.info(f"对账失败: {summary['failure_count']} 个")
         logger.info(f"清除待恢复标记: {summary['recovery_cleared_count']} 个")
-        logger.info(f"P0-4: 清除 orchestrator 待恢复记录: {summary['orchestrator_recovery_cleared_count']} 个")
-        logger.info(f"P0-4: 清除 orchestrator 熔断: {summary['orchestrator_circuit_breaker_cleared_count']} 个")
         logger.info(f"PG recovery: 已解决: {summary['pg_recovery_resolved_count']} 个")
         logger.info(f"PG recovery: 重试中: {summary['pg_recovery_retrying_count']} 个")
         logger.info(f"PG recovery: 已失败: {summary['pg_recovery_failed_count']} 个")

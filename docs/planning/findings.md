@@ -1,17 +1,18 @@
 # Findings Log
 
-> Last updated: 2026-04-23 16:22
+> Last updated: 2026-04-23 17:30
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
 
 ## 当前有效结论
 
-### 1. 执行恢复状态应优先进入 PG 主线
+### 1. 执行恢复状态已完全进入 PG 主线
 
-- `ExecutionIntent` 已是 PG 主真源
-- `execution_recovery_tasks` 已作为 PG 正式恢复真源接入主链
-- SQLite `pending_recovery` 仅保留过渡兼容
+- ✅ `ExecutionIntent` 是 PG 主真源
+- ✅ `execution_recovery_tasks` 是 PG 正式恢复真源
+- ✅ SQLite `pending_recovery` 过渡链已移除
+- ✅ `circuit_breaker` 由 PG active recovery tasks 重建（内存缓存）
 
 ### 2. 恢复工单独立成表是当前最合理的正式方案
 

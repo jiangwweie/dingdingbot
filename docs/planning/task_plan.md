@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 16:22
-> **Status**: 第一阶段已收口；当前进入第二阶段准备期
+> **Last updated**: 2026-04-23 17:30
+> **Status**: 第二阶段第一步已完成
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
@@ -11,21 +11,16 @@
 
 ### 阶段结论
 
-第一阶段已经完成从“执行链能跑”到“执行链有最小恢复闭环”的收口：
+第二阶段第一步已完成，SQLite `pending_recovery` 过渡链已完全移除：
 
-1. `ExecutionIntent` 已完成 PG 真源接通与验证
-2. `execution_recovery_tasks` 已作为 PG 正式恢复真源接入主链
-3. SQLite `pending_recovery` 仅保留过渡兼容，不再继续扩展
-4. 执行链已具备：
-   - partial-fill 保护
-   - 单一 SL 约束
-   - 撤旧挂新
-   - 失败即 pending recovery + 熔断 + 告警
-   - 启动对账恢复
+1. ✅ `execution_recovery_tasks` 是 PG 正式恢复真源
+2. ✅ `circuit_breaker` 由 PG active recovery tasks 重建（内存缓存）
+3. ✅ SQLite `pending_recovery` 整条过渡链已移除
+4. ✅ 恢复主链统一到 PG `execution_recovery_tasks`
 
 ### 当前唯一主线
 
-**第二阶段：执行恢复状态继续向 PG 收敛，并把执行链从“可运行”推到“可运营”。**
+**第二阶段：执行恢复状态继续向 PG 收敛，并把执行链从”可运行”推到”可运营”。**
 
 ### 设计前提（已锁定）
 
@@ -39,7 +34,6 @@
 2. 不做前端扩张
 3. 不做 API 面扩张
 4. 不同时推进多条 PG 表迁移
-5. 不继续在 SQLite 过渡态上做增强
 
 ---
 

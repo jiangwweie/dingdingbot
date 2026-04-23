@@ -61,7 +61,6 @@ class ExecutionOrchestrator:
         gateway: ExchangeGateway,
         intent_repository: Optional[ExecutionIntentRepositoryPort] = None,
         notifier: Optional[Callable[[str, str], Any]] = None,  # P0-6: 可选告警回调
-        pending_recovery_repository: Optional[Any] = None,  # P0-7: 可选 pending_recovery 持久化
         execution_recovery_repository: Optional[Any] = None,  # PG 正式恢复表
     ):
         """
@@ -73,7 +72,6 @@ class ExecutionOrchestrator:
             gateway: 交易所网关
             intent_repository: 执行意图仓储（可选，未提供时退回内存态）
             notifier: P0-6 告警回调函数（可选），签名 async (title: str, message: str) -> None
-            pending_recovery_repository: P0-7 pending_recovery 持久化仓储（可选，SQLite 过渡版）
             execution_recovery_repository: PG 正式恢复表仓储（可选）
         """
         self._capital_protection = capital_protection
@@ -81,15 +79,13 @@ class ExecutionOrchestrator:
         self._gateway = gateway
         self._intent_repository = intent_repository
         self._notifier = notifier  # P0-6: 保存告警回调
-        self._pending_recovery_repository = pending_recovery_repository  # P0-7: SQLite 过渡版
         self._execution_recovery_repository = execution_recovery_repository  # PG 正式版
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
 
-        # P0-2：熔断机制 + 待恢复记录
+        # P0-2：熔断机制（内存缓存，由 PG recovery tasks 重建）
         self._circuit_breaker_symbols: set = set()  # 熔断的 symbol 集合
-        self._pending_recovery: Dict[str, Dict[str, Any]] = {}  # order_id -> error info
 
         # MVP-Protected-Position-Step2: 注册 ENTRY 部分成交回调
         self._order_lifecycle.set_entry_partially_filled_callback(
@@ -847,26 +843,12 @@ class ExecutionOrchestrator:
                         )
 
                         # P0-2：标记待恢复
-                        self._pending_recovery[existing_sl.id] = {
-                            "order_id": existing_sl.id,
-                            "exchange_order_id": existing_sl.exchange_order_id,
-                            "symbol": existing_sl.symbol,
-                            "error": str(e),
-                            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
-                        }
-
-                        # P0-7：持久化到 SQLite repository（过渡版，如果可用）
-                        if self._pending_recovery_repository is not None:
-                            try:
-                                await self._pending_recovery_repository.save(
-                                    self._pending_recovery[existing_sl.id]
-                                )
-                            except Exception as repo_error:
-                                logger.error(
-                                    f"[ExecutionOrchestrator] 持久化 pending_recovery 失败: "
-                                    f"error={repo_error}",
-                                    exc_info=True
-                                )
+                        # 记录错误日志
+                        logger.error(
+                            f"[ExecutionOrchestrator] 撤销交易所旧 SL 失败，触发恢复流程: "
+                            f"order_id={existing_sl.id}, exchange_order_id={existing_sl.exchange_order_id}, "
+                            f"error={str(e)}"
+                        )
 
                         # PG 正式恢复表：创建 recovery task
                         if self._execution_recovery_repository is not None:
@@ -1135,28 +1117,6 @@ class ExecutionOrchestrator:
             )
             return 0
 
-    def get_pending_recovery(self, order_id: str) -> Optional[Dict[str, Any]]:
-        """
-        P0-2/P0-7：获取待恢复记录
-
-        Args:
-            order_id: 订单 ID
-
-        Returns:
-            待恢复记录，不存在返回 None
-
-        Note:
-            优先从 repository 读取（如果可用），回填内存缓存
-        """
-        # P0-7：优先从 repository 读取
-        if self._pending_recovery_repository is not None:
-            # 注意：repository 是异步的，但这个方法是同步的
-            # 这里我们返回内存缓存，调用者应该先调用 _sync_pending_recovery_from_repo()
-            # 或者在启动时从 repository 加载到内存
-            pass
-
-        return self._pending_recovery.get(order_id)
-
     def clear_circuit_breaker(self, symbol: str) -> None:
         """
         P0-2：清除 symbol 的熔断状态
@@ -1166,101 +1126,6 @@ class ExecutionOrchestrator:
         """
         self._circuit_breaker_symbols.discard(symbol)
         logger.info(f"[ExecutionOrchestrator] 已清除熔断: symbol={symbol}")
-
-    async def clear_pending_recovery_async(self, order_id: str) -> None:
-        """
-        P0-7：清除待恢复记录（异步版本，同时删除 repository）
-
-        Args:
-            order_id: 订单 ID
-        """
-        # P0-7：从 repository 删除（如果可用）
-        if self._pending_recovery_repository is not None:
-            try:
-                await self._pending_recovery_repository.delete(order_id)
-            except Exception as e:
-                logger.error(
-                    f"[ExecutionOrchestrator] 从 repository 删除 pending_recovery 失败: "
-                    f"order_id={order_id}, error={e}",
-                    exc_info=True
-                )
-
-        # 删除内存缓存
-        if order_id in self._pending_recovery:
-            del self._pending_recovery[order_id]
-            logger.info(f"[ExecutionOrchestrator] 已清除待恢复记录: order_id={order_id}")
-
-    def clear_pending_recovery(self, order_id: str) -> None:
-        """
-        P0-2：清除待恢复记录（同步版本，只删除内存）
-
-        Args:
-            order_id: 订单 ID
-
-        Note:
-            这是同步版本，只删除内存缓存。
-            如果需要同时删除 repository，请使用 clear_pending_recovery_async()
-        """
-        if order_id in self._pending_recovery:
-            del self._pending_recovery[order_id]
-            logger.info(f"[ExecutionOrchestrator] 已清除待恢复记录: order_id={order_id}")
-
-    async def list_pending_recovery_async(self) -> List[Dict[str, Any]]:
-        """
-        P0-7：列出所有待恢复记录（异步版本，从 repository 读取）
-
-        Returns:
-            待恢复记录列表，每条记录包含 order_id, exchange_order_id, symbol, error 等字段
-        """
-        # P0-7：优先从 repository 读取
-        if self._pending_recovery_repository is not None:
-            try:
-                records = await self._pending_recovery_repository.list_all()
-                # 回填内存缓存
-                for record in records:
-                    self._pending_recovery[record["order_id"]] = record
-                return records
-            except Exception as e:
-                logger.error(
-                    f"[ExecutionOrchestrator] 从 repository 读取 pending_recovery 失败: "
-                    f"error={e}",
-                    exc_info=True
-                )
-                # 回退到内存
-
-        # 回退到内存
-        result = []
-        for order_id, info in self._pending_recovery.items():
-            record = {
-                "order_id": order_id,
-                "exchange_order_id": info.get("exchange_order_id"),
-                "symbol": info.get("symbol"),
-                "error": info.get("error"),
-            }
-            result.append(record)
-        return result
-
-    def list_pending_recovery(self) -> List[Dict[str, Any]]:
-        """
-        P0-4：列出所有待恢复记录（只读，同步版本）
-
-        Returns:
-            待恢复记录列表，每条记录包含 order_id, exchange_order_id, symbol, error 等字段
-
-        Note:
-            这是同步版本，只返回内存缓存。
-            如果需要从 repository 读取，请使用 list_pending_recovery_async()
-        """
-        result = []
-        for order_id, info in self._pending_recovery.items():
-            record = {
-                "order_id": order_id,
-                "exchange_order_id": info.get("exchange_order_id"),
-                "symbol": info.get("symbol"),
-                "error": info.get("error"),
-            }
-            result.append(record)
-        return result
 
     def list_circuit_breaker_symbols(self) -> List[str]:
         """

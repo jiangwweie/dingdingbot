@@ -47,7 +47,6 @@ _execution_intent_repo = None
 _order_lifecycle_service: Optional[OrderLifecycleService] = None
 _capital_protection: Optional[CapitalProtectionManager] = None
 _execution_orchestrator: Optional[ExecutionOrchestrator] = None
-_pending_recovery_repo = None  # P0-7: SQLite 过渡版
 _execution_recovery_repo = None  # PG 正式版
 
 
@@ -85,7 +84,7 @@ async def graceful_shutdown():
     logger.info("Graceful shutdown initiated...")
 
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
-    global _execution_intent_repo, _order_repo, _pending_recovery_repo, _execution_recovery_repo
+    global _execution_intent_repo, _order_repo, _execution_recovery_repo
     _shutdown_event.set()
 
     if _exchange_gateway:
@@ -105,10 +104,6 @@ async def graceful_shutdown():
         _order_repo = None
 
     # P0-7: 关闭 pending_recovery_repo（SQLite 过渡版）
-    if _pending_recovery_repo:
-        await _pending_recovery_repo.close()
-        _pending_recovery_repo = None
-
     # PG 正式恢复表
     if _execution_recovery_repo:
         await _execution_recovery_repo.close()
@@ -159,7 +154,7 @@ async def run_application():
     """
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _order_lifecycle_service
-    global _capital_protection, _execution_orchestrator, _pending_recovery_repo
+    global _capital_protection, _execution_orchestrator
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -256,11 +251,6 @@ async def run_application():
         _order_lifecycle_service = OrderLifecycleService(repository=_order_repo)
         await _order_lifecycle_service.start()
 
-        # P0-7: 初始化 PendingRecoveryRepository（SQLite 过渡版）
-        from src.infrastructure.pending_recovery_repository import PendingRecoveryRepository
-        _pending_recovery_repo = PendingRecoveryRepository()
-        await _pending_recovery_repo.initialize()
-
         # PG 正式恢复表：初始化（仅当 PG 可用时）
         _execution_recovery_repo = None
         try:
@@ -277,7 +267,7 @@ async def run_application():
                 f"PG execution recovery repository 初始化失败（不影响主进程）: {e}",
                 exc_info=True
             )
-            # 继续启动（降级到 SQLite 过渡版）
+            # 继续启动（降级到无 PG 模式）
             _execution_recovery_repo = None
 
         account_service = BinanceAccountService(_exchange_gateway)
@@ -300,7 +290,6 @@ async def run_application():
             gateway=_exchange_gateway,
             intent_repository=_execution_intent_repo,
             notifier=_orchestrator_notifier_adapter,  # P0-6: 注入告警回调
-            pending_recovery_repository=_pending_recovery_repo,  # P0-7: SQLite 过渡版
             execution_recovery_repository=_execution_recovery_repo,  # PG 正式版
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
