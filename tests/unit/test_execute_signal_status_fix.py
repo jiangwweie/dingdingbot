@@ -36,11 +36,13 @@ from src.infrastructure.exchange_gateway import ExchangeGateway
 @pytest.mark.asyncio
 async def test_partially_filled_not_overwritten():
     """
-    P1-1 测试：PARTIALLY_FILLED 分支不会被尾部覆盖
+    P1-1 + P1-5 测试：PARTIALLY_FILLED 分支不会被尾部覆盖，且不伪造零成交事实
 
     场景：
     1. mock place_order() 返回 PARTIALLY_FILLED
     2. 断言 intent.status == SUBMITTED（不是 COMPLETED）
+    3. 断言 update_order_partially_filled 未被调用（P1-5：禁止伪造成交事实）
+    4. 断言 confirm_order 被调用（订单推进到 OPEN 状态）
     """
     # 准备：创建 orchestrator
     capital_protection = MagicMock(spec=CapitalProtectionManager)
@@ -111,6 +113,12 @@ async def test_partially_filled_not_overwritten():
     assert intent.status == ExecutionIntentStatus.SUBMITTED
     assert intent.order_id == "order_test_001"
     assert intent.exchange_order_id == "ex_order_001"
+
+    # P1-5 验证：confirm_order 被调用（订单推进到 OPEN）
+    order_lifecycle.confirm_order.assert_called_once_with("order_test_001")
+
+    # P1-5 验证：update_order_partially_filled 未被调用（禁止伪造零成交事实）
+    order_lifecycle.update_order_partially_filled.assert_not_called()
 
 
 @pytest.mark.asyncio

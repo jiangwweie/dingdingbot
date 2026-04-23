@@ -343,21 +343,18 @@ class ExecutionOrchestrator:
                 return intent
 
             elif placement_result.status == OrderStatus.PARTIALLY_FILLED:
-                # 市价单部分成交
-                # 需要先推进到 OPEN，再推进到 PARTIALLY_FILLED
+                # P1-5 修复：禁止落盘"PARTIALLY_FILLED 但 filled_qty=0"的自相矛盾订单事实
+                # 场景：ExchangeGateway.place_order() 返回 status=PARTIALLY_FILLED，但缺少真实成交数量/均价
+                # 正确做法：本地主单停留在 OPEN（已确认挂单），等待 WebSocket/启动对账推进真实 PARTIALLY_FILLED/FILLED
                 await self._order_lifecycle.confirm_order(order.id)
 
-                # P1 修复：推进到 PARTIALLY_FILLED 状态
-                # 注意：OrderPlacementResult 没有 filled_qty 和 average_exec_price 字段
-                # 使用默认值（0 成交数量）推进状态，后续通过 WebSocket 推送更新真实成交信息
-                await self._order_lifecycle.update_order_partially_filled(
-                    order.id,
-                    filled_qty=Decimal("0"),
-                    average_exec_price=placement_result.price or Decimal("0"),
-                )
+                # 注意：不调用 update_order_partially_filled(filled_qty=0)
+                # 原因：OrderPlacementResult 没有 filled_qty 和 average_exec_price 字段
+                # 使用默认值 0 会伪造"部分成交但成交量为 0"的自相矛盾事实
+                # 正确流程：等待 WebSocket 推送真实成交信息后再推进状态
 
                 logger.info(
-                    f"[ExecutionOrchestrator] 订单部分成交（等待 WebSocket 推送更新成交数量）: "
+                    f"[ExecutionOrchestrator] 订单已提交（交易所返回部分成交状态，等待 WebSocket 推送真实成交信息）: "
                     f"intent_id={intent_id}, order_id={order.id}, "
                     f"exchange_order_id={placement_result.exchange_order_id}"
                 )
