@@ -7026,3 +7026,142 @@ async def get_config_schema():
     except Exception as e:
         logger.error(f"Failed to get config schema: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# P0-7: Execution Admin API - Pending Recovery & Circuit Breaker
+# ============================================================
+
+@app.get("/api/execution/recovery/pending", tags=["Execution Admin"])
+async def get_pending_recovery():
+    """
+    P0-7: 查询所有待恢复记录
+
+    Returns:
+        List of pending recovery records, each containing:
+        - order_id: 订单 ID
+        - exchange_order_id: 交易所订单 ID
+        - symbol: 交易对
+        - error: 错误信息
+    """
+    if _execution_orchestrator is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ExecutionOrchestrator not initialized"
+        )
+
+    try:
+        pending_list = _execution_orchestrator.list_pending_recovery()
+        return {
+            "success": True,
+            "count": len(pending_list),
+            "records": pending_list
+        }
+    except Exception as e:
+        logger.error(f"Failed to get pending recovery: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/execution/circuit-breaker", tags=["Execution Admin"])
+async def get_circuit_breaker():
+    """
+    P0-7: 查询所有熔断的 symbol
+
+    Returns:
+        List of symbols currently in circuit breaker state
+    """
+    if _execution_orchestrator is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ExecutionOrchestrator not initialized"
+        )
+
+    try:
+        symbols = _execution_orchestrator.list_circuit_breaker_symbols()
+        return {
+            "success": True,
+            "count": len(symbols),
+            "symbols": symbols
+        }
+    except Exception as e:
+        logger.error(f"Failed to get circuit breaker: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/execution/recovery/pending/{order_id}/clear", tags=["Execution Admin"])
+async def clear_pending_recovery(order_id: str):
+    """
+    P0-7: 清除指定订单的待恢复记录
+
+    Args:
+        order_id: 订单 ID
+
+    Returns:
+        Success status
+    """
+    if _execution_orchestrator is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ExecutionOrchestrator not initialized"
+        )
+
+    try:
+        # 检查是否存在
+        existing = _execution_orchestrator.get_pending_recovery(order_id)
+        if existing is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending recovery not found: {order_id}"
+            )
+
+        # 清除
+        _execution_orchestrator.clear_pending_recovery(order_id)
+
+        return {
+            "success": True,
+            "message": f"Pending recovery cleared: {order_id}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear pending recovery: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/execution/circuit-breaker/clear", tags=["Execution Admin"])
+async def clear_circuit_breaker(symbol: str = Query(..., description="交易对符号，例如 BTC/USDT:USDT")):
+    """
+    P0-7: 清除指定 symbol 的熔断状态
+
+    Args:
+        symbol: 交易对符号（查询参数，例如 ?symbol=BTC/USDT:USDT）
+
+    Returns:
+        Success status
+    """
+    if _execution_orchestrator is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ExecutionOrchestrator not initialized"
+        )
+
+    try:
+        # 检查是否存在
+        if not _execution_orchestrator.is_symbol_blocked(symbol):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Symbol not in circuit breaker: {symbol}"
+            )
+
+        # 清除
+        _execution_orchestrator.clear_circuit_breaker(symbol)
+
+        return {
+            "success": True,
+            "message": f"Circuit breaker cleared: {symbol}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear circuit breaker: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

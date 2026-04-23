@@ -11,12 +11,13 @@ ExecutionOrchestrator MVP 第一步：最小主链
 5. 调用 ExchangeGateway 提交 ENTRY
 6. 回填 exchange_order_id
 7. 推进本地执行状态
+8. P0-2: 熔断机制与待恢复记录管理
+9. P0-6: pending_recovery / circuit_breaker 告警通知
 
 范围控制（这一步不做）：
-- 不实现 TP/SL 挂载
+- 不实现 TP/SL 挂载（已在 MVP-Protected-Position 实现）
 - 不实现 entry_filled_unprotected
-- 不实现 partial fill 保护逻辑
-- 不实现 recovery / circuit breaker
+- 不实现 partial fill 保护逻辑（已在 MVP-Protected-Position-Step2 实现）
 - 不改 API 主链
 """
 import uuid
@@ -1095,3 +1096,12 @@ class ExecutionOrchestrator:
             }
             result.append(record)
         return result
+
+    def list_circuit_breaker_symbols(self) -> List[str]:
+        """
+        P0-7：列出所有熔断的 symbol（只读）
+
+        Returns:
+            排序后的 symbol 列表
+        """
+        return sorted(list(self._circuit_breaker_symbols))
