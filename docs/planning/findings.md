@@ -1,6 +1,34 @@
 # Findings Log
 
-> Last updated: 2026-04-23 10:23
+> Last updated: 2026-04-23 15:40
+
+---
+
+## 2026-04-23 15:40 -- PG recovery 正式化阶段结论：恢复工单应进入 PG 主线，SQLite 仅保留过渡兼容
+
+### 新增结论
+
+1. **`execution_recovery_tasks` 是当前最合适的正式落点**
+   - `orders` 应保持订单事实真源，不宜承载恢复工作流状态
+   - `execution_intents` 当前仍应避免被扩成复杂 recovery graph 容器
+   - 因此恢复工单独立成 PG 表最符合现有 `db_scripts` 和执行链边界
+
+2. **PG recovery 主线已接通，当前阶段可以视为“正式方案落地”**
+   - `ExecutionOrchestrator` 已在 `replace_sl_failed` 场景双写 SQLite 过渡记录与 PG recovery task
+   - `StartupReconciliationService` 已能消费 PG recovery task 并推进到 `resolved / retrying / failed`
+   - SQLite `pending_recovery` 的角色已降级为过渡兼容，不再应作为长期真源继续演进
+
+3. **测试分层必须坚持“mock 单测 + 真库脚本验证”**
+   - 对执行恢复链这种强业务语义，unit test 应验证 orchestrator / reconciliation 的调用语义
+   - 真实 PG 连通性验证应移出 `pytest tests/unit`，改为单独脚本执行
+   - 当前 `scripts/verify_pg_execution_recovery_repo.py` 就是这条分层原则的正式落地
+
+4. **当前剩余问题已降级为 P2 级收尾**
+   - `PgExecutionRecoveryRepository.initialize()` 现已补上建表逻辑，P1 已关闭
+   - 仍有一个设计洁癖问题：
+     - 若继续允许外部注入自定义 `session_maker`
+     - 则初始化建表源与仓储读写源未来可能分叉
+   - 这不阻塞当前第二阶段启动，但后续 PG 收口时应顺手统一
 
 ---
 

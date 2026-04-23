@@ -1,6 +1,42 @@
 # Progress Log
 
-> Last updated: 2026-04-23 10:23
+> Last updated: 2026-04-23 15:40
+
+---
+
+## 2026-04-23 15:40 -- PG recovery 正式版已接入主链，准备切入第二阶段
+
+### 本次完成
+
+1. 完成 `execution_recovery_tasks` PG 正式恢复表设计与接线
+   - 新增 baseline SQL / appendix / ORM / repository
+   - 主链在 `replace_sl_failed` 场景已写入 PG recovery task
+   - startup reconciliation 已能消费并推进恢复任务状态
+2. 完成测试分层纠偏
+   - 单元测试改为 mock 驱动，避免 asyncpg 与 pytest-asyncio 冲突
+   - 真库能力改由 `scripts/verify_pg_execution_recovery_repo.py` 手工验证
+3. 完成审查收口
+   - `initialize()` 空实现问题已关闭
+   - “假集成测试未真打到 orchestrator 路径”问题已关闭
+   - 当前只剩 1 个非阻塞 P2：PG recovery repo 初始化源与注入 session source 可能分叉
+
+### 当前状态
+
+- `ExecutionIntent`：PG SSOT 已验证成立
+- `execution_recovery_tasks`：PG 正式恢复真源已接入主链
+- SQLite `pending_recovery`：仅保留过渡兼容
+- 可以开始准备第二阶段：执行恢复状态进一步向 PG 收敛
+
+### 下一阶段候选
+
+1. `circuit_breaker` 是否需要 PG 真源化
+2. SQLite `pending_recovery` 的退役路径
+3. recovery task 的 retry/backoff / 人工运维面是否需要再收口
+
+### 备注
+
+- 本次主要是文档收口与阶段结论整理
+- 未新增测试执行
 
 ---
 

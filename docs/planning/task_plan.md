@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 10:23
-> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 已补齐 partial-fill 保护、熔断生效、启动对账接入 pending_recovery；ExecutionIntent 已完成 PG 真源实切验证（写入/读回 OK，主链可启用 `CORE_EXECUTION_INTENT_BACKEND=postgres`）
+> **Last updated**: 2026-04-23 15:40
+> **Status**: ETH 1h LONG-only 主线已冻结；ExecutionIntent 已完成 PG 真源实切验证；`execution_recovery_tasks` 已作为 PG 正式恢复真源接入主链，SQLite `pending_recovery` 仅保留过渡兼容；当前准备进入第二阶段：执行恢复状态向 PG 进一步收敛
 
 ---
 
@@ -258,6 +258,49 @@
 1. ✅ WS 回写契约闭环（P0）
    已修复 WS 回写契约错位（参数/类型），并补齐 `exchange_order_id -> local order` 的映射闭环，避免 WS 回写断链。
 2. ✅ ExecutionOrchestrator MVP（信号 -> ENTRY 下单）（P0/P1）
+
+## 2026-04-23 15:40 -- 阶段更新：PG recovery 正式主链接通，SQLite pending_recovery 降级为过渡兼容
+
+### 已完成（阶段性收口）
+
+1. ✅ `execution_recovery_tasks` 已进入 PG 正式设计
+   - `db_scripts/2026-04-22-pg-core-baseline.sql` 已新增恢复表
+   - `pg_models.py` 已补齐 ORM、约束、最小索引
+   - 恢复状态机已收口为 `pending / retrying / resolved / failed`
+2. ✅ PG recovery repository 已接入主链
+   - `ExecutionOrchestrator` 在 `replace_sl_failed` 时双写：
+     - SQLite `pending_recovery`（过渡兼容）
+     - PG `execution_recovery_tasks`（正式真源）
+   - `StartupReconciliationService` 已扫描 PG recovery tasks 并推进：
+     - `resolved`
+     - `retrying`
+     - `failed`
+3. ✅ 测试分层已纠偏
+   - unit test 不再硬跑真实 PG + asyncpg
+   - 改为：
+     - mock 单元测试覆盖业务语义
+     - `scripts/verify_pg_execution_recovery_repo.py` 负责真库手工验证
+
+### 当前定性
+
+1. `ExecutionIntent`：已可视为 PG 主真源
+2. `execution_recovery_tasks`：已接入 PG 正式恢复主线
+3. SQLite `pending_recovery`：仅保留过渡兼容，不再继续扩展
+
+### 剩余小尾巴
+
+1. ⚠️ 仍有 1 个非阻塞 P2：
+   - `PgExecutionRecoveryRepository.initialize()` 当前建表走全局 PG engine
+   - 若未来继续保留“可注入 session_maker”能力，初始化源和仓储读写源仍可能分叉
+   - 该问题不阻塞当前第二阶段启动，但应在后续 PG 收口时顺手修掉
+
+### 第二阶段准备方向
+
+1. 目标：让执行恢复状态进一步向 PG 收敛，不再新增 SQLite 执行状态技术债
+2. 当前最明确的后续议题：
+   - `circuit_breaker` 是否需要 PG 真源化
+   - SQLite `pending_recovery` 的退役路径
+   - 恢复工单是否需要更明确的 retry/backoff 策略与运维操作面
    已处理“交易所返回失败但不抛异常”的失败分支，并对齐“市价单直接 FILLED / PARTIALLY_FILLED”的返回状态语义。
 3. ✅ WS 业务回调异常保护（P0）
    回调异常不会中断消费循环；失败订单进入 pending recovery，供对账兜底。
