@@ -317,8 +317,6 @@ async def run_application():
             logger.info(f"对账成功: {reconciliation_summary['success_count']} 个")
             logger.info(f"对账失败: {reconciliation_summary['failure_count']} 个")
             logger.info(f"清除待恢复标记: {reconciliation_summary['recovery_cleared_count']} 个")
-            logger.info(f"P0-4: 清除 orchestrator 待恢复记录: {reconciliation_summary['orchestrator_recovery_cleared_count']} 个")
-            logger.info(f"P0-4: 清除 orchestrator 熔断: {reconciliation_summary['orchestrator_circuit_breaker_cleared_count']} 个")
             logger.info(f"PG recovery: 已解决: {reconciliation_summary['pg_recovery_resolved_count']} 个")
             logger.info(f"PG recovery: 重试中: {reconciliation_summary['pg_recovery_retrying_count']} 个")
             logger.info(f"PG recovery: 已失败: {reconciliation_summary['pg_recovery_failed_count']} 个")
