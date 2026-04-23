@@ -28,6 +28,11 @@ from src.domain.models import Order, OrderStatus
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.order_repository import OrderRepository
 from src.application.order_lifecycle_service import OrderLifecycleService
+from src.application.recovery_retry_policy import (
+    should_retry,
+    calculate_next_retry_at,
+    MAX_RECOVERY_RETRY_COUNT,
+)
 from src.infrastructure.logger import logger
 
 
@@ -270,31 +275,32 @@ class StartupReconciliationService:
                         )
                     else:
                         # 订单未终态，检查重试次数
-                        max_retry_count = 3
-                        if retry_count >= max_retry_count:
+                        if not should_retry(retry_count):
                             # 达到最大重试次数，标记失败
                             await self._execution_recovery_repository.mark_failed(
                                 task_id=task_id,
-                                error_message=f"达到最大重试次数 {max_retry_count}",
+                                error_message=f"达到最大重试次数 {MAX_RECOVERY_RETRY_COUNT}",
                             )
                             pg_recovery_failed_count += 1
                             logger.warning(
                                 f"PG recovery: ❌ 标记失败: task_id={task_id}, "
-                                f"retry_count={retry_count}"
+                                f"retry_count={retry_count}, max_retries={MAX_RECOVERY_RETRY_COUNT}"
                             )
                         else:
-                            # 标记重试中，设置下次重试时间（60s 后）
+                            # 标记重试中，使用指数退避策略
                             now_ms = int(time.time() * 1000)
-                            next_retry_at = now_ms + 60000  # 60s 退避
+                            next_retry_at = calculate_next_retry_at(now_ms, retry_count)
+                            new_retry_count = retry_count + 1
+
                             await self._execution_recovery_repository.mark_retrying(
                                 task_id=task_id,
-                                retry_count=retry_count + 1,
+                                retry_count=new_retry_count,
                                 next_retry_at=next_retry_at,
                             )
                             pg_recovery_retrying_count += 1
                             logger.info(
                                 f"PG recovery: ⏸️ 标记重试中: task_id={task_id}, "
-                                f"retry_count={retry_count + 1}, next_retry_at={next_retry_at}"
+                                f"retry_count={new_retry_count}, next_retry_at={next_retry_at}"
                             )
 
             except Exception as e:
