@@ -1,11 +1,55 @@
 # Progress Log
 
-> Last updated: 2026-04-23 23:20
+> Last updated: 2026-04-23 23:35
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-23 -- Runtime Config 骨架已实现，尚未接入主程序
+
+1. ✅ 新增 `ResolvedRuntimeConfig` 与五模块 Pydantic 模型
+   - `EnvironmentRuntimeConfig`
+   - `MarketRuntimeConfig`
+   - `StrategyRuntimeConfig`
+   - `RiskRuntimeConfig`
+   - `ExecutionRuntimeConfig`
+
+2. ✅ 新增 `RuntimeConfigResolver`
+   - 从 `.env` / shell env 读取 environment
+   - 从 SQLite runtime profile 读取 market / strategy / risk / execution
+   - 生成 `config_hash`
+   - 输出脱敏 `safe_summary`
+
+3. ✅ 新增 SQLite `RuntimeProfileRepository`
+   - 新表：`runtime_profiles`
+   - profile 以 JSON 形式保存五模块配置
+   - 支持 upsert / get / active / list
+
+4. ✅ 新增工具脚本
+   - `scripts/seed_sim1_runtime_profile.py`
+   - `scripts/verify_sim1_runtime_config.py`
+
+5. ✅ 已做最小自检
+   - `python3 -m py_compile` 通过
+   - 使用临时 SQLite + fake env 验证 resolver 可解析 `sim1_eth_runtime`，并可正常退出
+
+### 当前边界
+
+- 本轮没有改 `main.py`
+- 本轮没有让运行时真实消费 resolver
+- 本轮没有修改现有 SQLite config tables
+- 本轮没有执行 pytest
+
+### 下一步
+
+1. 审查 Runtime Config 骨架
+2. 决定是否执行 seed 写入本地 `data/v3_dev.db`
+3. 下一轮再接 `main.py`：
+   - exchange secret / webhook 从 resolver environment 读取
+   - 启动日志打印 resolved runtime summary/hash
+   - 再后续切 SignalPipeline / execution OrderStrategy 消费
 
 ### 2026-04-23 -- Config Module SSOT / Runtime Resolver 架构设计已启动
 

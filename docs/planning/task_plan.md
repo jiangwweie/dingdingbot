@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 23:20
-> **Status**: Sim-0 受控链路通过，Config Module SSOT / Runtime Resolver 架构设计已启动，下一步进入 SQLite runtime profile 骨架实现
+> **Last updated**: 2026-04-23 23:35
+> **Status**: Sim-0 受控链路通过，Config Module SSOT / Runtime Resolver 骨架已实现，尚未接入主程序
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
@@ -249,10 +249,10 @@
    - `docs/planning/architecture/2026-04-23-config-module-ssot-runtime-resolver-design.md`
    - `docs/planning/architecture/2026-04-23-runtime-config-implementation-skeleton.md`
 3. 推荐下一步实现骨架：
-   - 新增 SQLite `runtime_profiles` 窄表
-   - 新增 `ResolvedRuntimeConfig` Pydantic 模型
-   - 新增 `RuntimeConfigResolver`
-   - 新增 `sim1_eth_runtime` seed / verify 脚本
+   - ✅ 新增 SQLite `runtime_profiles` 窄表
+   - ✅ 新增 `ResolvedRuntimeConfig` Pydantic 模型
+   - ✅ 新增 `RuntimeConfigResolver`
+   - ✅ 新增 `sim1_eth_runtime` seed / verify 脚本
 4. 当前不做：
    - 不迁 Config 到 PG
    - 不扩前端
@@ -262,6 +262,11 @@
    - `.env` 成为 exchange secret / webhook 真源
    - execution 模块成为实盘 TP/SL 的唯一真源
    - `SignalResult.take_profit_levels` 降级为 preview / notification / research 语义
+6. 当前实现状态：
+   - Runtime Config 骨架已完成
+   - 仅做临时 SQLite + fake env 自检
+   - 尚未写入本地正式 `data/v3_dev.db`
+   - 尚未接入 `main.py`
 
 ---
 

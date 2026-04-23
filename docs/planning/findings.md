@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-23 23:20
+> Last updated: 2026-04-23 23:35
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -28,6 +28,22 @@
 
 - `docs/planning/architecture/2026-04-23-config-module-ssot-runtime-resolver-design.md`
 - `docs/planning/architecture/2026-04-23-runtime-config-implementation-skeleton.md`
+
+### 0.1 Runtime Config 骨架实现结论
+
+1. `runtime_profiles` 采用 SQLite 窄表 + JSON profile 是当前最小可行方案。
+   - 不破坏现有 `strategies / system_configs / risk_configs`
+   - 不引入 PG config 迁移
+   - 后续迁移只需替换 repository adapter
+
+2. Resolver 必须在环境层做强校验。
+   - 缺 `PG_DATABASE_URL`、交易所 key/secret、webhook 时直接失败
+   - `CORE_EXECUTION_INTENT_BACKEND` 必须为 `postgres`
+   - `CORE_ORDER_BACKEND` 当前默认保持 `sqlite`
+
+3. 一次性脚本使用共享 SQLite 连接池时，必须在脚本结束前调用 `close_all_connections()`。
+   - 否则 aiosqlite 后台线程可能导致脚本不退出
+   - seed/verify 脚本已显式关闭连接池
 
 ### 1. 执行恢复状态已完全进入 PG 主线
 
