@@ -1,8 +1,32 @@
 # Progress Log
 
-> Last updated: 2026-04-23 01:25
+> Last updated: 2026-04-23 10:23
 
 ---
+
+## 2026-04-23 10:23 -- 执行链补稳 + PG 实切验证：进入“execution_intent-only 可控实切”阶段
+
+### 本次完成
+
+1. partial-fill 安全闭环补稳（P0）
+   - 增量成交：TP-only 补挂；SL 走撤旧挂新，确保交易所侧覆盖全仓
+   - 撤旧 SL 失败：停止继续动作，记录 pending_recovery，触发 symbol 熔断
+2. 熔断真正生效（P0）
+   - `execute_signal()` 开头拦截熔断 symbol，返回 `BLOCKED`
+3. pending_recovery 接入启动对账（P0）
+   - 启动对账会处理 orchestrator.pending_recovery
+   - 仅终态清除 pending_recovery 并自动解熔断（OPEN/PARTIALLY_FILLED 保持）
+4. 主进程启动时自动执行启动对账（P0）
+   - Phase 4.3：core runtime ready 后执行 startup reconciliation，并打印摘要日志
+5. PG-1 验证完成
+   - 已在真实 PG 环境验证 `execution_intents` 表创建 + 写入/读回正常
+
+### 当前状态
+
+- 可进入 execution_intent-only 小范围实切：
+  - `CORE_EXECUTION_INTENT_BACKEND=postgres`
+  - `CORE_ORDER_BACKEND=sqlite`
+- 本次未跑全套测试（按红线，测试前需用户确认）。
 
 ## 2026-04-23 01:25 -- PG shutdown / lifecycle 已收口：engine 与 sessionmaker 在 shutdown 后可重建
 

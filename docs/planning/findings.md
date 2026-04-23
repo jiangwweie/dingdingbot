@@ -1,8 +1,29 @@
 # Findings Log
 
-> Last updated: 2026-04-23 01:25
+> Last updated: 2026-04-23 10:23
 
 ---
+
+## 2026-04-23 10:23 -- ExecutionIntent PG 真源验证通过：可进入 execution_intent-only 小范围实切
+
+### 新增结论
+
+1. **PG `execution_intents` 真源已在真实 PG 环境完成写入/读回验证**
+   - 表已创建
+   - `save()/get()/get_by_order_id()` 可用
+   - 具备让 ExecutionIntent 先成为 PG SSOT 的落地条件
+
+2. **partial-fill 的安全最小闭环必须满足“交易所侧 SL 覆盖全仓”**
+   - 本地调整 `requested_qty` 不等于交易所侧覆盖
+   - 增量成交时的最小安全做法是：撤旧 SL + 挂新 SL（数量=filled_qty_total）
+
+3. **撤旧 SL 失败时必须立即刹车并熔断**
+   - 否则非常容易在交易所侧出现双 SL 并存 / 新 SL 提交失败导致裸奔
+   - pending_recovery + circuit breaker 是低频个人量化场景下最划算的止损线
+
+4. **启动对账清 pending_recovery 必须以“终态”为条件**
+   - OPEN/PARTIALLY_FILLED 不能清 pending_recovery，更不能解熔断
+   - 只有终态才表示该 pending_recovery 所代表的问题已自然收敛或可安全结束
 
 ## 2026-04-23 01:25 -- PG 生命周期收口原则确认：dispose 不够，必须显式复位可重建全局对象
 

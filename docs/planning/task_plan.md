@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 01:25
-> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 持续补稳，PG 双轨迁移已完成主进程执行链接线、ExecutionIntent PG 主真源切换与 PG 生命周期收口；`backtest-studio` 作为低优先级并行线进入设计准备
+> **Last updated**: 2026-04-23 10:23
+> **Status**: ETH 1h LONG-only 主线已冻结；执行链 MVP 已补齐 partial-fill 保护、熔断生效、启动对账接入 pending_recovery；ExecutionIntent 已完成 PG 真源实切验证（写入/读回 OK，主链可启用 `CORE_EXECUTION_INTENT_BACKEND=postgres`）
 
 ---
 
@@ -187,6 +187,33 @@
 1. 将当前主线定版为“阶段性实盘候选基线”
 2. 按最小执行主链设计收口实盘执行层
 3. 第一优先级先做：WS 回写契约核对 -> ExecutionOrchestrator -> ENTRY/TP/SL 闭环
+
+---
+
+## 2026-04-23 10:23 -- 阶段更新：ExecutionIntent PG 真源已验证，执行链补稳进入“可控实切”阶段
+
+### 已完成（关键 P0）
+
+1. ✅ partial-fill 保护链闭环补稳（交易所侧 SL 覆盖全仓）
+   - 增量成交时：只为 delta_qty 补挂 TP；SL 走“撤旧挂新”确保交易所侧覆盖 filled_qty_total
+   - 撤旧 SL 失败：立即刹车（不撤本地 SL、不挂新 SL），记录 pending_recovery 并触发 symbol 熔断
+2. ✅ 熔断机制生效
+   - `execute_signal()` 开头增加熔断检查，被熔断的 symbol 直接返回 `BLOCKED`
+3. ✅ 启动对账接入 orchestrator 的 pending_recovery，并支持自动解熔断
+   - 仅在终态（CANCELED/FILLED/REJECTED/EXPIRED）时清除 pending_recovery 并解熔断
+
+### PG 实切验证（ExecutionIntent-only）
+
+1. ✅ `execution_intents` 表已创建且写入/读回正常
+2. ✅ 推荐实切方式保持不变：
+   - `CORE_EXECUTION_INTENT_BACKEND=postgres`
+   - `CORE_ORDER_BACKEND=sqlite`
+   - `positions` 继续过渡态
+
+### 下一步（进入实切/观测）
+
+1. 先按 ExecutionIntent-only 在测试环境/个人盘小范围运行并观察（启动对账摘要、pending_recovery、熔断触发/解除）
+2. 再评估是否推进 `CORE_ORDER_BACKEND=postgres`（不与本阶段绑定）
 
 ### 并行规划（新增，低优先级）
 
