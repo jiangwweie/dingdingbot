@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-24 00:20
+> Last updated: 2026-04-24 00:32
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -64,7 +64,9 @@
 7. Runtime config 消费切换应按模块逐步推进。
    - 第一刀只切 market scope，风险最低
    - 已让预热、订阅、资产轮询间隔从 `ResolvedRuntimeConfig.market` 获取
-   - strategy/risk/execution 暂不切，避免一次性改变信号判断、仓位计算和保护单语义
+   - 第二刀只切 `SignalPipeline` 的 `RiskConfig`
+   - `CapitalProtectionManager` 账户级熔断不随本刀切换，避免把仓位试算和账户保护混成一个变更
+   - strategy/execution 暂不切，避免一次性改变信号判断和保护单语义
    - 每切一个模块都应在日志中明确标记来源，便于 Sim-1 观察回溯
 
 8. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。

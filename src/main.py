@@ -392,10 +392,29 @@ async def run_application():
         # =============================================
         logger.info("Phase 5: Creating signal pipeline...")
         # 配置重构后：SignalPipeline 需要 config_manager 作为第一个参数
-        risk_config = RiskConfig(
-            max_loss_percent=user_config.risk.max_loss_percent,
-            max_leverage=user_config.risk.max_leverage,
-        )
+        if _runtime_config_provider is not None:
+            runtime_risk = _runtime_config_provider.resolved_config.risk
+            risk_config = runtime_risk.to_risk_config()
+            logger.info(
+                "SignalPipeline risk config driven by runtime profile: "
+                f"profile={_runtime_config_provider.resolved_config.profile_name}, "
+                f"hash={_runtime_config_provider.config_hash}, "
+                f"max_loss_percent={risk_config.max_loss_percent}, "
+                f"max_leverage={risk_config.max_leverage}, "
+                f"max_total_exposure={risk_config.max_total_exposure}, "
+                f"daily_max_trades={risk_config.daily_max_trades}"
+            )
+        else:
+            risk_config = RiskConfig(
+                max_loss_percent=user_config.risk.max_loss_percent,
+                max_leverage=user_config.risk.max_leverage,
+            )
+            logger.warning(
+                "Runtime config provider missing; falling back to ConfigManager "
+                f"risk config: max_loss_percent={risk_config.max_loss_percent}, "
+                f"max_leverage={risk_config.max_leverage}, "
+                f"max_total_exposure={risk_config.max_total_exposure}"
+            )
         global _signal_pipeline
         _signal_pipeline = SignalPipeline(
             config_manager=config_manager,

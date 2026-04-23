@@ -1,11 +1,32 @@
 # Progress Log
 
-> Last updated: 2026-04-24 00:20
+> Last updated: 2026-04-24 00:32
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-24 -- Runtime Config risk 已接入 SignalPipeline
+
+1. ✅ `SignalPipeline` 的 `RiskConfig` 已由 runtime risk module 构建
+   - `max_loss_percent=0.01`
+   - `max_leverage=20`
+   - `max_total_exposure=1.0`
+   - `daily_max_trades=10`
+
+2. ✅ 保留旧配置 fallback
+   - 若 provider 缺失，仍回退到 `user_config.risk`
+   - 正常启动路径已经在 Phase 1.1 严格解析 runtime profile
+
+3. ✅ 明确未切范围
+   - `CapitalProtectionManager` 仍使用 `ConfigManager.build_capital_protection_config()`
+   - execution TP/SL 仍未从 runtime execution module 消费
+
+4. ✅ 已做轻量验证
+   - `python3 -m py_compile` 通过
+   - `scripts/verify_sim1_runtime_config.py` 通过
+   - 未执行 pytest
 
 ### 2026-04-24 -- Runtime Config market scope 已小范围实切
 

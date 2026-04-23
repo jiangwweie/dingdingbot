@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-24 00:20
-> **Status**: Sim-0 受控链路通过，Runtime Resolver 已接入 main.py，market scope 已小范围实切
+> **Last updated**: 2026-04-24 00:32
+> **Status**: Sim-0 受控链路通过，Runtime Resolver 已接入 main.py，market/risk 已小范围实切
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
@@ -267,12 +267,18 @@
    - 审查提出的 hash / readonly / transaction / strategy 契约问题已修复
    - 已 seed 本地正式 `data/v3_dev.db` 的 `sim1_eth_runtime`
    - 已接入 `main.py` Phase 1.1 启动解析
-   - market scope 已小范围实切：
+   - market scope 已实切：
      - `symbols=ETH/USDT:USDT`
      - `timeframes=1h,4h`
      - `warmup_bars=100`
      - `asset_polling_interval=60s`
-   - 尚未让 `strategy/risk/execution` 消费 runtime config
+   - SignalPipeline risk 已实切：
+     - `max_loss_percent=0.01`
+     - `max_leverage=20`
+     - `max_total_exposure=1.0`
+     - `daily_max_trades=10`
+   - 尚未让 `strategy/execution` 消费 runtime config
+   - `CapitalProtectionManager` 账户级熔断仍暂用原 ConfigManager 派生配置
 7. 下一步切换边界：
    - 先让启动日志和 API 可观测 runtime hash
    - 再评估 strategy module 是否接入 `SignalPipeline`
