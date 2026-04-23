@@ -36,9 +36,43 @@ from src.domain.models import (
     RiskConfig,
 )
 from src.infrastructure.exchange_gateway import ExchangeGateway
-from src.application.backtester import Backtester
+from src.application.backtester import Backtester, resolve_backtest_params
+from src.application.backtest_config import (
+    BACKTEST_ETH_BASELINE_PROFILE,
+    BacktestConfigResolver,
+    DEFAULT_BACKTEST_PROFILE_PROVIDER,
+    list_backtest_injectable_params,
+)
 
 logger = logging.getLogger(__name__)
+
+
+OPTUNA_PARAM_TO_CONTRACT_KEY = {
+    "max_atr_ratio": "strategy.atr.max_atr_ratio",
+    "min_distance_pct": "strategy.ema.min_distance_pct",
+    "ema_period": "strategy.ema.period",
+    "mtf_ema_period": "system.mtf_ema_period",
+    "tp_ratios": "execution.tp_ratios",
+    "tp_targets": "execution.tp_targets",
+    "breakeven_enabled": "backtest.breakeven_enabled",
+    "same_bar_policy": "backtest.same_bar_policy",
+    "same_bar_tp_first_prob": "backtest.same_bar_tp_first_prob",
+    "random_seed": "backtest.random_seed",
+    "allowed_directions": "backtest.allowed_directions",
+    "max_loss_percent": "risk.max_loss_percent",
+    "max_total_exposure": "risk.max_total_exposure",
+}
+
+OPTUNA_FIXED_PARAM_TO_CONTRACT_KEY = {
+    **OPTUNA_PARAM_TO_CONTRACT_KEY,
+    "max_leverage": "risk.max_leverage",
+    "initial_balance": "backtest.initial_balance",
+    "slippage_rate": "backtest.slippage_rate",
+    "tp_slippage_rate": "backtest.tp_slippage_rate",
+    "fee_rate": "backtest.fee_rate",
+}
+
+RISK_PARAM_NAMES = {"max_loss_percent", "max_total_exposure", "max_leverage"}
 
 
 # ============================================================
@@ -209,7 +243,9 @@ class StrategyOptimizer:
         self,
         exchange_gateway: ExchangeGateway,
         backtester: Backtester,
-        db_path: str = "data/optimization_history.db"
+        db_path: str = "data/optimization_history.db",
+        backtest_config_resolver: Optional[BacktestConfigResolver] = None,
+        backtest_profile_name: str = "backtest_eth_baseline",
     ):
         """
         初始化优化器
@@ -222,6 +258,10 @@ class StrategyOptimizer:
         self._gateway = exchange_gateway
         self._backtester = backtester
         self._db_path = db_path
+        self._backtest_config_resolver = backtest_config_resolver or BacktestConfigResolver(
+            DEFAULT_BACKTEST_PROFILE_PROVIDER
+        )
+        self._backtest_profile_name = backtest_profile_name
 
         # 任务管理
         self._jobs: Dict[str, OptimizationJob] = {}
@@ -266,6 +306,8 @@ class StrategyOptimizer:
         """
         if not OPTUNA_AVAILABLE:
             raise RuntimeError("Optuna 未安装，请运行：pip install optuna>=3.5.0")
+        self._validate_parameter_space(request.parameter_space)
+        self._validate_fixed_params(request.fixed_params)
 
         # 生成任务 ID
         job_id = f"opt_{uuid.uuid4().hex[:8]}"
@@ -481,6 +523,9 @@ class StrategyOptimizer:
         Returns:
             Optuna 目标函数
         """
+        self._validate_parameter_space(request.parameter_space)
+        self._validate_fixed_params(fixed_params)
+
         async def objective_async(trial: Trial) -> float:
             # 从参数空间采样
             params = self._sample_params(trial, request.parameter_space)
@@ -488,8 +533,13 @@ class StrategyOptimizer:
             # Phase 8.2: 构建 runtime_overrides，不再写 KV
             runtime_overrides = self._build_runtime_overrides(params, fixed_params)
 
-            # 构建回测请求
-            backtest_request = self._build_backtest_request(request, params, fixed_params)
+            # 构建回测请求：以 backtest profile 为基线，而不是在 Optuna 内部硬编码策略/TP/风控。
+            backtest_request, runtime_overrides = await self._build_trial_backtest_inputs(
+                request,
+                params,
+                fixed_params,
+                runtime_overrides,
+            )
 
             # 运行回测（注入 runtime_overrides）
             report = await self._run_backtest(backtest_request, runtime_overrides)
@@ -527,6 +577,36 @@ class StrategyOptimizer:
             return asyncio.run(objective_async(trial))
 
         return objective
+
+    @staticmethod
+    def _optimizer_safe_contract_keys() -> set[str]:
+        return {param.key for param in list_backtest_injectable_params(optimizer_safe=True)}
+
+    @staticmethod
+    def _fixed_contract_keys() -> set[str]:
+        return {param.key for param in list_backtest_injectable_params()}
+
+    def _validate_parameter_space(self, parameter_space: ParameterSpace) -> None:
+        """Ensure Optuna only samples explicitly optimizer-safe parameters."""
+        optimizer_safe_keys = self._optimizer_safe_contract_keys()
+        for param_def in parameter_space.parameters:
+            contract_key = OPTUNA_PARAM_TO_CONTRACT_KEY.get(param_def.name)
+            if contract_key is None:
+                raise ValueError(f"Unsupported Optuna parameter: {param_def.name}")
+            if contract_key not in optimizer_safe_keys:
+                raise ValueError(f"Optuna parameter is not optimizer_safe: {param_def.name}")
+
+    def _validate_fixed_params(self, fixed_params: Optional[Dict[str, Any]]) -> None:
+        """Ensure fixed params are still declared in the injectable contract."""
+        if not fixed_params:
+            return
+        contract_keys = self._fixed_contract_keys()
+        for param_name in fixed_params:
+            contract_key = OPTUNA_FIXED_PARAM_TO_CONTRACT_KEY.get(param_name)
+            if contract_key is None:
+                raise ValueError(f"Unsupported fixed parameter: {param_name}")
+            if contract_key not in contract_keys:
+                raise ValueError(f"Fixed parameter is not declared injectable: {param_name}")
 
     def _sample_params(
         self,
@@ -597,6 +677,8 @@ class StrategyOptimizer:
             overrides.min_distance_pct = Decimal(str(params["min_distance_pct"]))
         if "ema_period" in params:
             overrides.ema_period = int(params["ema_period"])
+        if "mtf_ema_period" in params:
+            overrides.mtf_ema_period = int(params["mtf_ema_period"])
 
         # TP 参数（第一批不搜索，但支持传入）
         if "tp_ratios" in params:
@@ -607,6 +689,14 @@ class StrategyOptimizer:
         # Breakeven 参数
         if "breakeven_enabled" in params:
             overrides.breakeven_enabled = bool(params["breakeven_enabled"])
+        if "same_bar_policy" in params:
+            overrides.same_bar_policy = str(params["same_bar_policy"])
+        if "same_bar_tp_first_prob" in params:
+            overrides.same_bar_tp_first_prob = Decimal(str(params["same_bar_tp_first_prob"]))
+        if "random_seed" in params:
+            overrides.random_seed = int(params["random_seed"])
+        if "allowed_directions" in params:
+            overrides.allowed_directions = [str(v) for v in params["allowed_directions"]]
 
         # 应用固定参数（覆盖采样参数）
         if fixed_params:
@@ -616,8 +706,98 @@ class StrategyOptimizer:
                 overrides.tp_targets = [Decimal(str(v)) for v in fixed_params["tp_targets"]]
             if "breakeven_enabled" in fixed_params:
                 overrides.breakeven_enabled = bool(fixed_params["breakeven_enabled"])
+            if "mtf_ema_period" in fixed_params:
+                overrides.mtf_ema_period = int(fixed_params["mtf_ema_period"])
+            if "same_bar_policy" in fixed_params:
+                overrides.same_bar_policy = str(fixed_params["same_bar_policy"])
+            if "same_bar_tp_first_prob" in fixed_params:
+                overrides.same_bar_tp_first_prob = Decimal(str(fixed_params["same_bar_tp_first_prob"]))
+            if "random_seed" in fixed_params:
+                overrides.random_seed = int(fixed_params["random_seed"])
+            if "allowed_directions" in fixed_params:
+                overrides.allowed_directions = [str(v) for v in fixed_params["allowed_directions"]]
 
         return overrides
+
+    async def _build_trial_backtest_inputs(
+        self,
+        opt_request: OptimizationRequest,
+        params: Dict[str, Any],
+        fixed_params: Optional[Dict[str, Any]],
+        runtime_overrides: BacktestRuntimeOverrides,
+    ) -> tuple[BacktestRequest, BacktestRuntimeOverrides]:
+        """
+        Build trial inputs from the backtest profile baseline.
+
+        Optuna can still override per-run fields, but the strategy/risk/execution
+        baseline comes from BacktestConfigResolver.
+        """
+        request = self._build_profile_seed_request(opt_request, fixed_params)
+        resolved = await self._backtest_config_resolver.resolve(
+            self._backtest_profile_name,
+            request=request,
+            runtime_overrides=runtime_overrides,
+        )
+
+        risk_overrides = self._build_risk_overrides(
+            params,
+            fixed_params,
+            fallback=resolved.risk_config,
+        )
+        if risk_overrides is not None:
+            request = request.model_copy(update={"risk_overrides": risk_overrides}, deep=True)
+            resolved = await self._backtest_config_resolver.resolve(
+                self._backtest_profile_name,
+                request=request,
+                runtime_overrides=runtime_overrides,
+            )
+
+        return resolved.to_backtest_request(request), runtime_overrides
+
+    def _build_profile_seed_request(
+        self,
+        opt_request: OptimizationRequest,
+        fixed_params: Optional[Dict[str, Any]] = None,
+    ) -> BacktestRequest:
+        """Build the minimal request that lets the profile fill strategy/risk/execution."""
+        request_kwargs = {
+            "symbol": opt_request.symbol,
+            "timeframe": opt_request.timeframe,
+            "start_time": opt_request.start_time,
+            "end_time": opt_request.end_time,
+            "limit": opt_request.limit,
+            "mode": "v3_pms",
+            "initial_balance": opt_request.initial_balance,
+            "slippage_rate": opt_request.slippage_rate,
+            "fee_rate": opt_request.fee_rate,
+        }
+        if fixed_params and "tp_slippage_rate" in fixed_params:
+            request_kwargs["tp_slippage_rate"] = Decimal(str(fixed_params["tp_slippage_rate"]))
+        return BacktestRequest(**request_kwargs)
+
+    def _build_risk_overrides(
+        self,
+        params: Dict[str, Any],
+        fixed_params: Optional[Dict[str, Any]] = None,
+        fallback: Optional[RiskConfig] = None,
+    ) -> Optional[RiskConfig]:
+        """Build RiskConfig overrides using profile risk as fallback."""
+        risk_values: Dict[str, Any] = {}
+        source = {**params, **(fixed_params or {})}
+        for key in RISK_PARAM_NAMES:
+            if key in source:
+                risk_values[key] = source[key]
+        if not risk_values:
+            return None
+
+        base = fallback or BACKTEST_ETH_BASELINE_PROFILE.risk.to_risk_config()
+        return RiskConfig(
+            max_loss_percent=Decimal(str(risk_values.get("max_loss_percent", base.max_loss_percent))),
+            max_leverage=int(risk_values.get("max_leverage", base.max_leverage)),
+            max_total_exposure=Decimal(str(risk_values.get("max_total_exposure", base.max_total_exposure))),
+            daily_max_trades=base.daily_max_trades,
+            daily_max_loss=base.daily_max_loss,
+        )
 
     def _build_backtest_request(
         self,
@@ -636,82 +816,26 @@ class StrategyOptimizer:
         Returns:
             回测请求
         """
-        # 默认策略配置（pinbar + EMA trend + MTF + ATR）
-        # 注意：过滤器参数通过 resolved_params 注入，这里只声明启用哪些过滤器
-        strategies = [{
-            "name": "pinbar",
-            "triggers": [{"type": "pinbar", "enabled": True}],
-            "filters": [
-                {"type": "ema_trend", "enabled": True, "params": {}},
-                {"type": "mtf", "enabled": True, "params": {}},
-                {"type": "atr", "enabled": True, "params": {}},
-            ]
-        }]
-
-        # 从固定参数或默认值构建订单策略
-        if fixed_params:
-            tp_ratios = fixed_params.get("tp_ratios", [Decimal("0.6"), Decimal("0.4")])
-            tp_targets = fixed_params.get("tp_targets", [Decimal("1.0"), Decimal("2.5")])
-        else:
-            tp_ratios = [Decimal("0.6"), Decimal("0.4")]
-            tp_targets = [Decimal("1.0"), Decimal("2.5")]
-
-        # 默认订单策略
-        from src.domain.models import OrderStrategy
-        order_strategy = OrderStrategy(
-            id="optuna_locked",
-            name="Optuna Locked TP",
-            tp_levels=len(tp_ratios),
-            tp_ratios=[Decimal(str(v)) for v in tp_ratios],
-            tp_targets=[Decimal(str(v)) for v in tp_targets],
-            initial_stop_loss_rr=Decimal("-1.0"),
-            trailing_stop_enabled=False,
-            oco_enabled=True,
+        request_kwargs = self._build_profile_seed_request(opt_request, fixed_params).model_dump()
+        request_kwargs["strategies"] = [
+            BACKTEST_ETH_BASELINE_PROFILE.strategy.to_strategy_definition(
+                strategy_id="optuna_profile_strategy",
+                name="optuna_profile_strategy",
+                market=BACKTEST_ETH_BASELINE_PROFILE.market,
+            ).model_dump(mode="python")
+        ]
+        resolved_params = resolve_backtest_params(
+            runtime_overrides=self._build_runtime_overrides(params, fixed_params),
+            request=self._build_profile_seed_request(opt_request, fixed_params),
+            kv_configs=BACKTEST_ETH_BASELINE_PROFILE.to_kv_defaults(),
         )
-
-        # 风控参数通过 request.risk_overrides 注入
-        # 语义：策略过滤参数走 runtime_overrides，风控参数走 RiskConfig
-        risk_kwargs: Dict[str, Any] = {}
-        if "max_loss_percent" in params:
-            risk_kwargs["max_loss_percent"] = Decimal(str(params["max_loss_percent"]))
-        if "max_total_exposure" in params:
-            risk_kwargs["max_total_exposure"] = Decimal(str(params["max_total_exposure"]))
-
-        if fixed_params:
-            if "max_loss_percent" in fixed_params:
-                risk_kwargs["max_loss_percent"] = Decimal(str(fixed_params["max_loss_percent"]))
-            if "max_total_exposure" in fixed_params:
-                risk_kwargs["max_total_exposure"] = Decimal(str(fixed_params["max_total_exposure"]))
-            if "max_leverage" in fixed_params:
-                risk_kwargs["max_leverage"] = int(fixed_params["max_leverage"])
-
-        risk_overrides = None
-        if risk_kwargs:
-            # 回测当前默认 leverage=20；fixed_params 可显式覆写
-            risk_kwargs.setdefault("max_leverage", 20)
-            risk_overrides = RiskConfig(**risk_kwargs)
-
-        # 构建请求，支持自定义滑点
-        request_kwargs = {
-            "symbol": opt_request.symbol,
-            "timeframe": opt_request.timeframe,
-            "start_time": opt_request.start_time,
-            "end_time": opt_request.end_time,
-            "limit": opt_request.limit,  # ⭐ 关键修复：传递 limit 参数，确保 MTF 数据充足
-            "mode": "v3_pms",
-            "initial_balance": opt_request.initial_balance,
-            "slippage_rate": opt_request.slippage_rate,
-            "fee_rate": opt_request.fee_rate,
-            "strategies": strategies,
-            "order_strategy": order_strategy,
-        }
-
+        request_kwargs["order_strategy"] = BACKTEST_ETH_BASELINE_PROFILE.execution.to_order_strategy(
+            strategy_id="optuna_profile_execution",
+            resolved_params=resolved_params,
+        )
+        risk_overrides = self._build_risk_overrides(params, fixed_params)
         if risk_overrides is not None:
             request_kwargs["risk_overrides"] = risk_overrides
-
-        # 支持自定义 tp_slippage_rate
-        if fixed_params and "tp_slippage_rate" in fixed_params:
-            request_kwargs["tp_slippage_rate"] = Decimal(str(fixed_params["tp_slippage_rate"]))
 
         return BacktestRequest(**request_kwargs)
 

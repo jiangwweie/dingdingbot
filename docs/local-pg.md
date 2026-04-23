@@ -28,9 +28,7 @@ export CORE_EXECUTION_INTENT_BACKEND=postgres
 # export CORE_POSITION_BACKEND=sqlite
 ```
 
-**备选：在 .env 中配置**
-
-在 `.env` 中取消注释即可启用。
+> 注意：不要把本地 PG 连接串写入已跟踪的 `.env`。本地开发优先使用 shell 环境变量，避免把私有运行时配置带入提交历史。
 
 ## 连接串
 

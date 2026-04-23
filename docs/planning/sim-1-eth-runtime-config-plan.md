@@ -261,17 +261,19 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 4. ✅ Backtest engine 参数只存在于回测配置，不进入 Sim/Live runtime。
 5. ✅ 新增 `BACKTEST_INJECTABLE_PARAMS`，显式声明可注入参数边界。
 6. ✅ 标记 `optimizer_safe` 参数，供 Optuna search space 后续读取。
-7. ⏳ 回测 API / 脚本入口默认接入 `BacktestConfigResolver`。
-8. ⏳ 回测可以显式选择 `use_runtime_snapshot`，但默认不跟随 mutable runtime。
+7. ⏸️ 回测 API 暂缓，当前不做 Web。
+8. ⏳ 研究脚本入口可按需接入 `BacktestConfigResolver`。
+9. ⏳ 回测可以显式选择 `use_runtime_snapshot`，但默认不跟随 mutable runtime。
 
 ### Phase G: Optuna 隔离
 
-1. 新增或整理 `ResolvedStudyConfig`。
-2. Optuna 必须显式指定 base profile。
-3. Search space 只允许覆盖声明字段。
-4. Fixed params 承载 ETH baseline 的 TP、BE、direction、risk/cost 口径。
-5. Optuna 输出 `optuna_candidate_*` 和 report。
-6. Optuna 不写 runtime DB，不自动应用模拟盘。
+1. ✅ Optuna 默认使用 `backtest_eth_baseline` 作为 base profile。
+2. ✅ `StrategyOptimizer` 接入 `BacktestConfigResolver`。
+3. ✅ Search space 只允许覆盖 `optimizer_safe=True` 的声明字段。
+4. ✅ Fixed params 必须命中 `BACKTEST_INJECTABLE_PARAMS` 声明字段。
+5. ✅ Trial request / strategy / risk / execution 从 profile resolver 生成，不再在 Optuna 内硬编码 ETH baseline。
+6. ✅ Optuna 不写 runtime DB，不自动应用模拟盘。
+7. ⏳ 后续只剩真实小规模搜索运行与 candidate report 落盘。
 
 ### Phase H: Sim-1 启动前验收
 

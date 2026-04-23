@@ -496,7 +496,7 @@
 
 3. ✅ 可注入参数契约已显式化
    - 新增 `BACKTEST_INJECTABLE_PARAMS`
-   - 当前共 22 个可注入参数
+   - 当前共 25 个可注入参数
    - 模块：`market / strategy / risk / execution / engine / diagnostic`
    - 已标记 `optimizer_safe`，供 Optuna/前端回测后续消费
 
@@ -507,10 +507,53 @@
    - 结果：解析 `backtest_eth_baseline` 成功，无 exchange / PG / historical data I/O
 
 5. ⏭️ 后续事项
-   - 将 `BacktestConfigResolver` 接入回测 API 和脚本默认入口
-   - 将 Optuna search space 改为读取 `optimizer_safe` 参数契约
+   - 回测 API 暂缓，当前不做 Web
+   - 按需将仍会使用的研究脚本入口接入 `BacktestConfigResolver`
    - 前端回测重构时读取同一份可注入参数契约
    - 真实回测执行前再单独确认是否跑耗时测试
+
+### 2026-04-24 -- Optuna 隔离完成
+
+1. ✅ `StrategyOptimizer` 接入 `BacktestConfigResolver`
+   - 默认 profile：`backtest_eth_baseline`
+   - trial request 从 profile resolver 生成
+   - strategy / risk / execution 不再在 Optuna 内部硬编码
+
+2. ✅ Optuna 参数注入白名单化
+   - parameter space 只能使用 `optimizer_safe=True` 字段
+   - fixed params 必须命中 `BACKTEST_INJECTABLE_PARAMS`
+   - 防止 secret / backend / runtime profile 被误作为搜索参数
+
+3. ✅ 覆盖语义保留
+   - runtime overrides 仍为最高优先级
+   - request 覆盖仍只影响单次 trial
+   - backtest profile 作为低优先级基线
+   - Optuna 不写 runtime DB，不自动应用模拟盘
+
+4. ✅ 小范围验证通过
+   - `python3 -m pytest tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py tests/unit/test_backtest_config_resolver.py -q`
+   - 结果：56 passed
+   - `python3 -m compileall -q src/application/strategy_optimizer.py src/application/backtest_config.py`
+
+5. ⏭️ 后续事项
+   - 真实 Optuna 小规模搜索运行前单独确认
+   - 如继续使用旧研究脚本，再逐个迁入 `BacktestConfigResolver`
+   - API/Web 仍暂缓
+
+### 2026-04-24 -- 两个 P1 收口
+
+1. ✅ `.env` 本地 PG 配置移除
+   - 已从已跟踪 `.env` 删除 `PG_DATABASE_URL` / `CORE_EXECUTION_INTENT_BACKEND` / `CORE_ORDER_BACKEND`
+   - `docs/local-pg.md` 改为推荐 shell 环境变量
+   - 文档明确不要把本地 PG 连接串写入已跟踪 `.env`
+
+2. ✅ Standalone lifespan reset 防线复核
+   - 当前 `src/interfaces/api.py` shutdown 已重置 `_exchange_gateway` / `_capital_protection` / `_account_service` / `_execution_orchestrator`
+   - 修正 `tests/unit/test_api_lifespan_runtime.py` 的 mock 目标，避免测试依赖 `.env` 或过期模块属性
+
+3. ✅ 验证
+   - `python3 -m pytest tests/unit/test_api_lifespan_runtime.py tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py tests/unit/test_backtest_config_resolver.py -q`
+   - 结果：66 passed
 
 ---
 

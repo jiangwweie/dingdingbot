@@ -118,6 +118,59 @@ class TestBuildRuntimeOverrides:
 
         assert overrides.max_atr_ratio == Decimal("0.01234")
 
+    def test_build_overrides_with_extended_optimizer_safe_params(self, optimizer):
+        """扩展的 optimizer_safe 参数正确映射"""
+        params = {
+            "mtf_ema_period": 80,
+            "same_bar_policy": "random",
+            "same_bar_tp_first_prob": 0.65,
+            "random_seed": 42,
+            "allowed_directions": ["LONG"],
+        }
+
+        overrides = optimizer._build_runtime_overrides(params)
+
+        assert overrides.mtf_ema_period == 80
+        assert overrides.same_bar_policy == "random"
+        assert overrides.same_bar_tp_first_prob == Decimal("0.65")
+        assert overrides.random_seed == 42
+        assert overrides.allowed_directions == ["LONG"]
+
+
+class TestOptunaInjectableContract:
+    """测试 Optuna 参数空间受 BACKTEST_INJECTABLE_PARAMS 约束"""
+
+    def test_validate_parameter_space_accepts_optimizer_safe_param(self, optimizer):
+        parameter_space = ParameterSpace(parameters=[
+            ParameterDefinition(
+                name="min_distance_pct",
+                type=ParameterType.FLOAT,
+                low_float=0.003,
+                high_float=0.02,
+            ),
+        ])
+
+        optimizer._validate_parameter_space(parameter_space)
+
+    def test_validate_parameter_space_rejects_unknown_param(self, optimizer):
+        parameter_space = ParameterSpace(parameters=[
+            ParameterDefinition(
+                name="exchange_api_secret",
+                type=ParameterType.CATEGORICAL,
+                choices=["bad"],
+            ),
+        ])
+
+        with pytest.raises(ValueError, match="Unsupported Optuna parameter"):
+            optimizer._validate_parameter_space(parameter_space)
+
+    def test_validate_fixed_params_accepts_declared_non_search_param(self, optimizer):
+        optimizer._validate_fixed_params({"max_leverage": 20, "tp_slippage_rate": "0.0005"})
+
+    def test_validate_fixed_params_rejects_unknown_param(self, optimizer):
+        with pytest.raises(ValueError, match="Unsupported fixed parameter"):
+            optimizer._validate_fixed_params({"pg_database_url": "postgresql://secret"})
+
 
 # ============================================================
 # Test: 参数注入到回测链路
@@ -171,6 +224,65 @@ class TestParameterInjectionToBacktest:
         mock_backtester.run_backtest.assert_called_once()
         call_kwargs = mock_backtester.run_backtest.call_args[1]
         assert call_kwargs.get("runtime_overrides") is None
+
+    @pytest.mark.asyncio
+    async def test_build_trial_inputs_uses_backtest_profile_baseline(self, optimizer):
+        """trial request 从 backtest_eth_baseline 生成，不再硬编码旧 TP 默认值"""
+        opt_request = OptimizationRequest(
+            symbol="ETH/USDT:USDT",
+            timeframe="1h",
+            objective=OptimizationObjective.SHARPE,
+            n_trials=10,
+            parameter_space=ParameterSpace(parameters=[]),
+        )
+        overrides = optimizer._build_runtime_overrides({})
+
+        request, runtime_overrides = await optimizer._build_trial_backtest_inputs(
+            opt_request,
+            params={},
+            fixed_params=None,
+            runtime_overrides=overrides,
+        )
+
+        assert runtime_overrides == overrides
+        assert request.strategies is not None
+        assert request.order_strategy is not None
+        assert request.order_strategy.tp_ratios == [Decimal("0.5"), Decimal("0.5")]
+        assert request.order_strategy.tp_targets == [Decimal("1.0"), Decimal("3.5")]
+        assert request.risk_overrides is not None
+        assert request.risk_overrides.max_loss_percent == Decimal("0.01")
+
+    @pytest.mark.asyncio
+    async def test_build_trial_inputs_applies_runtime_and_risk_overrides(self, optimizer):
+        """trial request 支持 runtime_overrides 与 risk params 覆盖 profile"""
+        opt_request = OptimizationRequest(
+            symbol="ETH/USDT:USDT",
+            timeframe="1h",
+            objective=OptimizationObjective.SHARPE,
+            n_trials=10,
+            parameter_space=ParameterSpace(parameters=[]),
+        )
+        params = {
+            "tp_targets": [1.5, 4.0],
+            "max_loss_percent": 0.02,
+            "max_total_exposure": 0.6,
+        }
+        fixed_params = {"max_leverage": 12}
+        overrides = optimizer._build_runtime_overrides(params, fixed_params)
+
+        request, _ = await optimizer._build_trial_backtest_inputs(
+            opt_request,
+            params=params,
+            fixed_params=fixed_params,
+            runtime_overrides=overrides,
+        )
+
+        assert request.order_strategy is not None
+        assert request.order_strategy.tp_targets == [Decimal("1.5"), Decimal("4.0")]
+        assert request.risk_overrides is not None
+        assert request.risk_overrides.max_loss_percent == Decimal("0.02")
+        assert request.risk_overrides.max_total_exposure == Decimal("0.6")
+        assert request.risk_overrides.max_leverage == 12
 
 
 # ============================================================

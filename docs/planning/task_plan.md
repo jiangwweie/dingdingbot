@@ -304,20 +304,37 @@
      - 保留优先级：`runtime_overrides > request > backtest profile > code defaults`
      - 新增 `ResolvedBacktestConfig`
      - 新增显式可注入参数契约 `BACKTEST_INJECTABLE_PARAMS`
-     - 当前可注入参数 22 个，覆盖 market / strategy / risk / execution / engine / diagnostic
+     - 当前可注入参数 25 个，覆盖 market / strategy / risk / execution / engine / diagnostic
      - 标记 `optimizer_safe` 参数，供 Optuna/前端回测后续使用
    - Backtest config 小范围验证已通过：
      - `tests/unit/test_backtest_config_resolver.py`
      - 10 passed
      - `scripts/verify_backtest_config_resolver.py`
      - 无 exchange / PG / historical data I/O
+   - Optuna 隔离已完成：
+     - `StrategyOptimizer` 默认使用 `backtest_eth_baseline`
+     - 参数空间必须命中 `optimizer_safe=True` 白名单
+     - fixed params 必须命中 `BACKTEST_INJECTABLE_PARAMS`
+     - trial request / strategy / risk / execution 由 `BacktestConfigResolver` 生成
+     - 不写 runtime DB，不自动应用模拟盘
+     - 已消除 Optuna 内部 ETH baseline TP/risk/strategy 硬编码
+   - Optuna / Backtest config 小范围验证已通过：
+     - `tests/unit/test_strategy_optimizer.py`
+     - `tests/unit/test_optuna_runtime_overrides.py`
+     - `tests/unit/test_backtest_config_resolver.py`
+     - 56 passed
+   - 两个 P1 已收口：
+     - `.env` 已移除本地 PG 连接串和 backend 切换值
+     - `api.py` standalone shutdown reset 防线已由 `test_api_lifespan_runtime.py` 覆盖
+     - 合并验证：66 passed
    - 执行配置边界已加固：
      - `tp_ratios` 必须全部为正数
      - `tp_targets` 必须全部为正数
    - `CapitalProtectionManager` 账户级熔断仍暂用原 ConfigManager 派生配置
 7. 下一步切换边界：
-   - 将 `BacktestConfigResolver` 接入回测 API / 脚本入口的默认 profile 选择
-   - 将 Optuna search space 改为读取 `optimizer_safe` 参数契约
+   - 回测 API 暂缓，当前不做 Web
+   - 按需将仍会使用的研究脚本入口接入 `BacktestConfigResolver`
+   - 真实 Optuna 小规模搜索运行前单独确认
    - 再做真实启动级冒烟验证
    - 暂不卷入前端重构；前端后续只消费同一份可注入参数契约
 

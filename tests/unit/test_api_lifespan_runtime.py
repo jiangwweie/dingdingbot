@@ -150,6 +150,7 @@ class TestLifespanStandaloneRuntime:
         """Create a mock ConfigManager with minimal required interface."""
         mock_cm = MagicMock()
         mock_cm.get_user_config = AsyncMock()
+        mock_cm.close = AsyncMock()
 
         # Mock user config with exchange settings
         user_config = MagicMock()
@@ -187,10 +188,6 @@ class TestLifespanStandaloneRuntime:
         mock_capital_protection = MagicMock()
         mock_orchestrator = MagicMock()
 
-        # Mock repository
-        mock_order_repo = MagicMock()
-        mock_order_repo.set_exchange_gateway = MagicMock()
-
         mock_intent_repo = AsyncMock()
         mock_intent_repo.close = AsyncMock()
 
@@ -208,18 +205,25 @@ class TestLifespanStandaloneRuntime:
         mock_lifecycle_service = AsyncMock()
         mock_lifecycle_service.stop = AsyncMock()
 
+        mock_order_repo = AsyncMock()
+        mock_order_repo.initialize = AsyncMock()
+        mock_order_repo.close = AsyncMock()
+        mock_order_repo.set_exchange_gateway = MagicMock()
+        mock_order_repo.set_audit_logger = MagicMock()
+
         with patch("src.infrastructure.exchange_gateway.ExchangeGateway", return_value=mock_gateway), \
              patch("src.application.account_service.BinanceAccountService", return_value=mock_account_service), \
              patch("src.application.capital_protection.CapitalProtectionManager", return_value=mock_capital_protection), \
              patch("src.application.execution_orchestrator.ExecutionOrchestrator", return_value=mock_orchestrator), \
              patch("src.infrastructure.notifier.get_notification_service") as mock_notifier_svc, \
-             patch("src.interfaces.api.SignalRepository", return_value=mock_signal_repo), \
-             patch("src.interfaces.api.ConfigEntryRepository", return_value=mock_config_entry_repo), \
+             patch("src.interfaces.api.validate_pg_core_configuration", return_value=None), \
+             patch("src.infrastructure.signal_repository.SignalRepository", return_value=mock_signal_repo), \
+             patch("src.infrastructure.config_entry_repository.ConfigEntryRepository", return_value=mock_config_entry_repo), \
              patch("src.interfaces.api.create_order_repository", return_value=mock_order_repo), \
              patch("src.interfaces.api.create_execution_intent_repository", return_value=mock_intent_repo), \
-             patch("src.interfaces.api.OrderAuditLogger", return_value=mock_audit_logger), \
-             patch("src.interfaces.api.OrderAuditLogRepository") as mock_audit_repo_cls, \
-             patch("src.interfaces.api.OrderLifecycleService", return_value=mock_lifecycle_service):
+             patch("src.application.order_audit_logger.OrderAuditLogger", return_value=mock_audit_logger), \
+             patch("src.infrastructure.order_audit_repository.OrderAuditLogRepository") as mock_audit_repo_cls, \
+             patch("src.application.order_lifecycle_service.OrderLifecycleService", return_value=mock_lifecycle_service):
 
             mock_notifier_svc.return_value = MagicMock()
             mock_notifier_svc.return_value.setup_channels = MagicMock()
@@ -279,18 +283,25 @@ class TestLifespanStandaloneRuntime:
         mock_lifecycle_service = AsyncMock()
         mock_lifecycle_service.stop = AsyncMock()
 
+        mock_order_repo = AsyncMock()
+        mock_order_repo.initialize = AsyncMock()
+        mock_order_repo.close = AsyncMock()
+        mock_order_repo.set_exchange_gateway = MagicMock()
+        mock_order_repo.set_audit_logger = MagicMock()
+
         with patch("src.infrastructure.exchange_gateway.ExchangeGateway", return_value=mock_gateway), \
              patch("src.application.account_service.BinanceAccountService"), \
              patch("src.application.capital_protection.CapitalProtectionManager"), \
              patch("src.application.execution_orchestrator.ExecutionOrchestrator"), \
              patch("src.infrastructure.notifier.get_notification_service") as mock_notifier_svc, \
-             patch("src.interfaces.api.SignalRepository", return_value=mock_signal_repo), \
-             patch("src.interfaces.api.ConfigEntryRepository", return_value=mock_config_entry_repo), \
-             patch("src.interfaces.api.create_order_repository"), \
+             patch("src.interfaces.api.validate_pg_core_configuration", return_value=None), \
+             patch("src.infrastructure.signal_repository.SignalRepository", return_value=mock_signal_repo), \
+             patch("src.infrastructure.config_entry_repository.ConfigEntryRepository", return_value=mock_config_entry_repo), \
+             patch("src.interfaces.api.create_order_repository", return_value=mock_order_repo), \
              patch("src.interfaces.api.create_execution_intent_repository", return_value=mock_intent_repo), \
-             patch("src.interfaces.api.OrderAuditLogger", return_value=mock_audit_logger), \
-             patch("src.interfaces.api.OrderAuditLogRepository") as mock_audit_repo_cls, \
-             patch("src.interfaces.api.OrderLifecycleService", return_value=mock_lifecycle_service):
+             patch("src.application.order_audit_logger.OrderAuditLogger", return_value=mock_audit_logger), \
+             patch("src.infrastructure.order_audit_repository.OrderAuditLogRepository") as mock_audit_repo_cls, \
+             patch("src.application.order_lifecycle_service.OrderLifecycleService", return_value=mock_lifecycle_service):
 
             mock_notifier_svc.return_value = MagicMock()
             mock_notifier_svc.return_value.setup_channels = MagicMock()
@@ -345,6 +356,12 @@ class TestLifespanStandaloneRuntime:
         mock_lifecycle_service = AsyncMock()
         mock_lifecycle_service.stop = AsyncMock()
 
+        mock_order_repo = AsyncMock()
+        mock_order_repo.initialize = AsyncMock()
+        mock_order_repo.close = AsyncMock()
+        mock_order_repo.set_exchange_gateway = MagicMock()
+        mock_order_repo.set_audit_logger = MagicMock()
+
         gateway_factory = MagicMock(side_effect=[mock_gateway_1, mock_gateway_2])
 
         with patch("src.infrastructure.exchange_gateway.ExchangeGateway", gateway_factory), \
@@ -352,13 +369,14 @@ class TestLifespanStandaloneRuntime:
              patch("src.application.capital_protection.CapitalProtectionManager"), \
              patch("src.application.execution_orchestrator.ExecutionOrchestrator"), \
              patch("src.infrastructure.notifier.get_notification_service") as mock_notifier_svc, \
-             patch("src.interfaces.api.SignalRepository", return_value=mock_signal_repo), \
-             patch("src.interfaces.api.ConfigEntryRepository", return_value=mock_config_entry_repo), \
-             patch("src.interfaces.api.create_order_repository"), \
+             patch("src.interfaces.api.validate_pg_core_configuration", return_value=None), \
+             patch("src.infrastructure.signal_repository.SignalRepository", return_value=mock_signal_repo), \
+             patch("src.infrastructure.config_entry_repository.ConfigEntryRepository", return_value=mock_config_entry_repo), \
+             patch("src.interfaces.api.create_order_repository", return_value=mock_order_repo), \
              patch("src.interfaces.api.create_execution_intent_repository", return_value=mock_intent_repo), \
-             patch("src.interfaces.api.OrderAuditLogger", return_value=mock_audit_logger), \
-             patch("src.interfaces.api.OrderAuditLogRepository") as mock_audit_repo_cls, \
-             patch("src.interfaces.api.OrderLifecycleService", return_value=mock_lifecycle_service):
+             patch("src.application.order_audit_logger.OrderAuditLogger", return_value=mock_audit_logger), \
+             patch("src.infrastructure.order_audit_repository.OrderAuditLogRepository") as mock_audit_repo_cls, \
+             patch("src.application.order_lifecycle_service.OrderLifecycleService", return_value=mock_lifecycle_service):
 
             mock_notifier_svc.return_value = MagicMock()
             mock_notifier_svc.return_value.setup_channels = MagicMock()
@@ -415,13 +433,20 @@ class TestLifespanStandaloneRuntime:
         mock_lifecycle_service = AsyncMock()
         mock_lifecycle_service.stop = AsyncMock()
 
-        with patch("src.interfaces.api.SignalRepository", return_value=mock_signal_repo), \
-             patch("src.interfaces.api.ConfigEntryRepository", return_value=mock_config_entry_repo), \
-             patch("src.interfaces.api.create_order_repository"), \
+        mock_order_repo = AsyncMock()
+        mock_order_repo.initialize = AsyncMock()
+        mock_order_repo.close = AsyncMock()
+        mock_order_repo.set_exchange_gateway = MagicMock()
+        mock_order_repo.set_audit_logger = MagicMock()
+
+        with patch("src.interfaces.api.validate_pg_core_configuration", return_value=None), \
+             patch("src.infrastructure.signal_repository.SignalRepository", return_value=mock_signal_repo), \
+             patch("src.infrastructure.config_entry_repository.ConfigEntryRepository", return_value=mock_config_entry_repo), \
+             patch("src.interfaces.api.create_order_repository", return_value=mock_order_repo), \
              patch("src.interfaces.api.create_execution_intent_repository", return_value=mock_intent_repo), \
-             patch("src.interfaces.api.OrderAuditLogger", return_value=mock_audit_logger), \
-             patch("src.interfaces.api.OrderAuditLogRepository") as mock_audit_repo_cls, \
-             patch("src.interfaces.api.OrderLifecycleService", return_value=mock_lifecycle_service):
+             patch("src.application.order_audit_logger.OrderAuditLogger", return_value=mock_audit_logger), \
+             patch("src.infrastructure.order_audit_repository.OrderAuditLogRepository") as mock_audit_repo_cls, \
+             patch("src.application.order_lifecycle_service.OrderLifecycleService", return_value=mock_lifecycle_service):
 
             mock_audit_repo_cls.return_value.initialize = AsyncMock()
 

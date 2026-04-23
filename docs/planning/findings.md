@@ -305,15 +305,30 @@
 1. 新增独立 `backtest_eth_baseline` profile。
 2. 新增 `ResolvedBacktestConfig` 作为回测配置消费对象。
 3. 保留优先级：`runtime_overrides > request > backtest profile > code defaults`。
-4. 新增显式可注入参数契约 `BACKTEST_INJECTABLE_PARAMS`，当前 22 个参数。
+4. 新增显式可注入参数契约 `BACKTEST_INJECTABLE_PARAMS`，当前 25 个参数。
 5. 将可注入参数按模块划分为 `market / strategy / risk / execution / engine / diagnostic`。
 6. 通过 `optimizer_safe` 标记 Optuna 可搜索参数，防止搜索空间误覆盖 secret、backend、runtime profile 等非回测参数。
+7. `StrategyOptimizer` 已接入 `BacktestConfigResolver`，trial request / strategy / risk / execution 不再由 Optuna 内部硬编码。
+8. Optuna parameter space 必须命中 `optimizer_safe=True` 字段；fixed params 必须命中可注入参数契约。
+9. Optuna 不写 runtime DB，不自动应用模拟盘。
 
 后续接线：
 
-1. 回测 API 默认 profile 改为 `backtest_eth_baseline`。
-2. Optuna search space 从 `optimizer_safe` 参数契约派生。
+1. 回测 API 暂缓，当前不做 Web。
+2. 后续只按需整理仍会继续使用的研究脚本入口。
 3. 前端回测重构时只展示该契约允许注入的字段。
+4. 真实 Optuna 小规模搜索运行前单独确认。
+
+### `.env` 不能承载本地 PG 示例或 backend 切换值
+
+已跟踪 `.env` 仍包含真实交易所 key / webhook，不能再混入本地 PG 连接串或 backend 切换示例。否则后续提交时容易把个人本地运行环境和敏感配置一起带入版本历史。
+
+已落地：
+
+1. 从 `.env` 移除 `PG_DATABASE_URL`、`CORE_EXECUTION_INTENT_BACKEND`、`CORE_ORDER_BACKEND`。
+2. 本地 PG 启动说明保留在 `docs/local-pg.md`。
+3. 推荐使用 shell 环境变量启动 PG 初始化链。
+4. API lifespan 测试不再隐式依赖 `.env` 中存在 PG 配置。
 
 ### Sim-0 真实 runtime 验证新增发现
 
