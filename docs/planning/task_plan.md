@@ -1,7 +1,7 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-24 01:32
+> **Last updated**: 2026-04-24 01:45
 > **Status**: Sim-0 受控链路通过，Runtime Resolver 已接入 main.py，market/risk/strategy/execution 已实切到 SignalPipeline
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
@@ -296,13 +296,16 @@
    - Runtime config / SignalPipeline 单元测试已补齐：
      - `tests/unit/test_runtime_config_signal_pipeline.py`
      - 27 passed
+   - Runtime cutover 非 I/O 冒烟已补齐：
+     - `scripts/verify_sim1_runtime_cutover.py`
+     - 验证 market/risk/strategy/execution 四模块可按 main.py 切换语义组装
    - 执行配置边界已加固：
      - `tp_ratios` 必须全部为正数
      - `tp_targets` 必须全部为正数
    - `CapitalProtectionManager` 账户级熔断仍暂用原 ConfigManager 派生配置
 7. 下一步切换边界：
    - 先做 runtime config 切换后的代码审查
-   - 再做启动级冒烟验证
+   - 再做真实启动级冒烟验证
    - 不继续扩大配置面，避免把账户级熔断、API、前端一起卷入
 
 ---

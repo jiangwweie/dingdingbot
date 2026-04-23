@@ -1,11 +1,30 @@
 # Progress Log
 
-> Last updated: 2026-04-24 01:32
+> Last updated: 2026-04-24 01:45
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-24 -- Sim-1 runtime cutover 非 I/O 冒烟已通过
+
+1. ✅ 新增 `scripts/verify_sim1_runtime_cutover.py`
+   - 不启动 `main.py`
+   - 不连接交易所
+   - 不启动 WebSocket / REST API
+   - 不初始化 PG session
+
+2. ✅ 验证内容
+   - `RuntimeConfigResolver` 可解析 `sim1_eth_runtime`
+   - market scope 为 `ETH/USDT:USDT` + `1h/4h`
+   - risk config 为 `1% / 20x / 100% exposure / 10 trades`
+   - strategy 可构建 `StrategyDefinition` 与 dynamic runner
+   - execution 可构建 runtime `OrderStrategy`
+
+3. ✅ 验证结果
+   - `python3 scripts/verify_sim1_runtime_cutover.py`
+   - 结果：通过，`config_hash=0279ca9c45b37fad`
 
 ### 2026-04-24 -- Runtime Config 单元测试已补齐并修复契约边界
 

@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-24 01:32
+> Last updated: 2026-04-24 01:45
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -95,7 +95,12 @@
    - 新 runtime config 主线不应继续触发 `StrategyDefinition` deprecated triggers/filters 迁移路径
    - 可保留 `trigger/filters` 字段作为兼容和可读性辅助，但 `logic_tree` 必须显式生成
 
-13. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
+13. Runtime cutover 需要独立的非 I/O 冒烟脚本。
+   - 单纯 resolver verify 只能证明配置可解析
+   - 还需要证明 main.py 会使用的 market/risk/strategy/execution 派生对象能组装成功
+   - `scripts/verify_sim1_runtime_cutover.py` 负责这个边界，不启动交易所和 WebSocket
+
+14. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
    - 本轮没有修改 `.env`
    - PG 示例继续以 `docs/local-pg.md` / 示例文件为准
    - 若后续要彻底治理，需要单独安排 secret rotation + `.env` 脱离版本控制，不应混在 runtime config 接入任务中顺手做
