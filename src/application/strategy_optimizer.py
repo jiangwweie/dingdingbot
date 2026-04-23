@@ -16,7 +16,8 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Callable, Awaitable
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Callable, Awaitable, Union
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
@@ -73,6 +74,13 @@ OPTUNA_FIXED_PARAM_TO_CONTRACT_KEY = {
 
 RISK_PARAM_NAMES = {"max_loss_percent", "max_total_exposure", "max_leverage"}
 ENGINE_PARAM_NAMES = {"initial_balance", "slippage_rate", "tp_slippage_rate", "fee_rate"}
+
+
+def json_dumps_safe(payload: Any, **kwargs: Any) -> str:
+    """Dump JSON with Decimal/datetime safety for script/report artifacts."""
+    import json
+
+    return json.dumps(payload, ensure_ascii=False, default=str, **kwargs)
 
 
 # ============================================================
@@ -428,6 +436,11 @@ class StrategyOptimizer:
                 )
                 job.best_value = study.best_value
                 logger.info(f"任务 {job_id}: 优化完成，最佳目标值={study.best_value:.4f}")
+                try:
+                    candidate_path = await self.write_candidate_report(job_id)
+                    logger.info(f"任务 {job_id}: candidate report written to {candidate_path}")
+                except Exception as e:
+                    logger.warning(f"任务 {job_id}: candidate report 写入失败: {e}", exc_info=True)
 
         except asyncio.CancelledError:
             # 任务被停止
@@ -973,6 +986,108 @@ class StrategyOptimizer:
                 datetime=t.created_at.isoformat() if hasattr(t.created_at, 'isoformat') else str(t.created_at),
             ))
         return results
+
+    async def build_candidate_report(
+        self,
+        job_id: str,
+        *,
+        top_n: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Build an Optuna candidate report without promoting it to runtime config.
+
+        Candidate reports are the handoff artifact for manual review: they keep
+        the source backtest profile hash, fixed params, best trial params, and
+        the final request summary that would be used for a replay backtest.
+        """
+        job = self.get_job(job_id)
+        if job is None:
+            raise ValueError(f"Optimization job not found: {job_id}")
+
+        results = await self.get_trial_results(job_id, limit=max(top_n, 1))
+        ranked_results = sorted(results, key=lambda item: item.objective_value, reverse=True)
+        best_trial = job.best_trial or (ranked_results[0] if ranked_results else None)
+        if best_trial is None:
+            raise ValueError(f"Optimization job has no completed trials: {job_id}")
+
+        fixed_params = job.request.fixed_params or {}
+        runtime_overrides = self._build_runtime_overrides(best_trial.params, fixed_params)
+        seed_request = self._build_profile_seed_request(job.request, fixed_params)
+        resolved = await self._backtest_config_resolver.resolve(
+            self._backtest_profile_name,
+            request=seed_request,
+            runtime_overrides=runtime_overrides,
+        )
+        final_request, _ = await self._build_trial_backtest_inputs(
+            job.request,
+            best_trial.params,
+            fixed_params,
+            runtime_overrides,
+        )
+
+        return {
+            "candidate_name": f"optuna_candidate_{job_id}",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "status": "candidate_only",
+            "promotion_policy": "manual_review_required",
+            "source_profile": {
+                "name": resolved.profile_name,
+                "version": resolved.profile_version,
+                "config_hash": resolved.config_hash,
+            },
+            "job": {
+                "job_id": job_id,
+                "status": job.status.value,
+                "objective": job.request.objective.value,
+                "symbol": job.request.symbol,
+                "timeframe": job.request.timeframe,
+                "start_time": job.request.start_time,
+                "end_time": job.request.end_time,
+                "n_trials": job.request.n_trials,
+            },
+            "best_trial": best_trial.model_dump(mode="json"),
+            "fixed_params": fixed_params,
+            "runtime_overrides": runtime_overrides.model_dump(mode="json", exclude_none=True),
+            "resolved_request": {
+                "symbol": final_request.symbol,
+                "timeframe": final_request.timeframe,
+                "limit": final_request.limit,
+                "mode": final_request.mode,
+                "initial_balance": final_request.initial_balance,
+                "slippage_rate": final_request.slippage_rate,
+                "tp_slippage_rate": final_request.tp_slippage_rate,
+                "fee_rate": final_request.fee_rate,
+                "risk_overrides": (
+                    final_request.risk_overrides.model_dump(mode="json")
+                    if final_request.risk_overrides
+                    else None
+                ),
+                "order_strategy": (
+                    final_request.order_strategy.model_dump(mode="json")
+                    if final_request.order_strategy
+                    else None
+                ),
+            },
+            "top_trials": [trial.model_dump(mode="json") for trial in ranked_results[:top_n]],
+        }
+
+    async def write_candidate_report(
+        self,
+        job_id: str,
+        *,
+        output_dir: Union[str, Path] = "reports/optuna_candidates",
+        top_n: int = 5,
+    ) -> Path:
+        """Write a candidate-only Optuna report to JSON and return its path."""
+        report = await self.build_candidate_report(job_id, top_n=top_n)
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        file_path = output_path / f"{report['candidate_name']}.json"
+        file_path.write_text(
+            json_dumps_safe(report, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return file_path
 
 
 # ============================================================

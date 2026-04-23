@@ -336,7 +336,17 @@
    - 执行配置边界已加固：
      - `tp_ratios` 必须全部为正数
      - `tp_targets` 必须全部为正数
-   - `CapitalProtectionManager` 账户级熔断仍暂用原 ConfigManager 派生配置
+   - `CapitalProtectionManager` 已接入 runtime risk 派生：
+     - `single_trade.max_loss_percent` 跟随 runtime `risk.max_loss_percent`
+     - `daily.max_loss_percent` 跟随 runtime `daily_max_loss_percent`
+     - 启动时若拿到账户权益快照，则冻结派生 `daily.max_loss_amount`
+     - 若启动时尚无账户快照，则保留百分比口径回退，不伪造金额
+   - Optuna candidate report 已落地：
+     - `StrategyOptimizer.write_candidate_report()`
+     - 输出目录：`reports/optuna_candidates/`
+     - 只产出 candidate JSON，不自动 promote runtime profile
+   - 研究/验证脚本最小入口已收口：
+     - `scripts/verify_fixed_params_minimal.py` 已切到 resolver trial inputs
 7. 下一步切换边界：
    - 回测 API 暂缓，当前不做 Web
    - 按需将仍会使用的研究脚本入口接入 `BacktestConfigResolver`

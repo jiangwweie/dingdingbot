@@ -586,6 +586,36 @@
    - `python3 -m pytest tests/unit/test_api_lifespan_runtime.py tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py tests/unit/test_backtest_config_resolver.py -q`
    - 结果：68 passed
 
+### 2026-04-24 -- Runtime risk / Optuna candidate 收口
+
+1. ✅ Runtime risk 已进入 `CapitalProtectionManager` 派生链
+   - 新增 `RiskRuntimeConfig.to_capital_protection_config()`
+   - `main.py` 启动时优先尝试读取账户快照
+   - 若拿到启动权益，则冻结 `daily.max_loss_amount = equity * daily_max_loss_percent`
+   - 若拿不到快照，则保留 `daily.max_loss_percent` 百分比口径回退
+   - 单笔风控与账户最大杠杆均随 runtime risk 对齐
+
+2. ✅ Optuna candidate report 已落盘能力化
+   - 新增 `StrategyOptimizer.build_candidate_report()`
+   - 新增 `StrategyOptimizer.write_candidate_report()`
+   - 默认输出到 `reports/optuna_candidates/`
+   - 仅生成 candidate JSON，不自动 promote runtime profile
+
+3. ✅ Optuna / 研究脚本入口同步收口
+   - `scripts/verify_fixed_params_minimal.py` 改为走 `_build_trial_backtest_inputs()`
+   - 移除对已删除 `_build_backtest_request()` 的依赖
+   - `scripts/run_optuna_eth_1h.py` / `scripts/run_optuna_narrow_search.py` 完成后会输出 candidate report 路径
+
+4. ✅ 单元测试补齐
+   - `tests/unit/test_runtime_config_signal_pipeline.py`
+     - 新增 runtime risk -> capital protection 派生测试
+   - `tests/unit/test_strategy_optimizer.py`
+     - 新增 candidate report 构建/落盘测试
+
+5. ✅ 验证
+   - `python3 -m pytest tests/unit/test_runtime_config_signal_pipeline.py tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py -q`
+   - 结果：79 passed
+
 ---
 
 ## 下一步

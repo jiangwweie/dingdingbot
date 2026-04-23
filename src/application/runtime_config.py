@@ -17,7 +17,7 @@ from typing import Any, Mapping, Optional
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from src.domain.logic_tree import FilterConfig, FilterLeaf, LogicNode, TriggerConfig, TriggerLeaf
-from src.domain.models import Direction, OrderStrategy, RiskConfig, StrategyDefinition
+from src.domain.models import CapitalProtectionConfig, Direction, OrderStrategy, RiskConfig, StrategyDefinition
 
 
 class EnvironmentRuntimeConfig(BaseModel):
@@ -162,6 +162,47 @@ class RiskRuntimeConfig(BaseModel):
             max_total_exposure=self.max_total_exposure,
             daily_max_trades=self.daily_max_trades,
             daily_max_loss=daily_max_loss_amount,
+        )
+
+    def to_capital_protection_config(
+        self,
+        *,
+        account_equity: Optional[Decimal] = None,
+        base: Optional[CapitalProtectionConfig] = None,
+    ) -> CapitalProtectionConfig:
+        """Derive account-level protection from the resolved runtime risk module.
+
+        Sim-1 uses `daily_max_loss_percent` as the business profile value. If a
+        startup equity snapshot is available, freeze it into an amount so daily
+        loss checks do not drift with balance changes during the session. When
+        no snapshot exists yet, keep the existing percentage fallback.
+        """
+        protection = base or CapitalProtectionConfig()
+
+        single_trade = dict(protection.single_trade)
+        single_trade["max_loss_percent"] = self.max_loss_percent * Decimal("100")
+
+        daily = dict(protection.daily)
+        daily["max_loss_percent"] = self.daily_max_loss_percent * Decimal("100")
+        daily["max_loss_amount"] = (
+            account_equity * self.daily_max_loss_percent
+            if account_equity is not None
+            else None
+        )
+        if self.daily_max_trades is not None:
+            daily["max_trade_count"] = self.daily_max_trades
+
+        account = dict(protection.account)
+        account["max_leverage"] = self.max_leverage
+
+        return CapitalProtectionConfig(
+            enabled=protection.enabled,
+            min_notional=protection.min_notional,
+            price_deviation_threshold=protection.price_deviation_threshold,
+            extreme_price_deviation_threshold=protection.extreme_price_deviation_threshold,
+            single_trade=single_trade,
+            daily=daily,
+            account=account,
         )
 
 

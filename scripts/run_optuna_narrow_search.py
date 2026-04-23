@@ -200,6 +200,8 @@ async def main():
             print(f"   best_trial: #{final_job.best_trial.trial_number}")
             print(f"   best_objective_value: {final_job.best_trial.objective_value:.4f}")
             print(f"   best_params: {final_job.best_trial.params}")
+            candidate_path = await optimizer.write_candidate_report(final_job.job_id)
+            print(f"   candidate_report: {candidate_path}")
             print("=" * 60)
 
     except Exception as e:

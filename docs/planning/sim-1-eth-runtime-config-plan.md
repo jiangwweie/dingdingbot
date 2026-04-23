@@ -273,7 +273,8 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 4. ✅ Fixed params 必须命中 `BACKTEST_INJECTABLE_PARAMS` 声明字段。
 5. ✅ Trial request / strategy / risk / execution 从 profile resolver 生成，不再在 Optuna 内硬编码 ETH baseline。
 6. ✅ Optuna 不写 runtime DB，不自动应用模拟盘。
-7. ⏳ 后续只剩真实小规模搜索运行与 candidate report 落盘。
+7. ✅ candidate report 落盘能力已完成。
+8. ⏳ 后续只剩真实小规模搜索运行。
 
 ### Phase H: Sim-1 启动前验收
 
@@ -309,7 +310,7 @@ Sim-1 前不做：
 
 当前已知待确认项较少，主要是实现细节：
 
-1. `daily_max_loss_percent=0.10` 派生金额时使用启动账户权益、固定基准权益，还是可配置 base equity。
+1. ✅ 已定：优先使用启动账户权益冻结金额；若启动瞬间无账户快照，则保留百分比口径回退。
 2. Runtime profile 存放位置：短期继续 SQLite，还是以独立 JSON/DB snapshot 过渡。
 3. 禁止热改的 API 行为：直接拒绝写入，还是允许写入但标记下次启动生效。
 4. Signal preview 中展示的 TP 是否直接来自 execution 模块，还是保留 preview 字段但声明非执行真源。

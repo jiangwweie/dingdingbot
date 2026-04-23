@@ -274,6 +274,8 @@ async def main():
             print(f"   Trial: #{final_job.best_trial.trial_number}")
             print(f"   Best Objective (Sharpe): {final_job.best_trial.objective_value:.4f}")
             print(f"   Best Params: {final_job.best_trial.params}")
+            candidate_path = await optimizer.write_candidate_report(final_job.job_id)
+            print(f"   Candidate Report: {candidate_path}")
             print("=" * 60)
 
         # 总结和建议

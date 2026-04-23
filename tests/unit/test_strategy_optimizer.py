@@ -17,6 +17,7 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 import sys
 import os
+from pathlib import Path
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -413,6 +414,77 @@ class TestBuildTrialBacktestInputs:
         assert backtest_request.risk_overrides.max_loss_percent == Decimal("0.015")
         assert backtest_request.risk_overrides.max_total_exposure == Decimal("2.0")
         assert backtest_request.risk_overrides.max_leverage == 10
+
+    @pytest.mark.asyncio
+    async def test_build_candidate_report_is_candidate_only(self, optimizer, sample_optimization_request):
+        """candidate report 只输出审查产物，不直接改 runtime profile。"""
+        from src.domain.models import OptimizationJob, OptimizationTrialResult, OptimizationJobStatus
+
+        job_id = "opt_candidate"
+        best_trial = OptimizationTrialResult(
+            trial_number=3,
+            params={"ema_period": 55, "max_loss_percent": 0.02},
+            objective_value=1.23,
+            total_return=Decimal("0.12"),
+            max_drawdown=Decimal("0.05"),
+            total_trades=8,
+        )
+        optimizer._jobs[job_id] = OptimizationJob(
+            job_id=job_id,
+            request=sample_optimization_request.model_copy(update={"fixed_params": {"tp_slippage_rate": Decimal("0.0007")}}, deep=True),
+            status=OptimizationJobStatus.COMPLETED,
+            total_trials=10,
+            best_trial=best_trial,
+            best_value=1.23,
+        )
+
+        async def _fake_results(*args, **kwargs):
+            return [best_trial]
+
+        optimizer.get_trial_results = _fake_results  # type: ignore[method-assign]
+
+        report = await optimizer.build_candidate_report(job_id)
+
+        assert report["status"] == "candidate_only"
+        assert report["promotion_policy"] == "manual_review_required"
+        assert report["source_profile"]["name"] == "backtest_eth_baseline"
+        assert report["best_trial"]["trial_number"] == 3
+        assert report["resolved_request"]["tp_slippage_rate"] == Decimal("0.0007")
+
+    @pytest.mark.asyncio
+    async def test_write_candidate_report_writes_json_file(self, optimizer, sample_optimization_request, tmp_path):
+        """candidate report 产物应可落盘给人工审查。"""
+        from src.domain.models import OptimizationJob, OptimizationTrialResult, OptimizationJobStatus
+
+        job_id = "opt_candidate_file"
+        best_trial = OptimizationTrialResult(
+            trial_number=1,
+            params={"max_atr_ratio": 0.01},
+            objective_value=0.88,
+            total_return=Decimal("0.08"),
+            max_drawdown=Decimal("0.03"),
+            total_trades=5,
+        )
+        optimizer._jobs[job_id] = OptimizationJob(
+            job_id=job_id,
+            request=sample_optimization_request,
+            status=OptimizationJobStatus.COMPLETED,
+            total_trials=10,
+            best_trial=best_trial,
+            best_value=0.88,
+        )
+
+        async def _fake_results(*args, **kwargs):
+            return [best_trial]
+
+        optimizer.get_trial_results = _fake_results  # type: ignore[method-assign]
+
+        file_path = await optimizer.write_candidate_report(job_id, output_dir=tmp_path)
+
+        assert file_path.exists()
+        content = file_path.read_text(encoding="utf-8")
+        assert "candidate_only" in content
+        assert "optuna_candidate_opt_candidate_file" in content
 
 
 # ============================================================

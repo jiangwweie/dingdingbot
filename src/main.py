@@ -312,8 +312,28 @@ async def run_application():
 
         account_service = BinanceAccountService(_exchange_gateway)
         capital_notifier = _CapitalProtectionNotifierAdapter(_notification_service)
+        capital_protection_config = config_manager.build_capital_protection_config()
+        if _runtime_config_provider is not None:
+            runtime_risk = _runtime_config_provider.resolved_config.risk
+            startup_snapshot = _exchange_gateway.get_account_snapshot()
+            if startup_snapshot is None:
+                startup_snapshot = await _exchange_gateway.fetch_account_balance()
+            startup_equity = startup_snapshot.total_balance if startup_snapshot else None
+            capital_protection_config = runtime_risk.to_capital_protection_config(
+                account_equity=startup_equity,
+                base=capital_protection_config,
+            )
+            logger.info(
+                "CapitalProtection driven by runtime risk: "
+                f"profile={_runtime_config_provider.resolved_config.profile_name}, "
+                f"hash={_runtime_config_provider.config_hash}, "
+                f"single_trade_max_loss_percent={capital_protection_config.single_trade['max_loss_percent']}, "
+                f"daily_max_loss_percent={capital_protection_config.daily['max_loss_percent']}, "
+                f"daily_max_loss_amount={capital_protection_config.daily.get('max_loss_amount')}, "
+                f"max_leverage={capital_protection_config.account['max_leverage']}"
+            )
         _capital_protection = CapitalProtectionManager(
-            config=config_manager.build_capital_protection_config(),
+            config=capital_protection_config,
             account_service=account_service,
             notifier=capital_notifier,
             gateway=_exchange_gateway,

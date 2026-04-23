@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 from typing import List, Dict, Any, Optional
 
 from src.domain.models import (
+    CapitalProtectionConfig,
     Direction,
     OrderStrategy,
     StrategyDefinition,
@@ -916,3 +917,39 @@ class TestRuntimeConfigEdgeCases:
         assert strategy_def.filters[0].type == "ema"
         assert strategy_def.filters[1].type == "mtf"
         assert strategy_def.filters[2].type == "atr"
+
+    def test_risk_runtime_config_derives_capital_protection_with_startup_equity(self):
+        """Runtime risk 应派生 CapitalProtectionConfig，并冻结启动权益口径。"""
+        config = RiskRuntimeConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=20,
+            max_total_exposure=Decimal("1.0"),
+            daily_max_trades=8,
+            daily_max_loss_percent=Decimal("0.10"),
+        )
+
+        protection = config.to_capital_protection_config(
+            account_equity=Decimal("1000"),
+            base=CapitalProtectionConfig(),
+        )
+
+        assert protection.single_trade["max_loss_percent"] == Decimal("1.00")
+        assert protection.daily["max_loss_percent"] == Decimal("10.00")
+        assert protection.daily["max_loss_amount"] == Decimal("100.00")
+        assert protection.daily["max_trade_count"] == 8
+        assert protection.account["max_leverage"] == 20
+
+    def test_risk_runtime_config_derives_capital_protection_without_equity_snapshot(self):
+        """启动时没有账户快照时，应保留百分比口径而不是伪造金额。"""
+        config = RiskRuntimeConfig(
+            max_loss_percent=Decimal("0.01"),
+            max_leverage=20,
+            max_total_exposure=Decimal("1.0"),
+            daily_max_trades=None,
+            daily_max_loss_percent=Decimal("0.10"),
+        )
+
+        protection = config.to_capital_protection_config()
+
+        assert protection.daily["max_loss_percent"] == Decimal("10.00")
+        assert protection.daily["max_loss_amount"] is None

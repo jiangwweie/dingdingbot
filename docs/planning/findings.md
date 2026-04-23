@@ -105,6 +105,23 @@
    - PG 示例继续以 `docs/local-pg.md` / 示例文件为准
    - 若后续要彻底治理，需要单独安排 secret rotation + `.env` 脱离版本控制，不应混在 runtime config 接入任务中顺手做
 
+15. Runtime risk 的 `daily_max_loss_percent` 已确定采用“启动权益冻结金额，缺快照则百分比回退”的双态策略。
+   - 启动时若能拿到账户权益快照，则派生 `daily.max_loss_amount = equity * daily_max_loss_percent`
+   - 这样当日熔断阈值在本次进程内固定，不会随盘中权益波动漂移
+   - 若启动瞬间尚无账户快照，则不伪造金额，保留 `daily.max_loss_percent` 百分比口径
+   - 这比强行要求固定 base equity 更适合当前 Sim-1 / 低频实盘准备阶段
+
+16. Optuna 的“candidate only”边界需要有真实产物，而不只是文档约定。
+   - 仅靠 `best_trial` 内存对象不利于跨机器审查和次日回看
+   - 现已在 `StrategyOptimizer` 中补齐 `build_candidate_report()` / `write_candidate_report()`
+   - 输出包含 source profile hash、best params、fixed params、resolved request summary
+   - 仍不自动写入 runtime profile，保持人工审查后 promote 的边界
+
+17. 旧的最小验证脚本若继续调用已删除私有方法，会在你以为“只是验证”时制造假阻塞。
+   - `scripts/verify_fixed_params_minimal.py` 曾调用已删除的 `_build_backtest_request()`
+   - 这类脚本属于研究链入口，也必须跟上主契约演进
+   - 现已改为验证 `_build_trial_backtest_inputs()` + resolver + runtime overrides
+
 ### 1. 执行恢复状态已完全进入 PG 主线
 
 - ✅ `ExecutionIntent` 是 PG 主真源
