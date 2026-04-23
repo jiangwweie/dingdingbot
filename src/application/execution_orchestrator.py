@@ -62,6 +62,7 @@ class ExecutionOrchestrator:
         intent_repository: Optional[ExecutionIntentRepositoryPort] = None,
         notifier: Optional[Callable[[str, str], Any]] = None,  # P0-6: 可选告警回调
         pending_recovery_repository: Optional[Any] = None,  # P0-7: 可选 pending_recovery 持久化
+        execution_recovery_repository: Optional[Any] = None,  # PG 正式恢复表
     ):
         """
         初始化执行编排器
@@ -72,14 +73,16 @@ class ExecutionOrchestrator:
             gateway: 交易所网关
             intent_repository: 执行意图仓储（可选，未提供时退回内存态）
             notifier: P0-6 告警回调函数（可选），签名 async (title: str, message: str) -> None
-            pending_recovery_repository: P0-7 pending_recovery 持久化仓储（可选）
+            pending_recovery_repository: P0-7 pending_recovery 持久化仓储（可选，SQLite 过渡版）
+            execution_recovery_repository: PG 正式恢复表仓储（可选）
         """
         self._capital_protection = capital_protection
         self._order_lifecycle = order_lifecycle
         self._gateway = gateway
         self._intent_repository = intent_repository
         self._notifier = notifier  # P0-6: 保存告警回调
-        self._pending_recovery_repository = pending_recovery_repository  # P0-7: 保存持久化仓储
+        self._pending_recovery_repository = pending_recovery_repository  # P0-7: SQLite 过渡版
+        self._execution_recovery_repository = execution_recovery_repository  # PG 正式版
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
@@ -852,7 +855,7 @@ class ExecutionOrchestrator:
                             "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
                         }
 
-                        # P0-7：持久化到 repository（如果可用）
+                        # P0-7：持久化到 SQLite repository（过渡版，如果可用）
                         if self._pending_recovery_repository is not None:
                             try:
                                 await self._pending_recovery_repository.save(
@@ -862,6 +865,39 @@ class ExecutionOrchestrator:
                                 logger.error(
                                     f"[ExecutionOrchestrator] 持久化 pending_recovery 失败: "
                                     f"error={repo_error}",
+                                    exc_info=True
+                                )
+
+                        # PG 正式恢复表：创建 recovery task
+                        if self._execution_recovery_repository is not None:
+                            try:
+                                task_id = f"recovery_{uuid.uuid4().hex[:16]}"
+                                context_payload = {
+                                    "entry_order_id": entry_order.id,
+                                    "filled_qty_total": str(filled_qty_total),
+                                    "protected_qty_total": str(protected_qty_total),
+                                    "delta_qty": str(delta_qty),
+                                    "existing_sl_order_id": existing_sl.id,
+                                    "existing_sl_exchange_order_id": existing_sl.exchange_order_id,
+                                }
+                                await self._execution_recovery_repository.create_task(
+                                    task_id=task_id,
+                                    intent_id=intent.id,
+                                    symbol=existing_sl.symbol,
+                                    recovery_type="replace_sl_failed",
+                                    related_order_id=existing_sl.id,
+                                    related_exchange_order_id=existing_sl.exchange_order_id,
+                                    error_message=str(e),
+                                    context_payload=context_payload,
+                                )
+                                logger.info(
+                                    f"[ExecutionOrchestrator] 已创建 PG recovery task: "
+                                    f"task_id={task_id}, intent_id={intent.id}"
+                                )
+                            except Exception as pg_error:
+                                logger.error(
+                                    f"[ExecutionOrchestrator] 创建 PG recovery task 失败: "
+                                    f"error={pg_error}",
                                     exc_info=True
                                 )
 

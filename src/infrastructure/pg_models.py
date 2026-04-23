@@ -5,6 +5,7 @@ PostgreSQL Core Models - 核心 PG ORM 模型
 - orders
 - execution_intents
 - positions
+- execution_recovery_tasks
 
 注意：
 - 这是新增实现，不替换现有 SQLite 表结构
@@ -194,3 +195,49 @@ Index(
     unique=True,
     postgresql_where=PGExecutionIntentORM.exchange_order_id.is_not(None),
 )
+
+
+class PGExecutionRecoveryTaskORM(PGCoreBase):
+    """PG 版执行恢复任务表。"""
+
+    __tablename__ = "execution_recovery_tasks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    intent_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("execution_intents.id", deferrable=True, initially="DEFERRED"),
+        nullable=False,
+    )
+    related_order_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("orders.id", deferrable=True, initially="DEFERRED"),
+        nullable=True,
+    )
+    related_exchange_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+    recovery_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    context_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    resolved_at: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "recovery_type IN ('replace_sl_failed')",
+            name="ck_execution_recovery_tasks_recovery_type",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'retrying', 'resolved', 'failed')",
+            name="ck_execution_recovery_tasks_status",
+        ),
+        CheckConstraint("retry_count >= 0", name="ck_execution_recovery_tasks_retry_count_non_negative"),
+        Index("idx_execution_recovery_tasks_status_created", "status", "created_at"),
+        Index("idx_execution_recovery_tasks_symbol_status", "symbol", "status"),
+        Index("idx_execution_recovery_tasks_intent_id", "intent_id"),
+        Index("idx_execution_recovery_tasks_next_retry_at", "next_retry_at"),
+    )
+

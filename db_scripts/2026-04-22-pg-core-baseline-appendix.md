@@ -9,11 +9,12 @@
 
 本附录用于解释第一波 PostgreSQL 核心表迁移的目标设计基线，作为后续实现的架构约束与审核依据。
 
-本轮只覆盖三张核心表：
+本轮只覆盖四张核心表：
 
 1. `orders`
 2. `execution_intents`
 3. `positions`
+4. `execution_recovery_tasks`
 
 ---
 
@@ -159,19 +160,73 @@
 
 ---
 
-## 6. 本轮审核重点
+## 6. `execution_recovery_tasks` 设计说明
 
-审核这份基线时，建议优先看以下问题：
+### 6.1 目标定位
 
-1. 三张表的字段类型口径是否统一
-2. `orders` 的状态/角色集合是否完整
-3. `execution_intents` 的状态集合是否足够支撑当前执行链
-4. `positions` 的过渡方案是否过轻或过重
-5. 当前索引是否覆盖核心执行链真实查询路径
+`execution_recovery_tasks` 是 PG 正式恢复表，用于替代 SQLite 过渡版 `pending_recovery`，承接执行链强语义状态的恢复任务。
+
+### 6.2 核心设计
+
+1. **主键**: `id TEXT PRIMARY KEY`
+2. **关联关系**:
+   - `intent_id TEXT NOT NULL` → `execution_intents.id`（外键）
+   - `related_order_id TEXT` → `orders.id`（外键，可空，deferrable）
+   - `related_exchange_order_id TEXT`（普通列，不加外键）
+3. **恢复类型**: `recovery_type TEXT NOT NULL`
+   - 第一版支持：`'replace_sl_failed'`
+4. **状态机**: `status TEXT NOT NULL`
+   - `'pending'`: 待处理
+   - `'retrying'`: 重试中
+   - `'resolved'`: 已解决
+   - `'failed'`: 最终失败
+5. **重试控制**:
+   - `retry_count INTEGER NOT NULL DEFAULT 0`
+   - `next_retry_at BIGINT`（可空，用于退避）
+6. **上下文载荷**: `context_payload JSONB`
+   - 存储恢复所需快照数据
+7. **时间戳**:
+   - `created_at BIGINT NOT NULL`
+   - `updated_at BIGINT NOT NULL`
+   - `resolved_at BIGINT`（可空）
+
+### 6.3 索引设计
+
+1. `(status, created_at)` - 按状态扫描活跃任务
+2. `(symbol, status)` - 按 symbol 检查是否还有待恢复任务
+3. `(intent_id)` - 按 intent 查找关联恢复任务
+4. `(next_retry_at)` - 查询可重试任务
+
+### 6.4 为什么不挂到 `orders` 或 `execution_intents`
+
+1. 恢复任务是独立生命周期，不应污染核心订单模型
+2. 一个 intent 可能产生多次恢复尝试（重试），不适合 1:1 挂载
+3. 恢复任务有自己的状态机（pending/retrying/resolved/failed），与订单状态正交
+4. 便于后续扩展其他恢复类型（如 `tp_failed`, `partial_fill_stuck`）
+
+### 6.5 与 SQLite `pending_recovery` 的关系
+
+1. SQLite `pending_recovery` 是过渡态，本轮保留但不扩展
+2. PG `execution_recovery_tasks` 是正式版，后续将逐步替代 SQLite 版
+3. 本轮实现双写：主链同时写入两者，启动对账同时清理两者
+4. 后续退役 SQLite 版时，只需删除相关代码，无需修改 PG 表结构
 
 ---
 
-## 7. 实现约束
+## 7. 本轮审核重点
+
+审核这份基线时，建议优先看以下问题：
+
+1. 四张表的字段类型口径是否统一
+2. `orders` 的状态/角色集合是否完整
+3. `execution_intents` 的状态集合是否足够支撑当前执行链
+4. `execution_recovery_tasks` 的状态机是否覆盖恢复全流程
+5. `positions` 的过渡方案是否过轻或过重
+6. 当前索引是否覆盖核心执行链真实查询路径
+
+---
+
+## 8. 实现约束
 
 后续实现 `pg_models.py`、PG repository、连接验证时，必须遵守：
 

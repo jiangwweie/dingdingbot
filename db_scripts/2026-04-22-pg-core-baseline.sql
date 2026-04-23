@@ -184,4 +184,54 @@ CREATE INDEX IF NOT EXISTS idx_positions_signal_id
 CREATE INDEX IF NOT EXISTS idx_positions_updated_at
     ON positions(updated_at);
 
+-- ============================================================
+-- execution_recovery_tasks
+-- ============================================================
+CREATE TABLE IF NOT EXISTS execution_recovery_tasks (
+    id                          TEXT PRIMARY KEY,
+    intent_id                   TEXT NOT NULL,
+    related_order_id            TEXT,
+    related_exchange_order_id   TEXT,
+    symbol                      TEXT NOT NULL,
+    recovery_type               TEXT NOT NULL
+                                CHECK (recovery_type IN (
+                                    'replace_sl_failed'
+                                )),
+    status                      TEXT NOT NULL
+                                CHECK (status IN (
+                                    'pending',
+                                    'retrying',
+                                    'resolved',
+                                    'failed'
+                                )),
+    error_message               TEXT,
+    retry_count                 INTEGER NOT NULL DEFAULT 0
+                                CHECK (retry_count >= 0),
+    next_retry_at               BIGINT,
+    context_payload             JSONB,
+    created_at                  BIGINT NOT NULL,
+    updated_at                  BIGINT NOT NULL,
+    resolved_at                 BIGINT,
+    CONSTRAINT fk_execution_recovery_tasks_intent
+        FOREIGN KEY (intent_id)
+        REFERENCES execution_intents(id)
+        DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT fk_execution_recovery_tasks_order
+        FOREIGN KEY (related_order_id)
+        REFERENCES orders(id)
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_recovery_tasks_status_created
+    ON execution_recovery_tasks(status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_execution_recovery_tasks_symbol_status
+    ON execution_recovery_tasks(symbol, status);
+
+CREATE INDEX IF NOT EXISTS idx_execution_recovery_tasks_intent_id
+    ON execution_recovery_tasks(intent_id);
+
+CREATE INDEX IF NOT EXISTS idx_execution_recovery_tasks_next_retry_at
+    ON execution_recovery_tasks(next_retry_at);
+
 COMMIT;

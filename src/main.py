@@ -47,7 +47,8 @@ _execution_intent_repo = None
 _order_lifecycle_service: Optional[OrderLifecycleService] = None
 _capital_protection: Optional[CapitalProtectionManager] = None
 _execution_orchestrator: Optional[ExecutionOrchestrator] = None
-_pending_recovery_repo = None  # P0-7: 全局 pending_recovery_repo
+_pending_recovery_repo = None  # P0-7: SQLite 过渡版
+_execution_recovery_repo = None  # PG 正式版
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -84,7 +85,7 @@ async def graceful_shutdown():
     logger.info("Graceful shutdown initiated...")
 
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
-    global _execution_intent_repo, _order_repo, _pending_recovery_repo
+    global _execution_intent_repo, _order_repo, _pending_recovery_repo, _execution_recovery_repo
     _shutdown_event.set()
 
     if _exchange_gateway:
@@ -103,10 +104,15 @@ async def graceful_shutdown():
         await _order_repo.close()
         _order_repo = None
 
-    # P0-7: 关闭 pending_recovery_repo
+    # P0-7: 关闭 pending_recovery_repo（SQLite 过渡版）
     if _pending_recovery_repo:
         await _pending_recovery_repo.close()
         _pending_recovery_repo = None
+
+    # PG 正式恢复表
+    if _execution_recovery_repo:
+        await _execution_recovery_repo.close()
+        _execution_recovery_repo = None
 
     await close_db()
 
@@ -250,10 +256,29 @@ async def run_application():
         _order_lifecycle_service = OrderLifecycleService(repository=_order_repo)
         await _order_lifecycle_service.start()
 
-        # P0-7: 初始化 PendingRecoveryRepository
+        # P0-7: 初始化 PendingRecoveryRepository（SQLite 过渡版）
         from src.infrastructure.pending_recovery_repository import PendingRecoveryRepository
         _pending_recovery_repo = PendingRecoveryRepository()
         await _pending_recovery_repo.initialize()
+
+        # PG 正式恢复表：初始化（仅当 PG 可用时）
+        _execution_recovery_repo = None
+        try:
+            from src.infrastructure.database import get_pg_session_maker
+            from src.infrastructure.pg_execution_recovery_repository import PgExecutionRecoveryRepository
+
+            session_maker = get_pg_session_maker()
+            if session_maker:
+                _execution_recovery_repo = PgExecutionRecoveryRepository(session_maker=session_maker)
+                await _execution_recovery_repo.initialize()
+                logger.info("PG execution recovery repository initialized")
+        except Exception as e:
+            logger.warning(
+                f"PG execution recovery repository 初始化失败（不影响主进程）: {e}",
+                exc_info=True
+            )
+            # 继续启动（降级到 SQLite 过渡版）
+            _execution_recovery_repo = None
 
         account_service = BinanceAccountService(_exchange_gateway)
         capital_notifier = _CapitalProtectionNotifierAdapter(_notification_service)
@@ -275,7 +300,8 @@ async def run_application():
             gateway=_exchange_gateway,
             intent_repository=_execution_intent_repo,
             notifier=_orchestrator_notifier_adapter,  # P0-6: 注入告警回调
-            pending_recovery_repository=_pending_recovery_repo,  # P0-7: 注入持久化仓储
+            pending_recovery_repository=_pending_recovery_repo,  # P0-7: SQLite 过渡版
+            execution_recovery_repository=_execution_recovery_repo,  # PG 正式版
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
         logger.info("Core execution runtime ready")
@@ -292,6 +318,7 @@ async def run_application():
                 repository=_order_repo,
                 lifecycle=_order_lifecycle_service,
                 orchestrator=_execution_orchestrator,
+                execution_recovery_repository=_execution_recovery_repo,
             )
 
             reconciliation_summary = await reconciliation_service.run_startup_reconciliation()
@@ -304,6 +331,9 @@ async def run_application():
             logger.info(f"清除待恢复标记: {reconciliation_summary['recovery_cleared_count']} 个")
             logger.info(f"P0-4: 清除 orchestrator 待恢复记录: {reconciliation_summary['orchestrator_recovery_cleared_count']} 个")
             logger.info(f"P0-4: 清除 orchestrator 熔断: {reconciliation_summary['orchestrator_circuit_breaker_cleared_count']} 个")
+            logger.info(f"PG recovery: 已解决: {reconciliation_summary['pg_recovery_resolved_count']} 个")
+            logger.info(f"PG recovery: 重试中: {reconciliation_summary['pg_recovery_retrying_count']} 个")
+            logger.info(f"PG recovery: 已失败: {reconciliation_summary['pg_recovery_failed_count']} 个")
             logger.info(f"执行耗时: {reconciliation_summary['duration_ms']} ms")
             logger.info("=" * 70)
 

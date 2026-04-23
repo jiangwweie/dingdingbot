@@ -47,6 +47,7 @@ class StartupReconciliationService:
         repository: OrderRepository,
         lifecycle: OrderLifecycleService,
         orchestrator: Optional[Any] = None,  # P0-4：可选注入 ExecutionOrchestrator
+        execution_recovery_repository: Optional[Any] = None,  # PG 正式恢复表
     ):
         """
         初始化启动对账服务
@@ -56,11 +57,13 @@ class StartupReconciliationService:
             repository: OrderRepository 实例
             lifecycle: OrderLifecycleService 实例
             orchestrator: ExecutionOrchestrator 实例（可选，用于处理 pending_recovery）
+            execution_recovery_repository: PG 正式恢复表仓储（可选）
         """
         self._gateway = gateway
         self._repository = repository
         self._lifecycle = lifecycle
         self._orchestrator = orchestrator
+        self._execution_recovery_repository = execution_recovery_repository
 
     async def run_startup_reconciliation(self) -> Dict[str, Any]:
         """
@@ -348,6 +351,101 @@ class StartupReconciliationService:
                     logger.info(f"P0-4: ✅ 清除熔断: symbol={symbol}")
 
 
+        # ===== 阶段 2.6: PG recovery task 扫描 =====
+        pg_recovery_resolved_count = 0
+        pg_recovery_retrying_count = 0
+        pg_recovery_failed_count = 0
+
+        if self._execution_recovery_repository:
+            try:
+                active_tasks = await self._execution_recovery_repository.list_active()
+                logger.info(f"PG recovery: 读取活跃任务: 总计={len(active_tasks)}")
+
+                for task in active_tasks:
+                    task_id = task["id"]
+                    recovery_type = task["recovery_type"]
+                    intent_id = task["intent_id"]
+                    related_order_id = task.get("related_order_id")
+                    related_exchange_order_id = task.get("related_exchange_order_id")
+                    symbol = task.get("symbol")
+                    retry_count = task.get("retry_count", 0)
+
+                    # 第一版只处理 replace_sl_failed
+                    if recovery_type != "replace_sl_failed":
+                        logger.info(
+                            f"PG recovery: 跳过不支持的恢复类型: "
+                            f"task_id={task_id}, recovery_type={recovery_type}"
+                        )
+                        continue
+
+                    logger.info(
+                        f"PG recovery: 处理任务: task_id={task_id}, "
+                        f"intent_id={intent_id}, symbol={symbol}, retry_count={retry_count}"
+                    )
+
+                    # 查询关联订单状态
+                    if related_order_id:
+                        local_order = await self._repository.get_order(related_order_id)
+                    else:
+                        local_order = None
+
+                    # 判断是否已自然收敛（订单终态）
+                    terminal_statuses = {
+                        OrderStatus.CANCELED,
+                        OrderStatus.FILLED,
+                        OrderStatus.REJECTED,
+                        OrderStatus.EXPIRED,
+                    }
+
+                    if local_order and local_order.status in terminal_statuses:
+                        # 订单已终态，可安全结束恢复任务
+                        now_ms = int(time.time() * 1000)
+                        await self._execution_recovery_repository.mark_resolved(
+                            task_id=task_id,
+                            resolved_at=now_ms,
+                            error_message="订单已自然收敛至终态",
+                        )
+                        pg_recovery_resolved_count += 1
+                        logger.info(
+                            f"PG recovery: ✅ 标记已解决: task_id={task_id}, "
+                            f"order_status={local_order.status}"
+                        )
+                    else:
+                        # 订单未终态，检查重试次数
+                        max_retry_count = 3
+                        if retry_count >= max_retry_count:
+                            # 达到最大重试次数，标记失败
+                            await self._execution_recovery_repository.mark_failed(
+                                task_id=task_id,
+                                error_message=f"达到最大重试次数 {max_retry_count}",
+                            )
+                            pg_recovery_failed_count += 1
+                            logger.warning(
+                                f"PG recovery: ❌ 标记失败: task_id={task_id}, "
+                                f"retry_count={retry_count}"
+                            )
+                        else:
+                            # 标记重试中，设置下次重试时间（60s 后）
+                            now_ms = int(time.time() * 1000)
+                            next_retry_at = now_ms + 60000  # 60s 退避
+                            await self._execution_recovery_repository.mark_retrying(
+                                task_id=task_id,
+                                retry_count=retry_count + 1,
+                                next_retry_at=next_retry_at,
+                            )
+                            pg_recovery_retrying_count += 1
+                            logger.info(
+                                f"PG recovery: ⏸️ 标记重试中: task_id={task_id}, "
+                                f"retry_count={retry_count + 1}, next_retry_at={next_retry_at}"
+                            )
+
+            except Exception as e:
+                logger.error(
+                    f"PG recovery: 扫描失败: error={e}",
+                    exc_info=True
+                )
+
+
         # ===== 阶段 3: 生成对账摘要 =====
         end_time = int(time.time() * 1000)
         duration_ms = end_time - start_time
@@ -360,6 +458,9 @@ class StartupReconciliationService:
             "duration_ms": duration_ms,
             "orchestrator_recovery_cleared_count": orchestrator_recovery_cleared_count,
             "orchestrator_circuit_breaker_cleared_count": orchestrator_circuit_breaker_cleared_count,
+            "pg_recovery_resolved_count": pg_recovery_resolved_count,
+            "pg_recovery_retrying_count": pg_recovery_retrying_count,
+            "pg_recovery_failed_count": pg_recovery_failed_count,
         }
 
         logger.info("=" * 70)
@@ -370,6 +471,9 @@ class StartupReconciliationService:
         logger.info(f"清除待恢复标记: {summary['recovery_cleared_count']} 个")
         logger.info(f"P0-4: 清除 orchestrator 待恢复记录: {summary['orchestrator_recovery_cleared_count']} 个")
         logger.info(f"P0-4: 清除 orchestrator 熔断: {summary['orchestrator_circuit_breaker_cleared_count']} 个")
+        logger.info(f"PG recovery: 已解决: {summary['pg_recovery_resolved_count']} 个")
+        logger.info(f"PG recovery: 重试中: {summary['pg_recovery_retrying_count']} 个")
+        logger.info(f"PG recovery: 已失败: {summary['pg_recovery_failed_count']} 个")
         logger.info(f"执行耗时: {summary['duration_ms']} ms")
         logger.info("=" * 70)
 
