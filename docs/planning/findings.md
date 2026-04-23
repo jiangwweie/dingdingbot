@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-24 01:02
+> Last updated: 2026-04-24 01:15
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -81,7 +81,12 @@
    - `SignalResult.take_profit_levels` 降级为展示/通知/研究语义，不再作为实盘 TP/SL 策略来源
    - `ExecutionIntent.strategy` 仍是后续 full-fill / partial-fill / recovery 保护单语义的一致性锚点
 
-10. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
+10. Runtime direction policy 必须在 attempt 持久化前落地。
+   - 仅在执行前跳过 SHORT 不够，会污染 `signal_attempts` 审计语义
+   - 不允许方向的 fired attempt 应转为 `FILTERED`
+   - filter result 中记录 `runtime_direction_policy`，方便后续归因
+
+11. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
    - 本轮没有修改 `.env`
    - PG 示例继续以 `docs/local-pg.md` / 示例文件为准
    - 若后续要彻底治理，需要单独安排 secret rotation + `.env` 脱离版本控制，不应混在 runtime config 接入任务中顺手做

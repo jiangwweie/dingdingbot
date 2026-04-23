@@ -16,7 +16,7 @@ from decimal import Decimal
 
 from src.domain.models import (
     KlineData, SignalResult, AccountSnapshot, Direction, TrendDirection, OrderStrategy,
-    StrategyDefinition, SignalAttempt, SignalStatus,
+    StrategyDefinition, SignalAttempt, SignalStatus, FilterResult,
 )
 from src.domain.strategy_engine import create_dynamic_runner
 from src.domain.risk_calculator import RiskCalculator, RiskConfig
@@ -549,6 +549,7 @@ class SignalPipeline:
             # Run strategy engine with lock protection (prevents race condition during hot-reload)
             async with lock:
                 attempts = self._run_strategy(kline)
+            self._apply_runtime_direction_policy(kline, attempts)
 
             # Log filter rejection details for analysis
             for attempt in attempts:
@@ -582,17 +583,6 @@ class SignalPipeline:
             # Process all SIGNAL_FIRED attempts
             for attempt in attempts:
                 if attempt.final_result == "SIGNAL_FIRED" and attempt.pattern:
-                    if (
-                        self._runtime_allowed_directions
-                        and attempt.pattern.direction not in self._runtime_allowed_directions
-                    ):
-                        logger.info(
-                            f"Signal skipped by runtime direction policy: {kline.symbol} "
-                            f"{kline.timeframe} {attempt.pattern.direction.value} "
-                            f"[{attempt.strategy_name}]"
-                        )
-                        continue
-
                     # Signal deduplication: check cooldown period
                     # Key includes strategy_name to allow concurrent strategies to fire independently
                     dedup_key = f"{kline.symbol}:{kline.timeframe}:{attempt.pattern.direction.value}:{attempt.strategy_name}"
@@ -673,6 +663,42 @@ class SignalPipeline:
 
         except Exception as e:
             logger.error(f"Error processing K-line: {e}")
+
+    def _apply_runtime_direction_policy(
+        self,
+        kline: KlineData,
+        attempts: List[SignalAttempt],
+    ) -> None:
+        """Convert disallowed runtime directions to FILTERED before persistence."""
+        if not self._runtime_allowed_directions:
+            return
+
+        allowed = {direction.value for direction in self._runtime_allowed_directions}
+        for attempt in attempts:
+            if attempt.final_result != "SIGNAL_FIRED" or not attempt.pattern:
+                continue
+            if attempt.pattern.direction in self._runtime_allowed_directions:
+                continue
+
+            attempt.final_result = "FILTERED"
+            attempt.filter_results.append(
+                (
+                    "runtime_direction_policy",
+                    FilterResult(
+                        passed=False,
+                        reason="direction_not_allowed_by_runtime_profile",
+                        metadata={
+                            "allowed_directions": sorted(allowed),
+                            "actual_direction": attempt.pattern.direction.value,
+                        },
+                    ),
+                )
+            )
+            logger.info(
+                f"Signal filtered by runtime direction policy before persistence: "
+                f"{kline.symbol} {kline.timeframe} {attempt.pattern.direction.value} "
+                f"[{attempt.strategy_name}]"
+            )
 
     def _store_kline(self, kline: KlineData) -> None:
         """Store K-line in history for MTF analysis"""

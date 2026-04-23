@@ -1,11 +1,23 @@
 # Progress Log
 
-> Last updated: 2026-04-24 01:02
+> Last updated: 2026-04-24 01:15
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-24 -- Runtime direction policy 审计语义已修复
+
+1. ✅ LONG-only direction policy 在持久化前生效
+   - 不允许方向的 `SIGNAL_FIRED` attempt 会先改为 `FILTERED`
+   - 追加 `runtime_direction_policy` filter result
+   - 避免 SHORT attempt 被记录成已触发信号
+
+2. ✅ 影响范围
+   - 不改变下单行为
+   - 只修正 signal attempt 审计语义
+   - 保持 Sim-1 LONG-only 运行边界
 
 ### 2026-04-24 -- Runtime Config execution 已接入 SignalPipeline
 

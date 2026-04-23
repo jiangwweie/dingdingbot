@@ -1,7 +1,7 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-24 01:02
+> **Last updated**: 2026-04-24 01:15
 > **Status**: Sim-0 受控链路通过，Runtime Resolver 已接入 main.py，market/risk/strategy/execution 已实切到 SignalPipeline
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
@@ -290,6 +290,9 @@
      - `initial_stop_loss_rr=-1.0`
      - `trailing_stop_enabled=False`
      - `oco_enabled=True`
+   - LONG-only direction policy 已在 attempt 持久化前落地：
+     - 不允许方向的 fired attempt 转为 `FILTERED`
+     - 追加 `runtime_direction_policy` filter result
    - `CapitalProtectionManager` 账户级熔断仍暂用原 ConfigManager 派生配置
 7. 下一步切换边界：
    - 先做 runtime config 切换后的代码审查
