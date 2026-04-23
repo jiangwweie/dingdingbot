@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-24 00:08
-> **Status**: Sim-0 受控链路通过，Runtime Resolver 已接入 main.py 启动期 observe-only，尚未切换执行消费路径
+> **Last updated**: 2026-04-24 00:20
+> **Status**: Sim-0 受控链路通过，Runtime Resolver 已接入 main.py，market scope 已小范围实切
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
@@ -267,11 +267,15 @@
    - 审查提出的 hash / readonly / transaction / strategy 契约问题已修复
    - 已 seed 本地正式 `data/v3_dev.db` 的 `sim1_eth_runtime`
    - 已接入 `main.py` Phase 1.1 启动解析
-   - 当前为 observe-only：只解析、保存 provider、打印脱敏 summary/hash
-   - 尚未让 `SignalPipeline` / `ExecutionOrchestrator` 消费 runtime config
+   - market scope 已小范围实切：
+     - `symbols=ETH/USDT:USDT`
+     - `timeframes=1h,4h`
+     - `warmup_bars=100`
+     - `asset_polling_interval=60s`
+   - 尚未让 `strategy/risk/execution` 消费 runtime config
 7. 下一步切换边界：
    - 先让启动日志和 API 可观测 runtime hash
-   - 再把 market symbol/timeframe 接入 runtime config
+   - 再评估 strategy module 是否接入 `SignalPipeline`
    - 最后把 execution module 转为实盘 `OrderStrategy` 唯一入口
 
 ---

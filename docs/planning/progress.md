@@ -1,11 +1,41 @@
 # Progress Log
 
-> Last updated: 2026-04-24 00:08
+> Last updated: 2026-04-24 00:20
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-24 -- Runtime Config market scope 已小范围实切
+
+1. ✅ `main.py` Phase 6/7/8 已消费 runtime market module
+   - `symbols` 来自 `ResolvedRuntimeConfig.market.symbols`
+   - `timeframes` 来自 `ResolvedRuntimeConfig.market.timeframes`
+   - `warmup_bars` 来自 `ResolvedRuntimeConfig.market.warmup_history_bars`
+   - `asset_polling_interval` 来自 `ResolvedRuntimeConfig.market.asset_polling_interval`
+
+2. ✅ Sim-1 market 当前生效口径
+   - symbol: `ETH/USDT:USDT`
+   - timeframes: `1h`, `4h`
+   - warmup bars: `100`
+   - polling interval: `60s`
+
+3. ✅ 保留旧配置 fallback
+   - 若 provider 缺失，仍回退到 `ConfigManager`
+   - 正常启动路径已经在 Phase 1.1 严格解析 runtime profile，因此 fallback 主要用于防御和后续测试替身
+
+4. ✅ 已做轻量验证
+   - `python3 -m py_compile` 通过
+   - `scripts/verify_sim1_runtime_config.py` 通过
+   - 未执行 pytest
+
+### 当前边界
+
+- `strategy` module 尚未驱动 `SignalPipeline`
+- `risk` module 尚未驱动 `RiskConfig` / `CapitalProtectionConfig`
+- `execution` module 尚未成为 `OrderStrategy` 唯一入口
+- 当前只完成 market scope 实切，交易语义参数仍由现有路径驱动
 
 ### 2026-04-24 -- Runtime Config 已接入 main.py 启动期（observe-only）
 

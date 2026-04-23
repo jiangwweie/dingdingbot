@@ -221,8 +221,8 @@ async def run_application():
                 )
             )
             logger.info(
-                "Runtime config is in observe-only mode: existing ConfigManager "
-                "paths still drive execution until the next cutover step"
+                "Runtime config resolved in partial-cutover mode: market scope is "
+                "runtime-driven; strategy/risk/execution still use existing paths"
             )
         except ValueError as e:
             raise FatalStartupError(f"Runtime config resolution failed: {e}", "F-003")
@@ -246,8 +246,6 @@ async def run_application():
         config_manager.assert_initialized()
         core_config = config_manager.get_core_config()
         user_config = await config_manager.get_user_config()
-        # 配置重构后：直接使用 core_config.core_symbols 获取交易标的列表
-        merged_symbols = core_config.core_symbols
         logger.info("Configuration snapshots ready for dependency injection")
 
         # =============================================
@@ -413,9 +411,26 @@ async def run_application():
         # Phase 6: REST API Warmup
         # =============================================
         logger.info("Phase 6: Warming up historical data...")
-        warmup_bars = core_config.warmup.history_bars
-        symbols = merged_symbols
-        timeframes = user_config.timeframes
+        if _runtime_config_provider is not None:
+            runtime_market = _runtime_config_provider.resolved_config.market
+            warmup_bars = runtime_market.warmup_history_bars
+            symbols = runtime_market.symbols
+            timeframes = runtime_market.timeframes
+            logger.info(
+                "Market scope driven by runtime config: "
+                f"profile={_runtime_config_provider.resolved_config.profile_name}, "
+                f"hash={_runtime_config_provider.config_hash}, "
+                f"symbols={symbols}, timeframes={timeframes}, warmup_bars={warmup_bars}"
+            )
+        else:
+            warmup_bars = core_config.warmup.history_bars
+            symbols = core_config.core_symbols
+            timeframes = user_config.timeframes
+            logger.warning(
+                "Runtime config provider missing; falling back to ConfigManager "
+                f"market scope: symbols={symbols}, timeframes={timeframes}, "
+                f"warmup_bars={warmup_bars}"
+            )
 
         warmup_tasks = []
         for symbol in symbols:
@@ -446,7 +461,12 @@ async def run_application():
         # Phase 7: Start Asset Polling
         # =============================================
         logger.info("Phase 7: Starting asset polling...")
-        polling_interval = user_config.asset_polling.interval_seconds
+        if _runtime_config_provider is not None:
+            polling_interval = _runtime_config_provider.resolved_config.market.asset_polling_interval
+            logger.info(f"Asset polling interval driven by runtime config: {polling_interval}s")
+        else:
+            polling_interval = user_config.asset_polling.interval_seconds
+            logger.warning(f"Asset polling interval fallback from ConfigManager: {polling_interval}s")
         await _exchange_gateway.start_asset_polling(polling_interval)
 
         # Periodically update pipeline with latest snapshot
