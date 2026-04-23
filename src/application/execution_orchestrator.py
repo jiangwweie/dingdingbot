@@ -680,18 +680,24 @@ class ExecutionOrchestrator:
             if o.status in valid_protection_statuses
         ]
 
-        # 计算 protected_qty_total：已保护数量
-        # 优先使用 SL 订单的 requested_qty 总和（SL 覆盖全部仓位）
-        # 如果没有 SL，则用 TP 订单的 requested_qty 总和作为兜底
+        # P1-6 修复：识别已有有效 SL，保证单一 SL 覆盖全仓
         sl_orders = [o for o in valid_protection_orders if o.order_role == OrderRole.SL]
         tp_orders = [o for o in valid_protection_orders if o.order_role != OrderRole.SL]
 
-        if sl_orders:
-            # SL 订单的 requested_qty 总和作为主口径
-            protected_qty_total = sum(
-                (o.requested_qty for o in sl_orders),
-                Decimal("0")
+        # P1-6 止血：如果存在多张有效 SL，报错并返回（不在本任务修复历史脏数据）
+        if len(sl_orders) > 1:
+            logger.error(
+                f"[ExecutionOrchestrator] 检测到多张有效 SL 订单（违反单一 SL 约束）: "
+                f"order_id={entry_order.id}, sl_count={len(sl_orders)}, "
+                f"sl_order_ids={[o.id for o in sl_orders]}"
             )
+            return
+
+        # 计算 protected_qty_total：已保护数量
+        # P1-6 修复：使用 SL 订单的 requested_qty（单一 SL 覆盖全仓）
+        if sl_orders:
+            # SL 订单的 requested_qty 作为主口径
+            protected_qty_total = sl_orders[0].requested_qty
         elif tp_orders:
             # 没有 SL 时，用 TP 订单的 requested_qty 总和作为兜底
             protected_qty_total = sum(
@@ -765,22 +771,52 @@ class ExecutionOrchestrator:
             # 使用 OrderManager 生成保护单
             # P1-3 修复：必须使用 intent.strategy（已在上文检查非空）
             order_manager = OrderManager()
-            protection_orders = order_manager._generate_tp_sl_orders(
+            all_protection_orders = order_manager._generate_tp_sl_orders(
                 filled_entry=delta_entry,
                 positions_map=positions_map,
                 strategy=intent.strategy,  # 使用 intent 中冻结的 strategy snapshot
                 tp_targets=intent.strategy.tp_targets,  # P1-3 修复：必须从 strategy 获取
             )
 
+            # P1-6 修复：分离 TP 和 SL 订单
+            # 只为 delta_qty 生成 TP 订单，SL 单独处理（保证单一 SL 覆盖全仓）
+            tp_orders_to_submit = [o for o in all_protection_orders if o.order_role != OrderRole.SL]
+            sl_order_generated = next((o for o in all_protection_orders if o.order_role == OrderRole.SL), None)
+
             logger.info(
                 f"[ExecutionOrchestrator] 生成增量保护单: "
                 f"intent_id={intent.id}, "
-                f"总计={len(protection_orders)} 个, "
+                f"TP 订单={len(tp_orders_to_submit)} 个, "
+                f"SL 订单={'有' if sl_order_generated else '无'}, "
                 f"delta_qty={delta_qty}"
             )
 
-            # 提交保护单到交易所
-            for prot_order in protection_orders:
+            # P1-6 修复：处理 SL 订单（保证单一 SL 覆盖全仓）
+            if sl_orders:
+                # 已有 SL：调整数量为 filled_qty_total（覆盖全仓）
+                existing_sl = sl_orders[0]
+                await self._order_lifecycle.update_order_requested_qty(
+                    existing_sl.id,
+                    filled_qty_total
+                )
+                logger.info(
+                    f"[ExecutionOrchestrator] 已有 SL 订单数量已调整: "
+                    f"order_id={existing_sl.id}, "
+                    f"old_qty={existing_sl.requested_qty}, "
+                    f"new_qty={filled_qty_total}"
+                )
+            elif sl_order_generated:
+                # 没有 SL：创建新的 SL（数量=filled_qty_total）
+                sl_order_generated.requested_qty = filled_qty_total  # 覆盖全仓
+                tp_orders_to_submit.append(sl_order_generated)  # 加入提交列表
+                logger.info(
+                    f"[ExecutionOrchestrator] 创建新 SL 订单: "
+                    f"order_id={sl_order_generated.id}, "
+                    f"qty={filled_qty_total}（覆盖全仓）"
+                )
+
+            # 提交保护单到交易所（只提交 TP 订单 + 可能的新 SL）
+            for prot_order in tp_orders_to_submit:
                 try:
                     # 设置 parent_order_id，关联到 ENTRY
                     prot_order.parent_order_id = entry_order.id

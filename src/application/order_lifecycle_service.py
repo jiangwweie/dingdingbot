@@ -450,6 +450,42 @@ class OrderLifecycleService:
         logger.info(f"订单完全成交：{order_id} (数量：{filled_qty}, 价格：{average_exec_price})")
         return order
 
+    async def update_order_requested_qty(
+        self,
+        order_id: str,
+        new_requested_qty: Decimal,
+    ) -> Order:
+        """
+        更新订单的请求数量（P1-6：用于调整 SL 订单覆盖全仓）
+
+        注意：此方法只更新本地事实（requested_qty + updated_at），不调用交易所改单接口。
+        适用场景：partial-fill 增量补挂时，调整已有 SL 的数量以覆盖全部已成交仓位。
+
+        Args:
+            order_id: 订单 ID
+            new_requested_qty: 新的请求数量
+
+        Returns:
+            更新后的订单对象
+
+        Raises:
+            ValueError: 订单不存在
+        """
+        order = await self._get_order(order_id)
+        if not order:
+            raise ValueError(f"订单不存在：{order_id}")
+
+        old_qty = order.requested_qty
+        order.requested_qty = new_requested_qty
+        order.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        await self._repository.save(order)
+        logger.info(
+            f"订单请求数量已更新：{order_id} "
+            f"(旧数量：{old_qty}, 新数量：{new_requested_qty})"
+        )
+        return order
+
     async def update_order_from_exchange(
         self,
         order: Order
