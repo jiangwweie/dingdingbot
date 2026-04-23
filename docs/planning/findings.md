@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-23 17:30
+> Last updated: 2026-04-23 18:30
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -54,25 +54,41 @@
   - 默认主链路径已闭合
   - 个别自定义注入/初始化一致性问题只保留为 P2 级约束
 
+### 6. 模拟盘准入冒烟通过，但真实全链路尚未实证
+
+当前已经通过的是准入级冒烟验证：
+
+1. 正常执行链路可运行
+2. `replace_sl_failed` 能创建 PG recovery task、触发 breaker、发送告警
+3. 启动恢复能推进 PG recovery task
+4. breaker 能拒绝同 symbol 新信号
+
+但这不等于真实模拟盘全链路已经跑通。
+
+尚需 Sim-0 验证：
+
+`真实/模拟行情 -> SignalPipeline -> 策略/过滤器 -> 风控/仓位 -> testnet 下单 -> WS 回写 -> OrderLifecycle -> StartupReconciliation -> PG recovery / breaker`
+
 ---
 
 ## 当前阶段最重要的判断
 
-**现在不该继续横向扩张，而应进入“第二阶段范围冻结”。**
+**现在不该继续横向扩张，而应进入 Sim-0 真实全链路验证。**
 
 也就是：
 
-1. 先明确第二阶段只做什么
-2. 再从其中选一个入口任务推进
-3. 其他事情只保留在 backlog，不进入执行态
+1. 模拟盘运行配置必须冻结
+2. 离线优化可以并行，但不能热改 Sim-0 配置
+3. Sim-0 只验证执行链稳定性，不做策略参数优化
+4. 其他事情只保留在 backlog，不进入执行态
 
 ---
 
-## 第二阶段候选议题
+## 第二阶段已完成议题
 
-1. `circuit_breaker` 是否 PG 真源化
-2. SQLite `pending_recovery` 的退役路径
-3. recovery task 的 retry/backoff / 运维操作面
+1. `circuit_breaker` 是否 PG 真源化：已完成，结论是不单独建表，作为 PG recovery task 的派生状态
+2. SQLite `pending_recovery` 的退役路径：已完成，系统未上线，无历史包袱，直接移除
+3. recovery task 的 retry/backoff：已完成，指数退避策略显式化
 
 ### 当前收敛结论
 
@@ -80,7 +96,7 @@
 
 1. 全局上看到后续还有 PG、运维、回测等多条线
 2. 当前层只允许锁定一个主线入口
-3. 当前入口已收敛为：`circuit_breaker` 是否 PG 真源化
+3. 当前入口已切换为：Sim-0 真实全链路验证
 
 这条原则的目的不是缩小视野，而是避免主线再次分裂。
 
@@ -105,6 +121,26 @@
 对应设计稿：
 
 - `docs/planning/architecture/2026-04-23-circuit-breaker-pg-analysis.md`
+
+### Sim-0 当前结论
+
+1. 可以开始模拟盘，但只能按 **Sim-0 小范围灰度** 启动
+2. Sim-0 不是策略优化阶段，而是执行系统稳定性验证阶段
+3. 建议范围：
+   - testnet / 模拟盘
+   - 单 symbol：`BTC/USDT:USDT`
+   - 当前冻结主线策略
+   - `CORE_EXECUTION_INTENT_BACKEND=postgres`
+   - `CORE_ORDER_BACKEND=sqlite`
+4. 通过标准：
+   - 至少一笔真实 testnet ENTRY 链路可追溯
+   - ENTRY / TP / SL / WS 回写 / 对账状态一致
+   - PG recovery task 无异常 pending/failed
+   - breaker 无误触发/漏触发
+
+对应计划：
+
+- `docs/planning/sim-0-real-chain-validation-plan.md`
 
 ---
 

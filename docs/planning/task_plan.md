@@ -1,8 +1,8 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-23 17:30
-> **Status**: 第二阶段第一步已完成
+> **Last updated**: 2026-04-23 18:30
+> **Status**: 模拟盘准入冒烟通过，准备 Sim-0 真实全链路验证
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
@@ -11,16 +11,24 @@
 
 ### 阶段结论
 
-第二阶段第一步已完成，SQLite `pending_recovery` 过渡链已完全移除：
+第二阶段第一步已完成，模拟盘准入冒烟已通过：
 
 1. ✅ `execution_recovery_tasks` 是 PG 正式恢复真源
 2. ✅ `circuit_breaker` 由 PG active recovery tasks 重建（内存缓存）
 3. ✅ SQLite `pending_recovery` 整条过渡链已移除
 4. ✅ 恢复主链统一到 PG `execution_recovery_tasks`
+5. ✅ recovery retry/backoff 策略已显式化
+6. ✅ 准入级冒烟验证通过（mock/fake 层验证“可运行 + 可恢复 + 可拦截”）
+
+### 当前真实状态
+
+当前已经证明的是**执行恢复主链具备模拟盘准入条件**，但还没有证明真实模拟盘全链路已经跑通。
+
+下一步不是继续开发大功能，而是进入 **Sim-0：真实模拟盘全链路验证**。
 
 ### 当前唯一主线
 
-**第二阶段：执行恢复状态继续向 PG 收敛，并把执行链从”可运行”推到”可运营”。**
+**Sim-0：验证真实链路从行情/信号管道到 testnet 下单、WS 回写、启动对账、PG recovery、breaker 的闭环。**
 
 ### 设计前提（已锁定）
 
@@ -41,25 +49,29 @@
 
 ### 目标
 
-把当前执行恢复链继续收口，明确哪些状态进入 PG 主线，哪些过渡态准备退役。
+用真实模拟盘链路验证当前系统是否能稳定完成：
 
-### 第二阶段启动定义
+`行情/K线 -> SignalPipeline -> 策略/过滤器 -> 风控/仓位 -> ExecutionOrchestrator -> ExchangeGateway testnet 下单 -> WS 回写 -> OrderLifecycle -> StartupReconciliation -> PG recovery / breaker / 告警`
+
+### Sim-0 启动定义
 
 #### 阶段主题
 
-**Phase 2：执行恢复状态收敛与可运营化**
+**真实模拟盘全链路验证**
 
 #### 阶段目标
 
-1. 继续把执行恢复相关状态向 PG 主线收敛
-2. 明确并启动 SQLite 过渡态的退役路径
-3. 让当前执行链从“可运行”走到“可运营”
+1. 证明真实信号管道能触发 testnet 下单
+2. 证明 ENTRY / TP / SL / WS 回写 / 对账链路能闭合
+3. 证明 PG recovery task 和 breaker 在真实启动/重启链路中可用
 
 #### 本阶段只做
 
-1. 恢复/熔断/对账相关状态的收敛
-2. recovery task 的最小重试与运维边界梳理
-3. 小范围 execution 主链稳定运行前的边界确认
+1. Sim-0 启动配置冻结
+2. 主程序真实启动
+3. 信号到下单链路验证
+4. WS 回写与保护单验证
+5. 启动对账与恢复验证
 
 #### 本阶段不做
 
@@ -68,50 +80,57 @@
 3. 不做前端/工作台推进
 4. 不做新的 API 面扩张
 5. 不同时推进多张核心 PG 表的实切
+6. 不在 Sim-0 运行中热改策略参数
 
 #### 本阶段入口任务
 
-**优先从 `circuit_breaker` 是否需要 PG 真源化 开始。**
+**Sim-0.1：启动配置冻结。**
 
-原因：
+需要冻结：
 
-1. 它是当前恢复链下一层最自然的状态收敛点
-2. 比回测/前端/更多 PG 迁移更贴当前主线
-3. 比直接退役 SQLite `pending_recovery` 更适合作为第二阶段起点
+1. `CORE_EXECUTION_INTENT_BACKEND=postgres`
+2. `CORE_ORDER_BACKEND=sqlite`
+3. testnet / 模拟盘环境
+4. 单 symbol：`BTC/USDT:USDT`
+5. 当前冻结策略参数
+6. 飞书 webhook 开启
 
-#### 入口议题当前结论
+#### 已完成的前置验证
 
-已完成架构判断：
+1. `docs/reports/2026-04-23-sim-trading-readiness-smoke-check.md`
+2. 四个准入场景全部通过：
+   - 正常链路冒烟
+   - `replace_sl_failed` 异常链路冒烟
+   - 启动恢复冒烟
+   - 熔断拦截冒烟
 
-1. `circuit_breaker` 不建议单独新增 PG 表
-2. 更合理的方案是让它作为 `execution_recovery_tasks` 的派生保护状态
-3. 第二阶段后续实现应围绕“由 PG active recovery tasks 重建/驱动 breaker”展开
+详细 Sim-0 任务拆分见：
 
-### 近期候选事项（按优先级）
+- `docs/planning/sim-0-real-chain-validation-plan.md`
 
-1. **`circuit_breaker` 是否 PG 真源化**
-   - 这是第二阶段最自然的入口题
-   - 重点不是立刻实现，而是先确认是否值得进入 PG
+### 近期事项（按优先级）
 
-2. **SQLite `pending_recovery` 的退役路径**
-   - 当前它已降级为过渡兼容
-   - 后续要定义什么时候停止双写、什么时候完全移除
+1. **Sim-0.1 启动配置冻结**
+   - 锁定环境变量、symbol、策略、PG/SQLite backend 开关
 
-3. **recovery task 的 retry/backoff / 运维操作面**
-   - 当前已有最小 `pending / retrying / resolved / failed`
-   - 后续要决定是否需要更正式的重试与人工操作面
+2. **Sim-0.2 主程序真实启动**
+   - 验证 PG 初始化、Phase 4.3、Phase 4.4、ExchangeGateway、WS、SignalPipeline
+
+3. **Sim-0.3 信号到下单链路验证**
+   - 证明真实/模拟行情能触发 SignalPipeline 并进入 testnet 下单
 
 ### 当前建议顺序
 
-1. 先冻结第二阶段范围
-2. 再只挑一个入口任务推进（当前锁定为 `circuit_breaker` 议题）
-3. 其它事项保留在后续规划，不进入当前执行态
+1. 先完成 Sim-0 配置冻结
+2. 再真实启动主程序
+3. 再观察至少一笔信号触发到 testnet 下单
+4. 再做重启对账验证
 
 ### 当前执行状态
 
-- 第二阶段**尚未启动实现**
-- 当前仅完成阶段定义与入口锁定
-- 等用户发令后，再正式进入第二阶段执行
+- 模拟盘准入冒烟已通过
+- 真实模拟盘全链路尚未实证
+- 下一步进入 Sim-0，不再继续扩功能
 
 ---
 
@@ -119,15 +138,16 @@
 
 ### A. 执行链方向
 
-1. `circuit_breaker` 真源化方案
-2. SQLite 过渡态退役
-3. 执行恢复运维面收口
+1. Sim-0 真实链路验证
+2. Sim-0 24h 观察复盘
+3. 根据 Sim-0 暴露问题决定是否补执行链或运维能力
 
 ### B. PG 迁移方向
 
 1. `ExecutionIntent` 已切通
 2. `execution_recovery_tasks` 已接通
-3. `orders / positions` 是否继续切 PG，不属于当前阶段默认动作
+3. `orders / positions` 是否继续切 PG，不属于 Sim-0 前置动作
+4. `CORE_ORDER_BACKEND=postgres` 等 Sim-0 观察后再评估
 
 ### C. 研究/回测方向（非当前主线）
 
