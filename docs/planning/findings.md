@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-24 01:15
+> Last updated: 2026-04-24 01:32
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -86,7 +86,16 @@
    - 不允许方向的 fired attempt 应转为 `FILTERED`
    - filter result 中记录 `runtime_direction_policy`，方便后续归因
 
-11. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
+11. Runtime execution config 必须拒绝非正数 TP 比例/目标。
+   - `tp_ratios` 总和为 1.0 仍不够，`[-0.5, 1.5]` 这类输入会通过求和但语义非法
+   - `tp_ratios` 每项必须 `> 0`
+   - `tp_targets` 每项必须 `> 0`
+
+12. Runtime strategy 应直接生成 `logic_tree`。
+   - 新 runtime config 主线不应继续触发 `StrategyDefinition` deprecated triggers/filters 迁移路径
+   - 可保留 `trigger/filters` 字段作为兼容和可读性辅助，但 `logic_tree` 必须显式生成
+
+13. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
    - 本轮没有修改 `.env`
    - PG 示例继续以 `docs/local-pg.md` / 示例文件为准
    - 若后续要彻底治理，需要单独安排 secret rotation + `.env` 脱离版本控制，不应混在 runtime config 接入任务中顺手做

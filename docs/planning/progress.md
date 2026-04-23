@@ -1,11 +1,32 @@
 # Progress Log
 
-> Last updated: 2026-04-24 01:15
+> Last updated: 2026-04-24 01:32
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
 
 ## 近期完成
+
+### 2026-04-24 -- Runtime Config 单元测试已补齐并修复契约边界
+
+1. ✅ 新增 `tests/unit/test_runtime_config_signal_pipeline.py`
+   - 覆盖 `StrategyRuntimeConfig.to_strategy_definition()`
+   - 覆盖 `ExecutionRuntimeConfig.to_order_strategy()`
+   - 覆盖 `SignalPipeline._apply_runtime_direction_policy()`
+   - 覆盖 `SignalPipeline._build_execution_strategy()`
+
+2. ✅ 修复执行配置契约边界
+   - `tp_ratios` 不允许 `0` 或负数
+   - `tp_targets` 不允许 `0` 或负数
+   - 防止非正数 TP 比例/目标进入保护单生成
+
+3. ✅ Runtime strategy 改为生成 `logic_tree`
+   - 避免新 runtime config 主线继续依赖 `StrategyDefinition` 的 deprecated triggers/filters 迁移路径
+   - 保留 `trigger/filters` 字段用于兼容和测试可读性
+
+4. ✅ 测试结果
+   - `python3 -m pytest tests/unit/test_runtime_config_signal_pipeline.py -q`
+   - 结果：27 passed
 
 ### 2026-04-24 -- Runtime direction policy 审计语义已修复
 

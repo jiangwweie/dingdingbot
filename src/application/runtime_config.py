@@ -16,7 +16,7 @@ from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
-from src.domain.logic_tree import FilterConfig, TriggerConfig
+from src.domain.logic_tree import FilterConfig, FilterLeaf, LogicNode, TriggerConfig, TriggerLeaf
 from src.domain.models import Direction, OrderStrategy, RiskConfig, StrategyDefinition
 
 
@@ -109,9 +109,17 @@ class StrategyRuntimeConfig(BaseModel):
             apply_to = [f"{primary_symbol}:{primary_timeframe}"]
             is_global = False
 
+        children = [TriggerLeaf(type="trigger", id=self.trigger.id or "runtime_trigger", config=self.trigger)]
+        children.extend(
+            FilterLeaf(type="filter", id=filter_config.id or f"runtime_filter_{idx}", config=filter_config)
+            for idx, filter_config in enumerate(self.filters)
+        )
+        logic_tree = children[0] if len(children) == 1 else LogicNode(gate="AND", children=children)
+
         return StrategyDefinition(
             id=strategy_id,
             name=name,
+            logic_tree=logic_tree,
             trigger=self.trigger,
             filters=self.filters,
             is_global=is_global,
@@ -191,6 +199,10 @@ class ExecutionRuntimeConfig(BaseModel):
             raise ValueError("tp_ratios length must match tp_levels")
         if len(self.tp_targets) != self.tp_levels:
             raise ValueError("tp_targets length must match tp_levels")
+        if any(ratio <= Decimal("0") for ratio in self.tp_ratios):
+            raise ValueError("tp_ratios must all be positive")
+        if any(target <= Decimal("0") for target in self.tp_targets):
+            raise ValueError("tp_targets must all be positive")
         if abs(sum(self.tp_ratios, Decimal("0")) - Decimal("1.0")) > Decimal("0.0001"):
             raise ValueError("tp_ratios must sum to 1.0")
         return self
