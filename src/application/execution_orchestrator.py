@@ -1054,3 +1054,21 @@ class ExecutionOrchestrator:
         if order_id in self._pending_recovery:
             del self._pending_recovery[order_id]
             logger.info(f"[ExecutionOrchestrator] 已清除待恢复记录: order_id={order_id}")
+
+    def list_pending_recovery(self) -> List[Dict[str, Any]]:
+        """
+        P0-4：列出所有待恢复记录（只读）
+
+        Returns:
+            待恢复记录列表，每条记录包含 order_id, exchange_order_id, symbol, error 等字段
+        """
+        result = []
+        for order_id, info in self._pending_recovery.items():
+            record = {
+                "order_id": order_id,
+                "exchange_order_id": info.get("exchange_order_id"),
+                "symbol": info.get("symbol"),
+                "error": info.get("error"),
+            }
+            result.append(record)
+        return result
