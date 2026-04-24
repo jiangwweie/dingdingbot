@@ -4,7 +4,7 @@ import { ConfigSnapshot } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
 import { Badge } from '@/src/components/ui/Badge';
-import { Loader2, Lock, Lightbulb, ShieldCheck, Layers, GitCommit, SearchCode } from 'lucide-react';
+import { Loader2, Lock, Lightbulb, ShieldCheck, Layers, GitCommit, SearchCode, Download } from 'lucide-react';
 
 export default function Snapshot() {
   const { refreshCount } = useRefreshContext();
@@ -29,6 +29,19 @@ export default function Snapshot() {
 
   if (!data) return null;
 
+  const handleExport = () => {
+    const jsonString = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `config_snapshot_${data.identity.profile}_${data.identity.hash}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end border-b border-zinc-200 dark:border-zinc-800 mb-6 pb-4">
@@ -43,6 +56,13 @@ export default function Snapshot() {
              系统当前有效配置的只读快照。这包含了运行时的硬编码值和覆盖参数提取出的静态映射。(不可编辑)
            </p>
         </div>
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-200 dark:border-zinc-700 text-xs font-medium transition-colors"
+        >
+          <Download className="w-3.5 h-3.5" />
+          导出 JSON
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

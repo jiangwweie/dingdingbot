@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { getEvents } from '@/src/services/mockApi';
 import { AppEvent } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
-import { Loader2, Activity, PlayCircle, ShieldAlert, Cpu, AlertTriangle, AlertCircle, SignalHigh, CheckCircle2 } from 'lucide-react';
+import { Loader2, Activity, PlayCircle, ShieldAlert, Cpu, AlertTriangle, AlertCircle, SignalHigh, CheckCircle2, Filter } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { format } from 'date-fns';
 
@@ -11,6 +11,9 @@ export default function Events() {
   const { refreshCount } = useRefreshContext();
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [severityFilter, setSeverityFilter] = useState('ALL');
 
   useEffect(() => {
     let active = true;
@@ -23,6 +26,14 @@ export default function Events() {
     });
     return () => { active = false; };
   }, [refreshCount]);
+
+  const filteredEvents = useMemo(() => {
+    return events.filter(evt => {
+      if (categoryFilter !== 'ALL' && evt.category !== categoryFilter) return false;
+      if (severityFilter !== 'ALL' && evt.severity !== severityFilter) return false;
+      return true;
+    });
+  }, [events, categoryFilter, severityFilter]);
 
   if (loading && events.length === 0) {
     return <div className="flex h-32 items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-zinc-500" /></div>;
@@ -62,12 +73,45 @@ export default function Events() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle>最新事件流</CardTitle>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Filter className="w-3.5 h-3.5 text-zinc-400" />
+              <select 
+                value={categoryFilter} 
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="text-xs bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded px-2 py-1 text-zinc-600 dark:text-zinc-300"
+              >
+                <option value="ALL">全部类别</option>
+                <option value="STARTUP">启动 (STARTUP)</option>
+                <option value="RECONCILIATION">对账 (RECONCILIATION)</option>
+                <option value="BREAKER">熔断 (BREAKER)</option>
+                <option value="RECOVERY">恢复 (RECOVERY)</option>
+                <option value="WARNING">警告 (WARNING)</option>
+                <option value="ERROR">错误 (ERROR)</option>
+                <option value="SIGNAL">信号 (SIGNAL)</option>
+                <option value="EXECUTION">执行 (EXECUTION)</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <select 
+                value={severityFilter} 
+                onChange={(e) => setSeverityFilter(e.target.value)}
+                className="text-xs bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded px-2 py-1 text-zinc-600 dark:text-zinc-300"
+              >
+                <option value="ALL">全部等级</option>
+                <option value="INFO">INFO</option>
+                <option value="WARN">WARN</option>
+                <option value="ERROR">ERROR</option>
+                <option value="SUCCESS">SUCCESS</option>
+              </select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-            {events.map((evt) => (
+            {filteredEvents.map((evt) => (
               <div key={evt.id} className="p-4 flex gap-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
                 <div className="flex-shrink-0 mt-0.5">
                   <div className={cn("w-8 h-8 rounded-full flex items-center justify-center border", getColor(evt.severity))}>
@@ -96,9 +140,9 @@ export default function Events() {
                 </div>
               </div>
             ))}
-            {events.length === 0 && (
+            {filteredEvents.length === 0 && (
               <div className="p-8 text-center text-zinc-500">
-                暂无日志
+                暂无符合条件的日志
               </div>
             )}
           </div>

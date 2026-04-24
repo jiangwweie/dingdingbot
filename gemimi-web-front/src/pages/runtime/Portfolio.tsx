@@ -81,10 +81,13 @@ export default function Portfolio() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-mono text-zinc-900 dark:text-zinc-100">${data.total_exposure.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            <p className="text-xs text-zinc-500 mt-1">
-              上限: <span className="font-mono">${data.max_total_exposure.toLocaleString()}</span>
-            </p>
+            <div className="flex items-end justify-between">
+              <div className="text-2xl font-mono text-zinc-900 dark:text-zinc-100">${data.total_exposure.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+              <div className="text-xs text-zinc-500 mb-1 font-mono">/ ${data.max_total_exposure.toLocaleString()}</div>
+            </div>
+            <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 mt-2 rounded overflow-hidden">
+               <div className="h-full bg-blue-500" style={{ width: `${Math.min((data.total_exposure / data.max_total_exposure) * 100, 100)}%` }} />
+            </div>
           </CardContent>
         </Card>
 
@@ -102,6 +105,24 @@ export default function Portfolio() {
              </div>
              <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 mt-2 rounded overflow-hidden">
                <div className="h-full bg-amber-500" style={{ width: `${Math.min(dailyLossPct, 100)}%` }} />
+             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-zinc-500 flex items-center justify-between">
+              杠杆使用率 (Leverage Usage)
+              <Activity className="w-4 h-4 text-zinc-600" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+             <div className="flex items-end justify-between">
+               <div className="text-2xl font-mono text-zinc-900 dark:text-zinc-100">{data.leverage_usage.toFixed(2)}x</div>
+               <div className="text-xs text-zinc-500 mb-1 font-mono">/ 20.0x (Max)</div>
+             </div>
+             <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 mt-2 rounded overflow-hidden">
+               <div className="h-full bg-purple-500" style={{ width: `${Math.min((data.leverage_usage / 20) * 100, 100)}%` }} />
              </div>
           </CardContent>
         </Card>
