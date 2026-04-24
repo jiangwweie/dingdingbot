@@ -463,6 +463,53 @@ class TestIncompleteMetadata:
         atr_comp = [c for c in result.components if c.name == "atr_volatility"][0]
         assert atr_comp.score == 0.5
 
+    def test_atr_partial_metadata_does_not_emit_warning(self, caplog):
+        """ATR 仅有部分 metadata 时静默降级，不污染 warning 日志"""
+        engine = AttributionEngine(_default_config())
+        attempt = _make_backtest_attempt(
+            filter_results=[
+                {
+                    "filter": "atr_volatility",
+                    "passed": True,
+                    "reason": "volatility_sufficient",
+                    "metadata": {
+                        "atr_value": 150.0,
+                        "min_atr_ratio": 0.5,
+                    },
+                },
+            ]
+        )
+
+        with caplog.at_level("WARNING"):
+            result = engine.attribute(attempt)
+
+        atr_comp = [c for c in result.components if c.name == "atr_volatility"][0]
+        assert atr_comp.score == 0.5
+        assert "partial ATR metadata" in atr_comp.confidence_basis
+        assert "ATR metadata incomplete" not in caplog.text
+
+    def test_atr_empty_metadata_still_warns(self, caplog):
+        """ATR metadata 真的为空时，仍保留 warning 提醒"""
+        engine = AttributionEngine(_default_config())
+        attempt = _make_backtest_attempt(
+            filter_results=[
+                {
+                    "filter": "atr_volatility",
+                    "passed": True,
+                    "reason": "volatility_sufficient",
+                    "metadata": {},
+                },
+            ]
+        )
+
+        with caplog.at_level("WARNING"):
+            result = engine.attribute(attempt)
+
+        atr_comp = [c for c in result.components if c.name == "atr_volatility"][0]
+        assert atr_comp.score == 0.5
+        assert "metadata incomplete" in atr_comp.confidence_basis
+        assert "ATR metadata incomplete" in caplog.text
+
 
 # ============================================================
 # UT-010: 未知过滤器

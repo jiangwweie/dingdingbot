@@ -412,6 +412,13 @@ class AttributionEngine:
                     Decimal("1.0"),
                 )
 
+            if self._has_partial_atr_metadata(metadata):
+                logger.debug(
+                    "[ATTRIBUTION] ATR metadata partial for attribution, "
+                    "default confidence=0.5"
+                )
+                return self._DEFAULT_CONFIDENCE
+
             logger.warning(
                 f"[ATTRIBUTION] ATR metadata incomplete for attribution, "
                 f"default confidence=0.5"
@@ -459,9 +466,21 @@ class AttributionEngine:
                     f"volatility ratio={atr_ratio:.3f}, "
                     f"score=min({atr_ratio:.3f}/2.0, 1.0)={score:.3f}"
                 )
+            if self._has_partial_atr_metadata(metadata):
+                return "partial ATR metadata (without volatility_ratio), default confidence=0.5"
             return "metadata incomplete, default confidence=0.5"
 
         return "confidence function not defined for this filter"
+
+    @staticmethod
+    def _has_partial_atr_metadata(metadata: Dict[str, Any]) -> bool:
+        """ATR attribution can safely degrade when only non-ratio fields exist."""
+        return (
+            metadata.get("atr_value") is not None
+            or metadata.get("atr_pct_of_price") is not None
+            or metadata.get("min_atr_ratio") is not None
+            or metadata.get("max_atr_ratio") is not None
+        )
 
     def _calc_percentages(
         self,
