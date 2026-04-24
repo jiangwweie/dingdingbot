@@ -43,6 +43,7 @@ from src.application.backtest_config import (
     DEFAULT_BACKTEST_PROFILE_PROVIDER,
     list_backtest_injectable_params,
 )
+from src.application.research_artifacts import get_git_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -1025,11 +1026,18 @@ class StrategyOptimizer:
             runtime_overrides,
         )
 
+        repo_root = Path(__file__).resolve().parents[2]
+        git_meta = get_git_metadata(repo_root)
+        report_path = f"reports/optuna_candidates/optuna_candidate_{job_id}.json"
+
         return {
+            "artifact_version": 1,
             "candidate_name": f"optuna_candidate_{job_id}",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "status": "candidate_only",
             "promotion_policy": "manual_review_required",
+            "git": git_meta.to_dict(),
+            "reproduce_cmd": f"PYTHONPATH=. python scripts/replay_optuna_candidate.py --candidate {report_path}",
             "source_profile": {
                 "name": resolved.profile_name,
                 "version": resolved.profile_version,
@@ -1048,6 +1056,11 @@ class StrategyOptimizer:
             "best_trial": best_trial.model_dump(mode="json"),
             "fixed_params": fixed_params,
             "runtime_overrides": runtime_overrides.model_dump(mode="json", exclude_none=True),
+            "constraints": {
+                "allowed_directions": resolved.params.allowed_directions,
+                "same_bar_policy": resolved.params.same_bar_policy,
+                "random_seed": resolved.params.random_seed,
+            },
             "resolved_request": {
                 "symbol": final_request.symbol,
                 "timeframe": final_request.timeframe,

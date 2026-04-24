@@ -23,6 +23,9 @@ Thumbs.db
 *.log
 logs/
 
+# Reports (research artifacts, candidate outputs)
+reports/
+
 # Coverage
 .coverage
 htmlcov/
@@ -38,6 +41,7 @@ config/user.yml
 
 # Environment
 .env
+.env.local
 .local
 
 # Node

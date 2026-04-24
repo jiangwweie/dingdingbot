@@ -622,6 +622,12 @@
    - 约束：candidate only；Sim-1 期间不允许自动 promote runtime profile
    - 方案 B（统一 CLI + registry）延后到 Sim-1 稳定后演进
 
+7. ✅ 方案 A 前置骨架已落地（等待脚本迁移接入）
+   - 新增 `OptunaStudySpec` / `BacktestJobSpec`（统一脚本装配入口）
+   - candidate report 补齐 `git` 与 `reproduce_cmd` 字段
+   - 新增 dry-run replay 脚本：`scripts/replay_optuna_candidate.py`
+   - 新增契约文档：`docs/planning/optuna-candidate-report-contract.md`
+
 ---
 
 ## 下一步
