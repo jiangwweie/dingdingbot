@@ -662,3 +662,32 @@
 3. 为 `coerce_decimal_list_fields()` 增加非 list/tuple 输入防御，避免把字符串逐字符转 Decimal 的隐性坏数据。
 4. 新增 `tests/unit/test_validators.py`，直接覆盖 shared validators 的边界行为。
 5. 记录 `stable_config_hash()` 的 hash schema 语义升级点，明确旧 hash 仅在审计语义上失效，不影响运行查询链路。
+
+### Candidate review 规则落盘
+
+1. ✅ candidate 链闭环已验证
+   - candidate JSON 可写出、可 replay
+   - `best_trial` 与 `top_trials[0]` 指标一致
+   - `sortino_ratio` 不再固定为 `0` / `null`
+
+2. ✅ 当前评审状态已冻结
+   - `PASS_STRICT`
+   - `PASS_STRICT_WITH_WARNINGS`
+   - `PASS_LOOSE`
+   - `REJECT`
+
+3. ✅ 当前 `Strict v1` 已落地文档
+   - `docs/planning/optuna-candidate-review-rubric.md`
+   - 当前硬门槛：
+     - `total_trades >= 100`
+     - `sharpe_ratio >= 1.0`
+     - `total_return >= 0.30`
+     - `max_drawdown <= 0.25`
+     - `win_rate >= 0.45`
+     - `params_at_boundary == false`
+
+4. ✅ 当前 warning-only 项明确保留
+   - `sortino_ratio` 异常时先 warning，不直接 fail
+   - `trade_concentration`
+   - `profit_concentration`
+   - `max_consecutive_losses`

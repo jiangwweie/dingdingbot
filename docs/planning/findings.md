@@ -438,3 +438,39 @@ R17. 旧的最小验证脚本若继续调用已删除私有方法，会在你以
 - 影响：同一业务 payload 在新实现下会产生不同于旧实现的 `config_hash`。
 - 当前判断：这不会阻塞运行链路，因为 `config_hash` 主要用于审计/日志，不作为 profile 查询键。
 - 运维含义：旧日志/旧 seed 产生的 hash 与新版本不可直接混比；如需重新对齐，应以新版本重新 seed/runtime resolve 为准。
+
+---
+
+## 2026-04-24 -- Candidate 评审口径已冻结为 Strict v1
+
+- 当前 candidate 链已经满足：
+  - `best_trial` 与 `top_trials[0]` 指标一致
+  - `sortino_ratio` 不再固定为 `0` / `null`
+  - replay 可稳定读取 candidate JSON
+- 因此评审体系不再依赖临场口头判断，当前冻结为：
+  - `PASS_STRICT`
+  - `PASS_STRICT_WITH_WARNINGS`
+  - `PASS_LOOSE`
+  - `REJECT`
+
+### Strict v1（当前人工评审池入口）
+
+- `total_trades >= 100`
+- `sharpe_ratio >= 1.0`
+- `total_return >= 0.30`
+- `max_drawdown <= 0.25`
+- `win_rate >= 0.45`
+- `params_at_boundary == false`
+
+### 当前 warning-only 项
+
+- `sortino_ratio` 缺失/异常
+- `trade_concentration` 未补齐
+- `profit_concentration` 未补齐
+- `max_consecutive_losses` 未补齐
+
+### 决策含义
+
+- `PASS_STRICT` / `PASS_STRICT_WITH_WARNINGS` 才进入人工评审池。
+- `PASS_LOOSE` 只保留为对照候选，不进入后续 runtime 讨论。
+- `REJECT` 不进入后续评审链路。
