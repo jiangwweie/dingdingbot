@@ -389,6 +389,14 @@ SSOT 文档：
 
 - `docs/planning/architecture/2026-04-24-frontend-runtime-monitor-and-research-console-plan.md`
 
+本轮补充确认：
+
+1. `Runtime / Overview` 必须加入 freshness / heartbeat 字段；手动刷新模式下，没有陈旧度提示的“健康页面”不可接受。
+2. Console 默认仅限本地 / 内网访问；若跨机器访问，至少加 Basic Auth 或反向代理鉴权。
+3. `Research / Replay` 第一版语义应按 replay context / reproduce context 理解，不承诺 K 线图表。
+4. `Research / Candidates` 第一版允许基于 `reports/optuna_candidates/` 扫描，但需显式记录后续文件索引缓存演进点。
+5. `breaker summary` 与 `recovery summary` 必须在接口语义上拆开，避免把运行时保护状态与 PG 恢复工单状态混成同一个聚合数字。
+
 ### `.env` 不能承载本地 PG 示例或 backend 切换值
 
 已跟踪 `.env` 仍包含真实交易所 key / webhook，不能再混入本地 PG 连接串或 backend 切换示例。否则后续提交时容易把个人本地运行环境和敏感配置一起带入版本历史。

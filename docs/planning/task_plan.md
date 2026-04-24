@@ -377,6 +377,11 @@ Sim-0 详细任务拆分（归档参考）：
      - 先做 Runtime Monitor MVP
      - 再接 Research 的 candidate / replay 只读页
      - 不做配置编辑，不做 runtime 热改
+   - 前端规划新增补充边界：
+     - `Runtime / Overview` 必须展示 freshness / heartbeat
+     - 默认只允许本地 / 内网访问
+     - `Replay` 第一版按 replay context 理解，不承诺 K 线图表
+     - `Candidates` 第一版允许目录扫描，后续视规模补文件索引缓存
 
 ---
 

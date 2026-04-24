@@ -4,6 +4,7 @@
 > Status: Planning
 > Current decision: **方案 A（分域控制台）**
 > Scope: Sim-1 观察面优先，研究分析面纳入统一信息架构；当前不做配置编辑与热改
+> Security default: **仅本地 / 内网访问**
 
 ---
 
@@ -51,6 +52,13 @@
 2. Candidate review 第一版 **只展示，不做人工写回**
 3. Runtime 页面第一版使用 **手动刷新**，不做 SSE / websocket UI
 4. Backtest Studio 作为 **二期并入**，这次先纳入整体信息架构，不进第一版实现范围
+
+### 2.3 新增约束补充
+
+1. Runtime 第一版必须展示**数据陈旧度 / 心跳**，避免手动刷新模式下误判系统仍然存活。
+2. Console 第一版默认只允许**本地 / 内网访问**；若跨机器访问，至少增加一层 Basic Auth 或反向代理鉴权。
+3. `Research / Replay` 第一版本质是 **Candidate Replay Context**，不承诺 K 线可视化回放。
+4. `Research / Candidates` 第一版允许基于 `reports/optuna_candidates/` 目录扫描，但需显式记录其冷启动与规模边界。
 
 ---
 
@@ -138,6 +146,16 @@ Trading Console
 - breaker count
 - 最近一次 reconciliation 摘要
 - 当前 backend 切换状态（execution intent / order / position）
+- `server_time`
+- `last_runtime_update_at` / `last_heartbeat_at`
+- freshness 状态：
+  - `Fresh`
+  - `Stale`
+  - `Possibly Dead`
+
+说明：
+
+由于第一版采用手动刷新，`Runtime / Overview` 必须明确给出后端时间戳和 freshness 判断，避免页面缓存停留在“看起来正常”的旧状态。
 
 ### 5.2 Runtime / Signals
 
@@ -171,6 +189,12 @@ Trading Console
 - PG / Exchange / Notification 状态
 - 最近 warning / error 摘要
 - 启动阶段关键 marker 状态
+- breaker summary
+- recovery summary
+
+约束：
+
+`breaker summary` 与 `recovery summary` 必须在接口语义上拆开定义，不允许前端把 breaker 状态与 PG recovery tasks 聚合结果混成单一数字。
 
 ### 5.5 Research / Candidates
 
@@ -199,7 +223,7 @@ Trading Console
 - constraints
 - review rubric 对照结果
 
-### 5.7 Research / Replay
+### 5.7 Research / Replay（第一版按 Replay Context 理解）
 
 目标：让人读懂 candidate 结构，而不是直接做重回测控制。
 
@@ -209,6 +233,12 @@ Trading Console
 - candidate metadata
 - resolved_request
 - runtime_overrides
+
+说明：
+
+1. 第一版 `Replay` 更准确的语义是 **Replay Context / Reproduce Context**。
+2. 第一版不承诺 K 线回放或交互式图表。
+3. 如后续已有现成静态 HTML 图表产物，可在 P1/P2 阶段补充为外链或内嵌只读展示。
 
 ---
 
@@ -229,6 +259,10 @@ Trading Console
 - exchange / pg / webhook health
 - breaker count
 - reconciliation summary
+- server_time
+- last_runtime_update_at
+- last_heartbeat_at
+- freshness_status
 
 #### 6.2 `GET /api/runtime/signals`
 
@@ -281,6 +315,12 @@ Trading Console
 - notification status
 - recent warning/error summary
 - breaker summary
+- recovery summary
+
+备注：
+
+- `breaker summary` 的真源和 `recovery summary` 的真源必须分开定义
+- 若 recovery 来自 PG 聚合，接口字段名必须显式表达为 recovery，而不是混称 breaker
 
 ### P1
 
@@ -294,6 +334,12 @@ Trading Console
 - objective
 - strict review status
 - warnings
+
+第一版数据源说明：
+
+1. 默认允许基于 `reports/optuna_candidates/` 目录扫描生成列表。
+2. 当前规模假设为低到中等，不以高并发或大规模分页为目标。
+3. 若 candidate 文件数量明显增长，后续应增加轻量文件索引 / manifest 缓存，避免直接全量扫描。
 
 #### 6.8 `GET /api/research/candidates/{candidate_name}`
 
@@ -403,6 +449,7 @@ Trading Console
 4. 不做 candidate 一键 promote
 5. 不做 websocket 前端实时订阅
 6. 不做大型多图表研究平台
+7. 不默认暴露公网访问
 
 ---
 

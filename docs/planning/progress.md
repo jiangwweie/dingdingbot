@@ -679,6 +679,12 @@
    - P0：runtime overview / signals / attempts / intents / orders / health
    - P1：candidate list / candidate detail / replay
    - P2：backtests / compare / review 写回
+6. ✅ 前端规划补充约束已收口：
+   - Runtime 页面加入 freshness / heartbeat 设计
+   - Console 默认本地 / 内网访问
+   - Replay 第一版按 replay context 理解
+   - Candidates 第一版默认目录扫描，后续如规模增长再补索引缓存
+   - breaker / recovery summary 在接口语义上拆分
 
 ### Config 重构第三轮审计收口（方案 A）
 
