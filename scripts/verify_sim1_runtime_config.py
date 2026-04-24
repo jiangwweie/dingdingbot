@@ -12,6 +12,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from src.application.runtime_config import RuntimeConfigResolver
 from src.infrastructure.connection_pool import close_all_connections
 from src.infrastructure.runtime_profile_repository import RuntimeProfileRepository
@@ -22,10 +26,9 @@ async def main() -> None:
     profile_name = os.getenv("RUNTIME_PROFILE", "sim1_eth_runtime")
 
     repo = RuntimeProfileRepository(db_path=db_path)
-    await repo.initialize()
-    resolver = RuntimeConfigResolver(repo)
-
     try:
+        await repo.initialize()
+        resolver = RuntimeConfigResolver(repo)
         resolved = await resolver.resolve(profile_name)
     finally:
         await repo.close()

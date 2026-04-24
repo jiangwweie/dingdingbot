@@ -16,7 +16,18 @@ import json
 import os
 import sys
 import signal as sys_signal
+from pathlib import Path
 from typing import Optional
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
+
+if load_dotenv is not None:
+    repo_root = Path(__file__).resolve().parents[1]
+    load_dotenv(repo_root / ".env")
+    load_dotenv(repo_root / ".env.local", override=True)
 
 from src.application.config_manager import ConfigManager, load_all_configs
 from src.application.runtime_config import RuntimeConfigProvider, RuntimeConfigResolver
@@ -253,24 +264,42 @@ async def run_application():
         # =============================================
         logger.info("Phase 3: Setting up notification channels...")
         _notification_service = get_notification_service()
-        _notification_service.setup_channels(
-            [{"type": ch.type, "webhook_url": ch.webhook_url}
-             for ch in user_config.notification.channels]
-        )
+        if _runtime_config_provider is not None:
+            env = _runtime_config_provider.resolved_config.environment
+            _notification_service.setup_channels(
+                [
+                    {
+                        "type": "feishu",
+                        "webhook_url": env.feishu_webhook_url.get_secret_value(),
+                    }
+                ]
+            )
+        else:
+            _notification_service.setup_channels(
+                [{"type": ch.type, "webhook_url": ch.webhook_url} for ch in user_config.notification.channels]
+            )
         logger.info(f"Notification channels ready: {len(_notification_service._channels)}")
 
         # =============================================
         # Phase 4: Initialize Exchange Gateway
         # =============================================
         logger.info("Phase 4: Initializing exchange gateway...")
-        exchange_cfg = user_config.exchange
-
-        _exchange_gateway = ExchangeGateway(
-            exchange_name=exchange_cfg.name,
-            api_key=exchange_cfg.api_key,
-            api_secret=exchange_cfg.api_secret,
-            testnet=exchange_cfg.testnet,
-        )
+        if _runtime_config_provider is not None:
+            env = _runtime_config_provider.resolved_config.environment
+            _exchange_gateway = ExchangeGateway(
+                exchange_name=env.exchange_name,
+                api_key=env.exchange_api_key.get_secret_value(),
+                api_secret=env.exchange_api_secret.get_secret_value(),
+                testnet=env.exchange_testnet,
+            )
+        else:
+            exchange_cfg = user_config.exchange
+            _exchange_gateway = ExchangeGateway(
+                exchange_name=exchange_cfg.name,
+                api_key=exchange_cfg.api_key,
+                api_secret=exchange_cfg.api_secret,
+                testnet=exchange_cfg.testnet,
+            )
 
         await _exchange_gateway.initialize()
         logger.info("Exchange gateway initialized")
@@ -403,9 +432,7 @@ async def run_application():
         # Phase 4.5: Check API Key Permissions
         # =============================================
         logger.info("Phase 4.5: Checking API key permissions...")
-        # 配置重构后：权限检查功能已移除，暂跳过此检查
-        # TODO: 在 ExchangeGateway 中集成权限检查
-        logger.info("API key permission check skipped (feature removed in config refactor)")
+        await _exchange_gateway.check_api_key_permissions()
 
         # =============================================
         # Phase 5: Create Signal Pipeline (Dependency Injection)

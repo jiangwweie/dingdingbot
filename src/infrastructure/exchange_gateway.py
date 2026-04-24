@@ -211,6 +211,48 @@ class ExchangeGateway:
                 "F-004"
             )
 
+    async def check_api_key_permissions(self) -> None:
+        """Check API key permission policy.
+
+        Sim/Live requires:
+        - Withdraw permission must be disabled (F-002).
+        - Trade permission may be enabled (Phase 5+), so we do not block on it here.
+        """
+        exchange = self.exchange_name.lower()
+        if exchange != "binance":
+            logger.warning(
+                "API key permission check not implemented for exchange=%s; "
+                "skipping permission enforcement",
+                self.exchange_name,
+            )
+            return
+
+        try:
+            restrictions = await self.rest_exchange.sapi_get_account_apirestrictions()
+        except Exception as e:
+            raise FatalStartupError(
+                f"Failed to check Binance API key restrictions: {e}",
+                "F-004",
+            )
+
+        withdraw_enabled = bool(
+            restrictions.get("enableWithdrawals")
+            or restrictions.get("enable_withdrawals")
+            or restrictions.get("enableWithdrawalsSwitch")
+        )
+        if withdraw_enabled:
+            raise FatalStartupError(
+                "API key has withdraw permission enabled; aborting startup",
+                "F-002",
+            )
+
+        logger.info(
+            "API key restrictions checked: exchange=%s, withdraw_enabled=%s, details=%s",
+            self.exchange_name,
+            withdraw_enabled,
+            {k: restrictions.get(k) for k in ("enableReading", "enableFutures", "enableSpotAndMarginTrading", "ipRestrict")},
+        )
+
     async def close(self) -> None:
         """Close all exchange connections"""
         # Stop asset polling

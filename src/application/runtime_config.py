@@ -14,7 +14,7 @@ import os
 from decimal import Decimal
 from typing import Any, Mapping, Optional
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from src.domain.logic_tree import FilterConfig, FilterLeaf, LogicNode, TriggerConfig, TriggerLeaf
 from src.domain.models import CapitalProtectionConfig, Direction, OrderStrategy, RiskConfig, StrategyDefinition
@@ -22,6 +22,8 @@ from src.domain.models import CapitalProtectionConfig, Direction, OrderStrategy,
 
 class EnvironmentRuntimeConfig(BaseModel):
     """Process-level runtime configuration sourced from environment variables."""
+
+    model_config = ConfigDict(frozen=True)
 
     pg_database_url: SecretStr
     core_execution_intent_backend: str = Field(default="postgres")
@@ -56,6 +58,8 @@ class EnvironmentRuntimeConfig(BaseModel):
 class MarketRuntimeConfig(BaseModel):
     """Market universe and subscription scope for the frozen runtime profile."""
 
+    model_config = ConfigDict(frozen=True)
+
     primary_symbol: str
     primary_timeframe: str
     mtf_timeframe: str
@@ -81,14 +85,16 @@ class MarketRuntimeConfig(BaseModel):
 class StrategyRuntimeConfig(BaseModel):
     """Strategy trigger and filter contract for runtime execution."""
 
-    allowed_directions: list[Direction]
+    model_config = ConfigDict(frozen=True)
+
+    allowed_directions: tuple[Direction, ...]
     trigger: TriggerConfig
-    filters: list[FilterConfig]
+    filters: tuple[FilterConfig, ...]
     atr_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_sim1_strategy(self) -> "StrategyRuntimeConfig":
-        if self.allowed_directions != [Direction.LONG]:
+        if self.allowed_directions != (Direction.LONG,):
             raise ValueError("Sim-1 strategy must be LONG-only")
         if self.atr_enabled:
             raise ValueError("Sim-1 strategy requires ATR disabled")
@@ -137,6 +143,8 @@ class StrategyRuntimeConfig(BaseModel):
 
 class RiskRuntimeConfig(BaseModel):
     """Risk contract for runtime execution."""
+
+    model_config = ConfigDict(frozen=True)
 
     max_loss_percent: Decimal
     max_leverage: int = Field(ge=1, le=125)
@@ -209,9 +217,11 @@ class RiskRuntimeConfig(BaseModel):
 class ExecutionRuntimeConfig(BaseModel):
     """Execution contract used to build the OrderStrategy snapshot."""
 
+    model_config = ConfigDict(frozen=True)
+
     tp_levels: int = Field(ge=1, le=5)
-    tp_ratios: list[Decimal]
-    tp_targets: list[Decimal]
+    tp_ratios: tuple[Decimal, ...]
+    tp_targets: tuple[Decimal, ...]
     initial_stop_loss_rr: Decimal = Decimal("-1.0")
     breakeven_enabled: bool = False
     trailing_stop_enabled: bool = False
@@ -253,8 +263,8 @@ class ExecutionRuntimeConfig(BaseModel):
             id=strategy_id,
             name=strategy_id,
             tp_levels=self.tp_levels,
-            tp_ratios=self.tp_ratios,
-            tp_targets=self.tp_targets,
+            tp_ratios=list(self.tp_ratios),
+            tp_targets=list(self.tp_targets),
             initial_stop_loss_rr=self.initial_stop_loss_rr,
             trailing_stop_enabled=self.trailing_stop_enabled,
             oco_enabled=self.oco_enabled,
@@ -263,6 +273,8 @@ class ExecutionRuntimeConfig(BaseModel):
 
 class ResolvedRuntimeConfig(BaseModel):
     """Frozen, fully-resolved runtime config consumed by Sim/Live runtime."""
+
+    model_config = ConfigDict(frozen=True)
 
     profile_name: str
     version: int
@@ -392,5 +404,13 @@ class RuntimeConfigResolver:
             },
             "profile": profile_payload,
         }
-        raw = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"), default=str)
+        # Hash stability depends on using a canonical JSON encoding (sorted keys, stable separators,
+        # and consistent unicode handling) rather than relying on the SQLite JSON text formatting.
+        raw = json.dumps(
+            hash_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

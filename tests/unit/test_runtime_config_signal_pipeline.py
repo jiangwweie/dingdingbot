@@ -14,6 +14,8 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 from typing import List, Dict, Any, Optional
 
+from pydantic import ValidationError
+
 from src.domain.models import (
     CapitalProtectionConfig,
     Direction,
@@ -232,11 +234,11 @@ class TestExecutionRuntimeConfigToOrderStrategy:
         assert strategy.trailing_stop_enabled is False
         assert strategy.oco_enabled is True
 
-    def test_model_copy_deep_does_not_affect_original(self):
+    def test_runtime_config_is_immutable(self):
         """
-        Test that model_copy(deep=True) creates independent copy.
+        RuntimeConfig models must be frozen (no hot-edit during Sim runtime).
 
-        Modifying the copy should not affect the original object.
+        This protects config_hash auditability and prevents accidental mutation.
         """
         config = ExecutionRuntimeConfig(
             tp_levels=2,
@@ -247,20 +249,16 @@ class TestExecutionRuntimeConfigToOrderStrategy:
             oco_enabled=True,
         )
 
-        # Create deep copy
         copy = config.model_copy(deep=True)
 
-        # Modify the copy
-        copy.tp_ratios[0] = Decimal("0.6")
-        copy.tp_targets[0] = Decimal("2.0")
+        with pytest.raises(TypeError):
+            copy.tp_ratios[0] = Decimal("0.6")
 
-        # Original should be unchanged
-        assert config.tp_ratios[0] == Decimal("0.5")
-        assert config.tp_targets[0] == Decimal("1.0")
+        with pytest.raises(TypeError):
+            copy.tp_targets[0] = Decimal("2.0")
 
-        # Copy should have new values
-        assert copy.tp_ratios[0] == Decimal("0.6")
-        assert copy.tp_targets[0] == Decimal("2.0")
+        with pytest.raises(ValidationError):
+            copy.tp_levels = 3
 
     def test_to_order_strategy_returns_independent_copy(self):
         """
@@ -297,7 +295,7 @@ class TestExecutionRuntimeConfigToOrderStrategy:
             tp_ratios=[Decimal("0.5"), Decimal("0.5")],
             tp_targets=[Decimal("1.0"), Decimal("2.0")],
         )
-        assert config_valid.tp_ratios == [Decimal("0.5"), Decimal("0.5")]
+        assert config_valid.tp_ratios == (Decimal("0.5"), Decimal("0.5"))
 
         # Invalid: does not sum to 1.0
         with pytest.raises(ValueError, match="tp_ratios must sum to 1.0"):
@@ -816,7 +814,7 @@ class TestRuntimeConfigEdgeCases:
             filters=[],
             atr_enabled=False,
         )
-        assert config_valid.allowed_directions == [Direction.LONG]
+        assert config_valid.allowed_directions == (Direction.LONG,)
 
         # Invalid: SHORT allowed
         with pytest.raises(ValueError, match="Sim-1 strategy must be LONG-only"):
