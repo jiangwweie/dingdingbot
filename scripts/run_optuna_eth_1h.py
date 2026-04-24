@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Optuna ETH/USDT 1h 小规模优化
+Optuna ETH/USDT 1h 小规模优化（使用 OptunaStudySpec）
 
 目标：
 1. 搜索 3 个参数：max_atr_ratio, min_distance_pct, ema_period
@@ -21,62 +21,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.domain.models import (
-    OptimizationRequest,
-    OptimizationObjective,
     ParameterSpace,
     ParameterDefinition,
     ParameterType,
 )
+from src.application.research_specs import (
+    OptunaStudySpec,
+    BacktestJobSpec,
+    TimeWindowMs,
+    EngineCostSpec,
+)
 from src.infrastructure.historical_data_repository import HistoricalDataRepository
 from src.application.backtester import Backtester
 from src.application.strategy_optimizer import StrategyOptimizer
-
-
-# ============================================================
-# 实验配置（按用户要求锁定）
-# ============================================================
-
-SYMBOL = "ETH/USDT:USDT"
-TIMEFRAME = "1h"
-START_TIME = 1704067200000  # 2024-01-01 00:00:00 UTC
-END_TIME = 1735689599000    # 2024-12-31 23:59:59 UTC
-OBJECTIVE = OptimizationObjective.SHARPE
-N_TRIALS = 30
-INITIAL_BALANCE = Decimal("10000")
-
-# Stress 滑点配置（用户要求）
-SLIPPAGE_RATE = Decimal("0.001")
-TP_SLIPPAGE_RATE = Decimal("0.0005")
-FEE_RATE = Decimal("0.0004")
-
-# 固定订单策略参数
-TP_RATIOS = [Decimal("0.6"), Decimal("0.4")]
-TP_TARGETS = [Decimal("1.0"), Decimal("2.5")]
-BREAKEVEN_ENABLED = False
-
-DB_PATH = "data/v3_dev.db"
-
-# 参数空间（只搜索这 3 个，窄范围）
-PARAMETER_SPACE = ParameterSpace(parameters=[
-    ParameterDefinition(
-        name="max_atr_ratio",
-        type=ParameterType.FLOAT,
-        low_float=0.008,
-        high_float=0.012,
-    ),
-    ParameterDefinition(
-        name="min_distance_pct",
-        type=ParameterType.FLOAT,
-        low_float=0.003,
-        high_float=0.007,
-    ),
-    ParameterDefinition(
-        name="ema_period",
-        type=ParameterType.INT,
-        low=150,
-        high=250,
-    ),
-])
 
 
 def format_timestamp(ts_ms: int) -> str:
@@ -87,36 +44,110 @@ def format_timestamp(ts_ms: int) -> str:
 async def main():
     """主函数"""
     print("=" * 60)
-    print("Optuna ETH/USDT 1h 小规模优化")
+    print("Optuna ETH/USDT 1h 小规模优化（OptunaStudySpec）")
     print("=" * 60)
 
+    # ============================================================
+    # 构建研究规范（所有配置集中在这里）
+    # ============================================================
+
+    # 时间窗口
+    window = TimeWindowMs(
+        start_time_ms=1704067200000,  # 2024-01-01 00:00:00 UTC
+        end_time_ms=1735689599000,    # 2024-12-31 23:59:59 UTC
+    )
+
+    # 成本参数（realistic）
+    costs = EngineCostSpec(
+        initial_balance=Decimal("10000"),
+        slippage_rate=Decimal("0.001"),
+        tp_slippage_rate=Decimal("0.0005"),
+        fee_rate=Decimal("0.0004"),
+    )
+
+    # 回测任务规范
+    job_spec = BacktestJobSpec(
+        name="eth_1h_optuna_realistic",
+        profile_name="backtest_eth_baseline",
+        symbol="ETH/USDT:USDT",
+        timeframe="1h",
+        window=window,
+        limit=9000,
+        mode="v3_pms",
+        costs=costs,
+    )
+
+    # 参数空间（只搜索这 3 个，窄范围）
+    parameter_space = ParameterSpace(parameters=[
+        ParameterDefinition(
+            name="max_atr_ratio",
+            type=ParameterType.FLOAT,
+            low_float=0.008,
+            high_float=0.012,
+        ),
+        ParameterDefinition(
+            name="min_distance_pct",
+            type=ParameterType.FLOAT,
+            low_float=0.003,
+            high_float=0.007,
+        ),
+        ParameterDefinition(
+            name="ema_period",
+            type=ParameterType.INT,
+            low=150,
+            high=250,
+        ),
+    ])
+
+    # Optuna 研究规范
+    study_spec = OptunaStudySpec(
+        study_name="eth_1h_narrow_search",
+        job=job_spec,
+        n_trials=30,
+        parameter_space=parameter_space,
+        fixed_params={
+            "tp_ratios": [Decimal("0.6"), Decimal("0.4")],
+            "tp_targets": [Decimal("1.0"), Decimal("2.5")],
+            "breakeven_enabled": False,
+        },
+    )
+
+    # ============================================================
+    # 打印配置信息
+    # ============================================================
+
     print(f"\n实验配置:")
-    print(f"   交易对: {SYMBOL}")
-    print(f"   周期: {TIMEFRAME}")
-    print(f"   时间范围: {format_timestamp(START_TIME)} ~ {format_timestamp(END_TIME)}")
-    print(f"   优化目标: {OBJECTIVE.value}")
-    print(f"   试验次数: {N_TRIALS}")
-    print(f"   初始资金: {INITIAL_BALANCE}")
+    print(f"   交易对: {study_spec.job.symbol}")
+    print(f"   周期: {study_spec.job.timeframe}")
+    print(f"   时间范围: {format_timestamp(study_spec.job.window.start_time_ms)} ~ {format_timestamp(study_spec.job.window.end_time_ms)}")
+    print(f"   优化目标: {study_spec.objective.value}")
+    print(f"   试验次数: {study_spec.n_trials}")
+    print(f"   初始资金: {study_spec.job.costs.initial_balance}")
 
     print(f"\n成本参数 (realistic):")
-    print(f"   入场滑点率: {SLIPPAGE_RATE}")
-    print(f"   止盈滑点率: {TP_SLIPPAGE_RATE}")
-    print(f"   手续费率: {FEE_RATE}")
+    print(f"   入场滑点率: {study_spec.job.costs.slippage_rate}")
+    print(f"   止盈滑点率: {study_spec.job.costs.tp_slippage_rate}")
+    print(f"   手续费率: {study_spec.job.costs.fee_rate}")
 
     print(f"\n固定订单参数:")
-    print(f"   TP ratios: {TP_RATIOS}")
-    print(f"   TP targets: {TP_TARGETS}")
-    print(f"   Breakeven: {BREAKEVEN_ENABLED}")
+    print(f"   TP ratios: {study_spec.fixed_params.get('tp_ratios')}")
+    print(f"   TP targets: {study_spec.fixed_params.get('tp_targets')}")
+    print(f"   Breakeven: {study_spec.fixed_params.get('breakeven_enabled')}")
 
     print(f"\n参数空间:")
-    for param in PARAMETER_SPACE.parameters:
+    for param in study_spec.parameter_space.parameters:
         if param.type == ParameterType.FLOAT:
             print(f"   {param.name}: [{param.low_float}, {param.high_float}]")
         else:
             print(f"   {param.name}: [{param.low}, {param.high}]")
 
+    # ============================================================
     # 初始化组件
+    # ============================================================
+
     print("\n初始化组件...")
+
+    DB_PATH = "data/v3_dev.db"
 
     # 使用本地数据仓库（不需要 API key）
     data_repo = HistoricalDataRepository(DB_PATH)
@@ -138,25 +169,11 @@ async def main():
     await optimizer.initialize()
     print("   StrategyOptimizer 初始化完成")
 
-    # 构建优化请求
-    request = OptimizationRequest(
-        symbol=SYMBOL,
-        timeframe=TIMEFRAME,
-        start_time=START_TIME,
-        end_time=END_TIME,
-        objective=OBJECTIVE,
-        n_trials=N_TRIALS,
-        parameter_space=PARAMETER_SPACE,
-        initial_balance=INITIAL_BALANCE,
-        slippage_rate=SLIPPAGE_RATE,
-        fee_rate=FEE_RATE,
-        fixed_params={
-            "tp_ratios": TP_RATIOS,
-            "tp_targets": TP_TARGETS,
-            "breakeven_enabled": BREAKEVEN_ENABLED,
-            "tp_slippage_rate": TP_SLIPPAGE_RATE,
-        },
-    )
+    # ============================================================
+    # 构建优化请求（使用 spec）
+    # ============================================================
+
+    request = study_spec.to_optimization_request()
 
     print("\n启动优化任务...")
 
@@ -211,8 +228,8 @@ async def main():
 
             # 检查是否有大量 0 trades
             zero_trades_count = sum(1 for r in sorted_results if r.total_trades == 0)
-            if zero_trades_count > N_TRIALS * 0.5:
-                print(f"\n警告: {zero_trades_count}/{N_TRIALS} 次试验无交易！")
+            if zero_trades_count > study_spec.n_trials * 0.5:
+                print(f"\n警告: {zero_trades_count}/{study_spec.n_trials} 次试验无交易！")
                 print("   可能原因: 参数空间过于严格")
                 print("   建议: 检查 max_atr_ratio 和 min_distance_pct 范围")
 

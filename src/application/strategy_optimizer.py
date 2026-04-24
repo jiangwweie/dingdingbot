@@ -245,9 +245,6 @@ class StrategyOptimizer:
     集成 Optuna 框架，支持多目标参数优化
     """
 
-    # 线程池用于运行 Optuna 同步优化
-    _executor = ThreadPoolExecutor(max_workers=4)
-
     def __init__(
         self,
         exchange_gateway: ExchangeGateway,
@@ -271,6 +268,9 @@ class StrategyOptimizer:
             DEFAULT_BACKTEST_PROFILE_PROVIDER
         )
         self._backtest_profile_name = backtest_profile_name
+
+        # 线程池用于运行 Optuna 同步优化（实例级，避免跨实例共享与泄漏）
+        self._executor = ThreadPoolExecutor(max_workers=4)
 
         # 任务管理
         self._jobs: Dict[str, OptimizationJob] = {}
@@ -299,6 +299,13 @@ class StrategyOptimizer:
         """关闭资源"""
         if self._history_repo:
             await self._history_repo.close()
+        if self._executor:
+            # Do not block shutdown; best-effort cleanup for API/script lifecycle.
+            try:
+                self._executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                # Python < 3.9 compatibility: cancel_futures not supported
+                self._executor.shutdown(wait=False)
 
     async def start_optimization(
         self,
@@ -399,9 +406,14 @@ class StrategyOptimizer:
             # if request.resume_from_trial is not None and self._history_repo:
             #     await self._resume_study(study, job_id, request.resume_from_trial)
 
+            main_loop = asyncio.get_running_loop()
+
             # 定义目标函数（传入 fixed_params）
             objective_func = self._create_objective_function(
-                request, job_id, fixed_params=request.fixed_params
+                request,
+                job_id,
+                fixed_params=request.fixed_params,
+                main_loop=main_loop,
             )
 
             # 运行优化（在线程中运行，避免与异步事件循环冲突）
@@ -410,8 +422,6 @@ class StrategyOptimizer:
             callbacks = [self._create_trial_callback(job_id)]
 
             # 在线程池中运行 Optuna 的同步 optimize 方法
-            loop = asyncio.get_event_loop()
-
             def _run_optimize():
                 study.optimize(
                     objective_func,
@@ -421,7 +431,7 @@ class StrategyOptimizer:
                     show_progress_bar=False,  # 在线程中禁用进度条
                 )
 
-            await loop.run_in_executor(self._executor, _run_optimize)
+            await main_loop.run_in_executor(self._executor, _run_optimize)
 
             # 更新任务状态为完成
             job.status = OptimizationJobStatus.COMPLETED
@@ -525,6 +535,8 @@ class StrategyOptimizer:
         request: OptimizationRequest,
         job_id: str,
         fixed_params: Optional[Dict[str, Any]] = None,
+        *,
+        main_loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> Callable[[Trial], float]:
         """
         创建目标函数
@@ -586,9 +598,16 @@ class StrategyOptimizer:
             if self._stop_flags.get(job_id, False):
                 raise optuna.TrialPruned("任务被停止")
 
-            # 运行异步目标函数
-            # 由于 optimize 在线程中运行，这里可以安全地使用 asyncio.run
-            return asyncio.run(objective_async(trial))
+            # Run the async objective on the main event loop.
+            # This avoids creating nested event loops in worker threads, which would
+            # break loop-bound async resources (aiosqlite/aiohttp).
+            if main_loop is None:
+                # Legacy/test-only path: runs the async objective in a fresh loop.
+                # Production optimize runs in a worker thread and must provide main_loop.
+                return asyncio.run(objective_async(trial))
+
+            future = asyncio.run_coroutine_threadsafe(objective_async(trial), main_loop)
+            return future.result()
 
         return objective
 

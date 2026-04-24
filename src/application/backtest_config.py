@@ -492,18 +492,24 @@ class ResolvedBacktestConfig(BaseModel):
     def to_backtest_request(self, request: Optional[BacktestRequest] = None) -> BacktestRequest:
         """Build a BacktestRequest with missing config filled from the profile."""
         request_data = request.model_dump() if request else {}
+        def _coalesce_none(value, default):
+            return default if value is None else value
+
         request_data.update(
             {
-                "symbol": request_data.get("symbol") or self.symbol,
-                "timeframe": request_data.get("timeframe") or self.timeframe,
-                "limit": request_data.get("limit") or self.limit,
-                "strategies": request_data.get("strategies") or [self.strategy_definition.model_dump(mode="python")],
-                "risk_overrides": request_data.get("risk_overrides") or self.risk_config,
-                "order_strategy": request_data.get("order_strategy") or self.order_strategy,
-                "initial_balance": request_data.get("initial_balance") or self.params.initial_balance,
-                "slippage_rate": request_data.get("slippage_rate") or self.params.slippage_rate,
-                "tp_slippage_rate": request_data.get("tp_slippage_rate") or self.params.tp_slippage_rate,
-                "fee_rate": request_data.get("fee_rate") or self.params.fee_rate,
+                "symbol": _coalesce_none(request_data.get("symbol"), self.symbol),
+                "timeframe": _coalesce_none(request_data.get("timeframe"), self.timeframe),
+                "limit": _coalesce_none(request_data.get("limit"), self.limit),
+                "strategies": _coalesce_none(
+                    request_data.get("strategies"),
+                    [self.strategy_definition.model_dump(mode="python")],
+                ),
+                "risk_overrides": _coalesce_none(request_data.get("risk_overrides"), self.risk_config),
+                "order_strategy": _coalesce_none(request_data.get("order_strategy"), self.order_strategy),
+                "initial_balance": _coalesce_none(request_data.get("initial_balance"), self.params.initial_balance),
+                "slippage_rate": _coalesce_none(request_data.get("slippage_rate"), self.params.slippage_rate),
+                "tp_slippage_rate": _coalesce_none(request_data.get("tp_slippage_rate"), self.params.tp_slippage_rate),
+                "fee_rate": _coalesce_none(request_data.get("fee_rate"), self.params.fee_rate),
             }
         )
         return BacktestRequest(**request_data)
