@@ -230,6 +230,13 @@ class ExchangeGateway:
         try:
             restrictions = await self.rest_exchange.sapi_get_account_apirestrictions()
         except Exception as e:
+            if self.testnet:
+                logger.warning(
+                    "Failed to check Binance API key restrictions on testnet; "
+                    "skipping withdraw-permission enforcement. error=%s",
+                    e,
+                )
+                return
             raise FatalStartupError(
                 f"Failed to check Binance API key restrictions: {e}",
                 "F-004",
