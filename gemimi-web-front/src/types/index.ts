@@ -138,3 +138,29 @@ export interface ReplayContext {
   resolved_request: Record<string, string | number | boolean>;
   runtime_overrides: Record<string, string | number | boolean>;
 }
+
+export interface BacktestRecord {
+  id: string;
+  candidate_ref: string;
+  symbol: string;
+  timeframe: string;
+  start_date: string;
+  end_date: string;
+  status: 'COMPLETED' | 'RUNNING' | 'FAILED';
+  metrics: {
+    total_return: number;
+    sharpe: number;
+    max_drawdown: number;
+    win_rate: number;
+    trades: number;
+  };
+}
+
+export interface CompareRecord {
+  metric: string;
+  baseline: string | number;
+  candidateA: string | number;
+  candidateB?: string | number;
+  diffA: number;
+  diffB?: number;
+}

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { RefreshCw, Activity, Zap, Server, HeartPulse, FileText, LayoutDashboard, GitBranch } from 'lucide-react';
+import { RefreshCw, Activity, Zap, Server, HeartPulse, FileText, LayoutDashboard, GitBranch, History, Scale } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 
 // Context to trigger refreshes across pages
@@ -34,6 +34,8 @@ export default function AppLayout() {
       links: [
         { name: '候选策略', to: '/research/candidates', icon: FileText },
         { name: '回测上下文', to: '/research/replay/default', icon: GitBranch, hideDisabled: true },
+        { name: '回测记录', to: '/research/backtests', icon: History },
+        { name: '策略对比', to: '/research/compare', icon: Scale },
       ]
     }
   ];

@@ -8,6 +8,8 @@ import {
   Candidate,
   CandidateDetail,
   ReplayContext,
+  BacktestRecord,
+  CompareRecord,
   FreshnessStatus
 } from '@/src/types';
 
@@ -146,4 +148,51 @@ export async function getReplayContext(candidateName: string): Promise<ReplayCon
     resolved_request: { mode: 'replay', timeframe: '5m', start: '2026-01-01', end: '2026-04-01' },
     runtime_overrides: { 'RSI_PERIOD': 14, 'MACD_FAST': 12 }
   };
+}
+
+export async function getBacktests(): Promise<BacktestRecord[]> {
+  await delay(400);
+  return [
+    {
+      id: 'bt_20260401_01',
+      candidate_ref: 'cand_eth_alpha_01',
+      symbol: 'ETH/USDT',
+      timeframe: '5m',
+      start_date: '2025-01-01',
+      end_date: '2026-01-01',
+      status: 'COMPLETED',
+      metrics: { total_return: 0.45, sharpe: 2.1, max_drawdown: 0.15, win_rate: 0.54, trades: 1250 }
+    },
+    {
+      id: 'bt_20260401_02',
+      candidate_ref: 'cand_eth_beta_14',
+      symbol: 'ETH/USDT',
+      timeframe: '5m',
+      start_date: '2025-01-01',
+      end_date: '2026-01-01',
+      status: 'COMPLETED',
+      metrics: { total_return: 0.38, sharpe: 1.8, max_drawdown: 0.18, win_rate: 0.51, trades: 840 }
+    },
+    {
+      id: 'bt_20260402_01',
+      candidate_ref: 'cand_eth_gamma_09',
+      symbol: 'ETH/USDT',
+      timeframe: '5m',
+      start_date: '2025-06-01',
+      end_date: '2026-04-01',
+      status: 'FAILED',
+      metrics: { total_return: 0, sharpe: 0, max_drawdown: 0, win_rate: 0, trades: 0 }
+    }
+  ];
+}
+
+export async function getCompareData(): Promise<CompareRecord[]> {
+  await delay(300);
+  return [
+    { metric: '总收益率 (Total Return)', baseline: '25.0%', candidateA: '45.0%', candidateB: '38.0%', diffA: 0.8, diffB: 0.52 },
+    { metric: '夏普比率 (Sharpe)', baseline: 1.5, candidateA: 2.1, candidateB: 1.8, diffA: 0.4, diffB: 0.2 },
+    { metric: '最大回撤 (Max Drawdown)', baseline: '22.0%', candidateA: '15.0%', candidateB: '18.0%', diffA: 0.31, diffB: 0.18 },
+    { metric: '胜率 (Win Rate)', baseline: '48.0%', candidateA: '54.0%', candidateB: '51.0%', diffA: 0.125, diffB: 0.0625 },
+    { metric: '交易次数 (Trades)', baseline: 950, candidateA: 1250, candidateB: 840, diffA: 0.31, diffB: -0.11 },
+  ];
 }
