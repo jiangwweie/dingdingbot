@@ -650,3 +650,15 @@
 具体任务拆分：
 
 - `docs/planning/sim-0-real-chain-validation-plan.md`
+
+---
+
+## 2026-04-24
+
+### Config 重构第三轮审计收口（方案 A）
+
+1. 修复 `StrategyOptimizer._build_profile_seed_request()` 丢失 `tp_slippage_rate` 的透传问题。
+2. 为 `run_coroutine_threadsafe(...).result()` 增加单 trial 超时保护；超时后取消 future 并 prune 当前 trial，避免 worker 线程长期阻塞。
+3. 为 `coerce_decimal_list_fields()` 增加非 list/tuple 输入防御，避免把字符串逐字符转 Decimal 的隐性坏数据。
+4. 新增 `tests/unit/test_validators.py`，直接覆盖 shared validators 的边界行为。
+5. 记录 `stable_config_hash()` 的 hash schema 语义升级点，明确旧 hash 仅在审计语义上失效，不影响运行查询链路。

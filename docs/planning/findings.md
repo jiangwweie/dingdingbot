@@ -429,3 +429,12 @@ R17. 旧的最小验证脚本若继续调用已删除私有方法，会在你以
 
 先把 A 的 “Resolver + Spec + Reporter + candidate output contract” 固化为真源；
 待 Sim-1 稳定后，再把脚本逐步收敛为统一 CLI/registry（方案 B）。
+
+---
+
+## 2026-04-24 -- Config Hash 语义升级记录
+
+- `stable_config_hash()` 从 `3e9de20` 起引入 `hash_schema_version` 包装层。
+- 影响：同一业务 payload 在新实现下会产生不同于旧实现的 `config_hash`。
+- 当前判断：这不会阻塞运行链路，因为 `config_hash` 主要用于审计/日志，不作为 profile 查询键。
+- 运维含义：旧日志/旧 seed 产生的 hash 与新版本不可直接混比；如需重新对齐，应以新版本重新 seed/runtime resolve 为准。

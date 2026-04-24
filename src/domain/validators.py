@@ -31,9 +31,12 @@ def coerce_decimal_list_fields(data: object, keys: Iterable[str]) -> object:
     converted = dict(data)
     for key in keys:
         if key in converted and converted[key] is not None:
+            raw = converted[key]
+            if not isinstance(raw, (list, tuple)):
+                raise TypeError(f"expected list for {key}, got {type(raw).__name__}")
             converted[key] = [
                 value if isinstance(value, Decimal) else Decimal(str(value))
-                for value in converted[key]
+                for value in raw
             ]
     return converted
 

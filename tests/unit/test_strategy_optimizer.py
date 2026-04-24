@@ -15,6 +15,7 @@ Strategy Optimizer 单元测试
 import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import sys
 import os
 from pathlib import Path
@@ -532,6 +533,45 @@ class TestEdgeCases:
 
         assert params == {}
         mock_trial.assert_not_called()
+
+    def test_build_profile_seed_request_preserves_tp_slippage_rate(self, optimizer, sample_optimization_request):
+        """测试 profile seed request 不丢失 TP slippage 配置"""
+        sample_optimization_request.tp_slippage_rate = Decimal("0.0009")
+
+        request = optimizer._build_profile_seed_request(sample_optimization_request)
+
+        assert request.tp_slippage_rate == Decimal("0.0009")
+
+    def test_objective_prunes_trial_when_main_loop_future_times_out(self, optimizer, sample_optimization_request):
+        """测试主循环 future 超时时会 prune 当前 trial"""
+        from src.application.strategy_optimizer import DEFAULT_TRIAL_TIMEOUT_SECONDS
+        import optuna
+
+        optimizer._jobs = {
+            "job_timeout": Mock(current_trial=0)
+        }
+        optimizer._stop_flags = {"job_timeout": False}
+
+        trial = Mock(number=0)
+        future = Mock()
+        future.result.side_effect = FutureTimeoutError()
+
+        def _fake_schedule(coro, _loop):
+            coro.close()
+            return future
+
+        with patch("src.application.strategy_optimizer.asyncio.run_coroutine_threadsafe", side_effect=_fake_schedule):
+            objective = optimizer._create_objective_function(  # type: ignore[attr-defined]
+                sample_optimization_request,
+                "job_timeout",
+                fixed_params=None,
+                main_loop=Mock(),
+            )
+            with pytest.raises(optuna.TrialPruned) as exc_info:
+                objective(trial)
+
+        future.cancel.assert_called_once()
+        assert str(DEFAULT_TRIAL_TIMEOUT_SECONDS) in str(exc_info.value)
 
 
 # ============================================================

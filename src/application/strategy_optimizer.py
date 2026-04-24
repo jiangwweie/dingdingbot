@@ -19,7 +19,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable, Awaitable, Union
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 from src.domain.models import (
     OptimizationRequest,
@@ -75,6 +75,7 @@ OPTUNA_FIXED_PARAM_TO_CONTRACT_KEY = {
 
 RISK_PARAM_NAMES = {"max_loss_percent", "max_total_exposure", "max_leverage"}
 ENGINE_PARAM_NAMES = {"initial_balance", "slippage_rate", "tp_slippage_rate", "fee_rate"}
+DEFAULT_TRIAL_TIMEOUT_SECONDS = 300
 
 
 def json_dumps_safe(payload: Any, **kwargs: Any) -> str:
@@ -607,7 +608,13 @@ class StrategyOptimizer:
                 return asyncio.run(objective_async(trial))
 
             future = asyncio.run_coroutine_threadsafe(objective_async(trial), main_loop)
-            return future.result()
+            try:
+                return future.result(timeout=DEFAULT_TRIAL_TIMEOUT_SECONDS)
+            except FutureTimeoutError:
+                future.cancel()
+                raise optuna.TrialPruned(
+                    f"trial timeout after {DEFAULT_TRIAL_TIMEOUT_SECONDS}s"
+                )
 
         return objective
 
@@ -752,6 +759,7 @@ class StrategyOptimizer:
             "mode": "v3_pms",
             "initial_balance": opt_request.initial_balance,
             "slippage_rate": opt_request.slippage_rate,
+            "tp_slippage_rate": opt_request.tp_slippage_rate,
             "fee_rate": opt_request.fee_rate,
         }
         if fixed_params:
