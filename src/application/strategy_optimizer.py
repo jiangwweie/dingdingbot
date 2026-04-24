@@ -1034,7 +1034,7 @@ class StrategyOptimizer:
 
         results = await self.get_trial_results(job_id, limit=max(top_n, 1))
         ranked_results = sorted(results, key=lambda item: item.objective_value, reverse=True)
-        best_trial = job.best_trial or (ranked_results[0] if ranked_results else None)
+        best_trial = ranked_results[0] if ranked_results else job.best_trial
         if best_trial is None:
             raise ValueError(f"Optimization job has no completed trials: {job_id}")
 

@@ -512,6 +512,53 @@ class TestBuildTrialBacktestInputs:
         assert "candidate_only" in content
         assert "optuna_candidate_opt_candidate_file" in content
 
+    @pytest.mark.asyncio
+    async def test_build_candidate_report_prefers_ranked_trial_with_complete_metrics(
+        self,
+        optimizer,
+        sample_optimization_request,
+    ):
+        """best_trial 若是瘦对象，candidate report 应优先使用历史回读的完整 trial。"""
+        from src.domain.models import OptimizationJob, OptimizationTrialResult, OptimizationJobStatus
+
+        job_id = "opt_candidate_ranked"
+        job_best_trial = OptimizationTrialResult(
+            trial_number=5,
+            params={"ema_period": 42},
+            objective_value=1.36,
+        )
+        ranked_trial = OptimizationTrialResult(
+            trial_number=5,
+            params={"ema_period": 42},
+            objective_value=1.36,
+            total_return=Decimal("0.48"),
+            sharpe_ratio=1.36,
+            sortino_ratio=0.81,
+            max_drawdown=Decimal("0.21"),
+            win_rate=47.9,
+            total_trades=144,
+            winning_trades=69,
+        )
+        optimizer._jobs[job_id] = OptimizationJob(
+            job_id=job_id,
+            request=sample_optimization_request,
+            status=OptimizationJobStatus.COMPLETED,
+            total_trials=10,
+            best_trial=job_best_trial,
+            best_value=1.36,
+        )
+
+        async def _fake_results(*args, **kwargs):
+            return [ranked_trial]
+
+        optimizer.get_trial_results = _fake_results  # type: ignore[method-assign]
+
+        report = await optimizer.build_candidate_report(job_id)
+
+        assert report["best_trial"]["trial_number"] == 5
+        assert report["best_trial"]["sortino_ratio"] == 0.81
+        assert report["best_trial"]["sharpe_ratio"] == 1.36
+
 
 # ============================================================
 # Tests: Edge Cases
