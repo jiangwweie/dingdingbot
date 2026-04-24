@@ -2338,6 +2338,7 @@ class OptimizationRequest(BaseModel):
     # 回测配置
     initial_balance: Decimal = Field(default=Decimal("10000"), description="初始资金")
     slippage_rate: Decimal = Field(default=Decimal("0.001"), description="滑点率")
+    tp_slippage_rate: Decimal = Field(default=Decimal("0.0005"), description="止盈滑点率")
     fee_rate: Decimal = Field(default=Decimal("0.0004"), description="手续费率")
 
     # 固定参数（Phase 8.2：Optuna 固定参数注入）

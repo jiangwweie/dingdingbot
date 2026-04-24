@@ -87,7 +87,7 @@ def test_optuna_study_spec_to_optimization_request_maps_fields():
         study_name="study",
         job=job,
         objective=OptimizationObjective.SHARPE,
-        n_trials=3,
+        n_trials=10,
         parameter_space=parameter_space,
         fixed_params={"breakeven_enabled": False},
     )
@@ -98,7 +98,7 @@ def test_optuna_study_spec_to_optimization_request_maps_fields():
     assert request.start_time == 10
     assert request.end_time == 20
     assert request.objective == OptimizationObjective.SHARPE
-    assert request.n_trials == 3
+    assert request.n_trials == 10
     assert request.initial_balance == Decimal("10000")
     assert request.slippage_rate == Decimal("0.001")
     assert request.tp_slippage_rate == Decimal("0.0005")
@@ -109,4 +109,3 @@ def test_optuna_study_spec_to_optimization_request_maps_fields():
 def test_time_window_requires_end_after_start():
     with pytest.raises(ValueError):
         TimeWindowMs(start_time_ms=5, end_time_ms=5)
-

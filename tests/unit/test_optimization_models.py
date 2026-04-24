@@ -310,6 +310,7 @@ class TestOptimizationRequest:
         assert request.objective == OptimizationObjective.SHARPE
         assert request.n_trials == 100
         assert request.initial_balance == Decimal("10000")
+        assert request.tp_slippage_rate == Decimal("0.0005")
 
     def test_full_request(self):
         """测试完整配置请求"""
@@ -334,6 +335,7 @@ class TestOptimizationRequest:
             timeout=1800,
             initial_balance=Decimal("50000"),
             slippage_rate=Decimal("0.001"),
+            tp_slippage_rate=Decimal("0.0007"),
             fee_rate=Decimal("0.0004"),
         )
 
@@ -341,6 +343,7 @@ class TestOptimizationRequest:
         assert request.n_trials == 50
         assert request.timeout == 1800
         assert request.initial_balance == Decimal("50000")
+        assert request.tp_slippage_rate == Decimal("0.0007")
         assert request.limit == 200
 
     def test_invalid_n_trials_too_low(self):
@@ -482,3 +485,4 @@ class TestModelSerialization:
         assert data["timeframe"] == "15m"
         assert data["objective"] == "sharpe"
         assert data["n_trials"] == 100
+        assert data["tp_slippage_rate"] == Decimal("0.0005")
