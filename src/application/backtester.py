@@ -2194,6 +2194,7 @@ class Backtester:
             total_funding_cost=total_funding_cost,  # BT-2: 总资金费用
             max_drawdown=max_drawdown,
             sharpe_ratio=self._calculate_sharpe_ratio(equity_curve, request.timeframe),
+            sortino_ratio=self._calculate_sortino_ratio(equity_curve, request.timeframe),
             positions=position_summaries,
             close_events=all_close_events,  # 【任务 1.4】平仓事件列表
             signal_attributions=signal_attributions,  # 阶段 5.4: 归因分析结果
@@ -2351,18 +2352,7 @@ class Backtester:
         Returns:
             年化夏普比率，数据不足时返回 None
         """
-        if len(equity_curve) < 2:
-            return None
-
-        # 计算逐期收益率
-        returns: List[Decimal] = []
-        for i in range(1, len(equity_curve)):
-            prev_equity = equity_curve[i - 1][1]
-            curr_equity = equity_curve[i][1]
-            if prev_equity == Decimal('0'):
-                continue
-            r = (curr_equity - prev_equity) / prev_equity
-            returns.append(r)
+        returns = self._calculate_period_returns(equity_curve)
 
         if len(returns) < 2:
             return None
@@ -2386,6 +2376,54 @@ class Backtester:
         annualization_factor = Decimal(str(math.sqrt(bars_per_year)))
 
         return sharpe_per_period * annualization_factor
+
+    def _calculate_sortino_ratio(
+        self,
+        equity_curve: List[Tuple[int, Decimal]],
+        timeframe: str,
+    ) -> Optional[Decimal]:
+        """基于权益曲线计算年化索提诺比率。"""
+        returns = self._calculate_period_returns(equity_curve)
+        if len(returns) < 2:
+            return None
+
+        downside_returns = [r for r in returns if r < Decimal("0")]
+        if len(downside_returns) < 2:
+            return Decimal("0")
+
+        n = Decimal(len(returns))
+        mean_return = sum(returns) / n
+
+        downside_n = Decimal(len(downside_returns))
+        downside_mean = sum(downside_returns) / downside_n
+        downside_variance = sum((r - downside_mean) ** 2 for r in downside_returns) / (downside_n - Decimal("1"))
+        downside_variance = max(Decimal("0"), downside_variance)
+        downside_std = downside_variance.sqrt()
+
+        if downside_std == Decimal("0"):
+            return Decimal("0")
+
+        sortino_per_period = mean_return / downside_std
+        bars_per_year = self.BARS_PER_YEAR.get(timeframe, 8760)
+        annualization_factor = Decimal(str(math.sqrt(bars_per_year)))
+        return sortino_per_period * annualization_factor
+
+    @staticmethod
+    def _calculate_period_returns(
+        equity_curve: List[Tuple[int, Decimal]],
+    ) -> List[Decimal]:
+        """Convert an equity curve into per-period returns, skipping zero-base points."""
+        if len(equity_curve) < 2:
+            return []
+
+        returns: List[Decimal] = []
+        for i in range(1, len(equity_curve)):
+            prev_equity = equity_curve[i - 1][1]
+            curr_equity = equity_curve[i][1]
+            if prev_equity == Decimal("0"):
+                continue
+            returns.append((curr_equity - prev_equity) / prev_equity)
+        return returns
 
 
 # ============================================================

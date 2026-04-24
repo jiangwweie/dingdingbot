@@ -1338,6 +1338,7 @@ class PMSBacktestReport(FinancialModel):
     - total_funding_cost: 总资金费用 (BT-2)
     - max_drawdown: 最大回撤 (%)
     - sharpe_ratio: 夏普比率 (可选)
+    - sortino_ratio: 索提诺比率 (可选)
     - positions: 仓位历史摘要列表
     """
     strategy_id: str
@@ -1369,6 +1370,7 @@ class PMSBacktestReport(FinancialModel):
         description="最大回撤 (%)，范围 0 ~ 100"
     )
     sharpe_ratio: Optional[Decimal] = None  # 夏普比率
+    sortino_ratio: Optional[Decimal] = None  # 索提诺比率
     positions: List[PositionSummary] = Field(default_factory=list)
     close_events: List["PositionCloseEvent"] = Field(default_factory=list)  # 任务 1.4 新增
 

@@ -904,7 +904,7 @@ class StrategyOptimizer:
         metrics = {
             "total_return": float(report.total_return),
             "sharpe_ratio": float(report.sharpe_ratio) if report.sharpe_ratio else 0.0,
-            "sortino_ratio": 0.0,  # 待实现
+            "sortino_ratio": float(report.sortino_ratio) if report.sortino_ratio else 0.0,
             "max_drawdown": float(report.max_drawdown),
             "win_rate": float(report.win_rate),
             "total_trades": report.total_trades,

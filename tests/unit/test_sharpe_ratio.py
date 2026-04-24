@@ -216,3 +216,50 @@ class TestCalculateSharpeRatio:
         # Should handle gracefully, skipping the (0 -> 5000) return
         result = self.backtester._calculate_sharpe_ratio(equity_curve, "1h")
         assert result is not None
+
+
+class TestCalculateSortinoRatio:
+    """Tests for Backtester._calculate_sortino_ratio()."""
+
+    def setup_method(self):
+        self.backtester = Backtester(exchange_gateway=None)
+
+    def test_insufficient_data_returns_none(self):
+        equity_curve = [(1000, Decimal("10000"))]
+        result = self.backtester._calculate_sortino_ratio(equity_curve, "1h")
+        assert result is None
+
+    def test_no_downside_returns_zero(self):
+        equity_curve = [
+            (1000, Decimal("10000")),
+            (2000, Decimal("10100")),
+            (3000, Decimal("10201")),
+            (4000, Decimal("10303.01")),
+        ]
+        result = self.backtester._calculate_sortino_ratio(equity_curve, "1h")
+        assert result == Decimal("0")
+
+    def test_mixed_returns_produce_positive_sortino(self):
+        equity_curve = [
+            (1000, Decimal("10000")),
+            (2000, Decimal("10200")),
+            (3000, Decimal("10047")),
+            (4000, Decimal("10300")),
+            (5000, Decimal("10145")),
+            (6000, Decimal("10503")),
+        ]
+        result = self.backtester._calculate_sortino_ratio(equity_curve, "1h")
+        assert result is not None
+        assert result > Decimal("0")
+
+    def test_zero_equity_periods_are_skipped(self):
+        equity_curve = [
+            (1000, Decimal("10000")),
+            (2000, Decimal("9900")),
+            (3000, Decimal("0")),
+            (4000, Decimal("100")),
+            (5000, Decimal("95")),
+            (6000, Decimal("105")),
+        ]
+        result = self.backtester._calculate_sortino_ratio(equity_curve, "1h")
+        assert result is not None

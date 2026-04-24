@@ -16,6 +16,7 @@ import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch
 from concurrent.futures import TimeoutError as FutureTimeoutError
+import json
 import sys
 import os
 from pathlib import Path
@@ -277,6 +278,30 @@ class TestObjectiveCalculation:
         )
 
         assert result == 0.25
+
+    def test_build_optimization_history_records_sortino_ratio(self, optimizer):
+        """测试优化历史记录不再把 sortino 写死为 0.0"""
+        mock_report = Mock(
+            total_return=Decimal("0.25"),
+            sharpe_ratio=Decimal("1.8"),
+            sortino_ratio=Decimal("2.4"),
+            max_drawdown=Decimal("0.12"),
+            win_rate=Decimal("47.5"),
+            total_trades=120,
+            total_pnl=Decimal("2500"),
+            total_fees_paid=Decimal("45"),
+        )
+
+        history = optimizer._build_optimization_history(
+            job_id="job_1",
+            trial_number=3,
+            params={"ema_period": 43},
+            objective_value=1.8,
+            report=mock_report,
+        )
+        metrics = json.loads(history.metrics_json)
+
+        assert metrics["sortino_ratio"] == 2.4
 
     def test_calculate_objective_win_rate(self, optimizer):
         """测试胜率目标计算"""
