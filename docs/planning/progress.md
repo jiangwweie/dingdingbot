@@ -655,6 +655,31 @@
 
 ## 2026-04-24
 
+### 前端重构规划已收口为方案 A
+
+1. ✅ 已确认当前前端重构不走“大杂烩 dashboard”，采用分域控制台方案：
+   - `Runtime`
+   - `Research`
+2. ✅ 四个关键边界已冻结：
+   - 第一版只读为主
+   - Candidate review 第一版只展示，不写回
+   - Runtime 页面第一版手动刷新
+   - Backtest Studio 二期并入
+3. ✅ 规划文档已新增：
+   - `docs/planning/architecture/2026-04-24-frontend-runtime-monitor-and-research-console-plan.md`
+4. ✅ 当前页面树已冻结：
+   - `Runtime / Overview`
+   - `Runtime / Signals`
+   - `Runtime / Execution`
+   - `Runtime / Health`
+   - `Research / Candidates`
+   - `Research / Candidate Detail`
+   - `Research / Replay`
+5. ✅ 当前接口优先级已冻结：
+   - P0：runtime overview / signals / attempts / intents / orders / health
+   - P1：candidate list / candidate detail / replay
+   - P2：backtests / compare / review 写回
+
 ### Config 重构第三轮审计收口（方案 A）
 
 1. 修复 `StrategyOptimizer._build_profile_seed_request()` 丢失 `tp_slippage_rate` 的透传问题。

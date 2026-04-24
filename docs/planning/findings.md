@@ -338,6 +338,57 @@ R17. 旧的最小验证脚本若继续调用已删除私有方法，会在你以
 3. 前端回测重构时只展示该契约允许注入的字段。
 4. 真实 Optuna 小规模搜索运行前单独确认。
 
+### 前端重构采用方案 A（分域控制台）
+
+已确认：
+
+1. 当前前端重构不做“大而全工作台”，先做统一控制台的信息架构。
+2. 采用方案 A：一级导航拆为 `Runtime` / `Research` 两个域。
+3. 第一版以只读为主：
+   - 不做配置编辑
+   - 不做策略热改
+   - Candidate review 第一版只展示
+   - Runtime 页面第一版手动刷新，不做 SSE / websocket UI
+4. Backtest Studio 作为二期并入 `Research` 域，本次先纳入架构，不进第一版实现范围。
+
+当前建议页面树：
+
+1. `Runtime`
+   - `Overview`
+   - `Signals`
+   - `Execution`
+   - `Health`
+2. `Research`
+   - `Candidates`
+   - `Candidate Detail`
+   - `Replay`
+   - `Backtests`（二期）
+   - `Compare`（二期）
+
+当前接口优先级：
+
+1. P0：Runtime 观察接口
+   - `GET /api/runtime/overview`
+   - `GET /api/runtime/signals`
+   - `GET /api/runtime/attempts`
+   - `GET /api/runtime/execution/intents`
+   - `GET /api/runtime/execution/orders`
+   - `GET /api/runtime/health`
+2. P1：Research 只读接口
+   - `GET /api/research/candidates`
+   - `GET /api/research/candidates/{candidate_name}`
+   - `GET /api/research/replay/{candidate_name}`
+3. P2：Backtest Studio / 对比与写回接口
+   - `GET /api/research/backtests`
+   - `GET /api/research/backtests/{report_id}`
+   - `POST /api/research/compare/candidates`
+   - `POST /api/research/compare/backtests`
+   - `POST /api/research/candidates/{candidate_name}/review`（后续如开放人工写回）
+
+SSOT 文档：
+
+- `docs/planning/architecture/2026-04-24-frontend-runtime-monitor-and-research-console-plan.md`
+
 ### `.env` 不能承载本地 PG 示例或 backend 切换值
 
 已跟踪 `.env` 仍包含真实交易所 key / webhook，不能再混入本地 PG 连接串或 backend 切换示例。否则后续提交时容易把个人本地运行环境和敏感配置一起带入版本历史。

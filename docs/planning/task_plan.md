@@ -365,7 +365,18 @@ Sim-0 详细任务拆分（归档参考）：
      - profit concentration
      - max consecutive losses
    - 再做真实启动级冒烟验证
-   - 暂不卷入前端重构；前端后续只消费同一份可注入参数契约
+   - 前端重构已进入规划阶段，但当前只推进方案 A：
+     - 一级导航拆为 `Runtime` / `Research`
+     - 第一版只读为主
+     - Candidate review 第一版只展示，不写回
+     - Runtime 页面第一版使用手动刷新
+     - Backtest Studio 作为二期并入
+   - 前端规划 SSOT：
+     - `docs/planning/architecture/2026-04-24-frontend-runtime-monitor-and-research-console-plan.md`
+   - 前端第一阶段目标：
+     - 先做 Runtime Monitor MVP
+     - 再接 Research 的 candidate / replay 只读页
+     - 不做配置编辑，不做 runtime 热改
 
 ---
 
