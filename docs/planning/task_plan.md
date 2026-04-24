@@ -349,7 +349,7 @@
      - `scripts/verify_fixed_params_minimal.py` 已切到 resolver trial inputs
 7. 下一步切换边界：
    - 回测 API 暂缓，当前不做 Web
-   - 按需将仍会使用的研究脚本入口接入 `BacktestConfigResolver`
+   - 按需将仍会使用的研究脚本入口接入 `BacktestConfigResolver`（决策：先行方案 A，脚本薄化；方案 B 延后）
    - 真实 Optuna 小规模搜索运行前单独确认
    - 再做真实启动级冒烟验证
    - 暂不卷入前端重构；前端后续只消费同一份可注入参数契约

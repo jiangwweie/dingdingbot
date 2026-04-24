@@ -388,3 +388,44 @@
 - `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 主文档今后只保留仍然影响当前阶段决策的结论。 
+
+---
+
+## 2026-04-24 -- 决策记录：研究脚本收口选方案 A（先行），方案 B（延后）
+
+### 背景
+
+当前目标是 Sim-1 启动与模拟盘期间的稳定性，且明确约束：
+
+- 模拟盘期间策略/风控不允许热改
+- Optuna 最优参数只生成 candidate，不允许一键应用到 runtime profile
+- 研究参数必须可复现、可审计、可对比，避免脚本各自拼装导致口径漂移
+
+### 决策
+
+选择方案 A：保留现有脚本入口，但将脚本逻辑薄化为：
+
+- CLI args -> `StudySpec` / `BacktestJobSpec`
+- 统一走 `BacktestConfigResolver` 解析 baseline + overrides + window + seed
+- 统一走 `CandidateReporter` 落盘 `reports/optuna_candidates/`（candidate only）
+
+方案 B（统一 CLI + TaskRegistry）延后到 Sim-1 稳定后演进。
+
+### 选择方案 A 的理由（与当前阶段最强相关）
+
+1. 变更面最小，能最快消除“脚本口径漂移/不可复现/难对比”的核心风险。
+2. 更容易在代码结构层面保证 “candidate only，不触碰 runtime profile”，符合 Sim-1 冻结约束。
+3. 并行友好：脚本可逐个迁移，不会因为统一入口/registry 设计争议阻塞整体研究链。
+4. 方案 A 的底座（Resolver/Spec/Reporter）可作为后续方案 B 的基础，不会推倒重来。
+
+### 此时不直接上方案 B 的反对点（时机风险）
+
+1. 容易超出“路径 1 轻量级收口”边界（CLI/registry/handler 契约会膨胀成框架工程）。
+2. 引入新的单点依赖：入口/registry 不稳会导致所有研究任务被阻塞。
+3. 更容易把研究与 runtime 边界混合，后续出现隐性“apply to runtime”的风险面。
+4. 短期收益不如 A：当前痛点是口径与复现，不是入口数量。
+
+### 后续演进策略（兼容方案 B）
+
+先把 A 的 “Resolver + Spec + Reporter + candidate output contract” 固化为真源；
+待 Sim-1 稳定后，再把脚本逐步收敛为统一 CLI/registry（方案 B）。

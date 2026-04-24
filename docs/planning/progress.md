@@ -616,6 +616,12 @@
    - `python3 -m pytest tests/unit/test_runtime_config_signal_pipeline.py tests/unit/test_strategy_optimizer.py tests/unit/test_optuna_runtime_overrides.py -q`
    - 结果：79 passed
 
+6. ✅ 决策记录：研究脚本收口选方案 A（先行）
+   - 目标：路径 1 轻量级收口，优先消除脚本口径漂移与不可复现
+   - 决策：保留现有脚本入口，但脚本薄化为 Spec + Resolver + Reporter
+   - 约束：candidate only；Sim-1 期间不允许自动 promote runtime profile
+   - 方案 B（统一 CLI + registry）延后到 Sim-1 稳定后演进
+
 ---
 
 ## 下一步
