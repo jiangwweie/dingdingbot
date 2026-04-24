@@ -10,7 +10,7 @@ export function Table({ className, ...props }: React.HTMLAttributes<HTMLTableEle
 }
 
 export function TableHeader({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn("text-[10px] uppercase text-zinc-500 font-bold bg-zinc-950 sticky top-0 border-b border-zinc-800 tracking-widest", className)} {...props} />;
+  return <thead className={cn("text-[10px] uppercase text-zinc-500 font-bold bg-white dark:bg-zinc-950 sticky top-0 border-b border-zinc-200 dark:border-zinc-800 tracking-widest", className)} {...props} />;
 }
 
 export function TableBody({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
@@ -18,7 +18,7 @@ export function TableBody({ className, ...props }: React.HTMLAttributes<HTMLTabl
 }
 
 export function TableRow({ className, ...props }: React.HTMLAttributes<HTMLTableRowElement>) {
-  return <tr className={cn("hover:bg-zinc-800/30 transition-colors", className)} {...props} />;
+  return <tr className={cn("hover:bg-zinc-100 dark:hover:bg-zinc-800/30 transition-colors", className)} {...props} />;
 }
 
 export function TableHead({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {

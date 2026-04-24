@@ -43,8 +43,8 @@ export default function Overview() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold tracking-tight">系统概览</h2>
-        <div className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 px-4 py-2 rounded-lg">
-          <span className="text-sm text-zinc-400">心跳状态 (Heartbeat):</span>
+        <div className="flex items-center gap-3 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2 rounded-lg">
+          <span className="text-sm text-zinc-600 dark:text-zinc-400">心跳状态 (Heartbeat):</span>
           <Badge variant={freshnessVariant[data.freshness_status as keyof typeof freshnessVariant] || 'default'}>
             {freshnessMap[data.freshness_status] || data.freshness_status}
           </Badge>
@@ -55,9 +55,9 @@ export default function Overview() {
         <Card>
           <CardHeader><CardTitle>配置信息 (Profile)</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-zinc-500">配置:</span> <span className="font-mono text-zinc-200">{data.profile}</span></div>
-            <div className="flex justify-between"><span className="text-zinc-500">版本:</span> <span className="font-mono text-zinc-200">{data.version}</span></div>
-            <div className="flex justify-between"><span className="text-zinc-500">哈希:</span> <span className="font-mono text-zinc-400">{data.hash}</span></div>
+            <div className="flex justify-between"><span className="text-zinc-500">配置:</span> <span className="font-mono text-zinc-800 dark:text-zinc-200">{data.profile}</span></div>
+            <div className="flex justify-between"><span className="text-zinc-500">版本:</span> <span className="font-mono text-zinc-800 dark:text-zinc-200">{data.version}</span></div>
+            <div className="flex justify-between"><span className="text-zinc-500">哈希:</span> <span className="font-mono text-zinc-600 dark:text-zinc-400">{data.hash}</span></div>
             <div className="flex justify-between"><span className="text-zinc-500">已冻结 (Frozen):</span> <Badge variant={data.frozen ? 'info' : 'warning'}>{data.frozen ? '是' : '否'}</Badge></div>
           </CardContent>
         </Card>
@@ -85,11 +85,11 @@ export default function Overview() {
           <CardContent className="space-y-2 text-sm">
             <div className="flex justify-between flex-col mb-2">
               <span className="text-zinc-500">服务器时间:</span> 
-              <span className="font-mono text-zinc-300">{format(new Date(data.server_time), 'yyyy-MM-dd HH:mm:ss')}</span>
+              <span className="font-mono text-zinc-700 dark:text-zinc-300">{format(new Date(data.server_time), 'yyyy-MM-dd HH:mm:ss')}</span>
             </div>
             <div className="flex justify-between flex-col mb-2">
               <span className="text-zinc-500">系统最后更新:</span> 
-              <span className="font-mono text-zinc-400">{format(new Date(data.last_runtime_update_at), 'HH:mm:ss.SSS')}</span>
+              <span className="font-mono text-zinc-600 dark:text-zinc-400">{format(new Date(data.last_runtime_update_at), 'HH:mm:ss.SSS')}</span>
             </div>
             <div className="flex justify-between flex-col">
               <span className="text-zinc-500">上次心跳时间:</span> 
@@ -100,15 +100,15 @@ export default function Overview() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card className="bg-zinc-900/50">
+        <Card className="bg-zinc-50 dark:bg-zinc-900/50">
           <CardHeader><CardTitle>后端及执行情况 (Backend & Execution)</CardTitle></CardHeader>
           <CardContent className="text-sm">
             <div className="mb-4">
-              <p className="text-zinc-400 mb-1">运行状态摘要</p>
+              <p className="text-zinc-600 dark:text-zinc-400 mb-1">运行状态摘要</p>
               <p className="font-mono text-blue-300">{data.backend_summary}</p>
             </div>
             <div className="flex gap-4">
-              <div className="bg-zinc-950 p-3 rounded border border-zinc-800 flex-1">
+              <div className="bg-white dark:bg-zinc-950 p-3 rounded border border-zinc-200 dark:border-zinc-800 flex-1">
                 <p className="text-zinc-500 text-xs mb-1">熔断次数 (Breaker Trips)</p>
                 <p className="text-2xl font-bold font-mono text-amber-500">{data.breaker_count}</p>
               </div>
@@ -116,7 +116,7 @@ export default function Overview() {
           </CardContent>
         </Card>
         
-        <Card className="bg-zinc-900/50">
+        <Card className="bg-zinc-50 dark:bg-zinc-900/50">
           <CardHeader><CardTitle>对账系统 (Reconciliation)</CardTitle></CardHeader>
           <CardContent className="text-sm h-full flex flex-col justify-center">
              <div className="bg-emerald-950/30 border border-emerald-900/50 p-4 rounded text-emerald-400 font-mono text-sm break-all">

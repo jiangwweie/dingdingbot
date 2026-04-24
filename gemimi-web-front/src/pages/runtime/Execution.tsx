@@ -51,8 +51,8 @@ export default function Execution() {
                 <TableRow key={intent.intent_id}>
                   <TableCell className="font-mono text-xs">{intent.intent_id}</TableCell>
                   <TableCell className="font-mono text-xs text-zinc-500">{intent.signal_id}</TableCell>
-                  <TableCell className="font-medium text-zinc-300">{intent.symbol}</TableCell>
-                  <TableCell className="font-mono text-xs text-zinc-400">{format(new Date(intent.created_at), 'HH:mm:ss')}</TableCell>
+                  <TableCell className="font-medium text-zinc-700 dark:text-zinc-300">{intent.symbol}</TableCell>
+                  <TableCell className="font-mono text-xs text-zinc-600 dark:text-zinc-400">{format(new Date(intent.created_at), 'HH:mm:ss')}</TableCell>
                   <TableCell>
                     <Badge variant={intent.status === 'COMPLETED' ? 'success' : intent.status === 'FAILED' ? 'danger' : 'info'}>
                       {intent.status === 'COMPLETED' ? '已完成' : intent.status === 'FAILED' ? '失败' : intent.status}
@@ -91,7 +91,7 @@ export default function Execution() {
                       {order.status === 'FILLED' ? '已成交' : order.status === 'NEW' ? '新建' : order.status === 'CANCELED' ? '已取消' : order.status === 'REJECTED' ? '已拒绝' : order.status}
                     </Badge>
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-zinc-400">{format(new Date(order.updated_at), 'HH:mm:ss')}</TableCell>
+                  <TableCell className="font-mono text-xs text-zinc-600 dark:text-zinc-400">{format(new Date(order.updated_at), 'HH:mm:ss')}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

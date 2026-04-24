@@ -1,11 +1,13 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
 @layer base {
   body {
-    @apply bg-zinc-950 text-zinc-100 font-sans antialiased;
+    @apply bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans antialiased;
   }
   
   h1, h2, h3, h4, h5, h6 {
-    @apply text-zinc-100;
+    @apply text-zinc-900 dark:text-zinc-100;
   }
 }

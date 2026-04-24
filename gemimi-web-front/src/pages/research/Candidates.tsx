@@ -73,10 +73,10 @@ export default function Candidates() {
                       <ExternalLink className="w-3 h-3" />
                     </Link>
                   </TableCell>
-                  <TableCell className="text-zinc-400 text-xs">{format(new Date(cand.generated_at), 'yyyy-MM-dd HH:mm')}</TableCell>
+                  <TableCell className="text-zinc-600 dark:text-zinc-400 text-xs">{format(new Date(cand.generated_at), 'yyyy-MM-dd HH:mm')}</TableCell>
                   <TableCell>
                     <div className="flex flex-col">
-                      <span className="text-zinc-300">{cand.source_profile}</span>
+                      <span className="text-zinc-700 dark:text-zinc-300">{cand.source_profile}</span>
                       <span className="text-zinc-600 font-mono text-[10px]">{cand.git_commit}</span>
                     </div>
                   </TableCell>
@@ -92,7 +92,7 @@ export default function Candidates() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Link to={`/research/replay/${cand.candidate_name}`} className="text-xs text-zinc-400 hover:text-white transition-colors bg-zinc-800 py-1.5 px-3 rounded">
+                    <Link to={`/research/replay/${cand.candidate_name}`} className="text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors bg-zinc-100 dark:bg-zinc-800 py-1.5 px-3 rounded">
                       操作上下文
                     </Link>
                   </TableCell>

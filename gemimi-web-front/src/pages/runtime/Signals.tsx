@@ -56,12 +56,12 @@ export default function Signals() {
             <TableBody>
               {attempts.map(att => (
                 <TableRow key={att.id}>
-                  <TableCell className="font-mono text-xs text-zinc-400">{format(new Date(att.timestamp), 'HH:mm:ss')}</TableCell>
-                  <TableCell className="font-medium text-zinc-300">{att.symbol}</TableCell>
+                  <TableCell className="font-mono text-xs text-zinc-600 dark:text-zinc-400">{format(new Date(att.timestamp), 'HH:mm:ss')}</TableCell>
+                  <TableCell className="font-medium text-zinc-700 dark:text-zinc-300">{att.symbol}</TableCell>
                   <TableCell>{att.strategy_name}</TableCell>
                   <TableCell>{getDirectionBadge(att.direction)}</TableCell>
                   <TableCell>
-                    <span className="text-zinc-400 text-xs">{att.filter_results_summary}</span>
+                    <span className="text-zinc-600 dark:text-zinc-400 text-xs">{att.filter_results_summary}</span>
                     {att.reject_reason && <div className="text-rose-400 text-[10px] mt-0.5">{att.reject_reason}</div>}
                   </TableCell>
                   <TableCell>
@@ -92,7 +92,7 @@ export default function Signals() {
             <TableBody>
               {signals.map(sig => (
                 <TableRow key={sig.id}>
-                  <TableCell className="font-mono text-xs text-zinc-400">{format(new Date(sig.created_at), 'HH:mm:ss')}</TableCell>
+                  <TableCell className="font-mono text-xs text-zinc-600 dark:text-zinc-400">{format(new Date(sig.created_at), 'HH:mm:ss')}</TableCell>
                   <TableCell className="font-mono text-xs text-zinc-500">{sig.id}</TableCell>
                   <TableCell>{sig.strategy_name}</TableCell>
                   <TableCell>{getDirectionBadge(sig.direction)}</TableCell>

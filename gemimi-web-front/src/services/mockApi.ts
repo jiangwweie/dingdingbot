@@ -10,6 +10,9 @@ import {
   ReplayContext,
   BacktestRecord,
   CompareRecord,
+  PortfolioContext,
+  AppEvent,
+  ConfigSnapshot,
   FreshnessStatus
 } from '@/src/types';
 
@@ -195,4 +198,94 @@ export async function getCompareData(): Promise<CompareRecord[]> {
     { metric: '胜率 (Win Rate)', baseline: '48.0%', candidateA: '54.0%', candidateB: '51.0%', diffA: 0.125, diffB: 0.0625 },
     { metric: '交易次数 (Trades)', baseline: 950, candidateA: 1250, candidateB: 840, diffA: 0.31, diffB: -0.11 },
   ];
+}
+
+export async function getPortfolioContext(): Promise<PortfolioContext> {
+  await delay(350);
+  return {
+    total_equity: 105240.50,
+    available_balance: 45240.50,
+    unrealized_pnl: 1240.50,
+    total_exposure: 60000.00,
+    daily_loss_used: 450.00,
+    daily_loss_limit: 2000.00,
+    max_total_exposure: 80000.00,
+    leverage_usage: 1.5,
+    positions: [
+      {
+        symbol: 'ETH/USDT',
+        direction: 'LONG',
+        quantity: 15.5,
+        entry_price: 3400.00,
+        current_price: 3480.03,
+        unrealized_pnl: 1240.50,
+        pnl_percent: 0.0235,
+        leverage: 2.0
+      }
+    ]
+  };
+}
+
+export async function getEvents(): Promise<AppEvent[]> {
+  await delay(250);
+  return [
+    { id: 'evt_9', timestamp: new Date(Date.now() - 5000).toISOString(), category: 'EXECUTION', severity: 'SUCCESS', message: 'Order filled: 1.5 ETH/USDT @ 3420.50', related_entities: ['ord_904'] },
+    { id: 'evt_8', timestamp: new Date(Date.now() - 6000).toISOString(), category: 'SIGNAL', severity: 'INFO', message: 'Signal accepted: Alpha_V2 LONG ETH/USDT', related_entities: ['sig_1003', 'att_203'] },
+    { id: 'evt_7', timestamp: new Date(Date.now() - 360000).toISOString(), category: 'WARNING', severity: 'WARN', message: 'Latency spike detected on CCXT fetch_ticker (150ms)' },
+    { id: 'evt_6', timestamp: new Date(Date.now() - 3600000).toISOString(), category: 'RECOVERY', severity: 'SUCCESS', message: 'Self-healing task completed: Restart Exchange WS' },
+    { id: 'evt_5', timestamp: new Date(Date.now() - 3601000).toISOString(), category: 'ERROR', severity: 'ERROR', message: 'Exchange API timeout' },
+    { id: 'evt_4', timestamp: new Date(Date.now() - 7200000).toISOString(), category: 'RECONCILIATION', severity: 'INFO', message: 'Hourly reconciliation passed. Diff: 0' },
+    { id: 'evt_3', timestamp: new Date(Date.now() - 86400000).toISOString(), category: 'STARTUP', severity: 'SUCCESS', message: 'Event loop started' },
+    { id: 'evt_2', timestamp: new Date(Date.now() - 86400000 - 500).toISOString(), category: 'STARTUP', severity: 'INFO', message: 'State restored from DB' },
+    { id: 'evt_1', timestamp: new Date(Date.now() - 86400000 - 1000).toISOString(), category: 'STARTUP', severity: 'INFO', message: 'System startup initialized' }
+  ];
+}
+
+export async function getConfigSnapshot(): Promise<ConfigSnapshot> {
+  await delay(400);
+  return {
+    identity: {
+      profile: 'sim1_eth_runtime',
+      version: '1.4.2',
+      hash: 'a7b8c9d0',
+      is_frozen: true
+    },
+    market: {
+      symbols: ['ETH/USDT'],
+      timeframes: ['5m', '15m', '1h'],
+      mtf_enabled: true
+    },
+    strategy: {
+      name: 'Alpha_V2_Enhanced',
+      direction_bias: 'NEUTRAL',
+      key_parameters: {
+        rsi_period: 14,
+        macd_fast: 12,
+        macd_slow: 26,
+        atr_multiplier: 2.5
+      }
+    },
+    risk: {
+      max_loss_percent: 0.15,
+      daily_max_loss_percent: 0.02,
+      max_total_exposure: 80000,
+      leverage: 2.0
+    },
+    execution: {
+      tp_targets: 2,
+      tp_ratios: [0.5, 0.5],
+      stop_behavior: 'TRAILING',
+      same_bar_policy: 'REJECT'
+    },
+    backend: {
+      intent: 'pg_intent_store',
+      order: 'ccxt_binance_vms',
+      position: 'pg_position_manager'
+    },
+    source_of_truth_hints: [
+      'Environment variable SIM_MODE=1 overrides API routing',
+      'Strategy config inherited from Candidate "cand_eth_alpha_01"',
+      'Risk limits bounded by safety-policy.yaml'
+    ]
+  };
 }

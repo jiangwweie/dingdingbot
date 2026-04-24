@@ -38,13 +38,13 @@ export default function Health() {
           <CardHeader className="bg-rose-950/20"><CardTitle className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-rose-500"/> 熔断器摘要 (Breaker Summary)</CardTitle></CardHeader>
           <CardContent className="space-y-4 pt-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-zinc-950 p-4 rounded border border-zinc-800">
+              <div className="bg-white dark:bg-zinc-950 p-4 rounded border border-zinc-200 dark:border-zinc-800">
                 <p className="text-sm text-zinc-500 mb-1">总计熔断次数</p>
                 <p className="text-3xl font-mono text-rose-500">{data.breaker_summary.total_tripped}</p>
               </div>
-              <div className="bg-zinc-950 p-4 rounded border border-zinc-800">
+              <div className="bg-white dark:bg-zinc-950 p-4 rounded border border-zinc-200 dark:border-zinc-800">
                 <p className="text-sm text-zinc-500 mb-1">当前活跃数</p>
-                <p className="text-3xl font-mono text-zinc-200">{data.breaker_summary.active_breakers.length}</p>
+                <p className="text-3xl font-mono text-zinc-800 dark:text-zinc-200">{data.breaker_summary.active_breakers.length}</p>
               </div>
             </div>
             {data.breaker_summary.active_breakers.length > 0 && (
@@ -60,11 +60,11 @@ export default function Health() {
           <CardHeader className="bg-blue-950/20"><CardTitle className="flex items-center gap-2"><RotateCcw className="w-4 h-4 text-blue-500"/> 恢复状态 (Recovery Summary)</CardTitle></CardHeader>
           <CardContent className="space-y-4 pt-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-zinc-950 p-4 rounded border border-zinc-800">
+              <div className="bg-white dark:bg-zinc-950 p-4 rounded border border-zinc-200 dark:border-zinc-800">
                 <p className="text-sm text-zinc-500 mb-1">待处理任务</p>
                 <p className="text-3xl font-mono text-amber-500">{data.recovery_summary.pending_tasks}</p>
               </div>
-              <div className="bg-zinc-950 p-4 rounded border border-zinc-800">
+              <div className="bg-white dark:bg-zinc-950 p-4 rounded border border-zinc-200 dark:border-zinc-800">
                 <p className="text-sm text-zinc-500 mb-1">已完成恢复</p>
                 <p className="text-3xl font-mono text-emerald-400">{data.recovery_summary.completed_tasks}</p>
               </div>
@@ -81,8 +81,8 @@ export default function Health() {
           <CardHeader><CardTitle>启动检查点 (Startup Markers)</CardTitle></CardHeader>
           <CardContent className="p-4 space-y-3">
              {Object.entries(data.startup_markers).map(([marker, status]) => (
-                <div key={marker} className="flex justify-between items-center text-sm border-b border-zinc-800 pb-2 last:border-0 last:pb-0">
-                  <span className="text-zinc-300">{marker}</span>
+                <div key={marker} className="flex justify-between items-center text-sm border-b border-zinc-200 dark:border-zinc-800 pb-2 last:border-0 last:pb-0">
+                  <span className="text-zinc-700 dark:text-zinc-300">{marker}</span>
                   {status === 'PASSED' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Badge>{status === 'PASSED' ? '通过' : status}</Badge>}
                 </div>
              ))}
@@ -120,7 +120,7 @@ export default function Health() {
             {rejectedAttempts.map((attempt) => (
               <div key={attempt.id} className="p-3 text-sm flex items-center justify-between">
                 <div>
-                  <div className="font-mono text-zinc-300">{attempt.strategy_name} <span className="text-zinc-500 mx-2">|</span> {attempt.symbol} <span className="text-zinc-500 mx-2">|</span> <Badge variant="outline">{attempt.direction}</Badge></div>
+                  <div className="font-mono text-zinc-700 dark:text-zinc-300">{attempt.strategy_name} <span className="text-zinc-500 mx-2">|</span> {attempt.symbol} <span className="text-zinc-500 mx-2">|</span> <Badge variant="outline">{attempt.direction}</Badge></div>
                   <div className="text-rose-400 text-xs mt-1">原因: {attempt.reject_reason || '未知'} ({attempt.filter_results_summary})</div>
                 </div>
                 <div className="text-xs text-zinc-500 font-mono">

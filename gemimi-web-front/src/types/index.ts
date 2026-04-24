@@ -164,3 +164,72 @@ export interface CompareRecord {
   diffA: number;
   diffB?: number;
 }
+
+export interface Position {
+  symbol: string;
+  direction: 'LONG' | 'SHORT';
+  quantity: number;
+  entry_price: number;
+  current_price: number;
+  unrealized_pnl: number;
+  pnl_percent: number;
+  leverage: number;
+}
+
+export interface PortfolioContext {
+  total_equity: number;
+  available_balance: number;
+  unrealized_pnl: number;
+  total_exposure: number;
+  daily_loss_used: number;
+  daily_loss_limit: number;
+  max_total_exposure: number;
+  leverage_usage: number;
+  positions: Position[];
+}
+
+export interface AppEvent {
+  id: string;
+  timestamp: string;
+  category: 'STARTUP' | 'RECONCILIATION' | 'BREAKER' | 'RECOVERY' | 'WARNING' | 'ERROR' | 'SIGNAL' | 'EXECUTION';
+  severity: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS';
+  message: string;
+  related_entities?: string[];
+}
+
+export interface ConfigSnapshot {
+  identity: {
+    profile: string;
+    version: string;
+    hash: string;
+    is_frozen: boolean;
+  };
+  market: {
+    symbols: string[];
+    timeframes: string[];
+    mtf_enabled: boolean;
+  };
+  strategy: {
+    name: string;
+    direction_bias: string;
+    key_parameters: Record<string, string | number | boolean>;
+  };
+  risk: {
+    max_loss_percent: number;
+    daily_max_loss_percent: number;
+    max_total_exposure: number;
+    leverage: number;
+  };
+  execution: {
+    tp_targets: number;
+    tp_ratios: number[];
+    stop_behavior: string;
+    same_bar_policy: string;
+  };
+  backend: {
+    intent: string;
+    order: string;
+    position: string;
+  };
+  source_of_truth_hints: string[];
+}

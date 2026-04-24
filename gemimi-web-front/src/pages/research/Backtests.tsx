@@ -40,7 +40,7 @@ export default function Backtests() {
             系统内所有策略和规则集产生的历史回测执行记录。
           </p>
         </div>
-        <Link to="/research/compare" className="text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition">
+        <Link to="/research/compare" className="text-sm font-medium bg-blue-600 hover:bg-blue-700 text-zinc-900 dark:text-white px-4 py-2 rounded transition">
           对比分析 (Compare)
         </Link>
       </div>
@@ -66,14 +66,14 @@ export default function Backtests() {
                 <TableRow key={bt.id}>
                   <TableCell className="font-mono text-xs text-blue-400">{bt.id}</TableCell>
                   <TableCell>
-                    <Link to={`/research/candidates/${bt.candidate_ref}`} className="hover:underline font-mono text-xs text-zinc-300">
+                    <Link to={`/research/candidates/${bt.candidate_ref}`} className="hover:underline font-mono text-xs text-zinc-700 dark:text-zinc-300">
                       {bt.candidate_ref}
                     </Link>
                   </TableCell>
                   <TableCell>
                     <span className="font-semibold">{bt.symbol}</span> <span className="text-zinc-500 text-xs ml-1">{bt.timeframe}</span>
                   </TableCell>
-                  <TableCell className="text-xs text-zinc-400">
+                  <TableCell className="text-xs text-zinc-600 dark:text-zinc-400">
                     {bt.start_date} ~ {bt.end_date}
                   </TableCell>
                   <TableCell>
