@@ -55,6 +55,25 @@ Sim-1 使用 ETH，不沿用 Sim-0 BTC 受控配置。
 5. 模拟盘期间禁止热改 strategy / risk / execution config。
 6. Optuna 最优参数不一键应用到模拟盘，只输出 candidate profile / report。
 
+### 2.4 Phase Registry（SSOT）
+
+为避免文档间 Phase 字母冲突，本项目对 Sim-1 收口工作引入跨文档稳定 ID：`SIM1-R*`。
+
+- 跨文档引用一律使用 `SIM1-R*`（例如“SIM1-R2 已完成”）。
+- `Phase A/B/C...` 只作为本文件的阅读顺序标签，不作为跨文档引用编号。
+
+| Stable ID | 事项 | 对应本文件 Phase |
+|---|---|---|
+| `SIM1-R0` | 契约与 Profile 收口 | Phase A |
+| `SIM1-R1` | Runtime Resolver 骨架 | Phase B |
+| `SIM1-R2` | Secret 真源收口（.env） | Phase B（子事项） |
+| `SIM1-R3` | Execution TP/SL 真源收口 | Phase C |
+| `SIM1-R4` | Strategy/Market runtime 适配 | Phase D |
+| `SIM1-R5` | Risk runtime 适配 | Phase E |
+| `SIM1-R6` | Backtest 隔离 | Phase F |
+| `SIM1-R7` | Optuna 隔离（candidate only） | Phase G |
+| `SIM1-R8` | Sim-1 启动前验收 | Phase H |
+
 ---
 
 ## 3. 五模块配置模型
@@ -208,9 +227,36 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 
 ---
 
+## 6.1 ConfigManager 退役路径（时间盒）
+
+当前主程序存在“双轨”：
+
+- `ConfigManager` 负责历史配置表、API 配置仓库、KV/backtest 兼容等
+- `RuntimeConfigResolver` / `ResolvedRuntimeConfig` 负责 Sim-1 冻结 runtime（market/strategy/risk/execution）
+
+双轨的目的只是过渡，不能永久存在。退役路径定义如下：
+
+1. 退役时间盒（建议）：Sim-1 启动后 2 周内必须做一次决策
+   - 要么推进 “runtime 消费面继续扩大，ConfigManager 仅保留 API/兼容层”
+   - 要么明确继续双轨的原因与新的截止条件
+
+2. 退役的最小退出条件（逐条切断 runtime 消费依赖）
+   - Exchange/通知：已由 `.env` secret 真源收口（不再从 ConfigManager 读取 secret）
+   - 执行语义：execution TP/SL 以 runtime `OrderStrategy` 为唯一执行真源
+   - 市场范围：symbols/timeframes/warmup/polling 全部来自 runtime market
+   - 风控/策略：SignalPipeline 不再依赖 ConfigManager 的可变配置来影响本进程决策
+
+3. 仍然允许 ConfigManager 保留的责任（短中期）
+   - v1 配置 API 的仓库依赖（Phase 9 的多个 config repos）
+   - backtest KV 配置与历史导入/导出兼容（不影响 runtime 冻结语义）
+
+4. 退役落地方式（建议）
+   - 给所有“runtime 冻结配置消费点”加显式注释与日志 marker（便于审计）
+   - 将 ConfigManager 的 runtime fallback 标注为 `legacy_fallback` 并在日志中警告
+
 ## 7. 任务清单
 
-### Phase A: 契约与 Profile 收口
+### Phase A（SIM1-R0）: 契约与 Profile 收口
 
 1. 定义五模块字段契约。
 2. 定义字段类型、默认值、Sim-1 值、来源、消费方、是否可热改。
@@ -218,7 +264,7 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 4. 将 ETH baseline 映射为 `eth_baseline_research`。
 5. 从 `eth_baseline_research` 派生 `sim1_eth_runtime`。
 
-### Phase B: Runtime Resolver
+### Phase B（SIM1-R1/SIM1-R2）: Runtime Resolver
 
 1. 新增或整理 `ResolvedRuntimeConfig`。
 2. 启动时从 `.env` 读取 environment secret。
@@ -227,7 +273,7 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 5. 禁止运行中热改 strategy / risk / execution。
 6. 启动日志打印 effective config，敏感字段脱敏。
 
-### Phase C: Execution TP/SL 收口
+### Phase C（SIM1-R3）: Execution TP/SL 收口
 
 1. 定义 `ExecutionStrategyConfig`。
 2. 从 execution 模块生成 `OrderStrategy`。
@@ -236,7 +282,7 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 5. `RiskCalculator.take_profit_config` 不再作为实盘保护单真源。
 6. 明确 signal preview TP 与 execution TP 的关系。
 
-### Phase D: Strategy / Market Runtime 适配
+### Phase D（SIM1-R4）: Strategy / Market Runtime 适配
 
 1. Runtime 主 symbol/timeframe 切到 ETH `1h`。
 2. 为 MTF 订阅 ETH `4h`。
@@ -244,7 +290,7 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 4. ATR 保留字段但 `enabled=false`，不创建有效 ATR filter。
 5. Direction scope 限定 LONG-only。
 
-### Phase E: Risk Runtime 适配
+### Phase E（SIM1-R5）: Risk Runtime 适配
 
 1. 设置 `max_loss_percent=0.01`。
 2. 设置 `max_leverage=20`。
@@ -253,7 +299,7 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 5. 启动时将 10% 权益口径派生成现有 `daily_max_loss` 金额字段。
 6. 保持 daily trade count 现有保守形态。
 
-### Phase F: Backtest 隔离
+### Phase F（SIM1-R6）: Backtest 隔离
 
 1. ✅ 新增 `ResolvedBacktestConfig`。
 2. ✅ 新增独立 `backtest_eth_baseline` profile。
@@ -265,7 +311,7 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 8. ⏳ 研究脚本入口可按需接入 `BacktestConfigResolver`。
 9. ⏳ 回测可以显式选择 `use_runtime_snapshot`，但默认不跟随 mutable runtime。
 
-### Phase G: Optuna 隔离
+### Phase G（SIM1-R7）: Optuna 隔离
 
 1. ✅ Optuna 默认使用 `backtest_eth_baseline` 作为 base profile。
 2. ✅ `StrategyOptimizer` 接入 `BacktestConfigResolver`。
@@ -276,7 +322,7 @@ Optuna 不写 runtime DB，不一键应用到模拟盘。
 7. ✅ candidate report 落盘能力已完成。
 8. ⏳ 后续只剩真实小规模搜索运行。
 
-### Phase H: Sim-1 启动前验收
+### Phase H（SIM1-R8）: Sim-1 启动前验收
 
 1. `.env` testnet 检查通过。
 2. API key 无提现权限。
@@ -311,9 +357,9 @@ Sim-1 前不做：
 当前已知待确认项较少，主要是实现细节：
 
 1. ✅ 已定：优先使用启动账户权益冻结金额；若启动瞬间无账户快照，则保留百分比口径回退。
-2. Runtime profile 存放位置：短期继续 SQLite，还是以独立 JSON/DB snapshot 过渡。
-3. 禁止热改的 API 行为：直接拒绝写入，还是允许写入但标记下次启动生效。
-4. Signal preview 中展示的 TP 是否直接来自 execution 模块，还是保留 preview 字段但声明非执行真源。
+2. ✅ 已定：Runtime profile 短中期继续 SQLite（不做 PG config SSOT 大迁移）。
+3. ✅ 已定：Sim-1 期间 strategy/risk/execution 对当前进程冻结；允许写入“下次启动生效”的配置，但不得影响当前进程。
+4. ✅ 已定：Signal preview TP 保留展示/研究语义；execution TP/SL（OrderStrategy）是唯一执行真源。
 
 ---
 

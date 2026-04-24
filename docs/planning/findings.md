@@ -31,37 +31,37 @@
 
 ### 0.1 Runtime Config 骨架实现结论
 
-1. `runtime_profiles` 采用 SQLite 窄表 + JSON profile 是当前最小可行方案。
+R1. `runtime_profiles` 采用 SQLite 窄表 + JSON profile 是当前最小可行方案。
    - 不破坏现有 `strategies / system_configs / risk_configs`
    - 不引入 PG config 迁移
    - 后续迁移只需替换 repository adapter
 
-2. Resolver 必须在环境层做强校验。
+R2. Resolver 必须在环境层做强校验。
    - 缺 `PG_DATABASE_URL`、交易所 key/secret、webhook 时直接失败
    - `CORE_EXECUTION_INTENT_BACKEND` 必须为 `postgres`
    - `CORE_ORDER_BACKEND` 当前默认保持 `sqlite`
 
-3. 一次性脚本使用共享 SQLite 连接池时，必须在脚本结束前调用 `close_all_connections()`。
+R3. 一次性脚本使用共享 SQLite 连接池时，必须在脚本结束前调用 `close_all_connections()`。
    - 否则 aiosqlite 后台线程可能导致脚本不退出
    - seed/verify 脚本已显式关闭连接池
 
-4. Runtime profile 的 readonly 与 active 语义必须在仓储层强制。
+R4. Runtime profile 的 readonly 与 active 语义必须在仓储层强制。
    - `is_readonly=True` 不能只作为 UI/文档标记
    - 默认 upsert 必须拒绝覆盖 readonly profile
    - seed/维护脚本如需更新 readonly profile，必须显式传入 override 参数
 
-5. `config_hash` 只应表达业务执行基准，不应混入纯基础设施变量。
+R5. `config_hash` 只应表达业务执行基准，不应混入纯基础设施变量。
    - DB DSN、backend port、repo backend switches 不进入 hash
    - `exchange_name / exchange_testnet` 会影响交易所执行环境，保留在 hash
    - secret 永远不进入 hash
 
-6. `main.py` 的第一阶段接入必须先 observe-only。
+R6. `main.py` 的第一阶段接入必须先 observe-only。
    - 当前只在启动期解析 `sim1_eth_runtime`
    - 只保存 `RuntimeConfigProvider` 并打印脱敏 summary/hash
    - 不直接替换现有 `ConfigManager` 消费路径
    - 这样可以先证明 runtime profile 可解析、可审计、可追踪，再分模块切换消费方
 
-7. Runtime config 消费切换应按模块逐步推进。
+R7. Runtime config 消费切换应按模块逐步推进。
    - 第一刀只切 market scope，风险最低
    - 已让预热、订阅、资产轮询间隔从 `ResolvedRuntimeConfig.market` 获取
    - 第二刀只切 `SignalPipeline` 的 `RiskConfig`
@@ -70,54 +70,54 @@
    - execution 暂不切，避免一次性改变保护单语义
    - 每切一个模块都应在日志中明确标记来源，便于 Sim-1 观察回溯
 
-8. Runtime strategy 接入后，热重载必须遵守冻结 profile 边界。
+R8. Runtime strategy 接入后，热重载必须遵守冻结 profile 边界。
    - runtime risk 已切入时，ConfigManager 热重载不能覆盖 `_risk_config`
    - runtime strategy 已切入时，ConfigManager 热重载不能覆盖 runner strategy / MTF EMA period
    - 如果未来要支持运行中变更 runtime profile，应通过新 profile + 重启或显式 reload 流程，而不是复用旧 ConfigManager observer 静默覆盖
 
-9. execution 切换必须只保留一个实盘保护单策略入口。
+R9. execution 切换必须只保留一个实盘保护单策略入口。
    - runtime execution module 已转成 `OrderStrategy`
    - `SignalPipeline._build_execution_strategy()` 优先返回 runtime `OrderStrategy` 深拷贝
    - `SignalResult.take_profit_levels` 降级为展示/通知/研究语义，不再作为实盘 TP/SL 策略来源
    - `ExecutionIntent.strategy` 仍是后续 full-fill / partial-fill / recovery 保护单语义的一致性锚点
 
-10. Runtime direction policy 必须在 attempt 持久化前落地。
+R10. Runtime direction policy 必须在 attempt 持久化前落地。
    - 仅在执行前跳过 SHORT 不够，会污染 `signal_attempts` 审计语义
    - 不允许方向的 fired attempt 应转为 `FILTERED`
    - filter result 中记录 `runtime_direction_policy`，方便后续归因
 
-11. Runtime execution config 必须拒绝非正数 TP 比例/目标。
+R11. Runtime execution config 必须拒绝非正数 TP 比例/目标。
    - `tp_ratios` 总和为 1.0 仍不够，`[-0.5, 1.5]` 这类输入会通过求和但语义非法
    - `tp_ratios` 每项必须 `> 0`
    - `tp_targets` 每项必须 `> 0`
 
-12. Runtime strategy 应直接生成 `logic_tree`。
+R12. Runtime strategy 应直接生成 `logic_tree`。
    - 新 runtime config 主线不应继续触发 `StrategyDefinition` deprecated triggers/filters 迁移路径
    - 可保留 `trigger/filters` 字段作为兼容和可读性辅助，但 `logic_tree` 必须显式生成
 
-13. Runtime cutover 需要独立的非 I/O 冒烟脚本。
+R13. Runtime cutover 需要独立的非 I/O 冒烟脚本。
    - 单纯 resolver verify 只能证明配置可解析
    - 还需要证明 main.py 会使用的 market/risk/strategy/execution 派生对象能组装成功
    - `scripts/verify_sim1_runtime_cutover.py` 负责这个边界，不启动交易所和 WebSocket
 
-14. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
+R14. 本地 `.env` 已是历史遗留敏感文件，后续不应继续扩大其提交面。
    - 本轮没有修改 `.env`
    - PG 示例继续以 `docs/local-pg.md` / 示例文件为准
    - 若后续要彻底治理，需要单独安排 secret rotation + `.env` 脱离版本控制，不应混在 runtime config 接入任务中顺手做
 
-15. Runtime risk 的 `daily_max_loss_percent` 已确定采用“启动权益冻结金额，缺快照则百分比回退”的双态策略。
+R15. Runtime risk 的 `daily_max_loss_percent` 已确定采用“启动权益冻结金额，缺快照则百分比回退”的双态策略。
    - 启动时若能拿到账户权益快照，则派生 `daily.max_loss_amount = equity * daily_max_loss_percent`
    - 这样当日熔断阈值在本次进程内固定，不会随盘中权益波动漂移
    - 若启动瞬间尚无账户快照，则不伪造金额，保留 `daily.max_loss_percent` 百分比口径
    - 这比强行要求固定 base equity 更适合当前 Sim-1 / 低频实盘准备阶段
 
-16. Optuna 的“candidate only”边界需要有真实产物，而不只是文档约定。
+R16. Optuna 的“candidate only”边界需要有真实产物，而不只是文档约定。
    - 仅靠 `best_trial` 内存对象不利于跨机器审查和次日回看
    - 现已在 `StrategyOptimizer` 中补齐 `build_candidate_report()` / `write_candidate_report()`
    - 输出包含 source profile hash、best params、fixed params、resolved request summary
    - 仍不自动写入 runtime profile，保持人工审查后 promote 的边界
 
-17. 旧的最小验证脚本若继续调用已删除私有方法，会在你以为“只是验证”时制造假阻塞。
+R17. 旧的最小验证脚本若继续调用已删除私有方法，会在你以为“只是验证”时制造假阻塞。
    - `scripts/verify_fixed_params_minimal.py` 曾调用已删除的 `_build_backtest_request()`
    - 这类脚本属于研究链入口，也必须跟上主契约演进
    - 现已改为验证 `_build_trial_backtest_inputs()` + resolver + runtime overrides

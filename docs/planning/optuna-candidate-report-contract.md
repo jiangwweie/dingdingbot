@@ -31,6 +31,17 @@ Required top-level keys:
 - `resolved_request`: object (minimum: symbol/timeframe/limit/mode/costs/risk_overrides/order_strategy)
 - `top_trials`: list of serialized OptimizationTrialResult
 
+## Versioning Policy
+
+- `artifact_version` 是候选产物的兼容版本号。
+- 允许 **只加字段不删字段** 的演进方式（backward-compatible additive changes）。
+- Reader 遇到更高版本（例如当前 reader 是 v1，但文件标注 v2）时：
+  - 必须 `warn`（日志/输出提示），但应尽量继续读取已知字段。
+  - 不应 silent failure，也不应直接拒绝（除非关键字段缺失）。
+- `best_trial` 与 `top_trials[0]`：
+  - 如果 `top_trials` 非空，约定 `top_trials[0]` 必须与 `best_trial` 表达同一个 trial（trial_number 一致）。
+  - 若未来要取消冗余，应通过提升 `artifact_version` 明确版本变更策略。
+
 ## Reproduce
 
 Candidate replay is dry-run by default:
@@ -52,4 +63,3 @@ This prints:
 - Candidate report construction is owned by `src/application/strategy_optimizer.py`:
   - `StrategyOptimizer.build_candidate_report()`
   - `StrategyOptimizer.write_candidate_report()`
-

@@ -24,11 +24,15 @@
 
 当前已经证明的是**执行恢复主链具备模拟盘准入条件**，但还没有证明真实模拟盘全链路已经跑通。
 
-下一步不是继续开发大功能，而是进入 **Sim-0：真实模拟盘全链路验证**。
+Sim-0 作为“受控验证阶段”已阶段性通过；当前主线已切换为 **Sim-1 ETH runtime config 收口 + 自然模拟盘观察准备**。
 
 ### 当前唯一主线
 
-**Sim-0：验证真实链路从行情/信号管道到 testnet 下单、WS 回写、启动对账、PG recovery、breaker 的闭环。**
+**Sim-1：以冻结的 `sim1_eth_runtime`（ETH 1h + 4h MTF, LONG-only）进入自然模拟盘观察窗口，并确保研究链（Backtest/Optuna）不会反向污染 runtime。**
+
+阶段编号/引用规范：
+
+- 跨文档阶段引用以 `docs/planning/sim-1-eth-runtime-config-plan.md` 的 `SIM1-R*` 为 SSOT。
 
 ### 设计前提（已锁定）
 
@@ -53,38 +57,37 @@
 
 `行情/K线 -> SignalPipeline -> 策略/过滤器 -> 风控/仓位 -> ExecutionOrchestrator -> ExchangeGateway testnet 下单 -> WS 回写 -> OrderLifecycle -> StartupReconciliation -> PG recovery / breaker / 告警`
 
-### Sim-0 启动定义
+### Sim-1 启动定义（替代 Sim-0）
 
 #### 阶段主题
 
-**真实模拟盘全链路验证**
+**自然模拟盘观察准备（冻结 runtime + 可审计）**
 
 #### 阶段目标
 
-1. 证明真实信号管道能触发 testnet 下单
-2. 证明 ENTRY / TP / SL / WS 回写 / 对账链路能闭合
-3. 证明 PG recovery task 和 breaker 在真实启动/重启链路中可用
+1. 证明 `sim1_eth_runtime` 的 effective snapshot/hash 可追溯且启动稳定
+2. 证明 SignalPipeline 的 market/risk/strategy/execution 均来自 runtime snapshot（冻结不热改）
+3. 证明启动对账/恢复/breaker 等强执行语义状态仍可用（PG 主线不回退）
 
-#### 本阶段只做
+#### 本阶段只做（Sim-1）
 
-1. Sim-0 启动配置冻结
-2. 主程序真实启动
-3. 信号到下单链路验证
-4. WS 回写与保护单验证
-5. 启动对账与恢复验证
+1. Sim-1 启动配置冻结（ETH 1h + 4h, LONG-only）
+2. 主程序真实启动（runtime snapshot + safe summary）
+3. 自然观察窗口（低频，不追求交易次数）
+4. 仅在需要时进行最小研究脚本收口（方案 A：脚本薄化）
 
-#### 本阶段不做
+#### 本阶段不做（Sim-1 期间）
 
 1. 不做回测精细化
 2. 不做参数搜索扩展
 3. 不做前端/工作台推进
 4. 不做新的 API 面扩张
 5. 不同时推进多张核心 PG 表的实切
-6. 不在 Sim-0 运行中热改策略参数
+6. 不在 Sim-1 运行中热改策略/风控/执行参数
 
 #### 本阶段入口任务
 
-**Sim-0.1：启动配置冻结。**
+**Sim-1.1：启动配置冻结与验收。**
 
 需要冻结：
 
@@ -104,34 +107,36 @@
    - 启动恢复冒烟
    - 熔断拦截冒烟
 
-详细 Sim-0 任务拆分见：
+Sim-0 详细任务拆分（归档参考）：
 
 - `docs/planning/sim-0-real-chain-validation-plan.md`
 
 ### 近期事项（按优先级）
 
-1. **Sim-0.1 启动配置冻结**
-   - 锁定环境变量、symbol、策略、PG/SQLite backend 开关
+1. **Sim-1.1：冻结 runtime profile 并输出可审计 snapshot**
+   - `sim1_eth_runtime` 固定：ETH `1h` + `4h`、LONG-only、ATR disabled、risk/execution 口径一致
+   - 启动日志打印 `profile/version/hash` + safe summary
 
-2. **Sim-0.2 主程序真实启动**
-   - 验证 PG 初始化、Phase 4.3、Phase 4.4、ExchangeGateway、WS、SignalPipeline
+2. **Sim-1.2：自然模拟盘观察窗口**
+   - 低频观察为主，不追求交易次数
+   - 运行期间禁止热改 strategy/risk/execution（只允许写入“下次启动生效”配置）
 
-3. **Sim-0.3 信号到下单链路验证**
-   - 证明真实/模拟行情能触发 SignalPipeline 并进入 testnet 下单
+3. **研究链收口（路径 1，方案 A）**
+   - 迁移纯回测入口与 Optuna 入口到统一 Spec/Resolver/Reporter
+   - 只产出 candidate，不自动 promote runtime
 
 ### 当前建议顺序
 
-1. 先完成 Sim-0 配置冻结
-2. 再真实启动主程序
-3. 再观察至少一笔信号触发到 testnet 下单
-4. 再做重启对账验证
+1. 先完成 Sim-1.1 冻结与验收（SIM1-R0..R5）
+2. 再进入 Sim-1.2 自然观察窗口（SIM1-R8）
+3. 观察期内按需做研究脚本收口（SIM1-R6..R7）
 
 ### 当前执行状态
 
 - 模拟盘准入冒烟已通过
-- Sim-0.2 ~ Sim-0.5 真实 runtime 链路已阶段性通过
+- Sim-0 真实 runtime 链路已阶段性通过（作为受控验证归档）
 - 受控验证仓位/保护单已清理
-- 下一步进入分阶段自然模拟盘观察，不再连续无停顿推进
+- 下一步进入 Sim-1 自然模拟盘观察（ETH 1h，4h 作为 MTF 辅助）
 
 ### Sim-0 阶段性结果
 

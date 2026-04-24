@@ -243,40 +243,52 @@ class RuntimeConfigResolver:
 
 ## 7. Sim-1 前最小落地方案
 
-### Phase A: 契约与 Profile 冻结
+> Phase 字母仅用于本文件内部阅读顺序；跨文档引用以 `docs/planning/sim-1-eth-runtime-config-plan.md` 的 `SIM1-R*` 为准。
+
+### Phase A（SIM1-R0）: 契约与 Profile 冻结
 
 1. 新增五模块字段契约文档。
 2. 新增 `sim1_eth_runtime` profile 的机器可读版本。
 3. 当前 SQLite BTC 配置标记为 `sim0_controlled_btc`。
 4. ETH baseline 从 `docs/planning/backtest-parameters.md` 映射到 `eth_baseline_research`。
 
-### Phase B: Runtime Resolver 骨架
+### Phase B（SIM1-R1）: Runtime Resolver 骨架
 
 1. 新增 `ResolvedRuntimeConfig` 模型。
 2. 新增 `RuntimeConfigResolver`。
 3. 先支持 `sim1_eth_runtime` 读取和 hash 生成。
 4. 启动日志打印脱敏 effective config。
 
-### Phase C: Secret 真源收口
+### Phase C（SIM1-R2）: Secret 真源收口
 
 1. `ExchangeGateway` 初始化改为使用 resolver 输出的 `.env` secret。
 2. `NotificationService` webhook 改为使用 resolver 输出的 `.env` secret。
 3. SQLite `exchange_configs` / `notifications.webhook_url` 暂保留兼容，但不作为 Sim-1 runtime 真源。
 
-### Phase D: Execution TP/SL 收口
+### Phase D（SIM1-R3）: Execution TP/SL 收口
 
 1. `SignalPipeline` 不再从 `signal.take_profit_levels` 反推实盘 `OrderStrategy`。
 2. `ResolvedRuntimeConfig.to_order_strategy()` 成为实盘保护单唯一入口。
 3. `SignalResult.take_profit_levels` 继续用于通知、预览和研究，不作为执行真源。
 
-### Phase E: Market / Strategy / Risk 适配
+### Phase E（SIM1-R4/SIM1-R5）: Market / Strategy / Risk 适配
 
 1. warmup / subscribe 只订阅 ETH `1h` 与 `4h`。
 2. Strategy runner 使用 ETH profile 的 Pinbar + EMA50 + MTF + ATR disabled。
 3. Risk 使用 `0.01 / 20 / 1.0`。
 4. daily loss amount 由启动账户权益派生。
 
-### Phase H: Sim-1 启动前验收
+### Phase F: Backtest 隔离（SIM1-R6）
+
+1. Sim-1 前要求 Backtest 与 runtime profile 解耦：回测默认使用 `backtest_eth_baseline`，允许 request/overrides 覆盖，但不得反向污染 runtime。
+2. 本 Phase 的详细口径与状态以 `docs/planning/sim-1-eth-runtime-config-plan.md` Phase F 为准。
+
+### Phase G: Optuna 隔离（SIM1-R7）
+
+1. Optuna 必须在 Backtest resolver 语义内运行，输出 candidate report，不写 runtime profile。
+2. 本 Phase 的详细口径与状态以 `docs/planning/sim-1-eth-runtime-config-plan.md` Phase G 为准。
+
+### Phase H（SIM1-R8）: Sim-1 启动前验收
 
 1. `ResolvedRuntimeConfig.profile_name == "sim1_eth_runtime"`
 2. `config_hash` 已生成并打印。
@@ -293,21 +305,21 @@ class RuntimeConfigResolver:
 
 ---
 
-## 8. 待用户确认项
+## 8. 已确认项（原待用户确认项）
 
 以下事项需要用户确认后再进入实现：
 
-1. **daily max loss 10% 的权益基准**
-   - 方案 A（推荐）：启动后以 ExchangeGateway 首次账户权益快照派生金额，并写入 effective snapshot。
-   - 方案 B：用配置里的固定 base equity 派生，避免依赖交易所查询，但与真实账户权益可能偏离。
+1. **daily max loss 10% 的权益基准**（已确认）
+   - 启动后以 ExchangeGateway 首次账户权益快照派生金额，并冻结写入 effective snapshot。
+   - 若启动瞬间尚无账户快照，则保留百分比口径回退（不伪造金额）。
 
-2. **禁止热改的 API 行为**
-   - 方案 A（推荐）：Sim-1 期间对 strategy / risk / execution 写入直接拒绝，返回“runtime frozen”。
-   - 方案 B：允许写入 SQLite，但标记下次启动生效；当前进程不刷新。
+2. **禁止热改的 API 行为**（已确认）
+   - Sim-1 期间 strategy / risk / execution 对当前进程冻结。
+   - 允许写入“下次启动生效”的配置，但不得影响当前进程。
 
-3. **Signal preview TP 与 execution TP 的 UI/通知关系**
-   - 方案 A（推荐）：preview 继续展示 signal TP，但通知中增加 execution TP/SL 摘要。
-   - 方案 B：preview 也强制改成 execution TP，减少差异但会弱化 signal research 语义。
+3. **Signal preview TP 与 execution TP 的 UI/通知关系**（已确认）
+   - preview 继续展示 signal TP（展示/通知/研究语义）。
+   - execution TP/SL（OrderStrategy）是唯一执行真源，不从 preview 推导保护单。
 
 ### 已确认事项
 
@@ -322,26 +334,26 @@ class RuntimeConfigResolver:
 
 在用户确认第 8 节后，可按以下切片交给 Claude：
 
-1. **Task C1: SQLite RuntimeProfileRepository 与 schema**
+1. **WP-C1: SQLite RuntimeProfileRepository 与 schema**
    - 新增或复用 SQLite profile 表承载 `sim1_eth_runtime`
    - 新增 Pydantic 模型最小实现
    - 不接主程序
 
-2. **Task C2: RuntimeConfigResolver 骨架**
+2. **WP-C2: RuntimeConfigResolver 骨架**
    - 读取 env + profile + defaults
    - 生成 `ResolvedRuntimeConfig` 与 hash
    - 补最小单元测试（需用户确认后执行）
 
-3. **Task C3: main.py 启动接线**
+3. **WP-C3: main.py 启动接线**
    - ExchangeGateway / NotificationService 改吃 resolver output
    - 打印脱敏 effective config
    - 不改 SignalPipeline 行为
 
-4. **Task C4: Execution OrderStrategy 收口**
+4. **WP-C4: Execution OrderStrategy 收口**
    - `SignalPipeline` 接收固定 execution strategy provider
    - 移除实盘执行从 signal TP 派生的主路径
 
-5. **Task C5: Sim-1 启动前验收脚本**
+5. **WP-C5: Sim-1 启动前验收脚本**
    - 只做配置解析验收，不跑真实交易
    - 输出 profile/hash/关键字段
 
