@@ -433,6 +433,19 @@ async def run_application():
         # =============================================
         logger.info("Phase 4.5: Checking API key permissions...")
         await _exchange_gateway.check_api_key_permissions()
+        permission_summary = _exchange_gateway.get_permission_check_summary()
+        logger.info(
+            "Phase 4.5 permission summary: verified=%s, status=%s, exchange=%s, testnet=%s",
+            permission_summary["verified"],
+            permission_summary["status"],
+            permission_summary["exchange"],
+            permission_summary["testnet"],
+        )
+        if permission_summary["reason"]:
+            logger.warning(
+                "Phase 4.5 permission check reason: %s",
+                permission_summary["reason"],
+            )
 
         # =============================================
         # Phase 5: Create Signal Pipeline (Dependency Injection)

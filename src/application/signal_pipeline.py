@@ -549,6 +549,9 @@ class SignalPipeline:
             # Run strategy engine with lock protection (prevents race condition during hot-reload)
             async with lock:
                 attempts = self._run_strategy(kline)
+            # Runtime direction policy intentionally runs after the strategy lock.
+            # This is safe because `_runtime_allowed_directions` is treated as a
+            # frozen startup snapshot and is not hot-reloaded during process lifetime.
             self._apply_runtime_direction_policy(kline, attempts)
 
             # Log filter rejection details for analysis

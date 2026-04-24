@@ -118,6 +118,11 @@ class ExchangeGateway:
         # P5-011: Global order update callback (for order persistence)
         self._global_order_callback: Optional[Callable[[Order], Awaitable[None]]] = None
 
+        # Permission-check audit state
+        self._permissions_verified = False
+        self._permissions_check_status = "not_checked"
+        self._permissions_check_reason: Optional[str] = None
+
         # P0-WS-Exception-Protection: 待恢复订单集合（WS 回调失败时标记）
         self._pending_recovery_orders: Dict[str, Dict[str, Any]] = {}
 
@@ -220,6 +225,9 @@ class ExchangeGateway:
         """
         exchange = self.exchange_name.lower()
         if exchange != "binance":
+            self._permissions_verified = False
+            self._permissions_check_status = "skipped_unsupported_exchange"
+            self._permissions_check_reason = f"unsupported_exchange:{exchange}"
             logger.warning(
                 "API key permission check not implemented for exchange=%s; "
                 "skipping permission enforcement",
@@ -231,6 +239,9 @@ class ExchangeGateway:
             restrictions = await self.rest_exchange.sapi_get_account_apirestrictions()
         except Exception as e:
             if self.testnet:
+                self._permissions_verified = False
+                self._permissions_check_status = "skipped_testnet"
+                self._permissions_check_reason = str(e)
                 logger.warning(
                     "Failed to check Binance API key restrictions on testnet; "
                     "skipping withdraw-permission enforcement. error=%s",
@@ -253,12 +264,25 @@ class ExchangeGateway:
                 "F-002",
             )
 
+        self._permissions_verified = True
+        self._permissions_check_status = "verified"
+        self._permissions_check_reason = None
         logger.info(
             "API key restrictions checked: exchange=%s, withdraw_enabled=%s, details=%s",
             self.exchange_name,
             withdraw_enabled,
             {k: restrictions.get(k) for k in ("enableReading", "enableFutures", "enableSpotAndMarginTrading", "ipRestrict")},
         )
+
+    def get_permission_check_summary(self) -> dict[str, Any]:
+        """Return a sanitized summary for startup logging and audit trails."""
+        return {
+            "verified": self._permissions_verified,
+            "status": self._permissions_check_status,
+            "reason": self._permissions_check_reason,
+            "exchange": self.exchange_name,
+            "testnet": self.testnet,
+        }
 
     async def close(self) -> None:
         """Close all exchange connections"""

@@ -10,8 +10,6 @@ runtime_overrides > request > backtest profile > code defaults
 
 from __future__ import annotations
 
-import hashlib
-import json
 from decimal import Decimal
 from typing import Literal, Mapping, Optional, Protocol
 
@@ -28,6 +26,7 @@ from src.domain.models import (
     RiskConfig,
     StrategyDefinition,
 )
+from src.domain.validators import coerce_decimal_fields, coerce_decimal_list_fields, stable_config_hash, validate_tp_contract
 
 
 BacktestInjectableSource = Literal["request", "runtime_overrides", "profile_kv"]
@@ -332,13 +331,7 @@ class BacktestRiskProfile(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def convert_decimal_inputs(cls, data: object) -> object:
-        if isinstance(data, dict):
-            converted = dict(data)
-            for key in ("max_loss_percent", "max_total_exposure"):
-                if key in converted and converted[key] is not None and not isinstance(converted[key], Decimal):
-                    converted[key] = Decimal(str(converted[key]))
-            return converted
-        return data
+        return coerce_decimal_fields(data, ("max_loss_percent", "max_total_exposure"))
 
     def to_risk_config(self) -> RiskConfig:
         return RiskConfig(
@@ -363,32 +356,16 @@ class BacktestExecutionProfile(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def convert_decimal_inputs(cls, data: object) -> object:
-        if isinstance(data, dict):
-            converted = dict(data)
-            for key in ("tp_ratios", "tp_targets"):
-                if key in converted and converted[key] is not None:
-                    converted[key] = [
-                        value if isinstance(value, Decimal) else Decimal(str(value))
-                        for value in converted[key]
-                    ]
-            if "initial_stop_loss_rr" in converted and converted["initial_stop_loss_rr"] is not None:
-                value = converted["initial_stop_loss_rr"]
-                converted["initial_stop_loss_rr"] = value if isinstance(value, Decimal) else Decimal(str(value))
-            return converted
-        return data
+        converted = coerce_decimal_list_fields(data, ("tp_ratios", "tp_targets"))
+        return coerce_decimal_fields(converted, ("initial_stop_loss_rr",))
 
     @model_validator(mode="after")
     def validate_execution_profile(self) -> "BacktestExecutionProfile":
-        if len(self.tp_ratios) != self.tp_levels:
-            raise ValueError("tp_ratios length must match tp_levels")
-        if len(self.tp_targets) != self.tp_levels:
-            raise ValueError("tp_targets length must match tp_levels")
-        if any(ratio <= Decimal("0") for ratio in self.tp_ratios):
-            raise ValueError("tp_ratios must all be positive")
-        if any(target <= Decimal("0") for target in self.tp_targets):
-            raise ValueError("tp_targets must all be positive")
-        if abs(sum(self.tp_ratios, Decimal("0")) - Decimal("1.0")) > Decimal("0.0001"):
-            raise ValueError("tp_ratios must sum to 1.0")
+        validate_tp_contract(
+            tp_levels=self.tp_levels,
+            tp_ratios=self.tp_ratios,
+            tp_targets=self.tp_targets,
+        )
         return self
 
     def to_kv_defaults(self) -> dict[str, object]:
@@ -430,13 +407,10 @@ class BacktestEngineProfile(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def convert_decimal_inputs(cls, data: object) -> object:
-        if isinstance(data, dict):
-            converted = dict(data)
-            for key in ("initial_balance", "slippage_rate", "tp_slippage_rate", "fee_rate", "same_bar_tp_first_prob"):
-                if key in converted and converted[key] is not None and not isinstance(converted[key], Decimal):
-                    converted[key] = Decimal(str(converted[key]))
-            return converted
-        return data
+        return coerce_decimal_fields(
+            data,
+            ("initial_balance", "slippage_rate", "tp_slippage_rate", "fee_rate", "same_bar_tp_first_prob"),
+        )
 
     def to_kv_defaults(self) -> dict[str, object]:
         return {
@@ -470,9 +444,7 @@ class BacktestProfile(BaseModel):
         return kv_defaults
 
     def config_hash(self) -> str:
-        payload = self.model_dump(mode="json")
-        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return stable_config_hash(self.model_dump(mode="json"))
 
 
 class ResolvedBacktestConfig(BaseModel):

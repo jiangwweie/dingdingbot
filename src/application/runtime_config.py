@@ -8,8 +8,6 @@ step is to make runtime configuration resolvable, hashable, and auditable.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 from decimal import Decimal
 from typing import Any, Mapping, Optional
@@ -18,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 
 from src.domain.logic_tree import FilterConfig, FilterLeaf, LogicNode, TriggerConfig, TriggerLeaf
 from src.domain.models import CapitalProtectionConfig, Direction, OrderStrategy, RiskConfig, StrategyDefinition
+from src.domain.validators import coerce_decimal_fields, coerce_decimal_list_fields, stable_config_hash, validate_tp_contract
 
 
 class EnvironmentRuntimeConfig(BaseModel):
@@ -155,13 +154,7 @@ class RiskRuntimeConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def convert_decimal_inputs(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            converted = dict(data)
-            for key in ("max_loss_percent", "max_total_exposure", "daily_max_loss_percent"):
-                if key in converted and converted[key] is not None and not isinstance(converted[key], Decimal):
-                    converted[key] = Decimal(str(converted[key]))
-            return converted
-        return data
+        return coerce_decimal_fields(data, ("max_loss_percent", "max_total_exposure", "daily_max_loss_percent"))
 
     def to_risk_config(self, daily_max_loss_amount: Optional[Decimal] = None) -> RiskConfig:
         return RiskConfig(
@@ -230,32 +223,16 @@ class ExecutionRuntimeConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def convert_decimal_inputs(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            converted = dict(data)
-            for key in ("tp_ratios", "tp_targets"):
-                if key in converted and converted[key] is not None:
-                    converted[key] = [
-                        value if isinstance(value, Decimal) else Decimal(str(value))
-                        for value in converted[key]
-                    ]
-            if "initial_stop_loss_rr" in converted and converted["initial_stop_loss_rr"] is not None:
-                value = converted["initial_stop_loss_rr"]
-                converted["initial_stop_loss_rr"] = value if isinstance(value, Decimal) else Decimal(str(value))
-            return converted
-        return data
+        converted = coerce_decimal_list_fields(data, ("tp_ratios", "tp_targets"))
+        return coerce_decimal_fields(converted, ("initial_stop_loss_rr",))
 
     @model_validator(mode="after")
     def validate_execution_contract(self) -> "ExecutionRuntimeConfig":
-        if len(self.tp_ratios) != self.tp_levels:
-            raise ValueError("tp_ratios length must match tp_levels")
-        if len(self.tp_targets) != self.tp_levels:
-            raise ValueError("tp_targets length must match tp_levels")
-        if any(ratio <= Decimal("0") for ratio in self.tp_ratios):
-            raise ValueError("tp_ratios must all be positive")
-        if any(target <= Decimal("0") for target in self.tp_targets):
-            raise ValueError("tp_targets must all be positive")
-        if abs(sum(self.tp_ratios, Decimal("0")) - Decimal("1.0")) > Decimal("0.0001"):
-            raise ValueError("tp_ratios must sum to 1.0")
+        validate_tp_contract(
+            tp_levels=self.tp_levels,
+            tp_ratios=self.tp_ratios,
+            tp_targets=self.tp_targets,
+        )
         return self
 
     def to_order_strategy(self, strategy_id: str = "sim1_eth_runtime") -> OrderStrategy:
@@ -392,25 +369,17 @@ class RuntimeConfigResolver:
         profile_name: str,
         version: int,
     ) -> str:
-        hash_payload = {
-            "profile_name": profile_name,
-            "version": version,
-            # Only execution-affecting environment semantics belong in the business hash.
-            # Infra details such as DB DSN, backend port, and repository backend switches
-            # stay out so operational changes do not fork the strategy/risk baseline.
-            "environment": {
-                "exchange_name": environment.exchange_name,
-                "exchange_testnet": environment.exchange_testnet,
-            },
-            "profile": profile_payload,
-        }
-        # Hash stability depends on using a canonical JSON encoding (sorted keys, stable separators,
-        # and consistent unicode handling) rather than relying on the SQLite JSON text formatting.
-        raw = json.dumps(
-            hash_payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            default=str,
+        return stable_config_hash(
+            {
+                "profile_name": profile_name,
+                "version": version,
+                # Only execution-affecting environment semantics belong in the business hash.
+                # Infra details such as DB DSN, backend port, and repository backend switches
+                # stay out so operational changes do not fork the strategy/risk baseline.
+                "environment": {
+                    "exchange_name": environment.exchange_name,
+                    "exchange_testnet": environment.exchange_testnet,
+                },
+                "profile": profile_payload,
+            }
         )
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

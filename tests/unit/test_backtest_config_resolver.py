@@ -20,6 +20,7 @@ from src.application.backtest_config import (
     list_backtest_injectable_params,
 )
 from src.domain.models import BacktestRequest, BacktestRuntimeOverrides, Direction, OrderStrategy, RiskConfig
+from src.domain.validators import stable_config_hash
 
 
 @pytest.mark.asyncio
@@ -181,3 +182,35 @@ def test_injectable_param_contract_can_filter_optimizer_safe_params():
     assert all(param.optimizer_safe for param in optimizer_params)
     assert "symbol" not in {param.key for param in optimizer_params}
     assert "execution.tp_targets" in {param.key for param in optimizer_params}
+
+
+def test_runtime_override_injectable_keys_align_with_backtest_runtime_overrides_model():
+    key_to_field = {
+        "strategy.atr.max_atr_ratio": "max_atr_ratio",
+        "strategy.ema.min_distance_pct": "min_distance_pct",
+        "strategy.ema.period": "ema_period",
+        "system.mtf_ema_period": "mtf_ema_period",
+        "system.mtf_mapping": "mtf_mapping",
+        "execution.tp_ratios": "tp_ratios",
+        "execution.tp_targets": "tp_targets",
+        "backtest.breakeven_enabled": "breakeven_enabled",
+        "backtest.allowed_directions": "allowed_directions",
+        "backtest.same_bar_policy": "same_bar_policy",
+        "backtest.same_bar_tp_first_prob": "same_bar_tp_first_prob",
+        "backtest.random_seed": "random_seed",
+    }
+    runtime_override_keys = {
+        param.key
+        for param in BACKTEST_INJECTABLE_PARAMS
+        if "runtime_overrides" in param.sources
+    }
+
+    assert runtime_override_keys == set(key_to_field)
+    assert set(key_to_field.values()).issubset(set(BacktestRuntimeOverrides.model_fields))
+
+
+def test_backtest_profile_hash_is_stable_across_key_order_and_unicode_payloads():
+    payload_a = {"profile_name": "回测ETH", "profile": {"b": 2, "a": "中文"}}
+    payload_b = {"profile": {"a": "中文", "b": 2}, "profile_name": "回测ETH"}
+
+    assert stable_config_hash(payload_a) == stable_config_hash(payload_b)
