@@ -26,14 +26,18 @@ If the current scaffold already includes:
 Then the next pages worth adding are:
 
 1. `Runtime / Portfolio`
-2. `Runtime / Events`
-3. `Config / Snapshot` (read-only preview only)
+2. `Runtime / Positions`
+3. `Runtime / Events`
+4. `Config / Snapshot` (read-only preview only)
+5. `Research / Candidate Review`
 
 Priority from operator value:
 
 1. `Runtime / Portfolio`
-2. `Runtime / Events`
-3. `Config / Snapshot`
+2. `Runtime / Positions`
+3. `Runtime / Events`
+4. `Config / Snapshot`
+5. `Research / Candidate Review`
 
 ---
 
@@ -105,7 +109,56 @@ Why it matters:
 
 ---
 
-### 2.3 Config / Snapshot (Read-only Preview)
+### 2.3 Runtime / Positions
+
+If Portfolio is account/risk oriented, Positions is position-detail oriented.
+
+Suggested sections:
+
+- symbol
+- direction
+- entry price
+- mark price
+- unrealized PnL
+- leverage
+- margin usage
+- TP / SL status
+- lifecycle / protection status
+
+Why it matters:
+
+- operators often first ask "what is the current position state?"
+- reduces the need to jump back to the exchange UI
+- pairs naturally with Execution without duplicating the same summary view
+
+---
+
+### 2.4 Research / Candidate Review
+
+This page is different from Candidate Detail.
+
+Candidate Detail is a raw detail page.
+
+Candidate Review should feel like a decision-support page.
+
+Suggested sections:
+
+- strict v1 checklist
+- warning-only checks
+- best trial summary
+- top trials comparison
+- parameter boundary warnings
+- final review summary (read-only)
+
+Why it matters:
+
+- turns artifact reading into review workflow
+- better matches how a human decides whether a candidate is worth follow-up
+- avoids overloading Candidate Detail with too many judgment-oriented widgets
+
+---
+
+### 2.5 Config / Snapshot (Read-only Preview)
 
 Yes, this page is worth adding, but only as a **preview / snapshot** page.
 
@@ -179,6 +232,7 @@ Trading Console
 ├── Runtime
 │   ├── Overview
 │   ├── Portfolio
+│   ├── Positions
 │   ├── Signals
 │   ├── Execution
 │   ├── Events
@@ -186,6 +240,7 @@ Trading Console
 ├── Research
 │   ├── Candidates
 │   ├── Candidate Detail
+│   ├── Candidate Review
 │   ├── Replay
 │   ├── Backtests
 │   └── Compare
@@ -212,6 +267,19 @@ Returns:
 - max_total_exposure
 - positions[]
 
+#### `GET /api/runtime/positions`
+
+Returns:
+
+- open positions
+- direction
+- entry price
+- mark price
+- unrealized pnl
+- leverage
+- margin usage
+- tp/sl status
+
 #### `GET /api/runtime/events`
 
 Returns:
@@ -236,6 +304,16 @@ Returns:
 - source-of-truth hints
 - frozen flags
 
+#### `GET /api/research/candidates/{candidate_name}/review-summary`
+
+Returns:
+
+- strict checklist
+- warning checks
+- summary decision
+- supporting metrics
+- notes (read-only)
+
 ---
 
 ## 6. Build Order Recommendation
@@ -243,8 +321,10 @@ Returns:
 If Gemini is continuing page expansion, recommend this order:
 
 1. `Runtime / Portfolio`
-2. `Runtime / Events`
-3. `Config / Snapshot`
+2. `Runtime / Positions`
+3. `Runtime / Events`
+4. `Config / Snapshot`
+5. `Research / Candidate Review`
 
 Reason:
 
@@ -261,6 +341,14 @@ Yes, the console should add a configuration-related page, but it should be:
 - `Config / Snapshot`
 - read-only
 - clearly positioned as preview / frozen runtime snapshot
+
+And the next operator-focused page bundle should be:
+
+- `Runtime / Portfolio`
+- `Runtime / Positions`
+- `Runtime / Events`
+- `Config / Snapshot`
+- `Research / Candidate Review`
 
 Not:
 

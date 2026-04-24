@@ -382,6 +382,16 @@ Sim-0 详细任务拆分（归档参考）：
      - 默认只允许本地 / 内网访问
      - `Replay` 第一版按 replay context 理解，不承诺 K 线图表
      - `Candidates` 第一版允许目录扫描，后续视规模补文件索引缓存
+   - 前端页面补充方案 A 已确认：
+     - `Runtime / Portfolio`
+     - `Runtime / Positions`
+     - `Runtime / Events`
+     - `Config / Snapshot`（只读）
+     - `Research / Candidate Review`（只读）
+   - 页面补充方案 A 的目标：
+     - 更贴近量化值班者使用场景
+     - 先补观察 / 理解能力
+     - 仍不引入写操作
 
 ---
 

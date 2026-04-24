@@ -685,6 +685,16 @@
    - Replay 第一版按 replay context 理解
    - Candidates 第一版默认目录扫描，后续如规模增长再补索引缓存
    - breaker / recovery summary 在接口语义上拆分
+7. ✅ 前端页面补充方案 A 已冻结：
+   - `Runtime / Portfolio`
+   - `Runtime / Positions`
+   - `Runtime / Events`
+   - `Config / Snapshot`（只读）
+   - `Research / Candidate Review`（只读）
+8. ✅ 当前页面补充方向已明确：
+   - 按量化使用者日常观察路径补页
+   - 仍保持只读 + mock-first
+   - 暂不进入配置写回与 runtime 操作页
 
 ### Config 重构第三轮审计收口（方案 A）
 

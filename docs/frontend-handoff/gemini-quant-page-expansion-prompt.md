@@ -37,8 +37,10 @@ Research:
 ## Add these pages now
 
 1. `Runtime / Portfolio`
-2. `Runtime / Events`
-3. `Config / Snapshot`
+2. `Runtime / Positions`
+3. `Runtime / Events`
+4. `Config / Snapshot`
+5. `Research / Candidate Review`
 
 ## Product semantics
 
@@ -55,6 +57,22 @@ Please include realistic mock sections for:
 - daily loss used / limit
 - leverage usage
 - open positions table
+
+### Runtime / Positions
+
+This page should focus on position-level monitoring.
+
+Please include realistic mock sections for:
+
+- symbol
+- direction
+- entry price
+- mark price
+- unrealized PnL
+- leverage
+- margin usage
+- TP / SL status
+- lifecycle / protection status
 
 ### Runtime / Events
 
@@ -87,6 +105,19 @@ Please include:
 - frozen indicators
 
 Make it visually obvious that this page is a frozen snapshot and not editable.
+
+### Research / Candidate Review
+
+This page should feel like a decision-support view, not a raw detail dump.
+
+Please include:
+
+- strict v1 checklist
+- warning-only checks
+- best trial summary
+- top trials comparison
+- parameter near-boundary warnings
+- final review summary (read-only)
 
 ## Engineering guidance
 

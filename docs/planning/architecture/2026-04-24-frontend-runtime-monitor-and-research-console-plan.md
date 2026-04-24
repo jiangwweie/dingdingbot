@@ -129,6 +129,38 @@ Trading Console
     └── Compare
 ```
 
+### 4.3 页面补充方案 A（已确认）
+
+从量化使用者 / Sim-1 观察者视角，已确认后续优先补齐以下页面：
+
+```text
+Trading Console
+├── Runtime
+│   ├── Overview
+│   ├── Portfolio
+│   ├── Positions
+│   ├── Signals
+│   ├── Execution
+│   ├── Events
+│   └── Health
+├── Research
+│   ├── Candidates
+│   ├── Candidate Detail
+│   ├── Candidate Review
+│   ├── Replay
+│   ├── Backtests
+│   └── Compare
+└── Config
+    └── Snapshot
+```
+
+当前决策：
+
+1. 采用页面补充 **方案 A**
+2. `Config / Snapshot` 明确为**只读预览页**
+3. `Research / Candidate Review` 明确为**评审聚合视图**，不是写回页
+4. 仍然不做配置编辑、不做 runtime 热改、不做 review 写回
+
 ---
 
 ## 5. 页面定义
@@ -196,7 +228,51 @@ Trading Console
 
 `breaker summary` 与 `recovery summary` 必须在接口语义上拆开定义，不允许前端把 breaker 状态与 PG recovery tasks 聚合结果混成单一数字。
 
-### 5.5 Research / Candidates
+### 5.5 Runtime / Portfolio
+
+目标：从账户与风险视角看系统当前是否安全。
+
+必须展示：
+
+- total equity
+- available balance
+- unrealized PnL
+- total exposure
+- daily loss used / limit
+- leverage usage
+- margin summary
+- 账户级风险状态
+
+### 5.6 Runtime / Positions
+
+目标：从仓位视角看当前市场暴露与保护状态。
+
+必须展示：
+
+- open positions
+- direction
+- entry price / mark price
+- unrealized PnL
+- leverage
+- margin usage
+- TP / SL 挂单状态
+- 仓位生命周期状态
+
+### 5.7 Runtime / Events
+
+目标：提供统一的运行事件时间线，减少值班时翻日志。
+
+必须展示：
+
+- startup events
+- reconciliation events
+- breaker events
+- recovery events
+- warnings / errors
+- signal decision summaries
+- execution lifecycle summaries
+
+### 5.8 Research / Candidates
 
 目标：看有哪些 candidate 值得进入人工评审。
 
@@ -210,7 +286,7 @@ Trading Console
 - Strict v1 通过情况
 - warnings 列表
 
-### 5.6 Research / Candidate Detail
+### 5.9 Research / Candidate Detail
 
 目标：看单个 candidate 是否值得继续跟进。
 
@@ -223,7 +299,19 @@ Trading Console
 - constraints
 - review rubric 对照结果
 
-### 5.7 Research / Replay（第一版按 Replay Context 理解）
+### 5.10 Research / Candidate Review
+
+目标：把单个 candidate 的评审信息组织成“做判断”的视图，而不是仅看原始字段。
+
+必须展示：
+
+- Strict v1 checklist
+- warning-only checks
+- best trial vs top trials 摘要
+- parameter near boundary 提示
+- review summary（只读）
+
+### 5.11 Research / Replay（第一版按 Replay Context 理解）
 
 目标：让人读懂 candidate 结构，而不是直接做重回测控制。
 
@@ -239,6 +327,27 @@ Trading Console
 1. 第一版 `Replay` 更准确的语义是 **Replay Context / Reproduce Context**。
 2. 第一版不承诺 K 线回放或交互式图表。
 3. 如后续已有现成静态 HTML 图表产物，可在 P1/P2 阶段补充为外链或内嵌只读展示。
+
+### 5.12 Config / Snapshot（Read-only）
+
+目标：让人确认“系统当前到底按什么配置运行”。
+
+必须展示：
+
+- runtime profile / version / hash
+- market snapshot
+- strategy snapshot
+- risk snapshot
+- execution snapshot
+- backend summary
+- source-of-truth hints
+- frozen indicators
+
+约束：
+
+1. 这是**只读 snapshot 页**
+2. 不允许在 UI 中编辑配置
+3. 必须明确标识当前处于 frozen runtime 语义下
 
 ---
 
@@ -362,6 +471,70 @@ Trading Console
 - resolved_request
 - runtime_overrides
 
+### P1.5 / P2 补充接口（方案 A）
+
+#### `GET /api/runtime/portfolio`
+
+返回：
+
+- total_equity
+- available_balance
+- unrealized_pnl
+- total_exposure
+- daily_loss_used
+- daily_loss_limit
+- leverage_usage
+- positions_summary
+
+#### `GET /api/runtime/positions`
+
+返回：
+
+- positions[]
+- symbol
+- direction
+- entry_price
+- mark_price
+- unrealized_pnl
+- leverage
+- margin_usage
+- tp_status
+- sl_status
+
+#### `GET /api/runtime/events`
+
+返回：
+
+- recent timeline items
+- category
+- severity
+- message
+- timestamp
+- related ids
+
+#### `GET /api/config/snapshot`
+
+返回：
+
+- profile identity
+- market snapshot
+- strategy snapshot
+- risk snapshot
+- execution snapshot
+- backend snapshot
+- source-of-truth hints
+- frozen flags
+
+#### `GET /api/research/candidates/{candidate_name}/review-summary`
+
+返回：
+
+- strict checklist
+- warning checks
+- summary decision
+- supporting metrics
+- notes（只读）
+
 ---
 
 ## 7. 后续接口（第二阶段）
@@ -416,9 +589,14 @@ Trading Console
 
 1. Research / Backtests
 2. Research / Compare
-3. 复杂分析图表
-4. 人工 review 写回
-5. 更丰富的 overfitting checks 展示
+3. Runtime / Portfolio
+4. Runtime / Positions
+5. Runtime / Events
+6. Config / Snapshot
+7. Research / Candidate Review
+8. 复杂分析图表
+9. 人工 review 写回
+10. 更丰富的 overfitting checks 展示
 
 ---
 

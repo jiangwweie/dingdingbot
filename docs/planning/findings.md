@@ -397,6 +397,21 @@ SSOT 文档：
 4. `Research / Candidates` 第一版允许基于 `reports/optuna_candidates/` 扫描，但需显式记录后续文件索引缓存演进点。
 5. `breaker summary` 与 `recovery summary` 必须在接口语义上拆开，避免把运行时保护状态与 PG 恢复工单状态混成同一个聚合数字。
 
+页面补充决策（方案 A）：
+
+1. 从量化使用者视角，当前最值得补齐的页面不是配置编辑，而是：
+   - `Runtime / Portfolio`
+   - `Runtime / Positions`
+   - `Runtime / Events`
+   - `Config / Snapshot`
+   - `Research / Candidate Review`
+2. `Config / Snapshot` 只允许作为 frozen runtime 的只读预览页存在，不允许演进为配置编辑器。
+3. `Research / Candidate Review` 只做评审聚合展示，不做状态写回。
+4. 当前前端补页的核心原则仍然是：
+   - 先补可见性
+   - 再补研究辅助
+   - 不突破只读边界
+
 ### `.env` 不能承载本地 PG 示例或 backend 切换值
 
 已跟踪 `.env` 仍包含真实交易所 key / webhook，不能再混入本地 PG 连接串或 backend 切换示例。否则后续提交时容易把个人本地运行环境和敏感配置一起带入版本历史。
