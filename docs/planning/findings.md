@@ -561,3 +561,44 @@ SSOT 文档：
 - `PASS_STRICT` / `PASS_STRICT_WITH_WARNINGS` 才进入人工评审池。
 - `PASS_LOOSE` 只保留为对照候选，不进入后续 runtime 讨论。
 - `REJECT` 不进入后续评审链路。
+
+---
+
+## 2026-04-25 -- 后端只读 API 成为当前主线扩展
+
+### 背景
+
+Gemini 生成的前端骨架已经覆盖 Runtime / Research / Config 的主要只读页面，mock 数据也已经能支撑第一轮体验。当前新的瓶颈不再是“有没有页面”，而是“前端是否有稳定、可对齐的后端只读数据源”。
+
+### 关键判断
+
+1. 主模块仍依赖 `src/interfaces/api.py` 启动，因此 API 模块短期不能一刀切删除，只能逐步瘦身。
+2. 前端控制台的下一步价值不在继续加页，而在把 mock-first 页面逐步对接为真实只读数据。
+3. Sim-1 仍然是 runtime 真源，后端 read model 必须围绕 Sim-1 真实运行状态来组织，而不是反向让前端直接读表。
+
+### 决策
+
+1. 先做只读 API，不做写接口。
+2. 先做页面级聚合接口，不先直出数据库表。
+3. `api.py` 先保留兼容入口，再逐步把控制台相关路由拆出去。
+4. 前端 mock 数据继续保留为临时垫层，最终逐页替换成真实后端数据。
+
+### 当前优先级
+
+- P0：`runtime/overview`、`runtime/portfolio`、`runtime/positions`、`runtime/events`、`runtime/health`
+- P1：`runtime/signals`、`runtime/attempts`、`runtime/execution/intents`、`runtime/execution/orders`
+- P1：`research/candidates`、`research/candidates/{candidate_name}`、`research/candidates/{candidate_name}/review-summary`、`research/replay/{candidate_name}`
+- P2：`research/backtests`、`research/backtests/{report_id}`、`research/compare/*`、`config/snapshot`
+
+### 待办步骤
+
+1. 冻结前端页面契约和 mock 字段命名。
+2. 为 P0 页面定义 read-model 输出结构。
+3. 先落 Runtime 域只读 API。
+4. 再落 Research 域只读 API。
+5. 把控制台相关读取逻辑从 `src/interfaces/api.py` 中拆出为独立模块。
+6. 用 Sim-1 真实数据逐页校验 mock 与后端差异。
+
+### 说明
+
+这条线的重点不是“把 API 全部重写”，而是建立一个稳定的只读数据层，让前端控制台先能看清，再逐步替换 mock。

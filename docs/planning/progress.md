@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-24 01:45
+> Last updated: 2026-04-25 00:15
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
@@ -11,6 +11,18 @@
 当需要还原精确执行顺序时，以 git history 为准（commit 时间戳是唯一可靠时间线）。
 
 ## 近期完成
+
+### 2026-04-25 -- 后端只读 API 主线已确认，api 模块进入瘦身规划
+
+1. ✅ 识别当前瓶颈已从“前端页面结构”转为“后端只读数据供给”。
+2. ✅ 确认主模块仍依赖 `src/interfaces/api.py` 启动，因此短期采取“保留兼容入口 + 逐步拆路由”的策略。
+3. ✅ 冻结当前后端主线方向：
+   - 先做只读 API
+   - 先做页面级聚合接口
+   - Runtime / Research 分域推进
+   - 前端 mock 作为临时垫层，逐页替换为真实后端数据
+4. ✅ 已新增后端只读 API 主线规划文档：
+   - `docs/planning/architecture/2026-04-25-backend-readonly-api-and-api-module-roadmap.md`
 
 ### 2026-04-24 -- Sim-1 runtime cutover 非 I/O 冒烟已通过
 

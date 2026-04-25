@@ -398,6 +398,36 @@ Sim-0 详细任务拆分（归档参考）：
      - 新的主文档：
        - `docs/planning/architecture/2026-04-25-frontend-console-plan-b.md`
 
+### G. 后端只读 API 方向（当前主线扩展）
+
+1. 方向判断：
+   - 前端骨架和 mock 数据已经足够支撑下一步推进
+   - 当前真正的瓶颈已转为“后端只读数据供给”
+   - 主模块仍依赖 `src/interfaces/api.py` 启动，因此 API 需要先瘦身而不是一次性重写
+2. 关键决策：
+   - 先做只读 API，不做写接口
+   - 先做页面级聚合接口，不先直出数据库表
+   - `api.py` 继续作为兼容入口，但逐步把控制台相关路由拆出去
+   - 运行主线以 Sim-1 真实数据为真源，前端 mock 只作为临时垫层
+3. 当前页面对应的 API 优先级：
+   - P0：`runtime/overview`、`runtime/portfolio`、`runtime/positions`、`runtime/events`、`runtime/health`
+   - P1：`runtime/signals`、`runtime/attempts`、`runtime/execution/intents`、`runtime/execution/orders`
+   - P1：`research/candidates`、`research/candidates/{candidate_name}`、`research/candidates/{candidate_name}/review-summary`、`research/replay/{candidate_name}`
+   - P2：`research/backtests`、`research/backtests/{report_id}`、`research/compare/*`、`config/snapshot`
+   - P3：`runtime/alerts`、`research/runs`、`research/artifact-explorer`
+4. 当前待办步骤：
+   1. 冻结前端页面契约和 mock 字段命名，避免后端接口反复改口径。
+   2. 为 P0 页面定义 read-model 输出结构。
+   3. 先实现 Runtime 域只读 API。
+   4. 再实现 Research 域只读 API。
+   5. 把控制台相关读取逻辑从 `src/interfaces/api.py` 中拆出为独立模块。
+   6. 用 Sim-1 真实数据逐页校验 mock 与后端的差异。
+5. 非目标：
+   - 不做配置编辑
+   - 不做 runtime 热改
+   - 不做 review 写回
+   - 不做一口气重写 `api.py`
+
 ---
 
 ## 约束提醒
