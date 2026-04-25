@@ -1146,6 +1146,16 @@ class Position(FinancialModel):
     total_fees_paid: Decimal = Field(default=Decimal('0'), description="累计支付的手续费")
     total_funding_paid: Decimal = Field(default=Decimal('0'), description="累计支付的资金费用 (BT-2)")
 
+    # Execution projection internals
+    projected_exit_fills: Dict[str, Decimal] = Field(
+        default_factory=dict,
+        description="本地已投影的 exit 订单累计成交量（按 order_id 聚合，用于幂等）",
+    )
+    projected_exit_fees: Dict[str, Decimal] = Field(
+        default_factory=dict,
+        description="本地已投影的 exit 订单累计手续费（按 order_id 聚合，用于幂等）",
+    )
+
     opened_at: Optional[int] = Field(default=None, description="开仓时间戳（毫秒）")
     closed_at: Optional[int] = Field(default=None, description="平仓时间戳（毫秒）")
     is_closed: bool = False      # current_qty 归零时标记为 True

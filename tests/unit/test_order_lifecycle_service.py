@@ -1062,3 +1062,363 @@ class TestCallbackAndAuditErrorHandling:
         assert order.status == OrderStatus.CREATED
         # 验证记录了错误日志
         assert "审计日志记录失败" in caplog.text or "Audit log error" in caplog.text
+
+
+# ============================================================
+# 补充测试用例 - EXIT progressed callback
+# ============================================================
+
+
+class TestExitProgressedCallback:
+    """测试 EXIT 成交推进回调"""
+
+    @pytest.mark.asyncio
+    async def test_exit_progressed_callback_on_partial_fill(
+        self, lifecycle_service, sample_strategy
+    ):
+        """
+        B.1: EXIT progressed callback on partial fill
+
+        场景：
+        - TP/SL 从 OPEN -> PARTIALLY_FILLED，filled_qty 从 0 -> 2
+        - 触发 exit_progressed callback 一次
+        """
+        callback_called = []
+
+        async def exit_progressed_callback(order: Order):
+            callback_called.append(order)
+
+        lifecycle_service.set_exit_progressed_callback(exit_progressed_callback)
+
+        # 直接创建 TP1 订单（不通过 create_order 创建整个订单链）
+        tp_order = Order(
+            id="tp1_test_001",
+            signal_id="sig_test_exit_progressed_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,  # TP 是平仓方向
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('3.0'),
+            price=Decimal('66000'),
+            status=OrderStatus.CREATED,
+            created_at=int(time.time() * 1000),
+            updated_at=int(time.time() * 1000),
+        )
+        await lifecycle_service._repository.save(tp_order)
+
+        await lifecycle_service.submit_order(tp_order.id, exchange_order_id="binance_exit_partial")
+        await lifecycle_service.confirm_order(tp_order.id)
+
+        # 部分成交
+        exchange_order = Order(
+            id=tp_order.id,
+            signal_id=tp_order.signal_id,
+            exchange_order_id="binance_exit_partial",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('3.0'),
+            filled_qty=Decimal('2.0'),  # 部分成交
+            average_exec_price=Decimal('66000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=tp_order.created_at,
+            updated_at=tp_order.updated_at,
+        )
+
+        updated_order = await lifecycle_service.update_order_from_exchange(exchange_order)
+
+        # 验证回调被触发一次
+        assert len(callback_called) == 1
+        assert callback_called[0].id == tp_order.id
+        assert callback_called[0].filled_qty == Decimal('2.0')
+
+    @pytest.mark.asyncio
+    async def test_duplicate_partial_fill_no_callback(
+        self, lifecycle_service, sample_strategy
+    ):
+        """
+        B.2: duplicate partial fill no callback
+
+        场景：
+        - 同样 filled_qty 再来一次，不应重复触发
+        """
+        callback_called = []
+
+        async def exit_progressed_callback(order: Order):
+            callback_called.append(order)
+
+        lifecycle_service.set_exit_progressed_callback(exit_progressed_callback)
+
+        # 直接创建 TP1 订单
+        tp_order = Order(
+            id="tp1_test_002",
+            signal_id="sig_test_exit_progressed_002",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('3.0'),
+            price=Decimal('66000'),
+            status=OrderStatus.CREATED,
+            created_at=int(time.time() * 1000),
+            updated_at=int(time.time() * 1000),
+        )
+        await lifecycle_service._repository.save(tp_order)
+
+        await lifecycle_service.submit_order(tp_order.id, exchange_order_id="binance_exit_dup")
+        await lifecycle_service.confirm_order(tp_order.id)
+
+        # 第一次部分成交
+        exchange_order_1 = Order(
+            id=tp_order.id,
+            signal_id=tp_order.signal_id,
+            exchange_order_id="binance_exit_dup",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('3.0'),
+            filled_qty=Decimal('2.0'),
+            average_exec_price=Decimal('66000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=tp_order.created_at,
+            updated_at=tp_order.updated_at,
+        )
+
+        await lifecycle_service.update_order_from_exchange(exchange_order_1)
+        assert len(callback_called) == 1
+
+        # 第二次相同 filled_qty
+        exchange_order_2 = Order(
+            id=tp_order.id,
+            signal_id=tp_order.signal_id,
+            exchange_order_id="binance_exit_dup",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('3.0'),
+            filled_qty=Decimal('2.0'),  # 相同
+            average_exec_price=Decimal('66000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=tp_order.created_at,
+            updated_at=tp_order.updated_at,
+        )
+
+        await lifecycle_service.update_order_from_exchange(exchange_order_2)
+
+        # 验证回调不再触发
+        assert len(callback_called) == 1  # 仍然是 1
+
+    @pytest.mark.asyncio
+    async def test_increased_partial_fill_retriggers_callback(
+        self, lifecycle_service, sample_strategy
+    ):
+        """
+        B.3: increased partial fill retriggers callback
+
+        场景：
+        - 同一订单 filled_qty 从 2 -> 5
+        - 应再次触发 exit_progressed callback
+        """
+        callback_called = []
+
+        async def exit_progressed_callback(order: Order):
+            callback_called.append(order)
+
+        lifecycle_service.set_exit_progressed_callback(exit_progressed_callback)
+
+        # 直接创建 TP1 订单
+        tp_order = Order(
+            id="tp1_test_003",
+            signal_id="sig_test_exit_progressed_003",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('10.0'),
+            price=Decimal('66000'),
+            status=OrderStatus.CREATED,
+            created_at=int(time.time() * 1000),
+            updated_at=int(time.time() * 1000),
+        )
+        await lifecycle_service._repository.save(tp_order)
+
+        await lifecycle_service.submit_order(tp_order.id, exchange_order_id="binance_exit_inc")
+        await lifecycle_service.confirm_order(tp_order.id)
+
+        # 第一次 filled_qty=2
+        exchange_order_1 = Order(
+            id=tp_order.id,
+            signal_id=tp_order.signal_id,
+            exchange_order_id="binance_exit_inc",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('10.0'),
+            filled_qty=Decimal('2.0'),
+            average_exec_price=Decimal('66000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=tp_order.created_at,
+            updated_at=tp_order.updated_at,
+        )
+
+        await lifecycle_service.update_order_from_exchange(exchange_order_1)
+        assert len(callback_called) == 1
+
+        # 第二次 filled_qty=5
+        exchange_order_2 = Order(
+            id=tp_order.id,
+            signal_id=tp_order.signal_id,
+            exchange_order_id="binance_exit_inc",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('10.0'),
+            filled_qty=Decimal('5.0'),  # 增加到 5
+            average_exec_price=Decimal('66000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=tp_order.created_at,
+            updated_at=tp_order.updated_at,
+        )
+
+        await lifecycle_service.update_order_from_exchange(exchange_order_2)
+
+        # 验证回调再次触发
+        assert len(callback_called) == 2
+        assert callback_called[1].filled_qty == Decimal('5.0')
+
+    @pytest.mark.asyncio
+    async def test_partial_fill_then_canceled(
+        self, lifecycle_service, sample_strategy
+    ):
+        """
+        B.4: partial fill then canceled
+
+        场景：
+        - 先 PARTIALLY_FILLED(filled_qty=2)，再 CANCELED
+        - callback 只在成交推进时触发，不在 canceled 时再触发一次
+        """
+        callback_called = []
+
+        async def exit_progressed_callback(order: Order):
+            callback_called.append(order)
+
+        lifecycle_service.set_exit_progressed_callback(exit_progressed_callback)
+
+        # 直接创建 TP1 订单
+        tp_order = Order(
+            id="tp1_test_004",
+            signal_id="sig_test_exit_progressed_004",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('3.0'),
+            price=Decimal('66000'),
+            status=OrderStatus.CREATED,
+            created_at=int(time.time() * 1000),
+            updated_at=int(time.time() * 1000),
+        )
+        await lifecycle_service._repository.save(tp_order)
+
+        await lifecycle_service.submit_order(tp_order.id, exchange_order_id="binance_exit_cancel")
+        await lifecycle_service.confirm_order(tp_order.id)
+
+        # 部分成交
+        exchange_order_1 = Order(
+            id=tp_order.id,
+            signal_id=tp_order.signal_id,
+            exchange_order_id="binance_exit_cancel",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('3.0'),
+            filled_qty=Decimal('2.0'),
+            average_exec_price=Decimal('66000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=tp_order.created_at,
+            updated_at=tp_order.updated_at,
+        )
+
+        await lifecycle_service.update_order_from_exchange(exchange_order_1)
+        assert len(callback_called) == 1
+
+        # 取消订单
+        exchange_order_2 = Order(
+            id=tp_order.id,
+            signal_id=tp_order.signal_id,
+            exchange_order_id="binance_exit_cancel",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.SHORT,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal('3.0'),
+            filled_qty=Decimal('2.0'),  # 不变
+            average_exec_price=Decimal('66000'),
+            status=OrderStatus.CANCELED,
+            created_at=tp_order.created_at,
+            updated_at=tp_order.updated_at,
+        )
+
+        await lifecycle_service.update_order_from_exchange(exchange_order_2)
+
+        # 验证回调不再触发（仍然是 1）
+        assert len(callback_called) == 1
+
+    @pytest.mark.asyncio
+    async def test_entry_order_should_not_trigger_exit_progressed_callback(
+        self, lifecycle_service, sample_strategy
+    ):
+        """
+        B.5: ENTRY order should not hit exit_progressed callback
+
+        场景：
+        - ENTRY 的部分成交不应误触 exit_progressed callback
+        """
+        callback_called = []
+
+        async def exit_progressed_callback(order: Order):
+            callback_called.append(order)
+
+        lifecycle_service.set_exit_progressed_callback(exit_progressed_callback)
+
+        # 创建 ENTRY 订单
+        order = await lifecycle_service.create_order(
+            strategy=sample_strategy,
+            signal_id="sig_test_exit_progressed_005",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            total_qty=Decimal('3.0'),
+            initial_sl_rr=Decimal('-1.0'),
+            tp_targets=[Decimal('1.5')],
+        )
+
+        await lifecycle_service.submit_order(order.id, exchange_order_id="binance_entry_partial")
+        await lifecycle_service.confirm_order(order.id)
+
+        # 部分成交
+        exchange_order = Order(
+            id=order.id,
+            signal_id=order.signal_id,
+            exchange_order_id="binance_entry_partial",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,  # ENTRY 角色
+            requested_qty=Decimal('3.0'),
+            filled_qty=Decimal('2.0'),
+            average_exec_price=Decimal('65000'),
+            status=OrderStatus.PARTIALLY_FILLED,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
+        )
+
+        await lifecycle_service.update_order_from_exchange(exchange_order)
+
+        # 验证回调未被触发
+        assert len(callback_called) == 0

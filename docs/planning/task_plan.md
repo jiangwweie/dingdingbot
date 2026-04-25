@@ -567,3 +567,25 @@ Sim-0 详细任务拆分（归档参考）：
 1. 当前阶段
 2. 近期规划
 3. 后续规划
+
+---
+
+## 2026-04-25 执行一致性补丁
+
+当前正在收口执行主线 PG 闭环后的第二层风险修复，范围只限 runtime execution 主链：
+
+1. `PositionProjectionService`
+   - 增加同仓位投影锁，降低并发脏写概率
+   - `project_exit_fill()` 改为按 `exit_order.id` 的累计成交量/手续费做幂等增量投影
+   - 不再只适配“首次 FILLED”单次扣减
+2. `OrderLifecycleService`
+   - 新增 exit progressed callback
+   - `TP/SL` 只要成交量前进，就回调 position projection
+   - 修复 `partial fill -> canceled` 不入本地仓位的问题
+3. `ExecutionOrchestrator`
+   - protection order 不再盲目 `confirm_order()->OPEN`
+   - 改为按 `placement_result.status` 推进本地状态
+   - 替换 SL 后新 SL 提交失败/异常时，统一触发 recovery + 熔断 + 告警
+   - 为 `ExecutionIntent` 增加状态前进约束，阻止 `COMPLETED -> PARTIALLY_PROTECTED` 之类回退
+
+测试仍未由 Codex 本地执行；如需 pytest，继续遵守项目红线，先由用户确认。

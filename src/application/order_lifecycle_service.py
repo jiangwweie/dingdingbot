@@ -100,6 +100,7 @@ class OrderLifecycleService:
         # MVP-Protected-Position-Step2: ENTRY 部分成交后的保护单挂载回调
         self._on_entry_partially_filled: Optional[Callable[[Order], Awaitable[None]]] = None
         self._on_entry_filled: Optional[Callable[[Order], Awaitable[None]]] = None
+        self._on_exit_progressed: Optional[Callable[[Order], Awaitable[None]]] = None
         self._on_exit_filled: Optional[Callable[[Order], Awaitable[None]]] = None
 
     async def start(self) -> None:
@@ -155,6 +156,13 @@ class OrderLifecycleService:
     ) -> None:
         """设置 TP/SL 完全成交回调（用于更新 position projection）。"""
         self._on_exit_filled = callback
+
+    def set_exit_progressed_callback(
+        self,
+        callback: Callable[[Order], Awaitable[None]]
+    ) -> None:
+        """设置 TP/SL 成交推进回调（部分成交/完全成交均可触发，用于增量投影）。"""
+        self._on_exit_progressed = callback
 
     async def _notify_order_changed(self, order: Order) -> None:
         """通知订单已变更"""
@@ -566,6 +574,9 @@ class OrderLifecycleService:
         # 获取状态机
         state_machine = self._get_or_create_state_machine(local_order)
 
+        previous_status = local_order.status
+        previous_filled_qty = local_order.filled_qty
+
         # 更新本地订单数据
         if order.exchange_order_id:
             local_order.exchange_order_id = order.exchange_order_id
@@ -573,8 +584,6 @@ class OrderLifecycleService:
             local_order.filled_qty = filled_qty
         if average_exec_price:
             local_order.average_exec_price = average_exec_price
-
-        previous_status = local_order.status
 
         # 执行状态转换
         if target_status == OrderStatus.FILLED:
@@ -641,6 +650,27 @@ class OrderLifecycleService:
                 await state_machine.confirm_open()
 
         await self._repository.save(local_order)
+
+        if (
+            local_order.order_role in {
+                OrderRole.SL,
+                OrderRole.TP1,
+                OrderRole.TP2,
+                OrderRole.TP3,
+                OrderRole.TP4,
+                OrderRole.TP5,
+            }
+            and filled_qty > previous_filled_qty
+            and self._on_exit_progressed is not None
+        ):
+            try:
+                await self._on_exit_progressed(local_order)
+            except Exception as e:
+                logger.error(
+                    f"[OrderLifecycleService] EXIT 成交推进回调失败: "
+                    f"order_id={local_order.id}, error={e}",
+                    exc_info=True
+                )
 
         if (
             target_status == OrderStatus.FILLED

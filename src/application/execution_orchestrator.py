@@ -21,6 +21,7 @@ ExecutionOrchestrator MVP 第一步：最小主链
 - 不改 API 主链
 """
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Dict, List, Any, Callable
@@ -86,6 +87,7 @@ class ExecutionOrchestrator:
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
+        self._intent_locks: Dict[str, asyncio.Lock] = {}
 
         # P0-2：熔断机制（内存缓存，由 PG recovery tasks 重建）
         self._circuit_breaker_symbols: set = set()  # 熔断的 symbol 集合
@@ -95,7 +97,95 @@ class ExecutionOrchestrator:
             self._handle_entry_partially_filled
         )
         self._order_lifecycle.set_entry_filled_callback(self._handle_entry_filled)
+        self._order_lifecycle.set_exit_progressed_callback(self._handle_exit_filled)
         self._order_lifecycle.set_exit_filled_callback(self._handle_exit_filled)
+
+    def _get_intent_lock(self, intent_id: str) -> asyncio.Lock:
+        lock = self._intent_locks.get(intent_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._intent_locks[intent_id] = lock
+        return lock
+
+    @staticmethod
+    def _can_transition_intent(
+        current: ExecutionIntentStatus,
+        target: ExecutionIntentStatus,
+    ) -> bool:
+        if current == target:
+            return True
+
+        allowed = {
+            ExecutionIntentStatus.PENDING: {
+                ExecutionIntentStatus.BLOCKED,
+                ExecutionIntentStatus.FAILED,
+                ExecutionIntentStatus.SUBMITTED,
+                ExecutionIntentStatus.PROTECTING,
+                ExecutionIntentStatus.COMPLETED,
+            },
+            ExecutionIntentStatus.SUBMITTED: {
+                ExecutionIntentStatus.PROTECTING,
+                ExecutionIntentStatus.PARTIALLY_PROTECTED,
+                ExecutionIntentStatus.FAILED,
+                ExecutionIntentStatus.COMPLETED,
+            },
+            ExecutionIntentStatus.PROTECTING: {
+                ExecutionIntentStatus.FAILED,
+                ExecutionIntentStatus.COMPLETED,
+            },
+            ExecutionIntentStatus.PARTIALLY_PROTECTED: {
+                ExecutionIntentStatus.PROTECTING,
+                ExecutionIntentStatus.FAILED,
+                ExecutionIntentStatus.COMPLETED,
+            },
+            ExecutionIntentStatus.BLOCKED: set(),
+            ExecutionIntentStatus.FAILED: set(),
+            ExecutionIntentStatus.COMPLETED: set(),
+        }
+        return target in allowed.get(current, set())
+
+    async def _set_intent_status(
+        self,
+        intent: ExecutionIntent,
+        status: ExecutionIntentStatus,
+        *,
+        failed_reason: Optional[str] = None,
+        blocked_reason: Optional[str] = None,
+        blocked_message: Optional[str] = None,
+    ) -> bool:
+        async with self._get_intent_lock(intent.id):
+            latest = await self._load_intent(intent.id) or intent
+            current_status = latest.status
+            if not hasattr(current_status, "value"):
+                current_status = ExecutionIntentStatus(current_status)
+
+            if not self._can_transition_intent(current_status, status):
+                logger.warning(
+                    "[ExecutionOrchestrator] 忽略非法/回退的 intent 状态转换: "
+                    f"intent_id={intent.id}, current={current_status}, target={status}"
+                )
+                return False
+
+            latest.order_id = intent.order_id
+            latest.exchange_order_id = intent.exchange_order_id
+            latest.strategy = intent.strategy
+            latest.signal = intent.signal
+            latest.status = status
+            latest.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+            if failed_reason is not None:
+                latest.failed_reason = failed_reason
+            if blocked_reason is not None:
+                latest.blocked_reason = blocked_reason
+            if blocked_message is not None:
+                latest.blocked_message = blocked_message
+
+            intent.status = latest.status
+            intent.updated_at = latest.updated_at
+            intent.failed_reason = latest.failed_reason
+            intent.blocked_reason = latest.blocked_reason
+            intent.blocked_message = latest.blocked_message
+            await self._save_intent(latest)
+            return True
 
     async def _save_intent(self, intent: ExecutionIntent) -> None:
         """保存执行意图到本地缓存，并按需持久化到仓储。"""
@@ -211,9 +301,8 @@ class ExecutionOrchestrator:
             f"intent_id={intent.id}, order_id={entry_order.id}"
         )
 
-        intent.status = ExecutionIntentStatus.PROTECTING
         intent.order_id = entry_order.id
-        intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+        await self._set_intent_status(intent, ExecutionIntentStatus.PROTECTING)
 
         protection_result = await self._mount_protection_orders(
             intent=intent,
@@ -223,7 +312,7 @@ class ExecutionOrchestrator:
         )
 
         if protection_result["success"]:
-            intent.status = ExecutionIntentStatus.COMPLETED
+            await self._set_intent_status(intent, ExecutionIntentStatus.COMPLETED)
             logger.info(
                 f"[ExecutionOrchestrator] 保护单挂载成功: "
                 f"intent_id={intent.id}, "
@@ -231,15 +320,17 @@ class ExecutionOrchestrator:
                 f"sl_order={protection_result['sl_order']}"
             )
         else:
-            intent.status = ExecutionIntentStatus.FAILED
-            intent.failed_reason = f"保护单挂载失败: {protection_result['error']}"
+            await self._set_intent_status(
+                intent,
+                ExecutionIntentStatus.FAILED,
+                failed_reason=f"保护单挂载失败: {protection_result['error']}",
+            )
             logger.error(
                 f"[ExecutionOrchestrator] 保护单挂载失败: "
                 f"intent_id={intent.id}, error={protection_result['error']}"
             )
 
         await self._project_position_from_entry_order(entry_order)
-        await self._save_intent(intent)
 
     async def _handle_entry_filled(self, entry_order: Order) -> None:
         """处理 ENTRY 完全成交后的保护单挂载与仓位投影。"""
@@ -270,6 +361,133 @@ class ExecutionOrchestrator:
                 f"order_id={exit_order.id}, error={e}",
                 exc_info=True,
             )
+
+    async def _apply_placed_order_status(
+        self,
+        *,
+        order: Order,
+        placement_result: Any,
+    ) -> None:
+        """按交易所真实返回状态推进本地订单，避免盲目停留在 OPEN。"""
+        await self._order_lifecycle.submit_order(
+            order.id,
+            exchange_order_id=placement_result.exchange_order_id,
+        )
+
+        if placement_result.status == OrderStatus.OPEN:
+            await self._order_lifecycle.confirm_order(order.id)
+            return
+
+        if placement_result.status == OrderStatus.FILLED:
+            await self._order_lifecycle.confirm_order(order.id)
+            filled_qty = placement_result.filled_qty or placement_result.amount
+            average_exec_price = placement_result.average_exec_price or placement_result.price
+            if average_exec_price is None and placement_result.exchange_order_id:
+                fetched_order = await self._gateway.fetch_order(
+                    placement_result.exchange_order_id,
+                    order.symbol,
+                )
+                filled_qty = fetched_order.filled_qty or fetched_order.amount or filled_qty
+                average_exec_price = fetched_order.average_exec_price or fetched_order.price
+
+            if filled_qty and average_exec_price is not None:
+                await self._order_lifecycle.update_order_filled(
+                    order.id,
+                    filled_qty=filled_qty,
+                    average_exec_price=average_exec_price,
+                )
+            return
+
+        if placement_result.status == OrderStatus.PARTIALLY_FILLED:
+            await self._order_lifecycle.confirm_order(order.id)
+            if (
+                placement_result.filled_qty is not None
+                and placement_result.filled_qty > Decimal("0")
+                and placement_result.average_exec_price is not None
+            ):
+                await self._order_lifecycle.update_order_partially_filled(
+                    order.id,
+                    filled_qty=placement_result.filled_qty,
+                    average_exec_price=placement_result.average_exec_price,
+                )
+            return
+
+        if placement_result.status == OrderStatus.CANCELED:
+            await self._order_lifecycle.cancel_order(
+                order.id,
+                reason="Exchange canceled the order",
+            )
+            return
+
+        if placement_result.status == OrderStatus.REJECTED:
+            await self._order_lifecycle.reject_order(
+                order.id,
+                reason="Exchange rejected the order",
+            )
+
+    async def _trigger_unprotected_recovery(
+        self,
+        *,
+        intent: ExecutionIntent,
+        symbol: str,
+        related_order: Optional[Order],
+        error_message: str,
+        context_payload: Dict[str, Any],
+    ) -> None:
+        """当仓位可能裸奔时，统一创建恢复任务、熔断并告警。"""
+        related_order_id = related_order.id if related_order else None
+        related_exchange_order_id = (
+            related_order.exchange_order_id if related_order else None
+        )
+
+        if self._execution_recovery_repository is not None:
+            try:
+                task_id = f"recovery_{uuid.uuid4().hex[:16]}"
+                await self._execution_recovery_repository.create_task(
+                    task_id=task_id,
+                    intent_id=intent.id,
+                    symbol=symbol,
+                    recovery_type="replace_sl_failed",
+                    related_order_id=related_order_id,
+                    related_exchange_order_id=related_exchange_order_id,
+                    error_message=error_message,
+                    context_payload=context_payload,
+                )
+                logger.info(
+                    "[ExecutionOrchestrator] 已创建 PG recovery task: "
+                    f"task_id={task_id}, intent_id={intent.id}"
+                )
+            except Exception as pg_error:
+                logger.error(
+                    "[ExecutionOrchestrator] 创建 PG recovery task 失败: "
+                    f"error={pg_error}",
+                    exc_info=True,
+                )
+
+        self._circuit_breaker_symbols.add(symbol)
+        logger.error(
+            "[ExecutionOrchestrator] 已触发熔断: "
+            f"symbol={symbol}, related_order_id={related_order_id}"
+        )
+
+        if self._notifier:
+            try:
+                title = "[P0] Pending Recovery Triggered"
+                message = (
+                    f"symbol={symbol}\n"
+                    f"intent_id={intent.id}\n"
+                    f"related_order_id={related_order_id}\n"
+                    f"exchange_order_id={related_exchange_order_id}\n"
+                    f"error={error_message}\n"
+                    f"action=circuit_breaker_triggered"
+                )
+                await self._notifier(title, message)
+            except Exception as notify_error:
+                logger.error(
+                    "[ExecutionOrchestrator] P0 告警发送失败（不影响主流程）: "
+                    f"error={notify_error}",
+                    exc_info=True,
+                )
 
     async def execute_signal(
         self,
@@ -316,17 +534,18 @@ class ExecutionOrchestrator:
 
         # P0-3：熔断检查（在 CapitalProtection 前置检查前）
         if self.is_symbol_blocked(signal.symbol):
-            intent.status = ExecutionIntentStatus.BLOCKED
-            intent.blocked_reason = "CIRCUIT_BREAKER"
-            intent.blocked_message = f"symbol 熔断中，拒绝新信号: {signal.symbol}"
-            intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await self._set_intent_status(
+                intent,
+                ExecutionIntentStatus.BLOCKED,
+                blocked_reason="CIRCUIT_BREAKER",
+                blocked_message=f"symbol 熔断中，拒绝新信号: {signal.symbol}",
+            )
 
             logger.warning(
                 f"[ExecutionOrchestrator] 信号被熔断拦截: "
                 f"intent_id={intent_id}, symbol={signal.symbol}"
             )
 
-            await self._save_intent(intent)
             return intent
 
         # 2. CapitalProtection 前置检查
@@ -341,10 +560,12 @@ class ExecutionOrchestrator:
 
         if not check_result.allowed:
             # 拦截：更新 ExecutionIntent 状态
-            intent.status = ExecutionIntentStatus.BLOCKED
-            intent.blocked_reason = check_result.reason
-            intent.blocked_message = check_result.reason_message
-            intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await self._set_intent_status(
+                intent,
+                ExecutionIntentStatus.BLOCKED,
+                blocked_reason=check_result.reason,
+                blocked_message=check_result.reason_message,
+            )
 
             logger.warning(
                 f"[ExecutionOrchestrator] 信号被拦截: "
@@ -352,7 +573,6 @@ class ExecutionOrchestrator:
                 f"message={check_result.reason_message}"
             )
 
-            await self._save_intent(intent)
             return intent
 
         logger.info(
@@ -378,16 +598,17 @@ class ExecutionOrchestrator:
 
         except Exception as e:
             # 创建订单失败
-            intent.status = ExecutionIntentStatus.FAILED
-            intent.failed_reason = f"创建本地订单失败: {str(e)}"
-            intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await self._set_intent_status(
+                intent,
+                ExecutionIntentStatus.FAILED,
+                failed_reason=f"创建本地订单失败: {str(e)}",
+            )
 
             logger.error(
                 f"[ExecutionOrchestrator] 创建本地订单失败: "
                 f"intent_id={intent_id}, error={e}"
             )
 
-            await self._save_intent(intent)
             return intent
 
         # 4. 提交 ENTRY 到交易所
@@ -410,13 +631,15 @@ class ExecutionOrchestrator:
             # P1 修复 1: 检查 placement_result.is_success
             if not placement_result.is_success:
                 # 提交失败（但未抛异常）
-                intent.status = ExecutionIntentStatus.FAILED
                 intent.order_id = order.id
-                intent.failed_reason = (
-                    f"交易所返回失败: {placement_result.error_code} - "
-                    f"{placement_result.error_message}"
+                await self._set_intent_status(
+                    intent,
+                    ExecutionIntentStatus.FAILED,
+                    failed_reason=(
+                        f"交易所返回失败: {placement_result.error_code} - "
+                        f"{placement_result.error_message}"
+                    ),
                 )
-                intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
 
                 logger.error(
                     f"[ExecutionOrchestrator] 交易所返回失败: "
@@ -425,7 +648,6 @@ class ExecutionOrchestrator:
                     f"error_message={placement_result.error_message}"
                 )
 
-                await self._save_intent(intent)
                 return intent
 
             logger.info(
@@ -469,12 +691,13 @@ class ExecutionOrchestrator:
                     average_exec_price = fetched_order.average_exec_price or fetched_order.price
 
                 if average_exec_price is None:
-                    intent.status = ExecutionIntentStatus.FAILED
                     intent.order_id = order.id
                     intent.exchange_order_id = placement_result.exchange_order_id
-                    intent.failed_reason = "交易所未返回真实成交均价，拒绝挂载保护单"
-                    intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
-                    await self._save_intent(intent)
+                    await self._set_intent_status(
+                        intent,
+                        ExecutionIntentStatus.FAILED,
+                        failed_reason="交易所未返回真实成交均价，拒绝挂载保护单",
+                    )
                     return intent
 
                 await self._order_lifecycle.update_order_filled(
@@ -514,16 +737,14 @@ class ExecutionOrchestrator:
                 # P1 修复：部分成交不应标记为 COMPLETED
                 # 当前阶段：订单部分成交，尚未完全受保护
                 # 使用 SUBMITTED 表示已提交但未完成
-                intent.status = ExecutionIntentStatus.SUBMITTED
                 intent.order_id = order.id
                 intent.exchange_order_id = placement_result.exchange_order_id
-                intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+                await self._set_intent_status(intent, ExecutionIntentStatus.SUBMITTED)
 
                 logger.info(
                     f"[ExecutionOrchestrator] 执行意图状态: SUBMITTED（部分成交，等待后续处理）"
                 )
 
-                await self._save_intent(intent)
                 return intent  # P1-1 修复：必须 return，避免落入通用尾部覆盖状态
 
             elif placement_result.status in (OrderStatus.CANCELED, OrderStatus.REJECTED):
@@ -535,32 +756,34 @@ class ExecutionOrchestrator:
                     )
 
                     # P1 修复：订单被取消，标记为失败
-                    intent.status = ExecutionIntentStatus.FAILED
                     intent.order_id = order.id
-                    intent.failed_reason = "交易所取消订单"
-                    intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+                    await self._set_intent_status(
+                        intent,
+                        ExecutionIntentStatus.FAILED,
+                        failed_reason="交易所取消订单",
+                    )
 
                     logger.error(
                         f"[ExecutionOrchestrator] 交易所取消订单: "
                         f"intent_id={intent_id}, order_id={order.id}"
                     )
 
-                    await self._save_intent(intent)
                     return intent  # P1-1 修复：必须 return，避免落入通用尾部覆盖状态
 
                 else:
                     # REJECTED: 标记为失败
-                    intent.status = ExecutionIntentStatus.FAILED
                     intent.order_id = order.id
-                    intent.failed_reason = "交易所拒绝订单"
-                    intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+                    await self._set_intent_status(
+                        intent,
+                        ExecutionIntentStatus.FAILED,
+                        failed_reason="交易所拒绝订单",
+                    )
 
                     logger.error(
                         f"[ExecutionOrchestrator] 交易所拒绝订单: "
                         f"intent_id={intent_id}, order_id={order.id}"
                     )
 
-                    await self._save_intent(intent)
                     return intent  # P1-1 修复：必须 return，避免落入通用尾部覆盖状态
 
             else:
@@ -572,10 +795,9 @@ class ExecutionOrchestrator:
                 )
 
             # 更新 ExecutionIntent 状态
-            intent.status = ExecutionIntentStatus.COMPLETED
             intent.order_id = order.id
             intent.exchange_order_id = placement_result.exchange_order_id
-            intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await self._set_intent_status(intent, ExecutionIntentStatus.COMPLETED)
 
             logger.info(
                 f"[ExecutionOrchestrator] 执行完成: "
@@ -584,22 +806,22 @@ class ExecutionOrchestrator:
                 f"final_status={placement_result.status}"
             )
 
-            await self._save_intent(intent)
             return intent
 
         except Exception as e:
             # 提交交易所失败
-            intent.status = ExecutionIntentStatus.FAILED
             intent.order_id = order.id
-            intent.failed_reason = f"提交交易所失败: {str(e)}"
-            intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await self._set_intent_status(
+                intent,
+                ExecutionIntentStatus.FAILED,
+                failed_reason=f"提交交易所失败: {str(e)}",
+            )
 
             logger.error(
                 f"[ExecutionOrchestrator] 提交交易所失败: "
                 f"intent_id={intent_id}, order_id={order.id}, error={e}"
             )
 
-            await self._save_intent(intent)
             return intent
 
     async def _mount_protection_orders(
@@ -691,15 +913,10 @@ class ExecutionOrchestrator:
                     )
 
                     if placement_result.is_success:
-                        # P1 修复：使用 OrderLifecycleService 正式链提交订单
-                        # 1. 回填 exchange_order_id
-                        await self._order_lifecycle.submit_order(
-                            prot_order.id,
-                            exchange_order_id=placement_result.exchange_order_id,
+                        await self._apply_placed_order_status(
+                            order=prot_order,
+                            placement_result=placement_result,
                         )
-
-                        # 2. 推进到 OPEN 状态
-                        await self._order_lifecycle.confirm_order(prot_order.id)
 
                         if prot_order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]:
                             tp_orders.append(prot_order)
@@ -713,6 +930,20 @@ class ExecutionOrchestrator:
                             f"exchange_order_id={placement_result.exchange_order_id}"
                         )
                     else:
+                        if prot_order.order_role == OrderRole.SL:
+                            await self._trigger_unprotected_recovery(
+                                intent=intent,
+                                symbol=prot_order.symbol,
+                                related_order=prot_order,
+                                error_message=(
+                                    f"{placement_result.error_code}: {placement_result.error_message}"
+                                ),
+                                context_payload={
+                                    "phase": "mount_initial_protection_sl",
+                                    "entry_order_id": entry_order.id,
+                                    "signal_id": entry_order.signal_id,
+                                },
+                            )
                         # 提交失败
                         failed_orders.append({
                             "order": prot_order,
@@ -736,6 +967,18 @@ class ExecutionOrchestrator:
                         f"role={prot_order.order_role}, "
                         f"error={e}"
                     )
+                    if prot_order.order_role == OrderRole.SL:
+                        await self._trigger_unprotected_recovery(
+                            intent=intent,
+                            symbol=prot_order.symbol,
+                            related_order=prot_order,
+                            error_message=str(e),
+                            context_payload={
+                                "phase": "mount_initial_protection_sl_exception",
+                                "entry_order_id": entry_order.id,
+                                "signal_id": entry_order.signal_id,
+                            },
+                        )
 
             # 判断是否全部成功
             if failed_orders:
@@ -942,6 +1185,14 @@ class ExecutionOrchestrator:
                 f"delta_qty={delta_qty}"
             )
 
+            sl_replaced = False
+            replacement_context = {
+                "entry_order_id": entry_order.id,
+                "filled_qty_total": str(filled_qty_total),
+                "protected_qty_total": str(protected_qty_total),
+                "delta_qty": str(delta_qty),
+            }
+
             # P0-1 修复：处理 SL 订单（撤旧挂新，保证交易所侧覆盖全仓）
             if sl_orders:
                 # 已有 SL：撤掉旧 SL（交易所 + 本地），创建新 SL 覆盖全仓
@@ -976,65 +1227,18 @@ class ExecutionOrchestrator:
                             f"error={str(e)}"
                         )
 
-                        # PG 正式恢复表：创建 recovery task
-                        if self._execution_recovery_repository is not None:
-                            try:
-                                task_id = f"recovery_{uuid.uuid4().hex[:16]}"
-                                context_payload = {
-                                    "entry_order_id": entry_order.id,
-                                    "filled_qty_total": str(filled_qty_total),
-                                    "protected_qty_total": str(protected_qty_total),
-                                    "delta_qty": str(delta_qty),
-                                    "existing_sl_order_id": existing_sl.id,
-                                    "existing_sl_exchange_order_id": existing_sl.exchange_order_id,
-                                }
-                                await self._execution_recovery_repository.create_task(
-                                    task_id=task_id,
-                                    intent_id=intent.id,
-                                    symbol=existing_sl.symbol,
-                                    recovery_type="replace_sl_failed",
-                                    related_order_id=existing_sl.id,
-                                    related_exchange_order_id=existing_sl.exchange_order_id,
-                                    error_message=str(e),
-                                    context_payload=context_payload,
-                                )
-                                logger.info(
-                                    f"[ExecutionOrchestrator] 已创建 PG recovery task: "
-                                    f"task_id={task_id}, intent_id={intent.id}"
-                                )
-                            except Exception as pg_error:
-                                logger.error(
-                                    f"[ExecutionOrchestrator] 创建 PG recovery task 失败: "
-                                    f"error={pg_error}",
-                                    exc_info=True
-                                )
-
-                        # P0-2：触发熔断（该 symbol）
-                        self._circuit_breaker_symbols.add(existing_sl.symbol)
-                        logger.error(
-                            f"[ExecutionOrchestrator] 已触发熔断: symbol={existing_sl.symbol}, "
-                            f"待恢复订单={existing_sl.id}"
+                        await self._trigger_unprotected_recovery(
+                            intent=intent,
+                            symbol=existing_sl.symbol,
+                            related_order=existing_sl,
+                            error_message=str(e),
+                            context_payload={
+                                **replacement_context,
+                                "phase": "cancel_existing_sl",
+                                "existing_sl_order_id": existing_sl.id,
+                                "existing_sl_exchange_order_id": existing_sl.exchange_order_id,
+                            },
                         )
-
-                        # P0-6：发送告警通知
-                        if self._notifier:
-                            try:
-                                title = "[P0] Pending Recovery Triggered"
-                                message = (
-                                    f"symbol={existing_sl.symbol}\n"
-                                    f"order_id={existing_sl.id}\n"
-                                    f"exchange_order_id={existing_sl.exchange_order_id}\n"
-                                    f"error={str(e)}\n"
-                                    f"action=circuit_breaker_triggered"
-                                )
-                                await self._notifier(title, message)
-                                logger.info(f"[ExecutionOrchestrator] P0-6 告警已发送: {title}")
-                            except Exception as notify_error:
-                                logger.error(
-                                    f"[ExecutionOrchestrator] P0-6 告警发送失败（不影响主流程）: "
-                                    f"error={notify_error}",
-                                    exc_info=True
-                                )
 
                         # P0-2：停止继续动作（不撤销本地 SL，不创建新 SL）
                         return
@@ -1055,6 +1259,7 @@ class ExecutionOrchestrator:
                         f"order_id={existing_sl.id}, error={e}",
                         exc_info=True
                     )
+                sl_replaced = True
 
                 # P0-1：创建新 SL（数量=filled_qty_total，覆盖全仓）
                 if sl_order_generated:
@@ -1108,13 +1313,10 @@ class ExecutionOrchestrator:
                     )
 
                     if placement_result.is_success:
-                        # 使用 OrderLifecycleService 正式链提交订单
-                        await self._order_lifecycle.submit_order(
-                            prot_order.id,
-                            exchange_order_id=placement_result.exchange_order_id,
+                        await self._apply_placed_order_status(
+                            order=prot_order,
+                            placement_result=placement_result,
                         )
-
-                        await self._order_lifecycle.confirm_order(prot_order.id)
 
                         logger.info(
                             f"[ExecutionOrchestrator] 增量保护单提交成功: "
@@ -1124,6 +1326,25 @@ class ExecutionOrchestrator:
                             f"amount={prot_order.requested_qty}"
                         )
                     else:
+                        if prot_order.order_role == OrderRole.SL:
+                            await self._trigger_unprotected_recovery(
+                                intent=intent,
+                                symbol=prot_order.symbol,
+                                related_order=prot_order,
+                                error_message=(
+                                    f"{placement_result.error_code}: {placement_result.error_message}"
+                                ),
+                                context_payload={
+                                    **replacement_context,
+                                    "phase": (
+                                        "submit_replacement_sl"
+                                        if sl_replaced
+                                        else "submit_incremental_sl"
+                                    ),
+                                    "replacement_sl_order_id": prot_order.id,
+                                },
+                            )
+                            return
                         logger.error(
                             f"[ExecutionOrchestrator] 增量保护单提交失败: "
                             f"order_id={prot_order.id}, "
@@ -1132,6 +1353,23 @@ class ExecutionOrchestrator:
                         )
 
                 except Exception as e:
+                    if prot_order.order_role == OrderRole.SL:
+                        await self._trigger_unprotected_recovery(
+                            intent=intent,
+                            symbol=prot_order.symbol,
+                            related_order=prot_order,
+                            error_message=str(e),
+                            context_payload={
+                                **replacement_context,
+                                "phase": (
+                                    "submit_replacement_sl_exception"
+                                    if sl_replaced
+                                    else "submit_incremental_sl_exception"
+                                ),
+                                "replacement_sl_order_id": prot_order.id,
+                            },
+                        )
+                        return
                     logger.error(
                         f"[ExecutionOrchestrator] 增量保护单提交异常: "
                         f"order_id={prot_order.id}, "
@@ -1141,16 +1379,16 @@ class ExecutionOrchestrator:
                     )
 
             # 更新 ExecutionIntent 状态为 PARTIALLY_PROTECTED
-            intent.status = ExecutionIntentStatus.PARTIALLY_PROTECTED
-            intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await self._set_intent_status(
+                intent,
+                ExecutionIntentStatus.PARTIALLY_PROTECTED,
+            )
 
             logger.info(
                 f"[ExecutionOrchestrator] ENTRY 部分成交增量保护单挂载完成: "
                 f"intent_id={intent.id}, status={intent.status}, "
                 f"delta_qty={delta_qty}"
             )
-            await self._save_intent(intent)
-
             await self._project_position_from_entry_order(entry_order)
 
         except Exception as e:

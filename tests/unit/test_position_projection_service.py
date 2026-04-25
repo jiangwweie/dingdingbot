@@ -727,3 +727,276 @@ class TestPositionTimestamps:
 
         # close_fee=0 → fee_paid=0, net = 1000 - 0 = 1000
         assert result.realized_pnl == Decimal("1000")
+
+
+# ============================================================
+# 补充测试用例 - project_exit_fill delta 幂等性
+# ============================================================
+
+
+class TestProjectExitFillDeltaIdempotency:
+    """project_exit_fill delta 增量投影幂等性测试。"""
+
+    @pytest.mark.asyncio
+    async def test_exit_fill_delta_idempotent(self):
+        """
+        A.1: project_exit_fill delta 幂等
+
+        场景：
+        - 第一次调用：filled_qty=3，existing current_qty=10 -> current_qty=7
+        - 第二次用同一个 exit_order.id、同样 filled_qty=3 再调一次 -> current_qty 仍是 7，不重复扣减
+        - realized_pnl / total_fees_paid 不重复累加
+        """
+        existing = _make_existing_position(
+            current_qty=Decimal("10"),
+            entry_price=Decimal("65000"),
+            realized_pnl=Decimal("100"),
+            total_fees_paid=Decimal("20"),
+        )
+        repo = MagicMock()
+        repo.get = AsyncMock(return_value=existing)
+        repo.save = AsyncMock()
+
+        svc = PositionProjectionService(repository=repo)
+        exit_order = _make_exit_order(
+            filled_qty=Decimal("3"),
+            average_exec_price=Decimal("66000"),
+            close_fee=Decimal("1.5"),
+        )
+
+        # 第一次调用
+        result1 = await svc.project_exit_fill(exit_order)
+        assert result1.current_qty == Decimal("7")
+        # LONG: (66000 - 65000) * 3 = 3000, net = 3000 - 1.5 = 2998.5
+        assert result1.realized_pnl == Decimal("100") + Decimal("2998.5")
+        assert result1.total_fees_paid == Decimal("20") + Decimal("1.5")
+
+        # 第二次调用（幂等）
+        repo.get = AsyncMock(return_value=result1)  # 返回第一次的结果
+        result2 = await svc.project_exit_fill(exit_order)
+        assert result2.current_qty == Decimal("7")  # 不重复扣减
+        assert result2.realized_pnl == Decimal("100") + Decimal("2998.5")  # 不重复累加
+        assert result2.total_fees_paid == Decimal("20") + Decimal("1.5")  # 不重复累加
+
+    @pytest.mark.asyncio
+    async def test_exit_fill_cumulative_progress(self):
+        """
+        A.2: project_exit_fill 累计值推进
+
+        场景：
+        - 同一个 exit_order.id
+        - 第一次 filled_qty=2
+        - 第二次 filled_qty=5
+        - 第二次只按 delta=3 扣减和计 pnl/fee，不按 5 全扣
+        """
+        existing = _make_existing_position(
+            current_qty=Decimal("10"),
+            entry_price=Decimal("65000"),
+            realized_pnl=Decimal("0"),
+            total_fees_paid=Decimal("0"),
+        )
+        repo = MagicMock()
+        repo.get = AsyncMock(return_value=existing)
+        repo.save = AsyncMock()
+
+        svc = PositionProjectionService(repository=repo)
+
+        # 第一次 filled_qty=2
+        exit_order_1 = _make_exit_order(
+            filled_qty=Decimal("2"),
+            average_exec_price=Decimal("66000"),
+            close_fee=Decimal("1.0"),
+        )
+        result1 = await svc.project_exit_fill(exit_order_1)
+        assert result1.current_qty == Decimal("8")
+        # LONG: (66000 - 65000) * 2 = 2000, net = 2000 - 1.0 = 1999
+        assert result1.realized_pnl == Decimal("1999")
+        assert result1.total_fees_paid == Decimal("1.0")
+
+        # 第二次 filled_qty=5（累计）
+        exit_order_2 = _make_exit_order(
+            filled_qty=Decimal("5"),
+            average_exec_price=Decimal("66000"),
+            close_fee=Decimal("2.5"),  # 累计手续费
+        )
+        exit_order_2.id = exit_order_1.id  # 同一个订单 ID
+        repo.get = AsyncMock(return_value=result1)
+        result2 = await svc.project_exit_fill(exit_order_2)
+
+        # delta_qty = 5 - 2 = 3
+        assert result2.current_qty == Decimal("5")  # 8 - 3 = 5
+        # delta_fee = 2.5 - 1.0 = 1.5
+        # delta_pnl = (66000 - 65000) * 3 - 1.5 = 3000 - 1.5 = 2998.5
+        assert result2.realized_pnl == Decimal("1999") + Decimal("2998.5")
+        assert result2.total_fees_paid == Decimal("1.0") + Decimal("1.5")
+
+    @pytest.mark.asyncio
+    async def test_exit_fill_fee_incremental(self):
+        """
+        A.3: project_exit_fill fee 增量
+
+        场景：
+        - close_fee 第一次=1.2，第二次累计=2.0
+        - 第二次只增加 0.8，不重复加整笔 2.0
+        - 注意：filled_qty 也需要推进，否则 delta_qty=0 会直接返回
+        """
+        existing = _make_existing_position(
+            current_qty=Decimal("10"),
+            entry_price=Decimal("65000"),
+            realized_pnl=Decimal("0"),
+            total_fees_paid=Decimal("0"),
+        )
+        repo = MagicMock()
+        repo.get = AsyncMock(return_value=existing)
+        repo.save = AsyncMock()
+
+        svc = PositionProjectionService(repository=repo)
+
+        # 第一次 filled_qty=2, close_fee=1.2
+        exit_order_1 = _make_exit_order(
+            filled_qty=Decimal("2"),
+            average_exec_price=Decimal("66000"),
+            close_fee=Decimal("1.2"),
+        )
+        result1 = await svc.project_exit_fill(exit_order_1)
+        assert result1.total_fees_paid == Decimal("1.2")
+
+        # 第二次 filled_qty=3（推进）, close_fee=2.0（累计）
+        exit_order_2 = _make_exit_order(
+            filled_qty=Decimal("3"),  # 推进到 3
+            average_exec_price=Decimal("66000"),
+            close_fee=Decimal("2.0"),  # 累计到 2.0
+        )
+        exit_order_2.id = exit_order_1.id
+        repo.get = AsyncMock(return_value=result1)
+        result2 = await svc.project_exit_fill(exit_order_2)
+
+        # delta_qty = 3 - 2 = 1
+        # delta_fee = 2.0 - 1.2 = 0.8
+        assert result2.total_fees_paid == Decimal("1.2") + Decimal("0.8")
+
+    @pytest.mark.asyncio
+    async def test_entry_fill_preserves_projection_metadata(self):
+        """
+        A.4: project_entry_fill 保留已有 projection metadata
+
+        场景：
+        - existing position 有 projected_exit_fills / projected_exit_fees
+        - 再次 project_entry_fill 后这些字段仍保留，不丢失
+        """
+        existing = _make_existing_position(
+            current_qty=Decimal("1.0"),
+            entry_price=Decimal("65000"),
+        )
+        # 设置已有的 projection metadata
+        existing.projected_exit_fills = {"exit_001": Decimal("0.5")}
+        existing.projected_exit_fees = {"exit_001": Decimal("0.3")}
+
+        repo = MagicMock()
+        repo.get = AsyncMock(return_value=existing)
+        repo.save = AsyncMock()
+
+        svc = PositionProjectionService(repository=repo)
+        entry_order = _make_entry_order(filled_qty=Decimal("1.0"))
+
+        result = await svc.project_entry_fill(entry_order)
+
+        # 验证 projection metadata 保留
+        assert result.projected_exit_fills == {"exit_001": Decimal("0.5")}
+        assert result.projected_exit_fees == {"exit_001": Decimal("0.3")}
+
+
+# ============================================================
+# 补充测试用例 - PgPositionRepository round-trip
+# ============================================================
+
+
+class TestPgPositionRepositoryRoundTrip:
+    """PgPositionRepository round-trip 测试。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.skip(
+        reason="集成测试：需要 PG_DATABASE_URL 环境配置，应在 tests/integration/ 中运行"
+    )
+    async def test_round_trip_with_projection_metadata(self):
+        """
+        A.5: PgPositionRepository round-trip
+
+        场景：
+        - 含 projected_exit_fills / projected_exit_fees 的 Position 存进去
+        - get() 读出来字段一致
+        """
+        from src.infrastructure.pg_position_repository import PgPositionRepository
+        import tempfile
+        import os
+
+        # 创建临时数据库
+        fd, db_path = tempfile.mkstemp(suffix='.db')
+        os.close(fd)
+
+        try:
+            repo = PgPositionRepository()
+            await repo.initialize()
+
+            # 创建包含 projection metadata 的 Position
+            position = Position(
+                id="pos_test_001",
+                signal_id="signal_test_001",
+                symbol="BTC/USDT:USDT",
+                direction=Direction.LONG,
+                entry_price=Decimal("65000"),
+                current_qty=Decimal("1.0"),
+                watermark_price=Decimal("66000"),
+                realized_pnl=Decimal("100"),
+                total_fees_paid=Decimal("10"),
+                total_funding_paid=Decimal("5"),
+                projected_exit_fills={
+                    "exit_001": Decimal("0.5"),
+                    "exit_002": Decimal("0.3"),
+                },
+                projected_exit_fees={
+                    "exit_001": Decimal("0.2"),
+                    "exit_002": Decimal("0.15"),
+                },
+                is_closed=False,
+                opened_at=1710000000000,
+            )
+
+            # 保存
+            await repo.save(position)
+
+            # 读取
+            result = await repo.get("pos_test_001")
+
+            # 验证字段一致
+            assert result is not None
+            assert result.id == "pos_test_001"
+            assert result.signal_id == "signal_test_001"
+            assert result.symbol == "BTC/USDT:USDT"
+            assert result.direction == Direction.LONG
+            assert result.entry_price == Decimal("65000")
+            assert result.current_qty == Decimal("1.0")
+            assert result.watermark_price == Decimal("66000")
+            assert result.realized_pnl == Decimal("100")
+            assert result.total_fees_paid == Decimal("10")
+            assert result.total_funding_paid == Decimal("5")
+            assert result.projected_exit_fills == {
+                "exit_001": Decimal("0.5"),
+                "exit_002": Decimal("0.3"),
+            }
+            assert result.projected_exit_fees == {
+                "exit_001": Decimal("0.2"),
+                "exit_002": Decimal("0.15"),
+            }
+            assert result.is_closed is False
+
+        finally:
+            # 清理临时数据库
+            try:
+                os.unlink(db_path)
+                for ext in ['-wal', '-shm']:
+                    wal_path = db_path + ext
+                    if os.path.exists(wal_path):
+                        os.unlink(wal_path)
+            except Exception:
+                pass

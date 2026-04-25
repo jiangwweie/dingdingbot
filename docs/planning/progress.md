@@ -819,3 +819,18 @@
    - `trade_concentration`
    - `profit_concentration`
    - `max_consecutive_losses`
+
+### 2026-04-25 PG 执行主线第二轮修复
+
+- 已直接修复用户确认的执行一致性主干问题：
+  - `PositionProjectionService` 加仓位级锁
+  - exit projection 改为累计值 -> delta 幂等投影
+  - `OrderLifecycleService` 增加 exit progressed callback
+  - protection order 按 `placement_result.status` 推进本地状态
+  - SL 替换后新单失败补 recovery / circuit breaker / notifier
+  - `ExecutionIntent` 增加最小状态前进约束
+- 已同步 `Position` / `PgPositionRepository` 的 projection payload 字段：
+  - `projected_exit_fills`
+  - `projected_exit_fees`
+- 已执行 `python3 -m py_compile` 静态校验，通过。
+- 未运行 pytest；继续遵守“测试前先用户确认”的项目红线。

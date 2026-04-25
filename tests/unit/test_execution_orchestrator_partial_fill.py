@@ -828,3 +828,515 @@ class TestPartialFillIncrementalProtection:
         # Assert: 应该为 delta_qty = 0.6 生成保护单（REJECTED 的 TP 不计入）
         assert mock_gateway.place_order.call_count == 3, \
             f"应该为 delta_qty=0.6 生成 3 个保护单，实际调用 {mock_gateway.place_order.call_count} 次"
+
+
+# ============================================================
+# 补充测试用例 - _apply_placed_order_status
+# ============================================================
+
+
+class TestApplyPlacedOrderStatus:
+    """测试 _apply_placed_order_status 方法"""
+
+    @pytest.mark.asyncio
+    async def test_apply_open_status(
+        self, temp_db, mock_gateway, sample_strategy, sample_signal
+    ):
+        """
+        C.1: _apply_placed_order_status for OPEN status
+
+        场景：
+        - placement_result.status = OPEN
+        - 应调用 submit_order + confirm_order
+        """
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        from src.application.capital_protection import CapitalProtectionManager
+
+        # Arrange
+        repository = OrderRepository(temp_db)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock()
+        capital_protection.pre_order_check.return_value = MagicMock(allowed=True)
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=mock_gateway,
+        )
+
+        # 创建订单
+        order = Order(
+            id="order_open_001",
+            signal_id="signal_open_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal("1.0"),
+            status=OrderStatus.CREATED,
+            created_at=1234567890000,
+            updated_at=1234567890000,
+        )
+        await repository.save(order)
+
+        # Mock placement result
+        placement_result = MagicMock(
+            is_success=True,
+            exchange_order_id="exchange_open_001",
+            status=OrderStatus.OPEN,
+        )
+
+        # Act
+        await orchestrator._apply_placed_order_status(
+            order=order,
+            placement_result=placement_result,
+        )
+
+        # Assert: 验证订单状态
+        updated_order = await repository.get_order(order.id)
+        assert updated_order.status == OrderStatus.OPEN
+        assert updated_order.exchange_order_id == "exchange_open_001"
+
+    @pytest.mark.asyncio
+    async def test_apply_partially_filled_status(
+        self, temp_db, mock_gateway, sample_strategy, sample_signal
+    ):
+        """
+        C.2: _apply_placed_order_status for PARTIALLY_FILLED status
+
+        场景：
+        - placement_result.status = PARTIALLY_FILLED
+        - 带真实 filled_qty/average_exec_price
+        - 应调用 submit_order + confirm_order + update_order_partially_filled
+        """
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        from src.application.capital_protection import CapitalProtectionManager
+
+        # Arrange
+        repository = OrderRepository(temp_db)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock()
+        capital_protection.pre_order_check.return_value = MagicMock(allowed=True)
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=mock_gateway,
+        )
+
+        # 创建订单
+        order = Order(
+            id="order_partial_001",
+            signal_id="signal_partial_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal("1.0"),
+            status=OrderStatus.CREATED,
+            created_at=1234567890000,
+            updated_at=1234567890000,
+        )
+        await repository.save(order)
+
+        # Mock placement result
+        placement_result = MagicMock(
+            is_success=True,
+            exchange_order_id="exchange_partial_001",
+            status=OrderStatus.PARTIALLY_FILLED,
+            filled_qty=Decimal("0.5"),
+            average_exec_price=Decimal("65000"),
+        )
+
+        # Act
+        await orchestrator._apply_placed_order_status(
+            order=order,
+            placement_result=placement_result,
+        )
+
+        # Assert: 验证订单状态
+        updated_order = await repository.get_order(order.id)
+        assert updated_order.status == OrderStatus.PARTIALLY_FILLED
+        assert updated_order.filled_qty == Decimal("0.5")
+        assert updated_order.average_exec_price == Decimal("65000")
+
+    @pytest.mark.asyncio
+    async def test_apply_filled_status(
+        self, temp_db, mock_gateway, sample_strategy, sample_signal
+    ):
+        """
+        C.3: _apply_placed_order_status for FILLED status
+
+        场景：
+        - placement_result.status = FILLED
+        - 应调用 submit_order + confirm_order + update_order_filled
+        """
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        from src.application.capital_protection import CapitalProtectionManager
+
+        # Arrange
+        repository = OrderRepository(temp_db)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock()
+        capital_protection.pre_order_check.return_value = MagicMock(allowed=True)
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=mock_gateway,
+        )
+
+        # 创建订单
+        order = Order(
+            id="order_filled_001",
+            signal_id="signal_filled_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.ENTRY,
+            requested_qty=Decimal("1.0"),
+            status=OrderStatus.CREATED,
+            created_at=1234567890000,
+            updated_at=1234567890000,
+        )
+        await repository.save(order)
+
+        # Mock placement result
+        placement_result = MagicMock(
+            is_success=True,
+            exchange_order_id="exchange_filled_001",
+            status=OrderStatus.FILLED,
+            filled_qty=Decimal("1.0"),
+            average_exec_price=Decimal("65000"),
+        )
+
+        # Act
+        await orchestrator._apply_placed_order_status(
+            order=order,
+            placement_result=placement_result,
+        )
+
+        # Assert: 验证订单状态
+        updated_order = await repository.get_order(order.id)
+        assert updated_order.status == OrderStatus.FILLED
+        assert updated_order.filled_qty == Decimal("1.0")
+        assert updated_order.average_exec_price == Decimal("65000")
+
+    @pytest.mark.asyncio
+    async def test_apply_canceled_status(
+        self, temp_db, mock_gateway, sample_strategy, sample_signal
+    ):
+        """
+        C.4: _apply_placed_order_status for CANCELED status
+
+        场景：
+        - placement_result.status = CANCELED
+        - 应调用 submit_order + cancel_order
+        """
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        from src.application.capital_protection import CapitalProtectionManager
+
+        # Arrange
+        repository = OrderRepository(temp_db)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock()
+        capital_protection.pre_order_check.return_value = MagicMock(allowed=True)
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=mock_gateway,
+        )
+
+        # 创建订单
+        order = Order(
+            id="order_canceled_001",
+            signal_id="signal_canceled_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal("1.0"),
+            status=OrderStatus.CREATED,
+            created_at=1234567890000,
+            updated_at=1234567890000,
+        )
+        await repository.save(order)
+
+        # Mock placement result
+        placement_result = MagicMock(
+            is_success=True,
+            exchange_order_id="exchange_canceled_001",
+            status=OrderStatus.CANCELED,
+        )
+
+        # Act
+        await orchestrator._apply_placed_order_status(
+            order=order,
+            placement_result=placement_result,
+        )
+
+        # Assert: 验证订单状态
+        updated_order = await repository.get_order(order.id)
+        assert updated_order.status == OrderStatus.CANCELED
+
+    @pytest.mark.asyncio
+    async def test_apply_rejected_status(
+        self, temp_db, mock_gateway, sample_strategy, sample_signal
+    ):
+        """
+        C.5: _apply_placed_order_status for REJECTED status
+
+        场景：
+        - placement_result.status = REJECTED
+        - 应调用 submit_order + reject_order
+        """
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        from src.application.capital_protection import CapitalProtectionManager
+
+        # Arrange
+        repository = OrderRepository(temp_db)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock()
+        capital_protection.pre_order_check.return_value = MagicMock(allowed=True)
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=mock_gateway,
+        )
+
+        # 创建订单
+        order = Order(
+            id="order_rejected_001",
+            signal_id="signal_rejected_001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            order_type=OrderType.LIMIT,
+            order_role=OrderRole.TP1,
+            requested_qty=Decimal("1.0"),
+            status=OrderStatus.CREATED,
+            created_at=1234567890000,
+            updated_at=1234567890000,
+        )
+        await repository.save(order)
+
+        # Mock placement result
+        placement_result = MagicMock(
+            is_success=True,
+            exchange_order_id="exchange_rejected_001",
+            status=OrderStatus.REJECTED,
+        )
+
+        # Act
+        await orchestrator._apply_placed_order_status(
+            order=order,
+            placement_result=placement_result,
+        )
+
+        # Assert: 验证订单状态
+        updated_order = await repository.get_order(order.id)
+        assert updated_order.status == OrderStatus.REJECTED
+
+
+# ============================================================
+# 补充测试用例 - _trigger_unprotected_recovery
+# ============================================================
+
+
+class TestTriggerUnprotectedRecovery:
+    """测试 _trigger_unprotected_recovery 方法"""
+
+    @pytest.mark.asyncio
+    async def test_trigger_unprotected_recovery_creates_task(
+        self, temp_db, mock_gateway, sample_strategy, sample_signal
+    ):
+        """
+        C.6: _trigger_unprotected_recovery 创建 recovery task
+
+        场景：
+        - 调用 _trigger_unprotected_recovery
+        - 验证创建 recovery task
+        - 验证熔断标记
+        - 验证告警通知
+        """
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        from src.application.capital_protection import CapitalProtectionManager
+
+        # Arrange
+        repository = OrderRepository(temp_db)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock()
+        capital_protection.pre_order_check.return_value = MagicMock(allowed=True)
+
+        # Mock recovery repository
+        recovery_repository = AsyncMock()
+        recovery_repository.create_task = AsyncMock()
+
+        # Mock notifier
+        notifier = AsyncMock()
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=mock_gateway,
+            execution_recovery_repository=recovery_repository,
+            notifier=notifier,
+        )
+
+        # 创建 intent
+        intent = ExecutionIntent(
+            id="intent_recovery_001",
+            signal_id="signal_recovery_001",
+            signal=sample_signal,
+            status=ExecutionIntentStatus.SUBMITTED,
+            strategy=sample_strategy,
+        )
+
+        # Act
+        await orchestrator._trigger_unprotected_recovery(
+            intent=intent,
+            symbol="BTC/USDT:USDT",
+            related_order=None,
+            error_message="SL placement failed",
+            context_payload={"test": "data"},
+        )
+
+        # Assert: 验证创建 recovery task
+        assert recovery_repository.create_task.called
+        call_args = recovery_repository.create_task.call_args
+        assert call_args.kwargs["intent_id"] == "intent_recovery_001"
+        assert call_args.kwargs["symbol"] == "BTC/USDT:USDT"
+        assert call_args.kwargs["recovery_type"] == "replace_sl_failed"
+
+        # 验证熔断标记
+        assert "BTC/USDT:USDT" in orchestrator._circuit_breaker_symbols
+
+        # 验证告警通知
+        assert notifier.called
+        call_args = notifier.call_args
+        assert "[P0] Pending Recovery Triggered" in call_args.args[0]
+
+
+# ============================================================
+# 补充测试用例 - _set_intent_status / _can_transition_intent
+# ============================================================
+
+
+class TestIntentStatusTransition:
+    """测试 ExecutionIntent 状态转换"""
+
+    @pytest.mark.asyncio
+    async def test_intent_status_only_forward(
+        self, temp_db, mock_gateway, sample_strategy, sample_signal
+    ):
+        """
+        C.7: _set_intent_status / _can_transition_intent
+
+        场景：
+        - 验证状态只前进不回退
+        - COMPLETED 不应被 PARTIALLY_PROTECTED 覆盖
+        """
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        from src.application.capital_protection import CapitalProtectionManager
+
+        # Arrange
+        repository = OrderRepository(temp_db)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock()
+        capital_protection.pre_order_check.return_value = MagicMock(allowed=True)
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=mock_gateway,
+        )
+
+        # 创建 intent（已 COMPLETED）
+        intent = ExecutionIntent(
+            id="intent_transition_001",
+            signal_id="signal_transition_001",
+            signal=sample_signal,
+            status=ExecutionIntentStatus.COMPLETED,
+            strategy=sample_strategy,
+        )
+        orchestrator._intents[intent.id] = intent
+
+        # Act: 尝试回退到 PARTIALLY_PROTECTED
+        result = await orchestrator._set_intent_status(
+            intent,
+            ExecutionIntentStatus.PARTIALLY_PROTECTED,
+        )
+
+        # Assert: 应该失败（返回 False）
+        assert result is False
+        assert intent.status == ExecutionIntentStatus.COMPLETED  # 状态不变
+
+    @pytest.mark.asyncio
+    async def test_intent_status_valid_transition(
+        self, temp_db, mock_gateway, sample_strategy, sample_signal
+    ):
+        """
+        C.8: 合法的状态转换
+
+        场景：
+        - SUBMITTED -> PROTECTING（合法）
+        """
+        from src.application.order_lifecycle_service import OrderLifecycleService
+        from src.application.capital_protection import CapitalProtectionManager
+
+        # Arrange
+        repository = OrderRepository(temp_db)
+        await repository.initialize()
+        order_lifecycle = OrderLifecycleService(repository)
+
+        capital_protection = MagicMock(spec=CapitalProtectionManager)
+        capital_protection.pre_order_check = AsyncMock()
+        capital_protection.pre_order_check.return_value = MagicMock(allowed=True)
+
+        orchestrator = ExecutionOrchestrator(
+            capital_protection=capital_protection,
+            order_lifecycle=order_lifecycle,
+            gateway=mock_gateway,
+        )
+
+        # 创建 intent（SUBMITTED）
+        intent = ExecutionIntent(
+            id="intent_transition_002",
+            signal_id="signal_transition_002",
+            signal=sample_signal,
+            status=ExecutionIntentStatus.SUBMITTED,
+            strategy=sample_strategy,
+        )
+        orchestrator._intents[intent.id] = intent
+
+        # Act: 转换到 PROTECTING
+        result = await orchestrator._set_intent_status(
+            intent,
+            ExecutionIntentStatus.PROTECTING,
+        )
+
+        # Assert: 应该成功
+        assert result is True
+        assert intent.status == ExecutionIntentStatus.PROTECTING

@@ -112,6 +112,12 @@ class PgPositionRepository:
             "total_fees_paid": str(position.total_fees_paid),
             "total_funding_paid": str(position.total_funding_paid),
             "watermark_price": str(position.watermark_price) if position.watermark_price is not None else None,
+            "projected_exit_fills": {
+                key: str(value) for key, value in position.projected_exit_fills.items()
+            },
+            "projected_exit_fees": {
+                key: str(value) for key, value in position.projected_exit_fees.items()
+            },
         }
 
         opened_at = getattr(position, "opened_at", None) or (existing.opened_at if existing else _now_ms())
@@ -144,6 +150,8 @@ class PgPositionRepository:
         total_fees_raw = payload.get("total_fees_paid", "0")
         total_funding_raw = payload.get("total_funding_paid", "0")
         original_tp_prices_raw = payload.get("original_tp_prices") or {}
+        projected_exit_fills_raw = payload.get("projected_exit_fills") or {}
+        projected_exit_fees_raw = payload.get("projected_exit_fees") or {}
 
         return Position(
             id=orm.id,
@@ -163,5 +171,13 @@ class PgPositionRepository:
             realized_pnl=orm.realized_pnl or Decimal("0"),
             total_fees_paid=Decimal(total_fees_raw),
             total_funding_paid=Decimal(total_funding_raw),
+            projected_exit_fills={
+                key: Decimal(value) for key, value in projected_exit_fills_raw.items()
+            },
+            projected_exit_fees={
+                key: Decimal(value) for key, value in projected_exit_fees_raw.items()
+            },
+            opened_at=orm.opened_at,
+            closed_at=orm.closed_at,
             is_closed=orm.is_closed,
         )
