@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from src.application.readmodels.console_models import (
+    BreakerSummaryResponse,
+    RecoverySummaryResponse,
+    RuntimeHealthResponse,
+)
+
+
+def _iso_from_millis(timestamp_ms: Optional[int]) -> Optional[str]:
+    if not timestamp_ms:
+        return None
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+class RuntimeHealthReadModel:
+    async def build(
+        self,
+        *,
+        runtime_config_provider: Optional[Any],
+        exchange_gateway: Optional[Any],
+        execution_orchestrator: Optional[Any],
+        execution_recovery_repo: Optional[Any],
+        startup_reconciliation_summary: Optional[dict[str, Any]],
+        account_snapshot: Optional[Any],
+    ) -> RuntimeHealthResponse:
+        permission_summary = (
+            exchange_gateway.get_permission_check_summary()
+            if exchange_gateway is not None and hasattr(exchange_gateway, "get_permission_check_summary")
+            else None
+        )
+
+        exchange_status = "OK"
+        if permission_summary is not None and permission_summary.get("status") in {
+            "failed",
+            "error",
+            "not_checked",
+        }:
+            exchange_status = "DEGRADED"
+
+        if account_snapshot is not None:
+            age_seconds = max(
+                0.0,
+                datetime.now(timezone.utc).timestamp() - (getattr(account_snapshot, "timestamp", 0) / 1000),
+            )
+            if age_seconds > 300:
+                exchange_status = "DOWN"
+            elif age_seconds > 90 and exchange_status == "OK":
+                exchange_status = "DEGRADED"
+
+        pg_status = "OK" if runtime_config_provider is not None else "DEGRADED"
+        notification_status = "OK" if runtime_config_provider is not None else "DEGRADED"
+
+        breaker_symbols: list[str] = []
+        if execution_orchestrator is not None and hasattr(execution_orchestrator, "list_circuit_breaker_symbols"):
+            breaker_symbols = execution_orchestrator.list_circuit_breaker_symbols()
+
+        active_recovery_tasks = []
+        if execution_recovery_repo is not None and hasattr(execution_recovery_repo, "list_active"):
+            active_recovery_tasks = await execution_recovery_repo.list_active()
+
+        startup_markers = {
+            "runtime_config": "PASSED" if runtime_config_provider is not None else "FAILED",
+            "exchange_gateway": "PASSED" if exchange_gateway is not None else "FAILED",
+            "permission_check": "PASSED" if permission_summary and permission_summary.get("verified") else "PENDING",
+            "startup_reconciliation": "PASSED" if startup_reconciliation_summary is not None else "PENDING",
+            "breaker_rebuild": "PASSED" if execution_orchestrator is not None else "PENDING",
+            "signal_pipeline": "PASSED",
+        }
+
+        recent_warnings: list[str] = []
+        if permission_summary and permission_summary.get("status") == "skipped_testnet":
+            recent_warnings.append("withdraw permission check skipped on testnet")
+        if exchange_status == "DEGRADED":
+            recent_warnings.append("exchange health is degraded")
+
+        recent_errors: list[str] = []
+        if exchange_status == "DOWN":
+            recent_errors.append("exchange heartbeat appears stale")
+
+        completed_tasks = 0
+        last_recovery_time = None
+        if startup_reconciliation_summary:
+            completed_tasks = int(startup_reconciliation_summary.get("pg_recovery_resolved_count", 0))
+
+        if active_recovery_tasks:
+            latest_retry = max(
+                (
+                    task.get("updated_at")
+                    or task.get("next_retry_at")
+                    or task.get("created_at")
+                    for task in active_recovery_tasks
+                ),
+                default=None,
+            )
+            if latest_retry:
+                if isinstance(latest_retry, datetime):
+                    last_recovery_time = latest_retry.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                else:
+                    last_recovery_time = str(latest_retry)
+
+        return RuntimeHealthResponse(
+            pg_status=pg_status,
+            exchange_status=exchange_status,
+            notification_status=notification_status,
+            recent_warnings=recent_warnings,
+            recent_errors=recent_errors,
+            startup_markers=startup_markers,
+            breaker_summary=BreakerSummaryResponse(
+                total_tripped=len(breaker_symbols),
+                active_breakers=breaker_symbols,
+                last_trip_time=None,
+            ),
+            recovery_summary=RecoverySummaryResponse(
+                pending_tasks=len(active_recovery_tasks),
+                completed_tasks=completed_tasks,
+                last_recovery_time=last_recovery_time,
+            ),
+        )
+

@@ -699,11 +699,13 @@ async def run_application():
             account_getter=_exchange_gateway.get_account_snapshot,
             config_manager=config_manager,
             exchange_gateway=_exchange_gateway,
+            runtime_config_provider=_runtime_config_provider,
             signal_tracker=_status_tracker,
             snapshot_service=_snapshot_service,
             config_entry_repo=_config_entry_repo,
             order_repo=_order_repo,
             execution_intent_repo=_execution_intent_repo,
+            execution_recovery_repo=_execution_recovery_repo,
             order_lifecycle_service=_order_lifecycle_service,
             # Config repositories (unified with api_v1_config.py)
             strategy_repo=_api_strategy_repo,
@@ -718,6 +720,7 @@ async def run_application():
             capital_protection=_capital_protection,
             account_service=account_service,
             execution_orchestrator=_execution_orchestrator,
+            startup_reconciliation_summary=reconciliation_summary,
         )
         logger.info("API dependencies initialized")
 

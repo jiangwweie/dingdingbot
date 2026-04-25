@@ -27,6 +27,15 @@
    - `docs/planning/architecture/2026-04-25-console-readonly-api-v1-contract.md`
 6. ✅ 已新增 Claude 杂活提示词：
    - `docs/frontend-handoff/claude-backend-readonly-api-mapping-prompt.md`
+7. ✅ 已确认第一批实现范围：
+   - `runtime/overview`
+   - `runtime/portfolio`
+   - `runtime/health`
+   - `research/candidates`
+8. ✅ 已开始第一阶段代码骨架：
+   - 新增 console readmodels 和 console routers
+   - `main.py -> api.py` 注入链已补 runtime config / recovery repo / startup reconciliation summary
+   - `runtime/events` 明确延后，不进入第一批
 
 ### 2026-04-24 -- Sim-1 runtime cutover 非 I/O 冒烟已通过
 

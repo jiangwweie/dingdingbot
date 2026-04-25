@@ -249,8 +249,11 @@ _snapshot_service: Optional[Any] = None  # ConfigSnapshotService instance
 _config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
 _order_repo: Optional[Any] = None  # OrderRepository instance
 _execution_intent_repo: Optional[Any] = None  # ExecutionIntentRepository instance
+_execution_recovery_repo: Optional[Any] = None  # ExecutionRecoveryRepository instance
 _audit_logger: Optional[Any] = None  # OrderAuditLogger instance
 _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
+_runtime_config_provider: Optional[Any] = None  # RuntimeConfigProvider instance
+_startup_reconciliation_summary: Optional[Dict[str, Any]] = None  # Startup reconciliation summary
 
 # Config repositories - stored in shared module to avoid circular imports with api_v1_config.py
 from src.interfaces import api_config_globals as _config_globals
@@ -266,8 +269,10 @@ def set_dependencies(
     config_entry_repo: Optional[Any] = None,
     order_repo: Optional[Any] = None,
     execution_intent_repo: Optional[Any] = None,
+    execution_recovery_repo: Optional[Any] = None,
     audit_logger: Optional[Any] = None,
     order_lifecycle_service: Optional[Any] = None,
+    runtime_config_provider: Optional[Any] = None,
     # Config repositories (unified with api_v1_config.py)
     strategy_repo: Optional[Any] = None,
     risk_repo: Optional[Any] = None,
@@ -300,7 +305,7 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _audit_logger, _order_lifecycle_service
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider
     _repository = repository
     _account_getter = account_getter
     _config_manager = config_manager
@@ -311,8 +316,10 @@ def set_dependencies(
     _config_entry_repo = config_entry_repo
     _order_repo = order_repo
     _execution_intent_repo = execution_intent_repo
+    _execution_recovery_repo = execution_recovery_repo
     _audit_logger = audit_logger
     _order_lifecycle_service = order_lifecycle_service
+    _runtime_config_provider = runtime_config_provider
     # Config repositories - stored in shared module (avoids circular imports)
     _config_globals._strategy_repo = strategy_repo
     _config_globals._risk_repo = risk_repo
@@ -336,6 +343,13 @@ def _get_config_manager() -> Any:
     if _config_manager is None:
         raise HTTPException(status_code=503, detail="Config manager not initialized")
     return _config_manager
+
+
+def _get_runtime_config_provider() -> Any:
+    """Get runtime config provider or raise error if not initialized."""
+    if _runtime_config_provider is None:
+        raise HTTPException(status_code=503, detail="Runtime config provider not initialized")
+    return _runtime_config_provider
 
 
 def _get_exchange_gateway() -> Any:
@@ -743,7 +757,11 @@ app.add_middleware(
 
 # Include v1 config router
 from src.interfaces.api_v1_config import router as config_v1_router
+from src.interfaces.api_console_runtime import router as console_runtime_router
+from src.interfaces.api_console_research import router as console_research_router
 app.include_router(config_v1_router)
+app.include_router(console_runtime_router)
+app.include_router(console_research_router)
 
 
 # ============================================================
@@ -4434,6 +4452,7 @@ def set_v3_dependencies(
     capital_protection: Optional[CapitalProtectionManager] = None,
     account_service: Optional[AccountService] = None,
     execution_orchestrator: Optional[ExecutionOrchestrator] = None,
+    startup_reconciliation_summary: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Inject v3 API dependencies.
@@ -4444,11 +4463,12 @@ def set_v3_dependencies(
         account_service: AccountService instance
         execution_orchestrator: ExecutionOrchestrator instance
     """
-    global _position_manager, _capital_protection, _account_service, _execution_orchestrator
+    global _position_manager, _capital_protection, _account_service, _execution_orchestrator, _startup_reconciliation_summary
     _position_manager = position_manager
     _capital_protection = capital_protection
     _account_service = account_service
     _execution_orchestrator = execution_orchestrator
+    _startup_reconciliation_summary = startup_reconciliation_summary
 
 
 # ------------------------------------------------------------

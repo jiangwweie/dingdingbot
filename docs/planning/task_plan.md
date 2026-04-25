@@ -417,11 +417,31 @@ Sim-0 详细任务拆分（归档参考）：
    - P3：`runtime/alerts`、`research/runs`、`research/artifact-explorer`
 4. 当前待办步骤：
    1. 冻结前端页面契约和 mock 字段命名，避免后端接口反复改口径。
-   2. 为 P0 页面定义 read-model 输出结构。
-   3. 先实现 Runtime 域只读 API。
-   4. 再实现 Research 域只读 API。
-   5. 把控制台相关读取逻辑从 `src/interfaces/api.py` 中拆出为独立模块。
-   6. 用 Sim-1 真实数据逐页校验 mock 与后端的差异。
+   2. 将第一批实现固定为 4 个接口：
+      - `GET /api/runtime/overview`
+      - `GET /api/runtime/portfolio`
+      - `GET /api/runtime/health`
+      - `GET /api/research/candidates`
+   3. 第二批固定为：
+      - `GET /api/runtime/positions`
+      - `GET /api/runtime/signals`
+      - `GET /api/runtime/attempts`
+      - `GET /api/runtime/execution/orders`
+      - `GET /api/runtime/execution/intents`
+   4. 第三批固定为：
+      - `GET /api/research/candidates/{candidate_name}`
+      - `GET /api/research/replay/{candidate_name}`
+      - `GET /api/research/candidates/{candidate_name}/review-summary`
+      - `GET /api/config/snapshot`
+   5. `GET /api/runtime/events` 延后到后续批次，待事件聚合设计稳定后再实现。
+   6. 第一阶段模块落点已确认：
+      - `src/application/readmodels/runtime_overview.py`
+      - `src/application/readmodels/runtime_portfolio.py`
+      - `src/application/readmodels/runtime_health.py`
+      - `src/application/readmodels/candidate_service.py`
+      - `src/interfaces/api_console_runtime.py`
+      - `src/interfaces/api_console_research.py`
+   7. 用 Sim-1 真实数据逐页校验 mock 与后端的差异。
 5. 当前 SSOT 文档：
    - `docs/planning/architecture/2026-04-25-backend-readonly-api-and-api-module-roadmap.md`
    - `docs/planning/architecture/2026-04-25-console-readonly-api-v1-contract.md`
