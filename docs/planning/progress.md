@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-25 00:15
+> Last updated: 2026-04-25 22:35
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
@@ -11,6 +11,35 @@
 当需要还原精确执行顺序时，以 git history 为准（commit 时间戳是唯一可靠时间线）。
 
 ## 近期完成
+
+### 2026-04-25 -- 研究链边界已补充并同步到 planning 文档
+
+1. ✅ 已明确 SQLite + PG 双轨阶段后续研究主线继续推进 `Spec / Resolver / Reporter` 收口。
+2. ✅ 已明确研究链必须保持 `research-only`：
+   - 纯回测
+   - Optuna
+   - candidate 产物
+   - 报告 / 解释分析
+3. ✅ 已明确不得新增 runtime 直读 SQLite 的旁路。
+4. ✅ 已明确所有研究产物只输出 `candidate`，不得直接影响 `sim1_eth_runtime`。
+5. ✅ 已将“research 生成候选、runtime 承载冻结配置、candidate 进入 runtime 必须人工审查”补充到 `task_plan.md / findings.md`。
+
+### 2026-04-25 -- 执行主线 PG 真源闭环窗口边界已补充并同步到规划文档
+
+1. ✅ 已基于架构文档 `docs/arch/2026-04-25-执行主线PG真源闭环调研与架构设计.md` 补充 planning 摘要。
+2. ✅ 已明确当前窗口只处理 runtime execution 主链，不扩大为“全库去 SQLite”。
+3. ✅ 已明确 `signals / signal_attempts` 本窗口不迁：
+   - 原因不是放弃迁移
+   - 而是避免把 execution 主线闭环扩大成 runtime observability 全迁移
+4. ✅ 已补充后续迁移顺序与准入条件：
+   - 第 1 窗口：execution 主线 PG 闭环
+   - 第 2 窗口：runtime observability 收口（优先 `signals / signal_attempts`）
+   - 第 3 窗口：参数 / 策略配置域迁移
+   - 第 4 窗口：backtest / research / 历史报表迁移
+5. ✅ 已明确 `positions` 在本窗口中的定位：
+   - 不是替代交易所事实真源
+   - 而是 PG 本地 execution projection / read model
+6. ✅ 当前仍停留在架构沟通与范围收口阶段，未进入代码实现，未执行测试。
 
 ### 2026-04-25 -- 后端只读 API 主线已确认，api 模块进入瘦身规划
 
@@ -721,7 +750,7 @@
    - 仍保持只读 + mock-first
    - 暂不进入配置写回与 runtime 操作页
 9. ✅ 前端扩展主线已切换到方案 B：
-   - 基于 `gemimi-web-front` 现有骨架继续扩展
+   - 基于 `gemimi-gemimi-web-front` 现有骨架继续扩展
    - 目标是完整控制台
    - 已新增方案 B 主规划文档
 

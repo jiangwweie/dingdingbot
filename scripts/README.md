@@ -102,7 +102,7 @@ tail -100 logs/frontend.log
 lsof -ti:5173
 
 # 手动启动调试
-cd web-front
+cd gemimi-web-front
 npm run dev
 ```
 

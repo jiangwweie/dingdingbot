@@ -609,7 +609,7 @@ class CapitalProtectionCheckResult(BaseModel):
 ## 12. TypeScript 类型定义（前端）
 
 ```typescript
-// web-front/src/types/order.ts
+// gemimi-web-front/src/types/order.ts
 
 export enum Direction {
   LONG = "LONG",
@@ -814,7 +814,7 @@ export interface CapitalProtectionCheckResult {
 
 | 类型 | 文件路径 |
 |------|----------|
-| 所有类型 | `web-front/src/types/order.ts` |
+| 所有类型 | `gemimi-web-front/src/types/order.ts` |
 
 ### 13.3 对齐检查表
 

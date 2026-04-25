@@ -107,9 +107,9 @@ prism mock docs/contracts/api-spec.yaml
 ```bash
 # 1. 生成 TypeScript 类型定义
 npm install -D openapi-typescript
-openapi-typescript docs/contracts/api-spec.yaml > web-front/src/types/api.ts
+openapi-typescript docs/contracts/api-spec.yaml > gemimi-web-front/src/types/api.ts
 
-# 输出：web-front/src/types/api.ts（自动生成类型定义）
+# 输出：gemimi-web-front/src/types/api.ts（自动生成类型定义）
 
 # 2. 在组件中导入类型
 import { components } from '@/types/api'
@@ -325,9 +325,9 @@ prism mock docs/contracts/orders-api-spec.yaml
 **前端**：
 ```bash
 # 生成 TypeScript 类型定义
-openapi-typescript docs/contracts/orders-api-spec.yaml > web-front/src/types/orders.ts
+openapi-typescript docs/contracts/orders-api-spec.yaml > gemimi-web-front/src/types/orders.ts
 
-# 输出：web-front/src/types/orders.ts
+# 输出：gemimi-web-front/src/types/orders.ts
 #   - export type OrderResponse = { order_id: string; status: OrderStatus; ... }
 #   - export type CreateOrderRequest = { symbol: string; ... }
 ```
@@ -395,11 +395,11 @@ openapi-spec-validator docs/contracts/orders-api-spec.yaml
 
 # 验证代码中使用自动生成的类型
 grep -r "from generated_client import" src/  # 后端
-grep -r "from '@/types/orders'" web-front/src/  # 前端
+grep -r "from '@/types/orders'" gemimi-web-front/src/  # 前端
 
 # 输出：
 # src/interfaces/orders_service.py: from generated_client.models import Order
-# web-front/src/pages/OrdersPage.tsx: import { components } from '@/types/orders'
+# gemimi-web-front/src/pages/OrdersPage.tsx: import { components } from '@/types/orders'
 ```
 
 ---

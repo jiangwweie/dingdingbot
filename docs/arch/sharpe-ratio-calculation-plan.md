@@ -349,7 +349,7 @@ class TestSharpeRatioCalculation:
 |-----------|---------|---------|---------|
 | `src/application/backtester.py` | 新增字段+方法 | P0 | 主逻辑修改 |
 | `src/domain/models.py` | 已有字段使用 | 无 | 无需修改 |
-| `web-front/src/components/v3/backtest/` | 前端展示 | P2 | 前端已有 null 检测，无需改 |
+| `gemimi-web-front/src/components/v3/backtest/` | 前端展示 | P2 | 前端已有 null 检测，无需改 |
 | `tests/unit/test_backtester.py` | 新增测试 | P1 | QA 负责 |
 
 ---

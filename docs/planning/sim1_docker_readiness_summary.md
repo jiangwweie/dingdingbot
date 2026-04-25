@@ -106,7 +106,7 @@ EOF
 sed -i '' 's/context: \./context: \.\./' docker/docker-compose.yml
 
 # 3. 构建前端
-cd web-front && npm install && npm run build && cd ..
+cd gemimi-web-front && npm install && npm run build && cd ..
 ```
 
 ### 2. 修复启动期阻塞项（1-2 小时）
@@ -148,13 +148,13 @@ curl http://localhost:8000/api/health
 
 ## 前端入口选择
 
-**正确入口**: `web-front/` ✅
+**正确入口**: `gemimi-web-front/` ✅
 
 **问题**: 缺少 `dist/` 构建产物
 
 **解决方案**:
 ```bash
-cd web-front
+cd gemimi-web-front
 npm install
 npm run build
 # dist/ 目录会生成

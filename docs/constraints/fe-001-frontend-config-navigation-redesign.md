@@ -203,7 +203,7 @@ BacktestPage (现有，优化)
 ### 4.2 React Query 配置
 
 ```typescript
-// web-front/src/lib/react-query-config.ts
+// gemimi-web-front/src/lib/react-query-config.ts
 
 // 策略列表查询
 const strategiesQuery = {
@@ -233,7 +233,7 @@ const updateStrategyMutation = {
 ### 4.3 表单状态管理
 
 ```typescript
-// web-front/src/components/strategy/StrategyEditor.tsx
+// gemimi-web-front/src/components/strategy/StrategyEditor.tsx
 
 import { useForm } from 'react-hook-form';
 
@@ -362,7 +362,7 @@ useEffect(() => {
 ### 6.1 API 客户端封装
 
 ```typescript
-// web-front/src/api/config.ts
+// gemimi-web-front/src/api/config.ts
 
 import { request } from './request';
 

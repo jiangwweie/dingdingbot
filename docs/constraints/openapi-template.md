@@ -352,9 +352,9 @@ openapi-python-client generate --path docs/contracts/orders-api-spec.yaml
 ```bash
 # 从 OpenAPI Spec 生成 TypeScript 类型
 npm install -D openapi-typescript
-openapi-typescript docs/contracts/orders-api-spec.yaml > web-front/src/types/orders.ts
+openapi-typescript docs/contracts/orders-api-spec.yaml > gemimi-web-front/src/types/orders.ts
 
-# 输出：web-front/src/types/orders.ts（自动生成）
+# 输出：gemimi-web-front/src/types/orders.ts（自动生成）
 ```
 
 ### 4. Mock 服务器

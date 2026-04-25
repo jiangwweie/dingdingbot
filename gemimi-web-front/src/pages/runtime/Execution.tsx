@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getRuntimeExecutionIntents, getRuntimeOrders } from '@/src/services/mockApi';
+import { getRuntimeExecutionIntents, getRuntimeOrders } from '@/src/services/api';
 import { ExecutionIntent, Order } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';

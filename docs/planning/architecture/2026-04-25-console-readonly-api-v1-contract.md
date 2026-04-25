@@ -495,7 +495,7 @@ v1 does not require a full API rewrite, but new console API should move toward:
 
 Freeze the field names shared between:
 
-1. `gemimi-web-front/src/types/index.ts`
+1. `gemimi-gemimi-web-front/src/types/index.ts`
 2. this contract
 3. backend response models
 

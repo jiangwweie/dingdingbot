@@ -303,7 +303,7 @@ finally:
 
 ### P0-3: 前端逻辑重复
 
-**文件**: `web-front/src/pages/Orders.tsx:140-174` 和 `243-258`
+**文件**: `gemimi-web-front/src/pages/Orders.tsx:140-174` 和 `243-258`
 
 #### 问题分析
 
@@ -401,7 +401,7 @@ const handleDeleteConfirm = useCallback(async () => {
 ```
 
 **修改文件清单**:
-- `web-front/src/pages/Orders.tsx`
+- `gemimi-web-front/src/pages/Orders.tsx`
   - 移除内联 `Modal.confirm` (行 243-258)
   - 修复 `handleDeleteChainClick` 统一入口
   - 完善删除结果展示
@@ -526,7 +526,7 @@ for i in range(0, len(orders_to_delete), BATCH_SIZE):
 
 ### P1-3: 前端 audit_info 字段硬编码
 
-**文件**: `web-front/src/pages/Orders.tsx:146-150`
+**文件**: `gemimi-web-front/src/pages/Orders.tsx:146-150`
 
 #### 问题分析
 
@@ -575,8 +575,8 @@ const handleDeleteConfirm = useCallback(async () => {
 ```
 
 **修改文件清单**:
-- `web-front/src/pages/Orders.tsx`
-- `web-front/src/hooks/useAuth.ts` (如不存在则新建)
+- `gemimi-web-front/src/pages/Orders.tsx`
+- `gemimi-web-front/src/hooks/useAuth.ts` (如不存在则新建)
 
 ---
 
@@ -683,7 +683,7 @@ async def test_batch_delete_with_exchange_mock(order_repository):
 
 ### P1-5: 删除结果展示不完整
 
-**文件**: `web-front/src/pages/Orders.tsx:155-163`
+**文件**: `gemimi-web-front/src/pages/Orders.tsx:155-163`
 
 #### 问题分析
 
@@ -714,7 +714,7 @@ if (response.failed_to_delete && response.failed_to_delete.length > 0) {
 ```
 
 **修改文件清单**:
-- `web-front/src/pages/Orders.tsx`
+- `gemimi-web-front/src/pages/Orders.tsx`
 
 ---
 

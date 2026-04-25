@@ -155,7 +155,7 @@ open http://localhost:3000/config
 ### 如果页面加载失败
 ```bash
 # 检查前端日志
-cd web-front
+cd gemimi-web-front
 npm run dev
 
 # 检查后端日志

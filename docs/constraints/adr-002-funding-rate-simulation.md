@@ -429,7 +429,7 @@ def _calculate_funding_cost(
 ### 4.6 前端展示模块
 
 **影响文件**:
-- `web-front/` (待确认)
+- `gemimi-web-front/` (待确认)
 
 **影响评估**: **待前端开发确认**
 

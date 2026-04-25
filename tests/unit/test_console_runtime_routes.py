@@ -402,6 +402,8 @@ async def test_intents_adapter_list_unfinished():
         "direction": "LONG",
         "suggested_position_size": Decimal("0.5"),
     }
+    # Prevent hasattr(intent, "signal") from returning True (MagicMock auto-creates attrs)
+    del intent.signal
 
     async def mock_list_unfinished():
         # 真实签名: list_unfinished() - 不接受参数
@@ -436,6 +438,7 @@ async def test_intents_adapter_list_with_status():
         "direction": "SHORT",
         "suggested_position_size": Decimal("0.2"),
     }
+    del intent.signal
 
     async def mock_list(status=None):
         # 真实 repo 期望 ExecutionIntentStatus 枚举，不是原始字符串
@@ -493,6 +496,7 @@ async def test_intents_adapter_limit_slice():
             "direction": "LONG",
             "suggested_position_size": Decimal("0.1"),
         }
+        del intent.signal
         intents.append(intent)
 
     async def mock_list_unfinished():

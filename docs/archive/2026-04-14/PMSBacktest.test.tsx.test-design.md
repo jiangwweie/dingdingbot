@@ -9,7 +9,7 @@
 ## 1. 测试文件路径
 
 ```
-web-front/src/pages/__tests__/PMSBacktest.test.tsx
+gemimi-web-front/src/pages/__tests__/PMSBacktest.test.tsx
 ```
 
 ---
@@ -514,6 +514,6 @@ vi.mock('../../../components/v3/backtest', () => ({
 
 ## 8. 参考文件
 
-- 被测试组件：`web-front/src/pages/PMSBacktest.tsx`
-- API 接口定义：`web-front/src/lib/api.ts` (PMSBacktestRequest/PMSBacktestReport)
-- 现有测试参考：`web-front/src/pages/config/__tests__/StrategiesTab.test.tsx`
+- 被测试组件：`gemimi-web-front/src/pages/PMSBacktest.tsx`
+- API 接口定义：`gemimi-web-front/src/lib/api.ts` (PMSBacktestRequest/PMSBacktestReport)
+- 现有测试参考：`gemimi-web-front/src/pages/config/__tests__/StrategiesTab.test.tsx`

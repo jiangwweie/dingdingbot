@@ -1,4 +1,4 @@
-Please continue from the existing frontend scaffold in `gemimi-web-front/`.
+Please continue from the existing frontend scaffold in `gemimi-gemimi-web-front/`.
 
 Do **not** regenerate a completely different app from scratch.
 

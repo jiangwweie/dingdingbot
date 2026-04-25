@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getPortfolioContext } from '@/src/services/mockApi';
+import { getPortfolioContext } from '@/src/services/api';
 import { PortfolioContext } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';

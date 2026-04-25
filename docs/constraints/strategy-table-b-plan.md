@@ -12,55 +12,55 @@
 
 | # | 文件:行号 | 旧端点 | 请求体格式 | 新端点 | 转换方式 |
 |---|-----------|--------|-----------|--------|---------|
-| 1 | `web-front/src/lib/api.ts:602-614` `fetchStrategyTemplates()` | `GET /api/strategies/templates` | 无 | `GET /api/v1/config/strategies` (通过 `configApi.getStrategies()`) | 响应格式从 `{templates: [...]}` 变为 `axios response {data: Strategy[]}`。需改用 `configApi.getStrategies()` |
-| 2 | `web-front/src/lib/api.ts:1030-1041` `fetchStrategyMetadata()` | `GET /api/strategies/meta` | 无 | **保留** `/api/strategies/meta` | 此端点不属于策略 CRUD，不在删除范围 |
-| 3 | `web-front/src/lib/api.ts:1084-1097` `previewStrategy()` | `POST /api/strategies/preview` | `{logic_tree, symbol, timeframe}` | **保留** `/api/strategies/preview` | 此端点不属于策略 CRUD，不在删除范围 |
-| 4 | `web-front/src/lib/api.ts:1103-1115` `applyStrategy()` | `POST /api/strategies/{id}/apply` | 无 | **保留** `/api/strategies/{id}/apply` | 此端点已使用新表，无需修改 |
-| 5 | `web-front/src/lib/api.ts:1618-1630` `fetchStrategyParamTemplates()` | `GET /api/strategies/templates` | 无 | `GET /api/v1/config/strategies` | 与 #1 相同端点 |
-| 6 | `web-front/src/lib/api.ts:1635-1651` `saveStrategyParamTemplate()` | `POST /api/strategies/templates` | `{name, description}` | `POST /api/v1/config/strategies` | 请求体格式完全不同，需用 `configApi.createStrategy()` |
-| 7 | `web-front/src/lib/api.ts:1656-1668` `loadStrategyParamTemplate()` | `POST /api/strategies/templates/{id}/load` | 无 | 无直接替代 | 此端点实际不存在于后端（可能已废弃）|
-| 8 | `web-front/src/lib/api.ts:1673-1685` `deleteStrategyParamTemplate()` | `DELETE /api/strategies/templates/{id}` | 无 | `DELETE /api/v1/config/strategies/{id}` | 改用 `configApi.deleteStrategy()` |
-| 9 | `web-front/src/pages/Backtest.tsx:238` `handleImportTemplate()` | `GET /api/strategies/{id}` | 无 | `GET /api/v1/config/strategies/{id}` | 改用 `configApi.getStrategy(id)` |
-| 10 | `web-front/src/pages/PMSBacktest.tsx:254` `handleImportTemplate()` | `GET /api/strategies/{id}` | 无 | `GET /api/v1/config/strategies/{id}` | 同上 |
-| 11 | `web-front/src/components/StrategyTemplatePicker.tsx:7` | 接口定义 `id: number` | — | — | `id` 类型从 `number` 改为 `string` |
+| 1 | `gemimi-web-front/src/lib/api.ts:602-614` `fetchStrategyTemplates()` | `GET /api/strategies/templates` | 无 | `GET /api/v1/config/strategies` (通过 `configApi.getStrategies()`) | 响应格式从 `{templates: [...]}` 变为 `axios response {data: Strategy[]}`。需改用 `configApi.getStrategies()` |
+| 2 | `gemimi-web-front/src/lib/api.ts:1030-1041` `fetchStrategyMetadata()` | `GET /api/strategies/meta` | 无 | **保留** `/api/strategies/meta` | 此端点不属于策略 CRUD，不在删除范围 |
+| 3 | `gemimi-web-front/src/lib/api.ts:1084-1097` `previewStrategy()` | `POST /api/strategies/preview` | `{logic_tree, symbol, timeframe}` | **保留** `/api/strategies/preview` | 此端点不属于策略 CRUD，不在删除范围 |
+| 4 | `gemimi-web-front/src/lib/api.ts:1103-1115` `applyStrategy()` | `POST /api/strategies/{id}/apply` | 无 | **保留** `/api/strategies/{id}/apply` | 此端点已使用新表，无需修改 |
+| 5 | `gemimi-web-front/src/lib/api.ts:1618-1630` `fetchStrategyParamTemplates()` | `GET /api/strategies/templates` | 无 | `GET /api/v1/config/strategies` | 与 #1 相同端点 |
+| 6 | `gemimi-web-front/src/lib/api.ts:1635-1651` `saveStrategyParamTemplate()` | `POST /api/strategies/templates` | `{name, description}` | `POST /api/v1/config/strategies` | 请求体格式完全不同，需用 `configApi.createStrategy()` |
+| 7 | `gemimi-web-front/src/lib/api.ts:1656-1668` `loadStrategyParamTemplate()` | `POST /api/strategies/templates/{id}/load` | 无 | 无直接替代 | 此端点实际不存在于后端（可能已废弃）|
+| 8 | `gemimi-web-front/src/lib/api.ts:1673-1685` `deleteStrategyParamTemplate()` | `DELETE /api/strategies/templates/{id}` | 无 | `DELETE /api/v1/config/strategies/{id}` | 改用 `configApi.deleteStrategy()` |
+| 9 | `gemimi-web-front/src/pages/Backtest.tsx:238` `handleImportTemplate()` | `GET /api/strategies/{id}` | 无 | `GET /api/v1/config/strategies/{id}` | 改用 `configApi.getStrategy(id)` |
+| 10 | `gemimi-web-front/src/pages/PMSBacktest.tsx:254` `handleImportTemplate()` | `GET /api/strategies/{id}` | 无 | `GET /api/v1/config/strategies/{id}` | 同上 |
+| 11 | `gemimi-web-front/src/components/StrategyTemplatePicker.tsx:7` | 接口定义 `id: number` | — | — | `id` 类型从 `number` 改为 `string` |
 
 ### 1.2 已使用新端点的文件（无需修改）
 
 | 文件 | 说明 |
 |------|------|
-| `web-front/src/api/config.ts:387-478` `configApi` | 全部使用 `/api/v1/config/strategies` |
-| `web-front/src/pages/config/StrategyConfig.tsx` | 全部通过 `configApi` 调用 |
-| `web-front/src/pages/config/StrategiesTab.tsx` | 全部通过 `configApi` 调用 |
+| `gemimi-web-front/src/api/config.ts:387-478` `configApi` | 全部使用 `/api/v1/config/strategies` |
+| `gemimi-web-front/src/pages/config/StrategyConfig.tsx` | 全部通过 `configApi` 调用 |
+| `gemimi-web-front/src/pages/config/StrategiesTab.tsx` | 全部通过 `configApi` 调用 |
 
 ### 1.3 前端改动详细步骤
 
-#### Step A: `web-front/src/lib/api.ts`
+#### Step A: `gemimi-web-front/src/lib/api.ts`
 
 1. **删除** L602-614 `fetchStrategyTemplates()` — 改用 `configApi.getStrategies()`
 2. **删除** L1618-1685 整套 strategy param template 函数 (`fetchStrategyParamTemplates`, `saveStrategyParamTemplate`, `loadStrategyParamTemplate`, `deleteStrategyParamTemplate`) — 这些是参数模板而非策略配置，如确实需要则需后端新增专用端点
 3. **修改** L1103-1115 `applyStrategy()` — 无需修改（后端已使用新表）
 
-#### Step B: `web-front/src/pages/Backtest.tsx`
+#### Step B: `gemimi-web-front/src/pages/Backtest.tsx`
 
 1. **修改** L238 `fetch(\`/api/strategies/${templateStrategy.id}\`)` — 改为 `configApi.getStrategy(templateStrategy.id)`
 2. 需额外导入 `configApi` from `../api/config`
 
-#### Step C: `web-front/src/pages/PMSBacktest.tsx`
+#### Step C: `gemimi-web-front/src/pages/PMSBacktest.tsx`
 
 1. **修改** L254 `fetch(\`/api/strategies/${templateStrategy.id}\`)` — 改为 `configApi.getStrategy(templateStrategy.id)`
 2. 需额外导入 `configApi` from `../api/config`
 
-#### Step D: `web-front/src/components/StrategyTemplatePicker.tsx`
+#### Step D: `gemimi-web-front/src/components/StrategyTemplatePicker.tsx`
 
 1. **修改** L7 `id: number` -> `id: string`
 
-#### Step E: `web-front/src/components/strategy-params/StrategyParamPanel.tsx`
+#### Step E: `gemimi-web-front/src/components/strategy-params/StrategyParamPanel.tsx`
 
 此组件使用的是 `/api/strategy/params` 系列端点（L1520-1601），与策略表 CRUD 无关，**无需修改**。但如果它调用了 `fetchStrategyParamTemplates` 等已删除的函数，需同步移除相关 UI。
 
 #### Step F: 测试文件
 
-1. `web-front/src/pages/config/__tests__/StrategiesTab.test.tsx:36-38` — mock 对象无需修改（继续使用 `configApi`）
+1. `gemimi-web-front/src/pages/config/__tests__/StrategiesTab.test.tsx:36-38` — mock 对象无需修改（继续使用 `configApi`）
 
 ---
 
@@ -298,7 +298,7 @@ def downgrade() -> None:
 
 ### 风险 2: 策略参数模板功能丢失
 
-**描述**: `web-front/src/lib/api.ts` 中有 `fetchStrategyParamTemplates`, `saveStrategyParamTemplate`, `loadStrategyParamTemplate`, `deleteStrategyParamTemplate` 四个函数，它们使用 `/api/strategies/templates` 端点。
+**描述**: `gemimi-web-front/src/lib/api.ts` 中有 `fetchStrategyParamTemplates`, `saveStrategyParamTemplate`, `loadStrategyParamTemplate`, `deleteStrategyParamTemplate` 四个函数，它们使用 `/api/strategies/templates` 端点。
 
 **影响**: 如果这些函数有实际用户，删除后端端点后功能将中断。
 

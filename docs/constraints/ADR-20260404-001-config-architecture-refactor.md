@@ -174,7 +174,7 @@
 
 ## 2. 前端配置页面功能模块
 
-### 2.1 页面结构 (web-front/src/pages/Config.tsx)
+### 2.1 页面结构 (gemimi-web-front/src/pages/Config.tsx)
 
 ```
 Config.tsx

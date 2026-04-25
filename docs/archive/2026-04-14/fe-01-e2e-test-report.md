@@ -32,7 +32,7 @@
 
 ### 2.1 StrategiesTab 组件测试（19 个测试）
 
-**测试文件**: `web-front/src/pages/config/__tests__/StrategiesTab.test.tsx`
+**测试文件**: `gemimi-web-front/src/pages/config/__tests__/StrategiesTab.test.tsx`
 
 | 测试类别 | 测试数 | 状态 | 说明 |
 |----------|--------|------|------|
@@ -55,7 +55,7 @@
 
 ### 2.2 SystemTab 组件测试（20 个测试）
 
-**测试文件**: `web-front/src/pages/config/__tests__/SystemTab.test.tsx`
+**测试文件**: `gemimi-web-front/src/pages/config/__tests__/SystemTab.test.tsx`
 
 | 测试类别 | 测试数 | 状态 | 说明 |
 |----------|--------|------|------|

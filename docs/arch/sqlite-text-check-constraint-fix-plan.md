@@ -311,7 +311,7 @@ class BacktestReport(BaseModel):
 | `src/application/backtester.py` | 无影响 | 无 | 无需修改 |
 | `src/domain/models.py` | 确认 Pydantic 验证 | 低 | 补充范围验证 |
 | `tests/unit/test_backtest*.py` | 新增测试 | 低 | 补充负收益测试 |
-| `web-front/` | 无影响 | 无 | 前端不受影响 |
+| `gemimi-web-front/` | 无影响 | 无 | 前端不受影响 |
 
 ---
 

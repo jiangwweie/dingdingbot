@@ -16,7 +16,7 @@
 **修复工作量估算**: 约 1-2 小时（不含 PostgreSQL 部署）。
 
 **重要纠正**:
-- ✅ 前端 dist 目录已存在（`web-front/dist/` 有 index.html 和 assets/）
+- ✅ 前端 dist 目录已存在（`gemimi-web-front/dist/` 有 index.html 和 assets/）
 - ✅ config 目录存在，`COPY config/` 不会失败（只是复制参考文件）
 - ❌ YAML 文件不再是启动必需条件（代码已改为 DB 驱动）
 
@@ -30,7 +30,7 @@
 
 | 项目 | 状态 | 证据 |
 |------|------|------|
-| 前端 dist | ✅ 已存在 | `web-front/dist/index.html` 和 `web-front/dist/assets/` 存在 |
+| 前端 dist | ✅ 已存在 | `gemimi-web-front/dist/index.html` 和 `gemimi-web-front/dist/assets/` 存在 |
 | config 目录 | ✅ 已存在 | `config/` 目录包含 `.reference`/`.example`/`.bak` 文件 |
 | YAML 文件 | ✅ 不必需 | `src/application/config_manager.py:908` 注释："No YAML file fallback — DB or defaults only." |
 
@@ -72,7 +72,7 @@
 **无构建期阻塞项** ✅
 
 **纠正说明**:
-- 上一版错误判断 P0-1（前端 dist 不存在）：实际 `web-front/dist/` 已存在
+- 上一版错误判断 P0-1（前端 dist 不存在）：实际 `gemimi-web-front/dist/` 已存在
 - 上一版错误判断 P0-3（config 目录缺少 core.yaml）：config 目录存在，且 YAML 不再是启动必需
 
 ### 启动期失败（容器启动后进程退出）
@@ -274,15 +274,15 @@ EXCHANGE_TESTNET=true  # ✅ 使用测试网
 
 ## 7. 前端入口选择（确认）
 
-**正确入口**: `web-front/` ✅
+**正确入口**: `gemimi-web-front/` ✅
 
 **证据**:
-- `docker/Dockerfile.frontend:11` 引用 `web-front/nginx.conf`
-- `web-front/dist/` 目录已存在（包含 index.html 和 assets/）
+- `docker/Dockerfile.frontend:11` 引用 `gemimi-web-front/nginx.conf`
+- `gemimi-web-front/dist/` 目录已存在（包含 index.html 和 assets/）
 
 **nginx 配置正确**:
 ```nginx
-# web-front/nginx.conf:23-33
+# gemimi-web-front/nginx.conf:23-33
 location /api {
     proxy_pass http://backend:8000;  # ✅ 正确代理到后端
 }

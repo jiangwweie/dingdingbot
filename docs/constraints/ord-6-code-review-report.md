@@ -122,7 +122,7 @@ finally:
 
 ### P0-3: 前端批量删除按钮逻辑重复，存在两个确认对话框
 
-**文件**: `web-front/src/pages/Orders.tsx:140-174` 和 `243-258`
+**文件**: `gemimi-web-front/src/pages/Orders.tsx:140-174` 和 `243-258`
 
 **问题描述**:
 
@@ -307,7 +307,7 @@ for i in range(0, len(orders_to_delete), BATCH_SIZE):
 
 ### P1-3: 前端 audit_info 字段硬编码，未从登录信息获取
 
-**文件**: `web-front/src/pages/Orders.tsx:146-150`
+**文件**: `gemimi-web-front/src/pages/Orders.tsx:146-150`
 
 **问题描述**:
 ```typescript
@@ -398,7 +398,7 @@ async def test_batch_delete_with_exchange_mock(order_repository):
 
 ### P1-5: 前端删除结果展示不完整，未显示 deleted_from_db
 
-**文件**: `web-front/src/pages/Orders.tsx:155-163`
+**文件**: `gemimi-web-front/src/pages/Orders.tsx:155-163`
 
 **问题描述**:
 ```typescript

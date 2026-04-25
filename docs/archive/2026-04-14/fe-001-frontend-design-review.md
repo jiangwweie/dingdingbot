@@ -20,15 +20,15 @@
 ### 1.2 现有代码分析
 
 已分析的现有前端代码:
-- `web-front/src/App.tsx` - 路由配置
-- `web-front/src/components/Layout.tsx` - 主导航布局
-- `web-front/src/pages/ConfigProfiles.tsx` - 配置 Profile 管理页面
-- `web-front/src/pages/Backtest.tsx` - 回测沙箱页面
-- `web-front/src/pages/StrategyWorkbench.tsx` - 策略工作台
-- `web-front/src/pages/config/StrategiesTab.tsx` - 策略管理 Tab
-- `web-front/src/pages/config/SystemTab.tsx` - 系统配置 Tab
-- `web-front/src/components/strategy-params/StrategyParamPanel.tsx` - 策略参数面板
-- `web-front/src/api/config.ts` - 配置管理 API 封装
+- `gemimi-web-front/src/App.tsx` - 路由配置
+- `gemimi-web-front/src/components/Layout.tsx` - 主导航布局
+- `gemimi-web-front/src/pages/ConfigProfiles.tsx` - 配置 Profile 管理页面
+- `gemimi-web-front/src/pages/Backtest.tsx` - 回测沙箱页面
+- `gemimi-web-front/src/pages/StrategyWorkbench.tsx` - 策略工作台
+- `gemimi-web-front/src/pages/config/StrategiesTab.tsx` - 策略管理 Tab
+- `gemimi-web-front/src/pages/config/SystemTab.tsx` - 系统配置 Tab
+- `gemimi-web-front/src/components/strategy-params/StrategyParamPanel.tsx` - 策略参数面板
+- `gemimi-web-front/src/api/config.ts` - 配置管理 API 封装
 
 ### 1.3 审查结论
 
@@ -311,7 +311,7 @@ const fieldSchema = await fetch('/api/config/schema');
 ### 5.1 推荐组件结构
 
 ```
-web-front/src/
+gemimi-web-front/src/
 ├── pages/
 │   ├── config/
 │   │   ├── StrategyConfig.tsx      // 新建：策略配置主页面

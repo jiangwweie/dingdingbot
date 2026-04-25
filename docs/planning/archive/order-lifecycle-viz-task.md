@@ -113,7 +113,7 @@ Response: {
 | B3: 颜色和形状区分 | ENTRY/TP/SL 使用不同颜色和形状 | 1h |
 
 **修改文件**:
-- `web-front/src/components/v3/OrderDetailsDrawer.tsx`
+- `gemimi-web-front/src/components/v3/OrderDetailsDrawer.tsx`
 
 ---
 

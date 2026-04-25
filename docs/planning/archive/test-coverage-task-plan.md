@@ -22,7 +22,7 @@
 
 ### TASK-F1: StrategiesTab 单元测试
 **描述**: 策略管理 Tab 组件测试
-**文件**: `web-front/src/pages/config/__tests__/StrategiesTab.test.tsx`
+**文件**: `gemimi-web-front/src/pages/config/__tests__/StrategiesTab.test.tsx`
 **Agent**: /frontend
 **工时**: 2h
 **覆盖场景**:
@@ -38,7 +38,7 @@
 
 ### TASK-F2: AdvancedStrategyForm 单元测试
 **描述**: 高级策略表单组件测试
-**文件**: `web-front/src/pages/config/__tests__/AdvancedStrategyForm.test.tsx`
+**文件**: `gemimi-web-front/src/pages/config/__tests__/AdvancedStrategyForm.test.tsx`
 **Agent**: /frontend
 **工时**: 2h
 **覆盖场景**:
@@ -54,7 +54,7 @@
 
 ### TASK-F3: SystemTab 单元测试
 **描述**: 系统配置 Tab 组件测试
-**文件**: `web-front/src/pages/config/__tests__/SystemTab.test.tsx`
+**文件**: `gemimi-web-front/src/pages/config/__tests__/SystemTab.test.tsx`
 **Agent**: /frontend
 **工时**: 2h
 **覆盖场景**:
@@ -73,9 +73,9 @@
 ### TASK-E1: Puppeteer 环境搭建
 **描述**: 配置 Puppeteer 测试框架和基础工具
 **文件**:
-- `web-front/e2e/puppeteer.config.js`
-- `web-front/e2e/utils/setup.ts`
-- `web-front/e2e/utils/helpers.ts`
+- `gemimi-web-front/e2e/puppeteer.config.js`
+- `gemimi-web-front/e2e/utils/setup.ts`
+- `gemimi-web-front/e2e/utils/helpers.ts`
 **Agent**: /frontend
 **工时**: 2h
 **交付物**:
@@ -90,7 +90,7 @@
 
 ### TASK-E2: 策略管理 E2E 测试
 **描述**: 策略管理全流程端到端测试
-**文件**: `web-front/e2e/config/strategies.e2e.test.ts`
+**文件**: `gemimi-web-front/e2e/config/strategies.e2e.test.ts`
 **Agent**: /qa
 **工时**: 3h
 **覆盖场景**:
@@ -108,7 +108,7 @@
 
 ### TASK-E3: 导入导出 E2E 测试
 **描述**: 配置导入导出功能端到端测试
-**文件**: `web-front/e2e/config/backup.e2e.test.ts`
+**文件**: `gemimi-web-front/e2e/config/backup.e2e.test.ts`
 **Agent**: /qa
 **工时**: 3h
 **覆盖场景**:
@@ -255,7 +255,7 @@ Phase 3: 后端补充 (并行)
 ## 📊 预期产出
 
 ```
-web-front/
+gemimi-web-front/
 ├── src/pages/config/__tests__/
 │   ├── StrategiesTab.test.tsx          [NEW]
 │   ├── AdvancedStrategyForm.test.tsx   [NEW]

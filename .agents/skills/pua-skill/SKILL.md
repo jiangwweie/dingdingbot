@@ -186,8 +186,8 @@ PUA 输出:
 - [ ] 通过 `npm run type-check` 类型检查
 
 ## 输出要求
-- 修改文件：`web-front/src/pages/xxx.tsx`
-- 测试文件：`web-front/src/__tests__/xxx.test.ts`（如需要）
+- 修改文件：`gemimi-web-front/src/pages/xxx.tsx`
+- 测试文件：`gemimi-web-front/src/__tests__/xxx.test.ts`（如需要）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 

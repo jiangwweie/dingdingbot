@@ -217,7 +217,7 @@
    - 也确认现有前端带有旧策略工作台/旧导航/旧模板导入包袱
 
 2. **确定新前端方向**
-   - 不继续把现有 `web-front` 作为主要演进载体
+   - 不继续把现有 `gemimi-web-front` 作为主要演进载体
    - 后续新建独立 `backtest-studio`
    - 当前倾向目录：`apps/backtest-studio`
 
@@ -2425,11 +2425,11 @@ python3 -c "from src.domain.models import RiskManagerConfig, Position"
 **任务**: 为回测报告新增 close_events 可视化展示（TP1~TP5/SL 出场明细）
 
 **改动文件**:
-1. `web-front/src/types/backtest.ts` — 新增 `PositionCloseEvent` 接口 + `close_events` 字段
+1. `gemimi-web-front/src/types/backtest.ts` — 新增 `PositionCloseEvent` 接口 + `close_events` 字段
    - `BacktestReportDetail` 新增 `close_events: PositionCloseEvent[]`
    - `PositionSummary` 新增 `close_events: PositionCloseEvent[]`
 
-2. `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` — 新增 205 行
+2. `gemimi-web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` — 新增 205 行
    - `CloseEventsTable` 组件：展示所有出场事件，按 position_id 分组
    - `CloseEventList` 组件：表格渲染（出场类型/成交价/成交量/盈亏/手续费/时间/原因）
    - `getEventTypeBadgeClass()`: TP 绿色 Badge，SL 红色 Badge

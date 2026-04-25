@@ -29,13 +29,9 @@ else
     exit 1
 fi
 
-# 启动前端服务
-echo "[2/3] 启动前端开发服务..."
-cd web-front
-npm run dev > ../logs/frontend.log 2>&1 &
-FRONTEND_PID=$!
-echo "      前端 PID: $FRONTEND_PID"
-echo "      日志：logs/frontend.log"
+# 启动前端服务（已迁移至 gemimi-web-front/）
+echo "[2/3] 前端已迁移至 gemimi-web-front/，需手动启动"
+echo "      cd gemimi-web-front && npm run dev"
 
 # 等待前端启动
 sleep 5

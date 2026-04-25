@@ -2118,7 +2118,7 @@ await page.evaluate(() => document.body.textContent.includes('通知渠道'))
 '[class*="Modal"], [class*="Drawer"]'
 ```
 
-**测试文件**: `web-front/e2e/notifications/signals.e2e.test.ts`
+**测试文件**: `gemimi-web-front/e2e/notifications/signals.e2e.test.ts`
 **测试用例数**: 28 个
 **截图数量**: 46+ 张
 
@@ -2693,7 +2693,7 @@ tests/unit/test_order_klines_api.py::test_order_chain_timeline_alignment PASSED 
 - ✅ 错误处理完善 - 404/500 错误码返回
 - ✅ 类型注解完整 - `Dict[str, Any]` 含详细注释
 
-**前端组件** (`web-front/src/components/v3/OrderDetailsDrawer.tsx`):
+**前端组件** (`gemimi-web-front/src/components/v3/OrderDetailsDrawer.tsx`):
 - ✅ TradingView 图表渲染 - 使用 Recharts `LineChart` + `ReferenceDot`
 - ✅ 订单标记位置准确 - 基于时间戳映射
 - ✅ 水平线价格对齐 - 使用订单价格数据
@@ -2860,7 +2860,7 @@ python scripts/migrate_config_to_db.py
 
 ### 前端组件升级实现
 
-**组件**: `web-front/src/components/v3/OrderDetailsDrawer.tsx`
+**组件**: `gemimi-web-front/src/components/v3/OrderDetailsDrawer.tsx`
 
 **核心修改**:
 1. ✅ 移除 Recharts 依赖（`ResponsiveContainer`, `LineChart`, `ReferenceDot` 等）
@@ -2912,7 +2912,7 @@ const candleData: CandlestickData[] = klines.map((k) => ({
 ```
 
 **修改文件**:
-- `web-front/src/components/v3/OrderDetailsDrawer.tsx` - 完整重写（约 500 行）
+- `gemimi-web-front/src/components/v3/OrderDetailsDrawer.tsx` - 完整重写（约 500 行）
 
 **TypeScript 类型检查**: ✅ 通过
 
@@ -3047,7 +3047,7 @@ return {
 
 **复用 SignalDetailsDrawer 组件逻辑**:
 ```typescript
-// web-front/src/components/v3/OrderDetailsDrawer.tsx
+// gemimi-web-front/src/components/v3/OrderDetailsDrawer.tsx
 
 // 1. 导入 TradingView
 import { 
@@ -3292,7 +3292,7 @@ const APPLE_BLUE = '#007AFF';    // 入场价/高亮
 
 ### 参考实现
 
-**文件**: `web-front/src/components/SignalDetailsDrawer.tsx`
+**文件**: `gemimi-web-front/src/components/SignalDetailsDrawer.tsx`
 
 **关键代码**:
 - 图表初始化：L45-77
@@ -4231,7 +4231,7 @@ async def _check_price_reasonability(
 
 ## Phase 6 前端架构
 
-### 前端 API 调用层 (`web-front/src/lib/api.ts`)
+### 前端 API 调用层 (`gemimi-web-front/src/lib/api.ts`)
 
 **订单管理**:
 ```typescript
@@ -4300,10 +4300,10 @@ async function fetchAccountSnapshot(): Promise<AccountSnapshot>
 
 | 组件 | 文件 | 状态 |
 |------|------|------|
-| 仓位管理页面 | `web-front/src/pages/Positions.tsx` | ✅ |
-| 订单管理页面 | `web-front/src/pages/Orders.tsx` | ✅ |
-| 回测报告组件 | `web-front/src/pages/PMSBacktest.tsx` | ✅ |
-| 账户页面 | `web-front/src/pages/Account.tsx` | ✅ |
+| 仓位管理页面 | `gemimi-web-front/src/pages/Positions.tsx` | ✅ |
+| 订单管理页面 | `gemimi-web-front/src/pages/Orders.tsx` | ✅ |
+| 回测报告组件 | `gemimi-web-front/src/pages/PMSBacktest.tsx` | ✅ |
+| 账户页面 | `gemimi-web-front/src/pages/Account.tsx` | ✅ |
 | 止盈可视化 | `TPChainDisplay.tsx` + `SLOrderDisplay.tsx` | ✅ |
 
 ### 发现的小问题
@@ -4813,10 +4813,10 @@ ON config_entries_v2(profile_name, config_key)
 | `src/infrastructure/config_profile_repository.py` | Repository 层 |
 | `src/application/config_profile_service.py` | Service 层 |
 | `src/interfaces/api.py` | API 端点 |
-| `web-front/src/types/config-profile.ts` | 类型定义 |
-| `web-front/src/lib/api.ts` | API 函数封装 |
-| `web-front/src/pages/ConfigProfiles.tsx` | 管理页面 |
-| `web-front/src/components/profiles/` | 5 个对话框组件 |
+| `gemimi-web-front/src/types/config-profile.ts` | 类型定义 |
+| `gemimi-web-front/src/lib/api.ts` | API 函数封装 |
+| `gemimi-web-front/src/pages/ConfigProfiles.tsx` | 管理页面 |
+| `gemimi-web-front/src/components/profiles/` | 5 个对话框组件 |
 
 ### 测试结果
 

@@ -15,7 +15,7 @@
 | 影响范围 | Orders 页面订单链树形表格无法正常渲染 |
 | 出现频率 | 必现（每次加载 Orders 页面） |
 | 首次出现时间 | 2026-04-03 20:47（前后端服务启动后） |
-| 相关组件 | `web-front/src/components/v3/OrderChainTreeTable.tsx`<br>`web-front/src/pages/Orders.tsx`<br>`react-window@2.2.7` |
+| 相关组件 | `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx`<br>`gemimi-web-front/src/pages/Orders.tsx`<br>`react-window@2.2.7` |
 | 用户补充线索 | 后端返回订单数据量过大（Content-Length: 280471，约 280KB） |
 
 ---
@@ -55,10 +55,10 @@
 ### Step 2: 深入排查
 
 **排查的文件**:
-- `web-front/src/components/v3/OrderChainTreeTable.tsx:365-373` - react-window List 组件使用
-- `web-front/src/components/v3/OrderChainTreeTable.tsx:41-63` - `flattenTreeData` 函数实现
-- `web-front/src/pages/Orders.tsx:36-75` - treeData 状态管理和数据加载
-- `web-front/package.json` - react-window 版本检查
+- `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx:365-373` - react-window List 组件使用
+- `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx:41-63` - `flattenTreeData` 函数实现
+- `gemimi-web-front/src/pages/Orders.tsx:36-75` - treeData 状态管理和数据加载
+- `gemimi-web-front/package.json` - react-window 版本检查
 
 **发现的异常模式**:
 
@@ -127,8 +127,8 @@ Why 6: 为什么后端返回数据量过大（280KB）？
 2. **次根因**: **数据量过大** - 后端返回 280KB 订单数据，缺少分页/限流机制，触发 react-window 内部边界条件
 
 **问题代码位置**:
-- `web-front/src/components/v3/OrderChainTreeTable.tsx:365-373` - List 组件 prop 错误
-- `web-front/src/components/v3/OrderChainTreeTable.tsx:170-172` - Row 组件数据访问方式不规范
+- `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx:365-373` - List 组件 prop 错误
+- `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx:170-172` - Row 组件数据访问方式不规范
 - 后端 API（未定位具体文件）- 缺少数据量限制机制
 
 **影响范围评估**:
@@ -145,7 +145,7 @@ Why 6: 为什么后端返回数据量过大（280KB）？
 **修改内容**:
 
 ```tsx
-文件：web-front/src/components/v3/OrderChainTreeTable.tsx
+文件：gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx
 位置：第 365-373 行
 
 当前代码：
@@ -174,7 +174,7 @@ Why 6: 为什么后端返回数据量过大（280KB）？
 **同时修改 Row 组件**（标准模式）:
 
 ```tsx
-文件：web-front/src/components/v3/OrderChainTreeTable.tsx
+文件：gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx
 位置：第 170-172 行
 
 当前代码：
@@ -252,7 +252,7 @@ Why 6: 为什么后端返回数据量过大（280KB）？
 **修改内容**:
 
 ```tsx
-文件：web-front/src/pages/Orders.tsx
+文件：gemimi-web-front/src/pages/Orders.tsx
 位置：第 54-75 行（loadOrderTree 函数）
 
 当前逻辑：
@@ -356,16 +356,16 @@ Why 6: 为什么后端返回数据量过大（280KB）？
 ### 相关文件
 
 **前端文件**:
-- `web-front/src/components/v3/OrderChainTreeTable.tsx` - 问题组件
-- `web-front/src/pages/Orders.tsx` - 使用问题组件的页面
-- `web-front/package.json` - react-window 版本
+- `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx` - 问题组件
+- `gemimi-web-front/src/pages/Orders.tsx` - 使用问题组件的页面
+- `gemimi-web-front/package.json` - react-window 版本
 
 **后端文件**（未定位）:
 - `src/interfaces/api.py` - 订单树查询 API（推测）
 - 订单数据 Repository 或 Service - 数据查询逻辑
 
 **测试文件**:
-- `web-front/src/components/v3/__tests__/OrderChainTreeTable.test.tsx` - 已有测试文件
+- `gemimi-web-front/src/components/v3/__tests__/OrderChainTreeTable.test.tsx` - 已有测试文件
 
 ### 参考文档
 
@@ -378,11 +378,11 @@ Why 6: 为什么后端返回数据量过大（280KB）？
 # 修复后运行的验证步骤
 
 # 1. 前端单元测试
-cd web-front
-npm run test web-front/src/components/v3/__tests__/OrderChainTreeTable.test.tsx
+cd gemimi-web-front
+npm run test gemimi-web-front/src/components/v3/__tests__/OrderChainTreeTable.test.tsx
 
 # 2. 前端启动验证
-cd web-front
+cd gemimi-web-front
 npm run dev
 # 浏览器访问 http://localhost:3000/orders
 # 确认订单树表格正常渲染，无 console 错误

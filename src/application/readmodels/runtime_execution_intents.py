@@ -64,14 +64,25 @@ class RuntimeExecutionIntentsReadModel:
         for intent in raw_intents:
             # intent 可能是 ORM 对象或领域模型
             intent_id = str(getattr(intent, "id", "unknown"))
-            symbol_val = str(getattr(intent, "symbol", "unknown"))
+            # 区分 ORM 对象和领域模型 (ExecutionIntent)
+            signal_payload = {}
+            if hasattr(intent, "signal"):
+                # 领域模型
+                signal_obj = getattr(intent, "signal")
+                if hasattr(signal_obj, "model_dump"):
+                    signal_payload = signal_obj.model_dump()
+                symbol_val = getattr(signal_obj, "symbol", "unknown")
+            else:
+                # ORM 模型
+                signal_payload = getattr(intent, "signal_payload", {}) or {}
+                symbol_attr = getattr(intent, "symbol", None)
+                symbol_val = str(symbol_attr) if symbol_attr and symbol_attr != "unknown" else str(signal_payload.get("symbol", "unknown"))
+            
             status_val = str(getattr(intent, "status", "pending"))
             signal_id = getattr(intent, "signal_id", None)
             created_at_ts = getattr(intent, "created_at", None)
             updated_at_ts = getattr(intent, "updated_at", None)
-
-            # 从 signal_payload 提取 side 和 quantity
-            signal_payload = getattr(intent, "signal_payload", {}) or {}
+            
             direction = signal_payload.get("direction", "LONG")
             quantity = signal_payload.get("suggested_position_size", Decimal("0"))
 

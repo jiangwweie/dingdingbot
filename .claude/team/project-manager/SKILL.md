@@ -159,7 +159,7 @@ Agent(
 
 【任务】实现策略管理页面
 - 根据契约表实现React组件
-- 文件: web-front/src/pages/strategies/
+- 文件: gemimi-web-front/src/pages/strategies/
 - 包含: 列表页 + 表单组件 + 组件测试
 
 【验收标准】
@@ -219,7 +219,7 @@ Agent(
 
 【任务】编写前端组件测试
 - 覆盖: 策略管理页面
-- 文件: web-front/src/pages/strategies/*.test.tsx
+- 文件: gemimi-web-front/src/pages/strategies/*.test.tsx
 - 要求: 组件渲染+交互测试
 
 【验收标准】
@@ -380,7 +380,7 @@ PM在调用Agent工具前，必须确认：
 ## ❌ 禁止修改
 
 - `src/` - 后端代码（backend-dev负责）
-- `web-front/` - 前端代码（frontend-dev负责）
+- `gemimi-web-front/` - 前端代码（frontend-dev负责）
 - `tests/` - 测试代码（qa-tester负责）
 
 ---

@@ -317,7 +317,7 @@ async def get_signals(query: SignalQuery):
 
 ### 5.1 K 线图止盈线绘制
 
-**文件**: `web-front/src/components/SignalDetailsDrawer.tsx`
+**文件**: `gemimi-web-front/src/components/SignalDetailsDrawer.tsx`
 
 ```typescript
 // 在现有止损线代码后添加（第 169 行后）
@@ -339,7 +339,7 @@ if (data.signal.take_profit_levels && data.signal.take_profit_levels.length > 0)
 
 ### 5.2 前端类型定义
 
-**文件**: `web-front/src/lib/api.ts`
+**文件**: `gemimi-web-front/src/lib/api.ts`
 
 ```typescript
 export interface Signal {
@@ -362,7 +362,7 @@ export interface Signal {
 
 ### 5.3 前端 UI 展示
 
-**文件**: `web-front/src/components/SignalDetailsDrawer.tsx`
+**文件**: `gemimi-web-front/src/components/SignalDetailsDrawer.tsx`
 
 ```typescript
 {/* Take Profit Levels - 多级别展示 */}
@@ -586,9 +586,9 @@ def format_signal_message(signal: SignalResult) -> str:
 
 | 任务 | 文件 | 说明 |
 |------|------|------|
-| F-5 | `web-front/src/lib/api.ts` | 扩展 Signal 类型 |
-| F-6 | `web-front/src/components/SignalDetailsDrawer.tsx` | K 线图绘制止盈线 |
-| F-7 | `web-front/src/components/SignalDetailsDrawer.tsx` | 数据面板展示多级别 |
+| F-5 | `gemimi-web-front/src/lib/api.ts` | 扩展 Signal 类型 |
+| F-6 | `gemimi-web-front/src/components/SignalDetailsDrawer.tsx` | K 线图绘制止盈线 |
+| F-7 | `gemimi-web-front/src/components/SignalDetailsDrawer.tsx` | 数据面板展示多级别 |
 
 ### Phase 3: 测试与修复（1-2h）
 
@@ -1184,7 +1184,7 @@ async def test_api_response_with_tp():
 
 ### 15.3 前端测试
 
-#### 测试文件：`web-front/src/components/__tests__/SignalDetailsDrawer.test.tsx`
+#### 测试文件：`gemimi-web-front/src/components/__tests__/SignalDetailsDrawer.test.tsx`
 
 **用例 9: K 线图渲染止盈线**
 

@@ -241,8 +241,8 @@
 
 | 文件 | 内容 | 状态 |
 |------|------|------|
-| `web-front/src/types/order.ts` | OrderRequest, OrderResponse, OrderCancelResponse, PositionInfo, PositionResponse, AccountBalance, AccountResponse, ReconciliationRequest, CapitalProtectionCheckResult | ✅ 已创建 |
-| `web-front/src/types/order.ts` | OrderRole 枚举 (ENTRY/TP1-5/SL) | ✅ 已更新 (v1.1) |
+| `gemimi-web-front/src/types/order.ts` | OrderRequest, OrderResponse, OrderCancelResponse, PositionInfo, PositionResponse, AccountBalance, AccountResponse, ReconciliationRequest, CapitalProtectionCheckResult | ✅ 已创建 |
+| `gemimi-web-front/src/types/order.ts` | OrderRole 枚举 (ENTRY/TP1-5/SL) | ✅ 已更新 (v1.1) |
 
 ### 审查结论
 ✅ **Phase 5 完全对齐设计文档**，所有核心模块、Gemini 评审问题修复、Pydantic 模型、前端类型均按设计实现。

@@ -74,7 +74,7 @@ user.yaml.example    # ✅ 只有示例文件
 |----|-----------|------|------|
 | P2-1 | `docker/docker-compose.yml:15` | config 只读挂载 | 无法热重载配置 |
 | P2-2 | `src/interfaces/api.py:832` | /health 端点无依赖检查 | 容器健康检查可能误报 |
-| P2-3 | `web-front/package.json` | 前端未预构建 | 需要手动 npm run build |
+| P2-3 | `gemimi-web-front/package.json` | 前端未预构建 | 需要手动 npm run build |
 
 ---
 
@@ -301,19 +301,19 @@ if _runtime_config_provider is not None:
 
 ## 5. 前端入口选择
 
-### ✅ 正确入口: `web-front/`
+### ✅ 正确入口: `gemimi-web-front/`
 
 **证据**:
 
 ```dockerfile
 # docker/Dockerfile.frontend:11
-COPY web-front/nginx.conf /etc/nginx/conf.d/default.conf
+COPY gemimi-web-front/nginx.conf /etc/nginx/conf.d/default.conf
 ```
 
 **nginx 配置正确**:
 
 ```nginx
-# web-front/nginx.conf:23-33
+# gemimi-web-front/nginx.conf:23-33
 location /api {
     proxy_pass http://backend:8000;  # ✅ 正确代理到后端
     proxy_http_version 1.1;
@@ -323,10 +323,10 @@ location /api {
 }
 ```
 
-### ❌ 未使用: `gemimi-web-front/`
+### ❌ 未使用: `gemimi-gemimi-web-front/`
 
 **说明**:
-- `gemimi-web-front/` 是独立的前端项目
+- `gemimi-gemimi-web-front/` 是独立的前端项目
 - 未在 Dockerfile 中引用
 - 与当前部署无关
 
@@ -342,22 +342,22 @@ location /api {
 
 ```bash
 # 方案 A: 本地构建后提交 dist/
-cd web-front
+cd gemimi-web-front
 npm install
 npm run build
-# dist/ 目录会生成到 web-front/dist/
+# dist/ 目录会生成到 gemimi-web-front/dist/
 
 # 方案 B: 修改 Dockerfile 多阶段构建
 FROM node:18-alpine AS builder
 WORKDIR /app
-COPY web-front/package*.json ./
+COPY gemimi-web-front/package*.json ./
 RUN npm install
-COPY web-front/ ./
+COPY gemimi-web-front/ ./
 RUN npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY web-front/nginx.conf /etc/nginx/conf.d/default.conf
+COPY gemimi-web-front/nginx.conf /etc/nginx/conf.d/default.conf
 ```
 
 ---
@@ -422,7 +422,7 @@ services:
 **Step 1.3: 构建前端静态文件**
 
 ```bash
-cd web-front
+cd gemimi-web-front
 npm install
 npm run build
 # 验证 dist/ 目录生成
@@ -562,7 +562,7 @@ docker compose -f docker/docker-compose.yml logs backend | grep "LONG-only"
 - [ ] **P0-3**: 创建 `config/core.yaml`（从 core.yaml.reference 复制）
 - [ ] **P0-3**: 创建 `config/user.yaml`（最小配置）
 - [ ] **P0-2**: 修改 `docker/docker-compose.yml` context 路径（`.` → `..`）
-- [ ] **P0-1**: 构建 web-front 前端（`npm install && npm run build`）
+- [ ] **P0-1**: 构建 gemimi-web-front 前端（`npm install && npm run build`）
 - [ ] **验证**: `docker compose -f docker/docker-compose.yml build` 成功
 
 ### ✅ 阶段 2: 启动期修复（P1，预计 1-2 小时）
@@ -595,7 +595,7 @@ docker compose -f docker/docker-compose.yml logs backend | grep "LONG-only"
 | `config/user.yaml` | **新建** | 最小用户配置 |
 | `docker/docker-compose.yml` | **修改** | context 路径 `.` → `..` |
 | `.env` | **新建** | 环境变量配置（不提交 git） |
-| `web-front/dist/` | **新建** | 前端构建产物（或修改 Dockerfile） |
+| `gemimi-web-front/dist/` | **新建** | 前端构建产物（或修改 Dockerfile） |
 
 ### 可选修改（P2）
 

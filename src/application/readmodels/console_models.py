@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -145,6 +145,8 @@ class ConsoleAttemptItem(BaseModel):
     signal_id: Optional[str] = None
     symbol: str
     timeframe: str
+    direction: Optional[str] = None
+    strategy_name: Optional[str] = None
     final_result: str
     reject_reason: Optional[str] = None
     filter_reason: Optional[str] = None
@@ -196,4 +198,113 @@ class ConsoleExecutionIntentsResponse(BaseModel):
     """Response model for GET /api/runtime/execution/intents."""
 
     intents: list[ConsoleExecutionIntentItem] = Field(default_factory=list)
+
+
+# ============================================================
+# Console Research v1 - Third Batch Models
+# ============================================================
+
+
+class CandidateTrialItem(BaseModel):
+    """A single trial within a candidate (best_trial or top_trials entry)."""
+
+    trial_number: int = Field(default=0)
+    objective_value: Optional[float] = None
+    sharpe_ratio: Optional[float] = None
+    sortino_ratio: Optional[float] = None
+    total_return: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    total_trades: int = Field(default=0)
+    win_rate: Optional[float] = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    completed_at: Optional[str] = None
+
+
+class CandidateMetadata(BaseModel):
+    """Candidate metadata block shared by detail and replay endpoints."""
+
+    candidate_name: str
+    generated_at: str
+    source_profile: dict[str, Any] = Field(default_factory=dict)
+    git: dict[str, Any] = Field(default_factory=dict)
+    objective: str = "unknown"
+    status: str = "unknown"
+
+
+class CandidateDetailResponse(BaseModel):
+    """Response model for GET /api/research/candidates/{candidate_name}."""
+
+    candidate_name: str
+    metadata: CandidateMetadata
+    best_trial: Optional[CandidateTrialItem] = None
+    top_trials: list[CandidateTrialItem] = Field(default_factory=list)
+    fixed_params: dict[str, Any] = Field(default_factory=dict)
+    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    resolved_request: dict[str, Any] = Field(default_factory=dict)
+    reproduce_cmd: str = ""
+    # Legacy top-level fields kept for backward compat
+    generated_at: str = ""
+    source_profile: dict[str, Any] = Field(default_factory=dict)
+    git: dict[str, Any] = Field(default_factory=dict)
+    objective: str = "unknown"
+    status: str = "unknown"
+
+
+class ReplayContextResponse(BaseModel):
+    """Response model for GET /api/research/replay/{candidate_name}."""
+
+    candidate_name: str
+    metadata: CandidateMetadata
+    reproduce_cmd: str
+    resolved_request: dict[str, Any] = Field(default_factory=dict)
+    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    # Legacy top-level field kept for backward compat
+    generated_at: str = ""
+
+
+class StrictGateCheckItem(BaseModel):
+    """A single gate check in the strict_v1 checklist."""
+
+    gate: str
+    threshold: str
+    actual: Optional[str] = None
+    passed: bool = False
+
+
+class ReviewSummaryResponse(BaseModel):
+    """Response model for GET /api/research/candidates/{candidate_name}/review-summary."""
+
+    candidate_name: str
+    review_status: ReviewStatus
+    strict_gate_result: Literal["PASSED", "FAILED"]
+    strict_v1_checklist: list[StrictGateCheckItem] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    params_at_boundary: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class ConfigIdentity(BaseModel):
+    """Identity block for config/snapshot."""
+
+    profile: str
+    version: int
+    hash: str
+
+
+class ConfigSnapshotResponse(BaseModel):
+    """Response model for GET /api/config/snapshot."""
+
+    identity: ConfigIdentity
+    market: dict[str, Any] = Field(default_factory=dict)
+    strategy: dict[str, Any] = Field(default_factory=dict)
+    risk: dict[str, Any] = Field(default_factory=dict)
+    execution: dict[str, Any] = Field(default_factory=dict)
+    backend: dict[str, Any] = Field(default_factory=dict)
+    source_of_truth_hints: list[str] = Field(default_factory=list)
+    # Legacy top-level fields kept for backward compat
+    profile: str = ""
+    version: int = 0
+    hash: str = ""
+    environment: dict[str, Any] = Field(default_factory=dict)
 

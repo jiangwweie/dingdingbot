@@ -490,5 +490,5 @@ class OrderDeleteResponse(BaseModel):
 
 - [Phase 6 v3 API 契约](docs/designs/phase6-v3-api-contract.md)
 - [订单 Repository 实现](src/infrastructure/order_repository.py)
-- [订单管理页面](web-front/src/pages/Orders.tsx)
+- [订单管理页面](gemimi-web-front/src/pages/Orders.tsx)
 - [架构审查报告](docs/reviews/order-chain-arch-review.md)

@@ -10,7 +10,7 @@
 
 ### 1.1 `RiskConfig` 类型对齐情况
 
-`web-front/src/api/config.ts:96-107` 中已定义的 `RiskConfig` 与后端 `RiskConfigResponse`（`src/interfaces/api_v1_config.py:123-134`）**字段完全对齐**，无需补充：
+`gemimi-web-front/src/api/config.ts:96-107` 中已定义的 `RiskConfig` 与后端 `RiskConfigResponse`（`src/interfaces/api_v1_config.py:123-134`）**字段完全对齐**，无需补充：
 
 | 字段 | 后端 `RiskConfigResponse` | 前端 `RiskConfig` | 状态 |
 |------|--------------------------|-------------------|------|
@@ -144,7 +144,7 @@ const [systemResponse, riskResponse] = await Promise.all([
 
 ## 四、代码变更清单
 
-### 4.1 `web-front/src/api/config.ts` — 新增类型导出
+### 4.1 `gemimi-web-front/src/api/config.ts` — 新增类型导出
 
 **新增 import**: 无（不涉及新 import）
 
@@ -178,7 +178,7 @@ export interface RiskConfigUpdateRequest {
 
 ---
 
-### 4.2 `web-front/src/pages/config/SystemSettings.tsx` — 主要改动
+### 4.2 `gemimi-web-front/src/pages/config/SystemSettings.tsx` — 主要改动
 
 #### 4.2.1 新增 import
 
@@ -548,15 +548,15 @@ if (loading || riskLoading) {
 
 | 文件 | 改动类型 | 预计行数 |
 |------|---------|---------|
-| `web-front/src/api/config.ts` | 新增 2 个接口 | +20 |
-| `web-front/src/pages/config/SystemSettings.tsx` | import 修改 | +2 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 新增常量 | +10 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 新增 state | +6 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 修改 loadConfig | +25 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 新增 handleRiskSubmit | +20 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 新增 handleRiskReset | +6 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 新增风控 Card JSX | +130 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 修改 loading/error 判断 | +15 |
+| `gemimi-web-front/src/api/config.ts` | 新增 2 个接口 | +20 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | import 修改 | +2 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 新增常量 | +10 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 新增 state | +6 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 修改 loadConfig | +25 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 新增 handleRiskSubmit | +20 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 新增 handleRiskReset | +6 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 新增风控 Card JSX | +130 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 修改 loading/error 判断 | +15 |
 | **总计** | | **~234 行** |
 
 ---
@@ -647,8 +647,8 @@ if (loading || riskLoading) {
 
 ## 八、执行顺序
 
-1. **Step 1**: `web-front/src/api/config.ts` 新增 `RiskConfigFormValues` 和 `RiskConfigUpdateRequest` 类型 (~20 行)
-2. **Step 2**: `web-front/src/pages/config/SystemSettings.tsx` 新增 import、常量、state (~18 行)
+1. **Step 1**: `gemimi-web-front/src/api/config.ts` 新增 `RiskConfigFormValues` 和 `RiskConfigUpdateRequest` 类型 (~20 行)
+2. **Step 2**: `gemimi-web-front/src/pages/config/SystemSettings.tsx` 新增 import、常量、state (~18 行)
 3. **Step 3**: 修改 `loadConfig` 函数，加入并行加载风控配置 (~25 行修改)
 4. **Step 4**: 新增 `handleRiskSubmit` 和 `handleRiskReset` 函数 (~26 行)
 5. **Step 5**: 新增风控配置 Card JSX (~130 行)
@@ -659,6 +659,6 @@ if (loading || riskLoading) {
 
 ## 九、关键文件绝对路径
 
-- 主要修改文件: `/Users/jiangwei/Documents/final/web-front/src/pages/config/SystemSettings.tsx`
-- 类型定义文件: `/Users/jiangwei/Documents/final/web-front/src/api/config.ts`
+- 主要修改文件: `/Users/jiangwei/Documents/final/gemimi-web-front/src/pages/config/SystemSettings.tsx`
+- 类型定义文件: `/Users/jiangwei/Documents/final/gemimi-web-front/src/api/config.ts`
 - 后端端点参考: `/Users/jiangwei/Documents/final/src/interfaces/api_v1_config.py`

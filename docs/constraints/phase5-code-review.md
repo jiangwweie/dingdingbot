@@ -51,7 +51,7 @@
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| `web-front/src/types/order.ts` | ✅ 已创建 | 契约表 Section 12 定义的 TypeScript 类型已完整实现 |
+| `gemimi-web-front/src/types/order.ts` | ✅ 已创建 | 契约表 Section 12 定义的 TypeScript 类型已完整实现 |
 
 前端类型文件包含：
 - 4 个枚举：Direction, OrderType, OrderRole, OrderStatus
@@ -268,7 +268,7 @@ def mask_secret(value: str, visible_chars: int = 4) -> str:
 2. ✅ 领域层纯净性良好，符合 Clean Architecture
 3. ✅ 金融精度使用正确（Decimal）
 4. ✅ Phase 5 契约表定义的所有核心模型已添加（OrderRequest 等 8 个）
-5. ✅ 前端 TypeScript 类型定义完整（`web-front/src/types/order.ts`）
+5. ✅ 前端 TypeScript 类型定义完整（`gemimi-web-front/src/types/order.ts`）
 6. ✅ `mask_secret()` 日志脱敏工具已实现并使用
 7. ✅ 错误码统一使用已落实
 
@@ -310,7 +310,7 @@ tests/integration/test_phase5_api.py: 45/45 (100%)
 7. `AccountResponse` (L1182-1199) ✅
 8. `ReconciliationRequest` (L1202-1211) ✅
 
-**前端类型**: `web-front/src/types/order.ts` ✅
+**前端类型**: `gemimi-web-front/src/types/order.ts` ✅
 
 **测试覆盖**:
 - `tests/unit/test_phase5_models.py` - 27 个测试用例 (100% 通过)

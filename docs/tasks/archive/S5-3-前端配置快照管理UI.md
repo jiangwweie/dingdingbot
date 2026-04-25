@@ -23,14 +23,14 @@
 ### 新增文件
 | 文件 | 说明 |
 |------|------|
-| `web-front/src/pages/Snapshots.tsx` | 快照管理主页面 |
+| `gemimi-web-front/src/pages/Snapshots.tsx` | 快照管理主页面 |
 
 ### 修改文件
 | 文件 | 修改内容 |
 |------|----------|
-| `web-front/src/lib/api.ts` | 新增快照类型定义和 4 个 API 函数 |
-| `web-front/src/App.tsx` | 新增 `/snapshots` 路由 |
-| `web-front/src/components/Layout.tsx` | 新增导航入口（配置快照） |
+| `gemimi-web-front/src/lib/api.ts` | 新增快照类型定义和 4 个 API 函数 |
+| `gemimi-web-front/src/App.tsx` | 新增 `/snapshots` 路由 |
+| `gemimi-web-front/src/components/Layout.tsx` | 新增导航入口（配置快照） |
 
 ---
 
@@ -38,7 +38,7 @@
 
 ### 步骤 1: 定义类型和 API 函数
 
-**文件**: `web-front/src/lib/api.ts`
+**文件**: `gemimi-web-front/src/lib/api.ts`
 
 ```typescript
 // 类型定义
@@ -67,7 +67,7 @@ export async function applySnapshot(id: number)
 
 ### 步骤 2: 创建页面组件
 
-**文件**: `web-front/src/pages/Snapshots.tsx`
+**文件**: `gemimi-web-front/src/pages/Snapshots.tsx`
 
 **功能**:
 - 使用 SWR 自动刷新数据
@@ -79,7 +79,7 @@ export async function applySnapshot(id: number)
 
 ### 步骤 3: 添加路由
 
-**文件**: `web-front/src/App.tsx`
+**文件**: `gemimi-web-front/src/App.tsx`
 
 ```tsx
 <Route path="snapshots" element={<Snapshots />} />
@@ -87,7 +87,7 @@ export async function applySnapshot(id: number)
 
 ### 步骤 4: 添加导航
 
-**文件**: `web-front/src/components/Layout.tsx`
+**文件**: `gemimi-web-front/src/components/Layout.tsx`
 
 ```tsx
 { to: '/snapshots', icon: Save, label: '配置快照' }
@@ -142,10 +142,10 @@ curl -X DELETE http://localhost:8000/api/config/snapshots/1
 ## Git 提交
 
 ```bash
-git add web-front/src/lib/api.ts
-git add web-front/src/pages/Snapshots.tsx
-git add web-front/src/App.tsx
-git add web-front/src/components/Layout.tsx
+git add gemimi-web-front/src/lib/api.ts
+git add gemimi-web-front/src/pages/Snapshots.tsx
+git add gemimi-web-front/src/App.tsx
+git add gemimi-web-front/src/components/Layout.tsx
 git commit -m "feat(S5-3): 前端配置快照管理 UI"
 git push origin main
 ```

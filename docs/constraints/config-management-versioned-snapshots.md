@@ -597,7 +597,7 @@ interface ConfigActions {
 ### 6.3 API 函数封装
 
 ```typescript
-// web-front/src/lib/api.ts
+// gemimi-web-front/src/lib/api.ts
 
 export async function fetchConfig(): Promise<ConfigResponse> {
   const res = await fetch('/api/config');
@@ -687,7 +687,7 @@ export async function deleteSnapshot(id: number): Promise<DeleteResponse> {
 
 | ID | 任务 | 工时 | 优先级 | 说明 |
 |----|------|------|--------|------|
-| F1 | 创建 API 函数封装 | 1h | P0 | `web-front/src/lib/api.ts` |
+| F1 | 创建 API 函数封装 | 1h | P0 | `gemimi-web-front/src/lib/api.ts` |
 | F2 | 配置页面重构 | 2h | P0 | 分离配置编辑器和快照面板 |
 | F3 | 导出按钮组件 | 0.5h | P0 | 一键下载 YAML |
 | F4 | 导入对话框组件 | 1.5h | P0 | 文件上传 + 预览 + 验证 |

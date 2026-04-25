@@ -789,9 +789,9 @@ def create_close_events_batch(self, events: List[PositionCloseEvent]) -> None:
     self.db.executemany(query, params_list)
 ```
 
-### 4.5 web-front/src/lib/api.ts
+### 4.5 gemimi-web-front/src/lib/api.ts
 
-**文件位置**: `/Users/jiangwei/Documents/dingdingbot/web-front/src/lib/api.ts`
+**文件位置**: `/Users/jiangwei/Documents/dingdingbot/gemimi-web-front/src/lib/api.ts`
 
 **变更 1**: 新增 `PositionCloseEvent` 接口（在 `PositionSummary` 之前，约 line 506）
 
@@ -840,9 +840,9 @@ export interface PositionSummary {
 }
 ```
 
-### 4.6 web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx
+### 4.6 gemimi-web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx
 
-**文件位置**: `/Users/jiangwei/Documents/dingdingbot/web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx`
+**文件位置**: `/Users/jiangwei/Documents/dingdingbot/gemimi-web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx`
 
 **变更内容**: 仓位历史表格改造
 
@@ -1311,7 +1311,7 @@ def _deserialize_positions_summary(self, json_str: Optional[str]) -> List[Positi
 | `src/application/backtester.py` | 出场事件记录逻辑重构 + 统计逻辑拆分（部分平仓 vs 完全平仓） | P0 | 每次 TP1/SL 成交时创建事件，仅 is_closed 时更新统计 |
 | `src/infrastructure/backtest_repository.py` | 新增独立表 CRUD 方法 + 序列化扩展 | P0 | INSERT/SELECT 独立表 + JSON 双写 |
 | **数据库** | 新增 position_close_events 表 + 索引 | P0 | CREATE TABLE + CREATE INDEX |
-| `web-front/src/lib/api.ts` | TS 接口新增 | P0 | 向后兼容 |
+| `gemimi-web-front/src/lib/api.ts` | TS 接口新增 | P0 | 向后兼容 |
 | `BacktestReportDetailModal.tsx` | 前端渲染逻辑改造 | P0 | 事件列表展开/折叠 |
 | **测试** | 需覆盖所有边界场景 | P0 | 见测试计划 |
 

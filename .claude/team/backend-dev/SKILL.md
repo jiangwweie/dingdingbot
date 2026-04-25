@@ -279,7 +279,7 @@ tests/unit/                   # 单元测试（与 QA 协作）
 
 ### ❌ 禁止修改的文件
 ```
-web-front/                    # 前端代码（绝对禁止）
+gemimi-web-front/                    # 前端代码（绝对禁止）
 ├── src/
 ├── public/
 └── package.json

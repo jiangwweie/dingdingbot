@@ -353,7 +353,7 @@ git add -A
 # - src/**/*.py      → feat/fix:
 # - tests/**/*.py    → test:
 # - docs/**/*.md     → docs:
-# - web-front/**     → feat(frontend):
+# - gemimi-web-front/**     → feat(frontend):
 # - requirements.*   → chore(deps):
 
 # 3. 提交
@@ -530,7 +530,7 @@ def cleanup_old_received_markers(days: int = 7):
 ```python
 变更类型优先级:
 1. 有 src/ 变更 → 检查是否有测试文件 → test: 或 feat/fix:
-2. 有 web-front/ 变更 → feat(frontend): 或 fix(frontend):
+2. 有 gemimi-web-front/ 变更 → feat(frontend): 或 fix(frontend):
 3. 仅 docs/ 变更 → docs:
 4. 仅 tests/ 变更 → test:
 5. 混合变更 → 按主要变更类型 (行数最多)
@@ -589,7 +589,7 @@ test_strategy_optimizer.py 新增
    U docs/planning/board.md
    A docs/planning/2026-04-03-handoff.md
    M src/domain/strategy_optimizer.py
-   M web-front/src/pages/Strategy.tsx
+   M gemimi-web-front/src/pages/Strategy.tsx
 
 💾 Git 提交：91085ca feat(phase8): 集成 Optuna 自动化调参框架
 

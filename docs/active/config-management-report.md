@@ -32,11 +32,11 @@
 
 | 文件 | 说明 |
 |------|------|
-| `web-front/src/lib/api.ts` | 9 个 API 函数封装 |
-| `web-front/src/pages/ConfigManagement.tsx` | 配置管理主页面 |
-| `web-front/src/components/config/` | 6 个配置组件 |
-| `web-front/src/App.tsx` | 添加 /config 路由 |
-| `web-front/src/components/Layout.tsx` | 添加导航入口 |
+| `gemimi-web-front/src/lib/api.ts` | 9 个 API 函数封装 |
+| `gemimi-web-front/src/pages/ConfigManagement.tsx` | 配置管理主页面 |
+| `gemimi-web-front/src/components/config/` | 6 个配置组件 |
+| `gemimi-web-front/src/App.tsx` | 添加 /config 路由 |
+| `gemimi-web-front/src/components/Layout.tsx` | 添加导航入口 |
 
 ### 测试代码
 
@@ -44,7 +44,7 @@
 |------|----------|
 | `tests/unit/test_config_snapshot.py` | 单元测试 (14 例) |
 | `tests/integration/test_config_snapshot_api.py` | 集成测试 (12 例) |
-| `web-front/src/components/config/__tests__/` | 组件测试 (3 例) |
+| `gemimi-web-front/src/components/config/__tests__/` | 组件测试 (3 例) |
 
 ---
 
@@ -103,7 +103,7 @@
 
 以下提交待生成：
 ```bash
-git add src/ web-front/ tests/
+git add src/ gemimi-web-front/ tests/
 git commit -m "$(cat <<'EOF'
 feat: 实现配置管理功能（版本化快照）
 

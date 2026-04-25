@@ -29,7 +29,7 @@
 
 ### 2.1 API 类型定义与函数封装
 
-**文件**: `web-front/src/lib/api.ts`
+**文件**: `gemimi-web-front/src/lib/api.ts`
 
 新增类型定义：
 - `ConfigSnapshotListItem` - 快照列表项
@@ -55,7 +55,7 @@
 ### 2.2 组件实现
 
 #### ExportButton (导出按钮)
-**文件**: `web-front/src/components/config/ExportButton.tsx`
+**文件**: `gemimi-web-front/src/components/config/ExportButton.tsx`
 
 功能：
 - 一键下载脱敏后的 YAML 配置文件
@@ -64,7 +64,7 @@
 - 错误提示
 
 #### ImportDialog (导入对话框)
-**文件**: `web-front/src/components/config/ImportDialog.tsx`
+**文件**: `gemimi-web-front/src/components/config/ImportDialog.tsx`
 
 功能：
 - 支持点击选择或拖拽上传 YAML 文件
@@ -75,7 +75,7 @@
 - 加载状态与成功/错误提示
 
 #### SnapshotList (快照列表)
-**文件**: `web-front/src/components/config/SnapshotList.tsx`
+**文件**: `gemimi-web-front/src/components/config/SnapshotList.tsx`
 
 功能：
 - 表格展示所有历史快照
@@ -85,7 +85,7 @@
 - 快照详情点击跳转
 
 #### SnapshotDetailDrawer (快照详情抽屉)
-**文件**: `web-front/src/components/config/SnapshotDetailDrawer.tsx`
+**文件**: `gemimi-web-front/src/components/config/SnapshotDetailDrawer.tsx`
 
 功能：
 - 配置详情查看
@@ -94,7 +94,7 @@
 - 回滚操作入口
 
 #### SnapshotActions (快照操作)
-**文件**: `web-front/src/components/config/SnapshotActions.tsx`
+**文件**: `gemimi-web-front/src/components/config/SnapshotActions.tsx`
 
 功能：
 - 回滚操作（带二次确认）
@@ -102,7 +102,7 @@
 - 保护状态提示（当前活跃快照不可删除）
 
 #### ConfigManagement (配置管理主页面)
-**文件**: `web-front/src/pages/ConfigManagement.tsx`
+**文件**: `gemimi-web-front/src/pages/ConfigManagement.tsx`
 
 功能：
 - 配置摘要展示
@@ -112,7 +112,7 @@
 
 ### 2.3 路由与导航
 
-**文件**: `web-front/src/App.tsx`, `web-front/src/components/Layout.tsx`
+**文件**: `gemimi-web-front/src/App.tsx`, `gemimi-web-front/src/components/Layout.tsx`
 
 - 添加 `/config` 路由
 - 在系统设置分类下添加"配置管理"导航项
@@ -120,11 +120,11 @@
 ### 2.4 测试配置
 
 **新增文件**:
-- `web-front/vitest.config.ts` - Vitest 测试配置
-- `web-front/src/tests/setup.ts` - 测试设置文件
-- `web-front/src/components/config/__tests__/ExportButton.test.tsx`
-- `web-front/src/components/config/__tests__/ImportDialog.test.tsx`
-- `web-front/src/components/config/__tests__/SnapshotList.test.tsx`
+- `gemimi-web-front/vitest.config.ts` - Vitest 测试配置
+- `gemimi-web-front/src/tests/setup.ts` - 测试设置文件
+- `gemimi-web-front/src/components/config/__tests__/ExportButton.test.tsx`
+- `gemimi-web-front/src/components/config/__tests__/ImportDialog.test.tsx`
+- `gemimi-web-front/src/components/config/__tests__/SnapshotList.test.tsx`
 
 **package.json 更新**:
 - 添加 `@testing-library/react`、`@testing-library/dom`、`@testing-library/jest-dom` 测试库
@@ -166,7 +166,7 @@
 ### 4.1 新增文件
 
 ```
-web-front/
+gemimi-web-front/
 ├── src/
 │   ├── lib/
 │   │   └── api.ts (已更新，新增配置管理 API)
@@ -192,11 +192,11 @@ web-front/
 
 ### 4.2 修改文件
 
-- `web-front/src/lib/api.ts` - 新增类型定义和 API 函数
-- `web-front/src/App.tsx` - 添加配置管理路由
-- `web-front/src/components/Layout.tsx` - 添加导航项
-- `web-front/src/pages/Snapshots.tsx` - 更新为使用新 API
-- `web-front/package.json` - 添加测试依赖
+- `gemimi-web-front/src/lib/api.ts` - 新增类型定义和 API 函数
+- `gemimi-web-front/src/App.tsx` - 添加配置管理路由
+- `gemimi-web-front/src/components/Layout.tsx` - 添加导航项
+- `gemimi-web-front/src/pages/Snapshots.tsx` - 更新为使用新 API
+- `gemimi-web-front/package.json` - 添加测试依赖
 
 ---
 
@@ -205,7 +205,7 @@ web-front/
 ### 5.1 安装依赖
 
 ```bash
-cd web-front
+cd gemimi-web-front
 npm install
 ```
 

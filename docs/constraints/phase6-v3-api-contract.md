@@ -452,7 +452,7 @@ enum OrderStatus {
 
 ## 4. 前端 TypeScript 类型
 
-**文件**: `web-front/src/types/order.ts`
+**文件**: `gemimi-web-front/src/types/order.ts`
 
 ```typescript
 // 与后端 Pydantic 模型对齐

@@ -37,7 +37,7 @@
 
 ### 契约 1: react-window 2.x API 适配
 
-**文件**: `web-front/src/components/v3/OrderChainTreeTable.tsx`
+**文件**: `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx`
 
 **修改内容**:
 
@@ -114,7 +114,7 @@ def _get_config_entry_repo() -> Any:
 
 **决策**: 前端修改为使用后端已定义的路径
 
-**修改文件**: `web-front/src/lib/api.ts`
+**修改文件**: `gemimi-web-front/src/lib/api.ts`
 
 **路径映射**:
 | 前端当前路径 | 修改为后端路径 | 说明 |

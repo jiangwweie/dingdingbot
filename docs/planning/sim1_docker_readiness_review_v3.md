@@ -5,7 +5,7 @@
 **主线目标**: Sim-1 冻结 runtime（ETH 1h + 4h MTF, LONG-only）进入自然模拟盘观察窗口
 **硬约束**:
 1. YAML 已彻底废弃，不再作为启动配置来源
-2. 前端处于重构期（gemimi-web-front 是重构主线，web-front 是旧前端）
+2. 前端处于重构期（gemimi-gemimi-web-front 是重构主线，gemimi-web-front 是旧前端）
 3. 数据库处于 SQLite + PostgreSQL 共存切换期（非全量 PG 迁移）
 
 ---
@@ -13,9 +13,9 @@
 ## 当前阶段边界
 
 **前端状态**:
-- **旧前端**: `web-front/`（当前 Docker 服务的前端）
-- **重构主线**: `gemimi-web-front/`（未在 Docker 中使用）
-- **Dockerfile.frontend**: 服务 `web-front/`（`docker/Dockerfile.frontend:11`）
+- **旧前端**: `gemimi-web-front/`（当前 Docker 服务的前端）
+- **重构主线**: `gemimi-gemimi-web-front/`（未在 Docker 中使用）
+- **Dockerfile.frontend**: 服务 `gemimi-web-front/`（`docker/Dockerfile.frontend:11`）
 
 **数据库状态**:
 - **execution_intent**: PostgreSQL 强制（Sim-1 要求）
@@ -26,7 +26,7 @@
 **Sim-1 主线优先级**:
 - **P0**: 后端模拟盘观察路径（backend + readonly observation）
 - **P1**: 前端只读观察面（可选，可降级）
-- **P2**: 前端切换到 gemimi-web-front（后续重构）
+- **P2**: 前端切换到 gemimi-gemimi-web-front（后续重构）
 
 ---
 
@@ -42,7 +42,7 @@
 - ❌ **P0-NEW-1**: bind mount 路径错误（`./config` → 应为 `../config`）
 - ❌ **P0-NEW-2**: dockerfile 路径未同步修改（context 改后 dockerfile 路径也需改）
 - ❌ **P0-NEW-3**: 环境变量未注入容器（宿主机 .env 不等于容器内可读）
-- ⚠️ **P1-NEW**: 前端仍服务旧前端（web-front），但非 Sim-1 阻塞项
+- ⚠️ **P1-NEW**: 前端仍服务旧前端（gemimi-web-front），但非 Sim-1 阻塞项
 
 ---
 
@@ -128,7 +128,7 @@ runtime_profile_name = os.environ.get("RUNTIME_PROFILE", "sim1_eth_runtime")
 | ID | 文件:行号 | 问题 | 影响 |
 |----|-----------|------|------|
 | P1-1 | `docker/docker-compose.yml:61-62` | frontend context/dockerfile 路径错误 | frontend 构建失败（不影响 backend） |
-| P1-2 | `docker/Dockerfile.frontend:11` | 服务旧前端 web-front，而非重构主线 gemimi-web-front | 前端观察面使用旧版 UI |
+| P1-2 | `docker/Dockerfile.frontend:11` | 服务旧前端 gemimi-web-front，而非重构主线 gemimi-gemimi-web-front | 前端观察面使用旧版 UI |
 
 ### P2 - 环境变量配置（必须配置，但不阻塞构建）
 
@@ -659,20 +659,20 @@ ls -la data/v3_dev.db  # ✅ 确认数据库文件存在
 
 #### 阶段 C: Frontend 选择（P1，可延后）
 
-**当前状态**: Dockerfile.frontend 服务旧前端 `web-front/`
+**当前状态**: Dockerfile.frontend 服务旧前端 `gemimi-web-front/`
 
 **选项 A: 保持旧前端（快速启动）**
 - 不修改 Dockerfile.frontend
 - 前端观察面使用旧版 UI
 - 优先级: P1（可延后）
 
-**选项 B: 切换到重构主线（gemimi-web-front）**
+**选项 B: 切换到重构主线（gemimi-gemimi-web-front）**
 - 修改 Dockerfile.frontend:
   ```dockerfile
-  COPY gemimi-web-front/nginx.conf /etc/nginx/conf.d/default.conf
-  COPY gemimi-web-front/dist/ /usr/share/nginx/html/
+  COPY gemimi-gemimi-web-front/nginx.conf /etc/nginx/conf.d/default.conf
+  COPY gemimi-gemimi-web-front/dist/ /usr/share/nginx/html/
   ```
-- 需要先构建 gemimi-web-front
+- 需要先构建 gemimi-gemimi-web-front
 - 优先级: P2（后续重构）
 
 **选项 C: 暂不启动 frontend**
@@ -745,8 +745,8 @@ docker compose -f docker/docker-compose.yml exec backend \
 
 - [ ] **P1-1**: 修复 frontend context 和 dockerfile 路径（如需启动 frontend）
 - [ ] **P1-2**: 决定前端方案
-  - 选项 A: 保持旧前端 web-front（快速启动）
-  - 选项 B: 切换到 gemimi-web-front（需先构建）
+  - 选项 A: 保持旧前端 gemimi-web-front（快速启动）
+  - 选项 B: 切换到 gemimi-gemimi-web-front（需先构建）
   - 选项 C: 暂不启动 frontend（当前推荐）
 - [ ] **验证**: 前端观察面可访问（如启动）
 
@@ -801,7 +801,7 @@ docker compose -f docker/docker-compose.yml exec backend \
 | ID | 问题 | 文件 | 优先级 |
 |----|------|------|--------|
 | P1-1 | frontend context 和 dockerfile 路径错误 | `docker/docker-compose.yml` | P1 |
-| P1-2 | 前端选择（web-front 或 gemimi-web-front） | `docker/Dockerfile.frontend` | P1 |
+| P1-2 | 前端选择（gemimi-web-front 或 gemimi-gemimi-web-front） | `docker/Dockerfile.frontend` | P1 |
 | P3-1 | 健康检查无依赖检查 | `src/interfaces/api.py` | P3 |
 | P3-2 | COPY config/ 冗余 | `docker/Dockerfile.backend` | P3 |
 

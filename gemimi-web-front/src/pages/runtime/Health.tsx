@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { getRuntimeHealth, getRuntimeAttempts } from '@/src/services/mockApi';
+import { getRuntimeHealth, getRuntimeAttempts } from '@/src/services/api';
 import { RuntimeHealth as IRuntimeHealth, Attempt } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
 import { Badge } from '@/src/components/ui/Badge';
 import { Loader2, AlertTriangle, ShieldAlert, CheckCircle2, RotateCcw, Ban } from 'lucide-react';
+import { format } from 'date-fns';
 
 export default function Health() {
   const { refreshCount } = useRefreshContext();
@@ -124,7 +125,7 @@ export default function Health() {
                   <div className="text-rose-400 text-xs mt-1">原因: {attempt.reject_reason || '未知'} ({attempt.filter_results_summary})</div>
                 </div>
                 <div className="text-xs text-zinc-500 font-mono">
-                  {new Date(attempt.timestamp).toLocaleTimeString()}
+                  {format(new Date(attempt.timestamp), 'HH:mm:ss')}
                 </div>
               </div>
             ))}

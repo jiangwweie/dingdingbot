@@ -12,7 +12,7 @@
 
 | 文件 | 说明 | 状态 |
 |------|------|------|
-| `web-front/e2e/notifications/signals.e2e.test.ts` | 信号通知 E2E 测试文件 | ✅ 已创建 |
+| `gemimi-web-front/e2e/notifications/signals.e2e.test.ts` | 信号通知 E2E 测试文件 | ✅ 已创建 |
 
 ---
 
@@ -113,7 +113,7 @@ Time:        205.532 s
 ### 启动前端后运行测试
 ```bash
 # 终端 1: 启动前端
-cd web-front
+cd gemimi-web-front
 npm run dev
 
 # 终端 2: 运行 E2E 测试
@@ -132,7 +132,7 @@ npm run test:e2e:ci
 
 测试失败时自动截图保存到：
 ```
-web-front/e2e/screenshots/
+gemimi-web-front/e2e/screenshots/
 ├── signals-empty-state-*.png
 ├── signals-table-header-*.png
 ├── config-notification-card-*.png
@@ -173,4 +173,4 @@ web-front/e2e/screenshots/
 ---
 
 *创建时间：2026-04-05*
-*测试文件：`web-front/e2e/notifications/signals.e2e.test.ts`*
+*测试文件：`gemimi-web-front/e2e/notifications/signals.e2e.test.ts`*

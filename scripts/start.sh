@@ -144,29 +144,9 @@ echo -e "${GREEN}✓ Python依赖检查完成${NC}"
 echo ""
 
 # ============================================
-# 6. 检查前端依赖
+# 6. 前端已迁移
 # ============================================
-echo -e "${YELLOW}[6/7] 检查前端依赖...${NC}"
-if [ ! -f "web-front/package.json" ]; then
-    echo -e "${RED}✗ web-front/package.json 不存在${NC}"
-    exit 1
-fi
-
-cd web-front
-
-if [ ! -d "node_modules" ]; then
-    echo -e "${YELLOW}⚠ node_modules 不存在，正在安装依赖...${NC}"
-    npm install
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}✗ 前端依赖安装失败${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}✓ 前端依赖安装完成${NC}"
-else
-    echo -e "${GREEN}✓ node_modules 已存在${NC}"
-fi
-
-cd "$PROJECT_ROOT"
+echo -e "${YELLOW}[6/7] 前端已迁移至 gemimi-web-front/，不再自动启动${NC}"
 echo ""
 
 # ============================================
@@ -202,16 +182,9 @@ echo -e "${GREEN}  日志: $BACKEND_LOG${NC}"
 echo -e "${GREEN}  端口: $BACKEND_PORT${NC}"
 echo ""
 
-# 启动前端
-echo -e "${BLUE}启动前端...${NC}"
-cd "$PROJECT_ROOT/web-front"
-nohup npm run dev > "$FRONTEND_LOG" 2>&1 &
-FRONTEND_PID_NUM=$!
-echo $FRONTEND_PID_NUM > "$FRONTEND_PID"
-
-echo -e "${GREEN}✓ 前端已启动 (PID: $FRONTEND_PID_NUM)${NC}"
-echo -e "${GREEN}  日志: $FRONTEND_LOG${NC}"
-echo -e "${GREEN}  端口: $FRONTEND_PORT${NC}"
+# 启动前端（已迁移至 gemimi-web-front/，需手动启动）
+echo -e "${BLUE}前端已迁移至 gemimi-web-front/，需手动启动${NC}"
+echo -e "${GREEN}  cd gemimi-web-front && npm run dev${NC}"
 echo ""
 
 cd "$PROJECT_ROOT"
@@ -224,9 +197,9 @@ echo -e "${GREEN}   ✓ 启动完成${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "${YELLOW}访问地址:${NC}"
-echo -e "${GREEN}  前端: http://localhost:$FRONTEND_PORT${NC}"
 echo -e "${GREEN}  后端: http://localhost:$BACKEND_PORT${NC}"
 echo -e "${GREEN}  API文档: http://localhost:$BACKEND_PORT/docs${NC}"
+echo -e "${GREEN}  前端: cd gemimi-web-front && npm run dev${NC}"
 echo ""
 echo -e "${YELLOW}停止服务:${NC}"
 echo -e "${GREEN}  ./scripts/stop.sh${NC}"
@@ -246,12 +219,5 @@ if ! ps -p $BACKEND_PID_NUM > /dev/null 2>&1; then
     exit 1
 fi
 
-# 检查前端进程
-if ! ps -p $FRONTEND_PID_NUM > /dev/null 2>&1; then
-    echo -e "${RED}✗ 前端启动失败，请检查日志:${NC}"
-    echo -e "${YELLOW}  tail -n 50 $FRONTEND_LOG${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✓ 所有服务运行正常${NC}"
+echo -e "${GREEN}✓ 后端服务运行正常${NC}"
 echo ""

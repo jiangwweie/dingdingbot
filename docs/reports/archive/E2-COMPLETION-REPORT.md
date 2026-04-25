@@ -12,7 +12,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `web-front/e2e/config/strategies.e2e.test.ts` | 策略工作台页面 E2E 测试（7 个测试用例） |
+| `gemimi-web-front/e2e/config/strategies.e2e.test.ts` | 策略工作台页面 E2E 测试（7 个测试用例） |
 
 ---
 
@@ -91,7 +91,7 @@ function generateStrategyDescription(): string
 ## 🚀 使用命令
 
 ```bash
-cd web-front
+cd gemimi-web-front
 
 # 运行策略配置 E2E 测试
 npm run test:e2e -- e2e/config/strategies.e2e.test.ts

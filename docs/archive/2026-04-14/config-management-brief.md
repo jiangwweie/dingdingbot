@@ -413,7 +413,7 @@ POST   /api/config/import              # 导入配置（新增）
 
 **前端（需要完成 S5-3 遗留）**:
 ```
-web-front/src/
+gemimi-web-front/src/
   pages/
     Snapshots.tsx        # 快照管理页面（已有 80%）
   components/

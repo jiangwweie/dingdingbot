@@ -22,7 +22,7 @@
 
 ### 1.1 Task 9: BackupTab 导入/导出修复 (P0)
 
-**当前代码位置**: `/Users/jiangwei/Documents/final/web-front/src/pages/config/BackupTab.tsx`
+**当前代码位置**: `/Users/jiangwei/Documents/final/gemimi-web-front/src/pages/config/BackupTab.tsx`
 
 **问题诊断**:
 
@@ -44,8 +44,8 @@
 ### 1.2 Task 10: 合并两个重复的 SystemTab 组件 (P1)
 
 **当前代码位置**:
-- `/Users/jiangwei/Documents/final/web-front/src/pages/config/SystemTab.tsx` (336 行)
-- `/Users/jiangwei/Documents/final/web-front/src/pages/config/SystemSettings.tsx` (521 行)
+- `/Users/jiangwei/Documents/final/gemimi-web-front/src/pages/config/SystemTab.tsx` (336 行)
+- `/Users/jiangwei/Documents/final/gemimi-web-front/src/pages/config/SystemSettings.tsx` (521 行)
 
 **问题诊断**:
 
@@ -60,13 +60,13 @@
    - `SystemTab` 缺少高级功能: 所有字段平铺展示、无 Collapse、无快捷入口、表单验证范围较宽松
    - `SystemTab` 默认值有差异: `ema_period` 默认 20，`atr_min_ratio` 默认 1.5；`SystemSettings` 默认 60 和 0.5
 
-4. **测试文件**: `web-front/src/pages/config/__tests__/SystemTab.test.tsx` 仅针对 `SystemTab` 有 564 行测试。
+4. **测试文件**: `gemimi-web-front/src/pages/config/__tests__/SystemTab.test.tsx` 仅针对 `SystemTab` 有 564 行测试。
 
 **影响**: 维护两套代码容易导致配置行为不一致，用户在不同入口看到的默认值和验证范围可能不同。
 
 ### 1.3 Task 11: StrategyForm 触发器参数表单补全 (P1)
 
-**当前代码位置**: `/Users/jiangwei/Documents/final/web-front/src/pages/config/StrategyForm.tsx`
+**当前代码位置**: `/Users/jiangwei/Documents/final/gemimi-web-front/src/pages/config/StrategyForm.tsx`
 
 **问题诊断**:
 
@@ -404,8 +404,8 @@
 **理由**: 对于 4 种触发器类型，动态表单是最实用且性价比最高的方案。无需新增后端 API，且用户体验好。未来可平滑迁移到方案 B。
 
 **关键改动**:
-1. 新建 `web-front/src/components/strategy/triggerSchemas.ts` 定义参数 Schema
-2. 新建 `web-front/src/components/strategy/TriggerParamsForm.tsx` 动态参数表单组件
+1. 新建 `gemimi-web-front/src/components/strategy/triggerSchemas.ts` 定义参数 Schema
+2. 新建 `gemimi-web-front/src/components/strategy/TriggerParamsForm.tsx` 动态参数表单组件
 3. `StrategyForm.tsx` 集成 `TriggerParamsForm`，回填 `trigger_config.params`
 4. 提交时将动态表单值合并到 payload
 
@@ -470,28 +470,28 @@ class SQLiteConnectionPool:
 
 | 受影响文件 | 影响类型 | 说明 |
 |-----------|---------|------|
-| `web-front/src/api/config.ts` | 新增 | 添加 3 个 API 方法和对应类型 |
+| `gemimi-web-front/src/api/config.ts` | 新增 | 添加 3 个 API 方法和对应类型 |
 | `tests/e2e/test_config_import_export_e2e.py` | 无影响 | 测试直接使用后端 API，不依赖前端 |
 | `tests/unit/test_config_import_export.py` | 无影响 | 单元测试直接测试后端 |
-| `web-front/src/pages/config/BackupTab.tsx` | 重写 | 整个组件的数据流需要重写 |
+| `gemimi-web-front/src/pages/config/BackupTab.tsx` | 重写 | 整个组件的数据流需要重写 |
 
 ### Task 10: SystemTab 合并
 
 | 受影响文件 | 影响类型 | 说明 |
 |-----------|---------|------|
-| `web-front/src/pages/ConfigProfiles.tsx` | 修改 | 替换 `<SystemTab />` 导入和用法 |
-| `web-front/src/pages/config/SystemTab.tsx` | 删除 | 文件被删除或改为转发 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 修改 | 添加 `variant` prop 支持嵌入模式 |
-| `web-front/src/pages/config/__tests__/SystemTab.test.tsx` | 修改 | 更新引用为 SystemSettings 或合并测试 |
+| `gemimi-web-front/src/pages/ConfigProfiles.tsx` | 修改 | 替换 `<SystemTab />` 导入和用法 |
+| `gemimi-web-front/src/pages/config/SystemTab.tsx` | 删除 | 文件被删除或改为转发 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 修改 | 添加 `variant` prop 支持嵌入模式 |
+| `gemimi-web-front/src/pages/config/__tests__/SystemTab.test.tsx` | 修改 | 更新引用为 SystemSettings 或合并测试 |
 
 ### Task 11: StrategyForm 触发器参数
 
 | 受影响文件 | 影响类型 | 说明 |
 |-----------|---------|------|
-| `web-front/src/pages/config/StrategyForm.tsx` | 修改 | 集成动态参数表单 |
-| `web-front/src/components/strategy/triggerSchemas.ts` | 新增 | 触发器参数 Schema 定义 |
-| `web-front/src/components/strategy/TriggerParamsForm.tsx` | 新增 | 动态参数表单组件 |
-| `web-front/src/api/config.ts` | 无影响 | 接口类型已支持 `params: Record<string, any>` |
+| `gemimi-web-front/src/pages/config/StrategyForm.tsx` | 修改 | 集成动态参数表单 |
+| `gemimi-web-front/src/components/strategy/triggerSchemas.ts` | 新增 | 触发器参数 Schema 定义 |
+| `gemimi-web-front/src/components/strategy/TriggerParamsForm.tsx` | 新增 | 动态参数表单组件 |
+| `gemimi-web-front/src/api/config.ts` | 无影响 | 接口类型已支持 `params: Record<string, any>` |
 | `tests/unit/` (如有 StrategyForm 测试) | 新增 | 需要补充触发器参数测试 |
 
 ### Task 12: 共享 DB 连接池
@@ -547,25 +547,25 @@ class SQLiteConnectionPool:
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `web-front/src/api/config.ts` | 修改 | 新增 `exportConfig`, `previewImport`, `confirmImport` 方法及类型定义 |
-| `web-front/src/pages/config/BackupTab.tsx` | 重写 | 完全重写数据流：handleUpload、handleConfirmImport、handleExport |
+| `gemimi-web-front/src/api/config.ts` | 修改 | 新增 `exportConfig`, `previewImport`, `confirmImport` 方法及类型定义 |
+| `gemimi-web-front/src/pages/config/BackupTab.tsx` | 重写 | 完全重写数据流：handleUpload、handleConfirmImport、handleExport |
 
 ### Task 10: 合并 SystemTab 组件
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `web-front/src/pages/config/SystemSettings.tsx` | 修改 | 添加 `variant` prop，支持嵌入模式 |
-| `web-front/src/pages/ConfigProfiles.tsx` | 修改 | 替换 `<SystemTab />` 为 `<SystemSettings variant="tab" />` |
-| `web-front/src/pages/config/SystemTab.tsx` | 删除 | 改为转发模块或直接删除 |
-| `web-front/src/pages/config/__tests__/SystemTab.test.tsx` | 修改 | 更新引用，迁移测试 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 修改 | 添加 `variant` prop，支持嵌入模式 |
+| `gemimi-web-front/src/pages/ConfigProfiles.tsx` | 修改 | 替换 `<SystemTab />` 为 `<SystemSettings variant="tab" />` |
+| `gemimi-web-front/src/pages/config/SystemTab.tsx` | 删除 | 改为转发模块或直接删除 |
+| `gemimi-web-front/src/pages/config/__tests__/SystemTab.test.tsx` | 修改 | 更新引用，迁移测试 |
 
 ### Task 11: StrategyForm 触发器参数表单
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `web-front/src/components/strategy/triggerSchemas.ts` | 新增 | 触发器参数 Schema 定义 |
-| `web-front/src/components/strategy/TriggerParamsForm.tsx` | 新增 | 动态参数表单组件 |
-| `web-front/src/pages/config/StrategyForm.tsx` | 修改 | 集成 TriggerParamsForm，回填 params |
+| `gemimi-web-front/src/components/strategy/triggerSchemas.ts` | 新增 | 触发器参数 Schema 定义 |
+| `gemimi-web-front/src/components/strategy/TriggerParamsForm.tsx` | 新增 | 动态参数表单组件 |
+| `gemimi-web-front/src/pages/config/StrategyForm.tsx` | 修改 | 集成 TriggerParamsForm，回填 params |
 
 ### Task 12: 共享 DB 连接池
 

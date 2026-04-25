@@ -279,7 +279,7 @@
 | 59 | 新增 10 个单元测试验证以上修复 | P0 | ✅ 已完成 |
 
 **修复摘要**：
-- 根因链：后端 CWD = web-front/ → DB 相对路径指向空库 → fallback 到 CCXT → CCXT 无 since 参数返回"最近的 1000 条" → 时间范围过滤全部清除 → 0 条数据
+- 根因链：后端 CWD = gemimi-web-front/ → DB 相对路径指向空库 → fallback 到 CCXT → CCXT 无 since 参数返回"最近的 1000 条" → 时间范围过滤全部清除 → 0 条数据
 - P0: 数据库路径改为基于 `__file__` 的绝对路径，不受 CWD 影响
 - P0: SQL 查询改为 DESC 取最新 N 条，reverse 恢复升序
 - P1: CCXT 分页循环（每次 1000 条），since 参数控制起始时间

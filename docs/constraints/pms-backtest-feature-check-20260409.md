@@ -57,7 +57,7 @@
 
 ## 四、类型定义检查
 
-`web-front/src/types/backtest.ts` 定义了完整的类型：
+`gemimi-web-front/src/types/backtest.ts` 定义了完整的类型：
 
 | 类型 | 说明 | 状态 |
 |------|------|------|

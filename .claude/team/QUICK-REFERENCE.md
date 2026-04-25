@@ -31,7 +31,7 @@
 | 目录 | Backend | Frontend | QA | Architect |
 |------|---------|----------|----|-----------|
 | `src/` | ✅ 全权 | ❌ 禁止 | ⚠️ 读取 | 🔍 审查 |
-| `web-front/` | ❌ 禁止 | ✅ 全权 | ⚠️ 测试 | ❌ 禁止 |
+| `gemimi-web-front/` | ❌ 禁止 | ✅ 全权 | ⚠️ 测试 | ❌ 禁止 |
 | `tests/` | ⚠️ 协作 | ⚠️ 测试 | ✅ 全权 | 🔍 审查 |
 | `config/` | ✅ 全权 | ❌ 禁止 | ❌ 禁止 | 🔍 审查 |
 | `docs/` | ✅ 读取 | ✅ 读取 | ✅ 读取 | ✅ 全权 |
@@ -51,9 +51,9 @@ flake8 src/
 
 ### 前端
 ```bash
-cd web-front && npm run type-check
-cd web-front && npm run build
-cd web-front && npm run lint
+cd gemimi-web-front && npm run type-check
+cd gemimi-web-front && npm run build
+cd gemimi-web-front && npm run lint
 ```
 
 ### 数据库查询

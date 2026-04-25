@@ -12,7 +12,7 @@
 |---------|----------|------|------|
 | P1-1 | 实现 v3 SQLAlchemy ORM 模型 | ✅ 完成 | `src/infrastructure/v3_orm.py` |
 | P1-2 | 编写 ORM 模型单元测试 | ✅ 完成 | `tests/unit/test_v3_orm.py` (27 测试) |
-| P1-3 | 定义前端 TypeScript 类型 | ✅ 完成 | `web-front/src/types/v3-models.ts` |
+| P1-3 | 定义前端 TypeScript 类型 | ✅ 完成 | `gemimi-web-front/src/types/v3-models.ts` |
 | P1-4 | 执行数据库迁移 | ✅ 完成 | 3 个迁移文件，4 个核心表 |
 | P1-5 | 审查与验证 | ✅ 完成 | 发现并修复 5 个问题 |
 | P1-6 | 测试执行 | ✅ 完成 | 70 个集成测试全部通过 |
@@ -90,7 +90,7 @@
 
 ### 3. 前端类型定义
 
-**文件**: `web-front/src/types/v3-models.ts`
+**文件**: `gemimi-web-front/src/types/v3-models.ts`
 
 - ✅ 4 个枚举类型：`Direction`, `OrderStatus`, `OrderType`, `OrderRole`
 - ✅ 4 个核心接口：`Account`, `Signal`, `Order`, `Position`
@@ -185,7 +185,7 @@ final/
 │       ├── 2026-05-01-001_unify_direction_enum.py
 │       ├── 2026-05-02-002_create_orders_positions_tables.py
 │       └── 2026-05-03-003_create_signals_accounts_tables.py
-├── web-front/src/types/
+├── gemimi-web-front/src/types/
 │   └── v3-models.ts               # TypeScript 类型定义
 ├── tests/
 │   ├── unit/

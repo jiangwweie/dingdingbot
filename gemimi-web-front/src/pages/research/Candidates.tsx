@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getCandidates } from '@/src/services/mockApi';
+import { getCandidates } from '@/src/services/api';
 import { Candidate } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';

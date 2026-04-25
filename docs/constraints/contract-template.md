@@ -158,7 +158,7 @@ class {{ModelName}}(BaseModel):
 ### 6.2 前端 TypeScript 类型
 
 ```typescript
-// web-front/src/types/{{file}}.ts
+// gemimi-web-front/src/types/{{file}}.ts
 export interface {{InterfaceName}} {
   {{fieldName}}: {{type}};
 }

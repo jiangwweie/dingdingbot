@@ -391,7 +391,7 @@ async def _perform_yaml_import(self) -> bool:
 
 ### 3.3 侧边栏导航变更
 
-**变更文件**: `web-front/src/components/Layout.tsx`
+**变更文件**: `gemimi-web-front/src/components/Layout.tsx`
 
 **变更后导航结构**:
 ```
@@ -428,19 +428,19 @@ async def _perform_yaml_import(self) -> bool:
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `web-front/src/App.tsx` | **修改** | 移除独立路由，添加重定向规则 |
-| `web-front/src/components/Layout.tsx` | **修改** | 合并导航项 |
-| `web-front/src/pages/ConfigManagement.tsx` | **重写** | 改为 Ant Design Tabs 容器（替代现有旧页面） |
-| `web-front/src/pages/config/SystemSettings.tsx` | **修改** | 新增 exchange/API Key/时间周期/轮询 编辑 |
-| `web-front/src/pages/config/BackupTab.tsx` | **修改** | 整合 ConfigProfiles 功能 |
-| `web-front/src/pages/ConfigProfiles.tsx` | **废弃** | 功能整合到 BackupTab |
-| `web-front/src/pages/config/EffectiveConfigView.tsx` | **新建** | 只读展示生效配置总览 |
-| `web-front/src/api/config.ts` | **修改** | 新增 exchange/timeframes/effective API 调用 |
-| `web-front/src/lib/api.ts` | **修改** | 新增对应的 TS 类型定义 |
+| `gemimi-web-front/src/App.tsx` | **修改** | 移除独立路由，添加重定向规则 |
+| `gemimi-web-front/src/components/Layout.tsx` | **修改** | 合并导航项 |
+| `gemimi-web-front/src/pages/ConfigManagement.tsx` | **重写** | 改为 Ant Design Tabs 容器（替代现有旧页面） |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | **修改** | 新增 exchange/API Key/时间周期/轮询 编辑 |
+| `gemimi-web-front/src/pages/config/BackupTab.tsx` | **修改** | 整合 ConfigProfiles 功能 |
+| `gemimi-web-front/src/pages/ConfigProfiles.tsx` | **废弃** | 功能整合到 BackupTab |
+| `gemimi-web-front/src/pages/config/EffectiveConfigView.tsx` | **新建** | 只读展示生效配置总览 |
+| `gemimi-web-front/src/api/config.ts` | **修改** | 新增 exchange/timeframes/effective API 调用 |
+| `gemimi-web-front/src/lib/api.ts` | **修改** | 新增对应的 TS 类型定义 |
 
 ### 3.6 App.tsx 路由变更
 
-**变更前** (当前 `web-front/src/App.tsx` 行 42-45):
+**变更前** (当前 `gemimi-web-front/src/App.tsx` 行 42-45):
 ```tsx
 <Route path="config" element={<ConfigManagement />} />
 <Route path="config/strategies" element={<StrategyConfig />} />
@@ -461,7 +461,7 @@ async def _perform_yaml_import(self) -> bool:
 ### 3.7 ConfigManagement 重写设计
 
 ```tsx
-// web-front/src/pages/ConfigManagement.tsx (重写)
+// gemimi-web-front/src/pages/ConfigManagement.tsx (重写)
 import { useState, useEffect } from 'react';
 import { Tabs, Alert } from 'antd';
 import { useSearchParams } from 'react-router-dom';
@@ -645,7 +645,7 @@ class EffectiveConfigResponse(BaseModel):
 ### 4.3 前端 EffectiveConfigView 组件设计
 
 ```tsx
-// web-front/src/pages/config/EffectiveConfigView.tsx
+// gemimi-web-front/src/pages/config/EffectiveConfigView.tsx
 import { useState } from 'react';
 import { Collapse, Descriptions, Tag, Button, Alert, Spin } from 'antd';
 import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
@@ -927,8 +927,8 @@ export default function EffectiveConfigView() {
 | `src/application/config/config_repository.py` | Repository 层，需新增方法 |
 | `src/infrastructure/db/config_tables.sql` | DB 表结构定义，需扩展 |
 | `src/interfaces/api_v1_config.py` | API 路由，需新增端点 |
-| `web-front/src/App.tsx` | 路由定义，需变更 |
-| `web-front/src/components/Layout.tsx` | 侧边栏导航，需变更 |
-| `web-front/src/pages/ConfigManagement.tsx` | 配置主页面，需重写 |
-| `web-front/src/pages/config/SystemSettings.tsx` | 系统设置页，需适配 |
-| `web-front/src/pages/config/BackupTab.tsx` | 备份恢复页，需整合 |
+| `gemimi-web-front/src/App.tsx` | 路由定义，需变更 |
+| `gemimi-web-front/src/components/Layout.tsx` | 侧边栏导航，需变更 |
+| `gemimi-web-front/src/pages/ConfigManagement.tsx` | 配置主页面，需重写 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 系统设置页，需适配 |
+| `gemimi-web-front/src/pages/config/BackupTab.tsx` | 备份恢复页，需整合 |

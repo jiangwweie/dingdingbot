@@ -36,33 +36,8 @@ else
     fi
 fi
 
-# 停止前端
-echo -n "📋 停止前端服务... "
-if [ -f "logs/frontend.pid" ]; then
-    PID=$(cat logs/frontend.pid 2>/dev/null)
-    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-        # 先杀子进程（node/vite）
-        pkill -P "$PID" 2>/dev/null || true
-        sleep 0.5
-        kill "$PID" 2>/dev/null
-        sleep 0.5
-        # 如果还在运行，强制停止
-        if kill -0 "$PID" 2>/dev/null; then
-            kill -9 "$PID" 2>/dev/null
-        fi
-        echo "✅ 前端 (PID $PID) 已停止"
-    else
-        echo "⚠️  前端服务未运行"
-    fi
-    rm -f logs/frontend.pid
-else
-    # 备用方案：清理可能的进程
-    if pkill -f "vite.*--port" 2>/dev/null; then
-        echo "✅ 清理了残留前端进程"
-    else
-        echo "⚠️  前端服务未运行"
-    fi
-fi
+# 前端已迁移至 gemimi-web-front/，不再自动管理前端进程
+# 如需停止前端，请手动 kill 前端进程
 
 # 清理端口占用（备用方案）
 echo ""

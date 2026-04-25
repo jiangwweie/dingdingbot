@@ -8,10 +8,16 @@ from typing import Any, Optional
 from src.application.readmodels.console_models import ConsoleSignalItem, ConsoleSignalsResponse
 
 
-def _to_iso_from_millis(timestamp_ms: Optional[int]) -> str:
-    if not timestamp_ms:
-        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+def _to_iso(timestamp_val) -> str:
+    """Convert millisecond timestamp or ISO string to ISO format string."""
+    if not timestamp_val:
+        return ""
+    if isinstance(timestamp_val, str):
+        return timestamp_val
+    try:
+        return datetime.fromtimestamp(timestamp_val / 1000, tz=timezone.utc).isoformat()
+    except (OSError, ValueError):
+        return str(timestamp_val)
 
 
 class RuntimeSignalsReadModel:
@@ -66,7 +72,7 @@ class RuntimeSignalsReadModel:
                     direction=direction_val if direction_val in {"LONG", "SHORT"} else "LONG",
                     strategy_name=strategy_name,
                     score=score,
-                    created_at=_to_iso_from_millis(created_at_ts),
+                    created_at=_to_iso(created_at_ts),
                     status=status_val,
                 )
             )

@@ -53,7 +53,7 @@ Why 5: 为什么会双乘？
   第 110 行再次乘以 100，导致 ×10000 的效果
 ```
 
-**问题代码位置**: `web-front/src/components/v3/backtest/EquityComparisonChart.tsx:93,110`
+**问题代码位置**: `gemimi-web-front/src/components/v3/backtest/EquityComparisonChart.tsx:93,110`
 
 ```tsx
 // 第 93 行：已经乘以 100，得到 -19.347
@@ -144,7 +144,7 @@ total_pnl += position.realized_pnl
 
 #### 方案 A [推荐] — 前端删除多余的 * 100
 **修改内容**:
-文件：`web-front/src/components/v3/backtest/EquityComparisonChart.tsx`，位置：第 93 行
+文件：`gemimi-web-front/src/components/v3/backtest/EquityComparisonChart.tsx`，位置：第 93 行
 
 当前代码：
 ```tsx
@@ -204,7 +204,7 @@ else:
 
 #### 方案 A [推荐] — 前端正确计算净盈亏
 **修改内容**:
-文件：`web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx`，位置：第 196-210 行
+文件：`gemimi-web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx`，位置：第 196-210 行
 
 当前代码显示的是 `report.total_pnl`，应改为：
 ```tsx

@@ -130,7 +130,7 @@ Agent(subagent_type="qa-tester", prompt="编写测试...")
 
 ### 验证命令
 pytest tests/unit/test_preview_api.py -v
-cd web-front && npm test
+cd gemimi-web-front && npm test
 ```
 
 ---

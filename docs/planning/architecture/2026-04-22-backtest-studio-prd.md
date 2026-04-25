@@ -16,13 +16,13 @@
 - `LONG-only`
 - 基准参数已冻结
 
-现有 `web-front` 中虽然已有 `PMSBacktest`、`BacktestReports` 等页面，但其信息架构混有：
+现有 `gemimi-web-front` 中虽然已有 `PMSBacktest`、`BacktestReports` 等页面，但其信息架构混有：
 
 - 旧策略工作台语义
 - 旧导航迁移包袱
 - 模板导入/策略配置混合职责
 
-因此，后续不再把现有 `web-front` 作为回测效率工具的主演进载体，而是新建一个**只服务回测**的独立前端：
+因此，后续不再把现有 `gemimi-web-front` 作为回测效率工具的主演进载体，而是新建一个**只服务回测**的独立前端：
 
 - 名称暂定：`backtest-studio`
 - 定位：个人回测工作台
@@ -267,15 +267,15 @@
 
 不建议继续把新需求塞入：
 
-- `web-front/src/pages/PMSBacktest.tsx`
+- `gemimi-web-front/src/pages/PMSBacktest.tsx`
 
 ### 8.3 可复用资产
 
 允许参考但不直接继承的资产：
 
-- `web-front/src/types/backtest.ts`
-- `web-front/src/lib/api.ts` 中的回测请求/响应契约
-- `web-front/src/components/v3/backtest/*`
+- `gemimi-web-front/src/types/backtest.ts`
+- `gemimi-web-front/src/lib/api.ts` 中的回测请求/响应契约
+- `gemimi-web-front/src/components/v3/backtest/*`
 
 ### 8.4 状态管理建议
 

@@ -67,9 +67,9 @@
 
 | # | 改动 | 文件 | 工时 |
 |---|------|------|------|
-| 1 | `config.ts` baseURL 从 `/api` → `/api/v1/config` | `web-front/src/api/config.ts` | 5 min |
-| 2 | 风险配置路径 `/config` → `/risk` | `web-front/src/api/config.ts` | 2 min |
-| 3 | 策略列表降级逻辑修复 | `web-front/src/pages/config/StrategyConfig.tsx` | 2 min |
+| 1 | `config.ts` baseURL 从 `/api` → `/api/v1/config` | `gemimi-web-front/src/api/config.ts` | 5 min |
+| 2 | 风险配置路径 `/config` → `/risk` | `gemimi-web-front/src/api/config.ts` | 2 min |
+| 3 | 策略列表降级逻辑修复 | `gemimi-web-front/src/pages/config/StrategyConfig.tsx` | 2 min |
 | 4 | admin 认证确认/bypass | `src/interfaces/api_v1_config.py` | 15 min |
 
 ### Phase 2：系统配置（P0）
@@ -77,7 +77,7 @@
 | # | 改动 | 文件 | 工时 |
 |---|------|------|------|
 | 5 | 新增 `GET/PUT /api/v1/config/system` 端点 | `src/interfaces/api_v1_config.py` | 90 min |
-| 6 | `SystemSettings.tsx` 数据适配 | `web-front/src/pages/config/SystemSettings.tsx` | 15 min |
+| 6 | `SystemSettings.tsx` 数据适配 | `gemimi-web-front/src/pages/config/SystemSettings.tsx` | 15 min |
 
 ### Phase 3：验证
 

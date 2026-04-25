@@ -12,7 +12,7 @@
 |---------|------|--------|------|------|--------|
 | 单元测试 | `tests/unit/test_order_repository.py` | 7 | 7 | 0 | 100% |
 | 集成测试 | `tests/integration/test_batch_delete.py` | 6 | 6 | 0 | 100% |
-| 前端测试 | `web-front/src/components/v3/__tests__/Orders.test.tsx` | 11 | 2 | 9 | 18% |
+| 前端测试 | `gemimi-web-front/src/components/v3/__tests__/Orders.test.tsx` | 11 | 2 | 9 | 18% |
 | **总计** | - | **24** | **15** | **9** | **62.5%** |
 
 ---
@@ -66,7 +66,7 @@
 
 ### 前端测试 (18% 通过)
 
-**文件**: `web-front/src/components/v3/__tests__/Orders.test.tsx`
+**文件**: `gemimi-web-front/src/components/v3/__tests__/Orders.test.tsx`
 
 | 用例 ID | 测试名称 | 状态 | 备注 |
 |---------|----------|------|------|
@@ -140,7 +140,7 @@
 
 1. ✅ 单元测试文件：`tests/unit/test_order_repository.py`（新增 7 个测试用例）
 2. ✅ 集成测试文件：`tests/integration/test_batch_delete.py`（新建，6 个测试用例）
-3. ✅ 前端测试文件：`web-front/src/components/v3/__tests__/Orders.test.tsx`（新建，11 个测试用例）
+3. ✅ 前端测试文件：`gemimi-web-front/src/components/v3/__tests__/Orders.test.tsx`（新建，11 个测试用例）
 4. ✅ 测试报告：本文档
 
 ---
@@ -186,7 +186,7 @@ python3 -m pytest tests/integration/test_batch_delete.py -v
 
 ### 运行前端测试
 ```bash
-cd web-front && npm test -- --run src/components/v3/__tests__/Orders.test.tsx
+cd gemimi-web-front && npm test -- --run src/components/v3/__tests__/Orders.test.tsx
 ```
 
 ### 运行所有批量删除相关测试

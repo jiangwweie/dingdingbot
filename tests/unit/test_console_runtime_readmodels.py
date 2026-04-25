@@ -560,3 +560,37 @@ async def test_overview_and_health_pg_webhook_consistency():
     # Both should be DEGRADED (conservative)
     assert overview_response.pg_health == "DEGRADED"
     assert overview_response.webhook_health == "DEGRADED"
+
+# ============================================================
+# Runtime Execution Intents Tests
+# ============================================================
+
+from src.application.readmodels.runtime_execution_intents import RuntimeExecutionIntentsReadModel
+
+@pytest.mark.asyncio
+async def test_execution_intents_domain_model_parsing():
+    """Test execution intent parsing when it's a domain model with a signal object."""
+    read_model = RuntimeExecutionIntentsReadModel()
+    
+    # Mock a domain intent model
+    intent = MagicMock()
+    intent.id = "intent-123"
+    intent.status = "pending"
+    
+    signal_obj = MagicMock()
+    signal_obj.symbol = "BTC/USDT:USDT"
+    signal_obj.model_dump = MagicMock(return_value={"direction": "SHORT", "suggested_position_size": Decimal("0.5")})
+    intent.signal = signal_obj
+    
+    repo = MagicMock()
+    repo.list_unfinished = MagicMock(return_value=pytest.helpers.future([intent]) if hasattr(pytest, "helpers") else [intent])
+    
+    async def mock_list(): return [intent]
+    repo.list_unfinished = mock_list
+    
+    response = await read_model.build(intent_repo=repo)
+    
+    assert len(response.intents) == 1
+    assert response.intents[0].symbol == "BTC/USDT:USDT"
+    assert response.intents[0].side == "SELL"
+    assert response.intents[0].quantity == 0.5

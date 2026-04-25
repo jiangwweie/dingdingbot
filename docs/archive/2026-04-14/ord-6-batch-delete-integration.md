@@ -203,7 +203,7 @@ await audit_logger.log(
 
 ### 4.3 前端修改点
 
-**文件**: `web-front/src/pages/Orders.tsx`
+**文件**: `gemimi-web-front/src/pages/Orders.tsx`
 
 **当前代码** (行 140-160 附近):
 ```typescript
@@ -321,7 +321,7 @@ async with self._db.transaction():
 | 文件 | 修改类型 | 说明 |
 |------|----------|------|
 | `src/infrastructure/order_repository.py` | 修改 | 集成交易所取消 + 审计日志 |
-| `web-front/src/pages/Orders.tsx` | 修改 | 批量删除 UI 逻辑 |
+| `gemimi-web-front/src/pages/Orders.tsx` | 修改 | 批量删除 UI 逻辑 |
 | `tests/unit/test_order_repository.py` | 新增 | 单元测试 |
 | `tests/integration/test_batch_delete.py` | 新增 | 集成测试 |
 

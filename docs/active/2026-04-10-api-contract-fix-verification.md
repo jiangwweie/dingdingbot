@@ -63,12 +63,12 @@
 
 | 文件 | 变更 | 说明 |
 |------|------|------|
-| `web-front/src/api/config.ts` | +60/-10 | baseURL 迁移 + 端点更新 |
-| `web-front/src/pages/config/StrategyConfig.tsx` | +287/-10 | 降级逻辑简化 |
-| `web-front/src/pages/config/AdvancedStrategyForm.tsx` | +23 | 适配新 API |
-| `web-front/src/pages/Backtest.tsx` | +132 | 适配新 API |
-| `web-front/src/pages/PMSBacktest.tsx` | +131 | 适配新 API |
-| `web-front/src/components/strategy/StrategyCard.tsx` | +170 | 适配新 API |
+| `gemimi-web-front/src/api/config.ts` | +60/-10 | baseURL 迁移 + 端点更新 |
+| `gemimi-web-front/src/pages/config/StrategyConfig.tsx` | +287/-10 | 降级逻辑简化 |
+| `gemimi-web-front/src/pages/config/AdvancedStrategyForm.tsx` | +23 | 适配新 API |
+| `gemimi-web-front/src/pages/Backtest.tsx` | +132 | 适配新 API |
+| `gemimi-web-front/src/pages/PMSBacktest.tsx` | +131 | 适配新 API |
+| `gemimi-web-front/src/components/strategy/StrategyCard.tsx` | +170 | 适配新 API |
 | `src/interfaces/api_v1_config.py` | +18 | 系统配置端点 |
 | `src/application/config/config_parser.py` | +10 | 配置解析适配 |
 | `tests/integration/test_api_v1_config.py` | +57 | 集成测试适配 |

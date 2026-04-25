@@ -14,7 +14,7 @@
 - 信号详情页已使用 TradingView Lightweight Charts（可复用代码）
 - 订单详情页使用 Recharts 折线图（待升级）
 
-**参考实现**: `web-front/src/components/SignalDetailsDrawer.tsx`
+**参考实现**: `gemimi-web-front/src/components/SignalDetailsDrawer.tsx`
 
 ---
 
@@ -85,7 +85,7 @@ interface OrderChainItem {
 
 ### 2.2 前端组件升级
 
-**组件**: `web-front/src/components/v3/OrderDetailsDrawer.tsx`
+**组件**: `gemimi-web-front/src/components/v3/OrderDetailsDrawer.tsx`
 
 **变更**: 从 Recharts 升级为 TradingView Lightweight Charts
 
@@ -305,7 +305,7 @@ const APPLE_BLUE = '#007AFF';    // 入场价/高亮
 
 ## 8. 参考文件
 
-- `web-front/src/components/SignalDetailsDrawer.tsx` - TradingView 实现参考
+- `gemimi-web-front/src/components/SignalDetailsDrawer.tsx` - TradingView 实现参考
 - `src/interfaces/api.py:3786-3965` - K 线 API 实现
 - `src/infrastructure/order_repository.py:689-768` - 订单链查询方法
 - `docs/designs/phase6-v3-api-contract.md` - v3 API 契约

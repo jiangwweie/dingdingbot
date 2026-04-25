@@ -727,7 +727,7 @@ class StrategyParams(BaseModel):
 ### 9.2 前端 TypeScript 类型
 
 ```typescript
-// web-front/src/types/strategy.ts
+// gemimi-web-front/src/types/strategy.ts
 
 export interface PinbarParams {
   min_wick_ratio: number;

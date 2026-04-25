@@ -8,10 +8,16 @@ from typing import Any, Optional
 from src.application.readmodels.console_models import ConsoleAttemptItem, ConsoleAttemptsResponse
 
 
-def _to_iso_from_millis(timestamp_ms: Optional[int]) -> str:
-    if not timestamp_ms:
-        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+def _to_iso(timestamp_val) -> str:
+    """Convert millisecond timestamp or ISO string to ISO format string."""
+    if not timestamp_val:
+        return ""
+    if isinstance(timestamp_val, str):
+        return timestamp_val
+    try:
+        return datetime.fromtimestamp(timestamp_val / 1000, tz=timezone.utc).isoformat()
+    except (OSError, ValueError):
+        return str(timestamp_val)
 
 
 class RuntimeAttemptsReadModel:
@@ -55,6 +61,8 @@ class RuntimeAttemptsReadModel:
             signal_id = raw.get("signal_id")
             symbol_val = str(raw.get("symbol", "unknown"))
             timeframe_val = str(raw.get("timeframe", "unknown"))
+            direction_val = raw.get("direction")
+            strategy_name_val = raw.get("strategy_name")
             final_result = str(raw.get("final_result", "UNKNOWN"))
             created_at_ts = raw.get("kline_timestamp") or raw.get("created_at")
 
@@ -72,10 +80,12 @@ class RuntimeAttemptsReadModel:
                     signal_id=str(signal_id) if signal_id else None,
                     symbol=symbol_val,
                     timeframe=timeframe_val,
+                    direction=direction_val,
+                    strategy_name=strategy_name_val,
                     final_result=final_result,
                     reject_reason=reject_reason,
                     filter_reason=filter_reason,
-                    created_at=_to_iso_from_millis(created_at_ts),
+                    created_at=_to_iso(created_at_ts),
                 )
             )
 

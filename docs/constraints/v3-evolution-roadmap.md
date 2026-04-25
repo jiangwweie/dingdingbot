@@ -343,7 +343,7 @@ Week 2:
 - `tests/unit/test_v3_models.py` (22 测试)
 - `tests/unit/test_v3_orm.py` (27 测试)
 - `tests/integration/test_v3_phase1_integration.py` (70 测试)
-- `web-front/src/types/v3-models.ts` (前端类型定义)
+- `gemimi-web-front/src/types/v3-models.ts` (前端类型定义)
 - `docs/v3/v3-phase1-complete-report.md` (完成报告)
 
 ---
@@ -488,7 +488,7 @@ Week 3:
 - `src/application/reconciliation.py` (15 测试)
 - `src/domain/dca_strategy.py` (30 测试)
 - `src/domain/models.py` (Phase 5 Pydantic 模型，27 测试)
-- `web-front/src/types/order.ts` (前端类型定义)
+- `gemimi-web-front/src/types/order.ts` (前端类型定义)
 - `docs/reviews/phase5-code-review.md` (审查报告)
 - `docs/reviews/phase1-5-comprehensive-review-report.md` (系统性审查)
 
@@ -524,12 +524,12 @@ Week 2:
 - [x] 移动端适配
 
 **交付物**:
-- `web-front/src/pages/Positions.tsx` ✅
-- `web-front/src/pages/Orders.tsx` ✅
-- `web-front/src/pages/Account.tsx` ✅
-- `web-front/src/pages/PMSBacktest.tsx` ✅
-- `web-front/src/components/v3/` (20+ 组件) ✅
-- `web-front/src/types/order.ts` (v3 类型定义) ✅
+- `gemimi-web-front/src/pages/Positions.tsx` ✅
+- `gemimi-web-front/src/pages/Orders.tsx` ✅
+- `gemimi-web-front/src/pages/Account.tsx` ✅
+- `gemimi-web-front/src/pages/PMSBacktest.tsx` ✅
+- `gemimi-web-front/src/components/v3/` (20+ 组件) ✅
+- `gemimi-web-front/src/types/order.ts` (v3 类型定义) ✅
 - `src/interfaces/api.py` (v3 REST API 端点) ✅
 
 **代码审查**:

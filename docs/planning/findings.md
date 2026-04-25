@@ -1,11 +1,69 @@
 # Findings Log
 
-> Last updated: 2026-04-24 01:45
+> Last updated: 2026-04-25 22:35
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
 
 ## 当前有效结论
+
+### 0. Research 收口必须保持 research-only，且不得反向污染 runtime
+
+新增结论：
+
+1. 当前 SQLite + PG 双轨并行阶段，研究链的正确方向是继续推进 `Spec / Resolver / Reporter` 收口，而不是给 runtime 增加新的 SQLite 直读捷径。
+2. `research-only` 边界必须固定：
+   - 回测
+   - Optuna
+   - candidate 产物
+   - 报告 / 解释分析
+   这些都属于研究链，不属于 runtime 冻结链。
+3. 所有研究产物只允许输出 `candidate`，不得直接改写 `sim1_eth_runtime`。
+   - 不自动 promote runtime
+   - 不通过脚本直接覆写 runtime profile
+   - 研究结论进入 runtime 必须经过人工审查 + 显式冻结
+4. 在双轨阶段，**不得新增 runtime 直读 SQLite 的旁路**。
+   - runtime 侧继续按既有冻结链路读取
+   - 研究链若需要便利入口，应在 `Spec / Resolver / Reporter` 内部收口，而不是把 runtime 拉回 SQLite
+5. 因此，当前更合理的职责分工是：
+   - `research` 负责候选、证据、比较
+   - `runtime` 负责冻结配置、自然观察、执行链路稳定性
+6. 当前研究链收口的最小目标不是“更快改 runtime”，而是“统一研究入口、统一 candidate 输出、保持人工 promote 边界”。
+
+### 0. Execution 主线 PG 真源闭环应与其他域迁移拆窗处理
+
+新增结论：
+
+1. 本轮“PG 真源闭环”只应覆盖 runtime execution 主链，不应扩大成“全库去 SQLite”。
+2. 当前最小闭环对象是：
+   - `orders`
+   - `execution_intents`
+   - `execution_recovery_tasks`
+   - `positions` 的 execution projection / read model
+3. `signals / signal_attempts` 当前不迁的原因不是优先级低，而是它们属于 signal / observability 域；一旦进入本窗口，会同时牵动 console 查询、跨库观察口径、历史兼容和可能的 read model 设计，范围会从 execution 主链收口扩张为 runtime 观察链迁移。
+4. 因此，当前允许保留的跨库边界是：
+   - `Signal(SQLite) -> ExecutionIntent(PG)`
+   - `Order(PG).signal_id -> Signal(SQLite)`
+5. `signals / signal_attempts` 的迁移前置条件应为：
+   - `orders / execution_intents / execution_recovery_tasks / positions projection` 已稳定在 PG
+   - runtime execution API 不再误读 SQLite
+   - 启动恢复 / 对账 / 订单生命周期不再依赖 SQLite 执行态
+   - `positions` 投影模型已经过至少一轮联调或真实运行验证，不再频繁改表
+6. 参数 / 策略配置域不应与 execution 主线同窗迁移。
+   - 其迁移前置条件是 runtime config 的 SSOT、发布、快照、回滚、运行时装配边界已经稳定
+   - 在此之前，SQLite 作为 config repository adapter 仍可接受
+7. backtest / research / 历史报表应最后迁。
+   - 它们属于历史分析型数据，不与 runtime execution 的一致性诉求同级
+   - 只有当线上执行主链和观察链稳定后，再考虑统一分析底座
+8. 推荐迁移顺序：
+   - 窗口 1：execution 主线 PG 闭环
+   - 窗口 2：runtime observability 收口（优先 `signals / signal_attempts`）
+   - 窗口 3：参数 / 策略配置域迁移
+   - 窗口 4：backtest / research / 历史报表迁移
+9. `positions` 本次不应被表述为“替代交易所真源”，而应定义为本地 execution projection。
+   - 交易所 `account_snapshot` 仍是外部事实源
+   - PG `positions` 承担恢复、风控、console、保护单挂载所需的本地执行态读模型
+10. `positions` 写入时机更适合挂在 `OrderLifecycleService` 的成交事件之后，由独立 projection/update 服务写 PG，而不是由 `ExecutionOrchestrator` 直接写仓位。
 
 ### 0. Config Module 短中期保留 SQLite，Runtime 通过 Resolver 收口
 
@@ -414,7 +472,7 @@ SSOT 文档：
 
 前端扩展新主线（方案 B）：
 
-1. `gemimi-web-front` 已证明可以作为完整控制台的起点，不需要推倒重来。
+1. `gemimi-gemimi-web-front` 已证明可以作为完整控制台的起点，不需要推倒重来。
 2. 方案 B 的目标不是单独补几个页，而是把前端扩展成完整的量化观察与研究控制台。
 3. 已新增主规划文档：
    - `docs/planning/architecture/2026-04-25-frontend-console-plan-b.md`

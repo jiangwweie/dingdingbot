@@ -166,7 +166,7 @@ black src/ tests/  # 如已配置
 mypy src/  # 如已配置
 
 # 前端验证
-cd web-front && npm run build  # 如已配置
+cd gemimi-web-front && npm run build  # 如已配置
 npm run lint  # 如已配置
 ```
 
@@ -326,7 +326,7 @@ grep -r "from generated_client import" src/
 - [ ] **类型导入验证**: 已从 OpenAPI Spec 导入类型定义 ⭐
   ```bash
   # 生成 TypeScript 类型
-  openapi-typescript docs/contracts/api-spec.yaml > web-front/src/types/api.ts
+  openapi-typescript docs/contracts/api-spec.yaml > gemimi-web-front/src/types/api.ts
   ```
 ```
 
@@ -342,7 +342,7 @@ grep -r "from generated_client import" src/
 
 **验证命令**:
 ```bash
-cd web-front
+cd gemimi-web-front
 
 # 类型检查
 npm run type-check
@@ -477,7 +477,7 @@ flake8 src/ tests/
           ```bash
           # 生成 TypeScript 类型
           npm install -D openapi-typescript
-          openapi-typescript docs/contracts/api-spec.yaml > web-front/src/types/api.ts
+          openapi-typescript docs/contracts/api-spec.yaml > gemimi-web-front/src/types/api.ts
           ```
         - 验证：契约文件生成成功，前后端类型一致 ⭐
 
@@ -505,7 +505,7 @@ flake8 src/ tests/
   用户确认点：测试前确认（耗时 30-60 分钟）⭐
 
   输出文档：
-    - 代码文件（src/, web-front/）
+    - 代码文件（src/, gemimi-web-front/）
     - 单元测试文件（tests/unit/）
     - docs/contracts/api-spec.yaml（OpenAPI Spec）⭐
     - docs/designs/<feature>-contract.md（契约表）

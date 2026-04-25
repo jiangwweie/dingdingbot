@@ -93,9 +93,9 @@ S6-2-6 (前端增强)
 - `src/infrastructure/notifier.py` - 通知消息增强
 
 ### 前端 TypeScript (3 个)
-- `web-front/src/lib/api.ts` - SignalStatus 枚举和接口扩展
-- `web-front/src/components/SignalStatusBadge.tsx` - 状态徽章组件
-- `web-front/src/pages/Signals.tsx` - 信号列表页
+- `gemimi-web-front/src/lib/api.ts` - SignalStatus 枚举和接口扩展
+- `gemimi-web-front/src/components/SignalStatusBadge.tsx` - 状态徽章组件
+- `gemimi-web-front/src/pages/Signals.tsx` - 信号列表页
 
 ### 配置文件 (1 个)
 - `config/core.yaml` - ATR 过滤器配置

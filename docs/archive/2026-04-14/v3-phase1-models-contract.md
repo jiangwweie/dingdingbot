@@ -376,7 +376,7 @@ class Position(FinancialModel):
 ### 6.2 前端 TypeScript 类型
 
 ```typescript
-// web-front/src/types/v3-models.ts
+// gemimi-web-front/src/types/v3-models.ts
 
 export type Direction = 'LONG' | 'SHORT';
 

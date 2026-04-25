@@ -121,7 +121,7 @@ set_dependencies(
 
 ### 修复 3: OrderChainTreeTable.tsx 防御增强
 
-**文件**: `web-front/src/components/v3/OrderChainTreeTable.tsx:173-175`
+**文件**: `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx:173-175`
 
 **修改内容**:
 ```tsx

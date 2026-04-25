@@ -269,7 +269,7 @@ dingdingbot/
 │   ├── core.yaml                   # 系统核心配置（只读）
 │   └── user.yaml                   # 用户配置（API 密钥/策略开关）
 │
-├── web-front/                      # 前端策略工作台（重构中）
+├── gemimi-web-front/               # 前端控制台（只读）
 ├── docs/                           # 架构文档
 │   ├── arch/                       # 架构规范
 │   └── tasks/                      # 子任务说明

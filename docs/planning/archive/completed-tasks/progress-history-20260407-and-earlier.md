@@ -1890,9 +1890,9 @@ async def _worker(self) -> None:
 - `src/application/backtester.py` - 实现计算逻辑和主循环集成
 
 **前端修改文件**:
-- `web-front/src/types/backtest.ts` - 新增 total_funding_cost 字段
-- `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` - 新建详情弹窗（398 行）
-- `web-front/src/pages/BacktestReports.tsx` - 集成详情弹窗组件
+- `gemimi-web-front/src/types/backtest.ts` - 新增 total_funding_cost 字段
+- `gemimi-web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` - 新建详情弹窗（398 行）
+- `gemimi-web-front/src/pages/BacktestReports.tsx` - 集成详情弹窗组件
 
 **资金费率设计决策**:
 - 固定费率 0.01%（0.0001）每 8 小时
@@ -2531,11 +2531,11 @@ tests/unit/test_config_snapshot_api.py::TestSnapshotListItemModel - 3 passed
 
 **完成工作**:
 
-1. ✅ **类型定义更新** (`web-front/src/types/backtest.ts`)
+1. ✅ **类型定义更新** (`gemimi-web-front/src/types/backtest.ts`)
    - `BacktestReportDetail` 添加 `total_funding_cost: string` 字段
    - 注释说明：正数=支付，负数=收取
 
-2. ✅ **详情弹窗组件开发** (`web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx`)
+2. ✅ **详情弹窗组件开发** (`gemimi-web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx`)
    - 新建独立 Modal 组件，替代原有 alert 实现
    - 展示完整的回测报告详情：
      - 核心指标看板（总收益、胜率、总盈亏、最大回撤）
@@ -2547,7 +2547,7 @@ tests/unit/test_config_snapshot_api.py::TestSnapshotListItemModel - 3 passed
      - 负数=收取（绿色背景）
      - 格式：`+$12.34` 或 `-$5.67`
 
-3. ✅ **回测报告列表页更新** (`web-front/src/pages/BacktestReports.tsx`)
+3. ✅ **回测报告列表页更新** (`gemimi-web-front/src/pages/BacktestReports.tsx`)
    - 导入 `BacktestReportDetailModal` 组件
    - 添加 modal 状态管理 (`selectedReportId`, `selectedReport`)
    - `handleViewDetails` 改用 Modal 展示（替代 alert）
@@ -2555,7 +2555,7 @@ tests/unit/test_config_snapshot_api.py::TestSnapshotListItemModel - 3 passed
 
 **构建验证**:
 ```bash
-cd web-front
+cd gemimi-web-front
 npm run build
 # ✓ built in 6.17s - 无类型错误
 ```
@@ -2568,9 +2568,9 @@ npm run build
 - [x] TypeScript 类型检查通过
 
 **修改文件**:
-- `web-front/src/types/backtest.ts` - 添加 `total_funding_cost` 字段
-- `web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` - 新建详情弹窗组件
-- `web-front/src/pages/BacktestReports.tsx` - 集成弹窗组件
+- `gemimi-web-front/src/types/backtest.ts` - 添加 `total_funding_cost` 字段
+- `gemimi-web-front/src/components/v3/backtest/BacktestReportDetailModal.tsx` - 新建详情弹窗组件
+- `gemimi-web-front/src/pages/BacktestReports.tsx` - 集成弹窗组件
 
 ---
 
@@ -3098,7 +3098,7 @@ P0 核心方法覆盖率：100%
    - 安装位置：`/Users/jiangwei/Library/Caches/ms-playwright/`
 
 2. ✅ **配置文件更新**
-   - `web-front/playwright.config.ts`: 添加 `testIgnore` 排除旧 Vitest 测试
+   - `gemimi-web-front/playwright.config.ts`: 添加 `testIgnore` 排除旧 Vitest 测试
    - 解决 Playwright 与 Vitest 测试文件冲突问题
 
 3. ✅ **测试验证**
@@ -3107,7 +3107,7 @@ P0 核心方法覆盖率：100%
 
 **运行方式**:
 ```bash
-cd web-front
+cd gemimi-web-front
 npm run dev &          # 启动开发服务器
 npx playwright test    # 运行测试
 ```
@@ -3220,8 +3220,8 @@ Message: test(TEST-2): OrderManager 测试重构 - 覆盖率 75%→100%
 1. ✅ **E2E 测试环境配置**
    - 安装 `@playwright/test` v1.59.1
    - 下载 Chromium 浏览器
-   - 创建 `web-front/playwright.config.ts` 配置文件
-   - 创建 E2E 测试目录 `web-front/tests/e2e/playwright/`
+   - 创建 `gemimi-web-front/playwright.config.ts` 配置文件
+   - 创建 E2E 测试目录 `gemimi-web-front/tests/e2e/playwright/`
 
 2. ✅ **后端 E2E 测试补充** (CFG-1)
    - 文件：`tests/e2e/test_config_import_export_e2e.py`
@@ -3230,7 +3230,7 @@ Message: test(TEST-2): OrderManager 测试重构 - 覆盖率 75%→100%
    - 覆盖：导出/导入/预览/冲突检测/回滚/边界条件/历史记录
 
 3. ✅ **前端 Playwright E2E 测试**
-   - 文件：`web-front/tests/e2e/playwright/backtest.spec.ts`
+   - 文件：`gemimi-web-front/tests/e2e/playwright/backtest.spec.ts`
    - 测试数：5 个
    - 覆盖：页面加载/参数选择/配置折叠/执行回测流程
 
@@ -3847,17 +3847,17 @@ tests/unit/test_config_api.py - 20/20 通过 (100%)
 7. ✅ FE-01-T7: 组件单元测试
 
 **新建文件**:
-- `web-front/src/pages/config/StrategyConfig.tsx` - 策略配置主页面
-- `web-front/src/components/strategy/StrategyCard.tsx` - 策略卡片组件
-- `web-front/src/components/strategy/StrategyEditor.tsx` - 策略编辑器抽屉
-- `web-front/src/pages/config/SystemSettings.tsx` - 系统设置页面
-- `web-front/src/components/strategy/__tests__/StrategyCard.test.tsx` - 策略卡片测试
-- `web-front/src/components/strategy/__tests__/StrategyEditor.test.tsx` - 策略编辑器测试
+- `gemimi-web-front/src/pages/config/StrategyConfig.tsx` - 策略配置主页面
+- `gemimi-web-front/src/components/strategy/StrategyCard.tsx` - 策略卡片组件
+- `gemimi-web-front/src/components/strategy/StrategyEditor.tsx` - 策略编辑器抽屉
+- `gemimi-web-front/src/pages/config/SystemSettings.tsx` - 系统设置页面
+- `gemimi-web-front/src/components/strategy/__tests__/StrategyCard.test.tsx` - 策略卡片测试
+- `gemimi-web-front/src/components/strategy/__tests__/StrategyEditor.test.tsx` - 策略编辑器测试
 
 **修改文件**:
-- `web-front/src/App.tsx` - 添加新路由配置
-- `web-front/src/components/Layout.tsx` - 更新导航结构
-- `web-front/src/pages/Backtest.tsx` - 优化快速配置区和高级配置折叠
+- `gemimi-web-front/src/App.tsx` - 添加新路由配置
+- `gemimi-web-front/src/components/Layout.tsx` - 更新导航结构
+- `gemimi-web-front/src/pages/Backtest.tsx` - 优化快速配置区和高级配置折叠
 
 **新导航结构**:
 ```
@@ -4343,7 +4343,7 @@ EXPIRED      → (终态)
 **修改文件**:
 - `src/infrastructure/order_repository.py` (173 行修改)
 - `src/interfaces/api.py` (48 行修改)
-- `web-front/src/pages/Orders.tsx` (前端修复)
+- `gemimi-web-front/src/pages/Orders.tsx` (前端修复)
 - `tests/integration/test_batch_delete.py` (测试 Mock 完善)
 
 **测试结果**:
@@ -4582,15 +4582,15 @@ EXPIRED      → (终态)
    - `get_core_config()` 移除 `await`（同步方法）- 3 处
    - `ConfigProfileRepository` 类型注解改为字符串格式
 
-3. ✅ **前端 API 路径修复** (`web-front/src/api/config.ts`):
+3. ✅ **前端 API 路径修复** (`gemimi-web-front/src/api/config.ts`):
    - baseURL 从 `/api/v1/config` 改为 `/api`
    - 映射接口到后端实际路径
 
-4. ✅ **前端组件修复** (`web-front/src/pages/config/BackupTab.tsx`):
+4. ✅ **前端组件修复** (`gemimi-web-front/src/pages/config/BackupTab.tsx`):
    - 导入改为 `FormData` multipart/form-data 格式
    - 导出改为 GET 方法
 
-5. ✅ **策略列表加载修复** (`web-front/src/pages/config/StrategiesTab.tsx`):
+5. ✅ **策略列表加载修复** (`gemimi-web-front/src/pages/config/StrategiesTab.tsx`):
    - 提取 `response.data.strategies` 字段
    - 添加 `symbols`/`timeframes` 空值检查
 

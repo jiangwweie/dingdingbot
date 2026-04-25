@@ -119,7 +119,7 @@ tests/integration/test_order_kline_timealignment.py::test_very_old_order_kline_f
 
 ### 前端组件审查
 
-**文件**: `web-front/src/components/v3/OrderDetailsDrawer.tsx`
+**文件**: `gemimi-web-front/src/components/v3/OrderDetailsDrawer.tsx`
 
 | 检查项 | 状态 | 备注 |
 |--------|------|------|

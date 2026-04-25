@@ -273,7 +273,7 @@ tests/                        # 测试代码目录（全部）
 │   └── test_*.py
 └── conftest.py               # Pytest 配置
 
-web-front/src/                # 仅限测试文件
+gemimi-web-front/src/                # 仅限测试文件
 ├── *.test.ts, *.test.tsx     # 前端测试
 └── *.spec.ts, *.spec.tsx     # 前端规格测试
 ```
@@ -286,7 +286,7 @@ src/                          # 后端业务代码（禁止修改实现）
 ├── infrastructure/
 └── interfaces/
 
-web-front/src/                # 前端业务代码（禁止修改实现）
+gemimi-web-front/src/                # 前端业务代码（禁止修改实现）
 ├── components/
 ├── pages/
 ├── hooks/
@@ -329,7 +329,7 @@ pytest tests/unit/ --cov=src --cov-report=html
 pytest tests/unit/test_strategy_engine.py::TestPinbarDetection -v
 
 # 前端测试
-cd web-front && npm test
+cd gemimi-web-front && npm test
 ```
 
 ---

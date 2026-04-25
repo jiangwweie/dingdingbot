@@ -13,7 +13,7 @@ Do not connect to any real backend yet.
 
 There is already an existing scaffold project:
 
-- `gemimi-web-front/`
+- `gemimi-gemimi-web-front/`
 
 Gemini should **continue from that scaffold** instead of regenerating a totally
 different project from scratch.

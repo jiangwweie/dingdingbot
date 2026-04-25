@@ -52,11 +52,11 @@
 ### Step 2: 深入排查
 
 **排查的文件**:
-- `web-front/package.json:32` - react-window 版本 `^2.2.7`
-- `web-front/src/components/v3/OrderChainTreeTable.tsx:369-377` - List 组件使用
+- `gemimi-web-front/package.json:32` - react-window 版本 `^2.2.7`
+- `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx:369-377` - List 组件使用
 - `src/interfaces/api.py:263-269` - `_get_config_entry_repo()` fallback
 - `src/interfaces/api.py:2191` - `/api/strategies/templates` 端点定义
-- `web-front/src/lib/api.ts:1643` - 前端调用 `/api/strategy/params/templates`
+- `gemimi-web-front/src/lib/api.ts:1643` - 前端调用 `/api/strategy/params/templates`
 
 **发现的异常模式**:
 
@@ -190,7 +190,7 @@ Why 5: 为什么前端假设错误？
 
 #### A1: 修复 react-window 2.x 兼容性
 
-**文件**: `web-front/src/components/v3/OrderChainTreeTable.tsx`
+**文件**: `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx`
 **位置**: 第 169-177 行（Row 组件定义）+ 第 369-377 行（List 使用）
 
 **修改 Row 组件定义**（适配 react-window 2.x RowComponentProps）:
@@ -262,7 +262,7 @@ def _get_config_entry_repo() -> Any:
 
 #### A3: 修复 API 路径不匹配
 
-**文件**: `web-front/src/lib/api.ts`
+**文件**: `gemimi-web-front/src/lib/api.ts`
 **位置**: 第 1643 行
 
 **修改方案**（统一使用后端定义的路径）:
@@ -365,9 +365,9 @@ async def get_strategy_params_templates():
 
 ### 相关文件
 
-- `web-front/package.json` - react-window 版本定义
-- `web-front/src/components/v3/OrderChainTreeTable.tsx` - react-window 使用
-- `web-front/src/lib/api.ts` - API 调用路径
+- `gemimi-web-front/package.json` - react-window 版本定义
+- `gemimi-web-front/src/components/v3/OrderChainTreeTable.tsx` - react-window 使用
+- `gemimi-web-front/src/lib/api.ts` - API 调用路径
 - `src/interfaces/api.py` - API 端点定义
 - `src/infrastructure/config_entry_repository.py` - Repository 实现
 
@@ -375,7 +375,7 @@ async def get_strategy_params_templates():
 
 ```bash
 # 修复后验证 react-window
-cd web-front && npm run dev
+cd gemimi-web-front && npm run dev
 
 # 验证 API 端点
 curl http://localhost:3000/api/strategy/params

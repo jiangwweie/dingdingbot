@@ -67,7 +67,7 @@ class PositionSummary(FinancialModel):
 | src/domain/models.py | 新增 PositionCloseEvent 模型 | P0 |
 | src/application/backtester.py | 记录出场事件逻辑 | P0 |
 | src/infrastructure/backtest_repository.py | 序列化支持嵌套列表 | P0 |
-| web-front/src/lib/api.ts | TS 接口新增 | P1 |
+| gemimi-web-front/src/lib/api.ts | TS 接口新增 | P1 |
 | BacktestReportDetailModal.tsx | 前端事件列表渲染 | P1 |
 
 ## 备注

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getReplayContext } from '@/src/services/mockApi';
+import { getReplayContext } from '@/src/services/api';
 import { ReplayContext as IReplayContext } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
@@ -47,7 +47,7 @@ export default function Replay() {
           <CardHeader><CardTitle className="flex flex-row items-center gap-2"><Terminal className="w-4 h-4"/> 策略重现指令 (Reproduce Command)</CardTitle></CardHeader>
           <CardContent className="bg-white dark:bg-zinc-950 rounded m-4 border border-zinc-200 dark:border-zinc-800 p-4">
              <code className="text-emerald-400 font-mono text-sm break-all select-all">
-                {data.reproduce_cmd}
+                {data.reproduce_cmd || 'N/A'}
              </code>
           </CardContent>
        </Card>
@@ -56,14 +56,14 @@ export default function Replay() {
           <Card>
              <CardHeader><CardTitle>解析后得出的参数集定义</CardTitle></CardHeader>
              <CardContent className="bg-white dark:bg-zinc-950 p-4 text-xs font-mono text-zinc-700 dark:text-zinc-300 rounded m-4 border border-zinc-200 dark:border-zinc-800 overflow-auto">
-               <pre>{JSON.stringify(data.resolved_request, null, 2)}</pre>
+               <pre>{JSON.stringify(data.resolved_request || {}, null, 2)}</pre>
              </CardContent>
           </Card>
 
           <Card>
              <CardHeader><CardTitle>运行时参数覆写集 (Runtime Overrides)</CardTitle></CardHeader>
              <CardContent className="bg-white dark:bg-zinc-950 p-4 text-xs font-mono text-amber-300 rounded m-4 border border-zinc-200 dark:border-zinc-800 overflow-auto">
-               <pre>{JSON.stringify(data.runtime_overrides, null, 2)}</pre>
+               <pre>{JSON.stringify(data.runtime_overrides || {}, null, 2)}</pre>
              </CardContent>
           </Card>
        </div>

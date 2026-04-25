@@ -85,7 +85,9 @@ done
 # ============================================================
 echo ""
 echo "启动前端服务..."
-cd "$ROOT_DIR/web-front" || exit 1
+# 前端已迁移至 gemimi-web-front/，不再自动启动
+echo "前端已迁移至 gemimi-web-front/，需手动启动"
+echo "  cd gemimi-web-front && npm run dev" || exit 1
 
 # 导出环境变量
 export FRONTEND_PORT=$FRONTEND_PORT

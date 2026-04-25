@@ -346,7 +346,7 @@ if all(task.status == "✅" for task in 开发任务):
         请对以下文件进行代码审查:
         - src/domain/xxx.py
         - src/application/xxx.py
-        - web-front/src/components/xxx.tsx
+        - gemimi-web-front/src/components/xxx.tsx
         
         审查重点:
         1. 对照契约表检查字段一致性
@@ -423,7 +423,7 @@ def 自动调度_QA():
             请对以下功能进行测试:
             - 功能：[功能名称]
             - 契约表：docs/designs/xxx-contract.md
-            - 代码路径：src/xxx, web-front/xxx
+            - 代码路径：src/xxx, gemimi-web-front/xxx
             
             测试任务:
             1. 运行单元测试 (覆盖率≥80%)
@@ -512,7 +512,7 @@ def 自动调度_QA():
    
    ### 📦 交付物
    - 后端代码：`src/...`
-   - 前端代码：`web-front/src/...`
+   - 前端代码：`gemimi-web-front/src/...`
    - 测试代码：`tests/...`
    
    ### ✅ 验证结果

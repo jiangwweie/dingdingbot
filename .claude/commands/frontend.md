@@ -6,7 +6,7 @@ Agent(
     prompt="""
 请阅读并遵循 .claude/team/frontend-dev/SKILL.md 中的规范。
 
-重要：严格遵守文件边界，只修改 web-front/ 目录下的文件！
+重要：严格遵守文件边界，只修改 gemimi-web-front/ 目录下的文件！
 
 用户任务：{{arguments}}
 

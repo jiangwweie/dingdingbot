@@ -5,15 +5,15 @@
 ## 目标
 
 1. 盘点当前已有后端 API、仓储、artifact 数据源，哪些可以直接复用，哪些需要新增聚合层。
-2. 把前端 `gemimi-web-front` 的 mock 契约映射到现有后端能力。
+2. 把前端 `gemimi-gemimi-web-front` 的 mock 契约映射到现有后端能力。
 3. 输出“可直接实现 / 需新增 read model / 当前缺口”三类结论。
 
 ## 先读这些文件
 
 1. `docs/planning/architecture/2026-04-25-backend-readonly-api-and-api-module-roadmap.md`
 2. `docs/planning/architecture/2026-04-25-console-readonly-api-v1-contract.md`
-3. `gemimi-web-front/src/types/index.ts`
-4. `gemimi-web-front/src/services/mockApi.ts`
+3. `gemimi-gemimi-web-front/src/types/index.ts`
+4. `gemimi-gemimi-web-front/src/services/mockApi.ts`
 5. `src/interfaces/api.py`
 
 ## 任务 A：现状盘点

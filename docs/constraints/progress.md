@@ -75,7 +75,7 @@
 - 测试验证：Decimal 相关 31 passed, 全量回归 192 passed
 
 **第九轮：回测数据加载修复** ✅
-- 根因链：后端 CWD = web-front/ → HistoricalDataRepository("data/v3_dev.db") 打开 web-front/data/v3_dev.db (空库) → fallback 到 CCXT → CCXT 无 since 参数返回"最近的 1000 条" → 时间范围过滤全部清除 → 0 条数据
+- 根因链：后端 CWD = gemimi-web-front/ → HistoricalDataRepository("data/v3_dev.db") 打开 gemimi-web-front/data/v3_dev.db (空库) → fallback 到 CCXT → CCXT 无 since 参数返回"最近的 1000 条" → 时间范围过滤全部清除 → 0 条数据
 - 修复 6 项：
   - P0: HistoricalDataRepository 默认路径改为 Path(__file__) 解析的绝对路径 (`/Users/jiangwei/Documents/dingdingbot/data/v3_dev.db`)
   - P0: _query_klines_from_db 改为 ORDER BY timestamp DESC + reverse，返回最新 N 条
@@ -264,15 +264,15 @@
 
 | 文件 | 说明 |
 |------|------|
-| `web-front/src/components/strategy/triggerSchemas.ts` | 触发器参数 Schema 定义 (SSOT)，包含 pinbar/engulfing/doji/hammer 四种类型的字段元数据 + 默认值 + 范围校验 |
-| `web-front/src/components/strategy/TriggerParamsForm.tsx` | 动态参数表单组件，根据 triggerType 自动渲染对应字段，支持 Slider + InputNumber 联动 |
+| `gemimi-web-front/src/components/strategy/triggerSchemas.ts` | 触发器参数 Schema 定义 (SSOT)，包含 pinbar/engulfing/doji/hammer 四种类型的字段元数据 + 默认值 + 范围校验 |
+| `gemimi-web-front/src/components/strategy/TriggerParamsForm.tsx` | 动态参数表单组件，根据 triggerType 自动渲染对应字段，支持 Slider + InputNumber 联动 |
 
 ### 修改文件
 
 | 文件 | 改动 |
 |------|------|
-| `web-front/src/pages/config/StrategyForm.tsx` | 导入 TriggerParamsForm + getTriggerDefaultParams；useEffect 中回填 trigger_params；handleSubmit 中使用 form 值替代空对象；trigger_type Select 下方渲染参数表单 |
-| `web-front/src/components/strategy/StrategyEditor.tsx` | 移除内联 DEFAULT_TRIGGER_PARAMS 和 helper 函数，统一引用 triggerSchemas.ts (SSOT) |
+| `gemimi-web-front/src/pages/config/StrategyForm.tsx` | 导入 TriggerParamsForm + getTriggerDefaultParams；useEffect 中回填 trigger_params；handleSubmit 中使用 form 值替代空对象；trigger_type Select 下方渲染参数表单 |
+| `gemimi-web-front/src/components/strategy/StrategyEditor.tsx` | 移除内联 DEFAULT_TRIGGER_PARAMS 和 helper 函数，统一引用 triggerSchemas.ts (SSOT) |
 
 ### 技术要点
 
@@ -302,7 +302,7 @@
 | 4 | 预览数据结构 | 使用不存在的 `changes` 字段 | 使用后端返回的 `summary`/`preview_data`/`conflicts`/`errors` ✅ |
 | 5 | Token 过期 | 无处理 | 5 分钟 TTL 检测 + 过期自动重置 ✅ |
 
-### 新增 API 方法（`web-front/src/api/config.ts`）
+### 新增 API 方法（`gemimi-web-front/src/api/config.ts`）
 
 | 方法 | 端点 | 类型 |
 |------|------|------|
@@ -411,11 +411,11 @@
 ### 前端改动（3 个提交）
 | 文件 | 改动 |
 |------|------|
-| `web-front/src/api/config.ts` | baseURL 迁移 + 风险配置路径修复 + 系统配置端点更新 |
-| `web-front/src/pages/config/StrategyConfig.tsx` | 降级逻辑简化 |
-| `web-front/src/pages/config/SystemSettings.tsx` | `requires_restart` → `restart_required` |
-| `web-front/src/pages/config/SystemTab.tsx` | `requires_restart` → `restart_required` |
-| `web-front/src/pages/config/__tests__/SystemTab.test.tsx` | Mock 数据格式更新 |
+| `gemimi-web-front/src/api/config.ts` | baseURL 迁移 + 风险配置路径修复 + 系统配置端点更新 |
+| `gemimi-web-front/src/pages/config/StrategyConfig.tsx` | 降级逻辑简化 |
+| `gemimi-web-front/src/pages/config/SystemSettings.tsx` | `requires_restart` → `restart_required` |
+| `gemimi-web-front/src/pages/config/SystemTab.tsx` | `requires_restart` → `restart_required` |
+| `gemimi-web-front/src/pages/config/__tests__/SystemTab.test.tsx` | Mock 数据格式更新 |
 
 ### 后端改动（2 个提交）
 | 文件 | 改动 |
@@ -491,7 +491,7 @@
 ## 2026-04-10 策略详情预览 Modal 实现
 
 ### 修改内容
-**文件**: `web-front/src/components/strategy/StrategyCard.tsx`
+**文件**: `gemimi-web-front/src/components/strategy/StrategyCard.tsx`
 
 | 改动 | 说明 |
 |------|------|
@@ -684,19 +684,19 @@ notify_hot_reload(config_type):
 **目标**：将系统配置 API 从旧的 `/api/v1/config/strategy/params` 迁移到新的 `/api/v1/config/system`
 
 **文件变更**：
-1. `web-front/src/api/config.ts`
+1. `gemimi-web-front/src/api/config.ts`
    - `SystemConfigResponse` 类型：新增 `restart_required`、`id`、`updated_at` 字段
    - `getSystemConfig()`: `GET /strategy/params` → `GET /system`
    - `updateSystemConfig()`: `PUT /strategy/params`（带 wrapper） → `PUT /system`（直接返回）
    - 更新注释：系统配置端点状态从"待后端补充"改为"GET/PUT"
 
-2. `web-front/src/pages/config/SystemSettings.tsx`
+2. `gemimi-web-front/src/pages/config/SystemSettings.tsx`
    - `requires_restart` → `restart_required`（对齐后端字段名）
 
-3. `web-front/src/pages/config/SystemTab.tsx`
+3. `gemimi-web-front/src/pages/config/SystemTab.tsx`
    - `requires_restart` → `restart_required`（对齐后端字段名）
 
-4. `web-front/src/pages/config/__tests__/SystemTab.test.tsx`
+4. `gemimi-web-front/src/pages/config/__tests__/SystemTab.test.tsx`
    - Mock 数据结构更新：从 `{ requires_restart, config: ... }` 改为 `{ restart_required, ...spread }`
 
 ### 验证结果

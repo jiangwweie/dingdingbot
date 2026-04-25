@@ -11,7 +11,7 @@
 当前仓库**可以** `docker build` 成功，但存在 2 个 P0 启动期阻塞项、3 个 P1 启动期阻塞项。修复工作量约 1-2 小时。
 
 **重要纠正**（相比 v1 版本）:
-- ✅ 前端 dist 目录已存在（`web-front/dist/` 有 index.html 和 assets/）
+- ✅ 前端 dist 目录已存在（`gemimi-web-front/dist/` 有 index.html 和 assets/）
 - ✅ config 目录存在，`COPY config/` 不会失败
 - ✅ YAML 文件不再是启动必需条件（代码已改为 DB 驱动）
 
@@ -166,11 +166,11 @@ curl http://localhost:8000/api/health
 
 ## 前端入口确认
 
-**正确入口**: `web-front/` ✅
+**正确入口**: `gemimi-web-front/` ✅
 
 **证据**:
-- `docker/Dockerfile.frontend:11` 引用 `web-front/nginx.conf`
-- `web-front/dist/` 目录已存在（包含 index.html 和 assets/）
+- `docker/Dockerfile.frontend:11` 引用 `gemimi-web-front/nginx.conf`
+- `gemimi-web-front/dist/` 目录已存在（包含 index.html 和 assets/）
 
 ---
 

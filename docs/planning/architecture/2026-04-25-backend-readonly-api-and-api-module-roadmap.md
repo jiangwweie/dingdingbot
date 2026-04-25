@@ -312,7 +312,7 @@ What must be delivered:
 
 ### To-do A - Frontend contract freeze
 
-1. Lock the current page tree from `gemimi-web-front`.
+1. Lock the current page tree from `gemimi-gemimi-web-front`.
 2. Freeze `Runtime / Portfolio`, `Runtime / Positions`, `Runtime / Events`, `Config / Snapshot`, `Research / Candidate Review` as official pages.
 3. Freeze the field naming in mock payloads.
 4. Freeze read-only semantics in the docs.

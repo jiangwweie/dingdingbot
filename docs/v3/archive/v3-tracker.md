@@ -53,10 +53,10 @@
 **前端页面** (4 个):
 | 页面 | 文件 | 状态 |
 |------|------|------|
-| 仓位管理页面 | `web-front/src/pages/Positions.tsx` | ✅ |
-| 订单管理页面 | `web-front/src/pages/Orders.tsx` | ✅ |
-| 账户页面 | `web-front/src/pages/Account.tsx` | ✅ |
-| 回测报告页面 | `web-front/src/pages/PMSBacktest.tsx` | ✅ |
+| 仓位管理页面 | `gemimi-web-front/src/pages/Positions.tsx` | ✅ |
+| 订单管理页面 | `gemimi-web-front/src/pages/Orders.tsx` | ✅ |
+| 账户页面 | `gemimi-web-front/src/pages/Account.tsx` | ✅ |
+| 回测报告页面 | `gemimi-web-front/src/pages/PMSBacktest.tsx` | ✅ |
 
 **v3 组件** (20+ 个):
 - 徽章类：`DirectionBadge`, `OrderStatusBadge`, `OrderRoleBadge`, `PnLBadge`
@@ -81,7 +81,7 @@
 - `POST /api/v3/orders/check` - 资金保护检查
 
 **类型定义**:
-- `web-front/src/types/order.ts` - v3 订单/仓位/账户 TypeScript 类型
+- `gemimi-web-front/src/types/order.ts` - v3 订单/仓位/账户 TypeScript 类型
 
 **代码审查**:
 - 审查报告：`docs/reviews/phase6-code-review.md`

@@ -94,7 +94,7 @@
 | DcaStrategy | `src/domain/dca_strategy.py` | 30 | ✅ |
 | Reconciliation | `src/application/reconciliation.py` | 15 | ✅ |
 | Pydantic 模型 | `src/domain/models.py` | 27 | ✅ |
-| 前端类型 | `web-front/src/types/order.ts` | 45 | ✅ |
+| 前端类型 | `gemimi-web-front/src/types/order.ts` | 45 | ✅ |
 
 **核心设计决策**:
 | 决策项 | 决策结果 |

@@ -14,25 +14,25 @@
 
 | 文件 | 说明 |
 |------|------|
-| `web-front/e2e/puppeteer.config.js` | Puppeteer 浏览器配置 |
-| `web-front/e2e/jest.config.js` | Jest 测试框架配置 |
-| `web-front/e2e/tsconfig.json` | TypeScript 配置 |
-| `web-front/e2e/.gitignore` | Git 忽略规则 |
+| `gemimi-web-front/e2e/puppeteer.config.js` | Puppeteer 浏览器配置 |
+| `gemimi-web-front/e2e/jest.config.js` | Jest 测试框架配置 |
+| `gemimi-web-front/e2e/tsconfig.json` | TypeScript 配置 |
+| `gemimi-web-front/e2e/.gitignore` | Git 忽略规则 |
 
 ### 工具函数
 
 | 文件 | 说明 |
 |------|------|
-| `web-front/e2e/utils/setup.ts` | 全局设置、浏览器启动、钩子函数 |
-| `web-front/e2e/utils/helpers.ts` | 25+ 测试辅助函数（点击/输入/截图等） |
-| `web-front/e2e/utils/factories.ts` | Mock 数据工厂（用户/策略/K 线/信号等） |
+| `gemimi-web-front/e2e/utils/setup.ts` | 全局设置、浏览器启动、钩子函数 |
+| `gemimi-web-front/e2e/utils/helpers.ts` | 25+ 测试辅助函数（点击/输入/截图等） |
+| `gemimi-web-front/e2e/utils/factories.ts` | Mock 数据工厂（用户/策略/K 线/信号等） |
 
 ### 测试与文档
 
 | 文件 | 说明 |
 |------|------|
-| `web-front/e2e/environment.test.ts` | 环境验证测试（16 个测试用例） |
-| `web-front/e2e/README.md` | 完整运行说明文档 |
+| `gemimi-web-front/e2e/environment.test.ts` | 环境验证测试（16 个测试用例） |
+| `gemimi-web-front/e2e/README.md` | 完整运行说明文档 |
 
 ---
 
@@ -62,7 +62,7 @@ Time:        23.318 s
 ## 🚀 使用命令
 
 ```bash
-cd web-front
+cd gemimi-web-front
 
 # 基本测试（有头模式，可见浏览器）
 npm run test:e2e

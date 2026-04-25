@@ -305,7 +305,7 @@ Agent(subagent_type="qa-tester", prompt="...")
 | `docs/arch/**` | ⚠️ 只读 | ✅ 全权 | ⚠️ 只读 | ❌ | ❌ | ❌ | 🔍 审查 |
 | `docs/planning/**` | ⚠️ 只读 | ⚠️ 只读 | ✅ 全权 | ❌ | ❌ | ❌ | ✅ 全权 |
 | `docs/designs/**` | ⚠️ 只读 | ✅ 全权 | ⚠️ 只读 | ⚠️ 只读 | ⚠️ 只读 | ⚠️ 只读 | 🔍 审查 |
-| `web-front/**` | ❌ | ❌ | ❌ | ✅ 全权 | ❌ | ⚠️ 测试 | 🔍 审查 |
+| `gemimi-web-front/**` | ❌ | ❌ | ❌ | ✅ 全权 | ❌ | ⚠️ 测试 | 🔍 审查 |
 | `src/**` | ❌ | 🔍 审查 | ❌ | ❌ | ✅ 全权 | ⚠️ 测试（含审查）| 🔍 审查 |
 | `tests/**` | ❌ | 🔍 审查 | ⚠️ 协调 | ⚠️ 协助 | ⚠️ 协助 | ✅ 全权 | ⚠️ 运行 |
 | `config/**` | ❌ | 🔍 审查 | ❌ | ❌ | ✅ 全权 | ❌ | 🔍 审查 |
@@ -318,20 +318,20 @@ Agent(subagent_type="qa-tester", prompt="...")
 
 #### Frontend 边界
 ```
-✅ 可修改：web-front/** (全部前端文件)
+✅ 可修改：gemimi-web-front/** (全部前端文件)
 ❌ 禁止：src/**, tests/**, config/**
 ```
 
 #### Backend 边界
 ```
 ✅ 可修改：src/**, config/**
-❌ 禁止：web-front/**
+❌ 禁止：gemimi-web-front/**
 ```
 
 #### QA 边界
 ```
 ✅ 可修改：tests/** (全部测试文件)
-❌ 禁止：src/** (业务代码), web-front/** (前端代码)
+❌ 禁止：src/** (业务代码), gemimi-web-front/** (前端代码)
 ```
 
 #### PM 边界
@@ -343,13 +343,13 @@ Agent(subagent_type="qa-tester", prompt="...")
 #### Reviewer 边界
 ```
 ✅ 可修改：tests/** (测试代码)
-🔍 审查：src/**, web-front/**, config/** (仅审查意见，不直接修改)
+🔍 审查：src/**, gemimi-web-front/**, config/** (仅审查意见，不直接修改)
 ```
 
 #### Diagnostic Analyst 边界
 ```
 ✅ 可修改：docs/** (诊断报告、分析笔记)
-🔍 审查：src/**, web-front/**, config/** (仅分析问题，不修改代码)
+🔍 审查：src/**, gemimi-web-front/**, config/** (仅分析问题，不修改代码)
 ⚠️ 运行：tests/** (运行测试验证假设，但不修改测试代码)
 ```
 

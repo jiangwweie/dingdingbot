@@ -27,7 +27,7 @@
 | 编号 | 类别 | 问题描述 | 位置 | 修复建议 | 状态 |
 |------|------|----------|------|----------|------|
 | **CRIT-001** | 后端 | 订单创建 API 字段命名不一致 | `src/interfaces/api.py` L1877-1993 | 将 `amount` 改为 `quantity` 与契约表对齐 | 🔴 待修复 |
-| **CRIT-002** | 前端 | TypeScript 类型定义与后端 Pydantic 模型字段名不一致 | `web-front/src/types/order.ts` L89-114 | 统一使用 `quantity` 替代 `amount` | 🔴 待修复 |
+| **CRIT-002** | 前端 | TypeScript 类型定义与后端 Pydantic 模型字段名不一致 | `gemimi-web-front/src/types/order.ts` L89-114 | 统一使用 `quantity` 替代 `amount` | 🔴 待修复 |
 
 ### 1.2 一般问题 (Major)
 
@@ -36,14 +36,14 @@
 | **MAJ-001** | 后端 | OrderRequest 模型使用 `role` 字段但契约表定义为 `order_role` | `src/domain/models.py` L1050-1074 | 字段名改为 `order_role` | 🟡 待修复 |
 | **MAJ-002** | 后端 | OrderResponseFull 缺少 `remaining_qty` 字段 | `src/domain/models.py` L1076-1106 | 添加 `remaining_qty: Decimal` 字段 | 🟡 待修复 |
 | **MAJ-003** | 后端 | 订单列表端点返回类型错误 | `src/interfaces/api.py` L2122 | 返回类型应为 `OrdersResponse` 而非 `List[OrderResponseFull]` | 🟡 待修复 |
-| **MAJ-004** | 前端 | OrderRequest 接口使用 `amount` 而非 `quantity` | `web-front/src/types/order.ts` L99 | 字段名改为 `quantity` | 🟡 待修复 |
-| **MAJ-005** | 前端 | OrderResponse 接口使用 `amount` 而非 `quantity` | `web-front/src/types/order.ts` L135 | 字段名改为 `quantity` | 🟡 待修复 |
-| **MAJ-006** | 前端 | OrderResponse 缺少 `remaining_qty` 字段 | `web-front/src/types/order.ts` L119-162 | 添加 `remaining_qty: string` 字段 | 🟡 待修复 |
-| **MAJ-007** | 前端 | PositionsResponse 与后端 PositionResponse 字段不完全对齐 | `web-front/src/types/order.ts` L409-416 | 添加 `total_margin_used` 字段 | 🟡 待修复 |
-| **MAJ-008** | 类型 | Direction 枚举前后端定义一致但 TypeScript 使用字面量类型 | `web-front/src/types/v3-models.ts` L20 | 建议使用 `const enum` 或统一 `export enum` | 🟡 待修复 |
-| **MAJ-009** | 前端 | OrdersTable 组件中 `price` 显示逻辑可能为空 | `web-front/src/components/v3/OrdersTable.tsx` L110 | 增加对 `average_exec_price` 的显示 | 🟡 待修复 |
-| **MAJ-010** | 前端 | PositionsTable 缺少 `original_qty` 字段显示 | `web-front/src/components/v3/PositionsTable.tsx` L59-131 | 添加原始数量列 | 🟡 待修复 |
-| **MAJ-011** | 前端 | Account 页面使用 mock 数据而非真实 API | `web-front/src/pages/Account.tsx` L89-101 | 替换为真实历史数据 API | 🟡 待修复 |
+| **MAJ-004** | 前端 | OrderRequest 接口使用 `amount` 而非 `quantity` | `gemimi-web-front/src/types/order.ts` L99 | 字段名改为 `quantity` | 🟡 待修复 |
+| **MAJ-005** | 前端 | OrderResponse 接口使用 `amount` 而非 `quantity` | `gemimi-web-front/src/types/order.ts` L135 | 字段名改为 `quantity` | 🟡 待修复 |
+| **MAJ-006** | 前端 | OrderResponse 缺少 `remaining_qty` 字段 | `gemimi-web-front/src/types/order.ts` L119-162 | 添加 `remaining_qty: string` 字段 | 🟡 待修复 |
+| **MAJ-007** | 前端 | PositionsResponse 与后端 PositionResponse 字段不完全对齐 | `gemimi-web-front/src/types/order.ts` L409-416 | 添加 `total_margin_used` 字段 | 🟡 待修复 |
+| **MAJ-008** | 类型 | Direction 枚举前后端定义一致但 TypeScript 使用字面量类型 | `gemimi-web-front/src/types/v3-models.ts` L20 | 建议使用 `const enum` 或统一 `export enum` | 🟡 待修复 |
+| **MAJ-009** | 前端 | OrdersTable 组件中 `price` 显示逻辑可能为空 | `gemimi-web-front/src/components/v3/OrdersTable.tsx` L110 | 增加对 `average_exec_price` 的显示 | 🟡 待修复 |
+| **MAJ-010** | 前端 | PositionsTable 缺少 `original_qty` 字段显示 | `gemimi-web-front/src/components/v3/PositionsTable.tsx` L59-131 | 添加原始数量列 | 🟡 待修复 |
+| **MAJ-011** | 前端 | Account 页面使用 mock 数据而非真实 API | `gemimi-web-front/src/pages/Account.tsx` L89-101 | 替换为真实历史数据 API | 🟡 待修复 |
 
 ### 1.3 建议问题 (Minor)
 
@@ -51,10 +51,10 @@
 |------|------|----------|------|----------|------|
 | **MIN-001** | 后端 | 错误响应格式不统一 | `src/interfaces/api.py` 多处 | 统一使用 `{error_code, message}` 格式 | ⚪ 可选 |
 | **MIN-002** | 后端 | 缺少请求日志脱敏 | `src/interfaces/api.py` L1901-1999 | 添加 `mask_secret()` 调用 | ⚪ 可选 |
-| **MIN-003** | 前端 | 订单状态过滤器重复定义 | `web-front/src/pages/Orders.tsx` L19-28 | 从 `OrderStatus` 枚举自动生成 | ⚪ 可选 |
-| **MIN-004** | 前端 | 角色过滤器重复定义 | `web-front/src/pages/Orders.tsx` L30-39 | 从 `OrderRole` 枚举自动生成 | ⚪ 可选 |
-| **MIN-005** | 前端 | DecimalDisplay 组件精度 hardcoded | `web-front/src/components/v3/DecimalDisplay.tsx` L20 | 根据字段类型动态设置精度 | ⚪ 可选 |
-| **MIN-006** | 类型 | 缺少 API 响应错误类型定义 | `web-front/src/types/order.ts` | 添加 `ApiResponseError` 接口 | ⚪ 可选 |
+| **MIN-003** | 前端 | 订单状态过滤器重复定义 | `gemimi-web-front/src/pages/Orders.tsx` L19-28 | 从 `OrderStatus` 枚举自动生成 | ⚪ 可选 |
+| **MIN-004** | 前端 | 角色过滤器重复定义 | `gemimi-web-front/src/pages/Orders.tsx` L30-39 | 从 `OrderRole` 枚举自动生成 | ⚪ 可选 |
+| **MIN-005** | 前端 | DecimalDisplay 组件精度 hardcoded | `gemimi-web-front/src/components/v3/DecimalDisplay.tsx` L20 | 根据字段类型动态设置精度 | ⚪ 可选 |
+| **MIN-006** | 类型 | 缺少 API 响应错误类型定义 | `gemimi-web-front/src/types/order.ts` | 添加 `ApiResponseError` 接口 | ⚪ 可选 |
 
 ---
 

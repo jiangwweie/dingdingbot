@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getRuntimeOverview } from '@/src/services/mockApi';
+import { getRuntimeOverview } from '@/src/services/api';
 import { RuntimeOverview as IRuntimeOverview } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';

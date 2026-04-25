@@ -101,7 +101,7 @@ dingdingbot/
 │   ├── core.yaml               # 系统核心配置
 │   └── user.yaml               # 用户配置
 │
-├── web-front/                  # 前端策略工作台
+├── gemimi-web-front/              # 前端控制台（只读）
 ├── docs/                       # 架构文档
 └── tests/
     ├── unit/                   # 单元测试

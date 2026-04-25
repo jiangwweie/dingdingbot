@@ -3,7 +3,7 @@
 > Date: 2026-04-25
 > Status: Planning
 > Current decision: **方案 B（完整控制台扩展）**
-> Scope: 基于 `gemimi-web-front` 现有骨架继续扩展，优先补齐量化使用者真正会频繁打开的页面
+> Scope: 基于 `gemimi-gemimi-web-front` 现有骨架继续扩展，优先补齐量化使用者真正会频繁打开的页面
 > Security default: **仅本地 / 内网访问**
 > Data mode: **mock-first**
 
@@ -11,7 +11,7 @@
 
 ## 1. 当前骨架评估
 
-`gemimi-web-front` 现有骨架已经具备继续扩展的基础：
+`gemimi-gemimi-web-front` 现有骨架已经具备继续扩展的基础：
 
 1. 已有统一路由和布局。
 2. 已有 `Runtime / Research / Config` 三域的信息架构。
@@ -310,7 +310,7 @@ Config
 
 ### Phase 1 - 骨架收口
 
-1. 审核 `gemimi-web-front` 现有结构。
+1. 审核 `gemimi-gemimi-web-front` 现有结构。
 2. 保留可用 layout / routing / mock 层。
 3. 统一视觉风格、状态样式、卡片与表格组件。
 4. 清理明显的 toy-like mock 数据。

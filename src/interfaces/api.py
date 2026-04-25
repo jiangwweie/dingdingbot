@@ -250,6 +250,7 @@ _config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
 _order_repo: Optional[Any] = None  # OrderRepository instance
 _execution_intent_repo: Optional[Any] = None  # ExecutionIntentRepository instance
 _execution_recovery_repo: Optional[Any] = None  # ExecutionRecoveryRepository instance
+_signal_repo: Optional[Any] = None  # Alias for _repository, used by console runtime routes
 _audit_logger: Optional[Any] = None  # OrderAuditLogger instance
 _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
 _runtime_config_provider: Optional[Any] = None  # RuntimeConfigProvider instance
@@ -305,8 +306,9 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider
     _repository = repository
+    _signal_repo = repository  # Alias for console runtime routes
     _account_getter = account_getter
     _config_manager = config_manager
     ConfigManager.set_instance(config_manager)
@@ -440,7 +442,7 @@ async def lifespan(app: FastAPI):
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
 
     global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
-    global _capital_protection, _account_service, _execution_orchestrator, _exchange_gateway
+    global _capital_protection, _account_service, _execution_orchestrator, _exchange_gateway, _signal_repo
     _standalone_gateway_created = False  # 标记是否在 lifespan 中创建了 gateway
 
     # Startup - 初始化所有 Repository
@@ -455,6 +457,7 @@ async def lifespan(app: FastAPI):
             _repository = SignalRepository()
             await _repository.initialize()
             logger.info("SignalRepository initialized in lifespan")
+        _signal_repo = _repository  # Alias for console runtime routes
 
         # 初始化 ConfigEntryRepository（幂等）
         if _config_entry_repo is None:
@@ -759,9 +762,11 @@ app.add_middleware(
 from src.interfaces.api_v1_config import router as config_v1_router
 from src.interfaces.api_console_runtime import router as console_runtime_router
 from src.interfaces.api_console_research import router as console_research_router
+from src.interfaces.api_console_research import config_router as console_config_router
 app.include_router(config_v1_router)
 app.include_router(console_runtime_router)
 app.include_router(console_research_router)
+app.include_router(console_config_router)
 
 
 # ============================================================

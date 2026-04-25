@@ -51,7 +51,7 @@
 
 ### P1-3: 定义前端 TypeScript 类型 ✅
 
-**文件**: `web-front/src/types/v3-models.ts`
+**文件**: `gemimi-web-front/src/types/v3-models.ts`
 
 **交付内容**:
 - [x] Direction 枚举
