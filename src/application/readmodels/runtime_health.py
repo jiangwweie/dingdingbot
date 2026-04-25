@@ -33,9 +33,27 @@ class RuntimeHealthReadModel:
             else None
         )
 
-        # Exchange status: prioritize freshness, then permission check
-        exchange_status = "OK"
-        if account_snapshot is not None:
+        # Exchange status: distinguish startup warmup from real staleness
+        if account_snapshot is None:
+            # Startup warmup: no snapshot yet, use permission check as proxy
+            if exchange_gateway is None:
+                exchange_status = "DOWN"
+            elif permission_summary is not None and permission_summary.get("status") in {
+                "failed",
+                "error",
+            }:
+                exchange_status = "DOWN"
+            elif permission_summary is not None and permission_summary.get("status") in {
+                "not_checked",
+                "skipped_testnet",
+            }:
+                exchange_status = "DEGRADED"
+            else:
+                # Gateway exists, permission check passed or pending
+                exchange_status = "DEGRADED"  # Conservative: warmup, not yet verified
+        else:
+            # Snapshot exists: use freshness + permission check
+            exchange_status = "OK"
             age_seconds = max(
                 0.0,
                 datetime.now(timezone.utc).timestamp() - (getattr(account_snapshot, "timestamp", 0) / 1000),
@@ -52,8 +70,25 @@ class RuntimeHealthReadModel:
         }:
             exchange_status = "DEGRADED"
 
-        pg_status = "OK" if runtime_config_provider is not None else "DOWN"
-        notification_status = "OK" if runtime_config_provider is not None else "DOWN"
+        # PG status: conservative assessment (config exists != healthy)
+        # Only mark as OK when we have verified connectivity
+        if runtime_config_provider is None:
+            pg_status = "DOWN"
+        else:
+            # Config exists but no real connectivity probe available
+            # Use startup_reconciliation as weak signal of PG health
+            if startup_reconciliation_summary is not None:
+                # Reconciliation ran, suggesting PG was reachable at startup
+                pg_status = "DEGRADED"  # Conservative: was reachable, not sure now
+            else:
+                pg_status = "DEGRADED"  # Config exists, no connectivity signal
+
+        # Notification status: conservative assessment (webhook URL exists != healthy)
+        if runtime_config_provider is None:
+            notification_status = "DOWN"
+        else:
+            # Config exists but no delivery success signal available
+            notification_status = "DEGRADED"  # Conservative: not verified
 
         breaker_symbols: list[str] = []
         if execution_orchestrator is not None and hasattr(execution_orchestrator, "list_circuit_breaker_symbols"):
@@ -85,8 +120,12 @@ class RuntimeHealthReadModel:
             recent_warnings.append("exchange health degraded")
         if pg_status == "DOWN":
             recent_warnings.append("pg config unavailable")
+        elif pg_status == "DEGRADED":
+            recent_warnings.append("pg connectivity not verified")
         if notification_status == "DOWN":
             recent_warnings.append("notification config unavailable")
+        elif notification_status == "DEGRADED":
+            recent_warnings.append("notification delivery not verified")
 
         recent_errors: list[str] = []
         if exchange_status == "DOWN":

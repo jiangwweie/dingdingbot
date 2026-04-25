@@ -294,3 +294,269 @@ async def test_health_exchange_stale():
 
     assert response.exchange_status == "DOWN"
     assert "exchange heartbeat stale" in response.recent_errors
+
+
+# ============================================================
+# Finding 1: Startup warmup exchange health tests
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_overview_startup_warmup_no_snapshot():
+    """When account_snapshot is None (startup warmup), exchange should not be DOWN."""
+    read_model = RuntimeOverviewReadModel()
+    provider = _make_runtime_config_provider()
+
+    # No snapshot yet, but exchange gateway exists
+    exchange = MagicMock()
+    exchange.get_permission_check_summary = MagicMock(return_value={"status": "passed", "verified": True})
+
+    response = await read_model.build(
+        runtime_config_provider=provider,
+        account_snapshot=None,
+        exchange_gateway=exchange,
+        execution_orchestrator=None,
+        startup_reconciliation_summary=None,
+    )
+
+    # Should NOT be DOWN during startup warmup
+    assert response.exchange_health != "DOWN"
+    # Should be DEGRADED (conservative: warmup, not yet verified)
+    assert response.exchange_health == "DEGRADED"
+    # Freshness should be "Fresh" (pending first snapshot, not dead)
+    assert response.freshness_status == "Fresh"
+
+
+@pytest.mark.asyncio
+async def test_overview_startup_warmup_permission_failed():
+    """Startup warmup with permission check failed should be DOWN."""
+    read_model = RuntimeOverviewReadModel()
+    provider = _make_runtime_config_provider()
+
+    exchange = MagicMock()
+    exchange.get_permission_check_summary = MagicMock(return_value={"status": "failed", "verified": False})
+
+    response = await read_model.build(
+        runtime_config_provider=provider,
+        account_snapshot=None,
+        exchange_gateway=exchange,
+        execution_orchestrator=None,
+        startup_reconciliation_summary=None,
+    )
+
+    # Permission failed should be DOWN even during warmup
+    assert response.exchange_health == "DOWN"
+
+
+@pytest.mark.asyncio
+async def test_overview_and_health_consistency_startup_warmup():
+    """Overview and health should have consistent semantics during startup warmup."""
+    overview_model = RuntimeOverviewReadModel()
+    health_model = RuntimeHealthReadModel()
+    provider = _make_runtime_config_provider()
+
+    exchange = MagicMock()
+    exchange.get_permission_check_summary = MagicMock(return_value={"status": "passed", "verified": True})
+
+    overview_response = await overview_model.build(
+        runtime_config_provider=provider,
+        account_snapshot=None,
+        exchange_gateway=exchange,
+        execution_orchestrator=None,
+        startup_reconciliation_summary=None,
+    )
+
+    health_response = await health_model.build(
+        runtime_config_provider=provider,
+        exchange_gateway=exchange,
+        execution_orchestrator=None,
+        execution_recovery_repo=None,
+        startup_reconciliation_summary=None,
+        account_snapshot=None,
+    )
+
+    # Both should agree on exchange status during warmup
+    assert overview_response.exchange_health == health_response.exchange_status
+    assert overview_response.exchange_health == "DEGRADED"
+
+
+# ============================================================
+# Finding 2: PG and notification status conservative tests
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_health_pg_status_conservative_without_connectivity():
+    """PG status should be DEGRADED when only config exists, not OK."""
+    read_model = RuntimeHealthReadModel()
+    provider = _make_runtime_config_provider()
+
+    response = await read_model.build(
+        runtime_config_provider=provider,
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        execution_recovery_repo=None,
+        startup_reconciliation_summary=None,  # No reconciliation signal
+        account_snapshot=_make_account_snapshot(),
+    )
+
+    # Should NOT be OK when only config exists
+    assert response.pg_status != "OK"
+    # Should be DEGRADED (conservative: config exists, no connectivity verified)
+    assert response.pg_status == "DEGRADED"
+    assert "pg connectivity not verified" in response.recent_warnings
+
+
+@pytest.mark.asyncio
+async def test_health_pg_status_with_reconciliation_signal():
+    """PG status should be DEGRADED (not OK) even with reconciliation signal."""
+    read_model = RuntimeHealthReadModel()
+    provider = _make_runtime_config_provider()
+
+    response = await read_model.build(
+        runtime_config_provider=provider,
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        execution_recovery_repo=None,
+        startup_reconciliation_summary={"pg_recovery_resolved_count": 5},
+        account_snapshot=_make_account_snapshot(),
+    )
+
+    # Even with reconciliation signal, should be DEGRADED (conservative)
+    assert response.pg_status == "DEGRADED"
+
+
+@pytest.mark.asyncio
+async def test_health_notification_status_conservative():
+    """Notification status should be DEGRADED when only config exists, not OK."""
+    read_model = RuntimeHealthReadModel()
+    provider = _make_runtime_config_provider()
+
+    response = await read_model.build(
+        runtime_config_provider=provider,
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        execution_recovery_repo=None,
+        startup_reconciliation_summary=None,
+        account_snapshot=_make_account_snapshot(),
+    )
+
+    # Should NOT be OK when only config exists
+    assert response.notification_status != "OK"
+    # Should be DEGRADED (conservative: config exists, no delivery verified)
+    assert response.notification_status == "DEGRADED"
+    assert "notification delivery not verified" in response.recent_warnings
+
+
+@pytest.mark.asyncio
+async def test_health_pg_notification_down_when_no_provider():
+    """PG and notification should be DOWN when provider is None."""
+    read_model = RuntimeHealthReadModel()
+
+    response = await read_model.build(
+        runtime_config_provider=None,
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        execution_recovery_repo=None,
+        startup_reconciliation_summary=None,
+        account_snapshot=_make_account_snapshot(),
+    )
+
+    assert response.pg_status == "DOWN"
+    assert response.notification_status == "DOWN"
+    assert "pg config unavailable" in response.recent_warnings
+    assert "notification config unavailable" in response.recent_warnings
+
+
+# ============================================================
+# Overview pg/webhook health semantic alignment tests
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_overview_pg_health_conservative_without_probe():
+    """Overview pg_health should be DEGRADED when only config exists, not OK."""
+    read_model = RuntimeOverviewReadModel()
+    provider = _make_runtime_config_provider()
+
+    response = await read_model.build(
+        runtime_config_provider=provider,
+        account_snapshot=_make_account_snapshot(),
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        startup_reconciliation_summary=None,
+    )
+
+    # Should NOT be OK when only config exists
+    assert response.pg_health != "OK"
+    # Should be DEGRADED (conservative: config exists, no connectivity verified)
+    assert response.pg_health == "DEGRADED"
+
+
+@pytest.mark.asyncio
+async def test_overview_webhook_health_conservative_without_probe():
+    """Overview webhook_health should be DEGRADED when only config exists, not OK."""
+    read_model = RuntimeOverviewReadModel()
+    provider = _make_runtime_config_provider()
+
+    response = await read_model.build(
+        runtime_config_provider=provider,
+        account_snapshot=_make_account_snapshot(),
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        startup_reconciliation_summary=None,
+    )
+
+    # Should NOT be OK when only config exists
+    assert response.webhook_health != "OK"
+    # Should be DEGRADED (conservative: config exists, no delivery verified)
+    assert response.webhook_health == "DEGRADED"
+
+
+@pytest.mark.asyncio
+async def test_overview_pg_webhook_down_when_no_provider():
+    """Overview pg_health and webhook_health should be DOWN when provider is None."""
+    read_model = RuntimeOverviewReadModel()
+
+    response = await read_model.build(
+        runtime_config_provider=None,
+        account_snapshot=_make_account_snapshot(),
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        startup_reconciliation_summary=None,
+    )
+
+    assert response.pg_health == "DOWN"
+    assert response.webhook_health == "DOWN"
+
+
+@pytest.mark.asyncio
+async def test_overview_and_health_pg_webhook_consistency():
+    """Overview and health should have consistent PG/notification health semantics."""
+    overview_model = RuntimeOverviewReadModel()
+    health_model = RuntimeHealthReadModel()
+    provider = _make_runtime_config_provider()
+
+    overview_response = await overview_model.build(
+        runtime_config_provider=provider,
+        account_snapshot=_make_account_snapshot(),
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        startup_reconciliation_summary=None,
+    )
+
+    health_response = await health_model.build(
+        runtime_config_provider=provider,
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        execution_recovery_repo=None,
+        startup_reconciliation_summary=None,
+        account_snapshot=_make_account_snapshot(),
+    )
+
+    # Both should agree on PG/notification status
+    assert overview_response.pg_health == health_response.pg_status
+    assert overview_response.webhook_health == health_response.notification_status
+    # Both should be DEGRADED (conservative)
+    assert overview_response.pg_health == "DEGRADED"
+    assert overview_response.webhook_health == "DEGRADED"

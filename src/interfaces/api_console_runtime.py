@@ -1,15 +1,25 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from src.application.readmodels.console_models import (
+    ConsoleAttemptsResponse,
+    ConsoleExecutionIntentsResponse,
+    ConsoleOrdersResponse,
+    ConsolePositionsResponse,
+    ConsoleSignalsResponse,
     RuntimeHealthResponse,
     RuntimeOverviewResponse,
     RuntimePortfolioResponse,
 )
+from src.application.readmodels.runtime_attempts import RuntimeAttemptsReadModel
+from src.application.readmodels.runtime_execution_intents import RuntimeExecutionIntentsReadModel
 from src.application.readmodels.runtime_health import RuntimeHealthReadModel
+from src.application.readmodels.runtime_orders import RuntimeOrdersReadModel
 from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
 from src.application.readmodels.runtime_portfolio import RuntimePortfolioReadModel
+from src.application.readmodels.runtime_positions import RuntimePositionsReadModel
+from src.application.readmodels.runtime_signals import RuntimeSignalsReadModel
 
 router = APIRouter(prefix="/api/runtime", tags=["Console Runtime"])
 
@@ -58,5 +68,86 @@ async def get_runtime_health() -> RuntimeHealthResponse:
         execution_recovery_repo=getattr(api_module, "_execution_recovery_repo", None),
         startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
         account_snapshot=account_snapshot,
+    )
+
+
+# ============================================================
+# Second Batch: Positions / Signals / Attempts / Orders / Intents
+# ============================================================
+
+
+@router.get("/positions", response_model=ConsolePositionsResponse)
+async def get_runtime_positions() -> ConsolePositionsResponse:
+    """Get current positions from account snapshot."""
+    api_module = _load_api_module()
+    account_snapshot = api_module._account_getter() if api_module._account_getter else None
+    read_model = RuntimePositionsReadModel()
+    return await read_model.build(
+        account_snapshot=account_snapshot,
+        position_repo=getattr(api_module, "_position_repo", None),
+    )
+
+
+@router.get("/signals", response_model=ConsoleSignalsResponse)
+async def get_runtime_signals(
+    symbol: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+) -> ConsoleSignalsResponse:
+    """Get recent signals from signal repository."""
+    api_module = _load_api_module()
+    read_model = RuntimeSignalsReadModel()
+    return await read_model.build(
+        signal_repo=getattr(api_module, "_signal_repo", None),
+        symbol=symbol,
+        limit=limit,
+    )
+
+
+@router.get("/attempts", response_model=ConsoleAttemptsResponse)
+async def get_runtime_attempts(
+    symbol: Optional[str] = Query(None),
+    timeframe: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+) -> ConsoleAttemptsResponse:
+    """Get recent attempts from signal repository."""
+    api_module = _load_api_module()
+    read_model = RuntimeAttemptsReadModel()
+    return await read_model.build(
+        signal_repo=getattr(api_module, "_signal_repo", None),
+        symbol=symbol,
+        timeframe=timeframe,
+        limit=limit,
+    )
+
+
+@router.get("/execution/orders", response_model=ConsoleOrdersResponse)
+async def get_runtime_orders(
+    symbol: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+) -> ConsoleOrdersResponse:
+    """Get recent orders from order repository."""
+    api_module = _load_api_module()
+    read_model = RuntimeOrdersReadModel()
+    return await read_model.build(
+        order_repo=getattr(api_module, "_order_repo", None),
+        symbol=symbol,
+        status=status,
+        limit=limit,
+    )
+
+
+@router.get("/execution/intents", response_model=ConsoleExecutionIntentsResponse)
+async def get_runtime_execution_intents(
+    status: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+) -> ConsoleExecutionIntentsResponse:
+    """Get execution intents from intent repository."""
+    api_module = _load_api_module()
+    read_model = RuntimeExecutionIntentsReadModel()
+    return await read_model.build(
+        intent_repo=getattr(api_module, "_execution_intent_repo", None),
+        status=status,
+        limit=limit,
     )
 

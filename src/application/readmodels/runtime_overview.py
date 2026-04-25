@@ -37,16 +37,22 @@ class RuntimeOverviewReadModel:
         now = datetime.now(timezone.utc)
         server_time = now.isoformat().replace("+00:00", "Z")
 
-        runtime_update_at = _to_iso_from_millis(getattr(account_snapshot, "timestamp", None))
-        heartbeat_at = runtime_update_at
-
-        snapshot_ts = getattr(account_snapshot, "timestamp", None)
-        if snapshot_ts:
-            age_seconds = max(0.0, now.timestamp() - (snapshot_ts / 1000))
+        # Distinguish between "no snapshot yet" and "snapshot exists but stale"
+        if account_snapshot is not None:
+            runtime_update_at = _to_iso_from_millis(getattr(account_snapshot, "timestamp", None))
+            heartbeat_at = runtime_update_at
+            snapshot_ts = getattr(account_snapshot, "timestamp", None)
+            if snapshot_ts:
+                age_seconds = max(0.0, now.timestamp() - (snapshot_ts / 1000))
+            else:
+                age_seconds = 999999.0
+            freshness_status = _freshness_from_age(age_seconds)
         else:
-            age_seconds = 999999.0
-
-        freshness_status = _freshness_from_age(age_seconds)
+            # Startup warmup: no snapshot yet
+            runtime_update_at = _iso_now()
+            heartbeat_at = runtime_update_at
+            age_seconds = 0.0
+            freshness_status = "Fresh"  # Pending first snapshot, not dead
 
         if runtime_config_provider is not None:
             resolved = runtime_config_provider.resolved_config
@@ -63,8 +69,9 @@ class RuntimeOverviewReadModel:
                 f"order={environment.core_order_backend}, "
                 f"position={environment.core_position_backend}"
             )
-            pg_health = "OK" if environment.pg_database_url.get_secret_value() else "DOWN"
-            webhook_health = "OK" if environment.feishu_webhook_url.get_secret_value() else "DOWN"
+            # Conservative: config exists != healthy, align with runtime_health
+            pg_health = "DEGRADED"  # No real connectivity probe available
+            webhook_health = "DEGRADED"  # No delivery success signal available
         else:
             profile = "unavailable"
             version = "unavailable"
@@ -82,18 +89,37 @@ class RuntimeOverviewReadModel:
             else None
         )
 
-        # Exchange health: prioritize freshness, then permission check
-        exchange_health = "OK"
-        if freshness_status == "Possibly Dead":
-            exchange_health = "DOWN"
-        elif freshness_status == "Stale":
-            exchange_health = "DEGRADED"
-        elif permission_summary is not None and permission_summary.get("status") in {
-            "failed",
-            "error",
-            "not_checked",
-        }:
-            exchange_health = "DEGRADED"
+        # Exchange health: distinguish startup warmup from real staleness
+        if account_snapshot is None:
+            # Startup warmup: no snapshot yet, use permission check as proxy
+            if exchange_gateway is None:
+                exchange_health = "DOWN"
+            elif permission_summary is not None and permission_summary.get("status") in {
+                "failed",
+                "error",
+            }:
+                exchange_health = "DOWN"
+            elif permission_summary is not None and permission_summary.get("status") in {
+                "not_checked",
+                "skipped_testnet",
+            }:
+                exchange_health = "DEGRADED"
+            else:
+                # Gateway exists, permission check passed or pending
+                exchange_health = "DEGRADED"  # Conservative: warmup, not yet verified
+        else:
+            # Snapshot exists: use freshness + permission check
+            exchange_health = "OK"
+            if freshness_status == "Possibly Dead":
+                exchange_health = "DOWN"
+            elif freshness_status == "Stale":
+                exchange_health = "DEGRADED"
+            elif permission_summary is not None and permission_summary.get("status") in {
+                "failed",
+                "error",
+                "not_checked",
+            }:
+                exchange_health = "DEGRADED"
 
         breaker_symbols = []
         if execution_orchestrator is not None and hasattr(execution_orchestrator, "list_circuit_breaker_symbols"):
