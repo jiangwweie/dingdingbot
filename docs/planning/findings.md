@@ -412,6 +412,19 @@ SSOT 文档：
    - 再补研究辅助
    - 不突破只读边界
 
+前端扩展新主线（方案 B）：
+
+1. `gemimi-web-front` 已证明可以作为完整控制台的起点，不需要推倒重来。
+2. 方案 B 的目标不是单独补几个页，而是把前端扩展成完整的量化观察与研究控制台。
+3. 已新增主规划文档：
+   - `docs/planning/architecture/2026-04-25-frontend-console-plan-b.md`
+4. 方案 B 的优先级更偏向：
+   - Runtime 观察
+   - Portfolio / Positions 风险视图
+   - Events 事件时间线
+   - Candidate Review 聚合判断
+   - Config Snapshot 只读预览
+
 ### `.env` 不能承载本地 PG 示例或 backend 切换值
 
 已跟踪 `.env` 仍包含真实交易所 key / webhook，不能再混入本地 PG 连接串或 backend 切换示例。否则后续提交时容易把个人本地运行环境和敏感配置一起带入版本历史。

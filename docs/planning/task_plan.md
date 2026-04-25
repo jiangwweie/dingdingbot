@@ -392,6 +392,11 @@ Sim-0 详细任务拆分（归档参考）：
      - 更贴近量化值班者使用场景
      - 先补观察 / 理解能力
      - 仍不引入写操作
+   - 当前前端扩展主线已切换为方案 B：
+     - 基于 `gemimi-web-front` 现有骨架继续扩展
+     - 目标是完整控制台，而不是单点补页
+     - 新的主文档：
+       - `docs/planning/architecture/2026-04-25-frontend-console-plan-b.md`
 
 ---
 
