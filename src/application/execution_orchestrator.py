@@ -37,6 +37,7 @@ from src.domain.models import (
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.application.capital_protection import CapitalProtectionManager
 from src.application.order_lifecycle_service import OrderLifecycleService
+from src.application.position_projection_service import PositionProjectionService
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
 from src.infrastructure.repository_ports import ExecutionIntentRepositoryPort
@@ -62,6 +63,7 @@ class ExecutionOrchestrator:
         intent_repository: Optional[ExecutionIntentRepositoryPort] = None,
         notifier: Optional[Callable[[str, str], Any]] = None,  # P0-6: 可选告警回调
         execution_recovery_repository: Optional[Any] = None,  # PG 正式恢复表
+        position_projection_service: Optional[PositionProjectionService] = None,
     ):
         """
         初始化执行编排器
@@ -80,6 +82,7 @@ class ExecutionOrchestrator:
         self._intent_repository = intent_repository
         self._notifier = notifier  # P0-6: 保存告警回调
         self._execution_recovery_repository = execution_recovery_repository  # PG 正式版
+        self._position_projection_service = position_projection_service
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
@@ -91,6 +94,8 @@ class ExecutionOrchestrator:
         self._order_lifecycle.set_entry_partially_filled_callback(
             self._handle_entry_partially_filled
         )
+        self._order_lifecycle.set_entry_filled_callback(self._handle_entry_filled)
+        self._order_lifecycle.set_exit_filled_callback(self._handle_exit_filled)
 
     async def _save_intent(self, intent: ExecutionIntent) -> None:
         """保存执行意图到本地缓存，并按需持久化到仓储。"""
@@ -135,6 +140,136 @@ class ExecutionOrchestrator:
             if stored_intent.order_id == order_id:
                 return stored_intent
         return None
+
+    async def _project_position_from_entry_order(self, entry_order: Optional[Order]) -> None:
+        """把 ENTRY 成交事实投影到本地 positions。"""
+        if self._position_projection_service is None or entry_order is None:
+            return
+
+        try:
+            await self._position_projection_service.project_entry_fill(entry_order)
+        except Exception as e:
+            logger.warning(
+                "[ExecutionOrchestrator] position projection 更新失败: "
+                f"order_id={getattr(entry_order, 'id', 'unknown')}, error={e}",
+                exc_info=True,
+            )
+
+    async def _has_existing_protection_orders(self, entry_order: Order) -> bool:
+        """检查 ENTRY 是否已有保护单，避免重复挂载。"""
+        all_orders = await self._order_lifecycle.get_orders_by_signal(entry_order.signal_id)
+        protection_roles = {
+            OrderRole.SL,
+            OrderRole.TP1,
+            OrderRole.TP2,
+            OrderRole.TP3,
+            OrderRole.TP4,
+            OrderRole.TP5,
+        }
+        protection_orders = [
+            order for order in all_orders
+            if order.parent_order_id == entry_order.id
+            and order.order_role in protection_roles
+        ]
+        if protection_orders:
+            return True
+
+        # 对账重建或历史脏数据下，parent_order_id 可能缺失。
+        # 此时仅把“未绑定 parent”的保护单视为兜底命中，避免把别的 ENTRY 子单误判为已保护。
+        protection_orders = [
+            order for order in all_orders
+            if order.order_role in protection_roles
+            and not order.parent_order_id
+        ]
+        return bool(protection_orders)
+
+    async def _protect_filled_entry(
+        self,
+        *,
+        intent: ExecutionIntent,
+        entry_order: Order,
+        strategy: Optional[OrderStrategy],
+    ) -> None:
+        """对已完全成交的 ENTRY 挂载保护单并更新投影。"""
+        if strategy is None:
+            logger.warning(
+                "[ExecutionOrchestrator] intent 无策略快照，跳过 ENTRY 成交后保护单生成: "
+                f"intent_id={intent.id}, order_id={entry_order.id}"
+            )
+            return
+
+        if await self._has_existing_protection_orders(entry_order):
+            logger.info(
+                "[ExecutionOrchestrator] ENTRY 已存在保护单，跳过重复挂载: "
+                f"intent_id={intent.id}, order_id={entry_order.id}"
+            )
+            await self._project_position_from_entry_order(entry_order)
+            return
+
+        logger.info(
+            f"[ExecutionOrchestrator] ENTRY 成交，开始挂载保护单: "
+            f"intent_id={intent.id}, order_id={entry_order.id}"
+        )
+
+        intent.status = ExecutionIntentStatus.PROTECTING
+        intent.order_id = entry_order.id
+        intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        protection_result = await self._mount_protection_orders(
+            intent=intent,
+            entry_order=entry_order,
+            signal=intent.signal,
+            strategy=strategy,
+        )
+
+        if protection_result["success"]:
+            intent.status = ExecutionIntentStatus.COMPLETED
+            logger.info(
+                f"[ExecutionOrchestrator] 保护单挂载成功: "
+                f"intent_id={intent.id}, "
+                f"tp_orders={len(protection_result['tp_orders'])}, "
+                f"sl_order={protection_result['sl_order']}"
+            )
+        else:
+            intent.status = ExecutionIntentStatus.FAILED
+            intent.failed_reason = f"保护单挂载失败: {protection_result['error']}"
+            logger.error(
+                f"[ExecutionOrchestrator] 保护单挂载失败: "
+                f"intent_id={intent.id}, error={protection_result['error']}"
+            )
+
+        await self._project_position_from_entry_order(entry_order)
+        await self._save_intent(intent)
+
+    async def _handle_entry_filled(self, entry_order: Order) -> None:
+        """处理 ENTRY 完全成交后的保护单挂载与仓位投影。"""
+        intent = await self._load_intent_by_order_id(entry_order.id)
+        if not intent:
+            logger.warning(
+                "[ExecutionOrchestrator] 未找到对应的 ExecutionIntent，跳过 ENTRY 成交处理: "
+                f"order_id={entry_order.id}"
+            )
+            return
+
+        await self._protect_filled_entry(
+            intent=intent,
+            entry_order=entry_order,
+            strategy=intent.strategy,
+        )
+
+    async def _handle_exit_filled(self, exit_order: Order) -> None:
+        """处理 TP/SL 完全成交后的仓位投影更新。"""
+        if self._position_projection_service is None:
+            return
+
+        try:
+            await self._position_projection_service.project_exit_fill(exit_order)
+        except Exception as e:
+            logger.warning(
+                "[ExecutionOrchestrator] exit fill position projection 更新失败: "
+                f"order_id={exit_order.id}, error={e}",
+                exc_info=True,
+            )
 
     async def execute_signal(
         self,
@@ -348,48 +483,15 @@ class ExecutionOrchestrator:
                     average_exec_price=average_exec_price,
                 )
 
-                # MVP-Protected-Position: ENTRY 成交后挂载保护单
-                logger.info(
-                    f"[ExecutionOrchestrator] ENTRY 成交，开始挂载保护单: "
-                    f"intent_id={intent_id}, order_id={order.id}"
-                )
-
-                # 更新状态为 PROTECTING
-                intent.status = ExecutionIntentStatus.PROTECTING
-                intent.order_id = order.id
                 intent.exchange_order_id = placement_result.exchange_order_id
-                intent.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
 
                 # 从数据库重新加载订单（获取最新的 average_exec_price）
-                entry_order_filled = await self._order_lifecycle._repository.get_order(order.id)
-
-                # 挂载保护单
-                protection_result = await self._mount_protection_orders(
+                entry_order_filled = await self._order_lifecycle.get_order(order.id)
+                await self._protect_filled_entry(
                     intent=intent,
                     entry_order=entry_order_filled,
-                    signal=signal,
                     strategy=strategy,
                 )
-
-                if protection_result["success"]:
-                    # 所有保护单成功
-                    intent.status = ExecutionIntentStatus.COMPLETED
-                    logger.info(
-                        f"[ExecutionOrchestrator] 保护单挂载成功: "
-                        f"intent_id={intent_id}, "
-                        f"tp_orders={len(protection_result['tp_orders'])}, "
-                        f"sl_order={protection_result['sl_order']}"
-                    )
-                else:
-                    # 保护单部分失败
-                    intent.status = ExecutionIntentStatus.FAILED
-                    intent.failed_reason = f"保护单挂载失败: {protection_result['error']}"
-                    logger.error(
-                        f"[ExecutionOrchestrator] 保护单挂载失败: "
-                        f"intent_id={intent_id}, error={protection_result['error']}"
-                    )
-
-                await self._save_intent(intent)
                 return intent
 
             elif placement_result.status == OrderStatus.PARTIALLY_FILLED:
@@ -566,12 +668,13 @@ class ExecutionOrchestrator:
                     # 修改订单状态为 CREATED（OrderManager 生成的订单状态是 OPEN）
                     prot_order.status = OrderStatus.CREATED
 
-                    # P1 修复：使用 OrderLifecycleService 正式链保存订单
-                    # 而不是直接调用 repository.save()
-                    await self._order_lifecycle._repository.save(prot_order)
-
-                    # 创建状态机（触发审计日志和变更通知）
-                    self._order_lifecycle._get_or_create_state_machine(prot_order)
+                    await self._order_lifecycle.register_created_order(
+                        prot_order,
+                        metadata={
+                            "source": "ExecutionOrchestrator._mount_protection_orders",
+                            "parent_order_id": entry_order.id,
+                        },
+                    )
 
                     # 提交到交易所
                     side = "sell" if entry_order.direction == Direction.LONG else "buy"
@@ -704,9 +807,7 @@ class ExecutionOrchestrator:
             return
 
         # 获取当前 ENTRY 的所有子保护单
-        all_orders = await self._order_lifecycle._repository.get_orders_by_signal(
-            entry_order.signal_id
-        )
+        all_orders = await self._order_lifecycle.get_orders_by_signal(entry_order.signal_id)
 
         existing_protection_orders = [
             o for o in all_orders
@@ -984,11 +1085,13 @@ class ExecutionOrchestrator:
                     # 修改订单状态为 CREATED
                     prot_order.status = OrderStatus.CREATED
 
-                    # 使用 OrderLifecycleService 正式链保存订单
-                    await self._order_lifecycle._repository.save(prot_order)
-
-                    # 创建状态机
-                    self._order_lifecycle._get_or_create_state_machine(prot_order)
+                    await self._order_lifecycle.register_created_order(
+                        prot_order,
+                        metadata={
+                            "source": "ExecutionOrchestrator._handle_entry_partially_filled",
+                            "parent_order_id": entry_order.id,
+                        },
+                    )
 
                     # 提交到交易所
                     side = "sell" if entry_order.direction == Direction.LONG else "buy"
@@ -1047,6 +1150,8 @@ class ExecutionOrchestrator:
                 f"delta_qty={delta_qty}"
             )
             await self._save_intent(intent)
+
+            await self._project_position_from_entry_order(entry_order)
 
         except Exception as e:
             logger.error(

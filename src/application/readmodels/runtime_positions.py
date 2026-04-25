@@ -74,4 +74,32 @@ class RuntimePositionsReadModel:
                     )
                 )
 
+        if not positions and position_repo is not None and hasattr(position_repo, "list_active"):
+            try:
+                stored_positions = await position_repo.list_active(limit=200)
+            except Exception:
+                stored_positions = []
+
+            for pos in stored_positions:
+                direction = getattr(pos, "direction", "LONG")
+                entry_price = getattr(pos, "entry_price", Decimal("0"))
+                quantity = getattr(pos, "current_qty", getattr(pos, "quantity", Decimal("0")))
+                watermark_price = getattr(pos, "watermark_price", None)
+                updated_at = getattr(pos, "updated_at", None)
+
+                positions.append(
+                    ConsolePositionItem(
+                        symbol=getattr(pos, "symbol", "unknown"),
+                        direction=str(getattr(direction, "value", direction)),
+                        quantity=_to_float(quantity),
+                        entry_price=_to_float(entry_price),
+                        current_price=_to_float(watermark_price or entry_price),
+                        unrealized_pnl=_to_float(getattr(pos, "unrealized_pnl", Decimal("0"))),
+                        leverage=int(getattr(pos, "leverage", 1) or 1),
+                        margin=0.0,
+                        exposure=_to_float(quantity * entry_price),
+                        updated_at=_to_iso_from_millis(updated_at),
+                    )
+                )
+
         return ConsolePositionsResponse(positions=positions)

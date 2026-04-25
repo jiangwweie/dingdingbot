@@ -1146,6 +1146,8 @@ class Position(FinancialModel):
     total_fees_paid: Decimal = Field(default=Decimal('0'), description="累计支付的手续费")
     total_funding_paid: Decimal = Field(default=Decimal('0'), description="累计支付的资金费用 (BT-2)")
 
+    opened_at: Optional[int] = Field(default=None, description="开仓时间戳（毫秒）")
+    closed_at: Optional[int] = Field(default=None, description="平仓时间戳（毫秒）")
     is_closed: bool = False      # current_qty 归零时标记为 True
 
 

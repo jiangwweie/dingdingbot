@@ -12,6 +12,35 @@
 
 ## 近期完成
 
+### 2026-04-25 -- 执行主线 PG 切换第一层代码骨架已落地
+
+1. ✅ 已新增 execution 主线仓储显式入口：
+   - `create_pg_order_repository()`
+   - `create_pg_position_repository()`
+2. ✅ 已新增 `PositionProjectionService`，作为 ENTRY 成交投影到 PG `positions` 的最小骨架
+3. ✅ 已把 `PgPositionRepository` 从 ORM 骨架提升为可读写 domain `Position` 的最小实现，并新增 `list_active()`
+4. ✅ 已把 `position_repo` 注入链打通：
+   - `main.py -> api.set_dependencies() -> api_console_runtime.py -> RuntimePositionsReadModel`
+5. ✅ 已移除 `ExecutionOrchestrator` 内两处直接访问 `_order_lifecycle._repository.save()` 的主链绕过点，统一改走 `OrderLifecycleService.register_created_order()`
+6. ✅ 已把 `api.py` 的 runtime order repo fallback 改为统一工厂 `create_order_repository()`，不再固定直连 SQLite
+7. ✅ 已完成快速静态校验：
+   - `python3 -m py_compile ...` 通过
+8. ✅ 已补齐即时 `full fill` 的 position projection 入口，并把 orchestrator 内剩余 `_order_lifecycle._repository` 直连清零
+9. ✅ 已补齐 `ENTRY filled` 回调链：
+   - WebSocket / 对账把 ENTRY 推进到 `FILLED` 时，也会回到 orchestrator 挂保护单并更新 position projection
+   - 已增加“已有保护单则不重复挂载”的防重逻辑
+10. ✅ 已补齐 `TP/SL filled` -> position projection 更新链：
+   - exit filled 会更新 `current_qty / realized_pnl / total_fees_paid / is_closed / closed_at / watermark_price`
+11. ✅ 已把 runtime execution 装配收口到显式 PG 工厂：
+   - `main.py` runtime 主链不再走通用 order/position 工厂
+   - `api.py` runtime lifespan 与 runtime order fallback 也显式走 PG runtime 工厂
+12. ✅ 已把 runtime overview 的 backend summary 改为优先显示实际装配结果，避免继续被历史 `.env` 值误导
+13. ✅ 已增强 `_has_existing_protection_orders()` 防重判定：
+   - `parent_order_id` 优先
+   - 仅“未绑定 parent 的保护单”作为对账重建/脏数据场景的兜底
+14. ✅ 已补齐 `Position.opened_at / closed_at`，移除 `project_exit_fill()` 对 `object.__setattr__` 的依赖
+15. ✅ 已修复 `GET /api/v3/positions` 的 `offset` 双重切片 bug，fallback 分支不再因二次切片返回空数组
+16. ✅ 未执行 pytest；按仓库红线，完整测试前仍需用户确认
 ### 2026-04-25 -- 研究链边界已补充并同步到 planning 文档
 
 1. ✅ 已明确 SQLite + PG 双轨阶段后续研究主线继续推进 `Spec / Resolver / Reporter` 收口。

@@ -271,6 +271,18 @@ Sim-0 详细任务拆分（归档参考）：
 4. `signals / signal_attempts` 不并入当前窗口，待 execution 主链稳定后再迁
 5. 参数 / 策略配置域迁移必须等 runtime config SSOT 稳定后再评估
 6. backtest / research / 历史报表迁移放在最后，不进入当前与下一窗口
+7. 当前窗口第一层代码骨架已完成：
+   - order repo fallback 已统一回到工厂
+   - `ExecutionOrchestrator -> OrderLifecycleService` 的保护单 created 持久化绕过点已收口
+   - `positions` 的 PG projection service / repository / runtime read fallback 已打通最小骨架
+   - 即时 `full fill` 与 `partial fill` 两条主路径都已接入 projection 入口
+   - WebSocket / 对账把 ENTRY 推到 `FILLED` 的场景也已通过 callback 串回 orchestrator
+   - `TP/SL filled` 也已接入 projection 更新链，开始具备本地持仓执行态收缩能力
+   - runtime execution 装配已显式切到 PG order/position runtime 工厂，不再依赖通用工厂的环境变量切换
+   - runtime overview 已能展示实际 execution backend，而不是仅显示历史环境变量
+8. 当前窗口下一步应进入：
+   - fee 映射、幂等、防重放、乱序回放下的 position projection 语义加固
+   - 针对 PG order/position 路径的定向单测与集成验证
 
 ### C. 研究/回测方向（非当前主线）
 

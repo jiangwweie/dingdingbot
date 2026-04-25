@@ -35,11 +35,13 @@ from src.application.account_service import BinanceAccountService
 from src.application.capital_protection import CapitalProtectionManager
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.order_lifecycle_service import OrderLifecycleService
+from src.application.position_projection_service import PositionProjectionService
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.notifier import NotificationService, get_notification_service
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
-    create_order_repository,
+    create_runtime_order_repository,
+    create_runtime_position_repository,
 )
 from src.infrastructure.runtime_profile_repository import RuntimeProfileRepository
 from src.application.signal_pipeline import SignalPipeline
@@ -59,6 +61,7 @@ _notification_service: Optional[NotificationService] = None
 _config_entry_repo = None  # Initialized in Phase 9
 _order_repo = None
 _execution_intent_repo = None
+_position_repo = None
 _order_lifecycle_service: Optional[OrderLifecycleService] = None
 _capital_protection: Optional[CapitalProtectionManager] = None
 _execution_orchestrator: Optional[ExecutionOrchestrator] = None
@@ -100,7 +103,7 @@ async def graceful_shutdown():
     logger.info("Graceful shutdown initiated...")
 
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
-    global _execution_intent_repo, _order_repo, _execution_recovery_repo
+    global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
     global _runtime_config_provider
     _shutdown_event.set()
 
@@ -119,6 +122,10 @@ async def graceful_shutdown():
     if _order_repo:
         await _order_repo.close()
         _order_repo = None
+
+    if _position_repo:
+        await _position_repo.close()
+        _position_repo = None
 
     # PG 正式恢复表
     if _execution_recovery_repo:
@@ -170,7 +177,7 @@ async def run_application():
     Orchestrates the complete startup and runtime flow.
     """
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
-    global _order_repo, _execution_intent_repo, _order_lifecycle_service
+    global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator
     global _runtime_config_provider
 
@@ -308,7 +315,7 @@ async def run_application():
         # Phase 4.2: Initialize Core Execution Runtime
         # =============================================
         logger.info("Phase 4.2: Initializing core execution runtime...")
-        _order_repo = create_order_repository()
+        _order_repo = create_runtime_order_repository()
         await _order_repo.initialize()
         if hasattr(_order_repo, "set_exchange_gateway"):
             _order_repo.set_exchange_gateway(_exchange_gateway)
@@ -316,6 +323,10 @@ async def run_application():
         _execution_intent_repo = create_execution_intent_repository()
         if _execution_intent_repo is not None:
             await _execution_intent_repo.initialize()
+
+        _position_repo = create_runtime_position_repository()
+        if _position_repo is not None:
+            await _position_repo.initialize()
 
         _order_lifecycle_service = OrderLifecycleService(repository=_order_repo)
         await _order_lifecycle_service.start()
@@ -380,6 +391,7 @@ async def run_application():
             intent_repository=_execution_intent_repo,
             notifier=_orchestrator_notifier_adapter,  # P0-6: 注入告警回调
             execution_recovery_repository=_execution_recovery_repo,  # PG 正式版
+            position_projection_service=PositionProjectionService(_position_repo),
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
         logger.info("Core execution runtime ready")
@@ -706,6 +718,7 @@ async def run_application():
             order_repo=_order_repo,
             execution_intent_repo=_execution_intent_repo,
             execution_recovery_repo=_execution_recovery_repo,
+            position_repo=_position_repo,
             order_lifecycle_service=_order_lifecycle_service,
             # Config repositories (unified with api_v1_config.py)
             strategy_repo=_api_strategy_repo,

@@ -24,6 +24,18 @@ def _freshness_from_age(age_seconds: float) -> str:
     return "Possibly Dead"
 
 
+def _resolve_backend_name(repo: Optional[Any], default: str) -> str:
+    if repo is None:
+        return default
+
+    class_name = repo.__class__.__name__
+    if class_name.startswith("Pg"):
+        return "postgres"
+    if class_name.endswith("Repository"):
+        return "sqlite"
+    return default
+
+
 class RuntimeOverviewReadModel:
     async def build(
         self,
@@ -33,6 +45,9 @@ class RuntimeOverviewReadModel:
         exchange_gateway: Optional[Any],
         execution_orchestrator: Optional[Any],
         startup_reconciliation_summary: Optional[dict[str, Any]],
+        order_repo: Optional[Any] = None,
+        position_repo: Optional[Any] = None,
+        execution_intent_repo: Optional[Any] = None,
     ) -> RuntimeOverviewResponse:
         now = datetime.now(timezone.utc)
         server_time = now.isoformat().replace("+00:00", "Z")
@@ -64,10 +79,16 @@ class RuntimeOverviewReadModel:
             frozen = True
             symbol = market.primary_symbol
             timeframe = market.primary_timeframe
+            intent_backend = _resolve_backend_name(
+                execution_intent_repo,
+                environment.core_execution_intent_backend,
+            )
+            order_backend = _resolve_backend_name(order_repo, environment.core_order_backend)
+            position_backend = _resolve_backend_name(position_repo, environment.core_position_backend)
             backend_summary = (
-                f"intent={environment.core_execution_intent_backend}, "
-                f"order={environment.core_order_backend}, "
-                f"position={environment.core_position_backend}"
+                f"intent={intent_backend}, "
+                f"order={order_backend}, "
+                f"position={position_backend}"
             )
             # Conservative: config exists != healthy, align with runtime_health
             pg_health = "DEGRADED"  # No real connectivity probe available
@@ -152,4 +173,3 @@ class RuntimeOverviewReadModel:
             last_heartbeat_at=heartbeat_at,
             freshness_status=freshness_status,
         )
-

@@ -64,6 +64,49 @@
    - 交易所 `account_snapshot` 仍是外部事实源
    - PG `positions` 承担恢复、风控、console、保护单挂载所需的本地执行态读模型
 10. `positions` 写入时机更适合挂在 `OrderLifecycleService` 的成交事件之后，由独立 projection/update 服务写 PG，而不是由 `ExecutionOrchestrator` 直接写仓位。
+11. 当前代码骨架已先完成两条关键收口：
+   - `ExecutionOrchestrator` 不再直接调用 `order_lifecycle._repository.save()` 持久化保护单，而是统一改走 `OrderLifecycleService.register_created_order()`
+   - runtime API fallback 不再默认直接 `new OrderRepository()`，而是回到 `create_order_repository()` 统一装配入口
+12. `positions` 已补出 execution projection 骨架：
+   - 新增 `PositionProjectionService`
+   - `PgPositionRepository` 从“只收 ORM”升级为“可收 Position domain model + 可列出 active positions”
+   - `RuntimePositionsReadModel` 已具备 account snapshot 失效时回读 PG position projection 的 fallback 能力
+   - 即时 `full fill` 主路径与 `partial fill` 增量保护路径都已接入 projection 入口
+13. 当前仍未完成的部分是“投影语义完备化”，包括：
+   - partial fill / reduce / close / fee / watermark 的精确更新
+   - `v3 positions` API 是否改为 PG-first read model
+14. `OrderLifecycleService -> ExecutionOrchestrator` 已新增 `ENTRY filled` 回调。
+   - WebSocket / 对账把 ENTRY 推进到 `FILLED` 时，也会统一回到 orchestrator 挂保护单并更新 position projection
+   - 新增“已有保护单则跳过重复挂载”的防重门槛，避免下单响应 immediate fill 之后又被 WebSocket 重放时重复生成 TP/SL
+15. `TP/SL filled` 也已接入 position projection 回调链。
+   - `OrderLifecycleService` 在 TP/SL 首次进入 `FILLED` 时会触发 exit-filled callback
+   - `PositionProjectionService.project_exit_fill()` 会更新：
+     - `current_qty`
+     - `realized_pnl`
+     - `total_fees_paid`
+     - `is_closed / closed_at`
+     - `watermark_price`
+16. 当前剩余未补齐的 position projection 语义主要是：
+   - 交易所侧真实手续费字段如何稳定映射到 `close_fee / fee_paid`
+   - partial exit / repeated fill / out-of-order 回放的更严格幂等边界
+   - `v3 positions` 读面虽已支持 PG fallback，但是否需要进一步做成明确的 PG-first execution read model 仍待决定
+17. runtime execution 装配已从“通用工厂 + 环境变量切换”进一步收口为“显式 PG runtime 工厂”。
+   - `main.py` 的 execution 主链显式使用 PG order repo / PG position repo
+   - `api.py` 的 runtime lifespan 与 `_get_order_repo()` fallback 也显式使用 PG runtime 工厂
+   - backtest / research / 非主线场景仍可保留通用工厂或 SQLite 仓储，不在本窗口处理
+18. runtime overview 的 backend summary 已改为优先反映实际装配结果，而不是只显示环境变量。
+   - 这样即使 `.env` 中历史值仍是 `CORE_ORDER_BACKEND=sqlite`
+   - runtime console 仍会展示 execution 主链当前实际是 `order=postgres / position=postgres`
+19. `_has_existing_protection_orders()` 的防重判定已增强。
+   - `parent_order_id == entry_order.id` 仍是第一优先级
+   - 当对账重建或历史脏数据导致 `parent_order_id` 缺失时，仅把“未绑定 parent 的保护单”作为兜底命中，降低误判别的 ENTRY 子单的风险
+20. `Position` domain model 已补齐 `opened_at / closed_at` 字段。
+   - `project_exit_fill()` 不再需要通过 `object.__setattr__` 绕写 `closed_at`
+   - projection 读写链与 PG `positions` 表的时间字段语义现在更一致
+21. `GET /api/v3/positions` 的 `offset` 双重切片 bug 已修复。
+   - 之前 exchange 分支和 PG fallback 分支之外还有一层公共二次切片
+   - 当 fallback 分支已先切片时，`offset > 0` 会再次切片成空数组
+   - 现在改为各分支各自切片一次，避免重复裁剪
 
 ### 0. Config Module 短中期保留 SQLite，Runtime 通过 Resolver 收口
 

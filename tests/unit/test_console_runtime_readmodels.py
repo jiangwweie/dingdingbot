@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from src.application.readmodels.runtime_health import RuntimeHealthReadModel
 from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
 from src.application.readmodels.runtime_portfolio import RuntimePortfolioReadModel
+from src.application.readmodels.runtime_positions import RuntimePositionsReadModel
 from src.domain.models import PositionInfo
 
 
@@ -214,6 +216,49 @@ async def test_portfolio_no_account_snapshot():
 
     assert response.total_equity == 0.0
     assert response.positions == []
+
+
+# ============================================================
+# Runtime Positions Tests
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_positions_fallbacks_to_position_repo_when_snapshot_missing():
+    read_model = RuntimePositionsReadModel()
+
+    repo = MagicMock()
+
+    async def mock_list_active(*, limit=100, symbol=None):
+        assert symbol is None
+        assert limit == 200
+        return [
+            SimpleNamespace(
+                symbol="BTC/USDT:USDT",
+                direction="LONG",
+                current_qty=Decimal("0.25"),
+                entry_price=Decimal("64000"),
+                watermark_price=Decimal("65000"),
+                unrealized_pnl=Decimal("120"),
+                leverage=5,
+                updated_at=1710000000000,
+            )
+        ]
+
+    repo.list_active = mock_list_active
+
+    response = await read_model.build(account_snapshot=None, position_repo=repo)
+
+    assert len(response.positions) == 1
+    position = response.positions[0]
+    assert position.symbol == "BTC/USDT:USDT"
+    assert position.direction == "LONG"
+    assert position.quantity == 0.25
+    assert position.entry_price == 64000.0
+    assert position.current_price == 65000.0
+    assert position.unrealized_pnl == 120.0
+    assert position.exposure == 16000.0
+    assert position.updated_at == "2024-03-09T16:00:00Z"
 
 
 # ============================================================
@@ -594,3 +639,188 @@ async def test_execution_intents_domain_model_parsing():
     assert response.intents[0].symbol == "BTC/USDT:USDT"
     assert response.intents[0].side == "SELL"
     assert response.intents[0].quantity == 0.5
+
+
+# ============================================================
+# RuntimeOverviewReadModel: backend_summary 实际装配优先
+# ============================================================
+
+
+class TestRuntimeOverviewBackendSummary:
+    """backend_summary 优先展示实际装配的 repo 类型，而非 environment 配置。"""
+
+    def _make_provider_with_backends(
+        self,
+        order_backend="sqlite",
+        position_backend="sqlite",
+        intent_backend="postgres",
+    ):
+        provider = MagicMock()
+        resolved = MagicMock()
+        resolved.profile_name = "test_profile"
+        resolved.version = 1
+        resolved.config_hash = "hash123"
+
+        environment = MagicMock()
+        environment.core_order_backend = order_backend
+        environment.core_position_backend = position_backend
+        environment.core_execution_intent_backend = intent_backend
+        resolved.environment = environment
+
+        market = MagicMock()
+        market.primary_symbol = "BTC/USDT:USDT"
+        market.primary_timeframe = "15m"
+        resolved.market = market
+
+        provider.resolved_config = resolved
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_pg_repo_shows_postgres_regardless_of_env_config(self):
+        """实际 repo 是 Pg*Repository 时，backend_summary 显示 postgres，忽略 environment 配置。"""
+        from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
+
+        read_model = RuntimeOverviewReadModel()
+
+        # environment 配置说 sqlite，但实际注入的是 PG repo
+        provider = self._make_provider_with_backends(
+            order_backend="sqlite",
+            position_backend="sqlite",
+            intent_backend="sqlite",
+        )
+
+        # Mock Pg*Repository 类名
+        pg_order_repo = MagicMock()
+        pg_order_repo.__class__.__name__ = "PgOrderRepository"
+        pg_position_repo = MagicMock()
+        pg_position_repo.__class__.__name__ = "PgPositionRepository"
+        pg_intent_repo = MagicMock()
+        pg_intent_repo.__class__.__name__ = "PgExecutionIntentRepository"
+
+        response = await read_model.build(
+            runtime_config_provider=provider,
+            account_snapshot=_make_account_snapshot(),
+            exchange_gateway=None,
+            execution_orchestrator=None,
+            startup_reconciliation_summary=None,
+            order_repo=pg_order_repo,
+            position_repo=pg_position_repo,
+            execution_intent_repo=pg_intent_repo,
+        )
+
+        assert "order=postgres" in response.backend_summary
+        assert "position=postgres" in response.backend_summary
+        assert "intent=postgres" in response.backend_summary
+
+    @pytest.mark.asyncio
+    async def test_sqlite_repo_shows_sqlite(self):
+        """实际 repo 是 *Repository (SQLite) 时，backend_summary 显示 sqlite。"""
+        from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
+
+        read_model = RuntimeOverviewReadModel()
+
+        provider = self._make_provider_with_backends(
+            order_backend="postgres",
+            position_backend="postgres",
+            intent_backend="postgres",
+        )
+
+        # Mock SQLite Repository 类名
+        sqlite_order_repo = MagicMock()
+        sqlite_order_repo.__class__.__name__ = "OrderRepository"
+
+        response = await read_model.build(
+            runtime_config_provider=provider,
+            account_snapshot=_make_account_snapshot(),
+            exchange_gateway=None,
+            execution_orchestrator=None,
+            startup_reconciliation_summary=None,
+            order_repo=sqlite_order_repo,
+            position_repo=None,
+            execution_intent_repo=None,
+        )
+
+        assert "order=sqlite" in response.backend_summary
+        # repo 为 None 时回退到 environment 配置
+        assert "position=postgres" in response.backend_summary
+        assert "intent=postgres" in response.backend_summary
+
+    @pytest.mark.asyncio
+    async def test_repo_none_falls_back_to_environment_config(self):
+        """repo 缺失时回退到 environment.*_backend 值。"""
+        from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
+
+        read_model = RuntimeOverviewReadModel()
+
+        provider = self._make_provider_with_backends(
+            order_backend="sqlite",
+            position_backend="postgres",
+            intent_backend="postgres",
+        )
+
+        response = await read_model.build(
+            runtime_config_provider=provider,
+            account_snapshot=_make_account_snapshot(),
+            exchange_gateway=None,
+            execution_orchestrator=None,
+            startup_reconciliation_summary=None,
+            order_repo=None,
+            position_repo=None,
+            execution_intent_repo=None,
+        )
+
+        assert "order=sqlite" in response.backend_summary
+        assert "position=postgres" in response.backend_summary
+        assert "intent=postgres" in response.backend_summary
+
+    @pytest.mark.asyncio
+    async def test_no_config_provider_shows_unavailable(self):
+        """runtime_config_provider 为 None 时 backend_summary 为 unavailable。"""
+        from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
+
+        read_model = RuntimeOverviewReadModel()
+
+        response = await read_model.build(
+            runtime_config_provider=None,
+            account_snapshot=_make_account_snapshot(),
+            exchange_gateway=None,
+            execution_orchestrator=None,
+            startup_reconciliation_summary=None,
+        )
+
+        assert response.backend_summary == "unavailable"
+
+    @pytest.mark.asyncio
+    async def test_mixed_pg_and_sqlite_repos(self):
+        """混合装配：order=PG, position=SQLite, intent=None。"""
+        from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
+
+        read_model = RuntimeOverviewReadModel()
+
+        provider = self._make_provider_with_backends(
+            order_backend="sqlite",
+            position_backend="postgres",
+            intent_backend="sqlite",
+        )
+
+        pg_order_repo = MagicMock()
+        pg_order_repo.__class__.__name__ = "PgOrderRepository"
+        sqlite_position_repo = MagicMock()
+        sqlite_position_repo.__class__.__name__ = "PgPositionRepository"  # 实际是 PG
+
+        response = await read_model.build(
+            runtime_config_provider=provider,
+            account_snapshot=_make_account_snapshot(),
+            exchange_gateway=None,
+            execution_orchestrator=None,
+            startup_reconciliation_summary=None,
+            order_repo=pg_order_repo,
+            position_repo=sqlite_position_repo,
+            execution_intent_repo=None,
+        )
+
+        # 实际 repo 优先于 environment 配置
+        assert "order=postgres" in response.backend_summary
+        assert "position=postgres" in response.backend_summary
+        # intent_repo=None → 回退到 environment 配置
+        assert "intent=sqlite" in response.backend_summary

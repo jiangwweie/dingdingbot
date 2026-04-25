@@ -136,3 +136,12 @@ class PositionRepositoryPort(Protocol):
     async def get_by_signal_id(self, signal_id: str) -> List[Any]:
         """按信号 ID 获取仓位列表。"""
         ...
+
+    async def list_active(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Any]:
+        """列出当前未平仓仓位。"""
+        ...

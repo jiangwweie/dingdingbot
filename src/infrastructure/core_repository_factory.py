@@ -29,6 +29,16 @@ def create_order_repository() -> OrderRepositoryPort:
     return OrderRepository()
 
 
+def create_pg_order_repository() -> OrderRepositoryPort:
+    """显式创建 PG 订单仓储。"""
+    return PgOrderRepository()
+
+
+def create_runtime_order_repository() -> OrderRepositoryPort:
+    """为 runtime execution 主链显式创建 PG 订单仓储。"""
+    return create_pg_order_repository()
+
+
 def create_execution_intent_repository() -> Optional[ExecutionIntentRepositoryPort]:
     """按配置创建执行意图仓储。
 
@@ -49,3 +59,13 @@ def create_position_repository() -> Optional[PositionRepositoryPort]:
     if backend == "postgres":
         return PgPositionRepository()
     return None
+
+
+def create_pg_position_repository() -> PositionRepositoryPort:
+    """显式创建 PG 仓位仓储。"""
+    return PgPositionRepository()
+
+
+def create_runtime_position_repository() -> PositionRepositoryPort:
+    """为 runtime execution 主链显式创建 PG 仓位仓储。"""
+    return create_pg_position_repository()

@@ -50,7 +50,8 @@ from src.domain.exceptions import (
 from src.infrastructure.signal_repository import SignalRepository
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
-    create_order_repository,
+    create_runtime_order_repository,
+    create_runtime_position_repository,
 )
 from src.infrastructure.database import close_db, validate_pg_core_configuration
 from src.application.config_manager import UserConfig, ConfigManager
@@ -250,6 +251,7 @@ _config_entry_repo: Optional[Any] = None  # ConfigEntryRepository instance
 _order_repo: Optional[Any] = None  # OrderRepository instance
 _execution_intent_repo: Optional[Any] = None  # ExecutionIntentRepository instance
 _execution_recovery_repo: Optional[Any] = None  # ExecutionRecoveryRepository instance
+_position_repo: Optional[Any] = None  # PositionRepository instance
 _signal_repo: Optional[Any] = None  # Alias for _repository, used by console runtime routes
 _audit_logger: Optional[Any] = None  # OrderAuditLogger instance
 _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
@@ -271,6 +273,7 @@ def set_dependencies(
     order_repo: Optional[Any] = None,
     execution_intent_repo: Optional[Any] = None,
     execution_recovery_repo: Optional[Any] = None,
+    position_repo: Optional[Any] = None,
     audit_logger: Optional[Any] = None,
     order_lifecycle_service: Optional[Any] = None,
     runtime_config_provider: Optional[Any] = None,
@@ -306,7 +309,7 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider
     _repository = repository
     _signal_repo = repository  # Alias for console runtime routes
     _account_getter = account_getter
@@ -319,6 +322,7 @@ def set_dependencies(
     _order_repo = order_repo
     _execution_intent_repo = execution_intent_repo
     _execution_recovery_repo = execution_recovery_repo
+    _position_repo = position_repo
     _audit_logger = audit_logger
     _order_lifecycle_service = order_lifecycle_service
     _runtime_config_provider = runtime_config_provider
@@ -410,16 +414,85 @@ def _get_config_entry_repo() -> Any:
 def _get_order_repo() -> Any:
     """Get order repository or create a new instance if not initialized."""
     if _order_repo is None:
-        # Fallback: create a new instance
-        from src.infrastructure.order_repository import OrderRepository
-        repo = OrderRepository()
+        repo = create_runtime_order_repository()
         # Auto-inject dependencies if available
         if _exchange_gateway:
-            repo.set_exchange_gateway(_exchange_gateway)
+            if hasattr(repo, "set_exchange_gateway"):
+                repo.set_exchange_gateway(_exchange_gateway)
         if _audit_logger:
-            repo.set_audit_logger(_audit_logger)
+            if hasattr(repo, "set_audit_logger"):
+                repo.set_audit_logger(_audit_logger)
         return repo
     return _order_repo
+
+
+def _get_position_repo() -> Any:
+    """Get position repository if initialized."""
+    return _position_repo
+
+
+def _build_position_info_from_exchange(pos: Any, *, opened_at: int) -> PositionInfoV3:
+    """Convert exchange PositionInfo to v3 response model."""
+    return PositionInfoV3(
+        position_id=f"pos_{pos.symbol}_{pos.side}",
+        symbol=pos.symbol,
+        direction=Direction.LONG if pos.side == "buy" else Direction.SHORT,
+        current_qty=pos.size,
+        entry_price=pos.entry_price,
+        mark_price=None,
+        unrealized_pnl=pos.unrealized_pnl,
+        realized_pnl=Decimal("0"),
+        liquidation_price=None,
+        leverage=pos.leverage,
+        margin_mode="CROSS",
+        is_closed=False,
+        opened_at=opened_at,
+        closed_at=None,
+        total_fees_paid=Decimal("0"),
+        strategy_name=None,
+        stop_loss=None,
+        take_profit=None,
+        tags=[],
+    )
+
+
+def _build_position_info_from_projection(position: Any) -> PositionInfoV3:
+    """Convert local PG position projection to v3 response model."""
+    direction = getattr(position, "direction", Direction.LONG)
+    if isinstance(direction, str):
+        direction = Direction(direction)
+
+    entry_price = getattr(position, "entry_price", Decimal("0")) or Decimal("0")
+    mark_price = getattr(position, "watermark_price", None)
+    current_qty = getattr(position, "current_qty", Decimal("0"))
+    realized_pnl = getattr(position, "realized_pnl", Decimal("0")) or Decimal("0")
+    total_fees_paid = getattr(position, "total_fees_paid", Decimal("0")) or Decimal("0")
+    leverage = int(getattr(position, "leverage", 1) or 1)
+    opened_at = getattr(position, "opened_at", None) or int(datetime.now(timezone.utc).timestamp() * 1000)
+    closed_at = getattr(position, "closed_at", None)
+    unrealized_pnl = getattr(position, "unrealized_pnl", Decimal("0")) or Decimal("0")
+
+    return PositionInfoV3(
+        position_id=getattr(position, "id", f"pos_{getattr(position, 'symbol', 'unknown')}"),
+        symbol=getattr(position, "symbol", "unknown"),
+        direction=direction,
+        current_qty=current_qty,
+        entry_price=entry_price,
+        mark_price=mark_price,
+        unrealized_pnl=unrealized_pnl,
+        realized_pnl=realized_pnl,
+        liquidation_price=None,
+        leverage=leverage,
+        margin_mode="CROSS",
+        is_closed=bool(getattr(position, "is_closed", False)),
+        opened_at=opened_at,
+        closed_at=closed_at,
+        total_fees_paid=total_fees_paid,
+        strategy_name=None,
+        stop_loss=None,
+        take_profit=None,
+        tags=[],
+    )
 
 
 def _get_audit_logger() -> Any:
@@ -466,7 +539,7 @@ async def lifespan(app: FastAPI):
             logger.info("ConfigEntryRepository initialized in lifespan")
 
         # Initialize OrderAuditLogger global singleton (FIX-002)
-        global _audit_logger, _order_lifecycle_service
+        global _audit_logger, _order_lifecycle_service, _position_repo
         from src.application.order_audit_logger import OrderAuditLogger
         from src.infrastructure.order_audit_repository import OrderAuditLogRepository
 
@@ -483,7 +556,7 @@ async def lifespan(app: FastAPI):
 
         # Initialize core repositories if not already set
         if _order_repo is None:
-            _order_repo = create_order_repository()
+            _order_repo = create_runtime_order_repository()
             await _order_repo.initialize()
             # Auto-inject dependencies
             if _exchange_gateway and hasattr(_order_repo, "set_exchange_gateway"):
@@ -497,6 +570,12 @@ async def lifespan(app: FastAPI):
             if _execution_intent_repo is not None:
                 await _execution_intent_repo.initialize()
                 logger.info("ExecutionIntentRepository initialized in lifespan")
+
+        if _position_repo is None:
+            _position_repo = create_runtime_position_repository()
+            if _position_repo is not None:
+                await _position_repo.initialize()
+                logger.info("PositionRepository initialized in lifespan")
 
         # Initialize OrderLifecycleService (ORD-1-T5)
         from src.application.order_lifecycle_service import OrderLifecycleService
@@ -5306,46 +5385,38 @@ async def list_positions(
     """
     try:
         gateway = _get_exchange_gateway()
-
-        # 从交易所获取持仓信息
-        positions = await gateway.fetch_positions(symbol=symbol)
-
-        # 同时获取账户余额用于计算权益
-        account_balance = await gateway.fetch_account_balance()
-
-        # 转换为 API 响应格式
-        position_infos = []
+        position_repo = _get_position_repo()
         total_unrealized_pnl = Decimal("0")
         total_realized_pnl = Decimal("0")
         total_margin_used = Decimal("0")
-
         now = int(datetime.now(timezone.utc).timestamp() * 1000)
+        account_balance = None
+        position_infos = []
 
-        for pos in positions:
-            # 将 Position 转换为 PositionInfoV3
-            position_info = PositionInfoV3(
-                position_id=f"pos_{pos.symbol}_{pos.side}",  # 生成持仓 ID
-                symbol=pos.symbol,
-                direction=Direction.LONG if pos.side == "buy" else Direction.SHORT,
-                current_qty=pos.size,
-                entry_price=pos.entry_price,
-                mark_price=None,  # 需要从交易所获取标记价格
-                unrealized_pnl=pos.unrealized_pnl,
-                realized_pnl=Decimal("0"),  # 需要从交易所获取
-                liquidation_price=None,  # 需要从交易所获取
-                leverage=pos.leverage,
-                margin_mode="CROSS",  # 默认全仓
-                is_closed=False,
-                opened_at=now,  # 实际应从持仓存储中获取
-                closed_at=None,
-                total_fees_paid=Decimal("0"),
-                strategy_name=None,
-                stop_loss=None,
-                take_profit=None,
-                tags=[],
-            )
-            position_infos.append(position_info)
-            total_unrealized_pnl += pos.unrealized_pnl
+        try:
+            positions = await gateway.fetch_positions(symbol=symbol)
+            account_balance = await gateway.fetch_account_balance()
+
+            sliced_positions = positions[offset: offset + limit]
+            for pos in sliced_positions:
+                position_info = _build_position_info_from_exchange(pos, opened_at=now)
+                position_infos.append(position_info)
+                total_unrealized_pnl += pos.unrealized_pnl
+        except Exception as exchange_error:
+            logger.warning(f"交易所持仓读取失败，准备回退 PG positions: {exchange_error}")
+
+        if not position_infos and position_repo is not None and hasattr(position_repo, "list_active"):
+            if is_closed:
+                projected_positions = []
+            else:
+                projected_positions = await position_repo.list_active(symbol=symbol, limit=limit + offset)
+
+            sliced_positions = projected_positions[offset: offset + limit]
+            for pos in sliced_positions:
+                position_info = _build_position_info_from_projection(pos)
+                position_infos.append(position_info)
+                total_unrealized_pnl += position_info.unrealized_pnl
+                total_realized_pnl += position_info.realized_pnl
 
         # 计算账户权益 = 总余额 + 未实现盈亏
         account_equity = None
@@ -5386,9 +5457,15 @@ async def get_position(position_id: str) -> PositionInfoV3:
             - 404: 持仓不存在
     """
     try:
-        # 从持仓存储中查询
-        # TODO: 实现 PositionRepository
-        raise HTTPException(status_code=404, detail="持仓不存在")
+        position_repo = _get_position_repo()
+        if position_repo is None:
+            raise HTTPException(status_code=404, detail="持仓不存在")
+
+        position = await position_repo.get(position_id)
+        if not position:
+            raise HTTPException(status_code=404, detail="持仓不存在")
+
+        return _build_position_info_from_projection(position)
 
     except HTTPException:
         raise

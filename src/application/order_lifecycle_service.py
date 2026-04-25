@@ -99,6 +99,8 @@ class OrderLifecycleService:
 
         # MVP-Protected-Position-Step2: ENTRY 部分成交后的保护单挂载回调
         self._on_entry_partially_filled: Optional[Callable[[Order], Awaitable[None]]] = None
+        self._on_entry_filled: Optional[Callable[[Order], Awaitable[None]]] = None
+        self._on_exit_filled: Optional[Callable[[Order], Awaitable[None]]] = None
 
     async def start(self) -> None:
         """启动服务"""
@@ -139,6 +141,20 @@ class OrderLifecycleService:
             callback: 异步回调函数，接收 Order 对象
         """
         self._on_entry_partially_filled = callback
+
+    def set_entry_filled_callback(
+        self,
+        callback: Callable[[Order], Awaitable[None]]
+    ) -> None:
+        """设置 ENTRY 完全成交回调（用于挂载保护单与更新投影）。"""
+        self._on_entry_filled = callback
+
+    def set_exit_filled_callback(
+        self,
+        callback: Callable[[Order], Awaitable[None]]
+    ) -> None:
+        """设置 TP/SL 完全成交回调（用于更新 position projection）。"""
+        self._on_exit_filled = callback
 
     async def _notify_order_changed(self, order: Order) -> None:
         """通知订单已变更"""
@@ -292,6 +308,27 @@ class OrderLifecycleService:
         await self._notify_order_changed(order)
 
         logger.info(f"订单创建成功：{order.id} (策略：{strategy.name if strategy else 'N/A'}, 币种：{symbol})")
+        return order
+
+    async def register_created_order(
+        self,
+        order: Order,
+        *,
+        triggered_by: OrderAuditTriggerSource = OrderAuditTriggerSource.SYSTEM,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Order:
+        """注册一个已生成但尚未提交的订单。"""
+        order.status = OrderStatus.CREATED
+        await self._repository.save(order)
+        self._get_or_create_state_machine(order)
+        await self._log_audit(
+            order=order,
+            event_type=OrderAuditEventType.ORDER_CREATED,
+            triggered_by=triggered_by,
+            new_status=OrderStatus.CREATED.value,
+            metadata=metadata,
+        )
+        await self._notify_order_changed(order)
         return order
 
     async def submit_order(
@@ -537,13 +574,16 @@ class OrderLifecycleService:
         if average_exec_price:
             local_order.average_exec_price = average_exec_price
 
+        previous_status = local_order.status
+
         # 执行状态转换
         if target_status == OrderStatus.FILLED:
             # 完全成交
-            await state_machine.mark_filled(
-                filled_qty=str(filled_qty),
-                average_exec_price=str(average_exec_price) if average_exec_price else "0"
-            )
+            if previous_status != OrderStatus.FILLED:
+                await state_machine.mark_filled(
+                    filled_qty=str(filled_qty),
+                    average_exec_price=str(average_exec_price) if average_exec_price else "0"
+                )
         elif target_status == OrderStatus.PARTIALLY_FILLED:
             # 部分成交
             # MVP-Protected-Position-Step2: 避免重复状态转换
@@ -601,6 +641,46 @@ class OrderLifecycleService:
                 await state_machine.confirm_open()
 
         await self._repository.save(local_order)
+
+        if (
+            target_status == OrderStatus.FILLED
+            and previous_status != OrderStatus.FILLED
+            and local_order.order_role == OrderRole.ENTRY
+            and filled_qty > 0
+            and self._on_entry_filled is not None
+        ):
+            try:
+                await self._on_entry_filled(local_order)
+            except Exception as e:
+                logger.error(
+                    f"[OrderLifecycleService] ENTRY 完全成交回调失败: "
+                    f"order_id={local_order.id}, error={e}",
+                    exc_info=True
+                )
+
+        if (
+            target_status == OrderStatus.FILLED
+            and previous_status != OrderStatus.FILLED
+            and local_order.order_role in {
+                OrderRole.SL,
+                OrderRole.TP1,
+                OrderRole.TP2,
+                OrderRole.TP3,
+                OrderRole.TP4,
+                OrderRole.TP5,
+            }
+            and filled_qty > 0
+            and self._on_exit_filled is not None
+        ):
+            try:
+                await self._on_exit_filled(local_order)
+            except Exception as e:
+                logger.error(
+                    f"[OrderLifecycleService] EXIT 完全成交回调失败: "
+                    f"order_id={local_order.id}, error={e}",
+                    exc_info=True
+                )
+
         logger.info(f"订单根据交易所数据更新：{local_order.id} (exchange_id={exchange_order_id}) -> {target_status.value}")
         return local_order
 

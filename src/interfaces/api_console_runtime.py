@@ -41,6 +41,9 @@ async def get_runtime_overview() -> RuntimeOverviewResponse:
         exchange_gateway=getattr(api_module, "_exchange_gateway", None),
         execution_orchestrator=getattr(api_module, "_execution_orchestrator", None),
         startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
+        order_repo=getattr(api_module, "_order_repo", None),
+        position_repo=getattr(api_module, "_position_repo", None),
+        execution_intent_repo=getattr(api_module, "_execution_intent_repo", None),
     )
 
 
@@ -150,4 +153,3 @@ async def get_runtime_execution_intents(
         status=status,
         limit=limit,
     )
-
