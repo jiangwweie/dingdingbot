@@ -422,7 +422,10 @@ Sim-0 详细任务拆分（归档参考）：
    4. 再实现 Research 域只读 API。
    5. 把控制台相关读取逻辑从 `src/interfaces/api.py` 中拆出为独立模块。
    6. 用 Sim-1 真实数据逐页校验 mock 与后端的差异。
-5. 非目标：
+5. 当前 SSOT 文档：
+   - `docs/planning/architecture/2026-04-25-backend-readonly-api-and-api-module-roadmap.md`
+   - `docs/planning/architecture/2026-04-25-console-readonly-api-v1-contract.md`
+6. 非目标：
    - 不做配置编辑
    - 不做 runtime 热改
    - 不做 review 写回

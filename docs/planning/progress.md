@@ -23,6 +23,10 @@
    - 前端 mock 作为临时垫层，逐页替换为真实后端数据
 4. ✅ 已新增后端只读 API 主线规划文档：
    - `docs/planning/architecture/2026-04-25-backend-readonly-api-and-api-module-roadmap.md`
+5. ✅ 已新增后端只读 API v1 合同文档：
+   - `docs/planning/architecture/2026-04-25-console-readonly-api-v1-contract.md`
+6. ✅ 已新增 Claude 杂活提示词：
+   - `docs/frontend-handoff/claude-backend-readonly-api-mapping-prompt.md`
 
 ### 2026-04-24 -- Sim-1 runtime cutover 非 I/O 冒烟已通过
 
