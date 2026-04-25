@@ -66,7 +66,7 @@ class CandidateArtifactService:
                 payload = json.load(handle)
             if isinstance(payload, dict):
                 return payload
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             return None
         return None
 
@@ -75,12 +75,16 @@ class CandidateArtifactService:
         warnings = self._build_warnings(best_trial)
         review_status, strict_gate_result = self._evaluate_review(best_trial, warnings)
 
+        source_profile_data = payload.get("source_profile") or {}
+        git_data = payload.get("git") or {}
+        job_data = payload.get("job") or {}
+
         return CandidateListItem(
             candidate_name=str(payload.get("candidate_name", "unknown")),
             generated_at=str(payload.get("generated_at", "")),
-            source_profile=str((payload.get("source_profile") or {}).get("name", "unknown")),
-            git_commit=str((payload.get("git") or {}).get("commit", ""))[:12],
-            objective=str((payload.get("job") or {}).get("objective", "unknown")),
+            source_profile=str(source_profile_data.get("name", "unknown")),
+            git_commit=str(git_data.get("commit", ""))[:12],
+            objective=str(job_data.get("objective", "unknown")),
             review_status=review_status,
             strict_gate_result=strict_gate_result,
             warnings=warnings,

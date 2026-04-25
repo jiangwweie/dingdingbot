@@ -61,7 +61,7 @@ class RuntimePortfolioReadModel:
             leverage = int(getattr(position, "leverage", 1) or 1)
             notional = abs(size * entry_price)
             total_exposure += notional
-            pnl_percent = float(position_unrealized_pnl / notional) if notional else 0.0
+            pnl_percent = float(position_unrealized_pnl / notional * 100) if notional else 0.0
 
             positions.append(
                 PortfolioPositionItem(
@@ -97,6 +97,10 @@ class RuntimePortfolioReadModel:
                 realized_pnl = getattr(daily_stats, "realized_pnl", Decimal("0"))
                 if realized_pnl < 0:
                     daily_loss_used = abs(realized_pnl)
+        elif runtime_config_provider is not None:
+            # Fallback to runtime risk config if capital_protection unavailable
+            daily_max_loss_percent = runtime_config_provider.resolved_config.risk.daily_max_loss_percent
+            daily_loss_limit = total_equity * daily_max_loss_percent
 
         leverage_usage = float(total_exposure / total_equity) if total_equity else 0.0
 

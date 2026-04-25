@@ -33,14 +33,8 @@ class RuntimeHealthReadModel:
             else None
         )
 
+        # Exchange status: prioritize freshness, then permission check
         exchange_status = "OK"
-        if permission_summary is not None and permission_summary.get("status") in {
-            "failed",
-            "error",
-            "not_checked",
-        }:
-            exchange_status = "DEGRADED"
-
         if account_snapshot is not None:
             age_seconds = max(
                 0.0,
@@ -48,11 +42,18 @@ class RuntimeHealthReadModel:
             )
             if age_seconds > 300:
                 exchange_status = "DOWN"
-            elif age_seconds > 90 and exchange_status == "OK":
+            elif age_seconds > 90:
                 exchange_status = "DEGRADED"
 
-        pg_status = "OK" if runtime_config_provider is not None else "DEGRADED"
-        notification_status = "OK" if runtime_config_provider is not None else "DEGRADED"
+        if exchange_status == "OK" and permission_summary is not None and permission_summary.get("status") in {
+            "failed",
+            "error",
+            "not_checked",
+        }:
+            exchange_status = "DEGRADED"
+
+        pg_status = "OK" if runtime_config_provider is not None else "DOWN"
+        notification_status = "OK" if runtime_config_provider is not None else "DOWN"
 
         breaker_symbols: list[str] = []
         if execution_orchestrator is not None and hasattr(execution_orchestrator, "list_circuit_breaker_symbols"):
@@ -65,21 +66,33 @@ class RuntimeHealthReadModel:
         startup_markers = {
             "runtime_config": "PASSED" if runtime_config_provider is not None else "FAILED",
             "exchange_gateway": "PASSED" if exchange_gateway is not None else "FAILED",
-            "permission_check": "PASSED" if permission_summary and permission_summary.get("verified") else "PENDING",
-            "startup_reconciliation": "PASSED" if startup_reconciliation_summary is not None else "PENDING",
+            "permission_check": "PASSED"
+            if permission_summary and permission_summary.get("verified")
+            else "FAILED"
+            if permission_summary and permission_summary.get("status") == "failed"
+            else "PENDING",
+            "startup_reconciliation": "PASSED"
+            if startup_reconciliation_summary is not None
+            else "PENDING",
             "breaker_rebuild": "PASSED" if execution_orchestrator is not None else "PENDING",
-            "signal_pipeline": "PASSED",
+            "signal_pipeline": "PASSED",  # Placeholder, always OK for now
         }
 
         recent_warnings: list[str] = []
         if permission_summary and permission_summary.get("status") == "skipped_testnet":
             recent_warnings.append("withdraw permission check skipped on testnet")
         if exchange_status == "DEGRADED":
-            recent_warnings.append("exchange health is degraded")
+            recent_warnings.append("exchange health degraded")
+        if pg_status == "DOWN":
+            recent_warnings.append("pg config unavailable")
+        if notification_status == "DOWN":
+            recent_warnings.append("notification config unavailable")
 
         recent_errors: list[str] = []
         if exchange_status == "DOWN":
-            recent_errors.append("exchange heartbeat appears stale")
+            recent_errors.append("exchange heartbeat stale")
+        if permission_summary and permission_summary.get("status") == "failed":
+            recent_errors.append("exchange permission check failed")
 
         completed_tasks = 0
         last_recovery_time = None

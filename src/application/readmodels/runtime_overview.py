@@ -66,31 +66,33 @@ class RuntimeOverviewReadModel:
             pg_health = "OK" if environment.pg_database_url.get_secret_value() else "DOWN"
             webhook_health = "OK" if environment.feishu_webhook_url.get_secret_value() else "DOWN"
         else:
-            profile = "unknown"
-            version = "unknown"
-            config_hash = "unknown"
+            profile = "unavailable"
+            version = "unavailable"
+            config_hash = "unavailable"
             frozen = False
-            symbol = "unknown"
-            timeframe = "unknown"
+            symbol = "unavailable"
+            timeframe = "unavailable"
             backend_summary = "unavailable"
-            pg_health = "DEGRADED"
-            webhook_health = "DEGRADED"
+            pg_health = "DOWN"
+            webhook_health = "DOWN"
 
         permission_summary = (
             exchange_gateway.get_permission_check_summary()
             if exchange_gateway is not None and hasattr(exchange_gateway, "get_permission_check_summary")
             else None
         )
+
+        # Exchange health: prioritize freshness, then permission check
         exchange_health = "OK"
-        if permission_summary is not None and permission_summary.get("status") in {
+        if freshness_status == "Possibly Dead":
+            exchange_health = "DOWN"
+        elif freshness_status == "Stale":
+            exchange_health = "DEGRADED"
+        elif permission_summary is not None and permission_summary.get("status") in {
             "failed",
             "error",
             "not_checked",
         }:
-            exchange_health = "DEGRADED"
-        if freshness_status == "Possibly Dead":
-            exchange_health = "DOWN"
-        elif freshness_status == "Stale" and exchange_health == "OK":
             exchange_health = "DEGRADED"
 
         breaker_symbols = []
@@ -99,13 +101,11 @@ class RuntimeOverviewReadModel:
 
         if startup_reconciliation_summary:
             reconciliation_summary = (
-                "candidate_orders="
-                f"{startup_reconciliation_summary.get('candidate_orders_count', 0)} "
-                "failed_orders="
-                f"{startup_reconciliation_summary.get('failed_reconciliations_count', 0)}"
+                f"candidates={startup_reconciliation_summary.get('candidate_orders_count', 0)}, "
+                f"failed={startup_reconciliation_summary.get('failed_reconciliations_count', 0)}"
             )
         else:
-            reconciliation_summary = "unavailable"
+            reconciliation_summary = "not_run"
 
         return RuntimeOverviewResponse(
             profile=profile,
