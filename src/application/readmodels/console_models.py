@@ -164,6 +164,7 @@ class ConsoleOrderItem(BaseModel):
 
     order_id: str
     symbol: str
+    order_role: Optional[str] = None
     side: str
     type: str
     status: str
@@ -307,4 +308,3 @@ class ConfigSnapshotResponse(BaseModel):
     version: int = 0
     hash: str = ""
     environment: dict[str, Any] = Field(default_factory=dict)
-

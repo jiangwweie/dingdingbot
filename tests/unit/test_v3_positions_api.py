@@ -1,12 +1,12 @@
-"""Tests for v3 positions API — exchange-first + PG projection fallback.
+"""Tests for v3 positions API — PG projection first + exchange enrich/fallback.
 
 覆盖:
-- list_positions: 交易所成功 → 交易所数据优先
-- list_positions: 交易所失败 → position_repo.list_active() fallback
-- list_positions: is_closed=True 不返回未平仓 projection
-- list_positions: offset/limit 切片
-- list_positions: account_balance 缺失 → account_equity 为 None
-- get_position: 从 PG projection 返回详情 / 404
+- list_positions: PG projection first, exchange enriches
+- list_positions: PG fails → exchange fallback
+- list_positions: is_closed=True → calls list_positions with is_closed=True
+- list_positions: offset/limit passed to repo
+- list_positions: account_balance missing → account_equity is None
+- get_position: from PG projection returns detail / 404
 """
 
 from __future__ import annotations
@@ -64,7 +64,13 @@ def mock_exchange_gateway():
     gateway = MagicMock()
     gateway.exchange_name = "binance"
     gateway.fetch_positions = AsyncMock(return_value=[])
-    gateway.fetch_account_balance = AsyncMock()
+    gateway.fetch_account_balance = AsyncMock(return_value=AccountSnapshot(
+        total_balance=Decimal("10000"),
+        available_balance=Decimal("9000"),
+        unrealized_pnl=Decimal("0"),
+        positions=[],
+        timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
+    ))
     return gateway
 
 
@@ -73,56 +79,13 @@ def mock_exchange_gateway():
 # ============================================================
 
 
-class TestListPositionsExchangeFirst:
-    """list_positions: 交易所成功时优先返回交易所数据。"""
+class TestListPositionsPGProjectionFirst:
+    """list_positions: PG projection first, exchange enriches."""
 
-    def test_exchange_success_returns_exchange_data(
+    def test_pg_projection_returned_first(
         self, client, mock_repository, mock_account_getter, mock_exchange_gateway
     ):
-        """exchange_gateway 可用时返回交易所数据。"""
-        mock_exchange_gateway.fetch_positions.return_value = [
-            PositionInfo(
-                symbol="BTC/USDT:USDT",
-                side="buy",
-                size=Decimal("0.1"),
-                entry_price=Decimal("65000"),
-                unrealized_pnl=Decimal("100"),
-                leverage=10,
-            )
-        ]
-        mock_exchange_gateway.fetch_account_balance.return_value = AccountSnapshot(
-            total_balance=Decimal("10000"),
-            available_balance=Decimal("9000"),
-            unrealized_pnl=Decimal("100"),
-            positions=[],
-            timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
-        )
-
-        position_repo = MagicMock()
-        position_repo.list_active = AsyncMock(return_value=[])
-
-        set_dependencies(
-            repository=mock_repository,
-            account_getter=mock_account_getter,
-            exchange_gateway=mock_exchange_gateway,
-            position_repo=position_repo,
-        )
-
-        response = client.get("/api/v3/positions")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["positions"]) == 1
-        assert data["positions"][0]["symbol"] == "BTC/USDT:USDT"
-        # 交易所数据优先，不应调用 position_repo fallback
-        position_repo.list_active.assert_not_called()
-
-    def test_exchange_failure_falls_back_to_repo(
-        self, client, mock_repository, mock_account_getter, mock_exchange_gateway
-    ):
-        """exchange_gateway 不可用时 fallback 到 position_repo.list_active()。"""
-        mock_exchange_gateway.fetch_positions.side_effect = Exception("Network error")
-
+        """PG projection exists → returned first, exchange enriches."""
         pg_position = Position(
             id="pos_btc_001",
             signal_id="sig_001",
@@ -134,7 +97,7 @@ class TestListPositionsExchangeFirst:
         )
 
         position_repo = MagicMock()
-        position_repo.list_active = AsyncMock(return_value=[pg_position])
+        position_repo.list_positions = AsyncMock(return_value=[pg_position])
 
         set_dependencies(
             repository=mock_repository,
@@ -148,18 +111,49 @@ class TestListPositionsExchangeFirst:
         assert response.status_code == 200
         data = response.json()
         assert len(data["positions"]) >= 1
-        # fallback 到 position_repo
-        position_repo.list_active.assert_called_once()
+        position_repo.list_positions.assert_called_once()
+
+    def test_pg_failure_falls_back_to_exchange(
+        self, client, mock_repository, mock_account_getter, mock_exchange_gateway
+    ):
+        """PG query fails → falls back to exchange positions."""
+        mock_exchange_gateway.fetch_positions.return_value = [
+            PositionInfo(
+                symbol="BTC/USDT:USDT",
+                side="buy",
+                size=Decimal("0.1"),
+                entry_price=Decimal("65000"),
+                current_price=Decimal("66000"),
+                unrealized_pnl=Decimal("100"),
+                leverage=10,
+            )
+        ]
+
+        position_repo = MagicMock()
+        position_repo.list_positions = AsyncMock(side_effect=RuntimeError("DB down"))
+
+        set_dependencies(
+            repository=mock_repository,
+            account_getter=mock_account_getter,
+            exchange_gateway=mock_exchange_gateway,
+            position_repo=position_repo,
+        )
+
+        response = client.get("/api/v3/positions")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["positions"]) >= 1
 
     def test_both_empty_returns_empty(
         self, client, mock_repository, mock_account_getter, mock_exchange_gateway
     ):
-        """交易所和 repo 都无仓位时返回空列表。"""
+        """PG and exchange both empty → empty list."""
         mock_exchange_gateway.fetch_positions.return_value = []
         mock_exchange_gateway.fetch_account_balance = AsyncMock(return_value=None)
 
         position_repo = MagicMock()
-        position_repo.list_active = AsyncMock(return_value=[])
+        position_repo.list_positions = AsyncMock(return_value=[])
 
         set_dependencies(
             repository=mock_repository,
@@ -256,26 +250,15 @@ class TestGetPositionFromProjection:
 class TestListPositionsEdgeCases:
     """list_positions 边界条件：is_closed / offset+limit / account_equity。"""
 
-    def test_is_closed_true_returns_empty_via_fallback(
+    def test_is_closed_true_calls_list_positions(
         self, client, mock_repository, mock_account_getter, mock_exchange_gateway
     ):
-        """is_closed=True 时 fallback 不调 list_active，直接返回空。"""
+        """is_closed=True → calls list_positions with is_closed=True."""
         mock_exchange_gateway.fetch_positions.return_value = []
         mock_exchange_gateway.fetch_account_balance = AsyncMock(return_value=None)
 
         position_repo = MagicMock()
-        position_repo.list_active = AsyncMock(return_value=[
-            Position(
-                id="pos_active_001",
-                signal_id="sig_001",
-                symbol="BTC/USDT:USDT",
-                direction=Direction.LONG,
-                entry_price=Decimal("65000"),
-                current_qty=Decimal("0.1"),
-                realized_pnl=Decimal("0"),
-                is_closed=False,
-            )
-        ])
+        position_repo.list_positions = AsyncMock(return_value=[])
 
         set_dependencies(
             repository=mock_repository,
@@ -287,33 +270,19 @@ class TestListPositionsEdgeCases:
         response = client.get("/api/v3/positions?is_closed=true")
 
         assert response.status_code == 200
-        data = response.json()
-        assert data["positions"] == []
-        # is_closed=True 不应调用 list_active
-        position_repo.list_active.assert_not_called()
+        position_repo.list_positions.assert_called_once()
+        call_kwargs = position_repo.list_positions.call_args.kwargs
+        assert call_kwargs.get("is_closed") is True
 
-    def test_offset_limit_slicing(
+    def test_offset_limit_passed_to_repo(
         self, client, mock_repository, mock_account_getter, mock_exchange_gateway
     ):
-        """offset/limit 切片行为正确：offset=0, limit=2 返回前 2 条。"""
+        """offset/limit passed to list_positions on PG main path."""
         mock_exchange_gateway.fetch_positions.return_value = []
         mock_exchange_gateway.fetch_account_balance = AsyncMock(return_value=None)
 
-        positions = [
-            Position(
-                id=f"pos_slice_{i}",
-                signal_id=f"sig_{i}",
-                symbol="BTC/USDT:USDT",
-                direction=Direction.LONG,
-                entry_price=Decimal("65000"),
-                current_qty=Decimal("0.1"),
-                realized_pnl=Decimal("0"),
-            )
-            for i in range(3)
-        ]
-
         position_repo = MagicMock()
-        position_repo.list_active = AsyncMock(return_value=positions)
+        position_repo.list_positions = AsyncMock(return_value=[])
 
         set_dependencies(
             repository=mock_repository,
@@ -322,14 +291,13 @@ class TestListPositionsEdgeCases:
             position_repo=position_repo,
         )
 
-        # offset=0 不会触发双重切片 bug
-        response = client.get("/api/v3/positions?offset=0&limit=2")
+        response = client.get("/api/v3/positions?offset=10&limit=5")
 
         assert response.status_code == 200
-        data = response.json()
-        assert len(data["positions"]) == 2
-        assert data["positions"][0]["position_id"] == "pos_slice_0"
-        assert data["positions"][1]["position_id"] == "pos_slice_1"
+        position_repo.list_positions.assert_called_once()
+        call_kwargs = position_repo.list_positions.call_args.kwargs
+        assert call_kwargs.get("offset") == 10
+        assert call_kwargs.get("limit") == 5
 
     def test_account_balance_missing_equity_none(
         self, client, mock_repository, mock_exchange_gateway
@@ -339,7 +307,7 @@ class TestListPositionsEdgeCases:
         mock_exchange_gateway.fetch_account_balance = AsyncMock(return_value=None)
 
         position_repo = MagicMock()
-        position_repo.list_active = AsyncMock(return_value=[])
+        position_repo.list_positions = AsyncMock(return_value=[])
 
         set_dependencies(
             repository=mock_repository,

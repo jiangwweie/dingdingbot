@@ -90,7 +90,6 @@ async def main() -> None:
             description="Sim-1 ETH 1h LONG-only frozen runtime profile",
             is_active=True,
             is_readonly=True,
-            allow_readonly_update=True,
         )
     finally:
         await repo.close()

@@ -55,7 +55,9 @@ export interface ExecutionIntent {
 export interface Order {
   order_id: string;
   role: 'ENTRY' | 'TP' | 'SL';
+  raw_role?: string;
   symbol: string;
+  type?: string;
   status: 'NEW' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELED' | 'REJECTED';
   quantity: number;
   price: number | null;

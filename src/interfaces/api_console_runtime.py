@@ -30,10 +30,23 @@ def _load_api_module():
     return api_module
 
 
+def _get_account_snapshot(api_module):
+    if getattr(api_module, "_account_getter", None):
+        return api_module._account_getter()
+
+    gateway = getattr(api_module, "_exchange_gateway", None)
+    if gateway is not None and hasattr(gateway, "get_account_snapshot"):
+        try:
+            return gateway.get_account_snapshot()
+        except Exception:
+            return None
+    return None
+
+
 @router.get("/overview", response_model=RuntimeOverviewResponse)
 async def get_runtime_overview() -> RuntimeOverviewResponse:
     api_module = _load_api_module()
-    account_snapshot = api_module._account_getter() if api_module._account_getter else None
+    account_snapshot = _get_account_snapshot(api_module)
     read_model = RuntimeOverviewReadModel()
     return await read_model.build(
         runtime_config_provider=getattr(api_module, "_runtime_config_provider", None),
@@ -50,7 +63,7 @@ async def get_runtime_overview() -> RuntimeOverviewResponse:
 @router.get("/portfolio", response_model=RuntimePortfolioResponse)
 async def get_runtime_portfolio() -> RuntimePortfolioResponse:
     api_module = _load_api_module()
-    account_snapshot = api_module._account_getter() if api_module._account_getter else None
+    account_snapshot = _get_account_snapshot(api_module)
     read_model = RuntimePortfolioReadModel()
     return await read_model.build(
         runtime_config_provider=getattr(api_module, "_runtime_config_provider", None),
@@ -62,7 +75,7 @@ async def get_runtime_portfolio() -> RuntimePortfolioResponse:
 @router.get("/health", response_model=RuntimeHealthResponse)
 async def get_runtime_health() -> RuntimeHealthResponse:
     api_module = _load_api_module()
-    account_snapshot = api_module._account_getter() if api_module._account_getter else None
+    account_snapshot = _get_account_snapshot(api_module)
     read_model = RuntimeHealthReadModel()
     return await read_model.build(
         runtime_config_provider=getattr(api_module, "_runtime_config_provider", None),
@@ -83,7 +96,7 @@ async def get_runtime_health() -> RuntimeHealthResponse:
 async def get_runtime_positions() -> ConsolePositionsResponse:
     """Get current positions from account snapshot."""
     api_module = _load_api_module()
-    account_snapshot = api_module._account_getter() if api_module._account_getter else None
+    account_snapshot = _get_account_snapshot(api_module)
     read_model = RuntimePositionsReadModel()
     return await read_model.build(
         account_snapshot=account_snapshot,

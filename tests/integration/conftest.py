@@ -1,14 +1,106 @@
+"""Integration test configuration.
+
+PG fixtures for real PostgreSQL integration tests.
 """
-Pytest 配置文件 - 集成测试专用
-"""
+
+from __future__ import annotations
+
+import os
+from typing import AsyncIterator
 
 import pytest
+import pytest_asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-# 为 test_order_chain_api.py 禁用 asyncio 模式
-# 这个文件使用同步 TestClient，需要跳过 pytest-asyncio 的事件循环管理
+from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
+from src.infrastructure.pg_execution_recovery_repository import PgExecutionRecoveryRepository
+from src.infrastructure.pg_order_repository import PgOrderRepository
+from src.infrastructure.pg_position_repository import PgPositionRepository
+
+PG_DATABASE_URL = os.environ.get(
+    "PG_DATABASE_URL",
+    "postgresql+asyncpg://dingdingbot:dingdingbot_dev@localhost:5432/dingdingbot",
+)
+
+_TRUNCATE_ORDER = [
+    "execution_recovery_tasks",
+    "orders",
+    "positions",
+    "execution_intents",
+]
+
+
+@pytest.fixture(scope="session")
+def pg_url() -> str:
+    return PG_DATABASE_URL
+
+
+@pytest_asyncio.fixture()
+async def pg_engine(pg_url: str) -> AsyncIterator[AsyncEngine]:
+    engine = create_async_engine(pg_url, echo=False, pool_size=5, max_overflow=5)
+    from src.infrastructure.pg_models import PGCoreBase
+
+    async with engine.begin() as conn:
+        await conn.run_sync(PGCoreBase.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture()
+async def pg_session_maker(
+    pg_engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(
+        pg_engine, expire_on_commit=False, autocommit=False, autoflush=False
+    )
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean_tables(pg_engine: AsyncEngine):
+    async with pg_engine.begin() as conn:
+        for t in _TRUNCATE_ORDER:
+            await conn.execute(text(f'TRUNCATE TABLE "{t}" CASCADE'))
+    yield
+    async with pg_engine.begin() as conn:
+        for t in _TRUNCATE_ORDER:
+            await conn.execute(text(f'TRUNCATE TABLE "{t}" CASCADE'))
+
+
+@pytest_asyncio.fixture()
+async def order_repo(
+    pg_session_maker: async_sessionmaker[AsyncSession],
+) -> PgOrderRepository:
+    return PgOrderRepository(pg_session_maker)
+
+
+@pytest_asyncio.fixture()
+async def intent_repo(
+    pg_session_maker: async_sessionmaker[AsyncSession],
+) -> PgExecutionIntentRepository:
+    return PgExecutionIntentRepository(pg_session_maker)
+
+
+@pytest_asyncio.fixture()
+async def position_repo(
+    pg_session_maker: async_sessionmaker[AsyncSession],
+) -> PgPositionRepository:
+    return PgPositionRepository(pg_session_maker)
+
+
+@pytest_asyncio.fixture()
+async def recovery_repo(
+    pg_session_maker: async_sessionmaker[AsyncSession],
+) -> PgExecutionRecoveryRepository:
+    return PgExecutionRecoveryRepository(pg_session_maker)
+
+
 def pytest_collection_modifyitems(config, items):
-    """根据文件名动态设置 asyncio 模式"""
     for item in items:
-        if "test_order_chain_api" in str(item.fspath):
-            # 为 test_order_chain_api.py 的所有测试禁用 asyncio
-            item.add_marker(pytest.mark.asyncio_mode("strict"))
+        if "test_pg_" in item.nodeid:
+            item.add_marker(pytest.mark.asyncio)

@@ -7,6 +7,8 @@ v3.0 数据库基础设施
 - PG 核心链路新增实现（双轨迁移）
 """
 
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
@@ -77,6 +79,8 @@ def create_engine(db_url: Optional[str] = None) -> AsyncEngine:
             echo=os.getenv("SQL_ECHO", "false").lower() == "true",
             pool_size=20,
             max_overflow=40,
+            pool_pre_ping=True,
+            pool_recycle=1800,
         )
 
 
@@ -109,6 +113,8 @@ def create_pg_engine(db_url: Optional[str] = None) -> AsyncEngine:
         echo=os.getenv("SQL_ECHO", "false").lower() == "true",
         pool_size=10,
         max_overflow=20,
+        pool_pre_ping=True,
+        pool_recycle=1800,
     )
 
 
@@ -219,6 +225,22 @@ def get_pg_session_maker() -> async_sessionmaker[AsyncSession]:
             autoflush=False,
         )
     return _pg_async_session_maker
+
+
+async def probe_pg_connectivity(
+    session_maker: Optional[async_sessionmaker[AsyncSession]] = None,
+) -> bool:
+    """轻量探测 PG 连通性。
+
+    优先使用注入的 session_maker；失败时返回 False。
+    """
+    try:
+        maker = session_maker or get_pg_session_maker()
+        async with maker() as session:
+            await session.execute(text("SELECT 1"))
+        return True
+    except (ValueError, SQLAlchemyError, OSError):
+        return False
 
 
 async def close_db():

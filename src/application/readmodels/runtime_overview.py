@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from src.application.readmodels.console_models import RuntimeOverviewResponse
+from src.infrastructure.database import probe_pg_connectivity
 
 
 def _iso_now() -> str:
@@ -90,8 +91,14 @@ class RuntimeOverviewReadModel:
                 f"order={order_backend}, "
                 f"position={position_backend}"
             )
-            # Conservative: config exists != healthy, align with runtime_health
-            pg_health = "DEGRADED"  # No real connectivity probe available
+            session_maker = None
+            if order_repo is not None:
+                session_maker = getattr(order_repo, "_session_maker", None)
+            if session_maker is None and position_repo is not None:
+                session_maker = getattr(position_repo, "_session_maker", None)
+            if session_maker is None and execution_intent_repo is not None:
+                session_maker = getattr(execution_intent_repo, "_session_maker", None)
+            pg_health = "OK" if await probe_pg_connectivity(session_maker) else "DOWN"
             webhook_health = "DEGRADED"  # No delivery success signal available
         else:
             profile = "unavailable"

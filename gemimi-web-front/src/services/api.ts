@@ -107,8 +107,14 @@ export async function getRuntimeOrders(): Promise<Order[]> {
   const res = await request<{ orders: any[] }>('/api/runtime/execution/orders');
   return (res.orders || []).map(ord => ({
     order_id: ord.order_id,
-    role: (ord.side || 'ENTRY') as any, // Use side (BUY/SELL) as role for better visibility
+    role: String(ord.order_role || 'ENTRY').startsWith('TP')
+      ? 'TP'
+      : String(ord.order_role || 'ENTRY') === 'SL'
+      ? 'SL'
+      : 'ENTRY',
+    raw_role: ord.order_role || 'ENTRY',
     symbol: ord.symbol,
+    type: ord.type || undefined,
     status: ord.status as any,
     quantity: ord.qty,
     price: ord.price,

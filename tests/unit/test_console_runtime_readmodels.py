@@ -275,11 +275,12 @@ async def test_health_breaker_recovery_separation():
     orchestrator.list_circuit_breaker_symbols = MagicMock(return_value=["ETH/USDT:USDT"])
 
     recovery_repo = MagicMock()
+    recovery_repo._session_maker = MagicMock()
 
     async def mock_list_active():
         return [{"id": "task1", "created_at": datetime.now(timezone.utc)}]
 
-    recovery_repo.list_active = mock_list_active
+    recovery_repo.list_blocking = mock_list_active
 
     response = await read_model.build(
         runtime_config_provider=provider,
@@ -431,8 +432,8 @@ async def test_overview_and_health_consistency_startup_warmup():
 
 
 @pytest.mark.asyncio
-async def test_health_pg_status_conservative_without_connectivity():
-    """PG status should be DEGRADED when only config exists, not OK."""
+async def test_health_pg_status_down_without_connectivity():
+    """PG status should be DOWN when probe fails (no _session_maker on repo)."""
     read_model = RuntimeHealthReadModel()
     provider = _make_runtime_config_provider()
 
@@ -441,20 +442,20 @@ async def test_health_pg_status_conservative_without_connectivity():
         exchange_gateway=None,
         execution_orchestrator=None,
         execution_recovery_repo=None,
-        startup_reconciliation_summary=None,  # No reconciliation signal
+        startup_reconciliation_summary=None,
         account_snapshot=_make_account_snapshot(),
     )
 
-    # Should NOT be OK when only config exists
+    # Should NOT be OK when probe fails
     assert response.pg_status != "OK"
-    # Should be DEGRADED (conservative: config exists, no connectivity verified)
-    assert response.pg_status == "DEGRADED"
-    assert "pg connectivity not verified" in response.recent_warnings
+    # Should be DOWN (probe_pg_connectivity fails without session_maker)
+    assert response.pg_status == "DOWN"
+    assert "pg connectivity unavailable" in response.recent_warnings
 
 
 @pytest.mark.asyncio
-async def test_health_pg_status_with_reconciliation_signal():
-    """PG status should be DEGRADED (not OK) even with reconciliation signal."""
+async def test_health_pg_status_down_with_reconciliation_signal():
+    """PG status should be DOWN (not OK) when probe fails, even with reconciliation signal."""
     read_model = RuntimeHealthReadModel()
     provider = _make_runtime_config_provider()
 
@@ -467,8 +468,8 @@ async def test_health_pg_status_with_reconciliation_signal():
         account_snapshot=_make_account_snapshot(),
     )
 
-    # Even with reconciliation signal, should be DEGRADED (conservative)
-    assert response.pg_status == "DEGRADED"
+    # Even with reconciliation signal, probe fails without session_maker -> DOWN
+    assert response.pg_status == "DOWN"
 
 
 @pytest.mark.asyncio
@@ -509,7 +510,7 @@ async def test_health_pg_notification_down_when_no_provider():
 
     assert response.pg_status == "DOWN"
     assert response.notification_status == "DOWN"
-    assert "pg config unavailable" in response.recent_warnings
+    assert "pg connectivity unavailable" in response.recent_warnings
     assert "notification config unavailable" in response.recent_warnings
 
 
@@ -519,8 +520,8 @@ async def test_health_pg_notification_down_when_no_provider():
 
 
 @pytest.mark.asyncio
-async def test_overview_pg_health_conservative_without_probe():
-    """Overview pg_health should be DEGRADED when only config exists, not OK."""
+async def test_overview_pg_health_down_without_probe():
+    """Overview pg_health should be DOWN when probe fails (no session_maker on repos)."""
     read_model = RuntimeOverviewReadModel()
     provider = _make_runtime_config_provider()
 
@@ -532,10 +533,10 @@ async def test_overview_pg_health_conservative_without_probe():
         startup_reconciliation_summary=None,
     )
 
-    # Should NOT be OK when only config exists
+    # Should NOT be OK when probe fails
     assert response.pg_health != "OK"
-    # Should be DEGRADED (conservative: config exists, no connectivity verified)
-    assert response.pg_health == "DEGRADED"
+    # Should be DOWN (probe_pg_connectivity fails without session_maker)
+    assert response.pg_health == "DOWN"
 
 
 @pytest.mark.asyncio
@@ -602,8 +603,8 @@ async def test_overview_and_health_pg_webhook_consistency():
     # Both should agree on PG/notification status
     assert overview_response.pg_health == health_response.pg_status
     assert overview_response.webhook_health == health_response.notification_status
-    # Both should be DEGRADED (conservative)
-    assert overview_response.pg_health == "DEGRADED"
+    # Both should be DOWN (probe fails without session_maker) and DEGRADED (webhook)
+    assert overview_response.pg_health == "DOWN"
     assert overview_response.webhook_health == "DEGRADED"
 
 # ============================================================

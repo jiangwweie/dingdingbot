@@ -89,6 +89,7 @@ class RuntimeOrdersReadModel:
                 ConsoleOrderItem(
                     order_id=order_id,
                     symbol=symbol_val,
+                    order_role=str(getattr(getattr(order, "order_role", None), "value", getattr(order, "order_role", None)) or "ENTRY"),
                     side=side,
                     type=order_type,
                     status=status_val,

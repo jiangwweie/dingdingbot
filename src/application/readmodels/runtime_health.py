@@ -8,6 +8,7 @@ from src.application.readmodels.console_models import (
     RecoverySummaryResponse,
     RuntimeHealthResponse,
 )
+from src.infrastructure.database import probe_pg_connectivity
 
 
 def _iso_from_millis(timestamp_ms: Optional[int]) -> Optional[str]:
@@ -70,18 +71,11 @@ class RuntimeHealthReadModel:
         }:
             exchange_status = "DEGRADED"
 
-        # PG status: conservative assessment (config exists != healthy)
-        # Only mark as OK when we have verified connectivity
         if runtime_config_provider is None:
             pg_status = "DOWN"
         else:
-            # Config exists but no real connectivity probe available
-            # Use startup_reconciliation as weak signal of PG health
-            if startup_reconciliation_summary is not None:
-                # Reconciliation ran, suggesting PG was reachable at startup
-                pg_status = "DEGRADED"  # Conservative: was reachable, not sure now
-            else:
-                pg_status = "DEGRADED"  # Config exists, no connectivity signal
+            session_maker = getattr(execution_recovery_repo, "_session_maker", None)
+            pg_status = "OK" if await probe_pg_connectivity(session_maker) else "DOWN"
 
         # Notification status: conservative assessment (webhook URL exists != healthy)
         if runtime_config_provider is None:
@@ -95,8 +89,11 @@ class RuntimeHealthReadModel:
             breaker_symbols = execution_orchestrator.list_circuit_breaker_symbols()
 
         active_recovery_tasks = []
-        if execution_recovery_repo is not None and hasattr(execution_recovery_repo, "list_active"):
-            active_recovery_tasks = await execution_recovery_repo.list_active()
+        if execution_recovery_repo is not None:
+            if hasattr(execution_recovery_repo, "list_blocking"):
+                active_recovery_tasks = await execution_recovery_repo.list_blocking()
+            elif hasattr(execution_recovery_repo, "list_active"):
+                active_recovery_tasks = await execution_recovery_repo.list_active()
 
         startup_markers = {
             "runtime_config": "PASSED" if runtime_config_provider is not None else "FAILED",
@@ -119,9 +116,7 @@ class RuntimeHealthReadModel:
         if exchange_status == "DEGRADED":
             recent_warnings.append("exchange health degraded")
         if pg_status == "DOWN":
-            recent_warnings.append("pg config unavailable")
-        elif pg_status == "DEGRADED":
-            recent_warnings.append("pg connectivity not verified")
+            recent_warnings.append("pg connectivity unavailable")
         if notification_status == "DOWN":
             recent_warnings.append("notification config unavailable")
         elif notification_status == "DEGRADED":
@@ -172,4 +167,3 @@ class RuntimeHealthReadModel:
                 last_recovery_time=last_recovery_time,
             ),
         )
-

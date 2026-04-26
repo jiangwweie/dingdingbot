@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-25 22:35
+> Last updated: 2026-04-27 10:40
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
@@ -834,3 +834,93 @@
   - `projected_exit_fees`
 - 已执行 `python3 -m py_compile` 静态校验，通过。
 - 未运行 pytest；继续遵守“测试前先用户确认”的项目红线。
+
+### 2026-04-26 单实例执行一致性补强
+
+- 已按用户确认的方案 A 完成单实例补强：
+  - `PositionProjectionService` 清理空闲锁
+  - `ExecutionOrchestrator` 清理终态 intent 锁
+  - 去掉 EXIT 双回调，只保留 exit progressed 投影链
+  - 替换 SL 失败时先 best-effort 补挂旧 SL
+  - 首次/增量 SL 失败时先做一次同步立即重试
+  - 修复 SL 同步重试成功后 `sl_order` 仍指向原失败单的问题，改为回传真实 retry order
+  - `project_entry_fill()` 修复 `is_closed=False` 但 `closed_at!=None` 的僵尸 position
+  - breaker 重建改为读取 blocking recovery tasks
+  - `api.py` 独立 uvicorn 模式补齐 PG recovery repo / position projection / startup reconciliation / breaker 重建，避免 runtime 主线在不同入口下语义漂移
+  - `api.py` shutdown 补齐 `PositionRepository` / `ExecutionRecoveryRepository` 关闭
+- 在 5 份审计报告基础上继续自动收口：
+  - `database.py` 为 PG 引擎补 `pool_pre_ping` / `pool_recycle`
+  - 新增 `probe_pg_connectivity()`，runtime health / overview 不再永远返回 `DEGRADED`
+  - `api_console_runtime.py` 为独立 uvicorn 模式补 `_account_getter` 兜底
+  - `RuntimePositionsReadModel` 改为 PG projection 优先，交易所 snapshot 仅做价格/PnL/杠杆补强
+  - `/api/v3/positions` 改为 PG projection 优先，交易所持仓作为 enrich/fallback
+  - `PgPositionRepository` 新增 `list_positions()`
+  - `PgOrderRepository` 补齐 `get_orders` / `get_order_tree` / `get_order_chain_by_order_id` / `delete_orders_batch` 等 API 主路径方法
+  - runtime orders 前后端契约补齐 `order_role` / `type`，避免把 BUY/SELL 误当 TP/SL
+  - `seed_sim1_runtime_profile.py` 去掉 `allow_readonly_update=True`，避免只读 runtime profile 被脚本静默改写
+- 已执行 `python3 -m py_compile src/application/position_projection_service.py src/application/execution_orchestrator.py src/infrastructure/pg_execution_recovery_repository.py src/application/readmodels/runtime_health.py`，通过。
+- 已执行 `python3 -m py_compile src/interfaces/api.py src/application/position_projection_service.py src/application/execution_orchestrator.py src/infrastructure/pg_execution_recovery_repository.py src/application/readmodels/runtime_health.py`，通过。
+- 已执行 `python3 -m py_compile src/infrastructure/database.py src/application/readmodels/runtime_health.py src/application/readmodels/runtime_overview.py src/application/readmodels/runtime_positions.py src/application/readmodels/runtime_orders.py src/interfaces/api_console_runtime.py src/interfaces/api.py src/infrastructure/pg_position_repository.py src/infrastructure/pg_order_repository.py`，通过。
+- 外部 Claude 已完成本轮定向测试：
+  - 共 90 个测试通过，0 失败
+  - 新增/修改测试覆盖：
+    - runtime health / overview PG probe
+    - console runtime `_get_account_snapshot` 回退逻辑
+    - runtime positions PG-first + snapshot enrich
+    - `/api/v3/positions` PG-first
+    - `/api/v3/orders` / `/api/v3/orders/tree` / `/api/v3/orders/batch`
+- 当前剩余缺口：
+  - `PositionInfo` 缺少 `current_price` / `mark_price`，导致 positions enrich 不完整
+  - `PgOrderRepository` / 其他 PG repo 仍缺真实 PostgreSQL 集成测试
+- 未运行 pytest。
+
+### 2026-04-27 PG Repository 集成验证完成
+
+- 外部 Claude 已完成 4 个 PG Repository 的真实 PostgreSQL 集成测试：
+  - `tests/integration/test_pg_order_repo.py`
+  - `tests/integration/test_pg_execution_intent_repo.py`
+  - `tests/integration/test_pg_position_repo.py`
+  - `tests/integration/test_pg_execution_recovery_repo.py`
+- 本轮集成测试结果：
+  - 90 passed, 0 failed, 0 skipped
+- 两轮合计：
+  - 180 passed, 0 failed
+- 当前状态更新：
+  - execution PG 主线的代码修复、只读观测面修复、以及 4 个 PG Repository 的真实 PG 验证均已完成
+  - 剩余项降为非阻塞增强：
+    - `PositionInfo.current_price / mark_price` 语义补齐
+    - `list_active()` / `list_blocking()` 语义澄清
+
+### 2026-04-27 后续方向收敛
+
+- 已根据最新判断把后续优先级从“继续迁库”调整为“边界治理优先”：
+  1. 固化 execution PG 主线已完成的边界定义
+  2. 收紧 runtime observability 口径
+  3. 推进配置冻结与参数链防污染
+  4. 收紧 research / runtime 隔离
+  5. 最后再评估 `signals / attempts` 是否需要迁 PG
+- 当前不再默认把 `signals` / `signal_attempts` / config 表迁移当作下一步主任务。
+
+### 2026-04-27 五份审计报告已并入主线重排
+
+1. ✅ 已重新通读并筛选以下 5 份文档的当前有效风险：
+   - `2026-04-26-full-db-source-audit.md`
+   - `2026-04-26-runtime-observation-audit.md`
+   - `sqlite-retirement-design.md`
+   - `2026-04-26-pg-execution-mainline-verification-assets.md`
+   - `2026-04-26-research-chain-audit-and-config-freeze-design.md`
+2. ✅ 已识别哪些风险仍然有效，哪些已被最新代码/测试解除：
+   - 继续有效：边界未冻结、config 可被研究链污染、signals/attempts 角色未定型
+   - 已解除或需按最新代码复核：orders API fallback、PG health 永久降级、PG repo 无验证、PgOrderRepository 主路径不完整
+3. ✅ 已新增主线汇总文档：
+   - `docs/planning/2026-04-27-boundary-governance-mainline-plan.md`
+4. ✅ 已把当前主线重新定义为“边界治理优先”：
+   - execution truth
+   - observability
+   - config freeze / parameter governance
+   - research / runtime isolation
+5. ✅ 已明确当前不再默认继续推进：
+   - `signals` 直接迁 PG
+   - config 全域迁 PG
+   - backtest / klines / history 迁 PG
+   - 多实例 / 分布式语义扩展

@@ -98,7 +98,6 @@ class ExecutionOrchestrator:
         )
         self._order_lifecycle.set_entry_filled_callback(self._handle_entry_filled)
         self._order_lifecycle.set_exit_progressed_callback(self._handle_exit_filled)
-        self._order_lifecycle.set_exit_filled_callback(self._handle_exit_filled)
 
     def _get_intent_lock(self, intent_id: str) -> asyncio.Lock:
         lock = self._intent_locks.get(intent_id)
@@ -106,6 +105,16 @@ class ExecutionOrchestrator:
             lock = asyncio.Lock()
             self._intent_locks[intent_id] = lock
         return lock
+
+    def _cleanup_intent_lock_if_idle(self, intent_id: str, lock: asyncio.Lock) -> None:
+        current = self._intent_locks.get(intent_id)
+        if current is not lock:
+            return
+
+        waiters = getattr(lock, "_waiters", None)
+        has_waiters = bool(waiters) if waiters is not None else False
+        if not lock.locked() and not has_waiters:
+            self._intent_locks.pop(intent_id, None)
 
     @staticmethod
     def _can_transition_intent(
@@ -153,7 +162,9 @@ class ExecutionOrchestrator:
         blocked_reason: Optional[str] = None,
         blocked_message: Optional[str] = None,
     ) -> bool:
-        async with self._get_intent_lock(intent.id):
+        lock = self._get_intent_lock(intent.id)
+        cleanup_after_save = False
+        async with lock:
             latest = await self._load_intent(intent.id) or intent
             current_status = latest.status
             if not hasattr(current_status, "value"):
@@ -185,7 +196,14 @@ class ExecutionOrchestrator:
             intent.blocked_reason = latest.blocked_reason
             intent.blocked_message = latest.blocked_message
             await self._save_intent(latest)
-            return True
+            cleanup_after_save = status in {
+                ExecutionIntentStatus.COMPLETED,
+                ExecutionIntentStatus.FAILED,
+                ExecutionIntentStatus.BLOCKED,
+            }
+        if cleanup_after_save:
+            self._cleanup_intent_lock_if_idle(intent.id, lock)
+        return True
 
     async def _save_intent(self, intent: ExecutionIntent) -> None:
         """保存执行意图到本地缓存，并按需持久化到仓储。"""
@@ -488,6 +506,132 @@ class ExecutionOrchestrator:
                     f"error={notify_error}",
                     exc_info=True,
                 )
+
+    async def _best_effort_restore_previous_sl(
+        self,
+        *,
+        existing_sl: Order,
+        entry_order: Order,
+        reason: str,
+    ) -> bool:
+        """单实例下尽最大努力把旧 SL 补挂回去，缩小裸奔窗口。"""
+        try:
+            restored_sl = existing_sl.model_copy(deep=True)
+            restored_sl.id = f"{existing_sl.id}_restore_{uuid.uuid4().hex[:8]}"
+            restored_sl.exchange_order_id = None
+            restored_sl.status = OrderStatus.CREATED
+            restored_sl.parent_order_id = entry_order.id
+            restored_sl.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+            await self._order_lifecycle.register_created_order(
+                restored_sl,
+                metadata={
+                    "source": "ExecutionOrchestrator._best_effort_restore_previous_sl",
+                    "restore_reason": reason,
+                    "restored_from_order_id": existing_sl.id,
+                    "parent_order_id": entry_order.id,
+                },
+            )
+
+            side = "sell" if entry_order.direction == Direction.LONG else "buy"
+            placement_result = await self._gateway.place_order(
+                symbol=restored_sl.symbol,
+                order_type=(
+                    "limit" if restored_sl.order_type == OrderType.LIMIT else "stop_market"
+                ),
+                side=side,
+                amount=restored_sl.requested_qty,
+                price=restored_sl.price,
+                trigger_price=restored_sl.trigger_price,
+                reduce_only=True,
+                client_order_id=restored_sl.id,
+            )
+
+            if not placement_result.is_success:
+                logger.error(
+                    "[ExecutionOrchestrator] 旧 SL 同步补挂失败: "
+                    f"order_id={existing_sl.id}, error={placement_result.error_code}: "
+                    f"{placement_result.error_message}"
+                )
+                return False
+
+            await self._apply_placed_order_status(
+                order=restored_sl,
+                placement_result=placement_result,
+            )
+            logger.warning(
+                "[ExecutionOrchestrator] 旧 SL 已 best-effort 补挂回去: "
+                f"old_order_id={existing_sl.id}, restored_order_id={restored_sl.id}"
+            )
+            return True
+        except Exception as e:
+            logger.error(
+                "[ExecutionOrchestrator] 旧 SL best-effort 补挂异常: "
+                f"order_id={existing_sl.id}, error={e}",
+                exc_info=True,
+            )
+            return False
+
+    async def _place_protection_order_with_single_retry(
+        self,
+        *,
+        prot_order: Order,
+        entry_order: Order,
+    ) -> Optional[Order]:
+        """单实例下为新 SL 做一次同步重试，避免直接进入退避窗口。"""
+        side = "sell" if entry_order.direction == Direction.LONG else "buy"
+        retry_order = prot_order.model_copy(deep=True)
+        retry_order.id = f"{prot_order.id}_retry_{uuid.uuid4().hex[:8]}"
+        retry_order.exchange_order_id = None
+        retry_order.status = OrderStatus.CREATED
+        retry_order.parent_order_id = entry_order.id
+        retry_order.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        try:
+            await self._order_lifecycle.register_created_order(
+                retry_order,
+                metadata={
+                    "source": "ExecutionOrchestrator._place_protection_order_with_single_retry",
+                    "retried_from_order_id": prot_order.id,
+                    "parent_order_id": entry_order.id,
+                },
+            )
+            placement_result = await self._gateway.place_order(
+                symbol=retry_order.symbol,
+                order_type=(
+                    "limit" if retry_order.order_type == OrderType.LIMIT else "stop_market"
+                ),
+                side=side,
+                amount=retry_order.requested_qty,
+                price=retry_order.price,
+                trigger_price=retry_order.trigger_price,
+                reduce_only=True,
+                client_order_id=retry_order.id,
+            )
+            if not placement_result.is_success:
+                logger.error(
+                    "[ExecutionOrchestrator] 新 SL 单次重试失败: "
+                    f"order_id={prot_order.id}, error={placement_result.error_code}: "
+                    f"{placement_result.error_message}"
+                )
+                return None
+
+            await self._apply_placed_order_status(
+                order=retry_order,
+                placement_result=placement_result,
+            )
+            logger.warning(
+                "[ExecutionOrchestrator] 新 SL 单次重试成功: "
+                f"original_order_id={prot_order.id}, retry_order_id={retry_order.id}"
+            )
+            return retry_order
+        except Exception as e:
+            logger.error(
+                "[ExecutionOrchestrator] 新 SL 单次重试异常: "
+                f"order_id={prot_order.id}, error={e}",
+                exc_info=True,
+            )
+            return None
 
     async def execute_signal(
         self,
@@ -931,6 +1075,13 @@ class ExecutionOrchestrator:
                         )
                     else:
                         if prot_order.order_role == OrderRole.SL:
+                            retried_sl = await self._place_protection_order_with_single_retry(
+                                prot_order=prot_order,
+                                entry_order=entry_order,
+                            )
+                            if retried_sl is not None:
+                                sl_order = retried_sl
+                                continue
                             await self._trigger_unprotected_recovery(
                                 intent=intent,
                                 symbol=prot_order.symbol,
@@ -968,6 +1119,13 @@ class ExecutionOrchestrator:
                         f"error={e}"
                     )
                     if prot_order.order_role == OrderRole.SL:
+                        retried_sl = await self._place_protection_order_with_single_retry(
+                            prot_order=prot_order,
+                            entry_order=entry_order,
+                        )
+                        if retried_sl is not None:
+                            sl_order = retried_sl
+                            continue
                         await self._trigger_unprotected_recovery(
                             intent=intent,
                             symbol=prot_order.symbol,
@@ -1327,6 +1485,20 @@ class ExecutionOrchestrator:
                         )
                     else:
                         if prot_order.order_role == OrderRole.SL:
+                            if sl_replaced and existing_sl is not None:
+                                restored = await self._best_effort_restore_previous_sl(
+                                    existing_sl=existing_sl,
+                                    entry_order=entry_order,
+                                    reason="replacement_sl_submit_failed",
+                                )
+                                if restored:
+                                    return
+                            retried_sl = await self._place_protection_order_with_single_retry(
+                                prot_order=prot_order,
+                                entry_order=entry_order,
+                            )
+                            if retried_sl is not None:
+                                continue
                             await self._trigger_unprotected_recovery(
                                 intent=intent,
                                 symbol=prot_order.symbol,
@@ -1354,6 +1526,20 @@ class ExecutionOrchestrator:
 
                 except Exception as e:
                     if prot_order.order_role == OrderRole.SL:
+                        if sl_replaced and existing_sl is not None:
+                            restored = await self._best_effort_restore_previous_sl(
+                                existing_sl=existing_sl,
+                                entry_order=entry_order,
+                                reason="replacement_sl_submit_exception",
+                            )
+                            if restored:
+                                return
+                        retried_sl = await self._place_protection_order_with_single_retry(
+                            prot_order=prot_order,
+                            entry_order=entry_order,
+                        )
+                        if retried_sl is not None:
+                            continue
                         await self._trigger_unprotected_recovery(
                             intent=intent,
                             symbol=prot_order.symbol,
@@ -1462,8 +1648,11 @@ class ExecutionOrchestrator:
             return 0
 
         try:
-            # 读取 PG 活跃恢复任务（status in ('pending', 'retrying')）
-            active_tasks = await self._execution_recovery_repository.list_active()
+            # 读取所有仍阻塞新开仓的 PG 恢复任务（不受 next_retry_at 限制）
+            if hasattr(self._execution_recovery_repository, "list_blocking"):
+                active_tasks = await self._execution_recovery_repository.list_blocking()
+            else:
+                active_tasks = await self._execution_recovery_repository.list_active()
 
             # 提取 symbol 并重建 breaker 集合
             old_count = len(self._circuit_breaker_symbols)

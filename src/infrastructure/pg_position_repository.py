@@ -87,6 +87,25 @@ class PgPositionRepository:
             result = await session.execute(stmt)
             return [self._to_domain(orm) for orm in result.scalars().all()]
 
+    async def list_positions(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        is_closed: Optional[bool] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Position]:
+        """按条件列出仓位，支持已平/未平过滤。"""
+        async with self._session_maker() as session:
+            stmt = select(PGPositionORM).order_by(PGPositionORM.updated_at.desc())
+            if symbol:
+                stmt = stmt.where(PGPositionORM.symbol == symbol)
+            if is_closed is not None:
+                stmt = stmt.where(PGPositionORM.is_closed.is_(is_closed))
+            stmt = stmt.offset(offset).limit(limit)
+            result = await session.execute(stmt)
+            return [self._to_domain(orm) for orm in result.scalars().all()]
+
     @staticmethod
     def _to_orm(
         position: Any,

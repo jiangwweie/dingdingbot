@@ -495,6 +495,12 @@ def _build_position_info_from_projection(position: Any) -> PositionInfoV3:
     )
 
 
+def _exchange_position_key(pos: Any) -> tuple[str, Direction]:
+    side = getattr(pos, "side", "buy")
+    direction = Direction.SHORT if str(side).lower() in {"short", "sell"} else Direction.LONG
+    return getattr(pos, "symbol", "unknown"), direction
+
+
 def _get_audit_logger() -> Any:
     """Get audit logger or raise error if not initialized."""
     if _audit_logger is None:
@@ -516,6 +522,7 @@ async def lifespan(app: FastAPI):
 
     global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
     global _capital_protection, _account_service, _execution_orchestrator, _exchange_gateway, _signal_repo
+    global _execution_recovery_repo, _position_repo, _startup_reconciliation_summary
     _standalone_gateway_created = False  # 标记是否在 lifespan 中创建了 gateway
 
     # Startup - 初始化所有 Repository
@@ -665,6 +672,8 @@ async def lifespan(app: FastAPI):
             from src.application.account_service import BinanceAccountService
             from src.application.capital_protection import CapitalProtectionManager
             from src.application.execution_orchestrator import ExecutionOrchestrator
+            from src.application.position_projection_service import PositionProjectionService
+            from src.application.startup_reconciliation_service import StartupReconciliationService
             from src.infrastructure.notifier import get_notification_service
 
             # 获取配置
@@ -712,12 +721,43 @@ async def lifespan(app: FastAPI):
                 gateway=_standalone_gateway,
             )
 
+            # 初始化 PG execution recovery repository（如果可用）
+            if _execution_recovery_repo is None:
+                try:
+                    from src.infrastructure.database import get_pg_session_maker
+                    from src.infrastructure.pg_execution_recovery_repository import (
+                        PgExecutionRecoveryRepository,
+                    )
+
+                    session_maker = get_pg_session_maker()
+                    if session_maker:
+                        _execution_recovery_repo = PgExecutionRecoveryRepository(
+                            session_maker=session_maker
+                        )
+                        await _execution_recovery_repo.initialize()
+                        logger.info(
+                            "PG execution recovery repository initialized in lifespan"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "PG execution recovery repository 初始化失败（独立 uvicorn 模式降级继续）: %s",
+                        e,
+                        exc_info=True,
+                    )
+                    _execution_recovery_repo = None
+
+            async def _orchestrator_notifier_adapter(title: str, message: str) -> None:
+                await _standalone_notifier.send_system_alert(title, message)
+
             # 初始化 ExecutionOrchestrator
             _standalone_orchestrator = ExecutionOrchestrator(
                 capital_protection=_standalone_capital_protection,
                 order_lifecycle=_order_lifecycle_service,
                 gateway=_standalone_gateway,
                 intent_repository=_execution_intent_repo,
+                notifier=_orchestrator_notifier_adapter,
+                execution_recovery_repository=_execution_recovery_repo,
+                position_projection_service=PositionProjectionService(_position_repo),
             )
 
             # 注册订单更新回调
@@ -727,6 +767,45 @@ async def lifespan(app: FastAPI):
             _capital_protection = _standalone_capital_protection
             _account_service = _standalone_account_service
             _execution_orchestrator = _standalone_orchestrator
+
+            # 独立 uvicorn 模式也运行启动对账，避免执行态主链弱化
+            try:
+                reconciliation_service = StartupReconciliationService(
+                    gateway=_standalone_gateway,
+                    repository=_order_repo,
+                    lifecycle=_order_lifecycle_service,
+                    orchestrator=_standalone_orchestrator,
+                    execution_recovery_repository=_execution_recovery_repo,
+                )
+                _startup_reconciliation_summary = (
+                    await reconciliation_service.run_startup_reconciliation()
+                )
+                logger.info(
+                    "Startup reconciliation completed in lifespan: candidates=%s, failed=%s",
+                    _startup_reconciliation_summary.get("total_candidates", 0),
+                    _startup_reconciliation_summary.get("failure_count", 0),
+                )
+            except Exception as e:
+                logger.error(
+                    "启动对账失败（独立 uvicorn 模式不影响主进程启动）: %s",
+                    e,
+                    exc_info=True,
+                )
+
+            try:
+                breaker_count = (
+                    await _standalone_orchestrator.rebuild_circuit_breakers_from_recovery_tasks()
+                )
+                logger.info(
+                    "Circuit breaker 重建完成（独立 uvicorn 模式）: %s 个 symbol 被熔断",
+                    breaker_count,
+                )
+            except Exception as e:
+                logger.error(
+                    "Circuit breaker 重建失败（独立 uvicorn 模式不影响主进程启动）: %s",
+                    e,
+                    exc_info=True,
+                )
 
             logger.info("Execution runtime initialized in lifespan (standalone uvicorn mode)")
 
@@ -743,6 +822,7 @@ async def lifespan(app: FastAPI):
             _capital_protection = None
             _account_service = None
             _execution_orchestrator = None
+            _startup_reconciliation_summary = None
             logger.info("Standalone execution runtime globals reset to None")
 
         # Shutdown - 清理所有 Repository
@@ -761,11 +841,21 @@ async def lifespan(app: FastAPI):
             logger.info("ExecutionIntentRepository closed")
             _execution_intent_repo = None
 
+        if _execution_recovery_repo is not None:
+            await _execution_recovery_repo.close()
+            logger.info("ExecutionRecoveryRepository closed")
+            _execution_recovery_repo = None
+
         # Shutdown OrderLifecycleService (ORD-1-T5)
         if _order_lifecycle_service is not None:
             await _order_lifecycle_service.stop()
             logger.info("OrderLifecycleService stopped")
             _order_lifecycle_service = None
+
+        if _position_repo is not None:
+            await _position_repo.close()
+            logger.info("PositionRepository closed")
+            _position_repo = None
 
         if _order_repo is not None:
             await _order_repo.close()
@@ -5389,34 +5479,66 @@ async def list_positions(
         total_unrealized_pnl = Decimal("0")
         total_realized_pnl = Decimal("0")
         total_margin_used = Decimal("0")
-        now = int(datetime.now(timezone.utc).timestamp() * 1000)
         account_balance = None
         position_infos = []
+        exchange_positions = []
+        exchange_position_map = {}
 
         try:
-            positions = await gateway.fetch_positions(symbol=symbol)
+            exchange_positions = await gateway.fetch_positions(symbol=symbol)
             account_balance = await gateway.fetch_account_balance()
+            exchange_position_map = {
+                _exchange_position_key(pos): pos for pos in exchange_positions
+            }
+        except Exception as exchange_error:
+            logger.warning(f"交易所持仓读取失败，继续使用 PG positions 主口径: {exchange_error}")
 
-            sliced_positions = positions[offset: offset + limit]
+        projected_positions = []
+        if position_repo is not None:
+            try:
+                if hasattr(position_repo, "list_positions"):
+                    projected_positions = await position_repo.list_positions(
+                        symbol=symbol,
+                        is_closed=is_closed,
+                        limit=limit,
+                        offset=offset,
+                    )
+                elif not is_closed and hasattr(position_repo, "list_active"):
+                    projected_positions = await position_repo.list_active(
+                        symbol=symbol,
+                        limit=limit + offset,
+                    )
+                    projected_positions = projected_positions[offset: offset + limit]
+            except Exception as projection_error:
+                logger.warning(f"PG positions 读取失败，尝试回退交易所口径: {projection_error}")
+                projected_positions = []
+
+        if projected_positions:
+            for pos in projected_positions:
+                position_info = _build_position_info_from_projection(pos)
+                exchange_pos = exchange_position_map.get((pos.symbol, position_info.direction))
+                if exchange_pos is not None:
+                    position_info.mark_price = getattr(exchange_pos, "current_price", None)
+                    position_info.unrealized_pnl = getattr(
+                        exchange_pos,
+                        "unrealized_pnl",
+                        position_info.unrealized_pnl,
+                    )
+                    position_info.leverage = int(
+                        getattr(exchange_pos, "leverage", position_info.leverage)
+                        or position_info.leverage
+                    )
+
+                position_infos.append(position_info)
+                total_unrealized_pnl += position_info.unrealized_pnl
+                total_realized_pnl += position_info.realized_pnl
+        else:
+            now = int(datetime.now(timezone.utc).timestamp() * 1000)
+            sliced_positions = exchange_positions[offset: offset + limit]
             for pos in sliced_positions:
                 position_info = _build_position_info_from_exchange(pos, opened_at=now)
                 position_infos.append(position_info)
                 total_unrealized_pnl += pos.unrealized_pnl
-        except Exception as exchange_error:
-            logger.warning(f"交易所持仓读取失败，准备回退 PG positions: {exchange_error}")
-
-        if not position_infos and position_repo is not None and hasattr(position_repo, "list_active"):
-            if is_closed:
-                projected_positions = []
-            else:
-                projected_positions = await position_repo.list_active(symbol=symbol, limit=limit + offset)
-
-            sliced_positions = projected_positions[offset: offset + limit]
-            for pos in sliced_positions:
-                position_info = _build_position_info_from_projection(pos)
-                position_infos.append(position_info)
-                total_unrealized_pnl += position_info.unrealized_pnl
-                total_realized_pnl += position_info.realized_pnl
 
         # 计算账户权益 = 总余额 + 未实现盈亏
         account_equity = None

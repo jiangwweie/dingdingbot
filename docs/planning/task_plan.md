@@ -1,7 +1,7 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-25 22:35
+> **Last updated**: 2026-04-27 10:40
 > **Status**: 当前唯一主线已切到 Sim-1 自然模拟盘观察准备；冻结 runtime 为 `sim1_eth_runtime`（ETH 1h + 4h MTF, LONG-only）；研究链按路径 1 / 方案 A 收口，避免反向污染 runtime
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
@@ -589,3 +589,118 @@ Sim-0 详细任务拆分（归档参考）：
    - 为 `ExecutionIntent` 增加状态前进约束，阻止 `COMPLETED -> PARTIALLY_PROTECTED` 之类回退
 
 测试仍未由 Codex 本地执行；如需 pytest，继续遵守项目红线，先由用户确认。
+
+### 2026-04-26 单实例一致性补强（方案 A）
+
+在用户明确“当前只有单实例”后，执行主线补强范围收敛为：
+
+1. 锁生命周期
+   - `PositionProjectionService` 在 position closed / 无效 exit 路径后清理空闲锁
+   - `ExecutionOrchestrator` 在 intent 进入终态后清理空闲锁
+2. EXIT 回调
+   - 去掉 `exit_progressed` + `exit_filled` 指向同一处理函数的双回调
+   - 保留 `exit_progressed` 作为 position projection 主链
+3. SL 裸奔窗口
+   - 替换 SL 失败时，先 best-effort 补挂旧 SL
+   - 首次 / 增量 SL 挂单失败时，先做一次同步立即重试
+   - 同步重试成功后，主流程回传真实 retry order，避免 `sl_order` 仍指向原失败单
+   - 仍失败才进入 recovery/breaker/notifier
+4. 僵尸 Position
+   - `current_qty > 0` 时强制 `is_closed=False` 且 `closed_at=None`
+5. breaker 重建
+   - 启动重建 breaker 时改读“所有 blocking recovery tasks”
+   - 不再只看 `next_retry_at <= now` 的到期任务
+6. 启动入口一致性
+   - `main.py` 与 `api.py` 的 execution runtime 入口保持同等主线语义
+   - 独立 uvicorn 模式也接入 PG recovery repo、position projection、startup reconciliation 与 breaker 重建
+7. 观测可信度收口
+   - runtime health / overview 增加真实 PG 连通性弱探针
+   - console runtime / v3 positions 改为 PG projection 优先，交易所数据改做 enrich/fallback
+   - 独立 uvicorn 模式下为 `_account_getter` 提供兜底 snapshot 来源
+8. orders 查询面补齐
+   - `PgOrderRepository` 补齐 `/api/v3/orders`、`/api/v3/orders/tree`、`/api/v3/orders/batch` 所需方法
+   - runtime orders 前后端契约补齐 `order_role` / `type`
+9. 运行期配置污染最小防护
+   - 移除 `seed_sim1_runtime_profile.py` 中的 `allow_readonly_update=True`
+
+### 2026-04-27 当前窗口收口判断
+
+基于已完成代码修复 + 90 个定向测试结果，当前窗口分层判断如下：
+
+1. **已基本完成**
+   - 单实例 execution 主线的代码级闭环
+   - runtime/console execution 只读面主要口径修正
+   - orders 查询面在 PG 主路径下可工作
+2. **仍未完成**
+   - 真实 PostgreSQL 集成验证（特别是 PG repositories）
+   - `PositionInfo.current_price/mark_price` 模型补齐，完善 positions enrich
+3. **当前不要扩做**
+   - signals 迁移到 PG
+   - config/backtest/klines 迁移
+   - 分布式/多实例并发语义
+
+### 2026-04-27 后续阶段优先级重排（边界治理优先）
+
+在 execution PG 主线通过代码修复 + 真实 PG 验证后，后续优先级不再是“继续迁能迁的表”，而是正式固化系统边界：
+
+1. **第一优先：边界定义**
+   - 明确哪些属于 `runtime execution truth`
+   - 明确哪些属于 `runtime observability`
+   - 明确哪些属于 `config / research / history`
+2. **第二优先：observability 口径收紧**
+   - runtime console / readonly API 明确标识 PG vs SQLite 来源
+   - 优先保证“看见的数据可信”，不默认要求立刻迁 `signals / attempts`
+3. **第三优先：配置冻结与参数链防污染**
+   - `runtime_profiles`
+   - 参数表 / resolver / provider / ConfigManager 来源优先级
+   - runtime freeze 后哪些配置不可变
+4. **第四优先：research / runtime 隔离**
+   - candidate / replay / optuna / backtest 保持独立链路
+   - research 产物进入 runtime 必须经过显式发布/冻结
+5. **第五优先：再评估 signals / attempts 是否迁 PG**
+   - 若属于执行判断/恢复/风控必需，则迁 PG
+   - 若主要用于观测/分析/诊断，可继续留 SQLite 一段时间
+
+### 2026-04-27 基于 5 份审计的主线重排（新的 SSOT）
+
+结合以下 5 份输入：
+
+- `docs/planning/2026-04-26-full-db-source-audit.md`
+- `docs/planning/2026-04-26-runtime-observation-audit.md`
+- `docs/planning/sqlite-retirement-design.md`
+- `docs/planning/2026-04-26-pg-execution-mainline-verification-assets.md`
+- `docs/planning/2026-04-26-research-chain-audit-and-config-freeze-design.md`
+
+当前主线重新定义为：
+
+1. **先钉死 execution truth 边界**
+   - `orders`
+   - `execution_intents`
+   - `positions`（execution projection）
+   - `execution_recovery_tasks`
+   这 4 个对象构成 runtime execution truth，不再默认继续扩大“迁表范围”。
+
+2. **再钉死 runtime observability 边界**
+   - `signals / signal_attempts` 当前先按 observability / diagnosis 候选处理
+   - 只有在确认它们仍参与执行判断/恢复/状态推进时，才升级为下一窗的 PG 迁移对象
+
+3. **配置冻结与参数链防污染优先于继续迁库**
+   - `runtime_profiles`
+   - resolver / provider / ConfigManager 来源优先级
+   - freeze 后哪些配置不可变
+   这些必须进入正式主线
+
+4. **research / runtime 隔离正式入主计划**
+   - research 只允许 candidate / replay / compare / report
+   - candidate 进入 runtime 必须经过显式发布/冻结
+   - 不允许研究脚本旁路污染 runtime
+
+5. **默认不作为下一步主任务**
+   - `signals` 直接迁 PG
+   - config 全域迁 PG
+   - backtest / klines / history 迁 PG
+   - 分布式 / 多实例扩展
+
+对应汇总文档：
+
+- `docs/planning/2026-04-27-boundary-governance-mainline-plan.md`

@@ -83,9 +83,15 @@ export default function Execution() {
               {orders.map(order => (
                 <TableRow key={order.order_id}>
                   <TableCell className="font-mono text-xs text-zinc-500">{order.order_id}</TableCell>
-                  <TableCell><Badge variant="default">{order.role}</Badge></TableCell>
+                  <TableCell>
+                    <Badge variant="default" title={order.type || undefined}>
+                      {order.raw_role || order.role}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="font-mono">{order.quantity}</TableCell>
-                  <TableCell className="font-mono text-blue-400">{order.price?.toFixed(2) || '市价 (MARKET)'}</TableCell>
+                  <TableCell className="font-mono text-blue-400">
+                    {order.price?.toFixed(2) || `市价 (${order.type || 'MARKET'})`}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={order.status === 'FILLED' ? 'success' : order.status === 'REJECTED' || order.status === 'CANCELED' ? 'danger' : 'warning'}>
                       {order.status === 'FILLED' ? '已成交' : order.status === 'NEW' ? '新建' : order.status === 'CANCELED' ? '已取消' : order.status === 'REJECTED' ? '已拒绝' : order.status}

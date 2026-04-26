@@ -3,7 +3,7 @@ PG Execution Recovery Repository - PostgreSQL 执行恢复任务仓库
 
 职责：
 1. 管理 execution_recovery_tasks 表
-2. 提供最小方法集：create/get/list_active/mark_resolved/mark_retrying/mark_failed/delete
+2. 提供最小方法集：create/get/list_active/list_blocking/mark_resolved/mark_retrying/mark_failed/delete
 3. 不搞大而全，只做当前恢复链会用到的方法
 """
 
@@ -169,6 +169,22 @@ class PgExecutionRecoveryRepository:
             )
             tasks = result.scalars().all()
 
+            return [self._orm_to_dict(task) for task in tasks]
+
+    async def list_blocking(self) -> List[Dict[str, Any]]:
+        """
+        列出仍应阻止新开仓的恢复任务。
+
+        语义：status in ('pending','retrying')，不关心 next_retry_at 是否到期。
+        用于启动时重建 circuit breaker。
+        """
+        async with self._session_maker() as session:
+            result = await session.execute(
+                select(PGExecutionRecoveryTaskORM).where(
+                    PGExecutionRecoveryTaskORM.status.in_(["pending", "retrying"])
+                )
+            )
+            tasks = result.scalars().all()
             return [self._orm_to_dict(task) for task in tasks]
 
     async def mark_resolved(
