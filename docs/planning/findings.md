@@ -35,6 +35,15 @@
    - `get_stats()` 仍依赖 `created_at LIKE 'YYYY-MM-DD%'`
    - `status` 大小写历史混用仍存在兼容痕迹
    - `store_take_profit_levels()` 仍是 delete + insert 的单事务替换语义
+11. `Direction` 输入归一化已补到 model / repository / tracker 边界。
+   - `Direction` 现在接受大小写混合输入并统一输出 `LONG/SHORT`
+   - `SignalQuery` / `SignalDeleteRequest` 的 `direction` 已在模型层统一归一化
+   - `get_active_signal()` / `get_opposing_signal()` / 方向过滤查询已不再依赖调用方恰好传大写
+12. `PgSignalRepository.save_signal()` 已从粗粒度 `merge()` 收紧为：
+   - 优先按 `signal_id` 查找
+   - 不存在则 insert
+   - 已存在则定向刷新字段
+   - 若重复创建路径再次写入 `PENDING`，不会把已推进状态回退覆盖
 
 ### 0. Research 收口必须保持 research-only，且不得反向污染 runtime
 

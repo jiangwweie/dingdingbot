@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any
 import aiosqlite
 
 from src.domain.models import (
-    SignalResult, SignalQuery, SignalDeleteRequest, AttemptQuery, AttemptDeleteRequest,
+    Direction, SignalResult, SignalQuery, SignalDeleteRequest, AttemptQuery, AttemptDeleteRequest,
     SignalAttempt, PatternResult, FilterResult
 )
 from src.domain.logic_tree import LogicNode, LeafNode, TriggerLeaf, FilterLeaf
@@ -866,7 +866,7 @@ class SignalRepository:
 
         # Extract from the end: strategy_name, direction, timeframe, and the rest is symbol
         strategy_name = parts[-1]
-        direction = parts[-2]
+        direction = Direction.normalize(parts[-2])
         timeframe = parts[-3]
         symbol = ":".join(parts[:-3])  # Join remaining parts as symbol
 
@@ -935,7 +935,8 @@ class SignalRepository:
             Signal dict if found, None otherwise
         """
         # Determine opposing direction
-        opposing_direction = "SHORT" if direction == "LONG" else "LONG"
+        normalized_direction = Direction.normalize(direction)
+        opposing_direction = "SHORT" if normalized_direction == "LONG" else "LONG"
 
         async with self._db.execute(
             """
@@ -997,6 +998,8 @@ class SignalRepository:
             status = query.status
             start_time = query.start_time
             end_time = query.end_time
+
+        direction = Direction.normalize(direction) if direction else None
 
         # Build WHERE clause dynamically
         where_clauses = ["1=1"]
@@ -1118,6 +1121,8 @@ class SignalRepository:
             start_time = request.start_time
             end_time = request.end_time
             source = request.source
+
+        direction = Direction.normalize(direction) if direction else None
 
         # If ids provided, delete by IDs
         if ids and len(ids) > 0:

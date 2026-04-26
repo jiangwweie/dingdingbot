@@ -69,6 +69,20 @@
    - `signal_attempts` 继续留 SQLite
    - 主线代码 + unit tests + PG integration tests 均已过
 
+### 2026-04-27 -- Signals 窗口补充修复：direction 归一化与 save_signal 状态回退防护
+
+1. ✅ `Direction` 已支持大小写无关归一化
+   - `Direction._missing_()` / `Direction.normalize()` 新增
+   - `SignalQuery.direction` / `SignalDeleteRequest.direction` 在模型层归一化
+2. ✅ `PerformanceTracker` 不再依赖小写 `long/short`
+   - pending signal 跟踪统一按 `LONG/SHORT` 语义执行
+3. ✅ `PgSignalRepository.save_signal()` 已移除粗粒度 `merge()` 主路径
+   - 改为按 `signal_id` 查已有行
+   - 已存在时定向刷新字段
+   - incoming `PENDING` 不会覆盖已推进状态
+4. ✅ SQLite `SignalRepository` 的方向查询入口也已补归一化，保持 hybrid contract 一致
+5. ✅ 本轮仅执行 `py_compile` 静态校验，未主动跑测试
+
 ### 2026-04-25 -- 执行主线 PG 切换第一层代码骨架已落地
 
 1. ✅ 已新增 execution 主线仓储显式入口：

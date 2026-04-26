@@ -41,6 +41,8 @@
 
 1. ~~`PgSignalRepository` 真实 PostgreSQL 集成测试~~ ✅ 已完成
 2. ~~历史 `test_signal_repository_s6_2.py` fixture 现代化（当前是旧 SQLite `:memory:` 连接方式问题，不是本窗主链 bug）~~ ✅ 已完成
+3. ~~Direction 归一化 / dedup key 大小写稳固~~ ✅ 已完成
+4. ~~`save_signal()` 状态回退防护（减少 merge 覆写风险）~~ ✅ 已完成
 
 ### 阶段结论
 

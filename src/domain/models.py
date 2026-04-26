@@ -18,6 +18,25 @@ class Direction(str, Enum):
     LONG = "LONG"
     SHORT = "SHORT"
 
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip().upper()
+            for member in cls:
+                if member.value == normalized:
+                    return member
+        return None
+
+    @classmethod
+    def normalize(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, cls):
+            return value.value
+        if isinstance(value, str):
+            return cls(value).value
+        raise ValueError(f"Unsupported direction value: {value!r}")
+
 
 class MtfStatus(str, Enum):
     """MTF validation status"""
@@ -557,6 +576,11 @@ class SignalQuery(BaseModel):
     end_time: Optional[str] = None
     source: Optional[str] = None  # 'live' or 'backtest'
 
+    @field_validator("direction")
+    @classmethod
+    def normalize_direction(cls, value: Optional[str]) -> Optional[str]:
+        return Direction.normalize(value) if value is not None else None
+
 
 class SignalDeleteRequest(BaseModel):
     """Delete request for signals endpoint"""
@@ -569,6 +593,11 @@ class SignalDeleteRequest(BaseModel):
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     source: Optional[str] = None  # 'live' or 'backtest'
+
+    @field_validator("direction")
+    @classmethod
+    def normalize_direction(cls, value: Optional[str]) -> Optional[str]:
+        return Direction.normalize(value) if value is not None else None
 
 
 class SignalDeleteResponse(BaseModel):

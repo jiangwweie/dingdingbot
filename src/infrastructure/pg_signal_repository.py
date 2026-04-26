@@ -17,9 +17,10 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.domain.models import SignalDeleteRequest, SignalQuery, SignalResult
+from src.domain.models import Direction, SignalDeleteRequest, SignalQuery, SignalResult
 from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
 from src.infrastructure.logger import logger
 from src.infrastructure.pg_models import PGSignalORM, PGSignalTakeProfitORM
@@ -49,57 +50,142 @@ class PgSignalRepository:
     ) -> str:
         created_at = datetime.now(timezone.utc).isoformat()
         signal_id_value = signal_id or created_at
-        take_profit_1 = None
-        if signal.take_profit_levels:
-            take_profit_1 = Decimal(str(signal.take_profit_levels[0].get("price")))
-
-        orm = PGSignalORM(
-            signal_id=signal_id_value,
+        values = self._build_signal_values(
+            signal=signal,
+            signal_id_value=signal_id_value,
             created_at=created_at,
-            symbol=signal.symbol,
-            timeframe=signal.timeframe,
-            direction=signal.direction.value,
-            entry_price=signal.entry_price,
-            stop_loss=signal.suggested_stop_loss,
-            position_size=signal.suggested_position_size,
-            leverage=signal.current_leverage,
-            tags_json=signal.tags,
-            risk_info=signal.risk_reward_info,
             status=status,
-            take_profit_1=take_profit_1,
-            pnl_ratio=signal.pnl_ratio,
-            kline_timestamp=signal.kline_timestamp or None,
-            strategy_name=signal.strategy_name,
-            score=Decimal(str(signal.score)),
             source=source,
-            pattern_score=Decimal(str(signal.score)),
-            ema_trend="",
-            mtf_status="",
         )
 
         async with self._session_maker() as session:
-            await session.merge(orm)
-            if signal.take_profit_levels:
-                await session.execute(
-                    delete(PGSignalTakeProfitORM).where(
-                        PGSignalTakeProfitORM.signal_id == signal_id_value
+            try:
+                stmt = select(PGSignalORM).where(PGSignalORM.signal_id == signal_id_value)
+                orm = (await session.execute(stmt)).scalar_one_or_none()
+                if orm is None:
+                    session.add(PGSignalORM(**values))
+                else:
+                    self._apply_signal_refresh(orm, values)
+
+                if signal.take_profit_levels is not None:
+                    await self._replace_take_profit_levels(
+                        session,
+                        signal_id_value,
+                        signal.take_profit_levels,
                     )
-                )
-                for tp in signal.take_profit_levels:
-                    session.add(
-                        PGSignalTakeProfitORM(
-                            signal_id=signal_id_value,
-                            tp_id=tp["id"],
-                            position_ratio=Decimal(str(tp["position_ratio"])),
-                            risk_reward=Decimal(str(tp["risk_reward"])),
-                            price_level=Decimal(str(tp["price"])),
-                            status="PENDING",
-                        )
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                stmt = select(PGSignalORM).where(PGSignalORM.signal_id == signal_id_value)
+                orm = (await session.execute(stmt)).scalar_one_or_none()
+                if orm is None:
+                    raise
+                self._apply_signal_refresh(orm, values)
+                if signal.take_profit_levels is not None:
+                    await self._replace_take_profit_levels(
+                        session,
+                        signal_id_value,
+                        signal.take_profit_levels,
                     )
-            await session.commit()
+                await session.commit()
 
         logger.info(f"PG live signal saved: signal_id={signal_id_value}, {signal.symbol}:{signal.timeframe}")
         return signal_id_value
+
+    def _build_signal_values(
+        self,
+        *,
+        signal: SignalResult,
+        signal_id_value: str,
+        created_at: str,
+        status: str,
+        source: str,
+    ) -> Dict[str, Any]:
+        take_profit_1 = None
+        if signal.take_profit_levels:
+            take_profit_1 = Decimal(str(signal.take_profit_levels[0].get("price")))
+        return {
+            "signal_id": signal_id_value,
+            "created_at": created_at,
+            "symbol": signal.symbol,
+            "timeframe": signal.timeframe,
+            "direction": Direction.normalize(signal.direction),
+            "entry_price": signal.entry_price,
+            "stop_loss": signal.suggested_stop_loss,
+            "position_size": signal.suggested_position_size,
+            "leverage": signal.current_leverage,
+            "tags_json": signal.tags,
+            "risk_info": signal.risk_reward_info,
+            "status": self._normalize_status(status) or "PENDING",
+            "take_profit_1": take_profit_1,
+            "pnl_ratio": signal.pnl_ratio,
+            "kline_timestamp": signal.kline_timestamp or None,
+            "strategy_name": signal.strategy_name,
+            "score": Decimal(str(signal.score)),
+            "source": source,
+            "pattern_score": Decimal(str(signal.score)),
+            "ema_trend": "",
+            "mtf_status": "",
+        }
+
+    def _apply_signal_refresh(self, orm: PGSignalORM, values: Dict[str, Any]) -> None:
+        orm.symbol = values["symbol"]
+        orm.timeframe = values["timeframe"]
+        orm.direction = values["direction"]
+        orm.entry_price = values["entry_price"]
+        orm.stop_loss = values["stop_loss"]
+        orm.position_size = values["position_size"]
+        orm.leverage = values["leverage"]
+        orm.tags_json = values["tags_json"]
+        orm.risk_info = values["risk_info"]
+        orm.take_profit_1 = values["take_profit_1"]
+        orm.kline_timestamp = values["kline_timestamp"]
+        orm.strategy_name = values["strategy_name"]
+        orm.score = values["score"]
+        orm.source = values["source"]
+        orm.pattern_score = values["pattern_score"]
+        orm.ema_trend = values["ema_trend"]
+        orm.mtf_status = values["mtf_status"]
+        orm.status = self._preserve_status_on_refresh(orm.status, values["status"])
+
+    def _normalize_status(self, status: Optional[str]) -> Optional[str]:
+        if status is None:
+            return None
+        return status.strip().upper()
+
+    def _preserve_status_on_refresh(
+        self,
+        existing_status: Optional[str],
+        incoming_status: Optional[str],
+    ) -> Optional[str]:
+        existing = self._normalize_status(existing_status)
+        incoming = self._normalize_status(incoming_status)
+        if incoming == "PENDING" and existing and existing != "PENDING":
+            return existing
+        return incoming or existing
+
+    async def _replace_take_profit_levels(
+        self,
+        session: AsyncSession,
+        signal_id: str,
+        take_profit_levels: List[Dict[str, str]],
+    ) -> None:
+        await session.execute(
+            delete(PGSignalTakeProfitORM).where(
+                PGSignalTakeProfitORM.signal_id == signal_id
+            )
+        )
+        for tp in take_profit_levels:
+            session.add(
+                PGSignalTakeProfitORM(
+                    signal_id=signal_id,
+                    tp_id=tp["id"],
+                    position_ratio=Decimal(str(tp["position_ratio"])),
+                    risk_reward=Decimal(str(tp["risk_reward"])),
+                    price_level=Decimal(str(tp["price"])),
+                    status="PENDING",
+                )
+            )
 
     async def update_signal_status_by_tracker_id(self, signal_id: str, status: str) -> None:
         async with self._session_maker() as session:
@@ -107,7 +193,7 @@ class PgSignalRepository:
             orm = (await session.execute(stmt)).scalar_one_or_none()
             if orm is None:
                 return
-            orm.status = status
+            orm.status = self._normalize_status(status) or orm.status
             await session.commit()
 
     async def update_superseded_by(self, signal_id: str, superseded_by: str) -> None:
@@ -117,7 +203,7 @@ class PgSignalRepository:
             if orm is None:
                 return
             orm.superseded_by = superseded_by
-            orm.status = "superseded"
+            orm.status = "SUPERSEDED"
             await session.commit()
 
     async def get_active_signal(self, dedup_key: str) -> Optional[dict]:
@@ -125,7 +211,7 @@ class PgSignalRepository:
         if len(parts) < 4:
             return None
         strategy_name = parts[-1]
-        direction = parts[-2]
+        direction = Direction.normalize(parts[-2])
         timeframe = parts[-3]
         symbol = ":".join(parts[:-3])
 
@@ -147,7 +233,8 @@ class PgSignalRepository:
             return await self._to_dict_with_tp(session, orm) if orm else None
 
     async def get_opposing_signal(self, symbol: str, timeframe: str, direction: str) -> Optional[dict]:
-        opposing_direction = "SHORT" if direction == "LONG" else "LONG"
+        normalized_direction = Direction.normalize(direction)
+        opposing_direction = "SHORT" if normalized_direction == "LONG" else "LONG"
         async with self._session_maker() as session:
             stmt = (
                 select(PGSignalORM)
@@ -208,6 +295,9 @@ class PgSignalRepository:
 
         if source and source != "live":
             return {"total": 0, "data": []}
+
+        direction = Direction.normalize(direction) if direction else None
+        status = self._normalize_status(status) if status else None
 
         filters = []
         if symbol:
@@ -271,6 +361,9 @@ class PgSignalRepository:
 
         if source == "backtest":
             return 0
+
+        direction = Direction.normalize(direction) if direction else None
+        status = self._normalize_status(status) if status else None
 
         async with self._session_maker() as session:
             if ids:
