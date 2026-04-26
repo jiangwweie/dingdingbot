@@ -39,7 +39,6 @@ async def run_one(symbol, start, end, slippage, tp_slippage, fee):
     repo = ConfigEntryRepository(DB_PATH)
     await repo.initialize()
     cm.set_config_entry_repository(repo)
-    ConfigManager.set_instance(cm)
 
     # 写 KV：关闭 TTP / Trailing Exit / BE=OFF
     conn = sqlite3.connect(DB_PATH)
@@ -73,7 +72,7 @@ async def run_one(symbol, start, end, slippage, tp_slippage, fee):
 
     data_repo = HistoricalDataRepository(DB_PATH)
     await data_repo.initialize()
-    bt = Backtester(None, data_repository=data_repo)
+    bt = Backtester(None, data_repository=data_repo, config_manager=cm)
 
     st = int(datetime.strptime(start, "%Y-%m-%d").timestamp() * 1000)
     et = int(datetime.strptime(end, "%Y-%m-%d").timestamp() * 1000)

@@ -3,14 +3,14 @@
 Covers:
 D. RuntimePositionsReadModel
   1. position_repo has data -> PG positions returned first
-  2. snapshot enriches current_price/unrealized_pnl/leverage/margin
+  2. snapshot enriches mark_price (as current_price)/unrealized_pnl/leverage/margin
   3. PG no data -> falls back to account_snapshot
   4. position_repo.list_active() throws -> falls back to snapshot
   5. No repo, no snapshot -> empty list
 
 E. /api/v3/positions
   1. PG positions exist -> projection returned first
-  2. Exchange positions enrich projection
+  2. Exchange positions enrich projection (mark_price from PositionInfo.mark_price)
   3. is_closed=True -> calls list_positions(is_closed=True)
   4. PG query fails -> falls back to exchange positions
   5. account_balance missing -> account_equity = None
@@ -70,7 +70,7 @@ def _make_position_info(
     side="long",
     size=Decimal("0.25"),
     entry_price=Decimal("64000"),
-    current_price=Decimal("65000"),
+    mark_price=Decimal("65000"),
     unrealized_pnl=Decimal("120"),
     leverage=5,
 ):
@@ -79,7 +79,7 @@ def _make_position_info(
         side=side,
         size=size,
         entry_price=entry_price,
-        current_price=current_price,
+        mark_price=mark_price,
         unrealized_pnl=unrealized_pnl,
         leverage=leverage,
     )
@@ -114,11 +114,10 @@ class TestRuntimePositionsPGProjection:
 
     @pytest.mark.asyncio
     async def test_snapshot_enriches_pg_position(self):
-        """Snapshot with same symbol/direction enriches unrealized_pnl/leverage/margin.
+        """Snapshot with same symbol/direction enriches current_price/unrealized_pnl/leverage/margin.
 
-        Note: PositionInfo has no current_price field, so current_price
-        enrichment via getattr falls back to watermark_price. Only
-        unrealized_pnl and leverage are actually enriched from snapshot.
+        PositionInfo now has mark_price field, so current_price in the
+        console response can be enriched from snapshot's mark_price.
         """
         model = RuntimePositionsReadModel()
 
@@ -132,10 +131,11 @@ class TestRuntimePositionsPGProjection:
         repo = MagicMock()
         repo.list_active = AsyncMock(return_value=[pg_pos])
 
-        # Snapshot has matching position (PositionInfo has no current_price)
+        # Snapshot has matching position with mark_price
         snap_pos = _make_position_info(
             symbol="ETH/USDT:USDT",
             side="long",
+            mark_price=Decimal("3200"),
             unrealized_pnl=Decimal("100"),
             leverage=10,
         )
@@ -149,8 +149,8 @@ class TestRuntimePositionsPGProjection:
         assert len(response.positions) == 1
         pos = response.positions[0]
         assert pos.symbol == "ETH/USDT:USDT"
-        # current_price comes from watermark_price (PositionInfo has no current_price)
-        assert pos.current_price == 3100.0
+        # current_price enriched from snapshot's mark_price (3200)
+        assert pos.current_price == 3200.0
         # unrealized_pnl and leverage ARE enriched from snapshot
         assert pos.unrealized_pnl == 100.0
         assert pos.leverage == 10
@@ -225,6 +225,99 @@ class TestRuntimePositionsPGProjection:
         # Without snapshot, current_price comes from watermark_price
         assert response.positions[0].current_price == 65000.0
 
+    @pytest.mark.asyncio
+    async def test_snapshot_mark_price_enriches_current_price(self):
+        """Snapshot PositionInfo.mark_price enriches ConsolePositionItem.current_price."""
+        model = RuntimePositionsReadModel()
+
+        pg_pos = _make_position(
+            symbol="SOL/USDT:USDT",
+            direction=Direction.LONG,
+            entry_price=Decimal("150"),
+            watermark_price=Decimal("155"),
+        )
+        repo = MagicMock()
+        repo.list_active = AsyncMock(return_value=[pg_pos])
+
+        snap_pos = _make_position_info(
+            symbol="SOL/USDT:USDT",
+            side="long",
+            entry_price=Decimal("150"),
+            mark_price=Decimal("160"),
+            unrealized_pnl=Decimal("10"),
+            leverage=5,
+        )
+        snapshot = _make_account_snapshot(positions=[snap_pos])
+
+        response = await model.build(
+            account_snapshot=snapshot,
+            position_repo=repo,
+        )
+
+        assert len(response.positions) == 1
+        # current_price enriched from snapshot's mark_price (160), not watermark_price (155)
+        assert response.positions[0].current_price == 160.0
+
+    @pytest.mark.asyncio
+    async def test_snapshot_no_mark_price_falls_back_to_watermark(self):
+        """Snapshot PositionInfo with mark_price=None falls back to watermark_price."""
+        model = RuntimePositionsReadModel()
+
+        pg_pos = _make_position(
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            entry_price=Decimal("60000"),
+            watermark_price=Decimal("61000"),
+        )
+        repo = MagicMock()
+        repo.list_active = AsyncMock(return_value=[pg_pos])
+
+        snap_pos = _make_position_info(
+            symbol="BTC/USDT:USDT",
+            side="long",
+            entry_price=Decimal("60000"),
+            mark_price=None,
+            unrealized_pnl=Decimal("0"),
+            leverage=5,
+        )
+        snapshot = _make_account_snapshot(positions=[snap_pos])
+
+        response = await model.build(
+            account_snapshot=snapshot,
+            position_repo=repo,
+        )
+
+        assert len(response.positions) == 1
+        # mark_price is None → falls back to watermark_price
+        assert response.positions[0].current_price == 61000.0
+
+    @pytest.mark.asyncio
+    async def test_fallback_snapshot_mark_price_enriches_current_price(self):
+        """In snapshot-fallback path, PositionInfo.mark_price enriches current_price."""
+        model = RuntimePositionsReadModel()
+
+        repo = MagicMock()
+        repo.list_active = AsyncMock(return_value=[])
+
+        snap_pos = _make_position_info(
+            symbol="BTC/USDT:USDT",
+            side="long",
+            entry_price=Decimal("60000"),
+            mark_price=Decimal("62000"),
+            unrealized_pnl=Decimal("50"),
+            leverage=5,
+        )
+        snapshot = _make_account_snapshot(positions=[snap_pos])
+
+        response = await model.build(
+            account_snapshot=snapshot,
+            position_repo=repo,
+        )
+
+        assert len(response.positions) == 1
+        # In fallback path, current_price enriched from mark_price
+        assert response.positions[0].current_price == 62000.0
+
 
 # ---------------------------------------------------------------------------
 # E. /api/v3/positions (API-level tests via TestClient)
@@ -287,11 +380,10 @@ class TestV3PositionsAPI:
         position_repo.list_positions.assert_called_once()
 
     def test_exchange_enriches_projection(self, client, mock_repo):
-        """Exchange positions enrich PG projection with unrealized_pnl/leverage.
+        """Exchange positions enrich PG projection with mark_price/unrealized_pnl/leverage.
 
-        Note: PositionInfo has no current_price field, so mark_price
-        enrichment via getattr(exchange_pos, "current_price") returns None.
-        Only unrealized_pnl and leverage are actually enriched.
+        PositionInfo now has mark_price, so the v3 API can enrich
+        mark_price from exchange positions.
         """
         pg_pos = Position(
             id="pos-btc-002",
@@ -313,6 +405,7 @@ class TestV3PositionsAPI:
             side="buy",
             size=Decimal("0.1"),
             entry_price=Decimal("65000"),
+            mark_price=Decimal("66000"),
             unrealized_pnl=Decimal("100"),
             leverage=10,
         )
@@ -337,10 +430,11 @@ class TestV3PositionsAPI:
         data = response.json()
         assert len(data["positions"]) >= 1
         pos = data["positions"][0]
+        # Exchange enriches mark_price from PositionInfo.mark_price
+        assert pos["mark_price"] is not None
+        assert Decimal(str(pos["mark_price"])) == Decimal("66000")
         # Exchange enriches unrealized_pnl and leverage
         assert pos["unrealized_pnl"] is not None
-        # mark_price is None because PositionInfo has no current_price field
-        assert pos["mark_price"] is None
 
     def test_is_closed_true_calls_list_positions(self, client, mock_repo):
         """is_closed=True -> calls list_positions(is_closed=True)."""
@@ -377,7 +471,7 @@ class TestV3PositionsAPI:
             side="buy",
             size=Decimal("0.1"),
             entry_price=Decimal("65000"),
-            current_price=Decimal("66000"),
+            mark_price=Decimal("66000"),
             unrealized_pnl=Decimal("100"),
             leverage=10,
         )
@@ -444,3 +538,140 @@ class TestV3PositionsAPI:
         call_kwargs = position_repo.list_positions.call_args.kwargs
         assert call_kwargs.get("offset") == 10
         assert call_kwargs.get("limit") == 5
+
+    def test_exchange_mark_price_enriches_projection(self, client, mock_repo):
+        """Exchange PositionInfo.mark_price enriches PG projection's mark_price."""
+        pg_pos = Position(
+            id="pos-eth-001",
+            signal_id="sig-001",
+            symbol="ETH/USDT:USDT",
+            direction=Direction.LONG,
+            entry_price=Decimal("3000"),
+            current_qty=Decimal("0.5"),
+            realized_pnl=Decimal("0"),
+            is_closed=False,
+            opened_at=_now_ms(),
+        )
+
+        position_repo = MagicMock()
+        position_repo.list_positions = AsyncMock(return_value=[pg_pos])
+
+        exchange_pos = PositionInfo(
+            symbol="ETH/USDT:USDT",
+            side="buy",
+            size=Decimal("0.5"),
+            entry_price=Decimal("3000"),
+            mark_price=Decimal("3100"),
+            unrealized_pnl=Decimal("50"),
+            leverage=10,
+        )
+
+        gateway = MagicMock()
+        gateway.exchange_name = "binance"
+        gateway.fetch_positions = AsyncMock(return_value=[exchange_pos])
+        gateway.fetch_account_balance = AsyncMock(return_value=MagicMock(
+            total_balance=Decimal("10000"),
+            unrealized_pnl=Decimal("50"),
+        ))
+
+        self._set_deps(
+            repository=mock_repo,
+            account_getter=lambda: None,
+            exchange_gateway=gateway,
+            position_repo=position_repo,
+        )
+
+        response = client.get("/api/v3/positions")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["positions"]) >= 1
+        pos = data["positions"][0]
+        # mark_price enriched from exchange PositionInfo.mark_price
+        assert pos["mark_price"] is not None
+        assert Decimal(str(pos["mark_price"])) == Decimal("3100")
+
+    def test_exchange_fallback_mark_price_populated(self, client, mock_repo):
+        """Exchange fallback path: PositionInfo.mark_price → PositionInfoV3.mark_price."""
+        position_repo = MagicMock()
+        position_repo.list_positions = AsyncMock(side_effect=RuntimeError("DB down"))
+
+        exchange_pos = PositionInfo(
+            symbol="BTC/USDT:USDT",
+            side="buy",
+            size=Decimal("0.1"),
+            entry_price=Decimal("65000"),
+            mark_price=Decimal("66000"),
+            unrealized_pnl=Decimal("100"),
+            leverage=10,
+        )
+
+        gateway = MagicMock()
+        gateway.exchange_name = "binance"
+        gateway.fetch_positions = AsyncMock(return_value=[exchange_pos])
+        gateway.fetch_account_balance = AsyncMock(return_value=None)
+
+        self._set_deps(
+            repository=mock_repo,
+            account_getter=lambda: None,
+            exchange_gateway=gateway,
+            position_repo=position_repo,
+        )
+
+        response = client.get("/api/v3/positions")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["positions"]) >= 1
+        pos = data["positions"][0]
+        # In exchange fallback, mark_price comes from PositionInfo.mark_price
+        assert pos["mark_price"] is not None
+        assert Decimal(str(pos["mark_price"])) == Decimal("66000")
+
+    def test_exchange_no_mark_price_falls_back_to_none(self, client, mock_repo):
+        """Exchange PositionInfo with mark_price=None → PositionInfoV3.mark_price is None."""
+        pg_pos = Position(
+            id="pos-btc-003",
+            signal_id="sig-001",
+            symbol="BTC/USDT:USDT",
+            direction=Direction.LONG,
+            entry_price=Decimal("65000"),
+            current_qty=Decimal("0.1"),
+            realized_pnl=Decimal("0"),
+            is_closed=False,
+            opened_at=_now_ms(),
+        )
+
+        position_repo = MagicMock()
+        position_repo.list_positions = AsyncMock(return_value=[pg_pos])
+
+        exchange_pos = PositionInfo(
+            symbol="BTC/USDT:USDT",
+            side="buy",
+            size=Decimal("0.1"),
+            entry_price=Decimal("65000"),
+            mark_price=None,
+            unrealized_pnl=Decimal("100"),
+            leverage=10,
+        )
+
+        gateway = MagicMock()
+        gateway.exchange_name = "binance"
+        gateway.fetch_positions = AsyncMock(return_value=[exchange_pos])
+        gateway.fetch_account_balance = AsyncMock(return_value=MagicMock(
+            total_balance=Decimal("10000"),
+            unrealized_pnl=Decimal("100"),
+        ))
+
+        self._set_deps(
+            repository=mock_repo,
+            account_getter=lambda: None,
+            exchange_gateway=gateway,
+            position_repo=position_repo,
+        )
+
+        response = client.get("/api/v3/positions")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["positions"]) >= 1
+        pos = data["positions"][0]
+        # mark_price is None when exchange PositionInfo.mark_price is None
+        assert pos["mark_price"] is None

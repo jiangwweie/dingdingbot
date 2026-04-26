@@ -35,6 +35,7 @@ class ProfileListResponse(BaseModel):
 class ProfileSwitchRequest(BaseModel):
     """切换 Profile 请求"""
     name: str = Field(..., description="Profile 名称")
+    confirm: bool = Field(False, description="必须显式确认切换，避免误操作污染 runtime freeze")
 
 
 class ProfileSwitchResponse(BaseModel):
@@ -217,16 +218,23 @@ async def create_profile(request: ProfileCreateRequest):
 
 
 @app.post("/api/config/profiles/{name}/activate", response_model=ProfileSwitchResponse)
-async def switch_profile(name: str):
+async def switch_profile(name: str, confirm: bool = Query(False, description="必须显式确认切换，避免误操作污染 runtime freeze")):
     """
     切换到指定的配置 Profile（带差异预览）
 
     Args:
         name: Profile 名称
+        confirm: 必须为 True 才执行切换，否则返回 409
 
     Returns:
         切换结果和配置差异
     """
+    if not confirm:
+        raise HTTPException(
+            status_code=409,
+            detail="Profile 切换需要显式确认：请设置 confirm=true 参数以确认切换操作",
+        )
+
     try:
         service = _get_profile_service()
 

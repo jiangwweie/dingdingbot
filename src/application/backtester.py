@@ -2,7 +2,7 @@
 Backtester - Stateless backtesting sandbox for strategy validation.
 
 Key Design Principles:
-1. **Sandbox Isolation**: Never calls global ConfigManager. Uses isolated config.
+1. **Sandbox Isolation**: Uses explicit config_manager if provided; falls back to global singleton only for backward compat.
 2. **Stateless Execution**: Each backtest run is independent.
 3. **Diagnostic Output**: Returns detailed statistics, not just PnL.
 4. **Dynamic Rule Engine Support**: Supports both legacy and new dynamic strategy definitions.
@@ -453,6 +453,7 @@ class Backtester:
         self,
         exchange_gateway: ExchangeGateway,
         data_repository: Optional[HistoricalDataRepository] = None,
+        config_manager=None,  # Optional[ConfigManager] — explicit injection (recommended); legacy_fallback to get_instance()
     ):
         """
         Initialize backtester.
@@ -461,9 +462,14 @@ class Backtester:
             exchange_gateway: Exchange gateway for fetching historical data
             data_repository: Optional historical data repository for local data access.
                             If not provided, will fetch directly from exchange gateway.
+            config_manager: Optional ConfigManager for reading KV backtest configs.
+                            **Recommended**: pass explicitly for testability and isolation.
+                            If omitted, falls back to ConfigManager.get_instance()
+                            (legacy_fallback — not recommended for new code).
         """
         self._gateway = exchange_gateway
         self._data_repo = data_repository
+        self._config_manager = config_manager
 
     async def run_backtest(
         self,
@@ -503,10 +509,15 @@ class Backtester:
         kv_configs = {}
         if request.mode == "v3_pms":
             try:
-                from src.application.config_manager import ConfigManager
-                config_manager = ConfigManager.get_instance()
-                if config_manager:
-                    kv_configs = await config_manager.get_backtest_configs()
+                cm = self._config_manager
+                if cm is None:
+                    # legacy_fallback: explicit config_manager injection is the recommended path.
+                    # This fallback to global singleton exists only for backward compatibility.
+                    from src.application.config_manager import ConfigManager
+                    cm = ConfigManager.get_instance()
+                    logger.info("legacy_fallback: ConfigManager not injected, using get_instance()")
+                if cm:
+                    kv_configs = await cm.get_backtest_configs()
                     logger.debug(f"Loaded backtest configs from KV: {kv_configs}")
                 else:
                     logger.warning("ConfigManager instance not available, using code defaults")

@@ -924,3 +924,123 @@
    - config 全域迁 PG
    - backtest / klines / history 迁 PG
    - 多实例 / 分布式语义扩展
+
+### 2026-04-27 `signals` / `signal_attempts` 角色已重新定性
+
+1. ✅ 已重新核对 `SignalPipeline` / `SignalRepository` / `PerformanceTracker` 代码路径。
+2. ✅ 新结论：
+   - `signals` 当前不是纯 observability，而是 **runtime pre-execution state**
+   - `signal_attempts` 当前仍主要属于 observability / diagnosis
+3. ✅ 这意味着后续不再把“signals / attempts 是否迁 PG”当作一个打包问题，而是拆成两条判断线：
+   - `signals`：是否要消灭 execution 上游跨库边界
+   - `signal_attempts`：是否值得为 observability 统一技术栈
+4. ✅ 已同步新增汇总文档：
+   - `docs/planning/2026-04-27-signal-domain-and-config-freeze-boundary-plan.md`
+
+### 2026-04-27 Config Freeze / Research Isolation 下一轮实施项已明确
+
+1. ✅ 已确认下一轮真正优先的是切断 runtime 被研究链污染的最短路径：
+   - `ConfigManager.set_instance()`
+   - profile switch API
+   - Backtester 对全局 `ConfigManager` 的隐式依赖
+2. ✅ 已把下一轮实施重点从“继续迁库”改为：
+   - 配置来源优先级
+   - active profile 切换门槛
+   - 研究脚本与 runtime 的单例/共享配置隔离
+
+### 2026-04-27 研究链污染最短路径已完成前两步
+
+1. ✅ 外部 Claude 已完成 8 个研究/验证脚本的最小止血改造：
+   - 仍保留 `ConfigManager.set_instance(config_manager)`
+   - 但统一改为 `try/finally`，结束后执行 `ConfigManager.set_instance(None)`
+   - 这意味着单例污染已从“持久残留”降为“仅在脚本执行期间存在”
+2. ✅ 外部 Claude 已为 profile switch API 增加显式确认门槛：
+   - `confirm != true` 时返回 `409`
+   - `confirm=true` 才允许真正切换 active profile
+3. ✅ 当前判断：
+   - 这两步已经完成“最短污染路径切断”
+   - 但 `Backtester -> ConfigManager.get_instance()` 的隐式依赖仍在，下一步应继续去掉
+
+### 2026-04-27 Backtester 去全局单例依赖已完成
+
+1. ✅ 外部 Claude 已对 `src/application/backtester.py` 做最小改造：
+   - `Backtester.__init__()` 新增 `config_manager=None`
+   - `run_backtest()` 优先使用 `self._config_manager`
+   - 仅在未注入时才 fallback 到 `ConfigManager.get_instance()`
+2. ✅ 对应的 8 个研究/验证脚本已同步改为显式注入 `config_manager=config_manager`
+   - 不再需要 `ConfigManager.set_instance()`
+3. ✅ 外部 Claude 已补最小测试：
+   - `test_backtester_config_injection.py`
+   - 连同既有相关测试共 46 passed
+4. ✅ 当前判断：
+   - runtime 被 research 链污染的三条最短路径已经全部切断：
+     - 脚本级 `set_instance()` 残留污染
+     - profile switch 无确认切换
+     - Backtester 对全局 `ConfigManager` 的隐式依赖
+   - 剩余工作转入“来源优先级正式化”和“边界文义固化”
+
+### 2026-04-27 Runtime / Research 配置来源优先级 SSOT 已落盘
+
+1. ✅ 已新增：
+   - `docs/planning/2026-04-27-runtime-and-research-config-source-priority-ssot.md`
+2. ✅ 已正式写清两条配置消费链：
+   - runtime execution：`ResolvedRuntimeConfig` / `RuntimeConfigProvider`
+   - research/backtest：显式 request/spec -> overrides -> 局部注入 -> research KV/defaults -> code defaults
+3. ✅ 已把 `ConfigManager.get_instance()` 重新定性为：
+   - 兼容保留
+   - `legacy_fallback`
+   - 非推荐路径
+4. ✅ 当前这条边界治理子线已从“急性风险收口”推进到“规则固化”
+
+### 2026-04-27 Backtester `legacy_fallback` 语义已显式化
+
+1. ✅ 外部 Claude 已继续收口 `Backtester` 的兼容 fallback：
+   - `ConfigManager.get_instance()` 保留
+   - 但已被明确标记为 `legacy_fallback`
+   - 仅在未显式注入 `config_manager` 时触发
+2. ✅ 已补最小测试：
+   - 显式注入时不触发 `legacy_fallback`
+   - fallback 分支日志包含 `legacy_fallback`
+3. ✅ 当前判断：
+   - `Backtester` 这条链路已从“隐式全局依赖”收口到“显式注入优先 + 兼容 fallback 可见化”
+
+### 2026-04-27 Runtime config snapshot 的真源提示已收紧
+
+1. ✅ 外部 Claude 已补强 `runtime_config_snapshot.py` 的 `source_of_truth_hints`
+2. ✅ 当前 hints 规则已覆盖：
+   - `runtime_profile:{name}`
+   - `{section}:resolved_from_profile`
+   - `backend:environment`
+   - `no_provider`
+   - `provider_error`
+   - `legacy_fallback`
+3. ✅ 相关测试已通过（32/32）
+4. ✅ 当前判断：
+   - runtime config readonly 面现在已能更明确表达“配置从哪里来”
+
+### 2026-04-27 `signals` 迁移策略已从“是否迁”调整为“何时有资格迁”
+
+1. ✅ 已补充对 `signals` / `signal_attempts` / `signal_take_profits` 的进一步定性：
+   - `signals` = runtime pre-execution state
+   - `signal_attempts` = observability / diagnosis
+   - `signal_take_profits` = signal 域附属观测数据
+2. ✅ 已新增：
+   - `docs/planning/2026-04-27-signals-migration-gate-and-domain-split.md`
+3. ✅ 当前结论：
+   - 不直接启动 `signals` 迁移
+   - 先定义它进入下一窗的准入条件
+   - 不再把 `signals / signal_attempts` 当成一个打包迁移对象
+
+### 2026-04-27 Positions enrich 的最后已知缺口已修复
+
+1. ✅ 外部 Claude 已完成 `PositionInfo.mark_price` 语义补齐：
+   - `src/domain/models.py` 为 `PositionInfo` 新增 `mark_price`
+   - `ExchangeGateway` 构造 `PositionInfo` 时捕获 CCXT `markPrice`
+   - `RuntimePositionsReadModel` 改读 `mark_price`
+   - `/api/v3/positions` 的 enrich 路径也改读 `mark_price`
+2. ✅ 对应测试已通过：
+   - 本轮 101 passed, 0 failed
+   - positions enrich 的 PG+snapshot、snapshot-only、exchange enrich、exchange fallback 路径均已覆盖
+3. ✅ 当前判断：
+   - `positions` 读面的价格 enrich 断裂点已全部修复
+   - 当前 execution PG 主线与 observability/config freeze 子线都已无已知 P0/P1 主阻塞

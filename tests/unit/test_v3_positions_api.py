@@ -123,7 +123,7 @@ class TestListPositionsPGProjectionFirst:
                 side="buy",
                 size=Decimal("0.1"),
                 entry_price=Decimal("65000"),
-                current_price=Decimal("66000"),
+                mark_price=Decimal("66000"),
                 unrealized_pnl=Decimal("100"),
                 leverage=10,
             )

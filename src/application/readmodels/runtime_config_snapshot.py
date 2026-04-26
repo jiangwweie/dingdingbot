@@ -1,4 +1,13 @@
-"""Console Config Snapshot ReadModel - 第三批只读 API"""
+"""Console Config Snapshot ReadModel - 第三批只读 API
+
+Source-of-truth hint taxonomy:
+  runtime_profile       — config comes from a resolved runtime profile (DB-backed)
+  resolved_from_profile — a section (strategy/risk/execution) was resolved from the profile
+  environment           — a value comes from .env / process environment
+  no_provider           — no RuntimeConfigProvider was supplied (config unavailable)
+  provider_error        — provider.to_safe_summary() raised an exception
+  legacy_fallback       — value fell back to a legacy/default path (no explicit source)
+"""
 
 from __future__ import annotations
 
@@ -51,16 +60,27 @@ class RuntimeConfigSnapshotReadModel:
 
         # Source of truth hints: describe where each data domain comes from
         hints: list[str] = []
+
+        # 1. Profile identity — the config was resolved from a named runtime profile
         if profile_name and profile_name != "unknown":
-            hints.append(f"config_provider:runtime_profile:{profile_name}")
-        if summary.get("strategy"):
-            hints.append("strategy:resolved_from_profile")
-        if summary.get("risk"):
-            hints.append("risk:resolved_from_profile")
-        if summary.get("execution"):
-            hints.append("execution:resolved_from_profile")
+            hints.append(f"runtime_profile:{profile_name}")
+
+        # 2. Per-section resolution — each section was resolved from the profile
+        for section in ("strategy", "risk", "execution"):
+            if summary.get(section):
+                hints.append(f"{section}:resolved_from_profile")
+
+        # 3. Environment — backend/exchange settings come from process environment
+        if env and any(env.get(k) for k in ("exchange_name", "exchange_testnet", "backend_port")):
+            hints.append("backend:environment")
+
+        # 4. Market section — if present, resolved from profile
+        if summary.get("market"):
+            hints.append("market:resolved_from_profile")
+
+        # 5. Fallback when nothing was resolved
         if not hints:
-            hints.append("no_active_source")
+            hints.append("legacy_fallback")
 
         return ConfigSnapshotResponse(
             identity=identity,

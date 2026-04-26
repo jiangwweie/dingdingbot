@@ -372,7 +372,7 @@ def test_config_snapshot_with_provider():
     assert result.backend["exchange_testnet"] is True
     # v1 contract: source_of_truth_hints
     assert len(result.source_of_truth_hints) > 0
-    assert any("config_provider" in h for h in result.source_of_truth_hints)
+    assert any("runtime_profile" in h for h in result.source_of_truth_hints)
     # market/strategy/risk/execution still present
     assert result.market["primary_symbol"] == "ETH/USDT:USDT"
     assert result.strategy["allowed_directions"] == ["LONG"]
@@ -409,7 +409,7 @@ def test_config_snapshot_identity_backend_hints():
     assert result.backend["exchange_testnet"] is False
     # source_of_truth_hints
     hints = result.source_of_truth_hints
-    assert "config_provider:runtime_profile:sim1_eth_runtime" in hints
+    assert "runtime_profile:sim1_eth_runtime" in hints
     assert "strategy:resolved_from_profile" in hints
     assert "risk:resolved_from_profile" in hints
     assert "execution:resolved_from_profile" in hints

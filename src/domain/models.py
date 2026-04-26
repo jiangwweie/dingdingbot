@@ -101,6 +101,7 @@ class PositionInfo(BaseModel):
     side: str                   # "long" | "short"
     size: Decimal               # Position size
     entry_price: Decimal
+    mark_price: Optional[Decimal] = None  # 标记价格（交易所实时）
     unrealized_pnl: Decimal
     leverage: int
 

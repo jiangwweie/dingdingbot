@@ -704,3 +704,116 @@ Sim-0 详细任务拆分（归档参考）：
 对应汇总文档：
 
 - `docs/planning/2026-04-27-boundary-governance-mainline-plan.md`
+
+### 2026-04-27 `signals` / `signal_attempts` 角色重判与配置冻结主线
+
+在重新检查代码后，当前进一步收紧为：
+
+1. **`signals` 不再按“纯 observability”处理**
+   - 当前 `signals` 参与：
+     - startup cache rebuild
+     - 同向 signal covering
+     - opposing signal conflict check
+     - pending signal performance tracking
+   - 因此它更接近 **runtime pre-execution state**
+   - 后续是否迁 PG，不再按“观测表是否统一技术栈”判断，而按“是否需要消灭 execution 上游跨库边界”判断
+
+2. **`signal_attempts` 当前仍按 observability / diagnosis 处理**
+   - 主要服务于：
+     - attempts 页面
+     - attribution / diagnostics
+     - backtest / semantic summary
+   - 暂不默认进入下一轮 PG 迁移主线
+
+3. **配置冻结与参数链防污染进一步升级为下一主线**
+   - 重点不再是继续迁表
+   - 而是切断研究脚本 / profile switch / ConfigManager 单例对 runtime 的反向污染
+
+4. **下一轮优先实施项**
+   - 清理研究脚本中的 `ConfigManager.set_instance()`
+   - 为 profile switch API 增加确认门槛
+   - Backtester 去除 `ConfigManager.get_instance()` 隐式依赖
+   - 文档级明确 runtime / research 配置来源优先级
+
+对应汇总文档：
+
+- `docs/planning/2026-04-27-signal-domain-and-config-freeze-boundary-plan.md`
+
+### 2026-04-27 Config Freeze 子任务当前状态
+
+1. ✅ 研究脚本的单例污染已完成最小止血：
+   - 8 个脚本改为 `try/finally`
+   - 执行后统一 `ConfigManager.set_instance(None)`
+2. ✅ profile switch API 已增加 `confirm=true` 门槛
+3. 🔄 当前剩余的下一个直接实施点：
+   - `Backtester.run_backtest()` 去除 `ConfigManager.get_instance()` 隐式依赖
+4. 当前原则：
+   - 不扩大到 config 全域重构
+   - 只切断 runtime 被 research 链污染的最短剩余路径
+
+### 2026-04-27 Config Freeze 子任务阶段更新
+
+1. ✅ 研究脚本的 `ConfigManager.set_instance()` 残留污染已止血
+2. ✅ profile switch API 已增加 `confirm=true` 门槛
+3. ✅ `Backtester.run_backtest()` 已改为显式 `config_manager` 注入优先
+4. 当前这条子线的核心代码去耦已完成，下一步转为：
+   - 把 runtime / research 配置来源优先级写成正式规则
+   - 明确哪些 fallback 是允许的，哪些必须禁用
+
+### 2026-04-27 Runtime / Research 配置来源优先级已形成 SSOT
+
+1. **runtime execution 配置真源**
+   - `ResolvedRuntimeConfig`
+   - `RuntimeConfigProvider`
+2. **runtime environment 真源**
+   - `.env` / process env
+3. **research/backtest 配置优先级**
+   - 显式 request/spec
+   - 显式 overrides
+   - 显式注入的局部 config provider / config manager
+   - 研究链 KV/defaults
+   - 代码默认值
+4. **当前兼容 fallback**
+   - `Backtester` 仍允许 `ConfigManager.get_instance()` 作为 `legacy_fallback`
+   - 但不再是推荐路径
+5. **当前明确禁止**
+   - runtime execution 静默回落到 research/backtest 参数
+   - 研究脚本通过全局单例污染 runtime
+   - candidate / replay 结果直接改写 runtime active profile
+
+对应文档：
+
+- `docs/planning/2026-04-27-runtime-and-research-config-source-priority-ssot.md`
+
+### 2026-04-27 `signals` 迁移的当前处理原则
+
+1. `signals` 当前不再按“纯 observability”处理，而按 **runtime pre-execution state** 处理。
+2. `signal_attempts` 当前继续按 observability / diagnosis 处理。
+3. 因此后续若要考虑迁移，必须拆开：
+   - `signals`
+   - `signal_attempts`
+4. 当前不直接启动 `signals` 迁移，而是先设定准入条件：
+   - execution truth 边界已冻结
+   - config freeze / research isolation 已稳定
+   - `signals` 仍被确认属于 execution 上游状态
+5. 当前不推荐把 `signal_take_profits` 重新拉回 execution truth，它更接近 signal 域附属观测数据。
+
+对应文档：
+
+- `docs/planning/2026-04-27-signals-migration-gate-and-domain-split.md`
+
+### 2026-04-27 当前窗口剩余项再收口
+
+1. execution PG 主线：
+   - 代码修复完成
+   - runtime/console/readonly 口径修复完成
+   - 真实 PostgreSQL 集成验证完成
+2. config freeze / research isolation：
+   - 最短污染路径已切断
+   - 配置来源优先级 SSOT 已落盘
+3. positions enrich：
+   - `PositionInfo.mark_price` 已补齐
+   - 已知价格 enrich 断裂点已关闭
+4. 当前剩余更像“规则澄清”，不再是主链阻塞：
+   - `list_active()` / `list_blocking()` 文义澄清
+   - profile switch 是“当前进程立即生效”还是“下次启动生效”的规则固化

@@ -73,7 +73,7 @@ class RuntimePositionsReadModel:
                 margin = 0.0
 
                 if snapshot_pos is not None:
-                    current_price = getattr(snapshot_pos, "current_price", current_price) or current_price
+                    current_price = getattr(snapshot_pos, "mark_price", current_price) or current_price
                     unrealized_pnl = getattr(snapshot_pos, "unrealized_pnl", unrealized_pnl)
                     leverage = int(getattr(snapshot_pos, "leverage", leverage) or leverage)
                     notional = abs(quantity * entry_price)
@@ -101,7 +101,7 @@ class RuntimePositionsReadModel:
 
                 size = getattr(pos, "size", Decimal("0"))
                 entry_price = getattr(pos, "entry_price", Decimal("0"))
-                current_price = getattr(pos, "current_price", entry_price) or entry_price
+                current_price = getattr(pos, "mark_price", entry_price) or entry_price
                 unrealized_pnl = getattr(pos, "unrealized_pnl", Decimal("0"))
                 leverage = int(getattr(pos, "leverage", 1) or 1)
 

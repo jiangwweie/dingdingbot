@@ -170,7 +170,6 @@ async def run_backtest_and_get_report():
     config_entry_repo = ConfigEntryRepository(DB_PATH)
     await config_entry_repo.initialize()
     config_manager.set_config_entry_repository(config_entry_repo)
-    ConfigManager.set_instance(config_manager)
 
     # 写 KV: 关闭 TTP / Trailing Exit / BE=OFF
     conn = sqlite3.connect(DB_PATH)
@@ -207,7 +206,7 @@ async def run_backtest_and_get_report():
 
     data_repo = HistoricalDataRepository(DB_PATH)
     await data_repo.initialize()
-    bt = Backtester(None, data_repository=data_repo)
+    bt = Backtester(None, data_repository=data_repo, config_manager=config_manager)
 
     st = int(datetime.strptime(START, "%Y-%m-%d").timestamp() * 1000)
     et = int(datetime.strptime(END, "%Y-%m-%d").timestamp() * 1000)

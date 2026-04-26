@@ -55,7 +55,6 @@ async def run_backtest_with_config(
     config_entry_repo = ConfigEntryRepository(DB_PATH)
     await config_entry_repo.initialize()
     config_manager.set_config_entry_repository(config_entry_repo)
-    ConfigManager.set_instance(config_manager)
 
     # 确保 TTP 关闭
     conn = sqlite3.connect(DB_PATH)
@@ -74,7 +73,7 @@ async def run_backtest_with_config(
 
     repo = HistoricalDataRepository(DB_PATH)
     await repo.initialize()
-    backtester = Backtester(None, data_repository=repo)
+    backtester = Backtester(None, data_repository=repo, config_manager=config_manager)
 
     all_close_events = []
     all_positions = []

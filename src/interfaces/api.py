@@ -439,7 +439,7 @@ def _build_position_info_from_exchange(pos: Any, *, opened_at: int) -> PositionI
         direction=Direction.LONG if pos.side == "buy" else Direction.SHORT,
         current_qty=pos.size,
         entry_price=pos.entry_price,
-        mark_price=None,
+        mark_price=getattr(pos, "mark_price", None),
         unrealized_pnl=pos.unrealized_pnl,
         realized_pnl=Decimal("0"),
         liquidation_price=None,
@@ -5518,7 +5518,7 @@ async def list_positions(
                 position_info = _build_position_info_from_projection(pos)
                 exchange_pos = exchange_position_map.get((pos.symbol, position_info.direction))
                 if exchange_pos is not None:
-                    position_info.mark_price = getattr(exchange_pos, "current_price", None)
+                    position_info.mark_price = getattr(exchange_pos, "mark_price", None)
                     position_info.unrealized_pnl = getattr(
                         exchange_pos,
                         "unrealized_pnl",
@@ -6483,16 +6483,23 @@ async def create_profile(request: ProfileCreateRequest):
 
 
 @app.post("/api/config/profiles/{name}/activate", response_model=ProfileSwitchResponse)
-async def switch_profile(name: str):
+async def switch_profile(name: str, confirm: bool = Query(False, description="必须显式确认切换，避免误操作污染 runtime freeze")):
     """
     切换到指定的配置 Profile（带差异预览）
 
     Args:
         name: Profile 名称
+        confirm: 必须为 True 才执行切换，否则返回 409
 
     Returns:
         切换结果和配置差异
     """
+    if not confirm:
+        raise HTTPException(
+            status_code=409,
+            detail="Profile 切换需要显式确认：请设置 confirm=true 参数以确认切换操作",
+        )
+
     try:
         from src.infrastructure.config_profile_repository import ConfigProfileRepository
         from src.application.config_profile_service import ConfigProfileService

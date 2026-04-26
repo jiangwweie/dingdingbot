@@ -158,7 +158,7 @@ async def test_portfolio_basic_calculation():
         side="long",
         size=Decimal("0.5"),
         entry_price=Decimal("3000"),
-        current_price=Decimal("3100"),
+        mark_price=Decimal("3100"),
         unrealized_pnl=Decimal("50"),
         leverage=5,
     )

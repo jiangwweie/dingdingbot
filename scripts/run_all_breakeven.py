@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""3币种×2年 BE=ON/OFF 逐个串行跑，结果写文件"""
+"""全币种 BE=ON vs OFF 回测对比"""
 import asyncio, sys, os, sqlite3, json
 from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 DB = "data/v3_dev.db"
-OUT = "/tmp/breakeven_all_results.json"
+OUT = "/tmp/all_breakeven_result.json"
 
 async def run_one(symbol, start, end, be_on):
     from src.infrastructure.historical_data_repository import HistoricalDataRepository
@@ -19,7 +19,6 @@ async def run_one(symbol, start, end, be_on):
     repo = ConfigEntryRepository(DB)
     await repo.initialize()
     cm.set_config_entry_repository(repo)
-    ConfigManager.set_instance(cm)
 
     conn = sqlite3.connect(DB)
     c = conn.cursor()
@@ -36,7 +35,7 @@ async def run_one(symbol, start, end, be_on):
 
     dr = HistoricalDataRepository(DB)
     await dr.initialize()
-    bt = Backtester(None, data_repository=dr)
+    bt = Backtester(None, data_repository=dr, config_manager=cm)
     st = int(datetime.strptime(start, "%Y-%m-%d").timestamp() * 1000)
     et = int(datetime.strptime(end, "%Y-%m-%d").timestamp() * 1000)
     req = BacktestRequest(
@@ -53,56 +52,35 @@ async def run_one(symbol, start, end, be_on):
     await dr.close()
 
     es = {}
-    for e in (getattr(report, "close_events", None) or []):
+    for e in (getattr(report,"close_events",None) or []):
         r = e.exit_reason or e.event_type
-        es[r] = es.get(r, 0) + 1
-    return {"trades": report.total_trades, "win_rate": float(report.win_rate),
-            "pnl": float(report.total_pnl), "exit_stats": es}
+        es[r] = es.get(r,0)+1
+    return {"trades":report.total_trades,"win_rate":float(report.win_rate),
+            "pnl":float(report.total_pnl),"exit_stats":es}
 
 async def main():
-    cases = [
-        ("BTC/USDT:USDT", "2023-01-01", "2024-01-01"),
-        ("BTC/USDT:USDT", "2024-01-01", "2025-01-01"),
-        ("ETH/USDT:USDT", "2023-01-01", "2024-01-01"),
-        ("ETH/USDT:USDT", "2024-01-01", "2025-01-01"),
-        ("SOL/USDT:USDT", "2023-01-01", "2024-01-01"),
-        ("SOL/USDT:USDT", "2024-01-01", "2025-01-01"),
-    ]
+    symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
+    start = sys.argv[1] if len(sys.argv)>1 else "2023-01-01"
+    end = sys.argv[2] if len(sys.argv)>2 else "2025-01-01"
 
-    all_results = []
-    for i, (symbol, start, end) in enumerate(cases):
-        coin = symbol.split("/")[0]
-        year = start[:4]
-
-        # 写进度文件
-        with open("/tmp/breakeven_progress.txt", "a") as f:
-            f.write(f"[{i+1}/6] {coin} {year} BE=ON starting...\n")
-
+    results = {}
+    for symbol in symbols:
+        sym = symbol.split("/")[0]
+        print(f"=== {sym} BE=ON ===")
         b = await run_one(symbol, start, end, True)
+        print(f"  trades={b['trades']} wr={b['win_rate']:.1%} pnl={b['pnl']:.2f} exits={b['exit_stats']}")
 
-        with open("/tmp/breakeven_progress.txt", "a") as f:
-            f.write(f"[{i+1}/6] {coin} {year} BE=OFF starting...\n")
-
+        print(f"=== {sym} BE=OFF ===")
         e = await run_one(symbol, start, end, False)
+        print(f"  trades={e['trades']} wr={e['win_rate']:.1%} pnl={e['pnl']:.2f} exits={e['exit_stats']}")
 
-        rec = {
-            "coin": coin, "year": year,
-            "on": b, "off": e,
-            "pnl_diff": e["pnl"] - b["pnl"],
-            "sl_diff": e["exit_stats"].get("SL", 0) - b["exit_stats"].get("SL", 0),
-            "tp2_diff": e["exit_stats"].get("TP2", 0) - b["exit_stats"].get("TP2", 0),
-            "be_count": b["exit_stats"].get("BREAKEVEN_STOP", 0),
-        }
-        all_results.append(rec)
+        diff = e['pnl'] - b['pnl']
+        print(f"  DIFF: pnl={diff:+.2f} sl={e['exit_stats'].get('SL',0)-b['exit_stats'].get('SL',0):+d} tp2={e['exit_stats'].get('TP2',0)-b['exit_stats'].get('TP2',0):+d}")
+        print()
+        results[sym] = {"baseline":b, "experiment":e, "pnl_diff":diff}
 
-        with open("/tmp/breakeven_progress.txt", "a") as f:
-            f.write(f"[{i+1}/6] {coin} {year} DONE: diff={rec['pnl_diff']:+.2f}\n")
-
-        # 每完成一个就写结果文件
-        with open(OUT, "w") as f:
-            json.dump(all_results, f, indent=2, default=float)
-
-    print("ALL DONE")
-    print(json.dumps(all_results, indent=2, default=float))
+    with open(OUT,"w") as f:
+        json.dump(results,f,indent=2,default=float)
+    print(f"结果已保存: {OUT}")
 
 asyncio.run(main())
