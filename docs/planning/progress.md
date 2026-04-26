@@ -48,8 +48,26 @@
 
 ### 当前剩余杂活
 
-1. `PgSignalRepository` 真实 PostgreSQL 集成测试
-2. 历史 `test_signal_repository_s6_2.py` fixture 现代化（旧 SQLite `:memory:` 连接语义）
+1. ~~`PgSignalRepository` 真实 PostgreSQL 集成测试~~ ✅ 已完成
+   - `tests/integration/test_pg_signal_repo.py`
+   - `33 passed`
+2. ~~历史 `test_signal_repository_s6_2.py` fixture 现代化（旧 SQLite `:memory:` 连接语义）~~ ✅ 已完成
+   - `12 passed`
+
+### 2026-04-27 -- Signals PG Window 验证收口完成
+
+1. ✅ `tests/integration/test_pg_signal_repo.py` 已新增并通过
+   - 覆盖 live signals CRUD / query / stats / clear
+   - 覆盖 `signal_take_profits` round trip
+   - 覆盖 PG 约束与 FK cascade
+2. ✅ `tests/integration/conftest.py` 已补 signal repo fixture 与表清理
+3. ✅ 历史 `tests/unit/test_signal_repository_s6_2.py` 已修复并通过
+   - 旧 SQLite `:memory:` fixture 适配当前连接获取方式
+   - direction 大小写断言已与 v3 语义对齐
+4. ✅ 当前 `signals` 窗口可判定为：
+   - runtime signal 主路径已切 PG
+   - `signal_attempts` 继续留 SQLite
+   - 主线代码 + unit tests + PG integration tests 均已过
 
 ### 2026-04-25 -- 执行主线 PG 切换第一层代码骨架已落地
 

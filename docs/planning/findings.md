@@ -25,6 +25,16 @@
 5. runtime `main.py` 与 standalone `api.py` lifespan 都必须通过统一 runtime signal factory 装配信号仓储。
 6. 当前 `api.py` 中仍保留的显式 `SignalRepository()` 仅存在于 backtest / 报表辅助路径，不属于本窗必须拆除的 runtime execution / runtime signal 主线。
 7. 目前已知失败里，`test_signal_repository_s6_2.py` 属于历史 SQLite `:memory:` fixture 语义问题，不构成当前 PG signal 主线阻塞。
+8. `PgSignalRepository` 的真实 PostgreSQL 集成测试已完成并通过。
+   - 覆盖 `save/get/update/query/stats/clear`
+   - 覆盖 `signal_take_profits` round trip
+   - 覆盖 direction / price / leverage / unique signal_id / TP FK cascade 等约束
+9. 历史 `test_signal_repository_s6_2.py` 已完成 fixture 现代化并通过。
+   - 当前不再是 `signals` 窗口阻塞项
+10. 当前 `signals` 窗口剩余问题已从“主线切换”转为“低优先级语义改进”：
+   - `get_stats()` 仍依赖 `created_at LIKE 'YYYY-MM-DD%'`
+   - `status` 大小写历史混用仍存在兼容痕迹
+   - `store_take_profit_levels()` 仍是 delete + insert 的单事务替换语义
 
 ### 0. Research 收口必须保持 research-only，且不得反向污染 runtime
 

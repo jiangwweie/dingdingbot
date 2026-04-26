@@ -22,6 +22,7 @@ from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentR
 from src.infrastructure.pg_execution_recovery_repository import PgExecutionRecoveryRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
+from src.infrastructure.pg_signal_repository import PgSignalRepository
 
 PG_DATABASE_URL = os.environ.get(
     "PG_DATABASE_URL",
@@ -29,6 +30,8 @@ PG_DATABASE_URL = os.environ.get(
 )
 
 _TRUNCATE_ORDER = [
+    "signal_take_profits",
+    "signals",
     "execution_recovery_tasks",
     "orders",
     "positions",
@@ -98,6 +101,13 @@ async def recovery_repo(
     pg_session_maker: async_sessionmaker[AsyncSession],
 ) -> PgExecutionRecoveryRepository:
     return PgExecutionRecoveryRepository(pg_session_maker)
+
+
+@pytest_asyncio.fixture()
+async def signal_repo(
+    pg_session_maker: async_sessionmaker[AsyncSession],
+) -> PgSignalRepository:
+    return PgSignalRepository(pg_session_maker)
 
 
 def pytest_collection_modifyitems(config, items):

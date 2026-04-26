@@ -8,20 +8,26 @@ Tests:
 """
 import pytest
 import asyncio
+import aiosqlite
 from decimal import Decimal
+from unittest.mock import patch, AsyncMock
+
 from src.domain.models import SignalStatus, SignalResult, Direction
 from src.infrastructure.signal_repository import SignalRepository
 
 
 @pytest.fixture
 async def repository():
-    """Create a test repository instance."""
-    repo = SignalRepository(db_path=":memory:")
-    await repo.initialize()
-    yield repo
-    # Cleanup
-    if repo._db:
-        await repo._db.close()
+    """Create a test repository backed by an in-memory SQLite database."""
+    db = await aiosqlite.connect(":memory:")
+    db.row_factory = aiosqlite.Row
+
+    with patch("src.infrastructure.connection_pool.get_connection", new_callable=AsyncMock, return_value=db):
+        repo = SignalRepository(db_path=":memory:")
+        await repo.initialize()
+        yield repo
+
+    await db.close()
 
 
 class TestSignalStatusEnum:
@@ -201,15 +207,15 @@ class TestSignalRepositoryMethods:
         await repository.update_signal_status_by_tracker_id("test-signal-1", "ACTIVE")
         await repository.update_signal_status_by_tracker_id("test-signal-2", "ACTIVE")
 
-        # Get active signal by dedup key
-        dedup_key = "BTC/USDT:USDT:15m:long:pinbar"
+        # Get active signal by dedup key (direction stored as uppercase in DB)
+        dedup_key = "BTC/USDT:USDT:15m:LONG:pinbar"
         active_signal = await repository.get_active_signal(dedup_key)
 
         # Should return the most recent active signal
         assert active_signal is not None, "Should find active signal"
         assert active_signal["symbol"] == "BTC/USDT:USDT"
         assert active_signal["timeframe"] == "15m"
-        assert active_signal["direction"] == "long"
+        assert active_signal["direction"] == "LONG"
         assert active_signal["strategy_name"] == "pinbar"
 
     @pytest.mark.asyncio
@@ -251,8 +257,8 @@ class TestSignalRepositoryMethods:
         await repository.update_signal_status_by_tracker_id("test-signal-3", "SUPERSEDED")
         await repository.update_signal_status_by_tracker_id("test-signal-4", "ACTIVE")
 
-        # Get active signal
-        dedup_key = "ETH/USDT:USDT:1h:short:engulfing"
+        # Get active signal (direction stored as uppercase in DB)
+        dedup_key = "ETH/USDT:USDT:1h:SHORT:engulfing"
         active_signal = await repository.get_active_signal(dedup_key)
 
         # Should return signal2 (active), not signal1 (superseded)
@@ -298,20 +304,20 @@ class TestSignalRepositoryMethods:
 
         # Get opposing signal for LONG (should return SHORT)
         opposing = await repository.get_opposing_signal(
-            "SOL/USDT:USDT", "4h", "long"
+            "SOL/USDT:USDT", "4h", "LONG"
         )
 
         assert opposing is not None
-        assert opposing["direction"] == "short"
+        assert opposing["direction"] == "SHORT"
         assert opposing["signal_id"] == "test-short"
 
         # Get opposing signal for SHORT (should return LONG)
         opposing = await repository.get_opposing_signal(
-            "SOL/USDT:USDT", "4h", "short"
+            "SOL/USDT:USDT", "4h", "SHORT"
         )
 
         assert opposing is not None
-        assert opposing["direction"] == "long"
+        assert opposing["direction"] == "LONG"
         assert opposing["signal_id"] == "test-long"
 
     @pytest.mark.asyncio
@@ -336,7 +342,7 @@ class TestSignalRepositoryMethods:
 
         # Get opposing signal for LONG (should return None because no SHORT exists)
         opposing = await repository.get_opposing_signal(
-            "BNB/USDT:USDT", "1d", "long"
+            "BNB/USDT:USDT", "1d", "LONG"
         )
 
         # Should return None because there's no SHORT signal
@@ -380,7 +386,7 @@ class TestSignalRepositoryMethods:
 
         # Get opposing signal for LONG (should return None because SHORT is superseded)
         opposing = await repository.get_opposing_signal(
-            "XRP/USDT:USDT", "15m", "long"
+            "XRP/USDT:USDT", "15m", "LONG"
         )
 
         assert opposing is None
@@ -453,11 +459,11 @@ class TestIntegration:
         assert result2["status"] == "ACTIVE"
 
         # Step 6: Verify get_active_signal returns signal2
-        dedup_key = "BTC/USDT:USDT:1h:long:pinbar"
+        dedup_key = "BTC/USDT:USDT:1h:LONG:pinbar"
         active = await repository.get_active_signal(dedup_key)
         assert active is not None, "Should find active signal"
         assert active["signal_id"] == signal_id2
 
         # Step 7: Verify get_opposing_signal works (should return None, no opposing signal)
-        opposing = await repository.get_opposing_signal("BTC/USDT:USDT", "1h", "long")
+        opposing = await repository.get_opposing_signal("BTC/USDT:USDT", "1h", "LONG")
         assert opposing is None  # No opposing SHORT signal
