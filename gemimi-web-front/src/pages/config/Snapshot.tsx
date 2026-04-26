@@ -47,10 +47,10 @@ export default function Snapshot() {
       <div className="flex justify-between items-end border-b border-zinc-200 dark:border-zinc-800 mb-6 pb-4">
         <div>
            <div className="flex items-center gap-3">
-             <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">配置快照 (Config Snapshot)</h2>
+             <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">配置快照 (Runtime Snapshot)</h2>
            </div>
            <p className="text-xs text-zinc-500 mt-2 max-w-xl">
-             系统当前有效配置的只读快照。这包含了运行时的硬编码值和覆盖参数提取出的静态映射。(不可编辑)
+             启动期冻结的 runtime 配置只读快照。真源为 runtime profile + RuntimeConfigResolver，非旧配置域 config_profiles。(不可编辑)
            </p>
         </div>
         <button
@@ -68,7 +68,7 @@ export default function Snapshot() {
             <CardTitle className="text-zinc-500 flex items-center"><GitCommit className="w-4 h-4 mr-2"/> 运行时标识 (Identity)</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-             <div className="flex justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2"><span className="text-zinc-500">配置集 (Profile)</span><span className="font-mono">{data.identity?.profile}</span></div>
+             <div className="flex justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2"><span className="text-zinc-500">Runtime Profile</span><span className="font-mono">{data.identity?.profile}</span></div>
              <div className="flex justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2"><span className="text-zinc-500">版本标识 (Version)</span><span className="font-mono">{data.identity?.version}</span></div>
              <div className="flex justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2"><span className="text-zinc-500">生成签名 (Hash)</span><span className="font-mono text-zinc-400">{data.identity?.hash}</span></div>
           </CardContent>

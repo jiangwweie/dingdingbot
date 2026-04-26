@@ -45,7 +45,7 @@ export PG_DATABASE_URL="postgresql+asyncpg://dingdingbot:dingdingbot_dev@localho
 export RUNTIME_PROFILE=sim1_eth_runtime
 ```
 
-> ⚠️ YAML 不再作为运行时配置真源。系统启动与 Sim-1 运行都以 SQLite 配置库 + runtime profile 为准；YAML 仅保留为导入导出/备份格式。
+> ⚠️ YAML 不再作为运行时配置真源。系统启动与 Sim-1 运行都以 runtime profile（`runtime_profiles` 表）为准；YAML 仅保留为导入导出/备份格式。旧配置域（`config_profiles` / `config_entries`）仅管理非 runtime 的配置 KV 条目，不是执行真源。
 
 ### 3. 运行系统
 

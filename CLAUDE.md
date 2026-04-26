@@ -421,6 +421,8 @@ Position_Size = (Balance × Loss_Percent) / Stop_Loss_Distance
 
 ### ConfigManager
 
+> **注意**: ConfigManager 管理的是旧配置域（config_profiles / config_entries），不是 Sim-1 runtime 真源。Runtime 真源为 `RuntimeConfigResolver` + `runtime_profiles` 表（SQLite）。ConfigManager 的 `/api/config/profiles/*` 端点仅管理配置 KV 快照，下次启动或显式 reload 后生效，不热切当前 runtime。
+
 ```python
 from src.application.config_manager import ConfigManager, load_all_configs
 

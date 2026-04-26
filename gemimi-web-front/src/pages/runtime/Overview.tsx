@@ -53,9 +53,9 @@ export default function Overview() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
-          <CardHeader><CardTitle>配置信息 (Profile)</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Runtime Profile</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-zinc-500">配置:</span> <span className="font-mono text-zinc-800 dark:text-zinc-200">{data.profile}</span></div>
+            <div className="flex justify-between"><span className="text-zinc-500">Profile:</span> <span className="font-mono text-zinc-800 dark:text-zinc-200">{data.profile}</span></div>
             <div className="flex justify-between"><span className="text-zinc-500">版本:</span> <span className="font-mono text-zinc-800 dark:text-zinc-200">{data.version}</span></div>
             <div className="flex justify-between"><span className="text-zinc-500">哈希:</span> <span className="font-mono text-zinc-600 dark:text-zinc-400">{data.hash}</span></div>
             <div className="flex justify-between"><span className="text-zinc-500">已冻结 (Frozen):</span> <Badge variant={data.frozen ? 'info' : 'warning'}>{data.frozen ? '是' : '否'}</Badge></div>
