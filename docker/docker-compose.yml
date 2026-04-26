@@ -1,85 +1,83 @@
-version: '3.8'
+# 盯盘狗 🐶 模拟盘 Docker Compose
+# Usage: docker compose up -d
+# Logs:   docker compose logs -f backend
 
 services:
-  # Backend API Service
+  # ── PostgreSQL ──────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: dingdingbot-pg
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: dingdingbot
+      POSTGRES_USER: dingdingbot
+      POSTGRES_PASSWORD: dingdingbot_dev
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - dingdingbot-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dingdingbot -d dingdingbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend ─────────────────────────────────────────────
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile.backend
-    container_name: monitor-dog-backend
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: dingdingbot-backend
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      # Config files (read-only from host)
-      - ./config:/app/config:ro
-      # Database persistence
-      - ./data:/app/data
-      # Logs persistence
-      - ./logs:/app/logs
+      # SQLite 数据持久化（v3_dev.db, config snapshots 等）
+      - ../data:/app/data
+      # 日志持久化
+      - ../logs:/app/logs
     environment:
       - TZ=Asia/Shanghai
       - PYTHONPATH=/app
-      # Database URL (SQLite for development)
+      # PostgreSQL（容器内网络用服务名 postgres）
+      - PG_DATABASE_URL=postgresql+asyncpg://dingdingbot:dingdingbot_dev@postgres:5432/dingdingbot?ssl=disable
+      - PG_SSL_DISABLED=true
+      # Execution backend
+      - CORE_EXECUTION_INTENT_BACKEND=postgres
+      - CORE_ORDER_BACKEND=postgres
+      - CORE_POSITION_BACKEND=postgres
+      # Exchange（Binance testnet mock_trade）
+      - EXCHANGE_NAME=binance
+      - EXCHANGE_TESTNET=true
+      - EXCHANGE_API_KEY=rmy4DPO0uydnQLRCKxql5oeqURfBlC36W7ijW0QwBjR9HxAXMEahc0KutHlHA8hI
+      - EXCHANGE_API_SECRET=mP7Hk5r3D8TeryzZKxipJ6aTfOJ6qbjqO3fzeG6VJtJB9DVxE4NXgMJZYXpqMFtR
+      # Notification
+      - FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/4d9badfa-7566-42e4-9c3c-15f6435aafb7
+      # Runtime
+      - RUNTIME_PROFILE=sim1_eth_runtime
+      - BACKEND_PORT=8000
+      # Database（SQLite 主库路径）
       - DATABASE_URL=sqlite+aiosqlite:///./data/v3_dev.db
-      # Set to 'true' to enable SQL query logging
-      - SQL_ECHO=false
-    networks:
-      - monitor-dog-network
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/runtime/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s  # Extended for Alembic migrations
-
-  # PostgreSQL Service (Optional - for production testing)
-  # Uncomment to use PostgreSQL instead of SQLite
-  # postgres:
-  #   image: postgres:15-alpine
-  #   container_name: monitor-dog-postgres
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_USER: v3
-  #     POSTGRES_PASSWORD: v3_password
-  #     POSTGRES_DB: v3_prod
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   networks:
-  #     - monitor-dog-network
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U v3"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-
-  # Frontend Web Service
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: monitor-dog-frontend
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    depends_on:
-      - backend
+      retries: 5
+      start_period: 60s
     networks:
-      - monitor-dog-network
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
+      - dingdingbot-net
+
+# 前端独立部署，见 docker-compose.frontend.yml
+# docker compose -f docker-compose.frontend.yml up -d
 
 networks:
-  monitor-dog-network:
+  dingdingbot-net:
     driver: bridge
 
 volumes:
-  config:
-  data:
-  logs:
-  # postgres_data:
+  pg_data:

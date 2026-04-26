@@ -1,45 +1,33 @@
-# 盯盘狗 🐶 后端 Dockerfile
-# Python 3.11 slim image for production
+# ── Stage 1: Build ────────────────────────────────────────
+FROM python:3.11-slim AS builder
 
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# ── Stage 2: Runtime ─────────────────────────────────────
 FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for better caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
 
 # Copy application code
-COPY src/ ./src/
-COPY config/ ./config/
+COPY src/ src/
+COPY config/ config/
+COPY scripts/ scripts/
 
-# Create logs directory
-RUN mkdir -p logs data
+# Ensure data and logs dirs exist
+RUN mkdir -p /app/data /app/logs
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash monitoruser
-RUN chown -R monitoruser:monitoruser /app
-USER monitoruser
-
-# Expose API port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Run the application
+# main.py is the full startup entry:
+# - loads .env / .env.local (no-op in Docker, env vars from compose)
+# - resolves runtime profile
+# - initializes PG, exchange, WebSocket, reconciliation
+# - starts embedded uvicorn API server
 CMD ["python", "src/main.py"]

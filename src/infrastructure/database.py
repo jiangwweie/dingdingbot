@@ -81,6 +81,7 @@ def _build_pg_engine_kwargs() -> dict:
         "pool_timeout": pool_timeout_seconds,
         "connect_args": {
             "command_timeout": command_timeout_seconds,
+            "ssl": None if os.getenv("PG_SSL_DISABLED", "false").lower() == "true" else "prefer",
             "server_settings": {
                 "statement_timeout": str(statement_timeout_ms),
                 "lock_timeout": str(lock_timeout_ms),

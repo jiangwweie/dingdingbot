@@ -43,6 +43,7 @@ config/user.yml
 .env
 .env.local
 .local
+docker/.env.docker
 
 # Node
 node_modules/
