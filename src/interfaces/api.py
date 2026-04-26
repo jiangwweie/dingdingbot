@@ -52,6 +52,7 @@ from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
     create_runtime_order_repository,
     create_runtime_position_repository,
+    create_runtime_signal_repository,
 )
 from src.infrastructure.database import close_db, validate_pg_core_configuration
 from src.application.config_manager import UserConfig, ConfigManager
@@ -517,7 +518,6 @@ async def lifespan(app: FastAPI):
     Manage application lifespan events.
     Initialize repositories on startup, close on shutdown.
     """
-    from src.infrastructure.signal_repository import SignalRepository
     from src.infrastructure.config_entry_repository import ConfigEntryRepository
 
     global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
@@ -534,7 +534,7 @@ async def lifespan(app: FastAPI):
 
         # 初始化 SignalRepository（幂等）
         if _repository is None:
-            _repository = SignalRepository()
+            _repository = create_runtime_signal_repository()
             await _repository.initialize()
             logger.info("SignalRepository initialized in lifespan")
         _signal_repo = _repository  # Alias for console runtime routes

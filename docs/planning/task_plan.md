@@ -9,6 +9,39 @@
 
 ## 当前阶段
 
+### 2026-04-27 补充：Signals PG Window（Window 2）当前执行状态
+
+当前已完成的本窗主线：
+
+1. 已选定 **Hybrid Runtime Signal Repository** 方案：
+   - live `signals` / `signal_take_profits` -> PG
+   - `signal_attempts` / `config_snapshots` / backtest signal helpers -> SQLite
+2. 已新增 `PgSignalRepository`
+3. 已新增 `HybridSignalRepository`
+4. 已新增 `create_runtime_signal_repository()` 并接入：
+   - `main.py`
+   - `api.py` standalone lifespan
+5. `SignalPipeline` 已去除对 `repository._db` 的直接依赖，改走 repository 方法：
+   - `list_active_signals_for_cache_rebuild()`
+   - `get_signal_by_tracker_id()`
+6. 定向回归已通过：
+   - `test_signal_repository.py`
+   - `test_runtime_config_signal_pipeline.py`
+   - `test_console_runtime_routes.py`
+   - `test_api_lifespan_runtime.py`
+   - `test_signal_pipeline.py`
+
+本窗明确暂不处理：
+
+1. 不迁 `signal_attempts`
+2. 不拆 `config_snapshots` 出独立 PG repo
+3. 不迁 backtest signal helpers
+
+本窗剩余杂活：
+
+1. `PgSignalRepository` 真实 PostgreSQL 集成测试
+2. 历史 `test_signal_repository_s6_2.py` fixture 现代化（当前是旧 SQLite `:memory:` 连接方式问题，不是本窗主链 bug）
+
 ### 阶段结论
 
 第二阶段第一步已完成，模拟盘准入冒烟已通过：
@@ -843,3 +876,21 @@ Sim-0 详细任务拆分（归档参考）：
 3. ⛔ 当前不启动 `signals / signal_attempts` 迁移
    - 原因：这会把 execution 主线闭环窗口扩大为信号域拆分窗口
    - 当前更合理的动作是把执行主线闭环先固化，再单开下一窗评估 `signals`
+
+### 2026-04-27 Signals PG Window 已启动（范围受控）
+
+1. ✅ 已正式启动 `signals` 迁移窗，但范围收敛为：
+   - `signals`
+   - `signal_take_profits`
+2. ✅ 当前采用的实现路线：
+   - `PgSignalRepository`
+   - `HybridSignalRepository`
+   - runtime `SignalPipeline` / `PerformanceTracker` / runtime readonly 面接 hybrid repo
+3. ⛔ 当前仍明确排除：
+   - `signal_attempts`
+   - `config_snapshots`
+   - backtest signal 全量迁 PG
+4. 下一步实现重点：
+   - PG signal ORM / repo 完整化
+   - runtime 装配与 API 信号读面切换
+   - 定向测试与 PG integration tests

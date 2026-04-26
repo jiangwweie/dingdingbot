@@ -211,16 +211,21 @@ class TestLifespanStandaloneRuntime:
         mock_order_repo.set_exchange_gateway = MagicMock()
         mock_order_repo.set_audit_logger = MagicMock()
 
+        mock_position_repo = AsyncMock()
+        mock_position_repo.initialize = AsyncMock()
+        mock_position_repo.close = AsyncMock()
+
         with patch("src.infrastructure.exchange_gateway.ExchangeGateway", return_value=mock_gateway), \
              patch("src.application.account_service.BinanceAccountService", return_value=mock_account_service), \
              patch("src.application.capital_protection.CapitalProtectionManager", return_value=mock_capital_protection), \
              patch("src.application.execution_orchestrator.ExecutionOrchestrator", return_value=mock_orchestrator), \
              patch("src.infrastructure.notifier.get_notification_service") as mock_notifier_svc, \
              patch("src.interfaces.api.validate_pg_core_configuration", return_value=None), \
-             patch("src.infrastructure.signal_repository.SignalRepository", return_value=mock_signal_repo), \
+             patch("src.interfaces.api.create_runtime_signal_repository", return_value=mock_signal_repo), \
              patch("src.infrastructure.config_entry_repository.ConfigEntryRepository", return_value=mock_config_entry_repo), \
-             patch("src.interfaces.api.create_order_repository", return_value=mock_order_repo), \
+             patch("src.interfaces.api.create_runtime_order_repository", return_value=mock_order_repo), \
              patch("src.interfaces.api.create_execution_intent_repository", return_value=mock_intent_repo), \
+             patch("src.interfaces.api.create_runtime_position_repository", return_value=mock_position_repo), \
              patch("src.application.order_audit_logger.OrderAuditLogger", return_value=mock_audit_logger), \
              patch("src.infrastructure.order_audit_repository.OrderAuditLogRepository") as mock_audit_repo_cls, \
              patch("src.application.order_lifecycle_service.OrderLifecycleService", return_value=mock_lifecycle_service):
@@ -289,16 +294,21 @@ class TestLifespanStandaloneRuntime:
         mock_order_repo.set_exchange_gateway = MagicMock()
         mock_order_repo.set_audit_logger = MagicMock()
 
+        mock_position_repo = AsyncMock()
+        mock_position_repo.initialize = AsyncMock()
+        mock_position_repo.close = AsyncMock()
+
         with patch("src.infrastructure.exchange_gateway.ExchangeGateway", return_value=mock_gateway), \
              patch("src.application.account_service.BinanceAccountService"), \
              patch("src.application.capital_protection.CapitalProtectionManager"), \
              patch("src.application.execution_orchestrator.ExecutionOrchestrator"), \
              patch("src.infrastructure.notifier.get_notification_service") as mock_notifier_svc, \
              patch("src.interfaces.api.validate_pg_core_configuration", return_value=None), \
-             patch("src.infrastructure.signal_repository.SignalRepository", return_value=mock_signal_repo), \
+             patch("src.interfaces.api.create_runtime_signal_repository", return_value=mock_signal_repo), \
              patch("src.infrastructure.config_entry_repository.ConfigEntryRepository", return_value=mock_config_entry_repo), \
-             patch("src.interfaces.api.create_order_repository", return_value=mock_order_repo), \
+             patch("src.interfaces.api.create_runtime_order_repository", return_value=mock_order_repo), \
              patch("src.interfaces.api.create_execution_intent_repository", return_value=mock_intent_repo), \
+             patch("src.interfaces.api.create_runtime_position_repository", return_value=mock_position_repo), \
              patch("src.application.order_audit_logger.OrderAuditLogger", return_value=mock_audit_logger), \
              patch("src.infrastructure.order_audit_repository.OrderAuditLogRepository") as mock_audit_repo_cls, \
              patch("src.application.order_lifecycle_service.OrderLifecycleService", return_value=mock_lifecycle_service):
@@ -362,6 +372,10 @@ class TestLifespanStandaloneRuntime:
         mock_order_repo.set_exchange_gateway = MagicMock()
         mock_order_repo.set_audit_logger = MagicMock()
 
+        mock_position_repo = AsyncMock()
+        mock_position_repo.initialize = AsyncMock()
+        mock_position_repo.close = AsyncMock()
+
         gateway_factory = MagicMock(side_effect=[mock_gateway_1, mock_gateway_2])
 
         with patch("src.infrastructure.exchange_gateway.ExchangeGateway", gateway_factory), \
@@ -370,10 +384,11 @@ class TestLifespanStandaloneRuntime:
              patch("src.application.execution_orchestrator.ExecutionOrchestrator"), \
              patch("src.infrastructure.notifier.get_notification_service") as mock_notifier_svc, \
              patch("src.interfaces.api.validate_pg_core_configuration", return_value=None), \
-             patch("src.infrastructure.signal_repository.SignalRepository", return_value=mock_signal_repo), \
+             patch("src.interfaces.api.create_runtime_signal_repository", return_value=mock_signal_repo), \
              patch("src.infrastructure.config_entry_repository.ConfigEntryRepository", return_value=mock_config_entry_repo), \
-             patch("src.interfaces.api.create_order_repository", return_value=mock_order_repo), \
+             patch("src.interfaces.api.create_runtime_order_repository", return_value=mock_order_repo), \
              patch("src.interfaces.api.create_execution_intent_repository", return_value=mock_intent_repo), \
+             patch("src.interfaces.api.create_runtime_position_repository", return_value=mock_position_repo), \
              patch("src.application.order_audit_logger.OrderAuditLogger", return_value=mock_audit_logger), \
              patch("src.infrastructure.order_audit_repository.OrderAuditLogRepository") as mock_audit_repo_cls, \
              patch("src.application.order_lifecycle_service.OrderLifecycleService", return_value=mock_lifecycle_service):
@@ -439,11 +454,16 @@ class TestLifespanStandaloneRuntime:
         mock_order_repo.set_exchange_gateway = MagicMock()
         mock_order_repo.set_audit_logger = MagicMock()
 
+        mock_position_repo = AsyncMock()
+        mock_position_repo.initialize = AsyncMock()
+        mock_position_repo.close = AsyncMock()
+
         with patch("src.interfaces.api.validate_pg_core_configuration", return_value=None), \
-             patch("src.infrastructure.signal_repository.SignalRepository", return_value=mock_signal_repo), \
+             patch("src.interfaces.api.create_runtime_signal_repository", return_value=mock_signal_repo), \
              patch("src.infrastructure.config_entry_repository.ConfigEntryRepository", return_value=mock_config_entry_repo), \
-             patch("src.interfaces.api.create_order_repository", return_value=mock_order_repo), \
+             patch("src.interfaces.api.create_runtime_order_repository", return_value=mock_order_repo), \
              patch("src.interfaces.api.create_execution_intent_repository", return_value=mock_intent_repo), \
+             patch("src.interfaces.api.create_runtime_position_repository", return_value=mock_position_repo), \
              patch("src.application.order_audit_logger.OrderAuditLogger", return_value=mock_audit_logger), \
              patch("src.infrastructure.order_audit_repository.OrderAuditLogRepository") as mock_audit_repo_cls, \
              patch("src.application.order_lifecycle_service.OrderLifecycleService", return_value=mock_lifecycle_service):
@@ -476,14 +496,10 @@ class TestLifespanStandaloneRuntime:
         import src.infrastructure.database as db_module
         importlib.reload(db_module)
 
-        mock_signal_repo = AsyncMock()
-        mock_signal_repo.initialize = AsyncMock()
+        from fastapi import FastAPI
+        app = FastAPI()
 
-        with patch("src.interfaces.api.SignalRepository", return_value=mock_signal_repo):
-            from fastapi import FastAPI
-            app = FastAPI()
-
-            from src.domain.exceptions import FatalStartupError
-            with pytest.raises(FatalStartupError, match="F-003"):
-                async with api.lifespan(app):
-                    pass
+        from src.domain.exceptions import FatalStartupError
+        with pytest.raises(FatalStartupError, match="F-003"):
+            async with api.lifespan(app):
+                pass

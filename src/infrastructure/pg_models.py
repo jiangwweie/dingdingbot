@@ -24,6 +24,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     Numeric,
@@ -237,4 +238,81 @@ class PGExecutionRecoveryTaskORM(PGCoreBase):
         Index("idx_execution_recovery_tasks_symbol_status", "symbol", "status"),
         Index("idx_execution_recovery_tasks_intent_id", "intent_id"),
         Index("idx_execution_recovery_tasks_next_retry_at", "next_retry_at"),
+    )
+
+
+class PGSignalORM(PGCoreBase):
+    """PG 版 live signal 表。"""
+
+    __tablename__ = "signals"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    signal_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(16), nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    entry_price: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    stop_loss: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    position_size: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    leverage: Mapped[int] = mapped_column(Integer, nullable=False)
+    tags_json: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    risk_info: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
+    take_profit_1: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    closed_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pnl_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    kline_timestamp: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    strategy_name: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    score: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="live")
+    pattern_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
+    ema_trend: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    mtf_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    superseded_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    opposing_signal_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    opposing_signal_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("direction IN ('LONG', 'SHORT')", name="ck_signals_direction"),
+        CheckConstraint("entry_price > 0", name="ck_signals_entry_price_positive"),
+        CheckConstraint("stop_loss > 0", name="ck_signals_stop_loss_positive"),
+        CheckConstraint("position_size > 0", name="ck_signals_position_size_positive"),
+        CheckConstraint("leverage > 0", name="ck_signals_leverage_positive"),
+        Index("idx_signals_symbol", "symbol"),
+        Index("idx_signals_created_at", "created_at"),
+        Index("idx_signals_status", "status"),
+        Index("idx_signals_symbol_timeframe_status", "symbol", "timeframe", "status"),
+        Index("idx_signals_source", "source"),
+    )
+
+
+Index("uq_signals_signal_id", PGSignalORM.signal_id, unique=True)
+
+
+class PGSignalTakeProfitORM(PGCoreBase):
+    """PG 版 signal take profit 表。"""
+
+    __tablename__ = "signal_take_profits"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    signal_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("signals.signal_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tp_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    position_ratio: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    risk_reward: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    price_level: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
+    filled_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pnl_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("position_ratio >= 0", name="ck_signal_take_profits_position_ratio_non_negative"),
+        CheckConstraint("risk_reward >= 0", name="ck_signal_take_profits_risk_reward_non_negative"),
+        CheckConstraint("price_level > 0", name="ck_signal_take_profits_price_level_positive"),
+        Index("idx_signal_take_profits_signal_id", "signal_id"),
+        Index("idx_signal_take_profits_status", "status"),
     )

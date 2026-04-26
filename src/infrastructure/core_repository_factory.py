@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from src.infrastructure.hybrid_signal_repository import HybridSignalRepository
 from src.infrastructure.database import get_core_backend_settings
 from src.infrastructure.order_repository import OrderRepository
 from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
@@ -69,3 +70,12 @@ def create_pg_position_repository() -> PositionRepositoryPort:
 def create_runtime_position_repository() -> PositionRepositoryPort:
     """为 runtime execution 主链显式创建 PG 仓位仓储。"""
     return create_pg_position_repository()
+
+
+def create_runtime_signal_repository() -> HybridSignalRepository:
+    """为 runtime signal 主链创建混合仓储。
+
+    - live signals / take profits -> PG
+    - attempts / config snapshots / backtest helpers -> SQLite
+    """
+    return HybridSignalRepository()

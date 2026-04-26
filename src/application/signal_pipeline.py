@@ -932,21 +932,11 @@ class SignalPipeline:
         logger.info("Rebuilding signal cooldown cache from database...")
 
         try:
-            # Get all ACTIVE signals from database
-            async with self._repository._db.execute(
-                """
-                SELECT signal_id, symbol, timeframe, direction, strategy_name,
-                       score, created_at
-                FROM signals
-                WHERE status IN ('ACTIVE', 'active', 'PENDING', 'pending')
-                ORDER BY created_at DESC
-                """
-            ) as cursor:
-                rows = await cursor.fetchall()
+            rows = await self._repository.list_active_signals_for_cache_rebuild()
 
             cache_count = 0
             for row in rows:
-                dedup_key = f"{row['symbol']}:{row['timeframe']}:{row['direction']}:{row['strategy_name']}"
+                dedup_key = f"{row['symbol']}:{row['timeframe']}:{row['direction']}:{row.get('strategy_name', 'unknown')}"
 
                 # Parse created_at timestamp
                 from datetime import datetime, timezone
@@ -1109,17 +1099,13 @@ class SignalPipeline:
             return None
 
         try:
-            async with self._repository._db.execute(
-                "SELECT * FROM signals WHERE signal_id = ?", (opposing_signal_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    opposing_signal_data = dict(row)
-                    logger.info(
-                        f"Opposing signal found: {opposing_signal_id} "
-                        f"({opposite_direction}, score: {old_score:.3f})"
-                    )
-                    return opposing_signal_data
+            opposing_signal_data = await self._repository.get_signal_by_tracker_id(opposing_signal_id)
+            if opposing_signal_data:
+                logger.info(
+                    f"Opposing signal found: {opposing_signal_id} "
+                    f"({opposite_direction}, score: {old_score:.3f})"
+                )
+                return opposing_signal_data
         except (TypeError, AttributeError):
             # Fallback for tests with mock objects - use cache data
             logger.info(

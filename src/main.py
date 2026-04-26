@@ -42,6 +42,7 @@ from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
     create_runtime_order_repository,
     create_runtime_position_repository,
+    create_runtime_signal_repository,
 )
 from src.infrastructure.runtime_profile_repository import RuntimeProfileRepository
 from src.application.signal_pipeline import SignalPipeline
@@ -251,8 +252,7 @@ async def run_application():
         # Phase 1.5: Initialize Signal Database
         # =============================================
         logger.info("Phase 1.5: Initializing signal database...")
-        from src.infrastructure.signal_repository import SignalRepository
-        signal_repository = SignalRepository()
+        signal_repository = create_runtime_signal_repository()
         await signal_repository.initialize()
         logger.info("Signal database initialized")
 

@@ -12,6 +12,45 @@
 
 ## 近期完成
 
+### 2026-04-27 -- Signals PG Window groundwork 已落地并完成定向回归
+
+1. ✅ 新增 `PgSignalRepository`
+   - live `signals` / `signal_take_profits` 进入 PG
+2. ✅ 新增 `HybridSignalRepository`
+   - live signal 主路径 -> PG
+   - `signal_attempts` / `config_snapshots` / backtest helpers -> SQLite
+3. ✅ 新增 `create_runtime_signal_repository()` 并接入：
+   - `main.py`
+   - `api.py` standalone lifespan
+4. ✅ `SignalPipeline` 已移除对 `repository._db` 的直连：
+   - active signal cache rebuild 改走 `list_active_signals_for_cache_rebuild()`
+   - opposing signal 查询改走 `get_signal_by_tracker_id()`
+5. ✅ SQLite `SignalRepository` 已补最小兼容方法：
+   - `get_signal_by_tracker_id()`
+   - `list_active_signals_for_cache_rebuild()`
+   - `save_signal()` 同步补 `take_profit_1` 持久化
+6. ✅ 定向测试通过：
+   - `test_signal_repository.py`
+   - `test_runtime_config_signal_pipeline.py`
+   - `test_console_runtime_routes.py`
+   - `test_api_lifespan_runtime.py`
+   - `test_signal_pipeline.py`
+   - 合并跑：`113 passed`
+7. ✅ 语法校验通过：
+   - `pg_signal_repository.py`
+   - `hybrid_signal_repository.py`
+   - `signal_pipeline.py`
+   - `api.py`
+   - `main.py`
+   - `core_repository_factory.py`
+   - `signal_repository.py`
+   - `pg_models.py`
+
+### 当前剩余杂活
+
+1. `PgSignalRepository` 真实 PostgreSQL 集成测试
+2. 历史 `test_signal_repository_s6_2.py` fixture 现代化（旧 SQLite `:memory:` 连接语义）
+
 ### 2026-04-25 -- 执行主线 PG 切换第一层代码骨架已落地
 
 1. ✅ 已新增 execution 主线仓储显式入口：
@@ -1074,3 +1113,23 @@
 4. ✅ 当前决策
    - 不在本窗口继续迁 `signals / signal_attempts`
    - 继续把它们视为下一窗的独立域决策，而不是顺手并进 execution PG 闭环
+
+### 2026-04-27 Signals PG Window 准备工作已完成并开始落骨架
+
+1. ✅ 已新增 `docs/planning/2026-04-27-signals-pg-window-design.md`
+   - 明确两套方案
+   - 当前选定 Hybrid 路线
+2. ✅ 已开始代码骨架：
+   - `src/infrastructure/pg_signal_repository.py`
+   - `src/infrastructure/hybrid_signal_repository.py`
+   - `src/infrastructure/pg_models.py` 新增 PG `signals` / `signal_take_profits` ORM
+   - `src/infrastructure/core_repository_factory.py` 新增 `create_runtime_signal_repository()`
+3. ✅ 已切掉 `SignalPipeline` 对 `repository._db` 的直接依赖
+   - 改为仓储方法驱动的 cache rebuild / opposing signal lookup
+4. ✅ `main.py` / `api.py` runtime 装配已切到 runtime signal factory
+5. 🟡 当前测试状态
+   - `py_compile` 通过
+   - `test_console_runtime_routes.py -k signals` 通过
+   - `test_signal_repository.py` 通过
+   - `test_signal_pipeline.py` 有 1 个旧的 dedup key 大小写断言失败（与当前迁移骨架无直接关系）
+   - `test_signal_repository_s6_2.py` 有 8 个 SQLite in-memory 连接旧问题（pre-existing / fixture 风格问题）

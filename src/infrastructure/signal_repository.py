@@ -758,16 +758,19 @@ class SignalRepository:
 
         # Use signal_id if provided, otherwise use created_at as signal_id
         signal_id_value = signal_id or created_at
+        take_profit_1 = None
+        if signal.take_profit_levels:
+            take_profit_1 = signal.take_profit_levels[0].get("price")
 
         await self._db.execute(
             """
             INSERT INTO signals (
                 created_at, symbol, timeframe, direction,
                 entry_price, stop_loss, position_size, leverage,
-                tags_json, risk_info, status, pnl_ratio,
+                tags_json, risk_info, status, take_profit_1, pnl_ratio,
                 kline_timestamp, strategy_name, score, signal_id, source,
                 ema_trend, mtf_status, pattern_score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -781,6 +784,7 @@ class SignalRepository:
                 tags_json,
                 signal.risk_reward_info,
                 status,
+                str(take_profit_1) if take_profit_1 is not None else None,
                 str(signal.pnl_ratio) if signal.pnl_ratio is not None else None,
                 signal.kline_timestamp,
                 signal.strategy_name,
@@ -890,6 +894,28 @@ class SignalRepository:
             if row is None:
                 return None
             return dict(row)
+
+    async def get_signal_by_tracker_id(self, signal_id: str) -> Optional[dict]:
+        """按 tracker signal_id 获取单条信号。"""
+        async with self._db.execute(
+            "SELECT * FROM signals WHERE signal_id = ? ORDER BY created_at DESC LIMIT 1",
+            (signal_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row is not None else None
+
+    async def list_active_signals_for_cache_rebuild(self) -> List[dict]:
+        """返回 ACTIVE/PENDING 信号，用于启动时重建 dedup cache。"""
+        async with self._db.execute(
+            """
+            SELECT signal_id, symbol, timeframe, direction, strategy_name, score, created_at
+            FROM signals
+            WHERE status IN ('ACTIVE', 'active', 'PENDING', 'pending')
+            ORDER BY created_at DESC
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 
     async def get_opposing_signal(
         self,

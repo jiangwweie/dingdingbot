@@ -233,7 +233,7 @@ class TestSignalDeduplication:
 
         await self._force_signal(pipeline, kline, Direction.LONG)
 
-        expected_key = "BTC/USDT:USDT:15m:long:pinbar"
+        expected_key = "BTC/USDT:USDT:15m:LONG:pinbar"
         assert expected_key in pipeline._signal_cooldown_cache
 
 
