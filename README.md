@@ -1,6 +1,6 @@
 # 盯盘狗 🐶
 
-**加密货币量化交易信号监控系统** - 完全动态化、高并发、强状态一致性的交易信号监控与回测沙箱系统。
+**加密货币量化交易自动化系统** - 完全动态化、高并发、强状态一致性的交易信号监控、执行与回测平台。
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
@@ -10,7 +10,7 @@
 
 ## 🎯 核心原则
 
-**Zero Execution Policy（零执行政策）** - 系统仅为观测与通知工具，严禁集成任何交易下单接口。
+**Automated Execution（自动执行）** - 量化交易自动化平台，支持信号监控、订单执行、仓位管理全流程。安全边界：API 密钥仅开交易权限，严禁提现权限。
 
 ---
 
@@ -24,39 +24,55 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. 配置文件
+### 2. 配置
 
-编辑 `config/user.yaml` 设置交易所凭证：
+系统配置存储在 SQLite 数据库中（`data/v3_dev.db`），通过 REST API 或管理脚本管理。
 
-```yaml
-exchange:
-  name: "binance"
-  api_key: "your-read-only-api-key"  # ⚠️ 必须只读权限
-  api_secret: "your-secret"
-  testnet: false  # 使用测试网
+**首次初始化**：
 
-timeframes:
-  - "15m"
-  - "1h"
-  - "4h"
-
-notification:
-  channels:
-    - type: "feishu"
-      webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+```bash
+python scripts/init_config_db.py
 ```
+
+**环境变量**（本地开发必需）：
+
+```bash
+# 复制示例文件
+cp .env.local.example .env.local
+
+# 或手动设置
+export PG_DATABASE_URL="postgresql+asyncpg://dingdingbot:dingdingbot_dev@localhost:5432/dingdingbot"
+export RUNTIME_PROFILE=sim1_eth_runtime
+```
+
+> ⚠️ YAML 不再作为运行时配置真源。系统启动与 Sim-1 运行都以 SQLite 配置库 + runtime profile 为准；YAML 仅保留为导入导出/备份格式。
 
 ### 3. 运行系统
 
+**本地开发**：
+
 ```bash
-# 运行主程序（实时监控 + REST API）
+# 1. 启动 PostgreSQL（首次或 PG 未运行时）
+docker compose -f docker-compose.pg.yml up -d
+
+# 2. 启动后端
 python src/main.py
 
-# 访问 REST API: http://localhost:8000
-# - GET /api/signals     - 查询历史信号
-# - POST /api/backtest   - 运行回测
-# - GET /api/strategies  - 获取策略模板
+# 3. 前端（另一个终端）
+cd gemimi-web-front && npm run dev
 ```
+
+**Sim-1 观察（Docker 全栈）**：
+
+```bash
+cd docker && docker compose up -d
+```
+
+访问 REST API: http://localhost:8000
+- `GET /api/runtime/health` - 健康检查
+- `GET /api/signals` - 查询信号
+- `POST /api/backtest` - 运行回测
+- `GET /api/strategies` - 策略管理
 
 ### 4. 运行回测
 
@@ -96,10 +112,6 @@ dingdingbot/
 │   │   └── api.py
 │   │
 │   └── main.py                 # 启动入口
-│
-├── config/
-│   ├── core.yaml               # 系统核心配置
-│   └── user.yaml               # 用户配置
 │
 ├── gemimi-web-front/              # 前端控制台（只读）
 ├── docs/                       # 架构文档
@@ -160,28 +172,19 @@ dingdingbot/
 
 ## ⚙️ 配置说明
 
-### 核心配置（`config/core.yaml`）
+### 运行时配置真源
 
-系统级配置，通常无需修改：
+系统当前的运行时配置真源是：
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `core_symbols` | 核心监测币种 | BTC, ETH, SOL, BNB |
-| `pinbar_defaults.min_wick_ratio` | 影线占比下限 | 0.6 |
-| `ema.period` | EMA 周期 | 60 |
-| `warmup.history_bars` | REST 预热 K 线数 | 100 |
+1. SQLite 配置库（`data/v3_dev.db`）
+2. `runtime_profiles` 中的冻结 profile（如 `sim1_eth_runtime`）
+3. 环境变量（仅用于 secrets / 基础设施连接，如 `PG_DATABASE_URL`、交易所密钥、Webhook）
 
-### 用户配置（`config/user.yaml`）
+YAML 仍然保留用于：
 
-| 参数 | 说明 |
-|------|------|
-| `exchange.api_key` | 交易所 API Key（**必须只读权限**） |
-| `exchange.testnet` | 是否使用测试网 |
-| `user_symbols` | 自定义监测币种 |
-| `timeframes` | 监测时间周期 |
-| `risk.max_loss_percent` | 单笔最大亏损比例 |
-| `risk.max_leverage` | 最大杠杆倍数 |
-| `notification.channels` | 通知渠道配置 |
+- 配置导出备份
+- 配置导入恢复
+- 测试中的临时 fixture
 
 ---
 
@@ -220,9 +223,10 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ## 🔒 安全注意事项
 
-1. **API Key 权限**：必须使用只读权限，系统启动时自动校验
+1. **API Key 权限**：仅开启交易权限，**严禁提现权限**，系统启动时自动校验
 2. **敏感信息脱敏**：所有日志中的 API Key、Secret、Webhook URL 自动脱敏
-3. **零执行政策**：代码中不得出现任何下单、撤单、转账相关方法
+3. **仓位限额控制**：单笔最大损失、每日最大回撤限制
+4. **紧急停止开关**：异常情况自动平仓退出
 
 ---
 
@@ -233,7 +237,7 @@ pytest tests/unit/test_strategy_engine.py -v
 | 后端 | Python 3.11+、FastAPI、asyncio |
 | 数据验证 | Pydantic v2 |
 | 交易所 | CCXT (async_support + WebSocket) |
-| 数据库 | SQLite |
+| 数据库 | PostgreSQL（runtime 执行主线）+ SQLite（配置/回测） |
 | 前端 | React、TypeScript、TailwindCSS |
 | 测试 | pytest、pytest-asyncio |
 
@@ -277,4 +281,4 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ---
 
-*本系统仅为行情观测与通知工具。*
+*本系统为量化交易自动化平台，不构成任何投资建议。*

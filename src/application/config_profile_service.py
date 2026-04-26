@@ -1,7 +1,14 @@
 """
-Config Profile Service - Business logic for configuration profile management.
+Config Profile Service - legacy config-domain profile management.
 
 配置 Profile 管理服务：支持 Profile 的创建、切换、删除、导出/导入等操作。
+
+边界说明：
+- 该服务管理的是 SQLite 配置域中的 KV Profile（config_profiles / config_entries）。
+- 它不是 Sim-1 runtime freeze 的真源；当前 runtime 真源是 runtime_profiles
+  + RuntimeConfigResolver 在启动期解析出的 ResolvedRuntimeConfig。
+- 因此这里的 switch/activate 语义应理解为“更新配置域 active profile”，默认对后续
+  启动或显式 reload 生效，而不是静默热切当前 execution runtime。
 """
 import asyncio
 from datetime import datetime, timezone
@@ -44,7 +51,7 @@ class ProfileDiff:
 
 class ConfigProfileService:
     """
-    Service layer for configuration profile management.
+    Service layer for legacy config-domain profile management.
 
     核心功能:
     - Profile 列表查询
@@ -140,13 +147,13 @@ class ConfigProfileService:
 
     async def switch_profile(self, name: str) -> ProfileDiff:
         """
-        切换到指定的 Profile
+        切换到指定的配置域 Profile
 
         Args:
             name: Profile 名称
 
         Returns:
-            差异对比结果
+            差异对比结果（针对 config_entries 配置域）
 
         Raises:
             ValueError: Profile 不存在

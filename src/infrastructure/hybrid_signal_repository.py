@@ -35,6 +35,13 @@ class HybridSignalRepository:
         await self._legacy_repo.close()
 
     def __getattr__(self, name: str) -> Any:
+        import logging
+        logging.getLogger(__name__).warning(
+            "HybridSignalRepository: method '%s' not explicitly routed, "
+            "falling back to SQLite legacy repo. "
+            "If this method should go to PG, add an explicit override.",
+            name,
+        )
         return getattr(self._legacy_repo, name)
 
     async def save_signal(self, *args, **kwargs):

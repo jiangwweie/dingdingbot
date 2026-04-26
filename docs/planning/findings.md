@@ -49,6 +49,39 @@
    - `DELETE /api/signals/clear_all` 仅允许 `source=backtest`
    - runtime live signals 默认不再暴露业务层硬删除入口
 
+### 0. Runtime config 真源应彻底去 YAML 化
+
+新增结论：
+
+1. `config/` 目录已不再是 runtime 配置真源，`main.py` 不应继续保留同步 YAML 启动壳。
+2. runtime 启动应直接使用 `load_all_configs_async()` + `initialize_from_db()` 路径，由 SQLite 配置库承担配置真源。
+3. `load_all_configs()` 应保留为 legacy helper，但仅限：
+   - YAML fixture 测试
+   - 显式 YAML 导入导出辅助脚本
+4. YAML 不应再被表述为运行时配置来源；它仅保留为：
+   - 导入导出格式
+   - 备份格式
+   - 测试 fixture 格式
+
+### 0. Config Profile 必须降级为旧配置域，而不是 runtime 真源
+
+新增结论：
+
+1. `config_profiles` / `ConfigProfileService` 属于旧配置域管理，不应再被表述为
+   Sim-1 runtime freeze 的配置入口。
+2. 当前 runtime 真源是：
+   - SQLite `runtime_profiles`
+   - `RuntimeConfigResolver`
+   - 启动期冻结后的 `ResolvedRuntimeConfig`
+3. `/api/config/profiles/*` 的语义应理解为：
+   - 管理旧配置域 active profile
+   - 默认对后续启动 / 显式 reload 生效
+   - 不应被解读为热切当前 execution runtime
+4. 这套代码当前仍有活跃 API / service / tests，因此本窗不做删除，只做：
+   - 降级定位
+   - 文义收紧
+   - 停止继续扩展
+
 ### 0. Research 收口必须保持 research-only，且不得反向污染 runtime
 
 新增结论：

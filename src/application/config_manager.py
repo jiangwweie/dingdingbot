@@ -16,6 +16,7 @@ import asyncio
 import copy
 import json
 import os
+import warnings
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -2012,7 +2013,7 @@ async def load_all_configs_async(
 
     Args:
         db_path: Path to SQLite database
-        config_dir: Path to YAML config directory (for backward compatibility)
+        config_dir: Legacy YAML config directory hint (backward compatibility only)
 
     Returns:
         ConfigManager with all configs loaded
@@ -2024,17 +2025,24 @@ async def load_all_configs_async(
 
 def load_all_configs(config_dir: Optional[str] = None) -> ConfigManager:
     """
-    Load all configurations (YAML version for backward compatibility).
+    Load ConfigManager without DB initialization (legacy YAML/testing path).
 
-    This is the legacy synchronous version that loads from YAML files.
-    For database-driven config, use load_all_configs_async().
+    Runtime startup should use load_all_configs_async() so SQLite DB remains the
+    sole configuration truth source. This helper only remains for:
+    - YAML fixture based tests
+    - legacy scripts that explicitly operate on YAML import/export material
 
     Args:
-        config_dir: Optional config directory path
+        config_dir: Optional YAML config directory path
 
     Returns:
-        ConfigManager with all configs loaded
+        ConfigManager instance without calling initialize_from_db()
     """
+    warnings.warn(
+        "load_all_configs() is deprecated for runtime startup; "
+        "use load_all_configs_async() to initialize from SQLite DB.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     manager = ConfigManager(config_dir=config_dir)
-    # Don't initialize from DB - use YAML fallback
     return manager

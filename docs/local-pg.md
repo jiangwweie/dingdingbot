@@ -25,9 +25,12 @@ source .env.local
 ```bash
 export PG_DATABASE_URL="postgresql+asyncpg://dingdingbot:dingdingbot_dev@localhost:5432/dingdingbot"
 export CORE_EXECUTION_INTENT_BACKEND=postgres
+export CORE_ORDER_BACKEND=postgres
+export CORE_POSITION_BACKEND=postgres
+export RUNTIME_PROFILE=sim1_eth_runtime
 ```
 
-> ⚠️ **重要**：不要把本地 PG 连接串写入已跟踪的 `.env`。本地开发优先使用 `.env.local` 或 shell 环境变量，避免把私有运行时配置带入提交历史。
+> ⚠️ **重要**：`.env` 已不再被 git 跟踪。真实 secrets（API key、webhook URL）仅放 `.env.local`（不提交到 git）。不要将 `.env` 重新加入 git 跟踪。
 
 ### 3. 验证连接
 
@@ -62,18 +65,36 @@ PG_DATABASE_URL=postgresql+asyncpg://dingdingbot:dingdingbot_dev@localhost:5432/
 
 > 注意：使用 `postgresql+asyncpg://` 前缀，而非 `postgresql://`
 
-## 当前推荐切换策略
+## 当前迁移状态
 
-当前阶段推荐按以下顺序小范围实切：
+**Runtime 执行主线已全量 PG 闭环**（2026-04-26 确认）：
 
-1. **先切 `CORE_EXECUTION_INTENT_BACKEND=postgres`**
-   - 让 `ExecutionIntent` 先成为 PG 主真源
-   - 这是当前最小、最稳的切换面
-2. **`CORE_ORDER_BACKEND` 暂时保持 `sqlite`**
-   - `orders` 虽然已经有 PG schema / repo / CRUD 验证，但主链切换面更大
-   - 需在后续阶段单独评估后再切
-3. **`CORE_POSITION_BACKEND` 继续保持 `sqlite` / 未启用**
-   - `positions` 当前仍是过渡 schema，不进入正式实切
+| 执行对象 | 后端 | 状态 |
+|----------|------|------|
+| Orders | PostgreSQL | ✅ `create_runtime_order_repository()` 硬编码 PG |
+| Execution Intents | PostgreSQL | ✅ `create_execution_intent_repository()` PG 优先 |
+| Positions | PostgreSQL | ✅ `create_runtime_position_repository()` 硬编码 PG |
+| Live Signals | PostgreSQL | ✅ `HybridSignalRepository` 路由到 PG |
+| Signal Take Profits | PostgreSQL | ✅ `HybridSignalRepository` 路由到 PG |
+| Execution Recovery | PostgreSQL | ✅ `PgExecutionRecoveryRepository` |
+
+**仍在 SQLite 的对象**（详见 `docs/planning/2026-04-26-system-truth-and-sqlite-triage.md`）：
+- Config 全套（strategies/risk_configs/system_configs/symbols/notifications 等）
+- Runtime Profiles
+- Signal Attempts（可观测性）
+- Backtest 全链路
+
+> ⚠️ 以下旧版三阶段迁移计划**已完成**，仅保留作历史参考。
+
+---
+
+## ~~当前推荐切换策略~~（已完成）
+
+~~当前阶段推荐按以下顺序小范围实切：~~
+
+1. ~~**先切 `CORE_EXECUTION_INTENT_BACKEND=postgres`**~~ → ✅ 已完成
+2. ~~**`CORE_ORDER_BACKEND` 暂时保持 `sqlite`**~~ → ✅ 已切换到 postgres
+3. ~~**`CORE_POSITION_BACKEND` 继续保持 `sqlite` / 未启用**~~ → ✅ 已切换到 postgres
 
 ## 常用操作
 
@@ -135,9 +156,12 @@ docker exec -it dingdingbot-pg psql -U dingdingbot -d dingdingbot
 # 设置环境变量
 export PG_DATABASE_URL="postgresql+asyncpg://dingdingbot:dingdingbot_dev@localhost:5432/dingdingbot"
 export CORE_EXECUTION_INTENT_BACKEND=postgres
-# 当前阶段建议保持：
-# export CORE_ORDER_BACKEND=sqlite
-# export CORE_POSITION_BACKEND=sqlite
+export CORE_ORDER_BACKEND=postgres
+export CORE_POSITION_BACKEND=postgres
+export RUNTIME_PROFILE=sim1_eth_runtime
+# 当前阶段全部使用 PG：
+# export CORE_ORDER_BACKEND=postgres  # 已默认
+# export CORE_POSITION_BACKEND=postgres  # 已默认
 
 # 验证配置校验
 python3 -c "

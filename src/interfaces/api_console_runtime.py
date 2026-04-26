@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
+from typing import Optional
 
 from src.application.readmodels.console_models import (
     ConsoleAttemptsResponse,

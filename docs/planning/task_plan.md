@@ -44,6 +44,8 @@
 3. ~~Direction 归一化 / dedup key 大小写稳固~~ ✅ 已完成
 4. ~~`save_signal()` 状态回退防护（减少 merge 覆写风险）~~ ✅ 已完成
 5. ~~live signals 业务层物理删除入口收紧~~ ✅ 已完成
+6. ~~runtime 启动 YAML 真源壳移除~~ ✅ 已完成
+7. ~~Config Profile 降级为 legacy config domain~~ ✅ 已完成
 
 ### 阶段结论
 

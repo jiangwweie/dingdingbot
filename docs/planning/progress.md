@@ -92,6 +92,29 @@
    - `tests/unit/test_signal_delete_boundary.py`
    - 结果：`4 passed`
 
+### 2026-04-27 -- Runtime config 真源去 YAML 化主干已收口
+
+1. ✅ `main.py` 启动已改为直接使用 `load_all_configs_async()`
+   - 不再先走失效的同步 YAML 启动壳
+2. ✅ `load_all_configs()` 已明确降级为 legacy helper
+   - 用于 YAML fixture 测试 / 导入导出辅助
+   - 调用时发出 `DeprecationWarning`
+3. ✅ README 已改为：
+   - SQLite 配置库 + runtime profile 是运行时真源
+   - YAML 仅保留为导入导出/备份/测试 fixture
+
+### 2026-04-27 -- Config Profile 边界已收紧为 legacy config domain
+
+1. ✅ 明确 `ConfigProfileService` 是旧配置域管理，不是 runtime freeze 真源
+2. ✅ `/api/config/profiles/*` 文义已收紧：
+   - 管理旧配置域 active profile
+   - 默认对后续启动 / 显式 reload 生效
+   - 不代表热切当前 execution runtime
+3. ✅ 当前决定：
+   - 暂不删除 config profile 代码
+   - 暂不继续给它加新运行时能力
+   - 后续只做降噪/维护，不再当主路径建设
+
 ### 2026-04-25 -- 执行主线 PG 切换第一层代码骨架已落地
 
 1. ✅ 已新增 execution 主线仓储显式入口：

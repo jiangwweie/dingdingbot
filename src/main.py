@@ -1,15 +1,14 @@
 """
-Crypto Signal Monitor - Main Entry Point
+Automated Execution System - Main Entry Point
 
 Orchestrates the complete startup flow:
-1. Load configuration
+1. Load configuration (SQLite DB + Runtime Profile)
 2. Initialize exchange (REST + WebSocket)
-3. Warm up historical data
-4. Start WebSocket subscriptions
-5. Start asset polling
-6. Enter event loop
-
-Zero Execution Policy: This system is READ-ONLY. No trading operations.
+3. Initialize execution runtime (PG-backed orders/positions/intents)
+4. Warm up historical data
+5. Start WebSocket subscriptions
+6. Start asset polling
+7. Enter event loop (embedded REST API on port 8000)
 """
 import asyncio
 import json
@@ -29,7 +28,7 @@ if load_dotenv is not None:
     load_dotenv(repo_root / ".env")
     load_dotenv(repo_root / ".env.local", override=True)
 
-from src.application.config_manager import ConfigManager, load_all_configs
+from src.application.config_manager import load_all_configs_async
 from src.application.runtime_config import RuntimeConfigProvider, RuntimeConfigResolver
 from src.application.account_service import BinanceAccountService
 from src.application.capital_protection import CapitalProtectionManager
@@ -205,9 +204,8 @@ async def run_application():
         # =============================================
         # Phase 1: Load Configuration
         # =============================================
-        logger.info("Phase 1: Loading configuration...")
-        config_manager = load_all_configs()
-        await config_manager.initialize_from_db()
+        logger.info("Phase 1: Loading configuration from SQLite DB...")
+        config_manager = await load_all_configs_async()
         logger.info("Configuration loaded successfully")
 
         # R7.1: Explicit marker - ConfigManager initialization complete
