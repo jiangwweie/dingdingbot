@@ -1,11 +1,27 @@
 # Findings Log
 
-> Last updated: 2026-04-27 10:40
+> Last updated: 2026-04-27 18:20
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
 
 ## 当前有效结论
+
+### 0. 后重构阶段应从“继续迁库”切换为“观察 + 做强”
+
+新增结论：
+
+1. 当前 execution PG 主线与 signals PG 主线都已闭环，并已进入 Sim-1 自然模拟盘观察。
+2. 因此后续默认主线不再是“继续把能迁的表都迁到 PG”。
+3. 当前最值钱的工作顺序应变为：
+   - Sim-1 观察与策略研究
+   - 前端 runtime / research 观察面完善
+   - PG / 边界治理后续减熵
+   - 配置 / 研究链第二轮治理
+4. `signal_attempts` 当前继续保留在 SQLite 是可接受的。
+   - 它属于 observability / diagnosis
+   - 目前不构成 Sim-1 运行阻塞
+5. 后续若继续推进 PG，也应遵循“按价值推进”而不是“默认继续迁库”的原则。
 
 ### 0. Signals PG Window 的当前边界已固定
 

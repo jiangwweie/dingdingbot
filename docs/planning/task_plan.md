@@ -1,13 +1,40 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-27 10:40
-> **Status**: 当前唯一主线已切到 Sim-1 自然模拟盘观察准备；冻结 runtime 为 `sim1_eth_runtime`（ETH 1h + 4h MTF, LONG-only）；研究链按路径 1 / 方案 A 收口，避免反向污染 runtime
+> **Last updated**: 2026-04-27 18:20
+> **Status**: Sim-1 已部署到 Mac mini Docker 进入自然模拟盘观察；主线从“重构闭环”切换到“观察 + 策略研究 + 前端完善 + 边界治理后续减熵”
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
 ---
 
 ## 当前阶段
+
+### 2026-04-27 补充：后重构阶段路线图（当前唯一有效优先级）
+
+当前大重构与 Sim-1 部署已经阶段完成，后续不再以“继续迁库”作为默认主线。  
+当前推荐顺序固定为：
+
+1. **Sim-1 观察与策略研究**（第一优先级）
+   - 每日观察自然模拟盘表现
+   - 复盘信号质量、入场、止损、止盈
+   - 收敛 candidate 策略与 promote 节奏
+2. **前端 runtime / research 观察面完善**（第二优先级）
+   - 提升 orders / intents / positions / signals 的可读性
+   - 明确 runtime / research / config 真源提示
+   - 让观察面更适合长期盯盘和复盘
+3. **PG / 边界治理后续减熵**（第三优先级）
+   - 保持 execution + live signals 主线稳定
+   - 按价值推进 observability / config 边界
+   - 不再默认继续“大迁库”
+4. **配置 / 研究链第二轮治理**（第四优先级）
+   - 继续收紧 runtime profile / config profile / env 边界
+   - candidate → promote 继续显式化
+
+当前明确不作为主任务的事项：
+
+1. 不立即迁 `signal_attempts`
+2. 不立即推进 config 全域迁 PG
+3. 不开启新一轮重型架构改造
 
 ### 2026-04-27 补充：Signals PG Window（Window 2）当前执行状态
 

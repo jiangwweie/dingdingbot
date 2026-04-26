@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-27 10:40
+> Last updated: 2026-04-27 18:20
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
@@ -11,6 +11,19 @@
 当需要还原精确执行顺序时，以 git history 为准（commit 时间戳是唯一可靠时间线）。
 
 ## 近期完成
+
+### 2026-04-27 -- Sim-1 已部署到 Mac mini Docker，进入自然模拟盘观察
+
+1. ✅ Sim-1 准入级检查通过
+   - `.env.local` 已补齐 PG / runtime profile 相关配置
+   - `sim1_eth_runtime` 可解析、可冻结、可启动
+   - runtime readonly 关键观察口可用
+2. ✅ `.env` 已停止被 git 跟踪
+   - 本地副本保留
+   - `.env.local.example` 与 `docs/local-pg.md` 已同步安全说明
+3. ✅ 当前阶段判断已切换：
+   - 不再以“继续迁库”作为默认主线
+   - 正式进入 “观察 + 策略研究 + 前端完善 + PG/边界治理后续减熵”
 
 ### 2026-04-27 -- Signals PG Window groundwork 已落地并完成定向回归
 
