@@ -144,9 +144,14 @@ class PgExecutionRecoveryRepository:
 
     async def list_active(self, now_ms: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        列出活跃恢复任务。
+        列出当前“可执行”的恢复任务。
 
-        语义：status in ('pending','retrying') 且 next_retry_at is null or <= now_ms
+        语义：
+        - status in ('pending','retrying')
+        - 且 next_retry_at is null or <= now_ms
+
+        这个方法用于“现在就要处理哪些 recovery task”的执行语义，
+        不等价于“哪些 task 仍然应该阻止新开仓”。
 
         Args:
             now_ms: 当前时间戳（毫秒），不传则使用当前时间
@@ -175,8 +180,12 @@ class PgExecutionRecoveryRepository:
         """
         列出仍应阻止新开仓的恢复任务。
 
-        语义：status in ('pending','retrying')，不关心 next_retry_at 是否到期。
-        用于启动时重建 circuit breaker。
+        语义：
+        - status in ('pending','retrying')
+        - 不关心 next_retry_at 是否到期
+
+        这个方法用于 breaker / health / startup rebuild 的“阻塞语义”，
+        与 list_active() 的“可执行语义”刻意分离。
         """
         async with self._session_maker() as session:
             result = await session.execute(

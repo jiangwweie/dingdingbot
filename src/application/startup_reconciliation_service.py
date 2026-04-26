@@ -221,6 +221,9 @@ class StartupReconciliationService:
 
         if self._execution_recovery_repository:
             try:
+                # 这里故意读取“当前可执行”的 recovery tasks，而不是所有 blocking tasks。
+                # 启动对账负责推进已到处理时间的任务；breaker 重建则由 orchestrator
+                # 使用 list_blocking() 负责恢复“仍应阻止新开仓”的完整集合。
                 active_tasks = await self._execution_recovery_repository.list_active()
                 logger.info(f"PG recovery: 读取活跃任务: 总计={len(active_tasks)}")
 

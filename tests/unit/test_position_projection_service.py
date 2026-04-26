@@ -308,6 +308,32 @@ class TestProjectExitFill:
         assert result.closed_at > 0
 
     @pytest.mark.asyncio
+    async def test_dust_remaining_qty_is_treated_as_closed(self):
+        """极小残余数量按 dust close 处理，避免僵尸仓位。"""
+        existing = _make_existing_position(
+            current_qty=Decimal("1.0"),
+            entry_price=Decimal("65000"),
+            realized_pnl=Decimal("0"),
+            total_fees_paid=Decimal("0"),
+        )
+        repo = MagicMock()
+        repo.get = AsyncMock(return_value=existing)
+        repo.save = AsyncMock()
+
+        svc = PositionProjectionService(repository=repo)
+        exit_order = _make_exit_order(
+            filled_qty=Decimal("0.999999995"),
+            average_exec_price=Decimal("66000"),
+            close_fee=Decimal("0"),
+        )
+
+        result = await svc.project_exit_fill(exit_order)
+
+        assert result.current_qty == Decimal("0")
+        assert result.is_closed is True
+        assert result.closed_at is not None
+
+    @pytest.mark.asyncio
     async def test_short_exit_pnl_calculation(self):
         """SHORT 方向 PnL 计算：(entry - exit) * qty。"""
         existing = _make_existing_position(
@@ -603,8 +629,8 @@ class TestPositionTimestamps:
         assert result.opened_at == opened_ts
 
     @pytest.mark.asyncio
-    async def test_entry_fill_preserves_existing_closed_at(self):
-        """已有仓位的 closed_at 保留。"""
+    async def test_entry_fill_clears_closed_at_on_reentry(self):
+        """已平仓仓位重新入场时，closed_at 应被清空避免僵尸状态。"""
         closed_ts = 1700001000000
         existing = _make_existing_position(is_closed=True, current_qty=Decimal("0"))
         existing.closed_at = closed_ts
@@ -618,7 +644,8 @@ class TestPositionTimestamps:
 
         result = await svc.project_entry_fill(entry_order)
 
-        assert result.closed_at == closed_ts
+        assert result.closed_at is None
+        assert result.is_closed is False
 
     @pytest.mark.asyncio
     async def test_exit_fill_sets_closed_at_on_full_close(self):

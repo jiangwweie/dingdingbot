@@ -817,3 +817,29 @@ Sim-0 详细任务拆分（归档参考）：
 4. 当前剩余更像“规则澄清”，不再是主链阻塞：
    - `list_active()` / `list_blocking()` 文义澄清
    - profile switch 是“当前进程立即生效”还是“下次启动生效”的规则固化
+
+### 2026-04-27 语义澄清尾巴已收口
+
+1. `list_active()` 已明确为“当前可执行的 recovery tasks”
+2. `list_blocking()` 已明确为“当前仍应阻止新开仓的 recovery tasks”
+3. startup reconciliation / breaker rebuild 的职责边界已区分
+4. profile switch 当前正式规则已固定为：
+   - 更新配置域 active profile
+   - 对后续启动 / 显式 reload 流程生效
+   - 不应被理解为静默热切当前 execution runtime
+
+对应文档：
+
+- `docs/planning/2026-04-27-recovery-and-profile-switch-semantic-clarifications.md`
+
+### 2026-04-27 PG 闭环窗口的立即收尾动作
+
+1. ✅ 已补 `positions` dust close 语义
+   - `PositionProjectionService.project_exit_fill()` 使用本地 dust 阈值
+   - 目标：防止极小残余数量造成僵尸仓位
+2. ✅ 已补 PG 读写超时硬化
+   - `database.py` 为 PostgreSQL engine 增加 command / statement / lock / idle tx / pool timeout
+   - 目标：降低持锁区内 DB I/O 长时间悬挂的风险
+3. ⛔ 当前不启动 `signals / signal_attempts` 迁移
+   - 原因：这会把 execution 主线闭环窗口扩大为信号域拆分窗口
+   - 当前更合理的动作是把执行主线闭环先固化，再单开下一窗评估 `signals`

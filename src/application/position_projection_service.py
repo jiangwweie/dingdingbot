@@ -11,6 +11,8 @@ from src.domain.models import Direction
 from src.domain.models import Order, Position
 from src.infrastructure.repository_ports import PositionRepositoryPort
 
+POSITION_CLOSE_DUST_LIMIT = Decimal("0.00000001")
+
 
 class PositionProjectionService:
     """把成交订单投影为本地 PG positions 执行态。"""
@@ -143,7 +145,7 @@ class PositionProjectionService:
                 net_pnl = gross_pnl - delta_fee
 
                 remaining_qty = position.current_qty - delta_exit_qty
-                if remaining_qty <= Decimal("0"):
+                if remaining_qty <= POSITION_CLOSE_DUST_LIMIT:
                     remaining_qty = Decimal("0")
                     position.is_closed = True
                     position.closed_at = int(datetime.now(timezone.utc).timestamp() * 1000)

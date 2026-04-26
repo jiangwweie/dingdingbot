@@ -1044,3 +1044,33 @@
 3. ✅ 当前判断：
    - `positions` 读面的价格 enrich 断裂点已全部修复
    - 当前 execution PG 主线与 observability/config freeze 子线都已无已知 P0/P1 主阻塞
+
+### 2026-04-27 最后两个语义尾巴已收口
+
+1. ✅ `list_active()` / `list_blocking()` 的职责边界已补入代码注释与规划文档：
+   - `list_active()` = 当前可执行任务
+   - `list_blocking()` = 当前阻止新开仓的任务
+2. ✅ profile switch 的规则已在接口 docstring 和规划文档中固定：
+   - 更新配置域 active profile
+   - 默认对后续启动 / 显式 reload 生效
+   - 不应被理解为静默热切当前 execution runtime
+3. ✅ 当前窗口从“主线修复”到“边界治理收口”的最后两个尾巴已完成
+
+### 2026-04-27 PG 闭环窗口新增立即修复已完成
+
+1. ✅ 已直接修复 `positions` dust 残余导致的僵尸仓位风险
+   - `src/application/position_projection_service.py`
+   - 新增 `POSITION_CLOSE_DUST_LIMIT`
+   - 对应测试已补，相关 suite 通过
+2. ✅ 已直接修复 PG 持锁区内 DB I/O 长时间悬挂的低成本硬化项
+   - `src/infrastructure/database.py`
+   - 新增 PG command / statement / lock / idle tx / pool timeout 配置
+   - 新增 `tests/unit/test_pg_database_timeouts.py`
+3. ✅ 本轮验证结果
+   - `tests/unit/test_position_projection_service.py`：41 passed, 1 skipped
+   - `tests/unit/test_pg_database_timeouts.py`：3 passed
+   - `tests/unit/test_runtime_health_overview_probe.py`：7 passed
+   - `tests/unit/test_v3_positions_api.py`：9 passed
+4. ✅ 当前决策
+   - 不在本窗口继续迁 `signals / signal_attempts`
+   - 继续把它们视为下一窗的独立域决策，而不是顺手并进 execution PG 闭环

@@ -49,6 +49,47 @@ CORE_EXECUTION_INTENT_BACKEND = os.getenv(
 CORE_POSITION_BACKEND = os.getenv("CORE_POSITION_BACKEND", "sqlite").lower()
 
 
+def _get_positive_int_env(name: str, default: int) -> int:
+    """读取正整数环境变量，非法值回退默认值。"""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _build_pg_engine_kwargs() -> dict:
+    """构建 PostgreSQL engine 配置。
+
+    单实例执行主链的主要目标是避免：
+    1. 连接失活后长时间悬挂；
+    2. SQL 在持锁区内无限等待，拖住业务锁。
+    """
+    command_timeout_seconds = _get_positive_int_env("PG_COMMAND_TIMEOUT_SECONDS", 15)
+    statement_timeout_ms = _get_positive_int_env("PG_STATEMENT_TIMEOUT_MS", 15000)
+    lock_timeout_ms = _get_positive_int_env("PG_LOCK_TIMEOUT_MS", 5000)
+    idle_tx_timeout_ms = _get_positive_int_env("PG_IDLE_TX_TIMEOUT_MS", 15000)
+    pool_timeout_seconds = _get_positive_int_env("PG_POOL_TIMEOUT_SECONDS", 10)
+
+    return {
+        "echo": os.getenv("SQL_ECHO", "false").lower() == "true",
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,
+        "pool_timeout": pool_timeout_seconds,
+        "connect_args": {
+            "command_timeout": command_timeout_seconds,
+            "server_settings": {
+                "statement_timeout": str(statement_timeout_ms),
+                "lock_timeout": str(lock_timeout_ms),
+                "idle_in_transaction_session_timeout": str(idle_tx_timeout_ms),
+            },
+        },
+    }
+
+
 def create_engine(db_url: Optional[str] = None) -> AsyncEngine:
     """
     创建异步数据库引擎
@@ -76,11 +117,9 @@ def create_engine(db_url: Optional[str] = None) -> AsyncEngine:
         # PostgreSQL 配置
         return create_async_engine(
             db_url,
-            echo=os.getenv("SQL_ECHO", "false").lower() == "true",
             pool_size=20,
             max_overflow=40,
-            pool_pre_ping=True,
-            pool_recycle=1800,
+            **_build_pg_engine_kwargs(),
         )
 
 
@@ -110,11 +149,9 @@ def create_pg_engine(db_url: Optional[str] = None) -> AsyncEngine:
         raise ValueError(f"PG_DATABASE_URL 必须是 PostgreSQL DSN，当前为: {resolved_url}")
     return create_async_engine(
         resolved_url,
-        echo=os.getenv("SQL_ECHO", "false").lower() == "true",
         pool_size=10,
         max_overflow=20,
-        pool_pre_ping=True,
-        pool_recycle=1800,
+        **_build_pg_engine_kwargs(),
     )
 
 
