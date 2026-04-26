@@ -83,6 +83,15 @@
 4. ✅ SQLite `SignalRepository` 的方向查询入口也已补归一化，保持 hybrid contract 一致
 5. ✅ 本轮仅执行 `py_compile` 静态校验，未主动跑测试
 
+### 2026-04-27 -- Signals 删除边界已收紧
+
+1. ✅ live signals 现在不能通过 API 做物理删除
+   - `DELETE /api/signals` 仅允许 `source=backtest`
+   - `DELETE /api/signals/clear_all` 仅允许 `source=backtest`
+2. ✅ 新增最小边界测试：
+   - `tests/unit/test_signal_delete_boundary.py`
+   - 结果：`4 passed`
+
 ### 2026-04-25 -- 执行主线 PG 切换第一层代码骨架已落地
 
 1. ✅ 已新增 execution 主线仓储显式入口：

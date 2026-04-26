@@ -44,6 +44,10 @@
    - 不存在则 insert
    - 已存在则定向刷新字段
    - 若重复创建路径再次写入 `PENDING`，不会把已推进状态回退覆盖
+13. live `signals` 的物理删除边界已收紧到 API 层。
+   - `DELETE /api/signals` 仅允许 `source=backtest`
+   - `DELETE /api/signals/clear_all` 仅允许 `source=backtest`
+   - runtime live signals 默认不再暴露业务层硬删除入口
 
 ### 0. Research 收口必须保持 research-only，且不得反向污染 runtime
 

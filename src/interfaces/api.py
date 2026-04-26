@@ -1104,6 +1104,11 @@ async def delete_signals(
     }
     """
     try:
+        if request.source != "backtest":
+            raise HTTPException(
+                status_code=409,
+                detail="Live signals do not support physical delete; only source=backtest cleanup is allowed",
+            )
         repo = _get_repository()
         deleted_count = await repo.delete_signals(request=request)
         return {
@@ -1117,7 +1122,9 @@ async def delete_signals(
 
 
 @app.delete("/api/signals/clear_all")
-async def clear_all_signals():
+async def clear_all_signals(
+    source: str = Query(..., pattern="^backtest$"),
+):
     """
     Clear all trading signals from the database.
 
@@ -1129,6 +1136,11 @@ async def clear_all_signals():
     """
     try:
         repo = _get_repository()
+        if source != "backtest":
+            raise HTTPException(
+                status_code=409,
+                detail="Live signals do not support clear_all; only source=backtest cleanup is allowed",
+            )
         deleted_count = await repo.clear_all_signals()
         return {
             "status": "success",
