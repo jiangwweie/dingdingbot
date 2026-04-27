@@ -1,7 +1,7 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-27 19:15
+> **Last updated**: 2026-04-27 20:05
 > **Status**: Sim-1 已部署到 Mac mini Docker 进入自然模拟盘观察；主线从“重构闭环”切换到“观察 + 策略研究 + 前端完善 + 边界治理后续减熵”
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
@@ -91,6 +91,7 @@
    - `ResearchRunner`
    - `/api/research/jobs/*`
    - 状态：✅ Codex 已完成第一版核心骨架与轻量冒烟
+   - 状态：✅ 已补 `GET /api/research/runs` 和 run result 列表读面
 3. **Phase 2：Backtest job 串联**
    - `ResearchSpec -> BacktestJobSpec -> BacktestRequest`
    - 调现有 backtester
@@ -103,6 +104,8 @@
    - New Backtest
    - Runs / Run Detail
    - Candidates / Candidate Detail
+   - 状态：✅ 已完成 `/research/new`、`/research/jobs`、`/research/runs/:run_result_id` 第一版真实 API 接入
+   - 状态：✅ 前端 adapter 测试与 mock API 尾巴已收口
 6. **Phase 5：后续评估**
    - compare / replay
    - Optuna job
@@ -999,3 +1002,22 @@ Sim-0 详细任务拆分（归档参考）：
    - PG signal ORM / repo 完整化
    - runtime 装配与 API 信号读面切换
    - 定向测试与 PG integration tests
+
+### 2026-04-27 Research Control Plane 默认基线漂移修复
+
+1. ✅ 已确认 Research Control Plane 回测结果与旧基线不一致的主因不是链路损坏，而是默认 spec 漂移：
+   - `profile_name` 原本只是标签，没有参与参数解析
+   - research 默认成本参数与旧 ETH/BNB9 基线不同
+   - 前端 `datetime-local` 按本地时区转毫秒，旧基线脚本使用 UTC
+2. ✅ 当前修复路线：
+   - `backtest_eth_baseline` / `sim1_eth_runtime` 在 research runner 内解析为显式 `BacktestRuntimeOverrides`
+   - 默认 overrides 固定为 ETH 旧基线可比口径：EMA50、LONG-only、TP 50/50、TP targets 1.0/3.5、BE off
+   - research 默认成本改为 BNB9 旧基线：slippage `0.0001`、TP slippage `0`、fee `0.000405`
+   - 前端时间输入改为 UTC 语义
+   - Research backtest adapter 显式注入当前 `ConfigManager`，避免无声走 legacy singleton fallback
+3. ✅ 当前验证：
+   - Research 后端定向测试 108 passed
+   - 前端 TypeScript 检查通过
+   - 前端 API adapter 测试 18 passed
+4. 下一步：
+   - 由外部测试窗口用同一年份 / 同参数重跑旧脚本与 Research Control Plane，比较交易数、方向分布、TP/SL 分布与收益差异

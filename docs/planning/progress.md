@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-27 19:15
+> Last updated: 2026-04-27 20:05
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
@@ -72,6 +72,70 @@
    - app 路由导入检查通过
    - research metadata 写读冒烟通过
 7. ⚠️ 未执行完整 pytest；后续测试补齐适合交给 Claude
+
+### 2026-04-27 -- Research Control Plane v1 骨架加固
+
+1. ✅ Claude 已补 4 个定向测试文件：
+   - `tests/unit/test_research_models.py`
+   - `tests/unit/test_research_repository.py`
+   - `tests/unit/test_research_control_plane_service.py`
+   - `tests/unit/test_research_jobs_api.py`
+2. ✅ 定向测试结果：
+   - `84 passed`
+3. ✅ Codex 已在审查后继续补强核心骨架：
+   - 新增 `ResearchRunListResponse`
+   - 新增 repository/service 层 `list_run_results()`
+   - 新增 API：`GET /api/research/runs`
+   - background job 异常现在会记录 logger.exception，便于 Sim/本地观察
+4. ✅ 复跑定向测试：
+   - `84 passed, 1 warning`
+5. ⚠️ 新增 `GET /api/research/runs` 的专项测试尚未补齐，适合交给 Claude 作为下一轮测试杂活
+
+### 2026-04-27 -- Research Control Plane v1 前端骨架已接入
+
+1. ✅ 新增真实 API adapter：
+   - `createResearchBacktestJob()`
+   - `getResearchJobs()`
+   - `getResearchJob()`
+   - `getResearchRuns()`
+   - `getResearchRun()`
+   - `createCandidateRecord()`
+   - `getCandidateRecords()`
+2. ✅ 新增前端类型：
+   - `ResearchSpec`
+   - `ResearchJob`
+   - `ResearchRunResult`
+   - `CandidateRecord`
+3. ✅ 新增页面：
+   - `/research/new` 新建回测任务
+   - `/research/jobs` 研究任务列表
+   - `/research/runs/:run_result_id` run detail + candidate 标记入口
+4. ✅ 更新导航：
+   - 新建回测
+   - 研究任务
+   - 历史报告（保留旧 backtest reports）
+5. ✅ 修复两个前端类型阻塞：
+   - `Card` 支持标准 div props
+   - `Health.tsx` startup marker badge 参数类型收紧
+6. ✅ 前端 TypeScript 静态检查通过：
+   - `npm run lint`
+
+### 2026-04-27 -- Research Control Plane v1 前端尾巴已收口
+
+1. ✅ Claude 已补 API adapter 测试：
+   - `gemimi-web-front/src/services/api.test.ts`
+   - 新增 13 个测试
+   - `18 passed`
+2. ✅ Codex 已补前端 adapter 小尾巴：
+   - `getResearchJobs(status, limit, offset)`
+   - `getResearchRuns(jobId, limit, offset)`
+3. ✅ `mockApi.ts` 已镜像 Research Control Plane API：
+   - create/list/get jobs
+   - list/get runs
+   - create/list candidate records
+4. ✅ 验证：
+   - `npm run lint` 通过
+   - `npx vitest run src/services/api.test.ts` 通过，`18 passed`
 
 ### 2026-04-27 -- Signals PG Window groundwork 已落地并完成定向回归
 
@@ -1258,3 +1322,27 @@
    - `test_signal_repository.py` 通过
    - `test_signal_pipeline.py` 有 1 个旧的 dedup key 大小写断言失败（与当前迁移骨架无直接关系）
    - `test_signal_repository_s6_2.py` 有 8 个 SQLite in-memory 连接旧问题（pre-existing / fixture 风格问题）
+
+### 2026-04-27 19:45 Research Control Plane 默认基线漂移已修复
+
+1. ✅ 根据外部 RCA 确认：
+   - 前端默认跑 2025 年回测与旧基线不一致，主因是默认参数漂移，而不是 Research Control Plane 链路断裂
+2. ✅ 已完成核心修复：
+   - `ResearchEngineCostSpec` / `EngineCostSpec` 默认成本改为旧 BNB9 口径
+   - `LocalBacktestResearchRunner` 对 `backtest_eth_baseline` / `sim1_eth_runtime` 解析出显式 baseline runtime overrides
+   - `LocalBacktestResearchRunner` 从解析后的 overrides 派生显式 `OrderStrategy`，防止未来全局默认值再次影响 Research 基线
+   - run artifact 的 `spec_snapshot` 记录 `resolved_runtime_overrides` 与 `resolved_order_strategy`
+   - Research backtest adapter 显式注入 `api._config_manager`
+   - `NewBacktest.tsx` 默认成本对齐，时间输入/输出改为 UTC 语义
+3. ✅ 已补针对性测试：
+   - baseline profile 自动解析 runtime overrides
+   - 显式 runtime overrides 优先于 profile 默认
+   - unknown profile 不自动发明 overrides
+   - research 默认成本断言
+4. ✅ 已执行验证：
+   - `./venv/bin/python -m pytest tests/unit/test_research_models.py tests/unit/test_research_repository.py tests/unit/test_research_control_plane_service.py tests/unit/test_research_jobs_api.py -v` → 108 passed
+   - `cd gemimi-web-front && npm run lint` → passed
+   - `cd gemimi-web-front && npx vitest run src/services/api.test.ts` → 18 passed
+   - `./venv/bin/python -m pytest tests/unit/test_research_control_plane_service.py -v` → 22 passed
+5. 下一步建议：
+   - 外部测试窗口重跑旧脚本与 Research Control Plane 同一窗口对比，确认剩余差异是否来自数据源、成交模型或旧脚本特殊逻辑
