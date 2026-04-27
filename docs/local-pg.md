@@ -79,9 +79,9 @@ PG_DATABASE_URL=postgresql+asyncpg://dingdingbot:dingdingbot_dev@localhost:5432/
 | Execution Recovery | PostgreSQL | ✅ `PgExecutionRecoveryRepository` |
 
 **仍在 SQLite 的对象**（详见 `docs/planning/2026-04-26-system-truth-and-sqlite-triage.md`）：
-- Config 全套（strategies/risk_configs/system_configs/symbols/notifications 等）
-- Runtime Profiles
-- Signal Attempts（可观测性）
+- Config 旧域（config_profiles / config_entries / strategies / risk_configs / system_configs / symbols / notifications 等）— 非 runtime 真源，变更仅下次启动生效
+- Runtime Profiles（启动期读取，冻结后不再访问）
+- Signal Attempts（可观测性 / 诊断）
 - Backtest 全链路
 
 > ⚠️ 以下旧版三阶段迁移计划**已完成**，仅保留作历史参考。

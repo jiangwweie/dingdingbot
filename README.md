@@ -45,7 +45,7 @@ export PG_DATABASE_URL="postgresql+asyncpg://dingdingbot:dingdingbot_dev@localho
 export RUNTIME_PROFILE=sim1_eth_runtime
 ```
 
-> ⚠️ YAML 不再作为运行时配置真源。系统启动与 Sim-1 运行都以 runtime profile（`runtime_profiles` 表）为准；YAML 仅保留为导入导出/备份格式。旧配置域（`config_profiles` / `config_entries`）仅管理非 runtime 的配置 KV 条目，不是执行真源。
+> ⚠️ YAML 不再作为运行时配置真源。系统启动与 Sim-1 运行都以 runtime profile（`runtime_profiles` 表）为准，通过 `RuntimeConfigResolver` 解析并冻结为 `ResolvedRuntimeConfig`；YAML 仅保留为导入导出/备份格式。旧配置域（`config_profiles` / `config_entries`）仅管理非 runtime 的配置 KV 条目，不是执行真源，变更仅在下一次启动或显式 reload 后生效。
 
 ### 3. 运行系统
 
@@ -97,23 +97,38 @@ dingdingbot/
 │   │   └── risk_calculator.py  # 风控试算
 │   │
 │   ├── application/            # 应用服务层
-│   │   ├── config_manager.py   # 配置加载/合并/热重载
+│   │   ├── runtime_config.py   # RuntimeConfigResolver → ResolvedRuntimeConfig
+│   │   ├── config_manager.py   # 旧配置域（非 runtime 真源）
+│   │   ├── execution_orchestrator.py # 信号→意图→订单编排
+│   │   ├── order_lifecycle_service.py
+│   │   ├── position_projection_service.py
+│   │   ├── capital_protection.py
 │   │   ├── signal_pipeline.py  # 信号处理管道
 │   │   ├── backtester.py       # 回测沙箱
 │   │   └── performance_tracker.py
 │   │
 │   ├── infrastructure/         # 基础设施层（I/O）
+│   │   ├── pg_models.py        # PG ORM（执行主线全量）
+│   │   ├── pg_order_repository.py
+│   │   ├── pg_execution_intent_repository.py
+│   │   ├── pg_position_repository.py
+│   │   ├── pg_signal_repository.py  # PG 实时信号
+│   │   ├── hybrid_signal_repository.py # live→PG, backtest→SQLite
+│   │   ├── runtime_profile_repository.py
+│   │   ├── core_repository_factory.py
 │   │   ├── exchange_gateway.py # 交易所网关
 │   │   ├── notifier.py         # 通知推送
 │   │   ├── logger.py           # 日志与脱敏
-│   │   └── signal_repository.py # SQLite 持久化
+│   │   └── signal_repository.py # SQLite（signal_attempts + 回测）
 │   │
 │   ├── interfaces/             # REST API
-│   │   └── api.py
+│   │   ├── api.py
+│   │   ├── api_console_runtime.py
+│   │   └── api_profile_endpoints.py
 │   │
 │   └── main.py                 # 启动入口
 │
-├── gemimi-web-front/              # 前端控制台（只读）
+├── gemimi-web-front/              # 前端控制台
 ├── docs/                       # 架构文档
 └── tests/
     ├── unit/                   # 单元测试
@@ -176,9 +191,13 @@ dingdingbot/
 
 系统当前的运行时配置真源是：
 
-1. SQLite 配置库（`data/v3_dev.db`）
-2. `runtime_profiles` 中的冻结 profile（如 `sim1_eth_runtime`）
-3. 环境变量（仅用于 secrets / 基础设施连接，如 `PG_DATABASE_URL`、交易所密钥、Webhook）
+1. `runtime_profiles` 表（SQLite，启动期读取）→ `RuntimeConfigResolver` → 冻结为 `ResolvedRuntimeConfig`
+2. 环境变量（仅用于 secrets / 基础设施连接，如 `PG_DATABASE_URL`、交易所密钥、Webhook）
+
+**旧配置域**（`config_profiles` / `config_entries` / `ConfigManager`）：
+- 仅管理非 runtime 的配置 KV 条目
+- 变更仅在下一次启动或显式 reload 后生效，不热切当前 runtime
+- 不是执行真源
 
 YAML 仍然保留用于：
 
@@ -237,7 +256,7 @@ pytest tests/unit/test_strategy_engine.py -v
 | 后端 | Python 3.11+、FastAPI、asyncio |
 | 数据验证 | Pydantic v2 |
 | 交易所 | CCXT (async_support + WebSocket) |
-| 数据库 | PostgreSQL（runtime 执行主线）+ SQLite（配置/回测） |
+| 数据库 | PostgreSQL（runtime 执行主线 + 实时信号）+ SQLite（配置旧域/回测/signal_attempts） |
 | 前端 | React、TypeScript、TailwindCSS |
 | 测试 | pytest、pytest-asyncio |
 
@@ -253,25 +272,35 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ## 📈 演进路线
 
-### 🟢 第一阶段：架构筑基（当前）
+### ✅ 第一阶段：架构筑基（已完成）
 - 强类型递归逻辑树
 - 前端 Schema 驱动
 - 动态标签系统
 
-### 🟡 第二阶段：交互升维
+### ✅ 第二阶段：交互升维（已完成）
 - 热预览接口（Dry Run）
 - 逻辑路径可视化
 - 策略模板 CRUD
 
-### 🟠 第三阶段：风控执行
+### ✅ 第三阶段：风控执行（已完成）
 - 多周期数据对齐
 - 动态风险头寸
 - 交易所挂单集成
 
-### 🔵 第四阶段：工业化
+### ✅ 第四阶段：工业化（已完成）
 - 配置快照版本化
 - 异步 I/O 队列
 - 指标计算缓存
+
+### ✅ v3.0 迁移（已完成）
+- 执行主线 PG 闭环（orders / intents / positions / signals / recovery）
+- RuntimeConfigResolver + runtime_profiles 配置真源
+- Sim-1 模拟盘观察部署
+
+### 🎯 当前阶段：Sim-1 观察期
+- 策略研究与运行治理
+- 前端 runtime / research 观察面完善
+- PG / 边界治理后续减熵
 
 ---
 
@@ -281,4 +310,4 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ---
 
-*本系统为量化交易自动化平台，不构成任何投资建议。*
+*本系统为量化交易自动化平台，具备自动执行能力，不构成任何投资建议。*

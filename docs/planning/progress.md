@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-27 18:20
+> Last updated: 2026-04-27 19:15
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
@@ -24,6 +24,54 @@
 3. ✅ 当前阶段判断已切换：
    - 不再以“继续迁库”作为默认主线
    - 正式进入 “观察 + 策略研究 + 前端完善 + PG/边界治理后续减熵”
+
+### 2026-04-27 -- Research Control Plane v1 方案文档已完成
+
+1. ✅ 已新增实施规划概要：
+   - `docs/planning/architecture/2026-04-27-research-control-plane-v1-plan.md`
+2. ✅ 已新增详细设计文档：
+   - `docs/planning/architecture/2026-04-27-research-control-plane-v1-detailed-design.md`
+3. ✅ 当前设计结论：
+   - 按 Research Control Plane 的架构做
+   - 按 Backtest Workbench 的最小范围先落地
+4. ✅ 当前明确边界：
+   - research/candidate 不直接改 runtime
+   - v1 不做一键 promote runtime
+   - v1 不把 `config_profiles` 当 runtime 入口
+5. ✅ 已补充决策记录：
+   - `docs/planning/architecture/2026-04-27-research-control-plane-v1-decision-record.md`
+6. ✅ 已完成 Claude 回测链路报告校准：
+   - 保留“query chain 防脏数据 / job 化 / 状态化”作为有效输入
+   - 剔除 `/api/backtest/run` 和 `BacktestRequest` 只能传 `strategy_id` 等过期判断
+7. ✅ 已明确核心代码骨架由 Codex 实施，Claude 只接测试/fixture/文档盘点等杂活
+
+### 2026-04-27 -- Research Control Plane v1 核心后端骨架已落地
+
+1. ✅ 新增 domain models：
+   - `src/domain/research_models.py`
+   - `ResearchSpec / ResearchJob / ResearchRunResult / CandidateRecord`
+2. ✅ 新增独立 research metadata repository：
+   - `src/infrastructure/research_repository.py`
+   - 默认 DB：`data/research_control_plane.db`
+3. ✅ 新增 application service / runner contract：
+   - `src/application/research_control_plane.py`
+   - `ResearchJobService`
+   - `LocalBacktestResearchRunner`
+4. ✅ 新增 API shell：
+   - `src/interfaces/api_research_jobs.py`
+   - `POST /api/research/jobs/backtest`
+   - `GET /api/research/jobs`
+   - `GET /api/research/jobs/{job_id}`
+   - `GET /api/research/runs/{run_result_id}`
+   - `POST /api/research/candidates`
+   - `GET/POST /api/research/candidate-records/*`
+5. ✅ 已接入主 FastAPI app：
+   - `src/interfaces/api.py`
+6. ✅ 已执行轻量校验：
+   - `py_compile` 通过
+   - app 路由导入检查通过
+   - research metadata 写读冒烟通过
+7. ⚠️ 未执行完整 pytest；后续测试补齐适合交给 Claude
 
 ### 2026-04-27 -- Signals PG Window groundwork 已落地并完成定向回归
 

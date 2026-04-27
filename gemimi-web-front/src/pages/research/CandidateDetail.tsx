@@ -100,7 +100,7 @@ export default function CandidateDetail() {
         </Card>
 
         <Card className="col-span-1">
-          <CardHeader><CardTitle>运行参数覆写</CardTitle></CardHeader>
+          <CardHeader><CardTitle>启动参数覆写</CardTitle></CardHeader>
           <CardContent className="bg-white dark:bg-zinc-950 p-4 font-mono text-xs text-blue-300 m-4 rounded overflow-auto">
             <pre>{JSON.stringify(data.runtime_overrides || {}, null, 2)}</pre>
           </CardContent>

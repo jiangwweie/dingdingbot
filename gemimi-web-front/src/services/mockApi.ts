@@ -314,7 +314,9 @@ export async function getConfigSnapshot(): Promise<ConfigSnapshot> {
     source_of_truth_hints: [
       'Environment variable SIM_MODE=1 overrides API routing',
       'Strategy config inherited from Candidate "cand_eth_alpha_01"',
-      'Risk limits bounded by safety-policy.yaml'
+      'Risk limits bounded by safety-policy.yaml',
+      'Runtime config resolved from runtime_profiles via RuntimeConfigResolver',
+      'Config profiles/entries are legacy — changes take effect on next startup only'
     ],
     profile: 'sim1_eth_runtime',
     version: 4,

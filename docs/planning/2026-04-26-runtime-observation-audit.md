@@ -4,6 +4,8 @@
 > **审计范围**: 所有 runtime 观测面（API endpoints + readmodels + 前端契约）
 > **约束**: 不修改 src/，仅审计 + 设计方案
 
+> ⚠️ **状态说明 (2026-04-27)**：本文档编写时 `/api/runtime/signals` 标记为读 SQLite。此后 live signals 已通过 `HybridSignalRepository` 路由到 PG，该端点数据源描述已过时。
+
 ---
 
 ## 一、当前观测面可信度结论

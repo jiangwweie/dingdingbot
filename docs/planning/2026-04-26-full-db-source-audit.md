@@ -5,6 +5,8 @@
 > **约束**: 未改动任何主链代码，未运行完整测试，以代码为准
 > **当前分支**: dev
 
+> ⚠️ **状态说明 (2026-04-27)**：本报告编写时 signals 标记为"纯 SQLite / 无 PG 实现"，但此后 live signals + signal_take_profits 已通过 `HybridSignalRepository` + `PgSignalRepository` 迁移到 PG。P0-2（signals 跨库）和 P1-1（signals 无 PG 实现）风险已缓解。报告中关于 signals 位置和迁移状态的描述已过时，仅保留作历史参考。
+
 ---
 
 ## 0. 结论摘要

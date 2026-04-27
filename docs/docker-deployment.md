@@ -115,8 +115,8 @@ gemimi-web-front/
 | `DATABASE_URL` | `sqlite+aiosqlite:///./data/v3_dev.db` | SQLite 主库路径 |
 | `RUNTIME_PROFILE` | `sim1_eth_runtime` | 运行时配置档案 |
 | `CORE_EXECUTION_INTENT_BACKEND` | 自动检测 | `postgres` 或 `sqlite` |
-| `CORE_ORDER_BACKEND` | `sqlite` | `postgres` 或 `sqlite` |
-| `CORE_POSITION_BACKEND` | `sqlite` | `postgres` 或 `sqlite` |
+| `CORE_ORDER_BACKEND` | `postgres` | 运行时工厂硬编码 PG，`sqlite` 仅用于非运行时路径 |
+| `CORE_POSITION_BACKEND` | `postgres` | 运行时工厂硬编码 PG，`sqlite` 仅用于非运行时路径 |
 | `EXCHANGE_NAME` | - | 交易所名称（`binance`） |
 | `EXCHANGE_TESTNET` | `false` | 是否使用测试网 |
 | `EXCHANGE_API_KEY` | - | 交易所 API Key |
@@ -126,7 +126,7 @@ gemimi-web-front/
 ### 自动检测逻辑
 
 - `CORE_EXECUTION_INTENT_BACKEND`：当 `PG_DATABASE_URL` 已配置时，默认为 `postgres`；否则为 `sqlite`
-- `CORE_ORDER_BACKEND` / `CORE_POSITION_BACKEND`：默认 `sqlite`，需显式设置为 `postgres`
+- `CORE_ORDER_BACKEND` / `CORE_POSITION_BACKEND`：运行时工厂已硬编码 PG（`create_runtime_order_repository()` / `create_runtime_position_repository()` 无条件返回 PG 实现），无需显式设置
 
 ---
 

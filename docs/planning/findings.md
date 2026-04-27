@@ -1,6 +1,6 @@
 # Findings Log
 
-> Last updated: 2026-04-27 18:20
+> Last updated: 2026-04-27 19:15
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/findings.full.md`
 
 ---
@@ -22,6 +22,48 @@
    - 它属于 observability / diagnosis
    - 目前不构成 Sim-1 运行阻塞
 5. 后续若继续推进 PG，也应遵循“按价值推进”而不是“默认继续迁库”的原则。
+
+### 0. Research 台当前最需要的是 control plane，不是继续迁库
+
+新增结论：
+
+1. 研究台现在适合建设，但不应再把 runtime / config / research 三条线搅回去。
+2. 当前正确方向是：
+   - 按 Research Control Plane 的架构设计
+   - 按 Backtest Workbench 的最小可用范围先落地
+3. research 台 v1 的成功标准不是“平台感完整”，而是：
+   - 能发起研究任务
+   - 能看结果
+   - 能保存结果
+   - 能沉淀 candidate
+   - 不污染 runtime
+4. v1 不应默认以“research 也要立即全量进 PG”为前提。
+   - 当前单机、低并发研究任务下，边界和对象模型优先于介质统一
+5. 第一阶段必须禁止：
+   - 研究台直接改 `runtime_profiles`
+   - candidate 一键 promote 到 live/runtime
+   - 研究台复用 `config_profiles` 作为 runtime 配置切换器
+6. Claude 回测链路报告需要按当前代码校准后使用：
+   - 有效风险是：research readmodel/query chain 必须防历史脏数据；同步阻塞回测不适合研究台；需要 job/status/result/candidate workflow
+   - 过期判断是：当前不存在 `/api/backtest/run` 主入口；`BacktestRequest` 并非只支持 `strategy_id`
+7. 新研究台应新增 `/api/research/jobs/*`，旧 `/api/backtest/*` 继续作为 engine/tooling compatibility。
+8. v1 research metadata 不进入 execution PG。
+   - PG 当前仍优先服务 runtime execution truth
+   - research v1 当前更需要边界清晰与任务生命周期
+   - 独立 SQLite + artifacts 在单机低并发阶段足够
+9. 本轮核心骨架不交给 Claude：
+   - domain models
+   - repository contract
+   - job service
+   - runner contract
+   - API shell
+   Claude 后续只补测试、fixture、文档盘点和非核心查询。
+10. Research Control Plane v1 第一版后端骨架已按上述边界落地。
+    - 新增独立 research metadata DB
+    - 新增 job service / local runner contract
+    - 新增 `/api/research/jobs/*`
+    - 旧 `/api/backtest/*` 未被重写
+    - runtime PG truth 未被写入
 
 ### 0. Signals PG Window 的当前边界已固定
 

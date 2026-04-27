@@ -1,7 +1,7 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-27 18:20
+> **Last updated**: 2026-04-27 19:15
 > **Status**: Sim-1 已部署到 Mac mini Docker 进入自然模拟盘观察；主线从“重构闭环”切换到“观察 + 策略研究 + 前端完善 + 边界治理后续减熵”
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
 
@@ -18,6 +18,7 @@
    - 每日观察自然模拟盘表现
    - 复盘信号质量、入场、止损、止盈
    - 收敛 candidate 策略与 promote 节奏
+   - 新增 Research Control Plane v1 规划，目标是让系统可从前端发起研究任务
 2. **前端 runtime / research 观察面完善**（第二优先级）
    - 提升 orders / intents / positions / signals 的可读性
    - 明确 runtime / research / config 真源提示
@@ -35,6 +36,78 @@
 1. 不立即迁 `signal_attempts`
 2. 不立即推进 config 全域迁 PG
 3. 不开启新一轮重型架构改造
+
+### 2026-04-27 补充：Research Control Plane v1 已进入设计阶段
+
+当前已决定：
+
+1. 采用 **A 架构 + B 范围**
+   - 架构按 Research Control Plane
+   - 第一期功能按 Backtest Workbench 最小可用范围落地
+2. 第一阶段只做：
+   - 发起单次回测
+   - 查看 runs / result
+   - 保存研究结果
+   - 标记 candidate
+3. 第一阶段明确不做：
+   - 不改 runtime profile
+   - 不做一键 promote runtime
+   - 不做全量 Optuna 前端化
+4. 详细文档：
+   - `docs/planning/architecture/2026-04-27-research-control-plane-v1-plan.md`
+   - `docs/planning/architecture/2026-04-27-research-control-plane-v1-detailed-design.md`
+   - `docs/planning/architecture/2026-04-27-research-control-plane-v1-decision-record.md`
+
+#### 本轮开工前已封板的关键决策
+
+1. 新研究台主入口使用 `/api/research/jobs/*`，不继续扩写旧 `/api/backtest/*` 作为产品入口。
+2. v1 使用独立 research SQLite + 文件 artifacts，不写 execution PG schema。
+3. v1 使用本机 local runner，不引入 Celery/RabbitMQ。
+4. 核心骨架由 Codex 亲自实施：
+   - domain models
+   - repository contract
+   - job service
+   - runner contract
+   - API shell
+5. Claude 只承担杂活：
+   - 测试补齐
+   - fixture
+   - 文档盘点
+   - 非核心查询实现
+6. Claude 回测链路报告已校准：
+   - 有效：查询链防脏数据、job 化、状态化
+   - 过期：`/api/backtest/run`、`BacktestRequest` 只能传 `strategy_id`
+
+#### Research Control Plane v1 实施阶段
+
+1. **Phase 0：前置稳定**
+   - console research router 可加载
+   - `/api/research/backtests` 不因历史脏数据 500
+   - 旧 backtest API 被定位为 engine/tooling compatibility
+2. **Phase 1：核心骨架**
+   - `ResearchSpec / ResearchJob / ResearchRunResult / CandidateRecord`
+   - `ResearchRepository`
+   - `ResearchJobService`
+   - `ResearchRunner`
+   - `/api/research/jobs/*`
+   - 状态：✅ Codex 已完成第一版核心骨架与轻量冒烟
+3. **Phase 2：Backtest job 串联**
+   - `ResearchSpec -> BacktestJobSpec -> BacktestRequest`
+   - 调现有 backtester
+   - 写 result + artifacts
+4. **Phase 3：Candidate 工作流**
+   - run result 标记 candidate
+   - candidate review/status update
+5. **Phase 4：前端 v1**
+   - Research Home
+   - New Backtest
+   - Runs / Run Detail
+   - Candidates / Candidate Detail
+6. **Phase 5：后续评估**
+   - compare / replay
+   - Optuna job
+   - research metadata PG 化
+   - promote approval workflow
 
 ### 2026-04-27 补充：Signals PG Window（Window 2）当前执行状态
 
