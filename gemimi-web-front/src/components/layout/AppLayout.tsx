@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { RefreshCw, Activity, Zap, Server, HeartPulse, FileText, LayoutDashboard, GitBranch, History, Scale, Sun, Moon, Monitor, WalletCards, CalendarClock, Settings } from 'lucide-react';
+import { RefreshCw, Activity, Zap, HeartPulse, FileText, LayoutDashboard, GitBranch, History, Scale, Sun, Moon, Monitor, WalletCards, CalendarClock, Settings, PlayCircle } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useTheme } from './ThemeContext';
 
@@ -65,9 +65,11 @@ export default function AppLayout() {
     {
       domain: '策略研究 (Research)',
       links: [
+        { name: '新建回测', to: '/research/new', icon: PlayCircle },
+        { name: '研究任务', to: '/research/jobs', icon: History },
         { name: '候选策略', to: '/research/candidates', icon: FileText },
         { name: '回测上下文', to: '/research/replay/default', icon: GitBranch, hideDisabled: true },
-        { name: '回测记录', to: '/research/backtests', icon: History },
+        { name: '历史报告', to: '/research/backtests', icon: History },
         { name: '策略对比', to: '/research/compare', icon: Scale },
       ]
     },

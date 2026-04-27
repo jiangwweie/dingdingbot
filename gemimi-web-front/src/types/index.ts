@@ -184,6 +184,91 @@ export interface BacktestRecord {
   };
 }
 
+export type ResearchJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED';
+export type CandidateRecordStatus = 'DRAFT' | 'REVIEWED' | 'REJECTED' | 'RECOMMENDED';
+
+export interface ResearchEngineCostSpec {
+  initial_balance: string | number;
+  slippage_rate: string | number;
+  tp_slippage_rate: string | number;
+  fee_rate: string | number;
+}
+
+export interface ResearchSpec {
+  kind?: 'backtest';
+  name: string;
+  profile_name?: string;
+  symbol: string;
+  timeframe: string;
+  start_time_ms: number;
+  end_time_ms: number;
+  limit?: number;
+  mode?: 'v3_pms';
+  costs?: ResearchEngineCostSpec;
+  notes?: string | null;
+}
+
+export interface ResearchJob {
+  id: string;
+  kind: 'backtest';
+  name: string;
+  spec_ref: string;
+  status: ResearchJobStatus;
+  run_result_id: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  requested_by: string;
+  error_code: string | null;
+  error_message: string | null;
+  progress_pct: number | null;
+  spec: ResearchSpec;
+}
+
+export interface ResearchJobListResponse {
+  jobs: ResearchJob[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ResearchJobAccepted {
+  status: 'accepted';
+  job_id: string;
+  job_status: ResearchJobStatus;
+}
+
+export interface ResearchRunResult {
+  id: string;
+  job_id: string;
+  kind: 'backtest';
+  spec_snapshot: Record<string, unknown>;
+  summary_metrics: Record<string, unknown>;
+  artifact_index: Record<string, string>;
+  source_profile: string | null;
+  generated_at: string;
+}
+
+export interface ResearchRunListResponse {
+  runs: ResearchRunResult[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface CandidateRecord {
+  id: string;
+  run_result_id: string;
+  candidate_name: string;
+  status: CandidateRecordStatus;
+  review_notes: string;
+  applicable_market: string | null;
+  risks: string[];
+  recommendation: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CompareResponse {
   baseline_label: string;
   candidate_a_label: string;

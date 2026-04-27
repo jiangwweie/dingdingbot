@@ -71,7 +71,7 @@ export default function Health() {
               {Object.entries(data.startup_markers).map(([key, value]) => (
                 <TableRow key={key}>
                   <TableCell className="font-medium">{fmtDash(key)}</TableCell>
-                  <TableCell><Badge variant={gateResultVariant(value)}>{fmtDash(value)}</Badge></TableCell>
+                  <TableCell><Badge variant={gateResultVariant(String(value))}>{fmtDash(value)}</Badge></TableCell>
                 </TableRow>
               ))}
               {Object.keys(data.startup_markers).length === 0 && (

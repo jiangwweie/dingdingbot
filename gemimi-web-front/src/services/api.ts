@@ -14,6 +14,15 @@ import {
   AppEvent,
   BacktestRecord,
   CompareResponse,
+  CandidateRecord,
+  CandidateRecordStatus,
+  ResearchJob,
+  ResearchJobAccepted,
+  ResearchJobListResponse,
+  ResearchJobStatus,
+  ResearchRunListResponse,
+  ResearchRunResult,
+  ResearchSpec,
 } from '@/src/types';
 
 const BASE_URL = 'http://localhost:8000'; // Backend server address
@@ -82,8 +91,14 @@ type RuntimeEventsPayload = {
   }>;
 };
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`);
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.headers || {}),
+    },
+  });
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
@@ -273,6 +288,71 @@ export async function getBacktests(): Promise<BacktestRecord[]> {
       trades: bt.metrics.trades,
     },
   }));
+}
+
+/**
+ * Research Control Plane: create a backtest job.
+ */
+export async function createResearchBacktestJob(spec: ResearchSpec): Promise<ResearchJobAccepted> {
+  return request<ResearchJobAccepted>('/api/research/jobs/backtest', {
+    method: 'POST',
+    body: JSON.stringify(spec),
+  });
+}
+
+/**
+ * Research Control Plane: list jobs.
+ */
+export async function getResearchJobs(
+  status?: ResearchJobStatus | 'ALL',
+  limit?: number,
+  offset?: number,
+): Promise<ResearchJobListResponse> {
+  const params = new URLSearchParams();
+  if (status && status !== 'ALL') params.set('status', status);
+  if (limit !== undefined) params.set('limit', String(limit));
+  if (offset !== undefined) params.set('offset', String(offset));
+  const qs = params.toString();
+  return request<ResearchJobListResponse>(`/api/research/jobs${qs ? `?${qs}` : ''}`);
+}
+
+export async function getResearchJob(jobId: string): Promise<ResearchJob> {
+  return request<ResearchJob>(`/api/research/jobs/${jobId}`);
+}
+
+export async function getResearchRuns(
+  jobId?: string,
+  limit?: number,
+  offset?: number,
+): Promise<ResearchRunListResponse> {
+  const params = new URLSearchParams();
+  if (jobId) params.set('job_id', jobId);
+  if (limit !== undefined) params.set('limit', String(limit));
+  if (offset !== undefined) params.set('offset', String(offset));
+  const qs = params.toString();
+  return request<ResearchRunListResponse>(`/api/research/runs${qs ? `?${qs}` : ''}`);
+}
+
+export async function getResearchRun(runResultId: string): Promise<ResearchRunResult> {
+  return request<ResearchRunResult>(`/api/research/runs/${runResultId}`);
+}
+
+export async function createCandidateRecord(runResultId: string, candidateName: string, reviewNotes = ''): Promise<CandidateRecord> {
+  return request<CandidateRecord>('/api/research/candidates', {
+    method: 'POST',
+    body: JSON.stringify({
+      run_result_id: runResultId,
+      candidate_name: candidateName,
+      review_notes: reviewNotes,
+    }),
+  });
+}
+
+export async function getCandidateRecords(status?: CandidateRecordStatus | 'ALL'): Promise<CandidateRecord[]> {
+  const params = new URLSearchParams();
+  if (status && status !== 'ALL') params.set('status', status);
+  const qs = params.toString();
+  return request<CandidateRecord[]>(`/api/research/candidate-records${qs ? `?${qs}` : ''}`);
 }
 
 /**

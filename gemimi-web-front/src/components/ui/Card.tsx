@@ -1,9 +1,9 @@
 import React from 'react';
 import { cn } from '@/src/lib/utils';
 
-export function Card({ className, children }: { className?: string; children: React.ReactNode }) {
+export function Card({ className, children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded flex flex-col", className)}>
+    <div className={cn("bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded flex flex-col", className)} {...props}>
       {children}
     </div>
   );

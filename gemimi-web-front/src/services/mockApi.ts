@@ -14,7 +14,16 @@ import {
   PortfolioContext,
   AppEvent,
   ConfigSnapshot,
-  FreshnessStatus
+  FreshnessStatus,
+  CandidateRecord,
+  CandidateRecordStatus,
+  ResearchJob,
+  ResearchJobAccepted,
+  ResearchJobListResponse,
+  ResearchJobStatus,
+  ResearchRunListResponse,
+  ResearchRunResult,
+  ResearchSpec
 } from '@/src/types';
 
 // Utility to simulate network delay
@@ -228,6 +237,195 @@ export async function getCompareData(): Promise<CompareResponse> {
       { metric: "Trades", baseline: 950, candidate_a: 1250, candidate_b: null, diff_a: 300, diff_b: null },
     ],
   };
+}
+
+const mockResearchJobs: ResearchJob[] = [
+  {
+    id: 'rj_mock_001',
+    kind: 'backtest',
+    name: 'eth-baseline-window-a',
+    spec_ref: 'reports/research_runs/rj_mock_001/spec.json',
+    status: 'SUCCEEDED',
+    run_result_id: 'rr_mock_001',
+    created_at: new Date(Date.now() - 3600000).toISOString(),
+    started_at: new Date(Date.now() - 3500000).toISOString(),
+    finished_at: new Date(Date.now() - 3300000).toISOString(),
+    requested_by: 'local',
+    error_code: null,
+    error_message: null,
+    progress_pct: 100,
+    spec: {
+      name: 'eth-baseline-window-a',
+      symbol: 'ETH/USDT:USDT',
+      timeframe: '1h',
+      start_time_ms: Date.now() - 30 * 86400000,
+      end_time_ms: Date.now(),
+      profile_name: 'backtest_eth_baseline',
+      limit: 9000,
+      mode: 'v3_pms',
+    },
+  },
+  {
+    id: 'rj_mock_002',
+    kind: 'backtest',
+    name: 'eth-regime-boundary-check',
+    spec_ref: 'reports/research_runs/rj_mock_002/spec.json',
+    status: 'RUNNING',
+    run_result_id: null,
+    created_at: new Date(Date.now() - 600000).toISOString(),
+    started_at: new Date(Date.now() - 580000).toISOString(),
+    finished_at: null,
+    requested_by: 'local',
+    error_code: null,
+    error_message: null,
+    progress_pct: 35,
+    spec: {
+      name: 'eth-regime-boundary-check',
+      symbol: 'ETH/USDT:USDT',
+      timeframe: '4h',
+      start_time_ms: Date.now() - 90 * 86400000,
+      end_time_ms: Date.now(),
+      profile_name: 'backtest_eth_baseline',
+      limit: 9000,
+      mode: 'v3_pms',
+    },
+  },
+];
+
+const mockResearchRuns: ResearchRunResult[] = [
+  {
+    id: 'rr_mock_001',
+    job_id: 'rj_mock_001',
+    kind: 'backtest',
+    spec_snapshot: { ...mockResearchJobs[0].spec },
+    summary_metrics: {
+      total_return: 0.18,
+      max_drawdown: 0.11,
+      win_rate: 0.54,
+      total_trades: 42,
+      sharpe_ratio: 1.45,
+      sortino_ratio: 2.1,
+      total_pnl: 1800,
+      final_balance: 11800,
+    },
+    artifact_index: {
+      spec: 'reports/research_runs/rj_mock_001/spec.json',
+      result: 'reports/research_runs/rj_mock_001/result.json',
+      metrics: 'reports/research_runs/rj_mock_001/metrics.json',
+    },
+    source_profile: 'backtest_eth_baseline',
+    generated_at: new Date(Date.now() - 3300000).toISOString(),
+  },
+];
+
+let mockCandidateRecords: CandidateRecord[] = [
+  {
+    id: 'cand_mock_001',
+    run_result_id: 'rr_mock_001',
+    candidate_name: 'candidate-rr_mock_001',
+    status: 'DRAFT',
+    review_notes: 'mock candidate only',
+    applicable_market: null,
+    risks: [],
+    recommendation: null,
+    created_at: new Date(Date.now() - 3200000).toISOString(),
+    updated_at: new Date(Date.now() - 3200000).toISOString(),
+  },
+];
+
+export async function createResearchBacktestJob(spec: ResearchSpec): Promise<ResearchJobAccepted> {
+  await delay(250);
+  const jobId = `rj_mock_${String(mockResearchJobs.length + 1).padStart(3, '0')}`;
+  mockResearchJobs.unshift({
+    id: jobId,
+    kind: 'backtest',
+    name: spec.name,
+    spec_ref: `reports/research_runs/${jobId}/spec.json`,
+    status: 'PENDING',
+    run_result_id: null,
+    created_at: new Date().toISOString(),
+    started_at: null,
+    finished_at: null,
+    requested_by: 'local',
+    error_code: null,
+    error_message: null,
+    progress_pct: null,
+    spec,
+  });
+  return { status: 'accepted', job_id: jobId, job_status: 'PENDING' };
+}
+
+export async function getResearchJobs(
+  status?: ResearchJobStatus | 'ALL',
+  limit = 100,
+  offset = 0,
+): Promise<ResearchJobListResponse> {
+  await delay(250);
+  const rows = status && status !== 'ALL'
+    ? mockResearchJobs.filter(job => job.status === status)
+    : mockResearchJobs;
+  return {
+    jobs: rows.slice(offset, offset + limit),
+    total: rows.length,
+    limit,
+    offset,
+  };
+}
+
+export async function getResearchJob(jobId: string): Promise<ResearchJob> {
+  await delay(200);
+  const job = mockResearchJobs.find(row => row.id === jobId);
+  if (!job) throw new Error(`Research job not found: ${jobId}`);
+  return job;
+}
+
+export async function getResearchRuns(
+  jobId?: string,
+  limit = 100,
+  offset = 0,
+): Promise<ResearchRunListResponse> {
+  await delay(250);
+  const rows = jobId ? mockResearchRuns.filter(run => run.job_id === jobId) : mockResearchRuns;
+  return {
+    runs: rows.slice(offset, offset + limit),
+    total: rows.length,
+    limit,
+    offset,
+  };
+}
+
+export async function getResearchRun(runResultId: string): Promise<ResearchRunResult> {
+  await delay(200);
+  const run = mockResearchRuns.find(row => row.id === runResultId);
+  if (!run) throw new Error(`Research run result not found: ${runResultId}`);
+  return run;
+}
+
+export async function createCandidateRecord(runResultId: string, candidateName: string, reviewNotes = ''): Promise<CandidateRecord> {
+  await delay(250);
+  const candidate: CandidateRecord = {
+    id: `cand_mock_${String(mockCandidateRecords.length + 1).padStart(3, '0')}`,
+    run_result_id: runResultId,
+    candidate_name: candidateName,
+    status: 'DRAFT',
+    review_notes: reviewNotes,
+    applicable_market: null,
+    risks: [],
+    recommendation: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  mockCandidateRecords = [candidate, ...mockCandidateRecords];
+  return candidate;
+}
+
+export async function getCandidateRecords(
+  status?: CandidateRecordStatus | 'ALL',
+): Promise<CandidateRecord[]> {
+  await delay(250);
+  return status && status !== 'ALL'
+    ? mockCandidateRecords.filter(candidate => candidate.status === status)
+    : mockCandidateRecords;
 }
 
 export async function getPortfolioContext(): Promise<PortfolioContext> {

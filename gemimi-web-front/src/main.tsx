@@ -16,6 +16,9 @@ import Replay from './pages/research/Replay';
 import ReviewSummary from './pages/research/ReviewSummary';
 import Backtests from './pages/research/Backtests';
 import Compare from './pages/research/Compare';
+import NewBacktest from './pages/research/NewBacktest';
+import ResearchJobs from './pages/research/ResearchJobs';
+import RunDetail from './pages/research/RunDetail';
 
 import Snapshot from './pages/config/Snapshot';
 
@@ -41,6 +44,9 @@ createRoot(document.getElementById('root')!).render(
 
               <Route path="research/candidates" element={<Candidates />} />
               <Route path="research/candidates/:candidate_name" element={<CandidateDetail />} />
+              <Route path="research/new" element={<NewBacktest />} />
+              <Route path="research/jobs" element={<ResearchJobs />} />
+              <Route path="research/runs/:run_result_id" element={<RunDetail />} />
               <Route path="research/replay/:candidate_name" element={<Replay />} />
               <Route path="research/review/:candidate_name" element={<ReviewSummary />} />
               <Route path="research/backtests" element={<Backtests />} />
