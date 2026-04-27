@@ -932,10 +932,12 @@ from src.interfaces.api_v1_config import router as config_v1_router
 from src.interfaces.api_console_runtime import router as console_runtime_router
 from src.interfaces.api_console_research import router as console_research_router
 from src.interfaces.api_console_research import config_router as console_config_router
+from src.interfaces.api_research_jobs import router as research_jobs_router
 app.include_router(config_v1_router)
 app.include_router(console_runtime_router)
 app.include_router(console_research_router)
 app.include_router(console_config_router)
+app.include_router(research_jobs_router)
 
 
 # ============================================================

@@ -37,9 +37,9 @@ class TimeWindowMs(BaseModel):
 
 class EngineCostSpec(BaseModel):
     initial_balance: Decimal = Decimal("10000")
-    slippage_rate: Decimal = Decimal("0.001")
-    tp_slippage_rate: Decimal = Decimal("0.0005")
-    fee_rate: Decimal = Decimal("0.0004")
+    slippage_rate: Decimal = Decimal("0.0001")
+    tp_slippage_rate: Decimal = Decimal("0")
+    fee_rate: Decimal = Decimal("0.000405")
 
 
 class BacktestJobSpec(BaseModel):
@@ -107,4 +107,3 @@ class OptunaStudySpec(BaseModel):
             fee_rate=self.job.costs.fee_rate,
             fixed_params=self.fixed_params,
         )
-
