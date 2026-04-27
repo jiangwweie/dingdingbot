@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query
 
 from src.application.readmodels.candidate_service import CandidateArtifactService
 from src.application.readmodels.console_models import (
     CandidateDetailResponse,
     CandidateListItem,
+    CompareResponse,
+    ConsoleBacktestsResponse,
     ConfigSnapshotResponse,
     ReplayContextResponse,
     ReviewSummaryResponse,
 )
+from src.application.readmodels.runtime_backtests import RuntimeBacktestsReadModel
 from src.application.readmodels.runtime_config_snapshot import RuntimeConfigSnapshotReadModel
 
 router = APIRouter(prefix="/api/research", tags=["Console Research"])
@@ -46,6 +51,39 @@ async def get_review_summary(candidate_name: str) -> ReviewSummaryResponse:
     if result is None:
         raise HTTPException(status_code=404, detail=f"Candidate not found: {candidate_name}")
     return result
+
+
+@router.get("/backtests", response_model=ConsoleBacktestsResponse)
+async def list_backtests(
+    limit: int = Query(100, ge=1, le=500),
+) -> ConsoleBacktestsResponse:
+    """List backtest reports from repository."""
+    from src.infrastructure.backtest_repository import BacktestReportRepository
+
+    repo = BacktestReportRepository()
+    try:
+        await repo.initialize()
+        readmodel = RuntimeBacktestsReadModel()
+        return await readmodel.build(backtest_repo=repo, limit=limit)
+    finally:
+        await repo.close()
+
+
+@router.get("/compare/candidates", response_model=CompareResponse)
+async def compare_candidates(
+    baseline_ref: Optional[str] = Query(None, description="Baseline candidate name"),
+    candidate_a: Optional[str] = Query(None, description="Candidate A name"),
+    candidate_b: Optional[str] = Query(None, description="Candidate B name (optional)"),
+) -> CompareResponse:
+    """Compare candidate metrics side-by-side against a baseline."""
+    from src.application.readmodels.compare_readmodel import CompareReadModel
+
+    readmodel = CompareReadModel()
+    return readmodel.build(
+        baseline_ref=baseline_ref,
+        candidate_a=candidate_a,
+        candidate_b=candidate_b,
+    )
 
 
 # Separate router for /api/config/* endpoints

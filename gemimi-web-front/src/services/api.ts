@@ -8,11 +8,79 @@ import {
   Candidate,
   CandidateDetail,
   ReplayContext,
+  ReviewSummary,
   ConfigSnapshot,
   PortfolioContext,
+  AppEvent,
+  BacktestRecord,
+  CompareResponse,
 } from '@/src/types';
 
 const BASE_URL = 'http://localhost:8000'; // Backend server address
+
+type RuntimeSignalsPayload = {
+  signals: Array<{
+    signal_id: string;
+    symbol: string;
+    timeframe: string;
+    direction: Signal['direction'];
+    strategy_name: string;
+    score?: number | null;
+    status?: string | null;
+    created_at: string;
+  }>;
+};
+
+type RuntimeAttemptsPayload = {
+  attempts: Array<{
+    attempt_id: string;
+    signal_id?: string | null;
+    symbol: string;
+    timeframe: string;
+    direction?: string | null;
+    strategy_name?: string | null;
+    final_result?: string | null;
+    reject_reason?: string | null;
+    filter_reason?: string | null;
+    created_at: string;
+  }>;
+};
+
+type RuntimeExecutionIntentsPayload = {
+  intents: Array<{
+    intent_id: string;
+    symbol: string;
+    status: ExecutionIntent['status'];
+    created_at: string;
+    updated_at?: string | null;
+    related_signal_id?: string | null;
+  }>;
+};
+
+type RuntimeOrdersPayload = {
+  orders: Array<{
+    order_id: string;
+    order_role?: string | null;
+    symbol: string;
+    type?: string | null;
+    status: Order['status'];
+    qty: number;
+    price?: number | null;
+    created_at: string;
+    updated_at?: string | null;
+  }>;
+};
+
+type RuntimeEventsPayload = {
+  events: Array<{
+    id: string;
+    timestamp: string;
+    category: AppEvent['category'];
+    severity: AppEvent['severity'];
+    message: string;
+    related_entities?: string[];
+  }>;
+};
 
 async function request<T>(path: string): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`);
@@ -54,7 +122,7 @@ export async function getCandidates(): Promise<Candidate[]> {
  * Adapter for Signals
  */
 export async function getRuntimeSignals(): Promise<Signal[]> {
-  const res = await request<{ signals: any[] }>('/api/runtime/signals');
+  const res = await request<RuntimeSignalsPayload>('/api/runtime/signals');
   return (res.signals || []).map(sig => ({
     id: sig.signal_id,
     symbol: sig.symbol,
@@ -62,7 +130,7 @@ export async function getRuntimeSignals(): Promise<Signal[]> {
     direction: sig.direction,
     strategy_name: sig.strategy_name,
     score: sig.score || 0,
-    status: sig.status || 'FIRED',
+    status: sig.status || '--',
     created_at: sig.created_at
   }));
 }
@@ -71,14 +139,14 @@ export async function getRuntimeSignals(): Promise<Signal[]> {
  * Adapter for Attempts
  */
 export async function getRuntimeAttempts(): Promise<Attempt[]> {
-  const res = await request<{ attempts: any[] }>('/api/runtime/attempts');
+  const res = await request<RuntimeAttemptsPayload>('/api/runtime/attempts');
   return (res.attempts || []).map(att => ({
     id: att.attempt_id,
     symbol: att.symbol,
     timeframe: att.timeframe,
-    direction: att.direction || 'FLAT', // Now provided by backend ConsoleAttemptItem
-    strategy_name: att.strategy_name || 'N/A', // Now provided by backend ConsoleAttemptItem
-    final_result: att.final_result === 'ACCEPTED' ? 'ACCEPTED' : 'REJECTED',
+    direction: att.direction || '--',
+    strategy_name: att.strategy_name || '--',
+    final_result: att.final_result || '--',
     filter_results_summary: att.filter_reason || att.reject_reason || '--',
     reject_reason: att.reject_reason || '',
     timestamp: att.created_at
@@ -89,10 +157,10 @@ export async function getRuntimeAttempts(): Promise<Attempt[]> {
  * Adapter for Execution Intents
  */
 export async function getRuntimeExecutionIntents(): Promise<ExecutionIntent[]> {
-  const res = await request<{ intents: any[] }>('/api/runtime/execution/intents');
+  const res = await request<RuntimeExecutionIntentsPayload>('/api/runtime/execution/intents');
   return (res.intents || []).map(intent => ({
     intent_id: intent.intent_id,
-    signal_id: intent.related_signal_id || 'N/A',
+    signal_id: intent.related_signal_id || '--',
     symbol: intent.symbol,
     status: intent.status as any,
     created_at: intent.created_at,
@@ -104,7 +172,7 @@ export async function getRuntimeExecutionIntents(): Promise<ExecutionIntent[]> {
  * Adapter for Orders
  */
 export async function getRuntimeOrders(): Promise<Order[]> {
-  const res = await request<{ orders: any[] }>('/api/runtime/execution/orders');
+  const res = await request<RuntimeOrdersPayload>('/api/runtime/execution/orders');
   return (res.orders || []).map(ord => ({
     order_id: ord.order_id,
     role: String(ord.order_role || 'ENTRY').startsWith('TP')
@@ -139,8 +207,8 @@ export async function getReplayContext(candidateName: string): Promise<ReplayCon
 /**
  * Adapter for Review Summary
  */
-export async function getReviewSummary(candidateName: string): Promise<any> {
-  return request<any>(`/api/research/candidates/${candidateName}/review-summary`);
+export async function getReviewSummary(candidateName: string): Promise<ReviewSummary> {
+  return request<ReviewSummary>(`/api/research/candidates/${candidateName}/review-summary`);
 }
 
 /**
@@ -148,4 +216,77 @@ export async function getReviewSummary(candidateName: string): Promise<any> {
  */
 export async function getConfigSnapshot(): Promise<ConfigSnapshot> {
   return request<ConfigSnapshot>('/api/config/snapshot');
+}
+
+/**
+ * Adapter for Events Timeline
+ */
+export async function getRuntimeEvents(): Promise<AppEvent[]> {
+  const res = await request<RuntimeEventsPayload>('/api/runtime/events');
+  return (res.events || []).map(evt => ({
+    id: evt.id,
+    timestamp: evt.timestamp,
+    category: evt.category,
+    severity: evt.severity,
+    message: evt.message,
+    related_entities: evt.related_entities || [],
+  }));
+}
+
+type ResearchBacktestsPayload = {
+  backtests: Array<{
+    id: string;
+    candidate_ref: string;
+    symbol: string;
+    timeframe: string;
+    start_date: string;
+    end_date: string;
+    status: BacktestRecord['status'];
+    metrics: {
+      total_return: number | null;
+      sharpe: number | null;
+      max_drawdown: number | null;
+      win_rate: number | null;
+      trades: number | null;
+    };
+  }>;
+};
+
+/**
+ * Adapter for Research Backtests
+ */
+export async function getBacktests(): Promise<BacktestRecord[]> {
+  const res = await request<ResearchBacktestsPayload>('/api/research/backtests');
+  return (res.backtests || []).map(bt => ({
+    id: bt.id,
+    candidate_ref: bt.candidate_ref,
+    symbol: bt.symbol,
+    timeframe: bt.timeframe,
+    start_date: bt.start_date,
+    end_date: bt.end_date,
+    status: bt.status,
+    metrics: {
+      total_return: bt.metrics.total_return,
+      sharpe: bt.metrics.sharpe,
+      max_drawdown: bt.metrics.max_drawdown,
+      win_rate: bt.metrics.win_rate,
+      trades: bt.metrics.trades,
+    },
+  }));
+}
+
+/**
+ * Adapter for Compare
+ */
+export async function getCompareData(
+  baselineRef?: string,
+  candidateA?: string,
+  candidateB?: string,
+): Promise<CompareResponse> {
+  const params = new URLSearchParams();
+  if (baselineRef) params.set('baseline_ref', baselineRef);
+  if (candidateA) params.set('candidate_a', candidateA);
+  if (candidateB) params.set('candidate_b', candidateB);
+  const qs = params.toString();
+  return request<CompareResponse>(`/api/research/compare/candidates${qs ? `?${qs}` : ''}`);
 }

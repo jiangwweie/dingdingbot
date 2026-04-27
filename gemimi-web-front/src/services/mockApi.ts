@@ -9,7 +9,8 @@ import {
   CandidateDetail,
   ReplayContext,
   BacktestRecord,
-  CompareRecord,
+  CompareResponse,
+  CompareRow,
   PortfolioContext,
   AppEvent,
   ConfigSnapshot,
@@ -128,17 +129,34 @@ export async function getCandidateDetail(candidateName: string): Promise<Candida
   await delay(300);
   return {
     candidate_name: candidateName,
-    metadata: { study_name: 'eth_study_1', trials: 500, duration_seconds: 3600 },
-    best_trial: { number: 412, value: 2.45, params: { rsi_period: 14, macd_fast: 12 } },
+    metadata: {
+      candidate_name: candidateName,
+      generated_at: new Date(Date.now() - 86400000).toISOString(),
+      source_profile: { name: 'optuna_daily', version: 4, config_hash: 'cfg_abc123' },
+      git: { branch: 'dev', commit: 'abc1237', is_dirty: false },
+      objective: 'maximize_sharpe',
+      status: 'candidate_only'
+    },
+    best_trial: {
+      trial_number: 412,
+      objective_value: 2.45,
+      sharpe_ratio: 2.45,
+      sortino_ratio: 3.12,
+      total_return: 0.41,
+      max_drawdown: 0.12,
+      total_trades: 150,
+      win_rate: 0.58,
+      params: { rsi_period: 14, macd_fast: 12 }
+    },
     top_trials: [
-      { number: 412, value: 2.45 },
-      { number: 189, value: 2.41 }
+      { trial_number: 412, objective_value: 2.45, params: { rsi_period: 14, macd_fast: 12 }, total_trades: 150 },
+      { trial_number: 189, objective_value: 2.41, params: { rsi_period: 21, macd_fast: 10 }, total_trades: 143 }
     ],
     fixed_params: { symbol: 'ETH/USDT', timeframe: '5m' },
     runtime_overrides: { 'RSI_PERIOD': 14, 'MACD_FAST': 12 },
     constraints: { min_trades: 100, max_drawdown: 0.25 },
-    resolved_request: '严格 v1 评估已完成 (Strict v1 evaluation complete.)',
-    rubric_evaluation: { 'sharpe_ratio': 2.45, 'total_trades': 150, 'max_drawdown': 0.12 }
+    resolved_request: { mode: 'strict_v1_review', candidate_name: candidateName },
+    reproduce_cmd: `poetry run python -m src.tools.replay --candidate ${candidateName}`
   };
 }
 
@@ -147,7 +165,14 @@ export async function getReplayContext(candidateName: string): Promise<ReplayCon
   return {
     candidate_name: candidateName,
     reproduce_cmd: `poetry run python -m src.tools.replay --candidate ${candidateName} --output-dir reports/replay`,
-    metadata: { created_by: 'optuna_worker', engine: 'v2' },
+    metadata: {
+      candidate_name: candidateName,
+      generated_at: new Date(Date.now() - 86400000).toISOString(),
+      source_profile: { name: 'optuna_daily', version: 4, config_hash: 'cfg_abc123' },
+      git: { branch: 'dev', commit: 'abc1237', is_dirty: false },
+      objective: 'maximize_sharpe',
+      status: 'candidate_only'
+    },
     resolved_request: { mode: 'replay', timeframe: '5m', start: '2026-01-01', end: '2026-04-01' },
     runtime_overrides: { 'RSI_PERIOD': 14, 'MACD_FAST': 12 }
   };
@@ -189,15 +214,20 @@ export async function getBacktests(): Promise<BacktestRecord[]> {
   ];
 }
 
-export async function getCompareData(): Promise<CompareRecord[]> {
+export async function getCompareData(): Promise<CompareResponse> {
   await delay(300);
-  return [
-    { metric: '总收益率 (Total Return)', baseline: '25.0%', candidateA: '45.0%', candidateB: '38.0%', diffA: 0.8, diffB: 0.52 },
-    { metric: '夏普比率 (Sharpe)', baseline: 1.5, candidateA: 2.1, candidateB: 1.8, diffA: 0.4, diffB: 0.2 },
-    { metric: '最大回撤 (Max Drawdown)', baseline: '22.0%', candidateA: '15.0%', candidateB: '18.0%', diffA: 0.31, diffB: 0.18 },
-    { metric: '胜率 (Win Rate)', baseline: '48.0%', candidateA: '54.0%', candidateB: '51.0%', diffA: 0.125, diffB: 0.0625 },
-    { metric: '交易次数 (Trades)', baseline: 950, candidateA: 1250, candidateB: 840, diffA: 0.31, diffB: -0.11 },
-  ];
+  return {
+    baseline_label: "cand_eth_alpha_01",
+    candidate_a_label: "cand_eth_beta_14",
+    candidate_b_label: null,
+    rows: [
+      { metric: "Total Return", baseline: 0.25, candidate_a: 0.45, candidate_b: null, diff_a: 0.20, diff_b: null },
+      { metric: "Sharpe", baseline: 1.5, candidate_a: 2.1, candidate_b: null, diff_a: 0.6, diff_b: null },
+      { metric: "Max Drawdown", baseline: 0.22, candidate_a: 0.15, candidate_b: null, diff_a: -0.07, diff_b: null },
+      { metric: "Win Rate", baseline: 0.48, candidate_a: 0.54, candidate_b: null, diff_a: 0.06, diff_b: null },
+      { metric: "Trades", baseline: 950, candidate_a: 1250, candidate_b: null, diff_a: 300, diff_b: null },
+    ],
+  };
 }
 
 export async function getPortfolioContext(): Promise<PortfolioContext> {
@@ -246,9 +276,8 @@ export async function getConfigSnapshot(): Promise<ConfigSnapshot> {
   return {
     identity: {
       profile: 'sim1_eth_runtime',
-      version: '1.4.2',
-      hash: 'a7b8c9d0',
-      is_frozen: true
+      version: '4',
+      hash: 'a7b8c9d0'
     },
     market: {
       symbols: ['ETH/USDT'],
@@ -286,6 +315,14 @@ export async function getConfigSnapshot(): Promise<ConfigSnapshot> {
       'Environment variable SIM_MODE=1 overrides API routing',
       'Strategy config inherited from Candidate "cand_eth_alpha_01"',
       'Risk limits bounded by safety-policy.yaml'
-    ]
+    ],
+    profile: 'sim1_eth_runtime',
+    version: 4,
+    hash: 'a7b8c9d0',
+    environment: {
+      exchange_name: 'binance',
+      exchange_testnet: true,
+      mode: 'SIM-1'
+    }
   };
 }

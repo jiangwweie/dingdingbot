@@ -284,10 +284,13 @@ class BacktestReportRepository:
         return result
 
     def _str_to_decimal(self, value: Optional[str]) -> Optional[Decimal]:
-        """将字符串转换为 Decimal"""
+        """将字符串转换为 Decimal。非法数值字符串返回 None，不抛异常。"""
         if value is None:
             return None
-        return Decimal(value)
+        try:
+            return Decimal(value)
+        except Exception:
+            return None
 
     def _serialize_positions_summary(self, positions: List[PositionSummary]) -> str:
         """
@@ -797,7 +800,7 @@ class BacktestReportRepository:
                 "win_rate": str(self._str_to_decimal(row["win_rate"])),
                 "total_pnl": str(self._str_to_decimal(row["total_pnl"])),
                 "max_drawdown": str(self._str_to_decimal(row["max_drawdown"])),
-                "sharpe_ratio": str(self._str_to_decimal(row["sharpe_ratio"])) if row["sharpe_ratio"] else None,
+                "sharpe_ratio": str(self._str_to_decimal(row["sharpe_ratio"])),
             }
             for row in rows
         ]

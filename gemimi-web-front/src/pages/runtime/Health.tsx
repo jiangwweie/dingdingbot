@@ -1,140 +1,146 @@
 import React, { useEffect, useState } from 'react';
-import { getRuntimeHealth, getRuntimeAttempts } from '@/src/services/api';
-import { RuntimeHealth as IRuntimeHealth, Attempt } from '@/src/types';
+import { getRuntimeHealth } from '@/src/services/api';
+import { RuntimeHealth as IRuntimeHealth } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
 import { Badge } from '@/src/components/ui/Badge';
-import { Loader2, AlertTriangle, ShieldAlert, CheckCircle2, RotateCcw, Ban } from 'lucide-react';
-import { format } from 'date-fns';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/src/components/ui/Table';
+import { Loader2, AlertCircle } from 'lucide-react';
+import { fmtDash, runtimeHealthVariant, runtimeHealthLabel, gateResultVariant } from '@/src/lib/console-utils';
 
 export default function Health() {
   const { refreshCount } = useRefreshContext();
   const [data, setData] = useState<IRuntimeHealth | null>(null);
-  const [rejectedAttempts, setRejectedAttempts] = useState<Attempt[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([getRuntimeHealth(), getRuntimeAttempts()]).then(([resHealth, resAttempts]) => {
-      if (active) {
-        setData(resHealth);
-        setRejectedAttempts(resAttempts.filter(a => a.final_result === 'REJECTED'));
-        setLoading(false);
-      }
+    setError(false);
+    getRuntimeHealth().then(res => {
+      if (active) { setData(res); setLoading(false); }
+    }).catch(() => {
+      if (active) { setError(true); setLoading(false); }
     });
     return () => { active = false; };
   }, [refreshCount]);
 
   if (loading && !data) return <div className="flex h-32 items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-zinc-500" /></div>;
-  if (!data) return <div className="text-rose-400">加载健康度上下文失败。</div>;
+  if (error && !data) return <div className="flex h-32 items-center justify-center text-rose-400 gap-2"><AlertCircle className="w-5 h-5" /><span>健康数据加载失败</span></div>;
+
+  if (!data) return (
+    <div className="space-y-6">
+      <h2 className="text-xl font-bold tracking-tight">系统健康</h2>
+      <Card><CardContent className="py-10 text-center text-zinc-500">暂无健康数据</CardContent></Card>
+    </div>
+  );
+
+  const statusCards = [
+    { title: '交易所 API', status: data.exchange_status },
+    { title: '数据库 (PG)', status: data.pg_status },
+    { title: '通知推送', status: data.notification_status },
+  ];
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold tracking-tight">系统健康度 (System Health)</h2>
+      <h2 className="text-xl font-bold tracking-tight">系统健康</h2>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Strictly separated: Breaker Summary */}
-        <Card className="border-rose-900/40">
-          <CardHeader className="bg-rose-950/20"><CardTitle className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-rose-500"/> 熔断器摘要 (Breaker Summary)</CardTitle></CardHeader>
-          <CardContent className="space-y-4 pt-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white dark:bg-zinc-950 p-4 rounded border border-zinc-200 dark:border-zinc-800">
-                <p className="text-sm text-zinc-500 mb-1">总计熔断次数</p>
-                <p className="text-3xl font-mono text-rose-500">{data.breaker_summary.total_tripped}</p>
-              </div>
-              <div className="bg-white dark:bg-zinc-950 p-4 rounded border border-zinc-200 dark:border-zinc-800">
-                <p className="text-sm text-zinc-500 mb-1">当前活跃数</p>
-                <p className="text-3xl font-mono text-zinc-800 dark:text-zinc-200">{data.breaker_summary.active_breakers.length}</p>
-              </div>
-            </div>
-            {data.breaker_summary.active_breakers.length > 0 && (
-              <div className="text-xs font-mono text-rose-400 bg-rose-950/30 p-2 rounded">
-                活跃熔断器: {data.breaker_summary.active_breakers.join(', ')}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Strictly separated: Recovery Summary */}
-        <Card className="border-blue-900/40">
-          <CardHeader className="bg-blue-950/20"><CardTitle className="flex items-center gap-2"><RotateCcw className="w-4 h-4 text-blue-500"/> 恢复状态 (Recovery Summary)</CardTitle></CardHeader>
-          <CardContent className="space-y-4 pt-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white dark:bg-zinc-950 p-4 rounded border border-zinc-200 dark:border-zinc-800">
-                <p className="text-sm text-zinc-500 mb-1">待处理任务</p>
-                <p className="text-3xl font-mono text-amber-500">{data.recovery_summary.pending_tasks}</p>
-              </div>
-              <div className="bg-white dark:bg-zinc-950 p-4 rounded border border-zinc-200 dark:border-zinc-800">
-                <p className="text-sm text-zinc-500 mb-1">已完成恢复</p>
-                <p className="text-3xl font-mono text-emerald-400">{data.recovery_summary.completed_tasks}</p>
-              </div>
-            </div>
-            <p className="text-xs text-zinc-500 font-mono">
-              上次恢复时间: {data.recovery_summary.last_recovery_time ? data.recovery_summary.last_recovery_time : 'N/A'}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader><CardTitle>启动检查点 (Startup Markers)</CardTitle></CardHeader>
-          <CardContent className="p-4 space-y-3">
-             {Object.entries(data.startup_markers).map(([marker, status]) => (
-                <div key={marker} className="flex justify-between items-center text-sm border-b border-zinc-200 dark:border-zinc-800 pb-2 last:border-0 last:pb-0">
-                  <span className="text-zinc-700 dark:text-zinc-300">{marker}</span>
-                  {status === 'PASSED' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Badge>{status === 'PASSED' ? '通过' : status}</Badge>}
-                </div>
-             ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2 text-amber-500"><AlertTriangle className="w-4 h-4"/> 近期警告与错误</CardTitle></CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-zinc-800">
-              {data.recent_errors.map((err, i) => (
-                <div key={i} className="p-3 text-sm text-rose-400 font-mono flex items-start gap-2">
-                  <span className="text-rose-500 mt-0.5">错误</span>
-                  <span>{err}</span>
-                </div>
-              ))}
-              {data.recent_warnings.map((warn, i) => (
-                <div key={i} className="p-3 text-sm text-amber-500/90 font-mono flex items-start gap-2">
-                  <span className="text-amber-500 mt-0.5">警告</span>
-                  <span>{warn}</span>
-                </div>
-              ))}
-              {data.recent_errors.length === 0 && data.recent_warnings.length === 0 && (
-                <div className="p-4 text-sm text-zinc-500 text-center">暂无近期报警。</div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {statusCards.map(card => (
+          <Card key={card.title}>
+            <CardHeader><CardTitle>{card.title}</CardTitle></CardHeader>
+            <CardContent className="flex items-center gap-3">
+              <Badge variant={runtimeHealthVariant(card.status)}>{runtimeHealthLabel(card.status)}</Badge>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2 text-rose-400"><Ban className="w-4 h-4"/> 近期拦截记录 (Recent Blocked Attempts)</CardTitle></CardHeader>
+        <CardHeader><CardTitle>启动检查</CardTitle></CardHeader>
         <CardContent className="p-0">
-          <div className="divide-y divide-zinc-800">
-            {rejectedAttempts.map((attempt) => (
-              <div key={attempt.id} className="p-3 text-sm flex items-center justify-between">
-                <div>
-                  <div className="font-mono text-zinc-700 dark:text-zinc-300">{attempt.strategy_name} <span className="text-zinc-500 mx-2">|</span> {attempt.symbol} <span className="text-zinc-500 mx-2">|</span> <Badge variant="outline">{attempt.direction}</Badge></div>
-                  <div className="text-rose-400 text-xs mt-1">原因: {attempt.reject_reason || '未知'} ({attempt.filter_results_summary})</div>
-                </div>
-                <div className="text-xs text-zinc-500 font-mono">
-                  {format(new Date(attempt.timestamp), 'HH:mm:ss')}
-                </div>
-              </div>
-            ))}
-            {rejectedAttempts.length === 0 && (
-              <div className="p-4 text-sm text-zinc-500 text-center">系统运行良好，暂无拦截干预。</div>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-zinc-50 dark:bg-zinc-900/50">
+                <TableHead>检查项</TableHead>
+                <TableHead>结果</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Object.entries(data.startup_markers).map(([key, value]) => (
+                <TableRow key={key}>
+                  <TableCell className="font-medium">{fmtDash(key)}</TableCell>
+                  <TableCell><Badge variant={gateResultVariant(value)}>{fmtDash(value)}</Badge></TableCell>
+                </TableRow>
+              ))}
+              {Object.keys(data.startup_markers).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={2} className="py-6 text-center text-zinc-500 text-sm">暂无启动检查记录</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>熔断器</CardTitle></CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4 text-sm">
+            <span>累计触发: <strong>{data.breaker_summary.total_tripped}</strong></span>
+            {data.breaker_summary.active_breakers.length > 0 && (
+              <span>活跃熔断: <strong>{data.breaker_summary.active_breakers.join(', ')}</strong></span>
+            )}
+            {data.breaker_summary.last_trip_time && (
+              <span className="text-xs text-zinc-500">最近触发: {fmtDash(data.breaker_summary.last_trip_time)}</span>
             )}
           </div>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader><CardTitle>恢复任务</CardTitle></CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4 text-sm">
+            <span>待处理: <strong>{data.recovery_summary.pending_tasks}</strong></span>
+            <span>已完成: <strong>{data.recovery_summary.completed_tasks}</strong></span>
+            {data.recovery_summary.last_recovery_time && (
+              <span className="text-xs text-zinc-500">最近恢复: {fmtDash(data.recovery_summary.last_recovery_time)}</span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {(data.recent_warnings.length > 0 || data.recent_errors.length > 0) && (
+        <Card>
+          <CardHeader><CardTitle>最近告警</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-zinc-50 dark:bg-zinc-900/50">
+                  <TableHead>级别</TableHead>
+                  <TableHead>消息</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.recent_errors.map((msg, i) => (
+                  <TableRow key={`err-${i}`}>
+                    <TableCell><Badge variant="danger">ERROR</Badge></TableCell>
+                    <TableCell className="text-xs">{fmtDash(msg)}</TableCell>
+                  </TableRow>
+                ))}
+                {data.recent_warnings.map((msg, i) => (
+                  <TableRow key={`warn-${i}`}>
+                    <TableCell><Badge variant="warning">WARN</Badge></TableCell>
+                    <TableCell className="text-xs">{fmtDash(msg)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

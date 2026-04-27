@@ -35,9 +35,9 @@ export interface Attempt {
   id: string;
   symbol: string;
   timeframe: string;
-  direction: 'LONG' | 'SHORT' | 'FLAT';
+  direction: string;
   strategy_name: string;
-  final_result: 'ACCEPTED' | 'REJECTED';
+  final_result: string;
   filter_results_summary: string;
   reject_reason: string;
   timestamp: string;
@@ -94,51 +94,77 @@ export interface Candidate {
   warnings: string[];
 }
 
+export type ReviewStatus =
+  | 'PASS_STRICT'
+  | 'PASS_STRICT_WITH_WARNINGS'
+  | 'PASS_LOOSE'
+  | 'REJECT'
+  | 'PENDING';
+
+export type StrictGateResult = 'PASSED' | 'FAILED';
+
 export interface CandidateMetadata {
-  study_name?: string;
-  trials?: number;
-  duration_seconds?: number;
-  created_by?: string;
-  engine?: string;
-  [key: string]: unknown;
+  candidate_name: string;
+  generated_at: string;
+  source_profile: Record<string, unknown>;
+  git: Record<string, unknown>;
+  objective: string;
+  status: string;
 }
 
-export interface BestTrial {
-  number: number;
-  value: number;
-  params?: Record<string, string | number | boolean>;
-}
-
-export interface TrialReference {
-  number: number;
-  value: number;
-}
-
-export interface RubricEvaluation {
-  sharpe_ratio?: number;
-  total_trades?: number;
-  max_drawdown?: number;
-  [key: string]: unknown;
+export interface CandidateTrialItem {
+  trial_number: number;
+  objective_value: number | null;
+  sharpe_ratio?: number | null;
+  sortino_ratio?: number | null;
+  total_return?: number | null;
+  max_drawdown?: number | null;
+  total_trades: number;
+  win_rate?: number | null;
+  params?: Record<string, unknown>;
+  completed_at?: string | null;
 }
 
 export interface CandidateDetail {
   candidate_name: string;
   metadata: CandidateMetadata;
-  best_trial: BestTrial;
-  top_trials: TrialReference[];
-  fixed_params: Record<string, string | number | boolean>;
-  runtime_overrides: Record<string, string | number | boolean>;
-  constraints: Record<string, string | number | boolean>;
-  resolved_request: string;
-  rubric_evaluation: RubricEvaluation;
+  best_trial: CandidateTrialItem | null;
+  top_trials: CandidateTrialItem[];
+  fixed_params: Record<string, unknown>;
+  runtime_overrides: Record<string, unknown>;
+  constraints: Record<string, unknown>;
+  resolved_request: Record<string, unknown>;
+  reproduce_cmd: string;
+  generated_at?: string;
+  source_profile?: Record<string, unknown>;
+  git?: Record<string, unknown>;
+  objective?: string;
+  status?: string;
 }
 
 export interface ReplayContext {
   candidate_name: string;
   reproduce_cmd: string;
   metadata: CandidateMetadata;
-  resolved_request: Record<string, string | number | boolean>;
-  runtime_overrides: Record<string, string | number | boolean>;
+  resolved_request: Record<string, unknown>;
+  runtime_overrides: Record<string, unknown>;
+}
+
+export interface StrictGateCheckItem {
+  gate: string;
+  threshold: string;
+  actual?: string | null;
+  passed: boolean;
+}
+
+export interface ReviewSummary {
+  candidate_name: string;
+  review_status: ReviewStatus;
+  strict_gate_result: StrictGateResult;
+  strict_v1_checklist: StrictGateCheckItem[];
+  warnings: string[];
+  params_at_boundary: string[];
+  summary: string;
 }
 
 export interface BacktestRecord {
@@ -150,21 +176,28 @@ export interface BacktestRecord {
   end_date: string;
   status: 'COMPLETED' | 'RUNNING' | 'FAILED';
   metrics: {
-    total_return: number;
-    sharpe: number;
-    max_drawdown: number;
-    win_rate: number;
-    trades: number;
+    total_return: number | null;
+    sharpe: number | null;
+    max_drawdown: number | null;
+    win_rate: number | null;
+    trades: number | null;
   };
 }
 
-export interface CompareRecord {
+export interface CompareResponse {
+  baseline_label: string;
+  candidate_a_label: string;
+  candidate_b_label: string | null;
+  rows: CompareRow[];
+}
+
+export interface CompareRow {
   metric: string;
-  baseline: string | number;
-  candidateA: string | number;
-  candidateB?: string | number;
-  diffA: number;
-  diffB?: number;
+  baseline: number | null;
+  candidate_a: number | null;
+  candidate_b: number | null;
+  diff_a: number | null;
+  diff_b: number | null;
 }
 
 export interface Position {
@@ -204,34 +237,15 @@ export interface ConfigSnapshot {
     profile: string;
     version: string;
     hash: string;
-    is_frozen: boolean;
   };
-  market: {
-    symbols: string[];
-    timeframes: string[];
-    mtf_enabled: boolean;
-  };
-  strategy: {
-    name: string;
-    direction_bias: string;
-    key_parameters: Record<string, string | number | boolean>;
-  };
-  risk: {
-    max_loss_percent: number;
-    daily_max_loss_percent: number;
-    max_total_exposure: number;
-    leverage: number;
-  };
-  execution: {
-    tp_targets: number;
-    tp_ratios: number[];
-    stop_behavior: string;
-    same_bar_policy: string;
-  };
-  backend: {
-    intent: string;
-    order: string;
-    position: string;
-  };
+  market: Record<string, unknown>;
+  strategy: Record<string, unknown>;
+  risk: Record<string, unknown>;
+  execution: Record<string, unknown>;
+  backend: Record<string, unknown>;
   source_of_truth_hints: string[];
+  profile?: string;
+  version?: number;
+  hash?: string;
+  environment?: Record<string, unknown>;
 }

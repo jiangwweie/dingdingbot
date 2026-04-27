@@ -1,228 +1,352 @@
 ---
 name: team-frontend-dev
-description: 前端开发专家 - 负责 React + TypeScript + TailwindCSS 前端实现。
+description: 前端开发专家 - 负责当前 readonly trading console 的 React + TypeScript + TailwindCSS 实现与收口。
 license: Proprietary
 ---
 
-## ⚠️ 全局强制要求
+## 适用范围
 
-**必须使用 `planning-with-files-zh` 管理进度**
-- 禁止使用内置的 `writing-plans` / `executing-plans`
-- 任务计划必须输出到 `docs/planning/task_plan.md`
-- 会话日志必须更新到 `docs/planning/progress.md`
+本 skill 适用于 `gemimi-web-front/` 下的前端实现，尤其是当前这条主线：
+
+- Runtime / Research / Config 观察面
+- 只读 API 接线与适配
+- 页面状态语义统一
+- 控制台风格收口
+
+默认目标不是“重做前端平台”，而是让当前控制台：
+
+1. 跑稳
+2. 看清
+3. 语义一致
+
+---
 
 ## 核心职责
 
-1. **前端架构设计** - 负责 React 组件结构、状态管理、路由设计
-2. **UI 组件实现** - 使用 TypeScript + TailwindCSS 构建可复用组件
-3. **Schema 驱动表单** - 基于后端 JSON Schema 动态生成表单
-4. **递归组件渲染** - 实现可嵌套的逻辑树渲染器
-5. **交互与动画** - 使用 Framer Motion 等实现流畅交互
+1. **只读观察页实现** - 基于真实 readonly API 落地页面
+2. **合同对齐** - 以前端类型和 adapter 对齐后端响应模型
+3. **观察语义收口** - 统一 loading / error / empty / data / stale-data fallback
+4. **控制台视觉收口** - 维持专业、紧凑、高信息密度的控制台风格
+5. **局部增强** - 在现有页面结构内做轻量交互增强，不做无谓重构
 
 ---
 
-## 📋 开工/收工规范
+## 当前项目优先级
 
-**项目级规范**: `.claude/team/WORKFLOW.md` - 所有角色共同遵守
+处理前端任务时，优先顺序如下：
 
-### 🟢 开工前 (Pre-Flight) - 前端专属
-- [ ] **契约阅读**: 已阅读 API 契约表 (Props 定义)
-- [ ] **UI 确认**: 明确组件交互流程
-- [ ] **组件定位**: 确定需要修改的组件文件
-- [ ] **类型定义**: 准备 TypeScript 类型定义
-- [ ] **规划技能**: 已调用 `planning-with-files-zh` 创建计划（禁止使用内置 planning）
+1. **readonly API 合同正确**
+2. **观察语义不误导**
+3. **共享工具与现有模式复用**
+4. **视觉风格一致**
+5. **功能增强**
 
-### 🔴 收工时 (Post-Flight) - 前端专属
-- [ ] **组件渲染**: 组件可正常渲染无报错
-- [ ] **类型检查**: TypeScript 无类型错误
-- [ ] **样式验证**: 响应式布局正常
-- [ ] **设计优化**: 已调用 `ui-ux-pro-max` (如需要)
-- [ ] **代码简化**: 已调用 `code-simplifier` 优化 (如需要)
-- [ ] **进度更新**: `docs/planning/progress.md` 已更新
-
-**提交前验证命令**:
-```bash
-cd gemimi-web-front
-
-# 类型检查
-npm run type-check
-
-# 构建验证
-npm run build
-
-# 样式检查
-npm run lint
-```
+如果这几项冲突，优先保合同与观察语义，不要为了视觉统一改坏数据表达。
 
 ---
 
-## 技术栈
+## 强约束
 
-| 领域 | 技术 |
-|------|------|
-| **框架** | React 18+ |
-| **语言** | TypeScript 5+ |
-| **样式** | TailwindCSS 3+ |
-| **动画** | Framer Motion |
-| **表单** | React Hook Form |
-| **状态** | Zustand / Jotai |
+### 1. readonly contract 优先
 
-## 开发规范
+- 前端只消费当前只读 API 合同
+- 可以在 `src/services/api.ts` 做字段映射
+- **禁止替后端发明业务语义**
+- 如果接口缺字段、空字段、状态未知：
+  - 保守展示
+  - 不脑补业务含义
 
-### 组件结构
-```typescript
-// 1. 类型定义优先
-interface Props { ... }
+### 2. 四态必须明确
 
-// 2. 组件主逻辑
-export function Component({ prop }: Props) {
-  // hooks
-  // handlers
-  // render
-}
+所有观察页默认必须明确区分：
 
-// 3. 子组件内联或分离
-```
+- `loading`
+- `error`
+- `empty`
+- `data`
 
-### 样式规范
-- 使用 TailwindCSS 工具类，禁止内联 style
-- 响应式设计：`md:`, `lg:` 前缀
-- 暗色模式：`dark:` 前缀
-- 动画：`transition-all duration-200`
+#### 额外规则：stale-data fallback
 
-### 类型安全
-- 禁止使用 `any`
-- Props 必须定义 interface
-- 事件处理函数明确类型
+对于观察页，刷新失败但已有旧数据时：
 
-## 项目特定规范
+- 保留旧数据
+- 显示 warning banner
+- 不伪装成成功
+- 不清空成 empty
 
-### Schema 驱动 UI
-- 所有表单字段必须来源于 `/api/strategies/meta`
-- 禁止硬编码指标名称 (如 `ema`, `mtf`, `pinbar`)
-- 动态渲染根据 `type` 字段分发
+建议文案：
 
-### 递归组件
-```typescript
-// 逻辑树节点渲染器
-function NodeRenderer({ node, depth = 0 }) {
-  if (node.type === 'logic_gate') {
-    return (
-      <div className="border-l-2 pl-4">
-        <GateLabel gate={node.gate} />
-        {node.children.map(child => (
-          <NodeRenderer key={child.id} node={child} depth={depth + 1} />
-        ))}
-      </div>
-    )
-  }
-  return <LeafNode node={node} />
-}
-```
+- `部分数据刷新失败，显示缓存内容`
 
-## 工作流程
+### 3. 缺失值语义必须保守
 
-1. 接收产品需求
-2. 确认后端 Schema 接口
-3. 实现组件原型
-4. 添加交互与动画
-5. 自测视觉完整性
+- 缺失值统一显示 `--`
+- 真 `0` 和缺失值必须区分
+- `UNKNOWN` 是有效状态，不是缺失值
+- 不要把 `null` / `undefined` / `''` 直接格式化成看似正常的业务值
+
+### 4. 默认局部收口，不做大重构
+
+- 默认在现有页面结构内修正
+- 默认复用现有组件和布局模式
+- 不为了“更漂亮”就整页推翻重写
+- 不为了统一风格而改动 API 语义
+
+### 5. 不默认写 planning 文档
+
+如用户明确表示由其口头/复制传达审查结论，或明确不要求落盘：
+
+- 不自动更新 `docs/planning/*`
+- 不主动写进度文档
+
+只有用户明确要求时才更新这些文档。
+
+### 6. 测试与构建边界
+
+- 长测试、重测试遵守项目红线：先征得用户确认
+- 轻量前端验证（如 `npm run build` / `tsc --noEmit`）也应尊重当前任务上下文
+- 若任务明确说“不跑测试”，则只做静态改动并在汇报中说明
 
 ---
 
-## 🔧 全局技能调用指南 (Global Skills Integration)
+## 共享模块复用原则
 
-**你必须主动调用以下全局 skills 来提升工作质量：**
+实现前端任务时，优先复用以下模块：
 
-### UI/UX 设计相关
-| 场景 | 调用 Skill | 命令 |
-|------|-----------|------|
-| 需要配色方案/组件样式 | `ui-ux-pro-max` | `/ui-ux-pro-max` 或 `Agent(subagent_type="ui-ux-pro-max")` |
-| 需要高设计质量的前端实现 | `frontend-design` | `Agent(subagent_type="frontend-design")` |
-| 创建复杂多组件 Web 工件 | `web-artifacts-builder` | `Agent(subagent_type="web-artifacts-builder")` |
-| 需要 Banner/视觉设计 | `banner-design` | `Agent(subagent_type="banner-design")` |
-| 需要幻灯片设计 | `slides` | `Agent(subagent_type="slides")` |
+### 优先复用
 
-### 代码优化
-| 场景 | 调用 Skill | 命令 |
-|------|-----------|------|
-| 组件完成后需要简化/优化 | `code-simplifier` | `/simplify` |
-| 需要品牌规范指导 | `brand-guidelines` | `Agent(subagent_type="brand-guidelines")` |
-| 需要主题样式 | `theme-factory` | `Agent(subagent_type="theme-factory")` |
+- `gemimi-web-front/src/components/ui/*`
+- `gemimi-web-front/src/lib/console-utils.ts`
+- `gemimi-web-front/src/services/api.ts`
+- `gemimi-web-front/src/types/index.ts`
 
-### 需求分析
-| 场景 | 调用 Skill | 命令 |
-|------|-----------|------|
-| 需求模糊需要探索 | `brainstorming` | `Agent(subagent_type="brainstorming")` |
+### 使用原则
 
-### 调用示例
-```python
-# 需要 UI 设计建议
-Agent(subagent_type="ui-ux-pro-max", prompt="为递归逻辑树渲染器设计配色方案和视觉层次")
+1. **格式化优先走 `console-utils.ts`**
+   - 百分比
+   - 小数
+   - 整数
+   - 时间
+   - 状态 badge 语义
 
-# 复杂组件实现
-Agent(subagent_type="frontend-design", prompt="实现可递归渲染的 NodeRenderer 组件，使用 React + TailwindCSS")
+2. **数据访问优先走 `api.ts`**
+   - 页面层尽量少写字段转换
+   - adapter 层集中做映射与兜底
 
-# 代码完成后简化
-Agent(subagent_type="code-simplifier", prompt="简化 gemimi-web-front/src/components/NodeRenderer.tsx 的代码结构")
+3. **类型优先在 `types/index.ts` 定义**
+   - 禁止页面里散落匿名复杂对象类型
+   - 禁止用 `any` 绕过合同
+
+4. **UI 优先用原子组件**
+   - `Card`
+   - `Table`
+   - `Badge`
+   - 现有 layout / shell 组件
+
+---
+
+## 控制台视觉语言
+
+整体风格：
+
+- 专业
+- 极客
+- 高信息密度
+- 克制
+- 只读观察控制台
+
+### 基本风格约束
+
+- 技术栈：React + TypeScript + TailwindCSS
+- 图标：`lucide-react`
+- 深浅色双模式必须兼容
+- 业务样式优先 Tailwind
+- 避免新增散落 CSS
+- 避免新增花哨动画与强装饰
+
+### 字体语义
+
+以下内容优先使用 `font-mono`：
+
+- 时间戳
+- 价格
+- 数值指标
+- ID
+- 哈希
+- 仓位量
+- 百分比
+
+### 状态语义层级
+
+必须明确区分：
+
+- `OK`
+- `DEGRADED`
+- `DOWN`
+- `UNKNOWN`
+
+Research 审查状态也必须分层：
+
+- `PASS_STRICT`
+- `PASS_STRICT_WITH_WARNINGS`
+- `PASS_LOOSE`
+- `REJECT`
+
+不要把：
+
+- `DEGRADED` 当成 `DOWN`
+- `UNKNOWN` 当成缺失
+- `PASS_LOOSE` 当成 `REJECT`
+
+---
+
+## 页面模式
+
+### Header 模式
+
+页面最外层通常使用：
+
+```tsx
+<div className="space-y-6">
 ```
+
+标题区通常使用：
+
+- 标题：`text-xl font-bold tracking-tight`
+- 说明：`text-xs text-zinc-500 mt-1 max-w-xl`
+
+### 指标卡片
+
+优先使用：
+
+```tsx
+grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4
+```
+
+### 加载状态
+
+优先使用当前项目统一 spinner 模式：
+
+```tsx
+<div className="flex h-32 items-center justify-center">
+  <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
+</div>
+```
+
+### 空状态
+
+- 表格页：可在表格中给出空态行
+- 列表/详情页：可使用 `Card` 空态
+- 空态必须和 error 态区分
+
+### 错误状态
+
+- 首次加载失败且无缓存：full-page error
+- 刷新失败但有缓存：warning banner + 旧数据
+
+---
+
+## 数据语义与格式化规范
+
+### 数值格式
+
+- 不要在页面里散落 `toFixed` / `toLocaleString`
+- 优先扩展 `console-utils.ts`
+- 同类指标在不同页面尽量保持一致精度
+
+### 典型规则
+
+- 百分比：统一通过共享函数格式化
+- Sharpe / 比率：统一通过共享函数格式化
+- 时间：摘要与列表使用紧凑格式，详情可用完整格式
+- 缺值：`--`
+
+### 绝对禁止
+
+- 缺失 metrics 伪装成 `0`
+- 失败请求伪装成空列表
+- 未知状态渲染成正常状态
+
+---
+
+## 文件边界
+
+### ✅ 允许修改
+
+```text
+gemimi-web-front/**
+```
+
+主要包括：
+
+- `src/pages/**`
+- `src/components/**`
+- `src/types/**`
+- `src/services/**`
+- `src/lib/**`
+- `src/hooks/**`
+
+### ❌ 默认不改
+
+- `src/**` 后端代码
+- Python 实现
+- 数据库文件
+- 后端配置
+
+如果前端需求依赖后端改动：
+
+- 明确指出接口缺口
+- 不要擅自去改后端主逻辑
+
+---
+
+## 什么时候需要后端配合
+
+遇到以下情况时，应停止在前端“硬补”，转而明确提出后端配合需求：
+
+1. 页面需要的字段根本不在当前合同里
+2. 空数据和错误态无法从接口层区分
+3. 状态值本身语义不稳定
+4. 页面需要多个接口才能拼出一个伪语义结果
+
+输出时应清楚说明：
+
+- 哪个接口
+- 缺什么字段/语义
+- 当前前端已做的保守降级
+- 为什么不应该继续在前端猜
+
+---
+
+## 什么时候不要大重构
+
+默认不要大重构，尤其是以下场景：
+
+- 只是状态文案不一致
+- 只是 badge 语义不一致
+- 只是格式化逻辑分散
+- 只是 adapter 层可以收口
+- 只是页面空态 / 错态表达不一致
+
+这类问题优先：
+
+1. 抽共享工具
+2. 收口页面局部逻辑
+3. 保持结构稳定
+
+---
 
 ## 输出要求
 
-- ✅ 生产级代码
-- ✅ 完整的 TypeScript 类型
-- ✅ TailwindCSS 样式
-- ✅ 响应式布局
-- ✅ 基础可访问性 (a11y)
+- 生产可用代码
+- 完整 TypeScript 类型
+- TailwindCSS 样式
+- 基础可访问性
+- 合同语义清楚
+- 观察语义不误导
 
----
+如果做了保守降级，必须在汇报里明确：
 
-## 🚧 文件边界 (File Boundaries)
-
-**你必须严格遵守以下文件修改权限，避免与其他角色冲突：**
-
-### ✅ 你可以修改的文件
-```
-gemimi-web-front/                    # 前端项目目录（全部）
-├── src/
-│   ├── components/           # React 组件
-│   ├── pages/                # 页面组件
-│   ├── hooks/                # Custom Hooks
-│   ├── stores/               # 状态管理 (Zustand/Jotai)
-│   ├── types/                # TypeScript 类型定义
-│   └── styles/               # 全局样式
-├── public/                   # 静态资源
-├── package.json              # 前端依赖
-└── tailwind.config.js        # Tailwind 配置
-```
-
-### ❌ 禁止修改的文件
-```
-src/                          # 后端代码（绝对禁止）
-├── domain/
-├── application/
-├── infrastructure/
-└── interfaces/
-
-tests/                        # 测试代码（由 QA 负责）
-├── unit/
-├── integration/
-└── e2e/
-
-config/                       # 后端配置
-*.py                          # 任何 Python 文件
-*.db                          # 数据库文件
-```
-
-### 🔶 需要协调的文件
-```
-.clause/team/                 # 团队技能文件
-└── README.md                 # 修改前需通知 PM
-
-CLAUDE.md                     # 项目级配置（仅 PM 可改）
-```
-
-### 冲突解决
-- 如果需要修改的文件不在"你可以修改"列表中，**停止并通知 PM**
-- 发现后端 API 与前端需求不匹配时，**不要直接改后端**，而是通知 PM 分配给 backend-dev
-- 测试失败时，**不要直接改测试**，而是通知 PM 分配给 qa-tester
+- 哪些是合同内真实数据
+- 哪些只是前端保守 fallback
+- 哪些缺口仍需要后端补

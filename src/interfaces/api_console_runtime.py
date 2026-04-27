@@ -5,6 +5,7 @@ from typing import Optional
 
 from src.application.readmodels.console_models import (
     ConsoleAttemptsResponse,
+    ConsoleEventsResponse,
     ConsoleExecutionIntentsResponse,
     ConsoleOrdersResponse,
     ConsolePositionsResponse,
@@ -14,6 +15,7 @@ from src.application.readmodels.console_models import (
     RuntimePortfolioResponse,
 )
 from src.application.readmodels.runtime_attempts import RuntimeAttemptsReadModel
+from src.application.readmodels.runtime_events import RuntimeEventsReadModel
 from src.application.readmodels.runtime_execution_intents import RuntimeExecutionIntentsReadModel
 from src.application.readmodels.runtime_health import RuntimeHealthReadModel
 from src.application.readmodels.runtime_orders import RuntimeOrdersReadModel
@@ -165,5 +167,20 @@ async def get_runtime_execution_intents(
     return await read_model.build(
         intent_repo=getattr(api_module, "_execution_intent_repo", None),
         status=status,
+        limit=limit,
+    )
+
+
+@router.get("/events", response_model=ConsoleEventsResponse)
+async def get_runtime_events(limit: int = Query(100, ge=1, le=500)) -> ConsoleEventsResponse:
+    """Runtime event timeline aggregated from signals, orders, startup, breakers, recovery."""
+    api_module = _load_api_module()
+    readmodel = RuntimeEventsReadModel()
+    return await readmodel.build(
+        signal_repo=getattr(api_module, "_signal_repo", None),
+        audit_logger=getattr(api_module, "_audit_logger", None),
+        execution_orchestrator=getattr(api_module, "_execution_orchestrator", None),
+        startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
+        execution_recovery_repo=getattr(api_module, "_execution_recovery_repo", None),
         limit=limit,
     )

@@ -181,6 +181,26 @@ class ConsoleOrdersResponse(BaseModel):
     orders: list[ConsoleOrderItem] = Field(default_factory=list)
 
 
+class ConsoleEventItem(BaseModel):
+    """Console-facing event item for runtime/events endpoint."""
+
+    id: str
+    timestamp: str
+    category: Literal[
+        "STARTUP", "RECONCILIATION", "BREAKER", "RECOVERY",
+        "WARNING", "ERROR", "SIGNAL", "EXECUTION",
+    ]
+    severity: Literal["INFO", "WARN", "ERROR", "SUCCESS"]
+    message: str
+    related_entities: list[str] = Field(default_factory=list)
+
+
+class ConsoleEventsResponse(BaseModel):
+    """Response model for GET /api/runtime/events."""
+
+    events: list[ConsoleEventItem] = Field(default_factory=list)
+
+
 class ConsoleExecutionIntentItem(BaseModel):
     """Console-facing execution intent item for runtime/execution/intents endpoint."""
 
@@ -283,6 +303,55 @@ class ReviewSummaryResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     params_at_boundary: list[str] = Field(default_factory=list)
     summary: str = ""
+
+
+class ConsoleBacktestMetrics(BaseModel):
+    """Metrics summary for a single backtest record."""
+
+    total_return: Optional[float] = None
+    sharpe: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    win_rate: Optional[float] = None
+    trades: Optional[int] = None
+
+
+class ConsoleBacktestItem(BaseModel):
+    """Console-facing backtest record for research/backtests endpoint."""
+
+    id: str
+    candidate_ref: str = ""
+    symbol: str
+    timeframe: str
+    start_date: str = ""
+    end_date: str = ""
+    status: Literal["COMPLETED", "RUNNING", "FAILED"] = "COMPLETED"
+    metrics: ConsoleBacktestMetrics = Field(default_factory=ConsoleBacktestMetrics)
+
+
+class ConsoleBacktestsResponse(BaseModel):
+    """Response model for GET /api/research/backtests."""
+
+    backtests: list[ConsoleBacktestItem] = Field(default_factory=list)
+
+
+class CompareRow(BaseModel):
+    """A single metric row in the compare response."""
+
+    metric: str
+    baseline: Optional[float] = None
+    candidate_a: Optional[float] = None
+    candidate_b: Optional[float] = None
+    diff_a: Optional[float] = None
+    diff_b: Optional[float] = None
+
+
+class CompareResponse(BaseModel):
+    """Response model for GET /api/research/compare/candidates."""
+
+    baseline_label: str = ""
+    candidate_a_label: str = ""
+    candidate_b_label: Optional[str] = None
+    rows: list[CompareRow] = Field(default_factory=list)
 
 
 class ConfigIdentity(BaseModel):
