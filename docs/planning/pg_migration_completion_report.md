@@ -274,3 +274,68 @@ async def cleanup():
   - `scripts/migrate_sqlite_state_to_pg.py`
 - `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q`
   - 60 passed
+
+---
+
+## 11. Docker PG 真实迁移结果（2026-04-29 08:10 CST）
+
+### 执行环境
+
+- PG 容器：`dingdingbot-pg`
+- 连接串：`postgresql+asyncpg://dingdingbot:dingdingbot_dev@localhost:5432/dingdingbot?ssl=disable`
+- 命令：
+  - `python3 -m py_compile scripts/migrate_sqlite_state_to_pg.py`
+  - `PG_DATABASE_URL=... MIGRATE_ALL_STATE_TO_PG=true python3 scripts/migrate_sqlite_state_to_pg.py`
+
+### 迁移脚本补充修复
+
+- 直接运行脚本时自动加入项目根目录到 `sys.path`。
+- `signal_take_profits.signal_id` 从旧 SQLite 数字主键映射到 PG 业务 `signals.signal_id`。
+- `runtime_profiles.profile_json` 映射为 PG `profile_payload`。
+- `research_jobs.spec_json` 映射为 PG `spec_payload`，并支持从 `spec_ref` artifact 文件兜底读取。
+- `research_run_results.spec_snapshot_json / summary_metrics_json / artifact_index_json` 映射为 PG JSONB 字段。
+- `candidate_records.risks_json` 映射为 PG `risks`。
+- `backtest_reports.sharpe_ratio` 历史脏数据清洗：若该字段存入 JSON，则迁移到 `positions_summary` 并将 `sharpe_ratio` 置空。
+- JSONB raw SQL 插入统一序列化为 JSON 字符串。
+- `klines` 批量插入并分批提交，避免逐行迁移过慢。
+
+### 迁移结果
+
+迁移完成：
+
+```text
+[done] migration copy attempted rows=831594
+```
+
+抽样计数：
+
+| 表 | 行数 |
+| --- | ---: |
+| `orders` | 6686 |
+| `signals` | 280 |
+| `signal_take_profits` | 560 |
+| `runtime_profiles` | 1 |
+| `config_entries_v2` | 23 |
+| `config_profiles` | 1 |
+| `backtest_reports` | 35 |
+| `position_close_events` | 512 |
+| `klines` | 823128 |
+| `config_snapshot_versions` | 1 |
+| `research_jobs` | 6 |
+| `research_run_results` | 5 |
+| `candidate_records` | 1 |
+| `optimization_history` | 343 |
+
+### 非破坏性 PG Smoke
+
+- PG connectivity probe: `True`
+- active runtime profile: `sim1_eth_runtime`
+- research jobs/runs/candidates 可查询
+- backtest reports 计数可查询
+- ETH/USDT:USDT 1h kline range: `(1609459200000, 1774998000000)`
+- signals/orders 可查询
+
+### 当前边界
+
+- 没有在迁移后的 PG 数据上运行 `tests/integration/test_pg_*`，因为 `tests/integration/conftest.py` 的 autouse fixture 会 `TRUNCATE` 核心 PG 表。
+- 已运行非破坏性 smoke 与显式 SQLite 回归，未运行全量测试。

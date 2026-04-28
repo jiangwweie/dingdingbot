@@ -1835,3 +1835,52 @@
 - 未跑真实 PG 数据搬迁。
 - 未跑全量测试。
 - 需要在 PG 环境执行迁移脚本并抽样核对表计数/关键行。
+
+### 2026-04-29 08:10 CST -- Docker PG 真实迁移验证
+
+**完成**
+- 使用 Docker 中的 `dingdingbot-pg` 执行真实 PG 初始化与 SQLite -> PG 搬迁。
+- 修复 `scripts/migrate_sqlite_state_to_pg.py` 的实库兼容问题：
+  - 支持直接运行脚本时自动加入项目根目录到 `sys.path`。
+  - `signal_take_profits` 旧 SQLite 数字 FK 映射到 PG 业务 `signal_id`。
+  - `runtime_profiles.profile_json` 映射为 PG `profile_payload`。
+  - `research_jobs.spec_json` 映射为 PG `spec_payload`，并支持从 `spec_ref` artifact 兜底读取。
+  - `research_run_results` 的 `*_json` 字段映射到 PG JSONB 字段。
+  - `candidate_records.risks_json` 映射为 PG `risks`。
+  - 清洗历史脏数据：`backtest_reports.sharpe_ratio` 中的 JSON positions 迁移到 `positions_summary`，避免 Decimal/数值字段污染。
+  - JSONB 字段通过 raw SQL 批量插入时统一序列化为 JSON 字符串。
+  - `klines` 改为批量插入并分批提交，避免 82 万行逐行迁移过慢。
+- 迁移脚本执行完成：`[done] migration copy attempted rows=831594`。
+
+**Docker PG 表计数抽样**
+- `orders`: 6686
+- `signals`: 280
+- `signal_take_profits`: 560
+- `runtime_profiles`: 1
+- `config_entries_v2`: 23
+- `config_profiles`: 1
+- `backtest_reports`: 35
+- `position_close_events`: 512
+- `klines`: 823128
+- `config_snapshot_versions`: 1
+- `research_jobs`: 6
+- `research_run_results`: 5
+- `candidate_records`: 1
+- `optimization_history`: 343
+
+**验证**
+- `python3 -m py_compile scripts/migrate_sqlite_state_to_pg.py` 通过。
+- 非破坏性 PG smoke 通过：
+  - PG connectivity probe: `True`
+  - active runtime profile: `sim1_eth_runtime`
+  - research jobs/runs/candidates 可查询
+  - backtest reports 计数可查询
+  - ETH/USDT:USDT 1h kline range: `(1609459200000, 1774998000000)`
+  - signals/orders 可查询
+- 显式 SQLite 路径回归仍通过：
+  - `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q`
+  - 60 passed
+
+**注意**
+- `tests/integration/conftest.py` 对核心 PG 表有 `TRUNCATE` autouse fixture，因此本次没有在已迁移数据上直接跑这些集成测试，避免擦掉迁移结果。
+- 未执行全量测试。

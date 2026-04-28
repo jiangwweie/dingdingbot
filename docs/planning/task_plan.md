@@ -1134,6 +1134,9 @@ Sim-0 详细任务拆分（归档参考）：
    - fake PG DSN 下默认仓储路由检查通过
    - SQLite 显式路径轻量回归：runtime_profile + research repository + config_profile 通过（60 passed）
    - `test_config_profile.py` 连接池隔离问题已修复
+   - Docker PG 真实迁移已执行完成：`scripts/migrate_sqlite_state_to_pg.py` attempted rows=831594
+   - PG 抽样计数通过：orders/signals/runtime_profiles/research/backtest/klines 等核心表均有数据
+   - 非破坏性 PG smoke 通过：connectivity、active runtime profile、research、backtest、klines、signals、orders 可查询
 4. 暂不扩大的范围：
-   - 真实 PG 容器数据搬迁与集成验证尚未执行
-   - 真实 PG 容器集成测试和数据搬迁执行留到明早窗口
+   - 未在迁移后的 PG 数据上跑 `tests/integration/test_pg_*`，因为该测试 fixture 会清表
+   - 未运行全量测试
