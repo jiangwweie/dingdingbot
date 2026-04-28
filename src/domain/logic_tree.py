@@ -18,7 +18,7 @@ from pydantic import field_validator
 class FilterConfig(BaseModel):
     """Unified dynamic Filter Configuration model."""
     id: str = Field(default_factory=lambda: "")
-    type: Literal["ema", "ema_trend", "mtf", "atr", "volume_surge", "volatility_filter", "time_filter", "price_action"] = Field(..., description="Filter type (e.g., 'ema_trend', 'mtf')")
+    type: Literal["ema", "ema_trend", "mtf", "atr", "donchian_distance", "volume_surge", "volatility_filter", "time_filter", "price_action"] = Field(..., description="Filter type (e.g., 'ema_trend', 'mtf', 'donchian_distance')")
     enabled: bool = Field(default=True, description="Whether this filter is active")
     params: Dict[str, Any] = Field(default_factory=dict, description="Filter parameters")
 

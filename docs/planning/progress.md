@@ -587,6 +587,52 @@
    - 启动日志打印 resolved runtime summary/hash
    - 再后续切 SignalPipeline / execution OrderStrategy 消费
 
+---
+
+### 2026-04-28 H6a Donchian 20-bar Breakout Proxy
+
+**完成**: Donchian 20-bar LONG-only 独立 proxy 回测
+
+**产出**:
+- `scripts/run_donchian_h6a_proxy.py` — 独立撮合 proxy（不修改 src）
+- `reports/research/donchian_h6a_proxy_2026-04-28.json` — 年度结果 JSON
+- `docs/planning/2026-04-28-h6a-donchian-breakout-proxy.md` — 完整分析报告
+
+**关键发现**:
+- 3yr PnL = **-17,305**（vs Pinbar +9,067）
+- 信号过频：年均 648 signals，年均 424 trades（Pinbar 67 trades）
+- WR 36.7%（高于 Pinbar 27.5%）但被 turnover 和紧止损杀死
+- 2025 极端：31 trades, 25 SL, WR 19.4%, MaxDD 74%
+- 2024 唯一正收益 (+504)，但 MaxDD 65.4%
+
+**判定**: **CLOSE** — Donchian 20 LONG 关闭，不进入参数搜索，不进入 H6b
+
+**根因**: 20-bar 1h 通道太窄，ETH 波动下频繁假突破，whipsaw 模式主导。Breakout 家族在 ETH 1h 20-bar 上无 alpha 痕迹。
+
+### 2026-04-28 M0 Strategy Ecology Map — Pinbar 市场状态诊断
+
+**完成**: 市场状态 × Pinbar 表现映射，10 特征 tercile 分桶分析
+
+**产出**:
+- `scripts/run_strategy_ecology_m0.py` — 独立撮合 + 特征计算 + 分桶
+- `reports/research/strategy_ecology_m0_2026-04-28.json` — 完整结果 JSON
+- `docs/planning/2026-04-28-strategy-ecology-map-m0.md` — 完整分析报告
+
+**关键发现**:
+- **6+ 特征有显著解释力**（spread > 5,000 USDT）
+- **Pinbar = 反趋势策略**: 低 ema slope + 低 volatility 环境赚钱
+- **近期涨幅是毒药**: 72h return 高 → Pinbar WR 从 18.8% 降到 7.3%
+- **高波动杀死 Pinbar**: atr_percentile 高 → PnL 从 -1,584 降到 -7,750
+- **2023 ATR percentile 0.625 vs 2024/25 0.531** — 2023 波动更高
+- **Donchian 距离互补**: Pinbar 在 Donchian 通道顶部最差（正是 breakout 入场位）
+
+**判定**: **PASS** — M0 有价值，下一步优先做 regime filter（不是新 entry）
+
+**下一步**:
+1. 给 Pinbar 加 regime filter（ema_4h_slope / atr_percentile 阈值）
+2. 验证过滤后 2023 亏损是否显著减少
+3. 暂停新 entry 策略（Donchian / Breakout / Engulfing）
+
 ### 2026-04-23 -- Config Module SSOT / Runtime Resolver 架构设计已启动
 
 1. ✅ 已审查 Sim-1 ETH runtime config 规划
@@ -1558,3 +1604,181 @@
 **判定**: H3a 不通过，H3 动态退出方向关闭
 
 **研究链总结**: H0→H1→H2→H3→H3a 全链完成。2023 亏损是市场环境不匹配，不是参数可调优的。建议接受 -3924 为 2024/2025 alpha 的固有成本。
+
+### 2026-04-28 M1 Pinbar Toxic State Avoidance — 4/4 单因子 filter 全部 PASS
+
+**完成**: M1 toxic state avoidance 实验，测试 4 个单因子 regime filter
+
+**产出**:
+- `scripts/run_pinbar_toxic_state_m1.py` — 独立撮合 + 4 实验 + verdict 逻辑
+- `reports/research/pinbar_toxic_state_m1_2026-04-28.json` — 完整结果 JSON
+- `docs/planning/2026-04-28-pinbar-toxic-state-avoidance-m1.md` — 分析报告
+
+**关键结果**:
+- E0 baseline: 3yr PnL = -2,158
+- E1 ema_4h_slope: 3yr PnL = **+1,314** (2023 loss ↓51.2%, 2024 profit ↑88%)
+- E2 recent_72h: 3yr PnL = **+1,200** (2025 loss -1,499 → -29)
+- E3 volatility: 3yr PnL = **+1,034** (trade reduction 最低 17.6%)
+- E4 donchian_dist: 3yr PnL = **+1,042** (2023 loss ↓71.3%, MaxDD 18.04%)
+- **所有 4 实验 PASS 全部 5 项标准**
+
+**研究链推进**: M0 诊断"问题在 regime" → M1 证明"跳过 toxic regime 解决问题"。因果链闭合。
+
+### 2026-04-28 M1b Pinbar Toxic State Parity Check — E4 PASS, E1 FAIL
+
+**完成**: M1b parity check，在官方 Backtester 口径下验证 E1/E4 filter
+
+**产出**:
+- `scripts/run_pinbar_toxic_state_m1b_parity.py` — Parity 撮合引擎（匹配官方参数）
+- `reports/research/pinbar_toxic_state_m1b_parity_2026-04-28.json` — 完整结果 JSON
+- `docs/planning/2026-04-28-pinbar-toxic-state-m1b-parity.md` — 分析报告
+
+**关键结果**:
+- E0 parity: 3yr PnL = -14,886（vs official +9,066，差距来自 concurrent positions + compounding）
+- E1 ema_4h_slope: 3yr PnL = -10,027 (+4,860)，2023 loss ↓15.4% → **FAIL**
+- E4 donchian_dist: 3yr PnL = -8,695 (+6,191)，2023 loss ↓32.6% → **PASS**
+
+**结论修正**:
+- E1 降级为 proxy-only（parity 口径下优势减弱）
+- E4 保留，可在正式 backtester 验证
+
+### 2026-04-28 C1 Pinbar + T1 Portfolio Proxy — CONDITIONAL PASS
+
+**完成**: C1 组合价值验证，Pinbar baseline (E0) + T1-R 在 5 种权重下组合分析
+
+**产出**:
+- `scripts/run_c1_pinbar_t1_portfolio.py` — 组合分析脚本
+- `reports/research/c1_pinbar_t1_portfolio_proxy_2026-04-28.json` — 完整结果 JSON
+- `docs/planning/2026-04-28-c1-pinbar-t1-portfolio-proxy.md` — 分析报告
+
+**关键结果**:
+- Pinbar: 3yr PnL +435, MaxDD 33.6%, 2023 -3,180
+- T1-R: 3yr PnL +2,039, 2023 +1,358, Top 3 winners 108.4% (fragile)
+- Correlation (weekly MTM): 0.195（弱正相关）
+- P60_T40: 3yr PnL +1,077, MaxDD 19.5%, 2023 -1,365 (改善 57%)
+- P50_T50: 3yr PnL +1,237, MaxDD 17.8%, 2023 -911 (改善 71%)
+- 移除 T1 Top 3 后 P60_T40 仍为 +193（组合不依赖 T1 大赢家）
+
+**判定**: CONDITIONAL PASS — 组合改善显著，但 T1 fragility 需 OOS 验证
+
+**建议下一步**:
+- 在正式 Backtester v3_pms 中验证 P60_T40 权重组合
+- T1 需要 OOS 验证（fragility 在 OOS 中可能更严重）
+- 需要更真实的 MTM equity curve（当前 proxy 有仓位模型简化）
+
+### 2026-04-29 P0 / R1b 收口：E4 official 验证与资金参数审计
+
+**完成**:
+- P0 `Pinbar + E4 donchian_distance` 已走通 official `v3_pms + dynamic strategy` 路径。
+- R1b capital allocation 二次审计已完成，纠正 R1 原始 MaxDD 口径错误，并确认在 `MaxDD <= 35%` 约束下存在 2 组可行配置。
+
+**P0 关键结果**:
+- E4 确认真实生效：`rejection_stats` 中出现 `donchian_distance` 拦截。
+- 2023 亏损显著降低：约 `-4518 -> -1903`，loss reduction 约 `57.9%`。
+- 但 2024/2025 收益被过度过滤，3yr PnL 从 `+3789` 降为 `-1924`。
+- 判定：`FAIL`。E4 是有效风险因子，但当前固定阈值不适合作为硬过滤器进入组合或 runtime。
+
+**R1b 关键结果**:
+- R1 原报告 MaxDD 严重低估，`report.max_drawdown` 不能作为真实回撤约束指标。
+- R1 首轮 audit 也过度悲观：只审 3 组配置，并把 realized curve 误称为 mark-to-market。
+- R1b 基于 `debug_equity_curve` 审计完整 56 组配置，确认 2 组满足 `MaxDD <= 35%`：
+  - `exposure=1.25, risk=0.5%`: PnL `+2346`, MaxDD `33.74%`
+  - `exposure=1.0, risk=0.5%`: PnL `+2113`, MaxDD `32.42%`
+
+**当前感受/判断**:
+- 这份资金参数报告不够“激励”，不是因为收益目标错，而是因为 `MaxDD <= 35%` 在当前 Pinbar baseline 上非常强约束。
+- 2023 亏损年决定了资金上限；为了守住 35% 回撤，risk 只能压到 `0.5%`，自然无法复现此前看到的 2024/2025 高收益。
+- 这说明后续应把研究拆成两条线：`稳健约束线` 和 `激励上限线`，不要用同一个约束同时追求心理激励与实盘准入。
+
+**产出**:
+- `scripts/run_p0_pinbar_e4_official.py`
+- `docs/planning/2026-04-29-p0-pinbar-e4-official-validation.md`
+- `reports/research/p0_pinbar_e4_official_validation_2026-04-29.json`
+- `scripts/run_r1b_capital_allocation_audit_v2.py`
+- `docs/planning/2026-04-29-r1b-capital-allocation-audit-v2.md`
+- `reports/research/r1b_capital_allocation_audit_v2_2026-04-29.json`
+
+**下一步**:
+- P0a：对 E4 被过滤交易做收益来源切片，确认 2024/2025 被过滤部分是否为主要盈利来源。
+- R2：设计激励型资金上限实验，不再使用 `MaxDD <= 35%` 作为唯一约束，可改用分年度、分阶段或收益/回撤分层目标。
+- 组合线暂缓：不直接推进 `Pinbar(E4) + T1`，先解决 E4 硬过滤过度牺牲收益的问题。
+
+### 2026-04-28 C2 Pinbar + T1 Portfolio Official Parity Check — CONDITIONAL FAIL
+
+**完成**: C2 官方口径组合验证，Pinbar via Backtester v3_pms + T1-R matched compounding
+
+**产出**:
+- `scripts/run_c2_pinbar_t1_portfolio_parity.py` — 组合验证脚本
+- `reports/research/c2_pinbar_t1_portfolio_parity_2026-04-28.json` — 完整结果 JSON
+- `docs/planning/2026-04-28-c2-pinbar-t1-portfolio-parity.md` — 分析报告
+
+**关键结果**:
+- Pinbar (official continuous): 3yr PnL +75 (vs C1 proxy +435)
+- Pinbar (yearly sum): 3yr PnL +1,492, 2023 -5,233, 2024 +3,701, 2025 +3,024
+- Pinbar MaxDD: 67.94% (vs C1 proxy 33.6%)
+- T1-R: 3yr PnL +2,039 (unchanged), Top 3 = 108.4%
+- Correlation (weekly MTM): 0.050 (接近零相关, vs C1 0.195)
+- P60_T40: 3yr PnL +861, MaxDD 39.36%, 2023 -2,931 (49% 改善)
+- P50_T50: 3yr PnL +1,057, MaxDD 32.65%, 2023 -2,216 (62% 改善)
+- **移除 T1 Top 3 后**: P60_T40 = -24 (变负!), P50_T50 = -48 (变负!)
+- P80_T20/P70_T30 移除 Top 3 后勉强正 (+26/+1)
+
+**判定**: CONDITIONAL FAIL — 组合 PnL↑/DD↓ 仍成立，但移除 T1 Top 3 后 P60_T40/P50_T50 变负
+
+**核心问题**:
+- Pinbar continuous PnL (+75) 太低 — compounding 下 2023 大亏严重拖累复利
+- T1 fragility 在 official 口径下更致命 — 组合对 T1 Top 3 依赖度从 C1 的可控变为 C2 的致命
+- 没有权重组合同时满足 "2023 改善 >=40%" 和 "移除 T1 Top 3 后不崩"
+
+### 2026-04-28 M1c E4 Donchian Distance Official Check — PASS
+
+**完成**: M1c E4 Donchian distance toxic filter 在 official/continuous 口径下验证
+
+**产出**:
+- `scripts/run_m1c_donchian_distance_official_check.py` — M1c 实验脚本
+- `reports/research/m1c_donchian_distance_official_check_2026-04-28.json` — 完整结果 JSON
+- `docs/planning/2026-04-28-m1c-donchian-distance-official-check.md` — 分析报告
+
+**关键结果**:
+- E0 (baseline continuous): 3yr PnL -7,230, MaxDD MTM 72.89%, trades 203
+- E4 (filter continuous): 3yr PnL -4,024, MaxDD MTM 40.48%, trades 148
+- 3yr PnL Δ: +3,206 (44.4% 改善)
+- 2023 loss reduction: 34.7% (>= 25%)
+- 2024/25 loss reduction: 58.1% (E0 baseline negative)
+- Trade reduction: 27.1% (<= 40%)
+- MaxDD MTM: 72.89% → 40.48% (-32.41pp)
+- Skipped trades (69): counterfactual PnL -2,886, avg -41.83 (确认有毒)
+- Sharpe: -2.517 → -1.961, Sortino: -2.154 → -1.831
+
+**判定**: PASS — 全部 5 项标准通过
+
+**跨口径一致性**: E4 在 M1 (proxy), M1b (parity year-by-year), M1c (parity continuous) 三种口径下均 PASS
+
+**下一步**:
+- 在正式 Backtester 中实现 donchian distance filter（当前 backtester 不支持）
+- 用 official backtester 跑 E4 continuous baseline
+- 如果 official E4 continuous PnL > 0，做 Pinbar(E4) + T1 组合验证
+
+### 2026-04-28 -- M1d Donchian Distance Filter 实现设计（design-only）
+
+1. ✅ 探索阶段：两个 Agent 子任务完成
+   - Agent 1: Filter 架构探索 — FilterContext 无 N-bar 历史，有状态 filter 通过 update_state() 积累内部状态
+   - Agent 2: Backtester 信号流探索 — kline_history 在 run_all() 中存在但只传给策略不传给过滤器
+2. ✅ 设计文档完成: `docs/planning/2026-04-28-m1d-donchian-distance-implementation-design.md`
+   - A: 推荐 — 有状态通用 filter `donchian_distance`，内部维护滚动窗口
+   - B: 三个备选方案（修改 FilterContext / Pinbar 专用 / 预计算），均不推荐
+   - C: 只需修改 `filter_factory.py`（新增 class + registry + create 分支）+ 新增测试文件
+   - D: 数据流设计（update_state 积累 high → check 时排除当前 bar 计算 dc_high）
+   - E: 参数模型（lookback=20, threshold=-0.016809, direction_aware=True, enabled=False）
+   - F: 未来函数防护（排除当前 K 线，只用前 N 根历史 high 计算 Donchian 上轨）
+   - G: 测试计划（10 单元 + 3 集成 + 2 回归 + 1 对齐）
+   - H: 建议现在实现，分两步（research/backtest 可用 → Pinbar(E4)+T1 组合验证）
+3. ✅ 关键设计决策:
+   - 不修改 FilterContext（不破坏现有架构）
+   - 不修改 strategy_engine.py / backtester.py（完全向后兼容）
+   - enabled=False 安全默认（sim1_eth_runtime 不受影响）
+   - 排除当前 K 线计算 Donchian（比 M1c 脚本更保守，防止未来函数）
+
+**下一步**:
+- 用户 review 设计文档
+- 确认后实施第一步（filter_factory.py 新增 DonchianDistanceFilterDynamic，~2h）
