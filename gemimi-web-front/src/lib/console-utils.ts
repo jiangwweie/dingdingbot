@@ -35,6 +35,12 @@ export function fmtInt(val: number | null | undefined): string {
   return Math.round(val).toString();
 }
 
+/** Format a monetary value with 2 decimal places and locale grouping. Null → "--". */
+export function fmtMoney(val: number | null | undefined, digits = 2): string {
+  if (val === null || val === undefined) return DASH;
+  return val.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
 // ─── Time formatting ──────────────────────────────────────────
 
 /** Compact time for tables: "HH:mm:ss" */

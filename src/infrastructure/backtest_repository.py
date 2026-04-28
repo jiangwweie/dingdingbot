@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
@@ -381,8 +382,10 @@ class BacktestReportRepository:
             timeframe
         )
 
-        # 生成报告 ID
-        report_id = f"rpt_{report.strategy_id}_{report.backtest_start}_{parameters_hash[:8]}"
+        # 生成报告 ID。
+        # parameters_hash 只表达“同一参数组合”，不能作为运行唯一性的一部分；
+        # 同一套参数允许被 Research job 反复复跑，所以 report_id 必须每次保存唯一。
+        report_id = f"rpt_{report.strategy_id}_{report.backtest_start}_{parameters_hash[:8]}_{uuid.uuid4().hex[:8]}"
 
         # 序列化 positions_summary
         positions_summary = self._serialize_positions_summary(report.positions) if report.positions else None

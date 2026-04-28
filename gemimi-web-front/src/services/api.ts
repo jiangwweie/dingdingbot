@@ -21,6 +21,7 @@ import {
   ResearchJobListResponse,
   ResearchJobStatus,
   ResearchRunListResponse,
+  ResearchRunReport,
   ResearchRunResult,
   ResearchSpec,
 } from '@/src/types';
@@ -32,11 +33,21 @@ type RuntimeSignalsPayload = {
     signal_id: string;
     symbol: string;
     timeframe: string;
-    direction: Signal['direction'];
+    direction: string;
     strategy_name: string;
     score?: number | null;
     status?: string | null;
     created_at: string;
+    entry_price?: number | null;
+    stop_loss?: number | null;
+    position_size?: number | null;
+    suggested_stop_loss?: number | null;
+    suggested_position_size?: number | null;
+    current_leverage?: number | null;
+    risk_reward_info?: string | null;
+    tags?: Array<{ name: string; value: string }> | null;
+    updated_at?: string | null;
+    expired_at?: string | null;
   }>;
 };
 
@@ -59,10 +70,19 @@ type RuntimeExecutionIntentsPayload = {
   intents: Array<{
     intent_id: string;
     symbol: string;
-    status: ExecutionIntent['status'];
+    status: string;
     created_at: string;
     updated_at?: string | null;
     related_signal_id?: string | null;
+    side?: string | null;
+    quantity?: number | null;
+    direction?: string | null;
+    intent_type?: string | null;
+    amount?: number | null;
+    entry_price?: number | null;
+    stop_loss?: number | null;
+    order_id?: string | null;
+    reject_reason?: string | null;
   }>;
 };
 
@@ -145,8 +165,14 @@ export async function getRuntimeSignals(): Promise<Signal[]> {
     direction: sig.direction,
     strategy_name: sig.strategy_name,
     score: sig.score || 0,
-    status: sig.status || '--',
-    created_at: sig.created_at
+    status: sig.status ?? undefined,
+    created_at: sig.created_at,
+    entry_price: sig.entry_price ?? undefined,
+    stop_loss: sig.stop_loss ?? undefined,
+    position_size: sig.position_size ?? undefined,
+    suggested_stop_loss: sig.suggested_stop_loss ?? undefined,
+    risk_reward_info: sig.risk_reward_info ?? undefined,
+    tags: sig.tags ?? undefined,
   }));
 }
 
@@ -175,11 +201,18 @@ export async function getRuntimeExecutionIntents(): Promise<ExecutionIntent[]> {
   const res = await request<RuntimeExecutionIntentsPayload>('/api/runtime/execution/intents');
   return (res.intents || []).map(intent => ({
     intent_id: intent.intent_id,
-    signal_id: intent.related_signal_id || '--',
+    signal_id: intent.related_signal_id || '',
     symbol: intent.symbol,
     status: intent.status as any,
     created_at: intent.created_at,
-    updated_at: intent.updated_at || intent.created_at
+    updated_at: intent.updated_at || intent.created_at,
+    direction: intent.direction || intent.side || undefined,
+    intent_type: intent.intent_type || undefined,
+    amount: intent.amount ?? intent.quantity ?? undefined,
+    entry_price: intent.entry_price ?? undefined,
+    stop_loss: intent.stop_loss ?? undefined,
+    order_id: intent.order_id || undefined,
+    reject_reason: intent.reject_reason || undefined,
   }));
 }
 
@@ -335,6 +368,10 @@ export async function getResearchRuns(
 
 export async function getResearchRun(runResultId: string): Promise<ResearchRunResult> {
   return request<ResearchRunResult>(`/api/research/runs/${runResultId}`);
+}
+
+export async function getResearchRunReport(runResultId: string): Promise<ResearchRunReport> {
+  return request<ResearchRunReport>(`/api/research/runs/${runResultId}/report`);
 }
 
 export async function createCandidateRecord(runResultId: string, candidateName: string, reviewNotes = ''): Promise<CandidateRecord> {

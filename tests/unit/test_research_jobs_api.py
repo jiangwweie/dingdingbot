@@ -172,6 +172,34 @@ class TestGetRunResult:
         assert resp.status_code == 404
 
 
+# ── GET /api/research/runs/{id}/report ───────────────────────────────
+
+class TestGetRunReport:
+    def test_get_report_success(self, client):
+        svc = _mock_service()
+        svc.get_run_report_payload.return_value = {"summary": {"total_return": 0.1}}
+        with patch("src.interfaces.api_research_jobs._build_service", return_value=svc):
+            resp = client.get("/api/research/runs/rr_api1/report")
+        assert resp.status_code == 200
+        assert resp.json()["summary"]["total_return"] == 0.1
+
+    def test_get_report_run_not_found_404(self, client):
+        svc = _mock_service()
+        svc.get_run_report_payload.return_value = None
+        with patch("src.interfaces.api_research_jobs._build_service", return_value=svc):
+            resp = client.get("/api/research/runs/nonexistent/report")
+        assert resp.status_code == 404
+
+    def test_get_report_artifact_missing_404(self, client):
+        from src.application.research_control_plane import ResearchRunnerError
+        svc = _mock_service()
+        svc.get_run_report_payload.side_effect = ResearchRunnerError("R-006", "Artifact missing")
+        with patch("src.interfaces.api_research_jobs._build_service", return_value=svc):
+            resp = client.get("/api/research/runs/rr_missing/report")
+        assert resp.status_code == 404
+        assert "Artifact missing" in resp.json()["message"]
+
+
 # ── POST /api/research/candidates ────────────────────────────────────
 
 class TestCreateCandidate:

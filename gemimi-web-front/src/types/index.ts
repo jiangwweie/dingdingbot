@@ -18,17 +18,33 @@ export interface RuntimeOverview {
   last_runtime_update_at: string;
   last_heartbeat_at: string;
   freshness_status: FreshnessStatus;
+  active_positions?: number;
+  active_signals?: number;
+  pending_intents?: number;
+  pending_recovery_tasks?: number;
+  total_equity?: number;
+  unrealized_pnl?: number;
 }
 
 export interface Signal {
   id: string;
   symbol: string;
   timeframe: string;
-  direction: 'LONG' | 'SHORT' | 'FLAT';
+  direction: string;
   strategy_name: string;
   score: number;
-  status: string;
+  status?: string | null;
   created_at: string;
+  entry_price?: number;
+  stop_loss?: number;
+  position_size?: number;
+  suggested_stop_loss?: number;
+  suggested_position_size?: number;
+  current_leverage?: number;
+  risk_reward_info?: string;
+  tags?: Array<{ name: string; value: string }>;
+  updated_at?: string;
+  expired_at?: string;
 }
 
 export interface Attempt {
@@ -47,9 +63,17 @@ export interface ExecutionIntent {
   intent_id: string;
   signal_id: string;
   symbol: string;
-  status: 'PENDING' | 'EXECUTING' | 'COMPLETED' | 'FAILED';
+  status: string;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
+  direction?: string;
+  intent_type?: string;
+  amount?: number;
+  signal_ref?: string;
+  entry_price?: number;
+  stop_loss?: number;
+  order_id?: string;
+  reject_reason?: string;
 }
 
 export interface Order {
@@ -247,6 +271,63 @@ export interface ResearchRunResult {
   artifact_index: Record<string, string>;
   source_profile: string | null;
   generated_at: string;
+  debug_equity_curve?: ResearchEquityPoint[];
+  positions?: ResearchPositionResult[];
+  artifact_path?: string;
+  git_commit?: string;
+}
+
+export interface ResearchEquityPoint {
+  timestamp: number;
+  equity: number | string;
+}
+
+export interface ResearchCloseEvent {
+  position_id?: string;
+  order_id?: string;
+  event_type?: string;
+  event_category?: string;
+  close_price?: string | number;
+  close_qty?: string | number;
+  close_pnl?: string | number;
+  close_fee?: string | number;
+  close_time?: number;
+  exit_reason?: string;
+}
+
+export interface ResearchPositionResult {
+  position_id?: string;
+  signal_id?: string;
+  symbol?: string;
+  direction?: string;
+  entry_price?: string | number;
+  exit_price?: string | number;
+  entry_time?: number;
+  entry_time_ms?: number;
+  exit_time?: number;
+  exit_time_ms?: number;
+  realized_pnl?: string | number;
+  exit_reason?: string;
+  commission?: string | number;
+}
+
+export interface ResearchRunReport {
+  total_return?: string | number | null;
+  max_drawdown?: string | number | null;
+  win_rate?: string | number | null;
+  total_trades?: string | number | null;
+  sharpe_ratio?: string | number | null;
+  sortino_ratio?: string | number | null;
+  total_pnl?: string | number | null;
+  final_balance?: string | number | null;
+  initial_balance?: string | number | null;
+  total_fees_paid?: string | number | null;
+  total_slippage_cost?: string | number | null;
+  total_funding_cost?: string | number | null;
+  debug_equity_curve?: ResearchEquityPoint[];
+  close_events?: ResearchCloseEvent[];
+  positions?: ResearchPositionResult[];
+  [key: string]: unknown;
 }
 
 export interface ResearchRunListResponse {

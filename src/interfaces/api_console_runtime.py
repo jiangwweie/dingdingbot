@@ -60,6 +60,8 @@ async def get_runtime_overview() -> RuntimeOverviewResponse:
         order_repo=getattr(api_module, "_order_repo", None),
         position_repo=getattr(api_module, "_position_repo", None),
         execution_intent_repo=getattr(api_module, "_execution_intent_repo", None),
+        execution_recovery_repo=getattr(api_module, "_execution_recovery_repo", None),
+        signal_repo=getattr(api_module, "_signal_repo", None),
     )
 
 

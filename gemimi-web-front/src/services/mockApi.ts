@@ -22,6 +22,7 @@ import {
   ResearchJobListResponse,
   ResearchJobStatus,
   ResearchRunListResponse,
+  ResearchRunReport,
   ResearchRunResult,
   ResearchSpec
 } from '@/src/types';
@@ -34,7 +35,7 @@ let refreshCount = 0;
 export async function getRuntimeOverview(): Promise<RuntimeOverview> {
   await delay(400);
   refreshCount++;
-  
+
   // Rotate freshness on each refresh to demonstrate the UI handling
   const freshnessOptions: FreshnessStatus[] = ['Fresh', 'Stale', 'Possibly Dead'];
   const currentFreshness = freshnessOptions[refreshCount % 3];
@@ -59,15 +60,23 @@ export async function getRuntimeOverview(): Promise<RuntimeOverview> {
     server_time: new Date().toISOString(),
     last_runtime_update_at: new Date(Date.now() - (isDead ? 300000 : (isStale ? 60000 : 2000))).toISOString(),
     last_heartbeat_at: new Date(Date.now() - (isDead ? 300000 : (isStale ? 60000 : 1000))).toISOString(),
-    freshness_status: currentFreshness
+    freshness_status: currentFreshness,
+    active_positions: 1,
+    active_signals: 2,
+    pending_intents: 0,
+    pending_recovery_tasks: isDead ? 3 : 0,
+    total_equity: 105240.50,
+    unrealized_pnl: 1240.50,
   };
 }
 
 export async function getRuntimeSignals(): Promise<Signal[]> {
   await delay(300);
   return [
-    { id: 'sig_1001', symbol: 'ETH/USDT', timeframe: '5m', direction: 'LONG', strategy_name: 'Alpha_V2', score: 0.85, status: 'FIRED', created_at: new Date(Date.now() - 30000).toISOString() },
-    { id: 'sig_1002', symbol: 'ETH/USDT', timeframe: '5m', direction: 'SHORT', strategy_name: 'Beta_Rev', score: 0.72, status: 'REJECTED', created_at: new Date(Date.now() - 180000).toISOString() },
+    { id: 'sig_1001', symbol: 'ETH/USDT:USDT', timeframe: '5m', direction: 'LONG', strategy_name: 'Pinbar EMA Trend', score: 0.85, status: 'executed', created_at: new Date(Date.now() - 30000).toISOString(), entry_price: 3245.50, stop_loss: 3210.00, position_size: 0.5, suggested_stop_loss: 3210.00, risk_reward_info: '1:2.5', tags: [{ name: 'EMA', value: 'Bullish' }] },
+    { id: 'sig_1002', symbol: 'BTC/USDT:USDT', timeframe: '15m', direction: 'SHORT', strategy_name: 'Engulfing ATR', score: 0.72, status: 'blocked_by_risk', created_at: new Date(Date.now() - 180000).toISOString(), entry_price: 94200.00, stop_loss: 94800.00, position_size: 0.02, suggested_stop_loss: 94800.00, risk_reward_info: '1:1.8', tags: [{ name: 'ATR', value: 'High Volatility' }] },
+    { id: 'sig_1003', symbol: 'SOL/USDT:USDT', timeframe: '1h', direction: 'LONG', strategy_name: 'Pinbar EMA Trend', score: 0.55, status: 'pending', created_at: new Date(Date.now() - 600000).toISOString(), entry_price: 178.20, stop_loss: 175.50, position_size: 5.0, suggested_stop_loss: 175.50, risk_reward_info: '1:2.0', tags: [{ name: 'EMA', value: 'Neutral' }] },
+    { id: 'sig_1004', symbol: 'BNB/USDT:USDT', timeframe: '4h', direction: 'LONG', strategy_name: 'Pinbar EMA Trend', score: 0.71, status: 'expired', created_at: new Date(Date.now() - 86400000).toISOString(), entry_price: 625.00, stop_loss: 618.00, position_size: 1.0, suggested_stop_loss: 618.00, risk_reward_info: '1:3.0', tags: [] },
   ];
 }
 
@@ -82,16 +91,19 @@ export async function getRuntimeAttempts(): Promise<Attempt[]> {
 export async function getRuntimeExecutionIntents(): Promise<ExecutionIntent[]> {
   await delay(200);
   return [
-    { intent_id: 'int_001', signal_id: 'sig_1001', symbol: 'ETH/USDT', status: 'COMPLETED', created_at: new Date(Date.now() - 28000).toISOString(), updated_at: new Date(Date.now() - 26000).toISOString() },
+    { intent_id: 'int_001', signal_id: 'sig_1001', symbol: 'ETH/USDT:USDT', status: 'filled', created_at: new Date(Date.now() - 28000).toISOString(), updated_at: new Date(Date.now() - 26000).toISOString(), direction: 'LONG', intent_type: 'ENTRY', amount: 0.5, entry_price: 3245.50, stop_loss: 3210.00, order_id: 'ord_901' },
+    { intent_id: 'int_002', signal_id: 'sig_1002', symbol: 'BTC/USDT:USDT', status: 'rejected', created_at: new Date(Date.now() - 7200000).toISOString(), updated_at: new Date(Date.now() - 7190000).toISOString(), direction: 'SHORT', intent_type: 'ENTRY', amount: 0.02, entry_price: 94200.00, stop_loss: 94800.00, reject_reason: 'Daily loss Limit Exceeded' },
+    { intent_id: 'int_003', signal_id: 'sig_1003', symbol: 'SOL/USDT:USDT', status: 'pending', created_at: new Date(Date.now() - 600000).toISOString(), direction: 'LONG', intent_type: 'ENTRY', amount: 5.0, entry_price: 178.20, stop_loss: 175.50 },
   ];
 }
 
 export async function getRuntimeOrders(): Promise<Order[]> {
   await delay(250);
   return [
-    { order_id: 'ord_901', role: 'ENTRY', symbol: 'ETH/USDT', status: 'FILLED', quantity: 1.5, price: 3450.25, updated_at: new Date(Date.now() - 25000).toISOString() },
-    { order_id: 'ord_902', role: 'TP', symbol: 'ETH/USDT', status: 'NEW', quantity: 1.5, price: 3500.00, updated_at: new Date(Date.now() - 25000).toISOString() },
-    { order_id: 'ord_903', role: 'SL', symbol: 'ETH/USDT', status: 'NEW', quantity: 1.5, price: 3400.00, updated_at: new Date(Date.now() - 25000).toISOString() },
+    { order_id: 'ord_901', role: 'ENTRY', raw_role: 'ENTRY', symbol: 'ETH/USDT:USDT', status: 'FILLED', quantity: 1.5, price: 3450.25, updated_at: new Date(Date.now() - 25000).toISOString() },
+    { order_id: 'ord_902', role: 'TP', raw_role: 'TP1', symbol: 'ETH/USDT:USDT', type: 'LIMIT', status: 'NEW', quantity: 0.75, price: 3500.00, updated_at: new Date(Date.now() - 25000).toISOString() },
+    { order_id: 'ord_903', role: 'TP', raw_role: 'TP2', symbol: 'ETH/USDT:USDT', type: 'LIMIT', status: 'NEW', quantity: 0.75, price: 3550.00, updated_at: new Date(Date.now() - 25000).toISOString() },
+    { order_id: 'ord_904', role: 'SL', raw_role: 'SL', symbol: 'ETH/USDT:USDT', type: 'STOP_MARKET', status: 'NEW', quantity: 1.5, price: 3400.00, updated_at: new Date(Date.now() - 25000).toISOString() },
   ];
 }
 
@@ -399,6 +411,63 @@ export async function getResearchRun(runResultId: string): Promise<ResearchRunRe
   const run = mockResearchRuns.find(row => row.id === runResultId);
   if (!run) throw new Error(`Research run result not found: ${runResultId}`);
   return run;
+}
+
+export async function getResearchRunReport(runResultId: string): Promise<ResearchRunReport> {
+  await delay(200);
+  const run = mockResearchRuns.find(row => row.id === runResultId);
+  if (!run) throw new Error(`Research run result not found: ${runResultId}`);
+  return {
+    ...run.summary_metrics,
+    initial_balance: 10000,
+    debug_equity_curve: [
+      { timestamp: Date.now() - 6 * 86400000, equity: 10000 },
+      { timestamp: Date.now() - 5 * 86400000, equity: 10120 },
+      { timestamp: Date.now() - 4 * 86400000, equity: 10060 },
+      { timestamp: Date.now() - 3 * 86400000, equity: 10840 },
+      { timestamp: Date.now() - 2 * 86400000, equity: 11220 },
+      { timestamp: Date.now() - 1 * 86400000, equity: 11800 },
+    ],
+    positions: [
+      {
+        position_id: 'pos_mock_001',
+        signal_id: 'sig_mock_001',
+        symbol: 'ETH/USDT:USDT',
+        direction: 'LONG',
+        entry_price: '3200',
+        exit_price: '3368',
+        entry_time: Date.now() - 5 * 86400000,
+        exit_time: Date.now() - 4 * 86400000,
+        realized_pnl: '420',
+        exit_reason: 'TP2',
+      },
+      {
+        position_id: 'pos_mock_002',
+        signal_id: 'sig_mock_002',
+        symbol: 'ETH/USDT:USDT',
+        direction: 'LONG',
+        entry_price: '3420',
+        exit_price: '3385',
+        entry_time: Date.now() - 3 * 86400000,
+        exit_time: Date.now() - 2 * 86400000,
+        realized_pnl: '-110',
+        exit_reason: 'SL',
+      },
+    ],
+    close_events: [
+      {
+        position_id: 'pos_mock_001',
+        order_id: 'ord_mock_tp1',
+        event_type: 'TP1',
+        close_price: '3260',
+        close_qty: '1.2',
+        close_pnl: '120',
+        close_fee: '1.2',
+        close_time: Date.now() - 4 * 86400000,
+        exit_reason: 'TP1',
+      },
+    ],
+  };
 }
 
 export async function createCandidateRecord(runResultId: string, candidateName: string, reviewNotes = ''): Promise<CandidateRecord> {

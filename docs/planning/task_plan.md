@@ -1021,3 +1021,69 @@ Sim-0 详细任务拆分（归档参考）：
    - 前端 API adapter 测试 18 passed
 4. 下一步：
    - 由外部测试窗口用同一年份 / 同参数重跑旧脚本与 Research Control Plane，比较交易数、方向分布、TP/SL 分布与收益差异
+
+### 2026-04-27 Research UI 可用性增强
+
+1. ✅ 当前策略研究模块不推倒重做，采用“现有页面增强 + 少量只读数据补口”的路线
+2. ✅ 已新增设计文档：
+   - `docs/planning/architecture/2026-04-27-research-ui-usability-enhancement-plan.md`
+3. ✅ 已完成第一阶段核心骨架：
+   - `/research/new` 表单中文化与基线说明
+   - `/research/jobs` 改造为“回测历史”，增加概览统计、参数摘要、收益/回撤/胜率/交易数
+   - `/research/runs/:run_result_id` 改造为回测研究报告骨架，展示实际生效参数、权益曲线、逐笔交易、候选策略入口
+   - 新增只读 `GET /api/research/runs/{run_result_id}/report` 读取 result artifact
+4. 当前不做：
+   - 新增独立研究首页
+   - 废弃旧回测/候选页面
+   - 引入第三方图表依赖
+   - 合并新旧 candidate 数据模型
+
+### 2026-04-27 Research UI v2.0 PRD 优先级调整
+
+1. ✅ 已吸收 PM 版 PRD：
+   - 目标从“页面能展示”升级为“围绕假设-验证-迭代的研究闭环”
+   - 工作流优先级高于图表技术选型
+2. ✅ 规划已调整：
+   - Clone & Tweak 提前到 Phase 1
+   - 回测历史从流水账改为研究资产列表
+   - 回测详情定位为“策略诊疗室”
+   - 候选策略库定位为资产沉淀池
+   - 对比页解决“选不出对象”的核心交互问题
+3. ✅ 技术原则调整：
+   - 不再以临时 SVG 作为长期路线
+   - 正式图表能力优先按 ECharts 规划
+   - 允许 mock 数据先支撑完整 UI 体验，再逐步接真实 artifact
+4. 下一步实施边界：
+   - 前端进入 v2 产品化改造，适合由 Claude 按明确 PRD 执行
+   - Codex 保持架构审查与验收把关
+
+### 2026-04-27 Runtime Cockpit 体验升级规划
+
+1. ✅ 已吸收 Runtime 模块 PRD：
+   - Runtime 不再按 DevOps 面板设计，而应定位为交易驾驶舱
+   - 核心问题从“服务是否在线”升级为“资金是否安全、执行是否失控、异常是否可接管”
+2. ✅ 已新增规划文档：
+   - `docs/planning/architecture/2026-04-27-runtime-cockpit-experience-upgrade-plan.md`
+3. ✅ 当前排序：
+   - P0：SIM/LIVE 环境条、资金风险首屏、告警横幅、Portfolio 持仓风险增强
+   - P1：Signals -> Intent -> Orders -> Positions 因果链与滑点展示
+   - P2：暂停新开仓、单仓市价平仓等人工接管基础
+   - P3：API latency、rate limit、熔断器 reset、recovery task 可视化
+4. ⛔ 当前明确不做：
+   - 第一阶段不直接开放一键清仓
+   - 不把 runtime profile 改写能力放到前端
+   - 不把工程 hash / backend implementation details 放回 Runtime 首屏
+
+### 2026-04-27 前端双轨并行执行计划
+
+1. ✅ 已确认 Research 与 Runtime 可以双轨并行：
+   - Research：策略研究台，负责假设、回测、复用、候选
+   - Runtime：交易驾驶舱，负责资金、风险、执行链、异常接管
+2. ✅ 已新增并行计划文档：
+   - `docs/planning/architecture/2026-04-27-frontend-dual-track-execution-plan.md`
+3. ✅ 并行窗口划分：
+   - Claude 窗口 1：Research UI v2，所有权限定在 `gemimi-web-front/src/pages/research/*`
+   - Claude 窗口 2：Runtime Cockpit 只读增强，所有权限定在 `gemimi-web-front/src/pages/runtime/*`、`Signals.tsx`、`Execution.tsx`
+4. ⚠️ 共享文件约束：
+   - `api.ts`、`types/index.ts`、`AppLayout.tsx`、`package.json` 只能小范围追加式修改
+   - 两个窗口不得同时重构共享文件

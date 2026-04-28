@@ -78,6 +78,10 @@ class TestRunJobSuccess:
         mock_report.model_dump.return_value = {
             "total_return": 0.15,
             "max_drawdown": -0.08,
+            "debug_max_drawdown_detail": {
+                "peak_ts": 1700020000000,
+                "trough_ts": 1700060000000,
+            },
             "win_rate": 0.6,
             "total_trades": 42,
             "sharpe_ratio": 1.5,
@@ -104,6 +108,8 @@ class TestRunJobSuccess:
         assert updated_job.status == ResearchJobStatus.SUCCEEDED
         assert updated_job.run_result_id == result.id
         assert updated_job.progress_pct == 100
+        assert result.summary_metrics["max_drawdown_start_ms"] == 1700020000000
+        assert result.summary_metrics["max_drawdown_end_ms"] == 1700060000000
 
     @pytest.mark.asyncio
     async def test_run_result_persisted(self, repo):

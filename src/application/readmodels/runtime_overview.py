@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional
 
 from src.application.readmodels.console_models import RuntimeOverviewResponse
@@ -37,6 +38,55 @@ def _resolve_backend_name(repo: Optional[Any], default: str) -> str:
     return default
 
 
+def _to_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _safe_pending_intent_count(execution_intent_repo: Optional[Any]) -> Optional[int]:
+    if execution_intent_repo is None or not hasattr(execution_intent_repo, "list_unfinished"):
+        return None
+    try:
+        return len(await execution_intent_repo.list_unfinished())
+    except Exception:
+        return None
+
+
+async def _safe_active_signal_count(signal_repo: Optional[Any]) -> Optional[int]:
+    if signal_repo is None or not hasattr(signal_repo, "get_signals"):
+        return None
+    try:
+        result = await signal_repo.get_signals(limit=500)
+    except Exception:
+        return None
+    if not isinstance(result, dict):
+        return None
+    data = result.get("data", [])
+    if not isinstance(data, list):
+        return None
+    active_statuses = {"PENDING", "ACTIVE", "pending", "active"}
+    return sum(1 for item in data if isinstance(item, dict) and item.get("status") in active_statuses)
+
+
+async def _safe_pending_recovery_count(execution_recovery_repo: Optional[Any]) -> Optional[int]:
+    if execution_recovery_repo is None:
+        return None
+    try:
+        if hasattr(execution_recovery_repo, "list_blocking"):
+            return len(await execution_recovery_repo.list_blocking())
+        if hasattr(execution_recovery_repo, "list_active"):
+            return len(await execution_recovery_repo.list_active())
+    except Exception:
+        return None
+    return None
+
+
 class RuntimeOverviewReadModel:
     async def build(
         self,
@@ -49,6 +99,8 @@ class RuntimeOverviewReadModel:
         order_repo: Optional[Any] = None,
         position_repo: Optional[Any] = None,
         execution_intent_repo: Optional[Any] = None,
+        execution_recovery_repo: Optional[Any] = None,
+        signal_repo: Optional[Any] = None,
     ) -> RuntimeOverviewResponse:
         now = datetime.now(timezone.utc)
         server_time = now.isoformat().replace("+00:00", "Z")
@@ -63,12 +115,18 @@ class RuntimeOverviewReadModel:
             else:
                 age_seconds = 999999.0
             freshness_status = _freshness_from_age(age_seconds)
+            active_positions = len(getattr(account_snapshot, "positions", []) or [])
+            total_equity = _to_float(getattr(account_snapshot, "total_balance", None))
+            unrealized_pnl = _to_float(getattr(account_snapshot, "unrealized_pnl", None))
         else:
             # Startup warmup: no snapshot yet
             runtime_update_at = _iso_now()
             heartbeat_at = runtime_update_at
             age_seconds = 0.0
             freshness_status = "Fresh"  # Pending first snapshot, not dead
+            active_positions = None
+            total_equity = None
+            unrealized_pnl = None
 
         if runtime_config_provider is not None:
             resolved = runtime_config_provider.resolved_config
@@ -161,6 +219,10 @@ class RuntimeOverviewReadModel:
         else:
             reconciliation_summary = "not_run"
 
+        active_signals = await _safe_active_signal_count(signal_repo)
+        pending_intents = await _safe_pending_intent_count(execution_intent_repo)
+        pending_recovery_tasks = await _safe_pending_recovery_count(execution_recovery_repo)
+
         return RuntimeOverviewResponse(
             profile=profile,
             version=version,
@@ -179,4 +241,10 @@ class RuntimeOverviewReadModel:
             last_runtime_update_at=runtime_update_at,
             last_heartbeat_at=heartbeat_at,
             freshness_status=freshness_status,
+            active_positions=active_positions,
+            active_signals=active_signals,
+            pending_intents=pending_intents,
+            pending_recovery_tasks=pending_recovery_tasks,
+            total_equity=total_equity,
+            unrealized_pnl=unrealized_pnl,
         )

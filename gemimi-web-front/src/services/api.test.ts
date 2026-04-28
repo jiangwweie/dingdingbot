@@ -6,10 +6,11 @@ import {
   getResearchRuns,
   getResearchRun,
   getResearchJob,
+  getResearchRunReport,
   createCandidateRecord,
   getCandidateRecords,
 } from './api';
-import type { ResearchSpec, ResearchJobAccepted, ResearchJobListResponse, ResearchRunListResponse, ResearchRunResult, ResearchJob, CandidateRecord } from '@/src/types';
+import type { ResearchSpec, ResearchJobAccepted, ResearchJobListResponse, ResearchRunListResponse, ResearchRunResult, ResearchJob, CandidateRecord, ResearchRunReport } from '@/src/types';
 
 describe('getRuntimeOrders', () => {
   beforeEach(() => {
@@ -274,6 +275,27 @@ describe('getResearchJob', () => {
     expect(result.id).toBe('rj_single');
     const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe('http://localhost:8000/api/research/jobs/rj_single');
+  });
+});
+
+describe('getResearchRunReport', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('calls /api/research/runs/{id}/report', async () => {
+    const report: ResearchRunReport = {
+      total_return: 0.1,
+      total_trades: 10,
+      debug_equity_curve: [],
+      positions: [],
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => report });
+
+    const result = await getResearchRunReport('rr_test_report');
+    expect(result.total_trades).toBe(10);
+    const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe('http://localhost:8000/api/research/runs/rr_test_report/report');
   });
 });
 

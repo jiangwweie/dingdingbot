@@ -346,6 +346,42 @@ class TestRepositoryCRUD:
 
         assert len(reports) >= 1
 
+    async def test_duplicate_parameter_runs_create_distinct_reports(self, sample_pms_report):
+        """Same strategy/window/parameters can be rerun and stored as separate reports."""
+        strategy_snapshot = '{"triggers": [{"type": "pinbar"}], "filters": []}'
+        symbol = "BTC/USDT:USDT"
+        timeframe = "15m"
+
+        cursor = await self.repo._db.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM backtest_reports
+            WHERE strategy_id = ? AND backtest_start = ?
+            """,
+            (sample_pms_report.strategy_id, sample_pms_report.backtest_start),
+        )
+        before = (await cursor.fetchone())["cnt"]
+
+        await self.repo.save_report(sample_pms_report, strategy_snapshot, symbol, timeframe)
+        await self.repo.save_report(sample_pms_report, strategy_snapshot, symbol, timeframe)
+
+        cursor = await self.repo._db.execute(
+            """
+            SELECT id, parameters_hash
+            FROM backtest_reports
+            WHERE strategy_id = ? AND backtest_start = ?
+            ORDER BY created_at ASC
+            """,
+            (sample_pms_report.strategy_id, sample_pms_report.backtest_start),
+        )
+        rows = await cursor.fetchall()
+        new_rows = rows[before:]
+
+        assert len(rows) == before + 2
+        assert len(new_rows) == 2
+        assert new_rows[0]["id"] != new_rows[1]["id"]
+        assert new_rows[0]["parameters_hash"] == new_rows[1]["parameters_hash"]
+
     async def test_delete_report(self, sample_pms_report):
         """Test deleting a report."""
         strategy_snapshot = '{"triggers": [{"type": "pinbar"}], "filters": []}'

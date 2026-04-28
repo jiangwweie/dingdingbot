@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { RefreshCw, Activity, Zap, HeartPulse, FileText, LayoutDashboard, GitBranch, History, Scale, Sun, Moon, Monitor, WalletCards, CalendarClock, Settings, PlayCircle } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import { environmentModeLabel, environmentBadgeStyle, type EnvironmentMode } from '@/src/lib/runtime-format';
 import { useTheme } from './ThemeContext';
 
 // Context to trigger refreshes across pages
@@ -66,10 +67,10 @@ export default function AppLayout() {
       domain: '策略研究 (Research)',
       links: [
         { name: '新建回测', to: '/research/new', icon: PlayCircle },
-        { name: '研究任务', to: '/research/jobs', icon: History },
+        { name: '回测历史', to: '/research/jobs', icon: History },
         { name: '候选策略', to: '/research/candidates', icon: FileText },
         { name: '回测上下文', to: '/research/replay/default', icon: GitBranch, hideDisabled: true },
-        { name: '历史报告', to: '/research/backtests', icon: History },
+        { name: '旧版报告', to: '/research/backtests', icon: History },
         { name: '策略对比', to: '/research/compare', icon: Scale },
       ]
     },
@@ -86,19 +87,22 @@ export default function AppLayout() {
       <div className="flex h-screen w-full overflow-hidden font-sans text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950">
         
         {/* Sidebar Navigation */}
-        <aside className="w-60 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex flex-col z-20">
-          <div className="p-6">
-            <h1 className="text-xs font-bold tracking-widest text-blue-400 uppercase">交易控制台</h1>
-            <p className="text-[10px] text-zinc-500 mt-1 uppercase font-mono tracking-tighter">Sim-1 (本地模拟)</p>
+        <aside className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 flex flex-col z-20">
+          <div className="p-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-900/80">
+            <h1 className="text-[11px] font-bold tracking-widest text-blue-500 uppercase">Trading Desk</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+              <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-tighter">Sim-1 (Local)</p>
+            </div>
           </div>
           
-          <nav className="flex-1 px-4 space-y-6 overflow-y-auto">
+          <nav className="flex-1 px-2 py-4 space-y-6 overflow-y-auto">
             {navItems.map((group) => (
               <div key={group.domain}>
-                <p className="px-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">
+                <p className="px-2 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5">
                   {group.domain}
                 </p>
-                <ul className="space-y-1">
+                <ul className="space-y-0.5">
                   {group.links.map(link => {
                     if (link.hideDisabled) return null; // simplify for now
                     const Icon = link.icon;
@@ -107,13 +111,13 @@ export default function AppLayout() {
                         <NavLink
                           to={link.to}
                           className={({ isActive }) => cn(
-                            "flex items-center gap-3 px-2 py-1.5 text-sm rounded transition-colors border-l-2",
+                            "flex items-center gap-2 px-2 py-[5px] text-[11px] font-medium rounded-sm transition-colors border-l-2",
                             isActive 
-                              ? "bg-blue-600/10 text-blue-400 border-blue-500" 
-                              : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:text-zinc-200 border-transparent"
+                              ? "bg-blue-600/10 text-blue-500 dark:text-blue-400 border-blue-500 font-bold" 
+                              : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 border-transparent"
                           )}
                         >
-                          <Icon className="w-4 h-4" />
+                          <Icon className="w-3.5 h-3.5" />
                           {link.name}
                         </NavLink>
                       </li>
@@ -124,41 +128,45 @@ export default function AppLayout() {
             ))}
           </nav>
           
-          <div className="p-4 mt-auto border-t border-zinc-200 dark:border-zinc-800">
+          <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-900/50">
             <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-              <span className="text-[10px] text-zinc-600 dark:text-zinc-400 font-mono">INSTANCE_ALPHA_01</span>
+              <span className="text-[9px] text-zinc-600 dark:text-zinc-400 font-mono tracking-widest">ALPHA_01_ACTIVE</span>
             </div>
           </div>
         </aside>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-[#09090b]">
           {/* Top Header */}
-          <header className="h-14 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex items-center justify-between px-6 z-10">
-            <div className="flex items-center space-x-4">
-               <h2 className="text-sm font-semibold tracking-tight capitalize">{location.pathname.split('/').pop()?.replace('-', ' ')}</h2>
-               <span className="px-2 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 rounded border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400">ID: 8824-X</span>
+          <header className="h-[38px] border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 flex items-center justify-between px-4 z-10 backdrop-blur-sm">
+            <div className="flex items-center space-x-3">
+               <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-700 dark:text-zinc-300">
+                 {location.pathname.split('/').pop()?.replace('-', ' ')}
+               </h2>
+               <div className="h-3.5 w-px bg-zinc-300 dark:bg-zinc-700"></div>
+               <span className="px-1.5 py-0.5 text-[9px] font-mono bg-zinc-200/50 dark:bg-zinc-800/50 rounded border border-zinc-300/50 dark:border-zinc-700/50 text-zinc-600 dark:text-zinc-400 font-bold">
+                 REQ: 8824-X
+               </span>
             </div>
 
-            <div className="flex items-center space-x-6">
-              <ThemeToggle />
-              <div className="flex flex-col items-end">
-                <span className="text-[10px] text-zinc-500 uppercase font-bold">仅支持手动刷新</span>
-                <span className="text-[11px] text-blue-400 font-mono">使用按钮 &rarr;</span>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <span className="text-[10px] text-zinc-500 font-mono">Manual Sync</span>
+                <button 
+                  onClick={handleManualRefresh}
+                  className="flex items-center space-x-1.5 px-2 py-1 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-300 dark:border-zinc-700 rounded-sm transition-colors text-zinc-700 dark:text-zinc-300"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span className="text-[10px] font-bold uppercase">Refresh</span>
+                </button>
               </div>
-              <button 
-                onClick={handleManualRefresh}
-                className="flex items-center space-x-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-300 dark:border-zinc-700 rounded transition-colors text-zinc-700 dark:text-zinc-300"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span className="text-xs font-medium">手动刷新</span>
-              </button>
+              <div className="h-4 w-px bg-zinc-300 dark:bg-zinc-700"></div>
+              <ThemeToggle />
             </div>
           </header>
 
           {/* Page Content */}
-          <main className="flex-1 overflow-y-auto p-6">
+          <main className="flex-1 overflow-y-auto p-4 md:p-6">
             <Outlet />
           </main>
         </div>

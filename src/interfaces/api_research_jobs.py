@@ -137,6 +137,21 @@ async def get_research_job(job_id: str) -> ResearchJob:
         await service.repository.close()
 
 
+@router.get("/runs/{run_result_id}/report")
+async def get_research_run_report(run_result_id: str) -> dict:
+    service = await _build_service(with_runner=False)
+    try:
+        try:
+            report = await service.get_run_report_payload(run_result_id)
+        except ResearchRunnerError as exc:
+            raise HTTPException(status_code=404, detail=exc.message)
+        if report is None:
+            raise HTTPException(status_code=404, detail=f"Research run result not found: {run_result_id}")
+        return report
+    finally:
+        await service.repository.close()
+
+
 @router.get("/runs/{run_result_id}", response_model=ResearchRunResult)
 async def get_research_run_result(run_result_id: str) -> ResearchRunResult:
     service = await _build_service(with_runner=False)

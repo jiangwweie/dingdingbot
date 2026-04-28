@@ -6,14 +6,37 @@ import { Card, CardContent } from '@/src/components/ui/Card';
 import { Badge } from '@/src/components/ui/Badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/src/components/ui/Table';
 import { Loader2, AlertCircle } from 'lucide-react';
-import { fmtDash, fmtDateTime, fmtDec } from '@/src/lib/console-utils';
+import { DASH, fmtDash, fmtDateTime, fmtDec } from '@/src/lib/console-utils';
 import { useTableSort, compareTimestamp, comparePrimitive, FilterSelect, EmptyFilterRow, emptyDataCard } from '@/src/lib/table-utils';
+import { signalStatusLabel, directionLabel, truncateId } from '@/src/lib/runtime-format';
 
+// ── Direction filter with Chinese labels ──────────────────────────
 const DIRECTION_OPTIONS = [
   { value: 'ALL', label: '全部方向' },
-  { value: 'LONG', label: 'LONG' },
-  { value: 'SHORT', label: 'SHORT' },
+  { value: 'LONG', label: '做多 (LONG)' },
+  { value: 'SHORT', label: '做空 (SHORT)' },
 ];
+
+// ── Status badge variant mapping ──────────────────────────────────
+function statusBadgeVariant(status: string | null | undefined): 'default' | 'success' | 'warning' | 'danger' | 'info' | 'outline' {
+  switch ((status || '').toLowerCase()) {
+    case 'executed': return 'success';
+    case 'active': return 'info';
+    case 'blocked_by_risk': return 'danger';
+    case 'blocked': return 'danger';
+    case 'expired': return 'outline';
+    case 'pending': return 'warning';
+    case 'superseded': return 'outline';
+    case 'failed': return 'danger';
+    default: return 'default';
+  }
+}
+
+/** Show numeric value or dash for optional price/size fields. */
+function fmtOptionalNumber(val: number | null | undefined): string {
+  if (val === null || val === undefined) return DASH;
+  return fmtDec(val);
+}
 
 export default function Signals() {
   const { refreshCount } = useRefreshContext();
@@ -35,15 +58,21 @@ export default function Signals() {
     return () => { active = false; };
   }, [refreshCount]);
 
+  // Detect whether any signal has a meaningful status field
+  const hasStatusData = useMemo(() => {
+    if (signals.length === 0) return false;
+    return signals.some(s => s.status && s.status.trim() !== '');
+  }, [signals]);
+
   const filtered = useMemo(() => {
     let rows = signals;
-    if (directionFilter !== 'ALL') rows = rows.filter(s => s.direction === directionFilter);
+    if (directionFilter !== 'ALL') rows = rows.filter(s => s.direction?.toUpperCase() === directionFilter);
     return [...rows].sort((a, b) => {
       switch (sort.sortField) {
         case 'created_at': return compareTimestamp(a.created_at, b.created_at, sort.sortOrder);
         case 'symbol': return comparePrimitive(a.symbol, b.symbol, sort.sortOrder);
-        case 'direction': return comparePrimitive(a.direction, b.direction, sort.sortOrder);
         case 'score': return comparePrimitive(a.score, b.score, sort.sortOrder);
+        case 'status': return comparePrimitive(a.status, b.status, sort.sortOrder);
         default: return 0;
       }
     });
@@ -55,7 +84,7 @@ export default function Signals() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold tracking-tight">信号列表</h2>
+        <h2 className="text-xl font-bold tracking-tight">信号列表 (Signals)</h2>
         <span className="text-sm text-zinc-500">{signals.length} 条记录</span>
       </div>
 
@@ -77,35 +106,45 @@ export default function Signals() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-zinc-50 dark:bg-zinc-900/50">
-                  <TableHead className="cursor-pointer select-none" onClick={() => sort.toggleSort('created_at')}>时间{sort.sortIndicator('created_at')}</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => sort.toggleSort('created_at')}>生成时间{sort.sortIndicator('created_at')}</TableHead>
                   <TableHead className="cursor-pointer select-none" onClick={() => sort.toggleSort('symbol')}>交易对{sort.sortIndicator('symbol')}</TableHead>
                   <TableHead>周期</TableHead>
-                  <TableHead className="cursor-pointer select-none" onClick={() => sort.toggleSort('direction')}>方向{sort.sortIndicator('direction')}</TableHead>
-                  <TableHead>入场价</TableHead>
+                  <TableHead>方向</TableHead>
+                  <TableHead>入场价/建议价</TableHead>
                   <TableHead>止损</TableHead>
-                  <TableHead>仓位</TableHead>
+                  <TableHead>建议仓位</TableHead>
                   <TableHead>策略</TableHead>
                   <TableHead className="cursor-pointer select-none" onClick={() => sort.toggleSort('score')}>评分{sort.sortIndicator('score')}</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => sort.toggleSort('status')}>状态/结局{sort.sortIndicator('status')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.length === 0 ? (
-                  <EmptyFilterRow colSpan={9} />
+                  <EmptyFilterRow colSpan={10} />
                 ) : filtered.map((s, idx) => (
-                  <TableRow key={idx}>
+                  <TableRow key={s.id ?? idx} title={s.id ? `ID: ${s.id}` : undefined}>
                     <TableCell className="font-mono text-xs">{fmtDateTime(s.created_at)}</TableCell>
                     <TableCell className="font-mono font-medium text-blue-400">{fmtDash(s.symbol)}</TableCell>
                     <TableCell className="font-mono">{fmtDash(s.timeframe)}</TableCell>
                     <TableCell>
                       <Badge variant={s.direction === 'LONG' ? 'success' : 'danger'}>
-                        {fmtDash(s.direction)}
+                        {directionLabel(s.direction)}
                       </Badge>
                     </TableCell>
-                    <TableCell className="font-mono">{fmtDash(s.entry_price)}</TableCell>
-                    <TableCell className="font-mono">{fmtDash(s.stop_loss)}</TableCell>
-                    <TableCell className="font-mono">{fmtDash(s.position_size)}</TableCell>
+                    <TableCell className="font-mono">{fmtOptionalNumber(s.entry_price)}</TableCell>
+                    <TableCell className="font-mono">{fmtOptionalNumber(s.stop_loss)}</TableCell>
+                    <TableCell className="font-mono">{fmtOptionalNumber(s.position_size)}</TableCell>
                     <TableCell className="text-xs">{fmtDash(s.strategy_name)}</TableCell>
                     <TableCell className="font-mono">{fmtDec(s.score)}</TableCell>
+                    <TableCell>
+                      {hasStatusData ? (
+                        <Badge variant={statusBadgeVariant(s.status)}>
+                          {signalStatusLabel(s.status)}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-zinc-400 italic">当前接口未提供结局状态</span>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

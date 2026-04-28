@@ -1346,3 +1346,196 @@
    - `./venv/bin/python -m pytest tests/unit/test_research_control_plane_service.py -v` → 22 passed
 5. 下一步建议：
    - 外部测试窗口重跑旧脚本与 Research Control Plane 同一窗口对比，确认剩余差异是否来自数据源、成交模型或旧脚本特殊逻辑
+
+### 2026-04-27 Research UI 可用性增强第一阶段
+
+1. ✅ 已完成现有页面盘点并确认路线：
+   - 不废弃重做
+   - 不新增研究首页抢主入口
+   - 先增强 `/research/new`、`/research/jobs`、`/research/runs/:id`
+2. ✅ 已新增方案文档：
+   - `docs/planning/architecture/2026-04-27-research-ui-usability-enhancement-plan.md`
+3. ✅ 已新增后端只读端点：
+   - `GET /api/research/runs/{run_result_id}/report`
+   - 读取 `result.json` artifact，用于前端展示权益曲线和逐笔交易
+4. ✅ 已增强前端：
+   - 导航 `研究任务` -> `回测历史`
+   - `/research/new` 中文化，并说明默认 ETH 基线
+   - `/research/jobs` 增加概览统计、参数摘要、收益/回撤/胜率/交易数
+   - `/research/runs/:id` 展示实际生效参数、权益曲线、逐笔交易、候选策略入口
+5. ✅ 已执行验证：
+   - `./venv/bin/python -m py_compile src/application/research_control_plane.py src/interfaces/api_research_jobs.py` -> passed
+   - `./venv/bin/python -m pytest tests/unit/test_research_control_plane_service.py tests/unit/test_research_jobs_api.py -v` -> 45 passed
+   - `cd gemimi-web-front && npm run lint` -> passed
+   - `cd gemimi-web-front && npx vitest run src/services/api.test.ts` -> 18 passed
+6. 待补杂活：
+   - API adapter 测试补 `getResearchRunReport`
+   - 后端 API 单测补 `/runs/{id}/report`
+   - 浏览器冒烟确认权益曲线和逐笔交易渲染
+
+### 2026-04-27 Research UI v2.0 PRD 已沉淀
+
+1. ✅ 已根据 PM 版 PRD 更新研究台 UI 规划：
+   - `docs/planning/architecture/2026-04-27-research-ui-usability-enhancement-plan.md`
+2. ✅ 已调整优先级：
+   - Phase 1：Clone & Tweak、回测历史资产化、详情页策略诊疗室
+   - Phase 2：正式图表能力（ECharts 优先）与端到端验证
+   - Phase 3：候选策略资产化
+   - Phase 4：策略对比与研究资产管理
+3. ✅ 当前执行策略：
+   - 由 Codex 负责产品/架构规划与验收标准
+   - 前端页面 v2 改造属于明确实施任务，可交 Claude 执行
+   - 技术选型服务产品体验，不再把图表库争论放在主线中心
+
+### 2026-04-27 Runtime Cockpit PRD 已纳入规划
+
+1. ✅ 已根据 Runtime 模块产品 PRD 新增规划文档：
+   - `docs/planning/architecture/2026-04-27-runtime-cockpit-experience-upgrade-plan.md`
+2. ✅ 已明确 Runtime 与 Research 的产品边界：
+   - Research = 实验室，回答策略是否值得继续研究
+   - Runtime = 驾驶舱，回答资金和执行链是否安全
+3. ✅ 已确认 Runtime 优先级：
+   - 先做资金/风险/告警/环境隔离
+   - 再做信号到执行的因果链
+   - 最后分期做人工接管能力
+4. ✅ 已明确安全降级：
+   - 第一阶段不直接做一键清仓
+   - 先规划暂停新开仓和单仓平仓
+   - 所有危险动作必须依赖后端幂等、审计与状态确认
+
+### 2026-04-27 前端双轨并行已定稿
+
+1. ✅ 已确认 Research 和 Runtime 两条前端产品线可以并行：
+   - 页面目录天然隔离
+   - 用户目标不同
+   - 数据域不同
+   - 第一阶段 Runtime 不做危险写操作
+2. ✅ 已新增执行计划：
+   - `docs/planning/architecture/2026-04-27-frontend-dual-track-execution-plan.md`
+3. ✅ 已完成当前页面勘察：
+   - Research 页面集中在 `gemimi-web-front/src/pages/research/*`
+   - Runtime 页面集中在 `gemimi-web-front/src/pages/runtime/*`
+   - `/signals` 和 `/execution` 当前独立页面已存在，可作为 Runtime 因果链窗口处理
+4. 下一步：
+   - 交给 Claude 分两个窗口并行实施
+   - Codex 后续做二次审查和产品验收
+
+### 2026-04-28 前端双轨改造审查与修复
+
+1. ✅ 已完成 Research / Runtime 前端改造的第一轮审查。
+2. ✅ 已修复明确缺陷：
+   - `RunDetail` 路由参数从错误的 `id` 改回 `run_result_id`
+   - `RunDetail` 图表和逐笔交易改为优先使用 `/api/research/runs/{id}/report` artifact 数据
+   - `加入候选策略`按钮从空转改为真实调用 `createCandidateRecord`
+   - Runtime 状态中文映射兼容大写/小写状态值
+   - Execution intent 映射兼容后端 `side` / `quantity` 字段
+   - `SIM-1` 环境识别修正为 SIM
+   - 回测历史的“对比这些回测”不再跳转到未接入的假闭环，改为禁用提示
+   - 清理 `.next` / `next-env.d.ts` / `tsconfig.tsbuildinfo` 生成物污染
+3. ✅ 本地验证：
+   - `npm run lint` 通过
+   - `npx vitest run src/services/api.test.ts src/pages/runtime/Execution.test.tsx` → 22 passed
+   - `npm run build` 通过
+   - `pytest tests/unit/test_research_jobs_api.py -v` → 26 passed
+   - `pytest tests/unit/test_console_runtime_routes.py tests/unit/test_console_runtime_readmodels.py -v` → 47 passed
+   - `pytest tests/unit/test_runtime_positions_pg_projection.py tests/unit/test_v3_positions_api.py -v` → 27 passed
+4. ⚠️ 本地完整后端联调受限：
+   - `python -m src.main` 在 Phase 4 初始化 Binance gateway 时被 `demo-dapi.binance.com` 返回 451 地区限制
+   - 因此真实 API + 页面浏览器联调需要在 Mac mini Docker / Sim-1 环境执行
+5. 待 Mac mini 验证：
+   - `/research/new`
+   - `/research/jobs`
+   - `/research/runs/{id}`
+   - `/runtime/overview`
+   - `/runtime/portfolio`
+   - `/signals`
+   - `/execution`
+
+### 2026-04-28 Mac mini 联调反馈收敛
+
+1. ✅ 已吸收 Mac mini / Sim-1 前端联调报告：
+   - 11 个页面均可渲染
+   - 0 个 API 失败
+   - 0 个阻塞性 console error
+2. ✅ 已修复 D1：Runtime Overview enrichment 缺口
+   - `RuntimeOverviewResponse` 新增：
+     - `active_positions`
+     - `active_signals`
+     - `pending_intents`
+     - `pending_recovery_tasks`
+     - `total_equity`
+     - `unrealized_pnl`
+   - `RuntimeOverviewReadModel` 从 account snapshot / signal repo / intent repo / recovery repo 尽力聚合
+   - 聚合失败时返回 `None`，不影响 overview 主响应
+3. ✅ 已修复 D3：Signal status null 处理
+   - 前端 adapter 不再把 `null` status 强制改成 `"--"`
+   - `signalStatusLabel` 支持空值
+   - Signals 页可正确显示“当前接口未提供结局状态”
+4. ✅ 已修复 D2：Research 回测最大回撤区间高亮数据缺口
+   - Backtester 已有 `debug_max_drawdown_detail.peak_ts/trough_ts`
+   - `LocalBacktestResearchRunner._extract_summary_metrics()` 透传为：
+     - `max_drawdown_start_ms`
+     - `max_drawdown_end_ms`
+   - `RunDetail` 的 ECharts 最大回撤 markArea 可以使用 summary metrics 渲染
+5. ✅ 本轮验证：
+   - `pytest tests/unit/test_console_runtime_readmodels.py tests/unit/test_console_runtime_routes.py -v` → 48 passed
+   - `npm run lint` → passed
+   - `npx vitest run src/services/api.test.ts src/pages/runtime/Execution.test.tsx` → 22 passed
+   - `npm run build` → passed
+   - `pytest tests/unit/test_research_control_plane_service.py tests/unit/test_research_jobs_api.py -v` → 48 passed
+
+### 2026-04-28 -- Research UI v2.0 前端产品化改造完成
+
+1. ✅ `/research/new` 新建回测页改造：
+   - 表单分区：基础信息、时间窗口、策略与资金、高级设置（折叠）
+   - 时间窗口快捷按钮：最近 1 个月、最近半年、2025 全年
+   - "本次回测摘要"自然语言说明
+   - clone_run 场景展示"已从某次回测复用配置"
+   - 提交按钮 loading/disabled 状态
+2. ✅ `/research/jobs` 回测历史页改造：
+   - 隐藏 rj/rr hash ID，名称+备注为主身份
+   - 金融色彩：盈利绿色、亏损红色、回撤红色
+   - 增加筛选：状态、交易对、基线配置、收益区间
+   - 支持 2-4 条勾选，底部浮出"对比这些回测"按钮
+   - 操作列增加"复制配置"快捷入口
+3. ✅ `/research/runs/:id` 回测详情页改造（策略诊疗室）：
+   - 顶部动作：基于此配置新建回测、加入候选策略
+   - KPI 增加：年化收益率、盈亏比 Profit Factor、最大连续亏损
+   - ECharts 权益曲线 + 回撤水下图（替代临时 SVG）
+   - 逐笔交易表：入场/出场时间、方向、价格、平仓原因、手续费、净盈亏
+   - 实际生效参数：resolved_runtime_overrides + resolved_order_strategy 人话展示
+   - 调试信息折叠：artifact 路径、raw JSON、run ID
+4. ✅ `/research/candidates` 候选策略页改造：
+   - 机器状态翻译：PASS_STRICT→严格通过、REJECT→不建议等
+   - 警告翻译：sortino_missing_or_suspect→索提诺比率异常等
+   - 隐藏 git hash，名称截断+tooltip
+5. ✅ `/research/compare` 策略对比页改造：
+   - 选择器 option 显示短名称+状态标记
+   - 差异列 0 值用低对比度显示（不再大量 --）
+   - 基准/候选名称截断展示
+6. ✅ ECharts 安装：echarts@6.0.0 + echarts-for-react@3.0.6
+7. ✅ 类型追加：ResearchRunResult 增加 debug_equity_curve/positions/artifact_path/git_commit
+8. ✅ research-format.ts 新增工具函数：computeProfitFactor、computeMaxConsecutiveLosses、computeAnnualizedReturn、directionLabel/Variant、pnlRatioClass、warningLabel、reviewLabel
+9. ✅ 验证结果：
+   - npm run lint → EXIT: 0
+   - npx vitest run → 22 passed
+   - npm run build → 成功
+
+### 2026-04-28 -- Research 重复回测 report_id 冲突修复
+
+1. ✅ 根因确认：
+   - `backtest_reports.id` 原公式为 `rpt_{strategy_id}_{backtest_start}_{parameters_hash[:8]}`
+   - 同一策略、同一窗口、同一参数组合被不同 Research job 复跑时会生成相同 report_id
+   - SQLite 主键触发 `UNIQUE constraint failed: backtest_reports.id`
+2. ✅ 修复策略：
+   - `parameters_hash` 继续表达“同一参数组合”，用于聚类和历史对比
+   - `report_id` 改为每次保存唯一：追加短 UUID 后缀
+   - 不改变 `save_report()` 签名，避免影响旧 `/api/backtest/run` 和既有集成测试
+3. ✅ 增补测试：
+   - `test_duplicate_parameter_runs_create_distinct_reports`
+   - 验证同参数复跑能保存两条报告，且两条报告：
+     - `id` 不同
+     - `parameters_hash` 相同
+4. ✅ 验证：
+   - `pytest tests/unit/test_backtest_repository.py -v` → 29 passed
+   - `pytest tests/unit/test_research_control_plane_service.py tests/unit/test_research_jobs_api.py -v` → 48 passed

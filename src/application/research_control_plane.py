@@ -155,9 +155,12 @@ class LocalBacktestResearchRunner:
         return request
 
     def _extract_summary_metrics(self, payload: dict[str, Any]) -> dict[str, Any]:
+        drawdown_detail = payload.get("debug_max_drawdown_detail") or {}
         return {
             "total_return": payload.get("total_return"),
             "max_drawdown": payload.get("max_drawdown"),
+            "max_drawdown_start_ms": drawdown_detail.get("peak_ts"),
+            "max_drawdown_end_ms": drawdown_detail.get("trough_ts"),
             "win_rate": payload.get("win_rate") or payload.get("simulated_win_rate"),
             "total_trades": payload.get("total_trades"),
             "sharpe_ratio": payload.get("sharpe_ratio"),
@@ -245,6 +248,29 @@ class ResearchJobService:
 
     async def get_run_result(self, result_id: str) -> Optional[ResearchRunResult]:
         return await self.repository.get_run_result(result_id)
+
+    async def get_run_report_payload(self, result_id: str) -> Optional[dict[str, Any]]:
+        result = await self.repository.get_run_result(result_id)
+        if result is None:
+            return None
+
+        result_path = result.artifact_index.get("result")
+        if not result_path:
+            raise ResearchRunnerError("R-006", f"Run result artifact missing: {result_id}")
+
+        path = Path(result_path)
+        if not path.exists():
+            raise ResearchRunnerError("R-006", f"Run result artifact not found: {result_path}")
+
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ResearchRunnerError("R-006", str(exc)) from exc
+
+        if not isinstance(payload, dict):
+            raise ResearchRunnerError("R-006", f"Run result artifact is not an object: {result_path}")
+        return payload
 
     async def list_run_results(
         self,

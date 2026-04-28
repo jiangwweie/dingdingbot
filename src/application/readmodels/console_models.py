@@ -34,6 +34,12 @@ class RuntimeOverviewResponse(BaseModel):
     last_runtime_update_at: str
     last_heartbeat_at: str
     freshness_status: FreshnessStatus
+    active_positions: Optional[int] = None
+    active_signals: Optional[int] = None
+    pending_intents: Optional[int] = None
+    pending_recovery_tasks: Optional[int] = None
+    total_equity: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
 
 
 class PortfolioPositionItem(BaseModel):

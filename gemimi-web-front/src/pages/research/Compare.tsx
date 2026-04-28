@@ -4,8 +4,9 @@ import { CompareResponse, CompareRow, Candidate } from '@/src/types';
 import { useRefreshContext } from '@/src/components/layout/AppLayout';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/src/components/ui/Table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
-import { Loader2, ArrowUpRight, ArrowDownRight, AlertCircle } from 'lucide-react';
-import { fmtPct, fmtDec, fmtInt, DASH } from '@/src/lib/console-utils';
+import { Loader2, ArrowUpRight, ArrowDownRight, Minus, AlertCircle } from 'lucide-react';
+import { DASH } from '@/src/lib/console-utils';
+import { shortResearchName } from '@/src/lib/research-format';
 
 type PageState =
   | { status: 'loading' }
@@ -15,32 +16,35 @@ type PageState =
 
 function formatValue(val: number | null, metric: string): string {
   if (val === null) return DASH;
-  if (metric === 'Trades') return fmtInt(val);
-  if (metric === 'Max Drawdown' || metric === 'Total Return' || metric === 'Win Rate') {
-    return fmtPct(val);
+  if (metric === 'Trades' || metric === '交易次数') return Math.round(val).toString();
+  if (metric === 'Max Drawdown' || metric === '最大回撤' || metric === 'Total Return' || metric === '收益率' || metric === 'Win Rate' || metric === '胜率') {
+    return `${(val * 100).toFixed(1)}%`;
   }
-  return fmtDec(val);
+  return val.toFixed(2);
 }
 
 const selectCls =
-  'bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 text-sm font-mono text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[220px] truncate';
+  'bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[280px]';
+
+function candidateOptionLabel(c: Candidate): string {
+  const name = shortResearchName(c.candidate_name);
+  const statusTag = c.review_status === 'PASS_STRICT' ? '✓' : c.review_status === 'REJECT' ? '✗' : '';
+  return `${name} ${statusTag}`;
+}
 
 export default function Compare() {
   const { refreshCount } = useRefreshContext();
 
-  // Candidate list for selectors
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [candidatesError, setCandidatesError] = useState(false);
 
-  // Selector state
   const [baselineRef, setBaselineRef] = useState<string>('');
   const [candidateARef, setCandidateARef] = useState<string>('');
   const [candidateBRef, setCandidateBRef] = useState<string>('');
 
-  // Compare data
   const [pageState, setPageState] = useState<PageState>({ status: 'loading' });
+  const [initialized, setInitialized] = useState(false);
 
-  // ── Load candidate list once ──────────────────────────────────
   useEffect(() => {
     let active = true;
     getCandidates()
@@ -49,10 +53,6 @@ export default function Compare() {
     return () => { active = false; };
   }, [refreshCount]);
 
-  // ── Initialize selector defaults from first compare load ──────
-  const [initialized, setInitialized] = useState(false);
-
-  // ── Fetch compare data ────────────────────────────────────────
   useEffect(() => {
     let active = true;
     setPageState(prev => {
@@ -60,7 +60,6 @@ export default function Compare() {
       return { status: 'loading' };
     });
 
-    // Only pass selector params after initialization (first load uses defaults)
     const bl = initialized ? baselineRef : undefined;
     const ca = initialized ? candidateARef : undefined;
     const cb = initialized ? candidateBRef : undefined;
@@ -90,7 +89,6 @@ export default function Compare() {
     return () => { active = false; };
   }, [refreshCount, initialized, baselineRef, candidateARef, candidateBRef]);
 
-  // ── Dedup logic ───────────────────────────────────────────────
   const isDuplicateBaseline = (name: string) =>
     name === candidateARef || name === candidateBRef;
   const isDuplicateA = (name: string) =>
@@ -98,10 +96,8 @@ export default function Compare() {
   const isDuplicateB = (name: string) =>
     name === baselineRef || name === candidateARef;
 
-  // ── Selector change handlers ──────────────────────────────────
   const handleBaselineChange = (val: string) => {
     setBaselineRef(val);
-    // If A or B now duplicates baseline, clear them
     if (candidateARef === val) setCandidateARef('');
     if (candidateBRef === val) setCandidateBRef('');
   };
@@ -111,26 +107,12 @@ export default function Compare() {
     if (candidateBRef === val) setCandidateBRef('');
   };
 
-  const handleBChange = (val: string) => {
-    setCandidateBRef(val);
-  };
-
-  // ── Render helpers ────────────────────────────────────────────
   if (pageState.status === 'loading') {
-    return (
-      <div className="flex h-32 items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
-      </div>
-    );
+    return <div className="flex h-32 items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-zinc-500" /></div>;
   }
 
   if (pageState.status === 'error') {
-    return (
-      <div className="flex h-32 items-center justify-center text-rose-400 gap-2">
-        <AlertCircle className="w-5 h-5" />
-        <span>{pageState.message}</span>
-      </div>
-    );
+    return <div className="flex h-32 items-center justify-center text-rose-400 gap-2"><AlertCircle className="w-5 h-5" /><span>{pageState.message}</span></div>;
   }
 
   if (pageState.status === 'empty') {
@@ -149,27 +131,26 @@ export default function Compare() {
 
   const { data } = pageState;
   const hasCandidateB = data.candidate_b_label != null;
-  const showStaleWarning = pageState.stale;
 
   const renderDirectionalDiff = (diff: number | null, metric: string) => {
     if (diff === null) return <span className="text-zinc-500 text-xs">{DASH}</span>;
-    const lowerIsBetter = metric === 'Max Drawdown';
+    const lowerIsBetter = metric === 'Max Drawdown' || metric === '最大回撤';
     const effectiveSign = lowerIsBetter ? -diff : diff;
     if (effectiveSign > 0) {
       return (
-        <span className="text-emerald-400 flex items-center text-xs justify-end">
+        <span className="text-emerald-500 flex items-center text-xs justify-end">
           <ArrowUpRight className="w-3 h-3 mr-0.5" /> +{Math.abs(diff).toFixed(3)}
         </span>
       );
     }
     if (effectiveSign < 0) {
       return (
-        <span className="text-rose-400 flex items-center text-xs justify-end">
+        <span className="text-rose-500 flex items-center text-xs justify-end">
           <ArrowDownRight className="w-3 h-3 mr-0.5" /> -{Math.abs(diff).toFixed(3)}
         </span>
       );
     }
-    return <span className="text-zinc-500 text-xs justify-end flex">0.000</span>;
+    return <span className="text-zinc-500 text-xs flex items-center justify-end"><Minus className="w-3 h-3 mr-0.5" /> 0</span>;
   };
 
   const renderCell = (val: number | null, metric: string) => {
@@ -177,17 +158,21 @@ export default function Compare() {
     return <span className="font-mono">{formatValue(val, metric)}</span>;
   };
 
+  const baselineDisplay = shortResearchName(data.baseline_label);
+  const candADisplay = shortResearchName(data.candidate_a_label);
+  const candBDisplay = data.candidate_b_label ? shortResearchName(data.candidate_b_label) : null;
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-bold tracking-tight">策略对比</h2>
-        <p className="text-xs text-zinc-500 mt-1">候选策略核心指标与基准线对比。</p>
+        <p className="text-xs text-zinc-500 mt-1">候选策略核心指标与基准线对比。绿色=改善，红色=退步。</p>
       </div>
 
-      {/* ── Selector bar ─────────────────────────────────────── */}
+      {/* Selector bar */}
       <div className="flex flex-wrap items-end gap-4 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3">
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-zinc-500 font-medium">Baseline</label>
+          <label className="text-xs text-zinc-500 font-medium">基准线</label>
           <select
             value={baselineRef}
             onChange={e => handleBaselineChange(e.target.value)}
@@ -197,14 +182,14 @@ export default function Compare() {
             {candidates.length === 0 && <option value="">--</option>}
             {candidates.map(c => (
               <option key={c.candidate_name} value={c.candidate_name} disabled={isDuplicateBaseline(c.candidate_name)}>
-                {c.candidate_name}
+                {candidateOptionLabel(c)}
               </option>
             ))}
           </select>
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-zinc-500 font-medium">Candidate A</label>
+          <label className="text-xs text-zinc-500 font-medium">候选 A</label>
           <select
             value={candidateARef}
             onChange={e => handleAChange(e.target.value)}
@@ -214,23 +199,23 @@ export default function Compare() {
             {candidates.length === 0 && <option value="">--</option>}
             {candidates.map(c => (
               <option key={c.candidate_name} value={c.candidate_name} disabled={isDuplicateA(c.candidate_name)}>
-                {c.candidate_name}
+                {candidateOptionLabel(c)}
               </option>
             ))}
           </select>
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-zinc-500 font-medium">Candidate B <span className="text-zinc-400">(可选)</span></label>
+          <label className="text-xs text-zinc-500 font-medium">候选 B <span className="text-zinc-400">(可选)</span></label>
           <select
             value={candidateBRef}
-            onChange={e => handleBChange(e.target.value)}
+            onChange={e => setCandidateBRef(e.target.value)}
             className={selectCls}
           >
             <option value="">-- 无 --</option>
             {candidates.map(c => (
               <option key={c.candidate_name} value={c.candidate_name} disabled={isDuplicateB(c.candidate_name)}>
-                {c.candidate_name}
+                {candidateOptionLabel(c)}
               </option>
             ))}
           </select>
@@ -243,16 +228,20 @@ export default function Compare() {
         )}
       </div>
 
-      {/* ── Current comparison summary ───────────────────────── */}
-      <div className="flex items-center gap-3 text-xs text-zinc-500 font-mono">
-        <span>Base: <span className="text-zinc-300">{data.baseline_label || '--'}</span></span>
+      {/* Current comparison summary */}
+      <div className="flex items-center gap-3 text-xs text-zinc-500">
+        <span>基准: <span className="text-zinc-300 font-medium">{baselineDisplay || '--'}</span></span>
         <span className="text-zinc-600">|</span>
-        <span>A: <span className="text-blue-400">{data.candidate_a_label || '--'}</span></span>
-        <span className="text-zinc-600">|</span>
-        <span>B: <span className="text-amber-400">{data.candidate_b_label ?? '--'}</span></span>
+        <span>A: <span className="text-blue-400 font-medium">{candADisplay || '--'}</span></span>
+        {candBDisplay && (
+          <>
+            <span className="text-zinc-600">|</span>
+            <span>B: <span className="text-amber-400 font-medium">{candBDisplay}</span></span>
+          </>
+        )}
       </div>
 
-      {showStaleWarning && (
+      {pageState.stale && (
         <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-amber-700 dark:text-amber-400 px-4 py-2 rounded text-sm">
           部分数据刷新失败，显示缓存内容
         </div>
@@ -264,7 +253,7 @@ export default function Compare() {
           <div className="flex items-center space-x-2 text-xs">
             <div className="flex items-center"><div className="w-2 h-2 rounded-full bg-emerald-500 mr-1.5"></div> 改善</div>
             <div className="flex items-center ml-2"><div className="w-2 h-2 rounded-full bg-rose-500 mr-1.5"></div> 退步</div>
-            <span className="text-zinc-500 ml-2">(方向感知：回撤越低越好)</span>
+            <span className="text-zinc-500 ml-2">(回撤越低越好)</span>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -273,18 +262,18 @@ export default function Compare() {
               <TableRow className="bg-zinc-50 dark:bg-zinc-900/50">
                 <TableHead className="font-semibold text-zinc-700 dark:text-zinc-300">评价指标</TableHead>
                 <TableHead className="font-semibold text-zinc-700 dark:text-zinc-300 border-r border-zinc-200 dark:border-zinc-800 text-right pr-4">
-                  {data.baseline_label || 'Baseline'}
+                  {baselineDisplay || '基准'}
                 </TableHead>
                 <TableHead className="font-semibold text-blue-400 text-right pr-4">
-                  {data.candidate_a_label || 'Candidate A'}
+                  {candADisplay || '候选 A'}
                 </TableHead>
-                <TableHead className="text-right text-xs pr-4 text-zinc-500 font-normal border-r border-zinc-200 dark:border-zinc-800">vs Base</TableHead>
+                <TableHead className="text-right text-xs pr-4 text-zinc-500 font-normal border-r border-zinc-200 dark:border-zinc-800">vs 基准</TableHead>
                 {hasCandidateB && (
                   <>
                     <TableHead className="font-semibold text-amber-500 text-right pr-4">
-                      {data.candidate_b_label}
+                      {candBDisplay}
                     </TableHead>
-                    <TableHead className="text-right text-xs pr-4 text-zinc-500 font-normal">vs Base</TableHead>
+                    <TableHead className="text-right text-xs pr-4 text-zinc-500 font-normal">vs 基准</TableHead>
                   </>
                 )}
               </TableRow>
@@ -312,7 +301,7 @@ export default function Compare() {
       </Card>
 
       <p className="text-xs text-zinc-500">
-        数据来源：候选策略 best_trial 指标。diff = candidate − baseline；绿色 = 改善方向，红色 = 退步方向（回撤指标越低越好）。
+        diff = candidate − baseline；绿色 = 改善方向，红色 = 退步方向（回撤指标越低越好）。
       </p>
     </div>
   );

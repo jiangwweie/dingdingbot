@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -87,6 +88,56 @@ async def test_overview_freshness_fresh():
     assert response.symbol == "ETH/USDT:USDT"
     assert response.timeframe == "15m"
     assert response.backend_summary == "intent=postgres, order=sqlite, position=sqlite"
+
+
+@pytest.mark.asyncio
+async def test_overview_trading_day_summary_fields():
+    read_model = RuntimeOverviewReadModel()
+    position = PositionInfo(
+        symbol="ETH/USDT:USDT",
+        side="long",
+        size=Decimal("0.2"),
+        entry_price=Decimal("3000"),
+        mark_price=Decimal("3100"),
+        unrealized_pnl=Decimal("20"),
+        leverage=5,
+    )
+    snapshot = _make_account_snapshot(
+        total_balance=Decimal("1200"),
+        unrealized_pnl=Decimal("75"),
+        positions=[position],
+    )
+    provider = _make_runtime_config_provider()
+    signal_repo = MagicMock()
+    signal_repo.get_signals = AsyncMock(return_value={
+        "data": [
+            {"status": "PENDING"},
+            {"status": "ACTIVE"},
+            {"status": "CLOSED"},
+        ]
+    })
+    intent_repo = MagicMock()
+    intent_repo.list_unfinished = AsyncMock(return_value=[object(), object()])
+    recovery_repo = MagicMock()
+    recovery_repo.list_blocking = AsyncMock(return_value=[object()])
+
+    response = await read_model.build(
+        runtime_config_provider=provider,
+        account_snapshot=snapshot,
+        exchange_gateway=None,
+        execution_orchestrator=None,
+        startup_reconciliation_summary=None,
+        signal_repo=signal_repo,
+        execution_intent_repo=intent_repo,
+        execution_recovery_repo=recovery_repo,
+    )
+
+    assert response.active_positions == 1
+    assert response.active_signals == 2
+    assert response.pending_intents == 2
+    assert response.pending_recovery_tasks == 1
+    assert response.total_equity == 1200.0
+    assert response.unrealized_pnl == 75.0
 
 
 @pytest.mark.asyncio
