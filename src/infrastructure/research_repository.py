@@ -25,6 +25,18 @@ logger = setup_logger(__name__)
 class ResearchRepository:
     """Persists research jobs/results/candidates outside runtime truth stores."""
 
+    def __new__(
+        cls,
+        db_path: str = "data/research_control_plane.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is ResearchRepository and connection is None and db_path == "data/research_control_plane.db":
+            from src.infrastructure.database import should_use_pg_for_default_repository
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_research_repository import PgResearchRepository
+                return PgResearchRepository()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/research_control_plane.db",

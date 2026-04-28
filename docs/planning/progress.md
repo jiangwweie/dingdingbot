@@ -1782,3 +1782,56 @@
 **下一步**:
 - 用户 review 设计文档
 - 确认后实施第一步（filter_factory.py 新增 DonchianDistanceFilterDynamic，~2h）
+
+### 2026-04-29 01:05 CST -- PG 全状态迁移窗口编码骨架
+
+**完成**
+- 切到 `codex/pg-full-migration`，已快进到最新 `dev`。
+- 新增/修改 PG 默认仓储路由：默认运行态/研究态仓储在 `PG_DATABASE_URL` 存在且 `MIGRATE_ALL_STATE_TO_PG=true` 时走 PG；显式传入 SQLite `db_path` 或 `connection` 的测试/脚本继续走 SQLite。
+- 新增 PG 仓储文件：
+  - `pg_runtime_profile_repository.py`
+  - `pg_config_entry_repository.py`
+  - `pg_config_profile_repository.py`
+  - `pg_config_snapshot_repository.py`
+  - `pg_research_repository.py`
+  - `pg_historical_data_repository.py`
+  - `pg_backtest_repository.py`
+  - `pg_reconciliation_repository.py`
+- 扩展 `pg_signal_repository.py`，覆盖 `signal_attempts` 和 backtest signal id 查询。
+- 扩展 `pg_models.py`，覆盖剩余主要状态/观察表的 ORM。
+- 新增 `scripts/migrate_sqlite_state_to_pg.py`，用于明早执行 SQLite -> PG 数据搬迁。
+
+**验证**
+- `python3 -m py_compile` 覆盖新增/修改仓储模块，通过。
+- `import src.infrastructure.pg_models` 通过。
+- fake PG DSN 下默认仓储路由检查通过：Backtest/ConfigEntry/Profile/Snapshot/Historical/Reconciliation/Research/RuntimeProfile/Signal/Order 均返回 PG 实现。
+- 轻量 SQLite 回归：runtime profile + research repository 通过；`test_config_profile.py` 有旧测试连接池隔离失败，需单独处理或在清理连接池后重跑。
+
+**下一步**
+- 明早优先跑真实 PG 初始化与 `scripts/migrate_sqlite_state_to_pg.py`。
+- 再跑 PG 仓储集成测试和 API 冒烟。
+- 旧配置管理 `config_repositories.py` 全套 CRUD 仍是机械大块，建议单独 Claude 窗口补齐 PG 版本或明确退役。
+
+### 2026-04-29 07:23 CST -- PG 全状态迁移二次验收收口
+
+**完成**
+- 验收 Claude 的旧 config repositories PG 收尾结果。
+- 发现并修复入口问题：Claude 初版只有 `StrategyConfigRepository` 直接接入默认构造路径，其他 6 个 repository 只存在工厂函数，`main.py/api.py` 直接构造时仍可能落 SQLite。
+- 已补齐默认构造 PG 路由：
+  - `RiskConfigRepository`
+  - `SystemConfigRepository`
+  - `SymbolConfigRepository`
+  - `NotificationConfigRepository`
+  - `ConfigSnapshotRepositoryExtended`
+  - `ConfigHistoryRepository`
+- 修正 `config_repository_factory.py`，统一调用 `should_use_pg_for_default_repository()`，避免未配置 `PG_DATABASE_URL` 时仅因 `MIGRATE_ALL_STATE_TO_PG=true` 误切 PG。
+- 修复 `test_config_profile.py` 的 SQLite connection pool 隔离问题。
+
+**验证**
+- `python3 -m py_compile src/infrastructure/config_repository_factory.py src/infrastructure/repositories/config_repositories.py src/infrastructure/pg_config_repositories.py src/infrastructure/pg_models.py scripts/migrate_sqlite_state_to_pg.py` 通过。
+- `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q` 通过：60 passed。
+
+**剩余**
+- 未跑真实 PG 数据搬迁。
+- 未跑全量测试。
+- 需要在 PG 环境执行迁移脚本并抽样核对表计数/关键行。

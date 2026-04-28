@@ -70,6 +70,20 @@ class ConfigProfileRepository:
     - 复制 Profile 配置
     """
 
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is ConfigProfileRepository and connection is None and db_path == "data/v3_dev.db":
+            from src.infrastructure.database import should_use_pg_for_default_repository
+
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_config_profile_repository import PgConfigProfileRepository
+
+                return PgConfigProfileRepository()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",

@@ -2,6 +2,10 @@
 配置管理系统 Repository 层实现
 
 提供 7 个 Repository 类，用于配置管理系统的数据库操作接口。
+
+迁移策略：
+- 默认构造路由到 PG（当 MIGRATE_ALL_STATE_TO_PG=true 且无显式 db_path/connection）
+- 显式传入 db_path/connection 时仍走 SQLite（测试兼容）
 """
 import asyncio
 import json
@@ -21,6 +25,26 @@ from src.domain.exceptions import (
     CryptoMonitorError,
     FatalStartupError,
 )
+
+# PG 迁移环境变量
+MIGRATE_ALL_STATE_TO_PG = os.getenv("MIGRATE_ALL_STATE_TO_PG", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+
+def _should_route_default_to_pg(db_path: str, connection: Optional[aiosqlite.Connection]) -> bool:
+    """Route default production config repositories to PG, keep explicit SQLite fixtures untouched."""
+    if connection is not None or db_path != "data/v3_dev.db":
+        return False
+    try:
+        from src.infrastructure.database import should_use_pg_for_default_repository
+
+        return should_use_pg_for_default_repository()
+    except Exception:
+        return MIGRATE_ALL_STATE_TO_PG
 
 
 # ============================================================
@@ -48,12 +72,17 @@ class StrategyConfigRepository:
     """
     Repository for managing strategy configurations.
     Supports CRUD operations and toggle functionality.
+
+    迁移策略：
+    - 默认构造（无参数）→ PG
+    - 显式 db_path/connection → SQLite（测试兼容）
     """
 
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",
         connection: Optional[aiosqlite.Connection] = None,
+        use_pg: Optional[bool] = None,
     ):
         """
         Initialize StrategyConfigRepository.
@@ -61,14 +90,30 @@ class StrategyConfigRepository:
         Args:
             db_path: Path to SQLite database file
             connection: Optional injected connection (if None, creates own connection)
+            use_pg: 显式指定使用 PG（None 时根据环境变量和参数自动判断）
         """
-        self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = connection
-        self._owns_connection = connection is None  # 标记是否自行管理生命周期
-        self._lock = asyncio.Lock()
+        # 判断是否使用 PG
+        if use_pg is None:
+            # 默认构造（无显式 db_path/connection）→ PG
+            use_pg = _should_route_default_to_pg(db_path, connection)
+
+        if use_pg:
+            # 延迟导入避免循环依赖
+            from src.infrastructure.pg_config_repositories import PgStrategyConfigRepository
+            self._pg_repo = PgStrategyConfigRepository()
+            self._use_pg = True
+        else:
+            self.db_path = db_path
+            self._db: Optional[aiosqlite.Connection] = connection
+            self._owns_connection = connection is None  # 标记是否自行管理生命周期
+            self._lock = asyncio.Lock()
+            self._use_pg = False
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""
+        if self._use_pg:
+            return await self._pg_repo.initialize()
+
         # 如果有注入的连接，跳过连接创建
         if self._owns_connection and self._db is None:
             db_dir = os.path.dirname(self.db_path)
@@ -108,6 +153,8 @@ class StrategyConfigRepository:
 
     async def close(self) -> None:
         """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        if self._use_pg:
+            return await self._pg_repo.close()
         if self._db:
             self._db = None
 
@@ -132,6 +179,8 @@ class StrategyConfigRepository:
         Raises:
             ConfigConflictError: If strategy name already exists
         """
+        if self._use_pg:
+            return await self._pg_repo.create(strategy)
         async with self._lock:
             strategy_id = strategy.get("id") or str(uuid.uuid4())
             now = datetime.now(timezone.utc).isoformat()
@@ -179,6 +228,9 @@ class StrategyConfigRepository:
         Returns:
             Strategy dict with all fields, or None if not found
         """
+        if self._use_pg:
+            return await self._pg_repo.get_by_id(strategy_id)
+
         async with self._db.execute(
             "SELECT * FROM strategies WHERE id = ?",
             (strategy_id,)
@@ -205,6 +257,9 @@ class StrategyConfigRepository:
         Returns:
             Tuple of (list of strategy dicts, total count)
         """
+        if self._use_pg:
+            return await self._pg_repo.get_list(is_active, limit, offset)
+
         where_clauses = []
         params: List[Any] = []
 
@@ -250,6 +305,9 @@ class StrategyConfigRepository:
         Raises:
             ConfigConflictError: If new name conflicts with existing strategy
         """
+        if self._use_pg:
+            return await self._pg_repo.update(strategy_id, updates)
+
         async with self._lock:
             # Check if strategy exists
             existing = await self.get_by_id(strategy_id)
@@ -297,6 +355,9 @@ class StrategyConfigRepository:
         Returns:
             True if deleted successfully, False if not found
         """
+        if self._use_pg:
+            return await self._pg_repo.delete(strategy_id)
+
         async with self._lock:
             cursor = await self._db.execute(
                 "DELETE FROM strategies WHERE id = ?",
@@ -315,6 +376,9 @@ class StrategyConfigRepository:
         Returns:
             New active status, or None if not found
         """
+        if self._use_pg:
+            return await self._pg_repo.toggle(strategy_id)
+
         async with self._lock:
             existing = await self.get_by_id(strategy_id)
             if not existing:
@@ -356,6 +420,17 @@ class RiskConfigRepository:
     Repository for managing risk configuration.
     Single instance pattern (id='global').
     """
+
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is RiskConfigRepository and _should_route_default_to_pg(db_path, connection):
+            from src.infrastructure.pg_config_repositories import PgRiskConfigRepository
+
+            return PgRiskConfigRepository()
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -511,6 +586,17 @@ class SystemConfigRepository:
     Repository for managing system configuration.
     Single instance pattern (id='global').
     """
+
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is SystemConfigRepository and _should_route_default_to_pg(db_path, connection):
+            from src.infrastructure.pg_config_repositories import PgSystemConfigRepository
+
+            return PgSystemConfigRepository()
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -680,6 +766,17 @@ class SymbolConfigRepository:
     Repository for managing symbol configurations.
     Supports CRUD operations and toggle functionality.
     """
+
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is SymbolConfigRepository and _should_route_default_to_pg(db_path, connection):
+            from src.infrastructure.pg_config_repositories import PgSymbolConfigRepository
+
+            return PgSymbolConfigRepository()
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -960,6 +1057,17 @@ class NotificationConfigRepository:
     Repository for managing notification configurations.
     Supports CRUD operations and test functionality.
     """
+
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is NotificationConfigRepository and _should_route_default_to_pg(db_path, connection):
+            from src.infrastructure.pg_config_repositories import PgNotificationConfigRepository
+
+            return PgNotificationConfigRepository()
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -1248,6 +1356,17 @@ class ConfigSnapshotRepositoryExtended:
     additional methods for the new config management system.
     """
 
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is ConfigSnapshotRepositoryExtended and _should_route_default_to_pg(db_path, connection):
+            from src.infrastructure.pg_config_repositories import PgConfigSnapshotRepositoryExtended
+
+            return PgConfigSnapshotRepositoryExtended()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",
@@ -1458,6 +1577,17 @@ class ConfigHistoryRepository:
     Repository for managing configuration change history.
     Provides audit trail and rollback information.
     """
+
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is ConfigHistoryRepository and _should_route_default_to_pg(db_path, connection):
+            from src.infrastructure.pg_config_repositories import PgConfigHistoryRepository
+
+            return PgConfigHistoryRepository()
+        return super().__new__(cls)
 
     def __init__(
         self,

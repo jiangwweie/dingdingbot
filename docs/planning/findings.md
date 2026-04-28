@@ -1444,3 +1444,24 @@ R1b 二次审计确认，R1 原始 MaxDD 口径严重错误，但在 `debug_equi
 - `enabled=False` 默认，sim1_eth_runtime 零影响
 
 **完整设计**: `docs/planning/2026-04-28-m1d-donchian-distance-implementation-design.md`
+
+### PG 全状态迁移窗口发现
+
+1. **同名 `config_snapshots` 存在两套历史 schema**
+   - `src/infrastructure/config_snapshot_repository.py` 使用整数自增 `id/version/config_json`
+   - `src/infrastructure/repositories/config_repositories.py::ConfigSnapshotRepositoryExtended` 使用文本 `id/name/snapshot_data`
+   - PG 不能继续把两套 schema 混在同一张表；本轮把前者映射为 `config_snapshot_versions`，保留后者为 `config_snapshots`
+
+2. **默认仓储 PG 化必须保留显式 SQLite 逃生口**
+   - 大量单元测试和研究脚本显式传入临时 `db_path` 或 `connection`
+   - 因此本轮采用 `__new__` 默认路由：只有默认路径 + 无注入连接时才切 PG
+   - 这样 runtime/research 默认入口 PG 化，同时保留测试 fixture 与历史脚本可运行
+
+3. **旧 Config Profile 测试存在连接池隔离问题**
+   - `test_config_profile.py` 反复删除同一 `data/test_profiles.db`
+   - 但仓储通过全局 connection pool 复用连接，导致测试之间遗留 profile 行
+   - 该失败不是本轮 PG 默认路由直接引起，后续应清理连接池测试隔离或改为唯一临时 DB
+
+4. **`signal_attempts` 已具备直接 PG 化条件**
+   - PG signal repo 可以覆盖 attempts/diagnostics/trace_tree，不需要继续 SQLite fallback
+   - Hybrid repo 的 `__getattr__` 现在不再静默回落 SQLite，避免新增方法漏路由时发生 split-brain

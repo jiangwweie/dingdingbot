@@ -41,12 +41,22 @@ def _default_execution_intent_backend() -> str:
     return "postgres" if PG_DATABASE_URL else "sqlite"
 
 
-CORE_ORDER_BACKEND = os.getenv("CORE_ORDER_BACKEND", "sqlite").lower()
+def _default_pg_backend() -> str:
+    return "postgres" if PG_DATABASE_URL else "sqlite"
+
+
+CORE_ORDER_BACKEND = os.getenv("CORE_ORDER_BACKEND", _default_pg_backend()).lower()
 CORE_EXECUTION_INTENT_BACKEND = os.getenv(
     "CORE_EXECUTION_INTENT_BACKEND",
     _default_execution_intent_backend(),
 ).lower()
-CORE_POSITION_BACKEND = os.getenv("CORE_POSITION_BACKEND", "sqlite").lower()
+CORE_POSITION_BACKEND = os.getenv("CORE_POSITION_BACKEND", _default_pg_backend()).lower()
+MIGRATE_ALL_STATE_TO_PG = os.getenv("MIGRATE_ALL_STATE_TO_PG", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 def _get_positive_int_env(name: str, default: int) -> int:
@@ -163,6 +173,15 @@ def get_core_backend_settings() -> dict[str, str]:
         "execution_intent": CORE_EXECUTION_INTENT_BACKEND,
         "position": CORE_POSITION_BACKEND,
     }
+
+
+def should_use_pg_for_default_repository() -> bool:
+    """Whether default, non-test repositories should use PostgreSQL.
+
+    Explicit SQLite paths/connections in tests and scripts still bypass this by
+    constructing the SQLite repository with non-default arguments.
+    """
+    return bool(PG_DATABASE_URL and MIGRATE_ALL_STATE_TO_PG)
 
 
 def validate_pg_core_configuration() -> None:
