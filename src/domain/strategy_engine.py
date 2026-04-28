@@ -743,7 +743,8 @@ class DynamicStrategyRunner:
             pattern = None
 
             # S6-2-2: Pass atr_value to detect() if strategy supports it
-            if hasattr(strat.strategy, 'detect_with_history') and kline_history:
+            # CRITICAL: Check kline_history is not None, not just truthy (empty list is valid)
+            if hasattr(strat.strategy, 'detect_with_history') and kline_history is not None:
                 # Check if detect_with_history supports atr_value parameter
                 import inspect
                 sig = inspect.signature(strat.strategy.detect_with_history)

@@ -1048,6 +1048,9 @@ class Backtester:
                 logger.warning(f"Failed to fetch higher TF data for MTF: {e}")
 
         # Process each K-line
+        # Maintain kline_history for multi-candle strategies (e.g., Engulfing)
+        kline_history: List[KlineData] = []
+
         for kline in klines:
             # Update internal state (all stateful filters)
             runner.update_state(kline)
@@ -1058,8 +1061,17 @@ class Backtester:
             )
 
             # Run all strategies with their filter chains
-            strat_attempts = runner.run_all(kline, higher_tf_trends)
+            # CRITICAL: Pass kline_history BEFORE appending current kline
+            # This ensures detect_with_history() sees only historical data (no look-ahead)
+            strat_attempts = runner.run_all(
+                kline=kline,
+                higher_tf_trends=higher_tf_trends,
+                kline_history=kline_history,
+            )
             attempts.extend(strat_attempts)
+
+            # Append current kline to history AFTER processing
+            kline_history.append(kline)
 
         return attempts, higher_tf_data
 
@@ -1613,6 +1625,9 @@ class Backtester:
         signal_sl_map: Dict[str, Decimal] = {}  # {signal_id: expected_sl} 用于反填 pnl_ratio
         signal_strategy_map: Dict[str, OrderStrategy] = {}  # {signal_id: strategy} 用于 ENTRY 成交后生成 TP/SL
 
+        # Maintain kline_history for multi-candle strategies (e.g., Engulfing)
+        kline_history: List[KlineData] = []
+
         # Statistics tracking
         total_trades = 0
         winning_trades = 0
@@ -1913,14 +1928,23 @@ class Backtester:
             higher_tf_trends = self._get_closest_higher_tf_trends(kline.timestamp, higher_tf_data)
 
             # Run strategy to generate signals
+            # CRITICAL: Pass kline_history BEFORE appending current kline
+            # This ensures detect_with_history() sees only historical data (no look-ahead)
             if use_dynamic:
-                attempts = runner.run_all(kline, higher_tf_trends)
+                attempts = runner.run_all(
+                    kline=kline,
+                    higher_tf_trends=higher_tf_trends,
+                    kline_history=kline_history,
+                )
             else:
                 attempt = runner.run(kline, higher_tf_trends)
                 attempts = [attempt]
 
             # 阶段 5.4: 收集所有 attempts 用于归因分析
             all_attempts.extend(attempts)
+
+            # Append current kline to history AFTER processing
+            kline_history.append(kline)
 
             # Create ENTRY orders for fired signals
             for attempt in attempts:
