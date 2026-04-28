@@ -1539,3 +1539,22 @@
 4. ✅ 验证：
    - `pytest tests/unit/test_backtest_repository.py -v` → 29 passed
    - `pytest tests/unit/test_research_control_plane_service.py tests/unit/test_research_jobs_api.py -v` → 48 passed
+
+### 2026-04-28 H3a Follow-through Feature Check
+
+**完成**: H3a 入场前特征预测低 follow-through 实验
+
+**产出**:
+- `scripts/run_h3a_followthrough_feature_check.py` — 特征计算 + 分桶分析脚本
+- `reports/research/h3a_followthrough_feature_check_2026-04-28.json` — 实验结果
+- `docs/planning/2026-04-28-h3a-followthrough-feature-check.md` — 分析报告
+
+**关键发现**:
+- 5 个特征有 >=20pp 统计区分度（price_dist_ema_1h 最佳 27.9pp）
+- 但绝对水平重叠：2023 B3 HFT=45% ≈ 2024 B1 HFT=50%
+- Skip-B1 过滤器：2023 +19/+156，2024 -6539/-6395
+- 2023 悖论：高 FT 桶 PnL 更差
+
+**判定**: H3a 不通过，H3 动态退出方向关闭
+
+**研究链总结**: H0→H1→H2→H3→H3a 全链完成。2023 亏损是市场环境不匹配，不是参数可调优的。建议接受 -3924 为 2024/2025 alpha 的固有成本。
