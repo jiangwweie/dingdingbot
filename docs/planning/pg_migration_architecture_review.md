@@ -7,9 +7,27 @@
 
 ---
 
+## 状态更新（2026-04-29 14:20 CST）
+
+> 本文档保留了架构审查时的原始问题清单，其中 P1 问题已在后续修复并复验通过。
+
+### 最新结论
+
+- ✅ `HybridSignalRepository` 默认不再对 backtest 路径静默 fallback，缺少 `legacy_repo` 会显式拒绝
+- ✅ `delete_signals(source="backtest")` 等高风险路径已加安全检查，不会误删 PG live signals
+- ✅ `StrategyConfigRepository` 已统一为与其他 config repositories 一致的默认 PG 路由模式
+- ✅ 相关单元回归、独立 PG 测试库集成测试与 smoke 已通过
+- ✅ 分支已合入 `dev`：`027f7f5 merge: pg full migration`
+
+### 使用说明
+
+后续问题列表仍可作为设计追溯材料，但**不再代表当前阻塞状态**。
+
+---
+
 ## 📋 审查结论总览
 
-**整体评级**: **B+ (可合并，但需先解决 3 个 P1 问题)**
+**整体评级（审查时）**: **B+ (可合并，但需先解决 3 个 P1 问题)**
 
 **关键发现**:
 - ✅ 默认 PG 路由逻辑正确（环境变量 + 参数判断）
@@ -561,4 +579,4 @@ if spec_ref:
 
 **审查人**: Architect
 **审查日期**: 2026-04-29
-**建议**: **暂不合进 dev，先修复 P1 问题后再合并**
+**历史建议**: **暂不合进 dev，先修复 P1 问题后再合并**

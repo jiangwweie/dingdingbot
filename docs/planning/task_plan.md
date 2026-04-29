@@ -1277,3 +1277,13 @@ Sim-0 详细任务拆分（归档参考）：
 4. 暂不扩大的范围：
    - 未在迁移后的 PG 数据上跑 `tests/integration/test_pg_*`，因为该测试 fixture 会清表
    - 未运行全量测试
+
+### 2026-04-29 PG 全状态迁移窗口收口
+
+1. ✅ `codex/pg-full-migration` 已完成二次审查、迁移演练、独立测试库集成测试与 smoke。
+2. ✅ 已合入 `dev`，合并提交：`027f7f5 merge: pg full migration`
+3. ✅ 最终关键验证：
+   - SQLite 显式路径回归：65 passed
+   - 独立 PG 测试库集成测试：109 passed
+   - Docker PG 迁移演练：attempted rows=831594
+4. 当前结论：PG 全状态迁移不再是待执行任务，后续仅保留文档降噪与代码歧义减熵。

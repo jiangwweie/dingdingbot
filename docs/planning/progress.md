@@ -2095,3 +2095,23 @@
 
 **注意**
 - 第一次 PG 集成测试遇到 Docker PG 刚重启后的短暂 connection refused；容器 healthy 后复跑通过。
+
+### 2026-04-29 14:20 CST -- PG 窗口文档收口与剩余歧义归档
+
+**完成**
+- 更新 `docs/planning/pg_migration_validation_report.md`：
+  - 明确“首次验证快照”与“后续已修复/已合并”的边界
+  - 将早期“暂不合并”结论降级为历史建议
+- 更新 `docs/planning/pg_migration_architecture_review.md`：
+  - 标注 P1 问题已修复
+  - 标注该文档仅用于架构追溯，不再代表当前阻塞状态
+- 更新 `docs/planning/pg_migration_completion_report.md`：
+  - 补充已合入 `dev` 与最终验证结论
+- 更新 `docs/planning/task_plan.md` 与 `docs/planning/findings.md`：
+  - 明确 PG 全状态迁移窗口已完成
+  - 记录剩余非阻塞歧义：repository 返回形状、status 大小写、迁移/ smoke 脚本契约
+
+**结论**
+- PG 全状态迁移窗口已正式收口。
+- 当前不再需要为 PG 迁移补阻塞性测试。
+- 后续若继续处理 PG 相关事项，应归类为“减熵”而非“迁移主线”。

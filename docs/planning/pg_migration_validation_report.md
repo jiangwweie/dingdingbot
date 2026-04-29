@@ -7,6 +7,30 @@
 
 ---
 
+## 状态更新（2026-04-29 14:20 CST）
+
+> 本文档记录的是第一次验证快照。文中首次出现的阻塞项，已经在后续修复、复验并完成合并。
+
+### 最新结论
+
+- ✅ `HybridSignalRepository` 的 backtest 路由边界问题已修复
+- ✅ PG 集成测试隔离问题已修复并复跑通过
+- ✅ repository smoke 契约问题已修复并沉淀为 `scripts/pg_smoke_test.py`
+- ✅ `codex/pg-full-migration` 已合入 `dev`
+
+### 最新验证结果
+
+- SQLite 显式路径回归：`65 passed`
+- 独立 PG 测试库集成测试：`109 passed`
+- 独立 PG 测试库 smoke：通过
+- 合并提交：`027f7f5 merge: pg full migration`
+
+### 使用说明
+
+后续各节保留为“当时的验证发现”，用于追溯问题来源；**不应再作为当前“暂不合并”的依据**。
+
+---
+
 ## 1. 当前分支与 git status
 
 **分支**: `codex/pg-full-migration`
@@ -82,7 +106,7 @@ CREATE DATABASE dingdingbot_migration_test;
 
 ### 总体结果
 
-⚠️ **105 passed, 4 failed**
+⚠️ **本节为首次验证快照：105 passed, 4 failed**
 
 ### 失败用例分类
 
@@ -127,7 +151,7 @@ CREATE DATABASE dingdingbot_migration_test;
 
 ### 总体结果
 
-✅ **核心 repository 可用**，但发现 3 个 API 签名问题
+✅ **本节为首次 smoke 快照**，当时核心 repository 可用，但发现 3 个 API 签名/调用契约问题；这些问题已在后续修复。
 
 ### 详细结果
 
@@ -189,7 +213,7 @@ CREATE DATABASE dingdingbot_migration_test;
 
 ## 7. 是否发现必须回 Codex 决策的问题
 
-### 🔴 P1 问题（必须决策）
+### 🔴 P1 问题（首次验证时）
 
 #### 问题 1: HybridSignalRepository 默认删除 SQLite fallback
 
@@ -258,13 +282,15 @@ CREATE DATABASE dingdingbot_migration_test;
 
 ## 8. 合并建议
 
-### 建议: **暂不合并**
+### 历史建议: **暂不合并**
 
 ### 理由
 
 1. **P1 问题未解决**: HybridSignalRepository 默认删除 SQLite fallback 可能导致 backtest 信号误切 PG
 2. **测试隔离失败**: PG 集成测试 4 个失败用例需修复
 3. **API 签名不一致**: PgBacktestReportRepository / PgHistoricalDataRepository 签名与其他 repository 不一致
+
+> 上述问题现已全部关闭；当前状态以本文档顶部“状态更新（2026-04-29 14:20 CST）”为准。
 
 ### 合并前必须完成
 

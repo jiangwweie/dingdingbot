@@ -1465,3 +1465,15 @@ R1b 二次审计确认，R1 原始 MaxDD 口径严重错误，但在 `debug_equi
 4. **`signal_attempts` 已具备直接 PG 化条件**
    - PG signal repo 可以覆盖 attempts/diagnostics/trace_tree，不需要继续 SQLite fallback
    - Hybrid repo 的 `__getattr__` 现在不再静默回落 SQLite，避免新增方法漏路由时发生 split-brain
+
+### PG 全状态迁移窗口最终结论（2026-04-29）
+
+1. PG 全状态迁移窗口已完成并合入 `dev`，不再属于未收口主线。
+2. 本轮后，默认真源边界可概括为：
+   - runtime / research / historical state：默认优先 PG
+   - 显式测试脚本 / 临时连接 / legacy backtest isolation：保留 SQLite 逃生口
+3. 当前剩余问题已经从“迁移是否成立”切换为“减熵是否值得做”，不再是阻塞性风险。
+4. 最值得记录的非阻塞歧义只剩三类：
+   - repository 返回形状仍有历史差异（`list`、`tuple`、`dict` 混用）
+   - status 字段大小写存在历史包袱，PG 侧应继续收敛为大写语义
+   - 迁移 / smoke / 演练脚本的调用契约需要靠文档固定，避免后续误用主库
