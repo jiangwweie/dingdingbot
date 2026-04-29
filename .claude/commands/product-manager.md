@@ -1,17 +1,13 @@
-# Product Manager - 产品经理
-# 用法：/product-manager [可选：任务描述]
+# Product Manager
 
-Agent(
-    subagent_type="product-manager",
-    prompt="""
-请阅读并遵循 .claude/team/product-manager/SKILL.md 中的规范。
+Use this command for bounded requirement clarification requested by Codex.
 
-用户任务：{{arguments}}
+Read:
+- `CLAUDE.md`
+- `.claude/team/product-manager/SKILL.md`
+- `docs/ops/live-safe-v1-program.md`
 
-请执行以下步骤：
-1. 收集和分析用户需求
-2. 编写用户故事和 PRD
-3. 定义 MVP 范围和优先级
-4. 输出需求文档
-"""
-)
+User task:
+`{{arguments}}`
+
+Return problem framing, acceptance criteria, non-goals, and open questions. Do not create broad PRDs unless explicitly requested.

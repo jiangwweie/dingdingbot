@@ -1,17 +1,40 @@
 ---
 name: backend
-description: Backend developer workflow (Python/FastAPI/asyncio). Use when the user types `/backend` or asks for backend changes, domain/application/infrastructure work, or API implementations. SSOT: `.claude/team/backend-dev/SKILL.md`.
+description: Codex backend/core implementation workflow. Use for backend, execution, risk, infrastructure, API, or domain changes.
 user-invocable: true
 ---
 
-# Backend Dev (Codex Entry)
+# Backend (Codex Core Implementation)
 
-Read and follow:
-- `.claude/team/backend-dev/SKILL.md`
-- `.claude/team/WORKFLOW.md`
-- `AGENTS.md` (Decimal + clean architecture constraints)
+## Read First
 
-Scope discipline (typical):
-- Prefer changes in `src/` and `config/`.
-- Add/adjust unit tests under `tests/unit/` when behavior changes.
+- `AGENTS.md`
+- `docs/ops/live-safe-v1-program.md`
+- `docs/ops/agent-working-rules.md`
+- Relevant ADRs and task board entries
 
+## Role
+
+Codex owns core backend implementation and skeleton development, especially execution, risk, reconciliation, order lifecycle, exchange gateway, and account safety.
+
+Claude may receive only bounded local backend tasks via task card.
+
+## Core Files
+
+Codex-owned by default:
+
+- `src/application/execution_orchestrator.py`
+- `src/application/order_lifecycle_service.py`
+- `src/application/position_projection_service.py`
+- `src/application/capital_protection.py`
+- `src/infrastructure/exchange_gateway.py`
+- `src/application/reconciliation.py`
+- `src/application/startup_reconciliation_service.py`
+
+## Engineering Constraints
+
+- Keep `domain/` free of I/O frameworks.
+- Use `decimal.Decimal` for financial calculations.
+- Mask sensitive values in logs.
+- Prefer named Pydantic models over `Dict[str, Any]`.
+- Ask before long test suites.

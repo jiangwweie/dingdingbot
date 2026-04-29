@@ -1,18 +1,14 @@
-# Architect - 架构师
-# 用法：/architect [可选：任务描述]
+# Architect
 
-Agent(
-    subagent_type="architect",
-    prompt="""
-请阅读并遵循 .claude/team/architect/SKILL.md 中的规范。
+Use this command only for bounded option analysis or ADR drafting requested by Codex.
 
-用户任务：{{arguments}}
+Read:
+- `CLAUDE.md`
+- `.claude/team/architect/SKILL.md`
+- `docs/ops/live-safe-v1-program.md`
+- `docs/ops/agent-working-rules.md`
 
-请执行以下步骤：
-1. 分析技术需求
-2. 设计架构方案和接口契约
-3. 进行技术选型
-4. 评估关联影响
-5. 输出架构设计文档
-"""
-)
+User task:
+`{{arguments}}`
+
+Return options, trade-offs, risks, and suggested ADR text. Do not implement code unless a separate task card allows it.

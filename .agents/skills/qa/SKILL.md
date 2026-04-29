@@ -1,17 +1,27 @@
 ---
 name: qa
-description: QA tester workflow. Use when the user types `/qa`, wants tests, regression coverage, or verification plans. SSOT: `.claude/team/qa-tester/SKILL.md`.
+description: QA planning and scoped verification workflow. Use for test strategy, bounded test implementation, regression review, or verification plans.
 user-invocable: true
 ---
 
-# QA Tester (Codex Entry)
+# QA (Scoped Verification)
 
-Read and follow:
-- `.claude/team/qa-tester/SKILL.md`
-- `.claude/team/WORKFLOW.md`
-- `AGENTS.md` (edge-case checklist)
+## Read First
 
-Important:
-- If you discover a business-logic bug, do not silently fix it in-place; report it and ask PM to route it, unless the user explicitly asks you to patch it directly.
-- Follow the repo red line: ask user confirmation before running long test suites.
+- `AGENTS.md`
+- `docs/ops/live-safe-v1-program.md`
+- `docs/ops/agent-working-rules.md`
+- The relevant task card or ADR
 
+## Role
+
+QA designs and implements scoped tests. Historical tests were archived; new tests should be tied to Live-safe v1 acceptance criteria.
+
+If QA finds a business logic bug, report it and let Codex decide whether to patch or create a new task card.
+
+## Test Discipline
+
+- Ask before long or expensive suites.
+- Prefer targeted tests for the active task.
+- Record tests run and tests skipped.
+- Do not expand implementation scope while writing tests.

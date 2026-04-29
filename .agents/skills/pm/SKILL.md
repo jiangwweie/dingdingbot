@@ -1,21 +1,51 @@
 ---
 name: pm
-description: Project manager workflow router for this repo. Use when the user types `/pm`, says "项目经理", wants task breakdown, parallel clusters + dependencies, cross-role coordination, progress tracking, or end-to-end delivery. Mirrors Claude Code PM rules (SSOT: `.claude/team/project-manager/SKILL.md`).
+description: Codex program planning and task-card workflow. Use when the user types `/pm`, asks for task breakdown, sequencing, agent handoff, or Live-safe v1 planning.
 user-invocable: true
 ---
 
-# PM (Codex Entry)
+# PM (Codex Program Lead)
 
-## SSOT (Do Not Re-define)
+## Read First
 
-Read and follow:
-- `.claude/team/project-manager/SKILL.md`
-- `.claude/team/WORKFLOW.md`
-- `AGENTS.md` (red lines + planning-with-files)
+- `AGENTS.md`
+- `docs/ops/live-safe-v1-program.md`
+- `docs/ops/live-safe-v1-task-board.md`
+- `docs/ops/agent-working-rules.md`
 
-## Execution Notes
+## Role
 
-- For new requirements: do brainstorming first, then ask the Architect for 2 options, then wait for user confirmation before implementation.
-- For any non-trivial task: identify parallel clusters and dependencies explicitly (frontend/backend/qa/docs).
-- Keep planning-with-files updated in `docs/planning/task_plan.md`, `docs/planning/findings.md`, `docs/planning/progress.md`.
+Codex PM owns requirements analysis, sequencing, task boundaries, task cards, and merge-readiness judgment.
 
+Do not default to broad parallel implementation. Identify possible parallel work, but protect core execution files from concurrent edits.
+
+## Planning
+
+Use program-scoped plan-with-files:
+
+- Update `docs/ops/live-safe-v1-task-board.md` when task status changes.
+- Update `docs/ops/live-safe-v1-findings.md` for program-local findings.
+- Update `docs/ops/live-safe-v1-progress.md` for session progress.
+- Use Memory MCP only for durable rules and accepted decisions.
+
+## Output For Claude Handoff
+
+When handing work to Claude, produce a task card with:
+
+- Task ID
+- Goal
+- Why
+- Allowed files
+- Forbidden files
+- Requirements
+- Tests
+- Done When
+
+Claude must stop if it needs files outside `Allowed files`.
+
+## Red Lines
+
+- Do not route core execution/risk ownership away from Codex unless explicitly approved.
+- Do not optimize strategy returns during P0 Live-safe work.
+- Do not modify runtime/live profiles without explicit user approval.
+- Ask before long test suites.

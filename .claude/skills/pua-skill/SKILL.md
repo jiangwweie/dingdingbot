@@ -24,9 +24,10 @@ license: MIT
 **必须读取的项目文件**:
 ```
 1. CLAUDE.md - 项目核心约束
-2. docs/arch/系统开发规范与红线.md - 架构红线
-3. .claude/team/backend-dev/SKILL.md - 后端规范
-4. .claude/team/frontend-dev/SKILL.md - 前端规范
+2. docs/ops/live-safe-v1-program.md - 当前 program 目标和禁令
+3. docs/ops/agent-working-rules.md - Codex/Claude 协作规则
+4. .claude/team/backend-dev/SKILL.md - 后端执行边界
+5. .claude/team/frontend-dev/SKILL.md - 前端规范
 ```
 
 ### 阶段 2: 需求分析

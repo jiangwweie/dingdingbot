@@ -1,30 +1,19 @@
-# Project Manager - 项目经理
-# 用法：/pm [可选：任务描述]
+# Project Manager
 
-## 路由逻辑
+Use this command to coordinate a Codex-issued task card or inspect Live-safe v1 task status.
 
-当用户输入任务时，PM 需要根据任务类型直接调用对应的 Agent：
+Read:
+- `CLAUDE.md`
+- `.claude/team/project-manager/SKILL.md`
+- `docs/ops/live-safe-v1-program.md`
+- `docs/ops/live-safe-v1-task-board.md`
+- `docs/ops/agent-working-rules.md`
 
-### 1. 执行类任务 → PM 直接调度执行
-- 包含"执行"、"验证"、"测试"、"修复"等关键词
-- 已有任务计划的任务
-- Bug 修复
+User task:
+`{{arguments}}`
 
-### 2. 需求类任务 → 调用 product-manager
-- 包含"想要"、"加个"、"新功能"、"需求"等关键词
-
-### 3. 技术类任务 → 调用 architect
-- 包含"方案"、"架构"、"技术选型"、"为什么"等关键词
-
----
-
-## PM 执行任务时的职责
-
-PM 作为统一协调者，负责：
-
-1. **任务分解**：识别并行簇和依赖关系
-2. **并行调度**：使用 Agent 工具并行调用后端/前端/测试角色
-3. **进度追踪**：使用 planning-with-files-zh 管理进度
-4. **验收报告**：完成后生成验收报告
-
-**详细规范**：请阅读 `.claude/team/project-manager/SKILL.md`
+Do:
+1. Confirm whether a valid task card exists.
+2. If yes, coordinate only within that boundary.
+3. If no, ask for Codex task-card clarification.
+4. Do not auto-dispatch broad parallel implementation.

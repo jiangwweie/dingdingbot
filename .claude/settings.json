@@ -4,7 +4,7 @@
       {
         "name": "pua",
         "description": "提示词升级助手 - 自动优化用户提示词，添加技术约束、验收标准、边界条件",
-        "path": "./.claude/skills/pua/SKILL.md"
+        "path": "./.claude/skills/pua-skill/SKILL.md"
       },
       {
         "name": "prd",
