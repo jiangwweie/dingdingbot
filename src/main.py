@@ -16,7 +16,7 @@ import os
 import sys
 import signal as sys_signal
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 try:
     from dotenv import load_dotenv
@@ -70,6 +70,7 @@ _execution_orchestrator: Optional[ExecutionOrchestrator] = None
 _execution_recovery_repo = None  # PG 正式版
 _runtime_config_provider: Optional[RuntimeConfigProvider] = None
 _trace_service: Optional[TraceService] = None
+_order_watch_tasks: List[asyncio.Task] = []
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -80,6 +81,55 @@ class _CapitalProtectionNotifierAdapter:
 
     async def send_alert(self, title: str, message: str) -> None:
         await self._notification_service.send_system_alert(title, message)
+
+
+async def _noop_order_watch_callback(_order: object) -> None:
+    """Keep watch_orders callback contract without duplicating lifecycle updates."""
+    return None
+
+
+def _dedupe_runtime_symbols(symbols: List[str]) -> List[str]:
+    """Preserve order while removing duplicate symbols for order watch startup."""
+    return list(dict.fromkeys(symbols))
+
+
+async def _run_order_watch(symbol: str) -> None:
+    """Run one order-watch loop and isolate failures from the main runtime."""
+    if _exchange_gateway is None:
+        logger.warning("Order watch start skipped: ExchangeGateway not initialized")
+        return
+
+    try:
+        await _exchange_gateway.watch_orders(symbol, _noop_order_watch_callback)
+    except asyncio.CancelledError:
+        logger.info(f"Order watch task cancelled: {symbol}")
+        raise
+    except Exception as e:
+        logger.error(f"Order watch runtime failed: symbol={symbol}, error={e}", exc_info=True)
+
+
+def _start_order_watch_tasks(symbols: List[str]) -> List[asyncio.Task]:
+    """Start one order-watch background task per runtime symbol."""
+    tasks: List[asyncio.Task] = []
+    for symbol in _dedupe_runtime_symbols(symbols):
+        task = asyncio.create_task(_run_order_watch(symbol))
+        tasks.append(task)
+        logger.info(f"Order watch task started: {symbol}")
+    return tasks
+
+
+async def _cancel_order_watch_tasks(tasks: List[asyncio.Task]) -> None:
+    """Cancel and await all order-watch tasks."""
+    for task in tasks:
+        task.cancel()
+
+    for task in tasks:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"Order watch task shutdown error: {e}", exc_info=True)
 
 
 # ============================================================
@@ -107,8 +157,12 @@ async def graceful_shutdown():
 
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
     global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
-    global _runtime_config_provider
+    global _runtime_config_provider, _order_watch_tasks
     _shutdown_event.set()
+
+    if _order_watch_tasks:
+        await _cancel_order_watch_tasks(_order_watch_tasks)
+        _order_watch_tasks = []
 
     if _exchange_gateway:
         await _exchange_gateway.close()
@@ -182,7 +236,7 @@ async def run_application():
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator, _trace_service
-    global _runtime_config_provider
+    global _runtime_config_provider, _order_watch_tasks
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -627,6 +681,9 @@ async def run_application():
         # =============================================
         logger.info("Phase 8: Starting WebSocket subscriptions...")
 
+        _order_watch_tasks = _start_order_watch_tasks(symbols)
+        logger.info(f"Order watch tasks active: {len(_order_watch_tasks)}")
+
         # Create WebSocket task
         ws_task = asyncio.create_task(
             _exchange_gateway.subscribe_ohlcv(
@@ -770,6 +827,10 @@ async def run_application():
         except asyncio.CancelledError:
             pass
 
+        if _order_watch_tasks:
+            await _cancel_order_watch_tasks(_order_watch_tasks)
+            _order_watch_tasks = []
+
     except FatalStartupError as e:
         logger.error(f"Fatal startup error: {e}")
         if _notification_service:
@@ -835,6 +896,7 @@ async def run_application():
         _capital_protection = None
         _execution_orchestrator = None
         _runtime_config_provider = None
+        _order_watch_tasks = []
 
         logger.info("Application shutdown complete")
 

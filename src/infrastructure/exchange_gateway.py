@@ -101,6 +101,8 @@ class ExchangeGateway:
 
         # WebSocket state
         self._ws_running = False
+        self._order_ws_running = False
+        self._order_watch_exchanges: List[Any] = []
 
         # Asset snapshot cache
         self._account_snapshot: Optional[AccountSnapshot] = None
@@ -296,11 +298,19 @@ class ExchangeGateway:
 
         # Stop WebSocket
         self._ws_running = False
+        self._order_ws_running = False
         if self.ws_exchange:
             try:
                 await self.ws_exchange.close()
             except Exception:
                 pass
+
+        for order_ws_exchange in list(self._order_watch_exchanges):
+            try:
+                await order_ws_exchange.close()
+            except Exception:
+                pass
+        self._order_watch_exchanges.clear()
 
         # Close REST
         try:
@@ -1664,6 +1674,17 @@ class ExchangeGateway:
             except Exception as e:
                 logger.error(f"全局订单回调执行失败：{e}")
 
+    def _register_order_watch_exchange(self, ws_exchange: Any) -> None:
+        """Track a dedicated order-watch WebSocket exchange for cleanup."""
+        self._order_watch_exchanges.append(ws_exchange)
+
+    def _unregister_order_watch_exchange(self, ws_exchange: Any) -> None:
+        """Remove a dedicated order-watch WebSocket exchange from cleanup tracking."""
+        try:
+            self._order_watch_exchanges.remove(ws_exchange)
+        except ValueError:
+            pass
+
     async def watch_orders(
         self,
         symbol: str,
@@ -1688,23 +1709,24 @@ class ExchangeGateway:
             logger.warning("CCXT Pro 未安装，无法使用 WebSocket 订单推送")
             return
 
-        self._ws_running = True
+        self._order_ws_running = True
         reconnect_count = 0
 
-        # 创建 WebSocket 交换实例
-        self.ws_exchange = self._create_ws_exchange({
+        # 创建专用的订单监听 WebSocket 实例，避免与 K-line WS 状态互相干扰
+        order_ws_exchange = self._create_ws_exchange({
             'defaultType': 'swap',
         })
+        self._register_order_watch_exchange(order_ws_exchange)
 
         # 加载市场数据
-        await self.ws_exchange.load_markets()
+        await order_ws_exchange.load_markets()
         logger.info(f"WebSocket 订单监听已启动：{symbol}")
 
         try:
-            while self._ws_running:
+            while self._order_ws_running:
                 try:
                     # 使用 CCXT Pro watch_orders 方法
-                    orders = await self.ws_exchange.watch_orders(symbol)
+                    orders = await order_ws_exchange.watch_orders(symbol)
 
                     # 处理每个订单更新
                     for raw_order in orders:
@@ -1758,9 +1780,14 @@ class ExchangeGateway:
                     await asyncio.sleep(delay)
 
         finally:
-            self._ws_running = False
-            if self.ws_exchange:
-                await self.ws_exchange.close()
+            self._unregister_order_watch_exchange(order_ws_exchange)
+            if not self._order_watch_exchanges:
+                self._order_ws_running = False
+
+            try:
+                await order_ws_exchange.close()
+            except Exception:
+                pass
 
     def get_pending_recovery_orders(self) -> Dict[str, Dict[str, Any]]:
         """

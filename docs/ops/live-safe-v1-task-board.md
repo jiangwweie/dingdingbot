@@ -6,7 +6,7 @@ Status values: `TODO`, `SPEC`, `IMPLEMENTING`, `TESTING`, `REVIEW`, `MERGED`, `B
 
 | ID | Task | Status | Owner | Notes |
 | --- | --- | --- | --- | --- |
-| LS-001 | Start `watch_orders` | TODO | Codex | First execution-chain blocker. |
+| LS-001 | Start `watch_orders` | MERGED | Codex | Main runtime order-watch enabled with isolated WS state; `api.py` out of scope; duplicate `watch_orders` definition remains as later cleanup. |
 | LS-002 | Make daily max loss/trades effective | TODO | Codex + Claude tests | Codex owns design and core wiring. |
 | LS-003 | Structured runtime logs | TODO | Claude | Requires Codex task card first. |
 | LS-004 | Daily equity snapshot | TODO | Claude | Requires Codex task card first. |
