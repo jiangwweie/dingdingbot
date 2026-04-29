@@ -339,3 +339,54 @@ async def cleanup():
 
 - 没有在迁移后的 PG 数据上运行 `tests/integration/test_pg_*`，因为 `tests/integration/conftest.py` 的 autouse fixture 会 `TRUNCATE` 核心 PG 表。
 - 已运行非破坏性 smoke 与显式 SQLite 回归，未运行全量测试。
+
+---
+
+## 12. 审查问题修复（2026-04-29 08:35 CST）
+
+### 已采纳并修复
+
+1. **默认路由与注释矛盾**
+   - 结论：注释过期，且 `OrderRepository()` 的默认构造确实不应绕过 `CORE_ORDER_BACKEND`。
+   - 修复：删除过期“小范围实切”注释；`OrderRepository.__new__()` 改为按 `get_core_backend_settings()["order"]` 路由。
+   - 验证：
+     - `CORE_ORDER_BACKEND=sqlite` -> `OrderRepository`
+     - `CORE_ORDER_BACKEND=postgres` -> `PgOrderRepository`
+
+2. **SQLite engine dispose 后未复位**
+   - 结论：不是必然崩溃，但热重载/多次 startup shutdown 语义不干净。
+   - 修复：`close_db()` dispose SQLite engine 后清空 `_engine` 和默认 sessionmaker；下一次访问可重建。
+   - 验证：`close_db()` smoke 确认 engine/sessionmaker 均可重建。
+
+3. **双轨路由边界**
+   - 结论：核心仓储和全状态迁移开关必须分层。
+   - 修复：核心订单仓储尊重 `CORE_ORDER_BACKEND`；非核心状态仓储继续使用 `MIGRATE_ALL_STATE_TO_PG`。
+
+4. **Numeric 精度**
+   - 结论：`NUMERIC(30, 8)` 对长尾币价格/数量保守不足。
+   - 修复：`src/infrastructure/pg_models.py` 与 `db_scripts/2026-04-22-pg-core-baseline.sql` 中 `30,8` 扩展为 `36,18`。
+   - 实库：Docker PG 已执行 ALTER，抽样显示 numeric columns 为 `precision=36, scale=18`。
+
+5. **active position 幂等约束**
+   - 结论：当前单实例也值得由 PG 承担最后一道防线。
+   - 修复：新增 `uq_positions_active_symbol_direction` partial unique index：
+     - `UNIQUE(symbol, direction) WHERE is_closed = FALSE`
+   - 实库：Docker PG 已创建该索引。
+
+### 验证命令
+
+```bash
+python3 -m py_compile \
+  src/infrastructure/database.py \
+  src/infrastructure/order_repository.py \
+  src/infrastructure/pg_models.py \
+  scripts/migrate_sqlite_state_to_pg.py
+
+MIGRATE_ALL_STATE_TO_PG=false \
+python3 -m pytest \
+  tests/unit/test_runtime_profile_repository.py \
+  tests/unit/test_research_repository.py \
+  tests/unit/test_config_profile.py -q
+```
+
+结果：`60 passed`。

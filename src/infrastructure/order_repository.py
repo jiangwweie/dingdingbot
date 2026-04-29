@@ -48,9 +48,9 @@ class OrderRepository:
         audit_logger: Optional[Any] = None,
     ):
         if cls is OrderRepository and connection is None and db_path == "data/v3_dev.db":
-            from src.infrastructure.database import should_use_pg_for_default_repository
+            from src.infrastructure.database import get_core_backend_settings
 
-            if should_use_pg_for_default_repository():
+            if get_core_backend_settings()["order"] == "postgres":
                 from src.infrastructure.pg_order_repository import PgOrderRepository
 
                 repo = PgOrderRepository()

@@ -1884,3 +1884,39 @@
 **注意**
 - `tests/integration/conftest.py` 对核心 PG 表有 `TRUNCATE` autouse fixture，因此本次没有在已迁移数据上直接跑这些集成测试，避免擦掉迁移结果。
 - 未执行全量测试。
+
+### 2026-04-29 08:35 CST -- PG 迁移审查问题修复
+
+**审查结论**
+- 误切 PG：审查指出的旧注释确实过期；本窗口目标已从“小范围 intent PG”推进到“PG 全状态迁移”。但 `OrderRepository()` 默认构造此前会被全局 `MIGRATE_ALL_STATE_TO_PG` 拉入 PG，可能绕过 `CORE_ORDER_BACKEND=sqlite` 的细粒度控制，已修复。
+- SQLite engine reset：`close_db()` 只 dispose `_engine` 但不复位，虽然 SQLAlchemy disposed engine 通常可重连，但热重载语义不够清晰，已改为 dispose 后清空 `_engine` 和默认 sessionmaker。
+- 双轨路由：核心订单仓储现在按 `CORE_ORDER_BACKEND`；非核心状态仓储继续按 `MIGRATE_ALL_STATE_TO_PG`。职责边界已收紧。
+- Numeric 精度：`NUMERIC(30, 8)` 对长尾币价格/数量不够宽，已扩展为 `NUMERIC(36, 18)`。
+- active position 幂等：新增 PG 部分唯一索引 `uq_positions_active_symbol_direction`，约束同一 `symbol + direction` 只能存在一个未关闭仓位。
+
+**改动**
+- `src/infrastructure/database.py`
+  - 删除过期“小范围实切”注释。
+  - `close_db()` 复位 SQLite `_engine` 和默认 sessionmaker，PG engine/sessionmaker 继续复位。
+- `src/infrastructure/order_repository.py`
+  - 默认构造 PG 路由改为尊重 `get_core_backend_settings()["order"]`，避免 `CORE_ORDER_BACKEND=sqlite` 时误切 PG。
+- `src/infrastructure/pg_models.py`
+  - 所有 `Numeric(30, 8)` 扩展为 `Numeric(36, 18)`。
+  - 新增 `uq_positions_active_symbol_direction` partial unique index。
+- `db_scripts/2026-04-22-pg-core-baseline.sql`
+  - 同步扩展 numeric 精度。
+  - 同步新增 active position partial unique index。
+- Docker PG 实库已执行 ALTER：
+  - 所有 public schema 中 `numeric(30,8)` 列扩展为 `numeric(36,18)`。
+  - 已创建 `uq_positions_active_symbol_direction`。
+
+**验证**
+- `python3 -m py_compile src/infrastructure/database.py src/infrastructure/order_repository.py src/infrastructure/pg_models.py scripts/migrate_sqlite_state_to_pg.py` 通过。
+- `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q`：60 passed。
+- 路由 smoke：
+  - `CORE_ORDER_BACKEND=sqlite` + `MIGRATE_ALL_STATE_TO_PG=true` -> `OrderRepository`
+  - `CORE_ORDER_BACKEND=postgres` + `MIGRATE_ALL_STATE_TO_PG=true` -> `PgOrderRepository`
+- Docker PG schema smoke：
+  - numeric columns 已显示 `precision=36, scale=18`
+  - `uq_positions_active_symbol_direction` 存在
+- `close_db()` smoke：SQLite engine/sessionmaker 均可复位重建，PG probe OK。

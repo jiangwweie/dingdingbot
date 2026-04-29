@@ -55,15 +55,15 @@ class PGOrderORM(PGCoreBase):
     order_type: Mapped[str] = mapped_column(String(32), nullable=False)
     order_role: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
-    price: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
-    trigger_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
-    requested_qty: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    trigger_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    requested_qty: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
     filled_qty: Mapped[Decimal] = mapped_column(
-        Numeric(30, 8),
+        Numeric(36, 18),
         nullable=False,
         default=Decimal("0"),
     )
-    average_exec_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    average_exec_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
     reduce_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     parent_order_id: Mapped[Optional[str]] = mapped_column(
         String(64),
@@ -151,12 +151,12 @@ class PGPositionORM(PGCoreBase):
     signal_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    entry_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
-    mark_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    entry_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    mark_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
     leverage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    unrealized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
-    realized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    unrealized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    realized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
     is_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     opened_at: Mapped[int] = mapped_column(BIGINT, nullable=False)
     closed_at: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
@@ -194,6 +194,13 @@ Index(
     PGExecutionIntentORM.exchange_order_id,
     unique=True,
     postgresql_where=PGExecutionIntentORM.exchange_order_id.is_not(None),
+)
+Index(
+    "uq_positions_active_symbol_direction",
+    PGPositionORM.symbol,
+    PGPositionORM.direction,
+    unique=True,
+    postgresql_where=PGPositionORM.is_closed.is_(False),
 )
 
 
@@ -252,16 +259,16 @@ class PGSignalORM(PGCoreBase):
     symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     timeframe: Mapped[str] = mapped_column(String(16), nullable=False)
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
-    entry_price: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    stop_loss: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    position_size: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    entry_price: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    stop_loss: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    position_size: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
     leverage: Mapped[int] = mapped_column(Integer, nullable=False)
     tags_json: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     risk_info: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
-    take_profit_1: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    take_profit_1: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
     closed_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    pnl_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    pnl_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
     kline_timestamp: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
     strategy_name: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
     score: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
@@ -304,10 +311,10 @@ class PGSignalTakeProfitORM(PGCoreBase):
     tp_id: Mapped[str] = mapped_column(String(16), nullable=False)
     position_ratio: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     risk_reward: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
-    price_level: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    price_level: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     filled_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    pnl_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    pnl_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
 
     __table_args__ = (
         CheckConstraint("position_ratio >= 0", name="ck_signal_take_profits_position_ratio_non_negative"),
@@ -560,11 +567,11 @@ class PGKlineORM(PGCoreBase):
     symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     timeframe: Mapped[str] = mapped_column(String(16), nullable=False)
     timestamp: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    open: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    high: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    low: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    close: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    volume: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    open: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    high: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    low: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    close: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    volume: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
     is_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
 
@@ -593,19 +600,19 @@ class PGBacktestReportORM(PGCoreBase):
     backtest_start: Mapped[int] = mapped_column(BIGINT, nullable=False)
     backtest_end: Mapped[int] = mapped_column(BIGINT, nullable=False)
     created_at: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    initial_balance: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    final_balance: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
-    total_return: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    initial_balance: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    final_balance: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    total_return: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
     total_trades: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     winning_trades: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     losing_trades: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    win_rate: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False, default=Decimal("0"))
-    total_pnl: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False, default=Decimal("0"))
-    total_fees_paid: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False, default=Decimal("0"))
-    total_slippage_cost: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False, default=Decimal("0"))
-    total_funding_cost: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False, default=Decimal("0"))
-    max_drawdown: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False, default=Decimal("0"))
-    sharpe_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    win_rate: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False, default=Decimal("0"))
+    total_pnl: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False, default=Decimal("0"))
+    total_fees_paid: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False, default=Decimal("0"))
+    total_slippage_cost: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False, default=Decimal("0"))
+    total_funding_cost: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False, default=Decimal("0"))
+    max_drawdown: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False, default=Decimal("0"))
+    sharpe_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
     positions_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     monthly_returns: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -633,10 +640,10 @@ class PGPositionCloseEventORM(PGCoreBase):
     order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     event_category: Mapped[str] = mapped_column(String(64), nullable=False)
-    close_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
-    close_qty: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
-    close_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
-    close_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 8), nullable=True)
+    close_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    close_qty: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    close_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    close_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
     close_time: Mapped[int] = mapped_column(BIGINT, nullable=False)
     exit_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
