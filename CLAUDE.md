@@ -17,6 +17,7 @@ System goals are capability goals. Annual return and max drawdown numbers are in
 
 Before starting work, read:
 
+- `docs/ops/project-roadmap-v2.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/live-safe-v1-task-board.md`
 - `docs/ops/agent-working-rules.md`
@@ -39,6 +40,8 @@ For Live-safe v1, update only the relevant program files:
 Use Memory MCP only for durable rules and accepted decisions. Do not store routine daily progress in Memory MCP.
 
 Do not recreate the old global `docs/planning/*` workflow unless the user explicitly asks.
+
+Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority. Do not turn future capability-pool items into current implementation work unless Codex or the user explicitly promotes them.
 
 ## Task Card Requirement
 

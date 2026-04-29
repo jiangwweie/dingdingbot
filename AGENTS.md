@@ -19,6 +19,7 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 
 Read these first for current work:
 
+- `docs/ops/project-roadmap-v2.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/live-safe-v1-task-board.md`
 - `docs/ops/live-safe-v1-findings.md`
@@ -38,6 +39,7 @@ Plan-with-files is still required, but it is now program-scoped.
 
 For Live-safe v1, write planning state to:
 
+- `docs/ops/project-roadmap-v2.md`
 - `docs/ops/live-safe-v1-task-board.md`
 - `docs/ops/live-safe-v1-findings.md`
 - `docs/ops/live-safe-v1-progress.md`
@@ -53,6 +55,8 @@ Use Memory MCP only for durable knowledge:
 Do not use Memory MCP for daily progress logs.
 
 Do not recreate the old global `docs/planning/*` workflow unless the user explicitly asks for it.
+
+Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority. Only current active tracks should produce direct implementation tasks by default.
 
 ## Red Lines
 

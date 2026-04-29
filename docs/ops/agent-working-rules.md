@@ -25,6 +25,7 @@ Plan-with-files remains required, but it is program-scoped.
 
 For Live-safe v1, use:
 
+- `docs/ops/project-roadmap-v2.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/live-safe-v1-task-board.md`
 - `docs/ops/live-safe-v1-findings.md`
@@ -56,6 +57,17 @@ Allowed framing:
 - Auditable and replayable decisions.
 
 Do not write fixed annual return or max drawdown numbers as system constraints. Such numbers may appear only as investor preferences, evaluation dimensions, or phase-specific review metrics.
+
+## Scope Framing
+
+Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority.
+
+Default rule:
+
+- Only current active tracks may produce direct implementation tasks.
+- Future capability-pool items stay as backlog unless the user explicitly promotes them.
+
+Codex decides whether a proposed capability belongs to the current active tracks or to the future capability pool. Claude does not own that decision.
 
 ## Claude Task Card
 

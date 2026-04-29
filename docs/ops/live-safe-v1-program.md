@@ -2,17 +2,19 @@
 
 Last updated: 2026-04-29
 
+## Role Of This Document
+
+This document is the execution-layer program document for the current active track.
+
+Use [project-roadmap-v2.md](/Users/jiangwei/Documents/final/docs/ops/project-roadmap-v2.md) as the high-level roadmap and boundary document.
+
+This file should define only the current execution program for `Live-safe Foundation`.
+
 ## Goal
 
-Move the current Sim-ready system toward full-auto small-live safety.
+Move the current Sim-ready system toward full-auto small-live candidate safety.
 
-The long-term direction is not an ETH Pinbar system. The system should evolve from a single-strategy research setup into a full-auto, multi-asset, multi-direction, low-frequency portfolio platform with account-level risk control.
-
-Return and drawdown numbers are evaluation dimensions and investor preference signals, not engineering constraints. Do not encode fixed annual-return or max-drawdown targets as hard system rules.
-
-## Evolution Path
-
-Live-safe -> Regime-aware -> Data-aware -> Multi-strategy -> Multi-asset -> Portfolio-level -> Small-live scaling.
+The scope of this program is the current active track `Live-safe Foundation`, not the full long-term platform roadmap.
 
 ## Operating Model
 
@@ -24,7 +26,8 @@ Claude Code is an execution worker for bounded implementation and tests. Claude 
 
 Use program-scoped plan-with-files:
 
-- `docs/ops/live-safe-v1-program.md`: goal, non-goals, safety rules, scope.
+- `docs/ops/project-roadmap-v2.md`: high-level roadmap, current-stage boundaries, capability-pool rules.
+- `docs/ops/live-safe-v1-program.md`: current live-safe program scope, non-goals, safety rules.
 - `docs/ops/live-safe-v1-task-board.md`: task status and ownership.
 - `docs/ops/live-safe-v1-findings.md`: program-local findings and short-lived technical notes.
 - `docs/ops/live-safe-v1-progress.md`: session progress and handoff notes.
@@ -37,6 +40,7 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Do not optimize strategy returns in P0.
 - Do not tune ETH Pinbar parameters.
 - Do not add multi-asset expansion.
+- Do not add Regime, Data, Strategy Router, or Portfolio capabilities unless the user explicitly promotes them from the capability pool.
 - Do not connect real funds.
 - Do not rewrite the architecture.
 - Do not change live/runtime profile trading parameters.

@@ -16,6 +16,8 @@ The long-term direction is a full-auto, multi-asset, multi-direction, low-freque
 
 Live-safe v1 will focus on execution safety, account-level risk controls, reconciliation, observability, and runtime guardrails.
 
+The program is an execution-layer track under the higher-level roadmap in `docs/ops/project-roadmap-v2.md`.
+
 Program planning will live under `docs/ops/` instead of the old global `docs/planning/` files.
 
 Memory MCP remains enabled for durable decisions and collaboration rules, but daily progress remains in plan-with-files.
