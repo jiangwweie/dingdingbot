@@ -78,6 +78,20 @@ class StrategyConfigRepository:
     - 显式 db_path/connection → SQLite（测试兼容）
     """
 
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+        use_pg: Optional[bool] = None,
+    ):
+        if cls is StrategyConfigRepository:
+            should_use_pg = _should_route_default_to_pg(db_path, connection) if use_pg is None else use_pg
+            if should_use_pg:
+                from src.infrastructure.pg_config_repositories import PgStrategyConfigRepository
+
+                return PgStrategyConfigRepository()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",
@@ -92,22 +106,11 @@ class StrategyConfigRepository:
             connection: Optional injected connection (if None, creates own connection)
             use_pg: 显式指定使用 PG（None 时根据环境变量和参数自动判断）
         """
-        # 判断是否使用 PG
-        if use_pg is None:
-            # 默认构造（无显式 db_path/connection）→ PG
-            use_pg = _should_route_default_to_pg(db_path, connection)
-
-        if use_pg:
-            # 延迟导入避免循环依赖
-            from src.infrastructure.pg_config_repositories import PgStrategyConfigRepository
-            self._pg_repo = PgStrategyConfigRepository()
-            self._use_pg = True
-        else:
-            self.db_path = db_path
-            self._db: Optional[aiosqlite.Connection] = connection
-            self._owns_connection = connection is None  # 标记是否自行管理生命周期
-            self._lock = asyncio.Lock()
-            self._use_pg = False
+        self.db_path = db_path
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None  # 标记是否自行管理生命周期
+        self._lock = asyncio.Lock()
+        self._use_pg = False
 
     async def initialize(self) -> None:
         """Initialize database connection and create tables."""

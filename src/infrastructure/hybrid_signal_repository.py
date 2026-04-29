@@ -26,6 +26,32 @@ class HybridSignalRepository:
         self._live_repo = live_repo or PgSignalRepository()
         self._legacy_repo = legacy_repo
 
+    @staticmethod
+    def _extract_source(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Optional[str]:
+        source = kwargs.get("source")
+        request = kwargs.get("request")
+        query = kwargs.get("query")
+        if request is None and args:
+            first = args[0]
+            if hasattr(first, "source"):
+                request = first
+        if query is None and request is None and args:
+            first = args[0]
+            if hasattr(first, "source"):
+                query = first
+        request_source = getattr(request, "source", None) if request is not None else None
+        query_source = getattr(query, "source", None) if query is not None else None
+        return source or request_source or query_source
+
+    def _require_legacy_for_backtest(self, operation: str) -> SignalRepository:
+        if self._legacy_repo is None:
+            raise RuntimeError(
+                f"Backtest signal {operation} requires an explicit legacy_repo. "
+                "Inject SignalRepository(...) to keep research/backtest cleanup "
+                "isolated from live PG signals."
+            )
+        return self._legacy_repo
+
     async def initialize(self) -> None:
         await self._live_repo.initialize()
         if self._legacy_repo is not None:
@@ -45,6 +71,9 @@ class HybridSignalRepository:
         return getattr(self._legacy_repo, name)
 
     async def save_signal(self, *args, **kwargs):
+        if self._extract_source(args, kwargs) == "backtest":
+            legacy = self._require_legacy_for_backtest("write")
+            return await legacy.save_signal(*args, **kwargs)
         return await self._live_repo.save_signal(*args, **kwargs)
 
     async def update_signal_status_by_tracker_id(self, *args, **kwargs):
@@ -89,15 +118,13 @@ class HybridSignalRepository:
         return await self._live_repo.get_stats()
 
     async def clear_all_signals(self):
-        return await self._live_repo.clear_all_signals()
+        legacy = self._require_legacy_for_backtest("clear_all")
+        return await legacy.clear_all_signals()
 
     async def delete_signals(self, *args, **kwargs):
-        if self._legacy_repo is not None:
-            source = kwargs.get("source")
-            request = kwargs.get("request")
-            request_source = getattr(request, "source", None) if request is not None else None
-            if source == "backtest" or request_source == "backtest":
-                return await self._legacy_repo.delete_signals(*args, **kwargs)
+        if self._extract_source(args, kwargs) == "backtest":
+            legacy = self._require_legacy_for_backtest("delete")
+            return await legacy.delete_signals(*args, **kwargs)
         return await self._live_repo.delete_signals(*args, **kwargs)
 
     async def save_attempt(self, *args, **kwargs):
@@ -119,4 +146,7 @@ class HybridSignalRepository:
         return await self._live_repo.clear_all_attempts()
 
     async def get_signals(self, *args, **kwargs):
+        if self._extract_source(args, kwargs) == "backtest":
+            legacy = self._require_legacy_for_backtest("read")
+            return await legacy.get_signals(*args, **kwargs)
         return await self._live_repo.get_signals(*args, **kwargs)

@@ -1920,3 +1920,39 @@
   - numeric columns 已显示 `precision=36, scale=18`
   - `uq_positions_active_symbol_direction` 存在
 - `close_db()` smoke：SQLite engine/sessionmaker 均可复位重建，PG probe OK。
+
+### 2026-04-29 09:05 CST -- PG 架构审查 P1 收口
+
+**输入**
+- 架构审查报告：`docs/planning/pg_migration_architecture_review.md`
+- 结论：整体 B+，合并前需处理 HybridSignalRepository backtest 边界和 repository 路由模式一致性。
+
+**完成**
+- `HybridSignalRepository` 增加 backtest source 安全边界：
+  - `save_signal(source="backtest")` 在无 `legacy_repo` 时抛明确 `RuntimeError`，避免 backtest 信号误写 PG live signals。
+  - `get_signals(source="backtest")` 在无 `legacy_repo` 时抛明确 `RuntimeError`，避免误读 PG live/backtest 混合数据。
+  - `delete_signals(source="backtest")` 在无 `legacy_repo` 时抛明确 `RuntimeError`，避免误删 PG 生产信号。
+  - `clear_all_signals()` 改为仅走显式注入的 legacy repo；无 legacy repo 时拒绝执行。
+- `StrategyConfigRepository` 与其他旧 config repositories 对齐为默认构造 `__new__` 替换模式：
+  - 默认 PG 路由时直接返回 `PgStrategyConfigRepository`。
+  - `use_pg=False` 或显式 SQLite 路径仍保留 SQLite 实例。
+- 迁移脚本增强 P2 防御：
+  - `signal_take_profits` 支持已是业务 `sig_*` 的 `signal_id`，并对无法映射记录打 warning。
+  - `backtest_reports.sharpe_ratio` 增加空字符串/非法数值清洗。
+  - JSONB 字段非法 JSON 时记录 warning 并置空，避免 PG JSONB 插入失败。
+  - 记录 SQLite 字段被 PG 忽略的字段差异。
+  - 记录 `ON CONFLICT DO NOTHING` 造成的 conflict/no-op 数量。
+  - `research_jobs` artifact 为空/缺失时记录 warning。
+
+**验证**
+- `python3 -m py_compile src/infrastructure/hybrid_signal_repository.py src/infrastructure/repositories/config_repositories.py scripts/migrate_sqlite_state_to_pg.py` 通过。
+- `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_hybrid_signal_repository.py tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q`
+  - 65 passed
+- Config repository route smoke:
+  - 默认：`StrategyConfigRepository` -> `PgStrategyConfigRepository`
+  - 默认：`RiskConfigRepository` -> `PgRiskConfigRepository`
+  - `StrategyConfigRepository(use_pg=True)` -> PG
+  - `StrategyConfigRepository(use_pg=False)` -> SQLite wrapper
+
+**边界**
+- 未重新执行整库迁移；迁移脚本增强已做语法检查，下一次可在独立测试库用 `--truncate` 做迁移演练。

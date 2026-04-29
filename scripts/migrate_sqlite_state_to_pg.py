@@ -16,6 +16,7 @@ import asyncio
 import json
 import sqlite3
 import sys
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -139,7 +140,8 @@ def _coerce_value(column: str, value: Any) -> Any:
         try:
             return json.dumps(json.loads(value), ensure_ascii=False, default=str)
         except Exception:
-            return value
+            print(f"[warn] invalid JSON in column {column}; storing null")
+            return None
     if column in BOOL_COLUMNS:
         return bool(value)
     return value
@@ -157,6 +159,11 @@ async def _pg_columns(session, table: str) -> set[str]:
         {"table": table},
     )
     return {row[0] for row in result.fetchall()}
+
+
+async def _pg_row_count(session, table: str) -> int:
+    result = await session.execute(text(f'SELECT COUNT(*) FROM "{table}"'))
+    return int(result.scalar_one())
 
 
 def _target_table(table: str, rows: list[dict[str, Any]]) -> str:
@@ -181,13 +188,25 @@ def _load_json_artifact(ref: Any) -> Any:
 
 async def _copy_table(session, db_path: Path, table: str, truncate: bool) -> int:
     rows = _sqlite_rows(db_path, table)
+    source_count = len(rows)
     if table == "signal_take_profits":
         signal_id_map = _sqlite_signal_id_map(db_path)
         mapped_rows = []
         for row in rows:
             numeric_id = row.get("signal_id")
-            signal_id = signal_id_map.get(int(numeric_id)) if numeric_id is not None else None
+            signal_id = None
+            if isinstance(numeric_id, str) and numeric_id.startswith("sig_"):
+                signal_id = numeric_id
+            elif numeric_id is not None:
+                try:
+                    signal_id = signal_id_map.get(int(numeric_id))
+                except (TypeError, ValueError):
+                    signal_id = None
             if not signal_id:
+                print(
+                    "[warn] skip signal_take_profit row with unmapped signal_id: "
+                    f"id={row.get('id')} signal_id={numeric_id}"
+                )
                 continue
             mapped = dict(row)
             mapped["signal_id"] = signal_id
@@ -210,6 +229,18 @@ async def _copy_table(session, db_path: Path, table: str, truncate: bool) -> int
                 if not cleaned.get("positions_summary"):
                     cleaned["positions_summary"] = sharpe_ratio
                 cleaned["sharpe_ratio"] = None
+            elif isinstance(sharpe_ratio, str):
+                if not sharpe_ratio.strip():
+                    cleaned["sharpe_ratio"] = None
+                else:
+                    try:
+                        Decimal(sharpe_ratio)
+                    except (InvalidOperation, ValueError):
+                        print(
+                            "[warn] invalid backtest_reports.sharpe_ratio; storing null: "
+                            f"id={cleaned.get('id')} value={sharpe_ratio[:80]}"
+                        )
+                        cleaned["sharpe_ratio"] = None
             cleaned_rows.append(cleaned)
         rows = cleaned_rows
     elif table == "research_jobs":
@@ -222,7 +253,13 @@ async def _copy_table(session, db_path: Path, table: str, truncate: bool) -> int
         ]
         for row in rows:
             if not row.get("spec_payload"):
-                row["spec_payload"] = _load_json_artifact(row.get("spec_ref"))
+                artifact = _load_json_artifact(row.get("spec_ref"))
+                if not artifact:
+                    print(
+                        "[warn] research_jobs spec artifact missing or empty: "
+                        f"id={row.get('id')} spec_ref={row.get('spec_ref')}"
+                    )
+                row["spec_payload"] = artifact
     elif table == "research_run_results":
         rows = [
             {
@@ -248,6 +285,14 @@ async def _copy_table(session, db_path: Path, table: str, truncate: bool) -> int
         print(f"[skip] PG table missing: {target_table}")
         return 0
 
+    source_columns = set(rows[0].keys()) if rows else set()
+    missing_in_pg = sorted(source_columns - pg_columns)
+    if missing_in_pg:
+        print(
+            f"[warn] {db_path.relative_to(ROOT)}:{table} columns ignored by PG "
+            f"{target_table}: {', '.join(missing_in_pg)}"
+        )
+
     if not rows:
         print(f"[skip] empty: {db_path.relative_to(ROOT)}:{table}")
         return 0
@@ -267,6 +312,8 @@ async def _copy_table(session, db_path: Path, table: str, truncate: bool) -> int
         payloads.append(payload)
 
     if not payloads:
+        if source_count:
+            print(f"[warn] no payload rows produced for {db_path.relative_to(ROOT)}:{table}")
         return 0
 
     columns = list(payloads[0].keys())
@@ -275,6 +322,7 @@ async def _copy_table(session, db_path: Path, table: str, truncate: bool) -> int
     stmt = text(f'INSERT INTO "{target_table}" ({column_sql}) VALUES ({value_sql}) ON CONFLICT DO NOTHING')
 
     inserted = 0
+    before_count = await _pg_row_count(session, target_table)
     batch_size = 5000 if target_table == "klines" else 1000
     for start in range(0, len(payloads), batch_size):
         batch = payloads[start:start + batch_size]
@@ -284,7 +332,21 @@ async def _copy_table(session, db_path: Path, table: str, truncate: bool) -> int
             print(f"[progress] {target_table}: attempted {inserted}/{len(payloads)}", flush=True)
 
     await session.commit()
-    print(f"[copy] {db_path.relative_to(ROOT)}:{table} -> {target_table}, attempted {inserted}", flush=True)
+    after_count = await _pg_row_count(session, target_table)
+    delta = max(after_count - before_count, 0)
+    skipped = max(inserted - delta, 0)
+    if skipped:
+        print(f"[warn] {target_table}: {skipped} attempted rows skipped by conflict/no-op", flush=True)
+    if delta < len(payloads) and truncate:
+        print(
+            f"[warn] {target_table}: expected at least {len(payloads)} inserted after truncate, got {delta}",
+            flush=True,
+        )
+    print(
+        f"[copy] {db_path.relative_to(ROOT)}:{table} -> {target_table}, "
+        f"attempted {inserted}, inserted_delta {delta}, pg_total {after_count}",
+        flush=True,
+    )
     return inserted
 
 
