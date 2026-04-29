@@ -32,10 +32,12 @@ from src.application.config_manager import load_all_configs_async
 from src.application.runtime_config import RuntimeConfigProvider, RuntimeConfigResolver
 from src.application.account_service import BinanceAccountService
 from src.application.capital_protection import CapitalProtectionManager
+from src.application.decision_trace import TraceService
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.position_projection_service import PositionProjectionService
 from src.infrastructure.exchange_gateway import ExchangeGateway
+from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.notifier import NotificationService, get_notification_service
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
@@ -67,6 +69,7 @@ _capital_protection: Optional[CapitalProtectionManager] = None
 _execution_orchestrator: Optional[ExecutionOrchestrator] = None
 _execution_recovery_repo = None  # PG 正式版
 _runtime_config_provider: Optional[RuntimeConfigProvider] = None
+_trace_service: Optional[TraceService] = None
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -178,7 +181,7 @@ async def run_application():
     """
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
-    global _capital_protection, _execution_orchestrator
+    global _capital_protection, _execution_orchestrator, _trace_service
     global _runtime_config_provider
 
     # Create shutdown event in the current event loop
@@ -350,6 +353,9 @@ async def run_application():
 
         account_service = BinanceAccountService(_exchange_gateway)
         capital_notifier = _CapitalProtectionNotifierAdapter(_notification_service)
+        _trace_service = TraceService(
+            sinks=[JsonlTraceSink(Path("logs/runtime/risk_decision.jsonl"))]
+        )
         capital_protection_config = config_manager.build_capital_protection_config()
         if _runtime_config_provider is not None:
             runtime_risk = _runtime_config_provider.resolved_config.risk
@@ -375,6 +381,8 @@ async def run_application():
             account_service=account_service,
             notifier=capital_notifier,
             gateway=_exchange_gateway,
+            trace_service=_trace_service,
+            config_hash=_runtime_config_provider.config_hash if _runtime_config_provider is not None else None,
         )
 
         # P0-6：为 ExecutionOrchestrator 创建告警适配函数

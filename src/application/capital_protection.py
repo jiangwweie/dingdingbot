@@ -19,6 +19,7 @@ from typing import Optional, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from src.application.decision_trace import TraceService
 from src.domain.models import (
     OrderType,
     OrderCheckResult,
@@ -68,6 +69,8 @@ class CapitalProtectionManager:
         notifier: "Notifier",
         gateway: "ExchangeGateway",
         volatility_detector: Optional[VolatilityDetector] = None,
+        trace_service: Optional[TraceService] = None,
+        config_hash: Optional[str] = None,
     ):
         """
         初始化资金保护管理器
@@ -84,6 +87,8 @@ class CapitalProtectionManager:
         self._notifier = notifier
         self._gateway = gateway
         self._volatility_detector = volatility_detector
+        self._trace_service = trace_service
+        self._config_hash = config_hash
         self._daily_stats = DailyTradeStats()
         self._stats_lock = asyncio.Lock()  # P0 修复：使用异步锁避免阻塞事件循环
 
@@ -119,45 +124,72 @@ class CapitalProtectionManager:
         Returns:
             OrderCheckResult: 检查结果
         """
-        # 获取账户余额
+        lifecycle_id = (
+            f"capital_protection:{symbol}:{order_type.value}:{int(time.time() * 1000)}"
+        )
+
+        def finalize(result: OrderCheckResult, current_price: Optional[Decimal]) -> OrderCheckResult:
+            if self._trace_service is None:
+                return result
+
+            self._trace_service.emit_risk_decision(
+                lifecycle_id=lifecycle_id,
+                decision="allow" if result.allowed else "deny",
+                reason=result.reason,
+                config_hash=self._config_hash,
+                metadata={
+                    "symbol": symbol,
+                    "order_type": order_type.value,
+                    "amount": str(amount),
+                    "price": str(price) if price is not None else None,
+                    "effective_price": str(current_price) if current_price is not None else None,
+                    "trigger_price": str(trigger_price) if trigger_price is not None else None,
+                    "stop_loss": str(stop_loss),
+                    "reason_message": result.reason_message,
+                    "checks": {
+                        "single_trade_check": result.single_trade_check,
+                        "position_limit_check": result.position_limit_check,
+                        "daily_loss_check": result.daily_loss_check,
+                        "daily_count_check": result.daily_count_check,
+                        "balance_check": result.balance_check,
+                    },
+                },
+            )
+            return result
+
         balance = await self._get_balance()
         if balance is None:
-            return OrderCheckResult(
+            return finalize(OrderCheckResult(
                 allowed=False,
                 reason="CANNOT_GET_BALANCE",
                 reason_message="无法获取账户余额"
-            )
+            ), None)
 
-        # ========== G-002 修复：市价单价格获取 ==========
         effective_price = price
         if effective_price is None:
             if order_type == OrderType.MARKET:
-                # 获取最新盘口价作为预估执行价
                 effective_price = await self._gateway.fetch_ticker_price(symbol)
                 if effective_price is None:
-                    return OrderCheckResult(
+                    return finalize(OrderCheckResult(
                         allowed=False,
                         reason="CANNOT_ESTIMATE_MARKET_PRICE",
                         reason_message="无法获取市价预估价格"
-                    )
+                    ), None)
             elif order_type == OrderType.STOP_MARKET:
-                # 条件单使用触发价作为预估
                 effective_price = trigger_price
                 if effective_price is None:
-                    return OrderCheckResult(
+                    return finalize(OrderCheckResult(
                         allowed=False,
                         reason="MISSING_TRIGGER_PRICE",
                         reason_message="STOP_MARKET 订单缺少触发价"
-                    )
+                    ), None)
             else:
-                # 限价单必须有价格
-                return OrderCheckResult(
+                return finalize(OrderCheckResult(
                     allowed=False,
                     reason="MISSING_PRICE",
                     reason_message="LIMIT 订单必须指定价格"
-                )
+                ), None)
 
-        # ========== P0-004 新增检查 1: 最小名义价值检查 ==========
         notional_check, notional_value = self._check_min_notional(
             quantity=amount,
             price=effective_price,
@@ -167,15 +199,14 @@ class CapitalProtectionManager:
                 f"订单名义价值过低：{notional_value:.2f} USDT < {self._config.min_notional} USDT "
                 f"(symbol={symbol}, amount={amount}, price={effective_price})"
             )
-            return OrderCheckResult(
+            return finalize(OrderCheckResult(
                 allowed=False,
                 reason="BELOW_MIN_NOTIONAL",
                 reason_message=f"订单名义价值 {notional_value:.2f} USDT 低于最小要求 {self._config.min_notional} USDT",
                 notional_value=notional_value,
                 min_notional=self._config.min_notional,
-            )
+            ), effective_price)
 
-        # ========== P0-004 新增检查 2: 数量精度检查 ==========
         qty_passed, qty_reason, qty_message = await self._check_quantity_precision(
             symbol=symbol,
             quantity=amount,
@@ -184,16 +215,14 @@ class CapitalProtectionManager:
             logger.warning(
                 f"订单数量精度检查失败：{qty_message} (symbol={symbol}, quantity={amount})"
             )
-            return OrderCheckResult(
+            return finalize(OrderCheckResult(
                 allowed=False,
                 reason=qty_reason,
                 reason_message=qty_message,
                 notional_value=notional_value,
                 min_notional=self._config.min_notional,
-            )
+            ), effective_price)
 
-        # ========== P0-004 新增检查 3: 价格合理性检查 ==========
-        # 限价单 (LIMIT 或 STOP_LIMIT) 需要检查价格偏差，市价单 already uses ticker price
         if order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and price is not None:
             price_check, ticker_price, deviation = await self._check_price_reasonability(
                 symbol=symbol,
@@ -204,16 +233,15 @@ class CapitalProtectionManager:
                     f"订单价格偏差过大：{deviation*100:.2f}% > {self._config.price_deviation_threshold*100:.0f}% "
                     f"(symbol={symbol}, order_price={price}, ticker_price={ticker_price})"
                 )
-                return OrderCheckResult(
+                return finalize(OrderCheckResult(
                     allowed=False,
                     reason="PRICE_DEVIATION_TOO_HIGH",
                     reason_message=f"订单价格偏差 {deviation*100:.2f}% 超过阈值 {self._config.price_deviation_threshold*100:.0f}%",
                     order_price=price,
                     ticker_price=ticker_price,
                     price_deviation=deviation,
-                )
+                ), effective_price)
 
-        # ========== 检查 1: 单笔最大损失 ==========
         single_trade_check, estimated_loss, max_allowed_loss = await self._check_single_trade_loss(
             amount=amount,
             price=effective_price,
@@ -225,23 +253,22 @@ class CapitalProtectionManager:
                 "单笔交易损失超限",
                 f"预计损失 {estimated_loss:.2f} > 限制 {max_allowed_loss:.2f} USDT"
             )
-            return OrderCheckResult(
+            return finalize(OrderCheckResult(
                 allowed=False,
                 reason="SINGLE_TRADE_LOSS_LIMIT",
                 reason_message=f"单笔损失超限：预计 {estimated_loss:.2f} USDT > 限制 {max_allowed_loss:.2f} USDT",
                 single_trade_check=False,
                 estimated_loss=estimated_loss,
                 max_allowed_loss=max_allowed_loss,
-            )
+            ), effective_price)
 
-        # ========== 检查 2: 单次最大仓位 ==========
         position_limit_check, position_value, max_allowed_position = self._check_position_limit(
             amount=amount,
             price=effective_price,
             balance=balance
         )
         if not position_limit_check:
-            return OrderCheckResult(
+            return finalize(OrderCheckResult(
                 allowed=False,
                 reason="POSITION_LIMIT",
                 reason_message=f"仓位占比超限：{position_value:.2f} USDT > 限制 {max_allowed_position:.2f} USDT",
@@ -251,12 +278,11 @@ class CapitalProtectionManager:
                 max_allowed_position=max_allowed_position,
                 estimated_loss=estimated_loss,
                 max_allowed_loss=max_allowed_loss,
-            )
+            ), effective_price)
 
-        # ========== 检查 3: 每日最大亏损 ==========
         daily_loss_check, daily_pnl = await self._check_daily_loss(balance)
         if not daily_loss_check:
-            return OrderCheckResult(
+            return finalize(OrderCheckResult(
                 allowed=False,
                 reason="DAILY_LOSS_LIMIT",
                 reason_message=f"每日亏损超限：当日已亏损 {abs(daily_pnl):.2f} USDT",
@@ -268,12 +294,11 @@ class CapitalProtectionManager:
                 max_allowed_loss=max_allowed_loss,
                 position_value=position_value,
                 max_allowed_position=max_allowed_position,
-            )
+            ), effective_price)
 
-        # ========== 检查 4: 每日交易次数 ==========
         daily_count_check, daily_trade_count = await self._check_daily_trade_count()
         if not daily_count_check:
-            return OrderCheckResult(
+            return finalize(OrderCheckResult(
                 allowed=False,
                 reason="DAILY_TRADE_COUNT_LIMIT",
                 reason_message=f"每日交易次数超限：当日已交易 {daily_trade_count} 次",
@@ -287,12 +312,11 @@ class CapitalProtectionManager:
                 max_allowed_loss=max_allowed_loss,
                 position_value=position_value,
                 max_allowed_position=max_allowed_position,
-            )
+            ), effective_price)
 
-        # ========== 检查 5: 最低余额 ==========
         balance_check, available_balance, min_required_balance = self._check_min_balance(balance)
         if not balance_check:
-            return OrderCheckResult(
+            return finalize(OrderCheckResult(
                 allowed=False,
                 reason="INSUFFICIENT_BALANCE",
                 reason_message=f"账户余额不足：{available_balance:.2f} USDT < 最低要求 {min_required_balance:.2f} USDT",
@@ -309,10 +333,9 @@ class CapitalProtectionManager:
                 max_allowed_loss=max_allowed_loss,
                 position_value=position_value,
                 max_allowed_position=max_allowed_position,
-            )
+            ), effective_price)
 
-        # 所有检查通过
-        return OrderCheckResult(
+        return finalize(OrderCheckResult(
             allowed=True,
             reason=None,
             reason_message="所有检查通过，允许下单",
@@ -331,7 +354,7 @@ class CapitalProtectionManager:
             min_required_balance=min_required_balance,
             notional_value=notional_value,
             min_notional=self._config.min_notional,
-        )
+        ), effective_price)
 
     def _check_min_notional(
         self,

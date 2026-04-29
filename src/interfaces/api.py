@@ -671,9 +671,11 @@ async def lifespan(app: FastAPI):
             from src.infrastructure.exchange_gateway import ExchangeGateway
             from src.application.account_service import BinanceAccountService
             from src.application.capital_protection import CapitalProtectionManager
+            from src.application.decision_trace import TraceService
             from src.application.execution_orchestrator import ExecutionOrchestrator
             from src.application.position_projection_service import PositionProjectionService
             from src.application.startup_reconciliation_service import StartupReconciliationService
+            from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
             from src.infrastructure.notifier import get_notification_service
 
             # 获取配置
@@ -712,6 +714,9 @@ async def lifespan(app: FastAPI):
 
             # 初始化 AccountService
             _standalone_account_service = BinanceAccountService(_standalone_gateway)
+            _standalone_trace_service = TraceService(
+                sinks=[JsonlTraceSink("logs/runtime/risk_decision.jsonl")]
+            )
 
             # 初始化 CapitalProtectionManager
             _standalone_capital_protection = CapitalProtectionManager(
@@ -719,6 +724,7 @@ async def lifespan(app: FastAPI):
                 account_service=_standalone_account_service,
                 notifier=_NotifierAdapter(_standalone_notifier),
                 gateway=_standalone_gateway,
+                trace_service=_standalone_trace_service,
             )
 
             # 初始化 PG execution recovery repository（如果可用）
