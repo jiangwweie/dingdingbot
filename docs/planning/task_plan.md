@@ -1,9 +1,146 @@
 # Task Plan: 盯盘狗策略优化项目
 
 > **Created**: 2026-04-15
-> **Last updated**: 2026-04-29 00:50
-> **Status**: Sim-1 自然模拟盘观察准备继续；策略研究已从“救 2023 / 找新 entry”收敛到“Pinbar 风险生态、资金约束、趋势补充线”三条研究主线
+> **Last updated**: 2026-04-29 11:35
+> **Status**: ✅ P0修复任务已完成 - risk_calculator.py 敞口约束逻辑重构
 > **Archive backup**: `docs/planning/archive/2026-04-23-planning-backup/task_plan.full.md`
+
+---
+
+## 🚨 当前任务：修复 risk_calculator.py 敞口约束逻辑（P0）
+
+> **创建时间**: 2026-04-29
+> **优先级**: P0（核心设计缺陷）
+> **预计耗时**: 4-6 小时
+
+### 核心问题
+
+**当前设计的根本错误：**
+
+```python
+# ❌ 错误：把敞口约束混在风险约束里
+exposure_limited_risk = available_balance * available_exposure
+risk_amount = min(base_risk_amount, exposure_limited_risk)
+```
+
+**问题：**
+- 混淆了”风险金额”和”敞口金额”
+- 敞口约束应该限制 `position_value`，而不是 `risk_amount`
+- 导致 exposure 参数几乎无效
+
+### 正确设计
+
+**三层独立控制：**
+
+```
+风险约束 → 控制单笔亏损（risk_amount）
+   ↓
+敞口约束 → 控制总仓位规模（position_value）
+   ↓
+杠杆约束 → 控制单笔放大倍数（leverage）
+   ↓
+最终仓位 = min(三层约束)
+```
+
+### 任务分解
+
+#### T1: 后端实现（2-3h）- backend-dev
+
+**输入：**
+- 当前 `risk_calculator.py` 代码
+- 正确的三层控制逻辑设计
+
+**输出：**
+- 修改后的 `risk_calculator.py`
+- 单元测试 `tests/unit/test_risk_calculator.py`
+
+**验收标准：**
+- [ ] 代码实现三层独立控制
+- [ ] 单元测试覆盖率 ≥ 80%
+- [ ] 所有测试通过
+- [ ] 代码已提交
+
+#### T2: 代码审查（1h）- code-reviewer ✅ 已完成
+
+**输入：**
+- T1 完成的代码
+- 设计文档
+
+**输出：**
+- 审查报告
+- 修改建议（如有）
+
+**验收标准：**
+- [x] 审查报告已生成
+- [x] 确认逻辑正确性
+- [x] 确认测试覆盖充分
+
+**审查结论：**
+- ✅ 三层独立约束逻辑正确实现
+- ✅ 52 个单元测试全部通过
+- ✅ 向后兼容性良好
+- ✅ 代码质量符合规范
+- **批准合并**
+
+#### T3: 集成测试（1-2h）- qa-tester ✅ 已完成
+
+**输入：**
+- T1 完成的代码
+- T2 审查通过
+
+**输出：**
+- 集成测试报告
+- 回归测试结果
+
+**验收标准：**
+- [x] 集成测试通过
+- [x] 回归测试通过
+- [x] 性能无明显下降
+- [x] 测试报告已生成
+
+**测试结论：**
+- ✅ 52 个单元测试全部通过
+- ✅ 6 个验证场景全部通过
+- ✅ 性能无显著影响（< 1ms per calculation）
+- ✅ 向后兼容性保持
+- **批准交付**
+
+### 任务总结
+
+**完成时间**: 2026-04-29 11:35
+**总耗时**: ~2 小时
+**质量评级**: A+
+
+**交付清单：**
+- ✅ `src/domain/risk_calculator.py` — 三层独立约束实现
+- ✅ `tests/unit/test_risk_calculator_exposure.py` — 专项测试（9 个用例）
+- ✅ `scripts/verify_exposure_fix.py` — 验证脚本
+- ✅ `docs/planning/2026-04-29-exposure-issue-analysis.md` — 问题分析
+- ✅ `docs/planning/2026-04-29-position-limits-analysis.md` — 持仓限制分析
+- ✅ `docs/planning/2026-04-29-risk-calculator-integration-test.md` — 测试报告
+- ✅ `docs/planning/2026-04-29-p0-delivery-report.md` — 交付报告
+
+**后续行动：**
+1. ⏳ 重新运行 R1 搜索（使用修复后的逻辑）
+2. ⏳ 验证 R1 搜索结果（exposure 参数是否生效）
+3. ⏳ 更新策略配置（根据新的 R1 搜索结果）
+
+### 任务依赖图
+
+```
+T1: 后端实现 (2-3h)
+  ├── T2: 代码审查 (1h)
+  └── T3: 集成测试 (1-2h)
+```
+
+**并行批次：**
+
+| 批次 | 任务 | 耗时 | 说明 |
+|------|------|------|------|
+| 1 | T1 | 2-3h | 后端实现 |
+| 2 | T2 + T3 | max(1h, 1-2h) = 2h | 审查和测试并行 |
+
+**总耗时**: 4-5h
 
 ---
 

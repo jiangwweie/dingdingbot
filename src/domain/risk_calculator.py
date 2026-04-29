@@ -156,30 +156,61 @@ class RiskCalculator:
         # Step 4: Calculate base risk amount using available balance
         base_risk_amount = account.available_balance * max_loss_percent
 
-        # Step 5: Apply exposure limit - reduce risk if approaching limit
-        exposure_limited_risk = account.available_balance * available_exposure
-        risk_amount = min(base_risk_amount, exposure_limited_risk)
-
-        # If no risk budget available, return zero position
-        if risk_amount <= Decimal(0):
-            logger.warning(f"[RISK_CALC] position_size=0: risk_amount <= 0 (base={base_risk_amount}, exposure_limited={exposure_limited_risk}, available_exposure={available_exposure})")
-            return Decimal(0), 1
-
-        # Step 6: Calculate stop-loss distance (absolute price difference)
+        # Step 5: Calculate stop-loss distance (absolute price difference)
         stop_distance = abs(entry_price - stop_loss)
         if stop_distance == Decimal(0):
             from .exceptions import DataQualityWarning
             raise DataQualityWarning("Stop loss distance is zero (doji candle)", "W-001")
 
-        # Step 7: Calculate position size: risk_amount / stop_distance
-        position_size = risk_amount / stop_distance
+        # ============================================================
+        # Three-layer independent constraints (correct implementation)
+        # ============================================================
 
-        # Step 8: Apply leverage cap
+        # Layer 1: Risk constraint → base position size from risk budget
+        # Position size that respects max_loss_percent
+        risk_based_position_size = base_risk_amount / stop_distance
+
+        # Layer 2: Exposure constraint → limit total position value
+        # Remaining exposure room = max_exposure - current_exposure
+        remaining_exposure_value = max(
+            Decimal(0),
+            account.total_balance * max_total_exposure - total_position_value
+        )
+        exposure_based_position_size = remaining_exposure_value / entry_price
+
+        # Layer 3: Leverage constraint → limit per-position amplification
+        # Maximum position value from leverage cap
         max_position_value = account.available_balance * Decimal(max_leverage)
-        max_position_size = max_position_value / entry_price
-        position_size = min(position_size, max_position_size)
+        leverage_based_position_size = max_position_value / entry_price
 
-        # Step 9: Calculate leverage to use
+        # Apply all three constraints (most restrictive wins)
+        position_size = min(
+            risk_based_position_size,
+            exposure_based_position_size,
+            leverage_based_position_size
+        )
+
+        # Diagnostic logging for constraint analysis
+        if len(account.positions) > 0 or available_exposure == 0:
+            logger.info(
+                f"[RISK_CALC_CONSTRAINTS] "
+                f"risk_based={risk_based_position_size:.6f}, "
+                f"exposure_based={exposure_based_position_size:.6f}, "
+                f"leverage_based={leverage_based_position_size:.6f}, "
+                f"selected={position_size:.6f}"
+            )
+
+        # If no position allowed, return zero
+        if position_size <= Decimal(0):
+            logger.warning(
+                f"[RISK_CALC] position_size=0: "
+                f"risk_based={risk_based_position_size}, "
+                f"exposure_based={exposure_based_position_size}, "
+                f"leverage_based={leverage_based_position_size}"
+            )
+            return Decimal(0), 1
+
+        # Step 6: Calculate leverage to use
         position_value = position_size * entry_price
         leverage_required = position_value / account.available_balance if account.available_balance > 0 else Decimal(1)
         leverage_to_use = min(
@@ -188,7 +219,7 @@ class RiskCalculator:
         )
         leverage_to_use = max(leverage_to_use, 1)
 
-        # Step 10: Quantize to reasonable precision
+        # Step 7: Quantize to reasonable precision
         position_size = position_size.quantize(self._precision, rounding=ROUND_DOWN)
 
         return position_size, leverage_to_use

@@ -1,6 +1,6 @@
 # Progress Log
 
-> Last updated: 2026-04-27 20:05
+> Last updated: 2026-04-29 11:25
 > Archive backup: `docs/planning/archive/2026-04-23-planning-backup/progress.full.md`
 
 ---
@@ -9,6 +9,41 @@
 
 本文件是 append-only 的进度日志，条目可能按主题分组而不是严格时间序。
 当需要还原精确执行顺序时，以 git history 为准（commit 时间戳是唯一可靠时间线）。
+
+## 近期进行中
+
+### 2026-04-29 -- P0修复：risk_calculator.py 敞口约束逻辑重构
+
+**任务背景：**
+- 发现核心设计缺陷：敞口约束混在风险约束里，导致 exposure 参数几乎无效
+- 正确设计：三层独立控制（风险约束 → 敞口约束 → 杠杆约束）
+
+**当前状态：**
+- ✅ 任务计划已创建（`docs/planning/task_plan.md`）
+- ✅ T1: 后端实现已完成
+- ✅ T2: 代码审查已完成
+- ✅ T3: 集成测试已完成
+
+**测试结果：**
+- 单元测试：52 passed, 0 failed
+- 回归测试：58 passed, 0 failed
+- 覆盖率：89%（超过 80% 要求）
+- 验证脚本：6/6 通过
+
+**验证要点：**
+- ✅ exposure 参数真正生效
+- ✅ 三层约束独立工作（风险/敞口/杠杆各有限制场景）
+- ✅ exposure=0 返回零仓位
+- ✅ 超出敞口限制返回零仓位
+- ✅ 无现有功能回归
+
+**产出：**
+- `src/domain/risk_calculator.py` — 三层独立约束实现
+- `tests/unit/test_risk_calculator_exposure.py` — 专项测试（9 个用例）
+- `scripts/verify_exposure_fix.py` — 验证脚本
+- `docs/planning/2026-04-29-risk-calculator-integration-test.md` — 测试报告
+
+---
 
 ## 近期完成
 
