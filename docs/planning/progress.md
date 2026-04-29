@@ -1956,3 +1956,32 @@
 
 **边界**
 - 未重新执行整库迁移；迁移脚本增强已做语法检查，下一次可在独立测试库用 `--truncate` 做迁移演练。
+
+### 2026-04-29 09:20 CST -- PG 验证失败项修复
+
+**输入**
+- 验证报告：`docs/planning/pg_migration_validation_report.md`
+- 初始结果：迁移演练成功；PG 集成测试 `105 passed, 4 failed`；repository smoke 脚本存在调用契约错误。
+
+**修复**
+- `tests/integration/test_pg_signal_repo.py`
+  - `update_superseded_by` 断言改为 PG 规范的大写 `SUPERSEDED`。
+- `tests/integration/test_pg_position_repo.py`
+  - 适配 active position partial unique index。
+  - 多活跃仓位列表/分页测试改用不同 `symbol`，避免同 `symbol + direction` 的未关闭仓位违反业务约束。
+- `scripts/pg_smoke_test.py`
+  - 修正 `PgResearchRepository.list_*` 返回 `(items,total)` 的契约。
+  - 修正 `PgBacktestReportRepository.list_reports(page_size=...)` 调用。
+  - 修正 `PgHistoricalDataRepository.get_kline_range(symbol,timeframe)` 调用。
+  - 修正 `PgOrderRepository.get_orders()` 返回 dict 的处理。
+
+**验证**
+- 独立 PG 测试库集成测试：
+  - `PG_DATABASE_URL=...dingdingbot_migration_test?... python3 -m pytest tests/integration/test_pg_order_repo.py tests/integration/test_pg_signal_repo.py tests/integration/test_pg_position_repo.py tests/integration/test_pg_execution_intent_repo.py tests/integration/test_pg_execution_recovery_repo.py -q`
+  - 109 passed
+- `scripts/pg_smoke_test.py` 在独立测试库执行通过，无异常。
+- SQLite 显式路径回归仍通过：
+  - 65 passed
+
+**说明**
+- 集成测试会清理测试库核心表，因此 smoke 中 signals/orders 为 0 是预期结果，不代表主库迁移数据缺失。
