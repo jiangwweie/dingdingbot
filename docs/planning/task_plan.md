@@ -1255,3 +1255,25 @@ Sim-0 详细任务拆分（归档参考）：
 4. ⚠️ 共享文件约束：
    - `api.ts`、`types/index.ts`、`AppLayout.tsx`、`package.json` 只能小范围追加式修改
    - 两个窗口不得同时重构共享文件
+
+### 2026-04-29 PG 全状态迁移窗口
+
+1. 目标：从“PG 执行主线闭环”推进到“默认运行态/研究态状态优先 PG”，尽量退役默认 SQLite 真源。
+2. 已完成编码骨架：
+   - 新增 PG 默认路由开关 `MIGRATE_ALL_STATE_TO_PG`，配置 PG 时默认仓储走 PG，显式测试/脚本 SQLite 路径继续保留
+   - 默认仓储切换：orders、signals/attempts、runtime_profiles、config_entries_v2、config_profiles、config snapshots、research jobs/runs/candidates、backtest reports、klines、reconciliation
+   - 新增 PG 仓储：runtime profile、config entry、config profile、config snapshot、research、historical data、backtest report、reconciliation
+   - 扩展 PG ORM：signal_attempts、runtime_profiles、config_entries_v2、config_profiles、config snapshots、research、klines、backtest reports、reconciliation、order audit、optimization history
+   - 新增 `scripts/migrate_sqlite_state_to_pg.py` 作为 SQLite -> PG 搬迁脚本
+3. 当前验证：
+   - 新增/修改 PG 仓储模块 `py_compile` 通过
+   - PG model import 通过
+   - fake PG DSN 下默认仓储路由检查通过
+   - SQLite 显式路径轻量回归：runtime_profile + research repository + config_profile 通过（60 passed）
+   - `test_config_profile.py` 连接池隔离问题已修复
+   - Docker PG 真实迁移已执行完成：`scripts/migrate_sqlite_state_to_pg.py` attempted rows=831594
+   - PG 抽样计数通过：orders/signals/runtime_profiles/research/backtest/klines 等核心表均有数据
+   - 非破坏性 PG smoke 通过：connectivity、active runtime profile、research、backtest、klines、signals、orders 可查询
+4. 暂不扩大的范围：
+   - 未在迁移后的 PG 数据上跑 `tests/integration/test_pg_*`，因为该测试 fixture 会清表
+   - 未运行全量测试

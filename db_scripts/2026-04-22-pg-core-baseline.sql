@@ -50,13 +50,13 @@ CREATE TABLE IF NOT EXISTS orders (
                             'REJECTED',
                             'EXPIRED'
                         )),
-    price               NUMERIC(30, 8),
-    trigger_price       NUMERIC(30, 8),
-    requested_qty       NUMERIC(30, 8) NOT NULL
+    price               NUMERIC(36, 18),
+    trigger_price       NUMERIC(36, 18),
+    requested_qty       NUMERIC(36, 18) NOT NULL
                         CHECK (requested_qty > 0),
-    filled_qty          NUMERIC(30, 8) NOT NULL DEFAULT 0
+    filled_qty          NUMERIC(36, 18) NOT NULL DEFAULT 0
                         CHECK (filled_qty >= 0 AND filled_qty <= requested_qty),
-    average_exec_price  NUMERIC(30, 8),
+    average_exec_price  NUMERIC(36, 18),
     reduce_only         BOOLEAN NOT NULL DEFAULT FALSE,
     parent_order_id     TEXT,
     oco_group_id        TEXT,
@@ -153,14 +153,14 @@ CREATE TABLE IF NOT EXISTS positions (
     symbol              TEXT NOT NULL,
     direction           TEXT NOT NULL
                         CHECK (direction IN ('LONG', 'SHORT')),
-    quantity            NUMERIC(30, 8) NOT NULL
+    quantity            NUMERIC(36, 18) NOT NULL
                         CHECK (quantity >= 0),
-    entry_price         NUMERIC(30, 8),
-    mark_price          NUMERIC(30, 8),
+    entry_price         NUMERIC(36, 18),
+    mark_price          NUMERIC(36, 18),
     leverage            INTEGER
                         CHECK (leverage IS NULL OR leverage > 0),
-    unrealized_pnl      NUMERIC(30, 8),
-    realized_pnl        NUMERIC(30, 8),
+    unrealized_pnl      NUMERIC(36, 18),
+    realized_pnl        NUMERIC(36, 18),
     is_closed           BOOLEAN NOT NULL DEFAULT FALSE,
     opened_at           BIGINT NOT NULL,
     closed_at           BIGINT,
@@ -179,6 +179,10 @@ CREATE INDEX IF NOT EXISTS idx_positions_signal_id
 
 CREATE INDEX IF NOT EXISTS idx_positions_updated_at
     ON positions(updated_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_active_symbol_direction
+    ON positions(symbol, direction)
+    WHERE is_closed = FALSE;
 
 -- ============================================================
 -- execution_recovery_tasks

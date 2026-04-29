@@ -66,6 +66,18 @@ class HistoricalDataRepository:
         "1w": 10080,
     }
 
+    def __new__(
+        cls,
+        db_path: Optional[str] = None,
+        exchange_gateway: Optional[ExchangeGateway] = None,
+    ):
+        if cls is HistoricalDataRepository and db_path is None:
+            from src.infrastructure.database import should_use_pg_for_default_repository
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_historical_data_repository import PgHistoricalDataRepository
+                return PgHistoricalDataRepository(exchange_gateway=exchange_gateway)
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: Optional[str] = None,

@@ -27,6 +27,18 @@ class ConfigEntryRepository:
     - risk.max_loss_percent
     """
 
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is ConfigEntryRepository and connection is None and db_path == "data/v3_dev.db":
+            from src.infrastructure.database import should_use_pg_for_default_repository
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_config_entry_repository import PgConfigEntryRepository
+                return PgConfigEntryRepository()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",

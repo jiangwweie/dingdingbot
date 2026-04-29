@@ -26,6 +26,20 @@ class SignalRepository:
     SQLite repository for persisting trading signals.
     """
 
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is SignalRepository and connection is None and db_path == "data/v3_dev.db":
+            from src.infrastructure.database import should_use_pg_for_default_repository
+
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_signal_repository import PgSignalRepository
+
+                return PgSignalRepository()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",

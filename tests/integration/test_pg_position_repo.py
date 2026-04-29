@@ -105,7 +105,7 @@ async def test_get_by_signal_id(position_repo):
     signal_id = str(uuid4())
     pos_a = make_position(signal_id=signal_id, symbol="BTC/USDT:USDT")
     pos_b = make_position(signal_id=signal_id, symbol="ETH/USDT:USDT")
-    pos_other = make_position(signal_id=str(uuid4()))
+    pos_other = make_position(signal_id=str(uuid4()), symbol="SOL/USDT:USDT")
 
     await position_repo.save(pos_a)
     await position_repo.save(pos_b)
@@ -158,8 +158,8 @@ async def test_list_active_symbol_filter(position_repo):
 
 @pytest.mark.asyncio
 async def test_list_active_limit(position_repo):
-    for _ in range(5):
-        await position_repo.save(make_position(is_closed=False))
+    for i in range(5):
+        await position_repo.save(make_position(symbol=f"TEST{i}/USDT:USDT", is_closed=False))
 
     results = await position_repo.list_active(limit=3)
     assert len(results) == 3
@@ -200,7 +200,7 @@ async def test_list_positions_symbol_filter(position_repo):
 async def test_list_positions_limit_offset_pagination(position_repo):
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
     for i in range(6):
-        await position_repo.save(make_position(opened_at=now + i))
+        await position_repo.save(make_position(symbol=f"PAGE{i}/USDT:USDT", opened_at=now + i))
 
     page1 = await position_repo.list_positions(limit=3, offset=0)
     page2 = await position_repo.list_positions(limit=3, offset=3)

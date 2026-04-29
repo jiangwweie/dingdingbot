@@ -36,6 +36,18 @@ class RuntimeProfile:
 class RuntimeProfileRepository:
     """SQLite repository for frozen runtime profiles."""
 
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is RuntimeProfileRepository and connection is None and db_path == "data/v3_dev.db":
+            from src.infrastructure.database import should_use_pg_for_default_repository
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_runtime_profile_repository import PgRuntimeProfileRepository
+                return PgRuntimeProfileRepository()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",

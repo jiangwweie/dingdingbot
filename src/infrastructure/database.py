@@ -32,21 +32,22 @@ DATABASE_URL = os.getenv(
 PG_DATABASE_URL = os.getenv("PG_DATABASE_URL")
 
 
-def _default_execution_intent_backend() -> str:
-    """
-    当前推荐的小范围实切策略：
-    - 配置了 PG_DATABASE_URL 时，ExecutionIntent 默认走 postgres
-    - orders / positions 仍保持 sqlite，避免一次性扩大切换面
-    """
+def _default_pg_backend() -> str:
     return "postgres" if PG_DATABASE_URL else "sqlite"
 
 
-CORE_ORDER_BACKEND = os.getenv("CORE_ORDER_BACKEND", "sqlite").lower()
+CORE_ORDER_BACKEND = os.getenv("CORE_ORDER_BACKEND", _default_pg_backend()).lower()
 CORE_EXECUTION_INTENT_BACKEND = os.getenv(
     "CORE_EXECUTION_INTENT_BACKEND",
-    _default_execution_intent_backend(),
+    _default_pg_backend(),
 ).lower()
-CORE_POSITION_BACKEND = os.getenv("CORE_POSITION_BACKEND", "sqlite").lower()
+CORE_POSITION_BACKEND = os.getenv("CORE_POSITION_BACKEND", _default_pg_backend()).lower()
+MIGRATE_ALL_STATE_TO_PG = os.getenv("MIGRATE_ALL_STATE_TO_PG", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 def _get_positive_int_env(name: str, default: int) -> int:
@@ -165,6 +166,15 @@ def get_core_backend_settings() -> dict[str, str]:
     }
 
 
+def should_use_pg_for_default_repository() -> bool:
+    """Whether default, non-test repositories should use PostgreSQL.
+
+    Explicit SQLite paths/connections in tests and scripts still bypass this by
+    constructing the SQLite repository with non-default arguments.
+    """
+    return bool(PG_DATABASE_URL and MIGRATE_ALL_STATE_TO_PG)
+
+
 def validate_pg_core_configuration() -> None:
     """严格校验 PG 核心链路配置。
 
@@ -201,14 +211,27 @@ def get_pg_engine() -> AsyncEngine:
     return _pg_engine
 
 
-# Session Factory
-async_session_maker = async_sessionmaker(
-    get_engine(),
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+def _build_default_session_maker() -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(
+        get_engine(),
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+
+
+# Session Factory. Kept as a module attribute for legacy imports; get_db always
+# resolves it through get_default_session_maker() so close_db() can reset it.
+async_session_maker: Optional[async_sessionmaker[AsyncSession]] = None
+
+
+def get_default_session_maker() -> async_sessionmaker[AsyncSession]:
+    """Return the current default SQLite/legacy sessionmaker."""
+    global async_session_maker
+    if async_session_maker is None:
+        async_session_maker = _build_default_session_maker()
+    return async_session_maker
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -220,7 +243,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         async def get_account(db: AsyncSession = Depends(get_db)):
             ...
     """
-    async with async_session_maker() as session:
+    async with get_default_session_maker()() as session:
         try:
             yield session
             await session.commit()
@@ -282,17 +305,18 @@ async def probe_pg_connectivity(
 
 
 async def close_db():
-    """关闭数据库连接并复位可重建的全局 PG 资源。
+    """关闭数据库连接并复位可重建的全局资源。
 
     迁移阶段需要支持同进程内多次 startup/shutdown：
     - 不在 shutdown 时隐式创建新的 engine
-    - PG dispose 后显式清空 engine/sessionmaker，下一次 startup 可重新初始化
-    - SQLite 旧链路继续复用模块级 sessionmaker，不在本轮扩大 reset 范围
+    - dispose 后显式清空 engine/sessionmaker，下一次 startup 可重新初始化
     """
-    global _pg_engine, _pg_async_session_maker
+    global _engine, _pg_engine, _pg_async_session_maker, async_session_maker
 
     if _engine is not None:
         await _engine.dispose()
+        _engine = None
+        async_session_maker = None
 
     if _pg_engine is not None:
         await _pg_engine.dispose()

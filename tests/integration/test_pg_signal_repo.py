@@ -206,7 +206,7 @@ async def test_update_superseded_by(signal_repo):
     loaded = await signal_repo.get_signal_by_tracker_id("super-old-001")
     assert loaded is not None
     assert loaded["superseded_by"] == "super-new-001"
-    assert loaded["status"] == "superseded"
+    assert loaded["status"] == "SUPERSEDED"
 
 
 @pytest.mark.asyncio

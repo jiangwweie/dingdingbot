@@ -44,6 +44,20 @@ class ReconciliationRepository:
     3. 查询服务 - 支持按币种、类型、时间范围查询
     """
 
+    def __new__(
+        cls,
+        db_path: str = "data/reconciliation.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is ReconciliationRepository and connection is None and db_path == "data/reconciliation.db":
+            from src.infrastructure.database import should_use_pg_for_default_repository
+
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_reconciliation_repository import PgReconciliationRepository
+
+                return PgReconciliationRepository()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/reconciliation.db",

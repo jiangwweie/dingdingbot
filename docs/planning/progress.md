@@ -1874,3 +1874,224 @@
 
 **输出文件**: `reports/research/r2_capital_allocation_search_2026-04-29.json` (90KB)
 
+### 2026-04-29 01:05 CST -- PG 全状态迁移窗口编码骨架
+
+**完成**
+- 切到 `codex/pg-full-migration`，已快进到最新 `dev`。
+- 新增/修改 PG 默认仓储路由：默认运行态/研究态仓储在 `PG_DATABASE_URL` 存在且 `MIGRATE_ALL_STATE_TO_PG=true` 时走 PG；显式传入 SQLite `db_path` 或 `connection` 的测试/脚本继续走 SQLite。
+- 新增 PG 仓储文件：
+  - `pg_runtime_profile_repository.py`
+  - `pg_config_entry_repository.py`
+  - `pg_config_profile_repository.py`
+  - `pg_config_snapshot_repository.py`
+  - `pg_research_repository.py`
+  - `pg_historical_data_repository.py`
+  - `pg_backtest_repository.py`
+  - `pg_reconciliation_repository.py`
+- 扩展 `pg_signal_repository.py`，覆盖 `signal_attempts` 和 backtest signal id 查询。
+- 扩展 `pg_models.py`，覆盖剩余主要状态/观察表的 ORM。
+- 新增 `scripts/migrate_sqlite_state_to_pg.py`，用于明早执行 SQLite -> PG 数据搬迁。
+
+**验证**
+- `python3 -m py_compile` 覆盖新增/修改仓储模块，通过。
+- `import src.infrastructure.pg_models` 通过。
+- fake PG DSN 下默认仓储路由检查通过：Backtest/ConfigEntry/Profile/Snapshot/Historical/Reconciliation/Research/RuntimeProfile/Signal/Order 均返回 PG 实现。
+- 轻量 SQLite 回归：runtime profile + research repository 通过；`test_config_profile.py` 有旧测试连接池隔离失败，需单独处理或在清理连接池后重跑。
+
+**下一步**
+- 明早优先跑真实 PG 初始化与 `scripts/migrate_sqlite_state_to_pg.py`。
+- 再跑 PG 仓储集成测试和 API 冒烟。
+- 旧配置管理 `config_repositories.py` 全套 CRUD 仍是机械大块，建议单独 Claude 窗口补齐 PG 版本或明确退役。
+
+### 2026-04-29 07:23 CST -- PG 全状态迁移二次验收收口
+
+**完成**
+- 验收 Claude 的旧 config repositories PG 收尾结果。
+- 发现并修复入口问题：Claude 初版只有 `StrategyConfigRepository` 直接接入默认构造路径，其他 6 个 repository 只存在工厂函数，`main.py/api.py` 直接构造时仍可能落 SQLite。
+- 已补齐默认构造 PG 路由：
+  - `RiskConfigRepository`
+  - `SystemConfigRepository`
+  - `SymbolConfigRepository`
+  - `NotificationConfigRepository`
+  - `ConfigSnapshotRepositoryExtended`
+  - `ConfigHistoryRepository`
+- 修正 `config_repository_factory.py`，统一调用 `should_use_pg_for_default_repository()`，避免未配置 `PG_DATABASE_URL` 时仅因 `MIGRATE_ALL_STATE_TO_PG=true` 误切 PG。
+- 修复 `test_config_profile.py` 的 SQLite connection pool 隔离问题。
+
+**验证**
+- `python3 -m py_compile src/infrastructure/config_repository_factory.py src/infrastructure/repositories/config_repositories.py src/infrastructure/pg_config_repositories.py src/infrastructure/pg_models.py scripts/migrate_sqlite_state_to_pg.py` 通过。
+- `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q` 通过：60 passed。
+
+**剩余**
+- 未跑真实 PG 数据搬迁。
+- 未跑全量测试。
+- 需要在 PG 环境执行迁移脚本并抽样核对表计数/关键行。
+
+### 2026-04-29 08:10 CST -- Docker PG 真实迁移验证
+
+**完成**
+- 使用 Docker 中的 `dingdingbot-pg` 执行真实 PG 初始化与 SQLite -> PG 搬迁。
+- 修复 `scripts/migrate_sqlite_state_to_pg.py` 的实库兼容问题：
+  - 支持直接运行脚本时自动加入项目根目录到 `sys.path`。
+  - `signal_take_profits` 旧 SQLite 数字 FK 映射到 PG 业务 `signal_id`。
+  - `runtime_profiles.profile_json` 映射为 PG `profile_payload`。
+  - `research_jobs.spec_json` 映射为 PG `spec_payload`，并支持从 `spec_ref` artifact 兜底读取。
+  - `research_run_results` 的 `*_json` 字段映射到 PG JSONB 字段。
+  - `candidate_records.risks_json` 映射为 PG `risks`。
+  - 清洗历史脏数据：`backtest_reports.sharpe_ratio` 中的 JSON positions 迁移到 `positions_summary`，避免 Decimal/数值字段污染。
+  - JSONB 字段通过 raw SQL 批量插入时统一序列化为 JSON 字符串。
+  - `klines` 改为批量插入并分批提交，避免 82 万行逐行迁移过慢。
+- 迁移脚本执行完成：`[done] migration copy attempted rows=831594`。
+
+**Docker PG 表计数抽样**
+- `orders`: 6686
+- `signals`: 280
+- `signal_take_profits`: 560
+- `runtime_profiles`: 1
+- `config_entries_v2`: 23
+- `config_profiles`: 1
+- `backtest_reports`: 35
+- `position_close_events`: 512
+- `klines`: 823128
+- `config_snapshot_versions`: 1
+- `research_jobs`: 6
+- `research_run_results`: 5
+- `candidate_records`: 1
+- `optimization_history`: 343
+
+**验证**
+- `python3 -m py_compile scripts/migrate_sqlite_state_to_pg.py` 通过。
+- 非破坏性 PG smoke 通过：
+  - PG connectivity probe: `True`
+  - active runtime profile: `sim1_eth_runtime`
+  - research jobs/runs/candidates 可查询
+  - backtest reports 计数可查询
+  - ETH/USDT:USDT 1h kline range: `(1609459200000, 1774998000000)`
+  - signals/orders 可查询
+- 显式 SQLite 路径回归仍通过：
+  - `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q`
+  - 60 passed
+
+**注意**
+- `tests/integration/conftest.py` 对核心 PG 表有 `TRUNCATE` autouse fixture，因此本次没有在已迁移数据上直接跑这些集成测试，避免擦掉迁移结果。
+- 未执行全量测试。
+
+### 2026-04-29 08:35 CST -- PG 迁移审查问题修复
+
+**审查结论**
+- 误切 PG：审查指出的旧注释确实过期；本窗口目标已从“小范围 intent PG”推进到“PG 全状态迁移”。但 `OrderRepository()` 默认构造此前会被全局 `MIGRATE_ALL_STATE_TO_PG` 拉入 PG，可能绕过 `CORE_ORDER_BACKEND=sqlite` 的细粒度控制，已修复。
+- SQLite engine reset：`close_db()` 只 dispose `_engine` 但不复位，虽然 SQLAlchemy disposed engine 通常可重连，但热重载语义不够清晰，已改为 dispose 后清空 `_engine` 和默认 sessionmaker。
+- 双轨路由：核心订单仓储现在按 `CORE_ORDER_BACKEND`；非核心状态仓储继续按 `MIGRATE_ALL_STATE_TO_PG`。职责边界已收紧。
+- Numeric 精度：`NUMERIC(30, 8)` 对长尾币价格/数量不够宽，已扩展为 `NUMERIC(36, 18)`。
+- active position 幂等：新增 PG 部分唯一索引 `uq_positions_active_symbol_direction`，约束同一 `symbol + direction` 只能存在一个未关闭仓位。
+
+**改动**
+- `src/infrastructure/database.py`
+  - 删除过期“小范围实切”注释。
+  - `close_db()` 复位 SQLite `_engine` 和默认 sessionmaker，PG engine/sessionmaker 继续复位。
+- `src/infrastructure/order_repository.py`
+  - 默认构造 PG 路由改为尊重 `get_core_backend_settings()["order"]`，避免 `CORE_ORDER_BACKEND=sqlite` 时误切 PG。
+- `src/infrastructure/pg_models.py`
+  - 所有 `Numeric(30, 8)` 扩展为 `Numeric(36, 18)`。
+  - 新增 `uq_positions_active_symbol_direction` partial unique index。
+- `db_scripts/2026-04-22-pg-core-baseline.sql`
+  - 同步扩展 numeric 精度。
+  - 同步新增 active position partial unique index。
+- Docker PG 实库已执行 ALTER：
+  - 所有 public schema 中 `numeric(30,8)` 列扩展为 `numeric(36,18)`。
+  - 已创建 `uq_positions_active_symbol_direction`。
+
+**验证**
+- `python3 -m py_compile src/infrastructure/database.py src/infrastructure/order_repository.py src/infrastructure/pg_models.py scripts/migrate_sqlite_state_to_pg.py` 通过。
+- `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q`：60 passed。
+- 路由 smoke：
+  - `CORE_ORDER_BACKEND=sqlite` + `MIGRATE_ALL_STATE_TO_PG=true` -> `OrderRepository`
+  - `CORE_ORDER_BACKEND=postgres` + `MIGRATE_ALL_STATE_TO_PG=true` -> `PgOrderRepository`
+- Docker PG schema smoke：
+  - numeric columns 已显示 `precision=36, scale=18`
+  - `uq_positions_active_symbol_direction` 存在
+- `close_db()` smoke：SQLite engine/sessionmaker 均可复位重建，PG probe OK。
+
+### 2026-04-29 09:05 CST -- PG 架构审查 P1 收口
+
+**输入**
+- 架构审查报告：`docs/planning/pg_migration_architecture_review.md`
+- 结论：整体 B+，合并前需处理 HybridSignalRepository backtest 边界和 repository 路由模式一致性。
+
+**完成**
+- `HybridSignalRepository` 增加 backtest source 安全边界：
+  - `save_signal(source="backtest")` 在无 `legacy_repo` 时抛明确 `RuntimeError`，避免 backtest 信号误写 PG live signals。
+  - `get_signals(source="backtest")` 在无 `legacy_repo` 时抛明确 `RuntimeError`，避免误读 PG live/backtest 混合数据。
+  - `delete_signals(source="backtest")` 在无 `legacy_repo` 时抛明确 `RuntimeError`，避免误删 PG 生产信号。
+  - `clear_all_signals()` 改为仅走显式注入的 legacy repo；无 legacy repo 时拒绝执行。
+- `StrategyConfigRepository` 与其他旧 config repositories 对齐为默认构造 `__new__` 替换模式：
+  - 默认 PG 路由时直接返回 `PgStrategyConfigRepository`。
+  - `use_pg=False` 或显式 SQLite 路径仍保留 SQLite 实例。
+- 迁移脚本增强 P2 防御：
+  - `signal_take_profits` 支持已是业务 `sig_*` 的 `signal_id`，并对无法映射记录打 warning。
+  - `backtest_reports.sharpe_ratio` 增加空字符串/非法数值清洗。
+  - JSONB 字段非法 JSON 时记录 warning 并置空，避免 PG JSONB 插入失败。
+  - 记录 SQLite 字段被 PG 忽略的字段差异。
+  - 记录 `ON CONFLICT DO NOTHING` 造成的 conflict/no-op 数量。
+  - `research_jobs` artifact 为空/缺失时记录 warning。
+
+**验证**
+- `python3 -m py_compile src/infrastructure/hybrid_signal_repository.py src/infrastructure/repositories/config_repositories.py scripts/migrate_sqlite_state_to_pg.py` 通过。
+- `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_hybrid_signal_repository.py tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q`
+  - 65 passed
+- Config repository route smoke:
+  - 默认：`StrategyConfigRepository` -> `PgStrategyConfigRepository`
+  - 默认：`RiskConfigRepository` -> `PgRiskConfigRepository`
+  - `StrategyConfigRepository(use_pg=True)` -> PG
+  - `StrategyConfigRepository(use_pg=False)` -> SQLite wrapper
+
+**边界**
+- 未重新执行整库迁移；迁移脚本增强已做语法检查，下一次可在独立测试库用 `--truncate` 做迁移演练。
+
+### 2026-04-29 09:20 CST -- PG 验证失败项修复
+
+**输入**
+- 验证报告：`docs/planning/pg_migration_validation_report.md`
+- 初始结果：迁移演练成功；PG 集成测试 `105 passed, 4 failed`；repository smoke 脚本存在调用契约错误。
+
+**修复**
+- `tests/integration/test_pg_signal_repo.py`
+  - `update_superseded_by` 断言改为 PG 规范的大写 `SUPERSEDED`。
+- `tests/integration/test_pg_position_repo.py`
+  - 适配 active position partial unique index。
+  - 多活跃仓位列表/分页测试改用不同 `symbol`，避免同 `symbol + direction` 的未关闭仓位违反业务约束。
+- `scripts/pg_smoke_test.py`
+  - 修正 `PgResearchRepository.list_*` 返回 `(items,total)` 的契约。
+  - 修正 `PgBacktestReportRepository.list_reports(page_size=...)` 调用。
+  - 修正 `PgHistoricalDataRepository.get_kline_range(symbol,timeframe)` 调用。
+  - 修正 `PgOrderRepository.get_orders()` 返回 dict 的处理。
+
+**验证**
+- 独立 PG 测试库集成测试：
+  - `PG_DATABASE_URL=...dingdingbot_migration_test?... python3 -m pytest tests/integration/test_pg_order_repo.py tests/integration/test_pg_signal_repo.py tests/integration/test_pg_position_repo.py tests/integration/test_pg_execution_intent_repo.py tests/integration/test_pg_execution_recovery_repo.py -q`
+  - 109 passed
+- `scripts/pg_smoke_test.py` 在独立测试库执行通过，无异常。
+- SQLite 显式路径回归仍通过：
+  - 65 passed
+
+**说明**
+- 集成测试会清理测试库核心表，因此 smoke 中 signals/orders 为 0 是预期结果，不代表主库迁移数据缺失。
+
+### 2026-04-29 -- PG 全状态迁移合入 dev
+
+**完成**
+- 将 `origin/codex/pg-full-migration` 合入本地 `dev`。
+- 仅 `docs/planning/progress.md` 存在追加式文档冲突，已保留 R2 资金配置搜索记录与 PG 迁移窗口记录。
+- 代码层无 merge conflict。
+
+**合并后验证**
+- `python3 -m py_compile src/infrastructure/database.py src/infrastructure/hybrid_signal_repository.py src/infrastructure/pg_models.py scripts/migrate_sqlite_state_to_pg.py scripts/pg_smoke_test.py` 通过。
+- SQLite 显式路径回归：
+  - `MIGRATE_ALL_STATE_TO_PG=false python3 -m pytest tests/unit/test_hybrid_signal_repository.py tests/unit/test_runtime_profile_repository.py tests/unit/test_research_repository.py tests/unit/test_config_profile.py -q`
+  - 65 passed
+- 独立 PG 测试库集成测试：
+  - `PG_DATABASE_URL=...dingdingbot_migration_test?... python3 -m pytest tests/integration/test_pg_order_repo.py tests/integration/test_pg_signal_repo.py tests/integration/test_pg_position_repo.py tests/integration/test_pg_execution_intent_repo.py tests/integration/test_pg_execution_recovery_repo.py -q`
+  - 109 passed
+
+**注意**
+- 第一次 PG 集成测试遇到 Docker PG 刚重启后的短暂 connection refused；容器 healthy 后复跑通过。

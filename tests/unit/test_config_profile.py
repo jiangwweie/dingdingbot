@@ -22,8 +22,12 @@ TEST_CONFIG_DB_PATH = "data/test_config_entries.db"
 @pytest.fixture
 async def profile_repo():
     """Fixture: Create and initialize profile repository"""
+    from src.infrastructure.connection_pool import close_all_connections
+
     # Ensure test directory exists
     Path("data").mkdir(exist_ok=True)
+
+    await close_all_connections()
 
     # Remove test database if exists
     for path in [TEST_DB_PATH, TEST_DB_PATH + "-wal", TEST_DB_PATH + "-shm"]:
@@ -81,6 +85,7 @@ async def profile_repo():
     await repo.initialize()
     yield repo
     await repo.close()
+    await close_all_connections()
 
     # Cleanup
     for path in [TEST_DB_PATH, TEST_DB_PATH + "-wal", TEST_DB_PATH + "-shm"]:
@@ -91,7 +96,11 @@ async def profile_repo():
 @pytest.fixture
 async def config_entry_repo():
     """Fixture: Create and initialize config entry repository with profile support"""
+    from src.infrastructure.connection_pool import close_all_connections
+
     Path("data").mkdir(exist_ok=True)
+
+    await close_all_connections()
 
     # Use separate DB for config entries
     for path in [TEST_CONFIG_DB_PATH, TEST_CONFIG_DB_PATH + "-wal", TEST_CONFIG_DB_PATH + "-shm"]:
@@ -120,6 +129,7 @@ async def config_entry_repo():
 
     yield repo
     await repo.close()
+    await close_all_connections()
 
     # Cleanup
     for path in [TEST_CONFIG_DB_PATH, TEST_CONFIG_DB_PATH + "-wal", TEST_CONFIG_DB_PATH + "-shm"]:
@@ -154,6 +164,9 @@ async def profile_service(profile_repo):
     yield service
 
     await config_repo.close()
+    from src.infrastructure.connection_pool import close_all_connections
+
+    await close_all_connections()
 
 
 # ============================================================

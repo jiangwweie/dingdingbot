@@ -40,6 +40,27 @@ class OrderRepository:
     - OrderAuditLogger: 审计日志器（可选）
     """
 
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+        exchange_gateway: Optional[Any] = None,
+        audit_logger: Optional[Any] = None,
+    ):
+        if cls is OrderRepository and connection is None and db_path == "data/v3_dev.db":
+            from src.infrastructure.database import get_core_backend_settings
+
+            if get_core_backend_settings()["order"] == "postgres":
+                from src.infrastructure.pg_order_repository import PgOrderRepository
+
+                repo = PgOrderRepository()
+                if exchange_gateway is not None:
+                    repo.set_exchange_gateway(exchange_gateway)
+                if audit_logger is not None:
+                    repo.set_audit_logger(audit_logger)
+                return repo
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",

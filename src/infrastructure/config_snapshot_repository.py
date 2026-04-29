@@ -15,6 +15,24 @@ class ConfigSnapshotRepository:
     Provides version control and rollback capabilities for user configuration.
     """
 
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if (
+            cls is ConfigSnapshotRepository
+            and connection is None
+            and db_path in {"data/v3_dev.db", "data/config_snapshots.db"}
+        ):
+            from src.infrastructure.database import should_use_pg_for_default_repository
+
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_config_snapshot_repository import PgConfigSnapshotRepository
+
+                return PgConfigSnapshotRepository()
+        return super().__new__(cls)
+
     def __init__(
         self,
         db_path: str = "data/v3_dev.db",

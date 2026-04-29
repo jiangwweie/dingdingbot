@@ -12,18 +12,27 @@ PostgreSQL Signal Repository - live signals / signal_take_profits 真源
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.domain.models import Direction, SignalDeleteRequest, SignalQuery, SignalResult
+from src.domain.models import (
+    AttemptDeleteRequest,
+    AttemptQuery,
+    Direction,
+    SignalDeleteRequest,
+    SignalQuery,
+    SignalResult,
+)
 from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
 from src.infrastructure.logger import logger
-from src.infrastructure.pg_models import PGSignalORM, PGSignalTakeProfitORM
+from src.infrastructure.pg_models import PGSignalAttemptORM, PGSignalORM, PGSignalTakeProfitORM
 
 
 class PgSignalRepository:
@@ -40,6 +49,17 @@ class PgSignalRepository:
 
     async def close(self) -> None:
         return None
+
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        if isinstance(value, Decimal):
+            return str(value)
+        if isinstance(value, Enum):
+            return value.value
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+    def _json_safe(self, value: Any) -> Any:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=self._json_default))
 
     async def save_signal(
         self,
@@ -293,9 +313,6 @@ class PgSignalRepository:
             end_time = query.end_time
             source = query.source
 
-        if source and source != "live":
-            return {"total": 0, "data": []}
-
         direction = Direction.normalize(direction) if direction else None
         status = self._normalize_status(status) if status else None
 
@@ -314,6 +331,8 @@ class PgSignalRepository:
             filters.append(PGSignalORM.created_at >= start_time)
         if end_time:
             filters.append(PGSignalORM.created_at <= end_time)
+        if source:
+            filters.append(PGSignalORM.source == source)
 
         sort_column = PGSignalORM.created_at if sort_by != "pattern_score" else PGSignalORM.pattern_score
         sort_column = sort_column.desc() if order.lower() == "desc" else sort_column.asc()
@@ -399,6 +418,218 @@ class PgSignalRepository:
             await session.commit()
             return result.rowcount or 0
 
+    async def save_attempt(self, attempt, symbol: str, timeframe: str, config_version: str = None) -> None:
+        created_at = datetime.now(timezone.utc).isoformat()
+        direction = attempt.pattern.direction.value if attempt.pattern else None
+        pattern_score = float(attempt.pattern.score) if attempt.pattern else None
+        final_result = attempt.final_result
+        kline_timestamp = attempt.kline_timestamp
+
+        filter_stage = None
+        filter_reason = None
+        for filter_name, filter_result in attempt.filter_results:
+            if not filter_result.passed:
+                filter_stage = filter_name
+                filter_reason = filter_result.reason
+                break
+
+        details = {
+            "pattern": attempt.pattern.details if attempt.pattern else None,
+            "filters": [
+                {"name": name, "passed": result.passed, "reason": result.reason}
+                for name, result in attempt.filter_results
+            ],
+        }
+        trace_tree = self._build_trace_tree(attempt)
+        evaluation_summary = self._generate_evaluation_summary(attempt, symbol, timeframe)
+
+        async with self._session_maker() as session:
+            session.add(
+                PGSignalAttemptORM(
+                    created_at=created_at,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    strategy_name=attempt.strategy_name,
+                    direction=direction,
+                    pattern_score=Decimal(str(pattern_score)) if pattern_score is not None else None,
+                    final_result=final_result,
+                    filter_stage=filter_stage,
+                    filter_reason=filter_reason,
+                    details=self._json_safe(details),
+                    kline_timestamp=kline_timestamp,
+                    evaluation_summary=evaluation_summary,
+                    trace_tree=self._json_safe(trace_tree),
+                    config_version=config_version,
+                )
+            )
+            await session.commit()
+
+    async def get_diagnostics(self, symbol: str = None, hours: int = 24) -> dict:
+        from datetime import timedelta
+
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        filters = [PGSignalAttemptORM.created_at >= since]
+        if symbol:
+            filters.append(PGSignalAttemptORM.symbol == symbol)
+
+        async with self._session_maker() as session:
+            total_klines = int((await session.execute(
+                select(func.count()).select_from(PGSignalAttemptORM).where(*filters)
+            )).scalar_one())
+            no_pattern = int((await session.execute(
+                select(func.count()).select_from(PGSignalAttemptORM).where(
+                    *filters,
+                    PGSignalAttemptORM.final_result == "NO_PATTERN",
+                )
+            )).scalar_one())
+            signal_fired = int((await session.execute(
+                select(func.count()).select_from(PGSignalAttemptORM).where(
+                    *filters,
+                    PGSignalAttemptORM.final_result == "SIGNAL_FIRED",
+                )
+            )).scalar_one())
+            filtered = int((await session.execute(
+                select(func.count()).select_from(PGSignalAttemptORM).where(
+                    *filters,
+                    PGSignalAttemptORM.final_result == "FILTERED",
+                )
+            )).scalar_one())
+            breakdown_rows = (await session.execute(
+                select(PGSignalAttemptORM.filter_stage, func.count())
+                .where(*filters, PGSignalAttemptORM.final_result == "FILTERED")
+                .group_by(PGSignalAttemptORM.filter_stage)
+            )).all()
+            recent_rows = (await session.execute(
+                select(PGSignalAttemptORM)
+                .where(*filters)
+                .order_by(PGSignalAttemptORM.created_at.desc())
+                .limit(20)
+            )).scalars().all()
+
+        return {
+            "summary": {
+                "total_klines": total_klines,
+                "no_pattern": no_pattern,
+                "signal_fired": signal_fired,
+                "filtered": filtered,
+                "filter_breakdown": {stage: count for stage, count in breakdown_rows if stage},
+            },
+            "recent_attempts": [self._attempt_to_dict(row) for row in recent_rows],
+        }
+
+    async def get_attempts(
+        self,
+        query: AttemptQuery = None,
+        limit: int = 50,
+        offset: int = 0,
+        symbol: str = None,
+        timeframe: str = None,
+        strategy_name: str = None,
+        final_result: str = None,
+        filter_stage: str = None,
+        start_time: str = None,
+        end_time: str = None,
+    ) -> dict:
+        if query:
+            limit = query.limit
+            offset = query.offset
+            symbol = query.symbol
+            timeframe = query.timeframe
+            strategy_name = query.strategy_name
+            final_result = query.final_result
+            filter_stage = query.filter_stage
+            start_time = query.start_time
+            end_time = query.end_time
+
+        filters = []
+        if symbol:
+            filters.append(PGSignalAttemptORM.symbol == symbol)
+        if timeframe:
+            filters.append(PGSignalAttemptORM.timeframe == timeframe)
+        if strategy_name:
+            filters.append(PGSignalAttemptORM.strategy_name == strategy_name)
+        if final_result:
+            filters.append(PGSignalAttemptORM.final_result == final_result)
+        if filter_stage:
+            filters.append(PGSignalAttemptORM.filter_stage == filter_stage)
+        if start_time:
+            filters.append(PGSignalAttemptORM.created_at >= start_time)
+        if end_time:
+            filters.append(PGSignalAttemptORM.created_at <= end_time)
+
+        async with self._session_maker() as session:
+            count_stmt = select(func.count()).select_from(PGSignalAttemptORM)
+            if filters:
+                count_stmt = count_stmt.where(*filters)
+            total = int((await session.execute(count_stmt)).scalar_one())
+
+            stmt = select(PGSignalAttemptORM)
+            if filters:
+                stmt = stmt.where(*filters)
+            stmt = stmt.order_by(PGSignalAttemptORM.created_at.desc()).limit(limit).offset(offset)
+            rows = (await session.execute(stmt)).scalars().all()
+            return {"total": total, "data": [self._attempt_to_dict(row) for row in rows]}
+
+    async def delete_attempts(
+        self,
+        request: AttemptDeleteRequest = None,
+        ids: list = None,
+        delete_all: bool = False,
+        symbol: str = None,
+        timeframe: str = None,
+        strategy_name: str = None,
+        final_result: str = None,
+        filter_stage: str = None,
+        start_time: str = None,
+        end_time: str = None,
+    ) -> int:
+        if request:
+            ids = request.ids
+            delete_all = request.delete_all
+            symbol = request.symbol
+            timeframe = request.timeframe
+            strategy_name = request.strategy_name
+            final_result = request.final_result
+            filter_stage = request.filter_stage
+            start_time = request.start_time
+            end_time = request.end_time
+
+        async with self._session_maker() as session:
+            if ids:
+                result = await session.execute(delete(PGSignalAttemptORM).where(PGSignalAttemptORM.id.in_(ids)))
+                await session.commit()
+                return result.rowcount or 0
+            if not delete_all:
+                return 0
+
+            stmt = delete(PGSignalAttemptORM)
+            filters = []
+            if symbol:
+                filters.append(PGSignalAttemptORM.symbol == symbol)
+            if timeframe:
+                filters.append(PGSignalAttemptORM.timeframe == timeframe)
+            if strategy_name:
+                filters.append(PGSignalAttemptORM.strategy_name == strategy_name)
+            if final_result:
+                filters.append(PGSignalAttemptORM.final_result == final_result)
+            if filter_stage:
+                filters.append(PGSignalAttemptORM.filter_stage == filter_stage)
+            if start_time:
+                filters.append(PGSignalAttemptORM.created_at >= start_time)
+            if end_time:
+                filters.append(PGSignalAttemptORM.created_at <= end_time)
+            if filters:
+                stmt = stmt.where(*filters)
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount or 0
+
+    async def clear_all_attempts(self) -> int:
+        async with self._session_maker() as session:
+            result = await session.execute(delete(PGSignalAttemptORM))
+            await session.commit()
+            return result.rowcount or 0
+
     async def get_signal_by_id(self, signal_id: int) -> Optional[dict]:
         async with self._session_maker() as session:
             orm = await session.get(PGSignalORM, signal_id)
@@ -443,6 +674,28 @@ class PgSignalRepository:
                 "won_count": won_count,
                 "lost_count": lost_count,
             }
+
+    async def get_signal_ids_by_backtest_report(
+        self,
+        strategy_id: str,
+        start_time: int,
+        end_time: int,
+    ) -> list[str]:
+        """Return backtest signal IDs for a strategy and time range."""
+        start_iso = datetime.fromtimestamp(start_time / 1000, tz=timezone.utc).isoformat()
+        end_iso = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc).isoformat()
+        async with self._session_maker() as session:
+            stmt = (
+                select(PGSignalORM.signal_id)
+                .where(
+                    PGSignalORM.source == "backtest",
+                    PGSignalORM.strategy_name == strategy_id,
+                    PGSignalORM.created_at >= start_iso,
+                    PGSignalORM.created_at <= end_iso,
+                )
+                .order_by(PGSignalORM.created_at.asc())
+            )
+            return [signal_id for signal_id in (await session.execute(stmt)).scalars().all() if signal_id]
 
     async def get_pending_signals(self, symbol: str) -> List[Dict[str, Any]]:
         async with self._session_maker() as session:
@@ -523,6 +776,99 @@ class PgSignalRepository:
                 }
                 for row in rows
             ]
+
+    def _generate_evaluation_summary(self, attempt, symbol: str, timeframe: str) -> str:
+        lines = [
+            "=== 信号评估报告 ===",
+            f"币种：{symbol}",
+            f"周期：{timeframe}",
+            f"策略：{attempt.strategy_name}",
+            "",
+            "【评估结果】",
+        ]
+        if attempt.final_result == "SIGNAL_FIRED":
+            direction = attempt.pattern.direction if attempt.pattern else None
+            direction_str = "看涨" if direction == "LONG" else "看跌" if direction == "SHORT" else "未知"
+            lines.append(f"最终结果：信号触发 ({direction_str})")
+        elif attempt.final_result == "NO_PATTERN":
+            lines.append("最终结果：未检测到有效形态")
+        elif attempt.final_result == "FILTERED":
+            lines.append("最终结果：信号被过滤器拦截")
+        else:
+            lines.append(f"最终结果：{attempt.final_result}")
+        return "\n".join(lines)
+
+    def _build_trace_tree(self, attempt) -> dict:
+        import uuid
+
+        root = {
+            "node_id": str(uuid.uuid4()),
+            "node_type": "and_gate",
+            "passed": attempt.final_result == "SIGNAL_FIRED",
+            "reason": "all_conditions_met" if attempt.final_result == "SIGNAL_FIRED" else "condition_failed",
+            "metadata": {
+                "strategy_name": attempt.strategy_name,
+                "final_result": attempt.final_result,
+            },
+            "children": [],
+        }
+
+        if attempt.pattern:
+            root["children"].append({
+                "node_id": str(uuid.uuid4()),
+                "node_type": "trigger",
+                "passed": True,
+                "reason": "pattern_detected",
+                "metadata": {
+                    "trigger_type": attempt.pattern.strategy_name,
+                    "direction": attempt.pattern.direction.value if hasattr(attempt.pattern.direction, "value") else attempt.pattern.direction,
+                    "score": attempt.pattern.score,
+                    "details": attempt.pattern.details,
+                },
+                "children": [],
+            })
+        else:
+            root["children"].append({
+                "node_id": str(uuid.uuid4()),
+                "node_type": "trigger",
+                "passed": False,
+                "reason": "no_pattern_detected",
+                "metadata": {"trigger_type": attempt.strategy_name},
+                "children": [],
+            })
+
+        for filter_name, filter_result in attempt.filter_results:
+            root["children"].append({
+                "node_id": str(uuid.uuid4()),
+                "node_type": "filter",
+                "passed": filter_result.passed,
+                "reason": filter_result.reason,
+                "metadata": {
+                    "filter_name": filter_name,
+                    "filter_type": filter_name,
+                },
+                "children": [],
+            })
+        return root
+
+    def _attempt_to_dict(self, orm: PGSignalAttemptORM) -> dict:
+        return {
+            "id": orm.id,
+            "created_at": orm.created_at,
+            "symbol": orm.symbol,
+            "timeframe": orm.timeframe,
+            "strategy_name": orm.strategy_name,
+            "direction": orm.direction,
+            "pattern_score": float(orm.pattern_score) if orm.pattern_score is not None else None,
+            "final_result": orm.final_result,
+            "filter_stage": orm.filter_stage,
+            "filter_reason": orm.filter_reason,
+            "details": orm.details,
+            "kline_timestamp": orm.kline_timestamp,
+            "evaluation_summary": orm.evaluation_summary,
+            "trace_tree": orm.trace_tree,
+            "config_version": orm.config_version,
+        }
 
     def _to_plain_dict(self, orm: PGSignalORM, *, normalize_status: bool = False) -> dict:
         data = {
