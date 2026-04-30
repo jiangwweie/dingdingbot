@@ -2,12 +2,18 @@
 
 Status values: `TODO`, `SPEC`, `IMPLEMENTING`, `TESTING`, `REVIEW`, `MERGED`, `BLOCKED`, `REJECTED`.
 
+## Milestones
+
+- `Decision Trace Backbone v0` completed: minimal decision trace backbone added; risk decisions can be written to JSONL without affecting trading behavior on trace failure.
+- `ADR-0002` completed: documented Decision Trace Backbone v0 semantics, scope, and non-goals.
+- `LS-001` completed: main runtime order-watch enabled with isolated WS state; `api.py` out of scope; duplicate `watch_orders` definition remains as later cleanup.
+
 ## P0
 
 | ID | Task | Status | Owner | Notes |
 | --- | --- | --- | --- | --- |
 | LS-001 | Start `watch_orders` | MERGED | Codex | Main runtime order-watch enabled with isolated WS state; `api.py` out of scope; duplicate `watch_orders` definition remains as later cleanup. |
-| LS-002 | Make daily max loss/trades effective | TODO | Codex + Claude tests | Codex owns design and core wiring. |
+| LS-002 | Make daily max loss/trades effective | TODO | Codex + Claude tests | Codex owns design and core wiring; next step is inspect + plan before code changes. |
 | LS-003 | Structured runtime logs | TODO | Claude | Requires Codex task card first. |
 | LS-004 | Daily equity snapshot | TODO | Claude | Requires Codex task card first. |
 | LS-005 | Periodic reconciliation | TODO | Codex | Core execution safety. |

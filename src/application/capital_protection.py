@@ -89,6 +89,9 @@ class CapitalProtectionManager:
         self._volatility_detector = volatility_detector
         self._trace_service = trace_service
         self._config_hash = config_hash
+        # LS-002 v0: daily stats remain process-local in-memory state. They use
+        # UTC day boundaries and track projected realized PnL deltas from the
+        # runtime position projection path, not a full account-true daily loss.
         self._daily_stats = DailyTradeStats()
         self._stats_lock = asyncio.Lock()  # P0 修复：使用异步锁避免阻塞事件循环
 
@@ -156,6 +159,8 @@ class CapitalProtectionManager:
                 },
             )
             return result
+
+        await self.reset_if_new_day()
 
         balance = await self._get_balance()
         if balance is None:
@@ -669,17 +674,55 @@ class CapitalProtectionManager:
             logger.error(f"获取账户余额失败：{e}")
             return None
 
-    async def record_trade(self, realized_pnl: Decimal) -> None:
+    async def record_projected_realized_pnl_delta(self, realized_pnl_delta: Decimal) -> None:
         """
-        记录交易，更新每日统计
+        记录 projected realized PnL 增量。
+
+        LS-002 v0:
+        - 使用 runtime position projection 口径
+        - 不是完整账户真实日亏
+        - 使用 UTC 日切
+        - runtime 重启后会归零（内存态已知限制）
 
         Args:
-            realized_pnl: 已实现盈亏（正数为盈利，负数为亏损）
+            realized_pnl_delta: 本次 exit delta 的 projected realized PnL
         """
+        if realized_pnl_delta == Decimal("0"):
+            return
+
+        await self.reset_if_new_day()
+        async with self._stats_lock:
+            self._daily_stats.realized_pnl += realized_pnl_delta
+            logger.info(
+                "每日 projected realized PnL 更新：delta=%s, cumulative=%s USDT",
+                realized_pnl_delta,
+                self._daily_stats.realized_pnl,
+            )
+
+    async def record_closed_trade(self) -> None:
+        """
+        记录一次完整关闭的 position lifecycle。
+
+        LS-002 v0:
+        - 只有 position 首次 full close 时才增加 trade_count
+        - partial TP / partial SL 不计为新的 daily trade
+        - 使用 UTC 日切
+        """
+        await self.reset_if_new_day()
         async with self._stats_lock:
             self._daily_stats.trade_count += 1
-            self._daily_stats.realized_pnl += realized_pnl
-            logger.info(f"交易记录更新：次数={self._daily_stats.trade_count}, 盈亏={self._daily_stats.realized_pnl:.2f} USDT")
+            logger.info("每日完整平仓计数更新：trade_count=%s", self._daily_stats.trade_count)
+
+    async def record_trade(
+        self,
+        realized_pnl: Decimal,
+        *,
+        increment_trade_count: bool = True,
+    ) -> None:
+        """兼容包装接口，避免旧调用点语义漂移。"""
+        await self.record_projected_realized_pnl_delta(realized_pnl)
+        if increment_trade_count:
+            await self.record_closed_trade()
 
     async def reset_if_new_day(self) -> None:
         """

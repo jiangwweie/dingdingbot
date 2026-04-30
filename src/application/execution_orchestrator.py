@@ -367,12 +367,22 @@ class ExecutionOrchestrator:
         )
 
     async def _handle_exit_filled(self, exit_order: Order) -> None:
-        """处理 TP/SL 完全成交后的仓位投影更新。"""
+        """处理 TP/SL 成交推进后的仓位投影与日内统计更新。"""
         if self._position_projection_service is None:
             return
 
         try:
-            await self._position_projection_service.project_exit_fill(exit_order)
+            projection_result = await self._position_projection_service.project_exit_fill(exit_order)
+            if projection_result is None or projection_result.was_already_processed:
+                return
+
+            if projection_result.delta_realized_pnl != Decimal("0"):
+                await self._capital_protection.record_projected_realized_pnl_delta(
+                    projection_result.delta_realized_pnl
+                )
+
+            if projection_result.just_closed:
+                await self._capital_protection.record_closed_trade()
         except Exception as e:
             logger.warning(
                 "[ExecutionOrchestrator] exit fill position projection 更新失败: "

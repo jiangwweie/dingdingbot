@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Optional
@@ -12,6 +13,24 @@ from src.domain.models import Order, Position
 from src.infrastructure.repository_ports import PositionRepositoryPort
 
 POSITION_CLOSE_DUST_LIMIT = Decimal("0.00000001")
+
+
+@dataclass(frozen=True)
+class ExitProjectionResult:
+    """Minimal result envelope for LS-002 daily stats updates.
+
+    This stays inside execution/runtime semantics. It exposes only the delta
+    needed to update daily projected realized PnL and daily closed-trade count.
+    """
+
+    position: Optional[Position]
+    position_id: str
+    signal_id: str
+    delta_exit_qty: Decimal = Decimal("0")
+    delta_realized_pnl: Decimal = Decimal("0")
+    is_position_closed: bool = False
+    just_closed: bool = False
+    was_already_processed: bool = False
 
 
 class PositionProjectionService:
@@ -101,72 +120,110 @@ class PositionProjectionService:
             self._cleanup_lock_if_idle(position_id, lock)
         return position
 
-    async def project_exit_fill(self, exit_order: Order) -> Optional[Position]:
-        """根据 TP/SL 成交更新当前仓位投影。"""
+    async def project_exit_fill(self, exit_order: Order) -> Optional[ExitProjectionResult]:
+        """根据 TP/SL 成交更新当前仓位投影并返回最小 delta 信息。"""
         if self._repository is None:
             return None
 
         position_id = f"pos_{exit_order.signal_id}"
         lock = self._get_lock(position_id)
         cleanup_after_save = False
+        result = ExitProjectionResult(
+            position=None,
+            position_id=position_id,
+            signal_id=exit_order.signal_id,
+            was_already_processed=True,
+        )
         async with lock:
             position = await self._repository.get(position_id)
             if position is None:
                 cleanup_after_save = True
+                result = ExitProjectionResult(
+                    position=None,
+                    position_id=position_id,
+                    signal_id=exit_order.signal_id,
+                    was_already_processed=True,
+                )
             else:
                 cumulative_exit_qty = exit_order.filled_qty or Decimal("0")
                 exit_price = exit_order.average_exec_price or exit_order.price
                 if cumulative_exit_qty <= Decimal("0") or exit_price is None:
-                    return position
+                    result = ExitProjectionResult(
+                        position=position,
+                        position_id=position_id,
+                        signal_id=exit_order.signal_id,
+                        is_position_closed=position.is_closed,
+                        was_already_processed=True,
+                    )
+                else:
+                    previous_projected_qty = position.projected_exit_fills.get(
+                        exit_order.id, Decimal("0")
+                    )
+                    delta_exit_qty = cumulative_exit_qty - previous_projected_qty
+                    if delta_exit_qty <= Decimal("0"):
+                        result = ExitProjectionResult(
+                            position=position,
+                            position_id=position_id,
+                            signal_id=exit_order.signal_id,
+                            is_position_closed=position.is_closed,
+                            was_already_processed=True,
+                        )
+                    else:
+                        fee_total = getattr(exit_order, "close_fee", None)
+                        if fee_total is None:
+                            fee_total = getattr(exit_order, "fee_paid", Decimal("0"))
+                        previous_projected_fee = position.projected_exit_fees.get(
+                            exit_order.id, Decimal("0")
+                        )
+                        delta_fee = fee_total - previous_projected_fee
+                        if delta_fee < Decimal("0"):
+                            delta_fee = Decimal("0")
 
-                previous_projected_qty = position.projected_exit_fills.get(
-                    exit_order.id, Decimal("0")
-                )
-                delta_exit_qty = cumulative_exit_qty - previous_projected_qty
-                if delta_exit_qty <= Decimal("0"):
-                    return position
+                        gross_pnl = self._calculate_gross_pnl(
+                            direction=position.direction,
+                            entry_price=position.entry_price,
+                            exit_price=exit_price,
+                            quantity=delta_exit_qty,
+                        )
+                        net_pnl = gross_pnl - delta_fee
 
-                fee_total = getattr(exit_order, "close_fee", None)
-                if fee_total is None:
-                    fee_total = getattr(exit_order, "fee_paid", Decimal("0"))
-                previous_projected_fee = position.projected_exit_fees.get(
-                    exit_order.id, Decimal("0")
-                )
-                delta_fee = fee_total - previous_projected_fee
-                if delta_fee < Decimal("0"):
-                    delta_fee = Decimal("0")
+                        remaining_qty = position.current_qty - delta_exit_qty
+                        was_closed_before = position.is_closed
+                        just_closed = False
+                        if remaining_qty <= POSITION_CLOSE_DUST_LIMIT:
+                            remaining_qty = Decimal("0")
+                            position.is_closed = True
+                            if not was_closed_before:
+                                just_closed = True
+                            position.closed_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+                            cleanup_after_save = True
 
-                gross_pnl = self._calculate_gross_pnl(
-                    direction=position.direction,
-                    entry_price=position.entry_price,
-                    exit_price=exit_price,
-                    quantity=delta_exit_qty,
-                )
-                net_pnl = gross_pnl - delta_fee
+                        position.current_qty = remaining_qty
+                        position.realized_pnl += net_pnl
+                        position.total_fees_paid += delta_fee
+                        position.projected_exit_fills[exit_order.id] = cumulative_exit_qty
+                        position.projected_exit_fees[exit_order.id] = fee_total
+                        position.watermark_price = self._update_watermark(
+                            direction=position.direction,
+                            current_watermark=position.watermark_price,
+                            exec_price=exit_price,
+                            entry_price=position.entry_price,
+                        )
 
-                remaining_qty = position.current_qty - delta_exit_qty
-                if remaining_qty <= POSITION_CLOSE_DUST_LIMIT:
-                    remaining_qty = Decimal("0")
-                    position.is_closed = True
-                    position.closed_at = int(datetime.now(timezone.utc).timestamp() * 1000)
-                    cleanup_after_save = True
-
-                position.current_qty = remaining_qty
-                position.realized_pnl += net_pnl
-                position.total_fees_paid += delta_fee
-                position.projected_exit_fills[exit_order.id] = cumulative_exit_qty
-                position.projected_exit_fees[exit_order.id] = fee_total
-                position.watermark_price = self._update_watermark(
-                    direction=position.direction,
-                    current_watermark=position.watermark_price,
-                    exec_price=exit_price,
-                    entry_price=position.entry_price,
-                )
-
-                await self._repository.save(position)
+                        await self._repository.save(position)
+                        result = ExitProjectionResult(
+                            position=position,
+                            position_id=position_id,
+                            signal_id=exit_order.signal_id,
+                            delta_exit_qty=delta_exit_qty,
+                            delta_realized_pnl=net_pnl,
+                            is_position_closed=position.is_closed,
+                            just_closed=just_closed,
+                            was_already_processed=False,
+                        )
         if cleanup_after_save:
             self._cleanup_lock_if_idle(position_id, lock)
-        return position
+        return result
 
     @staticmethod
     def _calculate_gross_pnl(
