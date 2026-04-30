@@ -73,6 +73,7 @@ _runtime_config_provider: Optional[RuntimeConfigProvider] = None
 _trace_service: Optional[TraceService] = None
 _order_watch_tasks: List[asyncio.Task] = []
 _periodic_reconciliation_task: Optional[asyncio.Task] = None
+_snapshot_update_task: Optional[asyncio.Task] = None
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -179,6 +180,57 @@ async def _cancel_periodic_reconciliation_task(task: Optional[asyncio.Task]) -> 
         logger.warning(f"Periodic reconciliation task shutdown error: {e}", exc_info=True)
 
 
+async def _run_snapshot_update_loop(polling_interval: float) -> None:
+    """Keep SignalPipeline account snapshot current until shutdown."""
+    if _shutdown_event is None:
+        logger.warning("Snapshot update loop start skipped: shutdown event not initialized")
+        return
+
+    while not _shutdown_event.is_set():
+        try:
+            snapshot = _exchange_gateway.get_account_snapshot() if _exchange_gateway else None
+            pipeline = get_signal_pipeline()
+            if snapshot and pipeline:
+                pipeline.update_account_snapshot(snapshot)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Snapshot update loop failed: {e}", exc_info=True)
+
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=polling_interval)
+        except TimeoutError:
+            pass
+
+
+def _start_snapshot_update_task(polling_interval: float) -> asyncio.Task:
+    """Start the managed account snapshot update background task."""
+    task = asyncio.create_task(_run_snapshot_update_loop(polling_interval))
+    logger.info("Snapshot update task started: polling_interval=%ss", polling_interval)
+    return task
+
+
+async def _cancel_snapshot_update_task() -> None:
+    """Cancel, await, and clear the snapshot update task."""
+    global _snapshot_update_task
+
+    task = _snapshot_update_task
+    if task is None:
+        return
+
+    if not task.done():
+        task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"Snapshot update task shutdown error: {e}", exc_info=True)
+    finally:
+        _snapshot_update_task = None
+
+
 # ============================================================
 # Signal Handlers
 # ============================================================
@@ -205,7 +257,11 @@ async def graceful_shutdown():
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
     global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
+    global _snapshot_update_task
     _shutdown_event.set()
+
+    if _snapshot_update_task:
+        await _cancel_snapshot_update_task()
 
     if _periodic_reconciliation_task:
         await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
@@ -288,6 +344,7 @@ async def run_application():
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator, _trace_service
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
+    global _snapshot_update_task
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -716,15 +773,7 @@ async def run_application():
             logger.warning(f"Asset polling interval fallback from ConfigManager: {polling_interval}s")
         await _exchange_gateway.start_asset_polling(polling_interval)
 
-        # Periodically update pipeline with latest snapshot
-        async def update_snapshot_loop():
-            while not _shutdown_event.is_set():
-                snapshot = _exchange_gateway.get_account_snapshot()
-                if snapshot and get_signal_pipeline():
-                    get_signal_pipeline().update_account_snapshot(snapshot)
-                await asyncio.sleep(polling_interval)
-
-        asyncio.create_task(update_snapshot_loop())
+        _snapshot_update_task = _start_snapshot_update_task(polling_interval)
         logger.info("Asset polling started")
 
         # =============================================
@@ -901,6 +950,9 @@ async def run_application():
         except asyncio.CancelledError:
             pass
 
+        if _snapshot_update_task:
+            await _cancel_snapshot_update_task()
+
         if _periodic_reconciliation_task:
             await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
             _periodic_reconciliation_task = None
@@ -937,6 +989,9 @@ async def run_application():
 
     finally:
         # Cleanup
+        if _snapshot_update_task:
+            await _cancel_snapshot_update_task()
+
         if _periodic_reconciliation_task:
             await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
             _periodic_reconciliation_task = None
@@ -980,6 +1035,7 @@ async def run_application():
         _runtime_config_provider = None
         _order_watch_tasks = []
         _periodic_reconciliation_task = None
+        _snapshot_update_task = None
 
         logger.info("Application shutdown complete")
 
