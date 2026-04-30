@@ -35,6 +35,7 @@ from src.application.capital_protection import CapitalProtectionManager
 from src.application.decision_trace import TraceService
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.order_lifecycle_service import OrderLifecycleService
+from src.application.periodic_reconciliation import run_periodic_reconciliation
 from src.application.position_projection_service import PositionProjectionService
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
@@ -71,6 +72,7 @@ _execution_recovery_repo = None  # PG 正式版
 _runtime_config_provider: Optional[RuntimeConfigProvider] = None
 _trace_service: Optional[TraceService] = None
 _order_watch_tasks: List[asyncio.Task] = []
+_periodic_reconciliation_task: Optional[asyncio.Task] = None
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -132,6 +134,51 @@ async def _cancel_order_watch_tasks(tasks: List[asyncio.Task]) -> None:
             logger.warning(f"Order watch task shutdown error: {e}", exc_info=True)
 
 
+async def _run_periodic_reconciliation_task(reconciliation_service: object, symbols: List[str]) -> None:
+    """Run periodic reconciliation and isolate unexpected task failures."""
+    if _shutdown_event is None:
+        logger.warning("Periodic reconciliation start skipped: shutdown event not initialized")
+        return
+
+    try:
+        await run_periodic_reconciliation(
+            reconciliation_service,
+            _dedupe_runtime_symbols(symbols),
+            _shutdown_event,
+        )
+    except asyncio.CancelledError:
+        logger.info("Periodic reconciliation task cancelled")
+        raise
+    except Exception as e:
+        logger.error(f"Periodic reconciliation task failed: {e}", exc_info=True)
+
+
+def _start_periodic_reconciliation_task(
+    reconciliation_service: object,
+    symbols: List[str],
+) -> asyncio.Task:
+    """Start the report-only periodic reconciliation background task."""
+    task = asyncio.create_task(
+        _run_periodic_reconciliation_task(reconciliation_service, symbols)
+    )
+    logger.info("Periodic reconciliation task started: symbols=%s", _dedupe_runtime_symbols(symbols))
+    return task
+
+
+async def _cancel_periodic_reconciliation_task(task: Optional[asyncio.Task]) -> None:
+    """Cancel and await the periodic reconciliation task."""
+    if task is None:
+        return
+
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"Periodic reconciliation task shutdown error: {e}", exc_info=True)
+
+
 # ============================================================
 # Signal Handlers
 # ============================================================
@@ -157,8 +204,12 @@ async def graceful_shutdown():
 
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
     global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
-    global _runtime_config_provider, _order_watch_tasks
+    global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
     _shutdown_event.set()
+
+    if _periodic_reconciliation_task:
+        await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
+        _periodic_reconciliation_task = None
 
     if _order_watch_tasks:
         await _cancel_order_watch_tasks(_order_watch_tasks)
@@ -236,7 +287,7 @@ async def run_application():
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator, _trace_service
-    global _runtime_config_provider, _order_watch_tasks
+    global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -677,6 +728,29 @@ async def run_application():
         logger.info("Asset polling started")
 
         # =============================================
+        # Phase 7.5: Start Periodic Reconciliation Read Model
+        # =============================================
+        logger.info("Phase 7.5: Starting periodic reconciliation read model...")
+        try:
+            from src.application.reconciliation import ReconciliationService
+
+            periodic_reconciliation_service = ReconciliationService(
+                gateway=_exchange_gateway,
+                position_mgr=_position_repo,
+                order_repository=_order_repo,
+            )
+            _periodic_reconciliation_task = _start_periodic_reconciliation_task(
+                periodic_reconciliation_service,
+                symbols,
+            )
+        except Exception as e:
+            logger.error(
+                f"Periodic reconciliation task startup failed（不影响主进程）: {e}",
+                exc_info=True,
+            )
+            _periodic_reconciliation_task = None
+
+        # =============================================
         # Phase 8: Start WebSocket Subscriptions
         # =============================================
         logger.info("Phase 8: Starting WebSocket subscriptions...")
@@ -827,6 +901,10 @@ async def run_application():
         except asyncio.CancelledError:
             pass
 
+        if _periodic_reconciliation_task:
+            await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
+            _periodic_reconciliation_task = None
+
         if _order_watch_tasks:
             await _cancel_order_watch_tasks(_order_watch_tasks)
             _order_watch_tasks = []
@@ -859,6 +937,10 @@ async def run_application():
 
     finally:
         # Cleanup
+        if _periodic_reconciliation_task:
+            await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
+            _periodic_reconciliation_task = None
+
         if _exchange_gateway:
             await _exchange_gateway.close()
             _exchange_gateway = None
@@ -897,6 +979,7 @@ async def run_application():
         _execution_orchestrator = None
         _runtime_config_provider = None
         _order_watch_tasks = []
+        _periodic_reconciliation_task = None
 
         logger.info("Application shutdown complete")
 
