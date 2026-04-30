@@ -74,6 +74,8 @@ _trace_service: Optional[TraceService] = None
 _order_watch_tasks: List[asyncio.Task] = []
 _periodic_reconciliation_task: Optional[asyncio.Task] = None
 _snapshot_update_task: Optional[asyncio.Task] = None
+_ws_task: Optional[asyncio.Task] = None
+_api_task: Optional[asyncio.Task] = None
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -231,6 +233,48 @@ async def _cancel_snapshot_update_task() -> None:
         _snapshot_update_task = None
 
 
+async def _cancel_ws_task() -> None:
+    """Cancel, await, and clear the OHLCV websocket task."""
+    global _ws_task
+
+    task = _ws_task
+    if task is None:
+        return
+
+    if not task.done():
+        task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"WebSocket task shutdown error: {e}", exc_info=True)
+    finally:
+        _ws_task = None
+
+
+async def _cancel_api_task() -> None:
+    """Cancel, await, and clear the embedded API server task."""
+    global _api_task
+
+    task = _api_task
+    if task is None:
+        return
+
+    if not task.done():
+        task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"API server task shutdown error: {e}", exc_info=True)
+    finally:
+        _api_task = None
+
+
 # ============================================================
 # Signal Handlers
 # ============================================================
@@ -257,8 +301,14 @@ async def graceful_shutdown():
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
     global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
-    global _snapshot_update_task
+    global _snapshot_update_task, _ws_task, _api_task
     _shutdown_event.set()
+
+    if _ws_task:
+        await _cancel_ws_task()
+
+    if _api_task:
+        await _cancel_api_task()
 
     if _snapshot_update_task:
         await _cancel_snapshot_update_task()
@@ -344,7 +394,7 @@ async def run_application():
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator, _trace_service
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
-    global _snapshot_update_task
+    global _snapshot_update_task, _ws_task, _api_task
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -808,7 +858,7 @@ async def run_application():
         logger.info(f"Order watch tasks active: {len(_order_watch_tasks)}")
 
         # Create WebSocket task
-        ws_task = asyncio.create_task(
+        _ws_task = asyncio.create_task(
             _exchange_gateway.subscribe_ohlcv(
                 symbols=symbols,
                 timeframes=timeframes,
@@ -932,7 +982,7 @@ async def run_application():
             lifespan="off",
         )
         api_server = uvicorn.Server(api_config)
-        api_task = asyncio.create_task(api_server.serve())
+        _api_task = asyncio.create_task(api_server.serve())
 
         # Wait a moment for API server to initialize
         await asyncio.sleep(2)
@@ -943,12 +993,8 @@ async def run_application():
         # =============================================
         await _shutdown_event.wait()
 
-        # Cancel WebSocket task
-        ws_task.cancel()
-        try:
-            await ws_task
-        except asyncio.CancelledError:
-            pass
+        await _cancel_ws_task()
+        await _cancel_api_task()
 
         if _snapshot_update_task:
             await _cancel_snapshot_update_task()
@@ -989,6 +1035,9 @@ async def run_application():
 
     finally:
         # Cleanup
+        await _cancel_ws_task()
+        await _cancel_api_task()
+
         if _snapshot_update_task:
             await _cancel_snapshot_update_task()
 
@@ -1017,16 +1066,6 @@ async def run_application():
             await _api_snapshot_repo_extended.close()
             logger.info("Config repositories closed")
 
-        # Stop API server task
-        if 'api_task' in locals():
-            logger.info("Stopping API server...")
-            api_task.cancel()
-            try:
-                await api_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("API server shutdown complete")
-
         await close_db()
         logger.info("Database engines closed")
 
@@ -1036,6 +1075,8 @@ async def run_application():
         _order_watch_tasks = []
         _periodic_reconciliation_task = None
         _snapshot_update_task = None
+        _ws_task = None
+        _api_task = None
 
         logger.info("Application shutdown complete")
 
