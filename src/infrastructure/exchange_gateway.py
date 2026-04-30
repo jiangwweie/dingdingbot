@@ -988,6 +988,19 @@ class ExchangeGateway:
     # Phase 5: Order Management APIs
     # ============================================================
 
+    async def fetch_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
+        """
+        Fetch exchange open orders for a symbol.
+
+        LS-003a read-model wrapper: keep reconciliation callers off the raw
+        exchange object while preserving the raw CCXT payload for parsing.
+        """
+        try:
+            return await self.rest_exchange.fetch_open_orders(symbol)
+        except Exception as e:
+            logger.error(f"获取未完成订单失败：symbol={symbol}, error={e}")
+            raise
+
     async def place_order(
         self,
         symbol: str,

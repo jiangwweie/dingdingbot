@@ -25,6 +25,7 @@ P0-003: 完善重启对账流程
 """
 import asyncio
 import time
+from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 
@@ -56,6 +57,44 @@ class PendingPositionItem(Dict[str, Any]):
 class PendingOrderItem(Dict[str, Any]):
     """待确认订单项"""
     pass
+
+
+@dataclass
+class ReconciliationMismatch:
+    """Read-only reconciliation mismatch for LS-003a."""
+
+    symbol: str
+    mismatch_type: str
+    severity: str
+    reason: str
+    local_ref: Optional[str] = None
+    exchange_ref: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ReconciliationReadModelResult:
+    """Minimal runtime reconciliation read model result.
+
+    LS-003a is report-only: these results must not block, repair, cancel, or
+    mutate runtime state.
+    """
+
+    symbol: str
+    checked_at: int
+    mismatches: List[ReconciliationMismatch] = field(default_factory=list)
+
+    @property
+    def is_consistent(self) -> bool:
+        return not self.mismatches
+
+    @property
+    def severe_count(self) -> int:
+        return sum(1 for item in self.mismatches if item.severity == "SEVERE")
+
+    @property
+    def warning_count(self) -> int:
+        return sum(1 for item in self.mismatches if item.severity == "WARNING")
 
 
 class ReconciliationService:
@@ -113,6 +152,82 @@ class ReconciliationService:
         self._lock = lock
         self._grace_period_seconds = grace_period_seconds
         self._pending_orphan_orders: Dict[str, Dict[str, Any]] = {}  # order_id -> {order, found_at, confirmed}
+
+    async def build_read_model(self, symbol: str) -> ReconciliationReadModelResult:
+        """Build a read-only reconciliation snapshot for LS-003a.
+
+        This path only discovers and reports mismatches. It does not reuse the
+        startup reconciliation action path that may mark, import, cancel, block,
+        or otherwise mutate runtime state.
+        """
+        checked_at = int(time.time() * 1000)
+        mismatches: List[ReconciliationMismatch] = []
+
+        try:
+            local_positions = await self._get_local_active_positions_for_read_model(symbol)
+            local_orders = await self._get_local_open_orders(symbol)
+        except Exception as exc:
+            mismatches.append(
+                ReconciliationMismatch(
+                    symbol=symbol,
+                    mismatch_type="local_state_fetch_failed",
+                    severity="SEVERE",
+                    local_ref=None,
+                    exchange_ref=None,
+                    reason="Failed to fetch local reconciliation state.",
+                    metadata={"error": str(exc)},
+                )
+            )
+            return ReconciliationReadModelResult(
+                symbol=symbol,
+                checked_at=checked_at,
+                mismatches=mismatches,
+            )
+
+        try:
+            exchange_positions = await self._fetch_exchange_positions_for_read_model(symbol)
+            exchange_orders = await self._fetch_exchange_open_orders_for_read_model(symbol)
+        except Exception as exc:
+            mismatches.append(
+                ReconciliationMismatch(
+                    symbol=symbol,
+                    mismatch_type="exchange_state_fetch_failed",
+                    severity="SEVERE",
+                    local_ref=None,
+                    exchange_ref=None,
+                    reason="Failed to fetch exchange reconciliation state.",
+                    metadata={"error": str(exc)},
+                )
+            )
+            return ReconciliationReadModelResult(
+                symbol=symbol,
+                checked_at=checked_at,
+                mismatches=mismatches,
+            )
+
+        mismatches.extend(
+            self._compare_positions_for_read_model(
+                symbol,
+                local_positions,
+                exchange_positions,
+            )
+        )
+        mismatches.extend(
+            self._compare_orders_for_read_model(symbol, local_orders, exchange_orders)
+        )
+        mismatches.extend(
+            self._check_protection_coverage_for_read_model(
+                symbol,
+                local_positions,
+                local_orders,
+            )
+        )
+
+        return ReconciliationReadModelResult(
+            symbol=symbol,
+            checked_at=checked_at,
+            mismatches=mismatches,
+        )
 
     async def run_reconciliation(
         self,
@@ -821,6 +936,250 @@ class ReconciliationService:
     # Helper Methods
     # ============================================================
 
+    async def _get_local_active_positions_for_read_model(self, symbol: str) -> List[PositionInfo]:
+        """Fetch local active positions without falling back to exchange snapshots."""
+        if self._position_mgr is None:
+            return []
+
+        try:
+            if hasattr(self._position_mgr, "get_open_positions"):
+                positions = await self._position_mgr.get_open_positions(symbol)
+            elif hasattr(self._position_mgr, "list_active"):
+                positions = await self._position_mgr.list_active(symbol=symbol)
+            else:
+                return []
+            return [self._orm_position_to_info(pos) for pos in positions]
+        except Exception as e:
+            logger.error(f"Failed to get local read-model positions: {e}")
+            raise
+
+    async def _fetch_exchange_positions_for_read_model(self, symbol: str) -> List[PositionInfo]:
+        """Fetch exchange positions for read-only reconciliation."""
+        if hasattr(self._gateway, "fetch_positions"):
+            return await self._gateway.fetch_positions(symbol)
+        return await self._get_exchange_positions(symbol)
+
+    async def _fetch_exchange_open_orders_for_read_model(self, symbol: str) -> List[OrderResponse]:
+        """Fetch exchange open orders for read-only reconciliation."""
+        if hasattr(self._gateway, "fetch_open_orders"):
+            orders = await self._gateway.fetch_open_orders(symbol)
+        else:
+            orders = await self._gateway.rest_exchange.fetch_open_orders(symbol)
+
+        result = []
+        for order in orders:
+            order_resp = self._parse_ccxt_order(order)
+            if order_resp:
+                result.append(order_resp)
+        return result
+
+    def _compare_positions_for_read_model(
+        self,
+        symbol: str,
+        local_positions: List[PositionInfo],
+        exchange_positions: List[PositionInfo],
+    ) -> List[ReconciliationMismatch]:
+        mismatches: List[ReconciliationMismatch] = []
+        tolerance = Decimal("0.00000001")
+        local_qty = sum((pos.size for pos in local_positions), Decimal("0"))
+        exchange_qty = sum((pos.size for pos in exchange_positions), Decimal("0"))
+
+        if local_qty > 0 and exchange_qty == 0:
+            mismatches.append(
+                ReconciliationMismatch(
+                    symbol=symbol,
+                    mismatch_type="local_position_missing_on_exchange",
+                    severity="SEVERE",
+                    local_ref=symbol,
+                    exchange_ref=None,
+                    reason="Local active position exists but exchange has no active position.",
+                    metadata={"local_qty": str(local_qty), "exchange_qty": str(exchange_qty)},
+                )
+            )
+        elif exchange_qty > 0 and local_qty == 0:
+            mismatches.append(
+                ReconciliationMismatch(
+                    symbol=symbol,
+                    mismatch_type="exchange_position_missing_locally",
+                    severity="SEVERE",
+                    local_ref=None,
+                    exchange_ref=symbol,
+                    reason="Exchange active position exists but local runtime has no active position.",
+                    metadata={"local_qty": str(local_qty), "exchange_qty": str(exchange_qty)},
+                )
+            )
+        elif abs(local_qty - exchange_qty) > tolerance:
+            mismatches.append(
+                ReconciliationMismatch(
+                    symbol=symbol,
+                    mismatch_type="position_qty_mismatch",
+                    severity="WARNING",
+                    local_ref=symbol,
+                    exchange_ref=symbol,
+                    reason="Local active position quantity differs from exchange quantity.",
+                    metadata={
+                        "local_qty": str(local_qty),
+                        "exchange_qty": str(exchange_qty),
+                        "tolerance": str(tolerance),
+                    },
+                )
+            )
+
+        return mismatches
+
+    def _compare_orders_for_read_model(
+        self,
+        symbol: str,
+        local_orders: List[OrderResponse],
+        exchange_orders: List[OrderResponse],
+    ) -> List[ReconciliationMismatch]:
+        mismatches: List[ReconciliationMismatch] = []
+        tolerance = Decimal("0.00000001")
+        local_by_exchange_id = {
+            order.exchange_order_id: order
+            for order in local_orders
+            if order.exchange_order_id
+        }
+        exchange_by_id = {
+            order.exchange_order_id or order.order_id: order
+            for order in exchange_orders
+            if order.exchange_order_id or order.order_id
+        }
+
+        for local_order in local_orders:
+            local_exchange_ref = local_order.exchange_order_id or local_order.order_id
+            exchange_order = exchange_by_id.get(local_exchange_ref)
+            if exchange_order is None:
+                mismatches.append(
+                    ReconciliationMismatch(
+                        symbol=symbol,
+                        mismatch_type="local_order_missing_on_exchange",
+                        severity="WARNING",
+                        local_ref=local_order.order_id,
+                        exchange_ref=local_order.exchange_order_id,
+                        reason="Local open order was not found in exchange open orders.",
+                        metadata={
+                            "order_role": local_order.order_role.value,
+                            "local_status": local_order.status.value,
+                        },
+                    )
+                )
+                continue
+
+            if local_order.status != exchange_order.status:
+                mismatches.append(
+                    ReconciliationMismatch(
+                        symbol=symbol,
+                        mismatch_type="order_status_mismatch",
+                        severity="WARNING",
+                        local_ref=local_order.order_id,
+                        exchange_ref=exchange_order.exchange_order_id,
+                        reason="Local order status differs from exchange order status.",
+                        metadata={
+                            "local_status": local_order.status.value,
+                            "exchange_status": exchange_order.status.value,
+                        },
+                    )
+                )
+
+            if abs(local_order.amount - exchange_order.amount) > tolerance:
+                mismatches.append(
+                    ReconciliationMismatch(
+                        symbol=symbol,
+                        mismatch_type="order_qty_mismatch",
+                        severity="WARNING",
+                        local_ref=local_order.order_id,
+                        exchange_ref=exchange_order.exchange_order_id,
+                        reason="Local order quantity differs from exchange order quantity.",
+                        metadata={
+                            "local_qty": str(local_order.amount),
+                            "exchange_qty": str(exchange_order.amount),
+                            "tolerance": str(tolerance),
+                        },
+                    )
+                )
+
+        for exchange_order in exchange_orders:
+            exchange_ref = exchange_order.exchange_order_id or exchange_order.order_id
+            if exchange_ref not in local_by_exchange_id:
+                mismatches.append(
+                    ReconciliationMismatch(
+                        symbol=symbol,
+                        mismatch_type="exchange_order_missing_locally",
+                        severity="WARNING",
+                        local_ref=None,
+                        exchange_ref=exchange_ref,
+                        reason="Exchange open order was not found in local open orders.",
+                        metadata={
+                            "order_role": exchange_order.order_role.value,
+                            "exchange_status": exchange_order.status.value,
+                        },
+                    )
+                )
+
+        return mismatches
+
+    def _check_protection_coverage_for_read_model(
+        self,
+        symbol: str,
+        local_positions: List[PositionInfo],
+        local_orders: List[OrderResponse],
+    ) -> List[ReconciliationMismatch]:
+        mismatches: List[ReconciliationMismatch] = []
+        if not local_positions:
+            return mismatches
+
+        open_orders = [order for order in local_orders if order.symbol == symbol]
+        sl_orders = [order for order in open_orders if order.order_role == OrderRole.SL]
+        tp_orders = [
+            order
+            for order in open_orders
+            if order.order_role
+            in {OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5}
+        ]
+
+        if not sl_orders and not tp_orders:
+            mismatches.append(
+                ReconciliationMismatch(
+                    symbol=symbol,
+                    mismatch_type="missing_any_protection",
+                    severity="SEVERE",
+                    local_ref=symbol,
+                    exchange_ref=None,
+                    reason="Local active position has no open SL or TP protection orders.",
+                    metadata={"association_scope": "symbol_role_v0"},
+                )
+            )
+        elif not sl_orders:
+            mismatches.append(
+                ReconciliationMismatch(
+                    symbol=symbol,
+                    mismatch_type="missing_sl_protection",
+                    severity="SEVERE",
+                    local_ref=symbol,
+                    exchange_ref=None,
+                    reason="Local active position has no open SL protection order.",
+                    metadata={"association_scope": "symbol_role_v0"},
+                )
+            )
+        elif not tp_orders:
+            mismatches.append(
+                ReconciliationMismatch(
+                    symbol=symbol,
+                    mismatch_type="missing_tp_protection",
+                    severity="WARNING",
+                    local_ref=symbol,
+                    exchange_ref=None,
+                    reason="Local active position has SL protection but no TP protection order.",
+                    metadata={
+                        "association_scope": "symbol_role_v0",
+                        "expected_min_tp_count": 1,
+                    },
+                )
+            )
+
+        return mismatches
+
     async def _get_local_positions(self, symbol: str) -> List[PositionInfo]:
         """
         获取本地仓位列表
@@ -892,9 +1251,36 @@ class ReconciliationService:
         Returns:
             List[OrderResponse]: 本地订单列表
         """
-        # TODO: 从数据库获取本地订单
-        # 目前返回空列表
-        return []
+        if self._order_repository is None:
+            return []
+
+        active_statuses = {
+            OrderStatus.SUBMITTED,
+            OrderStatus.OPEN,
+            OrderStatus.PARTIALLY_FILLED,
+        }
+        orders_by_id: Dict[str, Any] = {}
+
+        try:
+            if hasattr(self._order_repository, "get_open_orders"):
+                for order in await self._order_repository.get_open_orders(symbol):
+                    if getattr(order, "status", None) in active_statuses:
+                        orders_by_id[getattr(order, "id", getattr(order, "order_id", ""))] = order
+
+            if hasattr(self._order_repository, "get_orders_by_status"):
+                for status in active_statuses:
+                    for order in await self._order_repository.get_orders_by_status(status, symbol):
+                        orders_by_id[getattr(order, "id", getattr(order, "order_id", ""))] = order
+
+            result = [
+                self._order_to_response(order)
+                for order in orders_by_id.values()
+            ]
+            logger.debug(f"Local open orders for {symbol}: {len(result)}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get local open orders: {e}")
+            raise
 
     async def _get_exchange_open_orders(self, symbol: str) -> List[OrderResponse]:
         """
@@ -907,7 +1293,10 @@ class ReconciliationService:
             List[OrderResponse]: 交易所订单列表
         """
         try:
-            orders = await self._gateway.rest_exchange.fetch_open_orders(symbol)
+            if hasattr(self._gateway, "fetch_open_orders"):
+                orders = await self._gateway.fetch_open_orders(symbol)
+            else:
+                orders = await self._gateway.rest_exchange.fetch_open_orders(symbol)
             result = []
             for order in orders:
                 order_resp = self._parse_ccxt_order(order)
@@ -1077,15 +1466,15 @@ class ReconciliationService:
 
         # 假设 order 有必要的属性
         return OrderResponse(
-            order_id=getattr(order, 'order_id', ''),
+            order_id=getattr(order, 'order_id', getattr(order, 'id', '')),
             exchange_order_id=getattr(order, 'exchange_order_id', None),
             symbol=getattr(order, 'symbol', ''),
             order_type=getattr(order, 'order_type', OrderType.LIMIT),
             direction=getattr(order, 'direction', Direction.LONG),
             order_role=getattr(order, 'order_role', OrderRole.ENTRY),
             status=getattr(order, 'status', OrderStatus.OPEN),
-            amount=getattr(order, 'amount', Decimal('0')),
-            filled_amount=getattr(order, 'filled_amount', Decimal('0')),
+            amount=getattr(order, 'amount', getattr(order, 'requested_qty', Decimal('0'))),
+            filled_amount=getattr(order, 'filled_amount', getattr(order, 'filled_qty', Decimal('0'))),
             price=getattr(order, 'price', None),
             trigger_price=getattr(order, 'trigger_price', None),
             average_exec_price=getattr(order, 'average_exec_price', None),
