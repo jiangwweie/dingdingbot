@@ -1,6 +1,6 @@
 # Live-safe v1 Checkpoint
 
-**Date:** 2026-04-30  
+**Date:** 2026-05-02  
 **Purpose:** Summarize live-safe foundation progress, known limitations, non-goals, and candidate next tasks. This is a reference document for owner review and future Codex / Claude Code context — not a sprint plan or task breakdown.
 
 ---
@@ -21,7 +21,7 @@
 - Exchange order updates enter the local `OrderLifecycleService` lifecycle in real time.
 - Order-watch WebSocket state is fully isolated from K-line WebSocket state (`_order_ws_running` vs `_ws_running`).
 - `api.py` does not start order-watch tasks — this is explicitly out of scope.
-- Duplicate `watch_orders` definition in `exchange_gateway.py` remains for later cleanup.
+- ADR documents semantics, scope, and non-goals.
 
 ### LS-002 Daily Risk Limits Runtime Closure v0
 
@@ -59,8 +59,24 @@
 - Ordinary exceptions are logged and the loop continues; `CancelledError` is explicitly re-raised.
 - Interval waiting uses `asyncio.wait_for(shutdown_event.wait(), timeout=...)` for fast shutdown responsiveness.
 - Normal snapshot update behavior is unchanged.
-- `ws_task` and `api_task` lifecycle governance is deferred to RTG-002 candidate.
 - Does not modify `ws_task`, `api_task`, order-watch, reconciliation, strategy, risk rule, runtime profile, trace schema, backtest, research, or frontend.
+
+### RTG-002 Manage ws_task / api_task Lifecycle
+
+- `ws_task` and `api_task` are no longer local-only variables; module-level handles `_ws_task` / `_api_task` are stored.
+- Shutdown cancels and awaits both tasks across all three shutdown paths.
+- Cancel helpers `_cancel_ws_task()` / `_cancel_api_task()` are idempotent: None-safe, done-safe, running cancel+await, non-CancelledError logged, handle cleared in finally.
+- Removed the fragile `if 'api_task' in locals()` cleanup in the finally block.
+- Does not modify `subscribe_ohlcv()` internal behavior, uvicorn/API server behavior, order-watch, reconciliation, snapshot update, strategy, risk rule, runtime profile, trace schema, backtest, research, or frontend.
+- Does not introduce TaskManager or task registry.
+
+### DW-001 Remove shadowed watch_orders Definition
+
+- Removed the obsolete shadowed `watch_orders()` definition from `ExchangeGateway` (~78 lines of dead code).
+- The active `watch_orders()` implementation (with `_order_ws_running`, dedicated `order_ws_exchange`, global callback, exception protection) is unchanged.
+- `_handle_order_update()` is unchanged.
+- Added AST regression test to ensure only one `watch_orders()` definition exists at source level.
+- No runtime behavior change.
 
 ---
 
@@ -71,10 +87,11 @@ Compared to pre-live-safe state:
 - **Order runtime state is more可信**: order-watch ensures local lifecycle receives real-time exchange updates; startup reconciliation can advance stale orders at boot.
 - **Daily limits are real**: `pre_order_check` now enforces daily loss and daily trade count limits using live projected PnL, not dead placeholder stats.
 - **Reconciliation is observable**: the system now periodically compares local and exchange state and surfaces mismatches as structured logs — reconciliation is no longer a manual-only capability.
-- **Account snapshot update task lifecycle is managed**: the background task that keeps `SignalPipeline` current with account state is no longer a fire-and-forget leak; it is cancellable, awaitable, and shutdown-responsive.
+- **All main runtime background tasks have managed lifecycle**: snapshot update, OHLCV WebSocket, API server, order-watch, and periodic reconciliation all store task handles and support cancel+await during shutdown. No fire-and-forget tasks remain in the main runtime.
+- **Order-watch implementation is clean**: no duplicate `watch_orders()` definition remains; the active implementation uses isolated WS state, global callback, and exception protection.
+- **Shutdown semantics are consistent**: all three shutdown paths (graceful_shutdown, post-wait, finally) follow the same cancel+await pattern for managed tasks.
 - **Decision traceability exists**: risk decisions are recorded to JSONL for post-mortem analysis.
-- **Multiple background tasks now have cancel + await semantics**: order-watch, periodic reconciliation, and snapshot update all follow the stored-handle + shutdown-cancel pattern.
-- **Non-invasive and rollback-friendly**: all live-safe additions are optional (trace is `Optional`, reconciliation loop can be disabled by not starting the task, snapshot task is independently cancellable), and none change core trading logic.
+- **Non-invasive and rollback-friendly**: all live-safe additions are optional and none change core trading logic.
 
 ---
 
@@ -83,10 +100,7 @@ Compared to pre-live-safe state:
 ### Infrastructure gaps
 
 - `api.py` does not start order-watch tasks (out of LS-001 scope).
-- `exchange_gateway.py` contains duplicate `watch_orders` definitions — the old one is dead code but remains in the file.
 - `_order_ws_running` is a shared flag across multiple watch tasks; acceptable for single-symbol runtime but fragile for multi-symbol.
-- `ws_task` (OHLCV WebSocket) lifecycle is only cancelled in the post-wait path, not in `graceful_shutdown()` — defers to RTG-002.
-- `api_task` (uvicorn server) lifecycle is only cancelled in the finally block, not in `graceful_shutdown()` — defers to RTG-002.
 - `get_account_snapshot()` is a synchronous call; if it blocks, it blocks the event loop. Known limitation.
 - No unified runtime task manager exists. This is a deliberate scope choice, not a bug.
 
@@ -140,14 +154,6 @@ The following are explicitly not in scope for the current live-safe phase:
 
 These are potential follow-up items. None are scheduled or prioritized — each requires owner decision and a separate task card before implementation.
 
-### Cleanup Candidate: duplicate `watch_orders` definition
-
-Remove the shadowed, dead `watch_orders` definition from `exchange_gateway.py`. Does not change active behavior. Requires focused regression tests on order-watch to confirm no implicit reliance on the old definition. Low-risk cleanup.
-
-### RTG-002 Candidate: ws_task / api_task Lifecycle Governance
-
-Audit and fix remaining background task lifecycle gaps. Promote `ws_task` and `api_task` from local variables to stored handles with cancel+await in `graceful_shutdown()`. Does not introduce a TaskManager. Does not change trading logic. Requires inspect + plan first.
-
 ### LS-003c Candidate: Confirmed Severe Mismatch Handling
 
 Only if owner explicitly approves. Would introduce the first control-path action from reconciliation: block symbol on confirmed severe mismatch. Must define which `mismatch_type` values qualify, whether single-round or multi-round confirmation is required, and how to recover blocked symbols. Does not include auto-fix. Requires ADR. Risk level is significantly higher than LS-003a/b.
@@ -156,9 +162,21 @@ Only if owner explicitly approves. Would introduce the first control-path action
 
 Persist daily loss and trade count so they survive runtime restart. Should not be confused with a complete account risk state machine — this is a narrow checkpoint/persistence task. Requires design review for storage location and recovery semantics.
 
+### Reconciliation Report Persistence Candidate
+
+Persist reconciliation results beyond log-only. Not equivalent to block or recovery. Could serve a future frontend read-only display. Requires independent design of schema and storage boundaries.
+
 ### Owner Console Candidate
 
 Read-only display of reconciliation status, risk limit state, and trace summaries. No runtime control actions. No parameter hot-modification. Requires backend API design before frontend work.
+
+### Runtime Task Governance v1 Candidate
+
+Consider a unified task manager only if the number of background tasks continues to grow. Current managed-task pattern (module-level handle + cancel helper) is sufficient for the current task count. Do not introduce abstraction for its own sake.
+
+### get_account_snapshot Async/Timeout Candidate
+
+Audit whether the synchronous `get_account_snapshot()` call can block the event loop under adverse conditions. Inspect + plan only. Not for implementation in this checkpoint cycle.
 
 ---
 
@@ -166,19 +184,18 @@ Read-only display of reconciliation status, risk limit state, and trace summarie
 
 - **Do not proceed to LS-003c (control path) without explicit owner approval.** Transitioning from report-only reconciliation to symbol blocking or recovery task creation is a significant risk-level increase.
 - **Each candidate task should begin with inspect + plan**, not direct implementation. The pattern established by LS-003a/003b (inspect → plan → implement → review → ADR) has proven effective.
-- **Do not merge unrelated tasks into one large task.** Cleanup, task governance (RTG-002), and control path (LS-003c) are separate concerns with different risk profiles. Keep them in separate task cards.
+- **Do not merge unrelated tasks into one large task.** Persistence, frontend, block, and recovery are separate concerns with different risk profiles. Keep them in separate task cards.
 - **Do not expand live-safe scope into strategy, risk rule, or runtime profile territory.** These remain outside live-safe boundaries per ADR-0001.
-- **Known infrastructure gaps (ws_task/api_task lifecycle, duplicate definitions, logger boundary) should be addressed as separate cleanup tasks**, not mixed into feature work.
+- **Known infrastructure gaps (logger boundary, nesting depth) should be addressed as separate cleanup tasks**, not mixed into feature work.
 
 ---
 
 ## 7. Open Questions for Owner
 
-1. Should the duplicate `watch_orders` definition be cleaned up before further order-watch evolution?
-2. Should `ws_task` / `api_task` lifecycle governance (RTG-002) be addressed before LS-003c?
-3. Is LS-003c (confirmed severe mismatch → block symbol) needed, and if so, when?
-4. Which `mismatch_type` values should qualify for automatic symbol blocking in LS-003c?
-5. Should daily stats be persisted (LS-002b), and what is the target timeline?
-6. Should reconciliation results be displayed in a future Owner Console?
-7. Should reconciliation reports be persisted beyond log-only?
-8. Should the live-safe task board be unified or consolidated now that LS-003a/b and RTG-001 are complete?
+1. Is LS-003c (confirmed severe mismatch → block symbol) needed, and if so, when?
+2. Which `mismatch_type` values should qualify for automatic symbol blocking in LS-003c?
+3. Should daily stats be persisted (LS-002b), and what is the target timeline?
+4. Should reconciliation results be persisted beyond log-only?
+5. Should reconciliation results be displayed in a future Owner Console?
+6. Should the synchronous `get_account_snapshot()` call be audited for event-loop blocking risk?
+7. When would a unified TaskManager become worth introducing?
