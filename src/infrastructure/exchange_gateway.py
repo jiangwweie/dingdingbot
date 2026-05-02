@@ -1527,7 +1527,13 @@ class ExchangeGateway:
             return order
 
         except Exception as e:
-            logger.error(f"处理订单更新失败：{e}")
+            logger.error(
+                "处理订单更新失败：order_id=%s, symbol=%s, error=%s",
+                raw_order.get('id'),
+                raw_order.get('symbol'),
+                e,
+                exc_info=True,
+            )
             return None
 
     def _parse_order_status_with_filled_qty(

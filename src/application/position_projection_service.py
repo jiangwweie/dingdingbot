@@ -10,6 +10,7 @@ from typing import Dict, Optional
 
 from src.domain.models import Direction
 from src.domain.models import Order, Position
+from src.infrastructure.logger import logger
 from src.infrastructure.repository_ports import PositionRepositoryPort
 
 POSITION_CLOSE_DUST_LIMIT = Decimal("0.00000001")
@@ -123,6 +124,12 @@ class PositionProjectionService:
     async def project_exit_fill(self, exit_order: Order) -> Optional[ExitProjectionResult]:
         """根据 TP/SL 成交更新当前仓位投影并返回最小 delta 信息。"""
         if self._repository is None:
+            logger.warning(
+                "Exit projection skipped: position repository unavailable "
+                "order_id=%s signal_id=%s",
+                exit_order.id,
+                exit_order.signal_id,
+            )
             return None
 
         position_id = f"pos_{exit_order.signal_id}"
@@ -137,6 +144,13 @@ class PositionProjectionService:
         async with lock:
             position = await self._repository.get(position_id)
             if position is None:
+                logger.warning(
+                    "Exit projection skipped: local position missing "
+                    "position_id=%s order_id=%s signal_id=%s",
+                    position_id,
+                    exit_order.id,
+                    exit_order.signal_id,
+                )
                 cleanup_after_save = True
                 result = ExitProjectionResult(
                     position=None,
@@ -148,6 +162,15 @@ class PositionProjectionService:
                 cumulative_exit_qty = exit_order.filled_qty or Decimal("0")
                 exit_price = exit_order.average_exec_price or exit_order.price
                 if cumulative_exit_qty <= Decimal("0") or exit_price is None:
+                    logger.warning(
+                        "Exit projection skipped: invalid exit fill "
+                        "position_id=%s order_id=%s signal_id=%s filled_qty=%s exit_price=%s",
+                        position_id,
+                        exit_order.id,
+                        exit_order.signal_id,
+                        cumulative_exit_qty,
+                        exit_price,
+                    )
                     result = ExitProjectionResult(
                         position=position,
                         position_id=position_id,

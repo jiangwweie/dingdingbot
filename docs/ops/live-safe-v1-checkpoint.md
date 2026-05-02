@@ -78,6 +78,21 @@
 - Added AST regression test to ensure only one `watch_orders()` definition exists at source level.
 - No runtime behavior change.
 
+### TM-001 CapitalProtection Fail-open Hardening
+
+- `CapitalProtectionManager.pre_order_check()` no longer silently allows orders when quantity precision validation raises an internal dependency exception.
+- Quantity precision exception path now fails closed with `QUANTITY_PRECISION_CHECK_ERROR`.
+- Price reasonability exception path now fails closed with `PRICE_REASONABILITY_CHECK_ERROR`.
+- Existing Decision Trace behavior is preserved: fail-closed results naturally emit `decision=deny` through the current risk decision trace path.
+- Normal passing paths, strategy logic, runtime profiles, backtester, research, frontend, exchange gateway, and Decision Trace schema are unchanged.
+
+### Freeze Gate Active Tests: TM-002 / TM-003
+
+- TM-002 verifies exit projection no-op paths before freeze: missing local position and invalid exit fill are observable warning paths, and they do not update LS-002 daily projected PnL or closed-trade count.
+- TM-002 does not introduce account-level PnL reconstruction, fee/funding expansion, historical rebuild, or daily stats persistence.
+- TM-003 verifies order update parse failures are observable and do not silently kill the order-watch loop; valid later updates in the same watch batch can still reach callbacks.
+- TM-003 does not introduce recovery, auto-fix, orphan cancel, symbol block, LS-003c, or exchange simulation.
+
 ---
 
 ## 2. Current Live-safe Capability
@@ -91,6 +106,8 @@ Compared to pre-live-safe state:
 - **Order-watch implementation is clean**: no duplicate `watch_orders()` definition remains; the active implementation uses isolated WS state, global callback, and exception protection.
 - **Shutdown semantics are consistent**: all three shutdown paths (graceful_shutdown, post-wait, finally) follow the same cancel+await pattern for managed tasks.
 - **Decision traceability exists**: risk decisions are recorded to JSONL for post-mortem analysis.
+- **CapitalProtection internal check exceptions fail closed**: quantity precision and price reasonability dependency exceptions reject the order instead of silently allowing it; these rejects are traceable as `decision=deny`.
+- **Freeze Gate active tests passed**: TM-002 and TM-003 cover two high-risk silent-failure paths before observation entry without expanding runtime behavior.
 - **Non-invasive and rollback-friendly**: all live-safe additions are optional and none change core trading logic.
 
 ---
@@ -109,6 +126,12 @@ Compared to pre-live-safe state:
 - v0 state is in-memory: runtime restart resets daily loss and trade count to zero.
 - Daily PnL is projected realized PnL, not complete account-level daily loss.
 - Funding fees and full fee breakdown are not fully纳入 daily loss calculation.
+
+### CapitalProtection parameter checks
+
+- TM-001 only hardens internal exception paths for quantity precision and price reasonability checks.
+- Normal `fetch_ticker_price()` returning `None` or `0` still keeps the existing skip-check semantics in price reasonability validation.
+- Tightening the normal missing-ticker path into a reject/block behavior would be a separate owner decision and task card.
 
 ### Reconciliation
 
@@ -185,6 +208,7 @@ Audit whether the synchronous `get_account_snapshot()` call can block the event 
 - **Do not proceed to LS-003c (control path) without explicit owner approval.** Transitioning from report-only reconciliation to symbol blocking or recovery task creation is a significant risk-level increase.
 - **Each candidate task should begin with inspect + plan**, not direct implementation. The pattern established by LS-003a/003b (inspect → plan → implement → review → ADR) has proven effective.
 - **Do not merge unrelated tasks into one large task.** Persistence, frontend, block, and recovery are separate concerns with different risk profiles. Keep them in separate task cards.
+- **Do not treat TM-001 as a reason to broaden risk rules.** It is a narrow fail-open bug hardening slice, not a mandate to change runtime profiles, strategy behavior, backtests, frontend, LS-003c, block/recovery, or auto-fix behavior.
 - **Do not expand live-safe scope into strategy, risk rule, or runtime profile territory.** These remain outside live-safe boundaries per ADR-0001.
 - **Known infrastructure gaps (logger boundary, nesting depth) should be addressed as separate cleanup tasks**, not mixed into feature work.
 

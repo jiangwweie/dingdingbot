@@ -234,6 +234,19 @@ class CapitalProtectionManager:
                 order_price=price,
             )
             if not price_check:
+                if ticker_price is None:
+                    logger.warning(
+                        f"订单价格合理性检查失败：内部依赖异常 (symbol={symbol}, order_price={price})"
+                    )
+                    return finalize(OrderCheckResult(
+                        allowed=False,
+                        reason="PRICE_REASONABILITY_CHECK_ERROR",
+                        reason_message="价格合理性检查失败：内部依赖异常，live-safe 模式下拒绝下单",
+                        order_price=price,
+                        ticker_price=ticker_price,
+                        price_deviation=deviation,
+                    ), effective_price)
+
                 logger.warning(
                     f"订单价格偏差过大：{deviation*100:.2f}% > {self._config.price_deviation_threshold*100:.0f}% "
                     f"(symbol={symbol}, order_price={price}, ticker_price={ticker_price})"
@@ -482,8 +495,11 @@ class CapitalProtectionManager:
 
         except Exception as e:
             logger.error(f"数量精度检查失败：{e} (symbol={symbol}, quantity={quantity})")
-            # 异常情况下跳过检查（记录错误但不拒绝订单）
-            return True, None, None
+            return (
+                False,
+                "QUANTITY_PRECISION_CHECK_ERROR",
+                "数量精度检查失败：内部依赖异常，live-safe 模式下拒绝下单"
+            )
 
     async def _check_price_reasonability(
         self,
@@ -542,8 +558,7 @@ class CapitalProtectionManager:
 
         except Exception as e:
             logger.error(f"价格合理性检查失败：{e} (symbol={symbol}, order_price={order_price})")
-            # 异常情况下跳过检查（记录错误但不拒绝订单）
-            return True, None, Decimal("0")
+            return False, None, Decimal("0")
 
     async def _check_single_trade_loss(
         self,

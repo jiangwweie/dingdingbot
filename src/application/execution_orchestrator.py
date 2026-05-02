@@ -369,11 +369,33 @@ class ExecutionOrchestrator:
     async def _handle_exit_filled(self, exit_order: Order) -> None:
         """处理 TP/SL 成交推进后的仓位投影与日内统计更新。"""
         if self._position_projection_service is None:
+            logger.warning(
+                "[ExecutionOrchestrator] exit fill position projection skipped: "
+                f"projection service unavailable, order_id={exit_order.id}, "
+                f"signal_id={exit_order.signal_id}"
+            )
             return
 
         try:
             projection_result = await self._position_projection_service.project_exit_fill(exit_order)
-            if projection_result is None or projection_result.was_already_processed:
+            if projection_result is None:
+                logger.warning(
+                    "[ExecutionOrchestrator] exit fill position projection skipped: "
+                    f"no projection result, order_id={exit_order.id}, "
+                    f"signal_id={exit_order.signal_id}"
+                )
+                return
+
+            if projection_result.position is None:
+                logger.warning(
+                    "[ExecutionOrchestrator] exit fill position projection skipped: "
+                    f"local position missing, order_id={exit_order.id}, "
+                    f"position_id={projection_result.position_id}, "
+                    f"signal_id={projection_result.signal_id}"
+                )
+                return
+
+            if projection_result.was_already_processed:
                 return
 
             if projection_result.delta_realized_pnl != Decimal("0"):
