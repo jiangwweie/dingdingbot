@@ -1818,7 +1818,7 @@ class Backtester:
                             base_price = order.trigger_price
                             slippage = abs(order.average_exec_price - base_price)
                             total_slippage_cost += slippage * order.filled_qty
-                    elif order.order_type == OrderType.LIMIT and order.order_role in TP_ROLES:
+                    elif order.order_type == OrderType.LIMIT and order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]:
                         # TP exit: base price is the limit order price
                         if order.price:
                             base_price = order.price

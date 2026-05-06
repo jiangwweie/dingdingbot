@@ -56,3 +56,13 @@ Use this file for session progress and handoff notes.
 - No 2021 OOS was run. No runtime, profile, strategy, or risk rule changes.
 - Artifact: docs/ops/crypto-pullback-module-v1-2021-oos-gate-inspect-plan.md (version-controlled).
 - CPM-OOS-2021-PLAN-001 finalized: fixed Section 6 Decision Matrix row 3 (broken Markdown table), added caveat to Section 5.1 (negative result classification before equating with module hypothesis failure).
+
+## 2026-05-06 (CPM-OOS-2021-RUN)
+
+- Ran CPM-OOS-2021-RUN-001: 2021 full-year OOS backtest on frozen CPM-1 baseline.
+- Result: +25.26% return, 48 trades, WR 37.5%, PF 1.79, MaxDD -9.10%, Sharpe 1.49, Sortino 2.47.
+- Corrected total_slippage_cost: 832.20 USDT (CPM-BT-METRIC-001 fix active, non-zero).
+- Classification: Evidence gap reduced — consistent with CPM-1 profit hypothesis in favorable (bull) market.
+- Fixed TP_ROLES NameError in backtester.py (CPM-BT-METRIC-001 leftover bug: undefined TP_ROLES constant replaced with inline [OrderRole.TP1..TP5] list). No trade outcomes changed.
+- No runtime, profile, strategy, or risk rule changes.
+- Artifacts: reports/oos_runs/cpm1_2021_oos/ (local-only, .gitignored), docs/ops/crypto-pullback-module-v1-2021-oos-report.md (version-controlled), scripts/run_cpm1_2021_oos.py (version-controlled).
