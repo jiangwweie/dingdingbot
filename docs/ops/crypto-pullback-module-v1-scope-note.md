@@ -1,7 +1,7 @@
 # Crypto Pullback Module v1 — Scope Note
 
-**Date:** 2026-05-02
-**Status:** Active (SSOT for strategy module identity)
+**Date:** 2026-05-02 (updated 2026-05-06)
+**Status:** Active (SSOT for strategy module identity; module paused for promotion — see OOS failure classification)
 **Purpose:** Define the current strategy module's identity, assumptions, boundaries, and non-goals. This document is the single source of truth for what the module is and is not, preventing drift from ad-hoc parameter tuning or scope creep.
 
 ---
@@ -39,7 +39,7 @@
 | Trailing stop | OFF | Frozen |
 | OCO | ON | Frozen |
 
-**All parameters above are frozen.** No parameter changes are in scope for the current stabilization phase. Changes require owner decision and a separate task card.
+**All parameters above are frozen.** CPM-1 is paused for promotion after OOS gate failure (2021/2022 both negative). No parameter changes are in scope. Changes require owner decision and a separate task card.
 
 ---
 
@@ -166,7 +166,7 @@ The following questions require owner input before any action:
 
 2. **Should E4 (donchian_distance) be investigated as a risk-state label / position-weight-reduction factor?** (Current status: P0 official validation showed it is an effective risk factor but over-filters as a hard gate. Next step would be E4 threshold sensitivity analysis, not implementation.)
 
-3. **Should 2022 out-of-sample validation be prioritized?** (Current status: all conclusions are based on 2023-2025 in-sample. 2022 OOS is the strongest available validation but has not been run.)
+3. **Should additional OOS validation be pursued?** (Current status: 2021 and 2022 OOS have been run and both are negative. CPM-1 is paused. Any further OOS requires Owner decision on whether it would change the current Pause classification.)
 
 4. **Should a second observation pass (longer duration, crossing UTC midnight) be scheduled before declaring the baseline stable?** (Current status: OBS-001 pass 1 completed with 5-minute window; gaps in order update, risk trace, and daily boundary evidence.)
 
@@ -212,3 +212,4 @@ Key research documents supporting this scope note:
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-05-02 | Initial scope note created | Claude Code (CPM-001) |
+| 2026-05-06 | Updated status to reflect Pause after OOS gate failure; updated Owner decision point 3 for 2021/2022 OOS results | Claude Code (CPM-OOS-FAILURE-CLASSIFY-001) |
