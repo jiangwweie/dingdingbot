@@ -1802,15 +1802,28 @@ class Backtester:
             for order in executed:
                 all_executed_orders.append(order)
 
-                # Calculate slippage cost (for MARKET orders)
-                if order.order_type == OrderType.MARKET and order.average_exec_price:
-                    # For MARKET orders, compare exec price with kline.open
-                    if order.direction == Direction.LONG:
-                        expected_price = kline.open * (Decimal('1') + engine.slippage_rate)
-                    else:
-                        expected_price = kline.open * (Decimal('1') - engine.slippage_rate)
-                    slippage = abs(order.average_exec_price - expected_price)
-                    total_slippage_cost += slippage * order.filled_qty
+                # Calculate slippage cost: difference between unslipped base price
+                # and actual execution price (which includes slippage).
+                # Slippage is already embedded in average_exec_price by the matching
+                # engine; this tracking extracts it as a separate metric.
+                if order.average_exec_price and order.filled_qty:
+                    if order.order_type == OrderType.MARKET and order.order_role == OrderRole.ENTRY:
+                        # MARKET entry: base price is kline.open
+                        base_price = kline.open
+                        slippage = abs(order.average_exec_price - base_price)
+                        total_slippage_cost += slippage * order.filled_qty
+                    elif order.order_type in [OrderType.STOP_MARKET, OrderType.TRAILING_STOP]:
+                        # SL / trailing stop: base price is trigger_price
+                        if order.trigger_price:
+                            base_price = order.trigger_price
+                            slippage = abs(order.average_exec_price - base_price)
+                            total_slippage_cost += slippage * order.filled_qty
+                    elif order.order_type == OrderType.LIMIT and order.order_role in TP_ROLES:
+                        # TP exit: base price is the limit order price
+                        if order.price:
+                            base_price = order.price
+                            slippage = abs(order.average_exec_price - base_price)
+                            total_slippage_cost += slippage * order.filled_qty
 
                 # Track position changes
                 if order.order_role == OrderRole.ENTRY:
@@ -1880,7 +1893,7 @@ class Backtester:
                     # 处理 trailing_exit 事件：执行市价平仓
                     for event in risk_events:
                         if event.event_category == 'trailing_exit':
-                            self._execute_trailing_exit(
+                            trailing_slippage = self._execute_trailing_exit(
                                 position=position,
                                 event=event,
                                 kline=kline,
@@ -1888,6 +1901,7 @@ class Backtester:
                                 account=account,
                                 risk_manager_config=dynamic_risk_manager._config,
                             )
+                            total_slippage_cost += trailing_slippage
 
             # ===== BT-2: 资金费用计算 =====
             # 在动态风险管理之后，对每个未平仓的持仓计算资金费用
@@ -2282,13 +2296,16 @@ class Backtester:
         active_orders: List[Order],
         account: Any,
         risk_manager_config: RiskManagerConfig,
-    ) -> None:
+    ) -> Decimal:
         """执行追踪退出平仓
 
         1. 取消所有未成交订单
         2. 计算平仓价（含滑点）
         3. 计算平仓 PnL
         4. 更新仓位和账户状态
+
+        Returns:
+            Slippage cost (always non-negative) for tracking.
         """
 
         # 1. 取消所有未成交订单
@@ -2322,6 +2339,10 @@ class Backtester:
 
         # 6. 更新事件 PnL
         event.close_pnl = close_pnl
+
+        # 7. 返回滑点成本用于独立跟踪
+        slippage_cost = abs(exit_price - event.close_price) * qty
+        return slippage_cost
 
     def _calculate_funding_cost(
         self,
