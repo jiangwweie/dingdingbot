@@ -46,3 +46,13 @@ Use this file for session progress and handoff notes.
 - CPM-BT-METRIC-001: Fixed slippage cost tracking metric in backtester.py. Replaced self-referencing derivation (always-zero) with unslipped base price comparison for all order types (MARKET entry, STOP_MARKET SL, LIMIT TP, TRAILING_STOP). Added trailing exit slippage tracking. 16 unit tests pass. No trade outcomes changed. No rerun of 2022 OOS required.
 - No runtime, profile, strategy, or risk rule changes.
 - Artifacts: reports/oos_runs/cpm1_2022_oos/ (local-only, .gitignored), docs/ops/crypto-pullback-module-v1-2022-oos-report.md (version-controlled), docs/ops/crypto-pullback-module-v1-2022-oos-reconciliation-note.md (version-controlled).
+
+## 2026-05-06 (CPM-OOS-2021-PLAN)
+
+- Created CPM-OOS-2021-PLAN-001: 2021 OOS gate inspect plan for CPM-1.
+- 2021 is positioned as the complementary bull-year OOS candidate to 2022's bear-year evidence.
+- Pre-run data check: ETH 1h 8,760 candles, 4h 2,190 candles — complete, no gaps, no duplicates.
+- Open items: exchange outage verification during May 2021 crash, Binance contract rule stability, funding model choice.
+- No 2021 OOS was run. No runtime, profile, strategy, or risk rule changes.
+- Artifact: docs/ops/crypto-pullback-module-v1-2021-oos-gate-inspect-plan.md (version-controlled).
+- CPM-OOS-2021-PLAN-001 finalized: fixed Section 6 Decision Matrix row 3 (broken Markdown table), added caveat to Section 5.1 (negative result classification before equating with module hypothesis failure).
