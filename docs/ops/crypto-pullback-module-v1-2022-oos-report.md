@@ -246,8 +246,8 @@ close_events[] raw event counts: TP1=26, TP2=9, SL=42. After deduplication by (p
 ### Caveat
 2022 is a single, extreme bear year. It does not represent a "full market cycle." The profit hypothesis could still hold in bull/sideways years. A single-year OOS result is **insufficient** to reject the strategy outright.
 
-### Cost model caveat (resolved by CPM-OOS-RECON-001)
-The `total_slippage_cost=0` field is a confirmed engine tracking bug, not a missing cost. Slippage IS applied to execution prices and IS reflected in `total_pnl`. The estimated slippage impact is ~644 USDT (the largest single cost component). The cost composition breakdown in this report is unreliable, but the bottom-line PnL (-971.71 USDT) is correct. Evidence classification upgraded from "reproducibility ambiguity" to "caveated evidence — PnL clean, cost composition unreliable."
+### Cost model caveat (resolved by CPM-OOS-RECON-001, fixed by CPM-BT-METRIC-001)
+The `total_slippage_cost=0` field in this run's result.json is a legacy artifact of a now-fixed engine tracking bug. Slippage IS applied to execution prices and IS reflected in `total_pnl`. The estimated slippage impact is ~644 USDT (the largest single cost component). Future OOS runs will report correct `total_slippage_cost` automatically. The bottom-line PnL (-971.71 USDT) is correct. `total_pnl`, `win_rate`, `profit_factor`, `max_drawdown`, `sharpe_ratio`, and `sortino_ratio` are all unchanged. No rerun required.
 
 ## 16. Conclusion Classification
 
@@ -260,16 +260,16 @@ Rationale:
 2. However, 2022 is an extreme bear year — it is not a representative sample of a full market cycle
 3. The LONG-only constraint is structurally disadvantaged in a sustained bear market
 4. No data quality issues or same-bar conflicts were found that would invalidate the result
-5. The cost model has a confirmed slippage tracking bug (total_slippage_cost always reports 0), but slippage IS applied to execution prices and IS reflected in total_pnl. Cost composition breakdown is unreliable; bottom-line PnL is correct. See CPM-OOS-RECON-001.
+5. The cost model had a slippage tracking bug (total_slippage_cost always reported 0), fixed by CPM-BT-METRIC-001. Slippage IS applied to execution prices and IS reflected in total_pnl. 2022 result.json still has total_slippage_cost=0 (legacy artifact); future runs will report correct slippage. Bottom-line PnL is correct. See CPM-OOS-RECON-001.
 6. The result is **consistent with the failure hypothesis** for bear markets but **does not disprove the profit hypothesis** for bull/sideways markets
 
-**Status**: Slippage tracking bug resolved by CPM-OOS-RECON-001. Evidence classification: caveated — primary metrics (PnL, WR, PF, MaxDD, Sharpe, Sortino) are clean and correct; cost composition breakdown is unreliable due to slippage tracking bug. OOS_NEGATIVE classification and Require additional evidence conclusion are unaffected.
+**Status**: Slippage tracking bug resolved by CPM-OOS-RECON-001 and fixed by CPM-BT-METRIC-001. Evidence classification: caveated — primary metrics (PnL, WR, PF, MaxDD, Sharpe, Sortino) are clean and correct; 2022 result.json still has total_slippage_cost=0 (legacy artifact); future runs will report correct slippage. OOS_NEGATIVE classification and Require additional evidence conclusion are unaffected.
 
 ### Additional evidence needed:
 - 2023 OOS (recovery year — tests whether the strategy recovers in a non-bear environment)
 - 2021 OOS (bull year — tests whether the profit hypothesis holds in favorable conditions)
 - Multi-year OOS (2021–2023 or 2020–2023) for a more representative sample
-- Engine bug registered: `total_slippage_cost` tracking always reports 0 (backtester.py:1805-1813); slippage IS applied to PnL; separate fix task required
+- Engine bug fixed: `total_slippage_cost` tracking always reported 0 (backtester.py:1805-1813); fixed by CPM-BT-METRIC-001; slippage IS applied to PnL; future runs will report correct slippage
 
 ## 17. Impact Assessment
 
