@@ -13,9 +13,11 @@ from src.infrastructure.hybrid_signal_repository import HybridSignalRepository
 from src.infrastructure.database import get_core_backend_settings
 from src.infrastructure.order_repository import OrderRepository
 from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
+from src.infrastructure.pg_daily_risk_stats_repository import PgDailyRiskStatsRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
 from src.infrastructure.repository_ports import (
+    DailyRiskStatsRepositoryPort,
     ExecutionIntentRepositoryPort,
     OrderRepositoryPort,
     PositionRepositoryPort,
@@ -70,6 +72,11 @@ def create_pg_position_repository() -> PositionRepositoryPort:
 def create_runtime_position_repository() -> PositionRepositoryPort:
     """为 runtime execution 主链显式创建 PG 仓位仓储。"""
     return create_pg_position_repository()
+
+
+def create_runtime_daily_risk_stats_repository() -> DailyRiskStatsRepositoryPort:
+    """为 runtime daily risk stats 显式创建 PG 仓储。"""
+    return PgDailyRiskStatsRepository()
 
 
 def create_runtime_signal_repository() -> HybridSignalRepository:

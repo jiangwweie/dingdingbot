@@ -7,6 +7,8 @@ Repository Protocols - 核心仓储协议定义
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, List, Optional, Protocol, runtime_checkable
 
@@ -144,4 +146,67 @@ class PositionRepositoryPort(Protocol):
         limit: int = 100,
     ) -> List[Any]:
         """列出当前未平仓仓位。"""
+        ...
+
+
+@dataclass(frozen=True)
+class DailyRiskStatsSnapshot:
+    """Restored aggregate for one UTC daily risk scope."""
+
+    scope_key: str
+    stats_date: date
+    realized_pnl: Decimal
+    trade_count: int
+
+
+@dataclass(frozen=True)
+class DailyRiskStatsEvent:
+    """Idempotent daily risk stats accounting event."""
+
+    event_key: str
+    scope_key: str
+    stats_date: date
+    position_id: str
+    signal_id: str
+    exit_order_id: str
+    delta_exit_qty: Decimal
+    delta_realized_pnl: Decimal
+    trade_count_delta: int
+    occurred_at: datetime
+    source: str = "exit_projection"
+
+
+@dataclass(frozen=True)
+class DailyRiskStatsWriteResult:
+    """Result of an idempotent event-ledger write."""
+
+    snapshot: DailyRiskStatsSnapshot
+    inserted: bool
+
+
+@runtime_checkable
+class DailyRiskStatsRepositoryPort(Protocol):
+    """PG-backed daily risk stats persistence boundary."""
+
+    async def initialize(self) -> None:
+        ...
+
+    async def restore_or_create(
+        self,
+        scope_key: str,
+        stats_date: date,
+    ) -> DailyRiskStatsSnapshot:
+        ...
+
+    async def record_event(
+        self,
+        event: DailyRiskStatsEvent,
+    ) -> DailyRiskStatsWriteResult:
+        ...
+
+    async def get(
+        self,
+        scope_key: str,
+        stats_date: date,
+    ) -> Optional[DailyRiskStatsSnapshot]:
         ...

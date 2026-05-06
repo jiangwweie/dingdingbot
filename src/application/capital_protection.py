@@ -14,7 +14,7 @@ P0-004: 订单参数合理性检查
 import asyncio
 import time
 from datetime import datetime, timezone, date
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Optional, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
@@ -30,6 +30,11 @@ from src.domain.models import (
 )
 from src.domain.exceptions import FatalStartupError
 from src.infrastructure.logger import logger
+from src.infrastructure.repository_ports import (
+    DailyRiskStatsEvent,
+    DailyRiskStatsRepositoryPort,
+    DailyRiskStatsSnapshot,
+)
 from src.application.volatility_detector import VolatilityDetector
 from src.application.account_service import AccountService, BinanceAccountService
 
@@ -37,6 +42,24 @@ from src.application.account_service import AccountService, BinanceAccountServic
 if TYPE_CHECKING:
     from src.infrastructure.exchange_gateway import ExchangeGateway
     from src.infrastructure.notifier import Notifier
+
+
+DAILY_RISK_STATS_SCOPE_KEY = "runtime:default"
+DAILY_RISK_STATS_UNAVAILABLE_REASON = "DAILY_RISK_STATS_UNAVAILABLE"
+DAILY_RISK_STATS_UNAVAILABLE_MESSAGE = (
+    "daily risk stats persistence is unavailable; new entries are blocked"
+)
+DAILY_RISK_STATS_DECIMAL_QUANT = Decimal("0.000000000000000001")
+
+
+def normalize_daily_risk_decimal(value: Decimal) -> str:
+    """Return a stable Decimal string for daily risk idempotency keys."""
+    with localcontext() as context:
+        context.prec = 50
+        quantized = value.quantize(DAILY_RISK_STATS_DECIMAL_QUANT)
+    if quantized == Decimal("0"):
+        return "0"
+    return format(quantized.normalize(), "f")
 
 
 class CapitalProtectionManager:
@@ -71,6 +94,11 @@ class CapitalProtectionManager:
         volatility_detector: Optional[VolatilityDetector] = None,
         trace_service: Optional[TraceService] = None,
         config_hash: Optional[str] = None,
+        daily_stats_repository: Optional[DailyRiskStatsRepositoryPort] = None,
+        daily_stats_scope_key: str = DAILY_RISK_STATS_SCOPE_KEY,
+        restored_daily_stats: Optional[DailyRiskStatsSnapshot] = None,
+        daily_stats_persistence_required: bool = False,
+        daily_stats_persistence_available: bool = True,
     ):
         """
         初始化资金保护管理器
@@ -89,11 +117,40 @@ class CapitalProtectionManager:
         self._volatility_detector = volatility_detector
         self._trace_service = trace_service
         self._config_hash = config_hash
-        # LS-002 v0: daily stats remain process-local in-memory state. They use
-        # UTC day boundaries and track projected realized PnL deltas from the
-        # runtime position projection path, not a full account-true daily loss.
-        self._daily_stats = DailyTradeStats()
+        self._daily_stats_repository = daily_stats_repository
+        self._daily_stats_scope_key = daily_stats_scope_key
+        self._daily_stats_persistence_required = daily_stats_persistence_required
+        self._daily_stats_persistence_available = (
+            daily_stats_persistence_available
+            and (
+                daily_stats_repository is not None
+                or not daily_stats_persistence_required
+            )
+        )
+        # LS-002b: runtime may restore daily stats from PG aggregate. The
+        # in-memory copy remains the hot-path read model used by pre-order
+        # checks, with PG write-through on exit projection accounting.
+        self._daily_stats = self._stats_from_snapshot(restored_daily_stats)
         self._stats_lock = asyncio.Lock()  # P0 修复：使用异步锁避免阻塞事件循环
+
+    @staticmethod
+    def _stats_from_snapshot(
+        snapshot: Optional[DailyRiskStatsSnapshot],
+    ) -> DailyTradeStats:
+        if snapshot is None:
+            return DailyTradeStats()
+        return DailyTradeStats(
+            trade_count=snapshot.trade_count,
+            realized_pnl=snapshot.realized_pnl,
+            last_reset_date=snapshot.stats_date.isoformat(),
+        )
+
+    def mark_daily_stats_persistence_unavailable(self) -> None:
+        """Fail closed for future new-entry checks when persistence is unhealthy."""
+        self._daily_stats_persistence_available = False
+
+    def is_daily_stats_persistence_available(self) -> bool:
+        return self._daily_stats_persistence_available
 
     async def pre_order_check(
         self,
@@ -161,6 +218,21 @@ class CapitalProtectionManager:
             return result
 
         await self.reset_if_new_day()
+
+        if not self._daily_stats_persistence_available:
+            logger.warning(
+                "Daily risk stats persistence unavailable; denying new entry "
+                "symbol=%s order_type=%s",
+                symbol,
+                order_type.value,
+            )
+            return finalize(OrderCheckResult(
+                allowed=False,
+                reason=DAILY_RISK_STATS_UNAVAILABLE_REASON,
+                reason_message=DAILY_RISK_STATS_UNAVAILABLE_MESSAGE,
+                daily_loss_check=False,
+                daily_count_check=False,
+            ), None)
 
         balance = await self._get_balance()
         if balance is None:
@@ -728,6 +800,106 @@ class CapitalProtectionManager:
             self._daily_stats.trade_count += 1
             logger.info("每日完整平仓计数更新：trade_count=%s", self._daily_stats.trade_count)
 
+    async def record_exit_projection(
+        self,
+        *,
+        position_id: str,
+        signal_id: str,
+        exit_order_id: str,
+        delta_exit_qty: Decimal,
+        projected_exit_qty_after: Decimal,
+        delta_realized_pnl: Decimal,
+        just_closed: bool,
+        occurred_at: Optional[datetime] = None,
+    ) -> None:
+        """Record one LS-002 exit projection delta through the daily stats boundary."""
+        if delta_realized_pnl == Decimal("0") and not just_closed:
+            return
+
+        stats_date = datetime.now(timezone.utc).date()
+        await self._ensure_stats_date(stats_date)
+        if not self._daily_stats_persistence_available:
+            return
+        trade_count_delta = 1 if just_closed else 0
+
+        if self._daily_stats_repository is None:
+            if self._daily_stats_persistence_required:
+                self.mark_daily_stats_persistence_unavailable()
+                logger.error(
+                    "Daily risk stats repository unavailable during exit projection; "
+                    "future new entries will be blocked position_id=%s exit_order_id=%s",
+                    position_id,
+                    exit_order_id,
+                )
+                return
+            await self.record_projected_realized_pnl_delta(delta_realized_pnl)
+            if just_closed:
+                await self.record_closed_trade()
+            return
+
+        event_key = self.build_daily_risk_event_key(
+            scope_key=self._daily_stats_scope_key,
+            stats_date=stats_date,
+            position_id=position_id,
+            exit_order_id=exit_order_id,
+            projected_exit_qty_after=projected_exit_qty_after,
+        )
+        event = DailyRiskStatsEvent(
+            event_key=event_key,
+            scope_key=self._daily_stats_scope_key,
+            stats_date=stats_date,
+            position_id=position_id,
+            signal_id=signal_id,
+            exit_order_id=exit_order_id,
+            delta_exit_qty=delta_exit_qty,
+            delta_realized_pnl=delta_realized_pnl,
+            trade_count_delta=trade_count_delta,
+            occurred_at=occurred_at or datetime.now(timezone.utc),
+        )
+        try:
+            result = await self._daily_stats_repository.record_event(event)
+        except Exception as exc:
+            self.mark_daily_stats_persistence_unavailable()
+            logger.error(
+                "Daily risk stats write-through failed; future new entries will be blocked "
+                "position_id=%s exit_order_id=%s event_key=%s error=%s",
+                position_id,
+                exit_order_id,
+                event_key,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        async with self._stats_lock:
+            self._daily_stats = self._stats_from_snapshot(result.snapshot)
+
+        if result.inserted:
+            logger.info(
+                "每日风险统计持久化更新：event_key=%s, delta_pnl=%s, trade_count_delta=%s, "
+                "cumulative_pnl=%s, trade_count=%s",
+                event_key,
+                delta_realized_pnl,
+                trade_count_delta,
+                result.snapshot.realized_pnl,
+                result.snapshot.trade_count,
+            )
+
+    @staticmethod
+    def build_daily_risk_event_key(
+        *,
+        scope_key: str,
+        stats_date: date,
+        position_id: str,
+        exit_order_id: str,
+        projected_exit_qty_after: Decimal,
+    ) -> str:
+        normalized_qty = normalize_daily_risk_decimal(projected_exit_qty_after)
+        return (
+            f"daily-risk:v1:{scope_key}:{stats_date.isoformat()}:"
+            f"{position_id}:{exit_order_id}:{normalized_qty}"
+        )
+
     async def record_trade(
         self,
         realized_pnl: Decimal,
@@ -748,7 +920,38 @@ class CapitalProtectionManager:
         - realized_pnl = 0
         - last_reset_date = today
         """
-        today = datetime.now(timezone.utc).date().isoformat()
+        today_date = datetime.now(timezone.utc).date()
+        await self._ensure_stats_date(today_date)
+
+    async def _ensure_stats_date(self, stats_date: date) -> None:
+        today = stats_date.isoformat()
+
+        async with self._stats_lock:
+            if today == self._daily_stats.last_reset_date:
+                return
+
+        if self._daily_stats_repository is not None and self._daily_stats_persistence_available:
+            try:
+                snapshot = await self._daily_stats_repository.restore_or_create(
+                    self._daily_stats_scope_key,
+                    stats_date,
+                )
+            except Exception as exc:
+                self.mark_daily_stats_persistence_unavailable()
+                logger.error(
+                    "Daily risk stats restore failed during UTC day reset; "
+                    "future new entries will be blocked scope_key=%s stats_date=%s error=%s",
+                    self._daily_stats_scope_key,
+                    today,
+                    exc,
+                    exc_info=True,
+                )
+                return
+            async with self._stats_lock:
+                old_date = self._daily_stats.last_reset_date
+                self._daily_stats = self._stats_from_snapshot(snapshot)
+                logger.info(f"每日统计已从持久化聚合恢复/重置：{old_date} -> {today}")
+                return
 
         async with self._stats_lock:
             if today != self._daily_stats.last_reset_date:

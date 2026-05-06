@@ -154,3 +154,64 @@ Owner decisions that may be needed later:
 - If future workflows support add-ons or multi-entry lifecycles, does one position lifecycle still equal one daily trade?
 - Should daily risk state be shown in the frontend?
 - Should daily limit rejection be represented explicitly in Decision Trace?
+
+## LS-002b Update: Daily Risk Stats Persistence
+
+Status: Accepted for implementation on 2026-05-06.
+
+LS-002b persists the LS-002 daily stats read model with a PG aggregate plus an
+idempotent event ledger:
+
+- `daily_risk_stats_aggregates` stores the current UTC day's projected realized
+  PnL and closed-trade count for restore and pre-order checks.
+- `daily_risk_stats_events` stores deterministic exit-projection accounting
+  events keyed by `event_key`.
+- `scope_key` is fixed to `runtime:default`.
+- No portfolio, account, exchange-account, or multi-account semantics are
+  introduced in v0.
+
+The persisted stats keep the LS-002 semantics:
+
+- daily PnL remains projected realized PnL from runtime exit projection deltas
+- daily trade count remains first full close of a position lifecycle
+- UTC runtime date remains the day boundary
+- funding-inclusive or full account-true PnL reconstruction remains out of
+  scope
+
+Failure policy:
+
+- startup restore failure is not fatal to the process
+- restore failure or write-through failure puts `CapitalProtectionManager` into
+  no-new-entry mode
+- new entries are denied with `DAILY_RISK_STATS_UNAVAILABLE`
+- the deny uses the existing `pre_order_check` Decision Trace path
+- Decision Trace schema is not expanded
+- exits, protection order handling, shutdown, startup/periodic reconciliation,
+  and circuit-breaker rebuild must not be blocked by daily stats persistence
+  unavailability
+
+Accepted known limitation:
+
+- LS-002b does not put position projection save and daily stats event/aggregate
+  update inside the same DB transaction.
+- If position projection save succeeds and the daily stats write fails before
+  the event is recorded, a replay may observe the exit as already projected and
+  may not reconstruct the missing daily stats event from v0 state alone.
+- This crash/write window is accepted for LS-002b and must remain visible as a
+  known limitation.
+
+Future hardening paths:
+
+- introduce a shared unit-of-work so position projection and daily stats
+  event/aggregate updates commit in one transaction
+- add a recovery scanner comparing `positions.projected_exit_fills` against
+  `daily_risk_stats_events` and backfilling missing daily stats events with
+  operator-visible audit logs
+- persist a pending daily-stats event before or with projection, then finalize
+  the aggregate after projection save
+
+Rollback:
+
+- code can revert to LS-002 in-memory stats behavior if needed
+- the additive PG tables may be left in place during emergency code rollback
+- Alembic downgrade is reserved for explicit operator cleanup

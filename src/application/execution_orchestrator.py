@@ -398,13 +398,16 @@ class ExecutionOrchestrator:
             if projection_result.was_already_processed:
                 return
 
-            if projection_result.delta_realized_pnl != Decimal("0"):
-                await self._capital_protection.record_projected_realized_pnl_delta(
-                    projection_result.delta_realized_pnl
-                )
-
-            if projection_result.just_closed:
-                await self._capital_protection.record_closed_trade()
+            await self._capital_protection.record_exit_projection(
+                position_id=projection_result.position_id,
+                signal_id=projection_result.signal_id,
+                exit_order_id=projection_result.exit_order_id,
+                delta_exit_qty=projection_result.delta_exit_qty,
+                projected_exit_qty_after=projection_result.projected_exit_qty_after,
+                delta_realized_pnl=projection_result.delta_realized_pnl,
+                just_closed=projection_result.just_closed,
+                occurred_at=datetime.now(timezone.utc),
+            )
         except Exception as e:
             logger.warning(
                 "[ExecutionOrchestrator] exit fill position projection 更新失败: "

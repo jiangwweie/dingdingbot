@@ -22,14 +22,10 @@ class _NoopOrderLifecycle:
 
 class _FakeCapitalProtection:
     def __init__(self) -> None:
-        self.pnl_deltas: list[Decimal] = []
-        self.closed_trade_count = 0
+        self.exit_projection_calls: list[dict] = []
 
-    async def record_projected_realized_pnl_delta(self, realized_pnl_delta: Decimal) -> None:
-        self.pnl_deltas.append(realized_pnl_delta)
-
-    async def record_closed_trade(self) -> None:
-        self.closed_trade_count += 1
+    async def record_exit_projection(self, **kwargs) -> None:
+        self.exit_projection_calls.append(kwargs)
 
 
 class _InMemoryPositionRepository:
@@ -129,6 +125,5 @@ async def test_orchestrator_missing_position_does_not_update_daily_stats_and_log
 
     await orchestrator._handle_exit_filled(_build_exit_order())
 
-    assert capital_protection.pnl_deltas == []
-    assert capital_protection.closed_trade_count == 0
+    assert capital_protection.exit_projection_calls == []
     assert "local position missing" in caplog.text

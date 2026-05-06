@@ -31,7 +31,7 @@ Status values: `TODO`, `SPEC`, `IMPLEMENTING`, `TESTING`, `REVIEW`, `MERGED`, `B
 | LS-104 | Runtime health dashboard updates | TODO | TBD | After backend signals are stable. |
 | LS-105 | Trace backbone boundary cleanup | TODO | Codex | Fix `decision_trace.py` logger dependency direction; keep v0 semantics stable. |
 | LS-106 | Order watch hardening for multi-symbol runtime | TODO | Codex | Remove duplicate `watch_orders` definition and replace shared order-watch running flag before multi-symbol expansion. |
-| LS-107 | Daily stats persistence hardening | TODO | Codex | LS-002b: persist or checkpoint daily risk stats before live expansion. |
+| LS-107 | Daily stats persistence hardening | REVIEW | Codex | LS-002b: PG aggregate + event ledger implemented; targeted tests pass; Alembic upgrade blocked by local SQLite schema/version drift before LS-002b revision. |
 
 ## P2
 

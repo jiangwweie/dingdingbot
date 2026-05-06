@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import signal as sys_signal
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List
 
@@ -31,7 +32,10 @@ if load_dotenv is not None:
 from src.application.config_manager import load_all_configs_async
 from src.application.runtime_config import RuntimeConfigProvider, RuntimeConfigResolver
 from src.application.account_service import BinanceAccountService
-from src.application.capital_protection import CapitalProtectionManager
+from src.application.capital_protection import (
+    DAILY_RISK_STATS_SCOPE_KEY,
+    CapitalProtectionManager,
+)
 from src.application.decision_trace import TraceService
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.order_lifecycle_service import OrderLifecycleService
@@ -42,6 +46,7 @@ from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.notifier import NotificationService, get_notification_service
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
+    create_runtime_daily_risk_stats_repository,
     create_runtime_order_repository,
     create_runtime_position_repository,
     create_runtime_signal_repository,
@@ -588,6 +593,32 @@ async def run_application():
                 f"daily_max_loss_amount={capital_protection_config.daily.get('max_loss_amount')}, "
                 f"max_leverage={capital_protection_config.account['max_leverage']}"
             )
+        daily_risk_stats_repo = None
+        restored_daily_stats = None
+        daily_stats_persistence_available = True
+        try:
+            daily_risk_stats_repo = create_runtime_daily_risk_stats_repository()
+            await daily_risk_stats_repo.initialize()
+            restored_daily_stats = await daily_risk_stats_repo.restore_or_create(
+                DAILY_RISK_STATS_SCOPE_KEY,
+                datetime.now(timezone.utc).date(),
+            )
+            logger.info(
+                "Daily risk stats restored: "
+                f"scope_key={restored_daily_stats.scope_key}, "
+                f"stats_date={restored_daily_stats.stats_date}, "
+                f"realized_pnl={restored_daily_stats.realized_pnl}, "
+                f"trade_count={restored_daily_stats.trade_count}"
+            )
+        except Exception as e:
+            daily_risk_stats_repo = None
+            restored_daily_stats = None
+            daily_stats_persistence_available = False
+            logger.error(
+                "Daily risk stats restore failed; runtime will continue in no-new-entry mode: "
+                f"{e}",
+                exc_info=True,
+            )
         _capital_protection = CapitalProtectionManager(
             config=capital_protection_config,
             account_service=account_service,
@@ -595,6 +626,11 @@ async def run_application():
             gateway=_exchange_gateway,
             trace_service=_trace_service,
             config_hash=_runtime_config_provider.config_hash if _runtime_config_provider is not None else None,
+            daily_stats_repository=daily_risk_stats_repo,
+            daily_stats_scope_key=DAILY_RISK_STATS_SCOPE_KEY,
+            restored_daily_stats=restored_daily_stats,
+            daily_stats_persistence_required=True,
+            daily_stats_persistence_available=daily_stats_persistence_available,
         )
 
         # P0-6：为 ExecutionOrchestrator 创建告警适配函数

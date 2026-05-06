@@ -24,3 +24,11 @@ Use this file for session progress and handoff notes.
   - trace boundary cleanup
   - multi-symbol order-watch hardening
   - daily stats persistence before live expansion
+
+## 2026-05-06
+
+- Started LS-002b / LS-107 implementation after Owner approved the task card.
+- Implemented direction: PG aggregate + event ledger, fixed `scope_key="runtime:default"`, no-new-entry fail-closed on daily stats persistence restore/write-through failure.
+- Preserved LS-002 daily stats semantics and documented the accepted non-transactional crash/write window in ADR-0004.
+- Targeted tests pass for LS-002b, LS-002 daily limits, and TM-002 exit projection observability.
+- Alembic revision graph has single head `007`; local `alembic upgrade head` is blocked by existing SQLite schema/version drift at old revision `002`, before the LS-002b migration runs.

@@ -27,7 +27,9 @@ class ExitProjectionResult:
     position: Optional[Position]
     position_id: str
     signal_id: str
+    exit_order_id: str = ""
     delta_exit_qty: Decimal = Decimal("0")
+    projected_exit_qty_after: Decimal = Decimal("0")
     delta_realized_pnl: Decimal = Decimal("0")
     is_position_closed: bool = False
     just_closed: bool = False
@@ -139,6 +141,7 @@ class PositionProjectionService:
             position=None,
             position_id=position_id,
             signal_id=exit_order.signal_id,
+            exit_order_id=exit_order.id,
             was_already_processed=True,
         )
         async with lock:
@@ -156,6 +159,7 @@ class PositionProjectionService:
                     position=None,
                     position_id=position_id,
                     signal_id=exit_order.signal_id,
+                    exit_order_id=exit_order.id,
                     was_already_processed=True,
                 )
             else:
@@ -175,6 +179,7 @@ class PositionProjectionService:
                         position=position,
                         position_id=position_id,
                         signal_id=exit_order.signal_id,
+                        exit_order_id=exit_order.id,
                         is_position_closed=position.is_closed,
                         was_already_processed=True,
                     )
@@ -188,6 +193,8 @@ class PositionProjectionService:
                             position=position,
                             position_id=position_id,
                             signal_id=exit_order.signal_id,
+                            exit_order_id=exit_order.id,
+                            projected_exit_qty_after=previous_projected_qty,
                             is_position_closed=position.is_closed,
                             was_already_processed=True,
                         )
@@ -238,7 +245,9 @@ class PositionProjectionService:
                             position=position,
                             position_id=position_id,
                             signal_id=exit_order.signal_id,
+                            exit_order_id=exit_order.id,
                             delta_exit_qty=delta_exit_qty,
+                            projected_exit_qty_after=cumulative_exit_qty,
                             delta_realized_pnl=net_pnl,
                             is_position_closed=position.is_closed,
                             just_closed=just_closed,

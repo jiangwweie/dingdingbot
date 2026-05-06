@@ -15,7 +15,7 @@ PostgreSQL Core Models - 核心 PG ORM 模型
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -23,6 +23,8 @@ from sqlalchemy import (
     BIGINT,
     Boolean,
     CheckConstraint,
+    Date,
+    DateTime,
     ForeignKey,
     Identity,
     Index,
@@ -245,6 +247,76 @@ class PGExecutionRecoveryTaskORM(PGCoreBase):
         Index("idx_execution_recovery_tasks_symbol_status", "symbol", "status"),
         Index("idx_execution_recovery_tasks_intent_id", "intent_id"),
         Index("idx_execution_recovery_tasks_next_retry_at", "next_retry_at"),
+    )
+
+
+class PGDailyRiskStatsAggregateORM(PGCoreBase):
+    """PG daily risk stats aggregate for one UTC risk day."""
+
+    __tablename__ = "daily_risk_stats_aggregates"
+
+    scope_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    stats_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    realized_pnl: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    trade_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_event_key: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint("trade_count >= 0", name="ck_daily_risk_stats_trade_count_non_negative"),
+        Index("idx_daily_risk_stats_aggregates_scope_updated", "scope_key", "updated_at"),
+    )
+
+
+class PGDailyRiskStatsEventORM(PGCoreBase):
+    """PG daily risk stats idempotency ledger."""
+
+    __tablename__ = "daily_risk_stats_events"
+
+    event_key: Mapped[str] = mapped_column(String(256), primary_key=True)
+    scope_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    stats_date: Mapped[date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False, default="exit_projection")
+    position_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    signal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    exit_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    delta_exit_qty: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    delta_realized_pnl: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18),
+        nullable=False,
+        default=Decimal("0"),
+    )
+    trade_count_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint("source = 'exit_projection'", name="ck_daily_risk_stats_source"),
+        CheckConstraint("trade_count_delta IN (0, 1)", name="ck_daily_risk_stats_trade_count_delta"),
+        CheckConstraint("delta_exit_qty >= 0", name="ck_daily_risk_stats_delta_exit_qty_non_negative"),
+        Index("idx_daily_risk_stats_events_scope_date_created", "scope_key", "stats_date", "created_at"),
+        Index("idx_daily_risk_stats_events_position_exit", "position_id", "exit_order_id"),
     )
 
 

@@ -32,3 +32,10 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
 - Lower-priority follow-ups:
   - `JsonlTraceSink` remains synchronous file I/O on the hot path and should be treated as v0 tech debt, not a current correctness blocker.
   - `project_exit_fill()` in `PositionProjectionService` has grown denser and is a reasonable candidate for later internal split once behavior is stable.
+
+## 2026-05-06
+
+- Owner accepted LS-002b daily risk stats persistence using PG aggregate + event ledger with fixed `scope_key="runtime:default"`.
+- LS-002b keeps LS-002 projected realized PnL, full-close trade count, and UTC runtime date semantics; it does not introduce portfolio/account semantics or full account-true daily PnL reconstruction.
+- Restore/write-through failure must fail closed for new entries with `DAILY_RISK_STATS_UNAVAILABLE`, through the existing `pre_order_check` Decision Trace deny path, while exits/protection handling/shutdown/reconciliation/circuit-breaker rebuild continue.
+- Accepted LS-002b limitation: position projection save and daily stats event/aggregate write are not in one DB transaction; a crash/write window remains for future hardening.
