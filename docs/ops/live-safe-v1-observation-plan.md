@@ -1,6 +1,6 @@
 # Live-safe v1 Observation Plan
 
-**Date:** 2026-05-02  
+**Date:** 2026-05-06  
 **Status:** Active  
 **Purpose:** Define the observation period for Live-safe v1 after foundation governance is complete. The goal is to validate runtime behavior stability, not to expand functionality.
 
@@ -17,6 +17,7 @@ The following capabilities are frozen during the observation period. No active e
 | Daily Risk Limits Runtime Closure v0 | ADR-0004 | Frozen |
 | Reconciliation Read Model v0 | ADR-0005 | Frozen |
 | Periodic Reconciliation Report-only Loop | ADR-0006 | Frozen |
+| Reconciliation Read Model Persistence | ADR-0007 | Frozen |
 | RTG-001 Manage update_snapshot_loop lifecycle | — | Frozen |
 | RTG-002 Manage ws_task / api_task lifecycle | — | Frozen |
 | DW-001 Remove shadowed watch_orders definition | — | Frozen |
@@ -36,6 +37,7 @@ During the observation period, verify the following:
 - **Order updates** enter the local `OrderLifecycleService` lifecycle correctly.
 - **Periodic reconciliation** executes on schedule without persistent fetch failures.
 - **Reconciliation mismatches** are genuine, not false positives.
+- **Reconciliation persistence** writes succeed without blocking the loop or affecting trading.
 - **Daily stats** update correctly via projected exit delta and full position close.
 - **Snapshot update loop** runs without persistent failures.
 - **Shutdown** is clean: no hanging tasks, no resource leaks.
@@ -77,7 +79,7 @@ These limitations are accepted during the observation period:
 - Daily stats are in-memory; runtime restart resets daily loss and trade count to zero.
 - Reconciliation is report-only; does not block, recover, or auto-fix.
 - Protection coverage is `symbol_role_v0` (symbol-level, not position-chain-level).
-- No reconciliation report persistence; observation history is log-only.
+- Reconciliation read model history has PG persistence (best-effort, non-blocking); still no REST API / frontend display; still no LS-003c control path.
 - No frontend display of reconciliation or risk state.
 - `get_account_snapshot()` is a synchronous call; may block the event loop under adverse conditions.
 - Normal `fetch_ticker_price()` returning `None` or `0` still keeps the existing skip-check semantics in price reasonability validation; TM-001 did not change this path.
@@ -117,12 +119,9 @@ If any of the following occur, pause further expansion and prioritize investigat
 - Owner cannot accept the daily risk window resetting after restart.
 - Observation shows daily stats continuity is operationally important.
 
-### Reconciliation Report Persistence
+### Reconciliation Report Persistence — Completed (LS-003d)
 
-**Trigger when:**
-- Owner needs to review historical mismatch patterns beyond log retention.
-- Logs alone are insufficient for post-mortem analysis.
-- A future frontend read-only display needs a data source.
+Superseded by LS-003d. Periodic reconciliation read model results are now persisted to PG. Best-effort, non-blocking. ADR-0007.
 
 ### LS-003c: Confirmed Severe Mismatch Handling
 
@@ -188,6 +187,6 @@ Do not commit to a specific duration. Proceed to the next phase only when observ
 1. Should Live-safe v1 be formally frozen at this point?
 2. Should the next phase focus on strategy module stabilization instead of further live-safe expansion?
 3. Should LS-002b (daily stats persistence) be prioritized before other candidates?
-4. Is reconciliation report persistence needed, or is log-only sufficient for the foreseeable future?
+4. ~~Is reconciliation report persistence needed, or is log-only sufficient for the foreseeable future?~~ **Resolved: LS-003d completed.**
 5. Is an Owner Console read-only display needed, or are logs sufficient?
 6. Under what conditions would LS-003c (mismatch → block) become worth the risk?

@@ -2,12 +2,19 @@
 
 **Task ID:** CPM-OOS-2021-PLAN-001
 **Date:** 2026-05-06
-**Status:** Proposed / Planning
+**Status:** Historical planning artifact; OOS run completed
 **Scope:** Baseline Strategy Module Stabilization governance
 
 This document is an inspect plan and interpretation framework. It is not
 experiment approval, not runtime promotion approval, not parameter tuning
 approval, not live enablement approval, and not a backtest execution request.
+
+**Current-state note (2026-05-06):** This plan is now a historical planning
+artifact. The 2021 OOS run has been completed and was negative
+(-2,153.76 USDT / -21.54%, PF 0.466, MaxDD 22.18%, slippage 1,040.85). After
+CPM-OOS-FAILURE-CLASSIFY-001, CPM-1 is frozen and paused, is not a
+Small-live Candidate, and its promotion path is stopped. No runtime, profile,
+strategy, or risk-rule change follows automatically.
 
 ---
 

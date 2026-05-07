@@ -256,6 +256,8 @@ Per CPM-OOS-2021-PLAN-001 Section 6 Decision Matrix:
 
 **Classification: `OOS_NEGATIVE — Pause CPM-1 for classification`**
 
+Failure classification completed by CPM-OOS-FAILURE-CLASSIFY-001: **Favorable-regime profit hypothesis failure** + loss-concentration issue. See `docs/ops/crypto-pullback-module-v1-oos-failure-classification.md`.
+
 This falls between Decision Matrix rows 4 and 7:
 
 - Row 4: "Severe negative result with clean assumptions and enough trades" → Pause CPM-1
@@ -270,7 +272,11 @@ Rationale:
 6. The gross PnL is already negative before costs; cost drag amplifies but does not cause the loss
 7. The result is not driven by May 2021 crash alone (May = 6.9% of total loss)
 
-**Status**: This is a serious evidence point that requires Owner classification before any further CPM-1 state changes. The profit hypothesis is directly challenged. The failure hypothesis does not fully explain the result because 2021 is not a bear year.
+**Status**: Owner classification has been completed by
+CPM-OOS-FAILURE-CLASSIFY-001. CPM-1 is frozen and paused, is not a Small-live
+Candidate, and its promotion path is stopped. The profit hypothesis is directly
+challenged; the failure hypothesis does not fully explain the result because
+2021 is not a bear year.
 
 ### Additional evidence needed:
 - Root cause analysis: Why does CPM-1 lose more in a bull year than a bear year? Is the EMA50 uptrend filter actually filtering for uptrends, or is it whipsawing during corrections within the uptrend?
@@ -284,8 +290,8 @@ Rationale:
 |----------|--------|
 | Does this reduce the evidence gap? | Yes — but it reduces it in the wrong direction: 2021 is negative, not positive |
 | Can CPM-1 enter Small-live Candidate review? | **No** — a negative result in a favorable year is a stronger blocker than a negative result in a bear year |
-| Does this require immediate rejection? | **Not yet** — classify first; the result needs root cause analysis before deciding between Pause, Reopen Research, or Reject |
-| Does this require Pause? | **Yes** — CPM-1 should be paused for classification until Owner reviews this evidence alongside 2022 |
+| Does this require immediate rejection? | Not automatically — current state is Pause; Owner may later decide reject vs bounded research |
+| Does this require Pause? | **Yes** — classification is complete and CPM-1 remains paused |
 | Does this trigger any runtime change? | **No** — no automatic runtime changes |
 
 ## 14. Artifacts

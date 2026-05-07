@@ -74,6 +74,18 @@ All other capabilities belong to the future capability pool unless a specific st
 
 Only these two active tracks should produce current implementation tasks by default. Other directions should stay in backlog or capability-pool form unless the user explicitly promotes them.
 
+### Strategy Candidate Gate Status
+
+As of 2026-05-06, the Live-safe Foundation track may continue as system
+foundation work, but the current priority strategy module, CPM-1, has not passed
+the OOS gate. CPM-1 remains frozen and paused, is not a small-live or canary-live
+candidate, and its promotion path is stopped. The project therefore has no
+deployable small-live strategy candidate at this point.
+
+This status does not change runtime profiles, strategy parameters, risk rules,
+live enablement, or live-safe control logic. Research and classification
+evidence must continue to be handled through explicit Owner decisions.
+
 ## Core Design Principles
 
 ### Thin Core

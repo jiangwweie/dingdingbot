@@ -116,13 +116,19 @@ When evidence conflicts, use this precedence:
 
 | Year | Coverage | Status |
 |------|----------|--------|
-| 2022 | Not tested | Evidence gap — not an approved task |
+| 2021 | Tested (OOS) | Negative: -2,153.76 USDT / -21.54%, PF 0.466, MaxDD 22.18%; favorable-regime signal-level failure |
+| 2022 | Tested (OOS) | Negative: -971.71 USDT / -9.72%; bear-year failure hypothesis supported but no profit hypothesis support |
 | 2023 | Tested (in-sample) | Worst year; regime mismatch |
 | 2024 | Tested (in-sample) | Best year; +8,501 USDT |
 | 2025 | Tested (in-sample) | Good year; +4,490 USDT |
 | 2026 Q1 | Forward (testnet) | Small sample; +777 USDT |
 
-**Critical gap:** No out-of-sample year exists in the current evidence base. 2022 is the strongest available OOS candidate but has not been tested. All performance claims are in-sample. 2022 OOS is an evidence gap, not an approved task.
+**Current OOS status:** 2021 and 2022 have both been tested as OOS evidence and
+both are negative. The 2021 bull-year failure is classified as signal-level
+failure, not cost-dominated and not a May 2021 single-event artifact. CPM-1 is
+therefore paused, the promotion path is stopped, and CPM-1 is not a Small-live
+Candidate. No runtime, profile, strategy, or risk-rule change follows
+automatically from this evidence.
 
 ---
 

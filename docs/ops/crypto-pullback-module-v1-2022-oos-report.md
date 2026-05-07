@@ -273,12 +273,19 @@ Rationale:
 
 ## 17. Impact Assessment
 
+**Current-state update after CPM-OOS-FAILURE-CLASSIFY-001:** This section's
+original deferred candidate judgment has been superseded by the 2021 OOS result
+and failure classification. CPM-1 is now frozen and paused, is not a
+Small-live Candidate, and its promotion path is stopped. The 2022 result remains
+valid bear-year evidence, but it is now interpreted as part of the joint
+2021+2022 negative OOS set.
+
 | Question | Answer |
 |----------|--------|
-| Does this reduce the evidence gap? | Partially — confirms bear-market behavior but does not test the full cycle |
-| Can CPM-1 enter Small-live Candidate review? | **Deferred** — requires report reconciliation and additional OOS evidence before this judgment can be made |
-| Does this require immediate rejection? | No — a single bear-year OOS is insufficient to reject the strategy |
-| Does this require Pause? | No — but additional OOS years are strongly recommended before Small-live |
+| Does this reduce the evidence gap? | Partially for bear-market behavior, but joint 2021+2022 OOS evidence does not support promotion |
+| Can CPM-1 enter Small-live Candidate review? | **No** — blocked by the 2021 favorable-regime signal-level failure and joint negative OOS set |
+| Does this require immediate rejection? | Not automatically — current state is Pause pending Owner decision on reject vs bounded research |
+| Does this require Pause? | **Yes, after 2021 OOS and failure classification** — promotion movement is stopped |
 | Does this trigger any runtime change? | **No** — no automatic runtime changes |
 
 ## 18. Artifacts

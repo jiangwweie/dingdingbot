@@ -1,7 +1,7 @@
 # Crypto Pullback Module v1 Stabilization Plan
 
 **Date:** 2026-05-06
-**Status:** Proposed / Planning
+**Status:** Superseded for promotion movement / Planning artifact
 **Scope:** Baseline Strategy Module Stabilization
 
 This document is a governance plan. It is not an implementation task, not an
@@ -12,7 +12,10 @@ promotion approval.
 
 ## 1. Status
 
-CPM-1 stabilization is in planning status.
+CPM-1 stabilization was drafted in planning status. After the 2021 and 2022 OOS
+runs and CPM-OOS-FAILURE-CLASSIFY-001, the current baseline is frozen and
+paused. CPM-1 is not a Small-live Candidate, and the promotion path is stopped
+unless Owner explicitly opens a new bounded research or reclassification task.
 
 This plan exists to prevent the next phase from being misread as:
 
@@ -24,12 +27,15 @@ This plan exists to prevent the next phase from being misread as:
 - Runtime profile promotion.
 - Live-safe expansion.
 
-The current status is: **ready to plan stabilization with caveats**.
+The current status is: **paused after OOS gate failure**.
 
 Accepted caveats:
 
-- Current evidence is mainly 2023-2025 in-sample.
-- 2022 OOS is an evidence gap, not an approved task.
+- Current in-sample evidence remains mainly 2023-2025, but OOS evidence now
+  includes negative 2021 and 2022 runs.
+- 2021 OOS is classified as favorable-regime signal-level failure.
+- 2022 OOS is negative in a bear year and does not provide profit-hypothesis
+  support.
 - Historical documents use mixed naming such as "Pinbar baseline".
 - Historical reports use mixed cost, funding, and MaxDD semantics.
 - Code and profile identifiers may still use `pinbar` as a trigger or legacy
@@ -204,10 +210,12 @@ Purpose:
 - Decide whether 2022 OOS should become a stabilization gate.
 - Define how an OOS run would be interpreted if owner approves it later.
 
-Why it matters:
+Why it mattered at draft time:
 
-- Current evidence is mainly 2023-2025 in-sample.
-- 2022 is the strongest known OOS candidate.
+- Evidence was mainly 2023-2025 in-sample.
+- 2022 was the strongest known OOS candidate before the later 2022 and 2021
+  OOS runs. This section is historical and is superseded by the current Pause
+  status above.
 
 It must not:
 
