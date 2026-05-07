@@ -29,6 +29,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
@@ -813,6 +814,61 @@ class PGReconciliationDetailORM(PGCoreBase):
     __table_args__ = (
         Index("idx_details_report", "report_id"),
         Index("idx_details_type", "discrepancy_type"),
+    )
+
+
+class PGReconciliationReadModelReportORM(PGCoreBase):
+    """PG periodic reconciliation read model report table."""
+
+    __tablename__ = "reconciliation_read_model_reports"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    report_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+    checked_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    is_consistent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    severe_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    warning_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_fetch_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fetch_failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        Index("idx_reconciliation_read_model_reports_symbol_time", "symbol", "checked_at_ms"),
+        Index("idx_reconciliation_read_model_reports_consistent", "is_consistent"),
+        Index("idx_reconciliation_read_model_reports_time", "checked_at_ms"),
+    )
+
+
+class PGReconciliationReadModelMismatchORM(PGCoreBase):
+    """PG periodic reconciliation read model mismatch detail table."""
+
+    __tablename__ = "reconciliation_read_model_mismatches"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    report_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("reconciliation_read_model_reports.report_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+    mismatch_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    local_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    exchange_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
+    created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        Index("idx_reconciliation_read_model_mismatches_report", "report_id"),
+        Index("idx_reconciliation_read_model_mismatches_type", "mismatch_type"),
+        Index("idx_reconciliation_read_model_mismatches_severity", "severity"),
     )
 
 

@@ -16,11 +16,15 @@ from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentR
 from src.infrastructure.pg_daily_risk_stats_repository import PgDailyRiskStatsRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
+from src.infrastructure.pg_reconciliation_read_model_repository import (
+    PgReconciliationReadModelRepository,
+)
 from src.infrastructure.repository_ports import (
     DailyRiskStatsRepositoryPort,
     ExecutionIntentRepositoryPort,
     OrderRepositoryPort,
     PositionRepositoryPort,
+    ReconciliationReadModelRepositoryPort,
 )
 
 
@@ -77,6 +81,11 @@ def create_runtime_position_repository() -> PositionRepositoryPort:
 def create_runtime_daily_risk_stats_repository() -> DailyRiskStatsRepositoryPort:
     """为 runtime daily risk stats 显式创建 PG 仓储。"""
     return PgDailyRiskStatsRepository()
+
+
+def create_runtime_reconciliation_read_model_repository() -> ReconciliationReadModelRepositoryPort:
+    """为 runtime periodic reconciliation read model 显式创建 PG 仓储。"""
+    return PgReconciliationReadModelRepository()
 
 
 def create_runtime_signal_repository() -> HybridSignalRepository:

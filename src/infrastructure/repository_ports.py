@@ -210,3 +210,62 @@ class DailyRiskStatsRepositoryPort(Protocol):
         stats_date: date,
     ) -> Optional[DailyRiskStatsSnapshot]:
         ...
+
+
+@dataclass(frozen=True)
+class ReconciliationReadModelReport:
+    """Persisted periodic reconciliation read model report."""
+
+    report_id: str
+    symbol: str
+    checked_at_ms: int
+    is_consistent: bool = True
+    total_count: int = 0
+    severe_count: int = 0
+    warning_count: int = 0
+    is_fetch_failure: bool = False
+    fetch_failure_reason: Optional[str] = None
+    created_at: int = 0
+
+
+@dataclass(frozen=True)
+class ReconciliationReadModelMismatch:
+    """Persisted periodic reconciliation read model mismatch detail."""
+
+    report_id: str
+    symbol: str
+    mismatch_type: str
+    severity: str
+    reason: str
+    local_ref: Optional[str] = None
+    exchange_ref: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
+    created_at: int = 0
+
+
+@runtime_checkable
+class ReconciliationReadModelRepositoryPort(Protocol):
+    """PG-backed read-only periodic reconciliation report persistence boundary."""
+
+    async def initialize(self) -> None:
+        ...
+
+    async def save_report(
+        self,
+        report: ReconciliationReadModelReport,
+        mismatches: List[ReconciliationReadModelMismatch],
+    ) -> None:
+        ...
+
+    async def get_recent_reports(
+        self,
+        symbol: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[ReconciliationReadModelReport]:
+        ...
+
+    async def get_mismatches(
+        self,
+        report_id: str,
+    ) -> List[ReconciliationReadModelMismatch]:
+        ...

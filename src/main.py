@@ -49,6 +49,7 @@ from src.infrastructure.core_repository_factory import (
     create_runtime_daily_risk_stats_repository,
     create_runtime_order_repository,
     create_runtime_position_repository,
+    create_runtime_reconciliation_read_model_repository,
     create_runtime_signal_repository,
 )
 from src.infrastructure.runtime_profile_repository import RuntimeProfileRepository
@@ -76,6 +77,7 @@ _execution_orchestrator: Optional[ExecutionOrchestrator] = None
 _execution_recovery_repo = None  # PG 正式版
 _runtime_config_provider: Optional[RuntimeConfigProvider] = None
 _trace_service: Optional[TraceService] = None
+_reconciliation_read_model_repo = None
 _order_watch_tasks: List[asyncio.Task] = []
 _periodic_reconciliation_task: Optional[asyncio.Task] = None
 _snapshot_update_task: Optional[asyncio.Task] = None
@@ -142,7 +144,11 @@ async def _cancel_order_watch_tasks(tasks: List[asyncio.Task]) -> None:
             logger.warning(f"Order watch task shutdown error: {e}", exc_info=True)
 
 
-async def _run_periodic_reconciliation_task(reconciliation_service: object, symbols: List[str]) -> None:
+async def _run_periodic_reconciliation_task(
+    reconciliation_service: object,
+    symbols: List[str],
+    read_model_repository: object = None,
+) -> None:
     """Run periodic reconciliation and isolate unexpected task failures."""
     if _shutdown_event is None:
         logger.warning("Periodic reconciliation start skipped: shutdown event not initialized")
@@ -153,6 +159,7 @@ async def _run_periodic_reconciliation_task(reconciliation_service: object, symb
             reconciliation_service,
             _dedupe_runtime_symbols(symbols),
             _shutdown_event,
+            read_model_repository=read_model_repository,
         )
     except asyncio.CancelledError:
         logger.info("Periodic reconciliation task cancelled")
@@ -164,10 +171,15 @@ async def _run_periodic_reconciliation_task(reconciliation_service: object, symb
 def _start_periodic_reconciliation_task(
     reconciliation_service: object,
     symbols: List[str],
+    read_model_repository: object = None,
 ) -> asyncio.Task:
     """Start the report-only periodic reconciliation background task."""
     task = asyncio.create_task(
-        _run_periodic_reconciliation_task(reconciliation_service, symbols)
+        _run_periodic_reconciliation_task(
+            reconciliation_service,
+            symbols,
+            read_model_repository,
+        )
     )
     logger.info("Periodic reconciliation task started: symbols=%s", _dedupe_runtime_symbols(symbols))
     return task
@@ -306,6 +318,7 @@ async def graceful_shutdown():
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
     global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
+    global _reconciliation_read_model_repo
     global _snapshot_update_task, _ws_task, _api_task
     _shutdown_event.set()
 
@@ -321,6 +334,7 @@ async def graceful_shutdown():
     if _periodic_reconciliation_task:
         await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
         _periodic_reconciliation_task = None
+    _reconciliation_read_model_repo = None
 
     if _order_watch_tasks:
         await _cancel_order_watch_tasks(_order_watch_tasks)
@@ -869,6 +883,20 @@ async def run_application():
         try:
             from src.application.reconciliation import ReconciliationService
 
+            try:
+                _reconciliation_read_model_repo = (
+                    create_runtime_reconciliation_read_model_repository()
+                )
+                await _reconciliation_read_model_repo.initialize()
+                logger.info("Periodic reconciliation read model repository initialized")
+            except Exception as repo_error:
+                logger.error(
+                    "Periodic reconciliation read model repository unavailable; continuing without persistence: %s",
+                    repo_error,
+                    exc_info=True,
+                )
+                _reconciliation_read_model_repo = None
+
             periodic_reconciliation_service = ReconciliationService(
                 gateway=_exchange_gateway,
                 position_mgr=_position_repo,
@@ -877,12 +905,14 @@ async def run_application():
             _periodic_reconciliation_task = _start_periodic_reconciliation_task(
                 periodic_reconciliation_service,
                 symbols,
+                _reconciliation_read_model_repo,
             )
         except Exception as e:
             logger.error(
                 f"Periodic reconciliation task startup failed（不影响主进程）: {e}",
                 exc_info=True,
             )
+            _reconciliation_read_model_repo = None
             _periodic_reconciliation_task = None
 
         # =============================================
@@ -1108,6 +1138,7 @@ async def run_application():
         _capital_protection = None
         _execution_orchestrator = None
         _runtime_config_provider = None
+        _reconciliation_read_model_repo = None
         _order_watch_tasks = []
         _periodic_reconciliation_task = None
         _snapshot_update_task = None

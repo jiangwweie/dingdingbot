@@ -1,6 +1,6 @@
 # Live-safe v1 Checkpoint
 
-**Date:** 2026-05-02  
+**Date:** 2026-05-06  
 **Purpose:** Summarize live-safe foundation progress, known limitations, non-goals, and candidate next tasks. This is a reference document for owner review and future Codex / Claude Code context — not a sprint plan or task breakdown.
 
 ---
@@ -86,6 +86,18 @@
 - Existing Decision Trace behavior is preserved: fail-closed results naturally emit `decision=deny` through the current risk decision trace path.
 - Normal passing paths, strategy logic, runtime profiles, backtester, research, frontend, exchange gateway, and Decision Trace schema are unchanged.
 
+### LS-003d Reconciliation Read Model Persistence
+
+- Periodic reconciliation read model results are now persisted to PG via dedicated `reconciliation_read_model_reports` + `reconciliation_read_model_mismatches` tables.
+- Consistent reports, mismatch reports, and fetch failure reports are all saved.
+- Persistence is best-effort: write failures are logged and never propagated into trading, loop continuation, protection, shutdown, or reconciliation itself.
+- `repository=None` gracefully degrades to log-only (current behavior preserved).
+- Uses dedicated read-only tables instead of startup reconciliation tables because startup tables carry action/resolution semantics.
+- No `cycle_id` / `run_id`; report identity is `{checked_at_ms}:{symbol}`.
+- No retention policy, no REST API, no frontend, no LS-003c control path.
+- Alembic revision 008.
+- ADR-0007 documents semantics, scope, and non-goals.
+
 ### Freeze Gate Active Tests: TM-002 / TM-003
 
 - TM-002 verifies exit projection no-op paths before freeze: missing local position and invalid exit fill are observable warning paths, and they do not update LS-002 daily projected PnL or closed-trade count.
@@ -139,7 +151,7 @@ Compared to pre-live-safe state:
 - Protection coverage is `symbol_role_v0` — symbol-level, not position-chain-level.
 - Reconciliation does not validate `reduce_only` flag on exchange-side orders.
 - Reconciliation does not validate TP/SL price reasonableness.
-- No reconciliation report persistence: observation history is log-only and lost on restart.
+- Reconciliation read model history has PG persistence (best-effort, non-blocking); still no REST API / frontend display; still no LS-003c control path.
 - No grace period or consecutive-mismatch confirmation in LS-003b.
 - `_parse_ccxt_order` maps all `reduce_only=True` orders to `OrderRole.TP1` (including SL); this only affects metadata display and does not trigger action.
 
@@ -185,9 +197,9 @@ Only if owner explicitly approves. Would introduce the first control-path action
 
 Persist daily loss and trade count so they survive runtime restart. Should not be confused with a complete account risk state machine — this is a narrow checkpoint/persistence task. Requires design review for storage location and recovery semantics.
 
-### Reconciliation Report Persistence Candidate
+### Reconciliation Report Persistence — Completed (LS-003d)
 
-Persist reconciliation results beyond log-only. Not equivalent to block or recovery. Could serve a future frontend read-only display. Requires independent design of schema and storage boundaries.
+Superseded by LS-003d. Periodic reconciliation read model results are now persisted to PG via dedicated `reconciliation_read_model_reports` + `reconciliation_read_model_mismatches` tables. Best-effort, non-blocking. ADR-0007.
 
 ### Owner Console Candidate
 
@@ -219,7 +231,8 @@ Audit whether the synchronous `get_account_snapshot()` call can block the event 
 1. Is LS-003c (confirmed severe mismatch → block symbol) needed, and if so, when?
 2. Which `mismatch_type` values should qualify for automatic symbol blocking in LS-003c?
 3. Should daily stats be persisted (LS-002b), and what is the target timeline?
-4. Should reconciliation results be persisted beyond log-only?
+4. ~~Should reconciliation results be persisted beyond log-only?~~ **Resolved: Yes — LS-003d completed.**
 5. Should reconciliation results be displayed in a future Owner Console?
 6. Should the synchronous `get_account_snapshot()` call be audited for event-loop blocking risk?
 7. When would a unified TaskManager become worth introducing?
+8. Should a retention policy be added for reconciliation reports and daily risk stats?
