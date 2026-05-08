@@ -2,7 +2,7 @@
 
 **Task ID:** SMA-001
 **Date:** 2026-05-07
-**Status:** Completed / Docs-only applicability map; updated by SMA-003 with MTC-006 Direction D rejection; updated by SSD-004 with SSD-003 short-side rejection
+**Status:** Completed / Docs-only applicability map; updated by SMA-003 with MTC-006 Direction D rejection; updated by SSD-004 with SSD-003 short-side rejection; updated by DIRA-EH-001 with Direction A evidence hardening reclassification; updated by DIRA-XA-003 with Direction A cross-asset frozen diagnostic; updated by DIRA-P0-PLAN with P0/P1/P2 evidence diagnostics roadmap; updated by DIRA-P1 with edge-source attribution result; updated after P1 to make P2 risk-shape diagnostics the next eligible stage
 **Authorization Level:** Level 1/2 - docs-only
 **Source:** SR-001 Owner-accepted research-route review; CPM-MOD-002 accepted frozen diagnostic evidence; MTC-006 accepted Direction D frozen baseline evidence; SSD-003 accepted short-side frozen baseline evidence
 **Affects Runtime Automatically:** No
@@ -41,9 +41,9 @@ SR-001's current blocker remains binding:
 
 | Object | Current classification | Role | Family | Next allowed action |
 | --- | --- | --- | --- | --- |
-| Direction A | `PAUSE_FRAGILE` | Paused main-trend evidence, not reopened | Main Trend Capture / breakout | Preserve as evidence; no micro-variants |
+| Direction A | `CROSS_ASSET_SMART_BETA_TREND_TIMING / POSITIVE_SPARSE_TREND_EVIDENCE / PAUSE_FRAGILE / NON_RUNTIME` | Strongest current strategy research asset; cross-asset smart-beta trend timing with partial entry alpha; non-runtime | Main Trend Capture / breakout + lifecycle beta timing | P2 risk-shape diagnostics eligible with separate Owner approval; no variants, overlays, timing rescue, parameter changes, runtime, small-live, or portfolio implementation |
 | Direction C | `INSUFFICIENT_EVIDENCE / PAUSE_THIN_FRAGILE` | Paused candidate module | Main Trend Capture / volatility-state | No threshold loosening; use as map evidence |
-| CPM-1 | Paused; partially strengthened but incomplete applicability hypothesis; not small-live | Existing pullback module, frozen | Pullback-continuation | No CPM follow-up by default; preserve CPM-MOD-002 as evidence |
+| CPM-1 | `CONDITIONAL_EDGE_CANDIDATE / APPLICABILITY_RESEARCH_OBJECT / OHLCV_BOUNDARY_ATTRIBUTION_PAUSED`; OHLCV boundary attribution paused; evidence preserved | Existing pullback module, frozen | Pullback-continuation | No CPM follow-up; preserve attribution evidence; no further OHLCV feature mining without explicit Owner decision |
 | Direction D | `REJECTED_FROZEN_BASELINE` | Rejected pullback-continuation evidence | Pullback-continuation MTC variant | Archive MTC-006; no parameter/zone/EMA/confirmation/15m rescue |
 | Short-side breakdown continuation | `REJECTED_FROZEN_BASELINE` | Rejected non-pullback short-side evidence | Short-side / two-sided directional | Archive SSD-003; no variants/lookbacks/mirror/OI/rescue |
 | VEI (volatility expansion / impulse participation) | `PAUSE_FRAGILE` | Paused non-pullback bar-level impulse evidence; independent signals negative | Non-pullback / impulse capture | Preserve as evidence; no variants |
@@ -68,8 +68,8 @@ Current small-live state:
 | Exit / lifecycle assumption | EMA60 close-break trend lifecycle exit; next 4h open after closed-bar trigger |
 | Timeframe role | 4h is sole decision timeframe |
 | Pullback-continuation family? | No. Breakout / trend-lifecycle family |
-| Strategy role | Paused main strategy direction; positive-but-fragile evidence |
-| Current action | Do not reopen parameters, overlays, exits, or entry micro-variants |
+| Strategy role | Strongest current strategy research asset; cross-asset validated (ETH + BTC + SOL); pause-fragile; non-runtime |
+| Current action | Do not reopen parameters, overlays, exits, or entry micro-variants; no portfolio/router/regime work; no additional asset diagnostics without Owner approval |
 
 ### 2.2 Direction C
 
@@ -93,7 +93,7 @@ Current small-live state:
 | Timeframe role | 1h primary, 4h MTF confirmation |
 | Pullback-continuation family? | Yes. Baseline failure case for this family |
 | Strategy role | Existing frozen module; paused after OOS failure; not small-live |
-| Current action | CPM-MOD-002 completed; no CPM-MOD-003, second threshold, or replacement volatility feature authorized |
+| Current action | OHLCV boundary attribution paused. No CPM-MOD-003, CPM-2, gate variants, or further OHLCV feature mining. H5 macro evidence preserved. Future work limited to Owner-approved paths only: Option A (pause, current default) or Option C (docs-only extra-data inspect, reserved not authorized). |
 
 ### 2.4 Direction D
 
@@ -151,9 +151,9 @@ Current small-live state:
 
 | Object | Expected effective market | Ex-ante observable? | Required features | Future data dependency? |
 | --- | --- | --- | --- | --- |
-| Direction A | Sustained directional ETH 4h trends where breakout continuation can run for multi-day holds | Partially | 4h Donchian high/low, EMA60, trend persistence, breakout frequency, realized volatility/chop diagnostics | No funding/OI/orderbook required for current scope |
+| Direction A | Crypto-wide sustained directional 4h trends where Donchian20 breakout continuation can run for multi-day holds; validated across ETH, BTC, and SOL | Partially — cross-asset evidence supports mechanism, but no pre-observable boundary; 2023 year concentration unexplained | 4h Donchian high/low, EMA60, trend persistence, breakout frequency, realized volatility/chop diagnostics | No funding/OI/orderbook required for current scope |
 | Direction C | Established 4h uptrend with real compression before the next impulse | Partially | 4h EMA60, range ratio, re-expansion magnitude, bullish close, volatility/chop state | No funding/OI/orderbook required |
-| CPM-1 | Gentle, low-volatility uptrends with moderate slope, shallow pullbacks, price not near recent highs | Partially strengthened but incomplete | Rolling ATR percentile is partially supported for 2021 high-volatility damage; 2023 boundary still unidentified; EMA slope, recent 72h return, Donchian distance remain unresolved and not authorized for search | No new data for current evidence; funding/OI/orderbook are future only |
+| CPM-1 | Gentle, low-volatility uptrends with moderate slope, shallow pullbacks, price not near recent highs; non-hostile 1D/3D macro context may be required | Partially strengthened but incomplete; OHLCV boundary attribution paused | Rolling ATR percentile partially explains 2021 high-vol only; H5 macro context partially explains 2022 (1D multi-dimensional separation confirmed); 2023 continuation failure remains unresolved under OHLCV; no SRR-002-compliant pre-observable applicability boundary; no further OHLCV feature mining without explicit Owner decision | No new data for current evidence; funding/OI/orderbook are future only (Option C reserved) |
 | Direction D | 4h uptrend where pullbacks to EMA60 value zone resolve into continuation rather than reversal | Tested and rejected for frozen EMA60/EMA20 baseline | MTC-006 used 4h EMA60/EMA20, zone touch, resumption close, lifecycle exit; no further feature search authorized | No funding/OI/orderbook required or authorized |
 | Short-side breakdown continuation | Bearish 4h structure with confirmed support breakdown, continuation confirmation, and downside follow-through | Tested and rejected for frozen OHLCV-only baseline | SSD-003 used confirmed swing-low support, closed-bar breakdown, continuation confirmation, squeeze/stop exit; no further feature search authorized | No funding/OI/orderbook required or authorized; funding was cost caveat only |
 | VEI (volatility expansion / impulse participation) | Sudden 4h range expansion with directional close-location control and follow-through confirmation; bar-level energy detection | Tested and weak at Level 3: overlap gates passed (27.1% A, 2.5% C) but independent signals net negative; no clean pre-observable boundary | VEI-003 used 1.5×SMA20 expansion, 0.75 CLV, EMA60 trend, 5-bar hold, 2×ATR14 stop; no further feature search authorized | No funding/OI/orderbook required or authorized |
@@ -176,9 +176,9 @@ not be introduced by SMA-001 and must not become a hidden data-pipeline task.
 
 | Object | Expected failure state | Existing support | Post-hoc fitting risk | Downgrade rule if boundary is not ex-ante |
 | --- | --- | --- | --- | --- |
-| Direction A | Choppy or failed-trend years; breakout signals without enough payoff tail | Supported by 2022/2025 weakness and top-winner fragility | High if adding filters after seeing losing periods | Preserve as `PAUSE_FRAGILE`; no rescue variants |
+| Direction A | Choppy or failed-trend years; breakout signals without enough payoff tail; regime-dependent performance confirmed across ETH/BTC/SOL | Supported by 2022/2025 weakness and top-winner fragility across all three assets; 2023 dominance is regime-dependent pattern | High if adding filters after seeing losing periods | Preserve as `PAUSE_FRAGILE`; no rescue variants; cross-asset evidence strengthens but does not authorize runtime |
 | Direction C | Bear/chop or compression events that fail quickly; too few winners to support evaluation | Supported by thin sample, worse MAE/giveback, worse top concentration | High if ATR ratio is loosened after result | Keep `INSUFFICIENT_EVIDENCE`; no threshold rescue |
-| CPM-1 | High-volatility, high-slope, surge, near-Donchian-top, or reversal-within-uptrend states | Mixed but sharper after CPM-MOD-002: high-volatility gate avoided part of 2021 damage, but 2023 boundary remained untouched; H0/H3a still failed | Very high if any second gate, threshold, feature, E4 label, or composite score is fit after CPM-MOD-002 | Remain paused; do not infer runtime readiness or authorize CPM follow-up from partial 2021 improvement |
+| CPM-1 | High-volatility, high-slope, surge, near-Donchian-top, reversal-within-uptrend states (2021); hostile macro downtrend context (2022); continuation failure in non-hostile context (2023) | 2021: CPM-MOD-002 ATR gate partially addresses. 2022: H5 macro context partially explains (1D multi-dimensional separation, caveated 3D). 2023: unexplained under OHLCV — no credible pre-observable proxy found. Top-5 winners enter hostile macro context (contradiction). | Very high if any new gate, threshold, feature, macro filter, or composite is fit after closeout | OHLCV boundary attribution paused; evidence preserved; no CPM follow-up authorized without explicit Owner decision |
 | Direction D | EMA lag during corrections; value-zone touch becomes churn / falling-knife or weak bounce entry; cost drag overwhelms gross edge | Supported by MTC-006: 417 trades / 66 winners, net -262.57, PF 0.985, MTM DD 29.78%, top-N failure | Very high if zone/EMA/confirmation/15m timing is adjusted after rejection | `REJECTED_FROZEN_BASELINE`; no Direction D rescue |
 | Short-side breakdown continuation | Squeeze/reclaim invalidation, failed breakdowns, capitulation timing, funding cost drag, single-winner fragility | Supported by SSD-003: 23 trades / 1 winner, net -1699.88, PF 0.317, realized DD 24.88%, MTM DD 26.98%, 2021 strongly negative, 2022-2024 no trades, extreme top-winner fragility | Very high if breakdown thresholds, support lookbacks, or timing are adjusted after rejection | `REJECTED_FROZEN_BASELINE`; no SSD-003 rescue |
 | VEI (volatility expansion / impulse participation) | Independent signals unprofitable; all positive PnL from Direction A overlap echo; top-winner fragility; high cost drag | Supported by VEI-003: 118 trades / 56 winners, net +630.49, PF 1.21, but independent signals net -329.02 PF 0.86, top-3 removal -286.85, cost drag 60.2%, 88% time-exit | Very high if expansion/lookback/CLV/EMA/hold/ATR variants are attempted after PAUSE_FRAGILE | `PAUSE_FRAGILE`; no VEI variants or rescue |
@@ -207,9 +207,9 @@ depending on evidence strength and family drift.
 
 | Object | Positive evidence | Negative evidence | Trade / winner count | Top-winner fragility | Year concentration | MFE / MAE / giveback | MTM DD | Overlap / drift | Current classification |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Direction A | Real 4h trend signal; net +2332.51; PF 1.4227; trade floors met | Top-3/top-5 exclusion negative; 2022/2025 weak; 2023/2024 dominate | 172 closed positions; 33 winners reported in review | Top-1 survives; top-3 -935.73; top-5 -1812.81 | 2023/2024 carry most net | Known: MFE +1561.71, MAE -106.54, max giveback 400.97 | Known: 8.33% | Baseline reference; B-D1 marginally improves but same shape | `PAUSE_FRAGILE` |
+| Direction A | ETH: 173 trades, 34 winners, net +3,001.66, PF 1.517, payoff 6.20:1, win rate 19.65%, loss tail bounded (worst -133.30); BTC cross-asset: 159 trades, 40 winners, net +2,517.17, PF 1.477, payoff 4.39:1, win rate 25.16%; SOL cross-asset: 158 trades, 44 winners, net +4,018.80, PF 1.790, payoff 4.64:1, win rate 27.85%; mechanism transfers across all three assets; P1 shows partial Donchian20 entry alpha plus smart-beta trend timing | P0 evidence strength inconclusive: partially shared winner episodes and PF CI uncertainty; BTC top-3 removal NEGATIVE (−687.93); SOL top-5 removal NEGATIVE (−369.78); all three assets fail top-5 removal; no validated pre-observable applicability boundary; SRR-002 not met; 2023 year concentration extreme (BTC 95.7%, SOL 70.5%) | BTC 159 / SOL 158 / ETH 173 trades; all meet trade floors | BTC top-3 removal negative; SOL passes top-3 (+380.21) but fails top-5; ETH top-3 negative; universal top-5 failure across all assets | 2023 dominates all assets; P0 shows shared crypto-wide episodes; P1 shows smart beta timing rather than pure alpha | BTC avg winner 194.82 / avg loser −44.33; SOL avg winner 206.89 / avg loser −44.60; both high payoff ratios | BTC MTM DD 11.32%; SOL MTM DD 6.44% | Standalone trend timing; VEI overlap 27.1% is echo not independent alpha; 14.3% Direction C overlap | `CROSS_ASSET_SMART_BETA_TREND_TIMING / POSITIVE_SPARSE_TREND_EVIDENCE / PAUSE_FRAGILE / NON_RUNTIME` |
 | Direction C | Structurally distinct from A; low overlap; net +2039.29; PF 1.405 | Thin sample; 10 winners; worse top concentration; worse MTM DD; worse MAE/giveback | 63 trades; 10 winners | Top-1 82.25% of net; top-3 -2471.12; top-5 -3861.04 | 3 positive years but carried by few trades; 2021 48.2% of net | Known: MFE +2326.26, MAE -248.27, max giveback 720.15 | Known: 15.01% | 14.3% signal overlap with A; not pullback drift | `INSUFFICIENT_EVIDENCE / PAUSE_THIN_FRAGILE` |
-| CPM-1 | 2024/2025 applicable-market evidence preserved; CPM-MOD-002 clean frozen ATR-percentile gate improved 2021 by +933.37 and reduced 2021 MTM MaxDD 22.18% -> 10.59% | 2022 unchanged; 2023 unchanged; 2023 failure boundary still unidentified; favorable-year fragility remains, especially 2025 top-3 removal negative | CPM-MOD-002 overall 255 -> 208 trades, 99 -> 82 winners; 2024 stays 44/26, 2025 stays 41/17 | Overall not worsened; top 10 baseline winners preserved; favorable-year top-N fragility remains | Improvement comes entirely from 2021; 2024/2025 fully preserved; 2023 remains negative evidence | CPM-MOD-002: only 2021 changes; avg MFE improves, MAE roughly unchanged, giveback increases; no lifecycle edge inferred | CPM-MOD-002: 2021 MTM MaxDD 22.18% -> 10.59%; worst yearly MTM MaxDD 22.18% -> 11.04% | Pullback-continuation applicability hypothesis partially strengthened but incomplete | Paused; `HYPOTHESIS_STRENGTHENED_REQUIRES_FURTHER_VALIDATION`; not runtime/small-live |
+| CPM-1 | 2024/2025 applicable-market evidence preserved; CPM-MOD-002 ATR gate improved 2021; H5 macro context partially explains 2022 (1D multi-dimensional separation: d1_dist_ema200 gap 31.96, d1_ema50_above_ema200 gap 74.8pp, d1_ema200_slope_20d gap 7.54) | 2023 continuation failure unexplained (MFE 4.26 vs 406); top-5 winners enter hostile macro context (contradiction); 3D EMA200 warmup-limited (20.2% of 2022); no pre-observable boundary satisfies SRR-002 | 329 positions total; CPM-MOD-002 255→208 trades; 2024 44/26, 2025 41/17 | Favorable-year top-N fragility remains; 2024/2025 top-5 in hostile macro context | 2024 +8501; 2025 +4490; 2021 -2154; 2022 -972; 2023 -3924 | 2023 continuation-dominated: MFE 4.26 vs 406 (2024) | CPM-MOD-002: 2021 MTM MaxDD 22.18% → 10.59% | OHLCV boundary attribution paused; no SRR-002-compliant boundary; evidence preserved | `OHLCV_BOUNDARY_ATTRIBUTION_PAUSED`; `CONDITIONAL_EDGE_CANDIDATE / APPLICABILITY_RESEARCH_OBJECT` |
 | Direction D | Mechanism is structurally distinct from CPM-1 and not a Direction A variant; MTC-006 had enough trades/winners | MTC-006 rejected: net -262.57, PF 0.985, win rate 15.83%, realized DD 26.22%, MTM DD 29.78%; no clean applicability boundary | 417 trades; 66 winners | Severe: top-1 removal -3021.88; top-3 -5788.16; top-5 -7331.08 | 2024 strong positive, but 2022/2025 severe negative; no stable boundary | Avg MFE 127.05, avg MAE -48.07, avg giveback 115.56; cost/churn dominate | MTM DD 29.78% | Direction A overlap 29.50%; `NO_CLEAR_CPM_DRIFT`; still fails as pullback-continuation after costs/DD/top-N | `REJECTED_FROZEN_BASELINE` |
 | Short-side breakdown continuation | Structurally distinct from A/C/CPM/D; 0% overlap with Direction A; 0% overlap with Direction C; clean OHLCV-only frozen run completed | SSD-003 rejected: net -1699.88, PF 0.317, win rate 4.35%, realized DD 24.88%, MTM DD 26.98%; one winner; no clean applicability boundary | 23 trades; 1 winner | Extreme: top-1 removal -2488.50; top winner 100% of gross | 2021 strongly negative; 2022-2024 no trades; 2025 single-winner concentrated | Avg MFE 232.78, avg MAE -70.49, avg giveback 263.28; giveback exceeds MFE | MTM DD 26.98% | Direction A overlap 0.00%; Direction C overlap 0.00%; CPM/D overlap 4.35% each; not pullback drift; rejected on own evidence | `REJECTED_FROZEN_BASELINE` |
 | VEI (volatility expansion / impulse participation) | Overlap gates passed (A 27.1%, C 2.5%); net +630.49; PF 1.21; trade/winner floors met; 2022-2025 positive; follow-through filters 49% false starts | Independent signals net -329.02 PF 0.86; all positive PnL from Direction A overlap echo; top-3 removal -286.85; 88% time-exit; cost drag 60.2% | 118 trades; 56 winners | Top-1 +237 net excl.; top-3 -286.85 | 2021 negative (-70.09); 2022-2025 positive but modest | Avg MFE +76.10, avg MAE -50.31, avg giveback +62.67 | MTM DD 4.91% | Direction A 27.1%; Direction C 2.5%; D 18.6%; CPM 4.2%; SSD 0.8%; independent signals negative | `PAUSE_FRAGILE` |
@@ -217,20 +217,84 @@ depending on evidence strength and family drift.
 
 ### 5.2 Evidence Interpretation
 
-Direction A remains the clearest proof that ETH 4h main-trend capture is not
-empty. It is also the clearest proof that real signal is not enough when the
-payoff tail is too concentrated.
+Direction A is now the strongest current strategy research asset, supported by
+positive cross-asset sparse trend evidence across ETH, BTC, and SOL. After P1,
+it should be framed as `CROSS_ASSET_SMART_BETA_TREND_TIMING /
+POSITIVE_SPARSE_TREND_EVIDENCE / PAUSE_FRAGILE / NON_RUNTIME`, not as pure
+breakout alpha. The frozen Donchian20 → EMA60 4h lifecycle mechanism transfers
+beyond ETH — this is not an ETH-specific artifact. DIRA-EH-001 confirms ETH: 173 trades, 34
+winners, net +3,001.66, PF 1.517, payoff ratio 6.20:1. DIRA-XA-003 confirms
+BTC: 159 trades, 40 winners, net +2,517.17, PF 1.477; SOL: 158 trades, 44
+winners, net +4,018.80, PF 1.790. All three assets pass the SRR-002 sparse
+trend acceptance band. Top winners are thesis-consistent and span four+
+macro regimes across all assets. The mechanism appears to capture crypto-wide
+structural 4h trend lifecycle payoff.
+
+However, critical blockers remain. All three assets fail top-5 removal — this
+is a universal fragility pattern. 2023 dominates BTC and SOL results (BTC
+95.7%, SOL 70.5%) — extreme year concentration. No validated pre-observable
+applicability boundary exists (SRR-002 not met). Direction A is reclassified
+from `POSITIVE_SPARSE_TREND_EVIDENCE / NEEDS_TE_HARDENING / NON_RUNTIME` to
+`POSITIVE_CROSS_ASSET_SPARSE_TREND_EVIDENCE / PAUSE_FRAGILE / NON_RUNTIME`.
+Cross-asset positive evidence strengthens research confidence but does not
+authorize runtime, small-live, portfolio construction, or further empirical
+work. Direction A is standalone trend capture; not a CPM rescue and not a
+pullback-continuation module.
+
+The current Direction A research question has shifted. The question is no
+longer simply "does it work on ETH?" Cross-asset frozen diagnostics support
+the mechanism across ETH/BTC/SOL, so the next research questions are:
+
+1. Are cross-asset winners independent or synchronized?
+2. How statistically reliable is PF around 1.5?
+3. Is the edge in breakout entry, EMA60 exit, beta timing, or risk shape?
+
+External quant feedback is incorporated as advisory input into a staged
+diagnostic roadmap, not as authorization for a vol targeting or portfolio
+route. P0 evidence-strength diagnostics must be completed before any P1/P2
+work. P2 vol targeting is risk-shape diagnosis only; it is not deployment
+planning and must not be interpreted as small-live readiness.
+
+DIRA-P1 edge-source attribution classifies Direction A as
+`P1_MIXED_EDGE_SOURCE`: random-entry controls support only partial Donchian20
+entry alpha across ETH/BTC/SOL, while buy-and-hold / time-in-market
+decomposition classifies all three assets as `SMART_BETA_TIMING`. The edge is
+best read as a mixture of breakout selection, EMA60 lifecycle management, and
+crypto beta timing. P0 remains inconclusive because winner episodes are
+partially shared and PF confidence has material uncertainty. This does not
+create a pre-observable applicability boundary and does not change non-runtime
+status.
+
+The next valid research question is risk shape: can a small-capital,
+mid/low-frequency implementation around the Owner's approximate 3wU capital
+context use conservative sizing to make the mechanism tolerable after
+accounting for slippage, funding, correlated losses, exposure concentration,
+and drawdown tolerance? P2 risk-shape diagnostics are eligible only with
+separate Owner approval. P2 does not imply runtime or small-live readiness and
+must not be treated as portfolio/router implementation.
+
+DIRA-P2 risk-shape diagnostics classify Direction A as
+`P2_RISK_SHAPE_IMPROVES_BUT_NON_RUNTIME`. Conservative fixed-risk,
+vol-normalized sizing, and exposure caps improve tolerability directionally,
+but shared-episode concentration and top-winner dependence remain. Future path
+classification is `ELIGIBLE_FOR_SMALL_LIVE_DESIGN_PLAN`, which authorizes
+nothing by itself; it only means a future docs-only design plan may be proposed
+after separate Owner approval. Direction A remains non-runtime and non-small-live.
 
 Direction C proves structural differentiation is possible, but also proves that
 lower overlap alone is not enough. A distinct signal set with too few winners
 and worse concentration remains insufficient.
 
 CPM-1 proves a module may have applicable-market evidence without deployment
-permission. CPM-MOD-002 changes the evidence state but not the deployment
-state: one clean frozen ATR-percentile diagnostic partially strengthens the
-narrow high-volatility applicability hypothesis by avoiding part of 2021-style
-damage while preserving 2024/2025. It does not identify the 2023 failure
-boundary. CPM-1 remains paused and is not a runtime or small-live candidate.
+permission. CPM-MOD-002 addresses 2021 high-volatility damage; H5 macro context
+partially explains 2022 (multi-dimensional 1D separation confirmed, 3D
+warmup-caveated). But 2023 continuation failure remains unexplained under OHLCV
+— the dominant failure mode is invisible before entry. No pre-observable
+applicability boundary satisfies SRR-002. OHLCV boundary attribution is now
+paused. CPM-1 remains non-runtime and non-small-live. Future CPM work is
+limited to Owner-approved paths: Option A (pause, current default) or Option C
+(docs-only extra-data inspect, reserved not authorized). No further OHLCV
+feature mining is authorized.
 
 Direction D is now a result, not a candidate question. MTC-006 shows that the
 EMA60 value-zone / EMA20 resumption mechanism is structurally distinct but
@@ -464,7 +528,18 @@ SMA-001 does not authorize:
 - VEI pullback-entry rescue;
 - VEI 1h/15m timing rescue;
 - VEI funding/OI rescue;
-- interpreting VEI PAUSE_FRAGILE as a runtime candidate or small-live readiness signal.
+- interpreting VEI PAUSE_FRAGILE as a runtime candidate or small-live readiness signal;
+- CPM-1 changes (code, config, parameters);
+- CPM-MOD-003 or any new CPM gate variant;
+- CPM-2 or any CPM direction extension;
+- any new CPM backtest, empirical diagnostic, or parameter sweep;
+- CPM threshold optimization or ATR sweep;
+- CPM runtime use or small-live;
+- CPM strategy rescue or lower-timeframe rescue;
+- CPM extra-data rescue without named hypothesis satisfying SRR-002 Sec 6;
+- CPM CVD/order-flow data work;
+- CPM router/regime/portfolio work;
+- interpreting OHLCV boundary attribution pause as deployment readiness.
 
 ---
 
@@ -474,9 +549,9 @@ SMA-001 does not authorize:
 
 | Object | Classification |
 | --- | --- |
-| Direction A | `PAUSE_FRAGILE`; preserve evidence; do not reopen |
+| Direction A | `CROSS_ASSET_SMART_BETA_TREND_TIMING / POSITIVE_SPARSE_TREND_EVIDENCE / PAUSE_FRAGILE / NON_RUNTIME`; strongest current research asset; cross-asset validated (ETH + BTC + SOL); partial entry alpha plus smart beta timing; P2 risk-shape diagnostics eligible with separate Owner approval; no variants, overlays, timing rescue, parameter changes, runtime, small-live, or portfolio implementation |
 | Direction C | `INSUFFICIENT_EVIDENCE / PAUSE_THIN_FRAGILE`; paused |
-| CPM-1 | Paused; `HYPOTHESIS_STRENGTHENED_REQUIRES_FURTHER_VALIDATION`; partially strengthened but incomplete applicability hypothesis; not runtime/small-live |
+| CPM-1 | `CONDITIONAL_EDGE_CANDIDATE / APPLICABILITY_RESEARCH_OBJECT / OHLCV_BOUNDARY_ATTRIBUTION_PAUSED`; OHLCV boundary attribution paused; evidence preserved; no runtime/small-live; no further OHLCV feature mining |
 | Direction D | `REJECTED_FROZEN_BASELINE`; MTC-006 clean frozen Level 3 run rejected |
 | Short-side breakdown continuation | `REJECTED_FROZEN_BASELINE`; SSD-003 clean frozen Level 3 run rejected |
 | VEI (volatility expansion / impulse participation) | `PAUSE_FRAGILE`; VEI-003 clean frozen Level 3 run completed; independent signals negative; all positive PnL from Direction A echo |
@@ -502,6 +577,28 @@ CPM-MOD-002 did not change:
 - It did not prove pullback-continuation modules can be safely enabled and
   disabled in general.
 - It did not raise Direction D to automatic Level 3.
+
+### 11.2b CPM OHLCV Boundary Closeout (CPM-CLOSE-001)
+
+CPM-CLOSE-001 changed:
+
+- CPM-1 OHLCV boundary attribution is now paused, not merely strengthened-but-incomplete.
+- The full 12-step attribution chain has been consolidated: favorable regime review, artifact audit, MOD-001, MOD-002, ABI-001, FCX-001, CPA-001, CMC-001, H5RA-001, and SRR-002 methodology upgrade.
+- H5 macro context provides one robust partial axis: multi-dimensional 1D separation for 2022 (d1_dist_ema200 gap 31.96, d1_ema50_above_ema200 gap 74.8pp, d1_ema200_slope_20d gap 7.54) with partial 2021 mod-ATR support.
+- 3D EMA200 separation is warmup-caveated (20.2% of 2022; 0% of 2021).
+- Severe contradictions: 2024 top-5 and 2025 top-5 winners enter in hostile macro context; 2023 non-hostile context but 83.3% lose.
+- 2023 continuation failure remains the dominant unexplained mode (MFE 4.26 vs 406; no credible pre-observable proxy found under OHLCV).
+- No SRR-002-compliant pre-observable applicability boundary exists.
+- All 17 research lines are closed (CPM-MOD-003, CPM-2, ATR sweep, bar range gate, CHOP, Hurst, H3 composite, 3D/1D EMA200 gate, H5 empirical diagnostic, E4, Pinbar variants, TP/SL, 15m rescue, router, portfolio, extra-data rescue).
+- Owner decision: Option A recommended (pause and preserve evidence); Option C reserved (docs-only extra-data inspect, not authorized).
+
+CPM-CLOSE-001 did not change:
+
+- It did not create a runtime candidate.
+- It did not satisfy small-live readiness.
+- It did not permanently close CPM-1 research; a new Owner-approved path could reopen.
+- It did not authorize CPM-1 changes, gates, backtests, diagnostics, parameter sweeps, runtime use, small-live, strategy rescue, or extra-data work.
+- It did not authorize creating an extra-data task card.
 
 ### 11.3 MTC-006 Evidence Update
 
@@ -590,22 +687,246 @@ VEI-003 did not change:
   holding period, ATR multiplier), Direction A/C rescue, 1h/15m timing rescue,
   funding/OI rescue, or router/portfolio/regime proposals.
 
+### 11.5b Direction A Evidence Hardening (DIRA-EH-001)
+
+DIRA-EH-001 changed:
+
+- Direction A is reclassified from `PAUSE_FRAGILE` to
+  `POSITIVE_SPARSE_TREND_EVIDENCE / NEEDS_TE_HARDENING / NON_RUNTIME`.
+- 173 trades, 34 winners, net +3,001.66, PF 1.517, payoff ratio 6.20:1.
+- Top winners are thesis-consistent and span four distinct macro regimes
+  (2021-Q1, 2023-Q1, 2024-Q1, 2025-Q3). No single year or event monopolises
+  the tail.
+- Loss tail is shallow and bounded: worst single loss -133.30.
+- 166 EMA60 exits (+3,829.03) / 7 initial stops (-827.37); the EMA60 lifecycle
+  exit is the profit engine.
+- TE-001 nine-layer winner concentration review applied. Structurally positive
+  evidence confirmed; not accidental or data-mined.
+- Top-3 removal net negative (-443.91); top-5 removal -1,493.33. Negative
+  top-N removal remains deployment blocker.
+- No validated pre-observable applicability boundary. SRR-002 standards not met.
+- Direction A is standalone trend capture; not a CPM rescue and not a
+  pullback-continuation module. VEI's positive PnL is an echo of Direction A
+  (27.1% overlap), not independent alpha.
+- Preserve Direction A as the cleanest current sparse trend evidence asset.
+- No Direction A variants, overlays, timing rescue, or parameter changes are
+  authorized.
+
+Owner decision note:
+
+- **Option A — Preserve** (recommended): Direction A remains positive sparse
+  trend evidence; no further immediate research task.
+- Option B / TE full review is not auto-triggered. Requires separate Owner
+  approval.
+- Option C / applicability-boundary study is not auto-triggered. Requires
+  separate Owner approval and SRR-002 compliance.
+- Any future empirical work requires separate Owner approval and SRR-002
+  compliance.
+
+DIRA-EH-001 did not change:
+
+- It did not create a runtime candidate.
+- It did not satisfy small-live readiness.
+- It did not authorize Direction A variants, overlays, timing rescue, parameter
+  changes, empirical runs, TE execution, runtime use, small-live use, or
+  strategy rescue.
+
+### 11.5c Direction A Cross-Asset Frozen Diagnostic (DIRA-XA-003)
+
+DIRA-XA-003 changed:
+
+- Direction A is reclassified from `POSITIVE_SPARSE_TREND_EVIDENCE /
+  NEEDS_TE_HARDENING / NON_RUNTIME` to
+  `POSITIVE_CROSS_ASSET_SPARSE_TREND_EVIDENCE / PAUSE_FRAGILE / NON_RUNTIME`.
+- Direction A now has positive cross-asset sparse trend evidence across ETH,
+  BTC, and SOL. The frozen Donchian20 → EMA60 mechanism transfers beyond ETH.
+- Direction A is now the strongest current strategy research asset.
+
+**Cross-asset summary table:**
+
+| Asset | Trades | Winners | Net PnL | PF | Payoff Ratio | Top-N Fragility | Classification |
+| --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| ETH/USDT:USDT | 173 | 34 | +3,001.66 | 1.517 | 6.20:1 | Top-3 negative; Top-5 negative | POSITIVE_SPARSE_TREND_EVIDENCE |
+| BTC/USDT:USDT | 159 | 40 | +2,517.17 | 1.477 | 4.39:1 | Top-3 NEGATIVE (−687.93); Top-5 NEGATIVE | BTC_POSITIVE_SPARSE_TREND_EVIDENCE |
+| SOL/USDT:USDT | 158 | 44 | +4,018.80 | 1.790 | 4.64:1 | Top-3 POSITIVE (+380.21); Top-5 NEGATIVE | SOL_POSITIVE_SPARSE_TREND_EVIDENCE |
+
+**Key observations:**
+
+- All three assets pass the SRR-002 sparse trend acceptance band.
+- All three assets fail top-5 removal — universal fragility pattern.
+- SOL passes top-3 removal (+380.21); ETH and BTC fail top-3 removal.
+- 2023 is the strongest year for all three assets — regime-dependent pattern.
+- 2022 and 2025 are negative for both BTC and SOL — consistent.
+- BTC has highest year concentration (2023 = 95.7% of total net).
+- SOL has lowest MaxDD (4.49% realized, 6.44% MTM).
+- No data artifacts identified in top winners across any asset.
+
+**Current Owner interpretation:**
+
+- Recommended current action: Preserve Direction A as positive cross-asset
+  sparse trend evidence. Do not promote. Do not run further diagnostics
+  immediately.
+- Cross-asset evidence strengthens research confidence but does not solve
+  SRR-002 Standard 1 (pre-observable applicability boundary).
+- Year concentration (2023 dominance) must be explicitly noted.
+- Any future empirical work requires separate Owner approval.
+
+DIRA-XA-003 did not change:
+
+- It did not create a runtime candidate.
+- It did not satisfy small-live readiness.
+- It did not validate a pre-observable applicability boundary.
+- It did not authorize Direction A variants, parameter optimization,
+  additional asset backtests, runtime use, small-live use, TE execution,
+  CPM reopening, portfolio work, router work, regime gate research, or
+  strategy rescue.
+
+**Completion:** Direction A is archived as positive cross-asset sparse trend
+evidence, pause-fragile and non-runtime. This update does not authorize
+Direction A changes, further diagnostics, parameter optimization, portfolio
+work, runtime use, small-live use, TE execution, CPM reopening, or strategy
+rescue.
+
+### 11.5d Direction A P0/P1/P2 Diagnostic Roadmap (DIRA-P0-PLAN)
+
+DIRA-P0-PLAN changed:
+
+- Direction A is explicitly recorded as the strongest current strategy research
+  asset, while remaining `PAUSE_FRAGILE / NON_RUNTIME`.
+- External quant feedback is incorporated into Direction A as staged evidence
+  diagnostics, not as strategy redesign.
+- The staged roadmap is:
+  - **P0 - Evidence Strength:** immediate next stage after Owner approval.
+    Purpose: effective independent observation count, winner episode overlap,
+    and PF confidence / uncertainty. Authorized P0 diagnostics are winner
+    timing overlap and bootstrap PF CI only.
+  - **P1 - Edge Source Attribution:** blocked until P0. Purpose: entry alpha vs
+    exit management and alpha vs beta timing. Planned diagnostics are random
+    entry + EMA60 exit control and buy-and-hold / time-in-market
+    decomposition.
+  - **P2 - Risk Shape:** reserved. Purpose: risk normalization study only,
+    with no deployment implication and no portfolio construction. Planned
+    diagnostics are vol targeting risk-shape diagnosis and MFE / loser
+    characterization.
+- The research question now centers on whether ETH/BTC/SOL winners are
+  independent or synchronized, how reliable PF around 1.5 is, and whether the
+  evidence comes from breakout entry, EMA60 exit, beta timing, or risk shape.
+
+DIRA-P0-PLAN did not change:
+
+- It did not authorize more assets, Direction A variants, parameter
+  optimization, regime gates, vol targeting implementation, portfolio/router
+  work, runtime, small-live, TE execution, CPM reopening, extra-data work, or
+  strategy rescue.
+- It did not authorize P1 or P2 execution. P1 remains `BLOCKED_BY_P0`; P2
+  remains `RESERVED`.
+- It did not reinterpret P2 vol targeting as deployment planning or small-live
+  readiness.
+
+### 11.5e Direction A P1 Edge-Source Attribution (DIRA-P1)
+
+DIRA-P1 changed:
+
+- Owner authorized P1 attribution-only diagnostics after P0:
+  random entry + EMA60 exit control and buy-and-hold / time-in-market
+  decomposition.
+- Random-entry control results classify ETH, BTC, and SOL as
+  `ENTRY_ALPHA_PARTIAL`. Direction A generally outperforms matched random
+  entries, but not decisively enough across all assets to isolate pure
+  Donchian20 entry alpha.
+- Buy-and-hold / time-in-market decomposition classifies ETH, BTC, and SOL as
+  `SMART_BETA_TIMING`. Direction A is not simple full buy-and-hold exposure,
+  but crypto beta timing and EMA60 lifecycle management explain a material
+  share of the result.
+- Combined P1 classification: `P1_MIXED_EDGE_SOURCE`.
+- Recommendation: Owner decision required.
+
+DIRA-P1 did not change:
+
+- It did not create a runtime candidate.
+- It did not satisfy small-live readiness.
+- It did not validate a pre-observable applicability boundary.
+- It did not authorize P2 automatically.
+- It did not authorize Direction A changes, variants, parameter optimization,
+  additional assets, portfolio/router work, vol targeting, runtime use,
+  small-live use, TE execution, CPM reopening, or strategy rescue.
+
+### 11.5f Direction A Roadmap After P1
+
+Post-P1 roadmap update changed:
+
+- Direction A current classification is updated to
+  `CROSS_ASSET_SMART_BETA_TREND_TIMING / POSITIVE_SPARSE_TREND_EVIDENCE /
+  PAUSE_FRAGILE / NON_RUNTIME`.
+- Direction A should no longer be framed as pure breakout alpha. Donchian20
+  entry contributes partial alpha, but the broader mechanism is trend beta
+  timing plus EMA60 lifecycle exposure management.
+- Completed stages are now cross-asset frozen diagnostic, P0 evidence strength
+  diagnostics, and P1 edge-source attribution.
+- The next eligible stage is P2 risk-shape diagnostics, subject to separate
+  Owner approval.
+- P2's valid research question is whether a small-capital, mid/low-frequency
+  context can use conservative sizing to make the mechanism tolerable after
+  accounting for slippage, funding, correlated losses, exposure concentration,
+  and drawdown tolerance.
+
+Post-P1 roadmap update did not change:
+
+- It did not authorize P2 execution by itself.
+- It did not authorize runtime, small-live, portfolio implementation,
+  router/regime engine, parameter optimization, more assets, TE execution,
+  CPM reopening, or strategy rescue.
+- It did not imply runtime or small-live readiness.
+
+### 11.5g Direction A P2 Risk-Shape Diagnostic (DIRA-P2)
+
+DIRA-P2 changed:
+
+- Owner authorized empirical risk-shape diagnostics using existing
+  ETH/BTC/SOL Direction A trades only.
+- Scenarios evaluated existing baseline, equal-capital basket, fixed-risk
+  sizing at 0.25% / 0.50% / 1.00% of total research capital, 20-day
+  realized-vol normalized sizing, max concurrent exposure caps, and asset risk
+  contribution caps.
+- P2 classification: `P2_RISK_SHAPE_IMPROVES_BUT_NON_RUNTIME`.
+- Future path classification: `ELIGIBLE_FOR_SMALL_LIVE_DESIGN_PLAN`.
+- Recommendation: proceed only to a docs-only small-live design plan if the
+  Owner separately authorizes it.
+- Key read: conservative risk shaping improves tolerability, especially lower
+  fixed-risk / vol-normalized sizing and max-2 exposure cap, but top-winner
+  dependence and shared crypto-wide episode concentration remain.
+
+DIRA-P2 did not change:
+
+- It did not create a runtime candidate.
+- It did not authorize small-live.
+- It did not authorize portfolio implementation.
+- It did not validate a pre-observable applicability boundary.
+- It did not authorize Direction A changes, variants, parameter optimization,
+  TE execution, CPM reopening, or strategy rescue.
+
 ### 11.6 Recommended Next Step
 
 Recommended next step:
 
 1. Use SMA-001/SMA-004 as the current routing map.
-2. Pause pullback-continuation empirical experiments.
-3. Do not start CPM-MOD-003, Direction D follow-up, or 15m pullback-entry.
+2. Pause pullback-continuation empirical experiments. CPM-1 OHLCV boundary
+   attribution is now paused with evidence preserved.
+3. Do not start CPM-MOD-003, CPM-2, Direction D follow-up, or 15m
+   pullback-entry.
 4. Do not derive VEI variants or promote backlog candidates without fresh
    inspect.
 5. If Owner wants new research optionality, prefer a Strategy Research Reset /
    Direction Refresh that starts from the full evidence state (Direction A
-   PAUSE_FRAGILE, Direction C INSUFFICIENT_EVIDENCE, Direction D REJECTED,
-   SSD-003 REJECTED, VEI PAUSE_FRAGILE, CPM-1 paused).
-6. Keep 15m only as docs-only execution-timing auxiliary maintenance unless a
+   POSITIVE_SPARSE_TREND_EVIDENCE / NON_RUNTIME, Direction C
+   INSUFFICIENT_EVIDENCE, Direction D REJECTED, SSD-003 REJECTED, VEI
+   PAUSE_FRAGILE, CPM-1 OHLCV paused).
+6. CPM-1 future work limited to Owner-approved paths: Option A (pause, current
+   default) or Option C (docs-only extra-data inspect, reserved not authorized).
+   Do not create an extra-data task card without explicit Owner approval.
+7. Keep 15m only as docs-only execution-timing auxiliary maintenance unless a
    future parent-thesis task is separately authorized.
-7. Keep small-live gate closed.
+8. Keep small-live gate closed.
 
 ### 11.7 Recommendation Reason
 
@@ -660,7 +981,32 @@ through alternate lookbacks, bearish A/C mirror, failed-rally value-zone short,
 (expansion threshold, lookback, CLV, EMA, holding period, ATR multiplier),
 rescue VEI through Direction A/C, use 1h/15m timing to rescue VEI, use
 funding/OI to rescue VEI, or interpret VEI PAUSE_FRAGILE as runtime/small-live
-readiness.
+readiness. Do not interpret Direction A cross-asset positive evidence as runtime
+readiness, small-live readiness, promotion eligibility, or portfolio construction
+authorization. Do not run additional asset diagnostics, parameter optimization,
+regime gate research, router work, portfolio work, or strategy rescue without
+separate Owner approval. Do not interpret POSITIVE_CROSS_ASSET_SPARSE_TREND_
+EVIDENCE as deployment gate pass. Do not create Direction A variants, Direction
+A overlays, Direction A entry/stop/exit micro-variants, Direction A E-A overlay
+rescue, Direction A timing rescue, or Direction A parameter changes. CPM-1
+OHLCV boundary attribution pause does not authorize CPM-1 changes, CPM-MOD-003,
+CPM-2, new CPM gates, CPM empirical diagnostics, CPM backtests, CPM parameter
+sweeps, CPM threshold optimization, CPM runtime use, CPM small-live, CPM
+strategy rescue, CPM extra-data work without named hypothesis satisfying
+SRR-002 Sec 6, CPM CVD/order-flow work, CPM router/regime/portfolio work, or
+interpreting pause as deployment readiness.
+
+### 11.10 CPM-1 Future Option Note
+
+Future CPM work is limited to Owner-approved paths only:
+
+- **Option A:** Pause and preserve evidence — current default. OHLCV boundary
+  attribution is paused. Research evidence is preserved. No empirical work.
+- **Option C:** Docs-only extra-data dependency inspect — reserved, not
+  authorized. Would require named hypothesis satisfying SRR-002 Sec 6 before
+  any empirical work.
+
+Do not create an extra-data task card in this update.
 
 ### 11.9 Small-Live Readiness
 
@@ -678,3 +1024,10 @@ There is no runtime candidate and no deployable small-live strategy.
 | 2026-05-07 | SMA-002 update: archived CPM-MOD-002 evidence; CPM-1 changed to partially strengthened but incomplete applicability hypothesis; CPM follow-up paused by default | Codex |
 | 2026-05-07 | SMA-003 update: archived MTC-006 Direction D rejection; lowered pullback-continuation family priority; blocked Direction D and 15m pullback-entry rescue paths | Codex |
 | 2026-05-07 | SSD-004 update: archived SSD-003 short-side breakdown continuation rejection; added short-side family row; blocked all SSD-003 rescue paths; updated non-pullback direction queue | Claude |
+| 2026-05-08 | CPM-CLOSE-001 update: CPM-1 OHLCV boundary attribution paused; CPM-1 classification updated to OHLCV_BOUNDARY_ATTRIBUTION_PAUSED; H5 macro evidence preserved; 2023 continuation failure remains unexplained; no further OHLCV feature mining authorized; future work limited to Owner-approved Option A (pause) or Option C (reserved extra-data inspect) | Claude |
+| 2026-05-08 | DIRA-EH-001 update: Direction A reclassified to POSITIVE_SPARSE_TREND_EVIDENCE / NEEDS_TE_HARDENING / NON_RUNTIME; evidence matrix updated with full trade metrics and 9-layer winner concentration review; Owner decision note added (Option A preserve recommended); prohibitions updated for Direction A variants/overlays/empirical runs; preserved as cleanest sparse trend evidence asset | Claude |
+| 2026-05-08 | DIRA-XA-003 update: Direction A reclassified to POSITIVE_CROSS_ASSET_SPARSE_TREND_EVIDENCE / PAUSE_FRAGILE / NON_RUNTIME; cross-asset frozen diagnostic completed (BTC +2,517.17 PF 1.477, SOL +4,018.80 PF 1.790); mechanism transfers across ETH/BTC/SOL; evidence matrix updated with cross-asset metrics; cross-asset summary table added; 2023 year concentration noted; prohibitions updated for portfolio/router/regime work; Direction A is now strongest current research asset | Claude |
+| 2026-05-08 | DIRA-P0-PLAN update: Direction A P0/P1/P2 diagnostic roadmap recorded. P0 evidence-strength diagnostics are winner timing overlap and bootstrap PF CI. P1 edge-source attribution remains blocked by P0. P2 risk-shape diagnostics remain reserved and non-deployment. No Direction A changes, variants, parameter optimization, portfolio work, runtime, small-live, TE execution, CPM reopening, or strategy rescue authorized | Codex |
+| 2026-05-08 | DIRA-P1 update: Direction A P1 edge-source attribution completed after Owner authorization. Random-entry controls classify ETH/BTC/SOL as ENTRY_ALPHA_PARTIAL. Buy-and-hold / time-in-market decomposition classifies ETH/BTC/SOL as SMART_BETA_TIMING. Combined P1 classification: P1_MIXED_EDGE_SOURCE; recommendation Owner decision required. No P2, portfolio, vol targeting, runtime, small-live, TE, CPM reopening, or strategy rescue authorized | Codex |
+| 2026-05-08 | Direction A post-P1 roadmap update: classification updated to CROSS_ASSET_SMART_BETA_TREND_TIMING / POSITIVE_SPARSE_TREND_EVIDENCE / PAUSE_FRAGILE / NON_RUNTIME. Direction A is no longer framed as pure breakout alpha. P2 risk-shape diagnostics are the next eligible Owner-approved stage. Runtime, small-live, portfolio implementation, router/regime engine, parameter optimization, more assets, TE execution, CPM reopening, and strategy rescue remain blocked | Codex |
+| 2026-05-08 | DIRA-P2 update: Direction A P2 risk-shape diagnostic completed after Owner authorization. Classification: P2_RISK_SHAPE_IMPROVES_BUT_NON_RUNTIME. Future path: ELIGIBLE_FOR_SMALL_LIVE_DESIGN_PLAN, docs-only and not automatic. Conservative risk shaping improves tolerability but shared-episode concentration remains. No Direction A changes, portfolio implementation, runtime, small-live, TE execution, CPM reopening, or strategy rescue authorized | Codex |

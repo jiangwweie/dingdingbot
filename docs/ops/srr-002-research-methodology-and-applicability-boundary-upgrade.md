@@ -316,33 +316,89 @@ include:
    whose top winners are also another module's top winners is not
    independently deployable.
 
-### 4.4 Sparse Trend Acceptance Band
+### 4.4 Owner Tolerance Clarification for Sparse Trend Systems
 
-A module M with sparse trend characteristics passes the fragility standard if:
+The Owner can accept low win rate, high payoff ratio, backtest drawdown above
+30% in research context, and imperfect equity curves. Therefore:
 
-- Top-3 removal net PnL remains positive (mandatory).
-- Top-5 removal net PnL remains positive (mandatory).
+1. **Negative top-3/top-5 removal is a deployment / small-live / validated-
+   boundary blocker, not an automatic research rejection.** A sparse trend
+   module that fails top-3/top-5 removal is not deployable, but its evidence
+   may still be preserved as positive sparse trend research evidence.
+
+2. **For sparse trend systems, the following may justify preserving the module
+   as `POSITIVE_SPARSE_TREND_EVIDENCE` or `PAUSE_FRAGILE`** (not
+   `REJECTED_FROZEN_BASELINE`):
+   - Positive net PnL under realistic costs.
+   - PF > 1.
+   - Top winners are thesis-consistent (they are the trend moves the system
+     was designed to capture, not random outliers).
+   - Risk is controlled relative to Owner tolerance (drawdown, loss per trade,
+     and worst-case scenarios are within Owner-acceptable bounds for research).
+   - Enough trade count to support statistical evaluation (>= 30 trades).
+
+3. **This clarification does not authorize:**
+   - Parameter rescue or variants of paused modules.
+   - Runtime activation or small-live readiness.
+   - Gate relaxation for deployment or validated-boundary admission.
+   - Any change to the Level 3 admission gate (Section 7) or pre-observable
+     applicability boundary standard (Section 2).
+
+4. **Top-winner attribution remains mandatory** for any module preserved under
+   this clarification:
+   - Year and regime context for each top winner.
+   - Thesis consistency: does the top winner match the module's stated
+     mechanism, or is it an unrelated windfall?
+   - Event and data artifact check: was the top winner produced by a data
+   anomaly, exchange event, or bar-level artifact?
+   - Overlap echo check: does the top winner overlap with a reference module's
+     signals (Section 3)?
+   - Non-overlap signal performance: if the module has non-overlapping signals,
+     their independent performance must be reported (Section 3.4).
+
+### 4.5 Sparse Trend Acceptance Band
+
+A module M with sparse trend characteristics passes the acceptance band if:
+
+- Net PnL is positive under realistic costs (mandatory).
+- PF > 1 (mandatory).
+- Top winners are thesis-consistent (mandatory).
+- Trade count >= 30 over full sample (mandatory).
 - Top winners are distributed across >= 2 calendar years (mandatory).
 - Top-3 winners have stated market-feature explanations (mandatory).
 - If top-1 > 40% of net, this is disclosed but does not block research-only
   classification (Owner decision for deployment).
 
 A module that passes the acceptance band may be classified as
-`PAUSE_FRAGILE` (research evidence preserved) but not as `DEPLOYABLE` or
-`SMALL_LIVE_READY` unless the pre-observable applicability boundary (Section
-2) is also validated.
+`POSITIVE_SPARSE_TREND_EVIDENCE` or `PAUSE_FRAGILE` (research evidence
+preserved) but not as `DEPLOYABLE` or `SMALL_LIVE_READY` unless the
+pre-observable applicability boundary (Section 2) is also validated.
 
-### 4.5 Application to Current Evidence
+A module that fails the acceptance band (negative net PnL, PF < 1, or
+insufficient trade count) is not preserved as positive evidence regardless of
+Owner tolerance.
 
-| Module | Top-3 removal | Top-5 removal | Cross-year | Passes? |
-| --- | --- | --- | --- | --- |
-| Direction A | -935.73 (negative) | -1812.81 (negative) | 2023/2024 carry most | No |
-| Direction C | -2471.12 (negative) | -3861.04 (negative) | 3 positive years but thin | No |
-| Direction D | -5788.16 (negative) | -7331.08 (negative) | 2024 only | No |
-| VEI-003 | -286.85 (negative) | Not computed | 2022-2025 positive | No |
-| SSD-003 | -2488.50 (1 winner) | N/A | 2025 only | No |
+### 4.6 Application to Current Evidence
 
-No current module passes the sparse trend fragility standard.
+| Module | Net PnL | PF | Top-3 removal | Trade count | Thesis-consistent tops | Passes acceptance band? | Classification |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Direction A | +2332.51 | 1.42 | -935.73 (negative) | 172 | Yes (trend capture) | Yes (passes all except top-3) | `POSITIVE_SPARSE_TREND_EVIDENCE` / `PAUSE_FRAGILE` |
+| Direction C | +2039.29 | 1.405 | -2471.12 (negative) | 63 | Partial | No (thin sample, top-1 = 82.25% of net) | `INSUFFICIENT_EVIDENCE` / `PAUSE_THIN_FRAGILE` |
+| Direction D | -262.57 | 0.985 | -5788.16 (negative) | 417 | N/A | No (negative net, PF < 1) | `REJECTED_FROZEN_BASELINE` |
+| VEI-003 | +630.49 | 1.21 | -286.85 (negative) | 118 | No (overlap echo) | No (independent signals negative) | `PAUSE_FRAGILE` (overlap echo of A) |
+| SSD-003 | -1699.88 | 0.317 | -2488.50 (1 winner) | 23 | N/A | No (negative net, PF < 1) | `REJECTED_FROZEN_BASELINE` |
+
+**Direction A clarification:** Direction A should be preserved as
+`POSITIVE_SPARSE_TREND_EVIDENCE` / `PAUSE_FRAGILE`, not rejected solely due
+to top-3/top-5 removal. Its positive net PnL, PF 1.42, 172 trades, and
+thesis-consistent top winners (major trend moves that a trend-capture system
+is designed to catch) satisfy the acceptance band. Top-3/top-5 removal
+failure remains a deployment blocker but does not invalidate the research
+evidence.
+
+**SRR-002 remains the Level 3 / deployment / applicability-boundary admission
+baseline.** This clarification adjusts the research classification for sparse
+trend systems; it does not relax any deployment or small-live gate.
 
 ---
 
@@ -641,7 +697,7 @@ independent:
 | --- | --- | --- | --- |
 | Pre-observable applicability boundary | 2 | What qualifies as a validated boundary | No module satisfies |
 | Independent alpha vs overlap echo | 3 | How to distinguish independent profit from overlap echo | VEI confirmed as echo; no module claims independent alpha |
-| Sparse trend fragility | 4 | Acceptable vs unacceptable concentration for sparse systems | No module passes |
+| Sparse trend fragility | 4 | Acceptable vs unacceptable concentration for sparse systems; Owner tolerance for sparse evidence preservation | Direction A preserved as `POSITIVE_SPARSE_TREND_EVIDENCE`; no module passes deployment gate |
 | Conditional module evidence | 5 | How to evaluate regime-conditional modules without post-hoc fitting | CPM-MOD-002 partial; no module satisfies all prerequisites |
 | Extra-data dependency | 6 | When extra data is legitimate vs rescue narrative | No hypothesis proposed; no data authorized |
 | Level 3 admission gate | 7 | What makes a future Level 3 request admissible | No current request admissible |
@@ -719,7 +775,7 @@ change a module's classification or deployment state.
 
 | Module | Classification before SRR-002 | Classification after SRR-002 | Change |
 | --- | --- | --- | --- |
-| Direction A | `PAUSE_FRAGILE` | `PAUSE_FRAGILE` | None |
+| Direction A | `PAUSE_FRAGILE` | `POSITIVE_SPARSE_TREND_EVIDENCE` / `PAUSE_FRAGILE` | Upgraded per Owner tolerance clarification (Sec 4.4) |
 | Direction C | `INSUFFICIENT_EVIDENCE / PAUSE_THIN_FRAGILE` | `INSUFFICIENT_EVIDENCE / PAUSE_THIN_FRAGILE` | None |
 | CPM-1 | Paused; partial hypothesis | Paused; partial hypothesis | None |
 | Direction D | `REJECTED_FROZEN_BASELINE` | `REJECTED_FROZEN_BASELINE` | None |
