@@ -66,7 +66,19 @@ The current stage is:
 
 `Observation + Research Methodology Reset`
 
-The only current mainline strategy-research object is:
+The current active strategy exploration / intake lane is:
+
+`Strategy Research Re-entry v1`
+
+This lane may discuss strategy families, edge hypotheses, failure hypotheses,
+research briefs, candidate ranking, and question framing for Owner review. It
+does not authorize new backtests, experiments, adapter runs, strategy runtime
+activation, paper/testnet/live, small-live, strategy/risk/profile/parameter
+changes, or Claude task cards. Total Control v2 remains the authority for the
+roadmap, Owner decision queue, Codex/Claude gating, and whether any research
+brief may upgrade to Codex read-only inspect.
+
+The current docs-only / shadow-no-order observation design object is:
 
 `Direction A BTC+ETH Phase 1 observation design`
 
@@ -79,7 +91,10 @@ The active tracks are:
 
 1. `Live-safe Foundation` - preserved as a system safety foundation, but no
    live/small-live execution is authorized by the current research stage.
-2. `BTC+ETH Phase 1 Observation + Research Methodology Reset` - docs-only
+2. `Strategy Research Re-entry v1` - strategy exploration / intake only;
+   families, hypotheses, research briefs, candidate ranking, and Owner-review
+   question framing.
+3. `BTC+ETH Phase 1 Observation + Research Methodology Reset` - docs-only
    consolidation, artifact reconciliation, SRR-002 discipline, and Owner review
    readiness.
 
@@ -231,7 +246,16 @@ Current live-safe focus areas are:
 - Continuous reconciliation.
 - Replayable logs and event trails.
 
-## Active Track 2: Baseline Strategy Module Stabilization
+## Historical Track: Baseline Strategy Module Stabilization
+
+2026-05-09+ note: This section is historical context from the pre-reset baseline
+strategy phase. It is superseded for current work by `Observation + Research
+Methodology Reset`. CPM-1 is paused and is not the current mainline, runtime
+candidate, or small-live candidate. The current active strategy exploration /
+intake lane is `Strategy Research Re-entry v1`, and the current docs-only /
+shadow-no-order observation design object is Direction A BTC+ETH Phase 1. CPM-1
+or Baseline Strategy Module Stabilization may be reopened only by explicit
+Owner decision.
 
 ### Goal
 
@@ -239,7 +263,12 @@ The current ETH Pinbar line is no longer treated as the system-wide strategy. It
 
 `Crypto Pullback Module v1`
 
-This is the current and only priority strategy module, used to validate the full loop from research to backtest to execution to monitoring to review.
+Historical context: this was previously treated as the priority strategy module
+for validating the full loop from research to backtest to execution to
+monitoring to review. It is now paused for current work and must not be read as
+the current mainline or as authorization for CPM-1 runtime, small-live,
+backtests, experiments, adapter runs, strategy/risk/profile/parameter changes,
+or implementation.
 
 ### Module Position
 
