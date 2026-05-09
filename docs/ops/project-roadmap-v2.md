@@ -1,6 +1,6 @@
 # Project Roadmap v2
 
-Last updated: 2026-04-29
+Last updated: 2026-05-09
 
 ## Document Role
 
@@ -59,20 +59,33 @@ The key reasons are:
 
 ## Current Stage
 
-The current stage is neither a multi-strategy phase nor a multi-asset phase.
+The current stage is neither a multi-strategy phase, a multi-asset expansion
+phase, nor a live/small-live activation phase.
 
 The current stage is:
 
-`Sim-ready -> full-auto small-live candidate`
+`Observation + Research Methodology Reset`
 
-There are only two active tracks:
+The only current mainline strategy-research object is:
 
-1. `Live-safe Foundation`
-2. `Baseline Strategy Module Stabilization`
+`Direction A BTC+ETH Phase 1 observation design`
 
-All other capabilities belong to the future capability pool unless a specific strategy or risk requirement promotes them.
+BTC+ETH Phase 1 is docs-only and observation-methodology focused. It does not
+authorize strategy runtime, paper/testnet/live trading, small-live execution,
+portfolio/router work, SOL Phase 2, CPM reopening, short-side work, parameter
+optimization, or runtime/profile/risk changes.
 
-Only these two active tracks should produce current implementation tasks by default. Other directions should stay in backlog or capability-pool form unless the user explicitly promotes them.
+The active tracks are:
+
+1. `Live-safe Foundation` - preserved as a system safety foundation, but no
+   live/small-live execution is authorized by the current research stage.
+2. `BTC+ETH Phase 1 Observation + Research Methodology Reset` - docs-only
+   consolidation, artifact reconciliation, SRR-002 discipline, and Owner review
+   readiness.
+
+All other capabilities belong to the future capability pool unless the Owner
+explicitly promotes them through a separate decision. Other directions should
+stay in backlog, archive, or future-research-pool form by default.
 
 ### Strategy Candidate Gate Status
 

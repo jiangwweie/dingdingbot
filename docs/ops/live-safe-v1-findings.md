@@ -40,3 +40,11 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
 - Restore/write-through failure must fail closed for new entries with `DAILY_RISK_STATS_UNAVAILABLE`, through the existing `pre_order_check` Decision Trace deny path, while exits/protection handling/shutdown/reconciliation/circuit-breaker rebuild continue.
 - Accepted LS-002b limitation: position projection save and daily stats event/aggregate write are not in one DB transaction; a crash/write window remains for future hardening.
 - LS-003d reconciliation read model persistence intentionally uses dedicated read-only tables instead of startup reconciliation tables because startup reconciliation carries action/resolution semantics. LS-003d remains observational and best-effort; LS-003c block/recovery/repair behavior stays out of scope.
+
+## 2026-05-09
+
+- Current Owner-facing phase is `Observation + Research Methodology Reset`.
+- BTC+ETH Phase 1 Direction A observation design is the only current mainline strategy-research object.
+- SRR-002 is the accepted research methodology baseline for future analysis, but no current module satisfies SRR-002 standards.
+- The local worktree shows one untracked research doc under `docs/ops/`, not 21 visible untracked research docs. The discrepancy should be resolved with the Owner before any submission or grouping action.
+- Mac mini observation logging should remain docs-only/no-order unless separately approved; current required log dimensions are environment state, BTC/ETH signal observations, skipped signals, anomalies, and virtual risk exposure.

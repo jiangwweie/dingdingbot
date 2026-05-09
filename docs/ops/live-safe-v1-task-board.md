@@ -2,6 +2,20 @@
 
 Status values: `TODO`, `SPEC`, `IMPLEMENTING`, `TESTING`, `REVIEW`, `MERGED`, `BLOCKED`, `REJECTED`.
 
+## Current Mainline Confirmation
+
+As of 2026-05-09, the current phase label is `Observation + Research
+Methodology Reset`.
+
+The only current mainline strategy-research object is BTC+ETH Phase 1
+observation design for Direction A. This is docs-only and Owner-review focused.
+It does not authorize strategy runtime, paper/testnet/live trading, small-live
+execution, portfolio/router work, SOL Phase 2, CPM reopening, short-side work,
+parameter optimization, or runtime/profile/risk changes.
+
+SRR-002 is accepted as the guiding methodology for future analysis. Acceptance
+is docs-only and does not itself satisfy SRR-002 standards for any module.
+
 ## Milestones
 
 - `Decision Trace Backbone v0` completed: minimal decision trace backbone added; risk decisions can be written to JSONL without affecting trading behavior on trace failure.

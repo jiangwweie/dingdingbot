@@ -4,6 +4,14 @@
 
 Accepted
 
+2026-05-09 stage note: Live-safe v1 remains accepted as the execution-safety
+foundation, but the current Owner-facing mainline is now `Observation +
+Research Methodology Reset`. BTC+ETH Phase 1 observation design is the only
+current mainline strategy-research object. This note is docs-only and does not
+authorize strategy runtime, paper/testnet/live trading, small-live execution,
+portfolio/router work, SOL Phase 2, CPM reopening, short-side work, parameter
+optimization, or runtime/profile/risk changes.
+
 ## Context
 
 The project has been reset from a broad research and execution history into a focused live-safe replanning phase. The current system is treated as Sim-ready, not live-ready.

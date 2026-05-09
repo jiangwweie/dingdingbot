@@ -1,6 +1,6 @@
 # Live-safe v1 Program
 
-Last updated: 2026-04-29
+Last updated: 2026-05-09
 
 ## Role Of This Document
 
@@ -8,13 +8,26 @@ This document is the execution-layer program document for the current active tra
 
 Use [project-roadmap-v2.md](/Users/jiangwei/Documents/final/docs/ops/project-roadmap-v2.md) as the high-level roadmap and boundary document.
 
-This file should define only the current execution program for `Live-safe Foundation`.
+This file defines the preserved execution-safety foundation for
+`Live-safe Foundation`. As of 2026-05-09, it is no longer the active research
+mainline. The active research-stage label is `Observation + Research
+Methodology Reset`, with BTC+ETH Phase 1 as the only mainline
+strategy-research object.
 
 ## Goal
 
-Move the current Sim-ready system toward full-auto small-live candidate safety.
+Preserve and harden the execution-safety foundation without activating runtime
+trading.
 
-The scope of this program is the current active track `Live-safe Foundation`, not the full long-term platform roadmap.
+The scope of this program is `Live-safe Foundation`, not the full long-term
+platform roadmap. Current work must not start strategy runtime, paper/testnet/
+live trading, small-live execution, portfolio/router work, SOL Phase 2, CPM
+reopening, short-side work, or parameter optimization.
+
+The current Owner-facing stage is docs-only consolidation and observation
+methodology reset. BTC+ETH Phase 1 observation design is the only current
+mainline. Live-safe implementation tasks may remain in the backlog, but they do
+not imply live activation or a deployable strategy candidate.
 
 ## Operating Model
 
@@ -45,6 +58,11 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Do not rewrite the architecture.
 - Do not change live/runtime profile trading parameters.
 - Do not turn investor preference numbers into hard-coded engineering constraints.
+- Do not start any strategy runtime, paper/testnet/live execution, or
+  small-live operation during the current `Observation + Research Methodology
+  Reset` stage.
+- Do not promote SOL Phase 2, CPM, short-side, portfolio/router, or
+  multi-strategy work into current mainline without a separate Owner decision.
 
 ## P0 Scope
 
