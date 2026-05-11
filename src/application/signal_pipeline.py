@@ -56,6 +56,7 @@ class SignalPipeline:
         runtime_mtf_ema_period: Optional[int] = None,
         runtime_execution_strategy: Optional[OrderStrategy] = None,
         runtime_risk_locked: bool = False,
+        strategy_signal_v2_observe_writer: Optional[Any] = None,
     ):
         """
         Initialize Signal Pipeline.
@@ -72,6 +73,7 @@ class SignalPipeline:
             runtime_mtf_ema_period: Optional frozen MTF EMA period
             runtime_execution_strategy: Optional frozen execution OrderStrategy
             runtime_risk_locked: If True, ConfigManager hot reload cannot replace risk_config
+            strategy_signal_v2_observe_writer: Optional observe-only writer for StrategySignalV2 snapshots
         """
         self._config_manager = config_manager
         self._risk_config = risk_config
@@ -82,6 +84,7 @@ class SignalPipeline:
         self._notification_service = notification_service or get_notification_service()
         self._repository = signal_repository
         self._signal_executor = signal_executor
+        self._strategy_signal_v2_observe_writer = strategy_signal_v2_observe_writer
         self._cooldown_seconds = cooldown_seconds
         self._status_tracker = SignalStatusTracker(signal_repository)
 
@@ -553,6 +556,7 @@ class SignalPipeline:
             # This is safe because `_runtime_allowed_directions` is treated as a
             # frozen startup snapshot and is not hot-reloaded during process lifetime.
             self._apply_runtime_direction_policy(kline, attempts)
+            self._write_strategy_signal_v2_observations(kline, attempts)
 
             # Log filter rejection details for analysis
             for attempt in attempts:
@@ -666,6 +670,29 @@ class SignalPipeline:
 
         except Exception as e:
             logger.error(f"Error processing K-line: {e}")
+
+    def _write_strategy_signal_v2_observations(
+        self,
+        kline: KlineData,
+        attempts: List[SignalAttempt],
+    ) -> None:
+        """Write optional observe-only StrategySignalV2 snapshots after runtime filtering."""
+        writer = self._strategy_signal_v2_observe_writer
+        if writer is None:
+            return
+
+        source_context_id = f"{kline.symbol}:{kline.timeframe}:{kline.timestamp}"
+        try:
+            writer.write_observations(
+                kline=kline,
+                attempts=copy.deepcopy(attempts),
+                source_context_id=source_context_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "StrategySignalV2 observe writer failed; continuing signal flow: "
+                f"symbol={kline.symbol}, timeframe={kline.timeframe}, error={e}"
+            )
 
     def _apply_runtime_direction_policy(
         self,
