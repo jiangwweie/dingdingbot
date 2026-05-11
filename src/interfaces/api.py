@@ -257,6 +257,7 @@ _signal_repo: Optional[Any] = None  # Alias for _repository, used by console run
 _audit_logger: Optional[Any] = None  # OrderAuditLogger instance
 _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
 _runtime_config_provider: Optional[Any] = None  # RuntimeConfigProvider instance
+_global_kill_switch_service: Optional[Any] = None  # GlobalKillSwitchService instance
 _startup_reconciliation_summary: Optional[Dict[str, Any]] = None  # Startup reconciliation summary
 
 # Config repositories - stored in shared module to avoid circular imports with api_v1_config.py
@@ -278,6 +279,7 @@ def set_dependencies(
     audit_logger: Optional[Any] = None,
     order_lifecycle_service: Optional[Any] = None,
     runtime_config_provider: Optional[Any] = None,
+    global_kill_switch_service: Optional[Any] = None,
     # Config repositories (unified with api_v1_config.py)
     strategy_repo: Optional[Any] = None,
     risk_repo: Optional[Any] = None,
@@ -310,7 +312,7 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service
     _repository = repository
     _signal_repo = repository  # Alias for console runtime routes
     _account_getter = account_getter
@@ -327,6 +329,7 @@ def set_dependencies(
     _audit_logger = audit_logger
     _order_lifecycle_service = order_lifecycle_service
     _runtime_config_provider = runtime_config_provider
+    _global_kill_switch_service = global_kill_switch_service
     # Config repositories - stored in shared module (avoids circular imports)
     _config_globals._strategy_repo = strategy_repo
     _config_globals._risk_repo = risk_repo
@@ -522,6 +525,7 @@ async def lifespan(app: FastAPI):
 
     global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
     global _capital_protection, _account_service, _execution_orchestrator, _exchange_gateway, _signal_repo
+    global _global_kill_switch_service
     global _execution_recovery_repo, _position_repo, _startup_reconciliation_summary
     _standalone_gateway_created = False  # 标记是否在 lifespan 中创建了 gateway
 
@@ -673,6 +677,7 @@ async def lifespan(app: FastAPI):
             from src.application.capital_protection import CapitalProtectionManager
             from src.application.decision_trace import TraceService
             from src.application.execution_orchestrator import ExecutionOrchestrator
+            from src.application.global_kill_switch import GlobalKillSwitchService
             from src.application.position_projection_service import PositionProjectionService
             from src.application.startup_reconciliation_service import StartupReconciliationService
             from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
@@ -755,6 +760,35 @@ async def lifespan(app: FastAPI):
             async def _orchestrator_notifier_adapter(title: str, message: str) -> None:
                 await _standalone_notifier.send_system_alert(title, message)
 
+            try:
+                from src.infrastructure.core_repository_factory import (
+                    create_runtime_global_kill_switch_repository,
+                )
+
+                _global_kill_switch_service = GlobalKillSwitchService(
+                    repository=create_runtime_global_kill_switch_repository(),
+                    trace_service=_standalone_trace_service,
+                    notifier=_orchestrator_notifier_adapter,
+                )
+                await _global_kill_switch_service.initialize()
+            except Exception as e:
+                logger.critical(
+                    "[GKS-v0][HIGH] Global Kill Switch initialization failed; "
+                    "standalone runtime will use fail-closed process state: %s",
+                    e,
+                    exc_info=True,
+                )
+                _global_kill_switch_service = GlobalKillSwitchService(
+                    repository=None,
+                    trace_service=_standalone_trace_service,
+                    notifier=_orchestrator_notifier_adapter,
+                )
+                await _global_kill_switch_service.set_state(
+                    active=True,
+                    reason="GKS_INIT_FAILED",
+                    updated_by="system",
+                )
+
             # 初始化 ExecutionOrchestrator
             _standalone_orchestrator = ExecutionOrchestrator(
                 capital_protection=_standalone_capital_protection,
@@ -764,6 +798,7 @@ async def lifespan(app: FastAPI):
                 notifier=_orchestrator_notifier_adapter,
                 execution_recovery_repository=_execution_recovery_repo,
                 position_projection_service=PositionProjectionService(_position_repo),
+                global_kill_switch=_global_kill_switch_service,
             )
 
             # 注册订单更新回调
@@ -828,6 +863,7 @@ async def lifespan(app: FastAPI):
             _capital_protection = None
             _account_service = None
             _execution_orchestrator = None
+            _global_kill_switch_service = None
             _startup_reconciliation_summary = None
             logger.info("Standalone execution runtime globals reset to None")
 

@@ -37,6 +37,7 @@ from src.domain.models import (
 )
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.application.capital_protection import CapitalProtectionManager
+from src.application.global_kill_switch import KILL_SWITCH_BLOCK_REASON, GlobalKillSwitchService
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.position_projection_service import PositionProjectionService
 from src.infrastructure.exchange_gateway import ExchangeGateway
@@ -65,6 +66,7 @@ class ExecutionOrchestrator:
         notifier: Optional[Callable[[str, str], Any]] = None,  # P0-6: 可选告警回调
         execution_recovery_repository: Optional[Any] = None,  # PG 正式恢复表
         position_projection_service: Optional[PositionProjectionService] = None,
+        global_kill_switch: Optional[GlobalKillSwitchService] = None,
     ):
         """
         初始化执行编排器
@@ -84,6 +86,7 @@ class ExecutionOrchestrator:
         self._notifier = notifier  # P0-6: 保存告警回调
         self._execution_recovery_repository = execution_recovery_repository  # PG 正式版
         self._position_projection_service = position_projection_service
+        self._global_kill_switch = global_kill_switch
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
@@ -726,6 +729,35 @@ class ExecutionOrchestrator:
             )
 
             return intent
+
+        # GKS-v0：全局 Kill Switch 只阻止新开仓，不影响已有订单/仓位生命周期。
+        if self._global_kill_switch is not None:
+            gks_active = self._global_kill_switch.is_active()
+            self._global_kill_switch.emit_check_trace(
+                intent_id=intent_id,
+                signal=signal,
+                decision="deny" if gks_active else "allow",
+                reason=KILL_SWITCH_BLOCK_REASON if gks_active else None,
+            )
+            if gks_active:
+                state = self._global_kill_switch.get_state()
+                await self._set_intent_status(
+                    intent,
+                    ExecutionIntentStatus.BLOCKED,
+                    blocked_reason=KILL_SWITCH_BLOCK_REASON,
+                    blocked_message=(
+                        "Global Kill Switch active; new entries are blocked. "
+                        f"state_reason={state.reason or 'unspecified'}"
+                    ),
+                )
+
+                logger.warning(
+                    "[ExecutionOrchestrator] GKS-v0 blocked new entry: "
+                    f"intent_id={intent_id}, symbol={signal.symbol}, "
+                    f"state_source={state.source}, updated_at_ms={state.updated_at_ms}"
+                )
+
+                return intent
 
         # 2. CapitalProtection 前置检查
         check_result = await self._capital_protection.pre_order_check(

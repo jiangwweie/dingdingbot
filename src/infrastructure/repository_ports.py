@@ -213,6 +213,38 @@ class DailyRiskStatsRepositoryPort(Protocol):
 
 
 @dataclass(frozen=True)
+class GlobalKillSwitchStateSnapshot:
+    """Persisted global kill switch state."""
+
+    active: bool
+    reason: Optional[str]
+    updated_by: str
+    updated_at_ms: int
+    source: str = "pg"
+
+
+@runtime_checkable
+class GlobalKillSwitchRepositoryPort(Protocol):
+    """PG-backed global kill switch persistence boundary."""
+
+    async def initialize(self) -> None:
+        ...
+
+    async def get_state(self) -> Optional[GlobalKillSwitchStateSnapshot]:
+        ...
+
+    async def set_state(
+        self,
+        *,
+        active: bool,
+        reason: Optional[str],
+        updated_by: str,
+        updated_at_ms: int,
+    ) -> GlobalKillSwitchStateSnapshot:
+        ...
+
+
+@dataclass(frozen=True)
 class ReconciliationReadModelReport:
     """Persisted periodic reconciliation read model report."""
 

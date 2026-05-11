@@ -14,6 +14,7 @@ from src.infrastructure.database import get_core_backend_settings
 from src.infrastructure.order_repository import OrderRepository
 from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
 from src.infrastructure.pg_daily_risk_stats_repository import PgDailyRiskStatsRepository
+from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
 from src.infrastructure.pg_reconciliation_read_model_repository import (
@@ -22,6 +23,7 @@ from src.infrastructure.pg_reconciliation_read_model_repository import (
 from src.infrastructure.repository_ports import (
     DailyRiskStatsRepositoryPort,
     ExecutionIntentRepositoryPort,
+    GlobalKillSwitchRepositoryPort,
     OrderRepositoryPort,
     PositionRepositoryPort,
     ReconciliationReadModelRepositoryPort,
@@ -81,6 +83,11 @@ def create_runtime_position_repository() -> PositionRepositoryPort:
 def create_runtime_daily_risk_stats_repository() -> DailyRiskStatsRepositoryPort:
     """为 runtime daily risk stats 显式创建 PG 仓储。"""
     return PgDailyRiskStatsRepository()
+
+
+def create_runtime_global_kill_switch_repository() -> GlobalKillSwitchRepositoryPort:
+    """为 runtime Global Kill Switch 显式创建 PG 仓储。"""
+    return PgGlobalKillSwitchRepository()
 
 
 def create_runtime_reconciliation_read_model_repository() -> ReconciliationReadModelRepositoryPort:

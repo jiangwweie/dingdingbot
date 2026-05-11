@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
-from typing import Optional
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
 
 from src.application.readmodels.console_models import (
     ConsoleAttemptsResponse,
@@ -27,10 +28,60 @@ from src.application.readmodels.runtime_signals import RuntimeSignalsReadModel
 router = APIRouter(prefix="/api/runtime", tags=["Console Runtime"])
 
 
+class GlobalKillSwitchResponse(BaseModel):
+    active: bool
+    reason: Optional[str] = None
+    updated_by: str
+    updated_at_ms: int
+    source: str
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Local/internal runtime control only. This endpoint is not a public "
+        "internet control plane."
+    )
+    v0_missing_row_policy: str = "PG row missing is treated as OFF in v0 only."
+
+
+class GlobalKillSwitchToggleRequest(BaseModel):
+    active: bool = Field(..., description="True blocks all new entries")
+    reason: Optional[str] = Field(default=None, max_length=512)
+    updated_by: str = Field(default="owner", max_length=128)
+
+
 def _load_api_module():
     from src.interfaces import api as api_module
 
     return api_module
+
+
+def _require_internal_runtime_control(request: Request) -> None:
+    host = request.client.host if request.client else ""
+    if host in {"127.0.0.1", "::1", "localhost", "testclient"}:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Global Kill Switch control is restricted to local/internal runtime "
+            "access. It must not be exposed as a public control plane."
+        ),
+    )
+
+
+def _get_global_kill_switch_service(api_module):
+    service = getattr(api_module, "_global_kill_switch_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="Global Kill Switch service not initialized")
+    return service
+
+
+def _to_global_kill_switch_response(state) -> GlobalKillSwitchResponse:
+    return GlobalKillSwitchResponse(
+        active=state.active,
+        reason=state.reason,
+        updated_by=state.updated_by,
+        updated_at_ms=state.updated_at_ms,
+        source=state.source,
+    )
 
 
 def _get_account_snapshot(api_module):
@@ -90,6 +141,38 @@ async def get_runtime_health() -> RuntimeHealthResponse:
         startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
         account_snapshot=account_snapshot,
     )
+
+
+@router.get("/control/global-kill-switch", response_model=GlobalKillSwitchResponse)
+async def get_global_kill_switch(request: Request) -> GlobalKillSwitchResponse:
+    """Read GKS-v0 state. Local/internal runtime control surface only."""
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    service = _get_global_kill_switch_service(api_module)
+    return _to_global_kill_switch_response(service.get_state())
+
+
+@router.post("/control/global-kill-switch", response_model=GlobalKillSwitchResponse)
+async def toggle_global_kill_switch(
+    request: Request,
+    body: GlobalKillSwitchToggleRequest,
+) -> GlobalKillSwitchResponse:
+    """Toggle GKS-v0. Local/internal runtime control surface only."""
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    service = _get_global_kill_switch_service(api_module)
+    try:
+        state = await service.set_state(
+            active=body.active,
+            reason=body.reason,
+            updated_by=body.updated_by,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Global Kill Switch persistence failed: {exc}",
+        ) from exc
+    return _to_global_kill_switch_response(state)
 
 
 # ============================================================

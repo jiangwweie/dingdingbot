@@ -321,6 +321,23 @@ class PGDailyRiskStatsEventORM(PGCoreBase):
     )
 
 
+class PGGlobalKillSwitchStateORM(PGCoreBase):
+    """Single-row global kill switch state for stopping new entries."""
+
+    __tablename__ = "global_kill_switch_state"
+
+    state_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(128), nullable=False, default="system")
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint("state_key = 'global'", name="ck_global_kill_switch_state_key"),
+        Index("idx_global_kill_switch_updated_at", "updated_at_ms"),
+    )
+
+
 class PGSignalORM(PGCoreBase):
     """PG 版 live signal 表。"""
 

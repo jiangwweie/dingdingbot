@@ -38,6 +38,7 @@ from src.application.capital_protection import (
 )
 from src.application.decision_trace import TraceService
 from src.application.execution_orchestrator import ExecutionOrchestrator
+from src.application.global_kill_switch import GlobalKillSwitchService
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.periodic_reconciliation import run_periodic_reconciliation
 from src.application.position_projection_service import PositionProjectionService
@@ -46,6 +47,7 @@ from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.notifier import NotificationService, get_notification_service
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
+    create_runtime_global_kill_switch_repository,
     create_runtime_daily_risk_stats_repository,
     create_runtime_order_repository,
     create_runtime_position_repository,
@@ -77,6 +79,7 @@ _execution_orchestrator: Optional[ExecutionOrchestrator] = None
 _execution_recovery_repo = None  # PG 正式版
 _runtime_config_provider: Optional[RuntimeConfigProvider] = None
 _trace_service: Optional[TraceService] = None
+_global_kill_switch_service: Optional[GlobalKillSwitchService] = None
 _reconciliation_read_model_repo = None
 _order_watch_tasks: List[asyncio.Task] = []
 _periodic_reconciliation_task: Optional[asyncio.Task] = None
@@ -411,7 +414,7 @@ async def run_application():
     """
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
-    global _capital_protection, _execution_orchestrator, _trace_service
+    global _capital_protection, _execution_orchestrator, _trace_service, _global_kill_switch_service
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
     global _snapshot_update_task, _ws_task, _api_task
 
@@ -652,6 +655,32 @@ async def run_application():
             """复用现有 notification service 发送飞书告警"""
             await _notification_service.send_system_alert(title, message)
 
+        try:
+            global_kill_switch_repo = create_runtime_global_kill_switch_repository()
+            _global_kill_switch_service = GlobalKillSwitchService(
+                repository=global_kill_switch_repo,
+                trace_service=_trace_service,
+                notifier=_orchestrator_notifier_adapter,
+            )
+            await _global_kill_switch_service.initialize()
+        except Exception as e:
+            logger.critical(
+                "[GKS-v0][HIGH] Global Kill Switch initialization failed; "
+                "runtime will use fail-closed process state: %s",
+                e,
+                exc_info=True,
+            )
+            _global_kill_switch_service = GlobalKillSwitchService(
+                repository=None,
+                trace_service=_trace_service,
+                notifier=_orchestrator_notifier_adapter,
+            )
+            await _global_kill_switch_service.set_state(
+                active=True,
+                reason="GKS_INIT_FAILED",
+                updated_by="system",
+            )
+
         _execution_orchestrator = ExecutionOrchestrator(
             capital_protection=_capital_protection,
             order_lifecycle=_order_lifecycle_service,
@@ -660,6 +689,7 @@ async def run_application():
             notifier=_orchestrator_notifier_adapter,  # P0-6: 注入告警回调
             execution_recovery_repository=_execution_recovery_repo,  # PG 正式版
             position_projection_service=PositionProjectionService(_position_repo),
+            global_kill_switch=_global_kill_switch_service,
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
         logger.info("Core execution runtime ready")
@@ -1022,6 +1052,7 @@ async def run_application():
             execution_recovery_repo=_execution_recovery_repo,
             position_repo=_position_repo,
             order_lifecycle_service=_order_lifecycle_service,
+            global_kill_switch_service=_global_kill_switch_service,
             # Config repositories (unified with api_v1_config.py)
             strategy_repo=_api_strategy_repo,
             risk_repo=_api_risk_repo,
@@ -1114,6 +1145,8 @@ async def run_application():
         if _exchange_gateway:
             await _exchange_gateway.close()
             _exchange_gateway = None
+
+        _global_kill_switch_service = None
 
         # Close ConfigEntryRepository
         if _config_entry_repo:
