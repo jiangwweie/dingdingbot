@@ -56,11 +56,16 @@ from src.infrastructure.core_repository_factory import (
 )
 from src.infrastructure.runtime_profile_repository import RuntimeProfileRepository
 from src.application.signal_pipeline import SignalPipeline
+from src.application.strategy_signal_v2_observe_writer import PatternStrategySignalObserveWriter
 from src.domain.risk_calculator import RiskConfig
 from src.domain.models import KlineData
 from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, ConnectionLostError
 from src.infrastructure.logger import logger, setup_logger, register_secret
 from src.infrastructure.database import close_db, validate_pg_core_configuration
+from src.infrastructure.strategy_signal_v2_observe_sink import (
+    DEFAULT_STRATEGY_SIGNAL_V2_OBSERVE_PATH,
+    StrategySignalV2ObserveSink,
+)
 
 
 # ============================================================
@@ -106,6 +111,34 @@ async def _noop_order_watch_callback(_order: object) -> None:
 def _dedupe_runtime_symbols(symbols: List[str]) -> List[str]:
     """Preserve order while removing duplicate symbols for order watch startup."""
     return list(dict.fromkeys(symbols))
+
+
+def _build_strategy_signal_v2_observe_writer(env: Optional[dict] = None):
+    """Build optional StrategySignalV2 observe writer from local ops env flags."""
+    if env is None:
+        env = os.environ
+    enabled = env.get("STRATEGY_SIGNAL_V2_OBSERVE_ENABLED", "").strip().lower() == "true"
+    if not enabled:
+        logger.info("StrategySignalV2 observe disabled")
+        return None
+
+    observe_path = env.get(
+        "STRATEGY_SIGNAL_V2_OBSERVE_PATH",
+        DEFAULT_STRATEGY_SIGNAL_V2_OBSERVE_PATH,
+    )
+    try:
+        sink = StrategySignalV2ObserveSink(observe_path)
+        writer = PatternStrategySignalObserveWriter(sink=sink)
+    except Exception as e:
+        logger.warning(
+            "StrategySignalV2 observe init failed; observe disabled: "
+            f"path={observe_path}, error={e}",
+            exc_info=True,
+        )
+        return None
+
+    logger.info("StrategySignalV2 observe enabled: path=%s", observe_path)
+    return writer
 
 
 async def _run_order_watch(symbol: str) -> None:
@@ -825,6 +858,7 @@ async def run_application():
                 f"max_leverage={risk_config.max_leverage}, "
                 f"max_total_exposure={risk_config.max_total_exposure}"
             )
+        strategy_signal_v2_observe_writer = _build_strategy_signal_v2_observe_writer()
         global _signal_pipeline
         _signal_pipeline = SignalPipeline(
             config_manager=config_manager,
@@ -838,6 +872,7 @@ async def run_application():
             runtime_mtf_ema_period=runtime_mtf_ema_period,
             runtime_execution_strategy=runtime_execution_strategy,
             runtime_risk_locked=runtime_risk_locked,
+            strategy_signal_v2_observe_writer=strategy_signal_v2_observe_writer,
         )
         logger.info("Signal pipeline ready")
 
