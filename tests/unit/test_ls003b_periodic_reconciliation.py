@@ -73,6 +73,14 @@ class _SlowService:
         return _Result(symbol=_symbol, checked_at=123)
 
 
+class _FakeProtectionHealthMonitor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def handle_read_model_result(self, result: _Result, *, source: str) -> None:
+        self.calls.append((result.symbol, source))
+
+
 @pytest.mark.asyncio
 async def test_loop_calls_build_read_model_after_startup_delay():
     shutdown_event = asyncio.Event()
@@ -112,6 +120,27 @@ async def test_loop_calls_each_symbol_once_per_cycle():
     )
 
     assert service.calls == ["ETH/USDT:USDT", "BTC/USDT:USDT"]
+
+
+@pytest.mark.asyncio
+async def test_loop_passes_read_model_to_protection_health_monitor():
+    shutdown_event = asyncio.Event()
+    service = _FakeReconciliationService(shutdown_event, stop_after_calls=1)
+    monitor = _FakeProtectionHealthMonitor()
+
+    await asyncio.wait_for(
+        run_periodic_reconciliation(
+            service,
+            ["ETH/USDT:USDT"],
+            shutdown_event,
+            protection_health_monitor=monitor,
+            startup_delay_seconds=0,
+            interval_seconds=60,
+        ),
+        timeout=1,
+    )
+
+    assert monitor.calls == [("ETH/USDT:USDT", "periodic")]
 
 
 @pytest.mark.asyncio

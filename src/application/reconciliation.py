@@ -47,6 +47,12 @@ from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
 from src.infrastructure.reconciliation_repository import ReconciliationRepository
 from src.application.reconciliation_lock import ReconciliationLock, ReconciliationLockError
+from src.application.protection_health_monitor import (
+    PROTECTION_EXCHANGE_POSITION_UNTRACKED,
+    PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE,
+    PROTECTION_MISSING_EXCHANGE_SL,
+    PROTECTION_ORPHAN_REDUCE_ONLY_ORDER,
+)
 
 
 class PendingPositionItem(Dict[str, Any]):
@@ -90,7 +96,7 @@ class ReconciliationReadModelResult:
 
     @property
     def severe_count(self) -> int:
-        return sum(1 for item in self.mismatches if item.severity == "SEVERE")
+        return sum(1 for item in self.mismatches if item.severity in {"SEVERE", "CRITICAL"})
 
     @property
     def warning_count(self) -> int:
@@ -220,6 +226,15 @@ class ReconciliationService:
                 symbol,
                 local_positions,
                 local_orders,
+            )
+        )
+        mismatches.extend(
+            self._check_exchange_native_protection_for_read_model(
+                symbol,
+                local_positions,
+                exchange_positions,
+                local_orders,
+                exchange_orders,
             )
         )
 
@@ -1027,6 +1042,194 @@ class ReconciliationService:
 
         return mismatches
 
+    def _check_exchange_native_protection_for_read_model(
+        self,
+        symbol: str,
+        local_positions: List[PositionInfo],
+        exchange_positions: List[PositionInfo],
+        local_orders: List[OrderResponse],
+        exchange_orders: List[OrderResponse],
+    ) -> List[ReconciliationMismatch]:
+        """Detect critical exchange-native protection gaps without mutating state."""
+        mismatches: List[ReconciliationMismatch] = []
+        local_qty = sum((pos.size for pos in local_positions), Decimal("0"))
+        exchange_qty = sum((pos.size for pos in exchange_positions), Decimal("0"))
+        local_position = local_positions[0] if local_positions else None
+        exchange_position = exchange_positions[0] if exchange_positions else None
+
+        exchange_native_sl_orders = [
+            order for order in exchange_orders if self._is_exchange_native_sl_order(order)
+        ]
+        reduce_only_exit_orders = [
+            order for order in exchange_orders if self._is_reduce_only_exit_order(order)
+        ]
+        local_sl_orders = [
+            order for order in local_orders
+            if order.symbol == symbol and order.order_role == OrderRole.SL
+        ]
+
+        if local_qty > 0 and exchange_qty > 0 and not exchange_native_sl_orders:
+            mismatches.append(
+                self._protection_mismatch(
+                    symbol=symbol,
+                    mismatch_type="protection_missing_exchange_sl",
+                    reason_code=PROTECTION_MISSING_EXCHANGE_SL,
+                    local_ref=symbol,
+                    exchange_ref=symbol,
+                    local_position=local_position,
+                    exchange_position=exchange_position,
+                    reason="Local and exchange positions exist but no exchange-native reduce-only SL was found.",
+                    manual_recovery="Verify position exposure and mount or restore exchange-native SL before clearing the block.",
+                )
+            )
+
+        if exchange_qty > 0 and local_qty == 0:
+            mismatches.append(
+                self._protection_mismatch(
+                    symbol=symbol,
+                    mismatch_type="protection_exchange_position_untracked",
+                    reason_code=PROTECTION_EXCHANGE_POSITION_UNTRACKED,
+                    local_ref=None,
+                    exchange_ref=symbol,
+                    exchange_position=exchange_position,
+                    reason="Exchange active position exists but local runtime has no active position.",
+                    manual_recovery="Import or reconcile the exchange position into local state, or manually resolve exposure before clearing the block.",
+                )
+            )
+
+        for local_sl in local_sl_orders:
+            matching_exchange_sl = self._find_matching_exchange_protection_order(
+                local_sl,
+                exchange_native_sl_orders,
+            )
+            if matching_exchange_sl is None:
+                mismatches.append(
+                    self._protection_mismatch(
+                        symbol=symbol,
+                        mismatch_type="protection_local_sl_missing_on_exchange",
+                        reason_code=PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE,
+                        local_ref=local_sl.order_id,
+                        exchange_ref=local_sl.exchange_order_id,
+                        local_position=local_position,
+                        exchange_position=exchange_position,
+                        local_order=local_sl,
+                        reason="Local active SL record was not found in exchange open orders.",
+                        manual_recovery="Verify local SL record and exchange open orders; remount or reconcile manually before clearing the block.",
+                    )
+                )
+
+        for exchange_order in reduce_only_exit_orders:
+            matching_local_order = self._find_matching_local_order(exchange_order, local_orders)
+            if local_qty == 0 or matching_local_order is None:
+                mismatches.append(
+                    self._protection_mismatch(
+                        symbol=symbol,
+                        mismatch_type="protection_orphan_reduce_only_order",
+                        reason_code=PROTECTION_ORPHAN_REDUCE_ONLY_ORDER,
+                        local_ref=matching_local_order.order_id if matching_local_order else None,
+                        exchange_ref=exchange_order.exchange_order_id or exchange_order.order_id,
+                        local_position=local_position,
+                        exchange_position=exchange_position,
+                        local_order=matching_local_order,
+                        exchange_order=exchange_order,
+                        reason="Exchange reduce-only SL/TP order has no matching local active position or order chain.",
+                        manual_recovery="Inspect the reduce-only order and local order chain; cancel or reconcile manually before clearing the block.",
+                    )
+                )
+
+        return mismatches
+
+    def _protection_mismatch(
+        self,
+        *,
+        symbol: str,
+        mismatch_type: str,
+        reason_code: str,
+        reason: str,
+        local_ref: Optional[str],
+        exchange_ref: Optional[str],
+        manual_recovery: str,
+        local_position: Optional[PositionInfo] = None,
+        exchange_position: Optional[PositionInfo] = None,
+        local_order: Optional[OrderResponse] = None,
+        exchange_order: Optional[OrderResponse] = None,
+    ) -> ReconciliationMismatch:
+        metadata: Dict[str, Any] = {
+            "protection_reason_code": reason_code,
+            "manual_recovery": manual_recovery,
+            "local_position_id": local_ref if local_position is not None else None,
+            "exchange_position_qty": str(exchange_position.size) if exchange_position is not None else None,
+            "position_side": getattr(exchange_position or local_position, "side", None),
+            "local_order_id": local_order.order_id if local_order is not None else local_ref,
+            "exchange_order_id": (
+                (exchange_order.exchange_order_id or exchange_order.order_id)
+                if exchange_order is not None
+                else exchange_ref
+            ),
+            "reduce_only": exchange_order.reduce_only if exchange_order is not None else None,
+            "order_role": local_order.order_role.value if local_order is not None else None,
+            "exchange_order_type": exchange_order.order_type.value if exchange_order is not None else None,
+        }
+        return ReconciliationMismatch(
+            symbol=symbol,
+            mismatch_type=mismatch_type,
+            severity="CRITICAL",
+            reason=reason_code,
+            local_ref=local_ref,
+            exchange_ref=exchange_ref,
+            metadata={key: value for key, value in metadata.items() if value is not None},
+        )
+
+    def _is_exchange_native_sl_order(self, order: OrderResponse) -> bool:
+        if not order.reduce_only:
+            return False
+        if order.order_role == OrderRole.SL:
+            return True
+        if order.order_type in {OrderType.STOP_MARKET, OrderType.STOP_LIMIT, OrderType.TRAILING_STOP}:
+            return True
+        return order.trigger_price is not None
+
+    def _is_reduce_only_exit_order(self, order: OrderResponse) -> bool:
+        """Return True for exchange orders that may be exit protection.
+
+        This is intentionally conservative for protection-health detection:
+        role-marked TP/SL orders are treated as exit protection even if an
+        adapter failed to expose reduceOnly. The monitor only blocks new
+        entries and does not mutate or cancel the order.
+        """
+        return order.reduce_only or order.order_role in {
+            OrderRole.SL,
+            OrderRole.TP1,
+            OrderRole.TP2,
+            OrderRole.TP3,
+            OrderRole.TP4,
+            OrderRole.TP5,
+        }
+
+    def _find_matching_exchange_protection_order(
+        self,
+        local_order: OrderResponse,
+        exchange_orders: List[OrderResponse],
+    ) -> Optional[OrderResponse]:
+        local_refs = {local_order.exchange_order_id, local_order.order_id} - {None, ""}
+        for exchange_order in exchange_orders:
+            exchange_refs = {exchange_order.exchange_order_id, exchange_order.order_id} - {None, ""}
+            if local_refs & exchange_refs:
+                return exchange_order
+        return None
+
+    def _find_matching_local_order(
+        self,
+        exchange_order: OrderResponse,
+        local_orders: List[OrderResponse],
+    ) -> Optional[OrderResponse]:
+        exchange_refs = {exchange_order.exchange_order_id, exchange_order.order_id} - {None, ""}
+        for local_order in local_orders:
+            local_refs = {local_order.exchange_order_id, local_order.order_id} - {None, ""}
+            if local_refs & exchange_refs:
+                return local_order
+        return None
+
     def _compare_orders_for_read_model(
         self,
         symbol: str,
@@ -1391,13 +1594,13 @@ class ReconciliationService:
             status = self._map_exchange_status(order.get('status', 'open'))
 
             # 映射订单类型
-            ccxt_type = order.get('type', 'limit')
+            ccxt_type = str(order.get('type', 'limit')).lower()
             order_type = OrderType.LIMIT
             if ccxt_type == 'market':
                 order_type = OrderType.MARKET
-            elif ccxt_type == 'stop':
+            elif ccxt_type in {'stop', 'stop_market', 'stop market', 'stop_loss', 'stop_loss_market'}:
                 order_type = OrderType.STOP_MARKET
-            elif ccxt_type == 'stop limit':
+            elif ccxt_type in {'stop limit', 'stop_limit', 'stop_loss_limit'}:
                 order_type = OrderType.STOP_LIMIT
 
             # 映射方向
@@ -1410,6 +1613,12 @@ class ReconciliationService:
             if reduce_only:
                 # 根据方向判断是 TP 还是 SL
                 order_role = OrderRole.TP1  # 默认止盈
+                if (
+                    order_type in {OrderType.STOP_MARKET, OrderType.STOP_LIMIT}
+                    or order.get('triggerPrice')
+                    or order.get('stopPrice')
+                ):
+                    order_role = OrderRole.SL
 
             return OrderResponse(
                 order_id=order.get('id', ''),
@@ -1422,7 +1631,11 @@ class ReconciliationService:
                 amount=Decimal(str(order['amount'])) if order.get('amount') else Decimal('0'),
                 filled_amount=Decimal(str(order['filled'])) if order.get('filled') else Decimal('0'),
                 price=Decimal(str(order['price'])) if order.get('price') else None,
-                trigger_price=Decimal(str(order.get('triggerPrice'))) if order.get('triggerPrice') else None,
+                trigger_price=(
+                    Decimal(str(order.get('triggerPrice') or order.get('stopPrice')))
+                    if (order.get('triggerPrice') or order.get('stopPrice'))
+                    else None
+                ),
                 average_exec_price=Decimal(str(order['average'])) if order.get('average') else None,
                 reduce_only=reduce_only,
                 created_at=int(order.get('timestamp', time.time() * 1000)),

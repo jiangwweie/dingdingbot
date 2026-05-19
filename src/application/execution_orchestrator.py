@@ -39,7 +39,12 @@ from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.application.capital_protection import CapitalProtectionManager
 from src.application.global_kill_switch import KILL_SWITCH_BLOCK_REASON, GlobalKillSwitchService
 from src.application.order_lifecycle_service import OrderLifecycleService
+from src.application.protection_health_monitor import PROTECTION_HEALTH_REASON_CODES
 from src.application.position_projection_service import PositionProjectionService
+from src.application.startup_trading_guard import (
+    STARTUP_TRADING_GUARD_BLOCK_REASON,
+    StartupTradingGuardService,
+)
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
 from src.infrastructure.repository_ports import ExecutionIntentRepositoryPort
@@ -67,6 +72,7 @@ class ExecutionOrchestrator:
         execution_recovery_repository: Optional[Any] = None,  # PG 正式恢复表
         position_projection_service: Optional[PositionProjectionService] = None,
         global_kill_switch: Optional[GlobalKillSwitchService] = None,
+        startup_trading_guard: Optional[StartupTradingGuardService] = None,
     ):
         """
         初始化执行编排器
@@ -87,6 +93,7 @@ class ExecutionOrchestrator:
         self._execution_recovery_repository = execution_recovery_repository  # PG 正式版
         self._position_projection_service = position_projection_service
         self._global_kill_switch = global_kill_switch
+        self._startup_trading_guard = startup_trading_guard
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
@@ -94,6 +101,7 @@ class ExecutionOrchestrator:
 
         # P0-2：熔断机制（内存缓存，由 PG recovery tasks 重建）
         self._circuit_breaker_symbols: set = set()  # 熔断的 symbol 集合
+        self._protection_health_blocks: Dict[str, Dict[str, Any]] = {}
 
         # MVP-Protected-Position-Step2: 注册 ENTRY 部分成交回调
         self._order_lifecycle.set_entry_partially_filled_callback(
@@ -714,21 +722,38 @@ class ExecutionOrchestrator:
             f"intent_id={intent_id}, symbol={signal.symbol}, direction={signal.direction}"
         )
 
-        # P0-3：熔断检查（在 CapitalProtection 前置检查前）
-        if self.is_symbol_blocked(signal.symbol):
-            await self._set_intent_status(
-                intent,
-                ExecutionIntentStatus.BLOCKED,
-                blocked_reason="CIRCUIT_BREAKER",
-                blocked_message=f"symbol 熔断中，拒绝新信号: {signal.symbol}",
+        # Startup guard: process restarts must not resume new entries until
+        # an operator explicitly arms this runtime.
+        if self._startup_trading_guard is not None:
+            guard_armed = self._startup_trading_guard.is_armed()
+            guard_reason = (
+                None if guard_armed else self._startup_trading_guard.get_block_reason()
             )
-
-            logger.warning(
-                f"[ExecutionOrchestrator] 信号被熔断拦截: "
-                f"intent_id={intent_id}, symbol={signal.symbol}"
+            self._startup_trading_guard.emit_check_trace(
+                intent_id=intent_id,
+                signal=signal,
+                decision="allow" if guard_armed else "deny",
+                reason=guard_reason,
             )
+            if not guard_armed:
+                state = self._startup_trading_guard.get_state()
+                await self._set_intent_status(
+                    intent,
+                    ExecutionIntentStatus.BLOCKED,
+                    blocked_reason=STARTUP_TRADING_GUARD_BLOCK_REASON,
+                    blocked_message=(
+                        "Startup trading guard is not armed; new entries are blocked. "
+                        f"state_reason={state.reason or 'unspecified'}"
+                    ),
+                )
 
-            return intent
+                logger.warning(
+                    "[ExecutionOrchestrator] Startup guard blocked new entry: "
+                    f"intent_id={intent_id}, symbol={signal.symbol}, "
+                    f"state_source={state.source}, updated_at_ms={state.updated_at_ms}"
+                )
+
+                return intent
 
         # GKS-v0：全局 Kill Switch 只阻止新开仓，不影响已有订单/仓位生命周期。
         if self._global_kill_switch is not None:
@@ -758,6 +783,42 @@ class ExecutionOrchestrator:
                 )
 
                 return intent
+
+        # P0-3：熔断检查（在 CapitalProtection 前置检查前）
+        protection_health_block = self._protection_health_blocks.get(signal.symbol)
+        if protection_health_block:
+            reason_code = protection_health_block.get("reason_code") or "PROTECTION_HEALTH_BLOCK"
+            await self._set_intent_status(
+                intent,
+                ExecutionIntentStatus.BLOCKED,
+                blocked_reason=reason_code,
+                blocked_message=(
+                    "Protection health block active; new entries are blocked. "
+                    f"symbol={signal.symbol}, reason={reason_code}"
+                ),
+            )
+
+            logger.warning(
+                "[ExecutionOrchestrator] Protection health blocked new entry: "
+                f"intent_id={intent_id}, symbol={signal.symbol}, reason={reason_code}"
+            )
+
+            return intent
+
+        if self.is_symbol_blocked(signal.symbol):
+            await self._set_intent_status(
+                intent,
+                ExecutionIntentStatus.BLOCKED,
+                blocked_reason="CIRCUIT_BREAKER",
+                blocked_message=f"symbol 熔断中，拒绝新信号: {signal.symbol}",
+            )
+
+            logger.warning(
+                f"[ExecutionOrchestrator] 信号被熔断拦截: "
+                f"intent_id={intent_id}, symbol={signal.symbol}"
+            )
+
+            return intent
 
         # 2. CapitalProtection 前置检查
         check_result = await self._capital_protection.pre_order_check(
@@ -1700,6 +1761,47 @@ class ExecutionOrchestrator:
             True 表示被熔断，False 表示正常
         """
         return symbol in self._circuit_breaker_symbols
+
+    def block_symbol_for_protection_health(
+        self,
+        symbol: str,
+        reason_code: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Block new entries for a symbol due to critical protection-health state."""
+        if reason_code not in PROTECTION_HEALTH_REASON_CODES:
+            logger.warning(
+                "[ExecutionOrchestrator] Unknown protection health reason code: symbol=%s, reason=%s",
+                symbol,
+                reason_code,
+            )
+        self._protection_health_blocks[symbol] = {
+            "symbol": symbol,
+            "reason_code": reason_code,
+            "metadata": dict(metadata or {}),
+            "blocked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        logger.error(
+            "[ExecutionOrchestrator] Protection health block set: symbol=%s, reason=%s, metadata=%s",
+            symbol,
+            reason_code,
+            metadata or {},
+        )
+
+    def list_protection_health_blocks(self) -> Dict[str, Dict[str, Any]]:
+        """Return active protection-health new-entry blocks."""
+        return {
+            symbol: dict(block)
+            for symbol, block in sorted(self._protection_health_blocks.items())
+        }
+
+    def clear_protection_health_block(self, symbol: str) -> None:
+        """Manually clear a protection-health block after operator recovery."""
+        self._protection_health_blocks.pop(symbol, None)
+        logger.warning(
+            "[ExecutionOrchestrator] Protection health block cleared manually: symbol=%s",
+            symbol,
+        )
 
     async def rebuild_circuit_breakers_from_recovery_tasks(self) -> int:
         """

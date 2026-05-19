@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
@@ -27,6 +29,8 @@ from src.application.readmodels.runtime_signals import RuntimeSignalsReadModel
 
 router = APIRouter(prefix="/api/runtime", tags=["Console Runtime"])
 
+RUNTIME_CONTROL_API_ENABLED_ENV = "RUNTIME_CONTROL_API_ENABLED"
+
 
 class GlobalKillSwitchResponse(BaseModel):
     active: bool
@@ -39,11 +43,29 @@ class GlobalKillSwitchResponse(BaseModel):
         "Local/internal runtime control only. This endpoint is not a public "
         "internet control plane."
     )
-    v0_missing_row_policy: str = "PG row missing is treated as OFF in v0 only."
+    missing_row_policy: str = "PG row missing blocks new entries fail-closed."
 
 
 class GlobalKillSwitchToggleRequest(BaseModel):
     active: bool = Field(..., description="True blocks all new entries")
+    reason: Optional[str] = Field(default=None, max_length=512)
+    updated_by: str = Field(default="owner", max_length=128)
+
+
+class StartupTradingGuardResponse(BaseModel):
+    armed: bool
+    reason: Optional[str] = None
+    updated_by: str
+    updated_at_ms: int
+    source: str
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Local/internal runtime control only. This endpoint is not a public "
+        "internet control plane."
+    )
+
+
+class StartupTradingGuardArmRequest(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=512)
     updated_by: str = Field(default="owner", max_length=128)
 
@@ -61,8 +83,29 @@ def _require_internal_runtime_control(request: Request) -> None:
     raise HTTPException(
         status_code=403,
         detail=(
-            "Global Kill Switch control is restricted to local/internal runtime "
+            "Runtime control is restricted to local/internal runtime "
             "access. It must not be exposed as a public control plane."
+        ),
+    )
+
+
+def _runtime_control_api_enabled() -> bool:
+    return os.getenv(RUNTIME_CONTROL_API_ENABLED_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _require_runtime_control_api_enabled() -> None:
+    if _runtime_control_api_enabled():
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Runtime control API mutation is disabled. Set "
+            f"{RUNTIME_CONTROL_API_ENABLED_ENV}=true to allow this local control action."
         ),
     )
 
@@ -74,9 +117,26 @@ def _get_global_kill_switch_service(api_module):
     return service
 
 
+def _get_startup_trading_guard_service(api_module):
+    service = getattr(api_module, "_startup_trading_guard_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="Startup trading guard service not initialized")
+    return service
+
+
 def _to_global_kill_switch_response(state) -> GlobalKillSwitchResponse:
     return GlobalKillSwitchResponse(
         active=state.active,
+        reason=state.reason,
+        updated_by=state.updated_by,
+        updated_at_ms=state.updated_at_ms,
+        source=state.source,
+    )
+
+
+def _to_startup_trading_guard_response(state) -> StartupTradingGuardResponse:
+    return StartupTradingGuardResponse(
+        armed=state.armed,
         reason=state.reason,
         updated_by=state.updated_by,
         updated_at_ms=state.updated_at_ms,
@@ -159,6 +219,7 @@ async def toggle_global_kill_switch(
 ) -> GlobalKillSwitchResponse:
     """Toggle GKS-v0. Local/internal runtime control surface only."""
     _require_internal_runtime_control(request)
+    _require_runtime_control_api_enabled()
     api_module = _load_api_module()
     service = _get_global_kill_switch_service(api_module)
     try:
@@ -173,6 +234,29 @@ async def toggle_global_kill_switch(
             detail=f"Global Kill Switch persistence failed: {exc}",
         ) from exc
     return _to_global_kill_switch_response(state)
+
+
+@router.get("/control/startup-trading-guard", response_model=StartupTradingGuardResponse)
+async def get_startup_trading_guard(request: Request) -> StartupTradingGuardResponse:
+    """Read startup trading guard state. Local/internal runtime control surface only."""
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    service = _get_startup_trading_guard_service(api_module)
+    return _to_startup_trading_guard_response(service.get_state())
+
+
+@router.post("/control/startup-trading-guard/arm", response_model=StartupTradingGuardResponse)
+async def arm_startup_trading_guard(
+    request: Request,
+    body: StartupTradingGuardArmRequest,
+) -> StartupTradingGuardResponse:
+    """Manually arm startup trading guard after operator startup checks."""
+    _require_internal_runtime_control(request)
+    _require_runtime_control_api_enabled()
+    api_module = _load_api_module()
+    service = _get_startup_trading_guard_service(api_module)
+    state = service.manual_arm(reason=body.reason, updated_by=body.updated_by)
+    return _to_startup_trading_guard_response(state)
 
 
 # ============================================================

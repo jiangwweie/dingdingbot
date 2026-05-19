@@ -5,6 +5,12 @@ from decimal import Decimal
 import pytest
 
 from src.application.reconciliation import ReconciliationService
+from src.application.protection_health_monitor import (
+    PROTECTION_EXCHANGE_POSITION_UNTRACKED,
+    PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE,
+    PROTECTION_MISSING_EXCHANGE_SL,
+    PROTECTION_ORPHAN_REDUCE_ONLY_ORDER,
+)
 from src.domain.models import (
     Direction,
     Order,
@@ -124,19 +130,31 @@ def _order(
     )
 
 
-def _exchange_order(order_id: str, *, amount: str = "1", reduce_only: bool = True):
+def _exchange_order(
+    order_id: str,
+    *,
+    amount: str = "1",
+    reduce_only: bool = True,
+    order_type: str = "limit",
+    trigger_price: str | None = None,
+):
     return {
         "id": order_id,
         "symbol": SYMBOL,
         "status": "open",
-        "type": "limit",
+        "type": order_type,
         "side": "sell",
         "amount": amount,
         "filled": "0",
         "price": "120",
+        **({"triggerPrice": trigger_price} if trigger_price is not None else {}),
         "reduceOnly": reduce_only,
         "timestamp": 1,
     }
+
+
+def _exchange_sl(order_id: str = "ex-sl"):
+    return _exchange_order(order_id, order_type="stop", trigger_price="90")
 
 
 def _service(
@@ -237,7 +255,7 @@ async def test_active_position_with_sl_but_no_tp_reports_warning():
         local_positions=[_position()],
         exchange_positions=[_position()],
         local_orders=[_order("local-sl", "ex-sl", OrderRole.SL)],
-        exchange_orders=[_exchange_order("ex-sl")],
+        exchange_orders=[_exchange_sl("ex-sl")],
     )
 
     result = await service.build_read_model(SYMBOL)
@@ -291,13 +309,111 @@ async def test_matching_state_has_no_mismatches():
         local_positions=[_position()],
         exchange_positions=[_position()],
         local_orders=local_orders,
-        exchange_orders=[_exchange_order("ex-sl"), _exchange_order("ex-tp")],
+        exchange_orders=[_exchange_sl("ex-sl"), _exchange_order("ex-tp")],
     )
 
     result = await service.build_read_model(SYMBOL)
 
     assert result.is_consistent
     assert result.mismatches == []
+
+
+@pytest.mark.asyncio
+async def test_local_and_exchange_position_without_exchange_native_sl_is_critical():
+    service = _service(
+        local_positions=[_position()],
+        exchange_positions=[_position()],
+        local_orders=[_order("local-tp", "ex-tp", OrderRole.TP1)],
+        exchange_orders=[_exchange_order("ex-tp")],
+    )
+
+    result = await service.build_read_model(SYMBOL)
+
+    mismatch = next(
+        item
+        for item in result.mismatches
+        if item.metadata.get("protection_reason_code") == PROTECTION_MISSING_EXCHANGE_SL
+    )
+    assert mismatch.severity == "CRITICAL"
+    assert mismatch.reason == PROTECTION_MISSING_EXCHANGE_SL
+
+
+@pytest.mark.asyncio
+async def test_exchange_position_without_local_position_is_critical_protection_issue():
+    service = _service(local_positions=[], exchange_positions=[_position()])
+
+    result = await service.build_read_model(SYMBOL)
+
+    mismatch = next(
+        item
+        for item in result.mismatches
+        if item.metadata.get("protection_reason_code") == PROTECTION_EXCHANGE_POSITION_UNTRACKED
+    )
+    assert mismatch.severity == "CRITICAL"
+    assert mismatch.exchange_ref == SYMBOL
+
+
+@pytest.mark.asyncio
+async def test_local_sl_record_missing_on_exchange_is_critical():
+    service = _service(
+        local_positions=[_position()],
+        exchange_positions=[_position()],
+        local_orders=[_order("local-sl", "ex-missing-sl", OrderRole.SL)],
+        exchange_orders=[],
+    )
+
+    result = await service.build_read_model(SYMBOL)
+
+    mismatch = next(
+        item
+        for item in result.mismatches
+        if item.metadata.get("protection_reason_code")
+        == PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE
+    )
+    assert mismatch.severity == "CRITICAL"
+    assert mismatch.local_ref == "local-sl"
+    assert mismatch.exchange_ref == "ex-missing-sl"
+
+
+@pytest.mark.asyncio
+async def test_orphan_reduce_only_order_is_critical():
+    service = _service(
+        local_positions=[],
+        exchange_positions=[],
+        local_orders=[],
+        exchange_orders=[_exchange_order("ex-orphan-tp")],
+    )
+
+    result = await service.build_read_model(SYMBOL)
+
+    mismatch = next(
+        item
+        for item in result.mismatches
+        if item.metadata.get("protection_reason_code") == PROTECTION_ORPHAN_REDUCE_ONLY_ORDER
+    )
+    assert mismatch.severity == "CRITICAL"
+    assert mismatch.exchange_ref == "ex-orphan-tp"
+
+
+@pytest.mark.asyncio
+async def test_matching_position_and_exchange_native_sl_has_no_critical_protection_issue():
+    service = _service(
+        local_positions=[_position()],
+        exchange_positions=[_position()],
+        local_orders=[
+            _order("local-sl", "ex-sl", OrderRole.SL),
+            _order("local-tp", "ex-tp", OrderRole.TP1),
+        ],
+        exchange_orders=[_exchange_sl("ex-sl"), _exchange_order("ex-tp")],
+    )
+
+    result = await service.build_read_model(SYMBOL)
+
+    assert not [
+        item
+        for item in result.mismatches
+        if item.metadata.get("protection_reason_code")
+    ]
 
 
 @pytest.mark.asyncio

@@ -24,13 +24,16 @@ async def run_periodic_reconciliation(
     shutdown_event: asyncio.Event,
     *,
     read_model_repository: Optional[ReconciliationReadModelRepositoryPort] = None,
+    protection_health_monitor: Optional[Any] = None,
     interval_seconds: float = RECONCILIATION_INTERVAL_SECONDS,
     startup_delay_seconds: float = RECONCILIATION_STARTUP_DELAY_SECONDS,
 ) -> None:
-    """Run report-only reconciliation read model checks until shutdown.
+    """Run reconciliation read model checks until shutdown.
 
-    This loop intentionally only observes and logs. It must not block symbols,
-    create recovery tasks, repair orders, or mutate runtime trading state.
+    The reconciliation service remains read-only. When a protection health
+    monitor is provided, critical protection facts may block new entries, emit
+    trace, and alert; this loop still must not repair, cancel, or mutate
+    exchange/order lifecycle state.
     """
     runtime_symbols = _dedupe_symbols(symbols)
     if not runtime_symbols:
@@ -60,6 +63,11 @@ async def run_periodic_reconciliation(
                     read_model_repository,
                     result,
                 )
+                if protection_health_monitor is not None:
+                    await protection_health_monitor.handle_read_model_result(
+                        result,
+                        source="periodic",
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -93,7 +101,9 @@ def _log_reconciliation_result(result: Any) -> None:
         )
         return
 
-    severe_count = sum(1 for item in mismatches if getattr(item, "severity", None) == "SEVERE")
+    severe_count = sum(
+        1 for item in mismatches if getattr(item, "severity", None) in {"SEVERE", "CRITICAL"}
+    )
     warning_count = sum(1 for item in mismatches if getattr(item, "severity", None) == "WARNING")
     logger.warning(
         "Periodic reconciliation mismatches: symbol=%s, checked_at=%s, total=%s, severe=%s, warning=%s",
@@ -178,7 +188,9 @@ def _to_persistence_records(
     symbol = getattr(result, "symbol", "unknown")
     checked_at_ms = int(getattr(result, "checked_at", None) or time.time() * 1000)
     created_at = int(time.time() * 1000)
-    severe_count = sum(1 for item in mismatches if getattr(item, "severity", None) == "SEVERE")
+    severe_count = sum(
+        1 for item in mismatches if getattr(item, "severity", None) in {"SEVERE", "CRITICAL"}
+    )
     warning_count = sum(1 for item in mismatches if getattr(item, "severity", None) == "WARNING")
     report_id = _build_report_id(checked_at_ms, symbol)
     report = ReconciliationReadModelReport(

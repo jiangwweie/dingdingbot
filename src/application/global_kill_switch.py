@@ -17,6 +17,17 @@ from src.infrastructure.repository_ports import (
 
 KILL_SWITCH_BLOCK_REASON = "KILL_SWITCH"
 GLOBAL_KILL_SWITCH_UNAVAILABLE_REASON = "GKS_STATE_UNAVAILABLE"
+GLOBAL_KILL_SWITCH_MISSING_REASON = "GKS_STATE_MISSING"
+GLOBAL_KILL_SWITCH_CORRUPT_REASON = "GKS_STATE_CORRUPT"
+GLOBAL_KILL_SWITCH_CONFLICTING_REASON = "GKS_STATE_CONFLICTING"
+
+_FAIL_CLOSED_STATE_REASONS = {
+    GLOBAL_KILL_SWITCH_UNAVAILABLE_REASON,
+    GLOBAL_KILL_SWITCH_MISSING_REASON,
+    GLOBAL_KILL_SWITCH_CORRUPT_REASON,
+    GLOBAL_KILL_SWITCH_CONFLICTING_REASON,
+    "GKS_INIT_FAILED",
+}
 
 
 class GlobalKillSwitchState(BaseModel):
@@ -51,23 +62,23 @@ class GlobalKillSwitchService:
         )
 
     async def initialize(self) -> None:
-        """Restore persisted state. Missing row is OFF in v0 only, not final live semantics."""
+        """Restore persisted state using live-safe fail-closed semantics."""
         if self._repository is None:
-            logger.warning(
-                "[GKS-v0] No repository configured; using process-local OFF state. "
-                "This is not live-ready."
+            self._state = self._fail_closed_state(
+                reason=GLOBAL_KILL_SWITCH_UNAVAILABLE_REASON,
+                source="repository_unavailable_fail_closed",
+            )
+            logger.critical(
+                "[GKS-v0][HIGH] No repository configured; new entries are blocked fail-closed."
             )
             return
 
-        await self._repository.initialize()
         try:
+            await self._repository.initialize()
             snapshot = await self._repository.get_state()
         except Exception as exc:
-            self._state = GlobalKillSwitchState(
-                active=True,
+            self._state = self._fail_closed_state(
                 reason=GLOBAL_KILL_SWITCH_UNAVAILABLE_REASON,
-                updated_by="system",
-                updated_at_ms=self._now_ms(),
                 source="read_failure_fail_closed",
             )
             await self._alert_high(
@@ -79,16 +90,26 @@ class GlobalKillSwitchService:
             return
 
         if snapshot is None:
-            self._state = GlobalKillSwitchState(
-                active=False,
-                reason=None,
-                updated_by="system",
-                updated_at_ms=self._now_ms(),
-                source="missing_row_off_v0",
+            self._state = self._fail_closed_state(
+                reason=GLOBAL_KILL_SWITCH_MISSING_REASON,
+                source="missing_row_fail_closed",
             )
-            logger.warning(
-                "[GKS-v0] PG row missing; treating Global Kill Switch as OFF for v0. "
-                "This is not final live semantics and must be reconfirmed before live use."
+            logger.critical(
+                "[GKS-v0][HIGH] PG row missing; new entries are blocked fail-closed."
+            )
+            return
+
+        invalid_reason = self._validate_snapshot(snapshot)
+        if invalid_reason is not None:
+            self._state = self._fail_closed_state(
+                reason=invalid_reason,
+                source="invalid_state_fail_closed",
+            )
+            logger.critical(
+                "[GKS-v0][HIGH] Invalid PG state; new entries are blocked fail-closed: "
+                "reason=%s, snapshot=%s",
+                invalid_reason,
+                snapshot,
             )
             return
 
@@ -197,6 +218,39 @@ class GlobalKillSwitchService:
             updated_by=snapshot.updated_by,
             updated_at_ms=snapshot.updated_at_ms,
             source=snapshot.source,
+        )
+
+    @classmethod
+    def _validate_snapshot(
+        cls,
+        snapshot: GlobalKillSwitchStateSnapshot,
+    ) -> Optional[str]:
+        if not isinstance(getattr(snapshot, "active", None), bool):
+            return GLOBAL_KILL_SWITCH_CORRUPT_REASON
+        reason = getattr(snapshot, "reason", None)
+        if reason is not None and not isinstance(reason, str):
+            return GLOBAL_KILL_SWITCH_CORRUPT_REASON
+        updated_by = getattr(snapshot, "updated_by", None)
+        if not isinstance(updated_by, str) or not updated_by.strip():
+            return GLOBAL_KILL_SWITCH_CORRUPT_REASON
+        updated_at_ms = getattr(snapshot, "updated_at_ms", None)
+        if not isinstance(updated_at_ms, int) or updated_at_ms <= 0:
+            return GLOBAL_KILL_SWITCH_CORRUPT_REASON
+        source = getattr(snapshot, "source", None)
+        if not isinstance(source, str) or not source.strip():
+            return GLOBAL_KILL_SWITCH_CORRUPT_REASON
+        if snapshot.active is False and reason in _FAIL_CLOSED_STATE_REASONS:
+            return GLOBAL_KILL_SWITCH_CONFLICTING_REASON
+        return None
+
+    @classmethod
+    def _fail_closed_state(cls, *, reason: str, source: str) -> GlobalKillSwitchState:
+        return GlobalKillSwitchState(
+            active=True,
+            reason=reason,
+            updated_by="system",
+            updated_at_ms=cls._now_ms(),
+            source=source,
         )
 
     @staticmethod

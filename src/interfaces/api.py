@@ -58,6 +58,7 @@ from src.infrastructure.database import close_db, validate_pg_core_configuration
 from src.application.config_manager import UserConfig, ConfigManager
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.capital_protection import CapitalProtectionManager
+from src.application.startup_trading_guard import StartupTradingGuardService
 from src.application.account_service import AccountService
 from src.domain.models import (
     SignalQuery, SignalDeleteRequest, SignalDeleteResponse,
@@ -258,6 +259,7 @@ _audit_logger: Optional[Any] = None  # OrderAuditLogger instance
 _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
 _runtime_config_provider: Optional[Any] = None  # RuntimeConfigProvider instance
 _global_kill_switch_service: Optional[Any] = None  # GlobalKillSwitchService instance
+_startup_trading_guard_service: Optional[Any] = None  # StartupTradingGuardService instance
 _startup_reconciliation_summary: Optional[Dict[str, Any]] = None  # Startup reconciliation summary
 
 # Config repositories - stored in shared module to avoid circular imports with api_v1_config.py
@@ -280,6 +282,7 @@ def set_dependencies(
     order_lifecycle_service: Optional[Any] = None,
     runtime_config_provider: Optional[Any] = None,
     global_kill_switch_service: Optional[Any] = None,
+    startup_trading_guard_service: Optional[Any] = None,
     # Config repositories (unified with api_v1_config.py)
     strategy_repo: Optional[Any] = None,
     risk_repo: Optional[Any] = None,
@@ -304,6 +307,7 @@ def set_dependencies(
         execution_intent_repo: Optional ExecutionIntentRepository instance
         audit_logger: Optional OrderAuditLogger instance
         order_lifecycle_service: Optional OrderLifecycleService instance
+        startup_trading_guard_service: Optional StartupTradingGuardService instance
         strategy_repo: Optional StrategyConfigRepository instance
         risk_repo: Optional RiskConfigRepository instance
         system_repo: Optional SystemConfigRepository instance
@@ -312,7 +316,7 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service, _startup_trading_guard_service
     _repository = repository
     _signal_repo = repository  # Alias for console runtime routes
     _account_getter = account_getter
@@ -330,6 +334,7 @@ def set_dependencies(
     _order_lifecycle_service = order_lifecycle_service
     _runtime_config_provider = runtime_config_provider
     _global_kill_switch_service = global_kill_switch_service
+    _startup_trading_guard_service = startup_trading_guard_service
     # Config repositories - stored in shared module (avoids circular imports)
     _config_globals._strategy_repo = strategy_repo
     _config_globals._risk_repo = risk_repo
@@ -525,7 +530,7 @@ async def lifespan(app: FastAPI):
 
     global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
     global _capital_protection, _account_service, _execution_orchestrator, _exchange_gateway, _signal_repo
-    global _global_kill_switch_service
+    global _global_kill_switch_service, _startup_trading_guard_service
     global _execution_recovery_repo, _position_repo, _startup_reconciliation_summary
     _standalone_gateway_created = False  # 标记是否在 lifespan 中创建了 gateway
 
@@ -679,6 +684,8 @@ async def lifespan(app: FastAPI):
             from src.application.execution_orchestrator import ExecutionOrchestrator
             from src.application.global_kill_switch import GlobalKillSwitchService
             from src.application.position_projection_service import PositionProjectionService
+            from src.application.protection_health_monitor import ProtectionHealthMonitor
+            from src.application.reconciliation import ReconciliationService
             from src.application.startup_reconciliation_service import StartupReconciliationService
             from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
             from src.infrastructure.notifier import get_notification_service
@@ -760,6 +767,15 @@ async def lifespan(app: FastAPI):
             async def _orchestrator_notifier_adapter(title: str, message: str) -> None:
                 await _standalone_notifier.send_system_alert(title, message)
 
+            _startup_trading_guard_service = StartupTradingGuardService(
+                trace_service=_standalone_trace_service,
+                config_hash=(
+                    _runtime_config_provider.config_hash
+                    if _runtime_config_provider is not None
+                    else None
+                ),
+            )
+
             try:
                 from src.infrastructure.core_repository_factory import (
                     create_runtime_global_kill_switch_repository,
@@ -799,6 +815,7 @@ async def lifespan(app: FastAPI):
                 execution_recovery_repository=_execution_recovery_repo,
                 position_projection_service=PositionProjectionService(_position_repo),
                 global_kill_switch=_global_kill_switch_service,
+                startup_trading_guard=_startup_trading_guard_service,
             )
 
             # 注册订单更新回调
@@ -829,6 +846,41 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(
                     "启动对账失败（独立 uvicorn 模式不影响主进程启动）: %s",
+                    e,
+                    exc_info=True,
+                )
+
+            try:
+                protection_health_monitor = ProtectionHealthMonitor(
+                    execution_orchestrator=_standalone_orchestrator,
+                    trace_service=_standalone_trace_service,
+                    notifier=_orchestrator_notifier_adapter,
+                )
+                read_model_service = ReconciliationService(
+                    gateway=_standalone_gateway,
+                    position_mgr=_position_repo,
+                    order_repository=_order_repo,
+                )
+                standalone_symbols = []
+                if _runtime_config_provider is not None:
+                    standalone_symbols = list(
+                        _runtime_config_provider.resolved_config.market.symbols
+                    )
+                elif hasattr(user_config, "core_symbols"):
+                    standalone_symbols = list(user_config.core_symbols)
+                elif hasattr(user_config, "symbols"):
+                    standalone_symbols = list(user_config.symbols)
+                elif hasattr(user_config, "trading") and hasattr(user_config.trading, "symbol"):
+                    standalone_symbols = [user_config.trading.symbol]
+                for symbol in list(dict.fromkeys(standalone_symbols)):
+                    result = await read_model_service.build_read_model(symbol)
+                    await protection_health_monitor.handle_read_model_result(
+                        result,
+                        source="startup",
+                    )
+            except Exception as e:
+                logger.error(
+                    "Protection health startup check failed（独立 uvicorn 模式不影响已有生命周期）: %s",
                     e,
                     exc_info=True,
                 )

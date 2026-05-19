@@ -42,6 +42,8 @@ from src.application.global_kill_switch import GlobalKillSwitchService
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.periodic_reconciliation import run_periodic_reconciliation
 from src.application.position_projection_service import PositionProjectionService
+from src.application.protection_health_monitor import ProtectionHealthMonitor
+from src.application.startup_trading_guard import StartupTradingGuardService
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.notifier import NotificationService, get_notification_service
@@ -85,6 +87,8 @@ _execution_recovery_repo = None  # PG 正式版
 _runtime_config_provider: Optional[RuntimeConfigProvider] = None
 _trace_service: Optional[TraceService] = None
 _global_kill_switch_service: Optional[GlobalKillSwitchService] = None
+_startup_trading_guard_service: Optional[StartupTradingGuardService] = None
+_protection_health_monitor: Optional[ProtectionHealthMonitor] = None
 _reconciliation_read_model_repo = None
 _order_watch_tasks: List[asyncio.Task] = []
 _periodic_reconciliation_task: Optional[asyncio.Task] = None
@@ -184,6 +188,7 @@ async def _run_periodic_reconciliation_task(
     reconciliation_service: object,
     symbols: List[str],
     read_model_repository: object = None,
+    protection_health_monitor: object = None,
 ) -> None:
     """Run periodic reconciliation and isolate unexpected task failures."""
     if _shutdown_event is None:
@@ -196,6 +201,7 @@ async def _run_periodic_reconciliation_task(
             _dedupe_runtime_symbols(symbols),
             _shutdown_event,
             read_model_repository=read_model_repository,
+            protection_health_monitor=protection_health_monitor,
         )
     except asyncio.CancelledError:
         logger.info("Periodic reconciliation task cancelled")
@@ -208,6 +214,7 @@ def _start_periodic_reconciliation_task(
     reconciliation_service: object,
     symbols: List[str],
     read_model_repository: object = None,
+    protection_health_monitor: object = None,
 ) -> asyncio.Task:
     """Start the report-only periodic reconciliation background task."""
     task = asyncio.create_task(
@@ -215,10 +222,33 @@ def _start_periodic_reconciliation_task(
             reconciliation_service,
             symbols,
             read_model_repository,
+            protection_health_monitor,
         )
     )
     logger.info("Periodic reconciliation task started: symbols=%s", _dedupe_runtime_symbols(symbols))
     return task
+
+
+async def _run_startup_protection_health_check(
+    reconciliation_service: object,
+    symbols: List[str],
+    protection_health_monitor: object,
+) -> None:
+    """Run one startup protection-health check from the read-only reconciliation model."""
+    for symbol in _dedupe_runtime_symbols(symbols):
+        try:
+            result = await reconciliation_service.build_read_model(symbol)
+            await protection_health_monitor.handle_read_model_result(
+                result,
+                source="startup",
+            )
+        except Exception as exc:
+            logger.error(
+                "Startup protection health check failed: symbol=%s, error=%s",
+                symbol,
+                exc,
+                exc_info=True,
+            )
 
 
 async def _cancel_periodic_reconciliation_task(task: Optional[asyncio.Task]) -> None:
@@ -354,7 +384,7 @@ async def graceful_shutdown():
     global _shutdown_event, _exchange_gateway, _order_lifecycle_service
     global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
-    global _reconciliation_read_model_repo
+    global _reconciliation_read_model_repo, _protection_health_monitor
     global _snapshot_update_task, _ws_task, _api_task
     _shutdown_event.set()
 
@@ -371,6 +401,7 @@ async def graceful_shutdown():
         await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
         _periodic_reconciliation_task = None
     _reconciliation_read_model_repo = None
+    _protection_health_monitor = None
 
     if _order_watch_tasks:
         await _cancel_order_watch_tasks(_order_watch_tasks)
@@ -448,6 +479,7 @@ async def run_application():
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator, _trace_service, _global_kill_switch_service
+    global _startup_trading_guard_service, _protection_health_monitor
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
     global _snapshot_update_task, _ws_task, _api_task
 
@@ -688,6 +720,15 @@ async def run_application():
             """复用现有 notification service 发送飞书告警"""
             await _notification_service.send_system_alert(title, message)
 
+        _startup_trading_guard_service = StartupTradingGuardService(
+            trace_service=_trace_service,
+            config_hash=(
+                _runtime_config_provider.config_hash
+                if _runtime_config_provider is not None
+                else None
+            ),
+        )
+
         try:
             global_kill_switch_repo = create_runtime_global_kill_switch_repository()
             _global_kill_switch_service = GlobalKillSwitchService(
@@ -723,8 +764,14 @@ async def run_application():
             execution_recovery_repository=_execution_recovery_repo,  # PG 正式版
             position_projection_service=PositionProjectionService(_position_repo),
             global_kill_switch=_global_kill_switch_service,
+            startup_trading_guard=_startup_trading_guard_service,
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
+        _protection_health_monitor = ProtectionHealthMonitor(
+            execution_orchestrator=_execution_orchestrator,
+            trace_service=_trace_service,
+            notifier=_orchestrator_notifier_adapter,
+        )
         logger.info("Core execution runtime ready")
 
         # =============================================
@@ -967,10 +1014,17 @@ async def run_application():
                 position_mgr=_position_repo,
                 order_repository=_order_repo,
             )
+            if _protection_health_monitor is not None:
+                await _run_startup_protection_health_check(
+                    periodic_reconciliation_service,
+                    symbols,
+                    _protection_health_monitor,
+                )
             _periodic_reconciliation_task = _start_periodic_reconciliation_task(
                 periodic_reconciliation_service,
                 symbols,
                 _reconciliation_read_model_repo,
+                _protection_health_monitor,
             )
         except Exception as e:
             logger.error(
@@ -1088,6 +1142,7 @@ async def run_application():
             position_repo=_position_repo,
             order_lifecycle_service=_order_lifecycle_service,
             global_kill_switch_service=_global_kill_switch_service,
+            startup_trading_guard_service=_startup_trading_guard_service,
             # Config repositories (unified with api_v1_config.py)
             strategy_repo=_api_strategy_repo,
             risk_repo=_api_risk_repo,
