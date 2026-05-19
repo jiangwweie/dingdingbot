@@ -1057,11 +1057,8 @@ class ExchangeGateway:
 
             # 止损单需要 triggerPrice 参数
             if order_type == "stop_market" and trigger_price is not None:
+                params['stopPrice'] = str(trigger_price)
                 params['triggerPrice'] = str(trigger_price)
-                # CCXT 要求 stop 订单必须有 price 参数，即使是 stop_market
-                # 使用 trigger_price 作为 price 传递
-                if price is None:
-                    price = trigger_price
 
             if client_order_id:
                 params['clientOrderId'] = client_order_id
@@ -1188,6 +1185,177 @@ class ExchangeGateway:
         except Exception as e:
             logger.error(f"取消订单失败：{e}")
             raise
+
+    async def confirm_order_exists(
+        self,
+        *,
+        exchange_order_id: Optional[str],
+        symbol: str,
+        client_order_id: Optional[str] = None,
+        order_type: Optional[OrderType] = None,
+        side: Optional[str] = None,
+        reduce_only: Optional[bool] = None,
+        stop_price: Optional[Decimal] = None,
+        expected_type: Optional[str] = None,
+        amount: Optional[Decimal] = None,
+    ) -> bool:
+        """Confirm an exchange-native order exists using conservative query paths.
+
+        Binance futures conditional orders can surface different ids across
+        normal order, trigger/conditional order, and websocket payloads. This
+        helper accepts either the returned exchange id or the client order id
+        and checks normal plus conditional open-order paths without mutating
+        exchange state.
+        """
+        if not exchange_order_id and not client_order_id:
+            return False
+
+        if exchange_order_id:
+            try:
+                raw_fetched = await self.rest_exchange.fetch_order(exchange_order_id, symbol)
+                status = str(raw_fetched.get("status", "")).lower()
+                if status not in {"canceled", "rejected", "expired", "closed"}:
+                    if self._raw_order_matches(
+                        raw_fetched,
+                        exchange_order_id=exchange_order_id,
+                        client_order_id=client_order_id,
+                        expected_symbol=symbol,
+                        expected_side=side,
+                        expected_reduce_only=reduce_only,
+                        expected_type=expected_type,
+                        expected_stop_price=stop_price,
+                    ):
+                        return True
+            except Exception as exc:
+                logger.warning(
+                    "Order confirmation fetch_order miss: symbol=%s exchange_order_id=%s error=%s",
+                    symbol,
+                    exchange_order_id,
+                    exc,
+                )
+
+        params_candidates = [{}]
+        if order_type == OrderType.STOP_MARKET or str(expected_type).upper() == "STOP_MARKET":
+            params_candidates.extend(
+                [
+                    {"stop": True},
+                    {"type": "STOP_MARKET"},
+                ]
+            )
+
+        for params in params_candidates:
+            try:
+                raw_orders = await self.rest_exchange.fetch_open_orders(symbol, params=params)
+            except Exception as exc:
+                logger.warning(
+                    "Order confirmation fetch_open_orders miss: symbol=%s params=%s error=%s",
+                    symbol,
+                    params,
+                    exc,
+                )
+                continue
+
+            for raw_order in raw_orders:
+                if self._raw_order_matches(
+                    raw_order,
+                    exchange_order_id=exchange_order_id,
+                    client_order_id=client_order_id,
+                    expected_symbol=symbol,
+                    expected_side=side,
+                    expected_reduce_only=reduce_only,
+                    expected_type=expected_type,
+                    expected_stop_price=stop_price,
+                ):
+                    return True
+
+        return False
+
+    @staticmethod
+    def _raw_order_matches(
+        raw_order: Dict[str, Any],
+        *,
+        exchange_order_id: Optional[str],
+        client_order_id: Optional[str],
+        expected_symbol: str,
+        expected_side: Optional[str] = None,
+        expected_reduce_only: Optional[bool] = None,
+        expected_type: Optional[str] = None,
+        expected_stop_price: Optional[Decimal] = None,
+    ) -> bool:
+        info = raw_order.get("info") or {}
+        candidate_ids = {
+            raw_order.get("id"),
+            raw_order.get("clientOrderId"),
+            raw_order.get("clientOrderid"),
+            info.get("orderId"),
+            info.get("origClientOrderId"),
+            info.get("clientOrderId"),
+            info.get("clientOrderid"),
+            info.get("algoId"),
+            info.get("clientAlgoId"),
+        }
+        candidate_ids = {str(item) for item in candidate_ids if item is not None}
+
+        id_matched = (
+            (exchange_order_id is not None and str(exchange_order_id) in candidate_ids)
+            or (client_order_id is not None and str(client_order_id) in candidate_ids)
+        )
+        if not id_matched:
+            return False
+
+        try:
+            raw_symbol = raw_order.get("symbol") or info.get("symbol")
+            if raw_symbol:
+                s_raw = str(raw_symbol).replace("/", "").replace(":", "").lower()
+                s_exp = str(expected_symbol).replace("/", "").replace(":", "").lower()
+                if s_raw != s_exp and str(raw_symbol) != expected_symbol:
+                    logger.warning(f"[_raw_order_matches] false positive prevented: symbol {raw_symbol} != {expected_symbol}")
+                    return False
+
+            if expected_side:
+                raw_side = raw_order.get("side") or info.get("side")
+                if raw_side and str(raw_side).lower() != str(expected_side).lower():
+                    logger.warning(f"[_raw_order_matches] false positive prevented: side {raw_side} != {expected_side}")
+                    return False
+
+            if expected_reduce_only is not None:
+                raw_reduce = raw_order.get("reduceOnly")
+                if raw_reduce is None:
+                    raw_reduce = info.get("reduceOnly")
+                if raw_reduce is not None:
+                    act_ro = str(raw_reduce).lower() in ("true", "1", "yes")
+                    if act_ro != expected_reduce_only:
+                        logger.warning(f"[_raw_order_matches] false positive prevented: reduceOnly {act_ro} != {expected_reduce_only}")
+                        return False
+
+            if expected_type:
+                raw_type = raw_order.get("type") or info.get("type") or info.get("origType") or info.get("stopType")
+                if raw_type:
+                    t_raw = str(raw_type).lower()
+                    t_exp = str(expected_type).lower()
+                    if t_exp not in t_raw and t_raw not in t_exp:
+                        logger.warning(f"[_raw_order_matches] false positive prevented: type {raw_type} != {expected_type}")
+                        return False
+
+            if expected_stop_price is not None:
+                raw_stop_price = raw_order.get("stopPrice") or info.get("stopPrice") or info.get("triggerPrice")
+                if raw_stop_price is not None:
+                    act_sp = Decimal(str(raw_stop_price))
+                    # Binance truncates stopPrice to tick size (e.g., 0.01 for ETH).
+                    # Use relative tolerance of 0.1% + absolute tolerance of 0.02
+                    # to absorb tick-size truncation while still catching mismatches.
+                    tolerance = max(
+                        abs(expected_stop_price) * Decimal("0.001"),
+                        Decimal("0.02"),
+                    )
+                    if abs(act_sp - expected_stop_price) > tolerance:
+                        logger.warning(f"[_raw_order_matches] false positive prevented: stopPrice {act_sp} != {expected_stop_price} (tolerance={tolerance})")
+                        return False
+
+            return True
+        except Exception as exc:
+            logger.warning(f"[_raw_order_matches] validation exception: {exc}")
+            return False
 
     async def fetch_order(self, exchange_order_id: str, symbol: str) -> OrderPlacementResult:
         """
@@ -1356,7 +1524,7 @@ class ExchangeGateway:
         type_mapping = {
             "market": "market",
             "limit": "limit",
-            "stop_market": "stop",  # CCXT 使用 "stop" 表示条件单
+            "stop_market": "STOP_MARKET",
         }
         return type_mapping.get(order_type.lower(), order_type.lower())
 

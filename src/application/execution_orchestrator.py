@@ -39,7 +39,10 @@ from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.application.capital_protection import CapitalProtectionManager
 from src.application.global_kill_switch import KILL_SWITCH_BLOCK_REASON, GlobalKillSwitchService
 from src.application.order_lifecycle_service import OrderLifecycleService
-from src.application.protection_health_monitor import PROTECTION_HEALTH_REASON_CODES
+from src.application.protection_health_monitor import (
+    PROTECTION_HEALTH_REASON_CODES,
+    PROTECTION_SL_NOT_CONFIRMED_ON_EXCHANGE,
+)
 from src.application.position_projection_service import PositionProjectionService
 from src.application.startup_trading_guard import (
     STARTUP_TRADING_GUARD_BLOCK_REASON,
@@ -431,19 +434,23 @@ class ExecutionOrchestrator:
         *,
         order: Order,
         placement_result: Any,
-    ) -> None:
+    ) -> Order:
         """按交易所真实返回状态推进本地订单，避免盲目停留在 OPEN。"""
-        await self._order_lifecycle.submit_order(
+        updated_order = await self._order_lifecycle.submit_order(
             order.id,
             exchange_order_id=placement_result.exchange_order_id,
         )
+        order.exchange_order_id = updated_order.exchange_order_id
+        order.status = updated_order.status
 
         if placement_result.status == OrderStatus.OPEN:
-            await self._order_lifecycle.confirm_order(order.id)
-            return
+            updated_order = await self._order_lifecycle.confirm_order(order.id)
+            order.status = updated_order.status
+            return updated_order
 
         if placement_result.status == OrderStatus.FILLED:
-            await self._order_lifecycle.confirm_order(order.id)
+            updated_order = await self._order_lifecycle.confirm_order(order.id)
+            order.status = updated_order.status
             filled_qty = placement_result.filled_qty or placement_result.amount
             average_exec_price = placement_result.average_exec_price or placement_result.price
             if average_exec_price is None and placement_result.exchange_order_id:
@@ -455,39 +462,51 @@ class ExecutionOrchestrator:
                 average_exec_price = fetched_order.average_exec_price or fetched_order.price
 
             if filled_qty and average_exec_price is not None:
-                await self._order_lifecycle.update_order_filled(
+                updated_order = await self._order_lifecycle.update_order_filled(
                     order.id,
                     filled_qty=filled_qty,
                     average_exec_price=average_exec_price,
                 )
-            return
+                order.status = updated_order.status
+                order.filled_qty = updated_order.filled_qty
+                order.average_exec_price = updated_order.average_exec_price
+            return updated_order
 
         if placement_result.status == OrderStatus.PARTIALLY_FILLED:
-            await self._order_lifecycle.confirm_order(order.id)
+            updated_order = await self._order_lifecycle.confirm_order(order.id)
+            order.status = updated_order.status
             if (
                 placement_result.filled_qty is not None
                 and placement_result.filled_qty > Decimal("0")
                 and placement_result.average_exec_price is not None
             ):
-                await self._order_lifecycle.update_order_partially_filled(
+                updated_order = await self._order_lifecycle.update_order_partially_filled(
                     order.id,
                     filled_qty=placement_result.filled_qty,
                     average_exec_price=placement_result.average_exec_price,
                 )
-            return
+                order.status = updated_order.status
+                order.filled_qty = updated_order.filled_qty
+                order.average_exec_price = updated_order.average_exec_price
+            return updated_order
 
         if placement_result.status == OrderStatus.CANCELED:
-            await self._order_lifecycle.cancel_order(
+            updated_order = await self._order_lifecycle.cancel_order(
                 order.id,
                 reason="Exchange canceled the order",
             )
-            return
+            order.status = updated_order.status
+            return updated_order
 
         if placement_result.status == OrderStatus.REJECTED:
-            await self._order_lifecycle.reject_order(
+            updated_order = await self._order_lifecycle.reject_order(
                 order.id,
                 reason="Exchange rejected the order",
             )
+            order.status = updated_order.status
+            return updated_order
+
+        return updated_order
 
     async def _trigger_unprotected_recovery(
         self,
@@ -678,6 +697,95 @@ class ExecutionOrchestrator:
                 exc_info=True,
             )
             return None
+
+    async def _confirm_sl_order_or_fail_safe(
+        self,
+        *,
+        intent: ExecutionIntent,
+        sl_order: Order,
+        entry_order: Order,
+        phase: str,
+    ) -> bool:
+        """Confirm SL exists on exchange before treating position as protected."""
+        exchange_order_id = sl_order.exchange_order_id
+        confirmed = False
+        confirmer = getattr(self._gateway, "confirm_order_exists", None)
+        if confirmer is not None:
+            try:
+                side = "sell" if entry_order.direction == Direction.LONG else "buy"
+                confirmed = await confirmer(
+                    exchange_order_id=exchange_order_id,
+                    symbol=sl_order.symbol,
+                    client_order_id=sl_order.id,
+                    order_type=sl_order.order_type,
+                    side=side,
+                    reduce_only=True,
+                    stop_price=sl_order.trigger_price,
+                    expected_type="STOP_MARKET",
+                )
+            except Exception as exc:
+                logger.error(
+                    "[ExecutionOrchestrator] SL confirmation query failed: "
+                    "intent_id=%s order_id=%s exchange_order_id=%s error=%s",
+                    intent.id,
+                    sl_order.id,
+                    exchange_order_id,
+                    exc,
+                    exc_info=True,
+                )
+                confirmed = False
+
+        if confirmed:
+            return True
+
+        metadata = {
+            "phase": phase,
+            "entry_order_id": entry_order.id,
+            "signal_id": entry_order.signal_id,
+            "sl_order_id": sl_order.id,
+            "sl_exchange_order_id": exchange_order_id,
+            "reason": PROTECTION_SL_NOT_CONFIRMED_ON_EXCHANGE,
+        }
+        self.block_symbol_for_protection_health(
+            sl_order.symbol,
+            PROTECTION_SL_NOT_CONFIRMED_ON_EXCHANGE,
+            metadata,
+        )
+        await self._trigger_unprotected_recovery(
+            intent=intent,
+            symbol=sl_order.symbol,
+            related_order=sl_order,
+            error_message="SL order was placed but not confirmed on exchange",
+            context_payload=metadata,
+        )
+        try:
+            if sl_order.status not in {
+                OrderStatus.FILLED,
+                OrderStatus.CANCELED,
+                OrderStatus.REJECTED,
+                OrderStatus.EXPIRED,
+            }:
+                await self._order_lifecycle.reject_order(
+                    sl_order.id,
+                    reason=PROTECTION_SL_NOT_CONFIRMED_ON_EXCHANGE,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[ExecutionOrchestrator] Failed to mark unconfirmed SL as rejected: "
+                "order_id=%s error=%s",
+                sl_order.id,
+                exc,
+                exc_info=True,
+            )
+        logger.critical(
+            "[ExecutionOrchestrator][P0] SL not confirmed on exchange: "
+            "intent_id=%s symbol=%s sl_order_id=%s exchange_order_id=%s",
+            intent.id,
+            sl_order.symbol,
+            sl_order.id,
+            exchange_order_id,
+        )
+        return False
 
     async def execute_signal(
         self,
@@ -1193,6 +1301,18 @@ class ExecutionOrchestrator:
                         if prot_order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]:
                             tp_orders.append(prot_order)
                         elif prot_order.order_role == OrderRole.SL:
+                            sl_confirmed = await self._confirm_sl_order_or_fail_safe(
+                                intent=intent,
+                                sl_order=prot_order,
+                                entry_order=entry_order,
+                                phase="mount_initial_protection_sl_confirmation",
+                            )
+                            if not sl_confirmed:
+                                failed_orders.append({
+                                    "order": prot_order,
+                                    "error": PROTECTION_SL_NOT_CONFIRMED_ON_EXCHANGE,
+                                })
+                                continue
                             sl_order = prot_order
 
                         logger.info(
@@ -1208,6 +1328,18 @@ class ExecutionOrchestrator:
                                 entry_order=entry_order,
                             )
                             if retried_sl is not None:
+                                sl_confirmed = await self._confirm_sl_order_or_fail_safe(
+                                    intent=intent,
+                                    sl_order=retried_sl,
+                                    entry_order=entry_order,
+                                    phase="mount_initial_protection_sl_retry_confirmation",
+                                )
+                                if not sl_confirmed:
+                                    failed_orders.append({
+                                        "order": retried_sl,
+                                        "error": PROTECTION_SL_NOT_CONFIRMED_ON_EXCHANGE,
+                                    })
+                                    continue
                                 sl_order = retried_sl
                                 continue
                             await self._trigger_unprotected_recovery(
@@ -1252,6 +1384,18 @@ class ExecutionOrchestrator:
                             entry_order=entry_order,
                         )
                         if retried_sl is not None:
+                            sl_confirmed = await self._confirm_sl_order_or_fail_safe(
+                                intent=intent,
+                                sl_order=retried_sl,
+                                entry_order=entry_order,
+                                phase="mount_initial_protection_sl_exception_retry_confirmation",
+                            )
+                            if not sl_confirmed:
+                                failed_orders.append({
+                                    "order": retried_sl,
+                                    "error": PROTECTION_SL_NOT_CONFIRMED_ON_EXCHANGE,
+                                })
+                                continue
                             sl_order = retried_sl
                             continue
                         await self._trigger_unprotected_recovery(
