@@ -48,6 +48,7 @@ from src.infrastructure.logger import logger
 from src.infrastructure.reconciliation_repository import ReconciliationRepository
 from src.application.reconciliation_lock import ReconciliationLock, ReconciliationLockError
 from src.application.protection_health_monitor import (
+    PROTECTION_DATA_HYGIENE_LOCAL_SL_MISSING_ON_EXCHANGE,
     PROTECTION_EXCHANGE_POSITION_UNTRACKED,
     PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE,
     PROTECTION_MISSING_EXCHANGE_SL,
@@ -1103,17 +1104,23 @@ class ReconciliationService:
                 exchange_native_sl_orders,
             )
             if matching_exchange_sl is None:
+                has_position_risk = local_qty > 0 or exchange_qty > 0
                 mismatches.append(
                     self._protection_mismatch(
                         symbol=symbol,
                         mismatch_type="protection_local_sl_missing_on_exchange",
-                        reason_code=PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE,
+                        reason_code=(
+                            PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE
+                            if has_position_risk
+                            else PROTECTION_DATA_HYGIENE_LOCAL_SL_MISSING_ON_EXCHANGE
+                        ),
                         local_ref=local_sl.order_id,
                         exchange_ref=local_sl.exchange_order_id,
                         local_position=local_position,
                         exchange_position=exchange_position,
                         local_order=local_sl,
                         reason="Local active SL record was not found in exchange open orders.",
+                        severity="CRITICAL" if has_position_risk else "HIGH",
                         manual_recovery="Verify local SL record and exchange open orders; remount or reconcile manually before clearing the block.",
                     )
                 )
@@ -1153,10 +1160,13 @@ class ReconciliationService:
         exchange_position: Optional[PositionInfo] = None,
         local_order: Optional[OrderResponse] = None,
         exchange_order: Optional[OrderResponse] = None,
+        severity: str = "CRITICAL",
     ) -> ReconciliationMismatch:
         metadata: Dict[str, Any] = {
             "protection_reason_code": reason_code,
             "manual_recovery": manual_recovery,
+            "has_local_position": local_position is not None,
+            "has_exchange_position": exchange_position is not None,
             "local_position_id": local_ref if local_position is not None else None,
             "exchange_position_qty": str(exchange_position.size) if exchange_position is not None else None,
             "position_side": getattr(exchange_position or local_position, "side", None),
@@ -1173,7 +1183,7 @@ class ReconciliationService:
         return ReconciliationMismatch(
             symbol=symbol,
             mismatch_type=mismatch_type,
-            severity="CRITICAL",
+            severity=severity,
             reason=reason_code,
             local_ref=local_ref,
             exchange_ref=exchange_ref,

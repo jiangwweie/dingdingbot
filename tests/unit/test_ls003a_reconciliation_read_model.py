@@ -6,6 +6,7 @@ import pytest
 
 from src.application.reconciliation import ReconciliationService
 from src.application.protection_health_monitor import (
+    PROTECTION_DATA_HYGIENE_LOCAL_SL_MISSING_ON_EXCHANGE,
     PROTECTION_EXCHANGE_POSITION_UNTRACKED,
     PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE,
     PROTECTION_MISSING_EXCHANGE_SL,
@@ -373,6 +374,29 @@ async def test_local_sl_record_missing_on_exchange_is_critical():
     assert mismatch.severity == "CRITICAL"
     assert mismatch.local_ref == "local-sl"
     assert mismatch.exchange_ref == "ex-missing-sl"
+
+
+@pytest.mark.asyncio
+async def test_local_sl_record_missing_without_position_is_data_hygiene():
+    service = _service(
+        local_positions=[],
+        exchange_positions=[],
+        local_orders=[_order("local-sl", "ex-missing-sl", OrderRole.SL)],
+        exchange_orders=[],
+    )
+
+    result = await service.build_read_model(SYMBOL)
+
+    mismatch = next(
+        item
+        for item in result.mismatches
+        if item.metadata.get("protection_reason_code")
+        == PROTECTION_DATA_HYGIENE_LOCAL_SL_MISSING_ON_EXCHANGE
+    )
+    assert mismatch.severity == "HIGH"
+    assert mismatch.local_ref == "local-sl"
+    assert mismatch.metadata["has_local_position"] is False
+    assert mismatch.metadata["has_exchange_position"] is False
 
 
 @pytest.mark.asyncio
