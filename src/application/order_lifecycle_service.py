@@ -15,6 +15,7 @@ ORD-1: 订单状态机系统性重构 - T2 任务
 - OrderRepository: 订单持久化
 - OrderAuditLogger: 审计日志记录
 """
+import asyncio
 from typing import Optional, Dict, Any, List, Callable, Awaitable
 from decimal import Decimal
 import logging
@@ -84,6 +85,8 @@ class OrderLifecycleService:
         self,
         repository: OrderRepositoryPort,
         audit_logger: Optional[OrderAuditLogger] = None,
+        pending_update_retry_interval_seconds: float = 0.1,
+        pending_update_max_retries: int = 5,
     ):
         """
         初始化订单生命周期服务
@@ -102,6 +105,10 @@ class OrderLifecycleService:
         self._on_entry_filled: Optional[Callable[[Order], Awaitable[None]]] = None
         self._on_exit_progressed: Optional[Callable[[Order], Awaitable[None]]] = None
         self._on_exit_filled: Optional[Callable[[Order], Awaitable[None]]] = None
+        self._pending_exchange_updates: Dict[str, Dict[str, Any]] = {}
+        self._pending_update_tasks: Dict[str, asyncio.Task] = {}
+        self._pending_update_retry_interval_seconds = pending_update_retry_interval_seconds
+        self._pending_update_max_retries = pending_update_max_retries
 
     async def start(self) -> None:
         """启动服务"""
@@ -112,10 +119,44 @@ class OrderLifecycleService:
 
     async def stop(self) -> None:
         """停止服务"""
+        await self._cancel_pending_update_tasks()
         if self._audit_logger:
             await self._audit_logger.stop()
         self._state_machines.clear()
         logger.info("OrderLifecycleService 已停止")
+
+    async def _cancel_pending_update_tasks(self) -> None:
+        """Cancel in-memory retry tasks for early exchange updates."""
+        tasks = list(self._pending_update_tasks.values())
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.warning(
+                    "Pending exchange update retry task shutdown error: %s",
+                    exc,
+                    exc_info=True,
+                )
+        self._pending_update_tasks.clear()
+        self._pending_exchange_updates.clear()
+
+    def list_pending_exchange_updates(self) -> Dict[str, Dict[str, Any]]:
+        """Return a shallow diagnostic snapshot of buffered exchange updates."""
+        return {
+            exchange_order_id: {
+                "first_seen_at": item.get("first_seen_at"),
+                "last_seen_at": item.get("last_seen_at"),
+                "retry_count": item.get("retry_count", 0),
+                "order_status": getattr(item.get("order"), "status", None).value
+                if getattr(item.get("order"), "status", None) is not None
+                else None,
+            }
+            for exchange_order_id, item in self._pending_exchange_updates.items()
+        }
 
     def set_order_changed_callback(
         self,
@@ -554,16 +595,29 @@ class OrderLifecycleService:
             OrderTransitionError: 状态转换失败
             ValueError: 订单不存在
         """
-        # P0 修复（第二步）：使用 exchange_order_id 查询本地订单
-        # ExchangeGateway 推送的 Order.id 是交易所订单 ID
         exchange_order_id = order.exchange_order_id
 
         if not exchange_order_id:
             raise ValueError(f"交易所订单 ID 为空，无法查询本地订单")
 
-        # 从数据库获取本地订单
+        return await self._apply_exchange_update(order, buffer_if_missing=True)
+
+    async def _apply_exchange_update(
+        self,
+        order: Order,
+        *,
+        buffer_if_missing: bool,
+    ) -> Order:
+        """Apply an exchange order update, optionally buffering early unknown updates."""
+        exchange_order_id = order.exchange_order_id
+        if not exchange_order_id:
+            raise ValueError(f"交易所订单 ID 为空，无法查询本地订单")
+
         local_order = await self._repository.get_order_by_exchange_id(exchange_order_id)
         if not local_order:
+            if buffer_if_missing:
+                self._buffer_unknown_exchange_update(exchange_order_id, order)
+                return order
             raise ValueError(f"订单不存在：exchange_order_id={exchange_order_id}")
 
         # 直接从 Order 对象读取字段（已经是 Decimal 类型）
@@ -712,7 +766,83 @@ class OrderLifecycleService:
                 )
 
         logger.info(f"订单根据交易所数据更新：{local_order.id} (exchange_id={exchange_order_id}) -> {target_status.value}")
+        self._pending_exchange_updates.pop(exchange_order_id, None)
+        completed_retry_task = self._pending_update_tasks.pop(exchange_order_id, None)
+        current_task = asyncio.current_task()
+        if completed_retry_task is not None and completed_retry_task is not current_task:
+            completed_retry_task.cancel()
         return local_order
+
+    def _buffer_unknown_exchange_update(
+        self,
+        exchange_order_id: str,
+        order: Order,
+    ) -> None:
+        """Buffer a user-stream update that arrived before the local order row."""
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        existing = self._pending_exchange_updates.get(exchange_order_id)
+        first_seen_at = existing.get("first_seen_at") if existing else now_ms
+        retry_count = existing.get("retry_count", 0) if existing else 0
+        self._pending_exchange_updates[exchange_order_id] = {
+            "order": order,
+            "first_seen_at": first_seen_at,
+            "last_seen_at": now_ms,
+            "retry_count": retry_count,
+        }
+        if exchange_order_id not in self._pending_update_tasks:
+            self._pending_update_tasks[exchange_order_id] = asyncio.create_task(
+                self._retry_pending_exchange_update(exchange_order_id),
+                name=f"pending-exchange-update:{exchange_order_id}",
+            )
+        logger.warning(
+            "Buffered unknown exchange order update: exchange_order_id=%s status=%s retry_count=%s",
+            exchange_order_id,
+            getattr(order.status, "value", order.status),
+            retry_count,
+        )
+
+    async def _retry_pending_exchange_update(self, exchange_order_id: str) -> None:
+        """Retry applying one buffered update for a short race window."""
+        try:
+            while True:
+                await asyncio.sleep(self._pending_update_retry_interval_seconds)
+                pending = self._pending_exchange_updates.get(exchange_order_id)
+                if pending is None:
+                    return
+                retry_count = int(pending.get("retry_count", 0)) + 1
+                pending["retry_count"] = retry_count
+                try:
+                    await self._apply_exchange_update(
+                        pending["order"],
+                        buffer_if_missing=False,
+                    )
+                    return
+                except ValueError:
+                    if retry_count >= self._pending_update_max_retries:
+                        logger.warning(
+                            "Dropping unresolved exchange order update after retries: "
+                            "exchange_order_id=%s retry_count=%s first_seen_at=%s",
+                            exchange_order_id,
+                            retry_count,
+                            pending.get("first_seen_at"),
+                        )
+                        self._pending_exchange_updates.pop(exchange_order_id, None)
+                        return
+                except Exception as exc:
+                    logger.warning(
+                        "Pending exchange order update replay failed: exchange_order_id=%s error=%s",
+                        exchange_order_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    if retry_count >= self._pending_update_max_retries:
+                        self._pending_exchange_updates.pop(exchange_order_id, None)
+                        return
+        finally:
+            current_task = asyncio.current_task()
+            stored_task = self._pending_update_tasks.get(exchange_order_id)
+            if stored_task is current_task:
+                self._pending_update_tasks.pop(exchange_order_id, None)
 
     async def cancel_order(
         self,

@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 from src.domain.models import Direction
 from src.domain.models import Order, Position
@@ -256,6 +256,58 @@ class PositionProjectionService:
         if cleanup_after_save:
             self._cleanup_lock_if_idle(position_id, lock)
         return result
+
+    async def mark_external_close_unresolved(
+        self,
+        *,
+        symbol: str,
+        reason: str,
+        source: str = "reconciliation",
+        metadata: Optional[dict] = None,
+    ) -> List[Position]:
+        """Mark active local positions closed when exchange reconciliation proves no position.
+
+        This intentionally does not compute realized PnL or daily stats. It is
+        a conservative projection repair for manual/external closes where the
+        runtime does not have a reliable fill chain.
+        """
+        if self._repository is None:
+            logger.warning(
+                "External close projection skipped: position repository unavailable symbol=%s",
+                symbol,
+            )
+            return []
+
+        active_positions = await self._repository.list_active(symbol=symbol)
+        closed_positions: List[Position] = []
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        for position in active_positions:
+            position_id = position.id
+            lock = self._get_lock(position_id)
+            async with lock:
+                latest = await self._repository.get(position_id)
+                if latest is None or latest.is_closed:
+                    continue
+                previous_qty = latest.current_qty
+                latest.current_qty = Decimal("0")
+                latest.is_closed = True
+                latest.closed_at = now_ms
+                latest.projected_exit_fills[f"external_close:{source}:{now_ms}"] = previous_qty
+                await self._repository.save(latest)
+                closed_positions.append(latest)
+                logger.error(
+                    "External close detected and marked unresolved: "
+                    "symbol=%s position_id=%s previous_qty=%s reason=%s source=%s metadata=%s",
+                    symbol,
+                    position_id,
+                    previous_qty,
+                    reason,
+                    source,
+                    metadata or {},
+                )
+            self._cleanup_lock_if_idle(position_id, lock)
+
+        return closed_positions
 
     @staticmethod
     def _calculate_gross_pnl(

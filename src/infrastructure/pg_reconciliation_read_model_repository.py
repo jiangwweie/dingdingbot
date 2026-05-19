@@ -37,20 +37,20 @@ class PgReconciliationReadModelRepository:
     ) -> None:
         async with self._session_maker() as session:
             async with session.begin():
-                session.add(
-                    PGReconciliationReadModelReportORM(
-                        report_id=report.report_id,
-                        symbol=report.symbol,
-                        checked_at_ms=report.checked_at_ms,
-                        is_consistent=report.is_consistent,
-                        total_count=report.total_count,
-                        severe_count=report.severe_count,
-                        warning_count=report.warning_count,
-                        is_fetch_failure=report.is_fetch_failure,
-                        fetch_failure_reason=report.fetch_failure_reason,
-                        created_at=report.created_at,
-                    )
+                report_row = PGReconciliationReadModelReportORM(
+                    report_id=report.report_id,
+                    symbol=report.symbol,
+                    checked_at_ms=report.checked_at_ms,
+                    is_consistent=report.is_consistent,
+                    total_count=report.total_count,
+                    severe_count=report.severe_count,
+                    warning_count=report.warning_count,
+                    is_fetch_failure=report.is_fetch_failure,
+                    fetch_failure_reason=report.fetch_failure_reason,
+                    created_at=report.created_at,
                 )
+                session.add(report_row)
+                await session.flush()
                 for mismatch in mismatches:
                     session.add(
                         PGReconciliationReadModelMismatchORM(

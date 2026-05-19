@@ -25,15 +25,16 @@ async def run_periodic_reconciliation(
     *,
     read_model_repository: Optional[ReconciliationReadModelRepositoryPort] = None,
     protection_health_monitor: Optional[Any] = None,
+    external_close_monitor: Optional[Any] = None,
     interval_seconds: float = RECONCILIATION_INTERVAL_SECONDS,
     startup_delay_seconds: float = RECONCILIATION_STARTUP_DELAY_SECONDS,
 ) -> None:
     """Run reconciliation read model checks until shutdown.
 
-    The reconciliation service remains read-only. When a protection health
-    monitor is provided, critical protection facts may block new entries, emit
-    trace, and alert; this loop still must not repair, cancel, or mutate
-    exchange/order lifecycle state.
+    The reconciliation service remains read-only. Monitors may consume the read
+    model to block new entries, emit trace/alerts, or mark local projection as
+    externally closed when the exchange is already flat. This loop still must
+    not place, cancel, edit, or close exchange orders.
     """
     runtime_symbols = _dedupe_symbols(symbols)
     if not runtime_symbols:
@@ -63,6 +64,11 @@ async def run_periodic_reconciliation(
                     read_model_repository,
                     result,
                 )
+                if external_close_monitor is not None:
+                    await external_close_monitor.handle_read_model_result(
+                        result,
+                        source="periodic",
+                    )
                 if protection_health_monitor is not None:
                     await protection_health_monitor.handle_read_model_result(
                         result,

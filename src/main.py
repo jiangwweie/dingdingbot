@@ -38,6 +38,7 @@ from src.application.capital_protection import (
 )
 from src.application.decision_trace import TraceService
 from src.application.execution_orchestrator import ExecutionOrchestrator
+from src.application.external_close_monitor import ExternalCloseMonitor
 from src.application.global_kill_switch import GlobalKillSwitchService
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.periodic_reconciliation import run_periodic_reconciliation
@@ -89,6 +90,7 @@ _trace_service: Optional[TraceService] = None
 _global_kill_switch_service: Optional[GlobalKillSwitchService] = None
 _startup_trading_guard_service: Optional[StartupTradingGuardService] = None
 _protection_health_monitor: Optional[ProtectionHealthMonitor] = None
+_external_close_monitor: Optional[ExternalCloseMonitor] = None
 _reconciliation_read_model_repo = None
 _order_watch_tasks: List[asyncio.Task] = []
 _periodic_reconciliation_task: Optional[asyncio.Task] = None
@@ -164,7 +166,7 @@ def _start_order_watch_tasks(symbols: List[str]) -> List[asyncio.Task]:
     """Start one order-watch background task per runtime symbol."""
     tasks: List[asyncio.Task] = []
     for symbol in _dedupe_runtime_symbols(symbols):
-        task = asyncio.create_task(_run_order_watch(symbol))
+        task = asyncio.create_task(_run_order_watch(symbol), name=f"order-watch:{symbol}")
         tasks.append(task)
         logger.info(f"Order watch task started: {symbol}")
     return tasks
@@ -184,11 +186,46 @@ async def _cancel_order_watch_tasks(tasks: List[asyncio.Task]) -> None:
             logger.warning(f"Order watch task shutdown error: {e}", exc_info=True)
 
 
+def _runtime_task_name(task: asyncio.Task) -> str:
+    try:
+        return task.get_name()
+    except Exception:
+        return repr(task)
+
+
+async def _log_pending_runtime_tasks(context: str) -> None:
+    """Log named runtime tasks still pending during shutdown diagnostics."""
+    current = asyncio.current_task()
+    interesting_prefixes = (
+        "order-watch:",
+        "periodic-reconciliation",
+        "snapshot-update",
+        "ws-",
+        "api-",
+        "pending-exchange-update:",
+    )
+    pending = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not current
+        and not task.done()
+        and any(_runtime_task_name(task).startswith(prefix) for prefix in interesting_prefixes)
+    ]
+    if not pending:
+        return
+    logger.warning(
+        "Runtime shutdown pending tasks after %s: %s",
+        context,
+        [_runtime_task_name(task) for task in pending],
+    )
+
+
 async def _run_periodic_reconciliation_task(
     reconciliation_service: object,
     symbols: List[str],
     read_model_repository: object = None,
     protection_health_monitor: object = None,
+    external_close_monitor: object = None,
 ) -> None:
     """Run periodic reconciliation and isolate unexpected task failures."""
     if _shutdown_event is None:
@@ -202,6 +239,7 @@ async def _run_periodic_reconciliation_task(
             _shutdown_event,
             read_model_repository=read_model_repository,
             protection_health_monitor=protection_health_monitor,
+            external_close_monitor=external_close_monitor,
         )
     except asyncio.CancelledError:
         logger.info("Periodic reconciliation task cancelled")
@@ -215,6 +253,7 @@ def _start_periodic_reconciliation_task(
     symbols: List[str],
     read_model_repository: object = None,
     protection_health_monitor: object = None,
+    external_close_monitor: object = None,
 ) -> asyncio.Task:
     """Start the report-only periodic reconciliation background task."""
     task = asyncio.create_task(
@@ -223,7 +262,9 @@ def _start_periodic_reconciliation_task(
             symbols,
             read_model_repository,
             protection_health_monitor,
-        )
+            external_close_monitor,
+        ),
+        name="periodic-reconciliation",
     )
     logger.info("Periodic reconciliation task started: symbols=%s", _dedupe_runtime_symbols(symbols))
     return task
@@ -233,11 +274,17 @@ async def _run_startup_protection_health_check(
     reconciliation_service: object,
     symbols: List[str],
     protection_health_monitor: object,
+    external_close_monitor: object = None,
 ) -> None:
     """Run one startup protection-health check from the read-only reconciliation model."""
     for symbol in _dedupe_runtime_symbols(symbols):
         try:
             result = await reconciliation_service.build_read_model(symbol)
+            if external_close_monitor is not None:
+                await external_close_monitor.handle_read_model_result(
+                    result,
+                    source="startup",
+                )
             await protection_health_monitor.handle_read_model_result(
                 result,
                 source="startup",
@@ -290,7 +337,7 @@ async def _run_snapshot_update_loop(polling_interval: float) -> None:
 
 def _start_snapshot_update_task(polling_interval: float) -> asyncio.Task:
     """Start the managed account snapshot update background task."""
-    task = asyncio.create_task(_run_snapshot_update_loop(polling_interval))
+    task = asyncio.create_task(_run_snapshot_update_loop(polling_interval), name="snapshot-update")
     logger.info("Snapshot update task started: polling_interval=%ss", polling_interval)
     return task
 
@@ -381,10 +428,11 @@ async def graceful_shutdown():
     """
     logger.info("Graceful shutdown initiated...")
 
-    global _shutdown_event, _exchange_gateway, _order_lifecycle_service
+    global _shutdown_event, _exchange_gateway, _order_lifecycle_service, _capital_protection
+    global _execution_orchestrator
     global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
-    global _reconciliation_read_model_repo, _protection_health_monitor
+    global _reconciliation_read_model_repo, _protection_health_monitor, _external_close_monitor
     global _snapshot_update_task, _ws_task, _api_task
     _shutdown_event.set()
 
@@ -434,7 +482,13 @@ async def graceful_shutdown():
 
     await close_db()
     _runtime_config_provider = None
+    _capital_protection = None
+    _execution_orchestrator = None
+    _reconciliation_read_model_repo = None
+    _protection_health_monitor = None
+    _external_close_monitor = None
 
+    await _log_pending_runtime_tasks("graceful_shutdown")
     logger.info("Shutdown complete")
 
 
@@ -479,9 +533,9 @@ async def run_application():
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator, _trace_service, _global_kill_switch_service
-    global _startup_trading_guard_service, _protection_health_monitor
+    global _startup_trading_guard_service, _protection_health_monitor, _external_close_monitor
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
-    global _snapshot_update_task, _ws_task, _api_task
+    global _reconciliation_read_model_repo, _snapshot_update_task, _ws_task, _api_task
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -755,6 +809,7 @@ async def run_application():
                 updated_by="system",
             )
 
+        position_projection_service = PositionProjectionService(_position_repo)
         _execution_orchestrator = ExecutionOrchestrator(
             capital_protection=_capital_protection,
             order_lifecycle=_order_lifecycle_service,
@@ -762,7 +817,7 @@ async def run_application():
             intent_repository=_execution_intent_repo,
             notifier=_orchestrator_notifier_adapter,  # P0-6: 注入告警回调
             execution_recovery_repository=_execution_recovery_repo,  # PG 正式版
-            position_projection_service=PositionProjectionService(_position_repo),
+            position_projection_service=position_projection_service,
             global_kill_switch=_global_kill_switch_service,
             startup_trading_guard=_startup_trading_guard_service,
         )
@@ -771,6 +826,11 @@ async def run_application():
             execution_orchestrator=_execution_orchestrator,
             trace_service=_trace_service,
             notifier=_orchestrator_notifier_adapter,
+        )
+        _external_close_monitor = ExternalCloseMonitor(
+            execution_orchestrator=_execution_orchestrator,
+            position_projection_service=position_projection_service,
+            trace_service=_trace_service,
         )
         logger.info("Core execution runtime ready")
 
@@ -1019,12 +1079,14 @@ async def run_application():
                     periodic_reconciliation_service,
                     symbols,
                     _protection_health_monitor,
+                    _external_close_monitor,
                 )
             _periodic_reconciliation_task = _start_periodic_reconciliation_task(
                 periodic_reconciliation_service,
                 symbols,
                 _reconciliation_read_model_repo,
                 _protection_health_monitor,
+                _external_close_monitor,
             )
         except Exception as e:
             logger.error(
@@ -1049,7 +1111,8 @@ async def run_application():
                 timeframes=timeframes,
                 callback=on_kline_received,
                 history_bars=warmup_bars,
-            )
+            ),
+            name="ws-ohlcv",
         )
 
         logger.info("=" * 60)
@@ -1170,7 +1233,7 @@ async def run_application():
             lifespan="off",
         )
         api_server = uvicorn.Server(api_config)
-        _api_task = asyncio.create_task(api_server.serve())
+        _api_task = asyncio.create_task(api_server.serve(), name="api-server")
 
         # Wait a moment for API server to initialize
         await asyncio.sleep(2)
@@ -1233,6 +1296,10 @@ async def run_application():
             await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
             _periodic_reconciliation_task = None
 
+        if _order_watch_tasks:
+            await _cancel_order_watch_tasks(_order_watch_tasks)
+            _order_watch_tasks = []
+
         if _exchange_gateway:
             await _exchange_gateway.close()
             _exchange_gateway = None
@@ -1263,12 +1330,15 @@ async def run_application():
         _execution_orchestrator = None
         _runtime_config_provider = None
         _reconciliation_read_model_repo = None
+        _protection_health_monitor = None
+        _external_close_monitor = None
         _order_watch_tasks = []
         _periodic_reconciliation_task = None
         _snapshot_update_task = None
         _ws_task = None
         _api_task = None
 
+        await _log_pending_runtime_tasks("run_application.finally")
         logger.info("Application shutdown complete")
 
 

@@ -81,6 +81,14 @@ class _FakeProtectionHealthMonitor:
         self.calls.append((result.symbol, source))
 
 
+class _FakeExternalCloseMonitor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def handle_read_model_result(self, result: _Result, *, source: str) -> None:
+        self.calls.append((result.symbol, source))
+
+
 @pytest.mark.asyncio
 async def test_loop_calls_build_read_model_after_startup_delay():
     shutdown_event = asyncio.Event()
@@ -141,6 +149,30 @@ async def test_loop_passes_read_model_to_protection_health_monitor():
     )
 
     assert monitor.calls == [("ETH/USDT:USDT", "periodic")]
+
+
+@pytest.mark.asyncio
+async def test_loop_passes_read_model_to_external_close_monitor_before_protection_health():
+    shutdown_event = asyncio.Event()
+    service = _FakeReconciliationService(shutdown_event, stop_after_calls=1)
+    protection_monitor = _FakeProtectionHealthMonitor()
+    external_monitor = _FakeExternalCloseMonitor()
+
+    await asyncio.wait_for(
+        run_periodic_reconciliation(
+            service,
+            ["ETH/USDT:USDT"],
+            shutdown_event,
+            protection_health_monitor=protection_monitor,
+            external_close_monitor=external_monitor,
+            startup_delay_seconds=0,
+            interval_seconds=60,
+        ),
+        timeout=1,
+    )
+
+    assert external_monitor.calls == [("ETH/USDT:USDT", "periodic")]
+    assert protection_monitor.calls == [("ETH/USDT:USDT", "periodic")]
 
 
 @pytest.mark.asyncio
