@@ -45,8 +45,17 @@ cleanup() {
     if [[ -n "${RUNTIME_PID:-}" ]]; then
         log_info "Cleaning up runtime PID=${RUNTIME_PID}"
         kill "$RUNTIME_PID" 2>/dev/null || true
+        sleep 1
+        kill -9 "$RUNTIME_PID" 2>/dev/null || true
         wait "$RUNTIME_PID" 2>/dev/null || true
         unset RUNTIME_PID
+    fi
+    # Kill any lingering process on API port
+    local stale_pid
+    stale_pid=$(lsof -ti :${API_PORT} 2>/dev/null) || true
+    if [[ -n "$stale_pid" ]]; then
+        log_info "Killing stale process on port ${API_PORT}: PID=${stale_pid}"
+        kill -9 $stale_pid 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -113,13 +122,15 @@ wait_for_order_completion() {
             elapsed=$((elapsed + 3))
             continue
         }
-        # Check if there are any OPEN/SUBMITTED/PARTIALLY_FILLED orders
+        # Check if there are any active orders
+        # API may return status as "OPEN" or "OrderStatus.OPEN"
         local active_count
         active_count=$(echo "$orders_json" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 orders = data if isinstance(data, list) else data.get('orders', [])
-active = [o for o in orders if o.get('status') in ('OPEN', 'SUBMITTED', 'PARTIALLY_FILLED')]
+ACTIVE = {'OPEN', 'SUBMITTED', 'PARTIALLY_FILLED', 'OrderStatus.OPEN', 'OrderStatus.SUBMITTED', 'OrderStatus.PARTIALLY_FILLED'}
+active = [o for o in orders if o.get('status') in ACTIVE]
 print(len(active))
 " 2>/dev/null) || active_count="?"
 
@@ -136,14 +147,28 @@ print(len(active))
 }
 
 verify_exchange_flat() {
-    # Check via the runtime health endpoint
-    local health_json
-    health_json=$(curl -sf "${API_BASE}/api/runtime/health" 2>/dev/null) || {
-        log_warn "Cannot reach health endpoint"
+    # Check positions via the runtime positions endpoint
+    local pos_json
+    pos_json=$(curl -sf "${API_BASE}/api/runtime/positions" 2>/dev/null) || {
+        log_warn "Cannot reach positions endpoint"
         return 1
     }
-    log_info "Exchange flat verification: consult runtime log for position reconciliation"
-    return 0
+    local pos_count
+    pos_count=$(echo "$pos_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+positions = data.get('positions', [])
+non_zero = [p for p in positions if float(p.get('quantity', 0)) != 0]
+print(len(non_zero))
+" 2>/dev/null) || pos_count="?"
+
+    if [[ "$pos_count" == "0" ]]; then
+        log_info "Exchange flat: positions=0"
+        return 0
+    else
+        log_error "Exchange NOT flat: ${pos_count} open position(s)"
+        return 1
+    fi
 }
 
 reenable_gks() {
@@ -157,11 +182,100 @@ reenable_gks() {
     log_info "GKS re-enabled"
 }
 
+force_exchange_flat() {
+    # Force-close any remaining testnet positions and cancel orders
+    # Uses Binance demo-fapi REST API directly
+    log_info "Force-closing any remaining testnet positions..."
+    local result
+    result=$(python3 -c "
+import asyncio, aiohttp, hmac, hashlib, time, os, sys
+from urllib.parse import urlencode
+from dotenv import load_dotenv
+from pathlib import Path
+load_dotenv(Path('.env'))
+load_dotenv(Path('.env.local'), override=True)
+
+API_KEY = os.getenv('EXCHANGE_API_KEY')
+API_SECRET = os.getenv('EXCHANGE_API_SECRET')
+BASE = 'https://demo-fapi.binance.com'
+
+def sign(params):
+    params['timestamp'] = int(time.time() * 1000)
+    query = urlencode(params)
+    sig = hmac.new(API_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+    params['signature'] = sig
+    return params
+
+async def force_flat():
+    headers = {'X-MBX-APIKEY': API_KEY}
+    closed = 0
+    cancelled = 0
+    async with aiohttp.ClientSession() as session:
+        # Close positions
+        params = sign({})
+        async with session.get(f'{BASE}/fapi/v2/positionRisk', params=params, headers=headers) as resp:
+            positions = await resp.json()
+            for p in positions:
+                amt = float(p.get('positionAmt', 0))
+                if amt != 0:
+                    side = 'SELL' if amt > 0 else 'BUY'
+                    close_params = sign({
+                        'symbol': p['symbol'],
+                        'side': side,
+                        'type': 'MARKET',
+                        'quantity': str(abs(amt)),
+                        'reduceOnly': 'true',
+                    })
+                    async with session.post(f'{BASE}/fapi/v1/order', params=close_params, headers=headers) as r:
+                        await r.json()
+                        closed += 1
+
+        # Cancel all open orders for ETHUSDT
+        params = sign({'symbol': 'ETHUSDT'})
+        async with session.get(f'{BASE}/fapi/v1/openOrders', params=params, headers=headers) as resp:
+            orders = await resp.json()
+            for o in orders:
+                cancel_params = sign({'symbol': 'ETHUSDT', 'orderId': o['orderId']})
+                async with session.delete(f'{BASE}/fapi/v1/order', params=cancel_params, headers=headers) as r:
+                    await r.json()
+                    cancelled += 1
+
+        # Verify
+        params = sign({})
+        async with session.get(f'{BASE}/fapi/v2/positionRisk', params=params, headers=headers) as resp:
+            positions = await resp.json()
+            non_zero = [p for p in positions if float(p.get('positionAmt', 0)) != 0]
+
+        params = sign({'symbol': 'ETHUSDT'})
+        async with session.get(f'{BASE}/fapi/v1/openOrders', params=params, headers=headers) as resp:
+            orders = await resp.json()
+
+        print(f'closed={closed} cancelled={cancelled} remaining_positions={len(non_zero)} remaining_orders={len(orders)}')
+        return len(non_zero) == 0 and len(orders) == 0
+
+ok = asyncio.run(force_flat())
+sys.exit(0 if ok else 1)
+" 2>&1) || {
+        log_error "Force flat failed: $result"
+        return 1
+    }
+    log_info "Force flat result: $result"
+}
+
 run_cycle() {
     local cycle_num=$1
     log_info "========================================="
     log_info "CYCLE ${cycle_num}/${CYCLES}"
     log_info "========================================="
+
+    # Ensure port is free before starting
+    local stale_pid
+    stale_pid=$(lsof -ti :${API_PORT} 2>/dev/null) || true
+    if [[ -n "$stale_pid" ]]; then
+        log_warn "Killing stale process on port ${API_PORT}: PID=${stale_pid}"
+        kill -9 $stale_pid 2>/dev/null || true
+        sleep 2
+    fi
 
     # Start runtime
     log_info "Starting runtime..."
@@ -216,8 +330,13 @@ run_cycle() {
     log_info "Settling for ${CYCLE_SETTLE_SECONDS}s..."
     sleep "$CYCLE_SETTLE_SECONDS"
 
-    # Verify exchange flat
-    verify_exchange_flat
+    # Verify exchange flat; force-close if needed
+    if ! verify_exchange_flat; then
+        log_warn "Cycle ${cycle_num}: Exchange not flat, forcing cleanup..."
+        force_exchange_flat || log_error "Cycle ${cycle_num}: Force flat failed"
+        sleep 3
+        verify_exchange_flat || log_error "Cycle ${cycle_num}: Still not flat after force cleanup"
+    fi
 
     # Re-enable GKS before shutdown
     reenable_gks
@@ -225,6 +344,8 @@ run_cycle() {
     # Stop runtime
     log_info "Stopping runtime..."
     kill "$RUNTIME_PID" 2>/dev/null || true
+    sleep 1
+    kill -9 "$RUNTIME_PID" 2>/dev/null || true
     wait "$RUNTIME_PID" 2>/dev/null || true
     unset RUNTIME_PID
 
