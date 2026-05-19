@@ -91,6 +91,133 @@ async def test_exchange_update_before_local_order_is_buffered_and_replayed():
 
 
 @pytest.mark.asyncio
+async def test_pending_open_replay_after_local_filled_is_ignored():
+    repo = _InMemoryOrderRepository()
+    service = OrderLifecycleService(
+        repo,
+        pending_update_retry_interval_seconds=0.01,
+        pending_update_max_retries=10,
+    )
+    await service.update_order_from_exchange(
+        _order(
+            order_id="exchange-order",
+            exchange_order_id="ex-filled",
+            status=OrderStatus.OPEN,
+        )
+    )
+    await repo.save(
+        _order(
+            order_id="local-order",
+            exchange_order_id="ex-filled",
+            status=OrderStatus.FILLED,
+            filled_qty=Decimal("0.01"),
+        )
+    )
+
+    await asyncio.sleep(0.06)
+
+    updated = await repo.get_order_by_exchange_id("ex-filled")
+    assert updated.status == OrderStatus.FILLED
+    assert updated.filled_qty == Decimal("0.01")
+    assert service.list_pending_exchange_updates() == {}
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_pending_partially_filled_replay_after_local_filled_is_ignored():
+    repo = _InMemoryOrderRepository()
+    service = OrderLifecycleService(
+        repo,
+        pending_update_retry_interval_seconds=0.01,
+        pending_update_max_retries=10,
+    )
+    await service.update_order_from_exchange(
+        _order(
+            order_id="exchange-order",
+            exchange_order_id="ex-partial",
+            status=OrderStatus.PARTIALLY_FILLED,
+            filled_qty=Decimal("0.005"),
+        )
+    )
+    await repo.save(
+        _order(
+            order_id="local-order",
+            exchange_order_id="ex-partial",
+            status=OrderStatus.FILLED,
+            filled_qty=Decimal("0.01"),
+        )
+    )
+
+    await asyncio.sleep(0.06)
+
+    updated = await repo.get_order_by_exchange_id("ex-partial")
+    assert updated.status == OrderStatus.FILLED
+    assert updated.filled_qty == Decimal("0.01")
+    assert service.list_pending_exchange_updates() == {}
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_terminal_update_is_idempotent():
+    repo = _InMemoryOrderRepository()
+    service = OrderLifecycleService(repo)
+    await repo.save(
+        _order(
+            order_id="local-order",
+            exchange_order_id="ex-dup",
+            status=OrderStatus.FILLED,
+            filled_qty=Decimal("0.01"),
+        )
+    )
+
+    updated = await service.update_order_from_exchange(
+        _order(
+            order_id="exchange-order",
+            exchange_order_id="ex-dup",
+            status=OrderStatus.FILLED,
+            filled_qty=Decimal("0.01"),
+        )
+    )
+
+    assert updated.status == OrderStatus.FILLED
+    assert updated.filled_qty == Decimal("0.01")
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_pending_filled_replay_after_local_open_is_applied():
+    repo = _InMemoryOrderRepository()
+    service = OrderLifecycleService(
+        repo,
+        pending_update_retry_interval_seconds=0.01,
+        pending_update_max_retries=10,
+    )
+    await service.update_order_from_exchange(
+        _order(
+            order_id="exchange-order",
+            exchange_order_id="ex-late-filled",
+            status=OrderStatus.FILLED,
+            filled_qty=Decimal("0.01"),
+        )
+    )
+    await repo.save(
+        _order(
+            order_id="local-order",
+            exchange_order_id="ex-late-filled",
+            status=OrderStatus.OPEN,
+        )
+    )
+
+    await asyncio.sleep(0.06)
+
+    updated = await repo.get_order_by_exchange_id("ex-late-filled")
+    assert updated.status == OrderStatus.FILLED
+    assert updated.filled_qty == Decimal("0.01")
+    assert service.list_pending_exchange_updates() == {}
+    await service.stop()
+
+
+@pytest.mark.asyncio
 async def test_unresolved_pending_exchange_update_expires_without_crashing():
     repo = _InMemoryOrderRepository()
     service = OrderLifecycleService(

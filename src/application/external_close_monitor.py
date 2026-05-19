@@ -25,10 +25,12 @@ class ExternalCloseMonitor:
         *,
         execution_orchestrator: Any,
         position_projection_service: Any,
+        order_lifecycle: Optional[Any] = None,
         trace_service: Optional[Any] = None,
     ) -> None:
         self._execution_orchestrator = execution_orchestrator
         self._position_projection_service = position_projection_service
+        self._order_lifecycle = order_lifecycle
         self._trace_service = trace_service
         self._handled_keys: set[tuple[str, str, str]] = set()
 
@@ -48,6 +50,7 @@ class ExternalCloseMonitor:
                 source=source,
                 metadata=metadata,
             )
+            metadata.update(await self._collect_stale_local_protection_orders(closed_positions))
             self._block_symbol(symbol, metadata)
             self._emit_trace(symbol, metadata)
             if key not in self._handled_keys:
@@ -78,6 +81,58 @@ class ExternalCloseMonitor:
             "event_type": EXTERNAL_CLOSE_DETECTED,
             "action": "block_new_entries",
             "pnl_status": "unresolved_no_reliable_fill",
+        }
+
+    async def _collect_stale_local_protection_orders(
+        self,
+        closed_positions: list[Any],
+    ) -> dict[str, Any]:
+        if self._order_lifecycle is None:
+            return {
+                "stale_local_protection_order_ids": [],
+                "stale_local_protection_order_count": 0,
+                "stale_local_protection_status": "not_checked",
+            }
+
+        stale_order_ids: list[str] = []
+        stale_exchange_order_ids: list[str] = []
+        for position in closed_positions:
+            signal_id = getattr(position, "signal_id", None)
+            if not signal_id:
+                continue
+            try:
+                orders = await self._order_lifecycle.get_orders_by_signal(signal_id)
+            except Exception as exc:
+                logger.warning(
+                    "External close stale protection order lookup failed: signal_id=%s error=%s",
+                    signal_id,
+                    exc,
+                    exc_info=True,
+                )
+                continue
+            for order in orders:
+                role = getattr(order, "order_role", None)
+                status = getattr(order, "status", None)
+                if (
+                    role is not None
+                    and getattr(role, "value", role) in {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
+                    and getattr(status, "value", status) in {"OPEN", "SUBMITTED", "PARTIALLY_FILLED"}
+                ):
+                    stale_order_ids.append(getattr(order, "id", "unknown"))
+                    exchange_order_id = getattr(order, "exchange_order_id", None)
+                    if exchange_order_id:
+                        stale_exchange_order_ids.append(str(exchange_order_id))
+
+        return {
+            "stale_local_protection_order_ids": stale_order_ids[:10],
+            "stale_local_protection_exchange_order_ids": stale_exchange_order_ids[:10],
+            "stale_local_protection_order_count": len(stale_order_ids),
+            "stale_local_protection_status": (
+                "stale_after_external_close" if stale_order_ids else "none"
+            ),
+            "stale_local_protection_action": (
+                "manual_data_hygiene_required" if stale_order_ids else "none"
+            ),
         }
 
     def _block_symbol(self, symbol: str, metadata: dict[str, Any]) -> None:

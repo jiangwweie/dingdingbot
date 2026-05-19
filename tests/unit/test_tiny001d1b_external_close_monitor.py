@@ -10,7 +10,7 @@ from src.application.external_close_monitor import (
 )
 from src.application.position_projection_service import PositionProjectionService
 from src.application.reconciliation import ReconciliationMismatch, ReconciliationReadModelResult
-from src.domain.models import Direction, Position
+from src.domain.models import Direction, Order, OrderRole, OrderStatus, OrderType, Position
 
 
 SYMBOL = "ETH/USDT:USDT"
@@ -50,6 +50,14 @@ class _Trace:
         self.events.append(kwargs)
 
 
+class _OrderLifecycle:
+    def __init__(self, orders: list[Order]) -> None:
+        self.orders = orders
+
+    async def get_orders_by_signal(self, signal_id: str):
+        return [order for order in self.orders if order.signal_id == signal_id]
+
+
 def _active_position() -> Position:
     return Position(
         id="pos-sig-1",
@@ -62,6 +70,24 @@ def _active_position() -> Position:
         realized_pnl=Decimal("0"),
         opened_at=1,
         is_closed=False,
+    )
+
+
+def _stale_sl_order() -> Order:
+    return Order(
+        id="ord-sl",
+        signal_id="sig-1",
+        exchange_order_id="ex-sl",
+        symbol=SYMBOL,
+        direction=Direction.LONG,
+        order_type=OrderType.STOP_MARKET,
+        order_role=OrderRole.SL,
+        requested_qty=Decimal("0.01"),
+        filled_qty=Decimal("0"),
+        status=OrderStatus.OPEN,
+        created_at=1,
+        updated_at=1,
+        reduce_only=True,
     )
 
 
@@ -93,9 +119,11 @@ async def test_external_close_marks_local_position_unresolved_closed_and_blocks_
     projection = PositionProjectionService(repo)
     orchestrator = _Orchestrator()
     trace = _Trace()
+    order_lifecycle = _OrderLifecycle([_stale_sl_order()])
     monitor = ExternalCloseMonitor(
         execution_orchestrator=orchestrator,
         position_projection_service=projection,
+        order_lifecycle=order_lifecycle,
         trace_service=trace,
     )
 
@@ -114,6 +142,8 @@ async def test_external_close_marks_local_position_unresolved_closed_and_blocks_
         )
     ]
     assert orchestrator.blocks[0][2]["pnl_status"] == "unresolved_no_reliable_fill"
+    assert orchestrator.blocks[0][2]["stale_local_protection_order_ids"] == ["ord-sl"]
+    assert orchestrator.blocks[0][2]["stale_local_protection_status"] == "stale_after_external_close"
     assert trace.events[0]["event_type"] == "control.external_close_detected"
     assert trace.events[0]["decision"] == "deny_new_entries"
 

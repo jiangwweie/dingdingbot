@@ -37,6 +37,24 @@ from src.application.order_audit_logger import OrderAuditLogger, OrderAuditEvent
 
 logger = logging.getLogger(__name__)
 
+TERMINAL_ORDER_STATUSES = {
+    OrderStatus.FILLED,
+    OrderStatus.CANCELED,
+    OrderStatus.REJECTED,
+    OrderStatus.EXPIRED,
+}
+ORDER_STATUS_RANK = {
+    OrderStatus.CREATED: 0,
+    OrderStatus.PENDING: 0,
+    OrderStatus.SUBMITTED: 1,
+    OrderStatus.OPEN: 2,
+    OrderStatus.PARTIALLY_FILLED: 3,
+    OrderStatus.FILLED: 4,
+    OrderStatus.CANCELED: 4,
+    OrderStatus.REJECTED: 4,
+    OrderStatus.EXPIRED: 4,
+}
+
 
 class OrderLifecycleService:
     """
@@ -620,6 +638,10 @@ class OrderLifecycleService:
                 return order
             raise ValueError(f"订单不存在：exchange_order_id={exchange_order_id}")
 
+        if self._should_ignore_stale_or_regressive_update(local_order, order):
+            self._clear_pending_exchange_update(exchange_order_id)
+            return local_order
+
         # 直接从 Order 对象读取字段（已经是 Decimal 类型）
         target_status = order.status
         filled_qty = order.filled_qty
@@ -766,12 +788,94 @@ class OrderLifecycleService:
                 )
 
         logger.info(f"订单根据交易所数据更新：{local_order.id} (exchange_id={exchange_order_id}) -> {target_status.value}")
+        self._clear_pending_exchange_update(exchange_order_id)
+        return local_order
+
+    def _clear_pending_exchange_update(self, exchange_order_id: str) -> None:
         self._pending_exchange_updates.pop(exchange_order_id, None)
         completed_retry_task = self._pending_update_tasks.pop(exchange_order_id, None)
         current_task = asyncio.current_task()
         if completed_retry_task is not None and completed_retry_task is not current_task:
             completed_retry_task.cancel()
-        return local_order
+
+    def _should_ignore_stale_or_regressive_update(
+        self,
+        local_order: Order,
+        exchange_update: Order,
+    ) -> bool:
+        local_status = local_order.status
+        incoming_status = exchange_update.status
+        incoming_filled = exchange_update.filled_qty or Decimal("0")
+        local_filled = local_order.filled_qty or Decimal("0")
+        incoming_updated_at = exchange_update.updated_at or 0
+        local_updated_at = local_order.updated_at or 0
+
+        if local_status in TERMINAL_ORDER_STATUSES:
+            if incoming_status == local_status:
+                logger.debug(
+                    "Ignoring duplicate terminal exchange order update: "
+                    "order_id=%s exchange_order_id=%s status=%s",
+                    local_order.id,
+                    exchange_update.exchange_order_id,
+                    incoming_status.value,
+                )
+                return True
+            if incoming_status not in TERMINAL_ORDER_STATUSES:
+                logger.warning(
+                    "Ignoring regressive exchange order update for terminal local order: "
+                    "order_id=%s exchange_order_id=%s local_status=%s incoming_status=%s",
+                    local_order.id,
+                    exchange_update.exchange_order_id,
+                    local_status.value,
+                    incoming_status.value,
+                )
+                return True
+            logger.warning(
+                "Ignoring conflicting terminal exchange order update: "
+                "order_id=%s exchange_order_id=%s local_status=%s incoming_status=%s",
+                local_order.id,
+                exchange_update.exchange_order_id,
+                local_status.value,
+                incoming_status.value,
+            )
+            return True
+
+        if (
+            incoming_updated_at
+            and local_updated_at
+            and incoming_updated_at < local_updated_at
+            and ORDER_STATUS_RANK.get(incoming_status, 0) <= ORDER_STATUS_RANK.get(local_status, 0)
+            and incoming_filled <= local_filled
+        ):
+            logger.warning(
+                "Ignoring stale exchange order update: order_id=%s exchange_order_id=%s "
+                "local_status=%s incoming_status=%s local_updated_at=%s incoming_updated_at=%s",
+                local_order.id,
+                exchange_update.exchange_order_id,
+                local_status.value,
+                incoming_status.value,
+                local_updated_at,
+                incoming_updated_at,
+            )
+            return True
+
+        if (
+            ORDER_STATUS_RANK.get(incoming_status, 0) < ORDER_STATUS_RANK.get(local_status, 0)
+            and incoming_filled <= local_filled
+        ):
+            logger.warning(
+                "Ignoring regressive exchange order update: order_id=%s exchange_order_id=%s "
+                "local_status=%s incoming_status=%s local_filled=%s incoming_filled=%s",
+                local_order.id,
+                exchange_update.exchange_order_id,
+                local_status.value,
+                incoming_status.value,
+                local_filled,
+                incoming_filled,
+            )
+            return True
+
+        return False
 
     def _buffer_unknown_exchange_update(
         self,
