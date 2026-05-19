@@ -351,9 +351,10 @@ async def toggle_global_kill_switch(
             updated_by=body.updated_by,
         )
     except Exception as exc:
+        logger.error("Global Kill Switch persistence failed: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=503,
-            detail=f"Global Kill Switch persistence failed: {exc}",
+            detail="Global Kill Switch persistence failed",
         ) from exc
     return _to_global_kill_switch_response(state)
 
@@ -591,9 +592,10 @@ async def execute_controlled_entry(request: Request) -> ControlledEntryResponse:
     try:
         last_price = await gateway.fetch_ticker_price(_CONTROLLED_SYMBOL)
     except Exception as exc:
+        logger.error("Failed to fetch market price for controlled entry: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to fetch market price: {exc}",
+            detail="Failed to fetch market price",
         ) from exc
 
     entry_price = Decimal(str(last_price))
@@ -647,9 +649,10 @@ async def execute_controlled_entry(request: Request) -> ControlledEntryResponse:
     try:
         intent = await orchestrator.execute_signal(signal, strategy)
     except Exception as exc:
+        logger.error("Controlled entry execution failed: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Execution failed: {exc}",
+            detail="Execution failed",
         ) from exc
 
     # --- Gate 8: trace/audit ---

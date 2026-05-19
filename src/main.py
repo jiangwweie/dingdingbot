@@ -627,11 +627,13 @@ async def run_application():
         _notification_service = get_notification_service()
         if _runtime_config_provider is not None:
             env = _runtime_config_provider.resolved_config.environment
+            webhook_url_val = env.feishu_webhook_url.get_secret_value()
+            register_secret(webhook_url_val)
             _notification_service.setup_channels(
                 [
                     {
                         "type": "feishu",
-                        "webhook_url": env.feishu_webhook_url.get_secret_value(),
+                        "webhook_url": webhook_url_val,
                     }
                 ]
             )
@@ -647,14 +649,20 @@ async def run_application():
         logger.info("Phase 4: Initializing exchange gateway...")
         if _runtime_config_provider is not None:
             env = _runtime_config_provider.resolved_config.environment
+            api_key_val = env.exchange_api_key.get_secret_value()
+            api_secret_val = env.exchange_api_secret.get_secret_value()
+            register_secret(api_key_val)
+            register_secret(api_secret_val)
             _exchange_gateway = ExchangeGateway(
                 exchange_name=env.exchange_name,
-                api_key=env.exchange_api_key.get_secret_value(),
-                api_secret=env.exchange_api_secret.get_secret_value(),
+                api_key=api_key_val,
+                api_secret=api_secret_val,
                 testnet=env.exchange_testnet,
             )
         else:
             exchange_cfg = user_config.exchange
+            register_secret(exchange_cfg.api_key)
+            register_secret(exchange_cfg.api_secret)
             _exchange_gateway = ExchangeGateway(
                 exchange_name=exchange_cfg.name,
                 api_key=exchange_cfg.api_key,
@@ -830,6 +838,7 @@ async def run_application():
         _external_close_monitor = ExternalCloseMonitor(
             execution_orchestrator=_execution_orchestrator,
             position_projection_service=position_projection_service,
+            order_lifecycle=_order_lifecycle_service,
             trace_service=_trace_service,
         )
         logger.info("Core execution runtime ready")
@@ -1225,9 +1234,10 @@ async def run_application():
         logger.info("API dependencies initialized")
 
         # Start uvicorn server as a background task
+        api_host = os.environ.get("API_HOST", "127.0.0.1")
         api_config = uvicorn.Config(
             api_app,
-            host="0.0.0.0",
+            host=api_host,
             port=api_port,
             log_level="warning",
             lifespan="off",
@@ -1237,7 +1247,7 @@ async def run_application():
 
         # Wait a moment for API server to initialize
         await asyncio.sleep(2)
-        logger.info(f"REST API server ready at http://localhost:{api_port}")
+        logger.info(f"REST API server ready at http://{api_host}:{api_port}")
 
         # =============================================
         # Event Loop - Wait for shutdown
