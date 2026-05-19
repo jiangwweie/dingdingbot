@@ -1143,6 +1143,7 @@ async def run_application():
             order_lifecycle_service=_order_lifecycle_service,
             global_kill_switch_service=_global_kill_switch_service,
             startup_trading_guard_service=_startup_trading_guard_service,
+            trace_service=_trace_service,
             # Config repositories (unified with api_v1_config.py)
             strategy_repo=_api_strategy_repo,
             risk_repo=_api_risk_repo,

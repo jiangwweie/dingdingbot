@@ -260,6 +260,7 @@ _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
 _runtime_config_provider: Optional[Any] = None  # RuntimeConfigProvider instance
 _global_kill_switch_service: Optional[Any] = None  # GlobalKillSwitchService instance
 _startup_trading_guard_service: Optional[Any] = None  # StartupTradingGuardService instance
+_trace_service: Optional[Any] = None  # TraceService instance (decision trace backbone)
 _startup_reconciliation_summary: Optional[Dict[str, Any]] = None  # Startup reconciliation summary
 
 # Config repositories - stored in shared module to avoid circular imports with api_v1_config.py
@@ -283,6 +284,7 @@ def set_dependencies(
     runtime_config_provider: Optional[Any] = None,
     global_kill_switch_service: Optional[Any] = None,
     startup_trading_guard_service: Optional[Any] = None,
+    trace_service: Optional[Any] = None,
     # Config repositories (unified with api_v1_config.py)
     strategy_repo: Optional[Any] = None,
     risk_repo: Optional[Any] = None,
@@ -308,6 +310,7 @@ def set_dependencies(
         audit_logger: Optional OrderAuditLogger instance
         order_lifecycle_service: Optional OrderLifecycleService instance
         startup_trading_guard_service: Optional StartupTradingGuardService instance
+        trace_service: Optional TraceService instance
         strategy_repo: Optional StrategyConfigRepository instance
         risk_repo: Optional RiskConfigRepository instance
         system_repo: Optional SystemConfigRepository instance
@@ -316,7 +319,7 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service, _startup_trading_guard_service
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service, _startup_trading_guard_service, _trace_service
     _repository = repository
     _signal_repo = repository  # Alias for console runtime routes
     _account_getter = account_getter
@@ -335,6 +338,7 @@ def set_dependencies(
     _runtime_config_provider = runtime_config_provider
     _global_kill_switch_service = global_kill_switch_service
     _startup_trading_guard_service = startup_trading_guard_service
+    _trace_service = trace_service
     # Config repositories - stored in shared module (avoids circular imports)
     _config_globals._strategy_repo = strategy_repo
     _config_globals._risk_repo = risk_repo
@@ -530,7 +534,7 @@ async def lifespan(app: FastAPI):
 
     global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
     global _capital_protection, _account_service, _execution_orchestrator, _exchange_gateway, _signal_repo
-    global _global_kill_switch_service, _startup_trading_guard_service
+    global _global_kill_switch_service, _startup_trading_guard_service, _trace_service
     global _execution_recovery_repo, _position_repo, _startup_reconciliation_summary
     _standalone_gateway_created = False  # 标记是否在 lifespan 中创建了 gateway
 
@@ -729,6 +733,7 @@ async def lifespan(app: FastAPI):
             _standalone_trace_service = TraceService(
                 sinks=[JsonlTraceSink("logs/runtime/risk_decision.jsonl")]
             )
+            _trace_service = _standalone_trace_service
 
             # 初始化 CapitalProtectionManager
             _standalone_capital_protection = CapitalProtectionManager(
