@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 4 review complete; real live not authorized
+Status: Phase 5A first gates smoked on testnet; real live not authorized
 
 ## Boundary
 
@@ -142,12 +142,9 @@ Completion evidence:
   - reconciliation read model severe `0`, warning `0`;
   - GKS restored active and runtime stopped.
 
-Phase 4 remains blocked and requires a separate Owner request, safety review,
-and authorization. This document still does not authorize real live trading.
-
 ## Phase 4 - Tiny-Live-Style Review
 
-Status: REVIEW / NOT_READY_FOR_REAL_LIVE
+Status: REVIEW / NON_REAL_LIVE_HARDENING_SMOKED / NOT_READY_FOR_REAL_LIVE
 
 Scope:
 
@@ -163,14 +160,59 @@ Review artifact:
 
 - `docs/ops/plc-phase4-tiny-live-style-readiness-review.md`
 
+Completion evidence:
+
+- account/liquidation gate active before CapitalProtection;
+- PG-backed campaign state machine gates new entries;
+- reconciliation reads normal plus conditional STOP_MARKET open-order views;
+- startup guard resets to `RUNTIME_SHUTDOWN_RESET` during runtime shutdown;
+- no-order lifecycle smoke exited naturally and released port `8001`;
+- active Binance testnet smoke opened and closed one controlled `0.01 ETH`
+  exposure through runtime, then ended flat with local active orders `0`.
+
 Phase 4 verdict:
 
-- `phase4_review_complete / real_live_not_authorized / continue_non_real_live_hardening`
+- `phase4_p4_001_to_p4_004_non_real_live_smoke_complete / real_live_not_authorized / strategy_promotion_still_blocked`
 
 Main blockers:
 
-- account risk and liquidation safety are design-only;
-- campaign risk state machine is design-only;
-- conditional SL visibility still creates temporary protection-health noise;
-- runtime control lifecycle needs explicit reset/clean shutdown checks;
 - no strategy contract is promoted to real-live use.
+
+## Phase 5 - Small-Scale Rehearsal Readiness
+
+Status: DESIGN_AND_FIRST_GATES_IN_REVIEW / BOUNDED_TESTNET_SMOKED
+
+Scope:
+
+- Prepare the system for longer non-real-live rehearsal without increasing
+  real-live authority.
+- Keep ETH single-symbol runtime as the current execution scope.
+- Strengthen account-level risk, campaign-state runtime transitions,
+  symbol-isolation proof, and Strategy Contract promotion governance before
+  repeated or longer testnet rehearsal.
+
+Design artifact:
+
+- `docs/ops/plc-phase5-small-scale-rehearsal-design.md`
+
+Current Phase 5A evidence:
+
+- `dev` is the current integration candidate and remains unpushed until Owner
+  requests remote publication;
+- account-risk now prefers account-scope positions and can block a new ETH
+  entry because of critical risk on another symbol;
+- account-risk computes total account exposure and blocks when the exposure
+  multiple cap is exceeded;
+- campaign state service accepts runtime events for profit-protect, stop-loss
+  lock, position close, entry-filled, and risk-critical transitions;
+- Strategy Contract promotion gate preserves
+  `promotion_review_no_order_authority` and cannot grant order or exchange
+  authority.
+- bounded Binance testnet smoke passed after the Phase 5A changes with one
+  controlled entry, one runtime controlled close, final positions `0`, local
+  active orders `0`, restored GKS/campaign/startup-guard state, clean shutdown,
+  and port `8001` release.
+
+Phase 5 verdict:
+
+- `phase5a_first_gates_smoked_on_testnet / real_live_not_authorized / repeated_rehearsal_still_separate_gate`

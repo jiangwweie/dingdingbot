@@ -119,6 +119,18 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   bound `RuntimeContext` now supports legacy `_signal_repo` / `_repository` /
   `_account_getter` reads used by console routes, and context clear removes the
   compatibility globals that otherwise could retain stale runtime handles.
+- Phase 5A starts the small-scale rehearsal readiness path without widening
+  real-live authority. The important architecture shift is from single-symbol
+  entry checks toward platform-level gates: account-risk now prefers
+  account-scope positions and total exposure, campaign state can be advanced by
+  runtime events, and Strategy Contract promotion can only grant eligibility
+  for the next review gate with no order/exchange/account/profile authority.
+- Phase 5A bounded Binance testnet smoke passed after those gate changes:
+  one controlled entry, one runtime controlled close, final runtime positions
+  `0`, local active orders `0`, restored GKS/campaign/startup-guard controls,
+  clean shutdown, and no missing-stop or orphan protection-health block logged.
+  This supports `phase5a_first_gates_smoked_on_testnet`; it does not authorize
+  repeated rehearsal, multi-symbol runtime, or real live.
 
 ## 2026-05-09
 

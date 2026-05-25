@@ -54,6 +54,12 @@ in the backlog, and non-real-live runtime/testnet verification may be used when
 authorized, but they do not imply real live activation or a deployable strategy
 candidate.
 
+2026-05-25 update: PLC Phase 5A small-scale rehearsal readiness has started
+after Phase 4 non-real-live hardening. Phase 5A is still non-real-live and
+focuses on account-scope risk, runtime campaign-state transitions, Strategy
+Contract promotion gating, and bounded testnet evidence. It does not authorize
+repeated rehearsal, multi-symbol runtime, or real live.
+
 ## Operating Model
 
 Codex is the program owner for requirements analysis, planning, architecture decisions, core implementation, skeleton development, code review, and merge decisions.

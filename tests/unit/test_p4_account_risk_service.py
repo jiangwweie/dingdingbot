@@ -26,23 +26,29 @@ class _Gateway:
     def __init__(self, positions=None, *, fail: bool = False) -> None:
         self.positions = positions or []
         self.fail = fail
+        self.fetch_symbols: list[str | None] = []
 
-    async def fetch_positions(self, symbol: str):
+    async def fetch_positions(self, symbol: str | None = None):
+        self.fetch_symbols.append(symbol)
         if self.fail:
             raise RuntimeError("positions unavailable")
+        if symbol is None:
+            return self.positions
         return [pos for pos in self.positions if pos.symbol == symbol]
 
 
 def _position(
     *,
+    symbol: str = SYMBOL,
     side: str = "long",
     mark: str = "100",
     liquidation: str | None = "80",
+    size: str = "1",
 ) -> PositionInfo:
     return PositionInfo(
-        symbol=SYMBOL,
+        symbol=symbol,
         side=side,
-        size=Decimal("1"),
+        size=Decimal(size),
         entry_price=Decimal("100"),
         mark_price=Decimal(mark),
         unrealized_pnl=Decimal("0"),
@@ -53,13 +59,15 @@ def _position(
 
 @pytest.mark.asyncio
 async def test_flat_account_allows_new_entry():
-    service = AccountRiskService(gateway=_Gateway([]), account_service=_AccountService())
+    gateway = _Gateway([])
+    service = AccountRiskService(gateway=gateway, account_service=_AccountService())
 
     assessment = await service.evaluate_new_entry(SYMBOL)
 
     assert assessment.allowed_new_entry
     assert assessment.state == AccountRiskState.HEALTHY
     assert assessment.reason == "ACCOUNT_HEALTHY_FLAT"
+    assert gateway.fetch_symbols == [None]
 
 
 @pytest.mark.asyncio
@@ -115,3 +123,38 @@ async def test_liquidation_distance_thresholds_are_side_aware():
     assert not critical_assessment.allowed_new_entry
     assert healthy_assessment.reason == "ACCOUNT_HEALTHY_POSITION"
     assert healthy_assessment.allowed_new_entry
+
+
+@pytest.mark.asyncio
+async def test_account_scope_positions_block_new_entry_on_other_symbol_risk():
+    service = AccountRiskService(
+        gateway=_Gateway([
+            _position(symbol="BTC/USDT:USDT", side="long", mark="100", liquidation="98"),
+        ]),
+        account_service=_AccountService(),
+    )
+
+    assessment = await service.evaluate_new_entry(SYMBOL)
+
+    assert not assessment.allowed_new_entry
+    assert assessment.state == AccountRiskState.CRITICAL
+    assert assessment.reason == "LIQUIDATION_DISTANCE_CRITICAL"
+    assert assessment.metadata["symbol"] == "BTC/USDT:USDT"
+
+
+@pytest.mark.asyncio
+async def test_total_account_exposure_blocks_new_entry_when_cap_exceeded():
+    service = AccountRiskService(
+        gateway=_Gateway([
+            _position(symbol="BTC/USDT:USDT", mark="100", liquidation="50", size="20"),
+        ]),
+        account_service=_AccountService(balance=Decimal("500")),
+        max_total_exposure_to_balance=Decimal("3"),
+    )
+
+    assessment = await service.evaluate_new_entry(SYMBOL)
+
+    assert not assessment.allowed_new_entry
+    assert assessment.state == AccountRiskState.DEGRADED
+    assert assessment.reason == "ACCOUNT_TOTAL_EXPOSURE_LIMIT_EXCEEDED"
+    assert assessment.metadata["total_exposure"] == "2000"

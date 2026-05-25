@@ -25,6 +25,14 @@ class CampaignRuntimeState(str, Enum):
     CLOSED = "closed"
 
 
+class CampaignRuntimeEvent(str, Enum):
+    ENTRY_FILLED = "entry_filled"
+    PROFIT_PROTECT_TRIGGERED = "profit_protect_triggered"
+    STOP_LOSS_FILLED = "stop_loss_filled"
+    POSITION_CLOSED = "position_closed"
+    RISK_CRITICAL = "risk_critical"
+
+
 _ALLOWED_TRANSITIONS: dict[CampaignRuntimeState, set[CampaignRuntimeState]] = {
     CampaignRuntimeState.OBSERVE: {
         CampaignRuntimeState.ARMED,
@@ -198,6 +206,38 @@ class CampaignStateService:
             reason,
         )
         return snapshot
+
+    async def apply_runtime_event(
+        self,
+        *,
+        event: CampaignRuntimeEvent | str,
+        reason: Optional[str],
+        updated_by: str = "runtime",
+        active_strategy_contract_id: Optional[str] = None,
+        active_session_id: Optional[str] = None,
+    ) -> CampaignStateSnapshot:
+        """Advance campaign state from a runtime event.
+
+        This method only mutates the durable campaign state row. It does not
+        place, cancel, resize, or otherwise mutate exchange orders.
+        """
+        runtime_event = (
+            event if isinstance(event, CampaignRuntimeEvent) else CampaignRuntimeEvent(event)
+        )
+        target = {
+            CampaignRuntimeEvent.ENTRY_FILLED: CampaignRuntimeState.ARMED,
+            CampaignRuntimeEvent.PROFIT_PROTECT_TRIGGERED: CampaignRuntimeState.PROFIT_PROTECT,
+            CampaignRuntimeEvent.STOP_LOSS_FILLED: CampaignRuntimeState.LOSS_LOCKED,
+            CampaignRuntimeEvent.POSITION_CLOSED: CampaignRuntimeState.CLOSED,
+            CampaignRuntimeEvent.RISK_CRITICAL: CampaignRuntimeState.HARD_LOCKED,
+        }[runtime_event]
+        return await self.set_state(
+            status=target.value,
+            reason=reason or runtime_event.value,
+            updated_by=updated_by,
+            active_strategy_contract_id=active_strategy_contract_id,
+            active_session_id=active_session_id,
+        )
 
     async def _refresh_state(self) -> CampaignStateSnapshot:
         if self._repository is None:

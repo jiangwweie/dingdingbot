@@ -747,3 +747,48 @@ Use this file for session progress and handoff notes.
     released port `8001`, and logged no non-daemon thread warning.
 - No strategy logic, runtime profile, trading parameters, credentials, or
   real-live permissions were changed.
+
+## 2026-05-25 (PLC Phase 5A Small-Scale Rehearsal Readiness)
+
+- Owner approved the recommended 1/2/3 path and authorized bounded testnet.
+- Kept `dev` as the current unpushed integration candidate; no remote push was
+  performed.
+- Added `docs/ops/plc-phase5-small-scale-rehearsal-design.md` and updated the
+  PLC ladder/task board to show Phase 5A as the next non-real-live readiness
+  step after Phase 4.
+- Implemented first Phase 5A gates:
+  - account-risk now prefers account-scope position fetches and can block a new
+    entry because another symbol has critical liquidation distance;
+  - account-risk computes total account exposure and blocks if exposure exceeds
+    the configured balance multiple;
+  - campaign state service exposes runtime-event transitions for
+    `entry_filled`, `profit_protect_triggered`, `stop_loss_filled`,
+    `position_closed`, and `risk_critical`;
+  - Strategy Contract promotion gate accepts only reviewed paper-observation
+    packets into the next non-order gate and preserves
+    `promotion_review_no_order_authority`.
+- Verification:
+  - compileall passed for touched application/test modules;
+  - new/local gate tests passed with 16 tests;
+  - Phase 4/ARCH regression target passed with 95 tests;
+  - PLC promotion/schema target passed with 28 tests.
+- Bounded Binance testnet smoke passed:
+  - controlled ENTRY succeeded: `intent_99fdcaa96287`,
+    `sig_3d42cc1b8bf0`, amount `0.01`, notional `21.1324`;
+  - mid-smoke runtime positions count was `1`;
+  - controlled close returned `FILLED` with
+    `exit_controlled_48409f3fc46a`, exchange order `8728597319`, and
+    terminalized protection orders `3`;
+  - final runtime positions `0`;
+  - final local active orders `0`;
+  - GKS restored active, campaign state restored `observe`, startup guard
+    blocked/reset;
+  - runtime exited naturally, port `8001` released, and no non-daemon thread
+    warning appeared;
+  - no `PROTECTION_ORPHAN_REDUCE_ONLY_ORDER` or `PROTECTION_MISSING_STOP_LOSS`
+    block appeared in the smoke log.
+- No real-live trading, real-funds operation, runtime profile change,
+  credential change, strategy-parameter change, transfer, or withdrawal was
+  performed.
+- Current verdict:
+  `phase5a_first_gates_smoked_on_testnet / real_live_not_authorized / repeated_rehearsal_still_separate_gate`.

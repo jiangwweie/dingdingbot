@@ -5,6 +5,7 @@ import pytest
 from src.application.campaign_state_service import (
     CAMPAIGN_STATE_BLOCK_REASON,
     CAMPAIGN_STATE_SCOPE_KEY,
+    CampaignRuntimeEvent,
     CampaignStateService,
 )
 from src.infrastructure.repository_ports import CampaignStateSnapshot
@@ -96,5 +97,44 @@ async def test_missing_repository_is_fail_closed():
     decision = await service.evaluate_new_entry(symbol="ETH/USDT:USDT")
 
     assert service.get_state().status == "hard_locked"
+    assert not decision.allowed_new_entry
+    assert decision.reason == CAMPAIGN_STATE_BLOCK_REASON
+
+
+@pytest.mark.asyncio
+async def test_runtime_events_advance_campaign_state_machine():
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+
+    await service.initialize()
+    await service.set_state(status="armed", reason="owner arm", updated_by="owner")
+    profit_state = await service.apply_runtime_event(
+        event=CampaignRuntimeEvent.PROFIT_PROTECT_TRIGGERED,
+        reason="profit threshold reached",
+    )
+    closed_state = await service.apply_runtime_event(
+        event=CampaignRuntimeEvent.POSITION_CLOSED,
+        reason="runtime close completed",
+    )
+
+    assert profit_state.status == "profit_protect"
+    assert closed_state.status == "closed"
+    assert closed_state.updated_by == "runtime"
+
+
+@pytest.mark.asyncio
+async def test_stop_loss_event_locks_new_entries_until_closed():
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+
+    await service.initialize()
+    await service.set_state(status="armed", reason="owner arm", updated_by="owner")
+    loss_state = await service.apply_runtime_event(
+        event="stop_loss_filled",
+        reason="exchange stop filled",
+    )
+    decision = await service.evaluate_new_entry(symbol="ETH/USDT:USDT")
+
+    assert loss_state.status == "loss_locked"
     assert not decision.allowed_new_entry
     assert decision.reason == CAMPAIGN_STATE_BLOCK_REASON

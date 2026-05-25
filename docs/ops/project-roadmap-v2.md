@@ -96,6 +96,19 @@ loop.
 
 See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
 
+2026-05-25 PLC execution-stage update:
+
+- PLC Phase 0 local sandbox, Phase 1 read-only runtime adapter, Phase 2 paper
+  observation packet, Phase 3 bounded testnet rehearsal, and Phase 4
+  non-real-live runtime hardening/smoke are complete for review.
+- Phase 5A small-scale rehearsal readiness has started under
+  `docs/ops/plc-phase5-small-scale-rehearsal-design.md`: account-scope risk,
+  campaign runtime-event state transitions, and Strategy Contract promotion
+  gating are now the current non-real-live hardening focus.
+- Phase 5A bounded Binance testnet smoke passed after those first gates.
+- Repeated or longer testnet rehearsal, multi-symbol runtime, and real live
+  remain separate gates. Real live remains unauthorized.
+
 The active research SSOT is:
 
 - `docs/ops/opportunity-research-governance-v0.md`

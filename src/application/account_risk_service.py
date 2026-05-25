@@ -49,11 +49,15 @@ class AccountRiskService:
         account_service: Any,
         critical_distance: Decimal = Decimal("0.05"),
         degraded_distance: Decimal = Decimal("0.10"),
+        max_total_exposure_to_balance: Optional[Decimal] = Decimal("3"),
+        account_scope_positions: bool = True,
     ) -> None:
         self._gateway = gateway
         self._account_service = account_service
         self._critical_distance = critical_distance
         self._degraded_distance = degraded_distance
+        self._max_total_exposure_to_balance = max_total_exposure_to_balance
+        self._account_scope_positions = account_scope_positions
 
     async def evaluate_new_entry(self, symbol: str) -> AccountRiskAssessment:
         """Evaluate whether a new entry may proceed for a symbol."""
@@ -79,7 +83,7 @@ class AccountRiskService:
             )
 
         try:
-            positions = await self._gateway.fetch_positions(symbol=symbol)
+            positions = await self._fetch_positions_for_account_scope(symbol)
         except Exception as exc:
             logger.error("Account risk position read failed: %s", exc, exc_info=True)
             return self._assessment(
@@ -97,7 +101,11 @@ class AccountRiskService:
                 message="Account read succeeded and symbol has no active position.",
                 checked_at_ms=checked_at_ms,
                 allowed=True,
-                metadata={"balance": str(balance), "active_positions": 0},
+                metadata={
+                    "balance": str(balance),
+                    "active_positions": 0,
+                    "account_scope_positions": self._account_scope_positions,
+                },
             )
 
         worst: Optional[AccountRiskAssessment] = None
@@ -106,7 +114,84 @@ class AccountRiskService:
             if worst is None or self._severity_rank(assessment.state) > self._severity_rank(worst.state):
                 worst = assessment
         assert worst is not None
+        exposure_assessment = self._evaluate_total_exposure(
+            active_positions,
+            checked_at_ms,
+            Decimal(str(balance)),
+        )
+        if (
+            exposure_assessment is not None
+            and self._severity_rank(exposure_assessment.state) > self._severity_rank(worst.state)
+        ):
+            return exposure_assessment
         return worst
+
+    async def _fetch_positions_for_account_scope(self, symbol: str) -> list[PositionInfo]:
+        if not self._account_scope_positions:
+            return await self._gateway.fetch_positions(symbol=symbol)
+        try:
+            return await self._gateway.fetch_positions(symbol=None)
+        except TypeError:
+            logger.warning(
+                "Gateway does not support account-scope position fetch; "
+                "falling back to symbol scope for account risk."
+            )
+            return await self._gateway.fetch_positions(symbol=symbol)
+
+    def _evaluate_total_exposure(
+        self,
+        positions: list[PositionInfo],
+        checked_at_ms: int,
+        balance: Decimal,
+    ) -> Optional[AccountRiskAssessment]:
+        if self._max_total_exposure_to_balance is None:
+            return None
+        exposures: list[Decimal] = []
+        metadata_positions: list[dict[str, str | None]] = []
+        for position in positions:
+            mark_price = position.mark_price
+            if mark_price is None or mark_price <= Decimal("0"):
+                return self._assessment(
+                    state=AccountRiskState.DEGRADED,
+                    reason="ACCOUNT_EXPOSURE_MARK_PRICE_UNAVAILABLE",
+                    message="Cannot compute account exposure without mark prices; new entries are blocked.",
+                    checked_at_ms=checked_at_ms,
+                    metadata={
+                        "balance": str(balance),
+                        "symbol": position.symbol,
+                        "account_scope_positions": self._account_scope_positions,
+                    },
+                )
+            exposure = Decimal(str(position.size)) * mark_price
+            exposures.append(exposure)
+            metadata_positions.append(
+                {
+                    "symbol": position.symbol,
+                    "side": position.side,
+                    "size": str(position.size),
+                    "mark_price": str(mark_price),
+                    "exposure": str(exposure),
+                }
+            )
+
+        total_exposure = sum(exposures, Decimal("0"))
+        exposure_limit = balance * self._max_total_exposure_to_balance
+        if total_exposure > exposure_limit:
+            return self._assessment(
+                state=AccountRiskState.DEGRADED,
+                reason="ACCOUNT_TOTAL_EXPOSURE_LIMIT_EXCEEDED",
+                message="Total account exposure exceeds the configured balance multiple; new entries are blocked.",
+                checked_at_ms=checked_at_ms,
+                metadata={
+                    "balance": str(balance),
+                    "total_exposure": str(total_exposure),
+                    "exposure_limit": str(exposure_limit),
+                    "max_total_exposure_to_balance": str(self._max_total_exposure_to_balance),
+                    "positions": metadata_positions,
+                    "account_scope_positions": self._account_scope_positions,
+                },
+            )
+        return None
 
     def _evaluate_position(
         self,
