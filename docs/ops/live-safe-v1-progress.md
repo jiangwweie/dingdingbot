@@ -861,3 +861,44 @@ Use this file for session progress and handoff notes.
   runtime action was performed.
 - Current verdict:
   `phase5c_two_symbol_synthetic_fixture_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`.
+
+## 2026-05-25 (PLC Phase 5D Two-Symbol Exchange Read-Only Rehearsal)
+
+- Owner authorized the next step after Phase 5C.
+- Added `docs/ops/plc-phase5d-two-symbol-exchange-readonly-rehearsal.md`.
+- Added `src/application/two_symbol_exchange_rehearsal.py`:
+  - read-only BTC/ETH ticker, positions, normal open orders, and conditional
+    open-order probes;
+  - explicit `exchange_connected_read_only_no_order_authority`;
+  - fails if any symbol has nonzero position, normal open orders, or
+    conditional open orders.
+- Added tests for pass/fail read-only rehearsal behavior.
+- Used the official Binance plugin for public USDS futures book ticker:
+  `ETHUSDT` and `BTCUSDT` both returned bid/ask data.
+- Initial project Binance testnet read-only rehearsal:
+  - ETH position `0`, normal open orders `0`, conditional open orders `0`;
+  - BTC position `0`, normal open orders `0`, conditional open orders `6`;
+  - verdict `phase5d_two_symbol_exchange_readonly_needs_cleanup`.
+- Bounded BTC testnet cleanup:
+  - verified BTC position `0` and normal open orders `0`;
+  - verified all 6 BTC conditional orders were reduce-only;
+  - canceled exchange orders `1000000047775774`, `1000000047775957`,
+    `1000000047779744`, `1000000047779975`, `1000000048741712`,
+    `1000000048741904`;
+  - final BTC position `0`, normal open orders `0`, conditional open orders
+    `0`.
+- Final project Binance testnet read-only rehearsal passed:
+  - ETH ticker visible, position `0`, normal open orders `0`, conditional open
+    orders `0`;
+  - BTC ticker visible, position `0`, normal open orders `0`, conditional open
+    orders `0`;
+  - verdict `phase5d_two_symbol_exchange_readonly_passed`.
+- Local verification:
+  - Phase 5B/C/D local tests passed with 10 tests;
+  - compileall and `git diff --check` passed before the final integration
+    target.
+- No real-live trading, real-funds operation, runtime profile change,
+  credential change, strategy-parameter change, transfer, withdrawal, or
+  multi-symbol runtime action was performed.
+- Current verdict:
+  `phase5d_two_symbol_exchange_readonly_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`.

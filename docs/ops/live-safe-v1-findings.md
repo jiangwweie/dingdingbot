@@ -151,6 +151,12 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   This is still not a multi-symbol runtime authorization because no
   exchange-connected two-symbol process, profile change, or account-risk cap
   review was performed.
+- Phase 5D exchange-connected read-only rehearsal exposed stale BTC testnet
+  reduce-only conditional orders while BTC was flat. The bounded cleanup used
+  the existing conditional cancel fallback and removed 6 orphan conditional
+  orders. Final BTC/ETH read-only rehearsal passed with both symbols flat and
+  no normal or conditional open orders. This improves testnet hygiene but still
+  does not authorize multi-symbol runtime/profile changes.
 
 ## 2026-05-09
 

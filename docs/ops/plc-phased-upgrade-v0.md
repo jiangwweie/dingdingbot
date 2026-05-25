@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 5C synthetic fixture passed; real live not authorized
+Status: Phase 5D exchange read-only passed; real live not authorized
 
 ## Boundary
 
@@ -278,3 +278,34 @@ Current Phase 5C evidence:
 Phase 5C verdict:
 
 - `phase5c_two_symbol_synthetic_fixture_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`
+
+### Phase 5D - Two-Symbol Exchange Read-Only Rehearsal
+
+Status: REVIEW / EXCHANGE_READONLY_PASSED_AFTER_TESTNET_CLEANUP
+
+Design artifact:
+
+- `docs/ops/plc-phase5d-two-symbol-exchange-readonly-rehearsal.md`
+
+Scope:
+
+- exchange-connected read-only BTC/ETH visibility check;
+- no runtime profile/config change;
+- no multi-symbol execution runtime;
+- no order placement;
+- no real live.
+
+Current Phase 5D evidence:
+
+- official Binance plugin returned public USDS futures book ticker for
+  `ETHUSDT` and `BTCUSDT`;
+- initial project Binance testnet read-only check found BTC was flat but had
+  6 reduce-only orphan conditional orders;
+- bounded testnet cleanup canceled those 6 BTC reduce-only orphan conditional
+  orders after verifying BTC position `0` and normal open orders `0`;
+- final project Binance testnet read-only check passed for ETH and BTC:
+  position `0`, normal open orders `0`, conditional open orders `0`.
+
+Phase 5D verdict:
+
+- `phase5d_two_symbol_exchange_readonly_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`

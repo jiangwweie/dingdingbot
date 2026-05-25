@@ -118,6 +118,9 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   runtime read-model symbol filtering. Multi-symbol runtime still requires a
   separate Owner-authorized exchange-connected rehearsal and profile/config
   review.
+- Phase 5D BTC/ETH exchange-connected read-only rehearsal passed after bounded
+  BTC testnet orphan conditional cleanup. Multi-symbol runtime remains blocked
+  pending separate profile/config and execution-runtime authorization.
 
 The active research SSOT is:
 
