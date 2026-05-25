@@ -106,6 +106,19 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   verifies the same exchange id in the stop-order view and cancels with
   `params={"stop": True}`; an empty Binance cancel `status` is interpreted as
   `canceled`.
+- ARCH-P4-001 resolves the two-composition-root debt exposed by Phase 4 smoke:
+  `main.py` owns execution-runtime composition and shutdown; `api.py`
+  receives a bound `RuntimeContext` in embedded mode and no longer creates an
+  exchange gateway, execution orchestrator, startup reconciliation, or
+  protection-health runtime in standalone uvicorn mode.
+- Standalone API is intentionally lower priority and degraded to
+  HTTP/config/read-only behavior until the API/frontend track becomes active
+  again. Runtime control endpoints should return unavailable without an
+  embedded context rather than silently creating a second execution runtime.
+- ARCH-P4-001 acceptance repair closed the remaining compatibility edge cases:
+  bound `RuntimeContext` now supports legacy `_signal_repo` / `_repository` /
+  `_account_getter` reads used by console routes, and context clear removes the
+  compatibility globals that otherwise could retain stale runtime handles.
 
 ## 2026-05-09
 

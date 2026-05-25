@@ -112,7 +112,9 @@ class CampaignStateUpdateRequest(BaseModel):
 def _load_api_module():
     from src.interfaces import api as api_module
 
-    return api_module
+    get_runtime_context = getattr(api_module, "get_runtime_context", None)
+    runtime_context = get_runtime_context() if callable(get_runtime_context) else None
+    return runtime_context or api_module
 
 
 def _require_internal_runtime_control(request: Request) -> None:

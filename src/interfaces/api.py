@@ -50,7 +50,6 @@ from src.domain.exceptions import (
 from src.infrastructure.signal_repository import SignalRepository
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
-    create_runtime_campaign_state_repository,
     create_runtime_order_repository,
     create_runtime_position_repository,
     create_runtime_signal_repository,
@@ -60,10 +59,8 @@ from src.infrastructure.connection_pool import close_all_connections
 from src.application.config_manager import UserConfig, ConfigManager
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.capital_protection import CapitalProtectionManager
-from src.application.startup_trading_guard import StartupTradingGuardService
-from src.application.account_risk_service import AccountRiskService
-from src.application.campaign_state_service import CampaignStateService
 from src.application.account_service import AccountService
+from src.application.runtime_context import RuntimeContext
 from src.domain.models import (
     SignalQuery, SignalDeleteRequest, SignalDeleteResponse,
     AttemptQuery, AttemptDeleteRequest, AttemptDeleteResponse,
@@ -268,9 +265,81 @@ _account_risk_service: Optional[Any] = None  # AccountRiskService instance
 _campaign_state_service: Optional[Any] = None  # CampaignStateService instance
 _trace_service: Optional[Any] = None  # TraceService instance (decision trace backbone)
 _startup_reconciliation_summary: Optional[Dict[str, Any]] = None  # Startup reconciliation summary
+_runtime_context: Optional[RuntimeContext] = None  # Embedded runtime owner context
 
 # Config repositories - stored in shared module to avoid circular imports with api_v1_config.py
 from src.interfaces import api_config_globals as _config_globals
+
+
+def get_runtime_context() -> Optional[RuntimeContext]:
+    """Return the embedded runtime context when main.py owns this API process."""
+    if _runtime_context is not None:
+        return _runtime_context
+    context = getattr(app.state, "runtime", None) if "app" in globals() else None
+    if isinstance(context, RuntimeContext):
+        return context
+    return None
+
+
+def clear_runtime_context(target_app: Optional[FastAPI] = None) -> None:
+    """Clear the embedded runtime context after main.py shutdown cleanup."""
+    global _runtime_context
+    _runtime_context = None
+    if target_app is None and "app" in globals():
+        target_app = app
+    if target_app is not None and hasattr(target_app.state, "runtime"):
+        target_app.state.runtime = None
+    set_dependencies()
+    set_v3_dependencies()
+
+
+def bind_runtime_context(
+    runtime_context: RuntimeContext,
+    target_app: Optional[FastAPI] = None,
+) -> None:
+    """Bind a main-owned runtime context to the API compatibility globals."""
+    global _runtime_context
+    _runtime_context = runtime_context
+
+    if target_app is None and "app" in globals():
+        target_app = app
+    if target_app is not None:
+        target_app.state.runtime = runtime_context
+
+    set_dependencies(
+        repository=runtime_context.signal_repository,
+        account_getter=runtime_context.get_account_snapshot,
+        config_manager=runtime_context.config_manager,
+        exchange_gateway=runtime_context.exchange_gateway,
+        signal_tracker=runtime_context.signal_tracker,
+        snapshot_service=runtime_context.snapshot_service,
+        config_entry_repo=runtime_context.config_entry_repo,
+        order_repo=runtime_context.order_repo,
+        execution_intent_repo=runtime_context.execution_intent_repo,
+        execution_recovery_repo=runtime_context.execution_recovery_repo,
+        position_repo=runtime_context.position_repo,
+        audit_logger=runtime_context.audit_logger,
+        order_lifecycle_service=runtime_context.order_lifecycle_service,
+        runtime_config_provider=runtime_context.runtime_config_provider,
+        global_kill_switch_service=runtime_context.global_kill_switch_service,
+        startup_trading_guard_service=runtime_context.startup_trading_guard_service,
+        account_risk_service=runtime_context.account_risk_service,
+        campaign_state_service=runtime_context.campaign_state_service,
+        trace_service=runtime_context.trace_service,
+        strategy_repo=runtime_context.strategy_repo,
+        risk_repo=runtime_context.risk_repo,
+        system_repo=runtime_context.system_repo,
+        symbol_repo=runtime_context.symbol_repo,
+        notification_repo=runtime_context.notification_repo,
+        history_repo=runtime_context.history_repo,
+        snapshot_repo=runtime_context.snapshot_repo,
+    )
+    set_v3_dependencies(
+        capital_protection=runtime_context.capital_protection,
+        account_service=runtime_context.account_service,
+        execution_orchestrator=runtime_context.execution_orchestrator,
+        startup_reconciliation_summary=runtime_context.startup_reconciliation_summary,
+    )
 
 
 def set_dependencies(
@@ -547,8 +616,6 @@ async def lifespan(app: FastAPI):
     global _global_kill_switch_service, _startup_trading_guard_service, _trace_service
     global _account_risk_service, _campaign_state_service
     global _execution_recovery_repo, _position_repo, _startup_reconciliation_summary
-    _standalone_gateway_created = False  # 标记是否在 lifespan 中创建了 gateway
-
     # Startup - 初始化所有 Repository
     try:
         try:
@@ -608,20 +675,8 @@ async def lifespan(app: FastAPI):
                 await _position_repo.initialize()
                 logger.info("PositionRepository initialized in lifespan")
 
-        # Initialize OrderLifecycleService (ORD-1-T5)
-        from src.application.order_lifecycle_service import OrderLifecycleService
-        _order_lifecycle_service = OrderLifecycleService(
-            repository=_order_repo,
-            audit_logger=_audit_logger,
-        )
-        await _order_lifecycle_service.start()
-        logger.info("OrderLifecycleService initialized as global singleton")
-
-        # Register order update callback with ExchangeGateway (ORD-1-T5)
-        # This ensures all WebSocket order updates go through the lifecycle service
-        if _exchange_gateway is not None:
-            _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
-            logger.info("ExchangeGateway global callback registered with OrderLifecycleService")
+        if get_runtime_context() is not None and _order_lifecycle_service is not None:
+            logger.info("OrderLifecycleService provided by embedded runtime context")
 
         # =============================================
         # Initialize Config Repositories (独立 uvicorn 模式必需)
@@ -687,287 +742,21 @@ async def lifespan(app: FastAPI):
             logger.info("ConfigManager initialized in lifespan")
 
         # =============================================
-        # Initialize Execution Runtime (独立 uvicorn 模式必需)
-        # main.py 嵌入模式通过 set_v3_dependencies() 注入，lifespan="off" 不执行此处
+        # Standalone API mode
         # =============================================
-        # 独立 uvicorn 模式下需要创建 ExchangeGateway 和执行运行时
-        if _exchange_gateway is None and _cg._config_manager is not None:
-            from src.infrastructure.exchange_gateway import ExchangeGateway
-            from src.application.account_service import BinanceAccountService
-            from src.application.account_risk_service import AccountRiskService
-            from src.application.campaign_state_service import CampaignStateService
-            from src.application.capital_protection import CapitalProtectionManager
-            from src.application.decision_trace import TraceService
-            from src.application.execution_orchestrator import ExecutionOrchestrator
-            from src.application.global_kill_switch import GlobalKillSwitchService
-            from src.application.position_projection_service import PositionProjectionService
-            from src.application.protection_health_monitor import ProtectionHealthMonitor
-            from src.application.reconciliation import ReconciliationService
-            from src.application.startup_reconciliation_service import StartupReconciliationService
-            from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
-            from src.infrastructure.notifier import get_notification_service
-
-            # 获取配置
-            user_config = await _cg._config_manager.get_user_config()
-            exchange_cfg = user_config.exchange
-
-            # 初始化 ExchangeGateway
-            _standalone_gateway = ExchangeGateway(
-                exchange_name=exchange_cfg.name,
-                api_key=exchange_cfg.api_key,
-                api_secret=exchange_cfg.api_secret,
-                testnet=exchange_cfg.testnet,
+        # The execution runtime has one composition root: src/main.py. A plain
+        # `uvicorn src.interfaces.api:app` process initializes HTTP/config/read
+        # resources only and leaves exchange/orchestrator/control endpoints
+        # unavailable until an embedded RuntimeContext is bound by main.py.
+        if get_runtime_context() is None:
+            logger.info(
+                "Standalone API mode started without execution runtime; "
+                "embedded main.py owns runtime composition and shutdown."
             )
-            await _standalone_gateway.initialize()
-            _exchange_gateway = _standalone_gateway
-            _standalone_gateway_created = True  # 标记为 lifespan 创建，需要在 shutdown 时关闭
-            logger.info(f"ExchangeGateway initialized in lifespan (standalone uvicorn mode): {exchange_cfg.name}")
-
-            # 注入到 OrderRepository（如果支持）
-            if hasattr(_order_repo, "set_exchange_gateway"):
-                _order_repo.set_exchange_gateway(_standalone_gateway)
-
-            # 初始化 NotificationService (用于告警)
-            _standalone_notifier = get_notification_service()
-            _standalone_notifier.setup_channels(
-                [{"type": ch.type, "webhook_url": ch.webhook_url}
-                 for ch in user_config.notification.channels]
-            )
-
-            # Notifier adapter for CapitalProtectionManager
-            class _NotifierAdapter:
-                def __init__(self, notifier):
-                    self._notifier = notifier
-                async def send_alert(self, title: str, message: str) -> None:
-                    await self._notifier.send_system_alert(title, message)
-
-            # 初始化 AccountService
-            _standalone_account_service = BinanceAccountService(_standalone_gateway)
-            _standalone_trace_service = TraceService(
-                sinks=[JsonlTraceSink("logs/runtime/risk_decision.jsonl")]
-            )
-            _trace_service = _standalone_trace_service
-
-            # 初始化 CapitalProtectionManager
-            _standalone_capital_protection = CapitalProtectionManager(
-                config=_cg._config_manager.build_capital_protection_config(),
-                account_service=_standalone_account_service,
-                notifier=_NotifierAdapter(_standalone_notifier),
-                gateway=_standalone_gateway,
-                trace_service=_standalone_trace_service,
-            )
-
-            # 初始化 PG execution recovery repository（如果可用）
-            if _execution_recovery_repo is None:
-                try:
-                    from src.infrastructure.database import get_pg_session_maker
-                    from src.infrastructure.pg_execution_recovery_repository import (
-                        PgExecutionRecoveryRepository,
-                    )
-
-                    session_maker = get_pg_session_maker()
-                    if session_maker:
-                        _execution_recovery_repo = PgExecutionRecoveryRepository(
-                            session_maker=session_maker
-                        )
-                        await _execution_recovery_repo.initialize()
-                        logger.info(
-                            "PG execution recovery repository initialized in lifespan"
-                        )
-                except Exception as e:
-                    logger.warning(
-                        "PG execution recovery repository 初始化失败（独立 uvicorn 模式降级继续）: %s",
-                        e,
-                        exc_info=True,
-                    )
-                    _execution_recovery_repo = None
-
-            async def _orchestrator_notifier_adapter(title: str, message: str) -> None:
-                await _standalone_notifier.send_system_alert(title, message)
-
-            _startup_trading_guard_service = StartupTradingGuardService(
-                trace_service=_standalone_trace_service,
-                config_hash=(
-                    _runtime_config_provider.config_hash
-                    if _runtime_config_provider is not None
-                    else None
-                ),
-            )
-
-            try:
-                from src.infrastructure.core_repository_factory import (
-                    create_runtime_global_kill_switch_repository,
-                )
-
-                _global_kill_switch_service = GlobalKillSwitchService(
-                    repository=create_runtime_global_kill_switch_repository(),
-                    trace_service=_standalone_trace_service,
-                    notifier=_orchestrator_notifier_adapter,
-                )
-                await _global_kill_switch_service.initialize()
-            except Exception as e:
-                logger.critical(
-                    "[GKS-v0][HIGH] Global Kill Switch initialization failed; "
-                    "standalone runtime will use fail-closed process state: %s",
-                    e,
-                    exc_info=True,
-                )
-                _global_kill_switch_service = GlobalKillSwitchService(
-                    repository=None,
-                    trace_service=_standalone_trace_service,
-                    notifier=_orchestrator_notifier_adapter,
-                )
-                await _global_kill_switch_service.set_state(
-                    active=True,
-                    reason="GKS_INIT_FAILED",
-                    updated_by="system",
-                )
-
-            _account_risk_service = AccountRiskService(
-                gateway=_standalone_gateway,
-                account_service=_standalone_account_service,
-            )
-
-            try:
-                _campaign_state_service = CampaignStateService(
-                    repository=create_runtime_campaign_state_repository()
-                )
-                await _campaign_state_service.initialize()
-            except Exception as e:
-                logger.critical(
-                    "[CampaignState][HIGH] Campaign state initialization failed; "
-                    "standalone runtime will block new entries fail-closed: %s",
-                    e,
-                    exc_info=True,
-                )
-                _campaign_state_service = CampaignStateService(repository=None)
-                await _campaign_state_service.initialize()
-
-            # 初始化 ExecutionOrchestrator
-            _standalone_orchestrator = ExecutionOrchestrator(
-                capital_protection=_standalone_capital_protection,
-                order_lifecycle=_order_lifecycle_service,
-                gateway=_standalone_gateway,
-                intent_repository=_execution_intent_repo,
-                notifier=_orchestrator_notifier_adapter,
-                execution_recovery_repository=_execution_recovery_repo,
-                position_projection_service=PositionProjectionService(_position_repo),
-                global_kill_switch=_global_kill_switch_service,
-                startup_trading_guard=_startup_trading_guard_service,
-                account_risk_service=_account_risk_service,
-                campaign_state_service=_campaign_state_service,
-            )
-
-            # 注册订单更新回调
-            _standalone_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
-
-            # 注入到全局变量
-            _capital_protection = _standalone_capital_protection
-            _account_service = _standalone_account_service
-            _execution_orchestrator = _standalone_orchestrator
-
-            # 独立 uvicorn 模式也运行启动对账，避免执行态主链弱化
-            try:
-                reconciliation_service = StartupReconciliationService(
-                    gateway=_standalone_gateway,
-                    repository=_order_repo,
-                    lifecycle=_order_lifecycle_service,
-                    orchestrator=_standalone_orchestrator,
-                    execution_recovery_repository=_execution_recovery_repo,
-                )
-                _startup_reconciliation_summary = (
-                    await reconciliation_service.run_startup_reconciliation()
-                )
-                logger.info(
-                    "Startup reconciliation completed in lifespan: candidates=%s, failed=%s",
-                    _startup_reconciliation_summary.get("total_candidates", 0),
-                    _startup_reconciliation_summary.get("failure_count", 0),
-                )
-            except Exception as e:
-                logger.error(
-                    "启动对账失败（独立 uvicorn 模式不影响主进程启动）: %s",
-                    e,
-                    exc_info=True,
-                )
-
-            try:
-                protection_health_monitor = ProtectionHealthMonitor(
-                    execution_orchestrator=_standalone_orchestrator,
-                    trace_service=_standalone_trace_service,
-                    notifier=_orchestrator_notifier_adapter,
-                )
-                read_model_service = ReconciliationService(
-                    gateway=_standalone_gateway,
-                    position_mgr=_position_repo,
-                    order_repository=_order_repo,
-                )
-                standalone_symbols = []
-                if _runtime_config_provider is not None:
-                    standalone_symbols = list(
-                        _runtime_config_provider.resolved_config.market.symbols
-                    )
-                elif hasattr(user_config, "core_symbols"):
-                    standalone_symbols = list(user_config.core_symbols)
-                elif hasattr(user_config, "symbols"):
-                    standalone_symbols = list(user_config.symbols)
-                elif hasattr(user_config, "trading") and hasattr(user_config.trading, "symbol"):
-                    standalone_symbols = [user_config.trading.symbol]
-                for symbol in list(dict.fromkeys(standalone_symbols)):
-                    result = await read_model_service.build_read_model(symbol)
-                    await protection_health_monitor.handle_read_model_result(
-                        result,
-                        source="startup",
-                    )
-            except Exception as e:
-                logger.error(
-                    "Protection health startup check failed（独立 uvicorn 模式不影响已有生命周期）: %s",
-                    e,
-                    exc_info=True,
-                )
-
-            try:
-                breaker_count = (
-                    await _standalone_orchestrator.rebuild_circuit_breakers_from_recovery_tasks()
-                )
-                logger.info(
-                    "Circuit breaker 重建完成（独立 uvicorn 模式）: %s 个 symbol 被熔断",
-                    breaker_count,
-                )
-            except Exception as e:
-                logger.error(
-                    "Circuit breaker 重建失败（独立 uvicorn 模式不影响主进程启动）: %s",
-                    e,
-                    exc_info=True,
-                )
-
-            logger.info("Execution runtime initialized in lifespan (standalone uvicorn mode)")
 
         yield
 
     finally:
-        # Shutdown - 清理独立 uvicorn 模式创建的执行运行时
-        # 注意：只清理 lifespan 自己创建的对象，不影响 main.py 嵌入模式注入的依赖
-        if _standalone_gateway_created and _exchange_gateway is not None:
-            if _startup_trading_guard_service is not None:
-                _startup_trading_guard_service.block(
-                    updated_by="system",
-                    reason="RUNTIME_SHUTDOWN_RESET",
-                    source="api_lifespan_shutdown",
-                )
-            await _exchange_gateway.close()
-            logger.info("ExchangeGateway closed (standalone uvicorn mode)")
-            # 重置全局变量，避免下次 startup 时误判为已初始化
-            _exchange_gateway = None
-            _capital_protection = None
-            _account_service = None
-            _execution_orchestrator = None
-            _global_kill_switch_service = None
-            _startup_trading_guard_service = None
-            _account_risk_service = None
-            _campaign_state_service = None
-            _startup_reconciliation_summary = None
-            logger.info("Standalone execution runtime globals reset to None")
-
         # Shutdown - 清理所有 Repository
         if _repository is not None:
             await _repository.close()

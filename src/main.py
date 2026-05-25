@@ -32,6 +32,7 @@ if load_dotenv is not None:
 
 from src.application.config_manager import load_all_configs_async
 from src.application.runtime_config import RuntimeConfigProvider, RuntimeConfigResolver
+from src.application.runtime_context import RuntimeContext
 from src.application.account_service import BinanceAccountService
 from src.application.account_risk_service import AccountRiskService
 from src.application.capital_protection import (
@@ -891,6 +892,7 @@ async def run_application():
         # Phase 4.3: Run Startup Reconciliation
         # =============================================
         logger.info("Phase 4.3: Running startup reconciliation...")
+        reconciliation_summary = None
         try:
             from src.application.startup_reconciliation_service import StartupReconciliationService
 
@@ -1176,7 +1178,7 @@ async def run_application():
         # Phase 9: Start REST API Server (embedded)
         # =============================================
         import uvicorn
-        from src.interfaces.api import app as api_app, set_dependencies, set_v3_dependencies
+        from src.interfaces.api import app as api_app, bind_runtime_context
 
         api_port = int(os.environ.get("BACKEND_PORT", 8000))
         logger.info(f"Phase 9: Starting REST API server on port {api_port}...")
@@ -1243,26 +1245,35 @@ async def run_application():
         await _api_snapshot_repo_extended.initialize()
         logger.info("ConfigSnapshotRepository initialized")
 
-        set_dependencies(
-            repository=signal_repository,
-            account_getter=_exchange_gateway.get_account_snapshot,
+        runtime_context = RuntimeContext(
+            owner="main",
+            shutdown_event=_shutdown_event,
             config_manager=config_manager,
-            exchange_gateway=_exchange_gateway,
             runtime_config_provider=_runtime_config_provider,
-            signal_tracker=_status_tracker,
-            snapshot_service=_snapshot_service,
+            exchange_gateway=_exchange_gateway,
+            notification_service=_notification_service,
+            signal_repository=signal_repository,
             config_entry_repo=_config_entry_repo,
             order_repo=_order_repo,
             execution_intent_repo=_execution_intent_repo,
             execution_recovery_repo=_execution_recovery_repo,
             position_repo=_position_repo,
+            reconciliation_read_model_repo=_reconciliation_read_model_repo,
+            signal_pipeline=_signal_pipeline,
+            account_service=account_service,
             order_lifecycle_service=_order_lifecycle_service,
+            capital_protection=_capital_protection,
+            execution_orchestrator=_execution_orchestrator,
             global_kill_switch_service=_global_kill_switch_service,
             startup_trading_guard_service=_startup_trading_guard_service,
             account_risk_service=_account_risk_service,
             campaign_state_service=_campaign_state_service,
             trace_service=_trace_service,
-            # Config repositories (unified with api_v1_config.py)
+            protection_health_monitor=_protection_health_monitor,
+            external_close_monitor=_external_close_monitor,
+            startup_reconciliation_summary=reconciliation_summary,
+            signal_tracker=_status_tracker,
+            snapshot_service=_snapshot_service,
             strategy_repo=_api_strategy_repo,
             risk_repo=_api_risk_repo,
             system_repo=_api_system_repo,
@@ -1270,13 +1281,13 @@ async def run_application():
             notification_repo=_api_notification_repo,
             history_repo=_api_history_repo,
             snapshot_repo=_api_snapshot_repo_extended,
+            order_watch_tasks=_order_watch_tasks,
+            periodic_reconciliation_task=_periodic_reconciliation_task,
+            snapshot_update_task=_snapshot_update_task,
+            ws_task=_ws_task,
         )
-        set_v3_dependencies(
-            capital_protection=_capital_protection,
-            account_service=account_service,
-            execution_orchestrator=_execution_orchestrator,
-            startup_reconciliation_summary=reconciliation_summary,
-        )
+        await runtime_context.start()
+        bind_runtime_context(runtime_context, api_app)
         logger.info("API dependencies initialized")
 
         # Start uvicorn server as a background task
@@ -1290,6 +1301,8 @@ async def run_application():
         )
         _api_server = uvicorn.Server(api_config)
         _api_task = asyncio.create_task(_api_server.serve(), name="api-server")
+        runtime_context.api_server = _api_server
+        runtime_context.api_task = _api_task
 
         # Wait a moment for API server to initialize
         await asyncio.sleep(2)
@@ -1457,6 +1470,12 @@ async def run_application():
         _ws_task = None
         _api_task = None
         _api_server = None
+        try:
+            from src.interfaces import api as api_module
+
+            api_module.clear_runtime_context()
+        except Exception as exc:
+            logger.warning("API runtime context clear failed: %s", exc, exc_info=True)
 
         await _log_pending_runtime_tasks("run_application.finally")
         logger.info("Application shutdown complete")

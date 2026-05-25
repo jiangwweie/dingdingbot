@@ -716,3 +716,34 @@ Use this file for session progress and handoff notes.
   real account mutation was performed.
 - Current verdict:
   `phase4_p4_001_to_p4_004_non_real_live_smoke_complete / real_live_not_authorized / strategy_promotion_still_blocked`.
+
+## 2026-05-25 (ARCH-P4-001 Runtime/API Composition Root Governance)
+
+- Added ADR-0010 for runtime/API ownership:
+  - `src/main.py` is the only execution-runtime composition root;
+  - embedded API receives the main-owned runtime through `RuntimeContext` bound
+    to `app.state.runtime`;
+  - standalone `uvicorn src.interfaces.api:app` is degraded to
+    HTTP/config/read-only mode and must not create exchange/orchestrator
+    runtime wiring.
+- Added `src/application/runtime_context.py` as the explicit runtime container
+  for exchange, repositories, services, orchestrator, startup summary, runtime
+  tasks, and embedded API handles, with `start()` / `shutdown()` owner-state
+  methods.
+- Updated API runtime control reads to prefer the bound context while retaining
+  module-global compatibility for existing endpoints/tests.
+- Acceptance repair closed two governance gaps before commit:
+  - `RuntimeContext` now maps legacy `_signal_repo` / `_repository` reads to
+    `signal_repository`, and `_account_getter` to `get_account_snapshot`;
+  - `clear_runtime_context()` clears the compatibility globals populated by
+    `bind_runtime_context()`, so a process without bound context no longer
+    retains stale exchange/orchestrator/control handles.
+- Verification after acceptance repair:
+  - targeted architecture/API/control/Phase 4 regression tests passed with
+    87 tests;
+  - compileall and `git diff --check` passed;
+  - no-order testnet lifecycle smoke started embedded API with the bound
+    context, read startup guard successfully, exited naturally on SIGTERM,
+    released port `8001`, and logged no non-daemon thread warning.
+- No strategy logic, runtime profile, trading parameters, credentials, or
+  real-live permissions were changed.
