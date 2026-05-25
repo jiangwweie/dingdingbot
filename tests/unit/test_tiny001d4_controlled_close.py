@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.application.execution_orchestrator import ExecutionOrchestrator
+from src.domain.exceptions import OrderNotFoundError
 from src.domain.models import (
     Direction,
     Order,
@@ -79,6 +80,7 @@ class _Gateway:
     def __init__(self) -> None:
         self.place_calls = []
         self.cancel_calls = []
+        self.cancel_not_found_ids: set[str] = set()
 
     async def place_order(self, **kwargs):
         self.place_calls.append(kwargs)
@@ -99,6 +101,8 @@ class _Gateway:
 
     async def cancel_order(self, exchange_order_id: str, symbol: str):
         self.cancel_calls.append({"exchange_order_id": exchange_order_id, "symbol": symbol})
+        if exchange_order_id in self.cancel_not_found_ids:
+            raise OrderNotFoundError(f"订单不存在：{exchange_order_id}", "F-012")
         return OrderCancelResult(
             order_id=exchange_order_id,
             exchange_order_id=exchange_order_id,
@@ -192,6 +196,36 @@ async def test_runtime_managed_controlled_close_projects_and_cancels_protection(
     assert position_repo.position.is_closed is True
     assert position_repo.position.current_qty == Decimal("0")
     capital.record_exit_projection.assert_awaited_once()
+    assert {call["exchange_order_id"] for call in gateway.cancel_calls} == {"ex-sl", "ex-tp"}
+    assert lifecycle.orders["sl"].status == OrderStatus.CANCELED
+    assert lifecycle.orders["tp"].status == OrderStatus.CANCELED
+
+
+@pytest.mark.asyncio
+async def test_controlled_close_terminalizes_protection_when_exchange_order_already_missing():
+    from src.application.position_projection_service import PositionProjectionService
+
+    position = _position()
+    position_repo = _PositionRepo(position)
+    lifecycle = _Lifecycle()
+    lifecycle.orders["entry"] = _order("entry", OrderRole.ENTRY, OrderStatus.FILLED, "ex-entry")
+    lifecycle.orders["sl"] = _order("sl", OrderRole.SL, OrderStatus.OPEN, "ex-sl")
+    lifecycle.orders["tp"] = _order("tp", OrderRole.TP1, OrderStatus.OPEN, "ex-tp")
+    gateway = _Gateway()
+    gateway.cancel_not_found_ids = {"ex-tp"}
+    capital = MagicMock()
+    capital.record_exit_projection = AsyncMock()
+
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=capital,
+        order_lifecycle=lifecycle,
+        gateway=gateway,
+        position_projection_service=PositionProjectionService(position_repo),
+    )
+
+    result = await orchestrator.execute_controlled_close(position=position)
+
+    assert result["close_order"].status == OrderStatus.FILLED
     assert {call["exchange_order_id"] for call in gateway.cancel_calls} == {"ex-sl", "ex-tp"}
     assert lifecycle.orders["sl"].status == OrderStatus.CANCELED
     assert lifecycle.orders["tp"].status == OrderStatus.CANCELED

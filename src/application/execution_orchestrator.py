@@ -48,6 +48,7 @@ from src.application.startup_trading_guard import (
     STARTUP_TRADING_GUARD_BLOCK_REASON,
     StartupTradingGuardService,
 )
+from src.domain.exceptions import OrderNotFoundError
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
 from src.infrastructure.repository_ports import ExecutionIntentRepositoryPort
@@ -550,10 +551,20 @@ class ExecutionOrchestrator:
             if order.order_role not in protection_roles or order.status not in active_statuses:
                 continue
             if order.exchange_order_id:
-                await self._gateway.cancel_order(
-                    exchange_order_id=order.exchange_order_id,
-                    symbol=order.symbol,
-                )
+                try:
+                    await self._gateway.cancel_order(
+                        exchange_order_id=order.exchange_order_id,
+                        symbol=order.symbol,
+                    )
+                except OrderNotFoundError:
+                    logger.warning(
+                        "Controlled close protection cancel found no exchange order; "
+                        "terminalizing local protection order after confirmed close: "
+                        "order_id=%s exchange_order_id=%s signal_id=%s",
+                        order.id,
+                        order.exchange_order_id,
+                        signal_id,
+                    )
             terminalized_order = await self._order_lifecycle.cancel_order(
                 order.id,
                 reason=f"{reason}: position closed by runtime-managed close",

@@ -491,3 +491,50 @@ Use this file for session progress and handoff notes.
   - official Binance plugin public futures ticker check for `ETHUSDT` passed;
   - project read-only Binance testnet check for `ETH/USDT:USDT` returned no
     nonzero positions and open orders `0`.
+
+## 2026-05-25 (PLC Phase 3 Attempt 1)
+
+- Owner authorized one ADR-0009 Binance testnet controlled rehearsal cycle.
+- Runtime start evidence:
+  - commit: `14f4a2f`;
+  - profile: `sim1_eth_runtime`;
+  - `exchange_testnet=true`;
+  - startup reconciliation candidates `0`;
+  - startup guard manually armed;
+  - GKS temporarily set inactive for the authorized cycle.
+- Controlled entry succeeded:
+  - intent id: `intent_b8b65ad0e745`;
+  - signal id: `sig_c205e2c08e64`;
+  - amount: `0.01`;
+  - entry exchange order id: `8728367551`;
+  - local ENTRY status: `FILLED`;
+  - local protection orders mounted: SL `1000000084961186`, TP1
+    `8728367554`, TP2 `8728367574`.
+- Controlled close placed and filled the reduce-only `EXIT`:
+  - local EXIT id: `exit_controlled_cbcef6060340`;
+  - exchange order id: `8728368262`;
+  - status: `FILLED`;
+  - average execution price: `2102.72`;
+  - realized PnL: `-0.0085`;
+  - daily risk stats updated to cumulative PnL `0.9432`, trade count `3`.
+- Attempt 1 did not fully pass acceptance because the close endpoint returned
+  HTTP 500 after the EXIT fill. Root cause: Binance had already removed or
+  expired at least one protection order after the reduce-only close, and
+  `_cancel_remaining_protection_orders_after_controlled_close()` treated
+  `OrderNotFoundError` during cleanup as fatal.
+- Safety restoration:
+  - read-only Binance testnet check after close returned no nonzero
+    `ETH/USDT:USDT` position and open orders `0`;
+  - GKS was restored active before cleanup review;
+  - runtime process was stopped;
+  - three local stale protection rows for `sig_c205e2c08e64` were terminalized
+    locally with audit metadata and no exchange mutation;
+  - local active orders are `0`.
+- Follow-up patch:
+  - controlled close cleanup now treats `OrderNotFoundError` for protection
+    order cancellation as idempotent after the close is already confirmed;
+  - other cancellation failures still fail the close path;
+  - targeted verification passed: 65 tests, `compileall`, and
+    `git diff --check`.
+- Current verdict:
+  `attempt1_safe_flat_but_not_acceptance_pass / retry_authorization_required`.

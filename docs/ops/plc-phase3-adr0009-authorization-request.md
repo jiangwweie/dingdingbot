@@ -100,3 +100,11 @@ Binance testnet controlled runtime rehearsal.
 Use a specific approval such as:
 
 `Authorize PLC Phase 3 under ADR-0009: one Binance testnet controlled rehearsal, sim1_eth_runtime only, max 0.01 ETH, one entry and one reduce-only close, restore safe state and stop runtime after verification.`
+
+## Retry Approval Phrase After Attempt 1
+
+Attempt 1 safely reached exchange-flat and local-flat state, but did not fully
+pass acceptance because the close endpoint returned HTTP 500 after the EXIT
+filled. Use a specific retry approval such as:
+
+`Authorize PLC Phase 3 retry under ADR-0009: one additional Binance testnet controlled rehearsal, sim1_eth_runtime only, max 0.01 ETH, one entry and one reduce-only close, validate patched post-close cleanup, restore safe state and stop runtime after verification.`

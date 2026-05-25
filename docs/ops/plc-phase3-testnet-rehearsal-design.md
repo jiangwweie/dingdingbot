@@ -152,7 +152,7 @@ small task card with allowed files.
 
 ## Current Verdict
 
-`phase3_ready_for_owner_auth / authorization_required`
+`attempt1_safe_flat_but_not_acceptance_pass / retry_authorization_required`
 
 The design and implementation blockers are cleared at pre-execution level:
 
@@ -163,5 +163,8 @@ The design and implementation blockers are cleared at pre-execution level:
 - local PG is clean for active-order preflight and accepts `EXIT` orders;
 - Binance testnet read-only preflight is flat for `ETH/USDT:USDT`.
 
-Execution still must not start until Owner authorizes one exact ADR-0009
-rehearsal cycle.
+Attempt 1 safely reached exchange-flat and local-flat state, but it did not
+fully pass acceptance because the close endpoint returned HTTP 500 after the
+reduce-only EXIT filled. A follow-up patch makes post-close protection cleanup
+idempotent when Binance has already removed a protection order. A second
+bounded ADR-0009 rehearsal cycle is required to mark Phase 3 complete.

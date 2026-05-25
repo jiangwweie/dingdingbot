@@ -65,6 +65,12 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   risk-reducing action from armed/profit-protect/loss-locked/hard-locked, and
   account/liquidation state must fail closed for new entries when unknown,
   degraded, or critical.
+- PLC Phase 3 attempt 1 exposed a post-close cleanup idempotency gap: after a
+  reduce-only market close fills and Binance removes dependent protection
+  orders, `OrderNotFoundError` from protection cancellation must not turn a
+  flat, successfully closed position into a failed close. The runtime should
+  terminalize the local protection row after confirmed flat/confirmed close
+  while continuing to fail on non-idempotent cancellation errors.
 
 ## 2026-05-09
 
