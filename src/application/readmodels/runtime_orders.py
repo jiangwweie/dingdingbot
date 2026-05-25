@@ -27,6 +27,12 @@ def _to_iso_from_millis(timestamp_ms: Optional[int]) -> str:
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _direction_to_side(direction: Any) -> str:
+    value = getattr(direction, "value", direction)
+    normalized = str(value).split(".")[-1].upper()
+    return "BUY" if normalized == "LONG" else "SELL"
+
+
 class RuntimeOrdersReadModel:
     async def build(
         self,
@@ -73,7 +79,7 @@ class RuntimeOrdersReadModel:
             # order 可能是 ORM 对象或领域模型
             order_id = str(getattr(order, "id", "unknown"))
             symbol_val = str(getattr(order, "symbol", "unknown"))
-            direction = str(getattr(order, "direction", "LONG"))
+            direction = getattr(order, "direction", "LONG")
             order_type = str(getattr(order, "order_type", "MARKET"))
             status_val = str(getattr(order, "status", "PENDING"))
             requested_qty = getattr(order, "requested_qty", Decimal("0"))
@@ -82,8 +88,7 @@ class RuntimeOrdersReadModel:
             created_at_ts = getattr(order, "created_at", None)
             updated_at_ts = getattr(order, "updated_at", None)
 
-            # side 映射: direction -> side
-            side = "BUY" if direction == "LONG" else "SELL"
+            side = _direction_to_side(direction)
 
             orders.append(
                 ConsoleOrderItem(

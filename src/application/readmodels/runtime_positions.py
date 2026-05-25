@@ -58,12 +58,14 @@ class RuntimePositionsReadModel:
             for pos in snapshot_positions
         }
 
+        used_position_repo = False
         if position_repo is not None and hasattr(position_repo, "list_active"):
             try:
                 try:
                     stored_positions = await position_repo.list_active(symbol=symbol, limit=200)
                 except TypeError:
                     stored_positions = await position_repo.list_active(limit=200)
+                used_position_repo = True
             except Exception:
                 stored_positions = []
 
@@ -104,7 +106,7 @@ class RuntimePositionsReadModel:
                     )
                 )
 
-        if not positions and account_snapshot is not None:
+        if not positions and account_snapshot is not None and not used_position_repo:
             for pos in snapshot_positions:
                 symbol = getattr(pos, "symbol", "unknown")
                 direction = _snapshot_direction(getattr(pos, "side", "long"))

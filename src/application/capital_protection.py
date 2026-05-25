@@ -52,6 +52,11 @@ DAILY_RISK_STATS_UNAVAILABLE_MESSAGE = (
 DAILY_RISK_STATS_DECIMAL_QUANT = Decimal("0.000000000000000001")
 
 
+def resolve_daily_risk_stats_scope_key(*, profile_name: Optional[str] = None) -> str:
+    """Daily risk stats are account-level in v1, not profile/session scoped."""
+    return DAILY_RISK_STATS_SCOPE_KEY
+
+
 def normalize_daily_risk_decimal(value: Decimal) -> str:
     """Return a stable Decimal string for daily risk idempotency keys."""
     with localcontext() as context:

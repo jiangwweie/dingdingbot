@@ -16,6 +16,7 @@ from src.application.capital_protection import (
     DAILY_RISK_STATS_UNAVAILABLE_REASON,
     CapitalProtectionManager,
     normalize_daily_risk_decimal,
+    resolve_daily_risk_stats_scope_key,
 )
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.position_projection_service import PositionProjectionService
@@ -137,6 +138,18 @@ def _manager(**kwargs) -> CapitalProtectionManager:
         notifier=_FakeNotifier(),
         gateway=_FakeGateway(),
         **kwargs,
+    )
+
+
+def test_daily_risk_stats_scope_stays_account_level_across_runtime_profiles():
+    assert resolve_daily_risk_stats_scope_key(profile_name=None) == DAILY_RISK_STATS_SCOPE_KEY
+    assert (
+        resolve_daily_risk_stats_scope_key(profile_name="sim1_eth_runtime")
+        == DAILY_RISK_STATS_SCOPE_KEY
+    )
+    assert (
+        resolve_daily_risk_stats_scope_key(profile_name="phase5e_btc_eth_testnet_runtime")
+        == DAILY_RISK_STATS_SCOPE_KEY
     )
 
 

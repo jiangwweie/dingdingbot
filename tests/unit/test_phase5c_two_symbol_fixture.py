@@ -246,9 +246,26 @@ async def test_runtime_readmodels_filter_orders_intents_and_positions_by_symbol(
     )
 
     assert [order.symbol for order in order_response.orders] == [ETH]
+    assert [order.side for order in order_response.orders] == ["BUY"]
     assert [intent.symbol for intent in intent_response.intents] == [ETH]
+    assert [intent.side for intent in intent_response.intents] == ["BUY"]
     assert [position.symbol for position in position_response.positions] == [ETH]
     assert order_repo.symbol_calls == [ETH]
+
+
+@pytest.mark.asyncio
+async def test_runtime_positions_do_not_resurrect_snapshot_only_position_when_pg_is_flat():
+    stale_snapshot = SimpleNamespace(
+        positions=[_position_info(BTC, size="0.002")],
+    )
+
+    response = await RuntimePositionsReadModel().build(
+        account_snapshot=stale_snapshot,
+        position_repo=_PositionSource([]),
+        symbol=BTC,
+    )
+
+    assert response.positions == []
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,12 @@ def _to_iso_from_millis(timestamp_ms: Optional[int]) -> str:
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _direction_to_side(direction: Any) -> str:
+    value = getattr(direction, "value", direction)
+    normalized = str(value).split(".")[-1].upper()
+    return "BUY" if normalized == "LONG" else "SELL"
+
+
 class RuntimeExecutionIntentsReadModel:
     async def build(
         self,
@@ -92,8 +98,7 @@ class RuntimeExecutionIntentsReadModel:
             direction = signal_payload.get("direction", "LONG")
             quantity = signal_payload.get("suggested_position_size", Decimal("0"))
 
-            # side 映射: direction -> side
-            side = "BUY" if direction == "LONG" else "SELL"
+            side = _direction_to_side(direction)
 
             intents.append(
                 ConsoleExecutionIntentItem(
