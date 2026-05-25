@@ -1,6 +1,26 @@
 # Live-safe v1 Program
 
-Last updated: 2026-05-09
+Last updated: 2026-05-25
+
+## Current Status
+
+Status: Runtime safety foundation / not current business mainline
+
+This document remains useful for execution-safety boundaries, core-file
+ownership, and Live-safe backlog context. It is superseded as a mainline
+planning document by:
+
+- `docs/ops/project-roadmap-v2.md`
+- `docs/ops/personal-leveraged-campaign-mainline-v0.md`
+- `docs/adr/0008-personal-leveraged-campaign-business-chain.md`
+
+The current Owner-facing mainline is the Personal Leveraged Campaign chain:
+
+`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign control -> withdrawal instruction`
+
+Live-safe v1 work may support future execution safety, but this document does
+not authorize runtime activation, paper, testnet, live, tiny-live, real account
+actions, leverage, sizing, or direct research-to-order wiring.
 
 ## Role Of This Document
 
@@ -9,10 +29,8 @@ This document is the execution-layer program document for the current active tra
 Use [project-roadmap-v2.md](/Users/jiangwei/Documents/final/docs/ops/project-roadmap-v2.md) as the high-level roadmap and boundary document.
 
 This file defines the preserved execution-safety foundation for
-`Live-safe Foundation`. As of 2026-05-09, it is no longer the active research
-mainline. The active research-stage label is `Observation + Research
-Methodology Reset`, with BTC+ETH Phase 1 as the only mainline
-strategy-research object.
+`Live-safe Foundation`. As of 2026-05-25, it is not the active research or
+business mainline.
 
 ## Goal
 
@@ -24,10 +42,10 @@ platform roadmap. Current work must not start strategy runtime, paper/testnet/
 live trading, small-live execution, portfolio/router work, SOL Phase 2, CPM
 reopening, short-side work, or parameter optimization.
 
-The current Owner-facing stage is docs-only consolidation and observation
-methodology reset. BTC+ETH Phase 1 observation design is the only current
-mainline. Live-safe implementation tasks may remain in the backlog, but they do
-not imply live activation or a deployable strategy candidate.
+The current Owner-facing stage is docs/design/sandbox preparation for the
+Personal Leveraged Campaign chain. Live-safe implementation tasks may remain in
+the backlog, but they do not imply live activation or a deployable strategy
+candidate.
 
 ## Operating Model
 
@@ -59,8 +77,8 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Do not change live/runtime profile trading parameters.
 - Do not turn investor preference numbers into hard-coded engineering constraints.
 - Do not start any strategy runtime, paper/testnet/live execution, or
-  small-live operation during the current `Observation + Research Methodology
-  Reset` stage.
+  small-live/tiny-live operation during the current Personal Leveraged Campaign
+  docs/design/sandbox stage.
 - Do not promote SOL Phase 2, CPM, short-side, portfolio/router, or
   multi-strategy work into current mainline without a separate Owner decision.
 

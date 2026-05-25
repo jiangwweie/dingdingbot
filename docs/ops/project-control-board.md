@@ -2,6 +2,25 @@
 
 Last updated: 2026-05-09
 
+## Superseded Notice
+
+Status: Superseded by `docs/ops/project-roadmap-v2.md`,
+`docs/ops/personal-leveraged-campaign-mainline-v0.md`, and
+`docs/ops/opportunity-research-governance-v0.md`.
+
+This file is historical control-board context for the 2026-05-09
+`Observation + Research Methodology Reset` / Direction A period. It is not the
+current project mainline and must not be used to create implementation tasks for
+the Personal Leveraged Campaign chain.
+
+Current mainline:
+
+`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign control -> withdrawal instruction`
+
+Runtime, paper, testnet, live, tiny-live, real account, leverage, sizing, and
+direct research-to-order wiring remain behind the current promotion and runtime
+safety gates.
+
 ## 1. Current Phase
 
 `Observation + Research Methodology Reset`: the project is observation-ready for docs-only / shadow-no-order BTC+ETH Phase 1 review, but observation-ready is not live-ready, docs-only is not runtime, shadow/no-order is not paper/testnet/live, and a research object is not a runtime or small-live candidate.
