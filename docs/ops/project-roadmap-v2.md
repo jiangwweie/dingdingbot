@@ -121,6 +121,44 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
 - Phase 5D BTC/ETH exchange-connected read-only rehearsal passed after bounded
   BTC testnet orphan conditional cleanup. Multi-symbol runtime remains blocked
   pending separate profile/config and execution-runtime authorization.
+- Phase 5E design has started as an Owner-review package only. The proposed
+  path is one new readonly BTC/ETH testnet runtime profile, minimal
+  multi-symbol market-scope config support, and one runtime process with
+  sequential ETH then BTC controlled exposure under explicit exposure/order
+  caps, stop conditions, and rollback. No implementation or testnet runtime
+  execution is authorized by the design document.
+- Phase 5E was then Owner-authorized for bounded testnet. One runtime process
+  started with BTC/ETH market scope and order-watch. ETH controlled
+  entry/close passed and ended flat. BTC controlled entry was blocked before
+  order placement because fixed `0.001 BTC` notional was below min_notional;
+  the cap was not raised. Final direct Binance testnet and PG state were
+  flat/no-open-orders. Real live remains unauthorized.
+- Phase 5E follow-up added read-only feasibility preflight for fixed ETH/BTC
+  controlled specs so min_notional/cap blockers are visible before arming a
+  testnet entry window. BTC blocker handling now reports the next viable
+  exchange-step amount, estimated notional, and cap shortfall as Owner decision
+  evidence; it still does not raise caps or resize BTC orders automatically.
+- Owner then approved Binance testnet operations without the prior
+  minimum-capital limitation. Phase 5E BTC controlled amount/cap are updated
+  for a testnet-only retry: `0.002 BTC`, max notional `250 USDT`, sequential
+  one-symbol exposure, real live still unauthorized.
+- Phase 5E BTC testnet retry passed: feasibility was `OK`, controlled BTC
+  entry `0.002 BTC` completed, runtime-managed close filled, three protection
+  orders were terminalized/canceled, final direct Binance testnet and PG state
+  were flat/no-open-orders, controls were restored, and runtime stopped.
+- Phase 5E follow-up added a read-only inventory endpoint for standardized
+  BTC/ETH preflight and final flatness evidence across exchange and PG state.
+- Phase 5E+ long-term capability planning is now captured in
+  `docs/ops/plc-long-term-capability-roadmap-v1.md`. The next recommended
+  direction is local campaign risk state-machine completion before more
+  exchange-connected rehearsal: state before action, account before symbol,
+  Strategy Contract freeze before runtime, sequential before simultaneous, and
+  evidence before promotion.
+- PLC-STATE-001 completed the first local campaign state-machine core for
+  review: transition rules are now table-driven, runtime/Owner triggers are
+  explicit, transition records are replayable and audit-ready, and `entry_filled`
+  cannot arm a campaign from `observe`. No additional testnet action was needed
+  for this local proof.
 
 The active research SSOT is:
 

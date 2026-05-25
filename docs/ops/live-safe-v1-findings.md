@@ -157,6 +157,83 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   orders. Final BTC/ETH read-only rehearsal passed with both symbols flat and
   no normal or conditional open orders. This improves testnet hygiene but still
   does not authorize multi-symbol runtime/profile changes.
+- Phase 5E should begin as a design/authorization package, not as a direct
+  runtime/profile change. Current runtime config is still single-symbol by
+  construction (`MarketRuntimeConfig.symbols` derives from `primary_symbol`),
+  and the controlled endpoints are hard-coded to ETH plus `sim1_eth_runtime`.
+  The recommended 5E path is a new readonly testnet profile plus minimal
+  multi-symbol market-scope support, then one runtime process with sequential
+  ETH and BTC controlled exposure, explicit exposure/order caps, stop
+  conditions, and rollback. Implementation and testnet execution remain Owner
+  gated.
+- Phase 5E implementation kept the multi-symbol change narrow: optional
+  `symbols` in runtime market config, a new readonly inactive profile, and
+  fixed ETH/BTC control endpoints under the Phase 5E profile. The bounded
+  testnet rehearsal proved one runtime process can warm up, reconcile, and
+  watch BTC+ETH simultaneously while executing a controlled ETH entry/close.
+  BTC execution did not proceed because the fixed `0.001 BTC` notional was
+  below min_notional and raising size would challenge the Owner cap. This is a
+  cap/min-notional design blocker, not an execution failure.
+- Runtime `/positions` can lag after a close because it may show the cached
+  account snapshot before asset polling refreshes. For Phase 5E final flatness,
+  direct Binance read-only inventory and PG active position/order repositories
+  were treated as the authoritative cleanup evidence.
+- Phase 5E follow-up converted the BTC min-notional blocker into a reusable
+  read-only feasibility preflight. The endpoint reports whether each fixed
+  controlled symbol spec is feasible under current price, min_notional, and
+  cap before the entry path can place an order. This keeps the next BTC decision
+  as an Owner cap/design decision instead of a runtime surprise.
+- Phase 5E feasibility should prefer exchange-provided market metadata over
+  conservative defaults. `ExchangeGateway.get_min_notional(symbol)` now extracts
+  loaded `limits.cost.min` or Binance `MIN_NOTIONAL` / `NOTIONAL` filter values
+  without making a hidden network call; default min_notional is only a fallback.
+- BTC blocker handling now includes next-step decision evidence in the
+  feasibility response: `next_viable_amount`, `next_viable_notional`, and
+  `cap_shortfall`. For the observed blocked BTC price `77550.6`, the next
+  `0.001 BTC` exchange step would be `0.002 BTC`, estimated notional
+  `155.1012 USDT`, which exceeded the previous `130 USDT` cap by
+  `25.1012 USDT`. This remains an Owner cap decision, not an automatic order
+  sizing change.
+- Owner later approved Binance testnet operations without the prior
+  minimum-capital limitation. For Phase 5E testnet only, the BTC controlled
+  spec is raised to `0.002 BTC` with max notional `250 USDT`; no real-live,
+  mainnet, real-funds, withdrawal/transfer, or generic strategy-sizing
+  authority is implied.
+- Phase 5E BTC retry passed under that testnet-only authorization: feasibility
+  used exchange metadata min_notional `50.0`, controlled entry completed at
+  `0.002 BTC`, runtime-managed close filled, protection orders were
+  terminalized/canceled, and final direct Binance testnet plus PG state was
+  flat. Console order read-model side mapping also needed a display fix because
+  `Direction.LONG` enum values were previously rendered through the fallback
+  `SELL` branch even though the actual position was LONG.
+- The stale `/api/runtime/positions` observation after Phase 5E should be fixed
+  at the read-model boundary: when PG active-position lookup succeeds, PG active
+  lifecycle is authoritative for whether a position exists; account snapshot
+  can enrich mark price/PnL for those rows but must not resurrect a
+  snapshot-only position after PG is flat.
+- Daily risk stats scope should remain account-level across runtime profiles.
+  The accepted LS-002b `scope_key="runtime:default"` is intentionally not
+  profile-scoped or session-scoped, because daily loss/count limits are account
+  risk controls. Phase rehearsals that need bounded order counts should use
+  endpoint once guards, fixed caps, and session controls instead of splitting
+  daily risk aggregates by profile.
+- Phase 5E and later multi-symbol rehearsals should use a single inventory
+  read model for preflight and final flatness evidence. The Phase 5E inventory
+  endpoint reports exchange positions, exchange normal/conditional open orders,
+  PG active positions, and PG open orders per symbol, plus `all_flat`; it is
+  read-only and must not become a cleanup/mutation endpoint.
+- Post-Phase-5E planning should prioritize long-term capability closure over
+  more exchange-connected motion. The accepted direction is captured in
+  `docs/ops/plc-long-term-capability-roadmap-v1.md`: complete campaign state,
+  account state, multi-symbol isolation, Strategy Contract promotion, and
+  evidence/rollback foundations in separable gates. The immediate recommended
+  next capability is local campaign transition-table and replay proof, not a
+  larger testnet run.
+- PLC-STATE-001 confirms the right shape for campaign risk state hardening:
+  table-driven transition rules first, deterministic replay proof second, and
+  runtime event wiring after that evidence. The important guard is that
+  `entry_filled` may only confirm an already armed session; it must not become
+  a hidden arming path from `observe`.
 
 ## 2026-05-09
 

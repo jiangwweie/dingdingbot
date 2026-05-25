@@ -902,3 +902,321 @@ Use this file for session progress and handoff notes.
   multi-symbol runtime action was performed.
 - Current verdict:
   `phase5d_two_symbol_exchange_readonly_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`.
+
+## 2026-05-25 (PLC Phase 5E Design Start)
+
+- Added `docs/ops/plc-phase5e-controlled-multi-symbol-testnet-runtime-rehearsal.md`
+  as a design/Owner-review package only.
+- Proposed a new readonly testnet runtime profile
+  `phase5e_btc_eth_testnet_runtime`; `sim1_eth_runtime` must remain unchanged.
+- Identified current blockers: runtime market scope is still single-symbol and
+  controlled endpoints are hard-coded to ETH plus `sim1_eth_runtime`.
+- Recommended first 5E rehearsal shape: one runtime process, BTC/ETH market
+  scope, sequential ETH then BTC controlled testnet exposure, no simultaneous
+  BTC+ETH position, and no portfolio/router expansion.
+- Set proposed caps: ETH `0.01 ETH` / `25 USDT`, BTC exchange-minimum viable
+  quantity with `130 USDT` ceiling, combined open exposure cap `130 USDT`
+  because only one symbol may be open at a time, and max `5` order submissions
+  per symbol.
+- Recorded stop conditions and rollback path covering profile/config rollback,
+  GKS/startup/campaign restoration, runtime shutdown, final BTC/ETH flat and
+  open-orders `0`, and Owner-gated direct testnet cleanup only if runtime close
+  fails.
+- No implementation, profile/config mutation, runtime start, Binance testnet
+  order, cleanup, cancellation, credential change, or real live action was
+  executed.
+
+## 2026-05-25 (PLC Phase 5E Implementation And Bounded Testnet)
+
+- Owner authorized continuing PLC and bounded Phase 5E testnet.
+- Implemented minimal multi-symbol runtime profile support:
+  - optional `symbols` in `MarketRuntimeConfig`, defaulting to
+    `[primary_symbol]` for legacy profiles;
+  - validation that `primary_symbol` is included and symbols are unique;
+  - subscribed pairs now cover every symbol/timeframe pair.
+- Added dry-run-by-default `scripts/seed_phase5e_profile.py` and seeded
+  readonly inactive profile `phase5e_btc_eth_testnet_runtime`.
+- Added Phase 5E server-controlled ETH/BTC endpoints under
+  `/api/runtime/test/phase5e/{eth|btc}/...`; legacy `sim1_eth_runtime`
+  controlled endpoints remain intact.
+- Local verification before runtime:
+  - Phase 5E config/endpoint tests passed with 11 tests;
+  - affected controlled endpoint / Phase 5C / Phase 5D / account-risk
+    regression passed with 42 tests;
+  - compileall and `git diff --check` passed.
+- Read-only Binance testnet preflight passed: ETH/BTC positions `0`, normal
+  open orders `0`, conditional open orders `0`.
+- Runtime startup:
+  - wrapper launch was required because `src.main` loads `.env.local` with
+    override; direct shell `RUNTIME_PROFILE=...` was overwritten by
+    `.env.local`;
+  - 5E runtime resolved profile version `2`, hash `8c0f633708379804`;
+  - BTC/ETH warmup loaded `4/4` pairs;
+  - order-watch started for both symbols;
+  - startup reconciliation candidates/failures were `0`.
+- ETH leg passed:
+  - controlled entry `intent_fca06be68891`, signal `sig_39cb35ab8b3e`,
+    amount `0.01`, notional `21.1736`;
+  - controlled close `exit_controlled_18ff201e1ec3`, exchange order
+    `8728698638`, average execution price `2117.18`;
+  - runtime terminalized 3 protection orders and daily risk stats trade count
+    advanced from `7` to `8`.
+- BTC leg was blocked before order placement:
+  - fixed `0.001 BTC` notional was `77.5506`, below min_notional default
+    `100`;
+  - cap was not raised and no BTC order or position was opened.
+- Final cleanup:
+  - GKS active;
+  - startup guard blocked;
+  - campaign state `observe`;
+  - direct Binance testnet read-only final state flat/no-open-orders for ETH
+    and BTC;
+  - PG active positions `[]`, PG ETH/BTC open orders `[]`;
+  - runtime stopped naturally and port `8001` released.
+- Observation: `/api/runtime/positions` briefly showed stale ETH exposure after
+  close because account snapshot cache had not refreshed; direct exchange
+  inventory and PG repositories were flat.
+- Current verdict:
+  `phase5e_eth_leg_passed / phase5e_btc_leg_blocked_by_min_notional_without_order / final_exchange_flat / real_live_not_authorized`.
+
+## 2026-05-25 (PLC Phase 5E Feasibility Preflight Hardening)
+
+- Continued PLC after Phase 5E without starting runtime or executing another
+  testnet order.
+- Added pure `src/application/phase5e_rehearsal_feasibility.py` for
+  fixed-symbol cap/min-notional assessment.
+- Added read-only API endpoint:
+  `GET /api/runtime/test/phase5e/{eth|btc}/feasibility`.
+- Changed Phase 5E controlled entry to reuse the same feasibility result before
+  constructing the signal/order path.
+- The endpoint can report the observed BTC blocker as
+  `NOTIONAL_BELOW_MIN_NOTIONAL` before opening a GKS/startup/campaign entry
+  window.
+- Verification:
+  - compileall passed for the new feasibility module and touched API/tests;
+  - targeted tests passed with 43 tests;
+  - `git diff --check` passed.
+- No runtime start, exchange call, testnet order, profile cap increase, real
+  live action, commit, or push was performed.
+
+## 2026-05-25 (PLC Phase 5E Exchange MinNotional Metadata)
+
+- Continued Phase 5E hardening without starting runtime or making exchange
+  calls.
+- Added `ExchangeGateway.get_min_notional(symbol)` as a synchronous read of
+  already-loaded market metadata.
+- The method reads `limits.cost.min` first, then Binance `MIN_NOTIONAL` /
+  `NOTIONAL` filter values from market `info.filters`.
+- Phase 5E feasibility now gets exchange metadata when available and falls back
+  to conservative defaults only when metadata is unavailable.
+- Verification:
+  - compileall passed for touched exchange/test files;
+  - targeted tests passed with 23 tests;
+  - `git diff --check` passed.
+- No runtime start, testnet order, cap increase, real live action, commit, or
+  push was performed.
+
+## 2026-05-25 (PLC Phase 5E BTC Blocker Decision Evidence)
+
+- Continued Phase 5E BTC blocker handling without starting runtime or making
+  exchange calls.
+- Added next-viable BTC decision evidence to the pure feasibility model and
+  read-only Phase 5E feasibility endpoint:
+  - `next_viable_amount`;
+  - `next_viable_notional`;
+  - `cap_shortfall`.
+- The Phase 5E BTC spec now supplies the controlled exchange-step assumption
+  `amount_step=0.001` for decision evidence. It still keeps fixed order amount
+  `0.001 BTC` and max notional `130 USDT`.
+- For the observed blocked price `77550.6`, feasibility reports next viable
+  amount `0.002 BTC`, estimated notional `155.1012 USDT`, and cap shortfall
+  `25.1012 USDT`.
+- This does not increase BTC cap, change live/runtime profile defaults, resize
+  an order, start runtime, place a testnet order, or authorize real live.
+- Verification:
+  - `pytest -q tests/unit/test_phase5e_rehearsal_feasibility.py tests/unit/test_phase5e_controlled_multi_symbol_endpoints.py`
+    passed with 14 tests.
+  - broader Phase 5E/tiny controlled-close/Phase 5C/Phase 5D/account-risk
+    targeted regression passed with 70 tests.
+  - compileall and `git diff --check` passed for touched files.
+
+## 2026-05-25 (PLC Phase 5E BTC Testnet Retry Authorization)
+
+- Owner approved Binance testnet operations without the prior minimum-capital
+  limitation.
+- Interpreted scope: testnet-only permission to raise Phase 5E BTC controlled
+  amount/cap enough to satisfy Binance testnet min-notional. This does not
+  authorize real live, mainnet, real funds, withdrawal, transfer, or generic
+  strategy sizing changes.
+- Updated Phase 5E BTC controlled spec:
+  - amount `0.002 BTC`;
+  - max controlled notional `250 USDT`;
+  - amount step remains `0.001 BTC`;
+  - sequential one-symbol exposure remains required.
+- Next action: run local verification, then one bounded BTC testnet retry with
+  preflight, feasibility, controlled entry, runtime-managed close, final
+  exchange/PG flatness checks, and restored controls.
+
+## 2026-05-25 (PLC Phase 5E BTC Testnet Retry Passed)
+
+- Local verification before retry:
+  - compileall passed for touched runtime/config/API/readmodel/test files;
+  - targeted Phase 5E/Phase 5C/Phase 5D/tiny/account-risk regression passed
+    with 70 tests;
+  - `git diff --check` passed.
+- Read-only direct Binance testnet preflight:
+  - ETH position `0`, normal open orders `0`, conditional open orders `0`;
+  - BTC position `0`, normal open orders `0`, conditional open orders `0`;
+  - BTC ticker `77403.4`, min_notional `50.0`.
+- Started one runtime process on port `8001` with
+  `RUNTIME_PROFILE=phase5e_btc_eth_testnet_runtime`, `EXCHANGE_TESTNET=true`,
+  `RUNTIME_CONTROL_API_ENABLED=true`, and
+  `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true`.
+- Runtime resolved profile version `2`, hash `8c0f633708379804`, and safe
+  summary showed ETH/BTC symbols with testnet mode.
+- BTC feasibility before entry:
+  - amount `0.002`;
+  - price `77392.5`;
+  - notional `154.7850`;
+  - min_notional `50.0`, source `get_min_notional`;
+  - max_notional `250`;
+  - reason `OK`.
+- Controls for entry window:
+  - startup guard armed;
+  - GKS disabled only for the bounded entry window;
+  - campaign state set to `armed`.
+- Controlled BTC entry succeeded:
+  - intent `intent_ed2c999769bd`;
+  - signal `sig_929aabc7d2ce`;
+  - amount `0.002`;
+  - entry price `77391.8`;
+  - notional `154.7836`;
+  - status `completed`.
+- After entry, BTC active exposure was `0.002` with three reduce-only
+  protection orders (`TP1`, `TP2`, `SL`).
+- Controlled BTC runtime close succeeded:
+  - close order `exit_controlled_657fa92707ee`;
+  - exchange order `13192655923`;
+  - amount `0.002`;
+  - average execution price `77396.67`;
+  - terminalized protection orders `3`.
+- Daily risk stats updated to trade_count `9` and cumulative realized PnL
+  `-0.015260000000000000000`.
+- Final state:
+  - direct Binance testnet ETH/BTC positions `0`;
+  - direct Binance testnet ETH/BTC normal open orders `0`;
+  - direct Binance testnet ETH/BTC conditional open orders `0`;
+  - PG active positions `[]`;
+  - PG ETH/BTC open orders `[]`;
+  - GKS active;
+  - startup guard blocked;
+  - campaign state `observe`;
+  - runtime stopped via SIGTERM shutdown path and port `8001` released.
+- Additional read-model fix from evidence review:
+  - console order/execution-intent side mapping now handles enum directions
+    such as `Direction.LONG`, avoiding a false `SELL` display fallback.
+- No real live, mainnet, real-funds, withdrawal, transfer, commit, or push was
+  performed.
+
+## 2026-05-25 (PLC Phase 5E Positions Snapshot Freshness Hardening)
+
+- Continued PLC after Phase 5E without starting runtime or making exchange
+  calls.
+- Hardened `/api/runtime/positions` read-model behavior after the Phase 5E
+  stale snapshot observation.
+- New behavior: when `position_repo.list_active(...)` succeeds, PG active
+  positions are the source of truth for whether a position exists; account
+  snapshot rows only enrich those active PG rows with mark price/PnL/leverage.
+- This prevents a stale account snapshot from showing a snapshot-only position
+  after runtime-managed close has already made PG active positions flat.
+- Added regression coverage in the Phase 5C two-symbol read-model fixture.
+- No runtime start, exchange call, testnet order, cap increase, real live
+  action, commit, or push was performed.
+
+## 2026-05-25 (PLC Daily Risk Scope Decision Lock)
+
+- Continued PLC after Phase 5E without starting runtime or making exchange
+  calls.
+- Decision: daily risk stats remain account-level with fixed
+  `scope_key="runtime:default"` across runtime profiles.
+- Rationale: daily loss and daily trade count are account risk controls; making
+  them profile-scoped or session-scoped would let repeated profiles bypass the
+  account-level day budget.
+- Phase rehearsal order/session isolation should remain in dedicated controls:
+  endpoint once guards, fixed exposure caps, order-count caps, GKS/startup
+  guard/campaign state, and explicit Owner authorization.
+- Added `resolve_daily_risk_stats_scope_key(profile_name=...)` as a small code
+  policy point and wired runtime startup through it.
+- Added regression coverage proving `sim1_eth_runtime` and
+  `phase5e_btc_eth_testnet_runtime` resolve to the same account-level scope.
+- No runtime start, exchange call, testnet order, cap increase, real live
+  action, commit, or push was performed.
+
+## 2026-05-25 (PLC Phase 5E Inventory Preflight Read Model)
+
+- Continued PLC after Phase 5E without starting runtime or making exchange
+  calls.
+- Added read-only Phase 5E inventory endpoint:
+  `GET /api/runtime/test/phase5e/inventory`.
+- The endpoint requires the Phase 5E runtime scope and testnet mode, then
+  reports per-symbol counts for:
+  - exchange nonzero positions;
+  - exchange normal open orders;
+  - exchange conditional open orders;
+  - PG active positions;
+  - PG open orders.
+- The response includes per-symbol `flat` and account-level `all_flat`.
+- This standardizes future preflight/final flatness evidence and remains
+  read-only: no order placement, close, cancel, resize, or cleanup mutation.
+- Verification:
+  - `pytest -q tests/unit/test_phase5e_controlled_multi_symbol_endpoints.py`
+    passed with 11 tests.
+- No runtime start, exchange call, testnet order, cap increase, real live
+  action, commit, or push was performed.
+
+## 2026-05-25 (PLC Long-Term Capability Roadmap)
+
+- Continued PLC in planning mode after Phase 5E without starting runtime or
+  making exchange calls.
+- Added `docs/ops/plc-long-term-capability-roadmap-v1.md` as the long-term
+  capability roadmap for the Owner goal:
+  `controlled testnet tool -> reliable personal strategy execution platform`.
+- The roadmap separates the next durable capability tracks:
+  - campaign risk state machine;
+  - account-level risk state machine;
+  - multi-symbol runtime foundation;
+  - Strategy Contract promotion pipeline;
+  - runtime evidence, stop, and rollback packet.
+- Planning verdict: the next recommended task is local
+  `PLC-STATE-001 - Campaign Risk State Machine transition table and replay
+  proof` before more exchange-connected rehearsal.
+- No runtime profile default, strategy parameter, order sizing, exchange call,
+  testnet action, real live action, commit, or push was performed.
+
+## 2026-05-25 (PLC-STATE-001 Campaign Transition Table And Replay Proof)
+
+- Continued PLC after Phase 5E under Owner testnet authorization, but this task
+  stayed local because the requested core capability does not require another
+  exchange-connected rehearsal.
+- Implemented table-driven campaign state transitions in
+  `src/application/campaign_state_service.py`:
+  - explicit `CampaignTransitionTrigger` values for Owner control, entry fill,
+    profit-protect, stop-loss, position close, and risk-critical events;
+  - `CampaignTransitionRule` rows with owner-review, flat-proof, and
+    risk-reducing-close flags;
+  - `CampaignTransitionRecord` audit records with sequence number, previous
+    state, target/next state, trigger, reason, updated_by, strategy/session
+    ids, and context metadata such as symbol/profile/position/signal/order;
+  - `replay_campaign_transitions(...)` for deterministic local replay proof.
+- Hardened runtime event semantics: `entry_filled` can confirm an already
+  `armed` campaign, but cannot arm a campaign from `observe`; Owner arm remains
+  the only table path from `observe` to `armed`.
+- Added targeted unit coverage in `tests/unit/test_p4_campaign_state_service.py`
+  for transition-table contents, accepted replay, rejected replay stop,
+  invalid observe-entry runtime arming, and service audit metadata.
+- Verification:
+  - `pytest -q tests/unit/test_p4_campaign_state_service.py` passed with 11
+    tests.
+- No runtime start, exchange call, testnet order, migration, runtime profile
+  default change, strategy parameter change, real live action, commit, or push
+  was performed.
