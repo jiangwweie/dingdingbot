@@ -40,6 +40,14 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
 - Restore/write-through failure must fail closed for new entries with `DAILY_RISK_STATS_UNAVAILABLE`, through the existing `pre_order_check` Decision Trace deny path, while exits/protection handling/shutdown/reconciliation/circuit-breaker rebuild continue.
 - Accepted LS-002b limitation: position projection save and daily stats event/aggregate write are not in one DB transaction; a crash/write window remains for future hardening.
 - LS-003d reconciliation read model persistence intentionally uses dedicated read-only tables instead of startup reconciliation tables because startup reconciliation carries action/resolution semantics. LS-003d remains observational and best-effort; LS-003c block/recovery/repair behavior stays out of scope.
+- TC-TINY-001D-3 found the remaining reconciliation warning noise was local
+  historical data, not current exchange risk: 821 `ETH/USDT:USDT` `OPEN` ENTRY
+  rows had no active local position. They were backed up, terminalized locally
+  to `CANCELED`, and audited without exchange mutation.
+- TC-TINY-001D-5 confirmed Binance testnet STOP_MARKET confirmation can require
+  evidence outside immediate `fetch_order`. Confirmation now accepts recent
+  order-watch evidence and retries conditional `fetch_open_orders` after a
+  `fetch_order` miss before raising a false protection-health critical.
 
 ## 2026-05-09
 

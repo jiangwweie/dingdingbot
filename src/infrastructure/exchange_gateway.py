@@ -116,6 +116,8 @@ class ExchangeGateway:
         # Order state tracking (G-002: dedup based on filled_qty)
         # P0 修复：使用 OrderLocalState 替换 Dict[str, Any]
         self._order_local_state: Dict[str, OrderLocalState] = {}
+        self._recent_order_updates: Dict[str, Dict[str, Any]] = {}
+        self._order_confirmation_retry_delays = (0.25, 0.75)
 
         # P5-011: Global order update callback (for order persistence)
         self._global_order_callback: Optional[Callable[[Order], Awaitable[None]]] = None
@@ -1210,6 +1212,20 @@ class ExchangeGateway:
         if not exchange_order_id and not client_order_id:
             return False
 
+        for observed in self._recent_order_update_candidates(exchange_order_id, client_order_id):
+            if self._raw_order_matches(
+                observed,
+                exchange_order_id=exchange_order_id,
+                client_order_id=client_order_id,
+                expected_symbol=symbol,
+                expected_side=side,
+                expected_reduce_only=reduce_only,
+                expected_type=expected_type,
+                expected_stop_price=stop_price,
+            ):
+                return True
+
+        fetch_order_missed = False
         if exchange_order_id:
             try:
                 raw_fetched = await self.rest_exchange.fetch_order(exchange_order_id, symbol)
@@ -1227,6 +1243,7 @@ class ExchangeGateway:
                     ):
                         return True
             except Exception as exc:
+                fetch_order_missed = True
                 logger.warning(
                     "Order confirmation fetch_order miss: symbol=%s exchange_order_id=%s error=%s",
                     symbol,
@@ -1243,32 +1260,74 @@ class ExchangeGateway:
                 ]
             )
 
-        for params in params_candidates:
-            try:
-                raw_orders = await self.rest_exchange.fetch_open_orders(symbol, params=params)
-            except Exception as exc:
-                logger.warning(
-                    "Order confirmation fetch_open_orders miss: symbol=%s params=%s error=%s",
-                    symbol,
-                    params,
-                    exc,
-                )
-                continue
+        retry_delays = list(self._order_confirmation_retry_delays) if fetch_order_missed else []
+        attempts = 1 + len(retry_delays)
+        for attempt_idx in range(attempts):
+            for params in params_candidates:
+                try:
+                    raw_orders = await self.rest_exchange.fetch_open_orders(symbol, params=params)
+                except Exception as exc:
+                    logger.warning(
+                        "Order confirmation fetch_open_orders miss: symbol=%s params=%s error=%s",
+                        symbol,
+                        params,
+                        exc,
+                    )
+                    continue
 
-            for raw_order in raw_orders:
-                if self._raw_order_matches(
-                    raw_order,
-                    exchange_order_id=exchange_order_id,
-                    client_order_id=client_order_id,
-                    expected_symbol=symbol,
-                    expected_side=side,
-                    expected_reduce_only=reduce_only,
-                    expected_type=expected_type,
-                    expected_stop_price=stop_price,
-                ):
-                    return True
+                for raw_order in raw_orders:
+                    if self._raw_order_matches(
+                        raw_order,
+                        exchange_order_id=exchange_order_id,
+                        client_order_id=client_order_id,
+                        expected_symbol=symbol,
+                        expected_side=side,
+                        expected_reduce_only=reduce_only,
+                        expected_type=expected_type,
+                        expected_stop_price=stop_price,
+                    ):
+                        return True
+            if attempt_idx < len(retry_delays):
+                await asyncio.sleep(retry_delays[attempt_idx])
 
         return False
+
+    def _recent_order_update_candidates(
+        self,
+        exchange_order_id: Optional[str],
+        client_order_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        candidates: List[Dict[str, Any]] = []
+        for key in (exchange_order_id, client_order_id):
+            if key is None:
+                continue
+            raw_order = self._recent_order_updates.get(str(key))
+            if raw_order is not None and raw_order not in candidates:
+                candidates.append(raw_order)
+        return candidates
+
+    def _remember_recent_order_update(self, raw_order: Dict[str, Any]) -> None:
+        for candidate_id in self._candidate_order_ids(raw_order):
+            self._recent_order_updates[candidate_id] = raw_order
+        if len(self._recent_order_updates) > 1000:
+            for stale_key in list(self._recent_order_updates.keys())[:200]:
+                self._recent_order_updates.pop(stale_key, None)
+
+    @staticmethod
+    def _candidate_order_ids(raw_order: Dict[str, Any]) -> set[str]:
+        info = raw_order.get("info") or {}
+        candidate_ids = {
+            raw_order.get("id"),
+            raw_order.get("clientOrderId"),
+            raw_order.get("clientOrderid"),
+            info.get("orderId"),
+            info.get("origClientOrderId"),
+            info.get("clientOrderId"),
+            info.get("clientOrderid"),
+            info.get("algoId"),
+            info.get("clientAlgoId"),
+        }
+        return {str(item) for item in candidate_ids if item is not None}
 
     @staticmethod
     def _raw_order_matches(
@@ -1283,19 +1342,7 @@ class ExchangeGateway:
         expected_stop_price: Optional[Decimal] = None,
     ) -> bool:
         info = raw_order.get("info") or {}
-        candidate_ids = {
-            raw_order.get("id"),
-            raw_order.get("clientOrderId"),
-            raw_order.get("clientOrderid"),
-            info.get("orderId"),
-            info.get("origClientOrderId"),
-            info.get("clientOrderId"),
-            info.get("clientOrderid"),
-            info.get("algoId"),
-            info.get("clientAlgoId"),
-        }
-        candidate_ids = {str(item) for item in candidate_ids if item is not None}
-
+        candidate_ids = ExchangeGateway._candidate_order_ids(raw_order)
         id_matched = (
             (exchange_order_id is not None and str(exchange_order_id) in candidate_ids)
             or (client_order_id is not None and str(client_order_id) in candidate_ids)
@@ -1608,6 +1655,8 @@ class ExchangeGateway:
         import uuid
 
         try:
+            self._remember_recent_order_update(raw_order)
+
             # 解析订单数据
             order_id = str(raw_order.get('id', uuid.uuid4()))
             symbol = raw_order.get('symbol', '')

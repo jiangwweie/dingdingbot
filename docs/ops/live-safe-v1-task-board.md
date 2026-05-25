@@ -66,11 +66,11 @@ still requires the ADR-0009 scoped action gate.
 
 | ID | Task | Status | Owner | Notes |
 | --- | --- | --- | --- | --- |
-| TC-TINY-001D-3 | Historical local open-order warning cleanup | TODO | Codex | Periodic reconciliation now reports `severe=0`, but still has 821 historical `local_order_missing_on_exchange` warnings. Clean or terminalize stale non-risk-bearing local open rows only after a PG backup/query proof and without exchange mutation. |
-| TC-TINY-001D-4 | Runtime-managed close smoke design | SPEC | Codex | Replace direct exchange cleanup in the controlled smoke with a runtime-owned controlled reduce/close path, so ENTRY, protection mounting, close projection, daily stats, order terminalization, and reconciliation can be validated without out-of-band cleanup. |
-| TC-TINY-001D-5 | STOP_MARKET confirmation fallback hardening | TODO | Codex | Binance testnet `fetch_order` can miss immediately after STOP_MARKET submission while order-watch later observes the SL. Harden confirmation by treating fetch-open-orders/order-watch evidence as bounded confirmation before raising false criticals. |
-| PLC-RUNTIME-001 | PLC local chain to read-only runtime adapter spec | SPEC | Codex | Define the first non-order runtime adapter for `FeatureSnapshot -> StrategyContract -> TradeIntent` inspection. Must remain read-only until a separate ADR-0009 action request authorizes paper/testnet execution. |
-| LS-003 | Structured runtime logs task card refresh | TODO | Codex | Update task card to include new reconciliation/protection-health events and local hygiene metadata before assigning implementation. |
+| TC-TINY-001D-3 | Historical local open-order warning cleanup | REVIEW | Codex | Completed local PG-only cleanup after query proof: backed up 821 stale `ETH/USDT:USDT` `OPEN` ENTRY rows with no active position to `ops_backup_orders_tiny001d3_20260525`, terminalized them to `CANCELED`, and wrote 821 audit rows with `historical_local_entry_warning_cleanup` metadata. Post-check active stale ENTRY count is 0. No exchange mutation. |
+| TC-TINY-001D-4 | Runtime-managed close smoke design | REVIEW | Codex | Design is ready in `docs/ops/tc-tiny-001d-4-runtime-managed-close-smoke-design.md`. Implementation should be Codex-owned because it touches execution-chain service boundaries; no runtime close endpoint was added yet. |
+| TC-TINY-001D-5 | STOP_MARKET confirmation fallback hardening | REVIEW | Codex | Hardened `ExchangeGateway.confirm_order_exists` to accept recent order-watch evidence before REST, and to use bounded `fetch_open_orders` retry after a `fetch_order` miss. Targeted STOP_MARKET confirmation tests pass. |
+| PLC-RUNTIME-001 | PLC local chain to read-only runtime adapter spec | REVIEW | Codex | Read-only adapter spec is ready in `docs/ops/plc-runtime-001-read-only-runtime-adapter-spec.md`. It explicitly forbids exchange/order authority and requires a separate ADR-0009 action before paper/testnet execution. |
+| LS-003 | Structured runtime logs task card refresh | REVIEW | Codex | Refreshed Claude task card in `docs/ops/ls-003-structured-runtime-logs-task-card.md` for external-close hygiene, stale protection terminalization, protection-health healing, and secret-free structured event tests. |
 
 ### Long-Term Tasks
 
@@ -89,7 +89,7 @@ still requires the ADR-0009 scoped action gate.
 | --- | --- | --- | --- | --- |
 | LS-001 | Start `watch_orders` | MERGED | Codex | Main runtime order-watch enabled with isolated WS state; `api.py` out of scope; duplicate `watch_orders` definition remains as later cleanup. |
 | LS-002 | Make daily max loss/trades effective | MERGED | Codex + Claude tests | Runtime projected daily PnL and full-close trade counts now drive daily limit rejects; persistence deferred to LS-002b. |
-| LS-003 | Structured runtime logs | TODO | Claude | Requires Codex task card first. |
+| LS-003 | Structured runtime logs | READY | Claude | Codex task card is ready in `docs/ops/ls-003-structured-runtime-logs-task-card.md`. |
 | LS-004 | Daily equity snapshot | TODO | Claude | Requires Codex task card first. |
 | LS-005 | Periodic reconciliation | TODO | Codex | Core execution safety. |
 | LS-006 | Account risk state machine | TODO | Codex | ADR required before implementation. |

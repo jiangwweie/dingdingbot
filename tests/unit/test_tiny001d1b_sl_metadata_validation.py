@@ -56,6 +56,7 @@ def mock_exchange():
 def gateway(mock_exchange):
     gw = ExchangeGateway("binance", "key", "secret", testnet=True)
     gw.rest_exchange = mock_exchange
+    gw._order_confirmation_retry_delays = ()
     return gw
 
 @pytest.mark.asyncio

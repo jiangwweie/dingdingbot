@@ -267,6 +267,7 @@ async def test_exchange_confirmation_matches_conditional_order_by_client_id():
     gateway = ExchangeGateway("binance", "key", "secret", testnet=True)
     rest = _RestExchangeWithConditionalOpenOrders()
     gateway.rest_exchange = rest
+    gateway._order_confirmation_retry_delays = ()
 
     confirmed = await gateway.confirm_order_exists(
         exchange_order_id="unfetchable-id",
@@ -277,3 +278,102 @@ async def test_exchange_confirmation_matches_conditional_order_by_client_id():
 
     assert confirmed is True
     assert {"stop": True} in rest.open_order_params
+
+
+class _RestExchangeWithDelayedConditionalOrder:
+    def __init__(self) -> None:
+        self.fetch_open_order_calls = 0
+
+    async def fetch_order(self, exchange_order_id: str, symbol: str):
+        raise RuntimeError("normal order endpoint cannot find conditional order yet")
+
+    async def fetch_open_orders(self, symbol: str, params=None):
+        self.fetch_open_order_calls += 1
+        if self.fetch_open_order_calls < 2:
+            return []
+        return [
+            {
+                "id": "algo-1",
+                "clientOrderId": "sl-client-id",
+                "symbol": symbol,
+                "side": "sell",
+                "type": "STOP_MARKET",
+                "status": "open",
+                "info": {
+                    "algoId": "algo-1",
+                    "clientAlgoId": "sl-client-id",
+                    "reduceOnly": True,
+                    "stopPrice": "2114",
+                },
+            }
+        ]
+
+
+@pytest.mark.asyncio
+async def test_exchange_confirmation_retries_bounded_open_order_fallback():
+    gateway = ExchangeGateway("binance", "key", "secret", testnet=True)
+    rest = _RestExchangeWithDelayedConditionalOrder()
+    gateway.rest_exchange = rest
+    gateway._order_confirmation_retry_delays = (0,)
+
+    confirmed = await gateway.confirm_order_exists(
+        exchange_order_id="unfetchable-id",
+        symbol=SYMBOL,
+        client_order_id="sl-client-id",
+        order_type=OrderType.STOP_MARKET,
+        side="sell",
+        reduce_only=True,
+        stop_price=Decimal("2114"),
+        expected_type="STOP_MARKET",
+    )
+
+    assert confirmed is True
+    assert rest.fetch_open_order_calls >= 2
+
+
+class _RestExchangeShouldNotBeCalled:
+    async def fetch_order(self, exchange_order_id: str, symbol: str):
+        raise AssertionError("order-watch evidence should be checked before REST fetch_order")
+
+    async def fetch_open_orders(self, symbol: str, params=None):
+        raise AssertionError("order-watch evidence should be checked before REST fetch_open_orders")
+
+
+@pytest.mark.asyncio
+async def test_exchange_confirmation_accepts_recent_order_watch_evidence():
+    gateway = ExchangeGateway("binance", "key", "secret", testnet=True)
+    gateway.rest_exchange = _RestExchangeShouldNotBeCalled()
+    await gateway._handle_order_update(
+        {
+            "id": "algo-1",
+            "clientOrderId": "sl-client-id",
+            "symbol": SYMBOL,
+            "side": "sell",
+            "type": "stop_market",
+            "amount": "0.01",
+            "filled": "0",
+            "remaining": "0.01",
+            "status": "open",
+            "timestamp": 1,
+            "reduceOnly": True,
+            "info": {
+                "algoId": "algo-1",
+                "clientAlgoId": "sl-client-id",
+                "reduceOnly": True,
+                "stopPrice": "2114",
+            },
+        }
+    )
+
+    confirmed = await gateway.confirm_order_exists(
+        exchange_order_id="unfetchable-id",
+        symbol=SYMBOL,
+        client_order_id="sl-client-id",
+        order_type=OrderType.STOP_MARKET,
+        side="sell",
+        reduce_only=True,
+        stop_price=Decimal("2114"),
+        expected_type="STOP_MARKET",
+    )
+
+    assert confirmed is True

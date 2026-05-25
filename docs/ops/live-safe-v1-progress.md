@@ -354,3 +354,41 @@ Use this file for session progress and handoff notes.
     from runtime authority.
 - Real live trading remains out of scope unless separately and explicitly
   authorized.
+
+## 2026-05-25 (Short-Term Task Completion Pass)
+
+- TC-TINY-001D-3: completed local PG-only historical warning cleanup.
+  - Proof before cleanup: 821 `ETH/USDT:USDT` `OPEN` ENTRY rows and 0 active
+    positions.
+  - Backup table: `ops_backup_orders_tiny001d3_20260525` with 821 rows.
+  - Mutation: terminalized 821 stale ENTRY rows to `CANCELED` with
+    `HISTORICAL_LOCAL_ENTRY_WARNING_CLEANUP`.
+  - Audit: inserted 821 `ORDER_CANCELED` rows with
+    `historical_local_entry_warning_cleanup` metadata.
+  - Proof after cleanup: no active `SUBMITTED` / `OPEN` /
+    `PARTIALLY_FILLED` ETH orders and stale ENTRY count 0.
+  - Scope: local PG only; no exchange mutation.
+- TC-TINY-001D-5: hardened STOP_MARKET confirmation fallback in
+  `ExchangeGateway.confirm_order_exists`.
+  - Recent order-watch evidence is checked before REST confirmation.
+  - After a `fetch_order` miss, conditional `fetch_open_orders` is retried
+    with bounded delays before fail-closed.
+  - Targeted tests:
+    `pytest -q tests/unit/test_tiny001d1b_sl_confirmation.py tests/unit/test_tiny001d1b_sl_metadata_validation.py`
+    passed with 9 tests.
+- TC-TINY-001D-4: completed design document
+  `docs/ops/tc-tiny-001d-4-runtime-managed-close-smoke-design.md`.
+  No runtime close endpoint was added yet because lifecycle-close semantics
+  should be Codex-owned before exchange-connected testnet execution.
+- PLC-RUNTIME-001: completed read-only runtime adapter spec in
+  `docs/ops/plc-runtime-001-read-only-runtime-adapter-spec.md`.
+- LS-003: refreshed Claude task card in
+  `docs/ops/ls-003-structured-runtime-logs-task-card.md`.
+- Verification:
+  - `pytest -q tests/unit/test_tiny001d1b_sl_confirmation.py tests/unit/test_tiny001d1b_sl_metadata_validation.py tests/unit/test_tiny001d1b_external_close_monitor.py tests/unit/test_ls003b_periodic_reconciliation.py tests/unit/test_order_lifecycle_service_pending_updates.py tests/unit/test_ls003a_reconciliation_read_model.py tests/unit/test_tiny001c_protection_health_monitor.py tests/unit/test_tiny001d1a_controlled_signal_injection.py tests/unit/test_tiny001d4_once_per_session_guard.py`
+    passed with 91 tests.
+  - `python3 -m compileall -q src/infrastructure/exchange_gateway.py src/interfaces/api_console_runtime.py src/application/external_close_monitor.py src/application/order_lifecycle_service.py src/application/protection_health_monitor.py`
+    passed.
+  - `git diff --check` passed.
+  - Binance testnet read-only check for `ETH/USDT:USDT` returned active
+    positions `[]` and open orders count `0`.
