@@ -1,0 +1,485 @@
+"""Application service for Bounded Risk Campaign governance."""
+
+from __future__ import annotations
+
+import time
+import uuid
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any, Optional, Protocol
+
+from src.domain.bounded_risk_campaign import (
+    BrcAttemptStatus,
+    BrcCampaignStatus,
+    BrcDecisionResult,
+    BoundedRiskCampaign,
+    CampaignAttempt,
+    CampaignOutcome,
+    MockPnlEvent,
+    MockPnlSource,
+    PlaybookSwitchDecision,
+    RiskCapitalBucket,
+    RiskChangeDirection,
+    RiskEnvelope,
+    default_playbook_catalog,
+)
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+class BrcCampaignRepositoryPort(Protocol):
+    async def initialize(self) -> None:
+        ...
+
+    async def get_current_campaign(self) -> Optional[BoundedRiskCampaign]:
+        ...
+
+    async def save_campaign(self, campaign: BoundedRiskCampaign) -> BoundedRiskCampaign:
+        ...
+
+    async def append_switch_decision(
+        self,
+        decision: PlaybookSwitchDecision,
+    ) -> PlaybookSwitchDecision:
+        ...
+
+    async def append_campaign_event(
+        self,
+        *,
+        campaign_id: str,
+        event_type: str,
+        occurred_at_ms: int,
+        symbol: Optional[str] = None,
+        attempt_id: Optional[str] = None,
+        reason: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        ...
+
+    async def append_mock_pnl_event(self, event: MockPnlEvent) -> MockPnlEvent:
+        ...
+
+    async def list_switch_decisions(self, campaign_id: str) -> list[PlaybookSwitchDecision]:
+        ...
+
+    async def list_campaign_events(self, campaign_id: str) -> list[dict[str, Any]]:
+        ...
+
+    async def list_mock_pnl_events(self, campaign_id: str) -> list[MockPnlEvent]:
+        ...
+
+
+class BrcRuleViolation(ValueError):
+    """Raised when a BRC hard rule blocks a requested action."""
+
+
+@dataclass(frozen=True)
+class AttemptOpenRecord:
+    intent_id: Optional[str]
+    signal_id: Optional[str]
+    amount: Decimal
+    notional: Optional[Decimal]
+
+
+@dataclass(frozen=True)
+class AttemptCloseRecord:
+    close_order_id: Optional[str]
+    exchange_order_id: Optional[str]
+
+
+class BoundedRiskCampaignService:
+    """Coordinates BRC state without placing orders or touching account balances."""
+
+    CONTROLLED_TESTNET_PLAYBOOK_ID = "PB-004-BRC-CONTROLLED-TESTNET"
+    SYMBOL_SEQUENCE = ("ETH/USDT:USDT", "BTC/USDT:USDT")
+
+    def __init__(self, repository: BrcCampaignRepositoryPort) -> None:
+        self._repo = repository
+        self._catalog = default_playbook_catalog()
+
+    async def initialize(self) -> None:
+        await self._repo.initialize()
+
+    async def create_campaign(
+        self,
+        *,
+        bucket_id: str,
+        authorized_amount: Decimal,
+        max_campaign_loss: Decimal,
+        profit_protect_trigger: Decimal,
+        reason: str,
+        currency: str = "USDT",
+    ) -> BoundedRiskCampaign:
+        existing = await self._repo.get_current_campaign()
+        if existing is not None and existing.status != BrcCampaignStatus.ENDED:
+            raise BrcRuleViolation(f"active BRC campaign already exists: {existing.campaign_id}")
+        now = _now_ms()
+        campaign = BoundedRiskCampaign(
+            campaign_id=f"brc-{uuid.uuid4().hex[:12]}",
+            bucket=RiskCapitalBucket(
+                bucket_id=bucket_id,
+                currency=currency,
+                authorized_amount=authorized_amount,
+                refill_allowed=False,
+            ),
+            risk_envelope=RiskEnvelope(
+                max_campaign_loss=max_campaign_loss,
+                profit_protect_trigger=profit_protect_trigger,
+            ),
+            current_playbook_id="PB-000-OBSERVE-ONLY",
+            status=BrcCampaignStatus.OBSERVE,
+            created_at_ms=now,
+            updated_at_ms=now,
+        )
+        campaign = await self._repo.save_campaign(campaign)
+        await self._repo.append_campaign_event(
+            campaign_id=campaign.campaign_id,
+            event_type="campaign_created",
+            occurred_at_ms=now,
+            reason=reason,
+            metadata={
+                "bucket_id": bucket_id,
+                "authorized_amount": str(authorized_amount),
+                "max_campaign_loss": str(max_campaign_loss),
+                "profit_protect_trigger": str(profit_protect_trigger),
+                "initial_playbook_id": campaign.current_playbook_id,
+            },
+        )
+        return campaign
+
+    async def get_current_campaign(self) -> Optional[BoundedRiskCampaign]:
+        return await self._repo.get_current_campaign()
+
+    async def require_current_campaign(self) -> BoundedRiskCampaign:
+        campaign = await self.get_current_campaign()
+        if campaign is None:
+            raise BrcRuleViolation("no active BRC campaign")
+        return campaign
+
+    async def switch_playbook(
+        self,
+        *,
+        new_playbook_id: str,
+        reason_category: str,
+        reason_text: str,
+        evidence_refs: list[str],
+        risk_change_direction: RiskChangeDirection = RiskChangeDirection.SAME_RISK,
+    ) -> PlaybookSwitchDecision:
+        campaign = await self.require_current_campaign()
+        now = _now_ms()
+        decision_result = BrcDecisionResult.ALLOWED
+        blocked_reason = None
+
+        if new_playbook_id not in self._catalog:
+            decision_result = BrcDecisionResult.BLOCKED
+            blocked_reason = f"unknown playbook: {new_playbook_id}"
+        elif campaign.status == BrcCampaignStatus.LOSS_LOCKED:
+            decision_result = BrcDecisionResult.BLOCKED
+            blocked_reason = "loss_locked campaign cannot switch playbooks"
+        elif (
+            new_playbook_id == self.CONTROLLED_TESTNET_PLAYBOOK_ID
+            and not self._catalog[new_playbook_id].allows_controlled_testnet
+        ):
+            decision_result = BrcDecisionResult.BLOCKED
+            blocked_reason = "playbook is not allowed for controlled testnet"
+        elif not evidence_refs:
+            decision_result = BrcDecisionResult.REVIEW_REQUIRED
+            blocked_reason = "evidence_refs required for playbook switch"
+
+        decision = PlaybookSwitchDecision(
+            switch_id=f"brc-switch-{uuid.uuid4().hex[:12]}",
+            campaign_id=campaign.campaign_id,
+            previous_playbook_id=campaign.current_playbook_id,
+            new_playbook_id=new_playbook_id,
+            switched_at_ms=now,
+            reason_category=reason_category,
+            reason_text=reason_text,
+            evidence_refs=list(evidence_refs),
+            risk_change_direction=risk_change_direction,
+            campaign_pnl_at_switch=campaign.realized_pnl,
+            attempt_count_at_switch=campaign.attempt_count,
+            campaign_status_at_switch=campaign.status,
+            decision_result=decision_result,
+            blocked_reason=blocked_reason,
+            inferred_fields={
+                "loss_counter_reset": False,
+                "campaign_pnl_carried": str(campaign.realized_pnl),
+                "max_attempts": campaign.risk_envelope.max_attempts,
+                "remaining_attempts": max(
+                    campaign.risk_envelope.max_attempts - campaign.attempt_count,
+                    0,
+                ),
+            },
+        )
+        await self._repo.append_switch_decision(decision)
+        if decision_result != BrcDecisionResult.ALLOWED:
+            return decision
+
+        updated = campaign.model_copy(
+            update={
+                "current_playbook_id": new_playbook_id,
+                "updated_at_ms": now,
+            }
+        )
+        await self._repo.save_campaign(updated)
+        await self._repo.append_campaign_event(
+            campaign_id=updated.campaign_id,
+            event_type="playbook_switched",
+            occurred_at_ms=now,
+            reason=reason_text,
+            metadata={
+                "from_playbook": campaign.current_playbook_id,
+                "to_playbook": new_playbook_id,
+                "decision_result": decision_result.value,
+                "risk_change_direction": risk_change_direction.value,
+            },
+        )
+        return decision
+
+    async def arm_attempt(self, *, symbol: str, reason: str) -> CampaignAttempt:
+        campaign = await self.require_current_campaign()
+        self._ensure_can_attempt(campaign, symbol=symbol)
+        now = _now_ms()
+        attempt = CampaignAttempt(
+            attempt_id=f"brc-attempt-{campaign.attempt_count + 1}",
+            symbol=symbol,
+            status=BrcAttemptStatus.ARMED,
+            armed_at_ms=now,
+        )
+        updated = campaign.model_copy(
+            update={
+                "status": BrcCampaignStatus.ACTIVE,
+                "attempt_count": campaign.attempt_count + 1,
+                "attempts": [*campaign.attempts, attempt],
+                "updated_at_ms": now,
+            }
+        )
+        await self._repo.save_campaign(updated)
+        await self._repo.append_campaign_event(
+            campaign_id=updated.campaign_id,
+            event_type="attempt_armed",
+            occurred_at_ms=now,
+            symbol=symbol,
+            attempt_id=attempt.attempt_id,
+            reason=reason,
+            metadata={"attempt_count": updated.attempt_count},
+        )
+        return attempt
+
+    async def record_attempt_entry(
+        self,
+        *,
+        symbol: str,
+        record: AttemptOpenRecord,
+    ) -> CampaignAttempt:
+        campaign = await self.require_current_campaign()
+        index, attempt = self._require_last_attempt(campaign, symbol=symbol)
+        if attempt.status != BrcAttemptStatus.ARMED:
+            raise BrcRuleViolation(f"attempt must be armed before entry; got {attempt.status.value}")
+        now = _now_ms()
+        updated_attempt = attempt.model_copy(
+            update={
+                "status": BrcAttemptStatus.ENTRY_FILLED,
+                "entry_at_ms": now,
+                "intent_id": record.intent_id,
+                "signal_id": record.signal_id,
+                "amount": record.amount,
+                "notional": record.notional,
+            }
+        )
+        attempts = list(campaign.attempts)
+        attempts[index] = updated_attempt
+        await self._repo.save_campaign(campaign.model_copy(update={"attempts": attempts, "updated_at_ms": now}))
+        await self._repo.append_campaign_event(
+            campaign_id=campaign.campaign_id,
+            event_type="attempt_entry_recorded",
+            occurred_at_ms=now,
+            symbol=symbol,
+            attempt_id=attempt.attempt_id,
+            metadata={
+                "intent_id": record.intent_id,
+                "signal_id": record.signal_id,
+                "amount": str(record.amount),
+                "notional": str(record.notional) if record.notional is not None else None,
+            },
+        )
+        return updated_attempt
+
+    async def record_attempt_close(
+        self,
+        *,
+        symbol: str,
+        record: AttemptCloseRecord,
+    ) -> CampaignAttempt:
+        campaign = await self.require_current_campaign()
+        index, attempt = self._require_last_attempt(campaign, symbol=symbol)
+        if attempt.status != BrcAttemptStatus.ENTRY_FILLED:
+            raise BrcRuleViolation("attempt must have an entry before close")
+        now = _now_ms()
+        updated_attempt = attempt.model_copy(
+            update={
+                "status": BrcAttemptStatus.CLOSED,
+                "closed_at_ms": now,
+                "close_order_id": record.close_order_id,
+                "exchange_order_id": record.exchange_order_id,
+            }
+        )
+        attempts = list(campaign.attempts)
+        attempts[index] = updated_attempt
+        await self._repo.save_campaign(campaign.model_copy(update={"attempts": attempts, "updated_at_ms": now}))
+        await self._repo.append_campaign_event(
+            campaign_id=campaign.campaign_id,
+            event_type="attempt_closed",
+            occurred_at_ms=now,
+            symbol=symbol,
+            attempt_id=attempt.attempt_id,
+            metadata={
+                "close_order_id": record.close_order_id,
+                "exchange_order_id": record.exchange_order_id,
+            },
+        )
+        return updated_attempt
+
+    async def inject_mock_pnl(
+        self,
+        *,
+        amount: Decimal,
+        source: MockPnlSource,
+        reason: str,
+    ) -> MockPnlEvent:
+        campaign = await self.require_current_campaign()
+        now = _now_ms()
+        cumulative = campaign.realized_pnl + amount
+        triggered_state: Optional[BrcCampaignStatus] = None
+        status = campaign.status
+        if cumulative <= -campaign.risk_envelope.max_campaign_loss:
+            status = BrcCampaignStatus.LOSS_LOCKED
+            triggered_state = BrcCampaignStatus.LOSS_LOCKED
+        elif cumulative >= campaign.risk_envelope.profit_protect_trigger:
+            status = BrcCampaignStatus.PROFIT_PROTECT
+            triggered_state = BrcCampaignStatus.PROFIT_PROTECT
+
+        event = MockPnlEvent(
+            event_id=f"brc-mock-pnl-{uuid.uuid4().hex[:12]}",
+            campaign_id=campaign.campaign_id,
+            amount=amount,
+            cumulative_pnl=cumulative,
+            source=source,
+            reason=reason,
+            occurred_at_ms=now,
+            triggered_state=triggered_state,
+        )
+        updated = campaign.model_copy(
+            update={
+                "realized_pnl": cumulative,
+                "status": status,
+                "updated_at_ms": now,
+            }
+        )
+        await self._repo.save_campaign(updated)
+        await self._repo.append_mock_pnl_event(event)
+        await self._repo.append_campaign_event(
+            campaign_id=campaign.campaign_id,
+            event_type="mock_pnl_injected",
+            occurred_at_ms=now,
+            reason=reason,
+            metadata={
+                "amount": str(amount),
+                "cumulative_pnl": str(cumulative),
+                "source": source.value,
+                "triggered_state": triggered_state.value if triggered_state else None,
+                "exchange_balance_mutated": False,
+                "daily_risk_mutated": False,
+            },
+        )
+        return event
+
+    async def finalize(
+        self,
+        *,
+        outcome: CampaignOutcome,
+        reason: str,
+        final_flat: bool,
+    ) -> BoundedRiskCampaign:
+        campaign = await self.require_current_campaign()
+        if not final_flat:
+            raise BrcRuleViolation("cannot finalize BRC campaign until final inventory is flat")
+        if outcome == CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED:
+            if campaign.status != BrcCampaignStatus.LOSS_LOCKED:
+                raise BrcRuleViolation("loss-locked rehearsal outcome requires BRC loss_locked state")
+            if campaign.attempt_count != campaign.risk_envelope.max_attempts:
+                raise BrcRuleViolation("loss-locked rehearsal outcome requires two closed attempts")
+            if any(attempt.status != BrcAttemptStatus.CLOSED for attempt in campaign.attempts):
+                raise BrcRuleViolation("all BRC attempts must be closed before finalization")
+        now = _now_ms()
+        updated = campaign.model_copy(
+            update={
+                "status": BrcCampaignStatus.ENDED,
+                "outcome": outcome,
+                "finalized_at_ms": now,
+                "updated_at_ms": now,
+            }
+        )
+        await self._repo.save_campaign(updated)
+        await self._repo.append_campaign_event(
+            campaign_id=campaign.campaign_id,
+            event_type="campaign_finalized",
+            occurred_at_ms=now,
+            reason=reason,
+            metadata={"outcome": outcome.value, "final_flat": final_flat},
+        )
+        return updated
+
+    async def build_evidence_packet(self) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        switches = await self._repo.list_switch_decisions(campaign.campaign_id)
+        events = await self._repo.list_campaign_events(campaign.campaign_id)
+        mock_pnl_events = await self._repo.list_mock_pnl_events(campaign.campaign_id)
+        return {
+            "campaign": campaign.model_dump(mode="json"),
+            "playbook_catalog": {
+                key: value.model_dump(mode="json") for key, value in self._catalog.items()
+            },
+            "switch_decisions": [decision.model_dump(mode="json") for decision in switches],
+            "campaign_events": events,
+            "mock_pnl_events": [event.model_dump(mode="json") for event in mock_pnl_events],
+            "invariants": {
+                "mock_pnl_exchange_balance_mutated": False,
+                "mock_pnl_daily_risk_mutated": False,
+                "loss_counter_reset_on_switch": False,
+                "program_withdrawal_enabled": False,
+                "real_live_enabled": False,
+            },
+        }
+
+    def _ensure_can_attempt(self, campaign: BoundedRiskCampaign, *, symbol: str) -> None:
+        if campaign.current_playbook_id != self.CONTROLLED_TESTNET_PLAYBOOK_ID:
+            raise BrcRuleViolation("controlled testnet attempt requires PB-004-BRC-CONTROLLED-TESTNET")
+        if campaign.status == BrcCampaignStatus.LOSS_LOCKED:
+            raise BrcRuleViolation("loss_locked campaign blocks new attempts")
+        if campaign.attempt_count >= campaign.risk_envelope.max_attempts:
+            raise BrcRuleViolation("risk envelope blocks third attempt")
+        if symbol not in campaign.risk_envelope.allowed_symbols:
+            raise BrcRuleViolation(f"symbol not allowed by risk envelope: {symbol}")
+        expected = self.SYMBOL_SEQUENCE[campaign.attempt_count]
+        if symbol != expected:
+            raise BrcRuleViolation(f"BRC sequence requires {expected} before {symbol}")
+        last_attempt = campaign.last_attempt
+        if last_attempt is not None and last_attempt.status != BrcAttemptStatus.CLOSED:
+            raise BrcRuleViolation("previous BRC attempt must be closed before arming the next one")
+
+    @staticmethod
+    def _require_last_attempt(
+        campaign: BoundedRiskCampaign,
+        *,
+        symbol: str,
+    ) -> tuple[int, CampaignAttempt]:
+        if not campaign.attempts:
+            raise BrcRuleViolation("no armed BRC attempt")
+        index = len(campaign.attempts) - 1
+        attempt = campaign.attempts[index]
+        if attempt.symbol != symbol:
+            raise BrcRuleViolation(f"last BRC attempt is for {attempt.symbol}, not {symbol}")
+        return index, attempt

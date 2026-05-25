@@ -423,6 +423,153 @@ class PGRuntimeCampaignStateTransitionORM(PGCoreBase):
     )
 
 
+class PGBrcCampaignORM(PGCoreBase):
+    """Current Bounded Risk Campaign snapshot."""
+
+    __tablename__ = "brc_campaigns"
+
+    campaign_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    current_playbook_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    bucket_json: Mapped[dict] = mapped_column(
+        "bucket",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    risk_envelope_json: Mapped[dict] = mapped_column(
+        "risk_envelope",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False, default=Decimal("0"))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempts_json: Mapped[list] = mapped_column(
+        "attempts",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    outcome: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    finalized_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('observe', 'active', 'profit_protect', 'loss_locked', 'ended')",
+            name="ck_brc_campaigns_status",
+        ),
+        CheckConstraint("realized_pnl = realized_pnl", name="ck_brc_campaigns_realized_pnl_not_nan"),
+        CheckConstraint("attempt_count >= 0", name="ck_brc_campaigns_attempt_count_nonnegative"),
+        Index("idx_brc_campaigns_status_updated", "status", "updated_at_ms"),
+    )
+
+
+class PGBrcPlaybookSwitchDecisionORM(PGCoreBase):
+    """Append-only BRC playbook switch decision log."""
+
+    __tablename__ = "brc_playbook_switch_decisions"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    switch_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    previous_playbook_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    new_playbook_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    decision_result: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_category: Mapped[str] = mapped_column(String(128), nullable=False)
+    reason_text: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_refs_json: Mapped[list] = mapped_column(
+        "evidence_refs",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    risk_change_direction: Mapped[str] = mapped_column(String(32), nullable=False)
+    campaign_pnl_at_switch: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    attempt_count_at_switch: Mapped[int] = mapped_column(Integer, nullable=False)
+    campaign_status_at_switch: Mapped[str] = mapped_column(String(32), nullable=False)
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    inferred_fields_json: Mapped[dict] = mapped_column(
+        "inferred_fields",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    decided_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+    switched_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision_result IN ('allowed', 'blocked', 'review_required')",
+            name="ck_brc_switch_decisions_result",
+        ),
+        Index(
+            "uq_brc_switch_decisions_campaign_seq",
+            "campaign_id",
+            "sequence_number",
+            unique=True,
+        ),
+        Index("idx_brc_switch_decisions_campaign_time", "campaign_id", "switched_at_ms"),
+    )
+
+
+class PGBrcCampaignEventORM(PGCoreBase):
+    """Append-only BRC campaign event ledger."""
+
+    __tablename__ = "brc_campaign_events"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    attempt_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    occurred_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        Index("uq_brc_campaign_events_campaign_seq", "campaign_id", "sequence_number", unique=True),
+        Index("idx_brc_campaign_events_campaign_time", "campaign_id", "occurred_at_ms"),
+        Index("idx_brc_campaign_events_type", "event_type"),
+    )
+
+
+class PGBrcMockPnlEventORM(PGCoreBase):
+    """Append-only mock PnL events for BRC acceptance rehearsals."""
+
+    __tablename__ = "brc_mock_pnl_events"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    cumulative_pnl: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    triggered_state: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    occurred_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint("source IN ('testnet_mock')", name="ck_brc_mock_pnl_events_source"),
+        CheckConstraint("amount != 0", name="ck_brc_mock_pnl_events_amount_nonzero"),
+        Index("uq_brc_mock_pnl_events_campaign_seq", "campaign_id", "sequence_number", unique=True),
+        Index("idx_brc_mock_pnl_events_campaign_time", "campaign_id", "occurred_at_ms"),
+    )
+
+
 class PGSignalORM(PGCoreBase):
     """PG 版 live signal 表。"""
 

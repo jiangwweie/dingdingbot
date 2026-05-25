@@ -16,6 +16,7 @@ from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentR
 from src.infrastructure.pg_daily_risk_stats_repository import PgDailyRiskStatsRepository
 from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
 from src.infrastructure.pg_campaign_state_repository import PgCampaignStateRepository
+from src.infrastructure.pg_brc_campaign_repository import PgBrcCampaignRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
 from src.infrastructure.pg_reconciliation_read_model_repository import (
@@ -95,6 +96,11 @@ def create_runtime_global_kill_switch_repository() -> GlobalKillSwitchRepository
 def create_runtime_campaign_state_repository() -> CampaignStateRepositoryPort:
     """为 runtime campaign state machine 显式创建 PG 仓储。"""
     return PgCampaignStateRepository()
+
+
+def create_runtime_brc_campaign_repository() -> PgBrcCampaignRepository:
+    """为 Bounded Risk Campaign 显式创建 PG 仓储。"""
+    return PgBrcCampaignRepository()
 
 
 def create_runtime_reconciliation_read_model_repository() -> ReconciliationReadModelRepositoryPort:
