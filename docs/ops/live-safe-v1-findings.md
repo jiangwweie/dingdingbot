@@ -71,6 +71,11 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   flat, successfully closed position into a failed close. The runtime should
   terminalize the local protection row after confirmed flat/confirmed close
   while continuing to fail on non-idempotent cancellation errors.
+- PLC Phase 3 retry passed after that fix. The important runtime lesson is that
+  Binance testnet can remove reduce-only protection orders immediately after a
+  full reduce-only close, so post-close cleanup must be idempotent for missing
+  protection orders while preserving fail-fast behavior before the close is
+  confirmed.
 
 ## 2026-05-09
 

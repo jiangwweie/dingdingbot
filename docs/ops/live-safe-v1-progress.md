@@ -538,3 +538,57 @@ Use this file for session progress and handoff notes.
     `git diff --check`.
 - Current verdict:
   `attempt1_safe_flat_but_not_acceptance_pass / retry_authorization_required`.
+
+## 2026-05-25 (PLC Phase 3 Retry Completion)
+
+- Owner authorized one additional bounded ADR-0009 Binance testnet retry.
+- Preflight:
+  - commit: `d8ade02`;
+  - local active orders: `0`;
+  - local active positions: `0`;
+  - GKS active before start;
+  - Binance testnet read-only check for `ETH/USDT:USDT`: no nonzero position,
+    open orders `0`;
+  - `tests/unit/test_tiny001d4_controlled_close.py` passed with 4 tests before
+    retry.
+- Runtime start evidence:
+  - profile: `sim1_eth_runtime`;
+  - `exchange_testnet=true`;
+  - startup reconciliation candidates `0`, failures `0`;
+  - startup guard manually armed for the retry;
+  - GKS temporarily set inactive only for the authorized cycle.
+- Controlled entry succeeded:
+  - intent id: `intent_656a68bcc2c5`;
+  - signal id: `sig_ab0a0a0b495c`;
+  - amount: `0.01`;
+  - entry exchange order id: `8728378151`;
+  - local ENTRY status: `FILLED`;
+  - protection orders mounted: SL `1000000084965165`, TP1 `8728378170`,
+    TP2 `8728378187`.
+- Patched controlled close succeeded:
+  - response status: `FILLED`;
+  - local EXIT id: `exit_controlled_4d0c9fe3059e`;
+  - exchange order id: `8728378402`;
+  - amount: `0.01`;
+  - average execution price: `2101.62`;
+  - terminalized protection orders: `3`;
+  - endpoint returned success instead of HTTP 500.
+- Projection and daily stats evidence:
+  - local position `pos_sig_ab0a0a0b495c` is closed with quantity `0`;
+  - realized PnL: `-0.0027`;
+  - daily risk stats aggregate for `runtime:default` / `2026-05-25`:
+    realized PnL `0.9405`, trade count `4`;
+  - latest daily risk event key:
+    `daily-risk:v1:runtime:default:2026-05-25:pos_sig_ab0a0a0b495c:exit_controlled_4d0c9fe3059e:0.01`.
+- Final safety evidence:
+  - GKS restored active with reason `PLC Phase 3 retry complete - restore GKS`;
+  - local active orders: `0`;
+  - local active positions: `0`;
+  - Binance testnet final read-only check: no nonzero `ETH/USDT:USDT`
+    position and open orders `0`;
+  - manual bounded reconciliation read-model refresh persisted
+    `1779690282549:ETH/USDT:USDT` with severe `0`, warning `0`, total `0`,
+    consistent `true`;
+  - runtime was stopped after verification.
+- Current verdict:
+  `phase3_complete_testnet_rehearsal_passed / phase4_still_blocked`.

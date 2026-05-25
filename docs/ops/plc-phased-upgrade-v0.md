@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 3 ready for Owner authorization; testnet execution not authorized
+Status: Phase 3 completed for review; Phase 4 blocked
 
 ## Boundary
 
@@ -91,7 +91,7 @@ Acceptance:
 
 ## Phase 3 - Testnet Rehearsal Package
 
-Status: READY_FOR_OWNER_AUTH / AUTHORIZATION_REQUIRED
+Status: REVIEW / COMPLETED_TESTNET_REHEARSAL
 
 Scope:
 
@@ -126,8 +126,24 @@ Pre-authorization evidence:
 - Project read-only Binance testnet preflight returned no nonzero
   `ETH/USDT:USDT` position and open orders `0`.
 
-Execution remains blocked until a specific ADR-0009 Owner authorization passes
-for one bounded rehearsal cycle.
+Completion evidence:
+
+- Owner authorized an initial attempt and one retry under ADR-0009.
+- Initial attempt reached exchange-flat/local-flat state but exposed a
+  post-close protection cleanup idempotency gap.
+- Retry after the cleanup patch passed:
+  - one controlled ENTRY;
+  - one reduce-only controlled EXIT;
+  - 3 protection orders terminalized by runtime cleanup;
+  - daily stats updated;
+  - local active orders `0`;
+  - local active positions `0`;
+  - Binance testnet final nonzero position `0` and open orders `0`;
+  - reconciliation read model severe `0`, warning `0`;
+  - GKS restored active and runtime stopped.
+
+Phase 4 remains blocked and requires a separate Owner request, safety review,
+and authorization. This document still does not authorize real live trading.
 
 ## Phase 4 - Tiny-Live-Style Review
 

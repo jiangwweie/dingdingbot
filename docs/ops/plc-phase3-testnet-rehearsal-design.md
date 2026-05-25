@@ -1,7 +1,7 @@
 # PLC Phase 3 Testnet Rehearsal Design
 
 Date: 2026-05-25
-Status: READY_FOR_OWNER_AUTH / NOT AUTHORIZED FOR EXECUTION
+Status: REVIEW / COMPLETED_TESTNET_REHEARSAL
 
 ## Goal
 
@@ -152,7 +152,7 @@ small task card with allowed files.
 
 ## Current Verdict
 
-`attempt1_safe_flat_but_not_acceptance_pass / retry_authorization_required`
+`phase3_complete_testnet_rehearsal_passed / phase4_still_blocked`
 
 The design and implementation blockers are cleared at pre-execution level:
 
@@ -165,6 +165,19 @@ The design and implementation blockers are cleared at pre-execution level:
 
 Attempt 1 safely reached exchange-flat and local-flat state, but it did not
 fully pass acceptance because the close endpoint returned HTTP 500 after the
-reduce-only EXIT filled. A follow-up patch makes post-close protection cleanup
-idempotent when Binance has already removed a protection order. A second
-bounded ADR-0009 rehearsal cycle is required to mark Phase 3 complete.
+reduce-only EXIT filled. A follow-up patch made post-close protection cleanup
+idempotent when Binance has already removed a protection order.
+
+The authorized retry passed acceptance:
+
+- controlled entry succeeded for `sig_ab0a0a0b495c`;
+- controlled reduce-only EXIT `exit_controlled_4d0c9fe3059e` filled;
+- 3 protection orders were terminalized by runtime cleanup;
+- local position closed with quantity `0`;
+- daily risk stats updated;
+- Binance testnet final read-only state was flat with open orders `0`;
+- latest reconciliation read model had severe `0`, warning `0`, total `0`;
+- GKS was restored active and runtime was stopped.
+
+Phase 4 remains blocked and requires separate Owner request, review, and
+authorization.
