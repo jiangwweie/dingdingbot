@@ -207,6 +207,8 @@ class PgOrderRepository:
         for order in orders:
             if order.order_role == OrderRole.ENTRY:
                 entry_orders.append(order)
+            elif order.order_role == OrderRole.EXIT:
+                tp_orders.append(order)
             elif order.order_role in {
                 OrderRole.TP1,
                 OrderRole.TP2,
@@ -246,8 +248,9 @@ class PgOrderRepository:
                 (PGOrderORM.order_role == "TP3", 3),
                 (PGOrderORM.order_role == "TP4", 4),
                 (PGOrderORM.order_role == "TP5", 5),
-                (PGOrderORM.order_role == "SL", 6),
-                else_=7,
+                (PGOrderORM.order_role == "EXIT", 6),
+                (PGOrderORM.order_role == "SL", 7),
+                else_=8,
             )
             stmt = (
                 select(PGOrderORM)

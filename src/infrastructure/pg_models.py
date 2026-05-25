@@ -87,7 +87,7 @@ class PGOrderORM(PGCoreBase):
             name="ck_orders_order_type",
         ),
         CheckConstraint(
-            "order_role IN ('ENTRY', 'SL', 'TP1', 'TP2', 'TP3', 'TP4', 'TP5')",
+            "order_role IN ('ENTRY', 'EXIT', 'SL', 'TP1', 'TP2', 'TP3', 'TP4', 'TP5')",
             name="ck_orders_order_role",
         ),
         CheckConstraint(

@@ -729,6 +729,7 @@ class OrderLifecycleService:
 
         if (
             local_order.order_role in {
+                OrderRole.EXIT,
                 OrderRole.SL,
                 OrderRole.TP1,
                 OrderRole.TP2,
@@ -768,6 +769,7 @@ class OrderLifecycleService:
             target_status == OrderStatus.FILLED
             and previous_status != OrderStatus.FILLED
             and local_order.order_role in {
+                OrderRole.EXIT,
                 OrderRole.SL,
                 OrderRole.TP1,
                 OrderRole.TP2,

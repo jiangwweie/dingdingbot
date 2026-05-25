@@ -60,6 +60,11 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   exchange cleanup would fail the purpose of the rehearsal because it would not
   validate projection, daily stats, terminalization, and reconciliation through
   the runtime lifecycle.
+- PLC Phase 3 pre-execution now has explicit campaign/account safety boundaries:
+  campaign state must be armed before entry, close remains allowed as a
+  risk-reducing action from armed/profit-protect/loss-locked/hard-locked, and
+  account/liquidation state must fail closed for new entries when unknown,
+  degraded, or critical.
 
 ## 2026-05-09
 

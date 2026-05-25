@@ -1,7 +1,7 @@
 # PLC Phase 3 Testnet Rehearsal Design
 
 Date: 2026-05-25
-Status: DESIGN / NOT AUTHORIZED FOR EXECUTION
+Status: READY_FOR_OWNER_AUTH / NOT AUTHORIZED FOR EXECUTION
 
 ## Goal
 
@@ -37,9 +37,11 @@ Phase 3 execution must not start until all are true:
 
 1. Phase 2 paper observation packet implementation is reviewed.
 2. `TC-TINY-001D-4` runtime-managed controlled close is implemented and tested.
-3. Campaign risk state machine is specified at least to design-review quality.
+3. Campaign risk state machine is specified at least to design-review quality:
+   `docs/ops/plc-campaign-risk-state-machine-spec.md`.
 4. Account risk/liquidation safety checks are specified at least to
-   design-review quality.
+   design-review quality:
+   `docs/ops/plc-account-risk-liquidation-safety-spec.md`.
 5. Local verification passes:
    - PLC paper observation tests;
    - controlled entry tests;
@@ -75,12 +77,14 @@ The rehearsal should use test-only runtime endpoints:
 
 1. Existing controlled entry:
    `POST /api/runtime/test/smoke/execute-controlled-entry`
-2. Required controlled close:
+2. Implemented controlled close:
    `POST /api/runtime/test/smoke/execute-controlled-close`
 
-The close endpoint remains a blocker until implemented. Direct ccxt cleanup is
-not acceptable for PLC Phase 3 because the rehearsal must validate the runtime
-close/projection/daily-stats path.
+Direct ccxt cleanup is not acceptable for PLC Phase 3 because the rehearsal
+must validate the runtime close/projection/daily-stats path. If the runtime
+close path fails after a position is opened, stop and request separate
+emergency testnet cleanup authorization rather than silently bypassing the
+runtime lifecycle.
 
 ## ADR-0009 Action Request Template
 
@@ -148,11 +152,16 @@ small task card with allowed files.
 
 ## Current Verdict
 
-`phase3_design_ready / execution_blocked`
+`phase3_ready_for_owner_auth / authorization_required`
 
-The design is ready for review, but execution remains blocked by:
+The design and implementation blockers are cleared at pre-execution level:
 
-- missing runtime-managed controlled close implementation;
-- campaign risk state machine still TODO;
-- account risk/liquidation safety still TODO;
-- no specific Owner authorization for a Phase 3 rehearsal cycle yet.
+- runtime-managed controlled close exists locally;
+- campaign risk state machine is specified;
+- account risk/liquidation safety checks are specified;
+- scoped verification passed;
+- local PG is clean for active-order preflight and accepts `EXIT` orders;
+- Binance testnet read-only preflight is flat for `ETH/USDT:USDT`.
+
+Execution still must not start until Owner authorizes one exact ADR-0009
+rehearsal cycle.

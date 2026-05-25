@@ -986,6 +986,7 @@ class OrderType(str, Enum):
 class OrderRole(str, Enum):
     """订单角色"""
     ENTRY = "ENTRY"               # 入场开仓
+    EXIT = "EXIT"                 # 显式平仓/减仓
     TP1 = "TP1"                   # 第一目标位止盈
     TP2 = "TP2"                   # 第二目标位止盈
     TP3 = "TP3"                   # 第三目标位止盈
@@ -1615,7 +1616,7 @@ class OrderRequest(FinancialModel):
     约束条件:
     - order_type == LIMIT 时，price 必填
     - order_type == STOP_MARKET 时，trigger_price 必填
-    - order_role IN (TP1, TP2, TP3, TP4, TP5, SL) 时，reduce_only 必须为 True
+    - order_role IN (EXIT, TP1, TP2, TP3, TP4, TP5, SL) 时，reduce_only 必须为 True
     """
     symbol: str = Field(
         ...,
@@ -1623,7 +1624,7 @@ class OrderRequest(FinancialModel):
         description="币种对，如 'BTC/USDT:USDT'"
     )
     order_type: OrderType = Field(..., description="订单类型 (MARKET/LIMIT/STOP_MARKET/STOP_LIMIT)")
-    order_role: OrderRole = Field(..., description="订单角色 (ENTRY/TP1-5/SL)")
+    order_role: OrderRole = Field(..., description="订单角色 (ENTRY/EXIT/TP1-5/SL)")
     direction: Direction = Field(..., description="方向 (LONG/SHORT)")
     quantity: Decimal = Field(..., gt=0, description="数量（正数）")
     price: Optional[Decimal] = Field(None, gt=0, description="限价单价格（LIMIT 订单必填）")
@@ -1649,10 +1650,17 @@ class OrderRequest(FinancialModel):
                 raise ValueError('STOP_MARKET/STOP_LIMIT 订单必须指定触发价')
 
         # TP/SL 订单必须设置 reduce_only=True
-        if self.order_role in (OrderRole.TP1, OrderRole.TP2, OrderRole.TP3,
-                                OrderRole.TP4, OrderRole.TP5, OrderRole.SL):
+        if self.order_role in (
+            OrderRole.EXIT,
+            OrderRole.TP1,
+            OrderRole.TP2,
+            OrderRole.TP3,
+            OrderRole.TP4,
+            OrderRole.TP5,
+            OrderRole.SL,
+        ):
             if not self.reduce_only:
-                raise ValueError('TP/SL 订单必须设置 reduce_only=True')
+                raise ValueError('EXIT/TP/SL 订单必须设置 reduce_only=True')
 
         return self
 

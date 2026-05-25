@@ -453,3 +453,41 @@ Use this file for session progress and handoff notes.
 - The design prefers the installed Binance official plugin for read-only
   market/testnet state checks when available, but explicitly forbids using it
   to bypass the runtime lifecycle for order placement, cancellation, or cleanup.
+
+## 2026-05-25 (PLC Phase 3 Blocker Closure)
+
+- Implemented the runtime-managed controlled close path for `TC-TINY-001D-4`:
+  - added explicit `OrderRole.EXIT` support and PG/ORM constraint migration;
+  - added `ExecutionOrchestrator.execute_controlled_close()`;
+  - added `POST /api/runtime/test/smoke/execute-controlled-close`;
+  - keeps the close reduce-only, `sim1_eth_runtime` only, Binance testnet only,
+    max `0.01 ETH`, local/internal only, empty-body only, and once per runtime
+    session.
+- Added controlled close tests covering:
+  - reduce-only market close through the gateway;
+  - exit projection and daily stats callback;
+  - protection-order exchange cancel plus local terminalization;
+  - endpoint once-per-session guard and orchestrator delegation.
+- Added Phase 3 safety specs:
+  - `docs/ops/plc-campaign-risk-state-machine-spec.md`;
+  - `docs/ops/plc-account-risk-liquidation-safety-spec.md`.
+- Updated Phase 3 verdict:
+  `phase3_pre_execution_review / authorization_required`.
+- Remaining before testnet execution:
+  - exact ADR-0009 Owner authorization for one rehearsal cycle.
+- Verification completed:
+  - `pytest -q tests/unit/test_tiny001d4_controlled_close.py tests/unit/test_tiny001d4_once_per_session_guard.py tests/unit/test_tiny001d1a_controlled_signal_injection.py tests/unit/test_tiny001d1b_external_close_monitor.py tests/unit/test_ls003b_periodic_reconciliation.py tests/unit/test_order_lifecycle_service_pending_updates.py tests/unit/test_ls003a_reconciliation_read_model.py tests/unit/test_tiny001c_protection_health_monitor.py tests/unit/test_personal_campaign_paper_observation.py tests/unit/test_personal_campaign_runtime_adapter.py tests/unit/test_personal_campaign_sandbox.py tests/unit/test_personal_campaign_schema_docs.py tests/unit/test_personal_campaign_schema_examples.py`
+    passed with 126 tests.
+  - `python3 -m compileall -q ...` passed for touched modules.
+  - `git diff --check` passed.
+- PG preflight completed:
+  - backed up 3706 historical active local order rows to
+    `ops_backup_orders_plc_phase3_20260525`;
+  - terminalized 3706 historical active local order rows locally with audit
+    metadata and no exchange mutation;
+  - local active orders are now `0`;
+  - `orders.ck_orders_order_role` now allows `EXIT`.
+- Binance preflight completed:
+  - official Binance plugin public futures ticker check for `ETHUSDT` passed;
+  - project read-only Binance testnet check for `ETH/USDT:USDT` returned no
+    nonzero positions and open orders `0`.

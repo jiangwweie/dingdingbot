@@ -4801,8 +4801,16 @@ async def create_order(request: OrderRequest) -> OrderResponseFull:
                 detail={"error_code": "F-011", "message": "STOP 订单必须指定触发价"}
             )
 
-        # 2. 角色约束验证（TP/SL 单必须 reduce_only=True）
-        if request.order_role in (OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5, OrderRole.SL):
+        # 2. 角色约束验证（EXIT/TP/SL 单必须 reduce_only=True）
+        if request.order_role in (
+            OrderRole.EXIT,
+            OrderRole.TP1,
+            OrderRole.TP2,
+            OrderRole.TP3,
+            OrderRole.TP4,
+            OrderRole.TP5,
+            OrderRole.SL,
+        ):
             if not request.reduce_only:
                 raise HTTPException(
                     status_code=400,

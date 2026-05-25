@@ -429,6 +429,139 @@ class ExecutionOrchestrator:
                 exc_info=True,
             )
 
+    async def execute_controlled_close(
+        self,
+        *,
+        position: Any,
+        reason: str = "controlled_test_close",
+        max_amount: Decimal = Decimal("0.01"),
+    ) -> Dict[str, Any]:
+        """Execute one runtime-owned controlled reduce-only close for testnet smoke."""
+        if getattr(position, "is_closed", False):
+            raise ValueError("controlled close requires an active local position")
+        amount = Decimal(str(getattr(position, "current_qty", "0")))
+        if amount <= Decimal("0"):
+            raise ValueError("controlled close requires positive current_qty")
+        if amount > max_amount:
+            raise ValueError(f"controlled close amount exceeds max_amount ({amount} > {max_amount})")
+
+        signal_id = getattr(position, "signal_id")
+        symbol = getattr(position, "symbol")
+        direction = getattr(position, "direction")
+        orders = await self._order_lifecycle.get_orders_by_signal(signal_id)
+        entry_order = next(
+            (
+                order
+                for order in orders
+                if order.order_role == OrderRole.ENTRY
+                and order.status in {OrderStatus.FILLED, OrderStatus.OPEN}
+            ),
+            None,
+        )
+        if entry_order is None:
+            raise ValueError("controlled close requires a local ENTRY order for the position signal")
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        close_order = Order(
+            id=f"exit_controlled_{uuid.uuid4().hex[:12]}",
+            signal_id=signal_id,
+            symbol=symbol,
+            direction=direction,
+            order_type=OrderType.MARKET,
+            order_role=OrderRole.EXIT,
+            requested_qty=amount,
+            status=OrderStatus.CREATED,
+            created_at=now_ms,
+            updated_at=now_ms,
+            reduce_only=True,
+            parent_order_id=entry_order.id,
+            exit_reason=reason,
+        )
+        await self._order_lifecycle.register_created_order(
+            close_order,
+            metadata={
+                "source": "ExecutionOrchestrator.execute_controlled_close",
+                "reason": reason,
+                "parent_order_id": entry_order.id,
+                "scope": "testnet_runtime_managed_close",
+            },
+        )
+
+        side = "sell" if direction == Direction.LONG else "buy"
+        placement_result = await self._gateway.place_order(
+            symbol=symbol,
+            order_type="market",
+            side=side,
+            amount=amount,
+            reduce_only=True,
+            client_order_id=close_order.id,
+        )
+        if not placement_result.is_success:
+            await self._order_lifecycle.reject_order(
+                close_order.id,
+                reason=placement_result.error_message or "controlled close placement failed",
+            )
+            raise RuntimeError(
+                f"controlled close placement failed: "
+                f"{placement_result.error_code}: {placement_result.error_message}"
+            )
+
+        close_order = await self._apply_placed_order_status(
+            order=close_order,
+            placement_result=placement_result,
+        )
+        if close_order.status != OrderStatus.FILLED:
+            raise RuntimeError(
+                f"controlled close did not fill immediately: status={close_order.status.value}"
+            )
+
+        await self._handle_exit_filled(close_order)
+        terminalized = await self._cancel_remaining_protection_orders_after_controlled_close(
+            signal_id=signal_id,
+            reason=reason,
+        )
+        return {
+            "close_order": close_order,
+            "terminalized_protection_orders": terminalized,
+        }
+
+    async def _cancel_remaining_protection_orders_after_controlled_close(
+        self,
+        *,
+        signal_id: str,
+        reason: str,
+    ) -> List[Order]:
+        orders = await self._order_lifecycle.get_orders_by_signal(signal_id)
+        active_statuses = {
+            OrderStatus.SUBMITTED,
+            OrderStatus.OPEN,
+            OrderStatus.PARTIALLY_FILLED,
+        }
+        protection_roles = {
+            OrderRole.SL,
+            OrderRole.TP1,
+            OrderRole.TP2,
+            OrderRole.TP3,
+            OrderRole.TP4,
+            OrderRole.TP5,
+        }
+        terminalized: List[Order] = []
+        for order in orders:
+            if order.order_role not in protection_roles or order.status not in active_statuses:
+                continue
+            if order.exchange_order_id:
+                await self._gateway.cancel_order(
+                    exchange_order_id=order.exchange_order_id,
+                    symbol=order.symbol,
+                )
+            terminalized_order = await self._order_lifecycle.cancel_order(
+                order.id,
+                reason=f"{reason}: position closed by runtime-managed close",
+                oco_triggered=True,
+            )
+            terminalized.append(terminalized_order)
+        return terminalized
+
     async def _apply_placed_order_status(
         self,
         *,

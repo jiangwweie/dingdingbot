@@ -811,7 +811,14 @@ class OrderRepository:
         for order in orders:
             if order.order_role == OrderRole.ENTRY:
                 entry_orders.append(order)
-            elif order.order_role in [OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5]:
+            elif order.order_role in [
+                OrderRole.EXIT,
+                OrderRole.TP1,
+                OrderRole.TP2,
+                OrderRole.TP3,
+                OrderRole.TP4,
+                OrderRole.TP5,
+            ]:
                 tp_orders.append(order)
             elif order.order_role == OrderRole.SL:
                 sl_orders.append(order)
@@ -888,8 +895,9 @@ class OrderRepository:
                             WHEN 'TP3' THEN 3
                             WHEN 'TP4' THEN 4
                             WHEN 'TP5' THEN 5
-                            WHEN 'SL' THEN 6
-                            ELSE 7
+                            WHEN 'EXIT' THEN 6
+                            WHEN 'SL' THEN 7
+                            ELSE 8
                         END,
                         created_at ASC
                     """,
@@ -1126,8 +1134,9 @@ class OrderRepository:
                     WHEN 'TP3' THEN 3
                     WHEN 'TP4' THEN 4
                     WHEN 'TP5' THEN 5
-                    WHEN 'SL' THEN 6
-                    ELSE 7
+                    WHEN 'EXIT' THEN 6
+                    WHEN 'SL' THEN 7
+                    ELSE 8
                 END,
                 created_at ASC
             """,

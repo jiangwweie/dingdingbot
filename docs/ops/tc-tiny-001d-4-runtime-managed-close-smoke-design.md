@@ -23,13 +23,13 @@ local order terminalization, reconciliation, and final flat exchange state.
 - Runtime profile, credentials, sizing defaults, and strategy parameters are
   out of scope.
 
-## Required Runtime Shape
+## Implemented Runtime Shape
 
-Add a narrow test endpoint only after implementation review:
+The narrow test endpoint is now implemented:
 
 `POST /api/runtime/test/smoke/execute-controlled-close`
 
-The endpoint should:
+The endpoint:
 
 1. Require local/internal access, `RUNTIME_CONTROL_API_ENABLED=true`, and
    `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true`.
@@ -37,15 +37,22 @@ The endpoint should:
 3. Reject any non-empty request body.
 4. Require exactly one active local controlled-smoke position for
    `ETH/USDT:USDT`.
-5. Place one exchange-native reduce-only market close through
+5. Places one exchange-native reduce-only market close through
    `ExchangeGateway.place_order`.
-6. Persist a local exit order before exchange submission, then advance it
+6. Persists a local `EXIT` order before exchange submission, then advances it
    through existing lifecycle/projection services after exchange evidence.
-7. Cancel or terminalize remaining local/exchange protection orders only after
+7. Cancels or terminalizes remaining local/exchange protection orders only after
    the close is confirmed.
-8. Emit a structured trace event with no secrets:
+8. Emits a structured trace event with no secrets:
    `control.test_controlled_close`.
-9. Enforce once-per-session execution separately from controlled entry.
+9. Enforces once-per-session execution separately from controlled entry.
+
+Implemented artifacts:
+
+- `ExecutionOrchestrator.execute_controlled_close()`.
+- `POST /api/runtime/test/smoke/execute-controlled-close`.
+- `OrderRole.EXIT` plus PG/ORM check-constraint migration support.
+- `tests/unit/test_tiny001d4_controlled_close.py`.
 
 ## Acceptance
 
@@ -72,3 +79,11 @@ the final service method and allowed files.
 - If Binance testnet returns partial fill or delayed market-close evidence,
   stop and add bounded confirmation/reconciliation handling before another
   smoke run.
+
+## Current Verdict
+
+`implemented_locally / awaiting_scoped_verification_and_testnet_authorization`
+
+The runtime close blocker is cleared at implementation level. Phase 3 testnet
+execution still requires local verification, PG schema readiness, read-only
+testnet preflight, and a specific ADR-0009 Owner authorization.

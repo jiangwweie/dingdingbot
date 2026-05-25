@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 3 designed for review; execution blocked
+Status: Phase 3 ready for Owner authorization; testnet execution not authorized
 
 ## Boundary
 
@@ -89,9 +89,9 @@ Acceptance:
 - Reviewed packets require `reviewed_by` and `reviewed_at_ms`.
 - Packet export is JSON-ready and does not write files or call services.
 
-## Phase 3 - Testnet Rehearsal Design
+## Phase 3 - Testnet Rehearsal Package
 
-Status: DESIGN_REVIEW / EXECUTION_BLOCKED
+Status: READY_FOR_OWNER_AUTH / AUTHORIZATION_REQUIRED
 
 Scope:
 
@@ -103,16 +103,31 @@ Design artifacts:
 
 - `docs/ops/plc-phase3-testnet-rehearsal-design.md`
 - `docs/ops/plc-phase3-adr0009-authorization-request.md`
+- `docs/ops/plc-campaign-risk-state-machine-spec.md`
+- `docs/ops/plc-account-risk-liquidation-safety-spec.md`
+- `docs/ops/tc-tiny-001d-4-runtime-managed-close-smoke-design.md`
 
 Entry requirements:
 
 - Phase 2 review accepted.
-- Runtime-managed close smoke implemented.
-- Campaign risk state machine specified.
-- Account risk/liquidation safety checks at least designed.
+- Runtime-managed close smoke implemented and locally verified.
+- Campaign risk state machine specified to design-review quality.
+- Account risk/liquidation safety checks specified to design-review quality.
 
-Execution remains blocked until the entry requirements pass and Owner gives a
-specific ADR-0009 authorization for one bounded rehearsal cycle.
+Pre-authorization evidence:
+
+- Scoped local verification passed: 126 targeted tests.
+- `compileall` passed for touched modules.
+- `git diff --check` passed.
+- Local PG active orders were backed up and terminalized without exchange
+  mutation; active local orders are now `0`.
+- Local PG `orders.ck_orders_order_role` now allows `EXIT`.
+- Binance official plugin returned public `ETHUSDT` futures book ticker data.
+- Project read-only Binance testnet preflight returned no nonzero
+  `ETH/USDT:USDT` position and open orders `0`.
+
+Execution remains blocked until a specific ADR-0009 Owner authorization passes
+for one bounded rehearsal cycle.
 
 ## Phase 4 - Tiny-Live-Style Review
 

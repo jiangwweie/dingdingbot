@@ -37,6 +37,7 @@ RUNTIME_CONTROL_API_ENABLED_ENV = "RUNTIME_CONTROL_API_ENABLED"
 RUNTIME_TEST_SIGNAL_INJECTION_ENABLED_ENV = "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"
 
 _CONTROLLED_ENTRY_EXECUTED: bool = False
+_CONTROLLED_CLOSE_EXECUTED: bool = False
 
 
 class GlobalKillSwitchResponse(BaseModel):
@@ -198,6 +199,19 @@ class ControlledEntryResponse(BaseModel):
     attempt_locked: bool = False
     notional: Optional[Decimal] = None
     min_notional: Optional[Decimal] = None
+
+
+class ControlledCloseResponse(BaseModel):
+    status: str
+    signal_id: Optional[str] = None
+    close_order_id: Optional[str] = None
+    exchange_order_id: Optional[str] = None
+    amount: Decimal
+    average_exec_price: Optional[Decimal] = None
+    terminalized_protection_orders: int = 0
+    testnet: Literal[True] = True
+    profile: str = _CONTROLLED_PROFILE
+    attempt_locked: bool = False
 
 
 def _get_account_snapshot(api_module):
@@ -700,4 +714,132 @@ async def execute_controlled_entry(request: Request) -> ControlledEntryResponse:
         attempt_locked=True,
         notional=notional,
         min_notional=min_notional,
+    )
+
+
+@router.post(
+    "/test/smoke/execute-controlled-close",
+    response_model=ControlledCloseResponse,
+)
+async def execute_controlled_close(request: Request) -> ControlledCloseResponse:
+    """Runtime-managed reduce-only close for 001D-4 testnet smoke."""
+    global _CONTROLLED_CLOSE_EXECUTED
+
+    if not _test_signal_injection_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Controlled signal injection disabled. "
+                f"Set {RUNTIME_TEST_SIGNAL_INJECTION_ENABLED_ENV}=true."
+            ),
+        )
+    if not _runtime_control_api_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Runtime control API disabled. "
+                f"Set {RUNTIME_CONTROL_API_ENABLED_ENV}=true."
+            ),
+        )
+
+    _require_internal_runtime_control(request)
+    await _reject_controlled_entry_body(request)
+
+    api_module = _load_api_module()
+    config_provider = getattr(api_module, "_runtime_config_provider", None)
+    resolved = config_provider.resolved_config if config_provider else None
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="Runtime config not resolved")
+    if not resolved.environment.exchange_testnet:
+        raise HTTPException(status_code=403, detail="Endpoint requires EXCHANGE_TESTNET=true")
+    if resolved.profile_name != _CONTROLLED_PROFILE:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Endpoint requires RUNTIME_PROFILE={_CONTROLLED_PROFILE}, "
+                f"got {resolved.profile_name}"
+            ),
+        )
+    if _CONTROLLED_CLOSE_EXECUTED:
+        raise HTTPException(
+            status_code=409,
+            detail="Controlled close already executed in this runtime session",
+        )
+
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None or not hasattr(position_repo, "list_active"):
+        raise HTTPException(status_code=503, detail="Position repository not initialized")
+    try:
+        active_positions = await position_repo.list_active(symbol=_CONTROLLED_SYMBOL, limit=10)
+    except Exception as exc:
+        logger.error("Failed to load active positions for controlled close: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="Failed to load active positions") from exc
+
+    if len(active_positions) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Controlled close requires exactly one active local position "
+                f"for {_CONTROLLED_SYMBOL}; found {len(active_positions)}"
+            ),
+        )
+    position = active_positions[0]
+    amount = Decimal(str(getattr(position, "current_qty", "0")))
+    if amount <= Decimal("0") or amount > _CONTROLLED_AMOUNT_MAX:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Controlled close amount out of bounds: {amount}",
+        )
+
+    orchestrator = _get_orchestrator(api_module)
+    _CONTROLLED_CLOSE_EXECUTED = True
+    try:
+        result = await orchestrator.execute_controlled_close(
+            position=position,
+            reason="controlled_test_runtime_close",
+            max_amount=_CONTROLLED_AMOUNT_MAX,
+        )
+    except Exception as exc:
+        logger.error("Controlled close execution failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Controlled close failed") from exc
+
+    close_order = result["close_order"]
+    terminalized = result.get("terminalized_protection_orders") or []
+
+    trace_svc = _get_trace_service(api_module)
+    if trace_svc is not None:
+        try:
+            trace_svc.emit_risk_decision(
+                lifecycle_id=close_order.id,
+                decision="executed",
+                reason="controlled_test_runtime_close",
+                metadata={
+                    "symbol": _CONTROLLED_SYMBOL,
+                    "amount": str(amount),
+                    "profile": _CONTROLLED_PROFILE,
+                    "testnet": True,
+                    "source": "runtime_test_endpoint",
+                    "signal_id": close_order.signal_id,
+                    "exchange_order_id": close_order.exchange_order_id,
+                    "average_exec_price": str(close_order.average_exec_price)
+                    if close_order.average_exec_price is not None
+                    else None,
+                    "terminalized_protection_orders": len(terminalized),
+                    "attempt_locked": True,
+                },
+                event_type="control.test_controlled_close",
+            )
+        except Exception as exc:
+            logger.warning("Controlled close trace emit failed: %s", exc, exc_info=True)
+
+    return ControlledCloseResponse(
+        status=close_order.status.value if hasattr(close_order.status, "value") else str(close_order.status),
+        signal_id=close_order.signal_id,
+        close_order_id=close_order.id,
+        exchange_order_id=close_order.exchange_order_id,
+        amount=amount,
+        average_exec_price=close_order.average_exec_price,
+        terminalized_protection_orders=len(terminalized),
+        profile=_CONTROLLED_PROFILE,
+        attempt_locked=True,
     )

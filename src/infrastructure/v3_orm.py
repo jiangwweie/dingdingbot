@@ -125,7 +125,7 @@ ORDER_TYPE_CHECK = CheckConstraint(
 
 # OrderRole 枚举约束
 ORDER_ROLE_CHECK = CheckConstraint(
-    "order_role IN ('ENTRY', 'TP1', 'TP2', 'TP3', 'TP4', 'TP5', 'SL')",
+    "order_role IN ('ENTRY', 'EXIT', 'TP1', 'TP2', 'TP3', 'TP4', 'TP5', 'SL')",
     name="check_order_role"
 )
 

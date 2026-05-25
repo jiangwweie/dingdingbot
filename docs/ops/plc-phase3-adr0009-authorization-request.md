@@ -1,6 +1,6 @@
 # PLC Phase 3 ADR-0009 Authorization Request
 
-Status: DRAFT / DO NOT EXECUTE
+Status: READY_FOR_OWNER_APPROVAL / DO NOT EXECUTE WITHOUT EXPLICIT APPROVAL
 
 This is the reusable authorization request for one future PLC Phase 3 Binance
 testnet rehearsal. It is intentionally not approved by being committed.
@@ -57,14 +57,23 @@ Binance testnet controlled runtime rehearsal.
 
 ## Required Verification Before Requesting Owner Approval
 
-- PLC paper observation tests pass.
-- Controlled entry tests pass.
-- Controlled close tests pass.
-- Reconciliation/protection-health tests pass.
-- `compileall` passes for touched modules.
-- `git diff --check` passes.
-- Binance testnet read-only preflight returns no active position and no open
-  orders for `ETH/USDT:USDT`.
+- PLC paper observation tests: passed.
+- Controlled entry tests: passed.
+- Controlled close tests: passed.
+- Reconciliation/protection-health tests: passed.
+- `compileall` for touched modules: passed.
+- `git diff --check`: passed.
+- Binance official plugin public futures book ticker check for `ETHUSDT`:
+  passed.
+- Project read-only Binance testnet preflight for `ETH/USDT:USDT`: no nonzero
+  position and open orders `0`.
+- Local PG preflight:
+  - `orders.ck_orders_order_role` allows `EXIT`;
+  - historical active local orders were backed up to
+    `ops_backup_orders_plc_phase3_20260525`;
+  - 3706 historical local active orders were terminalized locally with audit
+    rows and no exchange mutation;
+  - current active local orders: `0`.
 
 ## Stop Conditions
 
