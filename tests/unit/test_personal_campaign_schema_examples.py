@@ -10,6 +10,7 @@ from src.domain.personal_campaign import (
     HumanArmAction,
     HumanArmDecision,
     ModeAdvice,
+    PaperObservationPacket,
     ReadOnlyRuntimeAdapterPreview,
     RiskOrderPlan,
     StrategyContract,
@@ -116,3 +117,17 @@ def test_sq02_read_only_runtime_adapter_preview_has_no_order_authority():
     assert preview.rejection_reasons == []
     assert not hasattr(preview, "order_id")
     assert not hasattr(preview, "exchange_order_id")
+
+
+def test_sq02_paper_observation_packet_has_no_runtime_authority():
+    packet = PaperObservationPacket.model_validate(
+        _load_example("paper_observation_packet_sq02.example.json")
+    )
+
+    assert packet.paper_only is True
+    assert packet.authority == "paper_observation_no_order_authority"
+    assert packet.preview.read_only is True
+    assert "exchange_mutation" in packet.prohibited_actions
+    assert packet.reviewed_by is None
+    assert not hasattr(packet, "order_id")
+    assert not hasattr(packet, "exchange_order_id")

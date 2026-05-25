@@ -79,6 +79,12 @@ class CampaignInvariantStatus(str, Enum):
     FAIL = "fail"
 
 
+class PaperObservationReviewStatus(str, Enum):
+    PENDING_REVIEW = "pending_review"
+    REVIEWED_ACCEPT = "reviewed_accept"
+    REVIEWED_REJECT = "reviewed_reject"
+
+
 class ModeAdvice(CampaignModel):
     """System-generated review packet; not a trading decision."""
 
@@ -193,6 +199,41 @@ class ReadOnlyRuntimeAdapterPreview(CampaignModel):
     trade_intent: TradeIntent
     rejection_reasons: list[str] = Field(default_factory=list)
     no_exchange_side_effect: Literal[True] = True
+
+
+class PaperObservationPacket(CampaignModel):
+    """Paper-only review packet derived from a read-only runtime preview."""
+
+    packet_version: str = "plc_paper_observation_packet_v1"
+    paper_only: Literal[True] = True
+    authority: Literal["paper_observation_no_order_authority"] = (
+        "paper_observation_no_order_authority"
+    )
+    packet_id: str
+    created_at_ms: int = Field(..., ge=0)
+    preview: ReadOnlyRuntimeAdapterPreview
+    review_status: PaperObservationReviewStatus = PaperObservationReviewStatus.PENDING_REVIEW
+    operator_notes: list[str] = Field(default_factory=list)
+    reviewed_by: Optional[str] = None
+    reviewed_at_ms: Optional[int] = Field(default=None, ge=0)
+    prohibited_actions: list[str] = Field(
+        default_factory=lambda: [
+            "order_placement",
+            "order_cancellation",
+            "exchange_mutation",
+            "real_account_read",
+            "runtime_profile_change",
+        ]
+    )
+    no_exchange_side_effect: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_review_fields(self) -> "PaperObservationPacket":
+        if self.review_status == PaperObservationReviewStatus.PENDING_REVIEW:
+            return self
+        if not self.reviewed_by or self.reviewed_at_ms is None:
+            raise ValueError("reviewed packets require reviewed_by and reviewed_at_ms")
+        return self
 
 
 class CampaignRiskCaps(CampaignModel):

@@ -415,3 +415,23 @@ Use this file for session progress and handoff notes.
 - Verification:
   `pytest -q tests/unit/test_personal_campaign_runtime_adapter.py tests/unit/test_personal_campaign_sandbox.py tests/unit/test_personal_campaign_schema_docs.py tests/unit/test_personal_campaign_schema_examples.py`
   passed with 35 tests.
+
+## 2026-05-25 (PLC Phased Upgrade Phase 2)
+
+- Implemented Phase 2 paper observation packet:
+  `src/application/personal_campaign_paper_observation.py`.
+- Added `PaperObservationPacket` and `PaperObservationReviewStatus` to the PLC
+  domain contracts.
+- Added paper observation packet schema and SQ02 example:
+  - `docs/schemas/personal_campaign/paper_observation_packet.schema.json`
+  - `docs/schemas/personal_campaign/examples/paper_observation_packet_sq02.example.json`
+- Packet behavior:
+  - wraps only read-only runtime previews;
+  - carries `paper_observation_no_order_authority`;
+  - stores review status, operator notes, and optional review provenance;
+  - reviewed packets require `reviewed_by` and `reviewed_at_ms`;
+  - exported packet dict is JSON-ready without writing files or calling
+    services.
+- Verification:
+  `pytest -q tests/unit/test_personal_campaign_paper_observation.py tests/unit/test_personal_campaign_runtime_adapter.py tests/unit/test_personal_campaign_schema_docs.py tests/unit/test_personal_campaign_schema_examples.py`
+  passed with 24 tests.

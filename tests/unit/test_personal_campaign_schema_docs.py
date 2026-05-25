@@ -14,6 +14,7 @@ EXPECTED_SCHEMAS = {
     "strategy_contract.schema.json": "StrategyContract",
     "trade_intent.schema.json": "TradeIntent",
     "read_only_runtime_adapter_preview.schema.json": "ReadOnlyRuntimeAdapterPreview",
+    "paper_observation_packet.schema.json": "PaperObservationPacket",
     "risk_order_plan.schema.json": "RiskOrderPlan",
     "execution_receipt.schema.json": "ExecutionReceipt",
     "position_lifecycle_state.schema.json": "PositionLifecycleState",
@@ -67,6 +68,30 @@ def test_read_only_runtime_adapter_schema_forbids_order_authority():
     assert schema["not"]["anyOf"] == [
         {"required": ["order_id"]},
         {"required": ["exchange_order_id"]},
+    ]
+
+
+def test_paper_observation_packet_schema_forbids_runtime_authority():
+    schema = _load_schema("paper_observation_packet.schema.json")
+    properties = schema["properties"]
+
+    assert properties["paper_only"]["const"] is True
+    assert properties["authority"]["const"] == "paper_observation_no_order_authority"
+    assert properties["no_exchange_side_effect"]["const"] is True
+    assert schema["not"]["anyOf"] == [
+        {"required": ["order_id"]},
+        {"required": ["exchange_order_id"]},
+        {"required": ["account_id"]},
+    ]
+    prohibited_contains = [
+        item["contains"]["const"] for item in properties["prohibited_actions"]["allOf"]
+    ]
+    assert prohibited_contains == [
+        "order_placement",
+        "order_cancellation",
+        "exchange_mutation",
+        "real_account_read",
+        "runtime_profile_change",
     ]
 
 

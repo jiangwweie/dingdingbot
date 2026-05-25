@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/personal_campaign/paper_observation_packet.schema.json",
+  "title": "PaperObservationPacket",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "packet_version",
+    "paper_only",
+    "authority",
+    "packet_id",
+    "created_at_ms",
+    "preview",
+    "review_status",
+    "operator_notes",
+    "reviewed_by",
+    "reviewed_at_ms",
+    "prohibited_actions",
+    "no_exchange_side_effect"
+  ],
+  "properties": {
+    "packet_version": {
+      "type": "string",
+      "const": "plc_paper_observation_packet_v1",
+      "default": "plc_paper_observation_packet_v1"
+    },
+    "paper_only": { "type": "boolean", "const": true, "default": true },
+    "authority": {
+      "type": "string",
+      "const": "paper_observation_no_order_authority",
+      "default": "paper_observation_no_order_authority"
+    },
+    "packet_id": { "type": "string", "minLength": 1 },
+    "created_at_ms": { "type": "integer", "minimum": 0 },
+    "preview": {
+      "$ref": "read_only_runtime_adapter_preview.schema.json"
+    },
+    "review_status": {
+      "type": "string",
+      "enum": ["pending_review", "reviewed_accept", "reviewed_reject"]
+    },
+    "operator_notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "reviewed_by": { "type": ["string", "null"] },
+    "reviewed_at_ms": { "type": ["integer", "null"], "minimum": 0 },
+    "prohibited_actions": {
+      "type": "array",
+      "allOf": [
+        { "contains": { "const": "order_placement" } },
+        { "contains": { "const": "order_cancellation" } },
+        { "contains": { "const": "exchange_mutation" } },
+        { "contains": { "const": "real_account_read" } },
+        { "contains": { "const": "runtime_profile_change" } }
+      ],
+      "items": { "type": "string" }
+    },
+    "no_exchange_side_effect": { "type": "boolean", "const": true, "default": true }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["order_id"] },
+      { "required": ["exchange_order_id"] },
+      { "required": ["account_id"] }
+    ]
+  }
+}

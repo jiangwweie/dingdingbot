@@ -52,6 +52,10 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   pure read-only adapter. The adapter rejects non-frozen contracts and
   non-prior snapshots before deterministic contract evaluation, and its output
   has explicit `read_only_no_order_authority`.
+- PLC Phase 2 can remain non-runtime by wrapping read-only previews into paper
+  observation packets. Review status and operator notes are data only; packet
+  authority explicitly forbids order placement/cancellation, exchange mutation,
+  real account reads, and runtime profile changes.
 
 ## 2026-05-09
 

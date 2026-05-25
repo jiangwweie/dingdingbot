@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 1 implemented for review
+Status: Phase 2 implemented for review
 
 ## Boundary
 
@@ -58,7 +58,7 @@ Acceptance:
 
 ## Phase 2 - Paper Observation Packet
 
-Status: TODO
+Status: REVIEW
 
 Scope:
 
@@ -72,6 +72,23 @@ Entry requirements:
 - Observation packet schema defined.
 - Redaction/secret-free structured logs ready.
 
+Implemented artifacts:
+
+- `src/application/personal_campaign_paper_observation.py`
+- `PaperObservationPacket`
+- `docs/schemas/personal_campaign/paper_observation_packet.schema.json`
+- `docs/schemas/personal_campaign/examples/paper_observation_packet_sq02.example.json`
+- `tests/unit/test_personal_campaign_paper_observation.py`
+
+Acceptance:
+
+- Packets wrap only read-only previews.
+- Packets carry `paper_observation_no_order_authority`.
+- Packets include review status, operator notes, and optional review
+  provenance.
+- Reviewed packets require `reviewed_by` and `reviewed_at_ms`.
+- Packet export is JSON-ready and does not write files or call services.
+
 ## Phase 3 - Testnet Rehearsal Design
 
 Status: TODO
@@ -84,6 +101,7 @@ Scope:
 
 Entry requirements:
 
+- Phase 2 review accepted.
 - Runtime-managed close smoke implemented.
 - Campaign risk state machine specified.
 - Account risk/liquidation safety checks at least designed.
