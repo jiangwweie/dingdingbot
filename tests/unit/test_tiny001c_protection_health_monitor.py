@@ -21,6 +21,7 @@ SYMBOL = "ETH/USDT:USDT"
 class _FakeOrchestrator:
     def __init__(self) -> None:
         self.blocks: list[tuple[str, str, dict]] = []
+        self.cleared: list[str] = []
 
     def block_symbol_for_protection_health(
         self,
@@ -29,6 +30,9 @@ class _FakeOrchestrator:
         metadata: dict,
     ) -> None:
         self.blocks.append((symbol, reason_code, metadata))
+
+    def clear_protection_health_block(self, symbol: str) -> None:
+        self.cleared.append(symbol)
 
 
 class _FakeTraceService:
@@ -195,6 +199,39 @@ async def test_many_local_sl_missing_without_position_is_data_hygiene_summary_on
     assert event["reason"] == PROTECTION_DATA_HYGIENE_LOCAL_SL_MISSING_ON_EXCHANGE
     assert event["metadata"]["count"] == 1852
     assert len(event["metadata"]["sample_local_order_ids"]) == 10
+
+
+@pytest.mark.asyncio
+async def test_healed_read_model_clears_existing_protection_health_block():
+    orchestrator = _FakeOrchestrator()
+    monitor = ProtectionHealthMonitor(execution_orchestrator=orchestrator)
+
+    await monitor.handle_read_model_result(
+        _result([_critical_position_missing_sl()]),
+        source="periodic",
+    )
+    await monitor.handle_read_model_result(_result([]), source="periodic")
+
+    assert len(orchestrator.blocks) == 1
+    assert orchestrator.cleared == [SYMBOL]
+
+
+@pytest.mark.asyncio
+async def test_report_only_read_model_clears_existing_protection_health_block():
+    orchestrator = _FakeOrchestrator()
+    monitor = ProtectionHealthMonitor(execution_orchestrator=orchestrator)
+
+    await monitor.handle_read_model_result(
+        _result([_critical_position_missing_sl()]),
+        source="periodic",
+    )
+    await monitor.handle_read_model_result(
+        _result([_data_hygiene_missing_sl("local-sl")]),
+        source="periodic",
+    )
+
+    assert len(orchestrator.blocks) == 1
+    assert orchestrator.cleared == [SYMBOL]
 
 
 @pytest.mark.asyncio

@@ -281,10 +281,12 @@ async def _run_startup_protection_health_check(
         try:
             result = await reconciliation_service.build_read_model(symbol)
             if external_close_monitor is not None:
-                await external_close_monitor.handle_read_model_result(
+                external_close_changed_state = bool(await external_close_monitor.handle_read_model_result(
                     result,
                     source="startup",
-                )
+                ))
+                if external_close_changed_state:
+                    result = await reconciliation_service.build_read_model(symbol)
             await protection_health_monitor.handle_read_model_result(
                 result,
                 source="startup",

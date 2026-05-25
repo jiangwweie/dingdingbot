@@ -68,6 +68,10 @@ Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority. Only c
 6. Claude may implement only from a task card with `Allowed files`, `Forbidden files`, `Requirements`, `Tests`, and `Done When`.
 7. Do not hard-code fixed return or drawdown targets into system constraints, task cards, runtime rules, or agent instructions.
 8. Claude subtasks must stay small: one primary outcome, small file surface, low architecture coupling, and clear acceptance.
+9. Real live trading is the absolute execution red line. Runtime, paper,
+   testnet, tiny-live, read-only exchange sync, and other non-real-live work may
+   proceed only after reasonable scoped verification and explicit Owner
+   authorization for the specific action.
 
 ## Core Files
 
@@ -143,9 +147,11 @@ Codex reviews the result before merge decisions.
 
 - No strategy-return optimization.
 - No multi-asset expansion.
-- No real-funds activation.
+- No real live trading or real-funds activation without a separate explicit
+  Owner authorization decision.
 - No architecture rewrite.
-- No live/runtime profile changes.
+- No live/runtime profile changes without a separate explicit Owner
+  authorization decision.
 
 ## Testing
 

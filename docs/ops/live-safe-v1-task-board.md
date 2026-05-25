@@ -4,14 +4,21 @@ Status values: `TODO`, `SPEC`, `IMPLEMENTING`, `TESTING`, `REVIEW`, `MERGED`, `B
 
 ## Current Mainline Confirmation
 
+2026-05-25 boundary update: ADR-0009 supersedes the older global docs-only
+execution boundary. Real live trading remains prohibited unless separately and
+explicitly authorized. Runtime, paper, testnet, tiny-live-style, read-only
+exchange sync, and other non-real-live work may be executed after reasonable
+scoped verification and explicit Owner authorization for the specific action.
+
 As of 2026-05-09, the current phase label is `Observation + Research
 Methodology Reset`.
 
-The only current mainline strategy-research object is BTC+ETH Phase 1
-observation design for Direction A. This is docs-only and Owner-review focused.
-It does not authorize strategy runtime, paper/testnet/live trading, small-live
-execution, portfolio/router work, SOL Phase 2, CPM reopening, short-side work,
-parameter optimization, or runtime/profile/risk changes.
+The only current mainline strategy-research object recorded at that time was
+BTC+ETH Phase 1 observation design for Direction A. That entry did not
+authorize strategy runtime, paper/testnet/live trading, small-live execution,
+portfolio/router work, SOL Phase 2, CPM reopening, short-side work, parameter
+optimization, or runtime/profile/risk changes. Future non-real-live execution
+can be requested under ADR-0009.
 
 SRR-002 is accepted as the guiding methodology for future analysis. Acceptance
 is docs-only and does not itself satisfy SRR-002 standards for any module.
@@ -22,6 +29,59 @@ is docs-only and does not itself satisfy SRR-002 standards for any module.
 - `ADR-0002` completed: documented Decision Trace Backbone v0 semantics, scope, and non-goals.
 - `LS-001` completed: main runtime order-watch enabled with isolated WS state; `api.py` out of scope; duplicate `watch_orders` definition remains as later cleanup.
 - `LS-002` completed: runtime daily risk limits now update from projected exit deltas and full position closes; UTC reset and replay-safe accounting are active; v0 remains process-local in-memory state.
+
+## Personal Leveraged Campaign Local Sandbox
+
+These tasks are currently docs/design/sandbox/test only. They do not by
+themselves authorize exchange access, paper/testnet/tiny-live-style execution,
+real account data, runtime profile changes, order placement, order
+cancellation, transfer, withdrawal, or direct research-to-order wiring. Such
+non-real-live steps may be requested separately under ADR-0009.
+
+| ID | Task | Status | Owner | Notes |
+| --- | --- | --- | --- | --- |
+| PLC-001 | Minimum local campaign chain sandbox | REVIEW | Codex | Adds disabled-by-default local objects, explicit `CampaignSandboxSettings(enabled=False)` guard, sandbox trace loop, repeatable scenario catalog, and trace invariant evaluator for `ModeAdvice -> HumanArmDecision -> StrategyContract -> TradeIntent -> RiskOrderPlan -> ExecutionReceipt -> PositionLifecycleState -> CampaignState`; targeted tests cover allow/reject, pause, hard-lock, profit-protect reduce/close, default-disabled, no-side-effect, catalog scenarios, and invariant pass/fail checks. Withdrawal is Owner-external and not modeled. |
+| PLC-GOV-001 | Branch and document governance for current PLC mainline | REVIEW | Codex | Adds current branch/document governance note. Classifies active/protected/frozen/stale branches and current SSOT/active governance/runtime foundation/historical evidence docs without deleting branches or physically moving docs. |
+| PLC-SCHEMA-001 | Local PLC schemas, risk matrix, and promotion checklist | REVIEW | Codex | Adds local JSON schemas for core PLC objects, rule matrix for order/position/campaign/profit-protection enforcement, and promotion checklist requiring scoped verification plus explicit Owner authorization before runtime/account stages. |
+| PLC-SQ02-001 | SQ02 docs-only StrategyContract skeleton and examples | REVIEW | Codex | Adds SQ02 skeleton plus local schema examples parsed by unit tests against the local campaign Pydantic models. Scanner, alert, runtime, paper/testnet/tiny-live-style, account, leverage, sizing, or order-path use requires a separate ADR-0009 action request. |
+| PLC-FEATURE-001 | Closed/prior FeatureSnapshot boundary for SQ02 local sandbox | REVIEW | Codex | Adds local `FeatureSnapshot` model/schema/example and routes sandbox contract evaluation through it. Feature snapshots forbid lookahead, LLM trade decisions, real account state, and exchange API state. |
+
+## Non-Real-Live Action Requests
+
+These tasks require scoped verification and explicit Owner authorization before
+execution under ADR-0009.
+
+| ID | Task | Status | Owner | Notes |
+| --- | --- | --- | --- | --- |
+| TC-TINY-001D-1 | Controlled Binance testnet order-lifecycle smoke | REVIEW | Codex | Executed after Owner authorization under ADR-0009. One `sim1_eth_runtime` Binance testnet controlled endpoint call completed with `amount=0.01`, `attempt_locked=true`, ENTRY filled, exchange-native TP/SL mounted, GKS restored, direct testnet cleanup closed the residual position, reconciliation cleared runtime positions, and runtime was stopped. Follow-up observations: testnet SL `fetch_order` confirmation miss after STOP_MARKET submission, PG protection-order rows stale `OPEN` after external cleanup, periodic reconciliation `severe=830` / `warning=2995`, protection-health critical block `PROTECTION_LOCAL_SL_MISSING_ON_EXCHANGE` count `829`, and no daily-risk update for the unresolved external close. |
+| TC-TINY-001D-2 | External-close local order hygiene follow-up | REVIEW | Codex | Implemented local-only hygiene for exchange-flat external close and closed-position stale protection rows. Active local TP/SL rows for the same signal are system-terminalized to `CANCELED` with audit metadata; startup/periodic reconciliation refreshes the read model before protection-health evaluation; healed read models clear stale protection-health blocks. Historical PG cleanup terminalized 2174 stale ETH protection rows and wrote 2174 audit rows. Follow-up testnet verification executed one more controlled endpoint (`intent_55db456b02ac`, `sig_d191164ff9bc`, amount `0.01`), cleaned exchange flat, then startup/periodic reconciliation terminalized the remaining 3 TP/SL rows, position closed with realized PnL, daily stats updated, periodic reconciliation reported `severe=0`, active stale protection rows without active position remained 0, and runtime stopped. Tests: targeted 82 passed; compileall and `git diff --check` passed; Binance testnet read-only verification: `positionAmt=0.000`, open orders 0. |
+
+## Current Planning Snapshot
+
+This snapshot reflects the state after `TC-TINY-001D-2`. It does not authorize
+real live trading. Any runtime, testnet, paper, or exchange-connected action
+still requires the ADR-0009 scoped action gate.
+
+### Short-Term Tasks
+
+| ID | Task | Status | Owner | Notes |
+| --- | --- | --- | --- | --- |
+| TC-TINY-001D-3 | Historical local open-order warning cleanup | TODO | Codex | Periodic reconciliation now reports `severe=0`, but still has 821 historical `local_order_missing_on_exchange` warnings. Clean or terminalize stale non-risk-bearing local open rows only after a PG backup/query proof and without exchange mutation. |
+| TC-TINY-001D-4 | Runtime-managed close smoke design | SPEC | Codex | Replace direct exchange cleanup in the controlled smoke with a runtime-owned controlled reduce/close path, so ENTRY, protection mounting, close projection, daily stats, order terminalization, and reconciliation can be validated without out-of-band cleanup. |
+| TC-TINY-001D-5 | STOP_MARKET confirmation fallback hardening | TODO | Codex | Binance testnet `fetch_order` can miss immediately after STOP_MARKET submission while order-watch later observes the SL. Harden confirmation by treating fetch-open-orders/order-watch evidence as bounded confirmation before raising false criticals. |
+| PLC-RUNTIME-001 | PLC local chain to read-only runtime adapter spec | SPEC | Codex | Define the first non-order runtime adapter for `FeatureSnapshot -> StrategyContract -> TradeIntent` inspection. Must remain read-only until a separate ADR-0009 action request authorizes paper/testnet execution. |
+| LS-003 | Structured runtime logs task card refresh | TODO | Codex | Update task card to include new reconciliation/protection-health events and local hygiene metadata before assigning implementation. |
+
+### Long-Term Tasks
+
+| ID | Task | Status | Owner | Notes |
+| --- | --- | --- | --- | --- |
+| PLC-LT-001 | Full PLC promotion ladder | TODO | Codex | Promote PLC from local sandbox to read-only runtime, paper, testnet, tiny-live-style rehearsal, and only later real-live review. Each step requires evidence, Owner authorization, and a rollback plan. |
+| PLC-LT-002 | Campaign risk state machine | TODO | Codex | Model campaign locks, profit-protection, pause/resume, and loss-lock as durable state with audit trails before any autonomous runtime use. |
+| LS-006 | Account risk state machine | TODO | Codex | Define account-level risk states, liquidation/margin controls, and fail-closed behavior before broader runtime exposure. |
+| LS-007 | Liquidation distance and margin safety checks | TODO | Codex | Add exchange-field tolerant liquidation and margin safety checks. Required before any larger notional or multi-position rehearsal. |
+| RUNTIME-LT-001 | Multi-symbol runtime readiness | TODO | Codex | Remove shared order-watch assumptions, finish symbol-scoped reconciliation/read models, and prove no cross-symbol state bleed before multi-asset runtime expansion. |
+| RESEARCH-LT-001 | Opportunity evidence to strategy-contract pipeline | TODO | Codex | Keep research evidence separate from runtime authority. Only frozen, falsified, Owner-approved strategy contracts can enter runtime/paper/testnet gates. |
 
 ## P0
 

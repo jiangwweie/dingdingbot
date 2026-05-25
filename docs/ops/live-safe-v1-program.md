@@ -16,11 +16,14 @@ planning document by:
 
 The current Owner-facing mainline is the Personal Leveraged Campaign chain:
 
-`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign control -> withdrawal instruction`
+`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign/profit-protection control`
 
-Live-safe v1 work may support future execution safety, but this document does
-not authorize runtime activation, paper, testnet, live, tiny-live, real account
-actions, leverage, sizing, or direct research-to-order wiring.
+Live-safe v1 work may support future execution safety. Under
+`ADR-0009`, runtime, paper, testnet, tiny-live-style rehearsal, read-only
+exchange sync, and other non-real-live steps are allowed only after reasonable
+scoped verification and explicit Owner authorization for the specific action.
+Real live trading remains prohibited unless separately and explicitly
+authorized.
 
 ## Role Of This Document
 
@@ -34,17 +37,21 @@ business mainline.
 
 ## Goal
 
-Preserve and harden the execution-safety foundation without activating runtime
-trading.
+Preserve and harden the execution-safety foundation. Runtime and testnet
+execution may be used when it is the appropriate verification boundary, but
+only after scoped verification and explicit Owner authorization.
 
 The scope of this program is `Live-safe Foundation`, not the full long-term
-platform roadmap. Current work must not start strategy runtime, paper/testnet/
-live trading, small-live execution, portfolio/router work, SOL Phase 2, CPM
-reopening, short-side work, or parameter optimization.
+platform roadmap. Current work must not start real live trading, real-funds
+deployment, portfolio/router work, SOL Phase 2, CPM reopening, short-side work,
+or parameter optimization. Runtime, paper, testnet, or tiny-live-style
+non-real-live execution requires a separate scoped action request and Owner
+authorization before execution.
 
-The current Owner-facing stage is docs/design/sandbox preparation for the
-Personal Leveraged Campaign chain. Live-safe implementation tasks may remain in
-the backlog, but they do not imply live activation or a deployable strategy
+The current Owner-facing stage starts from docs/design/sandbox preparation for
+the Personal Leveraged Campaign chain. Live-safe implementation tasks may remain
+in the backlog, and non-real-live runtime/testnet verification may be used when
+authorized, but they do not imply real live activation or a deployable strategy
 candidate.
 
 ## Operating Model
@@ -72,13 +79,14 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Do not tune ETH Pinbar parameters.
 - Do not add multi-asset expansion.
 - Do not add Regime, Data, Strategy Router, or Portfolio capabilities unless the user explicitly promotes them from the capability pool.
-- Do not connect real funds.
+- Do not connect real funds or execute real live trading without a separate
+  explicit Owner authorization decision.
 - Do not rewrite the architecture.
 - Do not change live/runtime profile trading parameters.
 - Do not turn investor preference numbers into hard-coded engineering constraints.
-- Do not start any strategy runtime, paper/testnet/live execution, or
-  small-live/tiny-live operation during the current Personal Leveraged Campaign
-  docs/design/sandbox stage.
+- Do not start any runtime, paper/testnet, tiny-live-style, exchange-connected,
+  or account-action step without scoped verification and explicit Owner
+  authorization for that step.
 - Do not promote SOL Phase 2, CPM, short-side, portfolio/router, or
   multi-strategy work into current mainline without a separate Owner decision.
 
@@ -105,6 +113,8 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Default to sim/testnet behavior.
 - Runtime profile changes require a separate task card and explicit user approval.
 - Exchange credentials, order sizing defaults, and live profile changes must not be mixed with code logic changes.
+- Real live trading remains the hard execution red line. Non-real-live runtime
+  and testnet work is permitted only through the ADR-0009 action gate.
 
 ## Core Files
 

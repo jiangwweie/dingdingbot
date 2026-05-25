@@ -1,9 +1,21 @@
 # TC-TINY-001D-1: Controlled Testnet Order Lifecycle Smoke — Proposal & Runbook
 
-**Status**: PROPOSAL — awaiting Owner approval
+**Status**: PROPOSAL — superseded for execution authorization by ADR-0009 request
 **Date**: 2026-05-19
 **Prepared by**: Claude (execution worker)
-**Authorization boundary**: Owner must approve before Step 9 (first testnet ENTRY)
+**Authorization boundary**: Owner must approve before any non-real-live runtime/testnet execution action under ADR-0009.
+
+2026-05-25 update:
+
+- Use `docs/ops/tc-tiny-001d-1-adr0009-authorization-request.md` as the current
+  execution authorization request.
+- The controlled endpoint now exists:
+  `POST /api/runtime/test/smoke/execute-controlled-entry`.
+- The endpoint is fixed-parameter, no-body, env-gated, testnet-gated,
+  profile-gated, startup-guard-gated, GKS-gated, protection-health-gated,
+  circuit-breaker-gated, and once-per-session.
+- This proposal remains useful as the detailed runbook/history, but the older
+  step numbering and "add endpoint" recommendation are superseded.
 
 ---
 
@@ -146,7 +158,10 @@ Attempt to inject a synthetic signal. It should be BLOCKED by startup guard.
 3. Calls `await _execution_orchestrator.execute_signal(signal, strategy)`
 4. Returns the ExecutionIntent status
 
-Alternative: Add a temporary test endpoint `POST /api/runtime/test/execute-signal` gated behind `RUNTIME_CONTROL_API_ENABLED=true` and `EXCHANGE_TESTNET=true`. This endpoint would call `_execution_orchestrator.execute_signal()` directly. **This does NOT modify strategy logic** — it bypasses the strategy engine entirely and feeds a pre-constructed signal into the orchestrator.
+Historical note: this proposal originally considered adding a temporary test
+endpoint. That has been superseded by the implemented fixed-parameter endpoint
+`POST /api/runtime/test/smoke/execute-controlled-entry`, which is documented in
+`docs/ops/tc-tiny-001d-1-adr0009-authorization-request.md`.
 
 #### Step 3: Arm Startup Guard
 
@@ -389,26 +404,31 @@ Any of the following requires **immediate runtime kill** and Owner report:
 
 All conditions are met for execution.
 
-### Recommended: Synthetic Signal Injection Mechanism
+### Implemented: Controlled Synthetic Signal Injection Mechanism
 
-The codebase has **no API endpoint** for injecting a synthetic signal into the live execution pipeline. The `ExecutionOrchestrator.execute_signal()` is an internal method with no HTTP exposure.
+The controlled endpoint exists:
 
-**Options**:
+`POST /api/runtime/test/smoke/execute-controlled-entry`
 
-| Option | Description | Risk | Effort |
-|--------|-------------|------|--------|
-| A. Test script | One-shot async script that imports `src.main._execution_orchestrator` and calls `execute_signal()` directly | Low — script runs in same process, touches no strategy code | Small |
-| B. Temporary test endpoint | Add `POST /api/runtime/test/execute-signal` gated behind `RUNTIME_CONTROL_API_ENABLED=true` + `EXCHANGE_TESTNET=true` | Low — controlled exposure, removed after test | Small |
-| C. Wait for natural signal | Let Pinbar strategy fire naturally on ETH/USDT:USDT 1h | None — no code change | Unpredictable timing (hours to days) |
+Current behavior:
 
-**Recommendation**: Option B. Add a temporary test endpoint that is explicitly scoped for 001D-1. The endpoint should:
-- Accept `SignalResult`-compatible JSON in request body
-- Validate `EXCHANGE_TESTNET=true` at runtime (reject if false)
-- Validate `RUNTIME_CONTROL_API_ENABLED=true` (already gated by middleware)
-- Call `_execution_orchestrator.execute_signal(signal, strategy)` directly
-- Return ExecutionIntent status
+- rejects unless `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true`;
+- rejects unless `RUNTIME_CONTROL_API_ENABLED=true`;
+- rejects unless resolved runtime config has `EXCHANGE_TESTNET=true`;
+- rejects unless profile is exactly `sim1_eth_runtime`;
+- rejects any request body, so symbol, direction, amount, SL, TP, and strategy
+  are server-controlled;
+- enforces once-per-session execution;
+- requires startup guard armed and GKS inactive;
+- blocks on protection-health or circuit-breaker blocks;
+- blocks before `execute_signal` if notional is below min-notional;
+- calls `ExecutionOrchestrator.execute_signal()` and does not directly call
+  exchange mutation methods from the endpoint;
+- emits a best-effort decision trace event.
 
-This does NOT modify strategy logic, Direction A, or StrategySignalV2 execution. It bypasses the strategy engine entirely.
+This does not modify strategy logic, Direction A, or StrategySignalV2
+execution. It bypasses the strategy engine and feeds a fixed controlled signal
+into the orchestrator.
 
 ### Nice-to-have: Fix reconciliation FK bug
 

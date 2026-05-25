@@ -53,9 +53,48 @@ class _Trace:
 class _OrderLifecycle:
     def __init__(self, orders: list[Order]) -> None:
         self.orders = orders
+        self.terminalize_calls: list[dict] = []
 
     async def get_orders_by_signal(self, signal_id: str):
         return [order for order in self.orders if order.signal_id == signal_id]
+
+    async def get_order(self, order_id: str):
+        for order in self.orders:
+            if order.id == order_id:
+                return order
+        return None
+
+    async def mark_stale_protection_orders_after_external_close(
+        self,
+        signal_id: str,
+        *,
+        source: str,
+        reason: str,
+        metadata: dict,
+    ):
+        terminalized = []
+        for order in self.orders:
+            if (
+                order.signal_id == signal_id
+                and order.order_role in {OrderRole.SL, OrderRole.TP1, OrderRole.TP2}
+                and order.status in {
+                    OrderStatus.SUBMITTED,
+                    OrderStatus.OPEN,
+                    OrderStatus.PARTIALLY_FILLED,
+                }
+            ):
+                order.status = OrderStatus.CANCELED
+                order.exit_reason = "EXTERNAL_CLOSE_LOCAL_HYGIENE"
+                terminalized.append(order)
+        self.terminalize_calls.append(
+            {
+                "signal_id": signal_id,
+                "source": source,
+                "reason": reason,
+                "metadata": metadata,
+            }
+        )
+        return terminalized
 
 
 def _active_position() -> Position:
@@ -113,6 +152,28 @@ def _external_close_result() -> ReconciliationReadModelResult:
     )
 
 
+def _closed_position_stale_protection_result() -> ReconciliationReadModelResult:
+    return ReconciliationReadModelResult(
+        symbol=SYMBOL,
+        checked_at=1,
+        mismatches=[
+            ReconciliationMismatch(
+                symbol=SYMBOL,
+                mismatch_type="protection_local_sl_missing_on_exchange",
+                severity="HIGH",
+                local_ref="ord-sl",
+                exchange_ref="ex-sl",
+                reason="DATA_HYGIENE_LOCAL_SL_MISSING_ON_EXCHANGE",
+                metadata={
+                    "local_order_id": "ord-sl",
+                    "has_local_position": False,
+                    "has_exchange_position": False,
+                },
+            )
+        ],
+    )
+
+
 @pytest.mark.asyncio
 async def test_external_close_marks_local_position_unresolved_closed_and_blocks_entries():
     repo = _PositionRepo([_active_position()])
@@ -127,9 +188,10 @@ async def test_external_close_marks_local_position_unresolved_closed_and_blocks_
         trace_service=trace,
     )
 
-    await monitor.handle_read_model_result(_external_close_result(), source="periodic")
+    changed = await monitor.handle_read_model_result(_external_close_result(), source="periodic")
 
     position = await repo.get("pos-sig-1")
+    assert changed is True
     assert position.is_closed is True
     assert position.current_qty == Decimal("0")
     assert position.realized_pnl == Decimal("0")
@@ -144,6 +206,11 @@ async def test_external_close_marks_local_position_unresolved_closed_and_blocks_
     assert orchestrator.blocks[0][2]["pnl_status"] == "unresolved_no_reliable_fill"
     assert orchestrator.blocks[0][2]["stale_local_protection_order_ids"] == ["ord-sl"]
     assert orchestrator.blocks[0][2]["stale_local_protection_status"] == "stale_after_external_close"
+    assert orchestrator.blocks[0][2]["stale_local_protection_action"] == "terminalized_local_only"
+    assert orchestrator.blocks[0][2]["terminalized_local_protection_order_ids"] == ["ord-sl"]
+    assert order_lifecycle.orders[0].status == OrderStatus.CANCELED
+    assert order_lifecycle.orders[0].exit_reason == "EXTERNAL_CLOSE_LOCAL_HYGIENE"
+    assert order_lifecycle.terminalize_calls[0]["source"] == "periodic"
     assert trace.events[0]["event_type"] == "control.external_close_detected"
     assert trace.events[0]["decision"] == "deny_new_entries"
 
@@ -170,8 +237,33 @@ async def test_external_close_monitor_ignores_non_external_close_mismatches():
         ],
     )
 
-    await monitor.handle_read_model_result(result, source="periodic")
+    changed = await monitor.handle_read_model_result(result, source="periodic")
 
     position = await repo.get("pos-sig-1")
+    assert changed is False
     assert position.is_closed is False
+    assert orchestrator.blocks == []
+
+
+@pytest.mark.asyncio
+async def test_closed_position_stale_protection_terminalizes_signal_chain():
+    repo = _PositionRepo([])
+    projection = PositionProjectionService(repo)
+    orchestrator = _Orchestrator()
+    order_lifecycle = _OrderLifecycle([_stale_sl_order()])
+    monitor = ExternalCloseMonitor(
+        execution_orchestrator=orchestrator,
+        position_projection_service=projection,
+        order_lifecycle=order_lifecycle,
+    )
+
+    changed = await monitor.handle_read_model_result(
+        _closed_position_stale_protection_result(),
+        source="startup",
+    )
+
+    assert changed is True
+    assert order_lifecycle.orders[0].status == OrderStatus.CANCELED
+    assert order_lifecycle.orders[0].exit_reason == "EXTERNAL_CLOSE_LOCAL_HYGIENE"
+    assert order_lifecycle.terminalize_calls[0]["reason"] == "CLOSED_POSITION_STALE_LOCAL_PROTECTION"
     assert orchestrator.blocks == []

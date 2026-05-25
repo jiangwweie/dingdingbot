@@ -76,13 +76,25 @@ Chain v0`, documented in
 The mainline is no longer "make better research tables" as an end state. The
 target chain is:
 
-`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Withdrawal Control`
+`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Profit Protection Control`
 
 This reframes the current work from pure opportunity review toward a future
-`Strategy Contract -> Risk-Aware Order Builder -> Campaign Withdrawal Control`
-loop. The current authorized surface remains docs/design/research/sandbox only.
-No runtime, paper, testnet, tiny-live, live, real account, leverage, sizing, or
-real order path is authorized by this update.
+`Strategy Contract -> Risk-Aware Order Builder -> Campaign Profit Protection Control`
+loop.
+
+2026-05-25 Owner boundary clarification:
+
+- real live trading remains prohibited unless separately and explicitly
+  authorized by the Owner;
+- all non-real-live development and research work, including runtime, paper,
+  testnet, tiny-live-style rehearsal, read-only exchange sync, and other
+  exchange-connected tests, may be executed after reasonable scoped
+  verification and explicit Owner authorization for the specific action;
+- this does not authorize automatic strategy promotion, real-funds deployment,
+  live order placement, live transfer, withdrawal, or LLM/agent autonomous
+  buy/sell/short/size/leverage decisions.
+
+See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
 
 The active research SSOT is:
 
@@ -114,8 +126,10 @@ The active tracks are:
    classification.
 2. `Personal Leveraged Campaign Mainline v0` - human-armed strategy contracts,
    trade intents, risk-aware order planning, position lifecycle, campaign
-   locks, and withdrawal instructions as docs/design/sandbox objects only until
-   separately promoted.
+   locks, and profit-protection controls. These begin as docs/design/sandbox
+   objects and may move into runtime, paper, testnet, or other non-real-live
+   modes only through scoped verification plus explicit Owner authorization.
+   Withdrawal is Owner-external and not a system object.
 3. `Runtime Safety Foundation` - Live-safe, OwnerGate, StrategySignalV2,
    permission state, and execution-chain safety remain runtime-only boundary
    material unless separately promoted.
@@ -137,17 +151,20 @@ the OOS gate. CPM-1 remains frozen and paused, is not a small-live or canary-liv
 candidate, and its promotion path is stopped. The project therefore has no
 deployable small-live strategy candidate at this point.
 
-`SQ02_DOWNSIDE_CONT_V0` may be used as the first docs-only
-strategy-contract skeleton candidate for the Personal Leveraged Campaign
-mainline. This is not a runtime, paper, testnet, tiny-live, live, scanner,
-alert, watchlist, leverage, sizing, or real order-path candidate.
+`SQ02_DOWNSIDE_CONT_V0` may be used as the first strategy-contract skeleton
+candidate for the Personal Leveraged Campaign mainline. It is currently a
+design/local-sandbox candidate only. Any move toward scanner, alert, watchlist,
+runtime, paper, testnet, tiny-live, account connectivity, leverage, sizing, or
+order-path use requires a separate promotion request, scoped verification, and
+explicit Owner authorization.
 
-This status does not change runtime profiles, strategy parameters, risk rules,
-live enablement, or live-safe control logic. Research and classification
-evidence must continue to use explicit labels and promotion gates. Owner
-confirmation is required when a promotion would touch real secrets, real trading
-permissions, real account actions, push, real-account deployment, or direct
-research-to-real-order wiring.
+This status does not by itself change runtime profiles, strategy parameters,
+risk rules, live enablement, or live-safe control logic. Research and
+classification evidence must continue to use explicit labels and promotion
+gates. Owner confirmation is required before any runtime, paper, testnet,
+tiny-live, exchange-connected, account-action, push, deployment, or direct
+research-to-order step; real live trading remains separately prohibited unless
+explicitly authorized.
 
 ## Core Design Principles
 

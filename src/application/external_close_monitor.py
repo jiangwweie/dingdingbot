@@ -34,9 +34,20 @@ class ExternalCloseMonitor:
         self._trace_service = trace_service
         self._handled_keys: set[tuple[str, str, str]] = set()
 
-    async def handle_read_model_result(self, result: Any, *, source: str) -> None:
+    async def handle_read_model_result(self, result: Any, *, source: str) -> bool:
+        state_changed = False
         for mismatch in list(getattr(result, "mismatches", []) or []):
-            if getattr(mismatch, "mismatch_type", None) != "local_position_missing_on_exchange":
+            mismatch_type = getattr(mismatch, "mismatch_type", None)
+            if mismatch_type == "protection_local_sl_missing_on_exchange":
+                state_changed = (
+                    await self._handle_closed_position_stale_protection_mismatch(
+                        mismatch,
+                        source=source,
+                    )
+                    or state_changed
+                )
+                continue
+            if mismatch_type != "local_position_missing_on_exchange":
                 continue
             if getattr(mismatch, "severity", None) not in {"SEVERE", "CRITICAL"}:
                 continue
@@ -50,7 +61,16 @@ class ExternalCloseMonitor:
                 source=source,
                 metadata=metadata,
             )
-            metadata.update(await self._collect_stale_local_protection_orders(closed_positions))
+            if closed_positions:
+                state_changed = True
+            stale_metadata, terminalized_count = await self._handle_stale_local_protection_orders(
+                closed_positions,
+                source=source,
+                reason=POSITION_CLOSED_ON_EXCHANGE_NOT_PROJECTED,
+            )
+            metadata.update(stale_metadata)
+            if terminalized_count:
+                state_changed = True
             self._block_symbol(symbol, metadata)
             self._emit_trace(symbol, metadata)
             if key not in self._handled_keys:
@@ -65,6 +85,70 @@ class ExternalCloseMonitor:
                     POSITION_CLOSED_ON_EXCHANGE_NOT_PROJECTED,
                     metadata,
                 )
+        return state_changed
+
+    async def _handle_closed_position_stale_protection_mismatch(
+        self,
+        mismatch: Any,
+        *,
+        source: str,
+    ) -> bool:
+        metadata = getattr(mismatch, "metadata", None) or {}
+        if metadata.get("has_local_position") or metadata.get("has_exchange_position"):
+            return False
+        local_order_id = metadata.get("local_order_id") or getattr(mismatch, "local_ref", None)
+        if not local_order_id or self._order_lifecycle is None:
+            return False
+        get_order = getattr(self._order_lifecycle, "get_order", None)
+        terminalizer = getattr(
+            self._order_lifecycle,
+            "mark_stale_protection_orders_after_external_close",
+            None,
+        )
+        if get_order is None or terminalizer is None:
+            return False
+        try:
+            order = await get_order(local_order_id)
+        except Exception as exc:
+            logger.warning(
+                "Closed-position stale protection lookup failed: order_id=%s error=%s",
+                local_order_id,
+                exc,
+                exc_info=True,
+            )
+            return False
+        signal_id = getattr(order, "signal_id", None) if order is not None else None
+        if not signal_id:
+            return False
+        try:
+            terminalized = await terminalizer(
+                signal_id,
+                source=source,
+                reason="CLOSED_POSITION_STALE_LOCAL_PROTECTION",
+                metadata={
+                    "local_order_id": local_order_id,
+                    "mismatch_type": getattr(mismatch, "mismatch_type", None),
+                    "reason": getattr(mismatch, "reason", None),
+                },
+            )
+        except Exception as exc:
+            logger.error(
+                "Closed-position stale protection hygiene failed: signal_id=%s error=%s",
+                signal_id,
+                exc,
+                exc_info=True,
+            )
+            return False
+        if terminalized:
+            logger.warning(
+                "Closed-position stale local protection orders terminalized: "
+                "signal_id=%s source=%s order_ids=%s",
+                signal_id,
+                source,
+                [getattr(order, "id", "unknown") for order in terminalized],
+            )
+            return True
+        return False
 
     def _metadata(self, mismatch: Any, symbol: str, source: str) -> dict[str, Any]:
         base_metadata = getattr(mismatch, "metadata", None) or {}
@@ -83,23 +167,28 @@ class ExternalCloseMonitor:
             "pnl_status": "unresolved_no_reliable_fill",
         }
 
-    async def _collect_stale_local_protection_orders(
+    async def _handle_stale_local_protection_orders(
         self,
         closed_positions: list[Any],
-    ) -> dict[str, Any]:
+        *,
+        source: str,
+        reason: str,
+    ) -> tuple[dict[str, Any], int]:
         if self._order_lifecycle is None:
             return {
                 "stale_local_protection_order_ids": [],
                 "stale_local_protection_order_count": 0,
                 "stale_local_protection_status": "not_checked",
-            }
+            }, 0
 
         stale_order_ids: list[str] = []
         stale_exchange_order_ids: list[str] = []
+        stale_signal_ids: list[str] = []
         for position in closed_positions:
             signal_id = getattr(position, "signal_id", None)
             if not signal_id:
                 continue
+            stale_signal_ids.append(signal_id)
             try:
                 orders = await self._order_lifecycle.get_orders_by_signal(signal_id)
             except Exception as exc:
@@ -123,6 +212,38 @@ class ExternalCloseMonitor:
                     if exchange_order_id:
                         stale_exchange_order_ids.append(str(exchange_order_id))
 
+        terminalized_order_ids: list[str] = []
+        terminalized_count = 0
+        terminalizer = getattr(
+            self._order_lifecycle,
+            "mark_stale_protection_orders_after_external_close",
+            None,
+        )
+        if terminalizer is not None:
+            for signal_id in sorted(set(stale_signal_ids)):
+                try:
+                    terminalized = await terminalizer(
+                        signal_id,
+                        source=source,
+                        reason=reason,
+                        metadata={
+                            "stale_local_protection_order_ids": stale_order_ids[:10],
+                            "stale_local_protection_exchange_order_ids": stale_exchange_order_ids[:10],
+                        },
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "External close local protection order hygiene failed: "
+                        "signal_id=%s error=%s",
+                        signal_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    continue
+                ids = [getattr(order, "id", "unknown") for order in terminalized]
+                terminalized_order_ids.extend(ids)
+                terminalized_count += len(ids)
+
         return {
             "stale_local_protection_order_ids": stale_order_ids[:10],
             "stale_local_protection_exchange_order_ids": stale_exchange_order_ids[:10],
@@ -131,9 +252,13 @@ class ExternalCloseMonitor:
                 "stale_after_external_close" if stale_order_ids else "none"
             ),
             "stale_local_protection_action": (
-                "manual_data_hygiene_required" if stale_order_ids else "none"
+                "terminalized_local_only"
+                if terminalized_count
+                else ("manual_data_hygiene_required" if stale_order_ids else "none")
             ),
-        }
+            "terminalized_local_protection_order_ids": terminalized_order_ids[:10],
+            "terminalized_local_protection_order_count": terminalized_count,
+        }, terminalized_count
 
     def _block_symbol(self, symbol: str, metadata: dict[str, Any]) -> None:
         blocker = getattr(

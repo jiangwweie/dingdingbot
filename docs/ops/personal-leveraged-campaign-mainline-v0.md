@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-25
 
-Status: Accepted business mainline / docs-only
+Status: Accepted business mainline / staged execution gate
 
 Runtime effect: none
 
@@ -13,12 +13,12 @@ Trading permission effect: none
 This document fixes the current Owner-facing business direction:
 
 Use small, loss-bounded risk capital for a human-armed, strategy-carried,
-risk-controlled derivatives campaign, with explicit pause and withdrawal
-mechanics.
+risk-controlled derivatives campaign, with explicit pause and profit-protection
+mechanics. Withdrawals are Owner-external and are not a system responsibility.
 
-This is not a promise of profit, not live readiness, and not authorization to
-trade. It is the mainline architecture target that future research, schemas,
-and local sandbox work should align to.
+This is not a promise of profit and not live readiness. It is the mainline
+architecture target that future research, schemas, local sandbox work, and
+authorized non-real-live runtime/testnet work should align to.
 
 ## Owner Objective
 
@@ -30,8 +30,8 @@ The intended operating shape is:
   the armed window;
 - risk is enforced at order construction, position lifecycle, and campaign
   lifecycle boundaries;
-- profits can be moved out by scheduled or rule-triggered withdrawal
-  instructions after Owner confirmation.
+- profit protection can mark reduce/close or pause requirements, while actual
+  withdrawals are handled manually by the Owner outside the system.
 
 ## Complete Business Chain
 
@@ -46,7 +46,7 @@ The intended operating shape is:
 | 7. Trade Intent | Express desired direction/action without exchange side effects. | Structured intent. | Real exchange order. |
 | 8. Risk-Aware Order Builder | Check every intent against order, position, and campaign rules. | Reject, resize, or risk order plan. | Unbounded order. |
 | 9. Execution + Order Lifecycle | Place, protect, reconcile, and audit orders only in authorized future modes. | Execution receipt and lifecycle state. | Silent or unprotected exposure. |
-| 10. Position / Campaign / Withdrawal Control | Manage pause, hard lock, restart, profit protection, and withdrawal instructions. | Campaign state and withdrawal instruction. | Automatic real withdrawal without Owner confirmation. |
+| 10. Position / Campaign / Profit Protection Control | Manage pause, hard lock, restart, and profit protection. | Campaign state and lifecycle requirements. | Withdrawal instructions or automatic withdrawal behavior. |
 
 ## Core Objects
 
@@ -118,13 +118,9 @@ The intended operating shape is:
 - rule version;
 - invariant checks.
 
-`WithdrawalInstruction`
-
-- withdrawal trigger source;
-- amount rule class;
-- Owner confirmation requirement;
-- blocked states;
-- audit trail.
+Withdrawal is explicitly outside the system. The Owner may withdraw manually
+based on personal judgment; the system must not generate withdrawal objects,
+amounts, schedules, or automation.
 
 ## Stage Map
 
@@ -135,8 +131,8 @@ The intended operating shape is:
 | 2 | Simulated risk order plan | Local sandbox intent-to-plan simulation with no exchange access. | Any exchange, paper, testnet, or real account connection. |
 | 3 | Demo portfolio execution | Local demo receipts and lifecycle replay only. | External account or exchange connection. |
 | 4 | Read-only exchange sync | Read-only account-state sync after explicit key handling approval. | Any trading permission. |
-| 5 | Paper/testnet | Explicit paper/testnet account mode only. | Real trading permission or real order path. |
-| 6 | Tiny-live | Small real-risk mode after separate promotion review. | Any expansion in risk, asset, strategy, or withdrawal automation. |
+| 5 | Paper/testnet | Explicit paper/testnet account mode after scoped verification and Owner authorization. | Real trading permission or real live order path. |
+| 6 | Tiny-live-style rehearsal | Explicitly authorized non-real-live rehearsal only unless separately upgraded. | Any real-funds activation or expansion in risk, asset, strategy, or withdrawal-related automation. |
 
 ## Immediate Mainline
 
@@ -153,8 +149,9 @@ Reason:
 - it is suitable for defining a contract boundary without claiming live
   readiness.
 
-This does not promote SQ02 to scanner, alert, watchlist, runtime, paper,
-testnet, tiny-live, live, position, leverage, or real order use.
+This does not automatically promote SQ02 to scanner, alert, watchlist, runtime,
+paper, testnet, tiny-live-style, live, position, leverage, or real order use.
+Any non-real-live promotion must use the ADR-0009 action gate.
 
 ## Next Safe Artifacts
 
@@ -166,12 +163,16 @@ Future work should prefer these design artifacts before implementation:
 - `campaign_state.schema.json`
 - `order_lifecycle_state_machine.md`
 - `human_arm_gate.md`
-- `withdrawal_policy.md`
 - `forbidden_live_actions.md`
 
-## Non-Authorization
+## Execution Boundary
 
-This document does not authorize real API keys, exchange account access, order
-placement, order cancellation, transfer, withdrawal, runtime profile changes,
-paper/testnet/live/tiny-live trading, strategy implementation in a real order
-path, leverage advice, or position-sizing advice.
+This document does not by itself authorize a specific runtime, paper/testnet,
+exchange-connected, or account-action execution. Those steps may be requested
+after scoped verification and require explicit Owner authorization under
+ADR-0009.
+
+This document does not authorize real live trading, live real-account order
+placement, live order cancellation, transfer, withdrawal, real-funds
+deployment, LLM/agent autonomous buy/sell/short/size/leverage decisions, or
+withdrawal automation.

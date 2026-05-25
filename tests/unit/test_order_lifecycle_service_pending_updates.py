@@ -35,6 +35,7 @@ def _order(
     exchange_order_id: str,
     status: OrderStatus,
     filled_qty: Decimal = Decimal("0"),
+    role: OrderRole = OrderRole.TP1,
 ) -> Order:
     return Order(
         id=order_id,
@@ -43,7 +44,7 @@ def _order(
         symbol="ETH/USDT:USDT",
         direction=Direction.LONG,
         order_type=OrderType.LIMIT,
-        order_role=OrderRole.TP1,
+        order_role=role,
         requested_qty=Decimal("0.01"),
         filled_qty=filled_qty,
         average_exec_price=Decimal("2133"),
@@ -88,6 +89,52 @@ async def test_exchange_update_before_local_order_is_buffered_and_replayed():
     assert updated.filled_qty == Decimal("0.01")
     assert service.list_pending_exchange_updates() == {}
     await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_external_close_hygiene_terminalizes_active_protection_orders_only():
+    repo = _InMemoryOrderRepository()
+    service = OrderLifecycleService(repo)
+    await repo.save(
+        _order(
+            order_id="entry",
+            exchange_order_id="ex-entry",
+            status=OrderStatus.FILLED,
+            filled_qty=Decimal("0.01"),
+            role=OrderRole.ENTRY,
+        )
+    )
+    await repo.save(
+        _order(
+            order_id="tp-open",
+            exchange_order_id="ex-tp-open",
+            status=OrderStatus.OPEN,
+            role=OrderRole.TP1,
+        )
+    )
+    await repo.save(
+        _order(
+            order_id="sl-partial",
+            exchange_order_id="ex-sl-partial",
+            status=OrderStatus.PARTIALLY_FILLED,
+            filled_qty=Decimal("0.001"),
+            role=OrderRole.SL,
+        )
+    )
+
+    terminalized = await service.mark_stale_protection_orders_after_external_close(
+        "sig-1",
+        source="periodic",
+        reason="POSITION_CLOSED_ON_EXCHANGE_NOT_PROJECTED",
+        metadata={"test": True},
+    )
+
+    assert [order.id for order in terminalized] == ["tp-open", "sl-partial"]
+    assert repo.orders["entry"].status == OrderStatus.FILLED
+    assert repo.orders["tp-open"].status == OrderStatus.CANCELED
+    assert repo.orders["tp-open"].exit_reason == "EXTERNAL_CLOSE_LOCAL_HYGIENE"
+    assert repo.orders["sl-partial"].status == OrderStatus.CANCELED
+    assert repo.orders["sl-partial"].exit_reason == "EXTERNAL_CLOSE_LOCAL_HYGIENE"
 
 
 @pytest.mark.asyncio

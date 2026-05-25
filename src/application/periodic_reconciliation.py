@@ -64,11 +64,19 @@ async def run_periodic_reconciliation(
                     read_model_repository,
                     result,
                 )
+                external_close_changed_state = False
                 if external_close_monitor is not None:
-                    await external_close_monitor.handle_read_model_result(
+                    external_close_changed_state = bool(await external_close_monitor.handle_read_model_result(
                         result,
                         source="periodic",
-                    )
+                    ))
+                    if external_close_changed_state and protection_health_monitor is not None:
+                        result = await reconciliation_service.build_read_model(symbol)
+                        _log_reconciliation_result(result)
+                        await _save_reconciliation_result_best_effort(
+                            read_model_repository,
+                            result,
+                        )
                 if protection_health_monitor is not None:
                     await protection_health_monitor.handle_read_model_result(
                         result,

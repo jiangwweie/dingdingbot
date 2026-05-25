@@ -116,6 +116,8 @@ class ProtectionHealthMonitor:
                 groups[group_key] = group
             self._add_to_group(group, metadata)
 
+        self._clear_healed_symbols(result, groups)
+
         external_sent = 0
         for group in groups.values():
             summary = self._group_to_summary(group)
@@ -147,6 +149,38 @@ class ProtectionHealthMonitor:
                     group.action,
                     summary,
                 )
+
+    def _clear_healed_symbols(
+        self,
+        result: Any,
+        groups: dict[tuple[str, str, str], _ProtectionHealthGroup],
+    ) -> None:
+        symbols = {
+            getattr(result, "symbol", None),
+            *[
+                getattr(mismatch, "symbol", None)
+                for mismatch in list(getattr(result, "mismatches", []) or [])
+            ],
+        }
+        symbols = {symbol for symbol in symbols if symbol}
+        blocked_symbols = {
+            group.symbol
+            for group in groups.values()
+            if group.action == "block_new_entries"
+        }
+        clearer = getattr(
+            self._execution_orchestrator,
+            "clear_protection_health_block",
+            None,
+        )
+        if clearer is None:
+            return
+        for symbol in sorted(symbols - blocked_symbols):
+            clearer(symbol)
+            logger.warning(
+                "Protection health block cleared after healed read model: symbol=%s",
+                symbol,
+            )
 
     def _extract_reason_code(self, mismatch: Any) -> Optional[str]:
         metadata = getattr(mismatch, "metadata", None) or {}

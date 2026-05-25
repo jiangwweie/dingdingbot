@@ -1,0 +1,18 @@
+{
+  "snapshot_id": "snapshot-sq02-local-001",
+  "strategy_contract_id": "SQ02_DOWNSIDE_CONT_V0",
+  "source": "local_sandbox_closed_or_prior",
+  "feature_timestamp_ms": 1000,
+  "input_scope": "closed_or_prior_inputs_only",
+  "conditions": {
+    "setup_present": true,
+    "setup_invalidated": false
+  },
+  "forbidden_data": [
+    "lookahead",
+    "llm_trade_decision",
+    "real_account_state",
+    "exchange_api_state"
+  ],
+  "llm_trade_decision_used": false
+}

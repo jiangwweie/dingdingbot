@@ -16,9 +16,14 @@ longer define the current opportunity research mainline.
 
 2026-05-25 update: the accepted Personal Leveraged Campaign mainline introduces
 `StrategyContract`, `TradeIntent`, `RiskOrderPlan`, `CampaignState`, and
-withdrawal-control concepts. These are allowed as docs/design/sandbox objects.
-They are not authorized runtime objects unless a separate promotion review
-approves the transition.
+profit-protection concepts. These are allowed as docs/design/sandbox objects.
+Withdrawal is Owner-external and is not a system object.
+
+2026-05-25 Owner boundary clarification: real live trading is the hard red
+line. Runtime, paper, testnet, tiny-live-style rehearsal, read-only exchange
+sync, and other non-real-live work may be executed after reasonable scoped
+verification and explicit Owner authorization for the specific action. See
+`docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
 
 ## Owner Confirmation Required
 
@@ -32,6 +37,8 @@ Owner confirmation is required before:
 4. pushing to a remote repository;
 5. deploying and connecting to a real account;
 6. wiring research output directly into a real order path.
+7. executing any runtime, paper, testnet, tiny-live-style, exchange-connected,
+   or account-action step, even when no real live funds are involved.
 
 ## Local Work Boundary
 
@@ -47,13 +54,18 @@ They must report:
 - tests run;
 - rollback path.
 
-Risk-aware order building belongs to the future execution boundary. Docs-only
-schemas and local simulations may describe it, but wiring it to exchange
-gateway, execution orchestrator, order lifecycle, real account data, paper,
-testnet, tiny-live, live, or any real order path requires separate Owner
-confirmation.
+Risk-aware order building belongs to the execution boundary. Docs-only schemas
+and local simulations may describe it. Wiring it to exchange gateway,
+execution orchestrator, order lifecycle, account data, paper, testnet,
+tiny-live-style rehearsal, or any real order path requires separate Owner
+confirmation and must follow the ADR-0009 action gate.
 
-## Non-Authorization
+## Standing Authorization Boundary
 
-This file does not authorize paper/testnet/live/tiny-live, real API keys, real
-orders, real account deployment, or LLM/Agent trading decisions.
+This file does not by itself execute or authorize a specific paper/testnet/
+runtime action. It establishes that non-real-live work can be requested and
+executed after scoped verification plus Owner approval.
+
+This file still does not authorize real live trading, live real-account order
+placement, live transfer/withdrawal/rebalancing, real-funds deployment, or
+LLM/Agent autonomous trading decisions.

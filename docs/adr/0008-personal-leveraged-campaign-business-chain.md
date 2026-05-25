@@ -10,12 +10,18 @@ Runtime effect: none
 
 Trading permission effect: none
 
+Superseded boundary note: ADR-0009 clarifies that non-real-live runtime,
+paper, testnet, tiny-live-style, and exchange-connected work may proceed after
+reasonable scoped verification and explicit Owner authorization for the
+specific action. Real live trading remains separately prohibited.
+
 ## Context
 
 The Owner's current target is a personal small-capital derivatives campaign:
-use bounded risk capital, controlled leverage, strategy support, human final
-authority, and scheduled or conditional profit withdrawal. The target is not a
-fully automatic strategy at this stage.
+use bounded risk capital, controlled leverage, strategy support, and human
+final authority. Profit protection is part of campaign control, but actual
+withdrawals are handled manually by the Owner outside the system. The target is
+not a fully automatic strategy at this stage.
 
 Recent research showed that manual review sheets and LLM summaries can help
 surface opportunity structure, but they cannot carry real trading behavior by
@@ -29,7 +35,7 @@ construction and position lifecycle control, not only as a pre-decision filter.
 
 The accepted Owner-facing mainline is:
 
-`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Withdrawal Control`
+`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Profit Protection Control`
 
 The system roles are:
 
@@ -44,8 +50,8 @@ The system roles are:
   Owner-fixed risk rules.
 - Order lifecycle: protect, reconcile, and audit actual order and position
   state.
-- Campaign control: pause, hard-lock, restart, and create withdrawal
-  instructions according to campaign rules.
+- Campaign control: pause, hard-lock, restart, and profit-protection state
+  according to campaign rules. It must not create withdrawal instructions.
 
 The simplified gate structure is:
 
@@ -59,21 +65,27 @@ The simplified gate structure is:
 - Human-review tables are subordinate research and review aids, not the
   business mainline.
 - Future design work should first define `StrategyContract`, `TradeIntent`,
-  `RiskOrderPlan`, `PositionLifecycleState`, `CampaignState`, and
-  `WithdrawalInstruction` schemas before any runtime connection.
-- `SQ02_DOWNSIDE_CONT_V0` may be used as the first docs-only strategy-contract
-  skeleton candidate because it currently has the strongest semi-auto research
-  thread, but it remains disconnected from runtime, paper, testnet, tiny-live,
-  live, account, leverage, and real order paths.
+  `RiskOrderPlan`, `PositionLifecycleState`, and `CampaignState` schemas before
+  any runtime connection.
+- `SQ02_DOWNSIDE_CONT_V0` may be used as the first strategy-contract skeleton
+  candidate because it currently has the strongest semi-auto research thread.
+  It remains disconnected from runtime, paper, testnet, tiny-live-style,
+  account, leverage, and real order paths until a separate ADR-0009 action gate
+  approves the specific non-real-live step.
 - Risk control belongs in the order-building and lifecycle boundary. Front-gate
   filters may reduce bad contexts, but they are not sufficient as risk control.
-- Profit withdrawal is part of the campaign lifecycle, not an LLM suggestion and
-  not a strategy signal.
+- Profit protection is part of the campaign lifecycle. Withdrawal itself is an
+  Owner-external manual action and is not a system object, LLM suggestion, or
+  strategy signal.
 
-## Non-Authorization
+## Execution Boundary
 
-This ADR does not authorize real API keys, real exchange account access,
-paper/testnet/live/tiny-live trading, order placement, order modification,
-order cancellation, transfer, withdrawal, deployment connected to a real
-account, runtime profile changes, strategy implementation in the real order
-path, leverage advice, or position-sizing advice.
+This ADR does not by itself authorize a specific runtime, paper/testnet,
+exchange-connected, or account-action execution. Those steps may be requested
+after scoped verification and require explicit Owner authorization under
+ADR-0009.
+
+This ADR does not authorize real live trading, live real-account order
+placement, live order modification/cancellation, transfer, withdrawal,
+real-funds deployment, LLM/agent autonomous buy/sell/short/size/leverage
+decisions, or withdrawal automation.

@@ -76,17 +76,21 @@ class _SlowService:
 class _FakeProtectionHealthMonitor:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.checked_ats: list[int] = []
 
     async def handle_read_model_result(self, result: _Result, *, source: str) -> None:
         self.calls.append((result.symbol, source))
+        self.checked_ats.append(result.checked_at)
 
 
 class _FakeExternalCloseMonitor:
-    def __init__(self) -> None:
+    def __init__(self, *, changed_state: bool = False) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.changed_state = changed_state
 
-    async def handle_read_model_result(self, result: _Result, *, source: str) -> None:
+    async def handle_read_model_result(self, result: _Result, *, source: str) -> bool:
         self.calls.append((result.symbol, source))
+        return self.changed_state
 
 
 @pytest.mark.asyncio
@@ -171,6 +175,31 @@ async def test_loop_passes_read_model_to_external_close_monitor_before_protectio
         timeout=1,
     )
 
+    assert external_monitor.calls == [("ETH/USDT:USDT", "periodic")]
+    assert protection_monitor.calls == [("ETH/USDT:USDT", "periodic")]
+
+
+@pytest.mark.asyncio
+async def test_loop_refreshes_read_model_after_external_close_state_change():
+    shutdown_event = asyncio.Event()
+    service = _FakeReconciliationService(shutdown_event, stop_after_calls=2)
+    protection_monitor = _FakeProtectionHealthMonitor()
+    external_monitor = _FakeExternalCloseMonitor(changed_state=True)
+
+    await asyncio.wait_for(
+        run_periodic_reconciliation(
+            service,
+            ["ETH/USDT:USDT"],
+            shutdown_event,
+            protection_health_monitor=protection_monitor,
+            external_close_monitor=external_monitor,
+            startup_delay_seconds=0,
+            interval_seconds=60,
+        ),
+        timeout=1,
+    )
+
+    assert service.calls == ["ETH/USDT:USDT", "ETH/USDT:USDT"]
     assert external_monitor.calls == [("ETH/USDT:USDT", "periodic")]
     assert protection_monitor.calls == [("ETH/USDT:USDT", "periodic")]
 

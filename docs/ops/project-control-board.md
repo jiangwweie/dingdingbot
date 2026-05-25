@@ -15,7 +15,7 @@ the Personal Leveraged Campaign chain.
 
 Current mainline:
 
-`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign control -> withdrawal instruction`
+`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign/profit-protection control`
 
 Runtime, paper, testnet, live, tiny-live, real account, leverage, sizing, and
 direct research-to-order wiring remain behind the current promotion and runtime

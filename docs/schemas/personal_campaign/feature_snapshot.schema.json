@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/personal_campaign/feature_snapshot.schema.json",
+  "title": "FeatureSnapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "snapshot_id",
+    "strategy_contract_id",
+    "source",
+    "feature_timestamp_ms",
+    "input_scope",
+    "conditions",
+    "forbidden_data",
+    "llm_trade_decision_used"
+  ],
+  "properties": {
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "strategy_contract_id": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "string",
+      "const": "local_sandbox_closed_or_prior",
+      "default": "local_sandbox_closed_or_prior"
+    },
+    "feature_timestamp_ms": { "type": "integer", "minimum": 0 },
+    "input_scope": {
+      "type": "string",
+      "const": "closed_or_prior_inputs_only",
+      "default": "closed_or_prior_inputs_only"
+    },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" },
+      "minProperties": 1
+    },
+    "forbidden_data": {
+      "type": "array",
+      "items": { "type": "string" },
+      "allOf": [
+        { "contains": { "const": "lookahead" } },
+        { "contains": { "const": "llm_trade_decision" } },
+        { "contains": { "const": "real_account_state" } },
+        { "contains": { "const": "exchange_api_state" } }
+      ]
+    },
+    "llm_trade_decision_used": { "type": "boolean", "const": false, "default": false }
+  }
+}

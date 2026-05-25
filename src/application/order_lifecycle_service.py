@@ -998,6 +998,73 @@ class OrderLifecycleService:
         logger.info(f"订单已取消：{order_id} (原因：{reason or 'N/A'}, OCO: {oco_triggered})")
         return order
 
+    async def mark_stale_protection_orders_after_external_close(
+        self,
+        signal_id: str,
+        *,
+        source: str,
+        reason: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[Order]:
+        """Terminalize active local protection orders after exchange-flat proof.
+
+        This is a local hygiene transition only. It must not call the exchange.
+        The external-close monitor invokes it after reconciliation proves the
+        exchange position is already flat and position projection has marked the
+        local position unresolved-closed.
+        """
+        orders = await self.get_orders_by_signal(signal_id)
+        active_statuses = {
+            OrderStatus.SUBMITTED,
+            OrderStatus.OPEN,
+            OrderStatus.PARTIALLY_FILLED,
+        }
+        protection_roles = {
+            OrderRole.SL,
+            OrderRole.TP1,
+            OrderRole.TP2,
+            OrderRole.TP3,
+            OrderRole.TP4,
+            OrderRole.TP5,
+        }
+        terminalized: List[Order] = []
+        for order in orders:
+            if order.order_role not in protection_roles or order.status not in active_statuses:
+                continue
+
+            old_status = order.status
+            state_machine = self._get_or_create_state_machine(order)
+            await state_machine.mark_canceled(
+                reason=reason,
+                oco_triggered=True,
+            )
+            order.exit_reason = "EXTERNAL_CLOSE_LOCAL_HYGIENE"
+            await self._repository.save(order)
+            await self._log_audit(
+                order=order,
+                event_type=OrderAuditEventType.ORDER_CANCELED,
+                triggered_by=OrderAuditTriggerSource.SYSTEM,
+                old_status=old_status.value,
+                new_status=OrderStatus.CANCELED.value,
+                metadata={
+                    "operation": "external_close_local_hygiene",
+                    "source": source,
+                    "reason": reason,
+                    **dict(metadata or {}),
+                },
+            )
+            terminalized.append(order)
+
+        if terminalized:
+            logger.warning(
+                "Stale local protection orders terminalized after external close: "
+                "signal_id=%s source=%s order_ids=%s",
+                signal_id,
+                source,
+                [order.id for order in terminalized],
+            )
+        return terminalized
+
     async def reject_order(
         self,
         order_id: str,

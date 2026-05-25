@@ -11,6 +11,11 @@ The current Owner-facing project mainline is:
 Start here:
 
 - `docs/ops/personal-leveraged-campaign-mainline-v0.md`
+- `docs/ops/personal-leveraged-campaign-local-sandbox-v0.md`
+- `docs/ops/project-branch-and-doc-governance-2026-05-25.md`
+- `docs/ops/personal-campaign-risk-rule-matrix-v0.md`
+- `docs/ops/personal-campaign-promotion-checklist-v0.md`
+- `docs/ops/sq02-downside-cont-strategy-contract-skeleton-v0.md`
 - `docs/adr/0008-personal-leveraged-campaign-business-chain.md`
 - `docs/ops/project-roadmap-v2.md`
 - `docs/ops/research-to-runtime-promotion-gate.md`
@@ -18,7 +23,7 @@ Start here:
 
 The short chain is:
 
-`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign control -> withdrawal instruction`
+`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign/profit-protection control`
 
 ## Active Research Context
 
@@ -53,3 +58,13 @@ current SSOT document explicitly promotes them.
 Archived pre-reset material remains under:
 
 - `archive/2026-04-29-pre-live-safe-replan/docs/`
+
+## Local Schemas
+
+Personal Leveraged Campaign local object schemas live under:
+
+- `docs/schemas/personal_campaign/`
+
+These schemas are docs/design contracts only. They do not authorize runtime,
+paper/testnet/live/tiny-live, real API keys, real account actions, real orders,
+or any withdrawal path. Owner handles withdrawals outside this system.
