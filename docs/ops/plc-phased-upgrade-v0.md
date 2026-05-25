@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 5A first gates smoked on testnet; real live not authorized
+Status: Phase 5B repeated testnet passed; real live not authorized
 
 ## Boundary
 
@@ -216,3 +216,36 @@ Current Phase 5A evidence:
 Phase 5 verdict:
 
 - `phase5a_first_gates_smoked_on_testnet / real_live_not_authorized / repeated_rehearsal_still_separate_gate`
+
+### Phase 5B - Repeated Testnet Rehearsal
+
+Status: REVIEW / REPEATED_TESTNET_PASSED
+
+Design artifact:
+
+- `docs/ops/plc-phase5b-repeated-testnet-rehearsal.md`
+
+Scope:
+
+- run two controlled Binance testnet cycles in separate runtime processes;
+- preserve one controlled entry and one runtime controlled close per process;
+- harden order-watch and order-confirmation evidence against basic
+  cross-symbol state bleed;
+- keep multi-symbol runtime blocked until reconciliation/read-model
+  two-symbol fixture proof exists.
+
+Current Phase 5B evidence:
+
+- order-watch now tracks symbol-specific running flags while retaining the
+  legacy global shutdown flag;
+- recent order-update evidence is indexed by symbol before order confirmation;
+- symbol-isolation audit marks order-watch/cache checks as passed,
+  reconciliation/read-model checks as review, and multi-symbol runtime as
+  blocked.
+- two repeated Binance testnet cycles passed with controlled entry, runtime
+  controlled close, final flat state, active local orders `0`, restored
+  controls, and clean shutdown in each cycle.
+
+Phase 5B verdict:
+
+- `phase5b_repeated_testnet_passed / multi_symbol_runtime_blocked / real_live_not_authorized`

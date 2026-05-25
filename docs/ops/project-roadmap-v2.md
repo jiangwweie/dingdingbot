@@ -108,6 +108,12 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
 - Phase 5A bounded Binance testnet smoke passed after those first gates.
 - Repeated or longer testnet rehearsal, multi-symbol runtime, and real live
   remain separate gates. Real live remains unauthorized.
+- Phase 5B repeated testnet rehearsal is now opened by Owner authorization.
+  It remains ETH-only and testnet-only. The first multi-symbol prerequisite is
+  symbol-isolation hardening/audit; multi-symbol runtime itself remains blocked.
+- Phase 5B repeated Binance testnet rehearsal passed across two fresh runtime
+  processes. The result supports continued ETH-only non-real-live hardening;
+  it does not promote multi-symbol runtime or real live.
 
 The active research SSOT is:
 

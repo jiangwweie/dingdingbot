@@ -131,6 +131,19 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   clean shutdown, and no missing-stop or orphan protection-health block logged.
   This supports `phase5a_first_gates_smoked_on_testnet`; it does not authorize
   repeated rehearsal, multi-symbol runtime, or real live.
+- Phase 5B opened repeated testnet rehearsal without changing the real-live
+  boundary. The first symbol-isolation hardening targets the highest-risk
+  shared assumptions before multi-symbol expansion: order-watch running state
+  now has a symbol-keyed map, and recent order-update confirmation evidence is
+  indexed by symbol before falling back to legacy ids. Reconciliation and
+  read-model symbol isolation remain review items, so multi-symbol runtime is
+  still blocked.
+- Phase 5B repeated Binance testnet passed across two fresh runtime processes.
+  Each cycle completed one controlled entry and one runtime controlled close,
+  ended with runtime positions `0`, local active orders `0`, restored
+  GKS/campaign/startup-guard state, natural shutdown, and port `8001` release.
+  This supports repeated ETH-only testnet rehearsal review, not multi-symbol or
+  real-live promotion.
 
 ## 2026-05-09
 

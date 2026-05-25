@@ -142,20 +142,32 @@ Rollback is operational, not trading-promotional:
 - do not use direct exchange cleanup unless runtime close cannot run and Owner
   explicitly authorizes a cleanup exception.
 
-## Phase 5B Reserved Work
+## Phase 5B - Repeated Testnet Rehearsal
 
-Phase 5B is not authorized by this document. It should be opened only after
-Phase 5A evidence is accepted.
+Status: REVIEW / REPEATED_TESTNET_PASSED.
 
-Reserved work:
+Design artifact:
 
-- longer testnet rehearsal window;
-- repeated-cycle testnet rehearsal;
-- symbol-isolation runtime audit across order-watch, reconciliation, read
-  models, and caches;
-- Strategy Contract promotion review for a specific candidate;
-- any discussion of real live trading.
+- `docs/ops/plc-phase5b-repeated-testnet-rehearsal.md`
+
+Scope:
+
+- run repeated controlled Binance testnet cycles as separate runtime processes;
+- harden order-watch and order-confirmation evidence against obvious
+  cross-symbol state bleed;
+- record a symbol-isolation audit that keeps multi-symbol runtime blocked until
+  reconciliation/read-model two-symbol fixture proof exists.
+
+Current status:
+
+- order-watch running state is now symbol-scoped while preserving the legacy
+  global shutdown flag;
+- recent order-update evidence is now indexed by symbol before confirmation;
+- two repeated Binance testnet cycles passed with controlled entry, runtime
+  controlled close, final flat state, active local orders `0`, restored
+  controls, and clean shutdown in each cycle;
+- multi-symbol runtime remains blocked.
 
 ## Verdict
 
-`phase5a_first_gates_smoked_on_testnet / real_live_not_authorized / repeated_rehearsal_still_separate_gate`
+`phase5b_repeated_testnet_passed / multi_symbol_runtime_blocked / real_live_not_authorized`

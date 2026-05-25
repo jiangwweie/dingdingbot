@@ -102,6 +102,7 @@ class ExchangeGateway:
         # WebSocket state
         self._ws_running = False
         self._order_ws_running = False
+        self._order_ws_running_symbols: Dict[str, bool] = {}
         self._order_watch_exchanges: List[Any] = []
 
         # Asset snapshot cache
@@ -117,6 +118,7 @@ class ExchangeGateway:
         # P0 修复：使用 OrderLocalState 替换 Dict[str, Any]
         self._order_local_state: Dict[str, OrderLocalState] = {}
         self._recent_order_updates: Dict[str, Dict[str, Any]] = {}
+        self._recent_order_updates_by_symbol: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._order_confirmation_retry_delays = (0.25, 0.75)
 
         # P5-011: Global order update callback (for order persistence)
@@ -301,6 +303,7 @@ class ExchangeGateway:
         # Stop WebSocket
         self._ws_running = False
         self._order_ws_running = False
+        self._order_ws_running_symbols.clear()
         if self.ws_exchange:
             try:
                 await self.ws_exchange.close()
@@ -1291,7 +1294,11 @@ class ExchangeGateway:
         if not exchange_order_id and not client_order_id:
             return False
 
-        for observed in self._recent_order_update_candidates(exchange_order_id, client_order_id):
+        for observed in self._recent_order_update_candidates(
+            exchange_order_id,
+            client_order_id,
+            expected_symbol=symbol,
+        ):
             if self._raw_order_matches(
                 observed,
                 exchange_order_id=exchange_order_id,
@@ -1375,8 +1382,18 @@ class ExchangeGateway:
         self,
         exchange_order_id: Optional[str],
         client_order_id: Optional[str],
+        expected_symbol: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         candidates: List[Dict[str, Any]] = []
+        if expected_symbol:
+            symbol_key = self._normalize_symbol_key(expected_symbol)
+            symbol_updates = self._recent_order_updates_by_symbol.get(symbol_key, {})
+            for key in (exchange_order_id, client_order_id):
+                if key is None:
+                    continue
+                raw_order = symbol_updates.get(str(key))
+                if raw_order is not None and raw_order not in candidates:
+                    candidates.append(raw_order)
         for key in (exchange_order_id, client_order_id):
             if key is None:
                 continue
@@ -1386,11 +1403,28 @@ class ExchangeGateway:
         return candidates
 
     def _remember_recent_order_update(self, raw_order: Dict[str, Any]) -> None:
+        raw_symbol = raw_order.get("symbol") or (raw_order.get("info") or {}).get("symbol")
+        symbol_updates = None
+        if raw_symbol:
+            symbol_key = self._normalize_symbol_key(str(raw_symbol))
+            symbol_updates = self._recent_order_updates_by_symbol.setdefault(symbol_key, {})
         for candidate_id in self._candidate_order_ids(raw_order):
             self._recent_order_updates[candidate_id] = raw_order
+            if symbol_updates is not None:
+                symbol_updates[candidate_id] = raw_order
         if len(self._recent_order_updates) > 1000:
             for stale_key in list(self._recent_order_updates.keys())[:200]:
                 self._recent_order_updates.pop(stale_key, None)
+        for symbol_key, updates in list(self._recent_order_updates_by_symbol.items()):
+            if len(updates) > 1000:
+                for stale_key in list(updates.keys())[:200]:
+                    updates.pop(stale_key, None)
+            if not updates:
+                self._recent_order_updates_by_symbol.pop(symbol_key, None)
+
+    @staticmethod
+    def _normalize_symbol_key(symbol: str) -> str:
+        return symbol.replace("/", "").replace(":", "").lower()
 
     @staticmethod
     def _candidate_order_ids(raw_order: Dict[str, Any]) -> set[str]:
@@ -1947,6 +1981,7 @@ class ExchangeGateway:
             return
 
         self._order_ws_running = True
+        self._order_ws_running_symbols[symbol] = True
         reconnect_count = 0
 
         # 创建专用的订单监听 WebSocket 实例，避免与 K-line WS 状态互相干扰
@@ -1960,7 +1995,7 @@ class ExchangeGateway:
         logger.info(f"WebSocket 订单监听已启动：{symbol}")
 
         try:
-            while self._order_ws_running:
+            while self._order_ws_running and self._order_ws_running_symbols.get(symbol, False):
                 try:
                     # 使用 CCXT Pro watch_orders 方法
                     orders = await order_ws_exchange.watch_orders(symbol)
@@ -2017,6 +2052,7 @@ class ExchangeGateway:
                     await asyncio.sleep(delay)
 
         finally:
+            self._order_ws_running_symbols.pop(symbol, None)
             self._unregister_order_watch_exchange(order_ws_exchange)
             if not self._order_watch_exchanges:
                 self._order_ws_running = False

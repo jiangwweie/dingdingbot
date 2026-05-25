@@ -792,3 +792,47 @@ Use this file for session progress and handoff notes.
   performed.
 - Current verdict:
   `phase5a_first_gates_smoked_on_testnet / real_live_not_authorized / repeated_rehearsal_still_separate_gate`.
+
+## 2026-05-25 (PLC Phase 5B Repeated Testnet Rehearsal)
+
+- Owner authorized Phase 5B.
+- Added `docs/ops/plc-phase5b-repeated-testnet-rehearsal.md`.
+- Started Phase 5B with a bounded scope:
+  - repeated controlled Binance testnet cycles;
+  - symbol-isolation hardening before any multi-symbol runtime discussion;
+  - explicit continued block on real live and multi-symbol runtime.
+- Implemented first symbol-isolation hardening:
+  - `ExchangeGateway` keeps symbol-specific order-watch running state while
+    preserving the legacy global shutdown flag for compatibility;
+  - recent order-update evidence is now indexed by symbol before order
+    confirmation, reducing same-id cross-symbol contamination risk;
+  - added `runtime_symbol_isolation_audit` as a pure audit snapshot that marks
+    order-watch/cache checks as pass, reconciliation/read-model checks as
+    review, and multi-symbol runtime as blocked.
+- Local verification:
+  - compileall passed for touched exchange/audit/test modules;
+  - symbol-isolation/order-watch/STOP_MARKET-adjacent tests passed with
+    18 tests.
+- Integration verification:
+  - Phase 4/ARCH/PLC/Phase 5B target regression passed with 107 tests;
+  - `git diff --check` passed.
+- Repeated Binance testnet rehearsal passed:
+  - Cycle 1 controlled ENTRY `intent_3c08be13f081`,
+    `sig_0a7446591611`, amount `0.01`, notional `21.1515`;
+  - Cycle 1 controlled close `FILLED`, `exit_controlled_67c1002181d4`,
+    exchange order `8728615333`, terminalized protection orders `3`;
+  - Cycle 2 controlled ENTRY `intent_a931c7dbf03b`,
+    `sig_226d23b1c6d1`, amount `0.01`, notional `21.1607`;
+  - Cycle 2 controlled close `FILLED`, `exit_controlled_7e1641a544ef`,
+    exchange order `8728616546`, terminalized protection orders `3`;
+  - both cycles started with pre positions `0`, observed mid positions `1`,
+    ended with final positions `0` and final active local orders `0`;
+  - both cycles restored GKS active, campaign state `observe`, and startup
+    guard blocked/reset;
+  - both cycles exited naturally, released port `8001`, and logged no
+    non-daemon thread warning, missing-stop block, or orphan protection block.
+- No real-live trading, real-funds operation, runtime profile change,
+  credential change, strategy-parameter change, transfer, withdrawal, or
+  multi-symbol runtime action was performed.
+- Current verdict:
+  `phase5b_repeated_testnet_passed / multi_symbol_runtime_blocked / real_live_not_authorized`.
