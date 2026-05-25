@@ -76,6 +76,11 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   full reduce-only close, so post-close cleanup must be idempotent for missing
   protection orders while preserving fail-fast behavior before the close is
   confirmed.
+- PLC Phase 4 review is complete for the current evidence set, but real live is
+  not authorized and not ready. The blocking gaps are account risk enforcement,
+  durable campaign state enforcement, conditional SL visibility in
+  protection-health, runtime control lifecycle reset, and absence of a promoted
+  strategy contract.
 
 ## 2026-05-09
 

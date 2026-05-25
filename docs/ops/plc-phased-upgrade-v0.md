@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 3 completed for review; Phase 4 blocked
+Status: Phase 4 review complete; real live not authorized
 
 ## Boundary
 
@@ -147,7 +147,7 @@ and authorization. This document still does not authorize real live trading.
 
 ## Phase 4 - Tiny-Live-Style Review
 
-Status: BLOCKED
+Status: REVIEW / NOT_READY_FOR_REAL_LIVE
 
 Scope:
 
@@ -158,3 +158,19 @@ Entry requirements:
 - Phase 3 evidence accepted.
 - Owner explicitly requests a separate real-live readiness review.
 - Real live authorization remains separate and explicit.
+
+Review artifact:
+
+- `docs/ops/plc-phase4-tiny-live-style-readiness-review.md`
+
+Phase 4 verdict:
+
+- `phase4_review_complete / real_live_not_authorized / continue_non_real_live_hardening`
+
+Main blockers:
+
+- account risk and liquidation safety are design-only;
+- campaign risk state machine is design-only;
+- conditional SL visibility still creates temporary protection-health noise;
+- runtime control lifecycle needs explicit reset/clean shutdown checks;
+- no strategy contract is promoted to real-live use.

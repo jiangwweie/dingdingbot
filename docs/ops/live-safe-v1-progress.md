@@ -592,3 +592,22 @@ Use this file for session progress and handoff notes.
   - runtime was stopped after verification.
 - Current verdict:
   `phase3_complete_testnet_rehearsal_passed / phase4_still_blocked`.
+
+## 2026-05-25 (PLC Phase 4 Readiness Review)
+
+- Owner authorized Phase 4.
+- Interpreted under the current PLC ladder as tiny-live-style readiness review
+  only, not real-live trading authorization.
+- Added `docs/ops/plc-phase4-tiny-live-style-readiness-review.md`.
+- Phase 4 verdict:
+  `phase4_review_complete / real_live_not_authorized / continue_non_real_live_hardening`.
+- Blocking gaps before any real-live readiness can be reconsidered:
+  - account risk and liquidation safety are still design-only;
+  - campaign risk state machine is still design-only;
+  - conditional SL visibility still creates temporary protection-health severe
+    noise during active testnet exposure;
+  - runtime control lifecycle needs explicit startup-guard reset and clean
+    shutdown/port-release verification;
+  - no strategy contract is promoted to real-live use.
+- Added next non-real-live hardening tasks P4-001 through P4-005 to the task
+  board.
