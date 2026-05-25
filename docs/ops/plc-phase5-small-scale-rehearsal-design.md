@@ -293,18 +293,22 @@ Current status:
 
 ## Phase 5F - Long-Term Capability Planning
 
-Status: REVIEW / PLANNING_AUTHORITY_ONLY.
+Status: REVIEW / AMENDED_BY_PLAYBOOK_GOVERNANCE_R0.
 
 Planning artifact:
 
 - `docs/ops/plc-long-term-capability-roadmap-v1.md`
+- `docs/ops/playbook-governance-r0-plan.md`
+- `docs/adr/0011-playbook-governance-before-strategy-contract.md`
 
 Scope:
 
 - convert the post-Phase-5E state into a long-term capability roadmap;
-- prioritize local campaign state-machine completion, account-level risk
-  states, multi-symbol runtime foundation, Strategy Contract promotion
-  governance, and standardized evidence/rollback;
+- prioritize Playbook Governance R0 before more Strategy Contract/runtime
+  implementation;
+- keep local campaign state-machine evidence as governance backbone, while
+  deferring account runtime expansion, multi-symbol runtime foundation,
+  Strategy Contract v2 implementation, and runtime evidence expansion;
 - avoid treating testnet authorization as authorization for real live,
   simultaneous exposure, runtime default changes, or automatic
   research-to-trade wiring.
@@ -312,3 +316,26 @@ Scope:
 Phase 5F verdict:
 
 `long_term_capability_roadmap_added / next_recommended_task_campaign_state_transition_table / no_runtime_action / real_live_not_authorized`
+
+`playbook_governance_r0_accepted_with_amendments / strategy_contract_runtime_branch_deferred / no_runtime_action / real_live_not_authorized`
+
+## Phase 5G - Playbook Governance R0
+
+Status: ACCEPTED_WITH_AMENDMENTS / PAPER_ONLY.
+
+Planning artifact:
+
+- `docs/ops/playbook-governance-r0-plan.md`
+
+Scope:
+
+- define playbook registry, switch decision log, switching gate rules,
+  cooldown/review governance, CPV0_2 continuity, and dry-run review;
+- make `PB-000-OBSERVE-ONLY` the default safe state;
+- treat `PB-003-MANUAL-DISCRETIONARY` as highest-risk governed manual posture;
+- forbid runtime, exchange API, order path, strategy implementation,
+  paper/testnet wrapping, and real live.
+
+Phase 5G verdict:
+
+`playbook_governance_r0_next / paper_only_docs_governance / no_runtime_action / real_live_not_authorized`

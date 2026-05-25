@@ -76,11 +76,40 @@ Chain v0`, documented in
 The mainline is no longer "make better research tables" as an end state. The
 target chain is:
 
-`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Profit Protection Control`
+`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Playbook Governance -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Profit Protection Control`
 
 This reframes the current work from pure opportunity review toward a future
-`Strategy Contract -> Risk-Aware Order Builder -> Campaign Profit Protection Control`
+`Playbook Governance -> Human Arm Gate -> Strategy Contract -> Risk-Aware Order Builder -> Campaign Profit Protection Control`
 loop.
+
+2026-05-25 Owner-facing amendment:
+
+The project direction is now formally reframed by ADR-0012 as
+`Bounded Risk Campaign System`.
+
+The active product model is no longer "prove a stable strategy first, then
+build a strategy execution platform." It is:
+
+`isolated risk capital -> Owner-selected Playbook -> bounded campaign attempts -> hard risk envelope -> profit protection / loss lock -> evidence packet -> outcome review`
+
+This allows bounded testnet or future risk-capital experimentation without
+pretending that a runtime-eligible strategy exists. The system's job is to
+prevent risk spillover, playbook-switch loss-counter reset, post-loss risk
+escalation, uncontrolled profit giveback, and programmatic withdrawal.
+
+Playbook Governance is now a BRC sub-capability. Strategy Contract/runtime
+execution work remains a future branch until a governed playbook and promoted
+strategy justify it.
+
+2026-05-25 Playbook Governance amendment:
+
+The PLC roadmap review accepted ADR-0011 and
+`docs/ops/playbook-governance-r0-plan.md`. The immediate next phase is
+`Playbook Governance R0`, not further Strategy Contract/runtime
+implementation. The reason is evidence-state driven: the project currently has
+no runtime-eligible strategy candidate, so the highest-value next capability is
+governing human playbook switching, cooldowns, decision logs, and CPV0_2
+continuity before any new execution-oriented branch.
 
 2026-05-25 Owner boundary clarification:
 
@@ -164,6 +193,20 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   order lifecycle callbacks, and a read-only replay evidence packet for future
   bounded testnet rehearsals. This strengthens auditability without changing
   runtime profile defaults or authorizing real live.
+- Playbook Governance R0 is now accepted with amendments as the next
+  docs-governance phase. The execution branch of PLC remains preserved as
+  safety evidence but reserved/deferred. Tracks B-E runtime implementation,
+  Phase 5H-8 runtime-oriented work, Strategy Contract v2 implementation, and
+  further paper/testnet runtime remain deferred until a governed playbook and a
+  separately promoted strategy justify them.
+- BRC-R0/R1 is implemented and Binance testnet smoke passed as the new mainline
+  acceptance slice. It adds the BRC domain model, PG persistence, readonly
+  inactive `brc_btc_eth_testnet_runtime` profile seed, and internal test
+  endpoints for ETH -> mock profit -> BTC -> mock loss. Mock PnL is BRC
+  business-state evidence only and does not mutate exchange fills, balances,
+  withdrawals, or daily risk accounting. Final outcome was
+  `ended_testnet_rehearsal_complete_loss_locked`; evidence inventory was flat.
+  Real live and program withdrawal remain unauthorized.
 
 The active research SSOT is:
 
@@ -193,12 +236,11 @@ The active tracks are:
 1. `Opportunity Structure Discovery v0` - open research funnel, hypothesis
    register, minimal falsification plans, labels, and capital-shape
    classification.
-2. `Personal Leveraged Campaign Mainline v0` - human-armed strategy contracts,
-   trade intents, risk-aware order planning, position lifecycle, campaign
-   locks, and profit-protection controls. These begin as docs/design/sandbox
-   objects and may move into runtime, paper, testnet, or other non-real-live
-   modes only through scoped verification plus explicit Owner authorization.
-   Withdrawal is Owner-external and not a system object.
+2. `Bounded Risk Campaign Mainline` - isolated risk bucket, Owner-selected
+   playbook, bounded attempts, hard risk envelope, playbook switch evidence,
+   profit-protect/loss-lock state, and outcome packet. Strategy Contract and
+   automated execution are future branches, not prerequisites for BRC
+   governance. Withdrawal is Owner-external and not a system object.
 3. `Runtime Safety Foundation` - Live-safe, OwnerGate, StrategySignalV2,
    permission state, and execution-chain safety remain runtime-only boundary
    material unless separately promoted.

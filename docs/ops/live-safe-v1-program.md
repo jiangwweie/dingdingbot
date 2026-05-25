@@ -13,10 +13,16 @@ planning document by:
 - `docs/ops/project-roadmap-v2.md`
 - `docs/ops/personal-leveraged-campaign-mainline-v0.md`
 - `docs/adr/0008-personal-leveraged-campaign-business-chain.md`
+- `docs/adr/0011-playbook-governance-before-strategy-contract.md`
 
 The current Owner-facing mainline is the Personal Leveraged Campaign chain:
 
-`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign/profit-protection control`
+`small-capital risk control -> opportunity detection -> playbook governance -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign/profit-protection control`
+
+As of ADR-0011, the active next planning branch is Playbook Governance R0.
+Further Strategy Contract/runtime implementation is deferred until playbook
+switching governance, decision logs, cooldown/hard-lock rules, and CPV0_2
+continuity exist as paper-only governance artifacts.
 
 Live-safe v1 work may support future execution safety. Under
 `ADR-0009`, runtime, paper, testnet, tiny-live-style rehearsal, read-only
@@ -59,6 +65,12 @@ after Phase 4 non-real-live hardening. Phase 5A is still non-real-live and
 focuses on account-scope risk, runtime campaign-state transitions, Strategy
 Contract promotion gating, and bounded testnet evidence. It does not authorize
 repeated rehearsal, multi-symbol runtime, or real live.
+
+2026-05-25 Playbook Governance update: Phase 5 execution-safety evidence is
+preserved, but the next active planning step is paper-only Playbook Governance
+R0. Tracks B-E runtime implementation, Strategy Contract v2 implementation,
+and additional paper/testnet runtime work are deferred until a governed
+playbook and promoted strategy justify them.
 
 ## Operating Model
 

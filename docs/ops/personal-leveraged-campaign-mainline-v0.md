@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-25
 
-Status: Accepted business mainline / staged execution gate
+Status: Accepted business mainline / staged execution gate / amended by Playbook Governance R0
 
 Runtime effect: none
 
@@ -25,6 +25,8 @@ authorized non-real-live runtime/testnet work should align to.
 The intended operating shape is:
 
 - the system detects and explains when a strategy mode may be worth arming;
+- Playbook Governance constrains whether the Owner may remain in, switch,
+  pause, or review an operating playbook;
 - the Owner decides whether to arm, pause, or ignore that mode;
 - a deterministic strategy contract carries the actual entry/exit logic inside
   the armed window;
@@ -41,12 +43,13 @@ The intended operating shape is:
 | 2. Market State / Feature Builder | Convert raw inputs into reproducible features and state labels. | Feature snapshot. | Buy/sell/short/size/leverage decisions. |
 | 3. Strategy Detector | Detect that a known strategy setup may be present. | Candidate setup packet. | Order instructions. |
 | 4. Mode Router | Decide which mode deserves Owner attention. | Mode advice. | Mandatory action. |
-| 5. Human Arm Gate | Owner arms, pauses, or rejects a bounded mode/session. | Human arm decision. | Per-order discretionary overrides hidden as automation. |
-| 6. Strategy Contract | Deterministically apply strategy rules inside the armed mode/session. | Trade intent. | Risk-ignored order plans. |
-| 7. Trade Intent | Express desired direction/action without exchange side effects. | Structured intent. | Real exchange order. |
-| 8. Risk-Aware Order Builder | Check every intent against order, position, and campaign rules. | Reject, resize, or risk order plan. | Unbounded order. |
-| 9. Execution + Order Lifecycle | Place, protect, reconcile, and audit orders only in authorized future modes. | Execution receipt and lifecycle state. | Silent or unprotected exposure. |
-| 10. Position / Campaign / Profit Protection Control | Manage pause, hard lock, restart, and profit protection. | Campaign state and lifecycle requirements. | Withdrawal instructions or automatic withdrawal behavior. |
+| 5. Playbook Governance | Govern whether a playbook can be kept, switched, paused, or reviewed. | Playbook registry state, switch decision log, cooldown/hard-lock result. | Trade intent, order instruction, or hidden discretionary automation. |
+| 6. Human Arm Gate | Owner arms, pauses, or rejects a bounded mode/session after governance checks. | Human arm decision. | Per-order discretionary overrides hidden as automation. |
+| 7. Strategy Contract | Deterministically apply strategy rules inside the armed mode/session. | Trade intent. | Risk-ignored order plans. |
+| 8. Trade Intent | Express desired direction/action without exchange side effects. | Structured intent. | Real exchange order. |
+| 9. Risk-Aware Order Builder | Check every intent against order, position, and campaign rules. | Reject, resize, or risk order plan. | Unbounded order. |
+| 10. Execution + Order Lifecycle | Place, protect, reconcile, and audit orders only in authorized future modes. | Execution receipt and lifecycle state. | Silent or unprotected exposure. |
+| 11. Position / Campaign / Profit Protection Control | Manage pause, hard lock, restart, and profit protection. | Campaign state and lifecycle requirements. | Withdrawal instructions or automatic withdrawal behavior. |
 
 ## Core Objects
 
@@ -65,6 +68,26 @@ The intended operating shape is:
 - allowed campaign id;
 - explicit expiry;
 - audit provenance.
+
+`PlaybookContract`
+
+- playbook id and current evidence state;
+- operating posture such as observe-only, paper-only, docs-only, or governed
+  manual;
+- minimum hold and cooldown rules;
+- switching conditions and forbidden behaviors;
+- associated Strategy Contract id when one exists;
+- explicit no-runtime/no-order authority unless separately authorized.
+
+`PlaybookSwitchDecision`
+
+- previous and new playbook ids;
+- reason category and required reason text;
+- campaign PnL and CPV0_2 state at switch time;
+- cooldown and minimum-hold status;
+- evidence references;
+- risk change direction;
+- override provenance when an override is allowed.
 
 `StrategyContract`
 
@@ -127,16 +150,32 @@ amounts, schedules, or automation.
 | Stage | Name | Allowed output | Requires Owner confirmation before next stage |
 |---|---|---|---|
 | 0 | No-order review | Packets, reports, readable review cards. | Promotion to any strategy-contract work that touches runtime. |
-| 1 | Strategy contract skeleton | Docs-only schemas and deterministic contract draft. | Runtime wiring or execution-path use. |
-| 2 | Simulated risk order plan | Local sandbox intent-to-plan simulation with no exchange access. | Any exchange, paper, testnet, or real account connection. |
-| 3 | Demo portfolio execution | Local demo receipts and lifecycle replay only. | External account or exchange connection. |
-| 4 | Read-only exchange sync | Read-only account-state sync after explicit key handling approval. | Any trading permission. |
-| 5 | Paper/testnet | Explicit paper/testnet account mode after scoped verification and Owner authorization. | Real trading permission or real live order path. |
-| 6 | Tiny-live-style rehearsal | Explicitly authorized non-real-live rehearsal only unless separately upgraded. | Any real-funds activation or expansion in risk, asset, strategy, or withdrawal-related automation. |
+| 1 | Playbook Governance R0 | Playbook registry, switch decision log, cooldown/hard-lock rules, CPV0_2 continuity rules. | Any Strategy Contract promotion, runtime wiring, or execution-path use. |
+| 2 | Strategy contract skeleton | Docs-only schemas and deterministic contract draft. | Runtime wiring or execution-path use. |
+| 3 | Simulated risk order plan | Local sandbox intent-to-plan simulation with no exchange access. | Any exchange, paper, testnet, or real account connection. |
+| 4 | Demo portfolio execution | Local demo receipts and lifecycle replay only. | External account or exchange connection. |
+| 5 | Read-only exchange sync | Read-only account-state sync after explicit key handling approval. | Any trading permission. |
+| 6 | Paper/testnet | Explicit paper/testnet account mode after scoped verification and Owner authorization. | Real trading permission or real live order path. |
+| 7 | Tiny-live-style rehearsal | Explicitly authorized non-real-live rehearsal only unless separately upgraded. | Any real-funds activation or expansion in risk, asset, strategy, or withdrawal-related automation. |
 
 ## Immediate Mainline
 
 The next docs/design target is:
+
+`Playbook Governance R0`
+
+Reason:
+
+- no current strategy is runtime-eligible;
+- the immediate risk is ungoverned human switching between observe-only,
+  fragile, parked, or discretionary playbooks;
+- playbook switching must not reset CPV0_2 campaign loss/protection state;
+- post-loss switching, post-profit risk escalation, and narrative chasing need
+  explicit decision logs, cooldowns, and hard-lock rules before further
+  Strategy Contract/runtime work.
+
+The next strategy-contract skeleton remains preserved but is no longer the
+immediate planning priority:
 
 `SQ02_DOWNSIDE_CONT_V0` as a docs-only `StrategyContract` skeleton.
 

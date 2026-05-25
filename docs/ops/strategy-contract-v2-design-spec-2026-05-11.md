@@ -1,5 +1,14 @@
 # Strategy Contract v2 Design Spec
 
+Status note, 2026-05-25:
+
+Strategy Contract v2 remains design-only. ADR-0011 and
+`docs/ops/playbook-governance-r0-plan.md` defer Strategy Contract v2
+implementation until Playbook Governance R0 exists and a governed playbook plus
+separate Owner promotion decision justify further Strategy Contract work. This
+document does not authorize runtime, paper/testnet, exchange, order-path, or
+real-live implementation.
+
 Last updated: 2026-05-11
 
 ## 0. Boundary

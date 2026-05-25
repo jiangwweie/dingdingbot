@@ -380,22 +380,53 @@ Phase 5E verdict:
 
 ### Phase 5F - Long-Term Capability Planning
 
-Status: REVIEW / PLANNING_AUTHORITY_ONLY
+Status: REVIEW / AMENDED_BY_PLAYBOOK_GOVERNANCE_R0
 
 Planning artifact:
 
 - `docs/ops/plc-long-term-capability-roadmap-v1.md`
+- `docs/ops/playbook-governance-r0-plan.md`
+- `docs/adr/0011-playbook-governance-before-strategy-contract.md`
 
 Scope:
 
 - translate the Owner's long-term target into staged capabilities:
-  `controlled testnet tool -> reliable personal strategy execution platform`;
-- keep the next work focused on capability closure, not bigger testnet size;
-- separate campaign state, account state, multi-symbol foundation, Strategy
-  Contract promotion, and evidence/rollback into independent gates;
+  `controlled testnet tool -> governed personal playbook process -> reliable
+  personal strategy execution platform`;
+- keep the next work focused on Playbook Governance R0, not bigger testnet size
+  or Strategy Contract/runtime implementation;
+- separate playbook switching governance, campaign state, account state,
+  multi-symbol foundation, Strategy Contract promotion, and evidence/rollback
+  into independent gates;
 - keep all runtime, paper, testnet, small-scale, and real-live moves behind
   scoped verification plus explicit Owner authorization.
+- defer Tracks B-E runtime implementation, Phase 5H-8 runtime-oriented work,
+  Strategy Contract v2 implementation, and further paper/testnet runtime until
+  a governed playbook and promoted strategy justify them.
 
 Phase 5F verdict:
 
 - `long_term_capability_roadmap_added / next_recommended_task_campaign_state_transition_table / no_runtime_action / real_live_not_authorized`
+- `playbook_governance_r0_accepted_with_amendments / strategy_contract_runtime_branch_deferred / real_live_not_authorized`
+
+### Phase 5G - Playbook Governance R0
+
+Status: ACCEPTED_WITH_AMENDMENTS / PAPER_ONLY
+
+Planning artifact:
+
+- `docs/ops/playbook-governance-r0-plan.md`
+
+Scope:
+
+- create playbook registry and decision-log governance;
+- define switch cooldowns, hard-locks, evidence refs, and minimum hold rules;
+- make CPV0_2 campaign protection continuous across playbook switches;
+- keep `PB-000-OBSERVE-ONLY` as the default safe state;
+- treat `PB-003-MANUAL-DISCRETIONARY` as highest-risk governed manual posture;
+- forbid runtime, exchange API, order path, strategy implementation,
+  paper/testnet wrapping, and real live.
+
+Phase 5G verdict:
+
+- `playbook_governance_r0_next / paper_only_docs_governance / no_runtime_action / real_live_not_authorized`

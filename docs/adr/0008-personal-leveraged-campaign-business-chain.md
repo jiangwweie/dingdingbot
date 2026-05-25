@@ -15,6 +15,11 @@ paper, testnet, tiny-live-style, and exchange-connected work may proceed after
 reasonable scoped verification and explicit Owner authorization for the
 specific action. Real live trading remains separately prohibited.
 
+Amendment note: ADR-0011 inserts a paper-only Playbook Governance layer before
+Human Arm Gate and Strategy Contract work. The execution chain in this ADR
+remains valid downstream, but Playbook Governance R0 is now the next planning
+priority before further Strategy Contract/runtime implementation.
+
 ## Context
 
 The Owner's current target is a personal small-capital derivatives campaign:
@@ -33,9 +38,9 @@ construction and position lifecycle control, not only as a pre-decision filter.
 
 ## Decision
 
-The accepted Owner-facing mainline is:
+The accepted Owner-facing mainline, as amended by ADR-0011, is:
 
-`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Profit Protection Control`
+`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Playbook Governance -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Profit Protection Control`
 
 The system roles are:
 

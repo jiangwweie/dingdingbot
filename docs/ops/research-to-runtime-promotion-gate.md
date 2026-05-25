@@ -24,6 +24,12 @@ runtime, paper, testnet, tiny-live-style rehearsal, and other non-real-live work
 can proceed after scoped verification and explicit Owner authorization for the
 specific action.
 
+2026-05-25 Playbook Governance note: ADR-0011 inserts Playbook Governance
+before Human Arm Gate and Strategy Contract work. In the current evidence
+state, no research output may move toward runtime before Playbook Governance R0
+exists and the target playbook has passed its registry, decision-log,
+cooldown/hard-lock, CPV0_2 continuity, and Owner-review requirements.
+
 ## Promotion Requires Separate Review
 
 Any promotion toward runtime, paper, testnet, tiny-live-style, live, or
@@ -68,6 +74,8 @@ authorization decision.
 Any future promotion must explicitly define and review these objects before
 execution-path use:
 
+- `PlaybookContract`;
+- `PlaybookSwitchDecision`;
 - `StrategyContract`;
 - `TradeIntent`;
 - `RiskOrderPlan`;
@@ -75,9 +83,11 @@ execution-path use:
 - `PositionLifecycleState`;
 - `CampaignState`.
 
-The `RiskOrderPlan` boundary is mandatory. A strategy contract may emit a trade
-intent only; it must not bypass order-level, position-level, and campaign-level
-risk checks.
+The Playbook Governance boundary is mandatory before Strategy Contract
+promotion. It must prove the playbook is allowed to be active or switched into
+without resetting CPV0_2 campaign loss/protection state. The `RiskOrderPlan`
+boundary is also mandatory. A strategy contract may emit a trade intent only;
+it must not bypass order-level, position-level, and campaign-level risk checks.
 
 Withdrawal is Owner-external and must not be represented as a promotion object,
 automation target, LLM suggestion, or strategy signal.

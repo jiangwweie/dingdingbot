@@ -8,11 +8,25 @@ Status: REVIEW / PLANNING_AUTHORITY_ONLY
 This document translates the Owner's long-term goal into a staged capability
 roadmap:
 
-`controlled testnet tool -> reliable personal strategy execution platform`
+`controlled testnet tool -> Bounded Risk Campaign System -> governed personal playbook process -> possible strategy execution branches`
 
 It is a planning authority for sequencing and boundaries. It is not a runtime
 profile, strategy contract, trading permission, order-sizing rule, leverage
 rule, deployment plan, or real-live authorization.
+
+2026-05-25 amendment:
+
+ADR-0011 accepts Playbook Governance R0 as the next planning phase before
+further Strategy Contract/runtime implementation. The execution-oriented branch
+of this roadmap is preserved as a reserved capability path, not the immediate
+next build path.
+
+ADR-0012 then reframes the active product model as `Bounded Risk Campaign
+System`. The mainline is no longer waiting for a stable alpha before any
+campaign work can exist. Instead, it permits Owner-authorized bounded
+experimentation inside an isolated risk envelope while hard-blocking risk
+spillover, loss-counter reset through playbook switching, post-loss risk
+escalation, uncontrolled profit giveback, and programmatic withdrawal.
 
 ## Boundary
 
@@ -50,10 +64,14 @@ As of Phase 5E:
 - Phase 5E one-process BTC/ETH testnet runtime rehearsal passed sequential ETH
   and BTC controlled legs, ended exchange-flat and PG-flat, and added a
   read-only inventory endpoint.
+- BRC-R0/R1 is implemented and Binance testnet smoke passed with a new BRC
+  domain/service, PG persistence, BRC testnet profile seed, and internal
+  endpoints for the ETH -> mock profit -> BTC -> mock loss acceptance flow.
+  Final outcome was `ended_testnet_rehearsal_complete_loss_locked`.
 
 This proves the system can run controlled non-real-live rehearsals under narrow
-caps. It does not prove that the system is a reliable personal strategy
-execution platform yet.
+caps. It does not prove that the system has a runtime-eligible strategy
+candidate or that it is a reliable personal strategy execution platform yet.
 
 ## Capability Principles
 
@@ -68,17 +86,76 @@ execution platform yet.
    A research opportunity must become an immutable Strategy Contract with
    provenance, validation status, and Owner authorization before any runtime
    stage can consume it.
-4. Sequential before simultaneous.
+4. Playbook governance before Strategy Contract.
+   The Owner's decision to switch, pause, hold, or review an operating
+   playbook must be logged and constrained before any Strategy Contract can be
+   promoted toward execution.
+5. Sequential before simultaneous.
    BTC/ETH sequential single-process rehearsal must remain the ceiling until
    symbol-isolated order-watch, reconciliation, inventory, and account-risk
    evidence are accepted.
-5. Evidence before promotion.
+6. Evidence before promotion.
    Each stage must produce preflight evidence, runtime evidence, final
    inventory evidence, rollback evidence, and a clear stop/continue verdict.
-6. Human arm gate before trade intent.
+7. Human arm gate before trade intent.
    Strategy Contract eligibility cannot by itself create order authority.
 
 ## Capability Tracks
+
+### Track 0 - Bounded Risk Campaign R0/R1
+
+Goal:
+
+- Build the outer campaign envelope that allows finite, Owner-authorized
+  testnet rehearsal without claiming a stable strategy exists.
+
+Required capabilities:
+
+- risk capital bucket;
+- bounded campaign state;
+- playbook catalog;
+- playbook switch decision log;
+- risk envelope with max attempts, one active symbol, fixed profile, fixed
+  symbol caps, and no loss-counter reset on switch;
+- campaign attempt records;
+- mock PnL events for profit-protect/loss-lock business-state acceptance only;
+- final campaign outcome packet.
+
+Acceptance direction:
+
+- ETH then BTC sequential controlled testnet entry/close;
+- mock profit after ETH close;
+- mock loss after BTC close;
+- third attempt blocked;
+- loss-locked playbook switch blocked without resetting PnL;
+- no program withdrawal, no mainnet/live, no automatic sizing, no LLM trade
+  decision.
+
+### Track 1 - Playbook Governance R0
+
+Goal:
+
+- Govern the human decision to remain in, switch, pause, or review an
+  operating playbook before any Strategy Contract/runtime work.
+
+Required capabilities:
+
+- playbook registry with evidence state and lifecycle state;
+- append-only playbook switch decision log;
+- cooldown, minimum-hold, and review rules;
+- hard-locks for loss-response switching, profit-response risk increase,
+  narrative chasing, and parked/rejected playbook resurrection;
+- CPV0_2 continuity across playbooks so campaign PnL/loss/protection state
+  cannot reset through a switch;
+- default `PB-000-OBSERVE-ONLY` safe state;
+- explicit high-risk treatment for `PB-003-MANUAL-DISCRETIONARY`.
+
+Acceptance direction:
+
+- docs/schema first;
+- no runtime, exchange, order path, or strategy implementation;
+- dry-run current posture against the governance rules;
+- only after R0 exists can Strategy Contract promotion work resume.
 
 ### Track A - Campaign Risk State Machine
 
@@ -246,52 +323,63 @@ Acceptance direction:
 
 ### Phase 5F - Long-Term Capability Planning
 
-Status: REVIEW
+Status: REVIEW / AMENDED_BY_PLAYBOOK_GOVERNANCE_R0
 
 Scope:
 
 - maintain this roadmap as the long-term planning authority;
 - choose the next capability by risk reduction, not by market excitement;
 - do not run new runtime/testnet actions by default.
+- treat execution-oriented Tracks B-E as reserved until Playbook Governance R0
+  and a promoted strategy justify them.
 
 Recommended next output:
 
-- task card or Codex implementation plan for Track A transition-table coverage.
+- `PLC-PG-R0-001` Playbook Registry and Switch Decision Log schema.
 
-### Phase 5G - Campaign State Machine Completion
+### Phase 5G - Playbook Governance R0
 
-Status: PROPOSED
-
-Scope:
-
-- complete campaign transition table;
-- add replay/invariant tests;
-- wire missing runtime lifecycle events after the table is accepted.
-
-Owner gate:
-
-- required before any new exchange-connected rehearsal using expanded campaign
-  event wiring.
-
-### Phase 5H - Account Risk State Machine Completion
-
-Status: PROPOSED
+Status: ACCEPTED_WITH_AMENDMENTS / PAPER_ONLY
 
 Scope:
 
-- define account risk states and action policy;
-- use account-level daily stats scope;
-- integrate margin/liquidation/exposure freshness;
-- fail closed for new entries on unknown/degraded/critical account state.
+- create playbook registry, decision log schema, switching gate rules,
+  CPV0_2/playbook integration, cooldown governance, and dry-run review;
+- keep all work docs/schema only;
+- do not implement runtime, exchange integration, order path, or strategies.
 
 Owner gate:
 
-- required before larger notional, simultaneous exposure, or longer testnet
-  rehearsal.
+- required before any Strategy Contract implementation, paper/testnet runtime,
+  or playbook execution work.
 
-### Phase 5I - Multi-Symbol Runtime Foundation
+### Phase 5H - Campaign State Machine Completion
 
-Status: PROPOSED
+Status: REVIEW / LOCAL_GOVERNANCE_BACKBONE
+
+Scope:
+
+- `PLC-STATE-001` through `PLC-STATE-004` are implemented locally for review;
+- use campaign state-machine evidence as the governance backbone for R0;
+- defer broader runtime event wiring until a governed playbook requires it.
+
+### Phase 5I - Account Risk State Machine Completion
+
+Status: DEFERRED_RUNTIME_IMPLEMENTATION
+
+Scope:
+
+- docs/schema constraints may support Playbook Governance R0;
+- runtime account-state implementation is deferred.
+
+Owner gate:
+
+- required before larger notional, simultaneous exposure, longer testnet
+  rehearsal, or account-state runtime implementation.
+
+### Phase 5J - Multi-Symbol Runtime Foundation
+
+Status: DEFERRED
 
 Scope:
 
@@ -303,16 +391,16 @@ Owner gate:
 
 - required before any simultaneous BTC/ETH testnet design.
 
-### Phase 5J - Strategy Contract Promotion Governance
+### Phase 5K - Strategy Contract Promotion Governance
 
-Status: PROPOSED
+Status: DEFERRED_IMPLEMENTATION / DOCS_ONLY_ALLOWED
 
 Scope:
 
-- freeze Strategy Contract lifecycle and provenance;
+- preserve Strategy Contract lifecycle and provenance as a future branch;
 - ensure research findings cannot directly create TradeIntent or runtime
   authority;
-- add revocation/parking rules.
+- merge useful revocation/parking rules into Playbook Governance R0 first.
 
 Owner gate:
 
@@ -349,6 +437,7 @@ Scope:
 
 Minimum blockers before discussion:
 
+- accepted Playbook Governance R0;
 - accepted campaign risk state machine;
 - accepted account risk state machine;
 - accepted Strategy Contract promotion pipeline;
@@ -374,15 +463,16 @@ live action is authorized by those local capabilities.
 
 Next task should stay with Codex:
 
-`LS-006-ACCOUNT-STATE-001 - Account risk state machine policy table and replay proof`
+`PLC-PG-R0-001 - Playbook Registry and Switch Decision Log schema`
 
 Why:
 
-- campaign state is now ledger-backed and replayable;
-- the next major safety gap is account-level state, not another testnet run;
-- account state should be table-driven and locally replayable before further
-  runtime/profile expansion;
-- this keeps the roadmap principle intact: account before symbol.
+- the project has no runtime-eligible strategy candidate;
+- the next major risk is ungoverned human playbook switching;
+- R0 is paper-only/docs-governance and does not widen runtime or exchange
+  authority;
+- CPV0_2 continuity across playbooks must be specified before Strategy
+  Contract/runtime work resumes.
 
 Claude can later receive bounded tests or docs cleanup after Codex freezes the
-account state model and allowed files.
+playbook governance schemas, allowed files, and validation expectations.

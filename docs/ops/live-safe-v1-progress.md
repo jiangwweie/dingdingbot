@@ -190,6 +190,43 @@ Use this file for session progress and handoff notes.
 - No runtime code, runtime profile, env file, exchange gateway, credentials, or
   order path was changed by this boundary clarification.
 
+## 2026-05-25 (BRC-R0/R1 Bounded Risk Campaign Implementation)
+
+- Accepted ADR-0012 and reframed PLC from "Strategy Execution Platform" toward
+  `Bounded Risk Campaign System`: isolated risk bucket, Owner-selected
+  playbook, bounded attempts, hard risk envelope, profit-protect/loss-lock, and
+  final outcome evidence.
+- Implemented pure BRC domain objects and service logic for campaign creation,
+  playbook switch decisions, ETH/BTC attempt sequence, mock PnL events,
+  profit-protect, loss-lock, evidence packet, and final outcome.
+- Added PG persistence and Alembic revision `012` for `brc_campaigns`,
+  `brc_playbook_switch_decisions`, `brc_campaign_events`, and
+  `brc_mock_pnl_events`.
+- Added readonly inactive `brc_btc_eth_testnet_runtime` profile seed with fixed
+  ETH/BTC caps, max attempts `2`, max simultaneous positions `1`, and program
+  withdrawal disabled.
+- Added local/internal BRC test endpoints under `/api/runtime/test/brc/*`.
+  They require runtime control enabled, testnet, and the BRC profile; mutation
+  endpoints also require test signal injection enabled. Request bodies cannot
+  override controlled entry/close amount, side, leverage, SL, or TP.
+- Mock PnL is BRC business-state evidence only. It does not mutate exchange
+  fills, account balance, daily risk stats, or withdrawals.
+- Targeted local tests were added for BRC service rules and BRC API acceptance
+  flow. Binance testnet smoke remains the final acceptance gate.
+- BRC-R0/R1 Binance testnet smoke passed after one repair cycle:
+  - first BTC retry was blocked by account-level daily trade count because the
+    same-day runtime trade count was already `10` and profile cap was `10`;
+  - repaired BRC entry handling so blocked/failed execution intents do not
+    record attempt entry;
+  - set BRC testnet profile `daily_max_trades=20` while keeping BRC max attempts
+    at `2`;
+  - final retry completed ETH controlled entry/close, mock profit,
+    BTC controlled entry/close, mock loss, third-attempt block, loss-locked
+    switch block, evidence packet, and final outcome
+    `ended_testnet_rehearsal_complete_loss_locked`;
+  - GKS restored active, startup guard blocked, runtime state closed-safe,
+    runtime stopped, and port `8001` released.
+
 ## 2026-05-25 (TC-TINY-001D-1 Authorization Package)
 
 - Prepared ADR-0009 action request for one controlled Binance testnet
@@ -1263,3 +1300,32 @@ Use this file for session progress and handoff notes.
 - No runtime start, exchange call, testnet order, migration execution against
   live PG, runtime profile change, strategy parameter change, or real live
   action was performed.
+
+## 2026-05-25 (Playbook Governance R0 Planning Alignment)
+
+- Owner accepted the PLC roadmap review conclusion with amendments:
+  Playbook Governance R0 should be inserted before Human Arm Gate and Strategy
+  Contract/runtime work.
+- Added ADR-0011:
+  `docs/adr/0011-playbook-governance-before-strategy-contract.md`.
+- Added R0 planning artifact:
+  `docs/ops/playbook-governance-r0-plan.md`.
+- Updated PLC SSOT docs so the current chain is now:
+  `Mode Router -> Playbook Governance -> Human Arm Gate -> Strategy Contract`.
+- Accepted R0 as paper-only/docs-governance only:
+  playbook registry, switch decision log, switching gate rules, cooldown/review
+  governance, CPV0_2 continuity, and dry-run review.
+- Standardized the initial playbook catalog:
+  - `PB-000-OBSERVE-ONLY` as default safe state;
+  - `PB-001-DIRECTION-A-PAPER` as pause-fragile observe-only;
+  - `PB-002-SQ02-DOWNSIDE-PAPER` as docs-only skeleton;
+  - `PB-003-MANUAL-DISCRETIONARY` as highest-risk governed manual posture.
+- Standardized the default switching constraints:
+  loss cluster 48h hard-lock plus 24h override delay, profit-response risk
+  increase 7-day hold plus review, 14-day minimum playbook hold, and max 3
+  switches per rolling 90 days for narrative chasing.
+- Deferred execution-oriented work: Tracks B-E runtime implementation,
+  Phase 5H-8 runtime work, Strategy Contract v2 implementation,
+  LifecycleStrategy/ExitMonitor runtime, and further paper/testnet runtime.
+- No runtime start, exchange call, order path, strategy implementation, testnet
+  action, real live action, commit, or push was performed.

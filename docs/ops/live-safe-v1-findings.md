@@ -240,6 +240,29 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   packet. This still does not authorize broader runtime/profile changes or
   real live; it creates the evidence substrate future bounded testnet
   rehearsals should collect.
+- The PLC roadmap review changes the next planning priority. The earlier
+  execution-safety branch remains useful evidence, but it should not imply that
+  a reliable strategy execution platform is the immediate next build. Because
+  there is still no runtime-eligible strategy candidate, ADR-0011 inserts
+  paper-only Playbook Governance before Human Arm Gate and Strategy Contract
+  work. The next accepted phase is Playbook Governance R0: playbook registry,
+  switch decision log, cooldown/hard-lock rules, CPV0_2 continuity across
+  playbooks, and dry-run review. Tracks B-E runtime implementation, Phase
+  5H-8 runtime-oriented work, Strategy Contract v2 implementation, and further
+  paper/testnet runtime stay deferred.
+- ADR-0012 refines the Owner goal again: the active business model is Bounded
+  Risk Campaign, not Strategy Execution Platform. In this model, lack of stable
+  alpha does not require pretending a strategy exists; it requires a campaign
+  envelope that isolates risk capital, constrains attempts, carries PnL across
+  playbook switches, triggers profit-protect/loss-lock states, and records an
+  evidence packet. The hard control is not "no risk"; it is "no risk
+  spillover, no loss-counter reset, no post-loss/post-profit risk escalation,
+  and no programmatic withdrawal."
+- BRC mock PnL must remain business-state evidence only. It can test
+  `profit_protect`, `loss_locked`, and final outcome logic, but it must not
+  mutate exchange fills, account balances, daily risk stats, or real PnL. This
+  keeps the ETH/BTC testnet order rehearsal and the campaign outcome rehearsal
+  deliberately separate.
 
 ## 2026-05-09
 

@@ -5,7 +5,8 @@ Last updated: 2026-05-09
 ## Superseded Notice
 
 Status: Superseded by `docs/ops/project-roadmap-v2.md`,
-`docs/ops/personal-leveraged-campaign-mainline-v0.md`, and
+`docs/ops/personal-leveraged-campaign-mainline-v0.md`,
+`docs/adr/0011-playbook-governance-before-strategy-contract.md`, and
 `docs/ops/opportunity-research-governance-v0.md`.
 
 This file is historical control-board context for the 2026-05-09
@@ -15,7 +16,10 @@ the Personal Leveraged Campaign chain.
 
 Current mainline:
 
-`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign/profit-protection control`
+`small-capital risk control -> opportunity detection -> playbook governance -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign/profit-protection control`
+
+Current next planning branch is paper-only Playbook Governance R0, not Strategy
+Contract/runtime implementation.
 
 Runtime, paper, testnet, live, tiny-live, real account, leverage, sizing, and
 direct research-to-order wiring remain behind the current promotion and runtime
