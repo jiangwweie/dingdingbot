@@ -114,6 +114,10 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
 - Phase 5B repeated Binance testnet rehearsal passed across two fresh runtime
   processes. The result supports continued ETH-only non-real-live hardening;
   it does not promote multi-symbol runtime or real live.
+- Phase 5C local BTC/ETH synthetic fixture passed for reconciliation and
+  runtime read-model symbol filtering. Multi-symbol runtime still requires a
+  separate Owner-authorized exchange-connected rehearsal and profile/config
+  review.
 
 The active research SSOT is:
 

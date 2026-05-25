@@ -40,6 +40,7 @@ class RuntimePositionsReadModel:
         *,
         account_snapshot: Optional[Any],
         position_repo: Optional[Any] = None,
+        symbol: Optional[str] = None,
     ) -> ConsolePositionsResponse:
         """Build console-facing positions response.
 
@@ -48,6 +49,10 @@ class RuntimePositionsReadModel:
         """
         positions: list[ConsolePositionItem] = []
         snapshot_positions = getattr(account_snapshot, "positions", []) if account_snapshot is not None else []
+        if symbol:
+            snapshot_positions = [
+                pos for pos in snapshot_positions if getattr(pos, "symbol", None) == symbol
+            ]
         snapshot_map = {
             _snapshot_key(getattr(pos, "symbol", "unknown"), getattr(pos, "side", "long")): pos
             for pos in snapshot_positions
@@ -55,11 +60,16 @@ class RuntimePositionsReadModel:
 
         if position_repo is not None and hasattr(position_repo, "list_active"):
             try:
-                stored_positions = await position_repo.list_active(limit=200)
+                try:
+                    stored_positions = await position_repo.list_active(symbol=symbol, limit=200)
+                except TypeError:
+                    stored_positions = await position_repo.list_active(limit=200)
             except Exception:
                 stored_positions = []
 
             for pos in stored_positions:
+                if symbol and getattr(pos, "symbol", None) != symbol:
+                    continue
                 direction = getattr(pos, "direction", "LONG")
                 direction_value = str(getattr(direction, "value", direction))
                 entry_price = getattr(pos, "entry_price", Decimal("0"))

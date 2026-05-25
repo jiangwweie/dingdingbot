@@ -511,7 +511,9 @@ async def update_campaign_state(
 
 
 @router.get("/positions", response_model=ConsolePositionsResponse)
-async def get_runtime_positions() -> ConsolePositionsResponse:
+async def get_runtime_positions(
+    symbol: Optional[str] = Query(None),
+) -> ConsolePositionsResponse:
     """Get current positions from account snapshot."""
     api_module = _load_api_module()
     account_snapshot = _get_account_snapshot(api_module)
@@ -519,6 +521,7 @@ async def get_runtime_positions() -> ConsolePositionsResponse:
     return await read_model.build(
         account_snapshot=account_snapshot,
         position_repo=getattr(api_module, "_position_repo", None),
+        symbol=symbol,
     )
 
 
@@ -573,6 +576,7 @@ async def get_runtime_orders(
 
 @router.get("/execution/intents", response_model=ConsoleExecutionIntentsResponse)
 async def get_runtime_execution_intents(
+    symbol: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
 ) -> ConsoleExecutionIntentsResponse:
@@ -581,6 +585,7 @@ async def get_runtime_execution_intents(
     read_model = RuntimeExecutionIntentsReadModel()
     return await read_model.build(
         intent_repo=getattr(api_module, "_execution_intent_repo", None),
+        symbol=symbol,
         status=status,
         limit=limit,
     )

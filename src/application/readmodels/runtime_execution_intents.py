@@ -32,6 +32,7 @@ class RuntimeExecutionIntentsReadModel:
         self,
         *,
         intent_repo: Optional[Any],
+        symbol: Optional[str] = None,
         status: Optional[str] = None,
         limit: int = 100,
     ) -> ConsoleExecutionIntentsResponse:
@@ -56,6 +57,11 @@ class RuntimeExecutionIntentsReadModel:
                 raw_intents = await intent_repo.list_unfinished()
         except Exception:
             return ConsoleExecutionIntentsResponse(intents=[])
+
+        if symbol:
+            raw_intents = [
+                intent for intent in raw_intents if _intent_symbol(intent) == symbol
+            ]
 
         # 在 readmodel 层做 limit 切片
         raw_intents = raw_intents[:limit]
@@ -104,3 +110,12 @@ class RuntimeExecutionIntentsReadModel:
             )
 
         return ConsoleExecutionIntentsResponse(intents=intents)
+
+
+def _intent_symbol(intent: Any) -> str:
+    if hasattr(intent, "signal"):
+        signal_obj = getattr(intent, "signal")
+        return str(getattr(signal_obj, "symbol", "unknown"))
+    signal_payload = getattr(intent, "signal_payload", {}) or {}
+    symbol_attr = getattr(intent, "symbol", None)
+    return str(symbol_attr) if symbol_attr and symbol_attr != "unknown" else str(signal_payload.get("symbol", "unknown"))

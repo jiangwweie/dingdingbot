@@ -28,9 +28,10 @@ class SymbolIsolationCheck(BaseModel):
 
 
 class SymbolIsolationAuditReport(BaseModel):
-    audit_version: Literal["phase5b_symbol_isolation_audit_v1"] = (
-        "phase5b_symbol_isolation_audit_v1"
-    )
+    audit_version: Literal[
+        "phase5b_symbol_isolation_audit_v1",
+        "phase5c_two_symbol_fixture_audit_v1",
+    ] = "phase5b_symbol_isolation_audit_v1"
     runtime_scope: Literal["single_symbol_eth_runtime"] = "single_symbol_eth_runtime"
     multi_symbol_runtime_authorized: Literal[False] = False
     checks: list[SymbolIsolationCheck] = Field(default_factory=list)
@@ -105,6 +106,63 @@ def build_phase5b_symbol_isolation_audit() -> SymbolIsolationAuditReport:
         checks=checks,
         verdict=(
             "single_symbol_repeated_testnet_ready_for_review / "
+            "multi_symbol_runtime_still_blocked"
+        ),
+    )
+
+
+def build_phase5c_symbol_isolation_audit() -> SymbolIsolationAuditReport:
+    """Return the Phase 5C two-symbol synthetic fixture audit snapshot."""
+
+    checks = [
+        SymbolIsolationCheck(
+            check_id="P5C-SYM-001",
+            component="order_watch_lifecycle",
+            status=SymbolIsolationStatus.PASS,
+            evidence="Inherited from Phase 5B symbol-keyed order-watch state.",
+        ),
+        SymbolIsolationCheck(
+            check_id="P5C-SYM-002",
+            component="order_confirmation_recent_update_cache",
+            status=SymbolIsolationStatus.PASS,
+            evidence="Inherited from Phase 5B symbol-indexed recent order evidence.",
+        ),
+        SymbolIsolationCheck(
+            check_id="P5C-SYM-003",
+            component="reconciliation",
+            status=SymbolIsolationStatus.PASS,
+            evidence=(
+                "BTC/ETH synthetic fixture proves build_read_model(symbol) "
+                "does not include mismatches from the other symbol."
+            ),
+        ),
+        SymbolIsolationCheck(
+            check_id="P5C-SYM-004",
+            component="runtime_read_models",
+            status=SymbolIsolationStatus.PASS,
+            evidence=(
+                "BTC/ETH synthetic fixture proves positions, orders, and "
+                "execution intents respect symbol filters while portfolio "
+                "remains account-level aggregation."
+            ),
+        ),
+        SymbolIsolationCheck(
+            check_id="P5C-SYM-005",
+            component="multi_symbol_runtime",
+            status=SymbolIsolationStatus.BLOCKED,
+            evidence="The proof is local synthetic only; no multi-symbol runtime was started.",
+            remaining_work=(
+                "Owner must separately authorize any multi-symbol runtime "
+                "profile, exchange-connected rehearsal, or profile/config "
+                "change."
+            ),
+        ),
+    ]
+    return SymbolIsolationAuditReport(
+        audit_version="phase5c_two_symbol_fixture_audit_v1",
+        checks=checks,
+        verdict=(
+            "two_symbol_synthetic_fixture_passed / "
             "multi_symbol_runtime_still_blocked"
         ),
     )

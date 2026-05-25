@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 5B repeated testnet passed; real live not authorized
+Status: Phase 5C synthetic fixture passed; real live not authorized
 
 ## Boundary
 
@@ -249,3 +249,32 @@ Current Phase 5B evidence:
 Phase 5B verdict:
 
 - `phase5b_repeated_testnet_passed / multi_symbol_runtime_blocked / real_live_not_authorized`
+
+### Phase 5C - Two-Symbol Synthetic Fixture Proof
+
+Status: REVIEW / SYNTHETIC_FIXTURE_PASSED
+
+Design artifact:
+
+- `docs/ops/plc-phase5c-two-symbol-synthetic-fixture-proof.md`
+
+Scope:
+
+- prove BTC/ETH local symbol isolation for reconciliation and runtime read
+  models without starting multi-symbol runtime;
+- add optional symbol filters to positions and execution-intents read models;
+- preserve portfolio as account-level aggregation;
+- keep multi-symbol runtime blocked.
+
+Current Phase 5C evidence:
+
+- reconciliation `build_read_model(ETH)` excludes BTC mismatches in a local
+  two-symbol fixture;
+- runtime orders, execution intents, and positions filter by symbol in the
+  fixture;
+- portfolio aggregates BTC and ETH as account-level state;
+- local Phase 5B/5C symbol-isolation tests passed with 8 tests.
+
+Phase 5C verdict:
+
+- `phase5c_two_symbol_synthetic_fixture_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`

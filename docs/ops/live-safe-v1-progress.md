@@ -836,3 +836,28 @@ Use this file for session progress and handoff notes.
   multi-symbol runtime action was performed.
 - Current verdict:
   `phase5b_repeated_testnet_passed / multi_symbol_runtime_blocked / real_live_not_authorized`.
+
+## 2026-05-25 (PLC Phase 5C Two-Symbol Synthetic Fixture Proof)
+
+- Continued from Phase 5B without changing runtime profile, credentials,
+  strategy parameters, or real-live permissions.
+- Added `docs/ops/plc-phase5c-two-symbol-synthetic-fixture-proof.md`.
+- Implemented local BTC/ETH synthetic fixture proof:
+  - reconciliation `build_read_model(ETH)` excludes BTC mismatches;
+  - runtime orders read model filters by symbol;
+  - runtime execution-intents read model now accepts a symbol filter;
+  - runtime positions read model and `/api/runtime/positions` now accept a
+    symbol filter;
+  - `/api/runtime/execution/intents` now accepts a symbol filter;
+  - portfolio remains account-level aggregation and includes both BTC and ETH.
+- Updated `runtime_symbol_isolation_audit` with a Phase 5C verdict:
+  `two_symbol_synthetic_fixture_passed / multi_symbol_runtime_still_blocked`.
+- Verification:
+  - compileall passed for touched read-model/API/audit/test modules;
+  - local Phase 5B/5C symbol-isolation tests passed with 8 tests.
+- No Binance testnet action was performed for Phase 5C because the task is a
+  local synthetic proof. No real-live trading, real-funds operation, runtime
+  profile change, credential change, transfer, withdrawal, or multi-symbol
+  runtime action was performed.
+- Current verdict:
+  `phase5c_two_symbol_synthetic_fixture_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`.

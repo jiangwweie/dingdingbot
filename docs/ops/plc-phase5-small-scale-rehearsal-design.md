@@ -171,3 +171,32 @@ Current status:
 ## Verdict
 
 `phase5b_repeated_testnet_passed / multi_symbol_runtime_blocked / real_live_not_authorized`
+
+## Phase 5C - Two-Symbol Synthetic Fixture Proof
+
+Status: REVIEW / SYNTHETIC_FIXTURE_PASSED.
+
+Design artifact:
+
+- `docs/ops/plc-phase5c-two-symbol-synthetic-fixture-proof.md`
+
+Scope:
+
+- prove BTC/ETH local symbol isolation without starting multi-symbol runtime;
+- add optional symbol filters to runtime positions and execution-intents read
+  models;
+- verify reconciliation `build_read_model(symbol)` does not include mismatches
+  from the other symbol;
+- verify portfolio remains account-level aggregation.
+
+Current status:
+
+- local BTC/ETH synthetic fixture passed;
+- runtime positions, orders, and execution intents respect symbol filters in
+  the fixture;
+- portfolio aggregates both symbols as account-level view;
+- multi-symbol runtime remains blocked.
+
+Phase 5C verdict:
+
+`phase5c_two_symbol_synthetic_fixture_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`

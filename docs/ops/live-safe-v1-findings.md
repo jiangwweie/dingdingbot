@@ -144,6 +144,13 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   GKS/campaign/startup-guard state, natural shutdown, and port `8001` release.
   This supports repeated ETH-only testnet rehearsal review, not multi-symbol or
   real-live promotion.
+- Phase 5C local BTC/ETH synthetic fixture closes the first reconciliation and
+  read-model proof gap: `build_read_model(symbol)` keeps other-symbol
+  mismatches out, runtime positions/orders/execution-intents now support
+  symbol-filtered reads, and portfolio remains an account-level aggregation.
+  This is still not a multi-symbol runtime authorization because no
+  exchange-connected two-symbol process, profile change, or account-risk cap
+  review was performed.
 
 ## 2026-05-09
 
