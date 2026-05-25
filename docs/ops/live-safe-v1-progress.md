@@ -611,3 +611,37 @@ Use this file for session progress and handoff notes.
   - no strategy contract is promoted to real-live use.
 - Added next non-real-live hardening tasks P4-001 through P4-005 to the task
   board.
+
+## 2026-05-25 (PLC Phase 4 Local Hardening)
+
+- Implemented P4-001 through P4-004 as non-real-live local hardening:
+  - account risk/liquidation gate now blocks new entries fail-closed before
+    CapitalProtection when account balance, positions, mark price, or
+    liquidation distance are unavailable/degraded/critical;
+  - campaign runtime state now persists in PG via `runtime_campaign_state`,
+    exposes local/internal owner-control API, and allows new entries only in
+    `armed`;
+  - reconciliation now fetches normal open orders plus Binance conditional
+    STOP_MARKET open-order views to reduce false protection-health severe
+    noise when exchange-native SL exists;
+  - startup guard now has explicit block/reset API and runtime shutdown paths
+    reset it to `RUNTIME_SHUTDOWN_RESET`.
+- Added migration `010_create_runtime_campaign_state`.
+- Local PG verification:
+  - attempted Alembic against the configured local PG and found the older
+    migration chain is not clean-install safe because `002_create_orders_positions`
+    references `signals` before the clean schema has `signals`;
+  - cleared local PG historical schema under the previously approved
+    disposable-data boundary;
+  - restored runtime PG schema with `PGCoreBase.metadata.create_all()`;
+  - verified `CampaignStateService` creates/restores `runtime:default` as
+    `observe` from PG.
+- Targeted verification:
+  - `pytest -q tests/unit/test_p4_account_risk_service.py tests/unit/test_p4_campaign_state_service.py tests/unit/test_gks_v0_global_kill_switch.py tests/unit/test_ls003a_reconciliation_read_model.py tests/unit/test_tiny001d1b_sl_confirmation.py tests/unit/test_rtg002_ws_api_task_lifecycle.py`
+    passed with 75 tests.
+  - `python3 -m compileall -q ...` passed for touched runtime/API/infra/tests.
+  - `git diff --check` passed.
+- No real-live trading, real-funds operation, real runtime profile change, or
+  real account mutation was performed.
+- Current verdict:
+  `phase4_hardening_local_complete / real_live_not_authorized / runtime_smoke_pending`.

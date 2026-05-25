@@ -963,6 +963,11 @@ class ExchangeGateway:
                     continue
 
                 leverage_val = pos.get('leverage', 1)
+                liquidation_price = (
+                    pos.get('liquidationPrice')
+                    or pos.get('liquidation_price')
+                    or (pos.get('info') or {}).get('liquidationPrice')
+                )
                 position = PositionInfo(
                     symbol=pos['symbol'],
                     side=pos['side'] if pos.get('side') else 'none',
@@ -971,6 +976,8 @@ class ExchangeGateway:
                     mark_price=Decimal(str(pos['markPrice'])) if pos.get('markPrice') else None,
                     unrealized_pnl=Decimal(str(pos['unrealizedPnl'])) if pos.get('unrealizedPnl') else Decimal('0'),
                     leverage=int(leverage_val) if leverage_val is not None else 1,
+                    liquidation_price=Decimal(str(liquidation_price)) if liquidation_price else None,
+                    margin_mode=pos.get('marginMode') or (pos.get('info') or {}).get('marginType'),
                 )
                 position_list.append(position)
 
@@ -990,7 +997,11 @@ class ExchangeGateway:
     # Phase 5: Order Management APIs
     # ============================================================
 
-    async def fetch_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
+    async def fetch_open_orders(
+        self,
+        symbol: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Fetch exchange open orders for a symbol.
 
@@ -998,7 +1009,7 @@ class ExchangeGateway:
         exchange object while preserving the raw CCXT payload for parsing.
         """
         try:
-            return await self.rest_exchange.fetch_open_orders(symbol)
+            return await self.rest_exchange.fetch_open_orders(symbol, params=params or {})
         except Exception as e:
             logger.error(f"获取未完成订单失败：symbol={symbol}, error={e}")
             raise

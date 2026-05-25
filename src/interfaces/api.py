@@ -50,6 +50,7 @@ from src.domain.exceptions import (
 from src.infrastructure.signal_repository import SignalRepository
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
+    create_runtime_campaign_state_repository,
     create_runtime_order_repository,
     create_runtime_position_repository,
     create_runtime_signal_repository,
@@ -59,6 +60,8 @@ from src.application.config_manager import UserConfig, ConfigManager
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.capital_protection import CapitalProtectionManager
 from src.application.startup_trading_guard import StartupTradingGuardService
+from src.application.account_risk_service import AccountRiskService
+from src.application.campaign_state_service import CampaignStateService
 from src.application.account_service import AccountService
 from src.domain.models import (
     SignalQuery, SignalDeleteRequest, SignalDeleteResponse,
@@ -260,6 +263,8 @@ _order_lifecycle_service: Optional[Any] = None  # OrderLifecycleService instance
 _runtime_config_provider: Optional[Any] = None  # RuntimeConfigProvider instance
 _global_kill_switch_service: Optional[Any] = None  # GlobalKillSwitchService instance
 _startup_trading_guard_service: Optional[Any] = None  # StartupTradingGuardService instance
+_account_risk_service: Optional[Any] = None  # AccountRiskService instance
+_campaign_state_service: Optional[Any] = None  # CampaignStateService instance
 _trace_service: Optional[Any] = None  # TraceService instance (decision trace backbone)
 _startup_reconciliation_summary: Optional[Dict[str, Any]] = None  # Startup reconciliation summary
 
@@ -284,6 +289,8 @@ def set_dependencies(
     runtime_config_provider: Optional[Any] = None,
     global_kill_switch_service: Optional[Any] = None,
     startup_trading_guard_service: Optional[Any] = None,
+    account_risk_service: Optional[Any] = None,
+    campaign_state_service: Optional[Any] = None,
     trace_service: Optional[Any] = None,
     # Config repositories (unified with api_v1_config.py)
     strategy_repo: Optional[Any] = None,
@@ -319,7 +326,7 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service, _startup_trading_guard_service, _trace_service
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service, _startup_trading_guard_service, _account_risk_service, _campaign_state_service, _trace_service
     _repository = repository
     _signal_repo = repository  # Alias for console runtime routes
     _account_getter = account_getter
@@ -338,6 +345,8 @@ def set_dependencies(
     _runtime_config_provider = runtime_config_provider
     _global_kill_switch_service = global_kill_switch_service
     _startup_trading_guard_service = startup_trading_guard_service
+    _account_risk_service = account_risk_service
+    _campaign_state_service = campaign_state_service
     _trace_service = trace_service
     # Config repositories - stored in shared module (avoids circular imports)
     _config_globals._strategy_repo = strategy_repo
@@ -535,6 +544,7 @@ async def lifespan(app: FastAPI):
     global _repository, _config_entry_repo, _order_repo, _execution_intent_repo, _config_manager
     global _capital_protection, _account_service, _execution_orchestrator, _exchange_gateway, _signal_repo
     global _global_kill_switch_service, _startup_trading_guard_service, _trace_service
+    global _account_risk_service, _campaign_state_service
     global _execution_recovery_repo, _position_repo, _startup_reconciliation_summary
     _standalone_gateway_created = False  # 标记是否在 lifespan 中创建了 gateway
 
@@ -683,6 +693,8 @@ async def lifespan(app: FastAPI):
         if _exchange_gateway is None and _cg._config_manager is not None:
             from src.infrastructure.exchange_gateway import ExchangeGateway
             from src.application.account_service import BinanceAccountService
+            from src.application.account_risk_service import AccountRiskService
+            from src.application.campaign_state_service import CampaignStateService
             from src.application.capital_protection import CapitalProtectionManager
             from src.application.decision_trace import TraceService
             from src.application.execution_orchestrator import ExecutionOrchestrator
@@ -810,6 +822,26 @@ async def lifespan(app: FastAPI):
                     updated_by="system",
                 )
 
+            _account_risk_service = AccountRiskService(
+                gateway=_standalone_gateway,
+                account_service=_standalone_account_service,
+            )
+
+            try:
+                _campaign_state_service = CampaignStateService(
+                    repository=create_runtime_campaign_state_repository()
+                )
+                await _campaign_state_service.initialize()
+            except Exception as e:
+                logger.critical(
+                    "[CampaignState][HIGH] Campaign state initialization failed; "
+                    "standalone runtime will block new entries fail-closed: %s",
+                    e,
+                    exc_info=True,
+                )
+                _campaign_state_service = CampaignStateService(repository=None)
+                await _campaign_state_service.initialize()
+
             # 初始化 ExecutionOrchestrator
             _standalone_orchestrator = ExecutionOrchestrator(
                 capital_protection=_standalone_capital_protection,
@@ -821,6 +853,8 @@ async def lifespan(app: FastAPI):
                 position_projection_service=PositionProjectionService(_position_repo),
                 global_kill_switch=_global_kill_switch_service,
                 startup_trading_guard=_startup_trading_guard_service,
+                account_risk_service=_account_risk_service,
+                campaign_state_service=_campaign_state_service,
             )
 
             # 注册订单更新回调
@@ -913,6 +947,12 @@ async def lifespan(app: FastAPI):
         # Shutdown - 清理独立 uvicorn 模式创建的执行运行时
         # 注意：只清理 lifespan 自己创建的对象，不影响 main.py 嵌入模式注入的依赖
         if _standalone_gateway_created and _exchange_gateway is not None:
+            if _startup_trading_guard_service is not None:
+                _startup_trading_guard_service.block(
+                    updated_by="system",
+                    reason="RUNTIME_SHUTDOWN_RESET",
+                    source="api_lifespan_shutdown",
+                )
             await _exchange_gateway.close()
             logger.info("ExchangeGateway closed (standalone uvicorn mode)")
             # 重置全局变量，避免下次 startup 时误判为已初始化
@@ -921,6 +961,9 @@ async def lifespan(app: FastAPI):
             _account_service = None
             _execution_orchestrator = None
             _global_kill_switch_service = None
+            _startup_trading_guard_service = None
+            _account_risk_service = None
+            _campaign_state_service = None
             _startup_reconciliation_summary = None
             logger.info("Standalone execution runtime globals reset to None")
 

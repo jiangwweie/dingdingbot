@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from src.application.startup_trading_guard import StartupTradingGuardService
 import src.main as main_module
 
 
@@ -14,12 +15,14 @@ def _reset_main_task_globals():
     original_snapshot_update_task = main_module._snapshot_update_task
     original_order_watch_tasks = list(main_module._order_watch_tasks)
     original_periodic_reconciliation_task = main_module._periodic_reconciliation_task
+    original_startup_trading_guard_service = main_module._startup_trading_guard_service
     yield
     main_module._ws_task = original_ws_task
     main_module._api_task = original_api_task
     main_module._snapshot_update_task = original_snapshot_update_task
     main_module._order_watch_tasks = original_order_watch_tasks
     main_module._periodic_reconciliation_task = original_periodic_reconciliation_task
+    main_module._startup_trading_guard_service = original_startup_trading_guard_service
 
 
 async def _running_forever() -> None:
@@ -154,3 +157,16 @@ async def test_cancel_api_task_logs_non_cancel_exception_and_clears_handle(caplo
 
     assert main_module._api_task is None
     assert "API server task shutdown error" in caplog.text
+
+
+def test_shutdown_guard_reset_blocks_previously_armed_runtime():
+    guard = StartupTradingGuardService()
+    guard.manual_arm(updated_by="owner", reason="startup checked")
+    main_module._startup_trading_guard_service = guard
+
+    main_module._block_startup_guard_for_shutdown("unit_shutdown")
+
+    state = guard.get_state()
+    assert state.armed is False
+    assert state.reason == "RUNTIME_SHUTDOWN_RESET"
+    assert state.source == "unit_shutdown"

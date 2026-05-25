@@ -338,6 +338,29 @@ class PGGlobalKillSwitchStateORM(PGCoreBase):
     )
 
 
+class PGRuntimeCampaignStateORM(PGCoreBase):
+    """Single-row/multi-scope campaign state for runtime entry control."""
+
+    __tablename__ = "runtime_campaign_state"
+
+    scope_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="observe")
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(128), nullable=False, default="system")
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    active_strategy_contract_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    active_session_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('observe', 'armed', 'paused', 'profit_protect', "
+            "'loss_locked', 'hard_locked', 'closed')",
+            name="ck_runtime_campaign_state_status",
+        ),
+        Index("idx_runtime_campaign_state_updated_at", "updated_at_ms"),
+    )
+
+
 class PGSignalORM(PGCoreBase):
     """PG 版 live signal 表。"""
 

@@ -19,6 +19,7 @@ from src.application.global_kill_switch import (
     KILL_SWITCH_BLOCK_REASON,
     GlobalKillSwitchService,
 )
+from src.application.campaign_state_service import CampaignStateService
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.protection_health_monitor import PROTECTION_MISSING_EXCHANGE_SL
@@ -39,7 +40,7 @@ from src.domain.models import (
 from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
 from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.pg_models import PGGlobalKillSwitchStateORM
-from src.infrastructure.repository_ports import GlobalKillSwitchStateSnapshot
+from src.infrastructure.repository_ports import CampaignStateSnapshot, GlobalKillSwitchStateSnapshot
 from src.interfaces import api as api_module
 from src.interfaces.api_console_runtime import router as runtime_router
 
@@ -125,6 +126,72 @@ class _CountingGks:
                 "updated_at_ms": 123,
             },
         )()
+
+
+class _DenyAccountRisk:
+    async def evaluate_new_entry(self, symbol: str):
+        return type(
+            "AccountRiskAssessment",
+            (),
+            {
+                "allowed_new_entry": False,
+                "reason": "LIQUIDATION_DISTANCE_CRITICAL",
+                "reason_message": "too close",
+                "state": type("State", (), {"value": "critical"})(),
+                "metadata": {"symbol": symbol},
+            },
+        )()
+
+
+class _CampaignGate:
+    def __init__(self, *, allowed: bool) -> None:
+        self.allowed = allowed
+
+    async def evaluate_new_entry(self, **kwargs):
+        return type(
+            "CampaignGateDecision",
+            (),
+            {
+                "allowed_new_entry": self.allowed,
+                "reason": "CAMPAIGN_STATE_NOT_ARMED",
+                "reason_message": "not armed",
+                "state": "observe",
+            },
+        )()
+
+
+class _CampaignRepo:
+    def __init__(self) -> None:
+        self.snapshot: CampaignStateSnapshot | None = None
+
+    async def initialize(self) -> None:
+        return None
+
+    async def get_state(self, scope_key: str):
+        return self.snapshot if self.snapshot and self.snapshot.scope_key == scope_key else None
+
+    async def set_state(
+        self,
+        *,
+        scope_key: str,
+        status: str,
+        reason: str | None,
+        updated_by: str,
+        updated_at_ms: int,
+        active_strategy_contract_id: str | None,
+        active_session_id: str | None,
+    ):
+        self.snapshot = CampaignStateSnapshot(
+            scope_key=scope_key,
+            status=status,
+            reason=reason,
+            updated_by=updated_by,
+            updated_at_ms=updated_at_ms,
+            active_strategy_contract_id=active_strategy_contract_id,
+            active_session_id=active_session_id,
+            source="test",
+        )
+        return self.snapshot
 
 
 class _OrderRepository:
@@ -317,6 +384,28 @@ async def _orchestrator_with_controls(
     return orchestrator, cp, lifecycle
 
 
+async def _orchestrator_with_runtime_gates(
+    *,
+    account_risk_service=None,
+    campaign_state_service=None,
+):
+    guard = StartupTradingGuardService()
+    guard.manual_arm(updated_by="owner", reason="test")
+    gks = _CountingGks(active=False)
+    cp = _CountingCapitalProtection(allowed=False)
+    lifecycle = _NoopLifecycle()
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=cp,
+        order_lifecycle=lifecycle,
+        gateway=_FakeGateway(),
+        global_kill_switch=gks,
+        startup_trading_guard=guard,
+        account_risk_service=account_risk_service,
+        campaign_state_service=campaign_state_service,
+    )
+    return orchestrator, cp, lifecycle
+
+
 @pytest.mark.asyncio
 async def test_gks_active_blocks_new_entries():
     orchestrator, cp, lifecycle = await _orchestrator(gks_active=True)
@@ -457,6 +546,35 @@ async def test_protection_health_block_preserves_reason_and_skips_capital_protec
 
 
 @pytest.mark.asyncio
+async def test_account_risk_gate_blocks_before_capital_protection():
+    orchestrator, cp, lifecycle = await _orchestrator_with_runtime_gates(
+        account_risk_service=_DenyAccountRisk(),
+    )
+
+    intent = await orchestrator.execute_signal(_signal(), _strategy())
+
+    assert intent.status == ExecutionIntentStatus.BLOCKED
+    assert intent.blocked_reason == "ACCOUNT_RISK_NOT_HEALTHY"
+    assert "LIQUIDATION_DISTANCE_CRITICAL" in intent.blocked_message
+    assert cp.calls == 0
+    assert lifecycle.created == 0
+
+
+@pytest.mark.asyncio
+async def test_campaign_state_gate_blocks_before_capital_protection():
+    orchestrator, cp, lifecycle = await _orchestrator_with_runtime_gates(
+        campaign_state_service=_CampaignGate(allowed=False),
+    )
+
+    intent = await orchestrator.execute_signal(_signal(), _strategy())
+
+    assert intent.status == ExecutionIntentStatus.BLOCKED
+    assert intent.blocked_reason == "CAMPAIGN_STATE_NOT_ARMED"
+    assert cp.calls == 0
+    assert lifecycle.created == 0
+
+
+@pytest.mark.asyncio
 async def test_gks_has_priority_over_capital_protection():
     orchestrator, cp, _lifecycle = await _orchestrator(gks_active=True)
 
@@ -585,6 +703,14 @@ def test_api_set_dependencies_receives_same_startup_guard_instance(monkeypatch):
     assert api_module._startup_trading_guard_service is guard
 
 
+def test_api_set_dependencies_receives_campaign_state_service(monkeypatch):
+    service = CampaignStateService(repository=None)
+
+    api_module.set_dependencies(campaign_state_service=service)
+
+    assert api_module._campaign_state_service is service
+
+
 def test_get_startup_guard_endpoint_returns_state(monkeypatch):
     monkeypatch.delenv("RUNTIME_CONTROL_API_ENABLED", raising=False)
     guard = StartupTradingGuardService()
@@ -649,6 +775,75 @@ async def test_arm_endpoint_arms_same_instance_used_by_orchestrator(monkeypatch)
     assert lifecycle.created == 0
     assert intent.status == ExecutionIntentStatus.BLOCKED
     assert intent.blocked_reason == "CP_DENY"
+
+
+def test_startup_guard_block_endpoint_resets_to_not_armed(monkeypatch):
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")
+    guard = StartupTradingGuardService()
+    guard.manual_arm(updated_by="owner", reason="startup checked")
+    monkeypatch.setattr(api_module, "_startup_trading_guard_service", guard)
+    app = FastAPI()
+    app.include_router(runtime_router)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/runtime/control/startup-trading-guard/block",
+            json={"reason": "clean shutdown", "updated_by": "owner"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["armed"] is False
+    assert response.json()["reason"] == "clean shutdown"
+    assert guard.is_armed() is False
+
+
+@pytest.mark.asyncio
+async def test_campaign_state_endpoint_updates_same_runtime_service(monkeypatch):
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+    await service.initialize()
+    monkeypatch.setattr(api_module, "_campaign_state_service", service)
+    app = FastAPI()
+    app.include_router(runtime_router)
+
+    with TestClient(app) as client:
+        arm_response = client.post(
+            "/api/runtime/control/campaign-state",
+            json={
+                "status": "armed",
+                "reason": "owner arm",
+                "updated_by": "owner",
+                "active_strategy_contract_id": "strategy-test",
+            },
+        )
+        read_response = client.get("/api/runtime/control/campaign-state")
+
+    assert arm_response.status_code == 200
+    assert arm_response.json()["status"] == "armed"
+    assert arm_response.json()["active_strategy_contract_id"] == "strategy-test"
+    assert read_response.status_code == 200
+    assert read_response.json()["status"] == "armed"
+
+
+@pytest.mark.asyncio
+async def test_campaign_state_endpoint_rejects_invalid_transition(monkeypatch):
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+    await service.initialize()
+    await service.set_state(status="hard_locked", reason="risk", updated_by="owner")
+    monkeypatch.setattr(api_module, "_campaign_state_service", service)
+    app = FastAPI()
+    app.include_router(runtime_router)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/runtime/control/campaign-state",
+            json={"status": "armed", "reason": "bad", "updated_by": "owner"},
+        )
+
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio

@@ -245,6 +245,44 @@ class GlobalKillSwitchRepositoryPort(Protocol):
 
 
 @dataclass(frozen=True)
+class CampaignStateSnapshot:
+    """Persisted runtime campaign state."""
+
+    scope_key: str
+    status: str
+    reason: Optional[str]
+    updated_by: str
+    updated_at_ms: int
+    active_strategy_contract_id: Optional[str] = None
+    active_session_id: Optional[str] = None
+    source: str = "pg"
+
+
+@runtime_checkable
+class CampaignStateRepositoryPort(Protocol):
+    """PG-backed runtime campaign state persistence boundary."""
+
+    async def initialize(self) -> None:
+        ...
+
+    async def get_state(self, scope_key: str) -> Optional[CampaignStateSnapshot]:
+        ...
+
+    async def set_state(
+        self,
+        *,
+        scope_key: str,
+        status: str,
+        reason: Optional[str],
+        updated_by: str,
+        updated_at_ms: int,
+        active_strategy_contract_id: Optional[str],
+        active_session_id: Optional[str],
+    ) -> CampaignStateSnapshot:
+        ...
+
+
+@dataclass(frozen=True)
 class ReconciliationReadModelReport:
     """Persisted periodic reconciliation read model report."""
 

@@ -1,9 +1,9 @@
 # PLC Phase 4 Tiny-Live-Style Readiness Review
 
 Date: 2026-05-25
-Status: REVIEW / NOT_READY_FOR_REAL_LIVE
+Status: HARDENING_REVIEW / NOT_READY_FOR_REAL_LIVE
 
-Runtime effect: none
+Runtime effect: local code and PG migration added; no real-live runtime executed
 
 Trading permission effect: none
 
@@ -48,9 +48,57 @@ authorization decision.
 Phase 4 review is accepted as started and completed for this evidence set, but
 the system is not ready for real live or real-funds activation.
 
+## Hardening Update - 2026-05-25
+
+The first four Phase 4 blockers have been converted from design-only gaps into
+runtime-enforced local code paths with targeted tests. This update did not run
+real-live trading and did not authorize real-live activation.
+
+- P4-001 account risk/liquidation: added `AccountRiskService`, exchange
+  liquidation-price parsing, and a fail-closed `ExecutionOrchestrator` gate
+  before `CapitalProtection`.
+- P4-002 campaign state machine: added durable `runtime_campaign_state` PG
+  table, repository, service, owner-control API, and new-entry enforcement. Only
+  `armed` allows new entries; observe/paused/profit-protect/loss-locked/
+  hard-locked/closed block new entries.
+- P4-003 conditional SL visibility: reconciliation now reads normal open orders
+  plus Binance conditional STOP_MARKET views and deduplicates raw exchange
+  payloads before protection-health checks.
+- P4-004 runtime lifecycle: startup guard now has explicit local
+  `/api/runtime/control/startup-trading-guard/block` reset and shutdown paths
+  reset the process-local guard to `RUNTIME_SHUTDOWN_RESET`.
+
+Targeted verification:
+
+- `pytest -q tests/unit/test_p4_account_risk_service.py tests/unit/test_p4_campaign_state_service.py tests/unit/test_gks_v0_global_kill_switch.py tests/unit/test_ls003a_reconciliation_read_model.py tests/unit/test_tiny001d1b_sl_confirmation.py tests/unit/test_rtg002_ws_api_task_lifecycle.py`
+  - result: 75 passed.
+- `python3 -m compileall -q ...`
+  - result: passed for touched runtime, infrastructure, API, migration, and
+    test files.
+- `git diff --check`
+  - result: passed.
+- Local PG runtime schema:
+  - direct Alembic clean upgrade is still blocked by older migration-chain
+    ordering (`orders` migration references `signals` before the clean schema
+    has `signals`);
+  - after clearing the local PG `public` schema, `PGCoreBase.metadata.create_all()`
+    completed and `CampaignStateService` restored/created
+    `runtime:default` as `observe` from PG.
+
+Remaining before any real-live readiness claim:
+
+- repair or baseline the older Alembic chain so clean PG migration can reach
+  head without relying on `create_all`;
+- run an ADR-0009-scoped non-real-live runtime smoke proving startup guard
+  reset and API port release without force kill;
+- run an active-position testnet protection-health observation showing a
+  confirmed exchange-native SL does not create false severe blocks.
+
 ## Blocking Gaps
 
 ### P4-BLOCK-001 Account Risk Is Design-Only
+
+Status after hardening update: IMPLEMENTED_LOCAL / NEEDS_RUNTIME_SMOKE.
 
 `docs/ops/plc-account-risk-liquidation-safety-spec.md` defines account states
 and liquidation distance behavior, but runtime does not yet enforce account
@@ -65,6 +113,9 @@ Required before any real-live readiness can be reconsidered:
 
 ### P4-BLOCK-002 Campaign Risk Is Design-Only
 
+Status after hardening update: IMPLEMENTED_LOCAL / PG_CREATE_ALL_VERIFIED /
+ALEMBIC_CHAIN_REPAIR_PENDING / NEEDS_RUNTIME_SMOKE.
+
 `docs/ops/plc-campaign-risk-state-machine-spec.md` defines observe/armed/paused/
 profit-protect/loss-locked/hard-locked/closed states, but runtime does not yet
 persist and enforce the full state machine.
@@ -78,6 +129,8 @@ Required before any real-live readiness can be reconsidered:
 - audit trail tests for every transition.
 
 ### P4-BLOCK-003 Protection Health Still Has Conditional-Order Visibility Noise
+
+Status after hardening update: IMPLEMENTED_LOCAL / NEEDS_ACTIVE_TESTNET_OBSERVATION.
 
 During Phase 3, periodic reconciliation emitted temporary protection-health
 critical warnings while the position was active because Binance conditional SL
@@ -94,6 +147,8 @@ Required before any real-live readiness can be reconsidered:
   protection-missing severe blocks when exchange-native SL exists.
 
 ### P4-BLOCK-004 Runtime Control Lifecycle Needs A Clean Close State
+
+Status after hardening update: IMPLEMENTED_LOCAL / NEEDS_RUNTIME_PORT_RELEASE_SMOKE.
 
 Phase 3 restored GKS and stopped runtime, but startup guard remains an arm-only
 control surface and the runtime process required force stop after graceful
@@ -125,10 +180,10 @@ requires ADR-0009 scoped authorization.
 
 | ID | Task | Scope | Done When |
 | --- | --- | --- | --- |
-| P4-001 | Runtime account risk gate | Implement account state read model and fail-closed entry gate. | Unit tests cover unknown/degraded/critical/healthy account states and liquidation distance boundaries. |
-| P4-002 | Durable campaign state machine | Implement campaign state persistence and transition audit. | Tests cover observe/armed/paused/profit-protect/loss-locked/hard-locked/closed transitions and close-only allowances. |
-| P4-003 | Conditional protection visibility hardening | Align reconciliation/protection-health with Binance conditional SL evidence. | Active testnet position with confirmed SL no longer creates false severe protection block. |
-| P4-004 | Runtime control lifecycle reset | Add startup-guard reset and shutdown/port-release verification. | Smoke run restores GKS, resets startup guard, and releases API port without force kill. |
+| P4-001 | Runtime account risk gate | IMPLEMENTED_LOCAL | Unit tests cover flat/unknown/degraded/critical/healthy account states and liquidation distance boundaries. Runtime smoke still pending. |
+| P4-002 | Durable campaign state machine | IMPLEMENTED_LOCAL | PG table/repository/service/API/new-entry gate added. Local transition tests pass. PG runtime `create_all` verified; older Alembic clean-upgrade chain still needs repair. Runtime smoke pending. |
+| P4-003 | Conditional protection visibility hardening | IMPLEMENTED_LOCAL | Reconciliation reads normal plus conditional STOP_MARKET open-order views. Active testnet observation still pending. |
+| P4-004 | Runtime control lifecycle reset | IMPLEMENTED_LOCAL | Startup-guard block/reset API and shutdown reset tests pass. Port-release runtime smoke still pending. |
 | P4-005 | Phase 4 non-real-live rehearsal design | Define a future tiny-live-style non-real-live rehearsal after P4-001 to P4-004. | ADR-0009 request names exact mode, commands, caps, stop conditions, and rollback path. |
 
 ## Explicit Non-Authorization
@@ -147,5 +202,4 @@ This review does not authorize:
 
 ## Current Verdict
 
-`phase4_review_complete / real_live_not_authorized / continue_non_real_live_hardening`
-
+`phase4_hardening_local_complete / real_live_not_authorized / runtime_smoke_pending`

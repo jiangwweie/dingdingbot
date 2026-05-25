@@ -32,10 +32,12 @@ if load_dotenv is not None:
 from src.application.config_manager import load_all_configs_async
 from src.application.runtime_config import RuntimeConfigProvider, RuntimeConfigResolver
 from src.application.account_service import BinanceAccountService
+from src.application.account_risk_service import AccountRiskService
 from src.application.capital_protection import (
     DAILY_RISK_STATS_SCOPE_KEY,
     CapitalProtectionManager,
 )
+from src.application.campaign_state_service import CampaignStateService
 from src.application.decision_trace import TraceService
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.external_close_monitor import ExternalCloseMonitor
@@ -50,6 +52,7 @@ from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.notifier import NotificationService, get_notification_service
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
+    create_runtime_campaign_state_repository,
     create_runtime_global_kill_switch_repository,
     create_runtime_daily_risk_stats_repository,
     create_runtime_order_repository,
@@ -89,6 +92,8 @@ _runtime_config_provider: Optional[RuntimeConfigProvider] = None
 _trace_service: Optional[TraceService] = None
 _global_kill_switch_service: Optional[GlobalKillSwitchService] = None
 _startup_trading_guard_service: Optional[StartupTradingGuardService] = None
+_account_risk_service: Optional[AccountRiskService] = None
+_campaign_state_service: Optional[CampaignStateService] = None
 _protection_health_monitor: Optional[ProtectionHealthMonitor] = None
 _external_close_monitor: Optional[ExternalCloseMonitor] = None
 _reconciliation_read_model_repo = None
@@ -117,6 +122,24 @@ async def _noop_order_watch_callback(_order: object) -> None:
 def _dedupe_runtime_symbols(symbols: List[str]) -> List[str]:
     """Preserve order while removing duplicate symbols for order watch startup."""
     return list(dict.fromkeys(symbols))
+
+
+def _block_startup_guard_for_shutdown(source: str) -> None:
+    """Reset process-local startup guard before runtime shutdown completes."""
+    if _startup_trading_guard_service is None:
+        return
+    try:
+        _startup_trading_guard_service.block(
+            updated_by="system",
+            reason="RUNTIME_SHUTDOWN_RESET",
+            source=source,
+        )
+    except Exception as exc:
+        logger.error(
+            "Startup trading guard shutdown reset failed: %s",
+            exc,
+            exc_info=True,
+        )
 
 
 def _build_strategy_signal_v2_observe_writer(env: Optional[dict] = None):
@@ -436,6 +459,8 @@ async def graceful_shutdown():
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
     global _reconciliation_read_model_repo, _protection_health_monitor, _external_close_monitor
     global _snapshot_update_task, _ws_task, _api_task
+    global _startup_trading_guard_service, _account_risk_service, _campaign_state_service
+    _block_startup_guard_for_shutdown("graceful_shutdown")
     _shutdown_event.set()
 
     if _ws_task:
@@ -486,6 +511,9 @@ async def graceful_shutdown():
     _runtime_config_provider = None
     _capital_protection = None
     _execution_orchestrator = None
+    _startup_trading_guard_service = None
+    _account_risk_service = None
+    _campaign_state_service = None
     _reconciliation_read_model_repo = None
     _protection_health_monitor = None
     _external_close_monitor = None
@@ -536,6 +564,7 @@ async def run_application():
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator, _trace_service, _global_kill_switch_service
     global _startup_trading_guard_service, _protection_health_monitor, _external_close_monitor
+    global _account_risk_service, _campaign_state_service
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
     global _reconciliation_read_model_repo, _snapshot_update_task, _ws_task, _api_task
 
@@ -819,6 +848,25 @@ async def run_application():
                 updated_by="system",
             )
 
+        _account_risk_service = AccountRiskService(
+            gateway=_exchange_gateway,
+            account_service=account_service,
+        )
+
+        try:
+            campaign_state_repo = create_runtime_campaign_state_repository()
+            _campaign_state_service = CampaignStateService(repository=campaign_state_repo)
+            await _campaign_state_service.initialize()
+        except Exception as e:
+            logger.critical(
+                "[CampaignState][HIGH] Campaign state initialization failed; "
+                "runtime will block new entries fail-closed: %s",
+                e,
+                exc_info=True,
+            )
+            _campaign_state_service = CampaignStateService(repository=None)
+            await _campaign_state_service.initialize()
+
         position_projection_service = PositionProjectionService(_position_repo)
         _execution_orchestrator = ExecutionOrchestrator(
             capital_protection=_capital_protection,
@@ -830,6 +878,8 @@ async def run_application():
             position_projection_service=position_projection_service,
             global_kill_switch=_global_kill_switch_service,
             startup_trading_guard=_startup_trading_guard_service,
+            account_risk_service=_account_risk_service,
+            campaign_state_service=_campaign_state_service,
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
         _protection_health_monitor = ProtectionHealthMonitor(
@@ -1217,6 +1267,8 @@ async def run_application():
             order_lifecycle_service=_order_lifecycle_service,
             global_kill_switch_service=_global_kill_switch_service,
             startup_trading_guard_service=_startup_trading_guard_service,
+            account_risk_service=_account_risk_service,
+            campaign_state_service=_campaign_state_service,
             trace_service=_trace_service,
             # Config repositories (unified with api_v1_config.py)
             strategy_repo=_api_strategy_repo,
@@ -1298,6 +1350,7 @@ async def run_application():
 
     finally:
         # Cleanup
+        _block_startup_guard_for_shutdown("run_application_finally")
         await _cancel_ws_task()
         await _cancel_api_task()
 
@@ -1317,6 +1370,9 @@ async def run_application():
             _exchange_gateway = None
 
         _global_kill_switch_service = None
+        _startup_trading_guard_service = None
+        _account_risk_service = None
+        _campaign_state_service = None
 
         # Close ConfigEntryRepository
         if _config_entry_repo:

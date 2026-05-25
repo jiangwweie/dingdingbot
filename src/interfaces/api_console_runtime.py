@@ -28,6 +28,7 @@ from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
 from src.application.readmodels.runtime_portfolio import RuntimePortfolioReadModel
 from src.application.readmodels.runtime_positions import RuntimePositionsReadModel
 from src.application.readmodels.runtime_signals import RuntimeSignalsReadModel
+from src.application.campaign_state_service import CampaignRuntimeState
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,36 @@ class StartupTradingGuardResponse(BaseModel):
 class StartupTradingGuardArmRequest(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=512)
     updated_by: str = Field(default="owner", max_length=128)
+
+
+class StartupTradingGuardBlockRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=512)
+    updated_by: str = Field(default="owner", max_length=128)
+
+
+class CampaignStateResponse(BaseModel):
+    scope_key: str
+    status: CampaignRuntimeState
+    reason: Optional[str] = None
+    updated_by: str
+    updated_at_ms: int
+    active_strategy_contract_id: Optional[str] = None
+    active_session_id: Optional[str] = None
+    source: str
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Local/internal runtime control only. This endpoint is not a public "
+        "internet control plane."
+    )
+    entry_policy: str = "Only armed campaign state allows new entries."
+
+
+class CampaignStateUpdateRequest(BaseModel):
+    status: CampaignRuntimeState
+    reason: Optional[str] = Field(default=None, max_length=512)
+    updated_by: str = Field(default="owner", max_length=128)
+    active_strategy_contract_id: Optional[str] = Field(default=None, max_length=128)
+    active_session_id: Optional[str] = Field(default=None, max_length=128)
 
 
 def _load_api_module():
@@ -132,6 +163,13 @@ def _get_startup_trading_guard_service(api_module):
     return service
 
 
+def _get_campaign_state_service(api_module):
+    service = getattr(api_module, "_campaign_state_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="Campaign state service not initialized")
+    return service
+
+
 def _to_global_kill_switch_response(state) -> GlobalKillSwitchResponse:
     return GlobalKillSwitchResponse(
         active=state.active,
@@ -148,6 +186,19 @@ def _to_startup_trading_guard_response(state) -> StartupTradingGuardResponse:
         reason=state.reason,
         updated_by=state.updated_by,
         updated_at_ms=state.updated_at_ms,
+        source=state.source,
+    )
+
+
+def _to_campaign_state_response(state) -> CampaignStateResponse:
+    return CampaignStateResponse(
+        scope_key=state.scope_key,
+        status=state.status,
+        reason=state.reason,
+        updated_by=state.updated_by,
+        updated_at_ms=state.updated_at_ms,
+        active_strategy_contract_id=state.active_strategy_contract_id,
+        active_session_id=state.active_session_id,
         source=state.source,
     )
 
@@ -394,6 +445,62 @@ async def arm_startup_trading_guard(
     service = _get_startup_trading_guard_service(api_module)
     state = service.manual_arm(reason=body.reason, updated_by=body.updated_by)
     return _to_startup_trading_guard_response(state)
+
+
+@router.post("/control/startup-trading-guard/block", response_model=StartupTradingGuardResponse)
+async def block_startup_trading_guard(
+    request: Request,
+    body: StartupTradingGuardBlockRequest,
+) -> StartupTradingGuardResponse:
+    """Block startup trading guard after runtime shutdown or operator reset."""
+    _require_internal_runtime_control(request)
+    _require_runtime_control_api_enabled()
+    api_module = _load_api_module()
+    service = _get_startup_trading_guard_service(api_module)
+    state = service.block(
+        reason=body.reason,
+        updated_by=body.updated_by,
+        source="manual_block",
+    )
+    return _to_startup_trading_guard_response(state)
+
+
+@router.get("/control/campaign-state", response_model=CampaignStateResponse)
+async def get_campaign_state(request: Request) -> CampaignStateResponse:
+    """Read durable runtime campaign state. Local/internal control surface only."""
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    service = _get_campaign_state_service(api_module)
+    return _to_campaign_state_response(service.get_state())
+
+
+@router.post("/control/campaign-state", response_model=CampaignStateResponse)
+async def update_campaign_state(
+    request: Request,
+    body: CampaignStateUpdateRequest,
+) -> CampaignStateResponse:
+    """Update durable runtime campaign state. Local/internal control surface only."""
+    _require_internal_runtime_control(request)
+    _require_runtime_control_api_enabled()
+    api_module = _load_api_module()
+    service = _get_campaign_state_service(api_module)
+    try:
+        state = await service.set_state(
+            status=body.status.value,
+            reason=body.reason,
+            updated_by=body.updated_by,
+            active_strategy_contract_id=body.active_strategy_contract_id,
+            active_session_id=body.active_session_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Campaign state persistence failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Campaign state persistence failed",
+        ) from exc
+    return _to_campaign_state_response(state)
 
 
 # ============================================================

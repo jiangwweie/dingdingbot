@@ -81,6 +81,16 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   durable campaign state enforcement, conditional SL visibility in
   protection-health, runtime control lifecycle reset, and absence of a promoted
   strategy contract.
+- PLC Phase 4 local hardening converted the first four blockers into code-level
+  controls: account/liquidation fail-closed gate, PG-backed campaign state
+  machine, conditional STOP_MARKET read-model visibility, and startup-guard
+  shutdown reset. This is still not a real-live readiness claim until PG
+  migration plus non-real-live runtime/testnet smoke evidence exists.
+- The current Alembic chain is not clean-install safe for PG: migration `002`
+  creates `orders` with a foreign key to `signals`, but a clean schema does not
+  have `signals` yet. Runtime `PGCoreBase.metadata.create_all()` can initialize
+  the core PG tables, but migration-chain repair or a baseline migration is
+  needed before treating Alembic head as the runtime schema authority.
 
 ## 2026-05-09
 

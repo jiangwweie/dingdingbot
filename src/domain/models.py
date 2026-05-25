@@ -123,6 +123,8 @@ class PositionInfo(BaseModel):
     mark_price: Optional[Decimal] = None  # 标记价格（交易所实时）
     unrealized_pnl: Decimal
     leverage: int
+    liquidation_price: Optional[Decimal] = None
+    margin_mode: Optional[str] = None
 
 
 class AccountSnapshot(BaseModel):

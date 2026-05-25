@@ -29,9 +29,11 @@ SYMBOL = "ETH/USDT:USDT"
 class _FakeRestExchange:
     def __init__(self) -> None:
         self.symbols: list[str] = []
+        self.params: list[dict] = []
 
-    async def fetch_open_orders(self, symbol: str):
+    async def fetch_open_orders(self, symbol: str, params=None):
         self.symbols.append(symbol)
+        self.params.append(params or {})
         return [{"id": "ex-1", "symbol": symbol, "status": "open", "amount": "1"}]
 
 
@@ -48,15 +50,17 @@ class _FakeGateway:
         self.open_orders = open_orders or []
         self.fail_positions = fail_positions
         self.fail_open_orders = fail_open_orders
+        self.fetch_open_order_params: list[dict] = []
 
     async def fetch_positions(self, symbol: str):
         if self.fail_positions:
             raise RuntimeError("positions unavailable")
         return [position for position in self.positions if position.symbol == symbol]
 
-    async def fetch_open_orders(self, symbol: str):
+    async def fetch_open_orders(self, symbol: str, params=None):
         if self.fail_open_orders:
             raise RuntimeError("open orders unavailable")
+        self.fetch_open_order_params.append(params or {})
         return [order for order in self.open_orders if order.get("symbol") == symbol]
 
     def get_account_snapshot(self):
@@ -92,6 +96,22 @@ class _FakeOrderRepository:
             order
             for order in self.orders
             if order.status == status and (symbol is None or order.symbol == symbol)
+        ]
+
+
+class _ConditionalOnlyGateway(_FakeGateway):
+    async def fetch_open_orders(self, symbol: str, params=None):
+        self.fetch_open_order_params.append(params or {})
+        if params in ({"stop": True}, {"type": "STOP_MARKET"}):
+            return [
+                order
+                for order in self.open_orders
+                if order.get("symbol") == symbol and order.get("triggerPrice") is not None
+            ]
+        return [
+            order
+            for order in self.open_orders
+            if order.get("symbol") == symbol and order.get("triggerPrice") is None
         ]
 
 
@@ -317,6 +337,31 @@ async def test_matching_state_has_no_mismatches():
 
     assert result.is_consistent
     assert result.mismatches == []
+
+
+@pytest.mark.asyncio
+async def test_conditional_stop_market_orders_are_included_in_read_model():
+    gateway = _ConditionalOnlyGateway(
+        positions=[_position()],
+        open_orders=[_exchange_sl("ex-sl"), _exchange_order("ex-tp")],
+    )
+    service = ReconciliationService(
+        gateway=gateway,
+        position_mgr=_FakePositionSource([_position()]),
+        order_repository=_FakeOrderRepository(
+            [
+                _order("local-sl", "ex-sl", OrderRole.SL),
+                _order("local-tp", "ex-tp", OrderRole.TP1),
+            ]
+        ),
+    )
+
+    result = await service.build_read_model(SYMBOL)
+
+    assert result.is_consistent
+    assert result.mismatches == []
+    assert {"stop": True} in gateway.fetch_open_order_params
+    assert {"type": "STOP_MARKET"} in gateway.fetch_open_order_params
 
 
 @pytest.mark.asyncio

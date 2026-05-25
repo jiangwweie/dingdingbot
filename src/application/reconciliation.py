@@ -976,18 +976,54 @@ class ReconciliationService:
         return await self._get_exchange_positions(symbol)
 
     async def _fetch_exchange_open_orders_for_read_model(self, symbol: str) -> List[OrderResponse]:
-        """Fetch exchange open orders for read-only reconciliation."""
-        if hasattr(self._gateway, "fetch_open_orders"):
-            orders = await self._gateway.fetch_open_orders(symbol)
-        else:
-            orders = await self._gateway.rest_exchange.fetch_open_orders(symbol)
+        """Fetch exchange open orders for read-only reconciliation.
+
+        Binance futures conditional STOP_MARKET orders can be absent from the
+        default open-orders view, so the read model checks normal plus
+        conditional views and deduplicates raw payloads before parsing.
+        """
+        raw_orders = []
+        seen_order_keys: set[str] = set()
+        params_candidates = [{}, {"stop": True}, {"type": "STOP_MARKET"}]
+        for params in params_candidates:
+            if hasattr(self._gateway, "fetch_open_orders"):
+                try:
+                    orders = await self._gateway.fetch_open_orders(symbol, params=params)
+                except TypeError:
+                    if params:
+                        continue
+                    orders = await self._gateway.fetch_open_orders(symbol)
+            else:
+                orders = await self._gateway.rest_exchange.fetch_open_orders(symbol, params=params)
+            for order in orders:
+                dedupe_key = self._exchange_order_dedupe_key(order)
+                if dedupe_key in seen_order_keys:
+                    continue
+                seen_order_keys.add(dedupe_key)
+                raw_orders.append(order)
 
         result = []
-        for order in orders:
+        for order in raw_orders:
             order_resp = self._parse_ccxt_order(order)
             if order_resp:
                 result.append(order_resp)
         return result
+
+    @staticmethod
+    def _exchange_order_dedupe_key(order: dict) -> str:
+        info = order.get("info") or {}
+        for key in (
+            order.get("id"),
+            order.get("clientOrderId"),
+            order.get("clientOrderID"),
+            info.get("orderId"),
+            info.get("origClientOrderId"),
+            info.get("clientOrderId"),
+            info.get("algoId"),
+        ):
+            if key is not None:
+                return str(key)
+        return repr(sorted(order.items()))
 
     def _compare_positions_for_read_model(
         self,

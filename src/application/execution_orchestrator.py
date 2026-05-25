@@ -37,6 +37,10 @@ from src.domain.models import (
 )
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.application.capital_protection import CapitalProtectionManager
+from src.application.account_risk_service import (
+    ACCOUNT_RISK_BLOCK_REASON,
+    AccountRiskService,
+)
 from src.application.global_kill_switch import KILL_SWITCH_BLOCK_REASON, GlobalKillSwitchService
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.protection_health_monitor import (
@@ -77,6 +81,8 @@ class ExecutionOrchestrator:
         position_projection_service: Optional[PositionProjectionService] = None,
         global_kill_switch: Optional[GlobalKillSwitchService] = None,
         startup_trading_guard: Optional[StartupTradingGuardService] = None,
+        account_risk_service: Optional[AccountRiskService] = None,
+        campaign_state_service: Optional[Any] = None,
     ):
         """
         初始化执行编排器
@@ -98,6 +104,8 @@ class ExecutionOrchestrator:
         self._position_projection_service = position_projection_service
         self._global_kill_switch = global_kill_switch
         self._startup_trading_guard = startup_trading_guard
+        self._account_risk_service = account_risk_service
+        self._campaign_state_service = campaign_state_service
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
@@ -1071,6 +1079,50 @@ class ExecutionOrchestrator:
             )
 
             return intent
+
+        if self._account_risk_service is not None:
+            account_risk = await self._account_risk_service.evaluate_new_entry(signal.symbol)
+            if not account_risk.allowed_new_entry:
+                await self._set_intent_status(
+                    intent,
+                    ExecutionIntentStatus.BLOCKED,
+                    blocked_reason=ACCOUNT_RISK_BLOCK_REASON,
+                    blocked_message=(
+                        f"{account_risk.reason}: {account_risk.reason_message}"
+                    ),
+                )
+                logger.warning(
+                    "[ExecutionOrchestrator] Account risk blocked new entry: "
+                    "intent_id=%s symbol=%s state=%s reason=%s metadata=%s",
+                    intent_id,
+                    signal.symbol,
+                    account_risk.state.value,
+                    account_risk.reason,
+                    account_risk.metadata,
+                )
+                return intent
+
+        if self._campaign_state_service is not None:
+            campaign_gate = await self._campaign_state_service.evaluate_new_entry(
+                symbol=signal.symbol,
+                strategy_contract_id=getattr(strategy, "id", None),
+            )
+            if not campaign_gate.allowed_new_entry:
+                await self._set_intent_status(
+                    intent,
+                    ExecutionIntentStatus.BLOCKED,
+                    blocked_reason=campaign_gate.reason,
+                    blocked_message=campaign_gate.reason_message,
+                )
+                logger.warning(
+                    "[ExecutionOrchestrator] Campaign state blocked new entry: "
+                    "intent_id=%s symbol=%s state=%s reason=%s",
+                    intent_id,
+                    signal.symbol,
+                    campaign_gate.state,
+                    campaign_gate.reason,
+                )
+                return intent
 
         # 2. CapitalProtection 前置检查
         check_result = await self._capital_protection.pre_order_check(
