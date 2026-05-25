@@ -7,6 +7,7 @@
   "required": [
     "strategy_contract_id",
     "strategy_name",
+    "contract_status",
     "disabled_by_default",
     "runtime_label",
     "setup_condition_key",
@@ -20,6 +21,7 @@
   "properties": {
     "strategy_contract_id": { "type": "string", "minLength": 1 },
     "strategy_name": { "type": "string", "minLength": 1 },
+    "contract_status": { "type": "string", "const": "frozen", "default": "frozen" },
     "disabled_by_default": { "type": "boolean", "const": true, "default": true },
     "runtime_label": {
       "type": "string",

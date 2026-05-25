@@ -392,3 +392,26 @@ Use this file for session progress and handoff notes.
   - `git diff --check` passed.
   - Binance testnet read-only check for `ETH/USDT:USDT` returned active
     positions `[]` and open orders count `0`.
+
+## 2026-05-25 (PLC Phased Upgrade Phase 1)
+
+- Committed the prior short-term Live-safe follow-up batch:
+  `28e97c8 chore: complete short-term live-safe followups`.
+- Added PLC phased upgrade ladder:
+  `docs/ops/plc-phased-upgrade-v0.md`.
+- Implemented Phase 1 read-only runtime adapter:
+  `src/application/personal_campaign_runtime_adapter.py`.
+- Added `ReadOnlyRuntimeAdapterPreview` to the PLC domain contracts.
+- Added read-only adapter schema and SQ02 example:
+  - `docs/schemas/personal_campaign/read_only_runtime_adapter_preview.schema.json`
+  - `docs/schemas/personal_campaign/examples/read_only_runtime_adapter_preview_sq02.example.json`
+- Adapter behavior:
+  - closed/prior snapshot plus frozen contract can produce an allowed
+    read-only `TradeIntent` preview;
+  - future/current snapshots are rejected;
+  - non-frozen contracts are rejected;
+  - contract/snapshot mismatches are rejected;
+  - output carries `read_only_no_order_authority` and has no order/exchange id.
+- Verification:
+  `pytest -q tests/unit/test_personal_campaign_runtime_adapter.py tests/unit/test_personal_campaign_sandbox.py tests/unit/test_personal_campaign_schema_docs.py tests/unit/test_personal_campaign_schema_examples.py`
+  passed with 35 tests.

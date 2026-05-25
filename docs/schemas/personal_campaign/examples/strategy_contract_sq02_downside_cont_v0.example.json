@@ -1,6 +1,7 @@
 {
   "strategy_contract_id": "SQ02_DOWNSIDE_CONT_V0",
   "strategy_name": "SQ02 downside continuation sandbox skeleton",
+  "contract_status": "frozen",
   "disabled_by_default": true,
   "runtime_label": "LOCAL_SANDBOX_ONLY_DISABLED_BY_DEFAULT",
   "setup_condition_key": "setup_present",

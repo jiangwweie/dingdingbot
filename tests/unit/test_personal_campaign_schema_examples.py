@@ -10,6 +10,7 @@ from src.domain.personal_campaign import (
     HumanArmAction,
     HumanArmDecision,
     ModeAdvice,
+    ReadOnlyRuntimeAdapterPreview,
     RiskOrderPlan,
     StrategyContract,
     TradeIntent,
@@ -30,6 +31,7 @@ def test_sq02_strategy_contract_example_is_disabled_and_local_only():
     )
 
     assert contract.strategy_contract_id == "SQ02_DOWNSIDE_CONT_V0"
+    assert contract.contract_status == "frozen"
     assert contract.disabled_by_default is True
     assert contract.runtime_label == "LOCAL_SANDBOX_ONLY_DISABLED_BY_DEFAULT"
     assert "lookahead" in contract.forbidden_data
@@ -101,3 +103,16 @@ def test_sq02_campaign_example_preserves_profit_protect_boundary():
     assert campaign_state.status == "armed"
     assert "profit-protect:threshold_reached" in campaign_state.invariant_checks
     assert not hasattr(campaign_state, "withdrawal_pending")
+
+
+def test_sq02_read_only_runtime_adapter_preview_has_no_order_authority():
+    preview = ReadOnlyRuntimeAdapterPreview.model_validate(
+        _load_example("read_only_runtime_adapter_preview_sq02.example.json")
+    )
+
+    assert preview.read_only is True
+    assert preview.authority == "read_only_no_order_authority"
+    assert preview.trade_intent.no_exchange_side_effect is True
+    assert preview.rejection_reasons == []
+    assert not hasattr(preview, "order_id")
+    assert not hasattr(preview, "exchange_order_id")

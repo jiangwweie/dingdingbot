@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -152,6 +152,7 @@ class StrategyContract(CampaignModel):
 
     strategy_contract_id: str
     strategy_name: str
+    contract_status: str = "frozen"
     disabled_by_default: bool = True
     runtime_label: str = "LOCAL_SANDBOX_ONLY_DISABLED_BY_DEFAULT"
     setup_condition_key: str
@@ -176,6 +177,22 @@ class TradeIntent(CampaignModel):
     invalidation_reason: Optional[str] = None
     evidence_text: Optional[str] = None
     no_exchange_side_effect: bool = True
+
+
+class ReadOnlyRuntimeAdapterPreview(CampaignModel):
+    """Read-only runtime inspection payload for PLC promotion Phase 1."""
+
+    adapter_version: str = "plc_read_only_runtime_adapter_v1"
+    read_only: Literal[True] = True
+    authority: Literal["read_only_no_order_authority"] = "read_only_no_order_authority"
+    source_snapshot_id: str
+    snapshot_feature_timestamp_ms: int = Field(..., ge=0)
+    runtime_clock_ms: int = Field(..., ge=0)
+    strategy_contract_id: str
+    strategy_contract_status: str
+    trade_intent: TradeIntent
+    rejection_reasons: list[str] = Field(default_factory=list)
+    no_exchange_side_effect: Literal[True] = True
 
 
 class CampaignRiskCaps(CampaignModel):

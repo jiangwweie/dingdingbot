@@ -48,6 +48,10 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   evidence outside immediate `fetch_order`. Confirmation now accepts recent
   order-watch evidence and retries conditional `fetch_open_orders` after a
   `fetch_order` miss before raising a false protection-health critical.
+- PLC Phase 1 can be promoted without exchange/runtime authority by using a
+  pure read-only adapter. The adapter rejects non-frozen contracts and
+  non-prior snapshots before deterministic contract evaluation, and its output
+  has explicit `read_only_no_order_authority`.
 
 ## 2026-05-09
 
