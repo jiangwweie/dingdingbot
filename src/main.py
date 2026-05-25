@@ -40,6 +40,7 @@ from src.application.capital_protection import (
     resolve_daily_risk_stats_scope_key,
 )
 from src.application.campaign_state_service import CampaignStateService
+from src.application.bounded_risk_campaign_service import BoundedRiskCampaignService
 from src.application.decision_trace import TraceService
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.external_close_monitor import ExternalCloseMonitor
@@ -55,6 +56,7 @@ from src.infrastructure.notifier import NotificationService, get_notification_se
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
     create_runtime_campaign_state_repository,
+    create_runtime_brc_campaign_repository,
     create_runtime_global_kill_switch_repository,
     create_runtime_daily_risk_stats_repository,
     create_runtime_order_repository,
@@ -97,6 +99,7 @@ _global_kill_switch_service: Optional[GlobalKillSwitchService] = None
 _startup_trading_guard_service: Optional[StartupTradingGuardService] = None
 _account_risk_service: Optional[AccountRiskService] = None
 _campaign_state_service: Optional[CampaignStateService] = None
+_brc_campaign_service: Optional[BoundedRiskCampaignService] = None
 _protection_health_monitor: Optional[ProtectionHealthMonitor] = None
 _external_close_monitor: Optional[ExternalCloseMonitor] = None
 _reconciliation_read_model_repo = None
@@ -556,7 +559,7 @@ async def run_application():
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
     global _capital_protection, _execution_orchestrator, _execution_recovery_repo, _trace_service, _global_kill_switch_service
     global _startup_trading_guard_service, _protection_health_monitor, _external_close_monitor
-    global _account_risk_service, _campaign_state_service
+    global _account_risk_service, _campaign_state_service, _brc_campaign_service
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
     global _reconciliation_read_model_repo, _snapshot_update_task, _ws_task, _api_task, _api_server
     global _signal_pipeline
@@ -866,6 +869,19 @@ async def run_application():
             )
             _campaign_state_service = CampaignStateService(repository=None)
             await _campaign_state_service.initialize()
+
+        try:
+            brc_campaign_repo = create_runtime_brc_campaign_repository()
+            _brc_campaign_service = BoundedRiskCampaignService(repository=brc_campaign_repo)
+            await _brc_campaign_service.initialize()
+        except Exception as e:
+            logger.critical(
+                "[BRC][HIGH] BRC campaign initialization failed; "
+                "BRC testnet control endpoints will fail closed: %s",
+                e,
+                exc_info=True,
+            )
+            _brc_campaign_service = None
 
         position_projection_service = PositionProjectionService(_position_repo)
         _execution_orchestrator = ExecutionOrchestrator(
@@ -1275,6 +1291,7 @@ async def run_application():
             startup_trading_guard_service=_startup_trading_guard_service,
             account_risk_service=_account_risk_service,
             campaign_state_service=_campaign_state_service,
+            brc_campaign_service=_brc_campaign_service,
             trace_service=_trace_service,
             protection_health_monitor=_protection_health_monitor,
             external_close_monitor=_external_close_monitor,
@@ -1389,6 +1406,7 @@ async def run_application():
         _startup_trading_guard_service = None
         _account_risk_service = None
         _campaign_state_service = None
+        _brc_campaign_service = None
 
         if _order_lifecycle_service is not None:
             try:

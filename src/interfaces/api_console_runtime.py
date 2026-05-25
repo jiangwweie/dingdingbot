@@ -32,6 +32,17 @@ from src.application.readmodels.runtime_signals import RuntimeSignalsReadModel
 from src.application.campaign_state_service import (
     CampaignReplayEvidence,
     CampaignRuntimeState,
+    CampaignTransitionTrigger,
+)
+from src.application.bounded_risk_campaign_service import (
+    AttemptCloseRecord,
+    AttemptOpenRecord,
+    BrcRuleViolation,
+)
+from src.domain.bounded_risk_campaign import (
+    CampaignOutcome,
+    MockPnlSource,
+    RiskChangeDirection,
 )
 from src.application.phase5e_rehearsal_feasibility import (
     Phase5EControlledSymbolFeasibility,
@@ -215,6 +226,13 @@ def _get_campaign_state_service(api_module):
     return service
 
 
+def _get_brc_campaign_service(api_module):
+    service = getattr(api_module, "_brc_campaign_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="BRC campaign service not initialized")
+    return service
+
+
 def _to_global_kill_switch_response(state) -> GlobalKillSwitchResponse:
     return GlobalKillSwitchResponse(
         active=state.active,
@@ -293,6 +311,9 @@ _CONTROLLED_PROFILE = "sim1_eth_runtime"
 _CONTROLLED_MIN_NOTIONAL_DEFAULT = Decimal("20")
 _PHASE5E_PROFILE = "phase5e_btc_eth_testnet_runtime"
 _PHASE5E_ALLOWED_SYMBOLS = {"ETH/USDT:USDT", "BTC/USDT:USDT"}
+_BRC_PROFILE = "brc_btc_eth_testnet_runtime"
+_BRC_ALLOWED_SYMBOLS = {"ETH/USDT:USDT", "BTC/USDT:USDT"}
+_BRC_CONTROLLED_PLAYBOOK = "PB-004-BRC-CONTROLLED-TESTNET"
 _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL: dict[str, bool] = {}
 _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL: dict[str, bool] = {}
 
@@ -331,6 +352,25 @@ _PHASE5E_CONTROLLED_SPECS: dict[str, ControlledSymbolSpec] = {
         symbol="BTC/USDT:USDT",
         amount_max=Decimal("0.002"),
         profile=_PHASE5E_PROFILE,
+        min_notional_default=Decimal("100"),
+        max_notional=Decimal("250"),
+        amount_step=Decimal("0.001"),
+    ),
+}
+
+_BRC_CONTROLLED_SPECS: dict[str, ControlledSymbolSpec] = {
+    "eth": ControlledSymbolSpec(
+        symbol="ETH/USDT:USDT",
+        amount_max=Decimal("0.01"),
+        profile=_BRC_PROFILE,
+        min_notional_default=Decimal("20"),
+        max_notional=Decimal("25"),
+        amount_step=Decimal("0.01"),
+    ),
+    "btc": ControlledSymbolSpec(
+        symbol="BTC/USDT:USDT",
+        amount_max=Decimal("0.002"),
+        profile=_BRC_PROFILE,
         min_notional_default=Decimal("100"),
         max_notional=Decimal("250"),
         amount_step=Decimal("0.001"),
@@ -407,6 +447,71 @@ class Phase5EInventoryResponse(BaseModel):
     testnet: Literal[True] = True
     symbols: list[Phase5EInventorySymbolState]
     all_flat: bool
+
+
+class BrcCreateCampaignRequest(BaseModel):
+    bucket_id: str = Field(default="BRC-R0-TESTNET-BUCKET", max_length=128)
+    authorized_amount: Decimal = Field(default=Decimal("500"), gt=Decimal("0"))
+    max_campaign_loss: Decimal = Field(default=Decimal("120"), gt=Decimal("0"))
+    profit_protect_trigger: Decimal = Field(default=Decimal("100"), gt=Decimal("0"))
+    reason: str = Field(default="BRC controlled BTC/ETH testnet rehearsal", max_length=512)
+
+
+class BrcSwitchPlaybookRequest(BaseModel):
+    new_playbook_id: str = Field(default=_BRC_CONTROLLED_PLAYBOOK, max_length=128)
+    reason_category: str = Field(default="owner_testnet_authorization", max_length=128)
+    reason_text: str = Field(max_length=1024)
+    evidence_refs: list[str] = Field(default_factory=list)
+    risk_change_direction: RiskChangeDirection = RiskChangeDirection.SAME_RISK
+
+
+class BrcArmAttemptRequest(BaseModel):
+    reason: str = Field(default="Owner-authorized BRC controlled testnet attempt", max_length=512)
+
+
+class BrcMockPnlRequest(BaseModel):
+    amount: Decimal
+    source: MockPnlSource = MockPnlSource.TESTNET_MOCK
+    reason: str = Field(max_length=512)
+
+
+class BrcFinalizeRequest(BaseModel):
+    outcome: CampaignOutcome = CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED
+    reason: str = Field(default="BRC ETH/BTC controlled testnet rehearsal complete", max_length=512)
+
+
+class BrcCampaignResponse(BaseModel):
+    campaign: dict
+    live_ready: Literal[False] = False
+    access_boundary: str = "BRC testnet-only campaign governance; no mainnet/live/withdrawal action."
+
+
+class BrcSwitchPlaybookResponse(BaseModel):
+    decision: dict
+    campaign: dict
+    live_ready: Literal[False] = False
+
+
+class BrcAttemptResponse(BaseModel):
+    attempt: dict
+    campaign: dict
+    runtime_campaign_state: Optional[CampaignStateResponse] = None
+    live_ready: Literal[False] = False
+
+
+class BrcMockPnlResponse(BaseModel):
+    event: dict
+    campaign: dict
+    exchange_balance_mutated: Literal[False] = False
+    daily_risk_mutated: Literal[False] = False
+    withdrawal_executed: Literal[False] = False
+    live_ready: Literal[False] = False
+
+
+class BrcEvidenceResponse(BaseModel):
+    evidence: dict
+    inventory: Phase5EInventoryResponse
+    live_ready: Literal[False] = False
 
 
 def _get_account_snapshot(api_module):
@@ -502,6 +607,17 @@ def _resolve_phase5e_spec(symbol_key: str) -> ControlledSymbolSpec:
     return spec
 
 
+def _resolve_brc_spec(symbol_key: str) -> ControlledSymbolSpec:
+    normalized = symbol_key.strip().lower()
+    spec = _BRC_CONTROLLED_SPECS.get(normalized)
+    if spec is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Unsupported BRC controlled symbol key; use eth or btc.",
+        )
+    return spec
+
+
 def _require_phase5e_runtime_scope(resolved) -> None:
     if resolved.profile_name != _PHASE5E_PROFILE:
         raise HTTPException(
@@ -518,6 +634,74 @@ def _require_phase5e_runtime_scope(resolved) -> None:
                 f"{sorted(_PHASE5E_ALLOWED_SYMBOLS)}, got {sorted(symbols)}"
             ),
         )
+
+
+def _require_brc_runtime_scope(resolved) -> None:
+    if resolved.profile_name != _BRC_PROFILE:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Endpoint requires RUNTIME_PROFILE={_BRC_PROFILE}, got {resolved.profile_name}",
+        )
+    market = getattr(resolved, "market", None)
+    symbols = set(getattr(market, "symbols", []) or [])
+    if symbols != _BRC_ALLOWED_SYMBOLS:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Endpoint requires BRC market symbols exactly "
+                f"{sorted(_BRC_ALLOWED_SYMBOLS)}, got {sorted(symbols)}"
+            ),
+        )
+
+
+def _require_brc_mutation_gates(request: Request):
+    if not _test_signal_injection_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Controlled signal injection disabled. "
+                f"Set {RUNTIME_TEST_SIGNAL_INJECTION_ENABLED_ENV}=true."
+            ),
+        )
+    if not _runtime_control_api_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Runtime control API disabled. "
+                f"Set {RUNTIME_CONTROL_API_ENABLED_ENV}=true."
+            ),
+        )
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    config_provider = getattr(api_module, "_runtime_config_provider", None)
+    resolved = config_provider.resolved_config if config_provider else None
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="Runtime config not resolved")
+    if not resolved.environment.exchange_testnet:
+        raise HTTPException(status_code=403, detail="Endpoint requires EXCHANGE_TESTNET=true")
+    _require_brc_runtime_scope(resolved)
+    return api_module, resolved
+
+
+def _require_brc_read_gates(request: Request):
+    _require_internal_runtime_control(request)
+    if not _runtime_control_api_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Runtime control API disabled. "
+                f"Set {RUNTIME_CONTROL_API_ENABLED_ENV}=true."
+            ),
+        )
+    api_module = _load_api_module()
+    config_provider = getattr(api_module, "_runtime_config_provider", None)
+    resolved = config_provider.resolved_config if config_provider else None
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="Runtime config not resolved")
+    if not resolved.environment.exchange_testnet:
+        raise HTTPException(status_code=403, detail="Endpoint requires EXCHANGE_TESTNET=true")
+    _require_brc_runtime_scope(resolved)
+    return api_module, resolved
 
 
 async def _require_no_phase5e_active_positions(api_module, spec: ControlledSymbolSpec) -> None:
@@ -538,6 +722,10 @@ async def _require_no_phase5e_active_positions(api_module, spec: ControlledSymbo
                 f"active positions present before {spec.symbol} entry: {symbols}"
             ),
         )
+
+
+async def _require_no_brc_active_positions(api_module, spec: ControlledSymbolSpec) -> None:
+    return await _require_no_phase5e_active_positions(api_module, spec)
 
 
 async def _build_phase5e_feasibility(
@@ -564,6 +752,14 @@ async def _build_phase5e_feasibility(
     )
 
 
+async def _build_brc_feasibility(
+    *,
+    api_module,
+    spec: ControlledSymbolSpec,
+) -> Phase5EControlledSymbolFeasibility:
+    return await _build_phase5e_feasibility(api_module=api_module, spec=spec)
+
+
 def _position_size_is_nonzero(position) -> bool:
     for attr_name in ("size", "contracts", "current_qty", "quantity"):
         value = getattr(position, attr_name, None)
@@ -588,6 +784,19 @@ async def _fetch_phase5e_exchange_open_orders(gateway, symbol: str, params: Opti
 
 
 async def _build_phase5e_inventory(api_module) -> Phase5EInventoryResponse:
+    return await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_PHASE5E_PROFILE,
+        symbols=_PHASE5E_ALLOWED_SYMBOLS,
+    )
+
+
+async def _build_controlled_inventory(
+    *,
+    api_module,
+    profile: str,
+    symbols: set[str],
+) -> Phase5EInventoryResponse:
     gateway = _get_gateway(api_module)
     position_repo = getattr(api_module, "_position_repo", None)
     order_repo = getattr(api_module, "_order_repo", None)
@@ -597,7 +806,7 @@ async def _build_phase5e_inventory(api_module) -> Phase5EInventoryResponse:
         raise HTTPException(status_code=503, detail="Order repository not initialized")
 
     states: list[Phase5EInventorySymbolState] = []
-    for symbol in sorted(_PHASE5E_ALLOWED_SYMBOLS):
+    for symbol in sorted(symbols):
         try:
             exchange_positions = await gateway.fetch_positions(symbol=symbol)
             exchange_normal_open_orders = await _fetch_phase5e_exchange_open_orders(gateway, symbol)
@@ -631,7 +840,7 @@ async def _build_phase5e_inventory(api_module) -> Phase5EInventoryResponse:
         states.append(state)
 
     return Phase5EInventoryResponse(
-        profile=_PHASE5E_PROFILE,
+        profile=profile,
         symbols=states,
         all_flat=all(state.flat for state in states),
     )
@@ -1634,3 +1843,412 @@ async def execute_phase5e_controlled_close(
         attempt_locked=True,
         symbol=spec.symbol,
     )
+
+
+@router.post("/test/brc/campaigns", response_model=BrcCampaignResponse)
+async def create_brc_campaign(
+    request: Request,
+    body: BrcCreateCampaignRequest,
+) -> BrcCampaignResponse:
+    """Create the current BRC testnet campaign envelope."""
+    api_module, _ = _require_brc_mutation_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    try:
+        campaign = await service.create_campaign(
+            bucket_id=body.bucket_id,
+            authorized_amount=body.authorized_amount,
+            max_campaign_loss=body.max_campaign_loss,
+            profit_protect_trigger=body.profit_protect_trigger,
+            reason=body.reason,
+        )
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcCampaignResponse(campaign=campaign.model_dump(mode="json"))
+
+
+@router.get("/test/brc/campaigns/current", response_model=BrcCampaignResponse)
+async def get_current_brc_campaign(request: Request) -> BrcCampaignResponse:
+    """Read the current BRC campaign envelope."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    campaign = await service.get_current_campaign()
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="No active BRC campaign")
+    return BrcCampaignResponse(campaign=campaign.model_dump(mode="json"))
+
+
+@router.post("/test/brc/switch-playbook", response_model=BrcSwitchPlaybookResponse)
+async def switch_brc_playbook(
+    request: Request,
+    body: BrcSwitchPlaybookRequest,
+) -> BrcSwitchPlaybookResponse:
+    """Record an owner playbook switch decision with inferred BRC fields."""
+    api_module, _ = _require_brc_mutation_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    try:
+        decision = await service.switch_playbook(
+            new_playbook_id=body.new_playbook_id,
+            reason_category=body.reason_category,
+            reason_text=body.reason_text,
+            evidence_refs=body.evidence_refs,
+            risk_change_direction=body.risk_change_direction,
+        )
+        campaign = await service.require_current_campaign()
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcSwitchPlaybookResponse(
+        decision=decision.model_dump(mode="json"),
+        campaign=campaign.model_dump(mode="json"),
+    )
+
+
+@router.post("/test/brc/{symbol_key}/arm-attempt", response_model=BrcAttemptResponse)
+async def arm_brc_attempt(
+    symbol_key: str,
+    request: Request,
+    body: BrcArmAttemptRequest,
+) -> BrcAttemptResponse:
+    """Arm one BRC attempt and the runtime exposure gate for the fixed symbol."""
+    spec = _resolve_brc_spec(symbol_key)
+    api_module, _ = _require_brc_mutation_gates(request)
+    await _require_no_brc_active_positions(api_module, spec)
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+    if not inventory.all_flat:
+        raise HTTPException(status_code=409, detail="BLOCKED: BRC attempt requires ETH/BTC final flatness")
+
+    service = _get_brc_campaign_service(api_module)
+    campaign_state_service = _get_campaign_state_service(api_module)
+    try:
+        attempt = await service.arm_attempt(symbol=spec.symbol, reason=body.reason)
+        runtime_state = campaign_state_service.get_state()
+        if runtime_state.status == CampaignRuntimeState.CLOSED.value:
+            runtime_state = await campaign_state_service.set_state(
+                status=CampaignRuntimeState.OBSERVE.value,
+                reason="BRC flat proof reset before next controlled attempt",
+                updated_by="brc_testnet_endpoint",
+                trigger=CampaignTransitionTrigger.OWNER_REVIEW_RESET,
+                metadata={"brc_campaign_id": attempt.attempt_id, "flat_proof": inventory.model_dump()},
+                profile_id=_BRC_PROFILE,
+                symbol=spec.symbol,
+            )
+        if runtime_state.status != CampaignRuntimeState.OBSERVE.value:
+            raise BrcRuleViolation(f"runtime campaign state must be observe before arming; got {runtime_state.status}")
+        runtime_state = await campaign_state_service.set_state(
+            status=CampaignRuntimeState.ARMED.value,
+            reason=f"BRC controlled testnet arm: {spec.symbol}",
+            updated_by="brc_testnet_endpoint",
+            trigger=CampaignTransitionTrigger.OWNER_ARM,
+            active_strategy_contract_id=f"playbook:{_BRC_CONTROLLED_PLAYBOOK}",
+            active_session_id=attempt.attempt_id,
+            metadata={"brc_attempt_id": attempt.attempt_id, "playbook_id": _BRC_CONTROLLED_PLAYBOOK},
+            profile_id=_BRC_PROFILE,
+            symbol=spec.symbol,
+        )
+        campaign = await service.require_current_campaign()
+    except (BrcRuleViolation, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcAttemptResponse(
+        attempt=attempt.model_dump(mode="json"),
+        campaign=campaign.model_dump(mode="json"),
+        runtime_campaign_state=_to_campaign_state_response(runtime_state),
+    )
+
+
+@router.post(
+    "/test/brc/{symbol_key}/execute-controlled-entry",
+    response_model=ControlledEntryResponse,
+)
+async def execute_brc_controlled_entry(
+    symbol_key: str,
+    request: Request,
+) -> ControlledEntryResponse:
+    """BRC server-controlled BTC/ETH testnet entry under the active BRC attempt."""
+    from src.domain.models import Direction, OrderStrategy, SignalResult
+
+    spec = _resolve_brc_spec(symbol_key)
+    api_module, _ = _require_brc_mutation_gates(request)
+    await _reject_controlled_entry_body(request)
+    service = _get_brc_campaign_service(api_module)
+    campaign = await service.require_current_campaign()
+    if not campaign.last_attempt or campaign.last_attempt.symbol != spec.symbol:
+        raise HTTPException(status_code=409, detail="BLOCKED: no armed BRC attempt for this symbol")
+    if campaign.last_attempt.status.value != "armed":
+        raise HTTPException(status_code=409, detail="BLOCKED: BRC attempt is not armed")
+
+    if _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL.get(spec.lock_key):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Controlled entry already executed for {spec.symbol} in this runtime session",
+        )
+
+    orchestrator = _get_orchestrator(api_module)
+    guard_svc = getattr(api_module, "_startup_trading_guard_service", None)
+    if guard_svc is None or not guard_svc.is_armed():
+        raise HTTPException(status_code=409, detail="BLOCKED: startup guard not armed")
+    gks_svc = getattr(api_module, "_global_kill_switch_service", None)
+    if gks_svc is None:
+        raise HTTPException(status_code=503, detail="BLOCKED: GKS_SERVICE_UNAVAILABLE")
+    if gks_svc.is_active():
+        raise HTTPException(status_code=409, detail="BLOCKED: global kill switch active")
+    await _require_no_brc_active_positions(api_module, spec)
+    blocks = orchestrator.list_protection_health_blocks()
+    if spec.symbol in blocks:
+        raise HTTPException(status_code=409, detail=f"BLOCKED: protection-health block active for {spec.symbol}")
+    if orchestrator.is_symbol_blocked(spec.symbol):
+        raise HTTPException(status_code=409, detail=f"BLOCKED: circuit breaker active for {spec.symbol}")
+
+    feasibility = await _build_brc_feasibility(api_module=api_module, spec=spec)
+    if feasibility.reason == "MIN_NOTIONAL_EXCEEDS_CAP":
+        raise HTTPException(
+            status_code=409,
+            detail=f"BLOCKED: BRC min_notional exceeds symbol cap ({feasibility.min_notional} > {feasibility.max_notional})",
+        )
+    if feasibility.reason == "NOTIONAL_BELOW_MIN_NOTIONAL":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "BLOCKED: controlled entry notional below min_notional "
+                f"({feasibility.notional} < {feasibility.min_notional}, "
+                f"source={feasibility.min_notional_source})"
+            ),
+        )
+    if feasibility.reason == "NOTIONAL_ABOVE_CAP":
+        raise HTTPException(
+            status_code=409,
+            detail=f"BLOCKED: controlled entry notional above BRC cap ({feasibility.notional} > {feasibility.max_notional})",
+        )
+
+    entry_price = feasibility.price
+    sl_price = entry_price * Decimal("0.99")
+    tp1_price = entry_price * Decimal("1.01")
+    tp2_price = entry_price * Decimal("1.035")
+    amount = feasibility.amount
+    signal = SignalResult(
+        symbol=spec.symbol,
+        timeframe="1h",
+        direction=Direction.LONG,
+        entry_price=entry_price,
+        suggested_stop_loss=sl_price,
+        suggested_position_size=amount,
+        current_leverage=1,
+        tags=[
+            {"key": "source", "value": "runtime_test_endpoint_brc"},
+            {"key": "brc_attempt_id", "value": campaign.last_attempt.attempt_id},
+        ],
+        risk_reward_info="brc_controlled_testnet:1h:LONG",
+        status="PENDING",
+        strategy_name="brc_controlled_testnet",
+        score=1.0,
+        take_profit_levels=[
+            {"price": str(tp1_price), "ratio": "0.5"},
+            {"price": str(tp2_price), "ratio": "0.5"},
+        ],
+    )
+    strategy = OrderStrategy(
+        id=f"strat_brc_controlled_{symbol_key.lower()}",
+        name=f"brc_controlled_testnet/{spec.profile}/{spec.symbol}",
+        tp_levels=2,
+        tp_ratios=[Decimal("0.5"), Decimal("0.5")],
+        tp_targets=[Decimal("1.0"), Decimal("3.5")],
+        initial_stop_loss_rr=Decimal("-1.0"),
+        trailing_stop_enabled=False,
+        oco_enabled=True,
+    )
+
+    _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL[spec.lock_key] = True
+    try:
+        intent = await orchestrator.execute_signal(signal, strategy)
+        intent_status = intent.status.value if hasattr(intent.status, "value") else str(intent.status)
+        if intent_status in {"blocked", "failed"}:
+            _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL.pop(spec.lock_key, None)
+            return ControlledEntryResponse(
+                status=intent_status,
+                intent_id=intent.id,
+                signal_id=intent.signal_id,
+                entry_price=entry_price,
+                stop_loss=sl_price,
+                amount=amount,
+                profile=spec.profile,
+                blocked_reason=getattr(intent, "blocked_reason", None)
+                or getattr(intent, "failed_reason", None),
+                attempt_locked=False,
+                notional=feasibility.notional,
+                min_notional=feasibility.min_notional,
+                symbol=spec.symbol,
+            )
+        await service.record_attempt_entry(
+            symbol=spec.symbol,
+            record=AttemptOpenRecord(
+                intent_id=intent.id,
+                signal_id=intent.signal_id,
+                amount=amount,
+                notional=feasibility.notional,
+            ),
+        )
+    except Exception as exc:
+        _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL.pop(spec.lock_key, None)
+        logger.error("BRC controlled entry execution failed: %s", exc, exc_info=True)
+        if isinstance(exc, BrcRuleViolation):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Execution failed") from exc
+
+    return ControlledEntryResponse(
+        status=intent.status.value if hasattr(intent.status, "value") else str(intent.status),
+        intent_id=intent.id,
+        signal_id=intent.signal_id,
+        entry_price=entry_price,
+        stop_loss=sl_price,
+        amount=amount,
+        profile=spec.profile,
+        blocked_reason=getattr(intent, "blocked_reason", None),
+        attempt_locked=True,
+        notional=feasibility.notional,
+        min_notional=feasibility.min_notional,
+        symbol=spec.symbol,
+    )
+
+
+@router.post(
+    "/test/brc/{symbol_key}/execute-controlled-close",
+    response_model=ControlledCloseResponse,
+)
+async def execute_brc_controlled_close(
+    symbol_key: str,
+    request: Request,
+) -> ControlledCloseResponse:
+    """BRC server-controlled reduce-only close for one fixed symbol."""
+    spec = _resolve_brc_spec(symbol_key)
+    api_module, _ = _require_brc_mutation_gates(request)
+    await _reject_controlled_entry_body(request)
+    service = _get_brc_campaign_service(api_module)
+    campaign = await service.require_current_campaign()
+    if not campaign.last_attempt or campaign.last_attempt.symbol != spec.symbol:
+        raise HTTPException(status_code=409, detail="BLOCKED: no BRC attempt for this symbol")
+    if campaign.last_attempt.status.value != "entry_filled":
+        raise HTTPException(status_code=409, detail="BLOCKED: BRC attempt has no recorded entry")
+    if _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL.get(spec.lock_key):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Controlled close already executed for {spec.symbol} in this runtime session",
+        )
+
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None or not hasattr(position_repo, "list_active"):
+        raise HTTPException(status_code=503, detail="Position repository not initialized")
+    try:
+        active_positions = await position_repo.list_active(symbol=spec.symbol, limit=10)
+    except Exception as exc:
+        logger.error("Failed to load active positions for BRC close: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="Failed to load active positions") from exc
+    if len(active_positions) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Controlled close requires exactly one active local position for {spec.symbol}; found {len(active_positions)}",
+        )
+    position = active_positions[0]
+    amount = Decimal(str(getattr(position, "current_qty", "0")))
+    if amount <= Decimal("0") or amount > spec.amount_max:
+        raise HTTPException(status_code=409, detail=f"Controlled close amount out of bounds: {amount}")
+
+    orchestrator = _get_orchestrator(api_module)
+    _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL[spec.lock_key] = True
+    try:
+        result = await orchestrator.execute_controlled_close(
+            position=position,
+            reason="brc_controlled_testnet_runtime_close",
+            max_amount=spec.amount_max,
+        )
+        close_order = result["close_order"]
+        await service.record_attempt_close(
+            symbol=spec.symbol,
+            record=AttemptCloseRecord(
+                close_order_id=close_order.id,
+                exchange_order_id=close_order.exchange_order_id,
+            ),
+        )
+    except Exception as exc:
+        _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL.pop(spec.lock_key, None)
+        logger.error("BRC controlled close execution failed: %s", exc, exc_info=True)
+        if isinstance(exc, BrcRuleViolation):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Controlled close failed") from exc
+
+    terminalized = result.get("terminalized_protection_orders") or []
+    return ControlledCloseResponse(
+        status=close_order.status.value if hasattr(close_order.status, "value") else str(close_order.status),
+        signal_id=close_order.signal_id,
+        close_order_id=close_order.id,
+        exchange_order_id=close_order.exchange_order_id,
+        amount=amount,
+        average_exec_price=close_order.average_exec_price,
+        terminalized_protection_orders=len(terminalized),
+        profile=spec.profile,
+        attempt_locked=True,
+        symbol=spec.symbol,
+    )
+
+
+@router.post("/test/brc/mock-pnl", response_model=BrcMockPnlResponse)
+async def inject_brc_mock_pnl(
+    request: Request,
+    body: BrcMockPnlRequest,
+) -> BrcMockPnlResponse:
+    """Inject BRC-level mock PnL evidence without mutating exchange/account PnL."""
+    api_module, _ = _require_brc_mutation_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    try:
+        event = await service.inject_mock_pnl(
+            amount=body.amount,
+            source=body.source,
+            reason=body.reason,
+        )
+        campaign = await service.require_current_campaign()
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcMockPnlResponse(
+        event=event.model_dump(mode="json"),
+        campaign=campaign.model_dump(mode="json"),
+    )
+
+
+@router.get("/test/brc/evidence", response_model=BrcEvidenceResponse)
+async def get_brc_evidence(request: Request) -> BrcEvidenceResponse:
+    """Return deterministic BRC evidence plus current ETH/BTC flatness inventory."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    evidence = await service.build_evidence_packet()
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+    evidence["final_inventory"] = inventory.model_dump(mode="json")
+    return BrcEvidenceResponse(evidence=evidence, inventory=inventory)
+
+
+@router.post("/test/brc/finalize", response_model=BrcCampaignResponse)
+async def finalize_brc_campaign(
+    request: Request,
+    body: BrcFinalizeRequest,
+) -> BrcCampaignResponse:
+    """Finalize BRC acceptance rehearsal after final flatness proof."""
+    api_module, _ = _require_brc_mutation_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+    try:
+        campaign = await service.finalize(
+            outcome=body.outcome,
+            reason=body.reason,
+            final_flat=inventory.all_flat,
+        )
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcCampaignResponse(campaign=campaign.model_dump(mode="json"))

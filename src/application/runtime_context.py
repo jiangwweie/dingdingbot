@@ -43,6 +43,7 @@ class RuntimeContext:
     startup_trading_guard_service: Optional[Any] = None
     account_risk_service: Optional[Any] = None
     campaign_state_service: Optional[Any] = None
+    brc_campaign_service: Optional[Any] = None
     trace_service: Optional[Any] = None
     protection_health_monitor: Optional[Any] = None
     external_close_monitor: Optional[Any] = None

@@ -263,6 +263,7 @@ _global_kill_switch_service: Optional[Any] = None  # GlobalKillSwitchService ins
 _startup_trading_guard_service: Optional[Any] = None  # StartupTradingGuardService instance
 _account_risk_service: Optional[Any] = None  # AccountRiskService instance
 _campaign_state_service: Optional[Any] = None  # CampaignStateService instance
+_brc_campaign_service: Optional[Any] = None  # BoundedRiskCampaignService instance
 _trace_service: Optional[Any] = None  # TraceService instance (decision trace backbone)
 _startup_reconciliation_summary: Optional[Dict[str, Any]] = None  # Startup reconciliation summary
 _runtime_context: Optional[RuntimeContext] = None  # Embedded runtime owner context
@@ -325,6 +326,7 @@ def bind_runtime_context(
         startup_trading_guard_service=runtime_context.startup_trading_guard_service,
         account_risk_service=runtime_context.account_risk_service,
         campaign_state_service=runtime_context.campaign_state_service,
+        brc_campaign_service=runtime_context.brc_campaign_service,
         trace_service=runtime_context.trace_service,
         strategy_repo=runtime_context.strategy_repo,
         risk_repo=runtime_context.risk_repo,
@@ -361,6 +363,7 @@ def set_dependencies(
     startup_trading_guard_service: Optional[Any] = None,
     account_risk_service: Optional[Any] = None,
     campaign_state_service: Optional[Any] = None,
+    brc_campaign_service: Optional[Any] = None,
     trace_service: Optional[Any] = None,
     # Config repositories (unified with api_v1_config.py)
     strategy_repo: Optional[Any] = None,
@@ -396,7 +399,7 @@ def set_dependencies(
         history_repo: Optional ConfigHistoryRepository instance
         snapshot_repo: Optional ConfigSnapshotRepositoryExtended instance
     """
-    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service, _startup_trading_guard_service, _account_risk_service, _campaign_state_service, _trace_service
+    global _repository, _account_getter, _config_manager, _exchange_gateway, _signal_tracker, _snapshot_service, _config_entry_repo, _order_repo, _execution_intent_repo, _execution_recovery_repo, _position_repo, _signal_repo, _audit_logger, _order_lifecycle_service, _runtime_config_provider, _global_kill_switch_service, _startup_trading_guard_service, _account_risk_service, _campaign_state_service, _brc_campaign_service, _trace_service
     _repository = repository
     _signal_repo = repository  # Alias for console runtime routes
     _account_getter = account_getter
@@ -417,6 +420,7 @@ def set_dependencies(
     _startup_trading_guard_service = startup_trading_guard_service
     _account_risk_service = account_risk_service
     _campaign_state_service = campaign_state_service
+    _brc_campaign_service = brc_campaign_service
     _trace_service = trace_service
     # Config repositories - stored in shared module (avoids circular imports)
     _config_globals._strategy_repo = strategy_repo
