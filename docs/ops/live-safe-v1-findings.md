@@ -56,6 +56,10 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   observation packets. Review status and operator notes are data only; packet
   authority explicitly forbids order placement/cancellation, exchange mutation,
   real account reads, and runtime profile changes.
+- PLC Phase 3 should not execute until runtime-owned close exists. Direct
+  exchange cleanup would fail the purpose of the rehearsal because it would not
+  validate projection, daily stats, terminalization, and reconciliation through
+  the runtime lifecycle.
 
 ## 2026-05-09
 

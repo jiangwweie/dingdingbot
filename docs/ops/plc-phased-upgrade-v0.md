@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 2 implemented for review
+Status: Phase 3 designed for review; execution blocked
 
 ## Boundary
 
@@ -91,7 +91,7 @@ Acceptance:
 
 ## Phase 3 - Testnet Rehearsal Design
 
-Status: TODO
+Status: DESIGN_REVIEW / EXECUTION_BLOCKED
 
 Scope:
 
@@ -99,12 +99,20 @@ Scope:
 - Must pass through ADR-0009 scoped action review.
 - Must remain separate from real live/mainnet.
 
+Design artifacts:
+
+- `docs/ops/plc-phase3-testnet-rehearsal-design.md`
+- `docs/ops/plc-phase3-adr0009-authorization-request.md`
+
 Entry requirements:
 
 - Phase 2 review accepted.
 - Runtime-managed close smoke implemented.
 - Campaign risk state machine specified.
 - Account risk/liquidation safety checks at least designed.
+
+Execution remains blocked until the entry requirements pass and Owner gives a
+specific ADR-0009 authorization for one bounded rehearsal cycle.
 
 ## Phase 4 - Tiny-Live-Style Review
 

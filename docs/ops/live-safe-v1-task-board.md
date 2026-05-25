@@ -48,6 +48,7 @@ non-real-live steps may be requested separately under ADR-0009.
 | PLC-UPGRADE-001 | PLC phased upgrade ladder | REVIEW | Codex | Adds `docs/ops/plc-phased-upgrade-v0.md`. Phase 0 local sandbox is REVIEW; Phase 1 read-only runtime adapter is implemented for review; Phase 2 paper observation, Phase 3 testnet rehearsal, and Phase 4 tiny-live-style review remain gated. |
 | PLC-RUNTIME-001 | PLC read-only runtime adapter implementation | REVIEW | Codex | Implements a pure read-only adapter from `FeatureSnapshot + StrategyContract` to `ReadOnlyRuntimeAdapterPreview` / `TradeIntent`. It rejects future snapshots, non-frozen contracts, and contract/snapshot mismatch; it has no order/exchange authority and imports no I/O frameworks. |
 | PLC-PAPER-001 | PLC paper observation packet | REVIEW | Codex | Implements paper-only packets around read-only previews. Packets carry review status, operator notes, optional review provenance, `paper_observation_no_order_authority`, and explicit prohibited actions for order placement/cancellation, exchange mutation, real account read, and runtime profile changes. |
+| PLC-TESTNET-001 | PLC Phase 3 testnet rehearsal design | DESIGN_REVIEW | Codex | Adds bounded Binance testnet rehearsal design and draft ADR-0009 authorization request. Execution is blocked until runtime-managed close is implemented, campaign risk state machine is specified, account/liquidation safety checks are specified, scoped verification passes, and Owner authorizes one exact rehearsal cycle. |
 
 ## Non-Real-Live Action Requests
 
@@ -79,7 +80,7 @@ still requires the ADR-0009 scoped action gate.
 
 | ID | Task | Status | Owner | Notes |
 | --- | --- | --- | --- | --- |
-| PLC-LT-001 | Full PLC promotion ladder | TODO | Codex | Phase 0 local sandbox, Phase 1 read-only adapter, and Phase 2 paper observation packet are implemented for review. Phase 3 testnet rehearsal and Phase 4 tiny-live-style review remain gated and require evidence, Owner authorization, and rollback plans. |
+| PLC-LT-001 | Full PLC promotion ladder | TODO | Codex | Phase 0 local sandbox, Phase 1 read-only adapter, and Phase 2 paper observation packet are implemented for review. Phase 3 testnet rehearsal is designed but execution-blocked; Phase 4 tiny-live-style review remains blocked. Later stages require evidence, Owner authorization, and rollback plans. |
 | PLC-LT-002 | Campaign risk state machine | TODO | Codex | Model campaign locks, profit-protection, pause/resume, and loss-lock as durable state with audit trails before any autonomous runtime use. |
 | LS-006 | Account risk state machine | TODO | Codex | Define account-level risk states, liquidation/margin controls, and fail-closed behavior before broader runtime exposure. |
 | LS-007 | Liquidation distance and margin safety checks | TODO | Codex | Add exchange-field tolerant liquidation and margin safety checks. Required before any larger notional or multi-position rehearsal. |

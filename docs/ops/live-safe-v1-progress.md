@@ -435,3 +435,21 @@ Use this file for session progress and handoff notes.
 - Verification:
   `pytest -q tests/unit/test_personal_campaign_paper_observation.py tests/unit/test_personal_campaign_runtime_adapter.py tests/unit/test_personal_campaign_schema_docs.py tests/unit/test_personal_campaign_schema_examples.py`
   passed with 24 tests.
+
+## 2026-05-25 (PLC Phased Upgrade Phase 3 Design)
+
+- Added bounded testnet rehearsal design:
+  `docs/ops/plc-phase3-testnet-rehearsal-design.md`.
+- Added draft ADR-0009 authorization request:
+  `docs/ops/plc-phase3-adr0009-authorization-request.md`.
+- Phase 3 verdict:
+  `phase3_design_ready / execution_blocked`.
+- Execution blockers:
+  - runtime-managed controlled close is not implemented yet;
+  - campaign risk state machine remains TODO;
+  - account risk/liquidation safety checks remain TODO;
+  - no specific Owner authorization has been requested or granted for one PLC
+    Phase 3 rehearsal cycle.
+- The design prefers the installed Binance official plugin for read-only
+  market/testnet state checks when available, but explicitly forbids using it
+  to bypass the runtime lifecycle for order placement, cancellation, or cleanup.
