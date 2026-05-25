@@ -6,7 +6,12 @@ from src.application.campaign_state_service import (
     CAMPAIGN_STATE_BLOCK_REASON,
     CAMPAIGN_STATE_SCOPE_KEY,
     CampaignRuntimeEvent,
+    CampaignRuntimeState,
     CampaignStateService,
+    CampaignTransitionInput,
+    CampaignTransitionTrigger,
+    get_campaign_transition_table,
+    replay_campaign_transitions,
 )
 from src.infrastructure.repository_ports import CampaignStateSnapshot
 
@@ -138,3 +143,155 @@ async def test_stop_loss_event_locks_new_entries_until_closed():
     assert loss_state.status == "loss_locked"
     assert not decision.allowed_new_entry
     assert decision.reason == CAMPAIGN_STATE_BLOCK_REASON
+
+
+def test_transition_table_exposes_required_campaign_paths():
+    table = get_campaign_transition_table()
+    keys = {(rule.current_state, rule.target_state, rule.trigger) for rule in table}
+
+    assert (
+        CampaignRuntimeState.OBSERVE,
+        CampaignRuntimeState.ARMED,
+        CampaignTransitionTrigger.OWNER_ARM,
+    ) in keys
+    assert (
+        CampaignRuntimeState.ARMED,
+        CampaignRuntimeState.PROFIT_PROTECT,
+        CampaignTransitionTrigger.PROFIT_PROTECT_TRIGGERED,
+    ) in keys
+    assert (
+        CampaignRuntimeState.HARD_LOCKED,
+        CampaignRuntimeState.CLOSED,
+        CampaignTransitionTrigger.POSITION_CLOSED,
+    ) in keys
+    assert any(rule.requires_flat_proof for rule in table)
+    assert any(rule.requires_owner_review for rule in table)
+    assert any(rule.allows_risk_reducing_close for rule in table)
+
+
+def test_replay_campaign_transitions_proves_accepted_path():
+    result = replay_campaign_transitions(
+        initial_state="observe",
+        transitions=[
+            CampaignTransitionInput(
+                target_state="armed",
+                trigger="owner_arm",
+                reason="owner arm",
+                updated_by="owner",
+                occurred_at_ms=1,
+                active_strategy_contract_id="strategy-test",
+                active_session_id="session-test",
+                metadata={"symbol": "ETH/USDT:USDT"},
+            ),
+            CampaignTransitionInput(
+                target_state="armed",
+                trigger="entry_filled",
+                reason="entry filled",
+                updated_by="runtime",
+                occurred_at_ms=2,
+                metadata={"position_id": "pos-1", "signal_id": "sig-1"},
+            ),
+            CampaignTransitionInput(
+                target_state="profit_protect",
+                trigger="profit_protect_triggered",
+                reason="profit threshold reached",
+                updated_by="runtime",
+                occurred_at_ms=3,
+            ),
+            CampaignTransitionInput(
+                target_state="closed",
+                trigger="position_closed",
+                reason="runtime close flat",
+                updated_by="runtime",
+                occurred_at_ms=4,
+            ),
+            CampaignTransitionInput(
+                target_state="observe",
+                trigger="owner_review_reset",
+                reason="owner reviewed final evidence",
+                updated_by="owner",
+                occurred_at_ms=5,
+            ),
+        ],
+    )
+
+    assert result.accepted
+    assert result.final_state == CampaignRuntimeState.OBSERVE
+    assert [record.sequence_number for record in result.records] == [1, 2, 3, 4, 5]
+    assert result.records[1].metadata["position_id"] == "pos-1"
+    assert result.records[3].rule_reason_code == "runtime_close_flat_proof"
+
+
+def test_replay_campaign_transitions_stops_on_invalid_path():
+    result = replay_campaign_transitions(
+        initial_state="hard_locked",
+        transitions=[
+            CampaignTransitionInput(
+                target_state="armed",
+                trigger="owner_arm",
+                reason="bad rearm",
+                updated_by="owner",
+                occurred_at_ms=1,
+            ),
+            CampaignTransitionInput(
+                target_state="closed",
+                trigger="position_closed",
+                reason="should not be reached",
+                updated_by="runtime",
+                occurred_at_ms=2,
+            ),
+        ],
+    )
+
+    assert not result.accepted
+    assert result.final_state == CampaignRuntimeState.HARD_LOCKED
+    assert len(result.records) == 1
+    assert "hard_locked->armed via owner_arm" in (result.rejection_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_runtime_event_from_observe_cannot_arm_campaign():
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+
+    await service.initialize()
+
+    with pytest.raises(ValueError, match="observe->armed via entry_filled"):
+        await service.apply_runtime_event(
+            event=CampaignRuntimeEvent.ENTRY_FILLED,
+            reason="unexpected fill without owner arm",
+        )
+
+    assert service.get_state().status == "observe"
+    assert service.get_transition_audit_records()[-1].accepted is False
+
+
+@pytest.mark.asyncio
+async def test_runtime_transition_audit_records_context_metadata():
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+
+    await service.initialize()
+    await service.set_state(
+        status="armed",
+        reason="owner arm",
+        updated_by="owner",
+        active_strategy_contract_id="strategy-test",
+        active_session_id="session-test",
+        symbol="ETH/USDT:USDT",
+        profile_id="phase5-testnet",
+    )
+    await service.apply_runtime_event(
+        event=CampaignRuntimeEvent.ENTRY_FILLED,
+        reason="entry filled",
+        position_id="pos-1",
+        signal_id="sig-1",
+        order_id="order-1",
+    )
+
+    records = service.get_transition_audit_records()
+    assert records[0].rule_reason_code == "owner_arm_to_bounded_session"
+    assert records[0].metadata["symbol"] == "ETH/USDT:USDT"
+    assert records[1].rule_reason_code == "entry_filled_state_retained"
+    assert records[1].metadata["position_id"] == "pos-1"
+    assert records[1].to_log_dict()["next_state"] == "armed"

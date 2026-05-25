@@ -1,9 +1,10 @@
 # PLC Campaign Risk State Machine Spec
 
 Date: 2026-05-25
-Status: DESIGN_REVIEW
+Status: REVIEW
 
-Runtime effect: none
+Runtime effect: application-layer campaign state validation hardened; no
+runtime process started by this document
 
 Trading permission effect: none
 
@@ -38,6 +39,35 @@ authorization.
 6. `closed -> observe` requires no active position, no open exchange orders,
    no severe reconciliation mismatch, and Owner review.
 
+## PLC-STATE-001 Implementation Proof
+
+`src/application/campaign_state_service.py` now exposes the campaign state
+machine as a table-driven local core:
+
+- `CampaignTransitionTrigger` names Owner and runtime triggers explicitly.
+- `CampaignTransitionRule` records source state, target state, trigger,
+  reason code, owner-review requirement, flat-proof requirement, and whether
+  the path exists to allow risk-reducing close.
+- `CampaignTransitionRecord` provides audit-ready transition records with
+  sequence number, previous state, target/next state, trigger, reason,
+  updated_by, active strategy/session ids, and context metadata.
+- `replay_campaign_transitions(...)` replays a sequence deterministically and
+  stops at the first invalid transition.
+
+Accepted local proof path:
+
+`observe --owner_arm--> armed --entry_filled--> armed --profit_protect_triggered--> profit_protect --position_closed--> closed --owner_review_reset--> observe`
+
+Rejected local proof path:
+
+`hard_locked --owner_arm--> armed`
+
+Important semantic lock:
+
+- `entry_filled` can confirm an already `armed` session, but it cannot move
+  `observe` to `armed`; Owner arm remains the only accepted transition for
+  arming a bounded campaign session.
+
 ## Phase 3 Enforcement
 
 For PLC Phase 3, this state machine is used as an acceptance boundary:
@@ -55,6 +85,15 @@ For PLC Phase 3, this state machine is used as an acceptance boundary:
 - Trigger reason for any transition.
 - Final state after reconciliation.
 - Operator/Owner review note if moving from `closed` back to `observe`.
+
+## Verification
+
+- `pytest -q tests/unit/test_p4_campaign_state_service.py` passed with 11
+  tests on 2026-05-25.
+
+No runtime start, exchange call, testnet order, migration, runtime profile
+change, strategy parameter change, real live action, commit, or push was
+performed for PLC-STATE-001.
 
 ## Non-Goals
 
