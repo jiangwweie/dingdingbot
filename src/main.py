@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import signal as sys_signal
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List
@@ -68,6 +69,7 @@ from src.domain.models import KlineData
 from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, ConnectionLostError
 from src.infrastructure.logger import logger, setup_logger, register_secret
 from src.infrastructure.database import close_db, validate_pg_core_configuration
+from src.infrastructure.connection_pool import close_all_connections
 from src.infrastructure.strategy_signal_v2_observe_sink import (
     DEFAULT_STRATEGY_SIGNAL_V2_OBSERVE_PATH,
     StrategySignalV2ObserveSink,
@@ -102,6 +104,7 @@ _periodic_reconciliation_task: Optional[asyncio.Task] = None
 _snapshot_update_task: Optional[asyncio.Task] = None
 _ws_task: Optional[asyncio.Task] = None
 _api_task: Optional[asyncio.Task] = None
+_api_server: Optional[object] = None
 
 
 class _CapitalProtectionNotifierAdapter:
@@ -411,35 +414,60 @@ async def _cancel_ws_task() -> None:
 
 async def _cancel_api_task() -> None:
     """Cancel, await, and clear the embedded API server task."""
-    global _api_task
+    global _api_task, _api_server
 
     task = _api_task
     if task is None:
+        _api_server = None
         return
+
+    if _api_server is not None:
+        try:
+            setattr(_api_server, "should_exit", True)
+        except Exception:
+            logger.warning("API server shutdown flag could not be set", exc_info=True)
 
     if not task.done():
         task.cancel()
 
     try:
-        await task
+        await asyncio.wait_for(task, timeout=10)
     except asyncio.CancelledError:
         pass
+    except TimeoutError:
+        logger.warning("API server task did not stop within timeout; cancelling")
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     except Exception as e:
         logger.warning(f"API server task shutdown error: {e}", exc_info=True)
     finally:
         _api_task = None
+        _api_server = None
 
 
 # ============================================================
 # Signal Handlers
 # ============================================================
+def _request_runtime_shutdown(source: str) -> None:
+    """Request runtime shutdown; cleanup is centralized in run_application."""
+    logger.info("Runtime shutdown requested: source=%s", source)
+    _block_startup_guard_for_shutdown(source)
+    if _shutdown_event is None:
+        logger.warning("Shutdown requested before shutdown event was initialized")
+        return
+    _shutdown_event.set()
+
+
 def setup_signal_handlers(loop: asyncio.AbstractEventLoop):
     """Set up graceful shutdown signal handlers"""
     for sig in (sys_signal.SIGINT, sys_signal.SIGTERM):
         try:
             loop.add_signal_handler(
                 sig,
-                lambda: asyncio.create_task(graceful_shutdown())
+                lambda sig=sig: _request_runtime_shutdown(sig.name),
             )
         except NotImplementedError:
             # Windows doesn't support add_signal_handler
@@ -453,73 +481,7 @@ async def graceful_shutdown():
     """
     logger.info("Graceful shutdown initiated...")
 
-    global _shutdown_event, _exchange_gateway, _order_lifecycle_service, _capital_protection
-    global _execution_orchestrator
-    global _execution_intent_repo, _order_repo, _position_repo, _execution_recovery_repo
-    global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
-    global _reconciliation_read_model_repo, _protection_health_monitor, _external_close_monitor
-    global _snapshot_update_task, _ws_task, _api_task
-    global _startup_trading_guard_service, _account_risk_service, _campaign_state_service
-    _block_startup_guard_for_shutdown("graceful_shutdown")
-    _shutdown_event.set()
-
-    if _ws_task:
-        await _cancel_ws_task()
-
-    if _api_task:
-        await _cancel_api_task()
-
-    if _snapshot_update_task:
-        await _cancel_snapshot_update_task()
-
-    if _periodic_reconciliation_task:
-        await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
-        _periodic_reconciliation_task = None
-    _reconciliation_read_model_repo = None
-    _protection_health_monitor = None
-
-    if _order_watch_tasks:
-        await _cancel_order_watch_tasks(_order_watch_tasks)
-        _order_watch_tasks = []
-
-    if _exchange_gateway:
-        await _exchange_gateway.close()
-        _exchange_gateway = None
-
-    if _order_lifecycle_service:
-        await _order_lifecycle_service.stop()
-        _order_lifecycle_service = None
-
-    if _execution_intent_repo:
-        await _execution_intent_repo.close()
-        _execution_intent_repo = None
-
-    if _order_repo:
-        await _order_repo.close()
-        _order_repo = None
-
-    if _position_repo:
-        await _position_repo.close()
-        _position_repo = None
-
-    # PG 正式恢复表
-    if _execution_recovery_repo:
-        await _execution_recovery_repo.close()
-        _execution_recovery_repo = None
-
-    await close_db()
-    _runtime_config_provider = None
-    _capital_protection = None
-    _execution_orchestrator = None
-    _startup_trading_guard_service = None
-    _account_risk_service = None
-    _campaign_state_service = None
-    _reconciliation_read_model_repo = None
-    _protection_health_monitor = None
-    _external_close_monitor = None
-
-    await _log_pending_runtime_tasks("graceful_shutdown")
-    logger.info("Shutdown complete")
+    _request_runtime_shutdown("graceful_shutdown")
 
 
 # ============================================================
@@ -552,6 +514,35 @@ def get_signal_pipeline() -> Optional[SignalPipeline]:
     return _signal_pipeline
 
 
+async def _close_runtime_resource(name: str, resource: object) -> None:
+    """Close an optional runtime resource without masking later cleanup."""
+    close_method = getattr(resource, "close", None)
+    if close_method is None:
+        return
+    try:
+        result = close_method()
+        if hasattr(result, "__await__"):
+            await result
+    except Exception as exc:
+        logger.warning("Runtime resource close failed: name=%s, error=%s", name, exc, exc_info=True)
+
+
+def _log_runtime_threads(context: str) -> None:
+    """Log non-daemon threads that could keep the process alive after shutdown."""
+    non_daemon_threads = [
+        (thread.name, thread.ident)
+        for thread in threading.enumerate()
+        if thread is not threading.main_thread() and not thread.daemon
+    ]
+    if not non_daemon_threads:
+        return
+    logger.warning(
+        "Runtime shutdown non-daemon threads after %s: %s",
+        context,
+        non_daemon_threads,
+    )
+
+
 # ============================================================
 # Main Application
 # ============================================================
@@ -562,11 +553,12 @@ async def run_application():
     """
     global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
     global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
-    global _capital_protection, _execution_orchestrator, _trace_service, _global_kill_switch_service
+    global _capital_protection, _execution_orchestrator, _execution_recovery_repo, _trace_service, _global_kill_switch_service
     global _startup_trading_guard_service, _protection_health_monitor, _external_close_monitor
     global _account_risk_service, _campaign_state_service
     global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
-    global _reconciliation_read_model_repo, _snapshot_update_task, _ws_task, _api_task
+    global _reconciliation_read_model_repo, _snapshot_update_task, _ws_task, _api_task, _api_server
+    global _signal_pipeline
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -1296,17 +1288,21 @@ async def run_application():
             log_level="warning",
             lifespan="off",
         )
-        api_server = uvicorn.Server(api_config)
-        _api_task = asyncio.create_task(api_server.serve(), name="api-server")
+        _api_server = uvicorn.Server(api_config)
+        _api_task = asyncio.create_task(_api_server.serve(), name="api-server")
 
         # Wait a moment for API server to initialize
         await asyncio.sleep(2)
-        logger.info(f"REST API server ready at http://{api_host}:{api_port}")
+        if _shutdown_event.is_set():
+            logger.info("Shutdown requested during API startup; proceeding to cleanup")
+        else:
+            logger.info(f"REST API server ready at http://{api_host}:{api_port}")
 
         # =============================================
         # Event Loop - Wait for shutdown
         # =============================================
-        await _shutdown_event.wait()
+        if not _shutdown_event.is_set():
+            await _shutdown_event.wait()
 
         await _cancel_ws_task()
         await _cancel_api_task()
@@ -1374,6 +1370,59 @@ async def run_application():
         _account_risk_service = None
         _campaign_state_service = None
 
+        if _order_lifecycle_service is not None:
+            try:
+                await _order_lifecycle_service.stop()
+            except Exception as exc:
+                logger.warning(
+                    "Order lifecycle service stop failed: %s",
+                    exc,
+                    exc_info=True,
+                )
+            else:
+                logger.info("Order lifecycle service stopped")
+            _order_lifecycle_service = None
+
+        if _signal_pipeline is not None:
+            await _close_runtime_resource("signal_pipeline", _signal_pipeline)
+            _signal_pipeline = None
+            _notification_service = None
+        elif _notification_service is not None:
+            await _close_runtime_resource("notification_service", _notification_service)
+            _notification_service = None
+
+        if 'config_manager' in locals():
+            await _close_runtime_resource("config_manager", config_manager)
+
+        if 'signal_repository' in locals():
+            await _close_runtime_resource("signal_repository", signal_repository)
+
+        if 'daily_risk_stats_repo' in locals() and daily_risk_stats_repo is not None:
+            await _close_runtime_resource("daily_risk_stats_repo", daily_risk_stats_repo)
+
+        if _execution_recovery_repo is not None:
+            await _close_runtime_resource("execution_recovery_repo", _execution_recovery_repo)
+            _execution_recovery_repo = None
+
+        if _execution_intent_repo is not None:
+            await _close_runtime_resource("execution_intent_repo", _execution_intent_repo)
+            _execution_intent_repo = None
+
+        if _order_repo is not None:
+            await _close_runtime_resource("order_repo", _order_repo)
+            _order_repo = None
+
+        if _position_repo is not None:
+            await _close_runtime_resource("position_repo", _position_repo)
+            _position_repo = None
+
+        if _reconciliation_read_model_repo is not None:
+            await _close_runtime_resource(
+                "reconciliation_read_model_repo",
+                _reconciliation_read_model_repo,
+            )
+            _reconciliation_read_model_repo = None
+
         # Close ConfigEntryRepository
         if _config_entry_repo:
             await _config_entry_repo.close()
@@ -1393,6 +1442,8 @@ async def run_application():
 
         await close_db()
         logger.info("Database engines closed")
+        await close_all_connections()
+        logger.info("SQLite connection pool closed")
 
         _capital_protection = None
         _execution_orchestrator = None
@@ -1405,6 +1456,7 @@ async def run_application():
         _snapshot_update_task = None
         _ws_task = None
         _api_task = None
+        _api_server = None
 
         await _log_pending_runtime_tasks("run_application.finally")
         logger.info("Application shutdown complete")
@@ -1418,19 +1470,23 @@ def main():
     Main entry point.
     Sets up event loop and runs the application.
     """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        # Create event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        # Run application
         loop.run_until_complete(run_application())
-
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     except Exception as e:
         logger.error(f"Failed to start: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.run_until_complete(loop.shutdown_default_executor())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+            _log_runtime_threads("main.loop_closed")
 
 
 if __name__ == "__main__":

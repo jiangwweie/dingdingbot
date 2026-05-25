@@ -1142,6 +1142,58 @@ class ExchangeGateway:
                 error_message=f"下单失败：{str(e)}",
             )
 
+    async def _cancel_conditional_open_order_if_visible(
+        self,
+        exchange_order_id: str,
+        symbol: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Cancel Binance futures conditional orders visible only in stop-order views."""
+        try:
+            raw_orders = await self.rest_exchange.fetch_open_orders(symbol, params={"stop": True})
+        except Exception as exc:
+            logger.warning(
+                "Conditional open-order lookup failed during cancel fallback: "
+                "symbol=%s exchange_order_id=%s error=%s",
+                symbol,
+                exchange_order_id,
+                exc,
+                exc_info=True,
+            )
+            return None
+
+        for raw_order in raw_orders or []:
+            if not self._raw_order_matches(
+                raw_order,
+                exchange_order_id=exchange_order_id,
+                client_order_id=None,
+                expected_symbol=symbol,
+            ):
+                continue
+            logger.warning(
+                "Order cancel fallback matched conditional open order: "
+                "symbol=%s exchange_order_id=%s",
+                symbol,
+                exchange_order_id,
+            )
+            try:
+                return await self.rest_exchange.cancel_order(
+                    exchange_order_id,
+                    symbol,
+                    params={"stop": True},
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Conditional order cancel fallback failed: "
+                    "symbol=%s exchange_order_id=%s error=%s",
+                    symbol,
+                    exchange_order_id,
+                    exc,
+                    exc_info=True,
+                )
+                return None
+
+        return None
+
     async def cancel_order(self, exchange_order_id: str, symbol: str) -> OrderCancelResult:
         """
         取消订单
@@ -1166,7 +1218,7 @@ class ExchangeGateway:
             order = await self.rest_exchange.cancel_order(exchange_order_id, symbol)
 
             # 解析订单状态
-            order_status = self._parse_order_status(order.get('status', 'canceled'))
+            order_status = self._parse_order_status(order.get('status') or 'canceled')
 
             if order_status == OrderStatus.FILLED:
                 raise OrderAlreadyFilledError(f"订单已成交，无法取消：{exchange_order_id}", "F-013")
@@ -1180,6 +1232,22 @@ class ExchangeGateway:
             )
 
         except ccxt.OrderNotFound as e:
+            order = await self._cancel_conditional_open_order_if_visible(
+                exchange_order_id,
+                symbol,
+            )
+            if order is not None:
+                order_status = self._parse_order_status(order.get('status') or 'canceled')
+                if order_status == OrderStatus.FILLED:
+                    raise OrderAlreadyFilledError(f"订单已成交，无法取消：{exchange_order_id}", "F-013")
+                return OrderCancelResult(
+                    order_id=exchange_order_id,
+                    exchange_order_id=order.get('id'),
+                    symbol=symbol,
+                    status=order_status,
+                    message="Conditional order canceled successfully",
+                )
+
             logger.warning(f"订单不存在：{e}")
             raise OrderNotFoundError(f"订单不存在：{exchange_order_id}", "F-012")
 

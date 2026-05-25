@@ -645,3 +645,74 @@ Use this file for session progress and handoff notes.
   real account mutation was performed.
 - Current verdict:
   `phase4_hardening_local_complete / real_live_not_authorized / runtime_smoke_pending`.
+
+## 2026-05-25 (PLC Phase 4 Runtime/Testnet Smoke Completion)
+
+- Repaired the clean PG Alembic path after clearing disposable local PG data:
+  - migration `002_create_orders_positions` no longer references `signals`
+    before `signals` exists on a clean schema;
+  - migration `009_add_exit_order_role` now drops either historical
+    `ck_orders_order_role` or `check_orders_order_role` before recreating the
+    order-role constraint;
+  - clean local PG `alembic upgrade head` reached `010 (head)`.
+- Restored runtime PG schema/profile state after the clean migration proof:
+  - `PGCoreBase.metadata.create_all()` initialized the current runtime tables;
+  - `sim1_eth_runtime` was reseeded as the active read-only runtime profile;
+  - GKS was seeded active with reason
+    `P4 lifecycle smoke default safe state`;
+  - `CampaignStateService` restored `runtime:default` as `observe`.
+- Fixed runtime lifecycle shutdown:
+  - signal handlers now request shutdown only; cleanup is centralized in
+    `run_application()`;
+  - the embedded uvicorn server gets `should_exit=True` and a bounded await;
+  - `SignalPipeline`, `ConfigManager`, runtime repositories, PG engines,
+    SQLite pooled connections, and the event-loop default executor are closed;
+  - startup guard is reset to `RUNTIME_SHUTDOWN_RESET` during shutdown.
+- No-order testnet lifecycle smoke passed:
+  - health check `ok`;
+  - startup guard initial `armed=false`;
+  - GKS `active=true`;
+  - campaign state `observe`;
+  - manual startup-guard arm then block worked;
+  - runtime exited naturally after SIGTERM;
+  - port `8001` released;
+  - no `Runtime shutdown non-daemon threads` warning;
+  - no `PROTECTION_ORPHAN_REDUCE_ONLY_ORDER` block.
+- Active-position Binance testnet smoke passed after fixing conditional order
+  cancellation:
+  - controlled ENTRY succeeded: `intent_4e135118e8be`,
+    `sig_5faab5666eeb`, amount `0.01`, notional `21.086`;
+  - during active exposure, direct read-only testnet check showed position qty
+    `0.01`, normal open orders `2`, conditional stop open orders `1`, and
+    stop reduce-only count `1`;
+  - periodic reconciliation reported `consistent` while the exchange-native SL
+    was active;
+  - no protection-health missing/orphan block appeared in the runtime log;
+  - controlled close returned `FILLED` with EXIT
+    `exit_controlled_f46d6fb36279`, exchange order `8728507418`, and
+    terminalized protection orders `3`;
+  - runtime close canceled the Binance conditional SL through the stop-order
+    fallback path;
+  - final direct read-only testnet check showed position qty `0`, normal open
+    orders `0`, and conditional stop open orders `0`;
+  - GKS was restored active, campaign state reset to `observe`, startup guard
+    blocked, runtime exited naturally, and port `8001` released.
+- Additional finding during smoke:
+  - Binance testnet conditional SL cancellation can return not found through
+    the normal cancel endpoint while the order is still visible under
+    `fetch_open_orders(..., params={"stop": True})`;
+  - `ExchangeGateway.cancel_order()` now falls back to the stop-order view and
+    cancels with `params={"stop": True}` after matching the same exchange id;
+  - Binance may return `status=None` for that cancel response, which is now
+    treated as `canceled`.
+- Final targeted verification:
+  - `pytest -q tests/unit/test_p4_account_risk_service.py tests/unit/test_p4_campaign_state_service.py tests/unit/test_gks_v0_global_kill_switch.py tests/unit/test_ls003a_reconciliation_read_model.py tests/unit/test_tiny001d1b_sl_confirmation.py tests/unit/test_rtg002_ws_api_task_lifecycle.py tests/unit/test_tiny001d4_controlled_close.py`
+    passed with 81 tests;
+  - compileall passed for touched runtime/API/gateway/migration/test files;
+  - `git diff --check` passed;
+  - final Binance testnet read-only check for `ETH/USDT:USDT` showed position
+    qty `0`, normal open orders `0`, and conditional stop open orders `0`.
+- No real-live trading, real-funds operation, real runtime profile change, or
+  real account mutation was performed.
+- Current verdict:
+  `phase4_p4_001_to_p4_004_non_real_live_smoke_complete / real_live_not_authorized / strategy_promotion_still_blocked`.

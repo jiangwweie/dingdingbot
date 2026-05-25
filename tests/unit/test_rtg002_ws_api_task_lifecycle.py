@@ -12,16 +12,20 @@ import src.main as main_module
 def _reset_main_task_globals():
     original_ws_task = main_module._ws_task
     original_api_task = main_module._api_task
+    original_api_server = main_module._api_server
     original_snapshot_update_task = main_module._snapshot_update_task
     original_order_watch_tasks = list(main_module._order_watch_tasks)
     original_periodic_reconciliation_task = main_module._periodic_reconciliation_task
+    original_shutdown_event = main_module._shutdown_event
     original_startup_trading_guard_service = main_module._startup_trading_guard_service
     yield
     main_module._ws_task = original_ws_task
     main_module._api_task = original_api_task
+    main_module._api_server = original_api_server
     main_module._snapshot_update_task = original_snapshot_update_task
     main_module._order_watch_tasks = original_order_watch_tasks
     main_module._periodic_reconciliation_task = original_periodic_reconciliation_task
+    main_module._shutdown_event = original_shutdown_event
     main_module._startup_trading_guard_service = original_startup_trading_guard_service
 
 
@@ -89,11 +93,15 @@ async def test_cancel_api_task_handles_completed_task_and_clears_handle():
 @pytest.mark.asyncio
 async def test_cancel_api_task_cancels_running_task_and_clears_handle():
     task = asyncio.create_task(_running_forever())
+    server = type("Server", (), {"should_exit": False})()
     main_module._api_task = task
+    main_module._api_server = server
 
     await main_module._cancel_api_task()
 
     assert main_module._api_task is None
+    assert main_module._api_server is None
+    assert server.should_exit is True
     assert task.cancelled()
 
 
@@ -170,3 +178,15 @@ def test_shutdown_guard_reset_blocks_previously_armed_runtime():
     assert state.armed is False
     assert state.reason == "RUNTIME_SHUTDOWN_RESET"
     assert state.source == "unit_shutdown"
+
+
+def test_request_runtime_shutdown_sets_event_without_clearing_runtime_handles():
+    event = asyncio.Event()
+    api_task = object()
+    main_module._shutdown_event = event
+    main_module._api_task = api_task
+
+    main_module._request_runtime_shutdown("unit_signal")
+
+    assert event.is_set()
+    assert main_module._api_task is api_task

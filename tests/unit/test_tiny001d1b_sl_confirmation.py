@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import ccxt
 import pytest
 
 from src.application.execution_orchestrator import ExecutionOrchestrator
@@ -377,3 +378,56 @@ async def test_exchange_confirmation_accepts_recent_order_watch_evidence():
     )
 
     assert confirmed is True
+
+
+class _RestExchangeCancelConditionalFallback:
+    def __init__(self) -> None:
+        self.cancel_calls: list[tuple[str, str, dict | None]] = []
+        self.fetch_open_order_params: list[dict] = []
+
+    async def cancel_order(self, exchange_order_id: str, symbol: str, params=None):
+        self.cancel_calls.append((exchange_order_id, symbol, params))
+        if not params:
+            raise ccxt.OrderNotFound("normal cancel cannot see conditional order")
+        return {
+            "id": exchange_order_id,
+            "symbol": symbol,
+            "status": None,
+        }
+
+    async def fetch_open_orders(self, symbol: str, params=None):
+        params = params or {}
+        self.fetch_open_order_params.append(params)
+        if params.get("stop") is True:
+            return [
+                {
+                    "id": "1000000085011119",
+                    "symbol": symbol,
+                    "side": "sell",
+                    "type": "STOP_MARKET",
+                    "status": "open",
+                    "reduceOnly": True,
+                    "info": {
+                        "orderId": "1000000085011119",
+                        "reduceOnly": True,
+                        "stopPrice": "2085.38",
+                    },
+                }
+            ]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_cancel_order_falls_back_to_conditional_stop_order_cancel():
+    gateway = ExchangeGateway("binance", "key", "secret", testnet=True)
+    rest = _RestExchangeCancelConditionalFallback()
+    gateway.rest_exchange = rest
+
+    result = await gateway.cancel_order("1000000085011119", SYMBOL)
+
+    assert result.status == OrderStatus.CANCELED
+    assert {"stop": True} in rest.fetch_open_order_params
+    assert rest.cancel_calls == [
+        ("1000000085011119", SYMBOL, None),
+        ("1000000085011119", SYMBOL, {"stop": True}),
+    ]

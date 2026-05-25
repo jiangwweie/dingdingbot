@@ -86,11 +86,26 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   machine, conditional STOP_MARKET read-model visibility, and startup-guard
   shutdown reset. This is still not a real-live readiness claim until PG
   migration plus non-real-live runtime/testnet smoke evidence exists.
-- The current Alembic chain is not clean-install safe for PG: migration `002`
-  creates `orders` with a foreign key to `signals`, but a clean schema does not
-  have `signals` yet. Runtime `PGCoreBase.metadata.create_all()` can initialize
-  the core PG tables, but migration-chain repair or a baseline migration is
-  needed before treating Alembic head as the runtime schema authority.
+- The clean PG Alembic blocker found during Phase 4 has been repaired for the
+  current chain: migration `002` no longer references `signals` before it
+  exists, migration `009` handles both historical order-role constraint names,
+  and clean local PG `alembic upgrade head` reached `010 (head)`. `create_all`
+  is still used afterward to restore the current runtime model shape, so future
+  work should keep Alembic and `PGCoreBase` from drifting again.
+- PLC Phase 4 non-real-live smoke closed the first four blockers for review:
+  account/campaign gates were active in runtime, active testnet exposure saw
+  normal open orders `2` plus conditional stop open orders `1`, periodic
+  reconciliation was `consistent`, no protection-health missing/orphan block
+  appeared, controlled close returned `FILLED`, final testnet state was
+  position `0` / normal open `0` / stop open `0`, and shutdown released port
+  `8001` naturally.
+- Binance testnet conditional order cancellation needs a dedicated fallback:
+  normal `cancel_order(id, symbol)` can return `OrderNotFound` for a conditional
+  STOP_MARKET that is still visible through
+  `fetch_open_orders(symbol, params={"stop": True})`. Runtime cancellation now
+  verifies the same exchange id in the stop-order view and cancels with
+  `params={"stop": True}`; an empty Binance cancel `status` is interpreted as
+  `canceled`.
 
 ## 2026-05-09
 

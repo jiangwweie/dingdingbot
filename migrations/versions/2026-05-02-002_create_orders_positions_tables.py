@@ -41,7 +41,6 @@ def upgrade() -> None:
         sa.Column('created_at', sa.Integer(), nullable=False),
         sa.Column('updated_at', sa.Integer(), nullable=False),
         sa.PrimaryKeyConstraint('id'),
-        sa.ForeignKeyConstraint(['signal_id'], ['signals.id'], ondelete='CASCADE'),
         sa.CheckConstraint("direction IN ('LONG', 'SHORT')", name='check_orders_direction'),
         sa.CheckConstraint("status IN ('PENDING', 'OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED')", name='check_orders_status'),
         sa.CheckConstraint("order_type IN ('MARKET', 'LIMIT', 'STOP_MARKET', 'STOP_LIMIT', 'TRAILING_STOP')", name='check_orders_order_type'),
@@ -69,7 +68,6 @@ def upgrade() -> None:
         sa.Column('created_at', sa.Integer(), nullable=False),
         sa.Column('updated_at', sa.Integer(), nullable=False),
         sa.PrimaryKeyConstraint('id'),
-        sa.ForeignKeyConstraint(['signal_id'], ['signals.id'], ondelete='CASCADE'),
         sa.CheckConstraint("direction IN ('LONG', 'SHORT')", name='check_positions_direction'),
     )
 

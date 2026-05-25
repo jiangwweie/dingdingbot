@@ -8,6 +8,7 @@ Create Date: 2026-05-25
 from typing import Sequence, Union
 
 from alembic import op
+import sqlalchemy as sa
 
 
 revision: str = "009"
@@ -16,8 +17,21 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _drop_existing_order_role_constraint() -> None:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    names = {
+        constraint.get("name")
+        for constraint in inspector.get_check_constraints("orders")
+    }
+    for name in ("ck_orders_order_role", "check_orders_order_role"):
+        if name in names:
+            op.drop_constraint(name, "orders", type_="check")
+            return
+
+
 def upgrade() -> None:
-    op.drop_constraint("ck_orders_order_role", "orders", type_="check")
+    _drop_existing_order_role_constraint()
     op.create_check_constraint(
         "ck_orders_order_role",
         "orders",
@@ -26,7 +40,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_orders_order_role", "orders", type_="check")
+    _drop_existing_order_role_constraint()
     op.create_check_constraint(
         "ck_orders_order_role",
         "orders",

@@ -56,6 +56,7 @@ from src.infrastructure.core_repository_factory import (
     create_runtime_signal_repository,
 )
 from src.infrastructure.database import close_db, validate_pg_core_configuration
+from src.infrastructure.connection_pool import close_all_connections
 from src.application.config_manager import UserConfig, ConfigManager
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.capital_protection import CapitalProtectionManager
@@ -1048,6 +1049,8 @@ async def lifespan(app: FastAPI):
 
         await close_db()
         logger.info("Database engines closed in lifespan")
+        await close_all_connections()
+        logger.info("SQLite connection pool closed in lifespan")
 
 
 # ============================================================
