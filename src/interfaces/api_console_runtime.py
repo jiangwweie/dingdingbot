@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -29,6 +30,10 @@ from src.application.readmodels.runtime_portfolio import RuntimePortfolioReadMod
 from src.application.readmodels.runtime_positions import RuntimePositionsReadModel
 from src.application.readmodels.runtime_signals import RuntimeSignalsReadModel
 from src.application.campaign_state_service import CampaignRuntimeState
+from src.application.phase5e_rehearsal_feasibility import (
+    Phase5EControlledSymbolFeasibility,
+    assess_controlled_symbol_feasibility,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +218,51 @@ _CONTROLLED_SYMBOL = "ETH/USDT:USDT"
 _CONTROLLED_AMOUNT_MAX = Decimal("0.01")
 _CONTROLLED_PROFILE = "sim1_eth_runtime"
 _CONTROLLED_MIN_NOTIONAL_DEFAULT = Decimal("20")
+_PHASE5E_PROFILE = "phase5e_btc_eth_testnet_runtime"
+_PHASE5E_ALLOWED_SYMBOLS = {"ETH/USDT:USDT", "BTC/USDT:USDT"}
+_CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL: dict[str, bool] = {}
+_CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL: dict[str, bool] = {}
+
+
+@dataclass(frozen=True)
+class ControlledSymbolSpec:
+    symbol: str
+    amount_max: Decimal
+    profile: str
+    min_notional_default: Decimal
+    max_notional: Decimal | None = None
+    amount_step: Decimal | None = None
+
+    @property
+    def lock_key(self) -> str:
+        return f"{self.profile}:{self.symbol}"
+
+
+_LEGACY_CONTROLLED_SPEC = ControlledSymbolSpec(
+    symbol=_CONTROLLED_SYMBOL,
+    amount_max=_CONTROLLED_AMOUNT_MAX,
+    profile=_CONTROLLED_PROFILE,
+    min_notional_default=_CONTROLLED_MIN_NOTIONAL_DEFAULT,
+)
+
+_PHASE5E_CONTROLLED_SPECS: dict[str, ControlledSymbolSpec] = {
+    "eth": ControlledSymbolSpec(
+        symbol="ETH/USDT:USDT",
+        amount_max=Decimal("0.01"),
+        profile=_PHASE5E_PROFILE,
+        min_notional_default=Decimal("20"),
+        max_notional=Decimal("25"),
+        amount_step=Decimal("0.01"),
+    ),
+    "btc": ControlledSymbolSpec(
+        symbol="BTC/USDT:USDT",
+        amount_max=Decimal("0.002"),
+        profile=_PHASE5E_PROFILE,
+        min_notional_default=Decimal("100"),
+        max_notional=Decimal("250"),
+        amount_step=Decimal("0.001"),
+    ),
+}
 
 
 def _test_signal_injection_enabled() -> bool:
@@ -252,6 +302,7 @@ class ControlledEntryResponse(BaseModel):
     attempt_locked: bool = False
     notional: Optional[Decimal] = None
     min_notional: Optional[Decimal] = None
+    symbol: Optional[str] = None
 
 
 class ControlledCloseResponse(BaseModel):
@@ -265,6 +316,24 @@ class ControlledCloseResponse(BaseModel):
     testnet: Literal[True] = True
     profile: str = _CONTROLLED_PROFILE
     attempt_locked: bool = False
+    symbol: Optional[str] = None
+
+
+class Phase5EInventorySymbolState(BaseModel):
+    symbol: str
+    exchange_position_count: int
+    exchange_normal_open_order_count: int
+    exchange_conditional_open_order_count: int
+    local_active_position_count: int
+    local_open_order_count: int
+    flat: bool
+
+
+class Phase5EInventoryResponse(BaseModel):
+    profile: str
+    testnet: Literal[True] = True
+    symbols: list[Phase5EInventorySymbolState]
+    all_flat: bool
 
 
 def _get_account_snapshot(api_module):
@@ -315,12 +384,15 @@ def _extract_min_notional_from_market(market) -> Optional[Decimal]:
     return value
 
 
-def _get_controlled_min_notional(gateway) -> tuple[Decimal, str]:
+def _get_controlled_min_notional(
+    gateway,
+    spec: ControlledSymbolSpec = _LEGACY_CONTROLLED_SPEC,
+) -> tuple[Decimal, str]:
     for attr_name in ("get_min_notional", "min_notional_for_symbol"):
         attr = getattr(gateway, attr_name, None)
         if callable(attr):
             try:
-                value = _to_decimal(attr(_CONTROLLED_SYMBOL))
+                value = _to_decimal(attr(spec.symbol))
             except Exception:
                 value = None
             if value is not None:
@@ -328,22 +400,168 @@ def _get_controlled_min_notional(gateway) -> tuple[Decimal, str]:
 
     markets = getattr(gateway, "markets", None)
     if isinstance(markets, dict):
-        value = _extract_min_notional_from_market(markets.get(_CONTROLLED_SYMBOL))
+        value = _extract_min_notional_from_market(markets.get(spec.symbol))
         if value is not None:
             return value, "gateway.markets"
 
     market_metadata = getattr(gateway, "market_metadata", None)
     if isinstance(market_metadata, dict):
-        value = _extract_min_notional_from_market(market_metadata.get(_CONTROLLED_SYMBOL))
+        value = _extract_min_notional_from_market(market_metadata.get(spec.symbol))
         if value is not None:
             return value, "gateway.market_metadata"
 
     logger.warning(
         "Controlled signal injection using conservative default min_notional=%s for %s",
-        _CONTROLLED_MIN_NOTIONAL_DEFAULT,
-        _CONTROLLED_SYMBOL,
+        spec.min_notional_default,
+        spec.symbol,
     )
-    return _CONTROLLED_MIN_NOTIONAL_DEFAULT, "default"
+    return spec.min_notional_default, "default"
+
+
+def _resolve_phase5e_spec(symbol_key: str) -> ControlledSymbolSpec:
+    normalized = symbol_key.strip().lower()
+    spec = _PHASE5E_CONTROLLED_SPECS.get(normalized)
+    if spec is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Unsupported Phase 5E controlled symbol key; use eth or btc.",
+        )
+    return spec
+
+
+def _require_phase5e_runtime_scope(resolved) -> None:
+    if resolved.profile_name != _PHASE5E_PROFILE:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Endpoint requires RUNTIME_PROFILE={_PHASE5E_PROFILE}, got {resolved.profile_name}",
+        )
+    market = getattr(resolved, "market", None)
+    symbols = set(getattr(market, "symbols", []) or [])
+    if symbols != _PHASE5E_ALLOWED_SYMBOLS:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Endpoint requires Phase 5E market symbols exactly "
+                f"{sorted(_PHASE5E_ALLOWED_SYMBOLS)}, got {sorted(symbols)}"
+            ),
+        )
+
+
+async def _require_no_phase5e_active_positions(api_module, spec: ControlledSymbolSpec) -> None:
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None or not hasattr(position_repo, "list_active"):
+        raise HTTPException(status_code=503, detail="Position repository not initialized")
+    try:
+        active_positions = await position_repo.list_active(symbol=None, limit=10)
+    except Exception as exc:
+        logger.error("Failed to load active positions for Phase 5E entry: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="Failed to load active positions") from exc
+    if active_positions:
+        symbols = sorted({str(getattr(position, "symbol", "unknown")) for position in active_positions})
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "BLOCKED: Phase 5E allows at most one sequential active symbol; "
+                f"active positions present before {spec.symbol} entry: {symbols}"
+            ),
+        )
+
+
+async def _build_phase5e_feasibility(
+    *,
+    api_module,
+    spec: ControlledSymbolSpec,
+) -> Phase5EControlledSymbolFeasibility:
+    gateway = _get_gateway(api_module)
+    try:
+        last_price = await gateway.fetch_ticker_price(spec.symbol)
+    except Exception as exc:
+        logger.error("Failed to fetch market price for Phase 5E feasibility: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Failed to fetch market price") from exc
+
+    min_notional, min_notional_source = _get_controlled_min_notional(gateway, spec)
+    return assess_controlled_symbol_feasibility(
+        symbol=spec.symbol,
+        amount=spec.amount_max,
+        price=Decimal(str(last_price)),
+        min_notional=min_notional,
+        min_notional_source=min_notional_source,
+        max_notional=spec.max_notional,
+        amount_step=spec.amount_step,
+    )
+
+
+def _position_size_is_nonzero(position) -> bool:
+    for attr_name in ("size", "contracts", "current_qty", "quantity"):
+        value = getattr(position, attr_name, None)
+        if value is None:
+            continue
+        try:
+            return Decimal(str(value)) != Decimal("0")
+        except Exception:
+            return bool(value)
+    return False
+
+
+async def _fetch_phase5e_exchange_open_orders(gateway, symbol: str, params: Optional[dict] = None) -> list:
+    try:
+        if params is None:
+            return list(await gateway.fetch_open_orders(symbol))
+        return list(await gateway.fetch_open_orders(symbol, params=params))
+    except TypeError:
+        if params is None:
+            return list(await gateway.fetch_open_orders(symbol=symbol))
+        return list(await gateway.fetch_open_orders(symbol=symbol, params=params))
+
+
+async def _build_phase5e_inventory(api_module) -> Phase5EInventoryResponse:
+    gateway = _get_gateway(api_module)
+    position_repo = getattr(api_module, "_position_repo", None)
+    order_repo = getattr(api_module, "_order_repo", None)
+    if position_repo is None or not hasattr(position_repo, "list_active"):
+        raise HTTPException(status_code=503, detail="Position repository not initialized")
+    if order_repo is None or not hasattr(order_repo, "get_open_orders"):
+        raise HTTPException(status_code=503, detail="Order repository not initialized")
+
+    states: list[Phase5EInventorySymbolState] = []
+    for symbol in sorted(_PHASE5E_ALLOWED_SYMBOLS):
+        try:
+            exchange_positions = await gateway.fetch_positions(symbol=symbol)
+            exchange_normal_open_orders = await _fetch_phase5e_exchange_open_orders(gateway, symbol)
+            exchange_conditional_open_orders = await _fetch_phase5e_exchange_open_orders(
+                gateway,
+                symbol,
+                params={"stop": True},
+            )
+            local_active_positions = await position_repo.list_active(symbol=symbol, limit=20)
+            local_open_orders = await order_repo.get_open_orders(symbol)
+        except Exception as exc:
+            logger.error("Phase 5E inventory read failed for %s: %s", symbol, exc, exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Phase 5E inventory read failed for {symbol}") from exc
+
+        exchange_position_count = sum(1 for position in exchange_positions if _position_size_is_nonzero(position))
+        state = Phase5EInventorySymbolState(
+            symbol=symbol,
+            exchange_position_count=exchange_position_count,
+            exchange_normal_open_order_count=len(exchange_normal_open_orders),
+            exchange_conditional_open_order_count=len(exchange_conditional_open_orders),
+            local_active_position_count=len(local_active_positions),
+            local_open_order_count=len(local_open_orders),
+            flat=(
+                exchange_position_count == 0
+                and len(exchange_normal_open_orders) == 0
+                and len(exchange_conditional_open_orders) == 0
+                and len(local_active_positions) == 0
+                and len(local_open_orders) == 0
+            ),
+        )
+        states.append(state)
+
+    return Phase5EInventoryResponse(
+        profile=_PHASE5E_PROFILE,
+        symbols=states,
+        all_flat=all(state.flat for state in states),
+    )
 
 
 @router.get("/overview", response_model=RuntimeOverviewResponse)
@@ -956,4 +1174,362 @@ async def execute_controlled_close(request: Request) -> ControlledCloseResponse:
         terminalized_protection_orders=len(terminalized),
         profile=_CONTROLLED_PROFILE,
         attempt_locked=True,
+    )
+
+
+@router.post(
+    "/test/phase5e/{symbol_key}/execute-controlled-entry",
+    response_model=ControlledEntryResponse,
+)
+async def execute_phase5e_controlled_entry(
+    symbol_key: str,
+    request: Request,
+) -> ControlledEntryResponse:
+    """Phase 5E server-controlled BTC/ETH testnet entry.
+
+    The symbol is selected only from the fixed path keys `eth` or `btc`.
+    Amount, side, SL/TP, leverage, and profile remain server-controlled.
+    """
+    from src.domain.models import Direction, OrderStrategy, SignalResult
+
+    spec = _resolve_phase5e_spec(symbol_key)
+    if not _test_signal_injection_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Controlled signal injection disabled. "
+                f"Set {RUNTIME_TEST_SIGNAL_INJECTION_ENABLED_ENV}=true."
+            ),
+        )
+    if not _runtime_control_api_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Runtime control API disabled. "
+                f"Set {RUNTIME_CONTROL_API_ENABLED_ENV}=true."
+            ),
+        )
+
+    _require_internal_runtime_control(request)
+    await _reject_controlled_entry_body(request)
+
+    api_module = _load_api_module()
+    config_provider = getattr(api_module, "_runtime_config_provider", None)
+    resolved = config_provider.resolved_config if config_provider else None
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="Runtime config not resolved")
+    if not resolved.environment.exchange_testnet:
+        raise HTTPException(status_code=403, detail="Endpoint requires EXCHANGE_TESTNET=true")
+    _require_phase5e_runtime_scope(resolved)
+
+    if _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL.get(spec.lock_key):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Controlled entry already executed for {spec.symbol} in this runtime session",
+        )
+
+    orchestrator = _get_orchestrator(api_module)
+
+    guard_svc = getattr(api_module, "_startup_trading_guard_service", None)
+    if guard_svc is None or not guard_svc.is_armed():
+        raise HTTPException(status_code=409, detail="BLOCKED: startup guard not armed")
+
+    gks_svc = getattr(api_module, "_global_kill_switch_service", None)
+    if gks_svc is None:
+        raise HTTPException(status_code=503, detail="BLOCKED: GKS_SERVICE_UNAVAILABLE")
+    if gks_svc.is_active():
+        raise HTTPException(status_code=409, detail="BLOCKED: global kill switch active")
+
+    await _require_no_phase5e_active_positions(api_module, spec)
+
+    blocks = orchestrator.list_protection_health_blocks()
+    if spec.symbol in blocks:
+        raise HTTPException(
+            status_code=409,
+            detail=f"BLOCKED: protection-health block active for {spec.symbol}",
+        )
+
+    if orchestrator.is_symbol_blocked(spec.symbol):
+        raise HTTPException(
+            status_code=409,
+            detail=f"BLOCKED: circuit breaker active for {spec.symbol}",
+        )
+
+    feasibility = await _build_phase5e_feasibility(api_module=api_module, spec=spec)
+    entry_price = feasibility.price
+    sl_price = entry_price * Decimal("0.99")
+    tp1_price = entry_price * Decimal("1.01")
+    tp2_price = entry_price * Decimal("1.035")
+    amount = feasibility.amount
+    if feasibility.reason == "MIN_NOTIONAL_EXCEEDS_CAP":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "BLOCKED: Phase 5E min_notional exceeds symbol cap "
+                f"({feasibility.min_notional} > {feasibility.max_notional})"
+            ),
+        )
+    if feasibility.reason == "NOTIONAL_BELOW_MIN_NOTIONAL":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "BLOCKED: controlled entry notional below min_notional "
+                f"({feasibility.notional} < {feasibility.min_notional}, "
+                f"source={feasibility.min_notional_source})"
+            ),
+        )
+    if feasibility.reason == "NOTIONAL_ABOVE_CAP":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "BLOCKED: controlled entry notional above Phase 5E cap "
+                f"({feasibility.notional} > {feasibility.max_notional})"
+            ),
+        )
+
+    signal = SignalResult(
+        symbol=spec.symbol,
+        timeframe="1h",
+        direction=Direction.LONG,
+        entry_price=entry_price,
+        suggested_stop_loss=sl_price,
+        suggested_position_size=amount,
+        current_leverage=1,
+        tags=[{"key": "source", "value": "runtime_test_endpoint_phase5e"}],
+        risk_reward_info="phase5e_controlled_test_smoke:1h:LONG",
+        status="PENDING",
+        strategy_name="phase5e_controlled_test_smoke",
+        score=1.0,
+        take_profit_levels=[
+            {"price": str(tp1_price), "ratio": "0.5"},
+            {"price": str(tp2_price), "ratio": "0.5"},
+        ],
+    )
+
+    strategy = OrderStrategy(
+        id=f"strat_phase5e_controlled_{symbol_key.lower()}",
+        name=f"phase5e_controlled_test_smoke/{spec.profile}/{spec.symbol}",
+        tp_levels=2,
+        tp_ratios=[Decimal("0.5"), Decimal("0.5")],
+        tp_targets=[Decimal("1.0"), Decimal("3.5")],
+        initial_stop_loss_rr=Decimal("-1.0"),
+        trailing_stop_enabled=False,
+        oco_enabled=True,
+    )
+
+    _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL[spec.lock_key] = True
+    try:
+        intent = await orchestrator.execute_signal(signal, strategy)
+    except Exception as exc:
+        logger.error("Phase 5E controlled entry execution failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Execution failed") from exc
+
+    trace_svc = _get_trace_service(api_module)
+    if trace_svc is not None:
+        try:
+            trace_svc.emit_risk_decision(
+                lifecycle_id=intent.id,
+                decision="executed",
+                reason="phase5e_controlled_test_signal_injection",
+                metadata={
+                    "symbol": spec.symbol,
+                    "direction": "LONG",
+                    "amount": str(amount),
+                    "profile": spec.profile,
+                    "testnet": True,
+                    "source": "runtime_test_endpoint_phase5e",
+                    "entry_price": str(entry_price),
+                    "stop_loss": str(sl_price),
+                    "tp1": str(tp1_price),
+                    "tp2": str(tp2_price),
+                    "notional": str(feasibility.notional),
+                    "min_notional": str(feasibility.min_notional),
+                    "min_notional_source": feasibility.min_notional_source,
+                    "max_notional": str(spec.max_notional) if spec.max_notional is not None else None,
+                    "max_order_submissions_per_symbol": 5,
+                    "attempt_locked": True,
+                },
+                event_type="control.phase5e_test_signal_injection",
+            )
+        except Exception as exc:
+            logger.warning("Phase 5E controlled entry trace emit failed: %s", exc, exc_info=True)
+
+    return ControlledEntryResponse(
+        status=intent.status.value if hasattr(intent.status, "value") else str(intent.status),
+        intent_id=intent.id,
+        signal_id=intent.signal_id,
+        entry_price=entry_price,
+        stop_loss=sl_price,
+        amount=amount,
+        profile=spec.profile,
+        blocked_reason=getattr(intent, "blocked_reason", None),
+        attempt_locked=True,
+        notional=feasibility.notional,
+        min_notional=feasibility.min_notional,
+        symbol=spec.symbol,
+    )
+
+
+@router.get(
+    "/test/phase5e/{symbol_key}/feasibility",
+    response_model=Phase5EControlledSymbolFeasibility,
+)
+async def get_phase5e_symbol_feasibility(
+    symbol_key: str,
+    request: Request,
+) -> Phase5EControlledSymbolFeasibility:
+    """Read-only Phase 5E fixed cap/min-notional feasibility preflight."""
+    spec = _resolve_phase5e_spec(symbol_key)
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    config_provider = getattr(api_module, "_runtime_config_provider", None)
+    resolved = config_provider.resolved_config if config_provider else None
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="Runtime config not resolved")
+    if not resolved.environment.exchange_testnet:
+        raise HTTPException(status_code=403, detail="Endpoint requires EXCHANGE_TESTNET=true")
+    _require_phase5e_runtime_scope(resolved)
+    return await _build_phase5e_feasibility(api_module=api_module, spec=spec)
+
+
+@router.get(
+    "/test/phase5e/inventory",
+    response_model=Phase5EInventoryResponse,
+)
+async def get_phase5e_inventory(
+    request: Request,
+) -> Phase5EInventoryResponse:
+    """Read-only Phase 5E BTC/ETH exchange+PG flatness inventory."""
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    config_provider = getattr(api_module, "_runtime_config_provider", None)
+    resolved = config_provider.resolved_config if config_provider else None
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="Runtime config not resolved")
+    if not resolved.environment.exchange_testnet:
+        raise HTTPException(status_code=403, detail="Endpoint requires EXCHANGE_TESTNET=true")
+    _require_phase5e_runtime_scope(resolved)
+    return await _build_phase5e_inventory(api_module)
+
+
+@router.post(
+    "/test/phase5e/{symbol_key}/execute-controlled-close",
+    response_model=ControlledCloseResponse,
+)
+async def execute_phase5e_controlled_close(
+    symbol_key: str,
+    request: Request,
+) -> ControlledCloseResponse:
+    """Phase 5E server-controlled reduce-only close for one fixed symbol."""
+    spec = _resolve_phase5e_spec(symbol_key)
+    if not _test_signal_injection_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Controlled signal injection disabled. "
+                f"Set {RUNTIME_TEST_SIGNAL_INJECTION_ENABLED_ENV}=true."
+            ),
+        )
+    if not _runtime_control_api_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Runtime control API disabled. "
+                f"Set {RUNTIME_CONTROL_API_ENABLED_ENV}=true."
+            ),
+        )
+
+    _require_internal_runtime_control(request)
+    await _reject_controlled_entry_body(request)
+
+    api_module = _load_api_module()
+    config_provider = getattr(api_module, "_runtime_config_provider", None)
+    resolved = config_provider.resolved_config if config_provider else None
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="Runtime config not resolved")
+    if not resolved.environment.exchange_testnet:
+        raise HTTPException(status_code=403, detail="Endpoint requires EXCHANGE_TESTNET=true")
+    _require_phase5e_runtime_scope(resolved)
+
+    if _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL.get(spec.lock_key):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Controlled close already executed for {spec.symbol} in this runtime session",
+        )
+
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None or not hasattr(position_repo, "list_active"):
+        raise HTTPException(status_code=503, detail="Position repository not initialized")
+    try:
+        active_positions = await position_repo.list_active(symbol=spec.symbol, limit=10)
+    except Exception as exc:
+        logger.error("Failed to load active positions for Phase 5E close: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="Failed to load active positions") from exc
+
+    if len(active_positions) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Controlled close requires exactly one active local position "
+                f"for {spec.symbol}; found {len(active_positions)}"
+            ),
+        )
+    position = active_positions[0]
+    amount = Decimal(str(getattr(position, "current_qty", "0")))
+    if amount <= Decimal("0") or amount > spec.amount_max:
+        raise HTTPException(status_code=409, detail=f"Controlled close amount out of bounds: {amount}")
+
+    orchestrator = _get_orchestrator(api_module)
+    _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL[spec.lock_key] = True
+    try:
+        result = await orchestrator.execute_controlled_close(
+            position=position,
+            reason="phase5e_controlled_test_runtime_close",
+            max_amount=spec.amount_max,
+        )
+    except Exception as exc:
+        logger.error("Phase 5E controlled close execution failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Controlled close failed") from exc
+
+    close_order = result["close_order"]
+    terminalized = result.get("terminalized_protection_orders") or []
+
+    trace_svc = _get_trace_service(api_module)
+    if trace_svc is not None:
+        try:
+            trace_svc.emit_risk_decision(
+                lifecycle_id=close_order.id,
+                decision="executed",
+                reason="phase5e_controlled_test_runtime_close",
+                metadata={
+                    "symbol": spec.symbol,
+                    "amount": str(amount),
+                    "profile": spec.profile,
+                    "testnet": True,
+                    "source": "runtime_test_endpoint_phase5e",
+                    "signal_id": close_order.signal_id,
+                    "exchange_order_id": close_order.exchange_order_id,
+                    "average_exec_price": str(close_order.average_exec_price)
+                    if close_order.average_exec_price is not None
+                    else None,
+                    "terminalized_protection_orders": len(terminalized),
+                    "max_order_submissions_per_symbol": 5,
+                    "attempt_locked": True,
+                },
+                event_type="control.phase5e_test_controlled_close",
+            )
+        except Exception as exc:
+            logger.warning("Phase 5E controlled close trace emit failed: %s", exc, exc_info=True)
+
+    return ControlledCloseResponse(
+        status=close_order.status.value if hasattr(close_order.status, "value") else str(close_order.status),
+        signal_id=close_order.signal_id,
+        close_order_id=close_order.id,
+        exchange_order_id=close_order.exchange_order_id,
+        amount=amount,
+        average_exec_price=close_order.average_exec_price,
+        terminalized_protection_orders=len(terminalized),
+        profile=spec.profile,
+        attempt_locked=True,
+        symbol=spec.symbol,
     )

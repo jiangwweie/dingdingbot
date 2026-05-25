@@ -1667,6 +1667,61 @@ class ExchangeGateway:
             logger.error(f"获取市场精度信息失败：{e} (symbol={symbol})")
             raise ValueError(f"无法获取 {symbol} 的市场精度信息：{e}")
 
+    def get_min_notional(self, symbol: str) -> Optional[Decimal]:
+        """Return the exchange market min notional if already available.
+
+        This is intentionally synchronous so local control/preflight endpoints
+        can read loaded market metadata without creating a hidden network call.
+        """
+        try:
+            markets = getattr(self.rest_exchange, "markets", None)
+            if not markets:
+                return None
+            try:
+                market = self.rest_exchange.market(symbol)
+            except Exception:
+                market = markets.get(symbol)
+            return self._extract_market_min_notional(market)
+        except Exception as exc:
+            logger.warning(
+                "Failed to extract min_notional from loaded market metadata: symbol=%s error=%s",
+                symbol,
+                exc,
+            )
+            return None
+
+    @staticmethod
+    def _extract_market_min_notional(market: Any) -> Optional[Decimal]:
+        if not isinstance(market, dict):
+            return None
+
+        limits = market.get("limits")
+        if isinstance(limits, dict):
+            cost = limits.get("cost")
+            if isinstance(cost, dict):
+                value = cost.get("min")
+                if value is not None:
+                    return Decimal(str(value))
+
+        value = market.get("min_notional") or market.get("minNotional")
+        if value is not None:
+            return Decimal(str(value))
+
+        info = market.get("info")
+        if isinstance(info, dict):
+            filters = info.get("filters")
+            if isinstance(filters, list):
+                for item in filters:
+                    if not isinstance(item, dict):
+                        continue
+                    filter_type = item.get("filterType")
+                    if filter_type in {"MIN_NOTIONAL", "NOTIONAL"}:
+                        value = item.get("notional") or item.get("minNotional")
+                        if value is not None:
+                            return Decimal(str(value))
+
+        return None
+
     # ============================================================
     # Helper Methods
     # ============================================================

@@ -200,3 +200,115 @@ Current status:
 Phase 5C verdict:
 
 `phase5c_two_symbol_synthetic_fixture_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`
+
+## Phase 5D - Two-Symbol Exchange Read-Only Rehearsal
+
+Status: REVIEW / EXCHANGE_READONLY_PASSED_AFTER_TESTNET_CLEANUP.
+
+Design artifact:
+
+- `docs/ops/plc-phase5d-two-symbol-exchange-readonly-rehearsal.md`
+
+Scope:
+
+- run BTC/ETH exchange-connected read-only visibility checks against Binance
+  testnet;
+- verify ticker, position, normal open-order, and conditional STOP-order
+  visibility for both symbols;
+- require final BTC/ETH flat/no-open-order state before any future
+  multi-symbol runtime discussion;
+- do not start runtime or change runtime profile/config.
+
+Current status:
+
+- official Binance plugin returned public USDS futures book ticker data for
+  `ETHUSDT` and `BTCUSDT`;
+- initial project Binance testnet read-only check found BTC flat with 6
+  reduce-only orphan conditional orders;
+- bounded testnet cleanup canceled the 6 BTC reduce-only orphan conditional
+  orders after verifying BTC position `0` and normal open orders `0`;
+- final project Binance testnet read-only rehearsal passed for ETH and BTC:
+  positions `0`, normal open orders `0`, conditional open orders `0`;
+- multi-symbol runtime remains blocked.
+
+Phase 5D verdict:
+
+`phase5d_two_symbol_exchange_readonly_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`
+
+## Phase 5E - Controlled Multi-Symbol Testnet Runtime Rehearsal
+
+Status: REVIEW / ETH_AND_BTC_TESTNET_LEGS_PASSED.
+
+Design artifact:
+
+- `docs/ops/plc-phase5e-controlled-multi-symbol-testnet-runtime-rehearsal.md`
+
+Scope:
+
+- design one controlled BTC/ETH Binance testnet runtime rehearsal;
+- use one new readonly testnet profile
+  `phase5e_btc_eth_testnet_runtime`;
+- preserve `sim1_eth_runtime` unchanged;
+- add minimal multi-symbol market-scope config support;
+- use one runtime process with sequential ETH then BTC controlled exposure;
+- forbid simultaneous BTC+ETH exposure in the first 5E rehearsal.
+
+Proposed caps:
+
+- ETH max `0.01 ETH` / `25 USDT`;
+- BTC exchange-minimum viable quantity with `250 USDT` ceiling;
+- combined open exposure cap `250 USDT` because at most one symbol may be open
+  at a time;
+- max `5` order submissions per symbol;
+- final BTC/ETH positions `0`, exchange open orders `0`, and local active
+  orders `0`.
+
+Phase 5E verdict:
+
+`phase5e_eth_leg_passed / phase5e_btc_leg_blocked_by_min_notional_without_order / final_exchange_flat / real_live_not_authorized`
+
+`phase5e_btc_leg_passed / final_exchange_flat / final_pg_flat / controls_restored / real_live_not_authorized`
+
+Current status:
+
+- Owner authorized bounded Phase 5E testnet after design review;
+- minimal multi-symbol runtime scope and Phase 5E controlled endpoints were
+  implemented;
+- one runtime process started with BTC/ETH warmup and order-watch;
+- ETH controlled entry and runtime close passed;
+- BTC controlled entry was blocked before order placement because fixed
+  `0.001 BTC` notional was below min_notional and cap was not raised;
+- BTC blocker handling now reports next viable exchange-step evidence:
+  `0.002 BTC`, estimated `155.1012 USDT` at the observed blocked price, and
+  `25.1012 USDT` cap shortfall versus the previous `130 USDT` cap;
+- Owner later approved testnet operations without the prior minimum-capital
+  limitation, so the Phase 5E BTC retry spec is now `0.002 BTC` with max
+  notional `250 USDT`, testnet-only;
+- BTC retry passed with controlled entry `intent_ed2c999769bd` /
+  `sig_929aabc7d2ce`, runtime close `exit_controlled_657fa92707ee` /
+  exchange order `13192655923`, and terminalized protection orders `3`;
+- read-only Phase 5E inventory endpoint now standardizes BTC/ETH preflight and
+  final flatness evidence across exchange and PG state;
+- final direct Binance testnet and PG state were flat/no-open-orders.
+
+## Phase 5F - Long-Term Capability Planning
+
+Status: REVIEW / PLANNING_AUTHORITY_ONLY.
+
+Planning artifact:
+
+- `docs/ops/plc-long-term-capability-roadmap-v1.md`
+
+Scope:
+
+- convert the post-Phase-5E state into a long-term capability roadmap;
+- prioritize local campaign state-machine completion, account-level risk
+  states, multi-symbol runtime foundation, Strategy Contract promotion
+  governance, and standardized evidence/rollback;
+- avoid treating testnet authorization as authorization for real live,
+  simultaneous exposure, runtime default changes, or automatic
+  research-to-trade wiring.
+
+Phase 5F verdict:
+
+`long_term_capability_roadmap_added / next_recommended_task_campaign_state_transition_table / no_runtime_action / real_live_not_authorized`

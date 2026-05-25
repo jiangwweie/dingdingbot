@@ -57,17 +57,33 @@ class EnvironmentRuntimeConfig(BaseModel):
 class MarketRuntimeConfig(BaseModel):
     """Market universe and subscription scope for the frozen runtime profile."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     primary_symbol: str
     primary_timeframe: str
     mtf_timeframe: str
+    symbol_scope: Optional[tuple[str, ...]] = Field(
+        default=None,
+        alias="symbols",
+        serialization_alias="symbols",
+    )
     warmup_history_bars: int = Field(default=100, ge=1)
     asset_polling_interval: int = Field(default=60, ge=1)
 
+    @model_validator(mode="after")
+    def validate_symbol_scope(self) -> "MarketRuntimeConfig":
+        symbols = self.symbol_scope or (self.primary_symbol,)
+        if not symbols:
+            raise ValueError("runtime market scope requires at least one symbol")
+        if self.primary_symbol not in symbols:
+            raise ValueError("primary_symbol must be included in symbols")
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("runtime market symbols must be unique")
+        return self
+
     @property
     def symbols(self) -> list[str]:
-        return [self.primary_symbol]
+        return list(self.symbol_scope or (self.primary_symbol,))
 
     @property
     def timeframes(self) -> list[str]:
@@ -76,8 +92,9 @@ class MarketRuntimeConfig(BaseModel):
     @property
     def subscribed_pairs(self) -> list[tuple[str, str]]:
         return [
-            (self.primary_symbol, self.primary_timeframe),
-            (self.primary_symbol, self.mtf_timeframe),
+            (symbol, timeframe)
+            for symbol in self.symbols
+            for timeframe in self.timeframes
         ]
 
 
@@ -276,7 +293,7 @@ class ResolvedRuntimeConfig(BaseModel):
                 "exchange_testnet": self.environment.exchange_testnet,
                 "backend_port": self.environment.backend_port,
             },
-            "market": self.market.model_dump(mode="json"),
+            "market": self.market.model_dump(mode="json", by_alias=True, exclude_none=True),
             "strategy": self.strategy.model_dump(mode="json"),
             "risk": self.risk.model_dump(mode="json"),
             "execution": self.execution.model_dump(mode="json"),

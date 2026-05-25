@@ -36,8 +36,8 @@ from src.application.runtime_context import RuntimeContext
 from src.application.account_service import BinanceAccountService
 from src.application.account_risk_service import AccountRiskService
 from src.application.capital_protection import (
-    DAILY_RISK_STATS_SCOPE_KEY,
     CapitalProtectionManager,
+    resolve_daily_risk_stats_scope_key,
 )
 from src.application.campaign_state_service import CampaignStateService
 from src.application.decision_trace import TraceService
@@ -764,11 +764,18 @@ async def run_application():
         daily_risk_stats_repo = None
         restored_daily_stats = None
         daily_stats_persistence_available = True
+        daily_risk_stats_scope_key = resolve_daily_risk_stats_scope_key(
+            profile_name=(
+                _runtime_config_provider.resolved_config.profile_name
+                if _runtime_config_provider is not None
+                else None
+            )
+        )
         try:
             daily_risk_stats_repo = create_runtime_daily_risk_stats_repository()
             await daily_risk_stats_repo.initialize()
             restored_daily_stats = await daily_risk_stats_repo.restore_or_create(
-                DAILY_RISK_STATS_SCOPE_KEY,
+                daily_risk_stats_scope_key,
                 datetime.now(timezone.utc).date(),
             )
             logger.info(
@@ -795,7 +802,7 @@ async def run_application():
             trace_service=_trace_service,
             config_hash=_runtime_config_provider.config_hash if _runtime_config_provider is not None else None,
             daily_stats_repository=daily_risk_stats_repo,
-            daily_stats_scope_key=DAILY_RISK_STATS_SCOPE_KEY,
+            daily_stats_scope_key=daily_risk_stats_scope_key,
             restored_daily_stats=restored_daily_stats,
             daily_stats_persistence_required=True,
             daily_stats_persistence_available=daily_stats_persistence_available,

@@ -1,7 +1,7 @@
 # PLC Phased Upgrade v0
 
 Date: 2026-05-25
-Status: Phase 5D exchange read-only passed; real live not authorized
+Status: Phase 5E bounded testnet partial pass; real live not authorized
 
 ## Boundary
 
@@ -309,3 +309,93 @@ Current Phase 5D evidence:
 Phase 5D verdict:
 
 - `phase5d_two_symbol_exchange_readonly_passed / multi_symbol_runtime_still_blocked / real_live_not_authorized`
+
+### Phase 5E - Controlled Multi-Symbol Testnet Runtime Rehearsal
+
+Status: REVIEW / ETH_AND_BTC_TESTNET_LEGS_PASSED
+
+Design artifact:
+
+- `docs/ops/plc-phase5e-controlled-multi-symbol-testnet-runtime-rehearsal.md`
+
+Scope:
+
+- design a controlled BTC/ETH Binance testnet runtime rehearsal;
+- use one new readonly testnet profile,
+  `phase5e_btc_eth_testnet_runtime`;
+- preserve `sim1_eth_runtime` unchanged;
+- add only minimal multi-symbol market-scope config support;
+- run one runtime process with sequential ETH then BTC controlled exposure;
+- forbid simultaneous BTC+ETH exposure in the first 5E rehearsal;
+- keep real live, portfolio routing, strategy optimization, and autonomous
+  trade decisions blocked.
+
+Proposed caps:
+
+- ETH max amount `0.01 ETH` and max notional `25 USDT`;
+- BTC exchange-minimum viable quantity only, with max notional `250 USDT`;
+- combined open exposure cap `250 USDT` because at most one symbol may be open
+  at a time;
+- max `5` order submissions per symbol:
+  one ENTRY, two TP, one SL, one reduce-only CLOSE;
+- final BTC/ETH positions `0`, normal open orders `0`, conditional open orders
+  `0`, and local active orders `0`.
+
+Current Phase 5E evidence:
+
+- optional multi-symbol market scope added without breaking legacy
+  single-symbol profiles;
+- readonly inactive `phase5e_btc_eth_testnet_runtime` profile seeded;
+- one 5E runtime process started with BTC/ETH warmup `4/4`, BTC/ETH
+  reconciliation, and BTC/ETH order-watch;
+- ETH leg passed with controlled entry `intent_fca06be68891` /
+  `sig_39cb35ab8b3e` and runtime close
+  `exit_controlled_18ff201e1ec3` / exchange order `8728698638`;
+- BTC leg was blocked before order placement because `0.001 BTC` notional
+  `77.5506` was below min_notional default `100`; cap was not raised;
+- BTC blocker handling now reports next viable exchange-step evidence:
+  `0.002 BTC` at the observed price would be `155.1012 USDT`, exceeding the
+  previous `130 USDT` cap by `25.1012 USDT`;
+- Owner later approved testnet operations without the prior minimum-capital
+  limitation; the Phase 5E BTC retry spec is now `0.002 BTC` with max notional
+  `250 USDT`, testnet-only;
+- BTC retry passed with controlled entry `intent_ed2c999769bd` /
+  `sig_929aabc7d2ce`, amount `0.002`, notional `154.7836`, and runtime close
+  `exit_controlled_657fa92707ee` / exchange order `13192655923`;
+- BTC retry final direct Binance testnet and PG state were flat/no-open-orders,
+  controls restored, runtime stopped;
+- read-only Phase 5E inventory endpoint added for future BTC/ETH preflight and
+  final flatness evidence across exchange and PG state;
+- final direct Binance testnet state was ETH/BTC position `0`, normal open
+  orders `0`, conditional open orders `0`;
+- PG active positions and ETH/BTC open orders were empty;
+- runtime stopped and port `8001` released.
+
+Phase 5E verdict:
+
+- `phase5e_eth_leg_passed / phase5e_btc_leg_blocked_by_min_notional_without_order / final_exchange_flat / real_live_not_authorized`
+- `phase5e_btc_next_viable_decision_evidence_available`
+- `phase5e_btc_retry_authorized_for_testnet_only / btc_cap_250_usdt`
+- `phase5e_btc_leg_passed / final_exchange_flat / final_pg_flat / controls_restored / real_live_not_authorized`
+
+### Phase 5F - Long-Term Capability Planning
+
+Status: REVIEW / PLANNING_AUTHORITY_ONLY
+
+Planning artifact:
+
+- `docs/ops/plc-long-term-capability-roadmap-v1.md`
+
+Scope:
+
+- translate the Owner's long-term target into staged capabilities:
+  `controlled testnet tool -> reliable personal strategy execution platform`;
+- keep the next work focused on capability closure, not bigger testnet size;
+- separate campaign state, account state, multi-symbol foundation, Strategy
+  Contract promotion, and evidence/rollback into independent gates;
+- keep all runtime, paper, testnet, small-scale, and real-live moves behind
+  scoped verification plus explicit Owner authorization.
+
+Phase 5F verdict:
+
+- `long_term_capability_roadmap_added / next_recommended_task_campaign_state_transition_table / no_runtime_action / real_live_not_authorized`
