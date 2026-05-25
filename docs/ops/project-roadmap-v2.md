@@ -159,6 +159,11 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   explicit, transition records are replayable and audit-ready, and `entry_filled`
   cannot arm a campaign from `observe`. No additional testnet action was needed
   for this local proof.
+- PLC-STATE-002/003/004 completed the next local campaign state-machine layer:
+  durable transition ledger, PG replay proof, runtime event wiring from existing
+  order lifecycle callbacks, and a read-only replay evidence packet for future
+  bounded testnet rehearsals. This strengthens auditability without changing
+  runtime profile defaults or authorizing real live.
 
 The active research SSOT is:
 

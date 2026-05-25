@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Iterable, Optional
 
 from src.infrastructure.logger import logger
-from src.infrastructure.repository_ports import CampaignStateSnapshot
+from src.infrastructure.repository_ports import (
+    CampaignStateSnapshot,
+    CampaignStateTransitionLog,
+)
 
 
 CAMPAIGN_STATE_BLOCK_REASON = "CAMPAIGN_STATE_NOT_ARMED"
@@ -115,6 +118,20 @@ class CampaignReplayResult:
     initial_state: CampaignRuntimeState
     final_state: CampaignRuntimeState
     accepted: bool
+    records: tuple[CampaignTransitionRecord, ...]
+    rejection_reason: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CampaignReplayEvidence:
+    scope_key: str
+    initial_state: CampaignRuntimeState
+    replay_final_state: CampaignRuntimeState
+    snapshot_state: Optional[CampaignRuntimeState]
+    matches_snapshot: bool
+    accepted: bool
+    transition_count: int
+    rejected_transition_count: int
     records: tuple[CampaignTransitionRecord, ...]
     rejection_reason: Optional[str] = None
 
@@ -238,6 +255,14 @@ _TRANSITION_TABLE: tuple[CampaignTransitionRule, ...] = (
     ),
     CampaignTransitionRule(
         CampaignRuntimeState.PROFIT_PROTECT,
+        CampaignRuntimeState.PROFIT_PROTECT,
+        CampaignTransitionTrigger.PROFIT_PROTECT_TRIGGERED,
+        "profit_protect_event_state_retained",
+        "Repeated profit protection event keeps campaign in profit protection.",
+        allows_risk_reducing_close=True,
+    ),
+    CampaignTransitionRule(
+        CampaignRuntimeState.PROFIT_PROTECT,
         CampaignRuntimeState.PAUSED,
         CampaignTransitionTrigger.OWNER_PAUSE,
         "owner_pause_profit_protect",
@@ -268,6 +293,14 @@ _TRANSITION_TABLE: tuple[CampaignTransitionRule, ...] = (
         "runtime_close_flat_proof",
         "Runtime-managed close ends the campaign exposure.",
         requires_flat_proof=True,
+        allows_risk_reducing_close=True,
+    ),
+    CampaignTransitionRule(
+        CampaignRuntimeState.LOSS_LOCKED,
+        CampaignRuntimeState.LOSS_LOCKED,
+        CampaignTransitionTrigger.STOP_LOSS_FILLED,
+        "stop_loss_event_state_retained",
+        "Repeated stop-loss event keeps campaign loss-locked.",
         allows_risk_reducing_close=True,
     ),
     CampaignTransitionRule(
@@ -378,6 +411,87 @@ def replay_campaign_transitions(
     )
 
 
+def replay_campaign_transition_logs(
+    *,
+    scope_key: str,
+    initial_state: CampaignRuntimeState | str,
+    transitions: Iterable[CampaignStateTransitionLog],
+    snapshot_state: CampaignRuntimeState | str | None = None,
+) -> CampaignReplayEvidence:
+    current_state = _parse_campaign_state(initial_state)
+    parsed_snapshot_state = (
+        _parse_campaign_state(snapshot_state) if snapshot_state is not None else None
+    )
+    records: list[CampaignTransitionRecord] = []
+    rejection_reason: Optional[str] = None
+    rejected_count = 0
+
+    for transition in sorted(transitions, key=lambda item: item.sequence_number):
+        if transition.scope_key != scope_key:
+            rejection_reason = (
+                f"Ledger scope mismatch: expected {scope_key}, got {transition.scope_key}"
+            )
+            break
+        expected = _build_transition_record(
+            sequence_number=transition.sequence_number,
+            current_state=current_state,
+            target_state=_parse_campaign_state(transition.target_status),
+            trigger=_parse_campaign_trigger(transition.trigger),
+            reason=transition.reason,
+            updated_by=transition.updated_by,
+            occurred_at_ms=transition.occurred_at_ms,
+            active_strategy_contract_id=transition.active_strategy_contract_id,
+            active_session_id=transition.active_session_id,
+            metadata=dict(transition.metadata or {}),
+        )
+        persisted_next = _parse_campaign_state(transition.next_status)
+        if (
+            expected.accepted != transition.accepted
+            or expected.next_state != persisted_next
+        ):
+            rejection_reason = (
+                "Ledger replay mismatch at sequence "
+                f"{transition.sequence_number}: expected accepted={expected.accepted} "
+                f"next={expected.next_state.value}, persisted accepted={transition.accepted} "
+                f"next={persisted_next.value}"
+            )
+            records.append(
+                replace(
+                    expected,
+                    accepted=False,
+                    rejection_reason=rejection_reason,
+                )
+            )
+            break
+        records.append(expected)
+        if transition.accepted:
+            current_state = persisted_next
+        else:
+            rejected_count += 1
+
+    matches_snapshot = (
+        parsed_snapshot_state is None or current_state == parsed_snapshot_state
+    )
+    accepted = rejection_reason is None and matches_snapshot
+    if rejection_reason is None and not matches_snapshot:
+        rejection_reason = (
+            "Ledger replay final state does not match snapshot: "
+            f"replay={current_state.value}, snapshot={parsed_snapshot_state.value}"
+        )
+    return CampaignReplayEvidence(
+        scope_key=scope_key,
+        initial_state=_parse_campaign_state(initial_state),
+        replay_final_state=current_state,
+        snapshot_state=parsed_snapshot_state,
+        matches_snapshot=matches_snapshot,
+        accepted=accepted,
+        transition_count=len(records),
+        rejected_transition_count=rejected_count,
+        records=tuple(records),
+        rejection_reason=rejection_reason,
+    )
+
+
 class CampaignStateService:
     """Fail-closed persisted state machine for campaign runtime control."""
 
@@ -434,6 +548,36 @@ class CampaignStateService:
 
     def get_transition_table(self) -> tuple[CampaignTransitionRule, ...]:
         return get_campaign_transition_table()
+
+    async def get_transition_ledger(
+        self,
+        *,
+        limit: int = 500,
+    ) -> tuple[CampaignStateTransitionLog, ...]:
+        list_transitions = getattr(self._repository, "list_transitions", None)
+        if self._repository is None or not callable(list_transitions):
+            return tuple(_record_to_transition_log(self._scope_key, record) for record in self._audit_records)
+        return tuple(
+            await list_transitions(
+                self._scope_key,
+                limit=limit,
+            )
+        )
+
+    async def build_replay_evidence(
+        self,
+        *,
+        initial_state: CampaignRuntimeState | str = CampaignRuntimeState.OBSERVE,
+        limit: int = 500,
+    ) -> CampaignReplayEvidence:
+        snapshot = await self._refresh_state()
+        transitions = await self.get_transition_ledger(limit=limit)
+        return replay_campaign_transition_logs(
+            scope_key=self._scope_key,
+            initial_state=initial_state,
+            transitions=transitions,
+            snapshot_state=snapshot.status,
+        )
 
     async def evaluate_new_entry(
         self,
@@ -519,13 +663,14 @@ class CampaignStateService:
             metadata=transition_metadata,
         )
         if not record.accepted:
-            self._audit_records.append(record)
+            persisted_record = await self._persist_transition_record(record)
+            self._audit_records.append(persisted_record)
             logger.warning(
                 "[CampaignState] Rejected campaign state transition: %s",
-                record.to_log_dict(),
+                persisted_record.to_log_dict(),
             )
             raise ValueError(
-                record.rejection_reason
+                persisted_record.rejection_reason
                 or (
                     "Invalid campaign state transition: "
                     f"{current_state.value}->{target.value}"
@@ -535,15 +680,35 @@ class CampaignStateService:
         if self._repository is None:
             raise RuntimeError("Campaign state repository is unavailable")
 
-        snapshot = await self._repository.set_state(
-            scope_key=self._scope_key,
-            status=target.value,
-            reason=reason,
-            updated_by=updated_by,
-            updated_at_ms=self._now_ms(),
-            active_strategy_contract_id=active_strategy_contract_id,
-            active_session_id=active_session_id,
+        set_state_with_transition = getattr(
+            self._repository,
+            "set_state_with_transition",
+            None,
         )
+        if callable(set_state_with_transition):
+            transition_log = _record_to_transition_log(self._scope_key, record)
+            snapshot, persisted_transition = await set_state_with_transition(
+                scope_key=self._scope_key,
+                status=target.value,
+                reason=reason,
+                updated_by=updated_by,
+                updated_at_ms=self._now_ms(),
+                active_strategy_contract_id=active_strategy_contract_id,
+                active_session_id=active_session_id,
+                transition=transition_log,
+            )
+            record = _transition_log_to_record(persisted_transition)
+        else:
+            snapshot = await self._repository.set_state(
+                scope_key=self._scope_key,
+                status=target.value,
+                reason=reason,
+                updated_by=updated_by,
+                updated_at_ms=self._now_ms(),
+                active_strategy_contract_id=active_strategy_contract_id,
+                active_session_id=active_session_id,
+            )
+            record = await self._persist_transition_record(record)
         self._state = snapshot
         self._audit_records.append(record)
         logger.warning(
@@ -558,6 +723,25 @@ class CampaignStateService:
             record.to_log_dict(),
         )
         return snapshot
+
+    async def _persist_transition_record(
+        self,
+        record: CampaignTransitionRecord,
+    ) -> CampaignTransitionRecord:
+        record_transition = getattr(self._repository, "record_transition", None)
+        if self._repository is None or not callable(record_transition):
+            return record
+        transition_log = _record_to_transition_log(self._scope_key, record)
+        try:
+            persisted_transition = await record_transition(transition_log)
+        except Exception as exc:
+            logger.error(
+                "[CampaignState] Campaign transition ledger write failed: %s",
+                exc,
+                exc_info=True,
+            )
+            raise
+        return _transition_log_to_record(persisted_transition)
 
     async def apply_runtime_event(
         self,
@@ -728,6 +912,49 @@ def _parse_campaign_trigger(
         return CampaignTransitionTrigger(trigger)
     except ValueError as exc:
         raise ValueError(f"Unknown campaign transition trigger: {trigger}") from exc
+
+
+def _record_to_transition_log(
+    scope_key: str,
+    record: CampaignTransitionRecord,
+) -> CampaignStateTransitionLog:
+    return CampaignStateTransitionLog(
+        scope_key=scope_key,
+        sequence_number=record.sequence_number,
+        previous_status=record.previous_state.value,
+        target_status=record.target_state.value,
+        next_status=record.next_state.value,
+        trigger=record.trigger.value,
+        reason=record.reason,
+        updated_by=record.updated_by,
+        occurred_at_ms=record.occurred_at_ms,
+        accepted=record.accepted,
+        rule_reason_code=record.rule_reason_code,
+        rejection_reason=record.rejection_reason,
+        active_strategy_contract_id=record.active_strategy_contract_id,
+        active_session_id=record.active_session_id,
+        metadata=dict(record.metadata),
+    )
+
+
+def _transition_log_to_record(
+    transition: CampaignStateTransitionLog,
+) -> CampaignTransitionRecord:
+    return CampaignTransitionRecord(
+        sequence_number=transition.sequence_number,
+        previous_state=_parse_campaign_state(transition.previous_status),
+        target_state=_parse_campaign_state(transition.target_status),
+        trigger=_parse_campaign_trigger(transition.trigger),
+        reason=transition.reason,
+        updated_by=transition.updated_by,
+        occurred_at_ms=transition.occurred_at_ms,
+        accepted=transition.accepted,
+        rule_reason_code=transition.rule_reason_code,
+        rejection_reason=transition.rejection_reason,
+        active_strategy_contract_id=transition.active_strategy_contract_id,
+        active_session_id=transition.active_session_id,
+        metadata=dict(transition.metadata or {}),
+    )
 
 
 def _now_ms() -> int:

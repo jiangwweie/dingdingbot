@@ -361,6 +361,68 @@ class PGRuntimeCampaignStateORM(PGCoreBase):
     )
 
 
+class PGRuntimeCampaignStateTransitionORM(PGCoreBase):
+    """Append-only campaign state transition ledger."""
+
+    __tablename__ = "runtime_campaign_state_transitions"
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    scope_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    next_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    trigger: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    occurred_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    accepted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    rule_reason_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    active_strategy_contract_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    active_session_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "previous_status IN ('observe', 'armed', 'paused', 'profit_protect', "
+            "'loss_locked', 'hard_locked', 'closed')",
+            name="ck_runtime_campaign_state_transitions_previous_status",
+        ),
+        CheckConstraint(
+            "target_status IN ('observe', 'armed', 'paused', 'profit_protect', "
+            "'loss_locked', 'hard_locked', 'closed')",
+            name="ck_runtime_campaign_state_transitions_target_status",
+        ),
+        CheckConstraint(
+            "next_status IN ('observe', 'armed', 'paused', 'profit_protect', "
+            "'loss_locked', 'hard_locked', 'closed')",
+            name="ck_runtime_campaign_state_transitions_next_status",
+        ),
+        Index(
+            "uq_runtime_campaign_state_transitions_scope_seq",
+            "scope_key",
+            "sequence_number",
+            unique=True,
+        ),
+        Index(
+            "idx_runtime_campaign_state_transitions_scope_time",
+            "scope_key",
+            "occurred_at_ms",
+        ),
+        Index(
+            "idx_runtime_campaign_state_transitions_trigger",
+            "trigger",
+        ),
+    )
+
+
 class PGSignalORM(PGCoreBase):
     """PG 版 live signal 表。"""
 

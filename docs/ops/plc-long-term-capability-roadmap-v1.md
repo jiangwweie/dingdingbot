@@ -358,19 +358,31 @@ Minimum blockers before discussion:
   accounting blocker;
 - explicit Owner decision for real live.
 
+## Current Track A Completion Note
+
+`PLC-STATE-001` through `PLC-STATE-004` are implemented locally for review:
+
+- transition table and replay proof;
+- durable PG transition ledger;
+- runtime event wiring from existing order lifecycle callbacks;
+- read-only replay evidence packet.
+
+No runtime start, exchange call, testnet order, profile default change, or real
+live action is authorized by those local capabilities.
+
 ## Recommended Immediate Next Task
 
 Next task should stay with Codex:
 
-`PLC-STATE-001 - Campaign Risk State Machine transition table and replay proof`
+`LS-006-ACCOUNT-STATE-001 - Account risk state machine policy table and replay proof`
 
 Why:
 
-- it is the central long-term capability for personal leveraged campaigns;
-- it reduces risk before more testnet exposure;
-- it can be implemented and tested locally without exchange calls;
-- it gives later account-risk, strategy-promotion, and multi-symbol work a
-  stable state model to integrate with.
+- campaign state is now ledger-backed and replayable;
+- the next major safety gap is account-level state, not another testnet run;
+- account state should be table-driven and locally replayable before further
+  runtime/profile expansion;
+- this keeps the roadmap principle intact: account before symbol.
 
 Claude can later receive bounded tests or docs cleanup after Codex freezes the
-state model and allowed files.
+account state model and allowed files.

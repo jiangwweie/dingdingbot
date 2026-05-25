@@ -42,6 +42,7 @@ from src.application.account_risk_service import (
     AccountRiskService,
 )
 from src.application.global_kill_switch import KILL_SWITCH_BLOCK_REASON, GlobalKillSwitchService
+from src.application.campaign_state_service import CampaignRuntimeEvent
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.protection_health_monitor import (
     PROTECTION_HEALTH_REASON_CODES,
@@ -383,6 +384,13 @@ class ExecutionOrchestrator:
             )
             return
 
+        await self._apply_campaign_runtime_event(
+            event=CampaignRuntimeEvent.ENTRY_FILLED,
+            reason="entry_order_filled",
+            order=entry_order,
+            active_strategy_contract_id=getattr(intent.strategy, "id", None),
+            active_session_id=getattr(intent, "id", None),
+        )
         await self._protect_filled_entry(
             intent=intent,
             entry_order=entry_order,
@@ -421,6 +429,40 @@ class ExecutionOrchestrator:
             if projection_result.was_already_processed:
                 return
 
+            if exit_order.order_role in {
+                OrderRole.TP1,
+                OrderRole.TP2,
+                OrderRole.TP3,
+                OrderRole.TP4,
+                OrderRole.TP5,
+            }:
+                await self._apply_campaign_runtime_event(
+                    event=CampaignRuntimeEvent.PROFIT_PROTECT_TRIGGERED,
+                    reason="take_profit_fill_progressed",
+                    order=exit_order,
+                    position_id=projection_result.position_id,
+                    metadata={
+                        "delta_exit_qty": str(projection_result.delta_exit_qty),
+                        "projected_exit_qty_after": str(
+                            projection_result.projected_exit_qty_after
+                        ),
+                    },
+                )
+
+            if exit_order.order_role == OrderRole.SL:
+                await self._apply_campaign_runtime_event(
+                    event=CampaignRuntimeEvent.STOP_LOSS_FILLED,
+                    reason="stop_loss_fill_progressed",
+                    order=exit_order,
+                    position_id=projection_result.position_id,
+                    metadata={
+                        "delta_exit_qty": str(projection_result.delta_exit_qty),
+                        "projected_exit_qty_after": str(
+                            projection_result.projected_exit_qty_after
+                        ),
+                    },
+                )
+
             await self._capital_protection.record_exit_projection(
                 position_id=projection_result.position_id,
                 signal_id=projection_result.signal_id,
@@ -431,10 +473,58 @@ class ExecutionOrchestrator:
                 just_closed=projection_result.just_closed,
                 occurred_at=datetime.now(timezone.utc),
             )
+            if projection_result.just_closed:
+                await self._apply_campaign_runtime_event(
+                    event=CampaignRuntimeEvent.POSITION_CLOSED,
+                    reason="position_projection_closed",
+                    order=exit_order,
+                    position_id=projection_result.position_id,
+                    metadata={
+                        "delta_exit_qty": str(projection_result.delta_exit_qty),
+                        "delta_realized_pnl": str(projection_result.delta_realized_pnl),
+                    },
+                )
         except Exception as e:
             logger.warning(
                 "[ExecutionOrchestrator] exit fill position projection 更新失败: "
                 f"order_id={exit_order.id}, error={e}",
+                exc_info=True,
+            )
+
+    async def _apply_campaign_runtime_event(
+        self,
+        *,
+        event: CampaignRuntimeEvent,
+        reason: str,
+        order: Order,
+        position_id: Optional[str] = None,
+        active_strategy_contract_id: Optional[str] = None,
+        active_session_id: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> None:
+        if self._campaign_state_service is None:
+            return
+        try:
+            await self._campaign_state_service.apply_runtime_event(
+                event=event,
+                reason=reason,
+                updated_by="runtime",
+                active_strategy_contract_id=active_strategy_contract_id,
+                active_session_id=active_session_id,
+                symbol=order.symbol,
+                position_id=position_id,
+                signal_id=order.signal_id,
+                order_id=order.id,
+                metadata=metadata,
+            )
+        except Exception as exc:
+            logger.error(
+                "[ExecutionOrchestrator] Campaign runtime event failed: "
+                "event=%s order_id=%s signal_id=%s error=%s",
+                event.value,
+                order.id,
+                order.signal_id,
+                exc,
                 exc_info=True,
             )
 

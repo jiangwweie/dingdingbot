@@ -258,6 +258,28 @@ class CampaignStateSnapshot:
     source: str = "pg"
 
 
+@dataclass(frozen=True)
+class CampaignStateTransitionLog:
+    """Persisted campaign state transition ledger row."""
+
+    scope_key: str
+    sequence_number: int
+    previous_status: str
+    target_status: str
+    next_status: str
+    trigger: str
+    reason: Optional[str]
+    updated_by: str
+    occurred_at_ms: int
+    accepted: bool
+    rule_reason_code: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    active_strategy_contract_id: Optional[str] = None
+    active_session_id: Optional[str] = None
+    metadata: dict[str, Any] | None = None
+    source: str = "pg"
+
+
 @runtime_checkable
 class CampaignStateRepositoryPort(Protocol):
     """PG-backed runtime campaign state persistence boundary."""
@@ -279,6 +301,34 @@ class CampaignStateRepositoryPort(Protocol):
         active_strategy_contract_id: Optional[str],
         active_session_id: Optional[str],
     ) -> CampaignStateSnapshot:
+        ...
+
+    async def record_transition(
+        self,
+        transition: CampaignStateTransitionLog,
+    ) -> CampaignStateTransitionLog:
+        ...
+
+    async def set_state_with_transition(
+        self,
+        *,
+        scope_key: str,
+        status: str,
+        reason: Optional[str],
+        updated_by: str,
+        updated_at_ms: int,
+        active_strategy_contract_id: Optional[str],
+        active_session_id: Optional[str],
+        transition: CampaignStateTransitionLog,
+    ) -> tuple[CampaignStateSnapshot, CampaignStateTransitionLog]:
+        ...
+
+    async def list_transitions(
+        self,
+        scope_key: str,
+        *,
+        limit: int = 500,
+    ) -> list[CampaignStateTransitionLog]:
         ...
 
 

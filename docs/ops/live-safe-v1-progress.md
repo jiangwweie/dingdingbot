@@ -1220,3 +1220,46 @@ Use this file for session progress and handoff notes.
 - No runtime start, exchange call, testnet order, migration, runtime profile
   default change, strategy parameter change, real live action, commit, or push
   was performed.
+
+## 2026-05-25 (PLC-STATE-002/003/004 Durable Ledger, Runtime Wiring, Replay Evidence)
+
+- Continued from PLC-STATE-001 to complete the next campaign state-machine
+  capabilities.
+- PLC-STATE-002:
+  - added migration `011_create_runtime_campaign_state_transitions`;
+  - added PG ORM/repository support for `runtime_campaign_state_transitions`;
+  - successful state transitions now update snapshot and append ledger in one
+    repository transaction when using PG;
+  - rejected transitions are also appended to the ledger;
+  - `CampaignStateService.build_replay_evidence()` replays the ledger and
+    verifies replay final state against the durable snapshot.
+- PLC-STATE-003:
+  - wired `ExecutionOrchestrator` entry-fill callback to `entry_filled`;
+  - wired TP fill/progress to `profit_protect_triggered`;
+  - wired SL fill/progress to `stop_loss_filled`;
+  - wired closed position projection to `position_closed`;
+  - campaign event write failures are logged without blocking protection mount
+    or risk-reducing close flow.
+- PLC-STATE-004:
+  - added read-only internal evidence endpoint
+    `GET /api/runtime/control/campaign-state/replay-evidence`;
+  - response reports replay final state, snapshot match, transition counts,
+    rejected transition count, and transition records;
+  - future bounded testnet rehearsals can collect this packet as audit
+    evidence.
+- Verification:
+  - compileall passed for touched campaign/orchestrator/repository/API/test
+    files;
+  - `pytest -q tests/unit/test_p4_campaign_state_service.py
+    tests/unit/test_plc_state_runtime_event_wiring.py
+    tests/unit/test_gks_v0_global_kill_switch.py -k 'campaign_state or
+    plc_state or runtime_event_wiring or CampaignState'` passed with 20
+    selected tests.
+  - `pytest -q tests/unit/test_tiny001d4_controlled_close.py
+    tests/unit/test_phase5e_controlled_multi_symbol_endpoints.py
+    tests/unit/test_phase5c_two_symbol_fixture.py` passed with 20 tests.
+  - `alembic heads` reported `011 (head)`.
+  - `git diff --check` passed.
+- No runtime start, exchange call, testnet order, migration execution against
+  live PG, runtime profile change, strategy parameter change, or real live
+  action was performed.

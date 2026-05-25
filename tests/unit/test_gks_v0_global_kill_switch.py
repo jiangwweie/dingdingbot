@@ -818,12 +818,22 @@ async def test_campaign_state_endpoint_updates_same_runtime_service(monkeypatch)
             },
         )
         read_response = client.get("/api/runtime/control/campaign-state")
+        evidence_response = client.get(
+            "/api/runtime/control/campaign-state/replay-evidence"
+        )
 
     assert arm_response.status_code == 200
     assert arm_response.json()["status"] == "armed"
     assert arm_response.json()["active_strategy_contract_id"] == "strategy-test"
     assert read_response.status_code == 200
     assert read_response.json()["status"] == "armed"
+    assert evidence_response.status_code == 200
+    evidence = evidence_response.json()
+    assert evidence["accepted"] is True
+    assert evidence["matches_snapshot"] is True
+    assert evidence["replay_final_state"] == "armed"
+    assert evidence["transition_count"] == 1
+    assert evidence["records"][0]["trigger"] == "owner_arm"
 
 
 @pytest.mark.asyncio

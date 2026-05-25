@@ -29,7 +29,10 @@ from src.application.readmodels.runtime_overview import RuntimeOverviewReadModel
 from src.application.readmodels.runtime_portfolio import RuntimePortfolioReadModel
 from src.application.readmodels.runtime_positions import RuntimePositionsReadModel
 from src.application.readmodels.runtime_signals import RuntimeSignalsReadModel
-from src.application.campaign_state_service import CampaignRuntimeState
+from src.application.campaign_state_service import (
+    CampaignReplayEvidence,
+    CampaignRuntimeState,
+)
 from src.application.phase5e_rehearsal_feasibility import (
     Phase5EControlledSymbolFeasibility,
     assess_controlled_symbol_feasibility,
@@ -104,6 +107,41 @@ class CampaignStateResponse(BaseModel):
         "internet control plane."
     )
     entry_policy: str = "Only armed campaign state allows new entries."
+
+
+class CampaignTransitionRecordResponse(BaseModel):
+    sequence_number: int
+    previous_state: CampaignRuntimeState
+    target_state: CampaignRuntimeState
+    next_state: CampaignRuntimeState
+    trigger: str
+    reason: Optional[str] = None
+    updated_by: str
+    occurred_at_ms: int
+    accepted: bool
+    rule_reason_code: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    active_strategy_contract_id: Optional[str] = None
+    active_session_id: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class CampaignReplayEvidenceResponse(BaseModel):
+    scope_key: str
+    initial_state: CampaignRuntimeState
+    replay_final_state: CampaignRuntimeState
+    snapshot_state: Optional[CampaignRuntimeState] = None
+    matches_snapshot: bool
+    accepted: bool
+    transition_count: int
+    rejected_transition_count: int
+    rejection_reason: Optional[str] = None
+    records: list[CampaignTransitionRecordResponse]
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Read-only local/internal runtime evidence. This endpoint does not "
+        "place, cancel, close, resize, or otherwise mutate exchange orders."
+    )
 
 
 class CampaignStateUpdateRequest(BaseModel):
@@ -207,6 +245,41 @@ def _to_campaign_state_response(state) -> CampaignStateResponse:
         active_strategy_contract_id=state.active_strategy_contract_id,
         active_session_id=state.active_session_id,
         source=state.source,
+    )
+
+
+def _to_campaign_replay_evidence_response(
+    evidence: CampaignReplayEvidence,
+) -> CampaignReplayEvidenceResponse:
+    return CampaignReplayEvidenceResponse(
+        scope_key=evidence.scope_key,
+        initial_state=evidence.initial_state,
+        replay_final_state=evidence.replay_final_state,
+        snapshot_state=evidence.snapshot_state,
+        matches_snapshot=evidence.matches_snapshot,
+        accepted=evidence.accepted,
+        transition_count=evidence.transition_count,
+        rejected_transition_count=evidence.rejected_transition_count,
+        rejection_reason=evidence.rejection_reason,
+        records=[
+            CampaignTransitionRecordResponse(
+                sequence_number=record.sequence_number,
+                previous_state=record.previous_state,
+                target_state=record.target_state,
+                next_state=record.next_state,
+                trigger=record.trigger.value,
+                reason=record.reason,
+                updated_by=record.updated_by,
+                occurred_at_ms=record.occurred_at_ms,
+                accepted=record.accepted,
+                rule_reason_code=record.rule_reason_code,
+                rejection_reason=record.rejection_reason,
+                active_strategy_contract_id=record.active_strategy_contract_id,
+                active_session_id=record.active_session_id,
+                metadata=dict(record.metadata),
+            )
+            for record in evidence.records
+        ],
     )
 
 
@@ -692,6 +765,34 @@ async def get_campaign_state(request: Request) -> CampaignStateResponse:
     api_module = _load_api_module()
     service = _get_campaign_state_service(api_module)
     return _to_campaign_state_response(service.get_state())
+
+
+@router.get(
+    "/control/campaign-state/replay-evidence",
+    response_model=CampaignReplayEvidenceResponse,
+)
+async def get_campaign_state_replay_evidence(
+    request: Request,
+) -> CampaignReplayEvidenceResponse:
+    """Read campaign transition ledger replay evidence. No exchange mutation."""
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    service = _get_campaign_state_service(api_module)
+    build_replay_evidence = getattr(service, "build_replay_evidence", None)
+    if not callable(build_replay_evidence):
+        raise HTTPException(
+            status_code=503,
+            detail="Campaign replay evidence is unavailable",
+        )
+    try:
+        evidence = await build_replay_evidence()
+    except Exception as exc:
+        logger.error("Campaign replay evidence failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Campaign replay evidence failed",
+        ) from exc
+    return _to_campaign_replay_evidence_response(evidence)
 
 
 @router.post("/control/campaign-state", response_model=CampaignStateResponse)

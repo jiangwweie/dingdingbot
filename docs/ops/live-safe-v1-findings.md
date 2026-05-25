@@ -234,6 +234,12 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
   runtime event wiring after that evidence. The important guard is that
   `entry_filled` may only confirm an already armed session; it must not become
   a hidden arming path from `observe`.
+- PLC-STATE-002/003/004 close the next auditability gap: campaign state is now
+  ledger-backed, replayable against the durable snapshot, wired to existing
+  order lifecycle callbacks, and exposed through a read-only replay evidence
+  packet. This still does not authorize broader runtime/profile changes or
+  real live; it creates the evidence substrate future bounded testnet
+  rehearsals should collect.
 
 ## 2026-05-09
 

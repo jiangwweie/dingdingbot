@@ -95,6 +95,60 @@ No runtime start, exchange call, testnet order, migration, runtime profile
 change, strategy parameter change, real live action, commit, or push was
 performed for PLC-STATE-001.
 
+## PLC-STATE-002 Durable Ledger
+
+The campaign state machine now has a durable transition ledger:
+
+- migration `011_create_runtime_campaign_state_transitions`;
+- ORM table `runtime_campaign_state_transitions`;
+- repository methods for append-only transition recording, state+transition
+  transactional writes, and ordered ledger reads;
+- rejected transitions are recorded with `accepted=false` and a rejection
+  reason;
+- successful transitions update `runtime_campaign_state` and append the ledger
+  row in one repository transaction when the PG repository is available.
+
+Replay proof:
+
+- `CampaignStateService.build_replay_evidence()` reads the ledger, replays it
+  from `observe`, and compares replay final state with the durable snapshot.
+- `replay_campaign_transition_logs(...)` treats rejected transitions as audit
+  facts that do not advance state.
+
+## PLC-STATE-003 Runtime Event Wiring
+
+The execution orchestrator now emits campaign runtime events from existing
+runtime callbacks:
+
+- ENTRY filled -> `entry_filled`;
+- TP filled/progressed -> `profit_protect_triggered`;
+- SL filled/progressed -> `stop_loss_filled`;
+- position projection `just_closed=true` -> `position_closed`.
+
+Campaign event write failures are logged and do not block protection mounting
+or risk-reducing close handling. This preserves safety: close/protection paths
+continue even if evidence recording has a local failure.
+
+## PLC-STATE-004 Replay Evidence Packet
+
+The internal runtime control surface now exposes read-only replay evidence:
+
+`GET /api/runtime/control/campaign-state/replay-evidence`
+
+The response includes:
+
+- initial state;
+- replay final state;
+- current snapshot state;
+- snapshot match flag;
+- accepted flag;
+- transition count;
+- rejected transition count;
+- transition records.
+
+The endpoint does not place, cancel, close, resize, or mutate exchange orders.
+It is designed for future bounded testnet rehearsal evidence collection.
+
 ## Non-Goals
 
 - No real live trading.

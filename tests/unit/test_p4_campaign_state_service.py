@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from src.application.campaign_state_service import (
     CAMPAIGN_STATE_BLOCK_REASON,
@@ -13,7 +16,13 @@ from src.application.campaign_state_service import (
     get_campaign_transition_table,
     replay_campaign_transitions,
 )
+from src.infrastructure.pg_campaign_state_repository import PgCampaignStateRepository
+from src.infrastructure.pg_models import (
+    PGRuntimeCampaignStateORM,
+    PGRuntimeCampaignStateTransitionORM,
+)
 from src.infrastructure.repository_ports import CampaignStateSnapshot
+from src.infrastructure.repository_ports import CampaignStateTransitionLog
 
 
 class _CampaignRepo:
@@ -49,6 +58,67 @@ class _CampaignRepo:
             source="test",
         )
         return self.snapshot
+
+
+class _LedgerCampaignRepo(_CampaignRepo):
+    def __init__(self) -> None:
+        super().__init__()
+        self.transitions: list[CampaignStateTransitionLog] = []
+
+    async def record_transition(
+        self,
+        transition: CampaignStateTransitionLog,
+    ) -> CampaignStateTransitionLog:
+        persisted = CampaignStateTransitionLog(
+            scope_key=transition.scope_key,
+            sequence_number=len(self.transitions) + 1,
+            previous_status=transition.previous_status,
+            target_status=transition.target_status,
+            next_status=transition.next_status,
+            trigger=transition.trigger,
+            reason=transition.reason,
+            updated_by=transition.updated_by,
+            occurred_at_ms=transition.occurred_at_ms,
+            accepted=transition.accepted,
+            rule_reason_code=transition.rule_reason_code,
+            rejection_reason=transition.rejection_reason,
+            active_strategy_contract_id=transition.active_strategy_contract_id,
+            active_session_id=transition.active_session_id,
+            metadata=dict(transition.metadata or {}),
+            source="test",
+        )
+        self.transitions.append(persisted)
+        return persisted
+
+    async def set_state_with_transition(self, **kwargs):
+        transition = kwargs.pop("transition")
+        snapshot = await self.set_state(**kwargs)
+        persisted = await self.record_transition(transition)
+        return snapshot, persisted
+
+    async def list_transitions(self, scope_key: str, *, limit: int = 500):
+        return [
+            transition
+            for transition in self.transitions
+            if transition.scope_key == scope_key
+        ][:limit]
+
+
+@pytest_asyncio.fixture()
+async def pg_campaign_repo():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(PGRuntimeCampaignStateORM.__table__.create)
+        await conn.run_sync(PGRuntimeCampaignStateTransitionORM.__table__.create)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield PgCampaignStateRepository(session_maker=session_maker)
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -295,3 +365,49 @@ async def test_runtime_transition_audit_records_context_metadata():
     assert records[1].rule_reason_code == "entry_filled_state_retained"
     assert records[1].metadata["position_id"] == "pos-1"
     assert records[1].to_log_dict()["next_state"] == "armed"
+
+
+@pytest.mark.asyncio
+async def test_transition_ledger_records_success_and_rejection_for_replay():
+    repo = _LedgerCampaignRepo()
+    service = CampaignStateService(repository=repo)
+
+    await service.initialize()
+    await service.set_state(status="armed", reason="owner arm", updated_by="owner")
+    await service.set_state(status="hard_locked", reason="risk", updated_by="owner")
+
+    with pytest.raises(ValueError, match="hard_locked->armed via owner_arm"):
+        await service.set_state(status="armed", reason="bad rearm", updated_by="owner")
+
+    transitions = await service.get_transition_ledger()
+    evidence = await service.build_replay_evidence()
+
+    assert [transition.sequence_number for transition in transitions] == [1, 2, 3]
+    assert transitions[-1].accepted is False
+    assert evidence.accepted
+    assert evidence.matches_snapshot
+    assert evidence.replay_final_state == CampaignRuntimeState.HARD_LOCKED
+    assert evidence.rejected_transition_count == 1
+
+
+@pytest.mark.asyncio
+async def test_pg_campaign_transition_ledger_replays_to_snapshot(pg_campaign_repo):
+    service = CampaignStateService(repository=pg_campaign_repo)
+
+    await service.initialize()
+    await service.set_state(status="armed", reason="owner arm", updated_by="owner")
+    await service.apply_runtime_event(
+        event=CampaignRuntimeEvent.PROFIT_PROTECT_TRIGGERED,
+        reason="profit threshold reached",
+        position_id="pos-1",
+        signal_id="sig-1",
+    )
+
+    transitions = await pg_campaign_repo.list_transitions(CAMPAIGN_STATE_SCOPE_KEY)
+    evidence = await service.build_replay_evidence()
+
+    assert [transition.sequence_number for transition in transitions] == [1, 2]
+    assert transitions[1].metadata["position_id"] == "pos-1"
+    assert evidence.accepted
+    assert evidence.matches_snapshot
+    assert evidence.replay_final_state == CampaignRuntimeState.PROFIT_PROTECT
