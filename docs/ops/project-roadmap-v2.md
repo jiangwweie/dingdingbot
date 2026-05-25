@@ -1,6 +1,6 @@
 # Project Roadmap v2
 
-Last updated: 2026-05-09
+Last updated: 2026-05-25
 
 ## Document Role
 
@@ -59,60 +59,95 @@ The key reasons are:
 
 ## Current Stage
 
-The current stage is neither a multi-strategy phase, a multi-asset expansion
-phase, nor a live/small-live activation phase.
+The current stage is neither a multi-strategy phase, a multi-asset runtime
+expansion phase, nor a live/small-live activation phase.
 
 The current stage is:
 
-`Observation + Research Methodology Reset`
+`RBC Reset / Opportunity Structure Discovery v0`
 
-The current active strategy exploration / intake lane is:
+2026-05-25 Owner-facing mainline update:
 
-`Strategy Research Re-entry v1`
+The business direction is now fixed as `Personal Leveraged Campaign Business
+Chain v0`, documented in
+`docs/ops/personal-leveraged-campaign-mainline-v0.md` and accepted by
+`docs/adr/0008-personal-leveraged-campaign-business-chain.md`.
 
-This lane may discuss strategy families, edge hypotheses, failure hypotheses,
-research briefs, candidate ranking, and question framing for Owner review. It
-does not authorize new backtests, experiments, adapter runs, strategy runtime
-activation, paper/testnet/live, small-live, strategy/risk/profile/parameter
-changes, or Claude task cards. Total Control v2 remains the authority for the
-roadmap, Owner decision queue, Codex/Claude gating, and whether any research
-brief may upgrade to Codex read-only inspect.
+The mainline is no longer "make better research tables" as an end state. The
+target chain is:
 
-The current docs-only / shadow-no-order observation design object is:
+`Data Ingestion -> Market State / Feature Builder -> Strategy Detector -> Mode Router -> Human Arm Gate -> Strategy Contract -> Trade Intent -> Risk-Aware Order Builder -> Execution + Order Lifecycle -> Position / Campaign / Withdrawal Control`
 
-`Direction A BTC+ETH Phase 1 observation design`
+This reframes the current work from pure opportunity review toward a future
+`Strategy Contract -> Risk-Aware Order Builder -> Campaign Withdrawal Control`
+loop. The current authorized surface remains docs/design/research/sandbox only.
+No runtime, paper, testnet, tiny-live, live, real account, leverage, sizing, or
+real order path is authorized by this update.
 
-BTC+ETH Phase 1 is docs-only and observation-methodology focused. It does not
-authorize strategy runtime, paper/testnet/live trading, small-live execution,
-portfolio/router work, SOL Phase 2, CPM reopening, short-side work, parameter
-optimization, or runtime/profile/risk changes.
+The active research SSOT is:
+
+- `docs/ops/opportunity-research-governance-v0.md`
+- `docs/ops/opportunity-research-control-board.md`
+- `docs/ops/opportunity-hypothesis-register.md`
+
+The current research model is an open opportunity-structure research funnel.
+It may compare opportunity mechanisms, edge hypotheses, failure hypotheses,
+capital-shape ideas, manual-event workflows, observe-only indicators, and
+no-long/risk-off contexts before deciding whether anything deserves deeper
+study.
+
+This stage does not pre-assume small-capital heavy swing, 1h entry, Campaign,
+OKX MCP, Direction A, HTF/LTF trend baseline, Owner-Gated execution, or
+StrategySignalV2 as the answer.
+
+Direction A / BTC+ETH Phase 1 is downgraded from current mainline to evidence
+archive / benchmark / cautionary case. It may inform future comparisons, but it
+does not define the current research priority.
+
+Live-safe Foundation is preserved as a runtime safety foundation. It no longer
+defines research priority. Runtime and research remain isolated.
 
 The active tracks are:
 
-1. `Live-safe Foundation` - preserved as a system safety foundation, but no
-   live/small-live execution is authorized by the current research stage.
-2. `Strategy Research Re-entry v1` - strategy exploration / intake only;
-   families, hypotheses, research briefs, candidate ranking, and Owner-review
-   question framing.
-3. `BTC+ETH Phase 1 Observation + Research Methodology Reset` - docs-only
-   consolidation, artifact reconciliation, SRR-002 discipline, and Owner review
-   readiness.
+1. `Opportunity Structure Discovery v0` - open research funnel, hypothesis
+   register, minimal falsification plans, labels, and capital-shape
+   classification.
+2. `Personal Leveraged Campaign Mainline v0` - human-armed strategy contracts,
+   trade intents, risk-aware order planning, position lifecycle, campaign
+   locks, and withdrawal instructions as docs/design/sandbox objects only until
+   separately promoted.
+3. `Runtime Safety Foundation` - Live-safe, OwnerGate, StrategySignalV2,
+   permission state, and execution-chain safety remain runtime-only boundary
+   material unless separately promoted.
+4. `Evidence Archive` - Direction A, CPM-1, HTF/LTF, SRR-002, HTP, short-side
+   OHLCV, and other prior research remain available as archived evidence,
+   benchmarks, or failure/cautionary material.
 
-All other capabilities belong to the future capability pool unless the Owner
-explicitly promotes them through a separate decision. Other directions should
-stay in backlog, archive, or future-research-pool form by default.
+All other capabilities belong to the future capability pool unless Codex
+promotes them locally inside the research freedom zone or Owner explicitly
+promotes them toward real-account use. Local research/design/code experiments
+must be labeled, tested where applicable, and disconnected from real trading by
+default.
 
 ### Strategy Candidate Gate Status
 
-As of 2026-05-06, the Live-safe Foundation track may continue as system
+As of 2026-05-25, the Live-safe Foundation track may continue as system
 foundation work, but the current priority strategy module, CPM-1, has not passed
 the OOS gate. CPM-1 remains frozen and paused, is not a small-live or canary-live
 candidate, and its promotion path is stopped. The project therefore has no
 deployable small-live strategy candidate at this point.
 
+`SQ02_DOWNSIDE_CONT_V0` may be used as the first docs-only
+strategy-contract skeleton candidate for the Personal Leveraged Campaign
+mainline. This is not a runtime, paper, testnet, tiny-live, live, scanner,
+alert, watchlist, leverage, sizing, or real order-path candidate.
+
 This status does not change runtime profiles, strategy parameters, risk rules,
 live enablement, or live-safe control logic. Research and classification
-evidence must continue to be handled through explicit Owner decisions.
+evidence must continue to use explicit labels and promotion gates. Owner
+confirmation is required when a promotion would touch real secrets, real trading
+permissions, real account actions, push, real-account deployment, or direct
+research-to-real-order wiring.
 
 ## Core Design Principles
 
@@ -248,14 +283,14 @@ Current live-safe focus areas are:
 
 ## Historical Track: Baseline Strategy Module Stabilization
 
-2026-05-09+ note: This section is historical context from the pre-reset baseline
-strategy phase. It is superseded for current work by `Observation + Research
-Methodology Reset`. CPM-1 is paused and is not the current mainline, runtime
-candidate, or small-live candidate. The current active strategy exploration /
-intake lane is `Strategy Research Re-entry v1`, and the current docs-only /
-shadow-no-order observation design object is Direction A BTC+ETH Phase 1. CPM-1
-or Baseline Strategy Module Stabilization may be reopened only by explicit
-Owner decision.
+2026-05-22 note: This section is historical context from the pre-reset baseline
+strategy phase. It is superseded for current work by `RBC Reset / Opportunity
+Structure Discovery v0`. CPM-1 is paused and is not the current mainline,
+runtime candidate, or small-live candidate. CPM-1 or Baseline Strategy Module
+Stabilization may be reconsidered only through the opportunity research funnel.
+Any path toward real secrets, real trading permissions, real account actions,
+push, real-account deployment, or direct research-to-real-order wiring remains
+behind the Owner confirmation gate.
 
 ### Goal
 

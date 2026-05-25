@@ -1,0 +1,177 @@
+# Personal Leveraged Campaign Mainline v0
+
+Last updated: 2026-05-25
+
+Status: Accepted business mainline / docs-only
+
+Runtime effect: none
+
+Trading permission effect: none
+
+## Purpose
+
+This document fixes the current Owner-facing business direction:
+
+Use small, loss-bounded risk capital for a human-armed, strategy-carried,
+risk-controlled derivatives campaign, with explicit pause and withdrawal
+mechanics.
+
+This is not a promise of profit, not live readiness, and not authorization to
+trade. It is the mainline architecture target that future research, schemas,
+and local sandbox work should align to.
+
+## Owner Objective
+
+The intended operating shape is:
+
+- the system detects and explains when a strategy mode may be worth arming;
+- the Owner decides whether to arm, pause, or ignore that mode;
+- a deterministic strategy contract carries the actual entry/exit logic inside
+  the armed window;
+- risk is enforced at order construction, position lifecycle, and campaign
+  lifecycle boundaries;
+- profits can be moved out by scheduled or rule-triggered withdrawal
+  instructions after Owner confirmation.
+
+## Complete Business Chain
+
+| Layer | Responsibility | Output | Must not output |
+|---|---|---|---|
+| 1. Data Ingestion | Collect allowed market and account-state inputs for the current stage. | Timestamped raw inputs. | Trading decisions. |
+| 2. Market State / Feature Builder | Convert raw inputs into reproducible features and state labels. | Feature snapshot. | Buy/sell/short/size/leverage decisions. |
+| 3. Strategy Detector | Detect that a known strategy setup may be present. | Candidate setup packet. | Order instructions. |
+| 4. Mode Router | Decide which mode deserves Owner attention. | Mode advice. | Mandatory action. |
+| 5. Human Arm Gate | Owner arms, pauses, or rejects a bounded mode/session. | Human arm decision. | Per-order discretionary overrides hidden as automation. |
+| 6. Strategy Contract | Deterministically apply strategy rules inside the armed mode/session. | Trade intent. | Risk-ignored order plans. |
+| 7. Trade Intent | Express desired direction/action without exchange side effects. | Structured intent. | Real exchange order. |
+| 8. Risk-Aware Order Builder | Check every intent against order, position, and campaign rules. | Reject, resize, or risk order plan. | Unbounded order. |
+| 9. Execution + Order Lifecycle | Place, protect, reconcile, and audit orders only in authorized future modes. | Execution receipt and lifecycle state. | Silent or unprotected exposure. |
+| 10. Position / Campaign / Withdrawal Control | Manage pause, hard lock, restart, profit protection, and withdrawal instructions. | Campaign state and withdrawal instruction. | Automatic real withdrawal without Owner confirmation. |
+
+## Core Objects
+
+`ModeAdvice`
+
+- why this mode is being surfaced;
+- which strategy contract it maps to;
+- evidence and caveats;
+- default action: observe, arm, pause, or ignore.
+
+`HumanArmDecision`
+
+- Owner decision;
+- armed strategy id;
+- allowed session window;
+- allowed campaign id;
+- explicit expiry;
+- audit provenance.
+
+`StrategyContract`
+
+- setup conditions;
+- invalidation conditions;
+- entry intent rules;
+- exit intent rules;
+- required feature snapshot;
+- forbidden data and lookahead rules;
+- disabled-by-default runtime label.
+
+`TradeIntent`
+
+- strategy id;
+- direction class;
+- entry/exit action class;
+- trigger reason;
+- invalidation reason;
+- confidence/evidence text when useful;
+- no exchange side effect.
+
+`RiskOrderPlan`
+
+- allow/reject decision;
+- risk-rule reasons;
+- owner-fixed caps used by the builder;
+- planned order structure in a future authorized mode;
+- protection requirements;
+- rollback and cancellation behavior.
+
+`ExecutionReceipt`
+
+- order ids and exchange acknowledgements in future authorized modes;
+- reconciliation references;
+- protection status;
+- lifecycle status.
+
+`PositionLifecycleState`
+
+- position source of truth;
+- protection state;
+- reduce/close requirements;
+- stale or inconsistent state handling.
+
+`CampaignState`
+
+- capital bucket;
+- loss lock;
+- profit protection;
+- pause and restart state;
+- rule version;
+- invariant checks.
+
+`WithdrawalInstruction`
+
+- withdrawal trigger source;
+- amount rule class;
+- Owner confirmation requirement;
+- blocked states;
+- audit trail.
+
+## Stage Map
+
+| Stage | Name | Allowed output | Requires Owner confirmation before next stage |
+|---|---|---|---|
+| 0 | No-order review | Packets, reports, readable review cards. | Promotion to any strategy-contract work that touches runtime. |
+| 1 | Strategy contract skeleton | Docs-only schemas and deterministic contract draft. | Runtime wiring or execution-path use. |
+| 2 | Simulated risk order plan | Local sandbox intent-to-plan simulation with no exchange access. | Any exchange, paper, testnet, or real account connection. |
+| 3 | Demo portfolio execution | Local demo receipts and lifecycle replay only. | External account or exchange connection. |
+| 4 | Read-only exchange sync | Read-only account-state sync after explicit key handling approval. | Any trading permission. |
+| 5 | Paper/testnet | Explicit paper/testnet account mode only. | Real trading permission or real order path. |
+| 6 | Tiny-live | Small real-risk mode after separate promotion review. | Any expansion in risk, asset, strategy, or withdrawal automation. |
+
+## Immediate Mainline
+
+The next docs/design target is:
+
+`SQ02_DOWNSIDE_CONT_V0` as a docs-only `StrategyContract` skeleton.
+
+Reason:
+
+- it is the strongest current semi-auto research line after the May 24-25
+  synthesis;
+- it already has public-universe retest evidence, no-order packets, event-time
+  priority logic, and readability audit artifacts;
+- it is suitable for defining a contract boundary without claiming live
+  readiness.
+
+This does not promote SQ02 to scanner, alert, watchlist, runtime, paper,
+testnet, tiny-live, live, position, leverage, or real order use.
+
+## Next Safe Artifacts
+
+Future work should prefer these design artifacts before implementation:
+
+- `strategy_contract.schema.yaml`
+- `trade_intent.schema.json`
+- `risk_order_plan.schema.json`
+- `campaign_state.schema.json`
+- `order_lifecycle_state_machine.md`
+- `human_arm_gate.md`
+- `withdrawal_policy.md`
+- `forbidden_live_actions.md`
+
+## Non-Authorization
+
+This document does not authorize real API keys, exchange account access, order
+placement, order cancellation, transfer, withdrawal, runtime profile changes,
+paper/testnet/live/tiny-live trading, strategy implementation in a real order
+path, leverage advice, or position-sizing advice.
