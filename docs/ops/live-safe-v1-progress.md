@@ -318,6 +318,29 @@ Use this file for session progress and handoff notes.
   no auto-filled confirmation phrase, and no new order path beyond existing
   fixed BRC testnet workflow.
 
+## 2026-05-26 (BRC-R4 API Surface Cleanup Planning)
+
+- Inspected the current backend API surface before Web implementation.
+- Current route inventory:
+  - `src/interfaces/api.py`: 79 legacy monolith routes;
+  - `src/interfaces/api_console_runtime.py`: 47 runtime/BRC/test routes;
+  - `src/interfaces/api_console_research.py`: 6 read-only research routes;
+  - `src/interfaces/api_research_jobs.py`: 10 research job/candidate routes;
+  - `src/interfaces/api_v1_config.py`: 42 broad config routes;
+  - `src/interfaces/api_profile_endpoints.py`: 8 profile routes.
+- Added `docs/ops/brc-r4-api-surface-cleanup-plan.md`.
+- Planning conclusion: BRC Web should depend on a BRC-first API contract, not
+  on the current legacy API surface. The target split is BRC campaign,
+  BRC operator, BRC LLM workflows, runtime read, runtime control, dev-testnet
+  BRC, and later research/strategy-pool routers.
+- Recommended implementation order:
+  contract freeze -> router split without behavior change -> dependency
+  cleanup to `RuntimeContext` -> Web console implementation -> pre-deploy
+  security gate.
+- No API code, frontend code, runtime profile, exchange path, testnet action,
+  real live action, withdrawal/transfer, strategy execution, or automatic
+  sizing path was changed.
+
 ## 2026-05-25 (TC-TINY-001D-1 Authorization Package)
 
 - Prepared ADR-0009 action request for one controlled Binance testnet
