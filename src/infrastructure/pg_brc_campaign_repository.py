@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from src.domain.bounded_risk_campaign import (
     BrcOperatorActionLedger,
     BrcCampaignStatus,
+    BrcReviewDecisionRecord,
     BoundedRiskCampaign,
     MockPnlEvent,
     PlaybookSwitchDecision,
@@ -21,6 +22,7 @@ from src.infrastructure.pg_models import (
     PGBrcMockPnlEventORM,
     PGBrcOperatorActionORM,
     PGBrcPlaybookSwitchDecisionORM,
+    PGBrcReviewDecisionORM,
 )
 
 
@@ -264,6 +266,56 @@ class PgBrcCampaignRepository:
             result = await session.execute(stmt)
             return [self._to_operator_action(row) for row in result.scalars().all()]
 
+    async def append_review_decision(
+        self,
+        decision: BrcReviewDecisionRecord,
+    ) -> BrcReviewDecisionRecord:
+        async with self._session_maker() as session:
+            async with session.begin():
+                row = PGBrcReviewDecisionORM(
+                    review_id=decision.review_id,
+                    campaign_id=decision.campaign_id,
+                    source_action_id=decision.source_action_id,
+                    decision=decision.decision.value,
+                    reason_text=decision.reason_text,
+                    next_recommended_task=decision.next_recommended_task,
+                    testnet_only=decision.testnet_only,
+                    real_live_authorized=decision.real_live_authorized,
+                    withdrawal_authorized=decision.withdrawal_authorized,
+                    strategy_execution_authorized=decision.strategy_execution_authorized,
+                    created_by=decision.created_by,
+                    created_at_ms=decision.created_at_ms,
+                    metadata_json=dict(decision.metadata_json),
+                )
+                session.add(row)
+                await session.flush()
+                return self._to_review_decision(row)
+
+    async def get_latest_review_decision(self) -> Optional[BrcReviewDecisionRecord]:
+        async with self._session_maker() as session:
+            stmt = (
+                select(PGBrcReviewDecisionORM)
+                .order_by(PGBrcReviewDecisionORM.created_at_ms.desc())
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return self._to_review_decision(row) if row is not None else None
+
+    async def list_review_decisions(
+        self,
+        *,
+        campaign_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[BrcReviewDecisionRecord]:
+        async with self._session_maker() as session:
+            stmt = select(PGBrcReviewDecisionORM)
+            if campaign_id is not None:
+                stmt = stmt.where(PGBrcReviewDecisionORM.campaign_id == campaign_id)
+            stmt = stmt.order_by(PGBrcReviewDecisionORM.created_at_ms.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return [self._to_review_decision(row) for row in result.scalars().all()]
+
     @staticmethod
     async def _next_sequence_number(
         *,
@@ -376,5 +428,25 @@ class PgBrcCampaignRepository:
                 "live_ready": row.live_ready,
                 "created_at_ms": row.created_at_ms,
                 "executed_at_ms": row.executed_at_ms,
+            }
+        )
+
+    @staticmethod
+    def _to_review_decision(row: PGBrcReviewDecisionORM) -> BrcReviewDecisionRecord:
+        return BrcReviewDecisionRecord.model_validate(
+            {
+                "review_id": row.review_id,
+                "campaign_id": row.campaign_id,
+                "source_action_id": row.source_action_id,
+                "decision": row.decision,
+                "reason_text": row.reason_text,
+                "next_recommended_task": row.next_recommended_task,
+                "testnet_only": row.testnet_only,
+                "real_live_authorized": row.real_live_authorized,
+                "withdrawal_authorized": row.withdrawal_authorized,
+                "strategy_execution_authorized": row.strategy_execution_authorized,
+                "created_by": row.created_by,
+                "created_at_ms": row.created_at_ms,
+                "metadata_json": dict(row.metadata_json or {}),
             }
         )

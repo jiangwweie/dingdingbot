@@ -75,6 +75,13 @@ class BrcOperatorDecisionResult(str, Enum):
     BLOCKED = "blocked"
 
 
+class BrcReviewDecision(str, Enum):
+    ACCEPTED = "accepted"
+    NEEDS_FOLLOWUP = "needs_followup"
+    NEXT_CAMPAIGN_BLOCKED = "next_campaign_blocked"
+    TESTNET_REHEARSAL_AUTHORIZED = "testnet_rehearsal_authorized"
+
+
 class PlaybookEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -281,6 +288,34 @@ class BrcOperatorActionLedger(BaseModel):
             raise ValueError("BRC operator action cannot execute withdrawals")
         if self.live_ready:
             raise ValueError("BRC operator action is never live-ready")
+        return self
+
+
+class BrcReviewDecisionRecord(BaseModel):
+    review_id: str
+    campaign_id: str
+    source_action_id: Optional[str] = None
+    decision: BrcReviewDecision
+    reason_text: str = Field(min_length=1, max_length=2048)
+    next_recommended_task: str = Field(min_length=1, max_length=256)
+    testnet_only: bool = True
+    real_live_authorized: bool = False
+    withdrawal_authorized: bool = False
+    strategy_execution_authorized: bool = False
+    created_by: str = Field(default="owner", min_length=1, max_length=128)
+    created_at_ms: int
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_review_boundaries(self) -> "BrcReviewDecisionRecord":
+        if not self.testnet_only:
+            raise ValueError("BRC review decisions must remain testnet-only")
+        if self.real_live_authorized:
+            raise ValueError("BRC review decisions cannot authorize real live")
+        if self.withdrawal_authorized:
+            raise ValueError("BRC review decisions cannot authorize withdrawal")
+        if self.strategy_execution_authorized:
+            raise ValueError("BRC review decisions cannot authorize strategy execution")
         return self
 
 

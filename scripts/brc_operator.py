@@ -70,9 +70,29 @@ def main() -> int:
         default=50,
         help="list limit for actions mode",
     )
+    parser.add_argument("--campaign-id", default=None, help="BRC campaign id")
+    parser.add_argument("--decision", default=None, help="review decision value")
+    parser.add_argument("--reason", default=None, help="review decision reason")
+    parser.add_argument(
+        "--next-task",
+        default="BRC-R2 operator governance review",
+        help="next recommended task for review-decision mode",
+    )
     parser.add_argument(
         "command",
-        choices=("review", "eligibility", "evidence", "draft", "plan", "run", "actions", "get-action"),
+        choices=(
+            "review",
+            "eligibility",
+            "evidence",
+            "draft",
+            "plan",
+            "run",
+            "actions",
+            "get-action",
+            "review-decision",
+            "review-decisions",
+            "latest-review-decision",
+        ),
         help="read-only BRC object to print",
     )
     parser.add_argument(
@@ -142,6 +162,42 @@ def main() -> int:
             args.base_url,
             f"/api/runtime/test/brc/operator/actions/{args.action_id}",
         )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "review-decision":
+        if not args.campaign_id:
+            parser.error("review-decision mode requires --campaign-id")
+        if not args.decision:
+            parser.error("review-decision mode requires --decision")
+        if not args.reason:
+            parser.error("review-decision mode requires --reason")
+        payload = _post_json(
+            args.base_url,
+            "/api/runtime/test/brc/review-decisions",
+            {
+                "campaign_id": args.campaign_id,
+                "source_action_id": args.action_id,
+                "decision": args.decision,
+                "reason_text": args.reason,
+                "next_recommended_task": args.next_task,
+                "created_by": "owner",
+                "metadata": {},
+            },
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "review-decisions":
+        query = f"limit={args.limit}"
+        if args.campaign_id:
+            query = f"campaign_id={args.campaign_id}&{query}"
+        payload = _get_json(args.base_url, f"/api/runtime/test/brc/review-decisions?{query}")
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "latest-review-decision":
+        payload = _get_json(args.base_url, "/api/runtime/test/brc/review-decisions/latest")
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 

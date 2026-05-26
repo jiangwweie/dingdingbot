@@ -265,6 +265,17 @@ Use this file for session progress and handoff notes.
   automatic sizing, strategy implementation, or natural-language
   auto-execution is introduced.
 
+## 2026-05-26 (BRC-R2-004 Review Decision Governance)
+
+- Added persisted Owner review decisions as the final operation-governance
+  ledger after read-only operator runs.
+- Review decisions record campaign id, optional source action id, decision,
+  reason, and next recommended task; they do not create campaigns or mutate
+  runtime/exchange/account state.
+- Review decision rows enforce `testnet_only=true`,
+  `real_live_authorized=false`, `withdrawal_authorized=false`, and
+  `strategy_execution_authorized=false`.
+
 ## 2026-05-25 (TC-TINY-001D-1 Authorization Package)
 
 - Prepared ADR-0009 action request for one controlled Binance testnet

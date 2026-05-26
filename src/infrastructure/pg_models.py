@@ -621,6 +621,47 @@ class PGBrcOperatorActionORM(PGCoreBase):
     )
 
 
+class PGBrcReviewDecisionORM(PGCoreBase):
+    """Persisted Owner review decisions for BRC campaigns."""
+
+    __tablename__ = "brc_review_decisions"
+
+    review_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_action_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    decision: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason_text: Mapped[str] = mapped_column(Text, nullable=False)
+    next_recommended_task: Mapped[str] = mapped_column(String(256), nullable=False)
+    testnet_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    real_live_authorized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    withdrawal_authorized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    strategy_execution_authorized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('accepted', 'needs_followup', 'next_campaign_blocked', 'testnet_rehearsal_authorized')",
+            name="ck_brc_review_decisions_decision",
+        ),
+        CheckConstraint("testnet_only = true", name="ck_brc_review_decisions_testnet_only"),
+        CheckConstraint("real_live_authorized = false", name="ck_brc_review_decisions_no_live"),
+        CheckConstraint("withdrawal_authorized = false", name="ck_brc_review_decisions_no_withdrawal"),
+        CheckConstraint(
+            "strategy_execution_authorized = false",
+            name="ck_brc_review_decisions_no_strategy_execution",
+        ),
+        Index("idx_brc_review_decisions_campaign_time", "campaign_id", "created_at_ms"),
+        Index("idx_brc_review_decisions_decision_time", "decision", "created_at_ms"),
+    )
+
+
 class PGSignalORM(PGCoreBase):
     """PG 版 live signal 表。"""
 

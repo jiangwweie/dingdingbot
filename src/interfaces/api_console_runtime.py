@@ -40,6 +40,7 @@ from src.application.bounded_risk_campaign_service import (
     BrcRuleViolation,
 )
 from src.domain.bounded_risk_campaign import (
+    BrcReviewDecision,
     CampaignOutcome,
     MockPnlSource,
     RiskChangeDirection,
@@ -494,6 +495,16 @@ class BrcOperatorActionRunRequest(BaseModel):
     confirmed_by: str = Field(default="owner", max_length=128)
 
 
+class BrcReviewDecisionRequest(BaseModel):
+    campaign_id: str = Field(max_length=128)
+    source_action_id: Optional[str] = Field(default=None, max_length=128)
+    decision: BrcReviewDecision
+    reason_text: str = Field(min_length=1, max_length=2048)
+    next_recommended_task: str = Field(min_length=1, max_length=256)
+    created_by: str = Field(default="owner", max_length=128)
+    metadata: dict = Field(default_factory=dict)
+
+
 class BrcCampaignResponse(BaseModel):
     campaign: dict
     live_ready: Literal[False] = False
@@ -585,6 +596,20 @@ class BrcOperatorActionResponse(BaseModel):
 
 class BrcOperatorActionListResponse(BaseModel):
     actions: list[dict]
+    live_ready: Literal[False] = False
+
+
+class BrcReviewDecisionResponse(BaseModel):
+    review_decision: dict
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "BRC review decision ledger only. This endpoint does not create "
+        "campaigns, place orders, transfer, withdraw, or authorize real live."
+    )
+
+
+class BrcReviewDecisionListResponse(BaseModel):
+    review_decisions: list[dict]
     live_ready: Literal[False] = False
 
 
@@ -2468,6 +2493,63 @@ async def run_brc_operator_action(
         run=run.model_dump(mode="json"),
         action=action.model_dump(mode="json") if action is not None else None,
         inventory=inventory,
+    )
+
+
+@router.post("/test/brc/review-decisions", response_model=BrcReviewDecisionResponse)
+async def create_brc_review_decision(
+    request: Request,
+    body: BrcReviewDecisionRequest,
+) -> BrcReviewDecisionResponse:
+    """Persist an Owner review decision without mutating runtime or exchange state."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    try:
+        review_decision = await service.record_review_decision(
+            campaign_id=body.campaign_id,
+            source_action_id=body.source_action_id,
+            decision=body.decision,
+            reason_text=body.reason_text,
+            next_recommended_task=body.next_recommended_task,
+            created_by=body.created_by,
+            metadata=body.metadata,
+        )
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcReviewDecisionResponse(
+        review_decision=review_decision.model_dump(mode="json"),
+    )
+
+
+@router.get("/test/brc/review-decisions/latest", response_model=BrcReviewDecisionResponse)
+async def get_latest_brc_review_decision(request: Request) -> BrcReviewDecisionResponse:
+    """Read the latest persisted BRC review decision."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    review_decision = await service.get_latest_review_decision()
+    if review_decision is None:
+        raise HTTPException(status_code=404, detail="No BRC review decision found")
+    return BrcReviewDecisionResponse(review_decision=review_decision.model_dump(mode="json"))
+
+
+@router.get("/test/brc/review-decisions", response_model=BrcReviewDecisionListResponse)
+async def list_brc_review_decisions(
+    request: Request,
+    campaign_id: Optional[str] = Query(default=None, max_length=128),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> BrcReviewDecisionListResponse:
+    """List persisted BRC review decisions."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    review_decisions = await service.list_review_decisions(
+        campaign_id=campaign_id,
+        limit=limit,
+    )
+    return BrcReviewDecisionListResponse(
+        review_decisions=[
+            review_decision.model_dump(mode="json")
+            for review_decision in review_decisions
+        ],
     )
 
 

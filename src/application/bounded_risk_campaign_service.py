@@ -23,6 +23,8 @@ from src.domain.bounded_risk_campaign import (
     BrcOperatorPlanStep,
     BrcOperatorRunResult,
     BrcReviewPacket,
+    BrcReviewDecision,
+    BrcReviewDecisionRecord,
     BoundedRiskCampaign,
     CampaignAttempt,
     CampaignOutcome,
@@ -99,6 +101,23 @@ class BrcCampaignRepositoryPort(Protocol):
         campaign_id: Optional[str] = None,
         limit: int = 50,
     ) -> list[BrcOperatorActionLedger]:
+        ...
+
+    async def append_review_decision(
+        self,
+        decision: BrcReviewDecisionRecord,
+    ) -> BrcReviewDecisionRecord:
+        ...
+
+    async def get_latest_review_decision(self) -> Optional[BrcReviewDecisionRecord]:
+        ...
+
+    async def list_review_decisions(
+        self,
+        *,
+        campaign_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[BrcReviewDecisionRecord]:
         ...
 
 
@@ -663,6 +682,49 @@ class BoundedRiskCampaignService:
     ) -> list[BrcOperatorActionLedger]:
         return await self._repo.list_operator_actions(campaign_id=campaign_id, limit=limit)
 
+    async def record_review_decision(
+        self,
+        *,
+        campaign_id: str,
+        decision: BrcReviewDecision,
+        reason_text: str,
+        next_recommended_task: str,
+        source_action_id: Optional[str] = None,
+        created_by: str = "owner",
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> BrcReviewDecisionRecord:
+        if source_action_id is not None:
+            action = await self._repo.get_operator_action(source_action_id)
+            if action is None:
+                raise BrcRuleViolation(f"unknown BRC operator action: {source_action_id}")
+        record = BrcReviewDecisionRecord(
+            review_id=f"brc-review-{uuid.uuid4().hex[:12]}",
+            campaign_id=campaign_id,
+            source_action_id=source_action_id,
+            decision=decision,
+            reason_text=reason_text,
+            next_recommended_task=next_recommended_task,
+            testnet_only=True,
+            real_live_authorized=False,
+            withdrawal_authorized=False,
+            strategy_execution_authorized=False,
+            created_by=created_by,
+            created_at_ms=_now_ms(),
+            metadata_json=dict(metadata or {}),
+        )
+        return await self._repo.append_review_decision(record)
+
+    async def get_latest_review_decision(self) -> Optional[BrcReviewDecisionRecord]:
+        return await self._repo.get_latest_review_decision()
+
+    async def list_review_decisions(
+        self,
+        *,
+        campaign_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[BrcReviewDecisionRecord]:
+        return await self._repo.list_review_decisions(campaign_id=campaign_id, limit=limit)
+
     async def run_operator_read_action(
         self,
         *,
@@ -690,6 +752,10 @@ class BoundedRiskCampaignService:
             raise BrcRuleViolation(f"unknown BRC operator action: {action_id}")
         plan = BrcOperatorExecutionPlan.model_validate(action_record.plan_json)
         now = _now_ms()
+        if action_record.decision_result != BrcOperatorDecisionResult.PLANNED:
+            raise BrcRuleViolation(
+                f"BRC operator action is already {action_record.decision_result.value}"
+            )
         if not plan.executable:
             blocked = action_record.model_copy(
                 update={

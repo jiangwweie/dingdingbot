@@ -223,6 +223,11 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   confirmation failures/unknown text are retained as blocked ledger rows. This
   keeps the operation-governance layer auditable without expanding execution
   authority.
+- BRC-R2-004 completes the first operation-governance loop by persisting Owner
+  review decisions after operator runs. These decisions record review posture
+  and the next recommended task only; they cannot create campaigns, trigger
+  runtime/order actions, authorize real live, authorize withdrawal, or
+  authorize strategy execution.
 
 The active research SSOT is:
 

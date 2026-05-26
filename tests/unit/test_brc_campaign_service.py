@@ -15,6 +15,7 @@ from src.domain.bounded_risk_campaign import (
     BrcAttemptStatus,
     BrcCampaignStatus,
     BrcDecisionResult,
+    BrcReviewDecision,
     CampaignOutcome,
     MockPnlSource,
 )
@@ -31,6 +32,7 @@ class InMemoryBrcRepo:
         self.events = []
         self.mock_pnl_events = []
         self.operator_actions = {}
+        self.review_decisions = []
 
     async def initialize(self) -> None:
         return None
@@ -101,6 +103,22 @@ class InMemoryBrcRepo:
             actions = [action for action in actions if action.campaign_id == campaign_id]
         actions.sort(key=lambda action: action.created_at_ms, reverse=True)
         return actions[:limit]
+
+    async def append_review_decision(self, decision):
+        self.review_decisions.append(decision)
+        return decision
+
+    async def get_latest_review_decision(self):
+        if not self.review_decisions:
+            return None
+        return sorted(self.review_decisions, key=lambda item: item.created_at_ms, reverse=True)[0]
+
+    async def list_review_decisions(self, *, campaign_id: Optional[str] = None, limit: int = 50):
+        decisions = list(self.review_decisions)
+        if campaign_id is not None:
+            decisions = [decision for decision in decisions if decision.campaign_id == campaign_id]
+        decisions.sort(key=lambda item: item.created_at_ms, reverse=True)
+        return decisions[:limit]
 
 
 async def _campaign_service():
@@ -432,9 +450,33 @@ async def test_brc_operator_unknown_text_is_persisted_as_blocked():
     assert action.executable is False
     assert action.decision_result.value == "blocked"
     assert action.draft_action.value == "unknown"
-    with pytest.raises(BrcRuleViolation, match="read-only"):
+    with pytest.raises(BrcRuleViolation, match="already blocked"):
         await service.run_operator_action_by_id(
             action_id=action.action_id,
             confirmation_phrase="CONFIRM_READ_ONLY_BRC",
             final_inventory={"all_flat": True},
         )
+
+
+@pytest.mark.asyncio
+async def test_brc_review_decision_records_owner_decision_without_live_authority():
+    service, repo = await _campaign_service()
+
+    record = await service.record_review_decision(
+        campaign_id=repo.campaign.campaign_id,
+        decision=BrcReviewDecision.ACCEPTED,
+        reason_text="BRC R2 reviewed",
+        next_recommended_task="BRC-R2-005",
+        created_by="owner",
+        metadata={"source": "unit-test"},
+    )
+    latest = await service.get_latest_review_decision()
+    listed = await service.list_review_decisions(campaign_id=repo.campaign.campaign_id)
+
+    assert record.review_id.startswith("brc-review-")
+    assert latest.review_id == record.review_id
+    assert listed[0].decision == BrcReviewDecision.ACCEPTED
+    assert record.testnet_only is True
+    assert record.real_live_authorized is False
+    assert record.withdrawal_authorized is False
+    assert record.strategy_execution_authorized is False

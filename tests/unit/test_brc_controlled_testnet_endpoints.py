@@ -29,6 +29,7 @@ class InMemoryBrcRepo:
         self.events = []
         self.mock_pnl_events = []
         self.operator_actions = {}
+        self.review_decisions = []
 
     async def initialize(self) -> None:
         return None
@@ -99,6 +100,22 @@ class InMemoryBrcRepo:
             actions = [action for action in actions if action.campaign_id == campaign_id]
         actions.sort(key=lambda action: action.created_at_ms, reverse=True)
         return actions[:limit]
+
+    async def append_review_decision(self, decision):
+        self.review_decisions.append(decision)
+        return decision
+
+    async def get_latest_review_decision(self):
+        if not self.review_decisions:
+            return None
+        return sorted(self.review_decisions, key=lambda item: item.created_at_ms, reverse=True)[0]
+
+    async def list_review_decisions(self, *, campaign_id: Optional[str] = None, limit: int = 50):
+        decisions = list(self.review_decisions)
+        if campaign_id is not None:
+            decisions = [decision for decision in decisions if decision.campaign_id == campaign_id]
+        decisions.sort(key=lambda item: item.created_at_ms, reverse=True)
+        return decisions[:limit]
 
 
 class MutablePositionRepo:
@@ -504,3 +521,29 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
         actions = client.get("/api/runtime/test/brc/operator/actions?limit=10")
         assert actions.status_code == 200
         assert len(actions.json()["actions"]) >= 2
+
+        campaign_id = final.json()["campaign"]["campaign_id"]
+        review_decision = client.post(
+            "/api/runtime/test/brc/review-decisions",
+            json={
+                "campaign_id": campaign_id,
+                "source_action_id": retry_action_id,
+                "decision": "accepted",
+                "reason_text": "BRC R2 reviewed",
+                "next_recommended_task": "BRC-R2-005",
+                "created_by": "owner",
+                "metadata": {"source": "endpoint-test"},
+            },
+        )
+        assert review_decision.status_code == 200
+        assert review_decision.json()["review_decision"]["decision"] == "accepted"
+        assert review_decision.json()["review_decision"]["real_live_authorized"] is False
+        assert review_decision.json()["review_decision"]["withdrawal_authorized"] is False
+
+        latest_review = client.get("/api/runtime/test/brc/review-decisions/latest")
+        assert latest_review.status_code == 200
+        assert latest_review.json()["review_decision"]["campaign_id"] == campaign_id
+
+        review_list = client.get(f"/api/runtime/test/brc/review-decisions?campaign_id={campaign_id}")
+        assert review_list.status_code == 200
+        assert len(review_list.json()["review_decisions"]) == 1

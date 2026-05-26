@@ -169,3 +169,26 @@ Rules:
 - confirmation failure is persisted as `blocked`;
 - unknown text is persisted as `blocked`;
 - executed rows must keep `mutation_executed=false`, `withdrawal_executed=false`, and `live_ready=false`.
+
+## BRC-R2-004 Extension
+
+`BRC-R2-004` persists Owner review decisions after the read-only operator run.
+
+The review decision table is `brc_review_decisions`.
+
+Supported decisions:
+
+- `accepted`;
+- `needs_followup`;
+- `next_campaign_blocked`;
+- `testnet_rehearsal_authorized`.
+
+Rules:
+
+- review decisions record Owner judgment only;
+- review decisions do not create campaigns;
+- review decisions do not place, close, resize, transfer, or withdraw;
+- review decisions must keep `testnet_only=true`;
+- review decisions must keep `real_live_authorized=false`,
+  `withdrawal_authorized=false`, and
+  `strategy_execution_authorized=false`.
