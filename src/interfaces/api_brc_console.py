@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -70,6 +71,58 @@ class BrcActionReadiness(BaseModel):
     risk_level: Literal["read_only", "controlled_testnet", "blocked"] = "read_only"
 
 
+RiskDecision = Literal[
+    "ALLOW_READ",
+    "ALLOW_MONITOR",
+    "BLOCK_TESTNET",
+    "ATTENTION_REQUIRED",
+    "BLOCK_ALL_STATE_CHANGE",
+]
+RuntimeState = Literal[
+    "observe",
+    "monitor",
+    "testnet_rehearsal",
+    "paused",
+    "stopped",
+    "flattening",
+    "attention_required",
+]
+ActionCardType = Literal[
+    "read_status",
+    "enter_monitor",
+    "testnet_rehearsal",
+    "pause_new_entries",
+    "emergency_stop_runtime",
+    "emergency_flatten",
+]
+
+
+class BrcActionCard(BaseModel):
+    action_card_id: str
+    title: str
+    action_type: ActionCardType
+    enabled: bool
+    disabled_reason: Optional[str] = None
+    route: Optional[str] = None
+    button_label: str
+    authority_source: Literal["application_preflight"] = "application_preflight"
+    fact_snapshot_id: str
+    preflight_result_id: str
+    idempotency_key: str
+    expiry_time: Optional[int] = None
+    current_state: RuntimeState
+    allowed_next_states: list[RuntimeState] = Field(default_factory=list)
+    blocked_next_states: list[str] = Field(default_factory=list)
+    reversible: bool = False
+    final_state_proof_required: bool = False
+    hard_blocks: list[str] = Field(default_factory=list)
+    advisory_warnings: list[str] = Field(default_factory=list)
+    confirmation_phrase: Optional[str] = None
+    account_impact: str = "不会影响真实账户。"
+    what_will_change: str
+    what_will_not_change: str = "不会启用真实实盘、提现/转账、自动 sizing/leverage 或策略池执行。"
+
+
 class BrcReadinessResponse(BaseModel):
     mode: Literal[
         "standalone_console",
@@ -85,10 +138,82 @@ class BrcReadinessResponse(BaseModel):
     available_actions: list[BrcActionReadiness] = Field(default_factory=list)
     disabled_actions: list[BrcActionReadiness] = Field(default_factory=list)
     latest_campaign: Optional[dict[str, Any]] = None
+    environment_boundary: dict[str, Any] = Field(default_factory=dict)
+    runtime_state: RuntimeState = "observe"
+    risk_decision: RiskDecision = "ALLOW_READ"
+    risk_account_summary: dict[str, Any] = Field(default_factory=dict)
+    strategy_playbook_summary: dict[str, Any] = Field(default_factory=dict)
+    action_cards: list[BrcActionCard] = Field(default_factory=list)
+    global_cutoff_controls: list[BrcActionCard] = Field(default_factory=list)
+    latest_audit: Optional[dict[str, Any]] = None
     runtime_summary: dict[str, Any] = Field(default_factory=dict)
     review_summary: dict[str, Any] = Field(default_factory=dict)
+    markets_summary: dict[str, Any] = Field(default_factory=dict)
+    playbook_summary: dict[str, Any] = Field(default_factory=dict)
+    parameter_summary: dict[str, Any] = Field(default_factory=dict)
+    audit_summary: dict[str, Any] = Field(default_factory=dict)
+    ai_investigator_summary: dict[str, Any] = Field(default_factory=dict)
     developer_details: dict[str, Any] = Field(default_factory=dict)
     live_ready: Literal[False] = False
+
+
+class BrcMarketsOrdersResponse(BaseModel):
+    conclusion: str
+    account_impact: str
+    symbols: list[dict[str, Any]] = Field(default_factory=list)
+    open_orders: list[dict[str, Any]] = Field(default_factory=list)
+    active_positions: list[dict[str, Any]] = Field(default_factory=list)
+    developer_details: dict[str, Any] = Field(default_factory=dict)
+    live_ready: Literal[False] = False
+
+
+class BrcAuditTrailResponse(BaseModel):
+    conclusion: str
+    account_impact: str
+    timeline: list[dict[str, Any]] = Field(default_factory=list)
+    operator_actions: list[dict[str, Any]] = Field(default_factory=list)
+    workflow_runs: list[dict[str, Any]] = Field(default_factory=list)
+    review_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    developer_details: dict[str, Any] = Field(default_factory=dict)
+    live_ready: Literal[False] = False
+
+
+class BrcInvestigatorAskRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+    context_type: Optional[str] = Field(default=None, max_length=64)
+    context_id: Optional[str] = Field(default=None, max_length=256)
+
+
+class BrcInvestigatorAskResponse(BaseModel):
+    intent: str
+    conclusion: str
+    reason: str
+    account_impact: str
+    evidence_summary: list[str] = Field(default_factory=list)
+    trace: list[dict[str, Any]] = Field(default_factory=list)
+    next_step: str
+    developer_details: dict[str, Any] = Field(default_factory=dict)
+    live_ready: Literal[False] = False
+
+
+_CONTROLLED_SYMBOLS: list[dict[str, Any]] = [
+    {
+        "symbol_key": "eth",
+        "display_symbol": "ETHUSDT",
+        "exchange_symbol": "ETH/USDT:USDT",
+        "allowed_amount": "0.01",
+        "max_notional_usdt": "25",
+        "leverage_cap": "1x",
+    },
+    {
+        "symbol_key": "btc",
+        "display_symbol": "BTCUSDT",
+        "exchange_symbol": "BTC/USDT:USDT",
+        "allowed_amount": "0.002",
+        "max_notional_usdt": "250",
+        "leverage_cap": "1x",
+    },
+]
 
 
 def _api_module() -> Any:
@@ -141,6 +266,29 @@ def _env_enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _dump_jsonable(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if hasattr(value, "dict"):
+        return value.dict()
+    if isinstance(value, dict):
+        return dict(value)
+    payload: dict[str, Any] = {}
+    for key in dir(value):
+        if key.startswith("_"):
+            continue
+        attr = getattr(value, key, None)
+        if callable(attr):
+            continue
+        if isinstance(attr, (str, int, float, bool, type(None), list, dict)):
+            payload[key] = attr
+        else:
+            payload[key] = str(attr)
+    return payload
+
+
 def _campaign_summary(campaign: Any) -> Optional[dict[str, Any]]:
     if campaign is None:
         return None
@@ -155,6 +303,181 @@ def _campaign_summary(campaign: Any) -> Optional[dict[str, Any]]:
         "profit_protect_trigger": str(campaign.risk_envelope.profit_protect_trigger),
         "max_campaign_loss": str(campaign.risk_envelope.max_campaign_loss),
         "finalized_at_ms": campaign.finalized_at_ms,
+    }
+
+
+async def _markets_orders_summary(api_module: Any) -> tuple[dict[str, Any], list[str]]:
+    """Build a read-only BTC/ETH status summary without exchange mutation."""
+    errors: list[str] = []
+    position_repo = getattr(api_module, "_position_repo", None)
+    order_repo = getattr(api_module, "_order_repo", None)
+    symbols: list[dict[str, Any]] = []
+    all_positions: list[dict[str, Any]] = []
+    all_open_orders: list[dict[str, Any]] = []
+
+    for spec in _CONTROLLED_SYMBOLS:
+        exchange_symbol = str(spec["exchange_symbol"])
+        positions: list[Any] = []
+        orders: list[Any] = []
+        if position_repo is not None and hasattr(position_repo, "list_active"):
+            try:
+                positions = list(await position_repo.list_active(symbol=exchange_symbol, limit=20))
+            except Exception as exc:  # pragma: no cover - defensive product summary
+                errors.append(f"{exchange_symbol} active position read failed: {exc}")
+        if order_repo is not None and hasattr(order_repo, "get_open_orders"):
+            try:
+                orders = list(await order_repo.get_open_orders(exchange_symbol))
+            except TypeError:
+                try:
+                    orders = list(await order_repo.get_open_orders())
+                except Exception as exc:  # pragma: no cover
+                    errors.append(f"{exchange_symbol} open order read failed: {exc}")
+            except Exception as exc:  # pragma: no cover
+                errors.append(f"{exchange_symbol} open order read failed: {exc}")
+
+        position_payloads = [_dump_jsonable(item) for item in positions]
+        order_payloads = [_dump_jsonable(item) for item in orders]
+        all_positions.extend(position_payloads)
+        all_open_orders.extend(order_payloads)
+        symbols.append(
+            {
+                **spec,
+                "testnet_only": True,
+                "live_enabled": False,
+                "strategy_execution_enabled": False,
+                "active_position_count": len(position_payloads),
+                "open_order_count": len(order_payloads),
+                "status_label": "flat" if not position_payloads and not order_payloads else "attention_required",
+                "owner_meaning": (
+                    "当前未发现本地 active position/open order。"
+                    if not position_payloads and not order_payloads
+                    else "发现本地 active position 或 open order，请先核对完整链路。"
+                ),
+            }
+        )
+
+    return (
+        {
+            "symbols": symbols,
+            "active_positions": all_positions,
+            "open_orders": all_open_orders,
+            "active_position_count": len(all_positions),
+            "open_order_count": len(all_open_orders),
+            "all_local_flat": len(all_positions) == 0 and len(all_open_orders) == 0,
+            "data_source": "local_pg_repositories_only",
+        },
+        errors,
+    )
+
+
+async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, Any], list[str]]:
+    errors: list[str] = []
+    actions: list[Any] = []
+    workflows: list[Any] = []
+    reviews: list[Any] = []
+    if service is None:
+        return {
+            "timeline": [],
+            "operator_actions": [],
+            "workflow_runs": [],
+            "review_decisions": [],
+            "latest_event": None,
+        }, ["BRC Campaign service unavailable"]
+
+    for label, method_name, target in [
+        ("operator actions", "list_operator_actions", "actions"),
+        ("workflow runs", "list_workflow_runs", "workflows"),
+        ("review decisions", "list_review_decisions", "reviews"),
+    ]:
+        method = getattr(service, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            items = list(await method(limit=limit))
+            if target == "actions":
+                actions = items
+            elif target == "workflows":
+                workflows = items
+            else:
+                reviews = items
+        except Exception as exc:  # pragma: no cover - defensive product summary
+            errors.append(f"{label} read failed: {exc}")
+
+    action_payloads = [_dump_jsonable(item) for item in actions]
+    workflow_payloads = [_dump_jsonable(item) for item in workflows]
+    review_payloads = [_dump_jsonable(item) for item in reviews]
+    timeline: list[dict[str, Any]] = []
+    for item in action_payloads:
+        timeline.append(
+            {
+                "type": "operator_action",
+                "id": item.get("action_id"),
+                "title": "Owner 操作计划 / Operator action",
+                "result": item.get("decision_result"),
+                "occurred_at_ms": item.get("executed_at_ms") or item.get("created_at_ms"),
+                "summary": item.get("source_text") or item.get("draft_action"),
+                "account_impact": "不会影响真实账户；mutation/live/withdrawal flags are false.",
+                "raw": item,
+            }
+        )
+    for item in workflow_payloads:
+        timeline.append(
+            {
+                "type": "workflow_run",
+                "id": item.get("workflow_run_id"),
+                "title": "受控流程 / Workflow",
+                "result": item.get("status"),
+                "occurred_at_ms": item.get("updated_at_ms") or item.get("created_at_ms"),
+                "summary": item.get("action") or item.get("normalized_action"),
+                "account_impact": "创建 workflow 本身不影响真实账户；执行仍需 Owner confirmation.",
+                "raw": item,
+            }
+        )
+    for item in review_payloads:
+        timeline.append(
+            {
+                "type": "review_decision",
+                "id": item.get("review_id"),
+                "title": "复盘决策 / Review decision",
+                "result": item.get("decision"),
+                "occurred_at_ms": item.get("created_at_ms"),
+                "summary": item.get("reason_text") or item.get("next_recommended_task"),
+                "account_impact": "复盘记录只写数据库事实，不创建 campaign 或触发 testnet.",
+                "raw": item,
+            }
+        )
+    timeline.sort(key=lambda item: int(item.get("occurred_at_ms") or 0), reverse=True)
+    return {
+        "timeline": timeline[:limit],
+        "operator_actions": action_payloads,
+        "workflow_runs": workflow_payloads,
+        "review_decisions": review_payloads,
+        "latest_event": timeline[0] if timeline else None,
+    }, errors
+
+
+def _parameter_summary(profile: Optional[str], testnet: Optional[bool]) -> dict[str, Any]:
+    return {
+        "runtime_profile": profile,
+        "exchange_testnet": testnet,
+        "controlled_symbols": _CONTROLLED_SYMBOLS,
+        "risk_envelope": {
+            "max_simultaneous_positions": 1,
+            "max_attempts": 2,
+            "mock_pnl_only": True,
+            "loss_counter_resets_on_playbook_switch": False,
+        },
+        "confirmation_phrases": {
+            "read_only": "CONFIRM_READ_ONLY_BRC",
+            "controlled_testnet": "CONFIRM_BRC_TESTNET_REHEARSAL",
+        },
+        "unauthorized_capabilities": [
+            "real_live",
+            "withdrawal_or_transfer",
+            "automatic_strategy_execution",
+            "automatic_sizing_or_leverage_override",
+            "strategy_pool_execution",
+        ],
     }
 
 
@@ -183,6 +506,123 @@ def _action(
     )
 
 
+def _risk_decision(
+    *,
+    runtime_ready: bool,
+    service_error: Optional[str],
+    market_errors: list[str],
+    audit_errors: list[str],
+    markets_summary: dict[str, Any],
+    mutation_env_ready: bool,
+) -> RiskDecision:
+    if service_error:
+        return "BLOCK_ALL_STATE_CHANGE"
+    if market_errors or audit_errors:
+        return "ATTENTION_REQUIRED"
+    if not bool(markets_summary.get("all_local_flat", False)):
+        return "ATTENTION_REQUIRED"
+    if not runtime_ready:
+        return "ALLOW_READ"
+    if not mutation_env_ready:
+        return "ALLOW_MONITOR"
+    return "ALLOW_MONITOR"
+
+
+def _runtime_state(
+    *,
+    risk_decision: RiskDecision,
+    runtime_ready: bool,
+    mutation_env_ready: bool,
+    gks_active: Optional[bool],
+) -> RuntimeState:
+    if risk_decision in {"ATTENTION_REQUIRED", "BLOCK_ALL_STATE_CHANGE"}:
+        return "attention_required"
+    if not runtime_ready:
+        return "observe"
+    if gks_active is True:
+        return "paused"
+    if mutation_env_ready:
+        return "monitor"
+    return "monitor"
+
+
+def _fact_snapshot_id(
+    *,
+    runtime_ready: bool,
+    profile: Optional[str],
+    testnet: Optional[bool],
+    markets_summary: dict[str, Any],
+    audit_summary: dict[str, Any],
+    risk_decision: RiskDecision,
+) -> str:
+    latest = audit_summary.get("latest_event") or {}
+    parts = [
+        "brc-v0",
+        "runtime" if runtime_ready else "standalone",
+        str(profile or "no-profile"),
+        "testnet" if testnet is True else "not-testnet",
+        f"pos{markets_summary.get('active_position_count', 'x')}",
+        f"ord{markets_summary.get('open_order_count', 'x')}",
+        str(latest.get("id") or "no-audit"),
+        risk_decision,
+    ]
+    return ":".join(parts)
+
+
+def _action_card(
+    *,
+    action_type: ActionCardType,
+    title: str,
+    enabled: bool,
+    disabled_reason: Optional[str],
+    route: Optional[str],
+    button_label: str,
+    fact_snapshot_id: str,
+    current_state: RuntimeState,
+    allowed_next_states: list[RuntimeState],
+    blocked_next_states: Optional[list[str]] = None,
+    reversible: bool = False,
+    final_state_proof_required: bool = False,
+    hard_blocks: Optional[list[str]] = None,
+    advisory_warnings: Optional[list[str]] = None,
+    confirmation_phrase: Optional[str] = None,
+    account_impact: str = "不会影响真实账户。",
+    what_will_change: str = "只读取当前系统状态。",
+    what_will_not_change: str = "不会启用真实实盘、提现/转账、自动 sizing/leverage 或策略池执行。",
+    expiry_seconds: Optional[int] = 300,
+) -> BrcActionCard:
+    action_card_id = f"brc-card-{action_type}"
+    preflight_result_id = f"preflight-{action_type}-{'allow' if enabled else 'block'}"
+    expiry_time = int(time.time() * 1000) + expiry_seconds * 1000 if expiry_seconds is not None else None
+    blocks = list(hard_blocks or [])
+    if not enabled and disabled_reason:
+        blocks.append(disabled_reason)
+    return BrcActionCard(
+        action_card_id=action_card_id,
+        title=title,
+        action_type=action_type,
+        enabled=enabled,
+        disabled_reason=None if enabled else disabled_reason,
+        route=route,
+        button_label=button_label,
+        fact_snapshot_id=fact_snapshot_id,
+        preflight_result_id=preflight_result_id,
+        idempotency_key=f"{fact_snapshot_id}:{action_type}",
+        expiry_time=expiry_time,
+        current_state=current_state,
+        allowed_next_states=allowed_next_states if enabled else [],
+        blocked_next_states=list(blocked_next_states or []),
+        reversible=reversible,
+        final_state_proof_required=final_state_proof_required,
+        hard_blocks=blocks,
+        advisory_warnings=list(advisory_warnings or []),
+        confirmation_phrase=confirmation_phrase,
+        account_impact=account_impact,
+        what_will_change=what_will_change,
+        what_will_not_change=what_will_not_change,
+    )
+
+
 @router.get("/readiness", response_model=BrcReadinessResponse)
 async def get_brc_readiness() -> BrcReadinessResponse:
     api_module = _api_module()
@@ -205,6 +645,9 @@ async def get_brc_readiness() -> BrcReadinessResponse:
         except Exception as exc:  # pragma: no cover - defensive product summary
             service_error = str(exc)
 
+    markets_summary, market_errors = await _markets_orders_summary(api_module)
+    audit_summary, audit_errors = await _audit_summary(service, limit=5)
+
     reasons: list[str] = []
     if runtime_context is None:
         reasons.append("当前只是 Standalone Console，后端没有绑定运行时 Runtime。")
@@ -213,6 +656,10 @@ async def get_brc_readiness() -> BrcReadinessResponse:
     if service_error:
         reasons.append("BRC Campaign 服务读取失败，页面只能显示安全说明。")
     reasons.extend(profile_reasons)
+    if market_errors:
+        reasons.append("交易对/订单摘要只能部分读取，详情见 Developer Detail。")
+    if audit_errors and service is not None:
+        reasons.append("审计摘要只能部分读取，详情见 Developer Detail。")
 
     runtime_ready = runtime_context is not None and service is not None and not profile_reasons
     has_campaign = latest_campaign is not None
@@ -220,11 +667,33 @@ async def get_brc_readiness() -> BrcReadinessResponse:
         "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"
     )
     testnet_ready = runtime_ready and mutation_env_ready
+    risk_decision = _risk_decision(
+        runtime_ready=runtime_ready,
+        service_error=service_error,
+        market_errors=market_errors,
+        audit_errors=audit_errors if service is not None else [],
+        markets_summary=markets_summary,
+        mutation_env_ready=mutation_env_ready,
+    )
+    runtime_state = _runtime_state(
+        risk_decision=risk_decision,
+        runtime_ready=runtime_ready,
+        mutation_env_ready=mutation_env_ready,
+        gks_active=gks_active,
+    )
+    fact_snapshot_id = _fact_snapshot_id(
+        runtime_ready=runtime_ready,
+        profile=profile,
+        testnet=testnet,
+        markets_summary=markets_summary,
+        audit_summary=audit_summary,
+        risk_decision=risk_decision,
+    )
 
     if runtime_context is None:
         mode: Literal["standalone_console", "runtime_bound_console", "brc_ready", "testnet_ready", "blocked"] = "standalone_console"
         conclusion = "当前只能查看，不能执行 BRC campaign 操作。"
-        next_step = "启动绑定 BRC runtime 的后端后，再回到 Guide 操作向导刷新状态。"
+        next_step = "启动绑定 BRC runtime 的后端后，回到 Command Center 刷新状态。"
     elif not runtime_ready:
         mode = "runtime_bound_console"
         conclusion = "运行时已连接，但 BRC 操作条件还不完整。"
@@ -232,7 +701,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
     elif testnet_ready:
         mode = "testnet_ready"
         conclusion = "当前满足受控测试网 workflow 的基础门槛。"
-        next_step = "如需 testnet 演练，请进入 Workflow 受控流程并手动确认。"
+        next_step = "主链路已可进入：打开 LLM Copilot，创建 testnet_rehearsal action card，并手动输入确认短语。"
     else:
         mode = "brc_ready"
         conclusion = "当前可以进行 BRC 只读治理操作；testnet 演练仍需额外门槛。"
@@ -328,6 +797,181 @@ async def get_brc_readiness() -> BrcReadinessResponse:
         else None,
         "review_available": runtime_ready and has_campaign,
     }
+    playbook_summary = {
+        "current_playbook_id": campaign_summary.get("current_playbook_id") if campaign_summary else "PB-000-OBSERVE-ONLY",
+        "current_playbook_meaning": "Playbook 是人工打法/治理框架，不等于可自动执行策略。",
+        "strategy_execution_enabled": False,
+        "strategy_execution_status": "未启用可执行 Strategy；策略池后续单独建设。",
+        "catalog": [
+            {"playbook_id": "PB-000-OBSERVE-ONLY", "label": "Observe Only", "status": "available"},
+            {"playbook_id": "PB-001-DIRECTION-A-PAPER", "label": "Direction A Paper", "status": "observe_only"},
+            {"playbook_id": "PB-002-SQ02-DOWNSIDE-PAPER", "label": "SQ02 Downside Paper", "status": "docs_only"},
+            {"playbook_id": "PB-003-MANUAL-DISCRETIONARY", "label": "Manual Discretionary", "status": "governed_only"},
+            {"playbook_id": "PB-004-BRC-CONTROLLED-TESTNET", "label": "BRC Controlled Testnet", "status": "testnet_only"},
+        ],
+    }
+    parameter_summary = _parameter_summary(profile, testnet)
+    environment_boundary = {
+        "current": "simulation",
+        "exchange_mode": "binance_testnet" if testnet is True else "unknown_or_not_testnet",
+        "executable_modes": ["local", "mock", "binance_testnet"],
+        "future_live": {
+            "modeled": True,
+            "available": False,
+            "display": "disabled_boundary",
+            "reason": "requires separate Owner production authorization plus cloud/security/secret/replay/permission work",
+        },
+        "production_authorized": False,
+        "real_account_impact": "none",
+    }
+    risk_account_summary = {
+        "risk_decision": risk_decision,
+        "account_state": {
+            "environment": environment_boundary["current"],
+            "exchange_mode": environment_boundary["exchange_mode"],
+            "real_account_impact": "none",
+            "wallet_equity_available": False,
+            "available_margin_available": False,
+        },
+        "exposure_orders": {
+            "symbols": markets_summary.get("symbols", []),
+            "active_positions": markets_summary.get("active_positions", []),
+            "open_orders": markets_summary.get("open_orders", []),
+            "active_position_count": markets_summary.get("active_position_count", 0),
+            "open_order_count": markets_summary.get("open_order_count", 0),
+            "order_source": "local_pg_repositories_only",
+            "unknown_exposure": not bool(markets_summary.get("all_local_flat", False)),
+            "flatness_proof": {
+                "all_local_flat": bool(markets_summary.get("all_local_flat", False)),
+                "source": markets_summary.get("data_source"),
+                "timestamp_ms": int(time.time() * 1000),
+            },
+        },
+        "risk_envelope": parameter_summary["risk_envelope"],
+        "loss_lock_status": campaign_summary.get("status") if campaign_summary else "no_campaign",
+        "profit_protect_status": "not_triggered_or_unknown",
+        "daily_realized_pnl": "not_available_in_console_v0",
+        "daily_trade_count": "not_available_in_console_v0",
+        "audit_writable": service is not None and not audit_errors,
+        "cutoff_available": runtime_ready,
+    }
+    strategy_playbook_summary = {
+        **playbook_summary,
+        "current_strategy_family": "Trend Following" if playbook_summary["current_playbook_id"] == "TF-001" else "BRC Controlled Testnet / Governance",
+        "current_mode": runtime_state,
+        "r5_carrier": {
+            "playbook_id": "TF-001",
+            "purpose": "carrier_validation_only",
+            "implementation_status": "later_slice",
+            "alpha_claim": False,
+        },
+    }
+    read_enabled = True
+    monitor_enabled = runtime_ready and risk_decision in {"ALLOW_MONITOR", "BLOCK_TESTNET"}
+    testnet_action_enabled = testnet_ready and risk_decision == "ALLOW_MONITOR"
+    cutoff_enabled = runtime_ready
+    action_cards = [
+        _action_card(
+            action_type="read_status",
+            title="Read current status",
+            enabled=read_enabled,
+            disabled_reason=None,
+            route="/command-center",
+            button_label="查看状态",
+            fact_snapshot_id=fact_snapshot_id,
+            current_state=runtime_state,
+            allowed_next_states=[runtime_state],
+            reversible=True,
+            final_state_proof_required=False,
+            what_will_change="只刷新 Command Center / Risk & Account 的只读状态。",
+        ),
+        _action_card(
+            action_type="enter_monitor",
+            title="Enter monitor",
+            enabled=monitor_enabled,
+            disabled_reason="需要绑定 runtime、BRC 服务、可读风险状态，并且不能处于 attention_required。",
+            route="/llm-copilot",
+            button_label="准备 monitor",
+            fact_snapshot_id=fact_snapshot_id,
+            current_state=runtime_state,
+            allowed_next_states=["monitor"],
+            blocked_next_states=["live_trade", "strategy_pool_execution"],
+            reversible=True,
+            final_state_proof_required=False,
+            advisory_warnings=["Monitor 不授予订单权限。"],
+            confirmation_phrase="CONFIRM_READ_ONLY_BRC",
+            what_will_change="生成进入 monitor 的应用层 action card；不会直接下单。",
+        ),
+        _action_card(
+            action_type="testnet_rehearsal",
+            title="Fixed BRC testnet rehearsal",
+            enabled=testnet_action_enabled,
+            disabled_reason=no_testnet_reason if not testnet_ready else "当前风险判定不允许 testnet_rehearsal。",
+            route="/llm-copilot",
+            button_label="准备 testnet_rehearsal",
+            fact_snapshot_id=fact_snapshot_id,
+            current_state=runtime_state,
+            allowed_next_states=["testnet_rehearsal", "attention_required"],
+            blocked_next_states=["live_trade", "withdrawal", "transfer", "strategy_pool_execution"],
+            reversible=False,
+            final_state_proof_required=True,
+            advisory_warnings=[
+                "只允许固定 ETH/BTC BRC 测试网演练。",
+                "策略证据是 advisory，不是执行授权。",
+            ],
+            confirmation_phrase="CONFIRM_BRC_TESTNET_REHEARSAL",
+            account_impact="只影响 Binance testnet；不会影响真实账户。",
+            what_will_change="Owner 确认后执行固定 BRC ETH/BTC testnet rehearsal 并写入审计和复盘证据。",
+        ),
+    ]
+    global_cutoff_controls = [
+        _action_card(
+            action_type="pause_new_entries",
+            title="Pause new entries",
+            enabled=cutoff_enabled,
+            disabled_reason=no_runtime_reason,
+            route="/runtime-control",
+            button_label="Pause",
+            fact_snapshot_id=fact_snapshot_id,
+            current_state=runtime_state,
+            allowed_next_states=["paused"],
+            reversible=True,
+            final_state_proof_required=False,
+            confirmation_phrase="CONFIRM_READ_ONLY_BRC",
+            what_will_change="停止新增开仓意图；不主动平掉已有 exposure。",
+        ),
+        _action_card(
+            action_type="emergency_stop_runtime",
+            title="Emergency stop runtime",
+            enabled=cutoff_enabled,
+            disabled_reason=no_runtime_reason,
+            route="/runtime-control",
+            button_label="Stop runtime",
+            fact_snapshot_id=fact_snapshot_id,
+            current_state=runtime_state,
+            allowed_next_states=["stopped"],
+            reversible=False,
+            final_state_proof_required=False,
+            confirmation_phrase="CONFIRM_READ_ONLY_BRC",
+            what_will_change="停止 runtime-driven 活动；不代表交易所残留单已自动消失。",
+        ),
+        _action_card(
+            action_type="emergency_flatten",
+            title="Emergency flatten",
+            enabled=cutoff_enabled,
+            disabled_reason=no_runtime_reason,
+            route="/runtime-control",
+            button_label="Flatten",
+            fact_snapshot_id=fact_snapshot_id,
+            current_state=runtime_state,
+            allowed_next_states=["flattening", "attention_required"],
+            reversible=False,
+            final_state_proof_required=True,
+            confirmation_phrase="CONFIRM_BRC_TESTNET_REHEARSAL",
+            account_impact="v0 仅允许在 simulation/testnet 边界内执行；真实账户不可用。",
+            what_will_change="尝试撤单/平仓并要求最终 flatness 证明；失败会进入 attention_required。",
+        ),
+    ]
 
     return BrcReadinessResponse(
         mode=mode,
@@ -338,6 +982,14 @@ async def get_brc_readiness() -> BrcReadinessResponse:
         available_actions=available,
         disabled_actions=disabled,
         latest_campaign=campaign_summary,
+        environment_boundary=environment_boundary,
+        runtime_state=runtime_state,
+        risk_decision=risk_decision,
+        risk_account_summary=risk_account_summary,
+        strategy_playbook_summary=strategy_playbook_summary,
+        action_cards=action_cards,
+        global_cutoff_controls=global_cutoff_controls,
+        latest_audit=audit_summary.get("latest_event"),
         runtime_summary={
             "runtime_bound": runtime_context is not None,
             "profile": profile,
@@ -349,11 +1001,35 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             "mutation_env_ready": mutation_env_ready,
         },
         review_summary=review_summary,
+        markets_summary=markets_summary,
+        playbook_summary=playbook_summary,
+        parameter_summary=parameter_summary,
+        audit_summary=audit_summary,
+        ai_investigator_summary={
+            "mode": "controlled_read_only_resolver",
+            "free_sql_enabled": False,
+            "can_answer": [
+                "这个订单怎么触发的？",
+                "现在系统能不能继续？",
+                "为什么 blocked？",
+                "上一轮 campaign 结果是什么？",
+                "最近发生了哪些关键操作？",
+            ],
+            "cannot_do": [
+                "下单",
+                "改参数",
+                "切换 playbook",
+                "提现/转账",
+                "自由 SQL",
+            ],
+        },
         developer_details={
             "runtime_context_bound": runtime_context is not None,
             "brc_campaign_service_present": service is not None,
             "service_error": service_error,
             "profile_reasons": profile_reasons,
+            "market_errors": market_errors,
+            "audit_errors": audit_errors,
             "mutation_env": {
                 "runtime_control_api_enabled": _env_enabled("RUNTIME_CONTROL_API_ENABLED"),
                 "runtime_test_signal_injection_enabled": _env_enabled("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"),
@@ -366,6 +1042,134 @@ async def get_brc_readiness() -> BrcReadinessResponse:
 @router.get("/dashboard", response_model=BrcDashboardResponse)
 async def get_brc_dashboard() -> BrcDashboardResponse:
     return BrcDashboardResponse()
+
+
+@router.get("/markets-orders", response_model=BrcMarketsOrdersResponse)
+async def get_brc_markets_orders() -> BrcMarketsOrdersResponse:
+    api_module = _api_module()
+    summary, errors = await _markets_orders_summary(api_module)
+    all_flat = bool(summary.get("all_local_flat"))
+    return BrcMarketsOrdersResponse(
+        conclusion=(
+            "当前本地 PG 未发现 BRC BTC/ETH active position/open order。"
+            if all_flat
+            else "当前发现本地 active position 或 open order，需要核对订单触发链路。"
+        ),
+        account_impact="只读查询，不会下单、平仓、提现、转账或修改仓位。",
+        symbols=list(summary.get("symbols", [])),
+        open_orders=list(summary.get("open_orders", [])),
+        active_positions=list(summary.get("active_positions", [])),
+        developer_details={"errors": errors, "data_source": summary.get("data_source")},
+    )
+
+
+@router.get("/audit-trail", response_model=BrcAuditTrailResponse)
+async def get_brc_audit_trail(limit: int = Query(default=50, ge=1, le=200)) -> BrcAuditTrailResponse:
+    service = getattr(_api_module(), "_brc_campaign_service", None)
+    summary, errors = await _audit_summary(service, limit=limit)
+    timeline = list(summary.get("timeline", []))
+    return BrcAuditTrailResponse(
+        conclusion=(
+            "已读取最近 BRC 操作审计记录。"
+            if timeline
+            else "当前没有可展示的 BRC 操作审计记录。"
+        ),
+        account_impact="只读审计查询，不会重放、修改或执行任何历史动作。",
+        timeline=timeline,
+        operator_actions=list(summary.get("operator_actions", [])),
+        workflow_runs=list(summary.get("workflow_runs", [])),
+        review_decisions=list(summary.get("review_decisions", [])),
+        developer_details={"errors": errors},
+    )
+
+
+@router.post("/investigator/ask", response_model=BrcInvestigatorAskResponse)
+async def ask_brc_investigator(body: BrcInvestigatorAskRequest) -> BrcInvestigatorAskResponse:
+    api_module = _api_module()
+    readiness = await get_brc_readiness()
+    markets, market_errors = await _markets_orders_summary(api_module)
+    audit, audit_errors = await _audit_summary(getattr(api_module, "_brc_campaign_service", None), limit=10)
+    question = body.question.strip()
+    lower = question.lower()
+
+    if any(token in lower for token in ["order", "订单"]):
+        intent = "order_trace"
+        orders = list(markets.get("open_orders", []))
+        conclusion = (
+            "当前没有可追踪的本地 open order；如果你问的是历史成交，需要后续接入历史订单 trace。"
+            if not orders
+            else "当前发现本地 open order，需通过 operator/workflow/campaign 证据继续核对来源。"
+        )
+        evidence = [
+            f"本地 open orders: {len(orders)}",
+            f"本地 active positions: {markets.get('active_position_count', 0)}",
+            "订单解释只读取本地 PG/order repository 摘要，不访问实盘账户。",
+        ]
+        trace = [
+            {"step": "Owner question", "evidence": question},
+            {"step": "Markets/orders resolver", "evidence": {"open_order_count": len(orders)}},
+            {"step": "Audit resolver", "evidence": audit.get("latest_event")},
+        ]
+        next_step = "如果页面上有具体 order_id，后续版本会按 order_id 展开 workflow/action/campaign 完整链路。"
+    elif any(token in lower for token in ["blocked", "block", "不能", "为什么"]):
+        intent = "blocked_reason"
+        conclusion = readiness.current_conclusion
+        evidence = readiness.why
+        trace = [
+            {"step": "Readiness mode", "evidence": readiness.mode},
+            {"step": "Disabled actions", "evidence": [item.model_dump(mode="json") for item in readiness.disabled_actions]},
+        ]
+        next_step = readiness.next_step
+    elif any(token in lower for token in ["campaign", "轮", "亏损", "盈利", "loss", "profit"]):
+        intent = "campaign_review"
+        campaign = readiness.latest_campaign
+        conclusion = (
+            f"最近 campaign 状态是 {campaign.get('status')}，结果是 {campaign.get('outcome') or '未结束'}。"
+            if campaign
+            else "当前没有 latest campaign，无法进行 campaign 复盘解释。"
+        )
+        evidence = [
+            f"latest_campaign_present: {campaign is not None}",
+            f"review_available: {readiness.review_summary.get('review_available')}",
+        ]
+        trace = [
+            {"step": "Latest campaign", "evidence": campaign},
+            {"step": "Review summary", "evidence": readiness.review_summary},
+        ]
+        next_step = "有 campaign 时先看 Campaigns 页面和 Review 页面；没有 campaign 时不要手填 ID。"
+    elif any(token in lower for token in ["最近", "发生", "日志", "审计", "audit"]):
+        intent = "recent_audit"
+        timeline = list(audit.get("timeline", []))
+        conclusion = "已读取最近关键操作。" if timeline else "当前没有最近关键操作记录。"
+        evidence = [f"timeline events: {len(timeline)}"]
+        trace = timeline[:5]
+        next_step = "进入 Audit Trail 查看完整时间线和对象链路。"
+    else:
+        intent = "runtime_status"
+        conclusion = readiness.current_conclusion
+        evidence = readiness.why
+        trace = [
+            {"step": "Runtime summary", "evidence": readiness.runtime_summary},
+            {"step": "Markets summary", "evidence": markets},
+        ]
+        next_step = readiness.next_step
+
+    return BrcInvestigatorAskResponse(
+        intent=intent,
+        conclusion=conclusion,
+        reason="AI Investigator MVP 使用受控只读 resolver，不使用自由 SQL，也不会把模型输出当作事实源。",
+        account_impact="不会影响真实账户；不会下单、提现、转账、改参数或切换 playbook。",
+        evidence_summary=[str(item) for item in evidence],
+        trace=trace,
+        next_step=next_step,
+        developer_details={
+            "context_type": body.context_type,
+            "context_id": body.context_id,
+            "market_errors": market_errors,
+            "audit_errors": audit_errors,
+            "free_sql_enabled": False,
+        },
+    )
 
 
 @router.get("/campaigns/current", response_model=runtime.BrcCampaignResponse)
