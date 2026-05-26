@@ -401,6 +401,25 @@ async def test_brc_rejects_wrong_profile(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_brc_operator_plan_does_not_require_runtime_control_api(monkeypatch):
+    monkeypatch.delenv("RUNTIME_CONTROL_API_ENABLED", raising=False)
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(),
+        _brc_campaign_service=await _brc_service(),
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post(
+            "/api/runtime/test/brc/operator/plan",
+            json={"text": "帮我看下一轮能不能开"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["plan"]["steps"][0]["mutation_intended"] is False
+
+
+@pytest.mark.asyncio
 async def test_brc_entry_rejects_body_override(monkeypatch):
     service = await _brc_service()
     await service.create_campaign(

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { GitBranch, PlayCircle } from 'lucide-react';
 import { brcApi, WorkflowResponse } from '@/src/services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
-import { ChainExplanation, EmptyState, ErrorState, JsonDetails, StageStrip, StatusBadge } from './ConsolePrimitives';
+import { ChainExplanation, EmptyState, ErrorState, JsonDetails, OwnerSummary, StageStrip, StatusBadge } from './ConsolePrimitives';
 
 const TESTNET_CONFIRM = 'CONFIRM_BRC_TESTNET_REHEARSAL';
 
@@ -54,6 +54,11 @@ export default function Workflow() {
   const blocked = String(workflow?.workflow?.blocked_reason || workflow?.intent?.blocked_reason || '');
   const requiresTestnet = action === 'request_testnet_rehearsal';
   const confirmPhrase = requiresTestnet ? TESTNET_CONFIRM : 'CONFIRM_READ_ONLY_BRC';
+  const mode = blocked
+    ? 'forbidden'
+    : requiresTestnet
+      ? 'testnet'
+      : 'readonly';
 
   return (
     <div className="space-y-4">
@@ -61,6 +66,17 @@ export default function Workflow() {
         current="BRC-R4 LLM workflow"
         next="LLM 只能归一化意图；执行前必须 Owner 手动确认。"
         global="后续可扩展多轮对话、计划修订和飞书卡片审批。"
+      />
+      <OwnerSummary
+        conclusion={requiresTestnet ? '这是受控 testnet workflow，需要更高确认' : '这里先识别意图，不会自动执行'}
+        why={requiresTestnet
+          ? '请求涉及固定 testnet 演练，必须通过 runtime/testnet/profile/guard 检查和专用确认短语。'
+          : 'LLM 只做意图归一化和计划编排，不能授权交易或绕过 Owner confirmation。'}
+        canDo="创建 workflow，查看识别结果、风险分类和需要满足的门槛。"
+        cannotDo="不能请求实盘、提现、自动下单、自动 sizing 或扩展到策略池执行。"
+        accountImpact={requiresTestnet ? '仅可能影响 Binance testnet；不会触碰真实账户或提现。' : '不会影响真实账户。创建 workflow 本身不执行动作。'}
+        next={requiresTestnet ? '确认风险分类后，只有在条件满足时才输入 CONFIRM_BRC_TESTNET_REHEARSAL。' : '先创建 workflow，再根据确认卡决定是否输入确认短语。'}
+        tone={requiresTestnet ? 'warning' : 'info'}
       />
       {error && <ErrorState error={error} />}
 
@@ -88,7 +104,7 @@ export default function Workflow() {
         </CardContent>
       </Card>
 
-      <ChainExplanation ownerText={text} intent={action} action={workflow} blocked={blocked || undefined} />
+      <ChainExplanation ownerText={text} intent={action} action={workflow} blocked={blocked || undefined} mode={mode} />
 
       {workflow && (
         <Card>

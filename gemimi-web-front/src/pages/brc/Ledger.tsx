@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { History } from 'lucide-react';
 import { brcApi } from '@/src/services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
-import { EmptyState, ErrorState, JsonDetails, StageStrip, StatusBadge } from './ConsolePrimitives';
+import { EmptyState, ErrorState, JsonDetails, OwnerSummary, StageStrip, StatusBadge } from './ConsolePrimitives';
 
 export default function Ledger() {
   const [actions, setActions] = useState<Array<Record<string, unknown>>>([]);
@@ -33,6 +33,15 @@ export default function Ledger() {
         current="BRC-R4 ledger"
         next="用数据库事实源查看 Owner 操作、workflow 和复盘记录。"
         global="后续 Feishu 和云部署审批需要复用这套审计链路。"
+      />
+      <OwnerSummary
+        conclusion="这里是操作记录，不是交易入口"
+        why="Ledger 只读取已经持久化的 operator actions、workflow runs 和 review decisions。"
+        canDo="查看记录、点击记录展开 JSON 明细，用于复盘和审计。"
+        cannotDo="不能下单、不能重放 workflow、不能修改历史记录。"
+        accountImpact="不会影响真实账户。读取 ledger 不会触发任何 runtime 或 exchange 动作。"
+        next="如果这里 blocked，先看用户解释；开发者详情只用于排查配置。"
+        tone="info"
       />
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { FileSearch, PlayCircle } from 'lucide-react';
 import { brcApi, OperatorPlanResponse, OperatorRunResponse } from '@/src/services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
-import { ChainExplanation, ErrorState, GuardNote, JsonDetails, StageStrip } from './ConsolePrimitives';
+import { ChainExplanation, ErrorState, GuardNote, JsonDetails, OwnerSummary, StageStrip } from './ConsolePrimitives';
 
 const READ_ONLY_CONFIRM = 'CONFIRM_READ_ONLY_BRC';
 
@@ -51,6 +51,15 @@ export default function Operator() {
         next="先生成计划，确认链路解释后手动输入确认短语。"
         global="BRC 操作治理层；自动策略、真实实盘和出金仍未授权。"
       />
+      <OwnerSummary
+        conclusion="这里用于生成只读操作计划，不会直接执行交易"
+        why="Operator 只把你的自然语言转成治理动作计划；执行前还要手动输入确认短语。"
+        canDo="生成 review/evidence/next eligibility 等只读检查计划。"
+        cannotDo="不能下单、平仓、提现、转账、修改杠杆或启用策略。"
+        accountImpact="不会影响真实账户。即使执行成功，也只是读取和写入操作记录。"
+        next="点击“生成只读操作计划”，检查确认卡，再手动输入 CONFIRM_READ_ONLY_BRC。"
+        tone="info"
+      />
       <GuardNote />
       {error && <ErrorState error={error} />}
 
@@ -73,12 +82,12 @@ export default function Operator() {
             disabled={loading || !text.trim()}
           >
             <FileSearch className="h-3.5 w-3.5" />
-            生成计划
+            生成只读操作计划
           </button>
         </CardContent>
       </Card>
 
-      <ChainExplanation ownerText={text} intent={draftAction} action={plan} blocked={blockedReason || undefined} />
+      <ChainExplanation ownerText={text} intent={draftAction} action={plan} blocked={blockedReason || undefined} mode="readonly" />
 
       {plan && (
         <Card>

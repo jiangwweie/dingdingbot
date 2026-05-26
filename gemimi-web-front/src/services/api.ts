@@ -80,11 +80,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('application/json') ? await response.json() : await response.text();
   if (!response.ok) {
+    const detailValue = typeof payload === 'object' && payload && 'detail' in payload
+      ? (payload as { detail?: unknown }).detail
+      : undefined;
     const detail = typeof payload === 'object' && payload && 'message' in payload
       ? String((payload as { message?: unknown }).message)
-      : typeof payload === 'object' && payload && 'detail' in payload
-        ? String((payload as { detail?: unknown }).detail)
-        : `API request failed: ${response.status}`;
+      : typeof detailValue === 'object' && detailValue && 'message' in detailValue
+        ? String((detailValue as { message?: unknown }).message)
+        : typeof detailValue === 'string'
+          ? detailValue
+          : `API request failed: ${response.status}`;
     throw { status: response.status, message: detail, payload } satisfies ApiError;
   }
   return payload as T;

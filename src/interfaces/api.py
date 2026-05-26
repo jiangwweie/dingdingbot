@@ -8,8 +8,19 @@ console API surface.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Callable, Optional
 import logging
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
+
+if load_dotenv is not None:
+    _repo_root = Path(__file__).resolve().parents[2]
+    load_dotenv(_repo_root / ".env")
+    load_dotenv(_repo_root / ".env.local", override=True)
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError

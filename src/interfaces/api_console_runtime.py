@@ -837,14 +837,6 @@ def _require_brc_mutation_gates(request: Request):
 
 def _require_brc_read_gates(request: Request):
     _require_internal_runtime_control(request)
-    if not _runtime_control_api_enabled():
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Runtime control API disabled. "
-                f"Set {RUNTIME_CONTROL_API_ENABLED_ENV}=true."
-            ),
-        )
     api_module = _load_api_module()
     config_provider = getattr(api_module, "_runtime_config_provider", None)
     resolved = config_provider.resolved_config if config_provider else None

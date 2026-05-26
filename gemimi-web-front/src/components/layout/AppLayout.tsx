@@ -55,11 +55,11 @@ const navItems = [
     domain: 'BRC Campaign（风险试错）',
     links: [
       { name: '总览', to: '/dashboard', icon: LayoutDashboard },
+      { name: 'Runtime Safety', to: '/runtime-safety', icon: ShieldAlert },
       { name: 'Operator', to: '/operator', icon: TerminalSquare },
       { name: 'Workflow', to: '/workflow', icon: GitBranch },
       { name: 'Review', to: '/review', icon: BookOpenCheck },
       { name: 'Ledger', to: '/ledger', icon: History },
-      { name: 'Runtime Safety', to: '/runtime-safety', icon: ShieldAlert },
     ],
   },
 ];

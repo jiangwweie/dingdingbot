@@ -47,6 +47,60 @@ export function StatusBadge({ state }: { state?: unknown }) {
   return <Badge variant={variant}>{text}</Badge>;
 }
 
+export function OwnerSummary({
+  conclusion,
+  why,
+  canDo,
+  cannotDo,
+  accountImpact,
+  next,
+  tone = 'info',
+}: {
+  conclusion: string;
+  why: string;
+  canDo: string;
+  cannotDo: string;
+  accountImpact: string;
+  next: string;
+  tone?: 'info' | 'success' | 'warning' | 'danger';
+}) {
+  const toneClass = {
+    info: 'border-blue-500/30 bg-blue-500/[0.04]',
+    success: 'border-emerald-500/30 bg-emerald-500/[0.04]',
+    warning: 'border-amber-500/30 bg-amber-500/[0.05]',
+    danger: 'border-rose-500/30 bg-rose-500/[0.05]',
+  }[tone];
+  return (
+    <div className={cn('rounded-sm border p-4', toneClass)}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">当前结论</p>
+          <h2 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">{conclusion}</h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">原因：{why}</p>
+        </div>
+        <div className="rounded-sm border border-zinc-200 bg-white/60 px-3 py-2 text-xs leading-5 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300">
+          <p className="font-bold">是否影响真实账户</p>
+          <p>{accountImpact}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-2 lg:grid-cols-3">
+        <SummaryBlock label="你现在可以做" value={canDo} />
+        <SummaryBlock label="你现在不能做" value={cannotDo} />
+        <SummaryBlock label="下一步" value={next} />
+      </div>
+    </div>
+  );
+}
+
+function SummaryBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-sm border border-zinc-200 bg-white/50 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{label}</p>
+      <p className="mt-1 text-xs leading-5 text-zinc-700 dark:text-zinc-300">{value}</p>
+    </div>
+  );
+}
+
 export function ExplanationCard({
   title,
   icon,
@@ -107,10 +161,19 @@ export function ErrorState({ error }: { error: unknown }) {
   const message = typeof error === 'object' && error && 'message' in error
     ? String((error as { message?: unknown }).message)
     : String(error);
+  const isRuntimeControlDisabled = message.includes('RUNTIME_CONTROL_API_ENABLED')
+    || message.includes('Runtime control API disabled');
+  const userMessage = isRuntimeControlDisabled
+    ? '当前无法执行需要 runtime 控制开关的动作。只读计划不应依赖这个开关；如果你仍看到此提示，请刷新页面或确认后端已更新。'
+    : message;
   return (
     <ExplanationCard title="Blocked / 无法继续" icon={<ShieldAlert className="h-3.5 w-3.5" />} tone="danger">
-      <p>系统没有继续执行。原因：{message}</p>
-      <p className="mt-1">请先检查配置、登录状态、runtime profile 或确认短语。这里不会自动重试高风险动作。</p>
+      <p>系统没有继续执行。原因：{userMessage}</p>
+      <p className="mt-1">这不会触发任何交易风险。请先查看“当前结论”和“下一步”，必要时再展开开发者详情。</p>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-widest text-zinc-500">Developer detail</summary>
+        <p className="mt-1 font-mono text-[11px] text-zinc-500">{message}</p>
+      </details>
     </ExplanationCard>
   );
 }
@@ -120,32 +183,47 @@ export function ChainExplanation({
   intent,
   action,
   blocked,
+  mode = 'readonly',
 }: {
   ownerText?: string;
   intent?: unknown;
   action?: unknown;
   blocked?: string;
+  mode?: 'readonly' | 'testnet' | 'forbidden';
 }) {
+  const modeLabel = {
+    readonly: 'Read-only（只读检查）',
+    testnet: 'Controlled Testnet（受控测试网）',
+    forbidden: 'Forbidden（禁止）',
+  }[mode];
+  const requirement = {
+    readonly: '输入 CONFIRM_READ_ONLY_BRC 后，只读取 review/evidence/eligibility。',
+    testnet: '输入 CONFIRM_BRC_TESTNET_REHEARSAL 前，还必须满足 runtime/testnet/profile/guard 条件。',
+    forbidden: '不会生成可执行计划，需要修改意图或停留在只读复盘。',
+  }[mode];
   return (
     <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-      <ExplanationCard title="链路解释" icon={<Clock3 className="h-3.5 w-3.5" />}>
+      <ExplanationCard title="系统理解" icon={<Clock3 className="h-3.5 w-3.5" />}>
         <ul className="space-y-1">
           <li>Owner 原始输入：{ownerText || '尚未输入'}</li>
           <li>系统识别意图：{String(intent || '等待生成')}</li>
-          <li>将要执行：只读 review/evidence 或固定受控 testnet workflow</li>
-          <li>不会执行：真实实盘、提现/转账、自动 sizing、策略池执行</li>
-          <li>结果写入：operator ledger、workflow run、review/evidence</li>
+          <li>风险分类：{modeLabel}</li>
+          <li>需要确认：{requirement}</li>
         </ul>
       </ExplanationCard>
       <ExplanationCard
-        title={blocked ? '为什么不能做' : '为什么可以继续'}
+        title={blocked ? '为什么不能做' : '确认前检查'}
         icon={blocked ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
         tone={blocked ? 'danger' : 'success'}
       >
         {blocked ? (
           <p>{blocked}</p>
         ) : (
-          <p>当前只是在受控治理链路中推进。任何可变更动作都需要 Owner 手动输入确认短语。</p>
+          <div className="space-y-1">
+            <p>计划执行内容：读取 BRC 复盘/证据/下一轮资格，或进入固定受控 testnet workflow。</p>
+            <p>不会执行：真实实盘、提现/转账、自动 sizing、策略池执行、任意下单。</p>
+            <p>结果写入：operator ledger、workflow run、review/evidence。</p>
+          </div>
         )}
         <JsonDetails data={action} label="展开计划明细" />
       </ExplanationCard>
