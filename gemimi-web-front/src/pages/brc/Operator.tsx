@@ -63,7 +63,7 @@ export default function Operator() {
       <OwnerSummary
         conclusion={canPlan ? '可以生成只读操作计划' : '当前不能生成真实 BRC 只读计划'}
         why={canPlan ? whyText(readiness) : planDisabledReason}
-        canDo={canPlan ? '生成 review/evidence/next eligibility 等只读检查计划。' : '查看说明，回到 Guide 或 Runtime Safety 确认缺失门槛。'}
+        canDo={canPlan ? '生成 review/evidence/next eligibility 等只读检查计划。' : '查看说明，回到 Runtime Control 确认缺失门槛。'}
         cannotDo="不能下单、平仓、提现、转账、修改杠杆或启用策略。"
         accountImpact="不会影响真实账户。即使执行成功，也只是读取和写入操作记录。"
         next={canPlan ? '点击“生成只读操作计划”，检查确认卡，再手动输入 CONFIRM_READ_ONLY_BRC。' : '先解决 readiness 提示的缺失条件；按钮已禁用，不会调用 API。'}

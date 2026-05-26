@@ -94,7 +94,7 @@ export default function Workflow() {
           : requiresTestnet
             ? `${whyText(readiness)} 请求涉及固定 testnet 演练，必须通过 runtime/testnet/profile/guard 检查和专用确认短语。`
             : 'LLM 只做意图归一化和计划编排，不能授权交易或绕过 Owner confirmation。'}
-        canDo={canCreateWorkflow ? '创建 workflow，查看识别结果、风险分类和需要满足的门槛。' : '查看禁用原因，回到 Guide 或 Runtime Safety 补齐门槛。'}
+        canDo={canCreateWorkflow ? '创建 workflow，查看识别结果、风险分类和需要满足的门槛。' : '查看禁用原因，回到 Runtime Control 补齐门槛。'}
         cannotDo="不能请求实盘、提现、自动下单、自动 sizing 或扩展到策略池执行。"
         accountImpact={requiresTestnet ? '仅可能影响 Binance testnet；不会触碰真实账户或提现。' : '不会影响真实账户。创建 workflow 本身不执行动作。'}
         next={!canCreateWorkflow

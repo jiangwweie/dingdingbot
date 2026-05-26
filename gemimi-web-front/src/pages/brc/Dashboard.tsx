@@ -36,7 +36,7 @@ export default function Dashboard() {
         canDo="查看说明、生成只读操作计划、查看 ledger/review/evidence。"
         cannotDo="不能执行 testnet 演练，不能真实下单、提现、转账或启用自动策略。"
         accountImpact="不会影响真实账户。当前页面只展示治理状态和只读操作入口。"
-        next="先查看 Runtime Safety（运行安全检查），再进入 Operator 生成只读操作计划。"
+        next="先查看 Runtime Control，再进入 Operator 生成只读操作计划。"
         tone={safety?.runtime_bound ? 'warning' : 'info'}
       />
       <GuardNote />
@@ -46,7 +46,7 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-              Runtime Safety（运行安全）
+              Runtime Control（运行控制）
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -59,7 +59,7 @@ export default function Dashboard() {
               <Metric label="GKS（全局安全开关）" value={<StatusBadge state={safety?.gks_active ? 'blocked' : 'not blocked'} />} help="GKS active 才是强制阻断；not blocked 仍需结合 runtime 判断。" />
               <Metric label="Startup Guard（启动保护）" value={<StatusBadge state={safety?.startup_guard_armed ? 'armed' : 'blocked'} />} help="blocked 表示启动保护正在阻止运行时自动进入交易状态。" />
             </div>
-            <JsonDetails data={safety} label="展开 runtime safety JSON" />
+            <JsonDetails data={safety} label="展开运行状态 JSON" />
           </CardContent>
         </Card>
 

@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Badge } from '@/src/components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
 import { cn } from '@/src/lib/utils';
-import type { ReadinessAction } from '@/src/services/api';
+import type { BrcActionCard, ReadinessAction } from '@/src/services/api';
 
 export function StageStrip({
   current,
@@ -16,9 +16,9 @@ export function StageStrip({
   global: string;
 }) {
   const items = [
-    ['当前阶段', current],
-    ['下一步建议', next],
-    ['全局规划阶段', global],
+    ['现在', current],
+    ['下一步', next],
+    ['项目节奏', global],
   ];
   return (
     <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
@@ -76,18 +76,18 @@ export function OwnerSummary({
     <div className={cn('rounded-sm border p-4', toneClass)}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">当前结论</p>
+      <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">系统现在怎么样</p>
           <h2 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">{conclusion}</h2>
           <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">原因：{why}</p>
         </div>
         <div className="rounded-sm border border-zinc-200 bg-white/60 px-3 py-2 text-xs leading-5 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300">
-          <p className="font-bold">是否影响真实账户</p>
+          <p className="font-bold">会不会影响真实账户</p>
           <p>{accountImpact}</p>
         </div>
       </div>
       <div className="mt-4 grid grid-cols-1 gap-2 lg:grid-cols-3">
-        <SummaryBlock label="你现在可以做" value={canDo} />
-        <SummaryBlock label="你现在不能做" value={cannotDo} />
+        <SummaryBlock label="现在可以做" value={canDo} />
+        <SummaryBlock label="现在不能做" value={cannotDo} />
         <SummaryBlock label="下一步" value={next} />
       </div>
     </div>
@@ -223,6 +223,162 @@ export function ActionCard({ action }: { action: ReadinessAction }) {
   );
 }
 
+export function ApplicationActionCard({ action }: { action: BrcActionCard }) {
+  const tone = action.enabled
+    ? action.final_state_proof_required
+      ? 'border-amber-500/30 bg-amber-500/[0.04]'
+      : 'border-emerald-500/30 bg-emerald-500/[0.04]'
+    : 'border-zinc-200 bg-zinc-50 opacity-80 dark:border-zinc-800 dark:bg-zinc-900/50';
+
+  return (
+    <Card className={tone}>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>{action.title}</span>
+          <StatusBadge state={action.enabled ? 'application_preflight' : 'disabled'} />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+        <p>
+          <span className="font-bold">谁说了算：</span>
+          {action.authority_source}
+        </p>
+        <p>
+          <span className="font-bold">本次依据：</span>
+          <span className="font-mono">{action.fact_snapshot_id}</span>
+        </p>
+        <p>
+          <span className="font-bold">检查结果：</span>
+          <span className="font-mono">{action.preflight_result_id}</span>
+        </p>
+        <p>
+          <span className="font-bold">防重复 ID：</span>
+          <span className="font-mono">{action.idempotency_key}</span>
+        </p>
+        <p>
+          <span className="font-bold">当前状态：</span>
+          <StatusBadge state={action.current_state} />
+        </p>
+        <p>
+          <span className="font-bold">允许去到：</span>
+          {action.allowed_next_states.join(', ') || 'none'}
+        </p>
+        <p>
+          <span className="font-bold">明确禁止：</span>
+          {action.blocked_next_states.join(', ') || 'none'}
+        </p>
+        <p>
+          <span className="font-bold">会改变：</span>
+          {action.what_will_change}
+        </p>
+        <p>
+          <span className="font-bold">不会改变：</span>
+          {action.what_will_not_change}
+        </p>
+        <p>
+          <span className="font-bold">账户影响：</span>
+          {action.account_impact}
+        </p>
+        {action.confirmation_phrase && (
+          <p>
+            <span className="font-bold">确认短语：</span>
+            <span className="font-mono">{action.confirmation_phrase}</span>
+          </p>
+        )}
+        {action.final_state_proof_required && (
+          <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1 text-amber-700 dark:text-amber-300">
+            需要最后证明已经安全结束；如果证明不了，会进入 attention_required。
+          </p>
+        )}
+        {action.advisory_warnings.length > 0 && (
+          <ul className="list-disc space-y-1 pl-4">
+            {action.advisory_warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        )}
+        {!action.enabled && (
+          <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1 text-amber-700 dark:text-amber-300">
+            当前不可用：{action.disabled_reason || '应用检查没有放行。'}
+          </p>
+        )}
+        {action.route && action.enabled ? (
+          <Link
+            to={action.route}
+            className="mt-2 inline-flex items-center gap-2 rounded-sm border border-blue-500 bg-blue-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white"
+          >
+            {action.button_label}
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        ) : (
+          <button
+            className="mt-2 inline-flex cursor-not-allowed items-center gap-2 rounded-sm border border-zinc-300 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500 dark:border-zinc-700"
+            disabled
+          >
+            {action.button_label}
+          </button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function MainFlowCard({
+  enabled,
+  disabledReason,
+}: {
+  enabled: boolean;
+  disabledReason?: string;
+}) {
+  return (
+    <Card className={enabled ? 'border-blue-500/30 bg-blue-500/[0.04]' : 'border-amber-500/30 bg-amber-500/[0.04]'}>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>主链路入口 Main Flow</span>
+          <StatusBadge state={enabled ? 'ready' : 'not ready'} />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+        <p className="font-semibold text-zinc-900 dark:text-zinc-100">
+          {enabled ? '现在可以准备受控 testnet 演练。' : '现在还不能准备受控 testnet 演练。'}
+        </p>
+        <ol className="list-decimal space-y-1 pl-4">
+          <li>进入 LLM Copilot（唯一自然语言入口）。</li>
+          <li>输入：帮我准备下一轮 testnet 演练。</li>
+          <li>检查系统识别结果必须是 Controlled Testnet。</li>
+          <li>手动输入 CONFIRM_BRC_TESTNET_REHEARSAL。</li>
+          <li>执行后到 Review / Audit Trail 复盘证据链。</li>
+        </ol>
+        <p>
+          不会发生：真实实盘、提现/转账、自动调仓或任意人工下单。
+        </p>
+        {!enabled && (
+          <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1 text-amber-700 dark:text-amber-300">
+            当前缺失：{disabledReason || '系统还没确认 testnet workflow 可用。'}
+          </p>
+        )}
+        {enabled ? (
+          <Link
+            to="/llm-copilot"
+            className="inline-flex items-center gap-2 rounded-sm border border-blue-500 bg-blue-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white"
+          >
+            进入 LLM Copilot
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        ) : (
+          <Link
+            to="/runtime-control"
+            className="inline-flex items-center gap-2 rounded-sm border border-amber-500 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-amber-700 dark:text-amber-300"
+          >
+            查看缺失门槛
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-sm border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-800">
@@ -243,8 +399,8 @@ export function ErrorState({ error }: { error: unknown }) {
     : message;
   return (
     <ExplanationCard title="Blocked / 无法继续" icon={<ShieldAlert className="h-3.5 w-3.5" />} tone="danger">
-      <p>系统没有继续执行。原因：{userMessage}</p>
-      <p className="mt-1">这不会触发任何交易风险。请先查看“当前结论”和“下一步”，必要时再展开开发者详情。</p>
+      <p>系统没有继续。原因：{userMessage}</p>
+      <p className="mt-1">这不会触发交易风险。先看“现在”和“下一步”，必要时再展开技术数据。</p>
       <DeveloperDetails data={{ message }} />
     </ExplanationCard>
   );
@@ -297,7 +453,7 @@ export function ChainExplanation({
             <p>结果写入：operator ledger、workflow run、review/evidence。</p>
           </div>
         )}
-        <JsonDetails data={action} label="展开计划明细" />
+        <JsonDetails data={action} label="展开明细" />
       </ExplanationCard>
     </div>
   );
@@ -307,7 +463,7 @@ export function GuardNote() {
   return (
     <div className="flex items-start gap-2 rounded-sm border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
       <LockKeyhole className="mt-0.5 h-3.5 w-3.5 text-zinc-500" />
-      <span>控制台不会展示真实实盘、提现、转账、自动下单入口。受控 testnet 也只能通过固定 workflow 和手动确认进入。</span>
+      <span>控制台不会提供真实实盘、提现、转账、自动下单入口。受控 testnet 也必须走固定流程和手动确认。</span>
     </div>
   );
 }

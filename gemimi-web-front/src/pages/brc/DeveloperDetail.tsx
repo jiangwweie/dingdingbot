@@ -32,7 +32,7 @@ export default function DeveloperDetail() {
       <OwnerSummary
         conclusion="这是技术详情页，不是操作入口"
         why={whyText(readiness)}
-        canDo="查看 readiness、runtime safety、developer detail 原始数据。"
+        canDo="查看 readiness、runtime control、developer detail 原始数据。"
         cannotDo="不能在这里触发下单、提现、转账、testnet 演练或复盘写入。"
         accountImpact="不会影响真实账户。"
         next="Owner 日常操作请回到 Guide 操作向导。"
@@ -47,7 +47,7 @@ export default function DeveloperDetail() {
         </CardHeader>
         <CardContent className="space-y-3">
           <DeveloperDetails data={readiness} label="Readiness JSON" />
-          <DeveloperDetails data={safety} label="Runtime Safety JSON" />
+          <DeveloperDetails data={safety} label="Runtime Control JSON" />
         </CardContent>
       </Card>
     </div>

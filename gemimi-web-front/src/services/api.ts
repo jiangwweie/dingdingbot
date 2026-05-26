@@ -53,6 +53,56 @@ export type ReadinessAction = {
   risk_level: 'read_only' | 'controlled_testnet' | 'blocked';
 };
 
+export type RiskDecision =
+  | 'ALLOW_READ'
+  | 'ALLOW_MONITOR'
+  | 'BLOCK_TESTNET'
+  | 'ATTENTION_REQUIRED'
+  | 'BLOCK_ALL_STATE_CHANGE';
+
+export type RuntimeState =
+  | 'observe'
+  | 'monitor'
+  | 'testnet_rehearsal'
+  | 'paused'
+  | 'stopped'
+  | 'flattening'
+  | 'attention_required';
+
+export type ActionCardType =
+  | 'read_status'
+  | 'enter_monitor'
+  | 'testnet_rehearsal'
+  | 'pause_new_entries'
+  | 'emergency_stop_runtime'
+  | 'emergency_flatten';
+
+export type BrcActionCard = {
+  action_card_id: string;
+  title: string;
+  action_type: ActionCardType;
+  enabled: boolean;
+  disabled_reason?: string | null;
+  route?: string | null;
+  button_label: string;
+  authority_source: 'application_preflight';
+  fact_snapshot_id: string;
+  preflight_result_id: string;
+  idempotency_key: string;
+  expiry_time?: number | null;
+  current_state: RuntimeState;
+  allowed_next_states: RuntimeState[];
+  blocked_next_states: string[];
+  reversible: boolean;
+  final_state_proof_required: boolean;
+  hard_blocks: string[];
+  advisory_warnings: string[];
+  confirmation_phrase?: string | null;
+  account_impact: string;
+  what_will_change: string;
+  what_will_not_change: string;
+};
+
 export type ReadinessResponse = {
   mode: 'standalone_console' | 'runtime_bound_console' | 'brc_ready' | 'testnet_ready' | 'blocked';
   current_conclusion: string;
@@ -62,8 +112,54 @@ export type ReadinessResponse = {
   available_actions: ReadinessAction[];
   disabled_actions: ReadinessAction[];
   latest_campaign?: Record<string, unknown> | null;
+  environment_boundary: Record<string, unknown>;
+  runtime_state: RuntimeState;
+  risk_decision: RiskDecision;
+  risk_account_summary: Record<string, unknown>;
+  strategy_playbook_summary: Record<string, unknown>;
+  action_cards: BrcActionCard[];
+  global_cutoff_controls: BrcActionCard[];
+  latest_audit?: Record<string, unknown> | null;
   runtime_summary: Record<string, unknown>;
   review_summary: Record<string, unknown>;
+  markets_summary: Record<string, unknown>;
+  playbook_summary: Record<string, unknown>;
+  parameter_summary: Record<string, unknown>;
+  audit_summary: Record<string, unknown>;
+  ai_investigator_summary: Record<string, unknown>;
+  developer_details: Record<string, unknown>;
+  live_ready: false;
+};
+
+export type MarketsOrdersResponse = {
+  conclusion: string;
+  account_impact: string;
+  symbols: Array<Record<string, unknown>>;
+  open_orders: Array<Record<string, unknown>>;
+  active_positions: Array<Record<string, unknown>>;
+  developer_details: Record<string, unknown>;
+  live_ready: false;
+};
+
+export type AuditTrailResponse = {
+  conclusion: string;
+  account_impact: string;
+  timeline: Array<Record<string, unknown>>;
+  operator_actions: Array<Record<string, unknown>>;
+  workflow_runs: Array<Record<string, unknown>>;
+  review_decisions: Array<Record<string, unknown>>;
+  developer_details: Record<string, unknown>;
+  live_ready: false;
+};
+
+export type InvestigatorResponse = {
+  intent: string;
+  conclusion: string;
+  reason: string;
+  account_impact: string;
+  evidence_summary: string[];
+  trace: Array<Record<string, unknown>>;
+  next_step: string;
   developer_details: Record<string, unknown>;
   live_ready: false;
 };
@@ -145,6 +241,18 @@ export const brcApi = {
   },
   runtimeSafety() {
     return request<RuntimeSafetyResponse>('/api/runtime/safety');
+  },
+  marketsOrders() {
+    return request<MarketsOrdersResponse>('/api/brc/markets-orders');
+  },
+  auditTrail(limit = 50) {
+    return request<AuditTrailResponse>(`/api/brc/audit-trail?limit=${limit}`);
+  },
+  askInvestigator(question: string, context?: { context_type?: string; context_id?: string }) {
+    return request<InvestigatorResponse>('/api/brc/investigator/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question, ...context }),
+    });
   },
   reviewPacket() {
     return request<Record<string, unknown>>('/api/brc/review-packet');

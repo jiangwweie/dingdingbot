@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   BookOpenCheck,
+  Bot,
   GitBranch,
   History,
   ListChecks,
@@ -10,6 +11,7 @@ import {
   Monitor,
   RefreshCw,
   ShieldAlert,
+  ShieldCheck,
   Sun,
   TerminalSquare,
 } from 'lucide-react';
@@ -52,26 +54,48 @@ function ThemeToggle() {
 
 const navItems = [
   {
-    domain: 'BRC Campaign（风险试错）',
+    domain: 'P0 Owner Console',
+    links: [
+      { name: 'Command Center 控制台', to: '/command-center', icon: Monitor },
+      { name: 'LLM Copilot 对话', to: '/llm-copilot', icon: Bot },
+      { name: 'Strategy / Playbook 打法', to: '/strategy-playbook', icon: GitBranch },
+      { name: 'Risk & Account 风险账户', to: '/risk-account', icon: ShieldCheck },
+      { name: 'Runtime Control 运行控制', to: '/runtime-control', icon: ShieldAlert },
+    ],
+  },
+  {
+    domain: 'P1 Review / Audit',
+    links: [
+      { name: 'Campaigns 轮次', to: '/campaigns', icon: ListChecks },
+      { name: 'Review 复盘决策', to: '/review', icon: BookOpenCheck },
+      { name: 'Audit Trail 审计', to: '/audit-trail', icon: History },
+      { name: 'Ledger 操作记录', to: '/ledger', icon: History },
+    ],
+  },
+  {
+    domain: 'P2 Developer',
     links: [
       { name: 'Guide 操作向导', to: '/guide', icon: ListChecks },
-      { name: 'Runtime Safety 运行安全', to: '/runtime-safety', icon: ShieldAlert },
       { name: 'Operator Plan 只读计划', to: '/operator', icon: TerminalSquare },
-      { name: 'Workflow 受控流程', to: '/workflow', icon: GitBranch },
-      { name: 'Review 复盘决策', to: '/review', icon: BookOpenCheck },
-      { name: 'Ledger 操作记录', to: '/ledger', icon: History },
+      { name: 'Workflow 旧流程', to: '/workflow', icon: GitBranch },
       { name: 'Developer Detail 技术详情', to: '/developer', icon: TerminalSquare },
     ],
   },
 ];
 
 const routeTitles: Record<string, string> = {
+  '/command-center': 'Command Center 控制台',
+  '/llm-copilot': 'LLM Copilot 对话',
+  '/strategy-playbook': 'Strategy / Playbook 打法',
+  '/risk-account': 'Risk & Account 风险账户',
+  '/runtime-control': 'Runtime Control 运行控制',
   '/guide': 'Guide 操作向导',
   '/operator': 'Operator Plan 只读计划',
   '/workflow': 'Workflow 受控流程',
   '/review': 'Review 复盘决策',
   '/ledger': 'Ledger 操作记录',
-  '/runtime-safety': 'Runtime Safety 运行安全',
+  '/campaigns': 'Campaigns 轮次管理',
+  '/audit-trail': 'Audit Trail 审计链路',
   '/developer': 'Developer Detail 技术详情',
 };
 
@@ -94,7 +118,7 @@ export default function AppLayout() {
       <div className="flex h-screen w-full overflow-hidden bg-white font-sans text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
         <aside className="z-20 flex w-64 flex-shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-900/30">
           <div className="border-b border-zinc-200 bg-zinc-100/50 p-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80">
-            <h1 className="text-[11px] font-bold uppercase tracking-widest text-blue-500">BRC Operator</h1>
+            <h1 className="text-[11px] font-bold uppercase tracking-widest text-blue-500">BRC Owner Console</h1>
             <div className="mt-1 flex items-center gap-2">
               <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
               <p className="font-mono text-[10px] uppercase tracking-tighter text-zinc-500">Local Console</p>
