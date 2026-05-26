@@ -162,6 +162,22 @@ This amendment still does not start Feishu approval, cloud deployment,
 strategy-pool construction, real live, withdrawal/transfer, automatic strategy
 execution, automatic sizing, or any broader testnet authority.
 
+2026-05-26 local acceptance amendment:
+
+For local Owner acceptance only, the development environment defaults to the
+fixed BRC testnet rehearsal posture:
+
+- `EXCHANGE_TESTNET=true`;
+- `RUNTIME_PROFILE=brc_btc_eth_testnet_runtime`;
+- `RUNTIME_CONTROL_API_ENABLED=true`;
+- `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true`.
+
+This is a local testing convenience so the Owner can validate the full
+testnet chain without repeatedly editing env flags. It is not the production
+security model. Before Feishu integration, cloud deployment, public/internal
+Web mutation controls, strategy-pool execution, or real-live review, these
+permissions must be re-gated by the relevant deployment/security tasks.
+
 2026-05-25 PLC execution-stage update:
 
 - PLC Phase 0 local sandbox, Phase 1 read-only runtime adapter, Phase 2 paper

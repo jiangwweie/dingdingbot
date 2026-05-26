@@ -1511,3 +1511,25 @@ Use this file for session progress and handoff notes.
   - `npm run lint`
   - `npm run build`
   - `git diff --check`
+
+## 2026-05-26 (BRC Local Testnet Acceptance Defaults)
+
+- Updated local-only acceptance defaults so BRC testnet rehearsal no longer
+  requires manual env toggling before Owner UI验收.
+- `.env.local` is configured locally with:
+  - `EXCHANGE_TESTNET=true`
+  - `RUNTIME_PROFILE=brc_btc_eth_testnet_runtime`
+  - `RUNTIME_CONTROL_API_ENABLED=true`
+  - `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true`
+  - corrected `BRC_LLM_TIMEOUT_SECONDS`
+- Added `scripts/start_brc_local_testnet.sh` as the local acceptance launcher.
+  It sources `.env` and `.env.local`, forces the BRC testnet acceptance
+  defaults, seeds the BRC runtime profile, starts `src/main.py`, and starts the
+  Vite console with `VITE_API_BASE_URL` pointed at the local backend.
+- Updated `.env.local.example` to show BRC testnet as the local acceptance
+  profile by default.
+- Boundary: this is local/dev convenience only. Production/cloud deployment
+  must explicitly reset mutation gates and reintroduce stricter approval,
+  replay, secret, and deployment controls. No real live/mainnet, withdrawal,
+  transfer, automatic strategy execution, automatic sizing, or strategy-pool
+  execution is authorized by this default.
