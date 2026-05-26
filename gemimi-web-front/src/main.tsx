@@ -1,59 +1,57 @@
-import { StrictMode } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout';
-
-import Overview from './pages/runtime/Overview';
-import Portfolio from './pages/runtime/Portfolio';
-import Signals from './pages/runtime/Signals';
-import Execution from './pages/runtime/Execution';
-import Events from './pages/runtime/Events';
-import Health from './pages/runtime/Health';
-
-import Candidates from './pages/research/Candidates';
-import CandidateDetail from './pages/research/CandidateDetail';
-import Replay from './pages/research/Replay';
-import ReviewSummary from './pages/research/ReviewSummary';
-import Backtests from './pages/research/Backtests';
-import Compare from './pages/research/Compare';
-import NewBacktest from './pages/research/NewBacktest';
-import ResearchJobs from './pages/research/ResearchJobs';
-import RunDetail from './pages/research/RunDetail';
-
-import Snapshot from './pages/config/Snapshot';
-
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { ThemeProvider } from './components/layout/ThemeContext';
+import { brcApi } from './services/api';
+import Dashboard from './pages/brc/Dashboard';
+import Ledger from './pages/brc/Ledger';
+import Operator from './pages/brc/Operator';
+import Review from './pages/brc/Review';
+import RuntimeSafety from './pages/brc/RuntimeSafety';
+import Workflow from './pages/brc/Workflow';
+import Login from './pages/Login';
 import './index.css';
+
+function RequireAuth() {
+  const location = useLocation();
+  const [state, setState] = useState<'checking' | 'ok' | 'blocked'>('checking');
+
+  useEffect(() => {
+    brcApi.session()
+      .then(() => setState('ok'))
+      .catch(() => setState('blocked'));
+  }, [location.pathname]);
+
+  if (state === 'checking') {
+    return <div className="p-6 text-xs text-zinc-500">检查 Owner 会话...</div>;
+  }
+  if (state === 'blocked') {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+  return <Outlet />;
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="dark" storageKey="trading-console-theme">
+      <ThemeProvider defaultTheme="dark" storageKey="brc-console-theme">
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<AppLayout />}>
-              <Route index element={<Navigate to="/runtime/overview" replace />} />
-              
-              <Route path="runtime/overview" element={<Overview />} />
-              <Route path="runtime/portfolio" element={<Portfolio />} />
-              <Route path="runtime/signals" element={<Signals />} />
-              <Route path="runtime/execution" element={<Execution />} />
-              <Route path="runtime/events" element={<Events />} />
-              <Route path="runtime/health" element={<Health />} />
-
-              <Route path="research/candidates" element={<Candidates />} />
-              <Route path="research/candidates/:candidate_name" element={<CandidateDetail />} />
-              <Route path="research/new" element={<NewBacktest />} />
-              <Route path="research/jobs" element={<ResearchJobs />} />
-              <Route path="research/runs/:run_result_id" element={<RunDetail />} />
-              <Route path="research/replay/:candidate_name" element={<Replay />} />
-              <Route path="research/review/:candidate_name" element={<ReviewSummary />} />
-              <Route path="research/backtests" element={<Backtests />} />
-              <Route path="research/compare" element={<Compare />} />
-
-              <Route path="config/snapshot" element={<Snapshot />} />
+            <Route path="/login" element={<Login />} />
+            <Route element={<RequireAuth />}>
+              <Route path="/" element={<AppLayout />}>
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="dashboard" element={<Dashboard />} />
+                <Route path="operator" element={<Operator />} />
+                <Route path="workflow" element={<Workflow />} />
+                <Route path="review" element={<Review />} />
+                <Route path="ledger" element={<Ledger />} />
+                <Route path="runtime-safety" element={<RuntimeSafety />} />
+              </Route>
             </Route>
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </BrowserRouter>
       </ThemeProvider>
