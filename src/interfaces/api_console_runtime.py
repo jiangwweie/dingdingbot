@@ -245,6 +245,21 @@ def _get_brc_operator_workflow(api_module) -> BrcOperatorWorkflow:
     return BrcOperatorWorkflow(campaign_service=_get_brc_campaign_service(api_module))
 
 
+class _ServerControlledEmptyBodyRequest:
+    """Request shim for internal server-owned endpoint reuse.
+
+    The outer workflow confirmation request has its own JSON body. Controlled
+    entry/close helpers must still see an empty body so Owner confirmation text
+    cannot be misinterpreted as order parameter input.
+    """
+
+    def __init__(self, request: Request) -> None:
+        self.client = request.client
+
+    async def body(self) -> bytes:
+        return b""
+
+
 def _to_global_kill_switch_response(state) -> GlobalKillSwitchResponse:
     return GlobalKillSwitchResponse(
         active=state.active,
@@ -2612,6 +2627,36 @@ async def _execute_brc_close_with_retry(symbol_key: str, request: Request) -> Co
     raise HTTPException(status_code=500, detail=f"BRC controlled close retry exhausted for {symbol_key}")
 
 
+async def _mark_brc_runtime_gate_closed_after_flat(
+    *,
+    api_module,
+    symbol: str,
+) -> dict[str, Any]:
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+    if not inventory.all_flat:
+        raise BrcRuleViolation("BRC runtime gate close requires ETH/BTC flat proof")
+    campaign_state_service = _get_campaign_state_service(api_module)
+    runtime_state = campaign_state_service.get_state()
+    if runtime_state.status != CampaignRuntimeState.CLOSED.value:
+        runtime_state = await campaign_state_service.set_state(
+            status=CampaignRuntimeState.CLOSED.value,
+            reason="BRC controlled testnet close flat proof",
+            updated_by="brc_llm_workflow",
+            trigger=CampaignTransitionTrigger.POSITION_CLOSED,
+            metadata={"flat_proof": inventory.model_dump(mode="json")},
+            profile_id=_BRC_PROFILE,
+            symbol=symbol,
+        )
+    return {
+        "inventory": inventory.model_dump(mode="json"),
+        "runtime_campaign_state": _to_campaign_state_response(runtime_state).model_dump(mode="json"),
+    }
+
+
 async def _execute_brc_fixed_testnet_rehearsal(
     *,
     request: Request,
@@ -2632,11 +2677,16 @@ async def _execute_brc_fixed_testnet_rehearsal(
         result["steps"].append({"name": name, "payload": payload})
 
     active_symbol: Optional[str] = None
+    controlled_request = _ServerControlledEmptyBodyRequest(request)
     try:
-        preflight = await get_brc_evidence(request)
-        if not preflight.inventory.all_flat:
+        preflight_inventory = await _build_controlled_inventory(
+            api_module=api_module,
+            profile=_BRC_PROFILE,
+            symbols=_BRC_ALLOWED_SYMBOLS,
+        )
+        if not preflight_inventory.all_flat:
             raise BrcRuleViolation("BRC LLM rehearsal preflight requires ETH/BTC flat inventory")
-        await _step("preflight_flat", preflight.inventory.model_dump(mode="json"))
+        await _step("preflight_flat", preflight_inventory.model_dump(mode="json"))
 
         campaign = await create_brc_campaign(
             request,
@@ -2673,12 +2723,16 @@ async def _execute_brc_fixed_testnet_rehearsal(
 
         eth_arm = await arm_brc_attempt("eth", request, BrcArmAttemptRequest(reason="BRC R3 ETH attempt"))
         await _step("eth_armed", {"attempt_id": eth_arm.attempt["attempt_id"]})
-        eth_entry = await execute_brc_controlled_entry("eth", request)
+        eth_entry = await execute_brc_controlled_entry("eth", controlled_request)
         active_symbol = "eth"
         await _step("eth_entry", eth_entry.model_dump(mode="json"))
-        eth_close = await _execute_brc_close_with_retry("eth", request)
+        eth_close = await _execute_brc_close_with_retry("eth", controlled_request)
         active_symbol = None
         await _step("eth_close", eth_close.model_dump(mode="json"))
+        await _step(
+            "eth_flat_runtime_gate_closed",
+            await _mark_brc_runtime_gate_closed_after_flat(api_module=api_module, symbol=_BRC_CONTROLLED_SPECS["eth"].symbol),
+        )
 
         profit = await inject_brc_mock_pnl(
             request,
@@ -2692,12 +2746,16 @@ async def _execute_brc_fixed_testnet_rehearsal(
 
         btc_arm = await arm_brc_attempt("btc", request, BrcArmAttemptRequest(reason="BRC R3 BTC attempt"))
         await _step("btc_armed", {"attempt_id": btc_arm.attempt["attempt_id"]})
-        btc_entry = await execute_brc_controlled_entry("btc", request)
+        btc_entry = await execute_brc_controlled_entry("btc", controlled_request)
         active_symbol = "btc"
         await _step("btc_entry", btc_entry.model_dump(mode="json"))
-        btc_close = await _execute_brc_close_with_retry("btc", request)
+        btc_close = await _execute_brc_close_with_retry("btc", controlled_request)
         active_symbol = None
         await _step("btc_close", btc_close.model_dump(mode="json"))
+        await _step(
+            "btc_flat_runtime_gate_closed",
+            await _mark_brc_runtime_gate_closed_after_flat(api_module=api_module, symbol=_BRC_CONTROLLED_SPECS["btc"].symbol),
+        )
 
         loss = await inject_brc_mock_pnl(
             request,
@@ -2760,7 +2818,7 @@ async def _execute_brc_fixed_testnet_rehearsal(
     finally:
         if active_symbol is not None:
             try:
-                await _execute_brc_close_with_retry(active_symbol, request)
+                await _execute_brc_close_with_retry(active_symbol, controlled_request)
             except Exception as exc:
                 logger.error("BRC R3 cleanup close failed for %s: %s", active_symbol, exc, exc_info=True)
         try:

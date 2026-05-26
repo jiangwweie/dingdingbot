@@ -177,6 +177,46 @@ class FakeReadOnlyLlmProvider:
         }
 
 
+class FakeTestnetLlmProvider:
+    provider_name = "fake_llm"
+    model_name = "fake-model"
+
+    async def classify(self, *, source_text: str):
+        return {
+            "action": "request_testnet_rehearsal",
+            "confidence": "0.9",
+            "reason_text": "Owner asks for fixed BRC testnet rehearsal",
+        }
+
+
+class MutableGlobalKillSwitch:
+    def __init__(self) -> None:
+        self.active = True
+
+    def is_active(self):
+        return self.active
+
+    async def set_state(self, *, active, reason, updated_by):
+        self.active = active
+        return SimpleNamespace(active=active, reason=reason, updated_by=updated_by)
+
+
+class MutableStartupGuard:
+    def __init__(self) -> None:
+        self.armed = False
+
+    def is_armed(self):
+        return self.armed
+
+    def manual_arm(self, *, reason, updated_by):
+        self.armed = True
+        return SimpleNamespace(armed=True, reason=reason, updated_by=updated_by)
+
+    def block(self, *, reason, updated_by, source):
+        self.armed = False
+        return SimpleNamespace(armed=False, reason=reason, updated_by=updated_by, source=source)
+
+
 class FakeCampaignStateService:
     def __init__(self) -> None:
         self.state = SimpleNamespace(
@@ -303,6 +343,24 @@ def _orchestrator():
         )
         return {"close_order": order, "terminalized_protection_orders": []}
 
+    orch.execute_controlled_close = AsyncMock(side_effect=close)
+    return orch
+
+
+def _orchestrator_with_position_updates(position_repo: MutablePositionRepo):
+    orch = _orchestrator()
+
+    async def execute_signal(signal, strategy):
+        qty = Decimal("0.01") if signal.symbol == ETH else Decimal("0.002")
+        position_repo.active = [_position(signal.symbol, qty)]
+        return _intent(signal.symbol)
+
+    async def close(position, reason, max_amount):
+        result = await _orchestrator().execute_controlled_close(position, reason, max_amount)
+        position_repo.active = []
+        return result
+
+    orch.execute_signal = AsyncMock(side_effect=execute_signal)
     orch.execute_controlled_close = AsyncMock(side_effect=close)
     return orch
 
@@ -665,9 +723,55 @@ async def test_brc_llm_workflow_api_confirms_read_only_without_mutation_gate(mon
             json={"confirmation_phrase": "CONFIRM_READ_ONLY_BRC"},
         )
 
-        assert confirmed.status_code == 200
+        assert confirmed.status_code == 200, confirmed.text
         workflow = confirmed.json()["workflow"]
         assert workflow["status"] == "completed"
         assert workflow["mutation_executed"] is False
         assert workflow["withdrawal_executed"] is False
         assert workflow["live_ready"] is False
+
+
+@pytest.mark.asyncio
+async def test_brc_llm_workflow_api_confirmed_testnet_rehearsal_creates_campaign_first(monkeypatch):
+    monkeypatch.setattr(
+        brc_operator_workflow.OpenAICompatibleBrcLlmProvider,
+        "from_env",
+        classmethod(lambda cls: FakeTestnetLlmProvider()),
+    )
+    service = await _brc_service()
+    position_repo = MutablePositionRepo()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(),
+        _brc_campaign_service=service,
+        _campaign_state_service=FakeCampaignStateService(),
+        _execution_orchestrator=_orchestrator_with_position_updates(position_repo),
+        _exchange_gateway=_gateway(price=Decimal("2100"), min_notional=Decimal("1")),
+        _startup_trading_guard_service=MutableStartupGuard(),
+        _global_kill_switch_service=MutableGlobalKillSwitch(),
+        _position_repo=position_repo,
+        _order_repo=EmptyOrderRepo(),
+        _trace_service=None,
+    )
+
+    with TestClient(_app()) as client:
+        created = client.post(
+            "/api/runtime/test/brc/llm/workflows",
+            json={"text": "帮我准备下一轮 testnet 演练"},
+        )
+        assert created.status_code == 200
+        workflow_run_id = created.json()["workflow"]["workflow_run_id"]
+        assert created.json()["workflow"]["confirmation_phrase_id"] == "CONFIRM_BRC_TESTNET_REHEARSAL"
+
+        confirmed = client.post(
+            f"/api/runtime/test/brc/llm/workflows/{workflow_run_id}/confirm",
+            json={"confirmation_phrase": "CONFIRM_BRC_TESTNET_REHEARSAL"},
+        )
+
+        assert confirmed.status_code == 200, confirmed.text
+        workflow = confirmed.json()["workflow"]
+        assert workflow["status"] == "completed"
+        assert workflow["mutation_executed"] is True
+        assert workflow["withdrawal_executed"] is False
+        assert workflow["live_ready"] is False
+        assert workflow["result_json"]["review_packet"]["status"] == "ended"
