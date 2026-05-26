@@ -202,9 +202,10 @@ Use this file for session progress and handoff notes.
 - Added PG persistence and Alembic revision `012` for `brc_campaigns`,
   `brc_playbook_switch_decisions`, `brc_campaign_events`, and
   `brc_mock_pnl_events`.
-- Added readonly inactive `brc_btc_eth_testnet_runtime` profile seed with fixed
+- Added controlled `brc_btc_eth_testnet_runtime` profile seed with fixed
   ETH/BTC caps, max attempts `2`, max simultaneous positions `1`, and program
-  withdrawal disabled.
+  withdrawal disabled. It was initially seeded conservatively; later local
+  acceptance defaults make this profile the testnet-first BRC validation path.
 - Added local/internal BRC test endpoints under `/api/runtime/test/brc/*`.
   They require runtime control enabled, testnet, and the BRC profile; mutation
   endpoints also require test signal injection enabled. Request bodies cannot
@@ -1533,3 +1534,81 @@ Use this file for session progress and handoff notes.
   replay, secret, and deployment controls. No real live/mainnet, withdrawal,
   transfer, automatic strategy execution, automatic sizing, or strategy-pool
   execution is authorized by this default.
+
+## 2026-05-26 (BRC Testnet-First / Production-Blocked Alignment)
+
+- Owner clarified that the BRC system should not be constrained to paper-only
+  operation at the current stage. The current executable validation path should
+  be the fixed Binance testnet rehearsal, while stricter gating should block
+  production/live/mainnet, withdrawal/transfer, autonomous strategy execution,
+  automatic sizing/leverage/side override, and strategy-pool execution.
+- Added `docs/ops/brc-testnet-first-production-blocked-principle.md`.
+- Updated ADR-0012, project roadmap, task board, and BRC R0/R1 plan to use the
+  unified operating posture:
+  `testnet-first for local acceptance; production-blocked by explicit env gates`.
+- Implementation implication recorded for the next cleanup: readiness and
+  workflow gates should stop presenting testnet as a suspicious or unavailable
+  path when local acceptance defaults are active. They should instead verify
+  testnet/profile/caps/flatness/Owner-confirmation and reserve fail-closed
+  behavior for production authority.
+- No code, env, runtime profile, exchange call, testnet order, real-live action,
+  withdrawal/transfer path, strategy execution, or commit/push was performed by
+  this documentation alignment.
+
+## 2026-05-26 (BRC-R5 Owner-Driven Runtime Control + Strategy Family Baseline)
+
+- Consolidated the Owner-confirmed BRC-R5 design principles into
+  `docs/ops/brc-r5-owner-driven-runtime-control-design.md`.
+- Confirmed operating model:
+  - single `TRADING_ENV=simulation|live` switch;
+  - no paper mainline;
+  - v0 Owner-facing runtime states:
+    `observe`, `monitor`, `testnet_rehearsal`, `paused`, `stopped`,
+    `flattening`, `attention_required`;
+  - bare `trade` is reserved out of v0; future live readiness may introduce
+    `live_trade` after separate Owner production authorization;
+  - `live` is modeled as a disabled environment boundary in v0, not as a switch;
+  - testnet/simulation should be open enough to expose engineering problems,
+    with hard gates limited to non-production proof, audit availability,
+    cut-off availability, and final state observability;
+  - live is modeled now but default-off and unauthorized until a future
+    Owner production/deployment task;
+  - LLM is an Owner assistant, risk advisor, and audit investigator. It can
+    query controlled read-only facts and provide advisory risk advice, but it
+    cannot write, trade, confirm, or bypass `TRADING_ENV`;
+  - action cards are weak control/explanation objects, not approval walls;
+  - fast cut-off controls are first-class:
+    `pause_new_entries`, `emergency_stop_runtime`, `emergency_flatten`;
+  - audit write failure is a hard block for state-changing actions.
+- Added `docs/ops/strategy-family-map-v0.md`.
+- Strategy-family baseline:
+  - the project should use multiple bounded playbook candidates wrapped by BRC,
+    not chase one universal strategy;
+  - `TF-001` Trend Following is the first carrier-validation playbook;
+  - `CPM-1` is reclassified as Pullback Continuation / Conditional Candidate,
+    not a universal failed strategy or direct runtime candidate;
+  - `VB-001` is Reserve, `MTF-001` is Filter Candidate,
+    Funding/OI/Event is Watchlist, and ML/HFT are Rejected for Now.
+- Added task-board entries for `BRC-R5-000`, `STRAT-FAMILY-000`, and the
+  recommended next slice `BRC-R5-001 Trend playbook carrier full-chain
+  validation`.
+- No code, env, runtime profile, exchange call, testnet order, live order,
+  withdrawal/transfer path, strategy execution, or commit/push was performed.
+
+## 2026-05-26 (BRC Owner Console v0 Design Freeze)
+
+- Added `docs/ops/brc-owner-console-product-design-v0/` with a product-design
+  README and low-fidelity SVG wireframes.
+- Accepted review verdict: `APPROVE_WITH_REQUIRED_REVISIONS`.
+- Froze v0 primary IA:
+  `Command Center`, `LLM Copilot`, `Strategy / Playbook`, `Risk & Account`,
+  and `Runtime Control`.
+- Folded `Markets & Orders` / `Positions & Orders` into `Risk & Account`.
+- Removed `Parameters` from the v0 primary nav; risk-envelope values remain
+  readonly inside `Risk & Account`.
+- Confirmed application-owned Action Card semantics:
+  `authority_source=application_preflight`, fact snapshot, preflight result,
+  idempotency key, expiry, allowed/blocked next states, and final-state proof.
+- Confirmed implementation order: first local console v0, then later R5
+  TF-001 carrier validation. Current testnet acceptance remains the fixed BRC
+  ETH/BTC rehearsal, not a new TF-001 execution path.

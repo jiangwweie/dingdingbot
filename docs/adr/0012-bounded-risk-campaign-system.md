@@ -48,8 +48,14 @@ The system is an outer campaign governance layer for:
   for campaign risk.
 - Strategy Contract/runtime execution work is downgraded to a future branch
   until a governed playbook and promoted strategy justify it.
-- BRC may proceed on Binance testnet after explicit Owner authorization and
-  scoped verification.
+- BRC local acceptance is testnet-first, not paper-first. The fixed Binance
+  testnet rehearsal is the current executable BRC validation path when local
+  testnet environment gates, fixed profile/caps, Owner confirmation, and final
+  flatness checks are satisfied.
+- The strict default block belongs at the production boundary: real live/mainnet
+  order placement, withdrawal/transfer, autonomous strategy execution,
+  automatic sizing/leverage/side override, and strategy-pool execution remain
+  unavailable unless separately designed and explicitly enabled by the Owner.
 - Mock PnL may be injected only as BRC business-state evidence. It must not
   alter exchange fills, actual balances, daily risk accounting, or realized
   order PnL.
@@ -84,12 +90,36 @@ The first implemented acceptance path is:
 
 ## Implementation Notes
 
-- Runtime profile: `brc_btc_eth_testnet_runtime`, readonly inactive by default.
+- Runtime profile: `brc_btc_eth_testnet_runtime`, the fixed BRC controlled
+  testnet profile.
+- For local Owner acceptance, the environment may default into this profile
+  with `EXCHANGE_TESTNET=true`, `RUNTIME_CONTROL_API_ENABLED=true`, and
+  `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true` so the testnet chain is usable
+  without repeated manual toggles.
+- Production/cloud deployment must not inherit those local acceptance defaults.
+  Production/live authority must remain blocked by explicit environment gates
+  such as `BRC_ALLOW_PRODUCTION=false`, `LIVE_TRADING_ENABLED=false`,
+  `MAINNET_ORDER_ENABLED=false`, `WITHDRAWAL_ENABLED=false`, and
+  `AUTO_STRATEGY_EXECUTION_ENABLED=false` until a separate Owner production
+  authorization task changes them.
 - Fixed caps: ETH `0.01` / `25 USDT`, BTC `0.002` / `250 USDT`, leverage `1x`.
 - Max simultaneous positions: `1`.
 - Max attempts: `2`.
 - Runtime campaign state remains the single-exposure gate; BRC is the outer
   campaign envelope and does not reset after symbol changes.
+- The aligned operating principle is recorded in
+  `docs/ops/brc-testnet-first-production-blocked-principle.md`.
+- The R5 Owner-driven runtime control baseline is recorded in
+  `docs/ops/brc-r5-owner-driven-runtime-control-design.md`.
+- The Owner Console v0 product baseline is recorded in
+  `docs/ops/brc-owner-console-product-design-v0/README.md`. v0 uses
+  `testnet_rehearsal` instead of bare `trade`, models `live` as a disabled
+  boundary rather than a switch, and treats executable action cards as
+  application-owned preflight artifacts rather than LLM authority.
+- Strategy family governance is recorded in
+  `docs/ops/strategy-family-map-v0.md`. Strategy families are playbook
+  candidates wrapped by BRC, not a universal strategy engine or automatic
+  strategy pool.
 - BRC-R3 may use a LangGraph-shaped workflow for Owner text classification,
   policy validation, confirmation pause/resume, and result persistence. It may
   normalize Owner text into one of the allowed BRC operator actions, but it may

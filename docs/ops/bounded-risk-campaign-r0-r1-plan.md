@@ -38,6 +38,9 @@ testnet entry/close endpoints in this implementation.
 
 - Profile: `brc_btc_eth_testnet_runtime`
 - Exchange: Binance testnet only
+- Local acceptance posture: testnet-first. When local env is configured for
+  BRC acceptance, the fixed testnet workflow should be usable without treating
+  paper-only/read-only mode as a prerequisite.
 - Program withdrawal: disabled / not implemented
 - Mainnet/live: unauthorized
 - LLM trading decision: unauthorized
@@ -67,6 +70,9 @@ All endpoints are local/internal and require:
 - `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true` for mutation endpoints
 - `EXCHANGE_TESTNET=true`
 - `RUNTIME_PROFILE=brc_btc_eth_testnet_runtime`
+
+For local Owner acceptance, these are expected startup defaults. They are not
+production defaults and must not be used to imply live/mainnet permission.
 
 Endpoints:
 

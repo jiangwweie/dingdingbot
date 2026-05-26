@@ -178,6 +178,107 @@ security model. Before Feishu integration, cloud deployment, public/internal
 Web mutation controls, strategy-pool execution, or real-live review, these
 permissions must be re-gated by the relevant deployment/security tasks.
 
+2026-05-26 BRC testnet-first / production-blocked amendment:
+
+The BRC operating posture is now explicitly `testnet-first` for local
+acceptance and `production-blocked` for real-live/mainnet authority.
+
+This supersedes any implementation interpretation that treats paper-only or
+read-only operation as the required current main path. Paper/simulation remains
+useful, but it is not a prerequisite for the fixed BRC testnet rehearsal. The
+local system should let the Owner run the controlled testnet chain when these
+non-production gates are satisfied:
+
+- Binance testnet mode is active;
+- the runtime profile is `brc_btc_eth_testnet_runtime`;
+- BRC runtime control/test-signal gates are enabled for local acceptance;
+- fixed ETH/BTC caps and max-attempt rules are server-owned;
+- preflight/final flatness checks pass;
+- Owner confirmation is provided for the workflow.
+
+The stricter approval wall belongs at the production boundary. Real
+live/mainnet order placement, withdrawal/transfer, autonomous strategy
+execution, automatic sizing/leverage/side override, strategy-pool execution,
+and broader runtime expansion remain blocked by default environment gates and
+require separate Owner production authorization.
+
+The alignment note is
+`docs/ops/brc-testnet-first-production-blocked-principle.md`.
+
+2026-05-26 BRC-R5 Owner-driven runtime-control amendment:
+
+The next design baseline is `BRC-R5 Owner-Driven Runtime Control`, documented
+in `docs/ops/brc-r5-owner-driven-runtime-control-design.md`.
+
+Confirmed design principles:
+
+- the single execution environment switch is `TRADING_ENV=simulation|live`;
+- `simulation` covers local, testnet, mock, and rehearsal and is the default;
+- `live` is modeled now but remains default-off and unauthorized until a
+  separate Owner production/deployment decision;
+- paper is not a BRC operating mainline;
+- runtime state should be expressed in Owner terms:
+  `observe`, `monitor`, `testnet_rehearsal`, `paused`, `stopped`,
+  `flattening`, `attention_required`;
+- v0 must not use bare `trade`; future live readiness may introduce a separate
+  `live_trade` state after Owner production authorization;
+- `live` is a modeled disabled environment boundary in v0, not a switch;
+- LLM is an Owner assistant, risk advisor, and audit investigator. It may query
+  controlled read-only system facts, explain chain evidence, and provide
+  advisory risk advice, but it may not write database rows, modify runtime
+  state, place/cancel/close/resize orders, or confirm on behalf of Owner;
+- LLM risk advice is advisory by default, not blocking;
+- the Owner must have fast cut-off controls:
+  `pause_new_entries`, `emergency_stop_runtime`, and `emergency_flatten`;
+- audit write failure is a hard block for any state-changing action.
+
+The first recommended implementation carrier is `TF-001`, an existing trend
+strategy/playbook used only to validate the full BRC control chain. It is not a
+profitability claim and does not authorize parameter optimization, strategy
+pool execution, or live trading.
+
+2026-05-26 BRC Owner Console v0 product-design amendment:
+
+The local console v0 information architecture is frozen by
+`docs/ops/brc-owner-console-product-design-v0/README.md`.
+
+P0 pages are:
+
+- `Command Center`;
+- `LLM Copilot`;
+- `Strategy / Playbook`;
+- `Risk & Account`;
+- `Runtime Control`.
+
+`Summary` is replaced by `Command Center`. `Markets & Orders` / `Positions &
+Orders` are folded into `Risk & Account` as exposure, order-source, and
+flatness proof. `Parameters` is not a primary page; risk envelope fields are
+readonly inside `Risk & Account`.
+
+Action cards are application-owned. LLM output is advisory input only.
+Executable action cards must carry application preflight authority, fact
+snapshot, preflight result, idempotency key, expiry, allowed/blocked next
+states, and final-state proof requirements.
+
+2026-05-26 Strategy family map amendment:
+
+The strategy direction is now documented in
+`docs/ops/strategy-family-map-v0.md`.
+
+The project should not pursue one universal strategy. It should maintain a
+small strategy-family/playbook map and wrap any usable playbook in BRC risk
+controls. Initial status:
+
+- `TF-001` Trend Following: `Intake` / `Carrier Validation`;
+- `CPM-1` Pullback Continuation: `Conditional Candidate`;
+- `VB-001` Volatility Contraction Breakout: `Reserve`;
+- `MTF-001` Multi-Timeframe Momentum: `Filter Candidate`;
+- Funding/OI/Event: `Watchlist`;
+- ML and HFT/orderbook: `Rejected for Now`.
+
+This is design/governance material. It is not an automatic strategy pool,
+auto-router, or live execution permission.
+
 2026-05-25 PLC execution-stage update:
 
 - PLC Phase 0 local sandbox, Phase 1 read-only runtime adapter, Phase 2 paper
@@ -336,6 +437,12 @@ The active tracks are:
 4. `Evidence Archive` - Direction A, CPM-1, HTF/LTF, SRR-002, HTP, short-side
    OHLCV, and other prior research remain available as archived evidence,
    benchmarks, or failure/cautionary material.
+
+The `strategy-family-map-v0.md` amendment does not reopen CPM-1 as a runtime
+candidate. It reclassifies CPM-1 for governance vocabulary only:
+`Pullback Continuation / Conditional Candidate`. That means CPM-1 may inform a
+future conditional playbook design, while its prior frozen runtime/small-live
+promotion path remains stopped.
 
 All other capabilities belong to the future capability pool unless Codex
 promotes them locally inside the research freedom zone or Owner explicitly
