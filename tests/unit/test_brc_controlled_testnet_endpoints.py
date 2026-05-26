@@ -37,6 +37,9 @@ class InMemoryBrcRepo:
             return None
         return self.campaign
 
+    async def get_latest_campaign(self):
+        return self.campaign
+
     async def save_campaign(self, campaign):
         self.campaign = campaign
         return campaign
@@ -427,3 +430,23 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
         final = client.post("/api/runtime/test/brc/finalize", json={})
         assert final.status_code == 200
         assert final.json()["campaign"]["outcome"] == "ended_testnet_rehearsal_complete_loss_locked"
+
+        review = client.get("/api/runtime/test/brc/review-packet")
+        assert review.status_code == 200
+        assert review.json()["review_packet"]["status"] == "ended"
+        assert review.json()["review_packet"]["profit_protect_triggered"] is True
+        assert review.json()["review_packet"]["loss_lock_triggered"] is True
+        assert review.json()["review_packet"]["final_inventory_flat"] is True
+
+        eligibility = client.get("/api/runtime/test/brc/next-eligibility")
+        assert eligibility.status_code == 200
+        assert eligibility.json()["eligibility"]["decision"] == "owner_review_required"
+        assert eligibility.json()["eligibility"]["next_campaign_allowed"] is False
+
+        draft = client.post(
+            "/api/runtime/test/brc/operator/draft",
+            json={"text": "帮我看复盘报告"},
+        )
+        assert draft.status_code == 200
+        assert draft.json()["draft"]["action"] == "read_review_packet"
+        assert draft.json()["draft"]["mutation_intended"] is False

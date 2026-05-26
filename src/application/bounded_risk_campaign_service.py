@@ -12,6 +12,12 @@ from src.domain.bounded_risk_campaign import (
     BrcAttemptStatus,
     BrcCampaignStatus,
     BrcDecisionResult,
+    BrcInvariantCheck,
+    BrcNextCampaignEligibility,
+    BrcNextEligibilityDecision,
+    BrcOperatorAction,
+    BrcOperatorIntentDraft,
+    BrcReviewPacket,
     BoundedRiskCampaign,
     CampaignAttempt,
     CampaignOutcome,
@@ -34,6 +40,9 @@ class BrcCampaignRepositoryPort(Protocol):
         ...
 
     async def get_current_campaign(self) -> Optional[BoundedRiskCampaign]:
+        ...
+
+    async def get_latest_campaign(self) -> Optional[BoundedRiskCampaign]:
         ...
 
     async def save_campaign(self, campaign: BoundedRiskCampaign) -> BoundedRiskCampaign:
@@ -152,10 +161,22 @@ class BoundedRiskCampaignService:
     async def get_current_campaign(self) -> Optional[BoundedRiskCampaign]:
         return await self._repo.get_current_campaign()
 
+    async def get_latest_campaign(self) -> Optional[BoundedRiskCampaign]:
+        getter = getattr(self._repo, "get_latest_campaign", None)
+        if callable(getter):
+            return await getter()
+        return await self._repo.get_current_campaign()
+
     async def require_current_campaign(self) -> BoundedRiskCampaign:
         campaign = await self.get_current_campaign()
         if campaign is None:
             raise BrcRuleViolation("no active BRC campaign")
+        return campaign
+
+    async def require_latest_campaign(self) -> BoundedRiskCampaign:
+        campaign = await self.get_latest_campaign()
+        if campaign is None:
+            raise BrcRuleViolation("no BRC campaign found")
         return campaign
 
     async def switch_playbook(
@@ -434,6 +455,184 @@ class BoundedRiskCampaignService:
 
     async def build_evidence_packet(self) -> dict[str, Any]:
         campaign = await self.require_current_campaign()
+        return await self._build_evidence_packet_for(campaign)
+
+    async def build_latest_evidence_packet(self) -> dict[str, Any]:
+        campaign = await self.require_latest_campaign()
+        return await self._build_evidence_packet_for(campaign)
+
+    async def build_review_packet(
+        self,
+        *,
+        final_inventory: Optional[dict[str, Any]] = None,
+    ) -> BrcReviewPacket:
+        campaign = await self.require_latest_campaign()
+        evidence = await self._build_evidence_packet_for(campaign)
+        if final_inventory is not None:
+            evidence["final_inventory"] = final_inventory
+        switches = evidence["switch_decisions"]
+        mock_pnl_events = evidence["mock_pnl_events"]
+        profit_protect_triggered = any(
+            event.get("triggered_state") == BrcCampaignStatus.PROFIT_PROTECT.value
+            for event in mock_pnl_events
+        )
+        loss_lock_triggered = campaign.status == BrcCampaignStatus.LOSS_LOCKED or any(
+            event.get("triggered_state") == BrcCampaignStatus.LOSS_LOCKED.value
+            for event in mock_pnl_events
+        )
+        all_attempts_closed = all(
+            attempt.status == BrcAttemptStatus.CLOSED for attempt in campaign.attempts
+        )
+        final_inventory_flat = None
+        if final_inventory is not None:
+            final_inventory_flat = bool(final_inventory.get("all_flat"))
+        invariant_checks = self._build_invariant_checks(
+            campaign=campaign,
+            switch_decisions=switches,
+            final_inventory_flat=final_inventory_flat,
+        )
+        return BrcReviewPacket(
+            campaign_id=campaign.campaign_id,
+            status=campaign.status,
+            outcome=campaign.outcome,
+            current_playbook_id=campaign.current_playbook_id,
+            realized_pnl=campaign.realized_pnl,
+            authorized_amount=campaign.bucket.authorized_amount,
+            max_campaign_loss=campaign.risk_envelope.max_campaign_loss,
+            profit_protect_trigger=campaign.risk_envelope.profit_protect_trigger,
+            attempt_count=campaign.attempt_count,
+            max_attempts=campaign.risk_envelope.max_attempts,
+            switch_count=len(switches),
+            mock_pnl_event_count=len(mock_pnl_events),
+            profit_protect_triggered=profit_protect_triggered,
+            loss_lock_triggered=loss_lock_triggered,
+            all_attempts_closed=all_attempts_closed,
+            final_inventory_flat=final_inventory_flat,
+            invariant_checks=invariant_checks,
+            evidence=evidence,
+        )
+
+    def draft_operator_intent(self, *, source_text: str) -> BrcOperatorIntentDraft:
+        normalized = source_text.strip().lower()
+        if not normalized:
+            raise BrcRuleViolation("operator intent text is required")
+
+        if any(token in normalized for token in ("review", "复盘", "报告", "packet")):
+            return BrcOperatorIntentDraft(
+                source_text=source_text,
+                action=BrcOperatorAction.READ_REVIEW_PACKET,
+                confidence=Decimal("0.90"),
+                endpoint_path="/api/runtime/test/brc/review-packet",
+                executable_without_owner_confirmation=True,
+            )
+        if any(
+            token in normalized
+            for token in ("eligibility", "eligible", "下一轮", "下轮", "能不能", "是否可以")
+        ):
+            return BrcOperatorIntentDraft(
+                source_text=source_text,
+                action=BrcOperatorAction.READ_NEXT_ELIGIBILITY,
+                confidence=Decimal("0.88"),
+                endpoint_path="/api/runtime/test/brc/next-eligibility",
+                executable_without_owner_confirmation=True,
+            )
+        if any(token in normalized for token in ("evidence", "证据", "验收", "evidence packet")):
+            return BrcOperatorIntentDraft(
+                source_text=source_text,
+                action=BrcOperatorAction.READ_EVIDENCE,
+                confidence=Decimal("0.86"),
+                endpoint_path="/api/runtime/test/brc/evidence",
+                executable_without_owner_confirmation=True,
+            )
+        return BrcOperatorIntentDraft(
+            source_text=source_text,
+            action=BrcOperatorAction.UNKNOWN,
+            confidence=Decimal("0"),
+            blocked_reason=(
+                "unrecognized BRC operator intent; R2 only drafts read-only "
+                "review, eligibility, and evidence actions"
+            ),
+        )
+
+    async def evaluate_next_campaign_eligibility(
+        self,
+        *,
+        final_inventory: Optional[dict[str, Any]] = None,
+    ) -> BrcNextCampaignEligibility:
+        campaign = await self.get_latest_campaign()
+        if campaign is None:
+            return BrcNextCampaignEligibility(
+                decision=BrcNextEligibilityDecision.OBSERVE_ONLY,
+                reason="no prior BRC campaign; start in observe-only until Owner authorizes a bounded risk bucket",
+                owner_review_required=True,
+                next_campaign_allowed=False,
+                required_actions=[
+                    "review or create a risk capital bucket",
+                    "Owner must authorize the next campaign envelope",
+                    "start from PB-000-OBSERVE-ONLY",
+                ],
+            )
+
+        if final_inventory is not None and not bool(final_inventory.get("all_flat")):
+            return BrcNextCampaignEligibility(
+                decision=BrcNextEligibilityDecision.BLOCKED,
+                reason="final inventory is not flat",
+                campaign_id=campaign.campaign_id,
+                latest_status=campaign.status,
+                latest_outcome=campaign.outcome,
+                blocked_reasons=["final ETH/BTC inventory is not flat"],
+                required_actions=["restore flat inventory before any next campaign review"],
+            )
+
+        if campaign.status != BrcCampaignStatus.ENDED:
+            return BrcNextCampaignEligibility(
+                decision=BrcNextEligibilityDecision.BLOCKED,
+                reason="current BRC campaign is still open",
+                campaign_id=campaign.campaign_id,
+                latest_status=campaign.status,
+                latest_outcome=campaign.outcome,
+                blocked_reasons=["open campaign must be finalized or manually stopped first"],
+                required_actions=[
+                    "complete current campaign review packet",
+                    "finalize or manually stop the current campaign",
+                ],
+            )
+
+        if campaign.outcome == CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED:
+            return BrcNextCampaignEligibility(
+                decision=BrcNextEligibilityDecision.OWNER_REVIEW_REQUIRED,
+                reason="latest BRC ended through loss-lock rehearsal; next campaign requires Owner review and a fresh risk bucket decision",
+                campaign_id=campaign.campaign_id,
+                latest_status=campaign.status,
+                latest_outcome=campaign.outcome,
+                owner_review_required=True,
+                cooldown_required=True,
+                next_campaign_allowed=False,
+                required_actions=[
+                    "review loss-lock evidence packet",
+                    "confirm no refill of the same risk bucket",
+                    "authorize a new campaign envelope before any next testnet attempt",
+                ],
+            )
+
+        return BrcNextCampaignEligibility(
+            decision=BrcNextEligibilityDecision.OWNER_REVIEW_REQUIRED,
+            reason="latest BRC campaign ended; next campaign requires explicit Owner review",
+            campaign_id=campaign.campaign_id,
+            latest_status=campaign.status,
+            latest_outcome=campaign.outcome,
+            owner_review_required=True,
+            next_campaign_allowed=False,
+            required_actions=[
+                "review final campaign outcome",
+                "confirm next campaign risk bucket and playbook",
+            ],
+        )
+
+    async def _build_evidence_packet_for(
+        self,
+        campaign: BoundedRiskCampaign,
+    ) -> dict[str, Any]:
         switches = await self._repo.list_switch_decisions(campaign.campaign_id)
         events = await self._repo.list_campaign_events(campaign.campaign_id)
         mock_pnl_events = await self._repo.list_mock_pnl_events(campaign.campaign_id)
@@ -453,6 +652,69 @@ class BoundedRiskCampaignService:
                 "real_live_enabled": False,
             },
         }
+
+    @staticmethod
+    def _build_invariant_checks(
+        *,
+        campaign: BoundedRiskCampaign,
+        switch_decisions: list[dict[str, Any]],
+        final_inventory_flat: Optional[bool],
+    ) -> list[BrcInvariantCheck]:
+        active_attempts = [
+            attempt
+            for attempt in campaign.attempts
+            if attempt.status in {BrcAttemptStatus.ARMED, BrcAttemptStatus.ENTRY_FILLED}
+        ]
+        checks = [
+            BrcInvariantCheck(
+                name="attempt_count_within_risk_envelope",
+                passed=campaign.attempt_count <= campaign.risk_envelope.max_attempts,
+                detail=f"{campaign.attempt_count}/{campaign.risk_envelope.max_attempts}",
+            ),
+            BrcInvariantCheck(
+                name="max_one_active_attempt",
+                passed=len(active_attempts) <= campaign.risk_envelope.max_simultaneous_positions,
+                detail=f"active_attempts={len(active_attempts)}",
+            ),
+            BrcInvariantCheck(
+                name="loss_counter_not_reset_on_switch",
+                passed=all(
+                    decision.get("inferred_fields", {}).get("loss_counter_reset") is False
+                    for decision in switch_decisions
+                ),
+                detail="switch decisions preserve campaign pnl continuity",
+            ),
+            BrcInvariantCheck(
+                name="program_withdrawal_disabled",
+                passed=True,
+                detail="BRC evidence only; no withdrawal or transfer endpoint is enabled",
+            ),
+            BrcInvariantCheck(
+                name="real_live_disabled",
+                passed=True,
+                detail="real live remains unauthorized and outside BRC R2",
+            ),
+        ]
+        if campaign.status == BrcCampaignStatus.ENDED:
+            checks.append(
+                BrcInvariantCheck(
+                    name="ended_campaign_attempts_closed",
+                    passed=all(
+                        attempt.status == BrcAttemptStatus.CLOSED
+                        for attempt in campaign.attempts
+                    ),
+                    detail="ended campaigns must not keep active BRC attempts",
+                )
+            )
+        if final_inventory_flat is not None:
+            checks.append(
+                BrcInvariantCheck(
+                    name="final_inventory_flat",
+                    passed=final_inventory_flat,
+                    detail=f"final_inventory.all_flat={final_inventory_flat}",
+                )
+            )
+        return checks
 
     def _ensure_can_attempt(self, campaign: BoundedRiskCampaign, *, symbol: str) -> None:
         if campaign.current_playbook_id != self.CONTROLLED_TESTNET_PLAYBOOK_ID:

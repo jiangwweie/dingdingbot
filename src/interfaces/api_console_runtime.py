@@ -480,6 +480,10 @@ class BrcFinalizeRequest(BaseModel):
     reason: str = Field(default="BRC ETH/BTC controlled testnet rehearsal complete", max_length=512)
 
 
+class BrcOperatorIntentDraftRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2048)
+
+
 class BrcCampaignResponse(BaseModel):
     campaign: dict
     live_ready: Literal[False] = False
@@ -512,6 +516,35 @@ class BrcEvidenceResponse(BaseModel):
     evidence: dict
     inventory: Phase5EInventoryResponse
     live_ready: Literal[False] = False
+
+
+class BrcReviewPacketResponse(BaseModel):
+    review_packet: dict
+    inventory: Phase5EInventoryResponse
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Read-only BRC campaign review. This endpoint does not place, cancel, "
+        "close, resize, transfer, withdraw, or mutate exchange state."
+    )
+
+
+class BrcNextEligibilityResponse(BaseModel):
+    eligibility: dict
+    inventory: Phase5EInventoryResponse
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Read-only BRC next-campaign gate. Real live and program withdrawal "
+        "remain unauthorized."
+    )
+
+
+class BrcOperatorIntentDraftResponse(BaseModel):
+    draft: dict
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Read-only BRC operator intent draft. This endpoint maps text only to "
+        "read-only review/evidence actions and does not execute trades."
+    )
 
 
 def _get_account_snapshot(api_module):
@@ -2228,6 +2261,62 @@ async def get_brc_evidence(request: Request) -> BrcEvidenceResponse:
     )
     evidence["final_inventory"] = inventory.model_dump(mode="json")
     return BrcEvidenceResponse(evidence=evidence, inventory=inventory)
+
+
+@router.get("/test/brc/review-packet", response_model=BrcReviewPacketResponse)
+async def get_brc_review_packet(request: Request) -> BrcReviewPacketResponse:
+    """Return a read-only BRC review packet for the latest campaign."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+    try:
+        review_packet = await service.build_review_packet(
+            final_inventory=inventory.model_dump(mode="json"),
+        )
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return BrcReviewPacketResponse(
+        review_packet=review_packet.model_dump(mode="json"),
+        inventory=inventory,
+    )
+
+
+@router.get("/test/brc/next-eligibility", response_model=BrcNextEligibilityResponse)
+async def get_brc_next_eligibility(request: Request) -> BrcNextEligibilityResponse:
+    """Return the read-only next-campaign eligibility gate."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+    eligibility = await service.evaluate_next_campaign_eligibility(
+        final_inventory=inventory.model_dump(mode="json"),
+    )
+    return BrcNextEligibilityResponse(
+        eligibility=eligibility.model_dump(mode="json"),
+        inventory=inventory,
+    )
+
+
+@router.post("/test/brc/operator/draft", response_model=BrcOperatorIntentDraftResponse)
+async def draft_brc_operator_intent(
+    request: Request,
+    body: BrcOperatorIntentDraftRequest,
+) -> BrcOperatorIntentDraftResponse:
+    """Draft a read-only BRC operator action from short Owner text."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    try:
+        draft = service.draft_operator_intent(source_text=body.text)
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return BrcOperatorIntentDraftResponse(draft=draft.model_dump(mode="json"))
 
 
 @router.post("/test/brc/finalize", response_model=BrcCampaignResponse)

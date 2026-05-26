@@ -54,6 +54,21 @@ class CampaignOutcome(str, Enum):
     ENDED_RULE_VIOLATION = "ended_rule_violation"
 
 
+class BrcNextEligibilityDecision(str, Enum):
+    ALLOWED = "allowed"
+    OBSERVE_ONLY = "observe_only"
+    OWNER_REVIEW_REQUIRED = "owner_review_required"
+    COOLDOWN_REQUIRED = "cooldown_required"
+    BLOCKED = "blocked"
+
+
+class BrcOperatorAction(str, Enum):
+    READ_REVIEW_PACKET = "read_review_packet"
+    READ_NEXT_ELIGIBILITY = "read_next_eligibility"
+    READ_EVIDENCE = "read_evidence"
+    UNKNOWN = "unknown"
+
+
 class PlaybookEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -139,6 +154,63 @@ class MockPnlEvent(BaseModel):
         if value == Decimal("0"):
             raise ValueError("mock pnl amount must be non-zero")
         return value
+
+
+class BrcInvariantCheck(BaseModel):
+    name: str
+    passed: bool
+    detail: str
+
+
+class BrcReviewPacket(BaseModel):
+    campaign_id: str
+    status: BrcCampaignStatus
+    outcome: Optional[CampaignOutcome] = None
+    current_playbook_id: str
+    realized_pnl: Decimal
+    authorized_amount: Decimal
+    max_campaign_loss: Decimal
+    profit_protect_trigger: Decimal
+    attempt_count: int
+    max_attempts: int
+    switch_count: int
+    mock_pnl_event_count: int
+    profit_protect_triggered: bool
+    loss_lock_triggered: bool
+    all_attempts_closed: bool
+    final_inventory_flat: Optional[bool] = None
+    invariant_checks: list[BrcInvariantCheck]
+    evidence: dict[str, Any]
+    live_ready: bool = False
+    withdrawal_executed: bool = False
+
+
+class BrcNextCampaignEligibility(BaseModel):
+    decision: BrcNextEligibilityDecision
+    reason: str
+    campaign_id: Optional[str] = None
+    latest_status: Optional[BrcCampaignStatus] = None
+    latest_outcome: Optional[CampaignOutcome] = None
+    recommended_playbook_id: str = "PB-000-OBSERVE-ONLY"
+    owner_review_required: bool = True
+    cooldown_required: bool = False
+    next_campaign_allowed: bool = False
+    blocked_reasons: list[str] = Field(default_factory=list)
+    required_actions: list[str] = Field(default_factory=list)
+    live_ready: bool = False
+
+
+class BrcOperatorIntentDraft(BaseModel):
+    source_text: str = Field(min_length=1, max_length=2048)
+    action: BrcOperatorAction
+    confidence: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
+    http_method: str = "GET"
+    endpoint_path: Optional[str] = None
+    mutation_intended: bool = False
+    executable_without_owner_confirmation: bool = False
+    owner_confirmation_required: bool = False
+    blocked_reason: Optional[str] = None
+    live_ready: bool = False
 
 
 class BoundedRiskCampaign(BaseModel):

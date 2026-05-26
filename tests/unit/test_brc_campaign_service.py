@@ -39,6 +39,9 @@ class InMemoryBrcRepo:
             return None
         return self.campaign
 
+    async def get_latest_campaign(self):
+        return self.campaign
+
     async def save_campaign(self, campaign):
         self.campaign = campaign
         return campaign
@@ -203,3 +206,139 @@ async def test_brc_finalize_requires_loss_locked_and_closed_attempts():
             reason="premature",
             final_flat=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_brc_review_packet_summarizes_latest_finalized_campaign():
+    service, _ = await _campaign_service()
+    await service.switch_playbook(
+        new_playbook_id="PB-004-BRC-CONTROLLED-TESTNET",
+        reason_category="evidence_driven",
+        reason_text="owner authorized controlled rehearsal",
+        evidence_refs=["evidence"],
+    )
+    for symbol in (ETH, BTC):
+        await service.arm_attempt(symbol=symbol, reason=symbol)
+        await service.record_attempt_entry(
+            symbol=symbol,
+            record=AttemptOpenRecord(
+                intent_id=f"intent-{symbol}",
+                signal_id=f"sig-{symbol}",
+                amount=Decimal("0.01"),
+                notional=Decimal("21"),
+            ),
+        )
+        await service.record_attempt_close(
+            symbol=symbol,
+            record=AttemptCloseRecord(close_order_id=f"close-{symbol}", exchange_order_id=None),
+        )
+    await service.inject_mock_pnl(
+        amount=Decimal("120"),
+        source=MockPnlSource.TESTNET_MOCK,
+        reason="mock profit branch",
+    )
+    await service.inject_mock_pnl(
+        amount=Decimal("-240"),
+        source=MockPnlSource.TESTNET_MOCK,
+        reason="mock loss branch",
+    )
+    await service.finalize(
+        outcome=CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED,
+        reason="complete",
+        final_flat=True,
+    )
+
+    packet = await service.build_review_packet(final_inventory={"all_flat": True})
+
+    assert packet.status == BrcCampaignStatus.ENDED
+    assert packet.outcome == CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED
+    assert packet.attempt_count == 2
+    assert packet.profit_protect_triggered is True
+    assert packet.loss_lock_triggered is True
+    assert packet.all_attempts_closed is True
+    assert packet.final_inventory_flat is True
+    assert all(check.passed for check in packet.invariant_checks)
+    assert packet.live_ready is False
+    assert packet.withdrawal_executed is False
+
+
+@pytest.mark.asyncio
+async def test_brc_next_eligibility_requires_owner_review_after_loss_locked_outcome():
+    service, _ = await _campaign_service()
+    await service.switch_playbook(
+        new_playbook_id="PB-004-BRC-CONTROLLED-TESTNET",
+        reason_category="evidence_driven",
+        reason_text="owner authorized controlled rehearsal",
+        evidence_refs=["evidence"],
+    )
+    for symbol in (ETH, BTC):
+        await service.arm_attempt(symbol=symbol, reason=symbol)
+        await service.record_attempt_entry(
+            symbol=symbol,
+            record=AttemptOpenRecord(
+                intent_id=f"intent-{symbol}",
+                signal_id=f"sig-{symbol}",
+                amount=Decimal("0.01"),
+                notional=Decimal("21"),
+            ),
+        )
+        await service.record_attempt_close(
+            symbol=symbol,
+            record=AttemptCloseRecord(close_order_id=f"close-{symbol}", exchange_order_id=None),
+        )
+    await service.inject_mock_pnl(
+        amount=Decimal("-120"),
+        source=MockPnlSource.TESTNET_MOCK,
+        reason="mock loss branch",
+    )
+    await service.finalize(
+        outcome=CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED,
+        reason="complete",
+        final_flat=True,
+    )
+
+    eligibility = await service.evaluate_next_campaign_eligibility(
+        final_inventory={"all_flat": True},
+    )
+
+    assert eligibility.decision.value == "owner_review_required"
+    assert eligibility.cooldown_required is True
+    assert eligibility.next_campaign_allowed is False
+    assert eligibility.recommended_playbook_id == "PB-000-OBSERVE-ONLY"
+
+
+@pytest.mark.asyncio
+async def test_brc_next_eligibility_blocks_when_inventory_is_not_flat():
+    service, _ = await _campaign_service()
+
+    eligibility = await service.evaluate_next_campaign_eligibility(
+        final_inventory={"all_flat": False},
+    )
+
+    assert eligibility.decision.value == "blocked"
+    assert "not flat" in eligibility.reason
+
+
+@pytest.mark.asyncio
+async def test_brc_operator_intent_draft_maps_text_to_read_only_action():
+    service, _ = await _campaign_service()
+
+    draft = service.draft_operator_intent(source_text="帮我看下一轮能不能开")
+
+    assert draft.action.value == "read_next_eligibility"
+    assert draft.endpoint_path == "/api/runtime/test/brc/next-eligibility"
+    assert draft.mutation_intended is False
+    assert draft.executable_without_owner_confirmation is True
+    assert draft.live_ready is False
+
+
+@pytest.mark.asyncio
+async def test_brc_operator_intent_draft_blocks_unknown_text():
+    service, _ = await _campaign_service()
+
+    draft = service.draft_operator_intent(source_text="帮我直接开一单")
+
+    assert draft.action.value == "unknown"
+    assert draft.endpoint_path is None
+    assert draft.executable_without_owner_confirmation is False
+    assert "R2 only drafts read-only" in draft.blocked_reason

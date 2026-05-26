@@ -49,6 +49,17 @@ class PgBrcCampaignRepository:
             row = result.scalar_one_or_none()
             return self._to_campaign(row) if row is not None else None
 
+    async def get_latest_campaign(self) -> Optional[BoundedRiskCampaign]:
+        async with self._session_maker() as session:
+            stmt = (
+                select(PGBrcCampaignORM)
+                .order_by(PGBrcCampaignORM.created_at_ms.desc())
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return self._to_campaign(row) if row is not None else None
+
     async def save_campaign(self, campaign: BoundedRiskCampaign) -> BoundedRiskCampaign:
         async with self._session_maker() as session:
             async with session.begin():

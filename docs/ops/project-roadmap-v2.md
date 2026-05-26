@@ -207,6 +207,12 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   withdrawals, or daily risk accounting. Final outcome was
   `ended_testnet_rehearsal_complete_loss_locked`; evidence inventory was flat.
   Real live and program withdrawal remain unauthorized.
+- BRC-R2-001 is the next active BRC capability slice. It focuses on low-friction
+  campaign operation review: latest campaign review packet, next-campaign
+  eligibility gate, a local read-only operator helper, and narrow
+  text-to-read-action draft. This does not expand order authority, strategy
+  authority, withdrawal/transfer authority, real-live authority, or
+  natural-language auto-execution.
 
 The active research SSOT is:
 

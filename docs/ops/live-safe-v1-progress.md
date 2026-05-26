@@ -227,6 +227,18 @@ Use this file for session progress and handoff notes.
   - GKS restored active, startup guard blocked, runtime state closed-safe,
     runtime stopped, and port `8001` released.
 
+## 2026-05-26 (BRC-R2-001 Low-Friction Review Layer)
+
+- Opened `BRC-R2-001` as the next BRC mainline step after the successful
+  R0/R1 testnet rehearsal.
+- Added the R2 plan in
+  `docs/ops/brc-r2-low-friction-ops-review-plan.md`.
+- Scope remains read-only for this slice: campaign review packet,
+  next-campaign eligibility gate, local operator helper, and narrow
+  text-to-read-action draft. No new order path, withdrawal/transfer endpoint,
+  real-live authority, automatic sizing, strategy implementation, or
+  natural-language auto-execution is introduced.
+
 ## 2026-05-25 (TC-TINY-001D-1 Authorization Package)
 
 - Prepared ADR-0009 action request for one controlled Binance testnet
