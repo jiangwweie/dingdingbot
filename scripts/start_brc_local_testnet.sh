@@ -22,8 +22,8 @@ export EXCHANGE_TESTNET=true
 export RUNTIME_PROFILE=brc_btc_eth_testnet_runtime
 export RUNTIME_CONTROL_API_ENABLED=true
 export RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true
-export BACKEND_PORT="${BACKEND_PORT:-8000}"
-export FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+export BACKEND_PORT="${BRC_BACKEND_PORT:-${BACKEND_PORT:-8000}}"
+export FRONTEND_PORT="${BRC_FRONTEND_PORT:-${FRONTEND_PORT:-3000}}"
 
 echo "BRC local testnet defaults:"
 echo "  EXCHANGE_TESTNET=${EXCHANGE_TESTNET}"
@@ -56,7 +56,7 @@ FRONTEND_PID=$!
 
 echo
 echo "BRC local testnet console:"
-echo "  frontend: http://127.0.0.1:${FRONTEND_PORT}/guide"
+echo "  frontend: http://127.0.0.1:${FRONTEND_PORT}/command-center"
 echo "  backend:  http://127.0.0.1:${BACKEND_PORT}"
 echo
 echo "Press Ctrl+C to stop both processes."

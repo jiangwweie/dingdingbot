@@ -234,38 +234,18 @@ export function ApplicationActionCard({ action }: { action: BrcActionCard }) {
     <Card className={tone}>
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
-          <span>{action.title}</span>
-          <StatusBadge state={action.enabled ? 'application_preflight' : 'disabled'} />
+          <span>{actionTitle(action)}</span>
+          <StatusBadge state={action.enabled ? '可用' : '不可用'} />
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
         <p>
           <span className="font-bold">谁说了算：</span>
-          {action.authority_source}
-        </p>
-        <p>
-          <span className="font-bold">本次依据：</span>
-          <span className="font-mono">{action.fact_snapshot_id}</span>
-        </p>
-        <p>
-          <span className="font-bold">检查结果：</span>
-          <span className="font-mono">{action.preflight_result_id}</span>
-        </p>
-        <p>
-          <span className="font-bold">防重复 ID：</span>
-          <span className="font-mono">{action.idempotency_key}</span>
+          应用检查 application_preflight
         </p>
         <p>
           <span className="font-bold">当前状态：</span>
           <StatusBadge state={action.current_state} />
-        </p>
-        <p>
-          <span className="font-bold">允许去到：</span>
-          {action.allowed_next_states.join(', ') || 'none'}
-        </p>
-        <p>
-          <span className="font-bold">明确禁止：</span>
-          {action.blocked_next_states.join(', ') || 'none'}
         </p>
         <p>
           <span className="font-bold">会改变：</span>
@@ -273,7 +253,7 @@ export function ApplicationActionCard({ action }: { action: BrcActionCard }) {
         </p>
         <p>
           <span className="font-bold">不会改变：</span>
-          {action.what_will_not_change}
+          不会打开 live、提现/转账、自动下单或跳过 Owner 确认。
         </p>
         <p>
           <span className="font-bold">账户影响：</span>
@@ -297,6 +277,18 @@ export function ApplicationActionCard({ action }: { action: BrcActionCard }) {
             ))}
           </ul>
         )}
+        <details className="rounded-sm border border-zinc-200 bg-white/50 p-2 dark:border-zinc-800 dark:bg-zinc-950/40">
+          <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+            技术数据
+          </summary>
+          <div className="mt-2 space-y-1">
+            <p>本次依据：<span className="font-mono">{action.fact_snapshot_id}</span></p>
+            <p>检查结果：<span className="font-mono">{action.preflight_result_id}</span></p>
+            <p>防重复 ID：<span className="font-mono">{action.idempotency_key}</span></p>
+            <p>允许去到：{action.allowed_next_states.join(', ') || 'none'}</p>
+            <p>明确禁止：{action.blocked_next_states.join(', ') || 'none'}</p>
+          </div>
+        </details>
         {!action.enabled && (
           <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1 text-amber-700 dark:text-amber-300">
             当前不可用：{action.disabled_reason || '应用检查没有放行。'}
@@ -321,6 +313,18 @@ export function ApplicationActionCard({ action }: { action: BrcActionCard }) {
       </CardContent>
     </Card>
   );
+}
+
+function actionTitle(action: BrcActionCard): string {
+  const labels: Record<BrcActionCard['action_type'], string> = {
+    read_status: '看当前状态',
+    enter_monitor: '进入监控 monitor',
+    testnet_rehearsal: '准备 testnet 演练',
+    pause_new_entries: '暂停新开仓',
+    emergency_stop_runtime: '停止 runtime',
+    emergency_flatten: '撤单/平仓 flatten',
+  };
+  return labels[action.action_type] || action.title;
 }
 
 export function MainFlowCard({

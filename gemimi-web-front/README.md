@@ -29,7 +29,7 @@ The launcher uses local-only BRC testnet defaults:
 Then open:
 
 ```text
-http://127.0.0.1:3000/guide
+http://127.0.0.1:3000/command-center
 ```
 
 ## Frontend Only

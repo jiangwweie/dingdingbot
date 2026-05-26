@@ -1612,3 +1612,49 @@ Use this file for session progress and handoff notes.
 - Confirmed implementation order: first local console v0, then later R5
   TF-001 carrier validation. Current testnet acceptance remains the fixed BRC
   ETH/BTC rehearsal, not a new TF-001 execution path.
+
+## 2026-05-26 (BRC Owner Console v0 Implementation And Acceptance Review)
+
+- Implemented the v0 Owner Console IA:
+  `Command Center`, `LLM Copilot`, `Strategy / Playbook`, `Risk & Account`,
+  and `Runtime Control`.
+- Frontend default route is now `/command-center`.
+  `/summary` redirects to `/command-center`;
+  `/markets-orders` and `/parameters` redirect to `/risk-account`;
+  `/ai-investigator` redirects to `/llm-copilot`.
+- `/api/brc/readiness` now exposes the v0 SSOT fields:
+  environment boundary, runtime state, risk decision, risk/account summary,
+  strategy/playbook summary, application-owned action cards, global cut-off
+  controls, and latest audit.
+- Action Card UI is application-owned. LLM Copilot can create advisory
+  workflow intent, but confirm remains separate and requires Owner phrase.
+- Frontend copy was simplified toward Owner language while keeping useful
+  English terms such as `testnet`, `LLM Copilot`, `Action Card`, and `live`.
+  Technical IDs such as fact snapshot, preflight, and idempotency are folded
+  under expandable technical data.
+- Verification completed:
+  - `python3 -m py_compile src/interfaces/api_brc_console.py`
+  - `pytest -q tests/unit/test_brc_console_api_surface.py tests/unit/test_brc_operator_workflow.py tests/unit/test_brc_controlled_testnet_endpoints.py` -> 25 passed
+  - `npm run lint`
+  - `npm run build`
+  - Browser smoke passed for all five P0 pages.
+- Local testnet startup succeeded with:
+  `BRC_BACKEND_PORT=8011 BRC_FRONTEND_PORT=3011 scripts/start_brc_local_testnet.sh`.
+  Runtime reached `SYSTEM READY` on profile `brc_btc_eth_testnet_runtime`.
+- New fixed testnet rehearsal rerun was intentionally stopped by the campaign
+  gate after Owner confirmation phrase:
+  workflow `brc-wf-5b07c9a504a8` failed with
+  `active BRC campaign already exists: brc-267d6efee3b0`.
+  This run kept `mutation_executed=false`, `withdrawal_executed=false`, and
+  `live_ready=false`.
+- Current blocker:
+  active campaign `brc-267d6efee3b0` is still `active`, with one ETH attempt
+  `armed`, mock PnL `0`, local active orders `0`, local active positions `0`,
+  and local `all_flat=true`.
+- Prior full-chain evidence remains available:
+  workflow `brc-wf-8e3155486b24`, campaign `brc-4e83f98ccb4a`,
+  ETH entry/close, BTC entry/close, mock profit/loss-lock, finalize, review
+  `brc-review-dff0efa77cf0`, `withdrawal_executed=false`, `live_ready=false`.
+- Added `docs/ops/brc-owner-console-v0-acceptance-review.md`.
+- No real live/mainnet, withdrawal/transfer, strategy-pool execution, or
+  automatic sizing/leverage authority was added.

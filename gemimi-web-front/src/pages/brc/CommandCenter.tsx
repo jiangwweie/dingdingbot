@@ -29,7 +29,7 @@ export default function CommandCenter() {
   const playbook = readiness.strategy_playbook_summary || readiness.playbook_summary || {};
   const environment = readiness.environment_boundary || {};
   const futureLive = recordAt(environment, 'future_live');
-  const enabledActions = readiness.action_cards.filter((action) => action.enabled).map((action) => action.title);
+  const enabledActions = readiness.action_cards.filter((action) => action.enabled).map((action) => actionLabel(action.action_type));
   const canDo = enabledActions.length ? enabledActions.join('；') : '先看状态，不做动作。';
   const latestAudit = readiness.latest_audit;
 
@@ -54,10 +54,10 @@ export default function CommandCenter() {
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-4">
         <MetricCard
           icon={<ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />}
-          title="Risk Decision"
+          title="系统判断 Risk"
           rows={[
-            ['系统判断', <StatusBadge state={readiness.risk_decision} />],
-            ['运行状态', <StatusBadge state={readiness.runtime_state} />],
+            ['系统判断', <StatusBadge state={riskLabel(readiness.risk_decision)} />],
+            ['运行状态', <StatusBadge state={stateLabel(readiness.runtime_state)} />],
             ['当前模式', readiness.mode],
           ]}
         />
@@ -67,7 +67,7 @@ export default function CommandCenter() {
           rows={[
             ['当前环境', stringAt(environment, 'current', 'simulation')],
             ['交易所模式', stringAt(environment, 'exchange_mode', 'unknown')],
-            ['Live', stringAt(futureLive, 'display', 'disabled_boundary')],
+            ['Live', liveLabel(futureLive)],
           ]}
         />
         <MetricCard
@@ -99,7 +99,7 @@ export default function CommandCenter() {
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300 md:grid-cols-2">
-            <Row label="真实账户影响" value={stringAt(recordAt(riskAccount, 'account_state'), 'real_account_impact', 'none')} />
+            <Row label="真实账户影响" value={accountImpactLabel(stringAt(recordAt(riskAccount, 'account_state'), 'real_account_impact', 'none'))} />
             <Row label="订单来源" value={stringAt(exposure, 'order_source', 'unknown')} />
             <Row label="是否有未知风险" value={<StatusBadge state={valueAt(exposure, 'unknown_exposure', 'unknown')} />} />
             <Row label="审计可写" value={<StatusBadge state={valueAt(riskAccount, 'audit_writable', 'unknown')} />} />
@@ -114,8 +114,8 @@ export default function CommandCenter() {
           </CardHeader>
           <CardContent className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
             <Row label="可用范围" value={arrayAt(environment, 'executable_modes').join(', ') || 'local/mock/testnet'} />
-            <Row label="Live 是否可用" value={<StatusBadge state={valueAt(futureLive, 'available', false)} />} />
-            <Row label="是否生产授权" value={<StatusBadge state={valueAt(environment, 'production_authorized', false)} />} />
+            <Row label="Live 是否可用" value={<StatusBadge state={valueAt(futureLive, 'available', false) ? '可用' : '不可用'} />} />
+            <Row label="是否生产授权" value={<StatusBadge state={valueAt(environment, 'production_authorized', false) ? '已授权' : '未授权'} />} />
             <p className="rounded-sm border border-zinc-200 p-2 text-[11px] leading-4 text-zinc-500 dark:border-zinc-800">
               live 这里只是提醒“未来有这个边界”，不是开关；v0 不会用 trade 这个状态名。
             </p>
@@ -195,4 +195,45 @@ function stringAt(source: Record<string, unknown> | undefined | null, key: strin
 function arrayAt(source: Record<string, unknown> | undefined | null, key: string): string[] {
   const value = source?.[key];
   return Array.isArray(value) ? value.map((item) => String(item)) : [];
+}
+
+function actionLabel(actionType: string): string {
+  const labels: Record<string, string> = {
+    read_status: '看当前状态',
+    enter_monitor: '进入监控 monitor',
+    testnet_rehearsal: '准备 testnet 演练',
+  };
+  return labels[actionType] || actionType;
+}
+
+function riskLabel(decision: string): string {
+  const labels: Record<string, string> = {
+    ALLOW_READ: '只读可用 ALLOW_READ',
+    ALLOW_MONITOR: '可进入监控 ALLOW_MONITOR',
+    BLOCK_TESTNET: 'testnet 暂停 BLOCK_TESTNET',
+    ATTENTION_REQUIRED: '需要人工处理 ATTENTION_REQUIRED',
+    BLOCK_ALL_STATE_CHANGE: '禁止状态变化 BLOCK_ALL_STATE_CHANGE',
+  };
+  return labels[decision] || decision;
+}
+
+function stateLabel(state: string): string {
+  const labels: Record<string, string> = {
+    observe: '观察 observe',
+    monitor: '监控 monitor',
+    testnet_rehearsal: 'testnet 演练',
+    paused: '已暂停 paused',
+    stopped: '已停止 stopped',
+    flattening: '正在收平 flattening',
+    attention_required: '需要处理 attention_required',
+  };
+  return labels[state] || state;
+}
+
+function liveLabel(futureLive: Record<string, unknown>): string {
+  return valueAt(futureLive, 'available', false) ? '可用' : '不可用 disabled';
+}
+
+function accountImpactLabel(value: string): string {
+  return value === 'none' ? '无 none' : value;
 }
