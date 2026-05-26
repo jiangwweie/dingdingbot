@@ -276,6 +276,25 @@ Use this file for session progress and handoff notes.
   `real_live_authorized=false`, `withdrawal_authorized=false`, and
   `strategy_execution_authorized=false`.
 
+## 2026-05-26 (BRC-R3 LangGraph LLM Operator Gateway)
+
+- Added a LangGraph-shaped BRC operator workflow:
+  `Owner text -> normalized intent -> policy validation -> persisted workflow
+  -> Owner confirmation -> allowed action -> persisted result`.
+- Added `brc_llm_intents` and `brc_workflow_runs` as the durable fact source
+  for LLM-normalized intents and workflow state. LangGraph checkpointing is
+  orchestration-only and does not replace PG audit tables.
+- Added OpenAI-compatible LLM provider configuration through environment
+  variables only. API keys are not persisted or logged.
+- Allowed actions are limited to read review packet, read next eligibility,
+  read evidence, and the fixed BRC ETH -> BTC controlled testnet rehearsal.
+  Forbidden live/mainnet, withdrawal/transfer, strategy execution, autonomous
+  order, sizing/leverage/side override, and broader multi-symbol requests are
+  blocked before execution.
+- Added internal API and CLI wrappers for LLM workflow create/get/list/confirm.
+  Read-only confirmation remains `CONFIRM_READ_ONLY_BRC`; controlled testnet
+  rehearsal confirmation is `CONFIRM_BRC_TESTNET_REHEARSAL`.
+
 ## 2026-05-25 (TC-TINY-001D-1 Authorization Package)
 
 - Prepared ADR-0009 action request for one controlled Binance testnet

@@ -192,3 +192,53 @@ Rules:
 - review decisions must keep `real_live_authorized=false`,
   `withdrawal_authorized=false`, and
   `strategy_execution_authorized=false`.
+
+## BRC-R3 Extension
+
+`BRC-R3` adds a LangGraph-shaped LLM operator gateway above the existing BRC
+operator and review ledgers.
+
+Canonical flow:
+
+```text
+Owner text -> LLM normalized intent -> policy validation -> persisted workflow
+-> Owner confirmation -> allowed read-only action or fixed testnet rehearsal
+-> persisted result -> next gate
+```
+
+Durable fact source:
+
+- `brc_llm_intents`;
+- `brc_workflow_runs`;
+- existing `brc_operator_actions`;
+- existing `brc_review_decisions`;
+- existing BRC campaign/event/mock-PnL tables.
+
+LangGraph checkpointing is used only for pause/resume orchestration. It is not
+the audit source and must not be used to bypass the PG ledgers.
+
+Allowed LLM-normalized actions:
+
+- `read_review_packet`;
+- `read_next_eligibility`;
+- `read_evidence`;
+- `request_testnet_rehearsal`;
+- `unknown`.
+
+Confirmation boundaries:
+
+- read-only actions require `CONFIRM_READ_ONLY_BRC`;
+- fixed BRC controlled testnet rehearsal requires
+  `CONFIRM_BRC_TESTNET_REHEARSAL`.
+
+Hard boundaries:
+
+- LLM output is never executable free-form input;
+- live/mainnet requests are blocked;
+- withdrawal and transfer requests are blocked;
+- strategy execution requests are blocked;
+- autonomous order, sizing, leverage, side, or symbol override requests are
+  blocked;
+- broader multi-symbol expansion remains deferred;
+- the only mutation-capable R3 workflow is the fixed server-owned ETH -> BTC
+  BRC testnet rehearsal under the existing BRC profile and caps.

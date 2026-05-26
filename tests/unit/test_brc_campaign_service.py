@@ -33,6 +33,8 @@ class InMemoryBrcRepo:
         self.mock_pnl_events = []
         self.operator_actions = {}
         self.review_decisions = []
+        self.llm_intents = {}
+        self.workflow_runs = {}
 
     async def initialize(self) -> None:
         return None
@@ -119,6 +121,34 @@ class InMemoryBrcRepo:
             decisions = [decision for decision in decisions if decision.campaign_id == campaign_id]
         decisions.sort(key=lambda item: item.created_at_ms, reverse=True)
         return decisions[:limit]
+
+    async def save_llm_intent(self, intent):
+        self.llm_intents[intent.intent_id] = intent
+        return intent
+
+    async def get_llm_intent(self, intent_id: str):
+        return self.llm_intents.get(intent_id)
+
+    async def list_llm_intents(self, *, limit: int = 50, action: Optional[str] = None):
+        intents = list(self.llm_intents.values())
+        if action is not None:
+            intents = [intent for intent in intents if intent.action.value == action]
+        intents.sort(key=lambda item: item.created_at_ms, reverse=True)
+        return intents[:limit]
+
+    async def save_workflow_run(self, run):
+        self.workflow_runs[run.workflow_run_id] = run
+        return run
+
+    async def get_workflow_run(self, workflow_run_id: str):
+        return self.workflow_runs.get(workflow_run_id)
+
+    async def list_workflow_runs(self, *, limit: int = 50, status: Optional[str] = None):
+        runs = list(self.workflow_runs.values())
+        if status is not None:
+            runs = [run for run in runs if run.status.value == status]
+        runs.sort(key=lambda item: item.created_at_ms, reverse=True)
+        return runs[:limit]
 
 
 async def _campaign_service():

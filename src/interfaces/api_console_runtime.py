@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import logging
 from dataclasses import dataclass
@@ -7,7 +8,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from src.application.readmodels.console_models import (
     ConsoleAttemptsResponse,
@@ -39,8 +40,14 @@ from src.application.bounded_risk_campaign_service import (
     AttemptOpenRecord,
     BrcRuleViolation,
 )
+from src.application.brc_operator_workflow import (
+    BrcOperatorWorkflow,
+    TESTNET_REHEARSAL_CONFIRMATION,
+)
 from src.domain.bounded_risk_campaign import (
+    BrcLlmIntentAction,
     BrcReviewDecision,
+    BrcWorkflowStatus,
     CampaignOutcome,
     MockPnlSource,
     RiskChangeDirection,
@@ -232,6 +239,10 @@ def _get_brc_campaign_service(api_module):
     if service is None:
         raise HTTPException(status_code=503, detail="BRC campaign service not initialized")
     return service
+
+
+def _get_brc_operator_workflow(api_module) -> BrcOperatorWorkflow:
+    return BrcOperatorWorkflow(campaign_service=_get_brc_campaign_service(api_module))
 
 
 def _to_global_kill_switch_response(state) -> GlobalKillSwitchResponse:
@@ -505,6 +516,15 @@ class BrcReviewDecisionRequest(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class BrcLlmWorkflowCreateRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2048)
+
+
+class BrcLlmWorkflowConfirmRequest(BaseModel):
+    confirmation_phrase: str = Field(min_length=1, max_length=128)
+    confirmed_by: str = Field(default="owner", max_length=128)
+
+
 class BrcCampaignResponse(BaseModel):
     campaign: dict
     live_ready: Literal[False] = False
@@ -610,6 +630,22 @@ class BrcReviewDecisionResponse(BaseModel):
 
 class BrcReviewDecisionListResponse(BaseModel):
     review_decisions: list[dict]
+    live_ready: Literal[False] = False
+
+
+class BrcLlmWorkflowResponse(BaseModel):
+    workflow: dict
+    intent: Optional[dict] = None
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "BRC LLM workflow gateway only. LLM output is policy-validated and "
+        "cannot authorize real live, withdrawal, strategy execution, sizing, "
+        "leverage, or autonomous orders."
+    )
+
+
+class BrcLlmWorkflowListResponse(BaseModel):
+    workflows: list[dict]
     live_ready: Literal[False] = False
 
 
@@ -2550,6 +2586,297 @@ async def list_brc_review_decisions(
             review_decision.model_dump(mode="json")
             for review_decision in review_decisions
         ],
+    )
+
+
+async def _execute_brc_close_with_retry(symbol_key: str, request: Request) -> ControlledCloseResponse:
+    last_exc: Optional[HTTPException] = None
+    for _ in range(6):
+        try:
+            return await execute_brc_controlled_close(symbol_key, request)
+        except HTTPException as exc:
+            last_exc = exc
+            detail = str(exc.detail)
+            if (
+                exc.status_code in {409, 500}
+                and (
+                    "requires exactly one active local position" in detail
+                    or "Controlled close failed" in detail
+                )
+            ):
+                await asyncio.sleep(5)
+                continue
+            raise
+    if last_exc is not None:
+        raise last_exc
+    raise HTTPException(status_code=500, detail=f"BRC controlled close retry exhausted for {symbol_key}")
+
+
+async def _execute_brc_fixed_testnet_rehearsal(
+    *,
+    request: Request,
+    workflow_run_id: str,
+) -> dict[str, Any]:
+    """Run the fixed Owner-confirmed BRC ETH -> BTC testnet rehearsal."""
+    api_module, _ = _require_brc_mutation_gates(request)
+    gks_svc = _get_global_kill_switch_service(api_module)
+    guard_svc = _get_startup_trading_guard_service(api_module)
+    service = _get_brc_campaign_service(api_module)
+    result: dict[str, Any] = {
+        "workflow_run_id": workflow_run_id,
+        "confirmation_phrase_id": TESTNET_REHEARSAL_CONFIRMATION,
+        "steps": [],
+    }
+
+    async def _step(name: str, payload: dict[str, Any]) -> None:
+        result["steps"].append({"name": name, "payload": payload})
+
+    active_symbol: Optional[str] = None
+    try:
+        preflight = await get_brc_evidence(request)
+        if not preflight.inventory.all_flat:
+            raise BrcRuleViolation("BRC LLM rehearsal preflight requires ETH/BTC flat inventory")
+        await _step("preflight_flat", preflight.inventory.model_dump(mode="json"))
+
+        campaign = await create_brc_campaign(
+            request,
+            BrcCreateCampaignRequest(
+                bucket_id="BRC-R3-LLM-TESTNET-BUCKET",
+                authorized_amount=Decimal("500"),
+                max_campaign_loss=Decimal("120"),
+                profit_protect_trigger=Decimal("100"),
+                reason="BRC R3 LLM operator confirmed controlled testnet rehearsal",
+            ),
+        )
+        campaign_id = campaign.campaign["campaign_id"]
+        await _step("campaign_created", {"campaign_id": campaign_id})
+
+        switch = await switch_brc_playbook(
+            request,
+            BrcSwitchPlaybookRequest(
+                reason_text="Owner confirmed BRC R3 LLM operator controlled testnet rehearsal",
+                evidence_refs=["BRC-R3-LLM-operator-workflow"],
+            ),
+        )
+        await _step("playbook_switched", {"decision_result": switch.decision["decision_result"]})
+
+        await gks_svc.set_state(
+            active=False,
+            reason="BRC R3 LLM confirmed controlled testnet rehearsal",
+            updated_by="brc_llm_workflow",
+        )
+        guard_svc.manual_arm(
+            reason="BRC R3 LLM confirmed controlled testnet rehearsal",
+            updated_by="brc_llm_workflow",
+        )
+        await _step("entry_window_opened", {"gks_active": False, "startup_guard_armed": True})
+
+        eth_arm = await arm_brc_attempt("eth", request, BrcArmAttemptRequest(reason="BRC R3 ETH attempt"))
+        await _step("eth_armed", {"attempt_id": eth_arm.attempt["attempt_id"]})
+        eth_entry = await execute_brc_controlled_entry("eth", request)
+        active_symbol = "eth"
+        await _step("eth_entry", eth_entry.model_dump(mode="json"))
+        eth_close = await _execute_brc_close_with_retry("eth", request)
+        active_symbol = None
+        await _step("eth_close", eth_close.model_dump(mode="json"))
+
+        profit = await inject_brc_mock_pnl(
+            request,
+            BrcMockPnlRequest(
+                amount=Decimal("120"),
+                source=MockPnlSource.TESTNET_MOCK,
+                reason="BRC R3 mock profit branch",
+            ),
+        )
+        await _step("mock_profit", profit.event)
+
+        btc_arm = await arm_brc_attempt("btc", request, BrcArmAttemptRequest(reason="BRC R3 BTC attempt"))
+        await _step("btc_armed", {"attempt_id": btc_arm.attempt["attempt_id"]})
+        btc_entry = await execute_brc_controlled_entry("btc", request)
+        active_symbol = "btc"
+        await _step("btc_entry", btc_entry.model_dump(mode="json"))
+        btc_close = await _execute_brc_close_with_retry("btc", request)
+        active_symbol = None
+        await _step("btc_close", btc_close.model_dump(mode="json"))
+
+        loss = await inject_brc_mock_pnl(
+            request,
+            BrcMockPnlRequest(
+                amount=Decimal("-240"),
+                source=MockPnlSource.TESTNET_MOCK,
+                reason="BRC R3 mock loss-lock branch",
+            ),
+        )
+        await _step("mock_loss", loss.event)
+
+        try:
+            await service.arm_attempt(symbol=_CONTROLLED_SYMBOL, reason="blocked third attempt proof")
+        except BrcRuleViolation as exc:
+            await _step("third_attempt_blocked", {"blocked_reason": str(exc)})
+        else:
+            raise BrcRuleViolation("BRC R3 rehearsal expected third attempt to be blocked")
+
+        blocked_switch = await switch_brc_playbook(
+            request,
+            BrcSwitchPlaybookRequest(
+                new_playbook_id="PB-000-OBSERVE-ONLY",
+                reason_category="loss_response",
+                reason_text="BRC R3 loss-locked switch proof",
+                evidence_refs=["BRC-R3-LLM-operator-workflow"],
+                risk_change_direction=RiskChangeDirection.DECREASED_RISK,
+            ),
+        )
+        await _step(
+            "loss_locked_switch_recorded",
+            {
+                "decision_result": blocked_switch.decision["decision_result"],
+                "blocked_reason": blocked_switch.decision.get("blocked_reason"),
+            },
+        )
+
+        final = await finalize_brc_campaign(
+            request,
+            BrcFinalizeRequest(
+                outcome=CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED,
+                reason="BRC R3 LLM operator confirmed rehearsal complete",
+            ),
+        )
+        await _step("finalized", final.campaign)
+
+        review_decision = await service.record_review_decision(
+            campaign_id=campaign_id,
+            decision=BrcReviewDecision.TESTNET_REHEARSAL_AUTHORIZED,
+            reason_text="Owner confirmed BRC R3 LLM workflow controlled testnet rehearsal",
+            next_recommended_task="BRC-R3 review LLM workflow evidence",
+            metadata={"workflow_run_id": workflow_run_id},
+        )
+        await _step("review_decision", review_decision.model_dump(mode="json"))
+
+        evidence = await get_brc_review_packet(request)
+        result["campaign_id"] = campaign_id
+        result["final_inventory"] = evidence.inventory.model_dump(mode="json")
+        result["review_packet"] = evidence.review_packet
+        return result
+    finally:
+        if active_symbol is not None:
+            try:
+                await _execute_brc_close_with_retry(active_symbol, request)
+            except Exception as exc:
+                logger.error("BRC R3 cleanup close failed for %s: %s", active_symbol, exc, exc_info=True)
+        try:
+            await gks_svc.set_state(
+                active=True,
+                reason="BRC R3 LLM rehearsal restore safe state",
+                updated_by="brc_llm_workflow",
+            )
+            guard_svc.block(
+                reason="BRC R3 LLM rehearsal restore safe state",
+                updated_by="brc_llm_workflow",
+                source="manual_block",
+            )
+        except Exception as exc:
+            logger.error("BRC R3 safety restore failed: %s", exc, exc_info=True)
+
+
+@router.post("/test/brc/llm/workflows", response_model=BrcLlmWorkflowResponse)
+async def create_brc_llm_workflow(
+    request: Request,
+    body: BrcLlmWorkflowCreateRequest,
+) -> BrcLlmWorkflowResponse:
+    """Create a persisted LLM operator workflow from Owner text."""
+    api_module, _ = _require_brc_read_gates(request)
+    workflow = _get_brc_operator_workflow(api_module)
+    try:
+        run = await workflow.create_workflow(source_text=body.text)
+        intent = await workflow.get_intent(run.llm_intent_id) if run.llm_intent_id else None
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcLlmWorkflowResponse(
+        workflow=run.model_dump(mode="json"),
+        intent=intent.model_dump(mode="json") if intent is not None else None,
+    )
+
+
+@router.get("/test/brc/llm/workflows", response_model=BrcLlmWorkflowListResponse)
+async def list_brc_llm_workflows(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    status: Optional[BrcWorkflowStatus] = Query(default=None),
+) -> BrcLlmWorkflowListResponse:
+    """List BRC LLM operator workflow runs."""
+    api_module, _ = _require_brc_read_gates(request)
+    workflow = _get_brc_operator_workflow(api_module)
+    runs = await workflow.list_workflows(
+        limit=limit,
+        status=status.value if status is not None else None,
+    )
+    return BrcLlmWorkflowListResponse(
+        workflows=[run.model_dump(mode="json") for run in runs],
+    )
+
+
+@router.get("/test/brc/llm/workflows/{workflow_run_id}", response_model=BrcLlmWorkflowResponse)
+async def get_brc_llm_workflow(
+    workflow_run_id: str,
+    request: Request,
+) -> BrcLlmWorkflowResponse:
+    """Read one BRC LLM operator workflow and its normalized intent."""
+    api_module, _ = _require_brc_read_gates(request)
+    workflow = _get_brc_operator_workflow(api_module)
+    run = await workflow.get_workflow(workflow_run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="BRC LLM workflow not found")
+    intent = await workflow.get_intent(run.llm_intent_id) if run.llm_intent_id else None
+    return BrcLlmWorkflowResponse(
+        workflow=run.model_dump(mode="json"),
+        intent=intent.model_dump(mode="json") if intent is not None else None,
+    )
+
+
+@router.post(
+    "/test/brc/llm/workflows/{workflow_run_id}/confirm",
+    response_model=BrcLlmWorkflowResponse,
+)
+async def confirm_brc_llm_workflow(
+    workflow_run_id: str,
+    request: Request,
+    body: BrcLlmWorkflowConfirmRequest,
+) -> BrcLlmWorkflowResponse:
+    """Resume a paused BRC LLM workflow after explicit Owner confirmation."""
+    api_module, _ = _require_brc_read_gates(request)
+    workflow = _get_brc_operator_workflow(api_module)
+    existing = await workflow.get_workflow(workflow_run_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="BRC LLM workflow not found")
+    if existing.action == BrcLlmIntentAction.REQUEST_TESTNET_REHEARSAL:
+        api_module, _ = _require_brc_mutation_gates(request)
+        workflow = _get_brc_operator_workflow(api_module)
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+
+    async def _executor(run_id: str) -> dict[str, Any]:
+        return await _execute_brc_fixed_testnet_rehearsal(
+            request=request,
+            workflow_run_id=run_id,
+        )
+
+    try:
+        run = await workflow.confirm_workflow(
+            workflow_run_id=workflow_run_id,
+            confirmation_phrase=body.confirmation_phrase,
+            confirmed_by=body.confirmed_by,
+            final_inventory=inventory.model_dump(mode="json"),
+            testnet_rehearsal_executor=_executor,
+        )
+        intent = await workflow.get_intent(run.llm_intent_id) if run.llm_intent_id else None
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcLlmWorkflowResponse(
+        workflow=run.model_dump(mode="json"),
+        intent=intent.model_dump(mode="json") if intent is not None else None,
     )
 
 

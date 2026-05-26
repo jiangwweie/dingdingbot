@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.application.bounded_risk_campaign_service import BoundedRiskCampaignService
+from src.application import brc_operator_workflow
 from src.domain.bounded_risk_campaign import BrcAttemptStatus
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.domain.models import Direction, Order, OrderRole, OrderStatus, OrderType, SignalResult
@@ -30,6 +31,8 @@ class InMemoryBrcRepo:
         self.mock_pnl_events = []
         self.operator_actions = {}
         self.review_decisions = []
+        self.llm_intents = {}
+        self.workflow_runs = {}
 
     async def initialize(self) -> None:
         return None
@@ -117,6 +120,34 @@ class InMemoryBrcRepo:
         decisions.sort(key=lambda item: item.created_at_ms, reverse=True)
         return decisions[:limit]
 
+    async def save_llm_intent(self, intent):
+        self.llm_intents[intent.intent_id] = intent
+        return intent
+
+    async def get_llm_intent(self, intent_id: str):
+        return self.llm_intents.get(intent_id)
+
+    async def list_llm_intents(self, *, limit: int = 50, action: Optional[str] = None):
+        intents = list(self.llm_intents.values())
+        if action is not None:
+            intents = [intent for intent in intents if intent.action.value == action]
+        intents.sort(key=lambda item: item.created_at_ms, reverse=True)
+        return intents[:limit]
+
+    async def save_workflow_run(self, run):
+        self.workflow_runs[run.workflow_run_id] = run
+        return run
+
+    async def get_workflow_run(self, workflow_run_id: str):
+        return self.workflow_runs.get(workflow_run_id)
+
+    async def list_workflow_runs(self, *, limit: int = 50, status: Optional[str] = None):
+        runs = list(self.workflow_runs.values())
+        if status is not None:
+            runs = [run for run in runs if run.status.value == status]
+        runs.sort(key=lambda item: item.created_at_ms, reverse=True)
+        return runs[:limit]
+
 
 class MutablePositionRepo:
     def __init__(self) -> None:
@@ -132,6 +163,18 @@ class MutablePositionRepo:
 class EmptyOrderRepo:
     async def get_open_orders(self, symbol=None):
         return []
+
+
+class FakeReadOnlyLlmProvider:
+    provider_name = "fake_llm"
+    model_name = "fake-model"
+
+    async def classify(self, *, source_text: str):
+        return {
+            "action": "read_next_eligibility",
+            "confidence": "0.9",
+            "reason_text": "Owner asks for next campaign eligibility",
+        }
 
 
 class FakeCampaignStateService:
@@ -547,3 +590,84 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
         review_list = client.get(f"/api/runtime/test/brc/review-decisions?campaign_id={campaign_id}")
         assert review_list.status_code == 200
         assert len(review_list.json()["review_decisions"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_brc_llm_workflow_api_persists_blocked_when_provider_disabled(monkeypatch):
+    monkeypatch.delenv("BRC_LLM_ENABLED", raising=False)
+    service = await _brc_service()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(),
+        _brc_campaign_service=service,
+        _exchange_gateway=_gateway(),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+    )
+
+    with TestClient(_app()) as client:
+        created = client.post(
+            "/api/runtime/test/brc/llm/workflows",
+            json={"text": "帮我准备下一轮 testnet 演练"},
+        )
+        assert created.status_code == 200
+        workflow = created.json()["workflow"]
+        assert workflow["status"] == "blocked"
+        assert workflow["live_ready"] is False
+        assert created.json()["intent"]["decision_result"] == "blocked"
+        workflow_run_id = workflow["workflow_run_id"]
+
+        fetched = client.get(f"/api/runtime/test/brc/llm/workflows/{workflow_run_id}")
+        assert fetched.status_code == 200
+        assert fetched.json()["workflow"]["workflow_run_id"] == workflow_run_id
+
+        listed = client.get("/api/runtime/test/brc/llm/workflows?limit=10&status=blocked")
+        assert listed.status_code == 200
+        assert listed.json()["workflows"][0]["workflow_run_id"] == workflow_run_id
+
+        confirm = client.post(
+            f"/api/runtime/test/brc/llm/workflows/{workflow_run_id}/confirm",
+            json={"confirmation_phrase": "CONFIRM_BRC_TESTNET_REHEARSAL"},
+        )
+        assert confirm.status_code == 409
+        assert "already blocked" in confirm.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_brc_llm_workflow_api_confirms_read_only_without_mutation_gate(monkeypatch):
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(
+        brc_operator_workflow.OpenAICompatibleBrcLlmProvider,
+        "from_env",
+        classmethod(lambda cls: FakeReadOnlyLlmProvider()),
+    )
+    service = await _brc_service()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(),
+        _brc_campaign_service=service,
+        _exchange_gateway=_gateway(),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+    )
+
+    with TestClient(_app()) as client:
+        created = client.post(
+            "/api/runtime/test/brc/llm/workflows",
+            json={"text": "帮我看下一轮能不能开"},
+        )
+        assert created.status_code == 200
+        workflow_run_id = created.json()["workflow"]["workflow_run_id"]
+        assert created.json()["workflow"]["confirmation_phrase_id"] == "CONFIRM_READ_ONLY_BRC"
+
+        confirmed = client.post(
+            f"/api/runtime/test/brc/llm/workflows/{workflow_run_id}/confirm",
+            json={"confirmation_phrase": "CONFIRM_READ_ONLY_BRC"},
+        )
+
+        assert confirmed.status_code == 200
+        workflow = confirmed.json()["workflow"]
+        assert workflow["status"] == "completed"
+        assert workflow["mutation_executed"] is False
+        assert workflow["withdrawal_executed"] is False
+        assert workflow["live_ready"] is False

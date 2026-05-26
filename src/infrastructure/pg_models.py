@@ -662,6 +662,100 @@ class PGBrcReviewDecisionORM(PGCoreBase):
     )
 
 
+class PGBrcLlmIntentORM(PGCoreBase):
+    """Persisted normalized BRC LLM intent ledger."""
+
+    __tablename__ = "brc_llm_intents"
+
+    intent_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    workflow_run_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
+    reason_text: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_response_summary: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    decision_result: Mapped[str] = mapped_column(String(32), nullable=False)
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    live_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('read_review_packet', 'read_next_eligibility', 'read_evidence', "
+            "'request_testnet_rehearsal', 'unknown')",
+            name="ck_brc_llm_intents_action",
+        ),
+        CheckConstraint(
+            "decision_result IN ('planned', 'executed', 'blocked')",
+            name="ck_brc_llm_intents_decision_result",
+        ),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_brc_llm_intents_confidence"),
+        CheckConstraint("live_ready = false", name="ck_brc_llm_intents_no_live"),
+        Index("idx_brc_llm_intents_workflow", "workflow_run_id"),
+        Index("idx_brc_llm_intents_action_time", "action", "created_at_ms"),
+    )
+
+
+class PGBrcWorkflowRunORM(PGCoreBase):
+    """Persisted BRC LangGraph operator workflow run."""
+
+    __tablename__ = "brc_workflow_runs"
+
+    workflow_run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    llm_intent_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    confirmation_phrase_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    confirmation_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    confirmation_matched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result_json: Mapped[Optional[dict]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
+    result_summary_json: Mapped[Optional[dict]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
+    workflow_state_json: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    langgraph_checkpoint_ref: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    mutation_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    withdrawal_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    live_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    completed_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('read_review_packet', 'read_next_eligibility', 'read_evidence', "
+            "'request_testnet_rehearsal', 'unknown')",
+            name="ck_brc_workflow_runs_action",
+        ),
+        CheckConstraint(
+            "status IN ('awaiting_confirmation', 'running', 'completed', 'blocked', 'failed')",
+            name="ck_brc_workflow_runs_status",
+        ),
+        CheckConstraint("withdrawal_executed = false", name="ck_brc_workflow_runs_no_withdrawal"),
+        CheckConstraint("live_ready = false", name="ck_brc_workflow_runs_no_live"),
+        Index("idx_brc_workflow_runs_status_time", "status", "created_at_ms"),
+        Index("idx_brc_workflow_runs_action_time", "action", "created_at_ms"),
+    )
+
+
 class PGSignalORM(PGCoreBase):
     """PG 版 live signal 表。"""
 

@@ -82,6 +82,22 @@ class BrcReviewDecision(str, Enum):
     TESTNET_REHEARSAL_AUTHORIZED = "testnet_rehearsal_authorized"
 
 
+class BrcLlmIntentAction(str, Enum):
+    READ_REVIEW_PACKET = "read_review_packet"
+    READ_NEXT_ELIGIBILITY = "read_next_eligibility"
+    READ_EVIDENCE = "read_evidence"
+    REQUEST_TESTNET_REHEARSAL = "request_testnet_rehearsal"
+    UNKNOWN = "unknown"
+
+
+class BrcWorkflowStatus(str, Enum):
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+    FAILED = "failed"
+
+
 class PlaybookEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -316,6 +332,77 @@ class BrcReviewDecisionRecord(BaseModel):
             raise ValueError("BRC review decisions cannot authorize withdrawal")
         if self.strategy_execution_authorized:
             raise ValueError("BRC review decisions cannot authorize strategy execution")
+        return self
+
+
+class BrcLlmIntent(BaseModel):
+    intent_id: str
+    workflow_run_id: str
+    source_text: str = Field(min_length=1, max_length=2048)
+    action: BrcLlmIntentAction
+    confidence: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
+    reason_text: str = Field(min_length=1, max_length=2048)
+    provider_name: str = Field(min_length=1, max_length=128)
+    model_name: Optional[str] = Field(default=None, max_length=128)
+    prompt_version: str = Field(default="brc_llm_operator_v1", max_length=64)
+    raw_response_summary: dict[str, Any] = Field(default_factory=dict)
+    decision_result: BrcOperatorDecisionResult
+    blocked_reason: Optional[str] = None
+    created_at_ms: int
+    live_ready: bool = False
+
+    @model_validator(mode="after")
+    def _validate_llm_boundaries(self) -> "BrcLlmIntent":
+        forbidden = dict(self.raw_response_summary or {})
+        if any(
+            bool(forbidden.get(key))
+            for key in (
+                "live_ready",
+                "withdrawal_requested",
+                "transfer_requested",
+                "strategy_execution_requested",
+                "autonomous_order_requested",
+                "sizing_override_requested",
+                "leverage_override_requested",
+                "side_override_requested",
+            )
+        ):
+            raise ValueError("BRC LLM intent cannot carry unauthorized trading authority")
+        if self.live_ready:
+            raise ValueError("BRC LLM intent is never live-ready")
+        return self
+
+
+class BrcWorkflowRun(BaseModel):
+    workflow_run_id: str
+    llm_intent_id: Optional[str] = None
+    source_text: str = Field(min_length=1, max_length=2048)
+    action: BrcLlmIntentAction = BrcLlmIntentAction.UNKNOWN
+    status: BrcWorkflowStatus
+    confirmation_phrase_id: str
+    confirmation_required: bool = True
+    confirmation_matched: bool = False
+    confirmed_by: Optional[str] = None
+    blocked_reason: Optional[str] = None
+    result_json: Optional[dict[str, Any]] = None
+    result_summary_json: Optional[dict[str, Any]] = None
+    workflow_state_json: dict[str, Any] = Field(default_factory=dict)
+    langgraph_checkpoint_ref: Optional[str] = Field(default=None, max_length=256)
+    mutation_executed: bool = False
+    withdrawal_executed: bool = False
+    live_ready: bool = False
+    created_at_ms: int
+    updated_at_ms: int
+    completed_at_ms: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _validate_workflow_boundaries(self) -> "BrcWorkflowRun":
+        if self.withdrawal_executed:
+            raise ValueError("BRC workflow cannot execute withdrawals")
+        if self.live_ready:
+            raise ValueError("BRC workflow is never live-ready")
+        if self.mutation_executed and self.action != BrcLlmIntentAction.REQUEST_TESTNET_REHEARSAL:
+            raise ValueError("Only fixed BRC testnet rehearsal may record mutation execution")
         return self
 
 

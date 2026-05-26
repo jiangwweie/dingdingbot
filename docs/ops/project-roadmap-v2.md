@@ -228,6 +228,14 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   and the next recommended task only; they cannot create campaigns, trigger
   runtime/order actions, authorize real live, authorize withdrawal, or
   authorize strategy execution.
+- BRC-R3 adds a LangGraph-shaped LLM operator gateway for the BRC operation
+  governance layer. The LLM may classify Owner text into a small typed action
+  enum and the workflow may pause/resume around Owner confirmation, but BRC PG
+  tables remain the audit fact source. Read-only actions still require
+  `CONFIRM_READ_ONLY_BRC`; the fixed controlled testnet rehearsal requires
+  `CONFIRM_BRC_TESTNET_REHEARSAL`. This does not authorize live/mainnet,
+  withdrawal/transfer, strategy execution, automatic sizing/leverage/side
+  selection, or broader multi-symbol runtime expansion.
 
 The active research SSOT is:
 

@@ -65,6 +65,11 @@ def main() -> int:
         help="persisted BRC operator action id for run/get-action mode",
     )
     parser.add_argument(
+        "--workflow-run-id",
+        default=None,
+        help="persisted BRC LLM workflow id for llm-confirm/get-llm-workflow mode",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=50,
@@ -92,6 +97,10 @@ def main() -> int:
             "review-decision",
             "review-decisions",
             "latest-review-decision",
+            "llm-plan",
+            "llm-confirm",
+            "llm-workflows",
+            "get-llm-workflow",
         ),
         help="read-only BRC object to print",
     )
@@ -198,6 +207,49 @@ def main() -> int:
 
     if args.command == "latest-review-decision":
         payload = _get_json(args.base_url, "/api/runtime/test/brc/review-decisions/latest")
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "llm-plan":
+        text = " ".join(args.text).strip()
+        if not text:
+            parser.error("llm-plan mode requires operator text")
+        payload = _post_json(
+            args.base_url,
+            "/api/runtime/test/brc/llm/workflows",
+            {"text": text},
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "llm-confirm":
+        if not args.workflow_run_id:
+            parser.error("llm-confirm mode requires --workflow-run-id")
+        if not args.confirm:
+            parser.error("llm-confirm mode requires --confirm")
+        payload = _post_json(
+            args.base_url,
+            f"/api/runtime/test/brc/llm/workflows/{args.workflow_run_id}/confirm",
+            {"confirmation_phrase": args.confirm, "confirmed_by": "owner"},
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "llm-workflows":
+        payload = _get_json(
+            args.base_url,
+            f"/api/runtime/test/brc/llm/workflows?limit={args.limit}",
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "get-llm-workflow":
+        if not args.workflow_run_id:
+            parser.error("get-llm-workflow mode requires --workflow-run-id")
+        payload = _get_json(
+            args.base_url,
+            f"/api/runtime/test/brc/llm/workflows/{args.workflow_run_id}",
+        )
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 

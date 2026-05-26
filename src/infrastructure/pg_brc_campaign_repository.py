@@ -8,9 +8,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.domain.bounded_risk_campaign import (
+    BrcLlmIntent,
     BrcOperatorActionLedger,
     BrcCampaignStatus,
     BrcReviewDecisionRecord,
+    BrcWorkflowRun,
     BoundedRiskCampaign,
     MockPnlEvent,
     PlaybookSwitchDecision,
@@ -19,10 +21,12 @@ from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
 from src.infrastructure.pg_models import (
     PGBrcCampaignEventORM,
     PGBrcCampaignORM,
+    PGBrcLlmIntentORM,
     PGBrcMockPnlEventORM,
     PGBrcOperatorActionORM,
     PGBrcPlaybookSwitchDecisionORM,
     PGBrcReviewDecisionORM,
+    PGBrcWorkflowRunORM,
 )
 
 
@@ -316,6 +320,102 @@ class PgBrcCampaignRepository:
             result = await session.execute(stmt)
             return [self._to_review_decision(row) for row in result.scalars().all()]
 
+    async def save_llm_intent(self, intent: BrcLlmIntent) -> BrcLlmIntent:
+        async with self._session_maker() as session:
+            async with session.begin():
+                row = await session.get(PGBrcLlmIntentORM, intent.intent_id, with_for_update=True)
+                payload = intent.model_dump(mode="json")
+                if row is None:
+                    row = PGBrcLlmIntentORM(intent_id=intent.intent_id)
+                    session.add(row)
+                row.workflow_run_id = intent.workflow_run_id
+                row.source_text = intent.source_text
+                row.action = intent.action.value
+                row.confidence = intent.confidence
+                row.reason_text = intent.reason_text
+                row.provider_name = intent.provider_name
+                row.model_name = intent.model_name
+                row.prompt_version = intent.prompt_version
+                row.raw_response_summary = dict(payload["raw_response_summary"])
+                row.decision_result = intent.decision_result.value
+                row.blocked_reason = intent.blocked_reason
+                row.created_at_ms = intent.created_at_ms
+                row.live_ready = intent.live_ready
+                await session.flush()
+                return self._to_llm_intent(row)
+
+    async def get_llm_intent(self, intent_id: str) -> Optional[BrcLlmIntent]:
+        async with self._session_maker() as session:
+            row = await session.get(PGBrcLlmIntentORM, intent_id)
+            return self._to_llm_intent(row) if row is not None else None
+
+    async def list_llm_intents(
+        self,
+        *,
+        limit: int = 50,
+        action: Optional[str] = None,
+    ) -> list[BrcLlmIntent]:
+        async with self._session_maker() as session:
+            stmt = select(PGBrcLlmIntentORM)
+            if action is not None:
+                stmt = stmt.where(PGBrcLlmIntentORM.action == action)
+            stmt = stmt.order_by(PGBrcLlmIntentORM.created_at_ms.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return [self._to_llm_intent(row) for row in result.scalars().all()]
+
+    async def save_workflow_run(self, run: BrcWorkflowRun) -> BrcWorkflowRun:
+        async with self._session_maker() as session:
+            async with session.begin():
+                row = await session.get(PGBrcWorkflowRunORM, run.workflow_run_id, with_for_update=True)
+                payload = run.model_dump(mode="json")
+                if row is None:
+                    row = PGBrcWorkflowRunORM(workflow_run_id=run.workflow_run_id)
+                    session.add(row)
+                row.llm_intent_id = run.llm_intent_id
+                row.source_text = run.source_text
+                row.action = run.action.value
+                row.status = run.status.value
+                row.confirmation_phrase_id = run.confirmation_phrase_id
+                row.confirmation_required = run.confirmation_required
+                row.confirmation_matched = run.confirmation_matched
+                row.confirmed_by = run.confirmed_by
+                row.blocked_reason = run.blocked_reason
+                row.result_json = dict(payload["result_json"]) if payload.get("result_json") else None
+                row.result_summary_json = (
+                    dict(payload["result_summary_json"])
+                    if payload.get("result_summary_json")
+                    else None
+                )
+                row.workflow_state_json = dict(payload["workflow_state_json"])
+                row.langgraph_checkpoint_ref = run.langgraph_checkpoint_ref
+                row.mutation_executed = run.mutation_executed
+                row.withdrawal_executed = run.withdrawal_executed
+                row.live_ready = run.live_ready
+                row.created_at_ms = run.created_at_ms
+                row.updated_at_ms = run.updated_at_ms
+                row.completed_at_ms = run.completed_at_ms
+                await session.flush()
+                return self._to_workflow_run(row)
+
+    async def get_workflow_run(self, workflow_run_id: str) -> Optional[BrcWorkflowRun]:
+        async with self._session_maker() as session:
+            row = await session.get(PGBrcWorkflowRunORM, workflow_run_id)
+            return self._to_workflow_run(row) if row is not None else None
+
+    async def list_workflow_runs(
+        self,
+        *,
+        limit: int = 50,
+        status: Optional[str] = None,
+    ) -> list[BrcWorkflowRun]:
+        async with self._session_maker() as session:
+            stmt = select(PGBrcWorkflowRunORM)
+            if status is not None:
+                stmt = stmt.where(PGBrcWorkflowRunORM.status == status)
+            stmt = stmt.order_by(PGBrcWorkflowRunORM.created_at_ms.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return [self._to_workflow_run(row) for row in result.scalars().all()]
+
     @staticmethod
     async def _next_sequence_number(
         *,
@@ -448,5 +548,57 @@ class PgBrcCampaignRepository:
                 "created_by": row.created_by,
                 "created_at_ms": row.created_at_ms,
                 "metadata_json": dict(row.metadata_json or {}),
+            }
+        )
+
+    @staticmethod
+    def _to_llm_intent(row: PGBrcLlmIntentORM) -> BrcLlmIntent:
+        return BrcLlmIntent.model_validate(
+            {
+                "intent_id": row.intent_id,
+                "workflow_run_id": row.workflow_run_id,
+                "source_text": row.source_text,
+                "action": row.action,
+                "confidence": row.confidence,
+                "reason_text": row.reason_text,
+                "provider_name": row.provider_name,
+                "model_name": row.model_name,
+                "prompt_version": row.prompt_version,
+                "raw_response_summary": dict(row.raw_response_summary or {}),
+                "decision_result": row.decision_result,
+                "blocked_reason": row.blocked_reason,
+                "created_at_ms": row.created_at_ms,
+                "live_ready": row.live_ready,
+            }
+        )
+
+    @staticmethod
+    def _to_workflow_run(row: PGBrcWorkflowRunORM) -> BrcWorkflowRun:
+        return BrcWorkflowRun.model_validate(
+            {
+                "workflow_run_id": row.workflow_run_id,
+                "llm_intent_id": row.llm_intent_id,
+                "source_text": row.source_text,
+                "action": row.action,
+                "status": row.status,
+                "confirmation_phrase_id": row.confirmation_phrase_id,
+                "confirmation_required": row.confirmation_required,
+                "confirmation_matched": row.confirmation_matched,
+                "confirmed_by": row.confirmed_by,
+                "blocked_reason": row.blocked_reason,
+                "result_json": dict(row.result_json) if row.result_json is not None else None,
+                "result_summary_json": (
+                    dict(row.result_summary_json)
+                    if row.result_summary_json is not None
+                    else None
+                ),
+                "workflow_state_json": dict(row.workflow_state_json or {}),
+                "langgraph_checkpoint_ref": row.langgraph_checkpoint_ref,
+                "mutation_executed": row.mutation_executed,
+                "withdrawal_executed": row.withdrawal_executed,
+                "live_ready": row.live_ready,
+                "created_at_ms": row.created_at_ms,
+                "updated_at_ms": row.updated_at_ms,
+                "completed_at_ms": row.completed_at_ms,
             }
         )

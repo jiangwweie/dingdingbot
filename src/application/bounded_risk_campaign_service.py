@@ -13,6 +13,7 @@ from src.domain.bounded_risk_campaign import (
     BrcCampaignStatus,
     BrcDecisionResult,
     BrcInvariantCheck,
+    BrcLlmIntent,
     BrcNextCampaignEligibility,
     BrcNextEligibilityDecision,
     BrcOperatorAction,
@@ -25,6 +26,7 @@ from src.domain.bounded_risk_campaign import (
     BrcReviewPacket,
     BrcReviewDecision,
     BrcReviewDecisionRecord,
+    BrcWorkflowRun,
     BoundedRiskCampaign,
     CampaignAttempt,
     CampaignOutcome,
@@ -118,6 +120,34 @@ class BrcCampaignRepositoryPort(Protocol):
         campaign_id: Optional[str] = None,
         limit: int = 50,
     ) -> list[BrcReviewDecisionRecord]:
+        ...
+
+    async def save_llm_intent(self, intent: BrcLlmIntent) -> BrcLlmIntent:
+        ...
+
+    async def get_llm_intent(self, intent_id: str) -> Optional[BrcLlmIntent]:
+        ...
+
+    async def list_llm_intents(
+        self,
+        *,
+        limit: int = 50,
+        action: Optional[str] = None,
+    ) -> list[BrcLlmIntent]:
+        ...
+
+    async def save_workflow_run(self, run: BrcWorkflowRun) -> BrcWorkflowRun:
+        ...
+
+    async def get_workflow_run(self, workflow_run_id: str) -> Optional[BrcWorkflowRun]:
+        ...
+
+    async def list_workflow_runs(
+        self,
+        *,
+        limit: int = 50,
+        status: Optional[str] = None,
+    ) -> list[BrcWorkflowRun]:
         ...
 
 
@@ -724,6 +754,34 @@ class BoundedRiskCampaignService:
         limit: int = 50,
     ) -> list[BrcReviewDecisionRecord]:
         return await self._repo.list_review_decisions(campaign_id=campaign_id, limit=limit)
+
+    async def save_llm_intent(self, intent: BrcLlmIntent) -> BrcLlmIntent:
+        return await self._repo.save_llm_intent(intent)
+
+    async def get_llm_intent(self, intent_id: str) -> Optional[BrcLlmIntent]:
+        return await self._repo.get_llm_intent(intent_id)
+
+    async def list_llm_intents(
+        self,
+        *,
+        limit: int = 50,
+        action: Optional[str] = None,
+    ) -> list[BrcLlmIntent]:
+        return await self._repo.list_llm_intents(limit=limit, action=action)
+
+    async def save_workflow_run(self, run: BrcWorkflowRun) -> BrcWorkflowRun:
+        return await self._repo.save_workflow_run(run)
+
+    async def get_workflow_run(self, workflow_run_id: str) -> Optional[BrcWorkflowRun]:
+        return await self._repo.get_workflow_run(workflow_run_id)
+
+    async def list_workflow_runs(
+        self,
+        *,
+        limit: int = 50,
+        status: Optional[str] = None,
+    ) -> list[BrcWorkflowRun]:
+        return await self._repo.list_workflow_runs(limit=limit, status=status)
 
     async def run_operator_read_action(
         self,

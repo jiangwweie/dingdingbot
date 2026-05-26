@@ -80,6 +80,7 @@ The first implemented acceptance path is:
 - No stable-alpha claim.
 - No simultaneous BTC/ETH exposure.
 - No Strategy Contract promotion from this rehearsal alone.
+- No LLM or workflow checkpoint state may become the audit fact source.
 
 ## Implementation Notes
 
@@ -89,3 +90,12 @@ The first implemented acceptance path is:
 - Max attempts: `2`.
 - Runtime campaign state remains the single-exposure gate; BRC is the outer
   campaign envelope and does not reset after symbol changes.
+- BRC-R3 may use a LangGraph-shaped workflow for Owner text classification,
+  policy validation, confirmation pause/resume, and result persistence. It may
+  normalize Owner text into one of the allowed BRC operator actions, but it may
+  not make trading decisions, generate executable order parameters, replace
+  Owner confirmation, or store secrets.
+- OpenAI-compatible LLM configuration is environment-only:
+  `BRC_LLM_ENABLED`, `BRC_LLM_BASE_URL`, `BRC_LLM_API_KEY`,
+  `BRC_LLM_MODEL`, and `BRC_LLM_TIMEOUT_SECONDS`. Secrets must not be
+  persisted in BRC tables, result packets, or logs.
