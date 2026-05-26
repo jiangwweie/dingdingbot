@@ -218,6 +218,11 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   confirmed read-only run. The confirmation phrase is scoped to read-only BRC
   review actions and does not authorize testnet orders, real live,
   withdrawals/transfers, automatic sizing, or strategy execution.
+- BRC-R2-003 makes the operator action ledger database-backed:
+  `/operator/plan` persists an action row, canonical run uses `action_id`, and
+  confirmation failures/unknown text are retained as blocked ledger rows. This
+  keeps the operation-governance layer auditable without expanding execution
+  authority.
 
 The active research SSOT is:
 

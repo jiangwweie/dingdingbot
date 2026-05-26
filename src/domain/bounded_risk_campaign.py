@@ -69,6 +69,12 @@ class BrcOperatorAction(str, Enum):
     UNKNOWN = "unknown"
 
 
+class BrcOperatorDecisionResult(str, Enum):
+    PLANNED = "planned"
+    EXECUTED = "executed"
+    BLOCKED = "blocked"
+
+
 class PlaybookEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -241,6 +247,41 @@ class BrcOperatorRunResult(BaseModel):
     mutation_executed: bool = False
     withdrawal_executed: bool = False
     live_ready: bool = False
+
+
+class BrcOperatorActionLedger(BaseModel):
+    action_id: str
+    campaign_id: Optional[str] = None
+    plan_id: str
+    source_text: str = Field(min_length=1, max_length=2048)
+    draft_action: BrcOperatorAction
+    http_method: str
+    endpoint_path: Optional[str] = None
+    executable: bool
+    confirmation_phrase_id: str = "CONFIRM_READ_ONLY_BRC"
+    confirmation_required: bool = True
+    confirmation_matched: bool = False
+    confirmed_by: Optional[str] = None
+    decision_result: BrcOperatorDecisionResult
+    blocked_reason: Optional[str] = None
+    plan_json: dict[str, Any]
+    result_json: Optional[dict[str, Any]] = None
+    result_summary_json: Optional[dict[str, Any]] = None
+    mutation_executed: bool = False
+    withdrawal_executed: bool = False
+    live_ready: bool = False
+    created_at_ms: int
+    executed_at_ms: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _validate_no_unauthorized_side_effects(self) -> "BrcOperatorActionLedger":
+        if self.mutation_executed:
+            raise ValueError("BRC operator action cannot execute mutations")
+        if self.withdrawal_executed:
+            raise ValueError("BRC operator action cannot execute withdrawals")
+        if self.live_ready:
+            raise ValueError("BRC operator action is never live-ready")
+        return self
 
 
 class BoundedRiskCampaign(BaseModel):

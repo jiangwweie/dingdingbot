@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.domain.bounded_risk_campaign import (
+    BrcOperatorActionLedger,
     BrcCampaignStatus,
     BoundedRiskCampaign,
     MockPnlEvent,
@@ -18,6 +19,7 @@ from src.infrastructure.pg_models import (
     PGBrcCampaignEventORM,
     PGBrcCampaignORM,
     PGBrcMockPnlEventORM,
+    PGBrcOperatorActionORM,
     PGBrcPlaybookSwitchDecisionORM,
 )
 
@@ -204,6 +206,64 @@ class PgBrcCampaignRepository:
             result = await session.execute(stmt)
             return [self._to_mock_pnl_event(row) for row in result.scalars().all()]
 
+    async def save_operator_action(
+        self,
+        action: BrcOperatorActionLedger,
+    ) -> BrcOperatorActionLedger:
+        async with self._session_maker() as session:
+            async with session.begin():
+                row = await session.get(PGBrcOperatorActionORM, action.action_id, with_for_update=True)
+                payload = action.model_dump(mode="json")
+                if row is None:
+                    row = PGBrcOperatorActionORM(action_id=action.action_id)
+                    session.add(row)
+                row.campaign_id = action.campaign_id
+                row.plan_id = action.plan_id
+                row.source_text = action.source_text
+                row.draft_action = action.draft_action.value
+                row.http_method = action.http_method
+                row.endpoint_path = action.endpoint_path
+                row.executable = action.executable
+                row.confirmation_phrase_id = action.confirmation_phrase_id
+                row.confirmation_required = action.confirmation_required
+                row.confirmation_matched = action.confirmation_matched
+                row.confirmed_by = action.confirmed_by
+                row.decision_result = action.decision_result.value
+                row.blocked_reason = action.blocked_reason
+                row.plan_json = dict(payload["plan_json"])
+                row.result_json = dict(payload["result_json"]) if payload.get("result_json") else None
+                row.result_summary_json = (
+                    dict(payload["result_summary_json"])
+                    if payload.get("result_summary_json")
+                    else None
+                )
+                row.mutation_executed = action.mutation_executed
+                row.withdrawal_executed = action.withdrawal_executed
+                row.live_ready = action.live_ready
+                row.created_at_ms = action.created_at_ms
+                row.executed_at_ms = action.executed_at_ms
+                await session.flush()
+                return self._to_operator_action(row)
+
+    async def get_operator_action(self, action_id: str) -> Optional[BrcOperatorActionLedger]:
+        async with self._session_maker() as session:
+            row = await session.get(PGBrcOperatorActionORM, action_id)
+            return self._to_operator_action(row) if row is not None else None
+
+    async def list_operator_actions(
+        self,
+        *,
+        campaign_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[BrcOperatorActionLedger]:
+        async with self._session_maker() as session:
+            stmt = select(PGBrcOperatorActionORM)
+            if campaign_id is not None:
+                stmt = stmt.where(PGBrcOperatorActionORM.campaign_id == campaign_id)
+            stmt = stmt.order_by(PGBrcOperatorActionORM.created_at_ms.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return [self._to_operator_action(row) for row in result.scalars().all()]
+
     @staticmethod
     async def _next_sequence_number(
         *,
@@ -283,5 +343,38 @@ class PgBrcCampaignRepository:
                 "reason": row.reason,
                 "occurred_at_ms": row.occurred_at_ms,
                 "triggered_state": row.triggered_state,
+            }
+        )
+
+    @staticmethod
+    def _to_operator_action(row: PGBrcOperatorActionORM) -> BrcOperatorActionLedger:
+        return BrcOperatorActionLedger.model_validate(
+            {
+                "action_id": row.action_id,
+                "campaign_id": row.campaign_id,
+                "plan_id": row.plan_id,
+                "source_text": row.source_text,
+                "draft_action": row.draft_action,
+                "http_method": row.http_method,
+                "endpoint_path": row.endpoint_path,
+                "executable": row.executable,
+                "confirmation_phrase_id": row.confirmation_phrase_id,
+                "confirmation_required": row.confirmation_required,
+                "confirmation_matched": row.confirmation_matched,
+                "confirmed_by": row.confirmed_by,
+                "decision_result": row.decision_result,
+                "blocked_reason": row.blocked_reason,
+                "plan_json": dict(row.plan_json or {}),
+                "result_json": dict(row.result_json) if row.result_json is not None else None,
+                "result_summary_json": (
+                    dict(row.result_summary_json)
+                    if row.result_summary_json is not None
+                    else None
+                ),
+                "mutation_executed": row.mutation_executed,
+                "withdrawal_executed": row.withdrawal_executed,
+                "live_ready": row.live_ready,
+                "created_at_ms": row.created_at_ms,
+                "executed_at_ms": row.executed_at_ms,
             }
         )

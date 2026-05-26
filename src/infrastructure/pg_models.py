@@ -570,6 +570,57 @@ class PGBrcMockPnlEventORM(PGCoreBase):
     )
 
 
+class PGBrcOperatorActionORM(PGCoreBase):
+    """Persisted BRC operator plan/run ledger."""
+
+    __tablename__ = "brc_operator_actions"
+
+    action_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    campaign_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    plan_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    draft_action: Mapped[str] = mapped_column(String(64), nullable=False)
+    http_method: Mapped[str] = mapped_column(String(16), nullable=False)
+    endpoint_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    executable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confirmation_phrase_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    confirmation_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    confirmation_matched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    decision_result: Mapped[str] = mapped_column(String(32), nullable=False)
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    plan_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False)
+    result_json: Mapped[Optional[dict]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
+    result_summary_json: Mapped[Optional[dict]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
+    mutation_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    withdrawal_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    live_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    executed_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "draft_action IN ('read_review_packet', 'read_next_eligibility', 'read_evidence', 'unknown')",
+            name="ck_brc_operator_actions_draft_action",
+        ),
+        CheckConstraint(
+            "decision_result IN ('planned', 'executed', 'blocked')",
+            name="ck_brc_operator_actions_decision_result",
+        ),
+        CheckConstraint("mutation_executed = false", name="ck_brc_operator_actions_no_mutation"),
+        CheckConstraint("withdrawal_executed = false", name="ck_brc_operator_actions_no_withdrawal"),
+        CheckConstraint("live_ready = false", name="ck_brc_operator_actions_no_live"),
+        Index("idx_brc_operator_actions_campaign_time", "campaign_id", "created_at_ms"),
+        Index("idx_brc_operator_actions_decision_time", "decision_result", "created_at_ms"),
+    )
+
+
 class PGSignalORM(PGCoreBase):
     """PG 版 live signal 表。"""
 

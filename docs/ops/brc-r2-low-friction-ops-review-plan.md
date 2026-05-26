@@ -148,3 +148,24 @@ Hard boundaries:
 - unknown text is blocked;
 - mutation-intended plans are blocked;
 - result payloads carry `mutation_executed=false`, `withdrawal_executed=false`, and `live_ready=false`.
+
+## BRC-R2-003 Extension
+
+`BRC-R2-003` makes the operator action ledger the database fact source.
+
+The canonical flow becomes:
+
+```text
+Owner text -> persisted action plan -> action_id -> confirmed read-only run -> persisted result
+```
+
+The ledger table is `brc_operator_actions`.
+
+Rules:
+
+- `/operator/plan` persists a ledger row and returns `action_id`;
+- canonical run uses `/operator/actions/{action_id}/run`;
+- text one-shot `/operator/run` is compatibility-only and internally creates a ledger row;
+- confirmation failure is persisted as `blocked`;
+- unknown text is persisted as `blocked`;
+- executed rows must keep `mutation_executed=false`, `withdrawal_executed=false`, and `live_ready=false`.

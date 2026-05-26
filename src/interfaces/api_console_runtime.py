@@ -489,6 +489,11 @@ class BrcOperatorRunRequest(BaseModel):
     confirmation_phrase: str = Field(min_length=1, max_length=128)
 
 
+class BrcOperatorActionRunRequest(BaseModel):
+    confirmation_phrase: str = Field(min_length=1, max_length=128)
+    confirmed_by: str = Field(default="owner", max_length=128)
+
+
 class BrcCampaignResponse(BaseModel):
     campaign: dict
     live_ready: Literal[False] = False
@@ -554,6 +559,7 @@ class BrcOperatorIntentDraftResponse(BaseModel):
 
 class BrcOperatorPlanResponse(BaseModel):
     plan: dict
+    action: dict
     live_ready: Literal[False] = False
     access_boundary: str = (
         "Read-only BRC operator plan. A run requires the explicit read-only "
@@ -563,12 +569,23 @@ class BrcOperatorPlanResponse(BaseModel):
 
 class BrcOperatorRunResponse(BaseModel):
     run: dict
+    action: Optional[dict] = None
     inventory: Phase5EInventoryResponse
     live_ready: Literal[False] = False
     access_boundary: str = (
         "Read-only BRC operator run. No order, close, resize, transfer, "
         "withdrawal, mainnet, or real-live action is executed."
     )
+
+
+class BrcOperatorActionResponse(BaseModel):
+    action: dict
+    live_ready: Literal[False] = False
+
+
+class BrcOperatorActionListResponse(BaseModel):
+    actions: list[dict]
+    live_ready: Literal[False] = False
 
 
 def _get_account_snapshot(api_module):
@@ -2352,10 +2369,76 @@ async def plan_brc_operator_action(
     api_module, _ = _require_brc_read_gates(request)
     service = _get_brc_campaign_service(api_module)
     try:
-        plan = service.build_operator_execution_plan(source_text=body.text)
+        action = await service.create_operator_action_plan(source_text=body.text)
     except BrcRuleViolation as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return BrcOperatorPlanResponse(plan=plan.model_dump(mode="json"))
+    return BrcOperatorPlanResponse(
+        plan=action.plan_json,
+        action=action.model_dump(mode="json"),
+    )
+
+
+@router.get("/test/brc/operator/actions", response_model=BrcOperatorActionListResponse)
+async def list_brc_operator_actions(
+    request: Request,
+    campaign_id: Optional[str] = Query(default=None, max_length=128),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> BrcOperatorActionListResponse:
+    """List persisted BRC operator action ledger rows."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    actions = await service.list_operator_actions(campaign_id=campaign_id, limit=limit)
+    return BrcOperatorActionListResponse(
+        actions=[action.model_dump(mode="json") for action in actions],
+    )
+
+
+@router.get("/test/brc/operator/actions/{action_id}", response_model=BrcOperatorActionResponse)
+async def get_brc_operator_action(
+    action_id: str,
+    request: Request,
+) -> BrcOperatorActionResponse:
+    """Read one BRC operator action ledger row."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    action = await service.get_operator_action(action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="BRC operator action not found")
+    return BrcOperatorActionResponse(action=action.model_dump(mode="json"))
+
+
+@router.post(
+    "/test/brc/operator/actions/{action_id}/run",
+    response_model=BrcOperatorRunResponse,
+)
+async def run_brc_operator_action_by_id(
+    action_id: str,
+    request: Request,
+    body: BrcOperatorActionRunRequest,
+) -> BrcOperatorRunResponse:
+    """Run a confirmed persisted BRC read-only operator action."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+    try:
+        run = await service.run_operator_action_by_id(
+            action_id=action_id,
+            confirmation_phrase=body.confirmation_phrase,
+            confirmed_by=body.confirmed_by,
+            final_inventory=inventory.model_dump(mode="json"),
+        )
+        action = await service.get_operator_action(action_id)
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcOperatorRunResponse(
+        run=run.model_dump(mode="json"),
+        action=action.model_dump(mode="json") if action is not None else None,
+        inventory=inventory,
+    )
 
 
 @router.post("/test/brc/operator/run", response_model=BrcOperatorRunResponse)
@@ -2377,10 +2460,13 @@ async def run_brc_operator_action(
             confirmation_phrase=body.confirmation_phrase,
             final_inventory=inventory.model_dump(mode="json"),
         )
+        actions = await service.list_operator_actions(limit=1)
+        action = actions[0] if actions else None
     except BrcRuleViolation as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return BrcOperatorRunResponse(
         run=run.model_dump(mode="json"),
+        action=action.model_dump(mode="json") if action is not None else None,
         inventory=inventory,
     )
 

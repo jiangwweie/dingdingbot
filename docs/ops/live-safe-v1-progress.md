@@ -251,6 +251,20 @@ Use this file for session progress and handoff notes.
   authority, automatic sizing, strategy implementation, or natural-language
   auto-execution is introduced.
 
+## 2026-05-26 (BRC-R2-003 Operator Action Ledger Persistence)
+
+- Added the operator action ledger as the database fact source for
+  `Owner text -> persisted plan -> action_id -> confirmed read-only run`.
+- `/operator/plan` persists a ledger row and returns `action_id`; canonical
+  run uses `/operator/actions/{action_id}/run`; compatibility `/operator/run`
+  creates a ledger row internally.
+- Confirmation failures and unknown text are persisted as `blocked`; executed
+  rows preserve `mutation_executed=false`, `withdrawal_executed=false`, and
+  `live_ready=false`.
+- No new order path, withdrawal/transfer endpoint, real-live authority,
+  automatic sizing, strategy implementation, or natural-language
+  auto-execution is introduced.
+
 ## 2026-05-25 (TC-TINY-001D-1 Authorization Package)
 
 - Prepared ADR-0009 action request for one controlled Binance testnet

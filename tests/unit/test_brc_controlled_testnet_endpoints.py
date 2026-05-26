@@ -28,6 +28,7 @@ class InMemoryBrcRepo:
         self.switches = []
         self.events = []
         self.mock_pnl_events = []
+        self.operator_actions = {}
 
     async def initialize(self) -> None:
         return None
@@ -84,6 +85,20 @@ class InMemoryBrcRepo:
 
     async def list_mock_pnl_events(self, campaign_id: str):
         return [item for item in self.mock_pnl_events if item.campaign_id == campaign_id]
+
+    async def save_operator_action(self, action):
+        self.operator_actions[action.action_id] = action
+        return action
+
+    async def get_operator_action(self, action_id: str):
+        return self.operator_actions.get(action_id)
+
+    async def list_operator_actions(self, *, campaign_id: Optional[str] = None, limit: int = 50):
+        actions = list(self.operator_actions.values())
+        if campaign_id is not None:
+            actions = [action for action in actions if action.campaign_id == campaign_id]
+        actions.sort(key=lambda action: action.created_at_ms, reverse=True)
+        return actions[:limit]
 
 
 class MutablePositionRepo:
@@ -458,22 +473,34 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
         assert plan.status_code == 200
         assert plan.json()["plan"]["executable"] is True
         assert plan.json()["plan"]["steps"][0]["mutation_intended"] is False
+        action_id = plan.json()["action"]["action_id"]
 
         blocked_run = client.post(
-            "/api/runtime/test/brc/operator/run",
-            json={"text": "帮我看下一轮能不能开", "confirmation_phrase": "WRONG"},
+            f"/api/runtime/test/brc/operator/actions/{action_id}/run",
+            json={"confirmation_phrase": "WRONG"},
         )
         assert blocked_run.status_code == 409
         assert "confirmation phrase mismatch" in blocked_run.json()["detail"]
 
+        blocked_row = client.get(f"/api/runtime/test/brc/operator/actions/{action_id}")
+        assert blocked_row.status_code == 200
+        assert blocked_row.json()["action"]["decision_result"] == "blocked"
+
+        retry_plan = client.post(
+            "/api/runtime/test/brc/operator/plan",
+            json={"text": "帮我看下一轮能不能开"},
+        )
+        retry_action_id = retry_plan.json()["action"]["action_id"]
         run = client.post(
-            "/api/runtime/test/brc/operator/run",
-            json={
-                "text": "帮我看下一轮能不能开",
-                "confirmation_phrase": "CONFIRM_READ_ONLY_BRC",
-            },
+            f"/api/runtime/test/brc/operator/actions/{retry_action_id}/run",
+            json={"confirmation_phrase": "CONFIRM_READ_ONLY_BRC"},
         )
         assert run.status_code == 200
         assert run.json()["run"]["action"] == "read_next_eligibility"
         assert run.json()["run"]["mutation_executed"] is False
         assert run.json()["run"]["withdrawal_executed"] is False
+        assert run.json()["action"]["decision_result"] == "executed"
+
+        actions = client.get("/api/runtime/test/brc/operator/actions?limit=10")
+        assert actions.status_code == 200
+        assert len(actions.json()["actions"]) >= 2

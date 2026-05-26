@@ -60,8 +60,19 @@ def main() -> int:
         help="confirmation phrase required for run mode",
     )
     parser.add_argument(
+        "--action-id",
+        default=None,
+        help="persisted BRC operator action id for run/get-action mode",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="list limit for actions mode",
+    )
+    parser.add_argument(
         "command",
-        choices=("review", "eligibility", "evidence", "draft", "plan", "run"),
+        choices=("review", "eligibility", "evidence", "draft", "plan", "run", "actions", "get-action"),
         help="read-only BRC object to print",
     )
     parser.add_argument(
@@ -96,15 +107,40 @@ def main() -> int:
         return 0
 
     if args.command == "run":
-        text = " ".join(args.text).strip()
-        if not text:
-            parser.error("run mode requires operator text")
         if not args.confirm:
             parser.error("run mode requires --confirm CONFIRM_READ_ONLY_BRC")
-        payload = _post_json(
+        if args.action_id:
+            payload = _post_json(
+                args.base_url,
+                f"/api/runtime/test/brc/operator/actions/{args.action_id}/run",
+                {"confirmation_phrase": args.confirm, "confirmed_by": "owner"},
+            )
+        else:
+            text = " ".join(args.text).strip()
+            if not text:
+                parser.error("run mode requires operator text or --action-id")
+            payload = _post_json(
+                args.base_url,
+                "/api/runtime/test/brc/operator/run",
+                {"text": text, "confirmation_phrase": args.confirm},
+            )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "actions":
+        payload = _get_json(
             args.base_url,
-            "/api/runtime/test/brc/operator/run",
-            {"text": text, "confirmation_phrase": args.confirm},
+            f"/api/runtime/test/brc/operator/actions?limit={args.limit}",
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "get-action":
+        if not args.action_id:
+            parser.error("get-action mode requires --action-id")
+        payload = _get_json(
+            args.base_url,
+            f"/api/runtime/test/brc/operator/actions/{args.action_id}",
         )
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0

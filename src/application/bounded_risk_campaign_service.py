@@ -16,6 +16,8 @@ from src.domain.bounded_risk_campaign import (
     BrcNextCampaignEligibility,
     BrcNextEligibilityDecision,
     BrcOperatorAction,
+    BrcOperatorActionLedger,
+    BrcOperatorDecisionResult,
     BrcOperatorExecutionPlan,
     BrcOperatorIntentDraft,
     BrcOperatorPlanStep,
@@ -80,6 +82,23 @@ class BrcCampaignRepositoryPort(Protocol):
         ...
 
     async def list_mock_pnl_events(self, campaign_id: str) -> list[MockPnlEvent]:
+        ...
+
+    async def save_operator_action(
+        self,
+        action: BrcOperatorActionLedger,
+    ) -> BrcOperatorActionLedger:
+        ...
+
+    async def get_operator_action(self, action_id: str) -> Optional[BrcOperatorActionLedger]:
+        ...
+
+    async def list_operator_actions(
+        self,
+        *,
+        campaign_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[BrcOperatorActionLedger]:
         ...
 
 
@@ -601,6 +620,49 @@ class BoundedRiskCampaignService:
             confirmation_phrase=self.READ_ONLY_CONFIRMATION_PHRASE,
         )
 
+    async def create_operator_action_plan(
+        self,
+        *,
+        source_text: str,
+    ) -> BrcOperatorActionLedger:
+        plan = self.build_operator_execution_plan(source_text=source_text)
+        campaign = await self.get_latest_campaign()
+        now = _now_ms()
+        action = BrcOperatorActionLedger(
+            action_id=f"brc-op-{uuid.uuid4().hex[:12]}",
+            campaign_id=campaign.campaign_id if campaign is not None else None,
+            plan_id=plan.plan_id,
+            source_text=source_text,
+            draft_action=plan.draft.action,
+            http_method=plan.steps[0].http_method if plan.steps else plan.draft.http_method,
+            endpoint_path=plan.steps[0].endpoint_path if plan.steps else plan.draft.endpoint_path,
+            executable=plan.executable,
+            confirmation_phrase_id=self.READ_ONLY_CONFIRMATION_PHRASE,
+            confirmation_required=True,
+            confirmation_matched=False,
+            confirmed_by=None,
+            decision_result=(
+                BrcOperatorDecisionResult.PLANNED
+                if plan.executable
+                else BrcOperatorDecisionResult.BLOCKED
+            ),
+            blocked_reason=plan.blocked_reason,
+            plan_json=plan.model_dump(mode="json"),
+            created_at_ms=now,
+        )
+        return await self._repo.save_operator_action(action)
+
+    async def get_operator_action(self, action_id: str) -> Optional[BrcOperatorActionLedger]:
+        return await self._repo.get_operator_action(action_id)
+
+    async def list_operator_actions(
+        self,
+        *,
+        campaign_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[BrcOperatorActionLedger]:
+        return await self._repo.list_operator_actions(campaign_id=campaign_id, limit=limit)
+
     async def run_operator_read_action(
         self,
         *,
@@ -608,10 +670,48 @@ class BoundedRiskCampaignService:
         confirmation_phrase: str,
         final_inventory: Optional[dict[str, Any]] = None,
     ) -> BrcOperatorRunResult:
-        plan = self.build_operator_execution_plan(source_text=source_text)
+        action = await self.create_operator_action_plan(source_text=source_text)
+        return await self.run_operator_action_by_id(
+            action_id=action.action_id,
+            confirmation_phrase=confirmation_phrase,
+            final_inventory=final_inventory,
+        )
+
+    async def run_operator_action_by_id(
+        self,
+        *,
+        action_id: str,
+        confirmation_phrase: str,
+        final_inventory: Optional[dict[str, Any]] = None,
+        confirmed_by: str = "owner",
+    ) -> BrcOperatorRunResult:
+        action_record = await self._repo.get_operator_action(action_id)
+        if action_record is None:
+            raise BrcRuleViolation(f"unknown BRC operator action: {action_id}")
+        plan = BrcOperatorExecutionPlan.model_validate(action_record.plan_json)
+        now = _now_ms()
         if not plan.executable:
-            raise BrcRuleViolation(plan.blocked_reason or "operator plan is blocked")
+            blocked = action_record.model_copy(
+                update={
+                    "decision_result": BrcOperatorDecisionResult.BLOCKED,
+                    "blocked_reason": plan.blocked_reason or "operator plan is blocked",
+                    "confirmed_by": confirmed_by,
+                    "executed_at_ms": now,
+                }
+            )
+            await self._repo.save_operator_action(blocked)
+            raise BrcRuleViolation(blocked.blocked_reason or "operator plan is blocked")
         if confirmation_phrase != self.READ_ONLY_CONFIRMATION_PHRASE:
+            blocked = action_record.model_copy(
+                update={
+                    "decision_result": BrcOperatorDecisionResult.BLOCKED,
+                    "blocked_reason": "Owner confirmation phrase mismatch",
+                    "confirmation_matched": False,
+                    "confirmed_by": confirmed_by,
+                    "executed_at_ms": now,
+                }
+            )
+            await self._repo.save_operator_action(blocked)
             raise BrcRuleViolation("Owner confirmation phrase mismatch")
 
         action = plan.draft.action
@@ -631,12 +731,34 @@ class BoundedRiskCampaignService:
         else:
             raise BrcRuleViolation(f"unsupported BRC operator action: {action.value}")
 
-        return BrcOperatorRunResult(
+        run_result = BrcOperatorRunResult(
             plan=plan,
             executed=True,
             action=action,
             result=result,
         )
+        result_summary = {
+            "action": action.value,
+            "result_keys": sorted(result.keys()),
+            "mutation_executed": False,
+            "withdrawal_executed": False,
+            "live_ready": False,
+        }
+        executed = action_record.model_copy(
+            update={
+                "decision_result": BrcOperatorDecisionResult.EXECUTED,
+                "confirmation_matched": True,
+                "confirmed_by": confirmed_by,
+                "result_json": run_result.model_dump(mode="json"),
+                "result_summary_json": result_summary,
+                "mutation_executed": False,
+                "withdrawal_executed": False,
+                "live_ready": False,
+                "executed_at_ms": now,
+            }
+        )
+        await self._repo.save_operator_action(executed)
+        return run_result
 
     async def evaluate_next_campaign_eligibility(
         self,

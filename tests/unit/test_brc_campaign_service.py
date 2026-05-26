@@ -30,6 +30,7 @@ class InMemoryBrcRepo:
         self.switches = []
         self.events = []
         self.mock_pnl_events = []
+        self.operator_actions = {}
 
     async def initialize(self) -> None:
         return None
@@ -86,6 +87,20 @@ class InMemoryBrcRepo:
 
     async def list_mock_pnl_events(self, campaign_id: str):
         return [item for item in self.mock_pnl_events if item.campaign_id == campaign_id]
+
+    async def save_operator_action(self, action):
+        self.operator_actions[action.action_id] = action
+        return action
+
+    async def get_operator_action(self, action_id: str):
+        return self.operator_actions.get(action_id)
+
+    async def list_operator_actions(self, *, campaign_id: Optional[str] = None, limit: int = 50):
+        actions = list(self.operator_actions.values())
+        if campaign_id is not None:
+            actions = [action for action in actions if action.campaign_id == campaign_id]
+        actions.sort(key=lambda action: action.created_at_ms, reverse=True)
+        return actions[:limit]
 
 
 async def _campaign_service():
@@ -365,7 +380,7 @@ async def test_brc_operator_execution_plan_requires_confirmation():
 
 @pytest.mark.asyncio
 async def test_brc_operator_read_run_executes_only_read_action():
-    service, _ = await _campaign_service()
+    service, repo = await _campaign_service()
 
     run = await service.run_operator_read_action(
         source_text="帮我看下一轮能不能开",
@@ -379,3 +394,47 @@ async def test_brc_operator_read_run_executes_only_read_action():
     assert run.withdrawal_executed is False
     assert run.live_ready is False
     assert run.result["eligibility"]["decision"] == "blocked"
+    action = next(iter(repo.operator_actions.values()))
+    assert action.decision_result.value == "executed"
+    assert action.confirmation_matched is True
+    assert action.result_summary_json["mutation_executed"] is False
+
+
+@pytest.mark.asyncio
+async def test_brc_operator_plan_persists_and_canonical_run_uses_action_id():
+    service, _ = await _campaign_service()
+
+    action = await service.create_operator_action_plan(source_text="帮我看复盘报告")
+    assert action.action_id.startswith("brc-op-")
+    assert action.decision_result.value == "planned"
+    assert action.plan_json["draft"]["action"] == "read_review_packet"
+
+    run = await service.run_operator_action_by_id(
+        action_id=action.action_id,
+        confirmation_phrase="CONFIRM_READ_ONLY_BRC",
+        final_inventory={"all_flat": True},
+    )
+    stored = await service.get_operator_action(action.action_id)
+
+    assert run.executed is True
+    assert stored.decision_result.value == "executed"
+    assert stored.result_json["action"] == "read_review_packet"
+    assert stored.mutation_executed is False
+    assert stored.withdrawal_executed is False
+
+
+@pytest.mark.asyncio
+async def test_brc_operator_unknown_text_is_persisted_as_blocked():
+    service, _ = await _campaign_service()
+
+    action = await service.create_operator_action_plan(source_text="帮我直接开一单")
+
+    assert action.executable is False
+    assert action.decision_result.value == "blocked"
+    assert action.draft_action.value == "unknown"
+    with pytest.raises(BrcRuleViolation, match="read-only"):
+        await service.run_operator_action_by_id(
+            action_id=action.action_id,
+            confirmation_phrase="CONFIRM_READ_ONLY_BRC",
+            final_inventory={"all_flat": True},
+        )
