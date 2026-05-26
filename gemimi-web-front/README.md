@@ -41,7 +41,9 @@ npm run build
 npm run lint
 ```
 
-Set `VITE_API_BASE_URL` if the backend is not on `http://localhost:8000`.
+By default the Vite dev server proxies same-origin `/api/*` requests to
+`http://127.0.0.1:8000`, so the login cookie stays on the frontend origin.
+Set `VITE_API_PROXY_TARGET` if the backend is on another local port.
 
 ## Boundaries
 

@@ -50,7 +50,7 @@ BACKEND_PID=$!
 
 (
   cd gemimi-web-front
-  VITE_API_BASE_URL="http://127.0.0.1:${BACKEND_PORT}" npm run dev -- --host 127.0.0.1 --port "${FRONTEND_PORT}"
+  VITE_API_PROXY_TARGET="http://127.0.0.1:${BACKEND_PORT}" npm run dev -- --host 127.0.0.1 --port "${FRONTEND_PORT}"
 ) &
 FRONTEND_PID=$!
 
