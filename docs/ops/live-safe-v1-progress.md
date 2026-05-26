@@ -239,6 +239,18 @@ Use this file for session progress and handoff notes.
   real-live authority, automatic sizing, strategy implementation, or
   natural-language auto-execution is introduced.
 
+## 2026-05-26 (BRC-R2-002 Owner-Confirmed Read-Only Runner)
+
+- Extended the BRC operator medium from draft-only to
+  `draft -> plan -> confirmed read-only run`.
+- The runner requires `CONFIRM_READ_ONLY_BRC`, executes only
+  review/eligibility/evidence read actions, and marks run results with
+  `mutation_executed=false`, `withdrawal_executed=false`, and
+  `live_ready=false`.
+- No new testnet order path, withdrawal/transfer endpoint, real-live
+  authority, automatic sizing, strategy implementation, or natural-language
+  auto-execution is introduced.
+
 ## 2026-05-25 (TC-TINY-001D-1 Authorization Package)
 
 - Prepared ADR-0009 action request for one controlled Binance testnet

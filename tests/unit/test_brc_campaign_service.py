@@ -342,3 +342,40 @@ async def test_brc_operator_intent_draft_blocks_unknown_text():
     assert draft.endpoint_path is None
     assert draft.executable_without_owner_confirmation is False
     assert "R2 only drafts read-only" in draft.blocked_reason
+
+
+@pytest.mark.asyncio
+async def test_brc_operator_execution_plan_requires_confirmation():
+    service, _ = await _campaign_service()
+
+    plan = service.build_operator_execution_plan(source_text="帮我看复盘报告")
+
+    assert plan.executable is True
+    assert plan.confirmation_phrase == "CONFIRM_READ_ONLY_BRC"
+    assert plan.steps[0].owner_confirmation_required is True
+    assert plan.steps[0].mutation_intended is False
+
+    with pytest.raises(BrcRuleViolation, match="confirmation phrase mismatch"):
+        await service.run_operator_read_action(
+            source_text="帮我看复盘报告",
+            confirmation_phrase="WRONG",
+            final_inventory={"all_flat": True},
+        )
+
+
+@pytest.mark.asyncio
+async def test_brc_operator_read_run_executes_only_read_action():
+    service, _ = await _campaign_service()
+
+    run = await service.run_operator_read_action(
+        source_text="帮我看下一轮能不能开",
+        confirmation_phrase="CONFIRM_READ_ONLY_BRC",
+        final_inventory={"all_flat": True},
+    )
+
+    assert run.executed is True
+    assert run.action.value == "read_next_eligibility"
+    assert run.mutation_executed is False
+    assert run.withdrawal_executed is False
+    assert run.live_ready is False
+    assert run.result["eligibility"]["decision"] == "blocked"

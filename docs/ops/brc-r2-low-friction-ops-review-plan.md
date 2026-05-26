@@ -11,6 +11,7 @@ Date: 2026-05-26
 - expose a read-only next-campaign eligibility gate;
 - provide a simple local operator helper for review and eligibility reads;
 - draft read-only operator actions from short Owner text;
+- build an Owner-confirmed read-only action plan and runner;
 - keep real live, withdrawal, transfer, automatic sizing, and LLM trade decisions unauthorized.
 
 This is not a new runtime expansion and does not add a new order path.
@@ -72,6 +73,8 @@ python scripts/brc_operator.py review
 python scripts/brc_operator.py eligibility
 python scripts/brc_operator.py evidence
 python scripts/brc_operator.py draft "帮我看下一轮能不能开"
+python scripts/brc_operator.py plan "帮我看下一轮能不能开"
+python scripts/brc_operator.py --confirm CONFIRM_READ_ONLY_BRC run "帮我看下一轮能不能开"
 ```
 
 The script calls only local runtime read endpoints. It does not mutate campaign state or exchange state.
@@ -90,6 +93,16 @@ R2 can draft only:
 
 Unknown or mutation-like requests are not made executable in R2.
 
+Execution is still not automatic. The read-only runner requires an explicit
+confirmation phrase:
+
+```text
+CONFIRM_READ_ONLY_BRC
+```
+
+The runner re-builds the plan from the Owner text, rejects unknown actions, and
+executes only the read-only BRC endpoints modeled by the plan.
+
 ## API Additions
 
 Read-only endpoints:
@@ -97,6 +110,8 @@ Read-only endpoints:
 - `GET /api/runtime/test/brc/review-packet`
 - `GET /api/runtime/test/brc/next-eligibility`
 - `POST /api/runtime/test/brc/operator/draft`
+- `POST /api/runtime/test/brc/operator/plan`
+- `POST /api/runtime/test/brc/operator/run`
 
 These require local/internal runtime control, Binance testnet mode, and the BRC runtime profile. They do not require test signal injection because they do not mutate state.
 
@@ -117,3 +132,19 @@ Owner text -> structured draft -> machine checks -> Owner confirm -> allowed loc
 ```
 
 R2 implements only the read-only draft/review/check layer.
+
+## BRC-R2-002 Extension
+
+`BRC-R2-002` adds the first Owner confirmation chain:
+
+```text
+Owner text -> draft -> read-only execution plan -> confirmation phrase -> read-only run result
+```
+
+Hard boundaries:
+
+- `run` accepts only read-only plans;
+- `run` requires `CONFIRM_READ_ONLY_BRC`;
+- unknown text is blocked;
+- mutation-intended plans are blocked;
+- result payloads carry `mutation_executed=false`, `withdrawal_executed=false`, and `live_ready=false`.

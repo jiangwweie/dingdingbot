@@ -213,6 +213,11 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   text-to-read-action draft. This does not expand order authority, strategy
   authority, withdrawal/transfer authority, real-live authority, or
   natural-language auto-execution.
+- BRC-R2-002 extends that operator layer with an Owner-confirmed read-only
+  runner: Owner text is converted to a draft, then a read-only plan, then a
+  confirmed read-only run. The confirmation phrase is scoped to read-only BRC
+  review actions and does not authorize testnet orders, real live,
+  withdrawals/transfers, automatic sizing, or strategy execution.
 
 The active research SSOT is:
 

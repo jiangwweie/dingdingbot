@@ -55,8 +55,13 @@ def main() -> int:
         help=f"local runtime base URL, default {DEFAULT_BASE_URL}",
     )
     parser.add_argument(
+        "--confirm",
+        default=None,
+        help="confirmation phrase required for run mode",
+    )
+    parser.add_argument(
         "command",
-        choices=("review", "eligibility", "evidence", "draft"),
+        choices=("review", "eligibility", "evidence", "draft", "plan", "run"),
         help="read-only BRC object to print",
     )
     parser.add_argument(
@@ -74,6 +79,32 @@ def main() -> int:
             args.base_url,
             "/api/runtime/test/brc/operator/draft",
             {"text": text},
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "plan":
+        text = " ".join(args.text).strip()
+        if not text:
+            parser.error("plan mode requires operator text")
+        payload = _post_json(
+            args.base_url,
+            "/api/runtime/test/brc/operator/plan",
+            {"text": text},
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "run":
+        text = " ".join(args.text).strip()
+        if not text:
+            parser.error("run mode requires operator text")
+        if not args.confirm:
+            parser.error("run mode requires --confirm CONFIRM_READ_ONLY_BRC")
+        payload = _post_json(
+            args.base_url,
+            "/api/runtime/test/brc/operator/run",
+            {"text": text, "confirmation_phrase": args.confirm},
         )
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0

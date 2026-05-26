@@ -450,3 +450,30 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
         assert draft.status_code == 200
         assert draft.json()["draft"]["action"] == "read_review_packet"
         assert draft.json()["draft"]["mutation_intended"] is False
+
+        plan = client.post(
+            "/api/runtime/test/brc/operator/plan",
+            json={"text": "帮我看下一轮能不能开"},
+        )
+        assert plan.status_code == 200
+        assert plan.json()["plan"]["executable"] is True
+        assert plan.json()["plan"]["steps"][0]["mutation_intended"] is False
+
+        blocked_run = client.post(
+            "/api/runtime/test/brc/operator/run",
+            json={"text": "帮我看下一轮能不能开", "confirmation_phrase": "WRONG"},
+        )
+        assert blocked_run.status_code == 409
+        assert "confirmation phrase mismatch" in blocked_run.json()["detail"]
+
+        run = client.post(
+            "/api/runtime/test/brc/operator/run",
+            json={
+                "text": "帮我看下一轮能不能开",
+                "confirmation_phrase": "CONFIRM_READ_ONLY_BRC",
+            },
+        )
+        assert run.status_code == 200
+        assert run.json()["run"]["action"] == "read_next_eligibility"
+        assert run.json()["run"]["mutation_executed"] is False
+        assert run.json()["run"]["withdrawal_executed"] is False

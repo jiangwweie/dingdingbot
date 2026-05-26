@@ -16,7 +16,10 @@ from src.domain.bounded_risk_campaign import (
     BrcNextCampaignEligibility,
     BrcNextEligibilityDecision,
     BrcOperatorAction,
+    BrcOperatorExecutionPlan,
     BrcOperatorIntentDraft,
+    BrcOperatorPlanStep,
+    BrcOperatorRunResult,
     BrcReviewPacket,
     BoundedRiskCampaign,
     CampaignAttempt,
@@ -103,6 +106,7 @@ class BoundedRiskCampaignService:
 
     CONTROLLED_TESTNET_PLAYBOOK_ID = "PB-004-BRC-CONTROLLED-TESTNET"
     SYMBOL_SEQUENCE = ("ETH/USDT:USDT", "BTC/USDT:USDT")
+    READ_ONLY_CONFIRMATION_PHRASE = "CONFIRM_READ_ONLY_BRC"
 
     def __init__(self, repository: BrcCampaignRepositoryPort) -> None:
         self._repo = repository
@@ -552,6 +556,86 @@ class BoundedRiskCampaignService:
                 "unrecognized BRC operator intent; R2 only drafts read-only "
                 "review, eligibility, and evidence actions"
             ),
+        )
+
+    def build_operator_execution_plan(
+        self,
+        *,
+        source_text: str,
+    ) -> BrcOperatorExecutionPlan:
+        draft = self.draft_operator_intent(source_text=source_text)
+        if draft.action == BrcOperatorAction.UNKNOWN or draft.endpoint_path is None:
+            return BrcOperatorExecutionPlan(
+                plan_id=f"brc-plan-{uuid.uuid4().hex[:12]}",
+                source_text=source_text,
+                draft=draft,
+                steps=[],
+                executable=False,
+                confirmation_phrase=self.READ_ONLY_CONFIRMATION_PHRASE,
+                blocked_reason=draft.blocked_reason or "operator action is not executable",
+            )
+        if draft.mutation_intended:
+            return BrcOperatorExecutionPlan(
+                plan_id=f"brc-plan-{uuid.uuid4().hex[:12]}",
+                source_text=source_text,
+                draft=draft,
+                steps=[],
+                executable=False,
+                confirmation_phrase=self.READ_ONLY_CONFIRMATION_PHRASE,
+                blocked_reason="BRC-R2 runner allows read-only actions only",
+            )
+        step = BrcOperatorPlanStep(
+            step_id="step-1",
+            action=draft.action,
+            http_method=draft.http_method,
+            endpoint_path=draft.endpoint_path,
+            mutation_intended=False,
+            owner_confirmation_required=True,
+        )
+        return BrcOperatorExecutionPlan(
+            plan_id=f"brc-plan-{uuid.uuid4().hex[:12]}",
+            source_text=source_text,
+            draft=draft,
+            steps=[step],
+            executable=True,
+            confirmation_phrase=self.READ_ONLY_CONFIRMATION_PHRASE,
+        )
+
+    async def run_operator_read_action(
+        self,
+        *,
+        source_text: str,
+        confirmation_phrase: str,
+        final_inventory: Optional[dict[str, Any]] = None,
+    ) -> BrcOperatorRunResult:
+        plan = self.build_operator_execution_plan(source_text=source_text)
+        if not plan.executable:
+            raise BrcRuleViolation(plan.blocked_reason or "operator plan is blocked")
+        if confirmation_phrase != self.READ_ONLY_CONFIRMATION_PHRASE:
+            raise BrcRuleViolation("Owner confirmation phrase mismatch")
+
+        action = plan.draft.action
+        if action == BrcOperatorAction.READ_REVIEW_PACKET:
+            packet = await self.build_review_packet(final_inventory=final_inventory)
+            result = {"review_packet": packet.model_dump(mode="json")}
+        elif action == BrcOperatorAction.READ_NEXT_ELIGIBILITY:
+            eligibility = await self.evaluate_next_campaign_eligibility(
+                final_inventory=final_inventory,
+            )
+            result = {"eligibility": eligibility.model_dump(mode="json")}
+        elif action == BrcOperatorAction.READ_EVIDENCE:
+            evidence = await self.build_latest_evidence_packet()
+            if final_inventory is not None:
+                evidence["final_inventory"] = final_inventory
+            result = {"evidence": evidence}
+        else:
+            raise BrcRuleViolation(f"unsupported BRC operator action: {action.value}")
+
+        return BrcOperatorRunResult(
+            plan=plan,
+            executed=True,
+            action=action,
+            result=result,
         )
 
     async def evaluate_next_campaign_eligibility(

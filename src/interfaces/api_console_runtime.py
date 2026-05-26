@@ -484,6 +484,11 @@ class BrcOperatorIntentDraftRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2048)
 
 
+class BrcOperatorRunRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2048)
+    confirmation_phrase: str = Field(min_length=1, max_length=128)
+
+
 class BrcCampaignResponse(BaseModel):
     campaign: dict
     live_ready: Literal[False] = False
@@ -544,6 +549,25 @@ class BrcOperatorIntentDraftResponse(BaseModel):
     access_boundary: str = (
         "Read-only BRC operator intent draft. This endpoint maps text only to "
         "read-only review/evidence actions and does not execute trades."
+    )
+
+
+class BrcOperatorPlanResponse(BaseModel):
+    plan: dict
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Read-only BRC operator plan. A run requires the explicit read-only "
+        "confirmation phrase and cannot execute mutation actions."
+    )
+
+
+class BrcOperatorRunResponse(BaseModel):
+    run: dict
+    inventory: Phase5EInventoryResponse
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "Read-only BRC operator run. No order, close, resize, transfer, "
+        "withdrawal, mainnet, or real-live action is executed."
     )
 
 
@@ -2317,6 +2341,48 @@ async def draft_brc_operator_intent(
     except BrcRuleViolation as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return BrcOperatorIntentDraftResponse(draft=draft.model_dump(mode="json"))
+
+
+@router.post("/test/brc/operator/plan", response_model=BrcOperatorPlanResponse)
+async def plan_brc_operator_action(
+    request: Request,
+    body: BrcOperatorIntentDraftRequest,
+) -> BrcOperatorPlanResponse:
+    """Build a read-only BRC operator execution plan from short Owner text."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    try:
+        plan = service.build_operator_execution_plan(source_text=body.text)
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return BrcOperatorPlanResponse(plan=plan.model_dump(mode="json"))
+
+
+@router.post("/test/brc/operator/run", response_model=BrcOperatorRunResponse)
+async def run_brc_operator_action(
+    request: Request,
+    body: BrcOperatorRunRequest,
+) -> BrcOperatorRunResponse:
+    """Run a confirmed read-only BRC operator action."""
+    api_module, _ = _require_brc_read_gates(request)
+    service = _get_brc_campaign_service(api_module)
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=_BRC_PROFILE,
+        symbols=_BRC_ALLOWED_SYMBOLS,
+    )
+    try:
+        run = await service.run_operator_read_action(
+            source_text=body.text,
+            confirmation_phrase=body.confirmation_phrase,
+            final_inventory=inventory.model_dump(mode="json"),
+        )
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BrcOperatorRunResponse(
+        run=run.model_dump(mode="json"),
+        inventory=inventory,
+    )
 
 
 @router.post("/test/brc/finalize", response_model=BrcCampaignResponse)

@@ -213,6 +213,36 @@ class BrcOperatorIntentDraft(BaseModel):
     live_ready: bool = False
 
 
+class BrcOperatorPlanStep(BaseModel):
+    step_id: str
+    action: BrcOperatorAction
+    http_method: str
+    endpoint_path: str
+    mutation_intended: bool = False
+    owner_confirmation_required: bool = True
+
+
+class BrcOperatorExecutionPlan(BaseModel):
+    plan_id: str
+    source_text: str = Field(min_length=1, max_length=2048)
+    draft: BrcOperatorIntentDraft
+    steps: list[BrcOperatorPlanStep]
+    executable: bool
+    confirmation_phrase: str = "CONFIRM_READ_ONLY_BRC"
+    blocked_reason: Optional[str] = None
+    live_ready: bool = False
+
+
+class BrcOperatorRunResult(BaseModel):
+    plan: BrcOperatorExecutionPlan
+    executed: bool
+    action: BrcOperatorAction
+    result: dict[str, Any] = Field(default_factory=dict)
+    mutation_executed: bool = False
+    withdrawal_executed: bool = False
+    live_ready: bool = False
+
+
 class BoundedRiskCampaign(BaseModel):
     campaign_id: str
     bucket: RiskCapitalBucket
