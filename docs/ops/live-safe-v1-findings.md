@@ -271,3 +271,34 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
 - SRR-002 is the accepted research methodology baseline for future analysis, but no current module satisfies SRR-002 standards.
 - The local worktree shows one untracked research doc under `docs/ops/`, not 21 visible untracked research docs. The discrepancy should be resolved with the Owner before any submission or grouping action.
 - Mac mini observation logging should remain docs-only/no-order unless separately approved; current required log dimensions are environment state, BTC/ETH signal observations, skipped signals, anomalies, and virtual risk exposure.
+
+## 2026-05-26
+
+- External BRC security audit immediate safety-gate findings are repaired in
+  commit `bc7e2ad`: GKS now starts fail-closed before initialize; campaign
+  transition `requires_owner_review` and `requires_flat_proof` flags are
+  enforced; terminal runtime states require explicit triggers; LLM cannot
+  upgrade generic Owner text into testnet rehearsal without explicit
+  testnet/rehearsal wording; ended campaigns reject mock PnL; fixed testnet
+  rehearsal results are schema-validated before workflow persistence; and
+  loss-locked ended campaigns require Owner review before a new campaign can
+  be created.
+- Remaining external audit work is intentionally deferred to the relevant
+  capability gates and recorded in
+  `docs/ops/brc-pre-deploy-audit-backlog.md`.
+  It is not a blocker for local-only BRC operator work, but it is a blocker
+  before Feishu callbacks, cloud deployment, cloud-exposed Web mutation
+  controls, or strategy-pool execution.
+- Deferred pre-deploy issues are: rotate exposed testnet/Feishu secrets if
+  needed, move cloud secrets to environment/secret manager, add Feishu/Web
+  signing + timestamp + nonce/idempotency replay protection, bind
+  confirmations to `workflow_run_id`, add authenticated operator sessions and
+  CSRF/callback protection for Web/cloud, add deployment preflight/runbook,
+  and define the future strategy-pool domain/promotion bridge separately from
+  BRC operation governance.
+- The next capability should reduce Owner operation friction without expanding
+  authority. The recommended next task is `BRC-R4-001 Local Operator Console`:
+  a local-only Web surface over existing BRC APIs, ledgers, and LLM workflow
+  gates. It should not add new order paths, withdrawal/transfer, real-live
+  authority, strategy execution, automatic sizing, or auto-filled confirmation
+  phrases.

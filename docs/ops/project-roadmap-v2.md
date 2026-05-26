@@ -1,6 +1,6 @@
 # Project Roadmap v2
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 ## Document Role
 
@@ -236,6 +236,13 @@ See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
   `CONFIRM_BRC_TESTNET_REHEARSAL`. This does not authorize live/mainnet,
   withdrawal/transfer, strategy execution, automatic sizing/leverage/side
   selection, or broader multi-symbol runtime expansion.
+- The external BRC audit immediate safety-gate fixes are complete for review
+  in commit `bc7e2ad`. Remaining audit/deployment items are recorded in
+  `docs/ops/brc-pre-deploy-audit-backlog.md` and are deferred to the correct
+  future gates: Feishu callbacks, cloud deployment, Web mutation controls, and
+  strategy-pool construction. The next recommended capability is local
+  operation friction reduction through `BRC-R4-001 Local Operator Console`,
+  not broader trading authority.
 
 The active research SSOT is:
 

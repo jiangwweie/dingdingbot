@@ -295,6 +295,29 @@ Use this file for session progress and handoff notes.
   Read-only confirmation remains `CONFIRM_READ_ONLY_BRC`; controlled testnet
   rehearsal confirmation is `CONFIRM_BRC_TESTNET_REHEARSAL`.
 
+## 2026-05-26 (BRC External Audit Backlog Alignment)
+
+- External audit immediate fixes were completed in commit `bc7e2ad`:
+  GKS constructor fail-closed, campaign transition owner-review/flat-proof
+  enforcement, explicit trigger requirement for terminal runtime states,
+  ended-campaign mock PnL guard, fixed testnet rehearsal result validation,
+  loss-locked next-campaign creation gate, and LLM testnet intent upgrade
+  guard.
+- Recorded deferred audit/deployment items in
+  `docs/ops/brc-pre-deploy-audit-backlog.md`.
+- Deferred items are intentionally tied to later gates:
+  Feishu callback integration, cloud deployment, Web mutation controls, and
+  strategy-pool construction. They are not prerequisites for continuing the
+  current local-only BRC operation-governance loop.
+- Recommended next capability is `BRC-R4-001 Local Operator Console`: a
+  local-only Web surface for current campaign state, review packet,
+  next-campaign eligibility, LLM/operator plan, explicit confirmation,
+  action/workflow ledger, review decision, and next gate.
+- Boundary preserved: no real live/mainnet, no withdrawal/transfer endpoint,
+  no autonomous strategy execution, no automatic sizing/leverage/side decision,
+  no auto-filled confirmation phrase, and no new order path beyond existing
+  fixed BRC testnet workflow.
+
 ## 2026-05-25 (TC-TINY-001D-1 Authorization Package)
 
 - Prepared ADR-0009 action request for one controlled Binance testnet
