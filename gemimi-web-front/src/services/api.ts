@@ -39,6 +39,35 @@ export type RuntimeSafetyResponse = {
   live_ready: false;
 };
 
+export type ReadinessAction = {
+  action_id: string;
+  title: string;
+  description: string;
+  enabled: boolean;
+  disabled_reason?: string | null;
+  route?: string | null;
+  button_label: string;
+  what_happens: string;
+  what_will_not_happen: string;
+  account_impact: string;
+  risk_level: 'read_only' | 'controlled_testnet' | 'blocked';
+};
+
+export type ReadinessResponse = {
+  mode: 'standalone_console' | 'runtime_bound_console' | 'brc_ready' | 'testnet_ready' | 'blocked';
+  current_conclusion: string;
+  why: string[];
+  account_impact: string;
+  next_step: string;
+  available_actions: ReadinessAction[];
+  disabled_actions: ReadinessAction[];
+  latest_campaign?: Record<string, unknown> | null;
+  runtime_summary: Record<string, unknown>;
+  review_summary: Record<string, unknown>;
+  developer_details: Record<string, unknown>;
+  live_ready: false;
+};
+
 export type OperatorPlanResponse = {
   plan: Record<string, unknown>;
   action: Record<string, unknown>;
@@ -110,6 +139,9 @@ export const brcApi = {
   },
   dashboard() {
     return request<DashboardResponse>('/api/brc/dashboard');
+  },
+  readiness() {
+    return request<ReadinessResponse>('/api/brc/readiness');
   },
   runtimeSafety() {
     return request<RuntimeSafetyResponse>('/api/runtime/safety');

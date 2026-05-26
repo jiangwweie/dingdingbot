@@ -4,7 +4,7 @@ import {
   BookOpenCheck,
   GitBranch,
   History,
-  LayoutDashboard,
+  ListChecks,
   LogOut,
   Moon,
   Monitor,
@@ -54,23 +54,25 @@ const navItems = [
   {
     domain: 'BRC Campaign（风险试错）',
     links: [
-      { name: '总览', to: '/dashboard', icon: LayoutDashboard },
-      { name: 'Runtime Safety', to: '/runtime-safety', icon: ShieldAlert },
-      { name: 'Operator', to: '/operator', icon: TerminalSquare },
-      { name: 'Workflow', to: '/workflow', icon: GitBranch },
-      { name: 'Review', to: '/review', icon: BookOpenCheck },
-      { name: 'Ledger', to: '/ledger', icon: History },
+      { name: 'Guide 操作向导', to: '/guide', icon: ListChecks },
+      { name: 'Runtime Safety 运行安全', to: '/runtime-safety', icon: ShieldAlert },
+      { name: 'Operator Plan 只读计划', to: '/operator', icon: TerminalSquare },
+      { name: 'Workflow 受控流程', to: '/workflow', icon: GitBranch },
+      { name: 'Review 复盘决策', to: '/review', icon: BookOpenCheck },
+      { name: 'Ledger 操作记录', to: '/ledger', icon: History },
+      { name: 'Developer Detail 技术详情', to: '/developer', icon: TerminalSquare },
     ],
   },
 ];
 
 const routeTitles: Record<string, string> = {
-  '/dashboard': 'BRC Dashboard',
-  '/operator': 'Operator Plan',
-  '/workflow': 'Workflow Gate',
-  '/review': 'Review Decision',
-  '/ledger': 'Audit Ledger',
-  '/runtime-safety': 'Runtime Safety',
+  '/guide': 'Guide 操作向导',
+  '/operator': 'Operator Plan 只读计划',
+  '/workflow': 'Workflow 受控流程',
+  '/review': 'Review 复盘决策',
+  '/ledger': 'Ledger 操作记录',
+  '/runtime-safety': 'Runtime Safety 运行安全',
+  '/developer': 'Developer Detail 技术详情',
 };
 
 export default function AppLayout() {
@@ -90,7 +92,7 @@ export default function AppLayout() {
   return (
     <RefreshContext.Provider value={{ refreshCount }}>
       <div className="flex h-screen w-full overflow-hidden bg-white font-sans text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-        <aside className="z-20 flex w-52 flex-shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-900/30">
+        <aside className="z-20 flex w-64 flex-shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-900/30">
           <div className="border-b border-zinc-200 bg-zinc-100/50 p-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80">
             <h1 className="text-[11px] font-bold uppercase tracking-widest text-blue-500">BRC Operator</h1>
             <div className="mt-1 flex items-center gap-2">

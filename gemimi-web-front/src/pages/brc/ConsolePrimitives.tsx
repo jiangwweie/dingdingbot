@@ -1,8 +1,10 @@
 import React from 'react';
-import { AlertCircle, CheckCircle2, Clock3, LockKeyhole, ShieldAlert } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Clock3, LockKeyhole, ShieldAlert } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Badge } from '@/src/components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
 import { cn } from '@/src/lib/utils';
+import type { ReadinessAction } from '@/src/services/api';
 
 export function StageStrip({
   current,
@@ -148,6 +150,79 @@ export function JsonDetails({ data, label = '查看 JSON / Evidence' }: { data: 
   );
 }
 
+export function DeveloperDetails({ data, label = 'Developer detail（技术详情）' }: { data: unknown; label?: string }) {
+  if (!data) return null;
+  return (
+    <details className="rounded-sm border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+        {label}
+      </summary>
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-zinc-700 dark:text-zinc-300">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    </details>
+  );
+}
+
+export function ActionCard({ action }: { action: ReadinessAction }) {
+  const tone = action.enabled
+    ? action.risk_level === 'controlled_testnet'
+      ? 'border-amber-500/30 bg-amber-500/[0.04]'
+      : 'border-emerald-500/30 bg-emerald-500/[0.04]'
+    : 'border-zinc-200 bg-zinc-50 opacity-80 dark:border-zinc-800 dark:bg-zinc-900/50';
+  const riskLabel = {
+    read_only: 'Read-only（只读）',
+    controlled_testnet: 'Controlled Testnet（受控测试网）',
+    blocked: 'Unavailable（当前不可用）',
+  }[action.risk_level];
+  return (
+    <Card className={tone}>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>{action.title}</span>
+          <StatusBadge state={action.enabled ? riskLabel : 'disabled'} />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+        <p>{action.description}</p>
+        <p>
+          <span className="font-bold">点击后会发生：</span>
+          {action.what_happens}
+        </p>
+        <p>
+          <span className="font-bold">不会发生：</span>
+          {action.what_will_not_happen}
+        </p>
+        <p>
+          <span className="font-bold">账户影响：</span>
+          {action.account_impact}
+        </p>
+        {!action.enabled && (
+          <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1 text-amber-700 dark:text-amber-300">
+            当前不可用：{action.disabled_reason || 'readiness 未确认此动作可用。'}
+          </p>
+        )}
+        {action.route && action.enabled ? (
+          <Link
+            to={action.route}
+            className="mt-2 inline-flex items-center gap-2 rounded-sm border border-blue-500 bg-blue-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white"
+          >
+            {action.button_label}
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        ) : (
+          <button
+            className="mt-2 inline-flex cursor-not-allowed items-center gap-2 rounded-sm border border-zinc-300 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500 dark:border-zinc-700"
+            disabled
+          >
+            {action.button_label}
+          </button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-sm border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-800">
@@ -170,10 +245,7 @@ export function ErrorState({ error }: { error: unknown }) {
     <ExplanationCard title="Blocked / 无法继续" icon={<ShieldAlert className="h-3.5 w-3.5" />} tone="danger">
       <p>系统没有继续执行。原因：{userMessage}</p>
       <p className="mt-1">这不会触发任何交易风险。请先查看“当前结论”和“下一步”，必要时再展开开发者详情。</p>
-      <details className="mt-2">
-        <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-widest text-zinc-500">Developer detail</summary>
-        <p className="mt-1 font-mono text-[11px] text-zinc-500">{message}</p>
-      </details>
+      <DeveloperDetails data={{ message }} />
     </ExplanationCard>
   );
 }

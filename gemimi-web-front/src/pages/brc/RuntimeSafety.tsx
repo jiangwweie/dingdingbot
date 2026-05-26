@@ -1,15 +1,22 @@
 import { useEffect, useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
-import { brcApi, RuntimeSafetyResponse } from '@/src/services/api';
+import { brcApi, ReadinessResponse, RuntimeSafetyResponse } from '@/src/services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
-import { ErrorState, JsonDetails, OwnerSummary, StageStrip, StatusBadge } from './ConsolePrimitives';
+import { DeveloperDetails, ErrorState, JsonDetails, OwnerSummary, StageStrip, StatusBadge } from './ConsolePrimitives';
+import { whyText } from './readiness';
 
 export default function RuntimeSafety() {
   const [safety, setSafety] = useState<RuntimeSafetyResponse | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
-    brcApi.runtimeSafety().then(setSafety).catch(setError);
+    Promise.all([brcApi.runtimeSafety(), brcApi.readiness()])
+      .then(([safetyPayload, readinessPayload]) => {
+        setSafety(safetyPayload);
+        setReadiness(readinessPayload);
+      })
+      .catch(setError);
   }, []);
 
   if (error) return <ErrorState error={error} />;
@@ -23,8 +30,10 @@ export default function RuntimeSafety() {
         global={safety.global_planning_stage}
       />
       <OwnerSummary
-        conclusion={safety.runtime_bound ? '运行时已连接，但仍需逐项检查' : '当前不可执行任何交易相关动作'}
-        why={safety.runtime_bound
+        conclusion={readiness?.current_conclusion || (safety.runtime_bound ? '运行时已连接，但仍需逐项检查' : '当前不可执行任何交易相关动作')}
+        why={readiness
+          ? whyText(readiness)
+          : safety.runtime_bound
           ? 'Runtime 已绑定；是否能 testnet 还取决于 profile、testnet、GKS 和 Startup Guard。'
           : 'Runtime 未绑定，Testnet 状态未知，系统不能确认当前是否安全。'}
         canDo="查看运行安全状态，回到 Operator 生成只读计划。"
@@ -50,6 +59,7 @@ export default function RuntimeSafety() {
             <Metric label="Startup Guard（启动保护）" value={<StatusBadge state={safety.startup_guard_armed ? 'armed' : 'blocked'} />} help="blocked 是保护状态，表示系统不会自动进入交易动作。" />
           </div>
           <JsonDetails data={safety} />
+          <DeveloperDetails data={readiness} label="Readiness 技术详情" />
         </CardContent>
       </Card>
     </div>

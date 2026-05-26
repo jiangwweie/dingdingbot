@@ -5,7 +5,8 @@ import AppLayout from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { ThemeProvider } from './components/layout/ThemeContext';
 import { brcApi } from './services/api';
-import Dashboard from './pages/brc/Dashboard';
+import DeveloperDetail from './pages/brc/DeveloperDetail';
+import Guide from './pages/brc/Guide';
 import Ledger from './pages/brc/Ledger';
 import Operator from './pages/brc/Operator';
 import Review from './pages/brc/Review';
@@ -42,16 +43,18 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/login" element={<Login />} />
             <Route element={<RequireAuth />}>
               <Route path="/" element={<AppLayout />}>
-                <Route index element={<Navigate to="/dashboard" replace />} />
-                <Route path="dashboard" element={<Dashboard />} />
+                <Route index element={<Navigate to="/guide" replace />} />
+                <Route path="guide" element={<Guide />} />
+                <Route path="dashboard" element={<Navigate to="/guide" replace />} />
                 <Route path="operator" element={<Operator />} />
                 <Route path="workflow" element={<Workflow />} />
                 <Route path="review" element={<Review />} />
                 <Route path="ledger" element={<Ledger />} />
                 <Route path="runtime-safety" element={<RuntimeSafety />} />
+                <Route path="developer" element={<DeveloperDetail />} />
               </Route>
             </Route>
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/guide" replace />} />
           </Routes>
         </BrowserRouter>
       </ThemeProvider>

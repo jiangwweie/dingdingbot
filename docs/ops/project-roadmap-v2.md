@@ -139,6 +139,29 @@ secret-manager integration, strategy pool construction, withdrawal interfaces,
 automatic strategy execution, and real live remain future or unauthorized
 tracks.
 
+2026-05-26 BRC-R4.1 delivery-console amendment:
+
+The current product stage is now `BRC-R4.1 Delivery Owner Guide`. The console
+is no longer treated as a collection of engineering status pages. It must
+answer, in Owner language, the four operating questions on every primary path:
+
+- where am I now;
+- what can I do;
+- why can/cannot I do it;
+- what is the next click or confirmation, and whether it can affect a real
+  account.
+
+`/api/brc/readiness` is the readonly product-state translation layer for the
+local console. It does not replace risk facts, does not mutate campaign or
+runtime state, and does not authorize orders. It only translates existing BRC
+and runtime conditions into Guide/action-card decisions. `/guide` is the
+default Owner entry. Review must auto-bind the latest campaign when available;
+Owner should not be asked to hand-type Campaign ID as the normal path.
+
+This amendment still does not start Feishu approval, cloud deployment,
+strategy-pool construction, real live, withdrawal/transfer, automatic strategy
+execution, automatic sizing, or any broader testnet authority.
+
 2026-05-25 PLC execution-stage update:
 
 - PLC Phase 0 local sandbox, Phase 1 read-only runtime adapter, Phase 2 paper

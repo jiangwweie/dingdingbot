@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
-import { brcApi, ReviewDecisionResponse } from '@/src/services/api';
+import { brcApi, ReadinessResponse, ReviewDecisionResponse } from '@/src/services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
-import { ErrorState, JsonDetails, OwnerSummary, StageStrip } from './ConsolePrimitives';
+import { DeveloperDetails, ErrorState, JsonDetails, OwnerSummary, StageStrip, StatusBadge } from './ConsolePrimitives';
+import { actionDisabledReason, isActionEnabled, whyText } from './readiness';
 
 export default function Review() {
   const [campaignId, setCampaignId] = useState('');
@@ -10,18 +11,34 @@ export default function Review() {
   const [reason, setReason] = useState('BRC R4 local console reviewed');
   const [nextTask, setNextTask] = useState('BRC-R4 local UI/API acceptance');
   const [result, setResult] = useState<ReviewDecisionResponse | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [packet, setPacket] = useState<Record<string, unknown> | null>(null);
   const [eligibility, setEligibility] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    brcApi.reviewPacket().then(setPacket).catch(() => setPacket(null));
-    brcApi.nextEligibility().then(setEligibility).catch(() => setEligibility(null));
+    brcApi.readiness()
+      .then((payload) => {
+        setReadiness(payload);
+        const latestCampaignId = String(payload.latest_campaign?.campaign_id || '');
+        setCampaignId(latestCampaignId);
+        if (isActionEnabled(payload, 'write_review_decision')) {
+          return Promise.all([
+            brcApi.reviewPacket().then(setPacket).catch(() => setPacket(null)),
+            brcApi.nextEligibility().then(setEligibility).catch(() => setEligibility(null)),
+          ]);
+        }
+        setPacket(null);
+        setEligibility(null);
+        return undefined;
+      })
+      .catch(setError);
   }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!canSubmitReview) return;
     setLoading(true);
     setError(null);
     try {
@@ -38,6 +55,10 @@ export default function Review() {
     }
   }
 
+  const canSubmitReview = isActionEnabled(readiness, 'write_review_decision') && Boolean(campaignId);
+  const reviewDisabledReason = actionDisabledReason(readiness, 'write_review_decision');
+  const latestCampaign = readiness?.latest_campaign || null;
+
   return (
     <div className="space-y-4">
       <StageStrip
@@ -46,15 +67,13 @@ export default function Review() {
         global="复盘闭环是后续 Feishu 卡片和云部署审批链路的基础。"
       />
       <OwnerSummary
-        conclusion={packet ? '基于证据写复盘结论' : '暂未读取到 campaign 证据，仍可手动写 review decision'}
-        why={packet
-          ? '系统已尝试读取 review packet 和 next eligibility，用于辅助 Owner 决策。'
-          : '当前 runtime/BRC service 可能未绑定；页面不会因为缺少证据而自动创建 campaign。'}
-        canDo="查看当前 campaign 摘要、填写 Owner 决策、记录下一步任务。"
+        conclusion={canSubmitReview ? '可以基于最近 campaign 写复盘结论' : '当前不能写复盘结论'}
+        why={canSubmitReview ? whyText(readiness) : reviewDisabledReason}
+        canDo={canSubmitReview ? '查看当前 campaign 摘要、填写 Owner 决策、记录下一步任务。' : '查看为什么 Review 不可用；Owner 不需要手填 Campaign ID。'}
         cannotDo="不会创建 campaign，不会触发 testnet，不会授权实盘或提现。"
         accountImpact="不会影响真实账户。Review decision 只是写入复盘事实。"
-        next="先确认摘要和系统建议，再填写最终决定与原因。"
-        tone={packet ? 'success' : 'warning'}
+        next={canSubmitReview ? '先确认摘要和系统建议，再填写最终决定与原因。' : '等待产生 latest campaign 后再写复盘。'}
+        tone={canSubmitReview ? 'success' : 'warning'}
       />
       {error && <ErrorState error={error} />}
 
@@ -64,16 +83,21 @@ export default function Review() {
             <CardTitle>当前 Campaign 摘要</CardTitle>
           </CardHeader>
           <CardContent>
-            {packet ? (
+            {latestCampaign ? (
               <div className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
-                <p>状态：{String((packet.review_packet as Record<string, unknown> | undefined)?.status || 'unknown')}</p>
-                <p>最终 flat：{String((packet.review_packet as Record<string, unknown> | undefined)?.final_inventory_flat ?? 'unknown')}</p>
-                <p>Profit Protect（盈利保护）：{String((packet.review_packet as Record<string, unknown> | undefined)?.profit_protect_triggered ?? 'unknown')}</p>
-                <p>Loss Lock（亏损锁定）：{String((packet.review_packet as Record<string, unknown> | undefined)?.loss_lock_triggered ?? 'unknown')}</p>
+                <p>状态 Status：<StatusBadge state={latestCampaign.status} /></p>
+                <p>结果 Outcome：{String(latestCampaign.outcome || '未结束')}</p>
+                <p>尝试次数 Attempts：{String(latestCampaign.attempt_count || 0)} / {String(latestCampaign.max_attempts || 'unknown')}</p>
+                <p>累计 P&L：{String(latestCampaign.realized_pnl ?? 'unknown')}</p>
+                <p>Profit Protect（盈利保护）：{String((packet?.review_packet as Record<string, unknown> | undefined)?.profit_protect_triggered ?? '由证据包确认')}</p>
+                <p>Loss Lock（亏损锁定）：{String((packet?.review_packet as Record<string, unknown> | undefined)?.loss_lock_triggered ?? '由证据包确认')}</p>
+                <p>Final flatness（最终无持仓/挂单）：{String((packet?.review_packet as Record<string, unknown> | undefined)?.final_inventory_flat ?? '由证据包确认')}</p>
                 <JsonDetails data={packet} label="展开 review packet" />
               </div>
             ) : (
-              <p className="text-xs leading-5 text-zinc-500">暂无可读取的 campaign 摘要。你仍可以手动记录复盘决定。</p>
+              <p className="text-xs leading-5 text-zinc-500">
+                当前没有 latest campaign，因此 Review 暂不可用。页面不会要求你手填 Campaign ID。
+              </p>
             )}
           </CardContent>
         </Card>
@@ -89,7 +113,9 @@ export default function Review() {
                 <JsonDetails data={eligibility} label="展开 next eligibility" />
               </div>
             ) : (
-              <p className="text-xs leading-5 text-zinc-500">暂无自动建议。默认不要跳过 Owner 复盘。</p>
+              <p className="text-xs leading-5 text-zinc-500">
+                暂无自动建议。默认不要跳过 Owner 复盘，也不要通过手填 ID 绕过 readiness。
+              </p>
             )}
           </CardContent>
         </Card>
@@ -104,15 +130,11 @@ export default function Review() {
         </CardHeader>
         <CardContent>
           <form className="grid grid-cols-1 gap-3 lg:grid-cols-2" onSubmit={submit}>
-            <label className="block">
-              <span className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Campaign ID</span>
-              <input
-                className="mt-1 w-full rounded-sm border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950"
-                value={campaignId}
-                onChange={(event) => setCampaignId(event.target.value)}
-                placeholder="brc_campaign_id"
-              />
-            </label>
+            <div className="rounded-sm border border-zinc-200 p-3 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">绑定 Campaign</p>
+              <p>{campaignId ? '已自动绑定最近 campaign。' : '暂无 campaign，不能提交复盘。'}</p>
+              <DeveloperDetails data={{ campaign_id: campaignId || null }} label="Campaign ID 技术详情" />
+            </div>
             <label className="block">
               <span className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Decision</span>
               <select
@@ -144,11 +166,17 @@ export default function Review() {
             </label>
             <button
               className="inline-flex items-center justify-center gap-2 rounded-sm border border-emerald-500 bg-emerald-600 px-3 py-2 text-xs font-bold uppercase tracking-widest text-white disabled:opacity-60"
-              disabled={loading || !campaignId.trim() || !reason.trim() || !nextTask.trim()}
+              disabled={loading || !canSubmitReview || !reason.trim() || !nextTask.trim()}
+              title={!canSubmitReview ? reviewDisabledReason : undefined}
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
               写入复盘结论
             </button>
+            {!canSubmitReview && (
+              <p className="text-xs leading-5 text-amber-700 dark:text-amber-300">
+                当前禁用原因：{reviewDisabledReason}
+              </p>
+            )}
           </form>
         </CardContent>
       </Card>

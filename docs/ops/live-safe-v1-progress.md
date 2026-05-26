@@ -1476,3 +1476,38 @@ Use this file for session progress and handoff notes.
   - targeted backend auth/API/runtime-context tests passed;
   - frontend `npm run lint` passed;
   - frontend `npm run build` passed.
+
+## 2026-05-26 (BRC-R4.1 Delivery Owner Guide)
+
+- Upgraded the local console from engineering status pages toward a
+  delivery-grade Owner operation guide.
+- Added readonly `GET /api/brc/readiness` as the product-state translation
+  layer. It summarizes current conclusion, reasons, account impact, next step,
+  available actions, disabled actions, latest campaign, review summary,
+  runtime summary, and developer details without mutating campaign/runtime/
+  exchange state.
+- Changed the frontend default route from dashboard to `/guide`. The Guide
+  page is now the primary Owner story entry: current conclusion, why, account
+  impact, next step, action cards, latest campaign/review summaries, and
+  folded developer detail.
+- Productized existing pages around readiness:
+  - Runtime Safety translates Runtime/GKS/Startup Guard/Profile into Owner
+    language and shows the overall conclusion.
+  - Operator Plan disables plan creation when readiness says BRC read actions
+    are unavailable and shows a confirmation card before read-only execution.
+  - Workflow distinguishes read-only, controlled testnet, and forbidden
+    intent; testnet confirmation is disabled until all readiness gates pass.
+  - Review auto-binds the latest campaign and no longer asks Owner to hand-type
+    Campaign ID by default.
+  - Ledger shows operation summaries first and keeps JSON under developer
+    detail.
+- Boundaries preserved: no new order path, no new testnet authority, no real
+  live/mainnet, no withdrawal/transfer, no automatic strategy execution, no
+  automatic sizing/leverage/side override, and no strategy-pool execution.
+- Verification completed:
+  - `python3 -m py_compile src/interfaces/api_brc_console.py src/interfaces/api_runtime_safety.py`
+  - `pytest -q tests/unit/test_brc_console_api_surface.py` -> 6 passed
+  - `pytest -q tests/unit/test_brc_controlled_testnet_endpoints.py` -> 8 passed
+  - `npm run lint`
+  - `npm run build`
+  - `git diff --check`

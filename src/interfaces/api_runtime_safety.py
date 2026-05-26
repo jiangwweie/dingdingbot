@@ -43,7 +43,9 @@ def _safe_profile(provider: Any) -> tuple[Optional[str], Optional[bool]]:
         return None, None
     profile = getattr(resolved, "profile_name", None)
     environment = getattr(resolved, "environment", None)
-    testnet = getattr(environment, "testnet", None)
+    testnet = getattr(environment, "exchange_testnet", None)
+    if testnet is None:
+        testnet = getattr(environment, "testnet", None)
     if testnet is None:
         market = getattr(resolved, "market", None)
         testnet = getattr(market, "testnet", None)
@@ -61,12 +63,16 @@ async def get_runtime_safety() -> RuntimeSafetyResponse:
     if gks is not None and hasattr(gks, "get_state"):
         state = gks.get_state()
         gks_active = bool(getattr(state, "active", state.get("active") if isinstance(state, dict) else None))
+    elif gks is not None and hasattr(gks, "is_active"):
+        gks_active = bool(gks.is_active())
 
     startup_guard_armed = None
     guard = getattr(api_module, "_startup_trading_guard_service", None)
     if guard is not None and hasattr(guard, "get_state"):
         state = guard.get_state()
         startup_guard_armed = bool(getattr(state, "armed", state.get("armed") if isinstance(state, dict) else None))
+    elif guard is not None and hasattr(guard, "is_armed"):
+        startup_guard_armed = bool(guard.is_armed())
 
     if runtime_context is None:
         summary = "Runtime is not bound, so the console can only show auth/session state."
