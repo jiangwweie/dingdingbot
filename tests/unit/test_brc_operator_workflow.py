@@ -84,6 +84,29 @@ async def test_brc_llm_workflow_blocks_forbidden_live_text_before_provider():
 
 
 @pytest.mark.asyncio
+async def test_brc_llm_workflow_blocks_testnet_upgrade_without_explicit_source_text():
+    service, repo = await _service()
+    workflow = BrcOperatorWorkflow(
+        campaign_service=service,
+        provider=FakeProvider(
+            {
+                "action": "request_testnet_rehearsal",
+                "confidence": "0.99",
+                "reason_text": "LLM attempted to upgrade generic next-campaign text",
+            }
+        ),
+    )
+
+    run = await workflow.create_workflow(source_text="帮我看下一轮能不能开")
+
+    assert run.status == BrcWorkflowStatus.BLOCKED
+    assert "requires explicit Owner text" in run.blocked_reason
+    intent = repo.llm_intents[run.llm_intent_id]
+    assert intent.action == BrcLlmIntentAction.REQUEST_TESTNET_REHEARSAL
+    assert intent.decision_result.value == "blocked"
+
+
+@pytest.mark.asyncio
 async def test_brc_llm_workflow_wrong_confirmation_blocks_run():
     service, _ = await _service()
     workflow = BrcOperatorWorkflow(
@@ -136,6 +159,33 @@ async def test_brc_llm_workflow_confirmed_read_only_executes_without_mutation():
             confirmation_phrase=READ_ONLY_CONFIRMATION,
             confirmed_by="owner",
             final_inventory={"all_flat": True},
+        )
+
+
+@pytest.mark.asyncio
+async def test_brc_llm_workflow_rejects_invalid_testnet_executor_result():
+    service, _ = await _service()
+    workflow = BrcOperatorWorkflow(
+        campaign_service=service,
+        provider=FakeProvider(
+            {
+                "action": "request_testnet_rehearsal",
+                "confidence": "0.92",
+                "reason_text": "Owner asks for controlled testnet rehearsal",
+            }
+        ),
+    )
+    run = await workflow.create_workflow(source_text="准备下一轮 testnet 演练")
+
+    async def executor(workflow_run_id: str) -> dict[str, Any]:
+        return {"campaign_id": "brc-test", "final_inventory": {"all_flat": False}}
+
+    with pytest.raises(BrcRuleViolation, match="final flat inventory"):
+        await workflow.confirm_workflow(
+            workflow_run_id=run.workflow_run_id,
+            confirmation_phrase=TESTNET_REHEARSAL_CONFIRMATION,
+            confirmed_by="owner",
+            testnet_rehearsal_executor=executor,
         )
 
 

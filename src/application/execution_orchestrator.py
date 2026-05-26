@@ -482,6 +482,11 @@ class ExecutionOrchestrator:
                     metadata={
                         "delta_exit_qty": str(projection_result.delta_exit_qty),
                         "delta_realized_pnl": str(projection_result.delta_realized_pnl),
+                        "flat_proof": {
+                            "all_flat": True,
+                            "source": "position_projection_just_closed",
+                            "position_id": projection_result.position_id,
+                        },
                     },
                 )
         except Exception as e:

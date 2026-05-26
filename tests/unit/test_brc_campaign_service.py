@@ -272,6 +272,30 @@ async def test_brc_finalize_requires_loss_locked_and_closed_attempts():
 
 
 @pytest.mark.asyncio
+async def test_brc_mock_pnl_rejects_ended_campaign_even_if_repo_returns_it():
+    service, repo = await _campaign_service()
+    campaign = await service.inject_mock_pnl(
+        amount=Decimal("-120"),
+        source=MockPnlSource.TESTNET_MOCK,
+        reason="mock loss branch",
+    )
+    assert campaign.triggered_state == BrcCampaignStatus.LOSS_LOCKED
+    repo.campaign = repo.campaign.model_copy(update={"status": BrcCampaignStatus.ENDED})
+
+    async def return_ended_campaign():
+        return repo.campaign
+
+    repo.get_current_campaign = return_ended_campaign
+
+    with pytest.raises(BrcRuleViolation, match="ended BRC campaign"):
+        await service.inject_mock_pnl(
+            amount=Decimal("1"),
+            source=MockPnlSource.TESTNET_MOCK,
+            reason="late mock pnl",
+        )
+
+
+@pytest.mark.asyncio
 async def test_brc_review_packet_summarizes_latest_finalized_campaign():
     service, _ = await _campaign_service()
     await service.switch_playbook(
@@ -368,6 +392,51 @@ async def test_brc_next_eligibility_requires_owner_review_after_loss_locked_outc
     assert eligibility.cooldown_required is True
     assert eligibility.next_campaign_allowed is False
     assert eligibility.recommended_playbook_id == "PB-000-OBSERVE-ONLY"
+
+
+@pytest.mark.asyncio
+async def test_brc_create_campaign_blocks_after_loss_locked_outcome_without_review():
+    service, _ = await _campaign_service()
+    await service.switch_playbook(
+        new_playbook_id="PB-004-BRC-CONTROLLED-TESTNET",
+        reason_category="evidence_driven",
+        reason_text="owner authorized controlled rehearsal",
+        evidence_refs=["evidence"],
+    )
+    for symbol in (ETH, BTC):
+        await service.arm_attempt(symbol=symbol, reason=symbol)
+        await service.record_attempt_entry(
+            symbol=symbol,
+            record=AttemptOpenRecord(
+                intent_id=f"intent-{symbol}",
+                signal_id=f"sig-{symbol}",
+                amount=Decimal("0.01"),
+                notional=Decimal("21"),
+            ),
+        )
+        await service.record_attempt_close(
+            symbol=symbol,
+            record=AttemptCloseRecord(close_order_id=f"close-{symbol}", exchange_order_id=None),
+        )
+    await service.inject_mock_pnl(
+        amount=Decimal("-120"),
+        source=MockPnlSource.TESTNET_MOCK,
+        reason="mock loss branch",
+    )
+    await service.finalize(
+        outcome=CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED,
+        reason="complete",
+        final_flat=True,
+    )
+
+    with pytest.raises(BrcRuleViolation, match="requires Owner review"):
+        await service.create_campaign(
+            bucket_id="next-bucket",
+            authorized_amount=Decimal("500"),
+            max_campaign_loss=Decimal("120"),
+            profit_protect_trigger=Decimal("100"),
+            reason="try next without review",
+        )
 
 
 @pytest.mark.asyncio

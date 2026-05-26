@@ -637,6 +637,15 @@ class CampaignStateService:
         target = self._parse_state(status)
         current = await self._refresh_state()
         current_state = self._parse_state(current.status)
+        if trigger is None and target in {
+            CampaignRuntimeState.CLOSED,
+            CampaignRuntimeState.PROFIT_PROTECT,
+            CampaignRuntimeState.LOSS_LOCKED,
+        }:
+            raise ValueError(
+                "explicit campaign transition trigger is required for "
+                f"{target.value}"
+            )
         transition_trigger = (
             _parse_campaign_trigger(trigger)
             if trigger is not None
@@ -1030,6 +1039,42 @@ def _build_transition_record(
             active_session_id=active_session_id,
             metadata=dict(metadata),
         )
+    if rule.requires_flat_proof and not _metadata_has_flat_proof(metadata):
+        return CampaignTransitionRecord(
+            sequence_number=sequence_number,
+            previous_state=current_state,
+            target_state=target_state,
+            trigger=trigger,
+            reason=reason,
+            updated_by=updated_by,
+            occurred_at_ms=occurred_at_ms,
+            accepted=False,
+            rejection_reason=(
+                "Campaign transition requires flat proof: "
+                f"{current_state.value}->{target_state.value} via {trigger.value}"
+            ),
+            active_strategy_contract_id=active_strategy_contract_id,
+            active_session_id=active_session_id,
+            metadata=dict(metadata),
+        )
+    if rule.requires_owner_review and not _metadata_has_owner_review(metadata):
+        return CampaignTransitionRecord(
+            sequence_number=sequence_number,
+            previous_state=current_state,
+            target_state=target_state,
+            trigger=trigger,
+            reason=reason,
+            updated_by=updated_by,
+            occurred_at_ms=occurred_at_ms,
+            accepted=False,
+            rejection_reason=(
+                "Campaign transition requires owner review evidence: "
+                f"{current_state.value}->{target_state.value} via {trigger.value}"
+            ),
+            active_strategy_contract_id=active_strategy_contract_id,
+            active_session_id=active_session_id,
+            metadata=dict(metadata),
+        )
     return CampaignTransitionRecord(
         sequence_number=sequence_number,
         previous_state=current_state,
@@ -1044,3 +1089,23 @@ def _build_transition_record(
         active_session_id=active_session_id,
         metadata=dict(metadata),
     )
+
+
+def _metadata_has_flat_proof(metadata: dict[str, Any]) -> bool:
+    flat_proof = metadata.get("flat_proof")
+    if isinstance(flat_proof, dict):
+        return bool(flat_proof.get("all_flat"))
+    if flat_proof is not None:
+        return bool(flat_proof)
+    final_inventory = metadata.get("final_inventory")
+    if isinstance(final_inventory, dict):
+        return bool(final_inventory.get("all_flat"))
+    return bool(metadata.get("all_flat"))
+
+
+def _metadata_has_owner_review(metadata: dict[str, Any]) -> bool:
+    if bool(metadata.get("owner_review")):
+        return True
+    if bool(metadata.get("owner_review_verified")):
+        return True
+    return bool(metadata.get("owner_review_decision_id"))

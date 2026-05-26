@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
 import aiohttp
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.application.bounded_risk_campaign_service import (
     BoundedRiskCampaignService,
@@ -43,6 +44,14 @@ WORKFLOW_NODE_NAMES = [
     "persist_result",
     "build_next_gate",
 ]
+TESTNET_REHEARSAL_SOURCE_TOKENS = (
+    "testnet",
+    "test net",
+    "rehearsal",
+    "测试网",
+    "演练",
+    "彩排",
+)
 
 
 def _now_ms() -> int:
@@ -74,6 +83,36 @@ class BrcLlmProvider(Protocol):
 
     async def classify(self, *, source_text: str) -> dict[str, Any]:
         ...
+
+
+class BrcTestnetRehearsalWorkflowResult(BaseModel):
+    """Validated result envelope for the fixed BRC testnet rehearsal executor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    campaign_id: str = Field(min_length=1)
+    final_inventory: dict[str, Any]
+    workflow_run_id: Optional[str] = None
+    confirmation_phrase_id: Optional[str] = None
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: Optional[dict[str, Any]] = None
+    review_packet: Optional[dict[str, Any]] = None
+    review_decision: Optional[dict[str, Any]] = None
+    mutation_executed: bool = True
+    withdrawal_executed: bool = False
+    live_ready: bool = False
+
+    @model_validator(mode="after")
+    def _validate_testnet_rehearsal_boundary(self) -> "BrcTestnetRehearsalWorkflowResult":
+        if not bool(self.final_inventory.get("all_flat")):
+            raise ValueError("BRC testnet rehearsal result requires final flat inventory")
+        if not self.mutation_executed:
+            raise ValueError("BRC testnet rehearsal result must record testnet mutation execution")
+        if self.withdrawal_executed:
+            raise ValueError("BRC testnet rehearsal result cannot execute withdrawals")
+        if self.live_ready:
+            raise ValueError("BRC testnet rehearsal result is never live-ready")
+        return self
 
 
 @dataclass(frozen=True)
@@ -355,7 +394,19 @@ class BrcOperatorWorkflow:
         if run.action == BrcLlmIntentAction.REQUEST_TESTNET_REHEARSAL:
             if testnet_rehearsal_executor is None:
                 raise BrcRuleViolation("BRC testnet rehearsal executor unavailable")
-            return await testnet_rehearsal_executor(run.workflow_run_id)
+            result = await testnet_rehearsal_executor(run.workflow_run_id)
+            try:
+                validated = BrcTestnetRehearsalWorkflowResult.model_validate(result)
+            except Exception as exc:
+                raise BrcRuleViolation(
+                    f"invalid BRC testnet rehearsal result: {exc}"
+                ) from exc
+            if (
+                validated.workflow_run_id is not None
+                and validated.workflow_run_id != run.workflow_run_id
+            ):
+                raise BrcRuleViolation("BRC testnet rehearsal result workflow id mismatch")
+            return validated.model_dump(mode="json")
         raise BrcRuleViolation(f"unsupported BRC LLM workflow action: {run.action.value}")
 
     @staticmethod
@@ -398,4 +449,17 @@ class BrcOperatorWorkflow:
             BrcLlmIntentAction.REQUEST_TESTNET_REHEARSAL,
         }:
             return f"BRC LLM action is not allowed: {action.value}"
+        if (
+            action == BrcLlmIntentAction.REQUEST_TESTNET_REHEARSAL
+            and not BrcOperatorWorkflow._source_explicitly_requests_testnet_rehearsal(source_text)
+        ):
+            return (
+                "BRC testnet rehearsal intent requires explicit Owner text "
+                "mentioning testnet/rehearsal"
+            )
         return BrcOperatorWorkflow._forbidden_text_reason(source_text)
+
+    @staticmethod
+    def _source_explicitly_requests_testnet_rehearsal(source_text: str) -> bool:
+        normalized = source_text.lower()
+        return any(token in normalized for token in TESTNET_REHEARSAL_SOURCE_TOKENS)

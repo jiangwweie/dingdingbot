@@ -196,6 +196,7 @@ class BoundedRiskCampaignService:
         existing = await self._repo.get_current_campaign()
         if existing is not None and existing.status != BrcCampaignStatus.ENDED:
             raise BrcRuleViolation(f"active BRC campaign already exists: {existing.campaign_id}")
+        await self._ensure_new_campaign_allowed_after_latest()
         now = _now_ms()
         campaign = BoundedRiskCampaign(
             campaign_id=f"brc-{uuid.uuid4().hex[:12]}",
@@ -250,6 +251,31 @@ class BoundedRiskCampaignService:
         if campaign is None:
             raise BrcRuleViolation("no BRC campaign found")
         return campaign
+
+    async def _ensure_new_campaign_allowed_after_latest(self) -> None:
+        latest = await self.get_latest_campaign()
+        if latest is None or latest.status != BrcCampaignStatus.ENDED:
+            return
+        if latest.outcome != CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED:
+            return
+        review = await self._repo.get_latest_review_decision()
+        allowed_review_decisions = {
+            BrcReviewDecision.ACCEPTED,
+            BrcReviewDecision.TESTNET_REHEARSAL_AUTHORIZED,
+        }
+        if (
+            review is None
+            or review.campaign_id != latest.campaign_id
+            or review.decision not in allowed_review_decisions
+            or (
+                latest.finalized_at_ms is not None
+                and review.created_at_ms < latest.finalized_at_ms
+            )
+        ):
+            raise BrcRuleViolation(
+                "latest loss-locked BRC campaign requires Owner review before "
+                "creating a new campaign"
+            )
 
     async def switch_playbook(
         self,
@@ -443,6 +469,8 @@ class BoundedRiskCampaignService:
         reason: str,
     ) -> MockPnlEvent:
         campaign = await self.require_current_campaign()
+        if campaign.status == BrcCampaignStatus.ENDED:
+            raise BrcRuleViolation("cannot inject mock PnL into an ended BRC campaign")
         now = _now_ms()
         cumulative = campaign.realized_pnl + amount
         triggered_state: Optional[BrcCampaignStatus] = None

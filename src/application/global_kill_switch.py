@@ -20,12 +20,14 @@ GLOBAL_KILL_SWITCH_UNAVAILABLE_REASON = "GKS_STATE_UNAVAILABLE"
 GLOBAL_KILL_SWITCH_MISSING_REASON = "GKS_STATE_MISSING"
 GLOBAL_KILL_SWITCH_CORRUPT_REASON = "GKS_STATE_CORRUPT"
 GLOBAL_KILL_SWITCH_CONFLICTING_REASON = "GKS_STATE_CONFLICTING"
+GLOBAL_KILL_SWITCH_NOT_INITIALIZED_REASON = "GKS_NOT_INITIALIZED"
 
 _FAIL_CLOSED_STATE_REASONS = {
     GLOBAL_KILL_SWITCH_UNAVAILABLE_REASON,
     GLOBAL_KILL_SWITCH_MISSING_REASON,
     GLOBAL_KILL_SWITCH_CORRUPT_REASON,
     GLOBAL_KILL_SWITCH_CONFLICTING_REASON,
+    GLOBAL_KILL_SWITCH_NOT_INITIALIZED_REASON,
     "GKS_INIT_FAILED",
 }
 
@@ -53,12 +55,9 @@ class GlobalKillSwitchService:
         self._repository = repository
         self._trace_service = trace_service
         self._notifier = notifier
-        self._state = GlobalKillSwitchState(
-            active=False,
-            reason=None,
-            updated_by="system",
-            updated_at_ms=self._now_ms(),
-            source="memory_default",
+        self._state = self._fail_closed_state(
+            reason=GLOBAL_KILL_SWITCH_NOT_INITIALIZED_REASON,
+            source="constructor_fail_closed",
         )
 
     async def initialize(self) -> None:

@@ -15,6 +15,7 @@ from src.application.global_kill_switch import (
     GLOBAL_KILL_SWITCH_CONFLICTING_REASON,
     GLOBAL_KILL_SWITCH_CORRUPT_REASON,
     GLOBAL_KILL_SWITCH_MISSING_REASON,
+    GLOBAL_KILL_SWITCH_NOT_INITIALIZED_REASON,
     GLOBAL_KILL_SWITCH_UNAVAILABLE_REASON,
     KILL_SWITCH_BLOCK_REASON,
     GlobalKillSwitchService,
@@ -586,6 +587,17 @@ async def test_gks_has_priority_over_capital_protection():
 
 
 @pytest.mark.asyncio
+async def test_gks_constructor_defaults_fail_closed_before_initialize(gks_repo):
+    service = GlobalKillSwitchService(repository=gks_repo)
+
+    state = service.get_state()
+
+    assert state.active is True
+    assert state.reason == GLOBAL_KILL_SWITCH_NOT_INITIALIZED_REASON
+    assert state.source == "constructor_fail_closed"
+
+
+@pytest.mark.asyncio
 async def test_startup_restores_persisted_on_state(gks_repo):
     await gks_repo.set_state(
         active=True,
@@ -650,7 +662,8 @@ async def test_activation_persistence_failure_logs_high_and_does_not_change_cach
         await service.set_state(active=True, reason="stop", updated_by="owner")
 
     state = service.get_state()
-    assert state.active is False
+    assert state.active is True
+    assert state.reason == GLOBAL_KILL_SWITCH_NOT_INITIALIZED_REASON
     assert "[GKS-v0][HIGH]" in caplog.text
 
 
@@ -692,7 +705,7 @@ def test_gks_mutation_endpoint_disabled_by_default(monkeypatch):
         )
 
     assert response.status_code == 403
-    assert service.is_active() is False
+    assert service.is_active() is True
 
 
 def test_api_set_dependencies_receives_same_startup_guard_instance(monkeypatch):
@@ -842,7 +855,12 @@ async def test_campaign_state_endpoint_rejects_invalid_transition(monkeypatch):
     repo = _CampaignRepo()
     service = CampaignStateService(repository=repo)
     await service.initialize()
-    await service.set_state(status="hard_locked", reason="risk", updated_by="owner")
+    await service.set_state(
+        status="hard_locked",
+        reason="risk",
+        updated_by="owner",
+        metadata={"owner_review": True},
+    )
     monkeypatch.setattr(api_module, "_campaign_state_service", service)
     app = FastAPI()
     app.include_router(runtime_router)

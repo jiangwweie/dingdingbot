@@ -158,7 +158,12 @@ async def test_invalid_hard_lock_to_armed_transition_is_rejected():
     service = CampaignStateService(repository=repo)
 
     await service.initialize()
-    await service.set_state(status="hard_locked", reason="risk", updated_by="owner")
+    await service.set_state(
+        status="hard_locked",
+        reason="risk",
+        updated_by="owner",
+        metadata={"owner_review": True},
+    )
 
     with pytest.raises(ValueError, match="Invalid campaign state transition"):
         await service.set_state(status="armed", reason="bad", updated_by="owner")
@@ -190,6 +195,7 @@ async def test_runtime_events_advance_campaign_state_machine():
     closed_state = await service.apply_runtime_event(
         event=CampaignRuntimeEvent.POSITION_CLOSED,
         reason="runtime close completed",
+        metadata={"flat_proof": {"all_flat": True}},
     )
 
     assert profit_state.status == "profit_protect"
@@ -274,6 +280,7 @@ def test_replay_campaign_transitions_proves_accepted_path():
                 reason="runtime close flat",
                 updated_by="runtime",
                 occurred_at_ms=4,
+                metadata={"flat_proof": {"all_flat": True}},
             ),
             CampaignTransitionInput(
                 target_state="observe",
@@ -281,6 +288,10 @@ def test_replay_campaign_transitions_proves_accepted_path():
                 reason="owner reviewed final evidence",
                 updated_by="owner",
                 occurred_at_ms=5,
+                metadata={
+                    "owner_review": True,
+                    "flat_proof": {"all_flat": True},
+                },
             ),
         ],
     )
@@ -337,6 +348,58 @@ async def test_runtime_event_from_observe_cannot_arm_campaign():
 
 
 @pytest.mark.asyncio
+async def test_position_closed_requires_flat_proof_metadata():
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+
+    await service.initialize()
+    await service.set_state(status="armed", reason="owner arm", updated_by="owner")
+
+    with pytest.raises(ValueError, match="requires flat proof"):
+        await service.apply_runtime_event(
+            event=CampaignRuntimeEvent.POSITION_CLOSED,
+            reason="runtime close without flat proof",
+        )
+
+    assert service.get_state().status == "armed"
+    assert service.get_transition_audit_records()[-1].accepted is False
+
+
+@pytest.mark.asyncio
+async def test_review_gated_transition_requires_owner_review_metadata():
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+
+    await service.initialize()
+
+    with pytest.raises(ValueError, match="requires owner review"):
+        await service.set_state(
+            status="hard_locked",
+            reason="manual hard lock without review evidence",
+            updated_by="owner",
+        )
+
+    assert service.get_state().status == "observe"
+
+
+@pytest.mark.asyncio
+async def test_terminal_runtime_states_require_explicit_trigger():
+    repo = _CampaignRepo()
+    service = CampaignStateService(repository=repo)
+
+    await service.initialize()
+    await service.set_state(status="armed", reason="owner arm", updated_by="owner")
+
+    with pytest.raises(ValueError, match="explicit campaign transition trigger"):
+        await service.set_state(
+            status="closed",
+            reason="manual implicit close",
+            updated_by="owner",
+            metadata={"flat_proof": {"all_flat": True}},
+        )
+
+
+@pytest.mark.asyncio
 async def test_runtime_transition_audit_records_context_metadata():
     repo = _CampaignRepo()
     service = CampaignStateService(repository=repo)
@@ -374,7 +437,12 @@ async def test_transition_ledger_records_success_and_rejection_for_replay():
 
     await service.initialize()
     await service.set_state(status="armed", reason="owner arm", updated_by="owner")
-    await service.set_state(status="hard_locked", reason="risk", updated_by="owner")
+    await service.set_state(
+        status="hard_locked",
+        reason="risk",
+        updated_by="owner",
+        metadata={"owner_review": True},
+    )
 
     with pytest.raises(ValueError, match="hard_locked->armed via owner_arm"):
         await service.set_state(status="armed", reason="bad rearm", updated_by="owner")

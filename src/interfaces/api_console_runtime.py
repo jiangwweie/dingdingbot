@@ -169,6 +169,8 @@ class CampaignStateUpdateRequest(BaseModel):
     updated_by: str = Field(default="owner", max_length=128)
     active_strategy_contract_id: Optional[str] = Field(default=None, max_length=128)
     active_session_id: Optional[str] = Field(default=None, max_length=128)
+    trigger: Optional[CampaignTransitionTrigger] = None
+    metadata: dict = Field(default_factory=dict)
 
 
 def _load_api_module():
@@ -1171,6 +1173,8 @@ async def update_campaign_state(
             updated_by=body.updated_by,
             active_strategy_contract_id=body.active_strategy_contract_id,
             active_session_id=body.active_session_id,
+            trigger=body.trigger,
+            metadata=body.metadata,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
