@@ -1647,10 +1647,7 @@ Use this file for session progress and handoff notes.
   `active BRC campaign already exists: brc-267d6efee3b0`.
   This run kept `mutation_executed=false`, `withdrawal_executed=false`, and
   `live_ready=false`.
-- Current blocker:
-  active campaign `brc-267d6efee3b0` is still `active`, with one ETH attempt
-  `armed`, mock PnL `0`, local active orders `0`, local active positions `0`,
-  and local `all_flat=true`.
+- This blocker was superseded by the follow-up cleanup and rerun recorded below.
 - Prior full-chain evidence remains available:
   workflow `brc-wf-8e3155486b24`, campaign `brc-4e83f98ccb4a`,
   ETH entry/close, BTC entry/close, mock profit/loss-lock, finalize, review
@@ -1658,3 +1655,31 @@ Use this file for session progress and handoff notes.
 - Added `docs/ops/brc-owner-console-v0-acceptance-review.md`.
 - No real live/mainnet, withdrawal/transfer, strategy-pool execution, or
   automatic sizing/leverage authority was added.
+
+## 2026-05-26 (BRC Owner Console v0 Testnet Rerun Follow-up)
+
+- Owner authorized resolving the stale active campaign and rerunning the fixed
+  ETH/BTC Binance testnet rehearsal.
+- Cleaned stale campaigns only through testnet finalize/review APIs; no direct
+  database override was used.
+- Fixed the LLM testnet workflow failure path:
+  - entry responses with `attempt_locked=false` now stop the workflow before
+    close;
+  - stale runtime gates are closed only with `all_flat=true` proof;
+  - entry-not-locked attempts are marked `blocked` before manual-stop finalize;
+  - ended campaign invariant now checks that no active attempt remains.
+- Verification:
+  - `python3 -m py_compile src/interfaces/api_console_runtime.py src/application/bounded_risk_campaign_service.py`
+  - `pytest -q tests/unit/test_brc_controlled_testnet_endpoints.py` -> 10 passed
+- Rerun result:
+  - workflow `brc-wf-59ad10e73dd7`;
+  - campaign `brc-9167363bf771`;
+  - stopped at ETH entry because Binance testnet returned `-1007` timeout with
+    execution status unknown;
+  - campaign ended as `ended_manual_stop`;
+  - ETH attempt marked `blocked`;
+  - final inventory `all_flat=true`;
+  - review `brc-review-970ba0da4197` recorded as `needs_followup`;
+  - `withdrawal_executed=false`, `live_ready=false`.
+- Current acceptance status:
+  `APPROVE_UI_AND_API_WITH_TESTNET_BLOCKER_RECORDED`.

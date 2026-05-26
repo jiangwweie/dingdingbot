@@ -461,6 +461,33 @@ class BoundedRiskCampaignService:
         )
         return updated_attempt
 
+    async def mark_attempt_blocked(
+        self,
+        *,
+        symbol: str,
+        reason: str,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> CampaignAttempt:
+        campaign = await self.require_current_campaign()
+        index, attempt = self._require_last_attempt(campaign, symbol=symbol)
+        if attempt.status != BrcAttemptStatus.ARMED:
+            raise BrcRuleViolation(f"only armed BRC attempts can be blocked; got {attempt.status.value}")
+        now = _now_ms()
+        updated_attempt = attempt.model_copy(update={"status": BrcAttemptStatus.BLOCKED})
+        attempts = list(campaign.attempts)
+        attempts[index] = updated_attempt
+        await self._repo.save_campaign(campaign.model_copy(update={"attempts": attempts, "updated_at_ms": now}))
+        await self._repo.append_campaign_event(
+            campaign_id=campaign.campaign_id,
+            event_type="attempt_blocked",
+            occurred_at_ms=now,
+            symbol=symbol,
+            attempt_id=attempt.attempt_id,
+            reason=reason,
+            metadata=dict(metadata or {}),
+        )
+        return updated_attempt
+
     async def inject_mock_pnl(
         self,
         *,
@@ -1056,9 +1083,10 @@ class BoundedRiskCampaignService:
         if campaign.status == BrcCampaignStatus.ENDED:
             checks.append(
                 BrcInvariantCheck(
-                    name="ended_campaign_attempts_closed",
+                    name="ended_campaign_has_no_active_attempt",
                     passed=all(
-                        attempt.status == BrcAttemptStatus.CLOSED
+                        attempt.status
+                        not in {BrcAttemptStatus.ARMED, BrcAttemptStatus.ENTRY_FILLED}
                         for attempt in campaign.attempts
                     ),
                     detail="ended campaigns must not keep active BRC attempts",

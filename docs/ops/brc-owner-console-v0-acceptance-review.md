@@ -4,12 +4,14 @@ Date: 2026-05-26
 
 ## Verdict
 
-`APPROVE_UI_AND_API_WITH_TESTNET_RERUN_BLOCKED`
+`APPROVE_UI_AND_API_WITH_TESTNET_BLOCKER_RECORDED`
 
 The v0 console docs, backend readiness contract, and frontend P0 pages are
-implemented and locally verified. A new fixed BRC ETH/BTC testnet rehearsal was
-not executed in this acceptance pass because the campaign gate correctly
-blocked the confirmation: an active BRC campaign already exists.
+implemented and locally verified. The Owner-authorized fixed BRC ETH/BTC
+testnet rehearsal rerun reached the ETH entry step, then stopped fail-closed
+because Binance testnet returned `-1007` with execution status unknown. The
+workflow did not continue to close or BTC, marked the attempt blocked, restored
+safe controls, verified flat inventory, and wrote review evidence.
 
 ## Implemented Scope
 
@@ -58,44 +60,49 @@ Observed:
 - runtime reported `SYSTEM READY`;
 - GKS restored active and Startup Guard remained protective after startup.
 
-## Testnet Rehearsal Attempt
+## Testnet Rehearsal Rerun
 
 Through `LLM Copilot`:
 
-- Owner text: `帮我准备下一轮 testnet 演练`;
-- workflow id: `brc-wf-5b07c9a504a8`;
+- Owner text: `帮我准备下一轮固定 ETH BTC testnet rehearsal，按 Owner 确认流程执行`;
+- workflow id: `brc-wf-59ad10e73dd7`;
 - detected action: `request_testnet_rehearsal`;
 - confirmation phrase entered: `CONFIRM_BRC_TESTNET_REHEARSAL`;
-- result: blocked/failed by campaign gate;
+- result: failed at ETH entry before any close/BTC branch;
 - blocked reason:
-  `active BRC campaign already exists: brc-267d6efee3b0`;
-- `mutation_executed=false`;
+  `BRC controlled entry for eth did not lock attempt: ... binance {"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}`;
 - `withdrawal_executed=false`;
 - `live_ready=false`.
 
-This is the expected fail-closed behavior. No reset, force-finalize, or
-database override was performed.
+This is the expected fail-closed behavior for unknown exchange execution
+status. No database override was performed.
 
-## Current Campaign Blocker
+## Cleanup And Review Evidence
 
-Current active campaign:
+Latest rerun campaign:
 
-- campaign id: `brc-267d6efee3b0`;
-- status: `active`;
+- campaign id: `brc-9167363bf771`;
+- status: `ended`;
+- outcome: `ended_manual_stop`;
 - playbook: `PB-004-BRC-CONTROLLED-TESTNET`;
 - attempt count: `1 / 2`;
-- attempt state: ETH attempt is `armed`;
+- attempt state: ETH attempt is `blocked`;
 - realized/mock PnL: `0`;
 - mock PnL events: none;
-- local active orders: `0`;
-- local active positions: `0`;
-- local flat proof: `all_flat=true`;
-- latest review: `brc-review-989fa242bf9b`, decision `accepted`,
+- current active campaign endpoint: `404` / no active BRC campaign;
+- final inventory: `all_flat=true`;
+- invariant checks: all passed, including `ended_campaign_has_no_active_attempt`;
+- review id: `brc-review-970ba0da4197`, decision `needs_followup`,
   `real_live_authorized=false`, `withdrawal_authorized=false`,
   `strategy_execution_authorized=false`.
 
-Because the active campaign is not ended, a fresh fixed rehearsal cannot create
-a new BRC campaign.
+During this acceptance pass, earlier stale local campaigns left by old workflow
+behavior were also closed only through the testnet finalize/review APIs. The
+code now prevents that drift by:
+
+- stopping the workflow immediately when `attempt_locked=false`;
+- closing stale runtime gates only with flat proof;
+- marking entry-not-locked attempts as `blocked` before manual-stop finalize.
 
 ## Prior Full-Chain Evidence Available
 
@@ -115,14 +122,13 @@ A previous completed fixed BRC ETH/BTC rehearsal remains available as evidence:
 
 ## Review Decision
 
-Do not rerun the testnet rehearsal until the active campaign
-`brc-267d6efee3b0` is intentionally closed or otherwise resolved through an
-Owner-approved campaign cleanup task.
+Do not treat this as a completed ETH/BTC full-chain rehearsal. The console and
+workflow boundary passed review, but the current live testnet rerun is blocked
+by Binance testnet `-1007` timeout / unknown execution status at ETH entry.
 
 Recommended next Owner decision:
 
 ```text
-Resolve active campaign brc-267d6efee3b0 before BRC Owner Console v0 final
-testnet rerun.
+Review Binance testnet timeout / reconciliation handling, then rerun the fixed
+ETH/BTC rehearsal.
 ```
-

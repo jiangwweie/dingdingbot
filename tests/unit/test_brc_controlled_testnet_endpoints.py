@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from src.application.bounded_risk_campaign_service import BoundedRiskCampaignService
 from src.application import brc_operator_workflow
-from src.domain.bounded_risk_campaign import BrcAttemptStatus
+from src.domain.bounded_risk_campaign import BrcAttemptStatus, CampaignOutcome
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.domain.models import Direction, Order, OrderRole, OrderStatus, OrderType, SignalResult
 from src.interfaces import api as api_module
@@ -219,6 +219,7 @@ class MutableStartupGuard:
 
 class FakeCampaignStateService:
     def __init__(self) -> None:
+        self.set_state_calls = []
         self.state = SimpleNamespace(
             scope_key="runtime:default",
             status="observe",
@@ -234,6 +235,7 @@ class FakeCampaignStateService:
         return self.state
 
     async def set_state(self, **kwargs):
+        self.set_state_calls.append(kwargs)
         self.state = SimpleNamespace(
             scope_key="runtime:default",
             status=kwargs["status"],
@@ -458,6 +460,24 @@ async def test_brc_entry_rejects_body_override(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_brc_evidence_returns_404_without_active_campaign(monkeypatch):
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(),
+        _brc_campaign_service=await _brc_service(),
+        _exchange_gateway=_gateway(),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.get("/api/runtime/test/brc/evidence")
+
+    assert resp.status_code == 404
+    assert "no active BRC campaign" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_brc_blocked_intent_does_not_record_attempt_entry(monkeypatch):
     service = await _brc_service()
     await service.create_campaign(
@@ -555,6 +575,14 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
 
         arm_btc = client.post("/api/runtime/test/brc/btc/arm-attempt", json={"reason": "btc"})
         assert arm_btc.status_code == 200
+        reset_call = next(
+            call
+            for call in campaign_state_service.set_state_calls
+            if call["status"] == "observe"
+        )
+        assert reset_call["metadata"]["owner_review"] is True
+        assert reset_call["metadata"]["owner_review_verified"] is True
+        assert reset_call["metadata"]["flat_proof"]["all_flat"] is True
         entry_btc = client.post("/api/runtime/test/brc/btc/execute-controlled-entry")
         assert entry_btc.status_code == 200
         position_repo.active = [_position(BTC, Decimal("0.002"))]
@@ -794,3 +822,59 @@ async def test_brc_llm_workflow_api_confirmed_testnet_rehearsal_creates_campaign
         assert workflow["withdrawal_executed"] is False
         assert workflow["live_ready"] is False
         assert workflow["result_json"]["review_packet"]["status"] == "ended"
+
+
+@pytest.mark.asyncio
+async def test_brc_llm_workflow_blocks_on_unlocked_entry_and_finalizes_flat_campaign(monkeypatch):
+    monkeypatch.setattr(
+        brc_operator_workflow.OpenAICompatibleBrcLlmProvider,
+        "from_env",
+        classmethod(lambda cls: FakeTestnetLlmProvider()),
+    )
+    service = await _brc_service()
+    position_repo = MutablePositionRepo()
+    campaign_state_service = FakeCampaignStateService()
+    campaign_state_service.state.status = "armed"
+    orch = _orchestrator()
+    blocked = _intent(ETH)
+    blocked.status = ExecutionIntentStatus.BLOCKED
+    blocked.blocked_reason = "DAILY_TRADE_COUNT_LIMIT"
+    orch.execute_signal = AsyncMock(return_value=blocked)
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(),
+        _brc_campaign_service=service,
+        _campaign_state_service=campaign_state_service,
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(price=Decimal("2100"), min_notional=Decimal("1")),
+        _startup_trading_guard_service=MutableStartupGuard(),
+        _global_kill_switch_service=MutableGlobalKillSwitch(),
+        _position_repo=position_repo,
+        _order_repo=EmptyOrderRepo(),
+        _trace_service=None,
+    )
+
+    with TestClient(_app()) as client:
+        created = client.post(
+            "/api/runtime/test/brc/llm/workflows",
+            json={"text": "帮我准备下一轮 testnet 演练"},
+        )
+        assert created.status_code == 200
+        workflow_run_id = created.json()["workflow"]["workflow_run_id"]
+
+        confirmed = client.post(
+            f"/api/runtime/test/brc/llm/workflows/{workflow_run_id}/confirm",
+            json={"confirmation_phrase": "CONFIRM_BRC_TESTNET_REHEARSAL"},
+        )
+
+    assert confirmed.status_code == 409
+    assert "did not lock attempt" in confirmed.json()["detail"]
+    orch.execute_controlled_close.assert_not_awaited()
+    assert await service.get_current_campaign() is None
+    latest = await service.require_latest_campaign()
+    assert latest.outcome == CampaignOutcome.ENDED_MANUAL_STOP
+    assert latest.last_attempt is not None
+    assert latest.last_attempt.status == BrcAttemptStatus.BLOCKED
+    packet = await service.build_review_packet(final_inventory={"all_flat": True})
+    assert all(check.passed for check in packet.invariant_checks)
+    assert any(call["status"] == "closed" for call in campaign_state_service.set_state_calls)
