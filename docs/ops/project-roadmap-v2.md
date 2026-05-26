@@ -125,6 +125,20 @@ continuity before any new execution-oriented branch.
 
 See `docs/adr/0009-non-real-live-execution-authorization-boundary.md`.
 
+2026-05-26 BRC-R4 operator-console update:
+
+The current engineering stage is `BRC-R4 API Surface Cleanup + Local Operator
+Console`. The system now has a local Owner-facing BRC control surface with
+username/password/Google-Authenticator login, BRC-first API mounting, operator
+plan/confirmation flow, LLM workflow visibility, review decision input, ledger
+views, runtime safety summary, and human-readable chain explanations.
+
+This is still local operation governance, not production deployment. User
+tables/RBAC, Feishu cards, cloud hardening, CSRF/nonce/idempotency,
+secret-manager integration, strategy pool construction, withdrawal interfaces,
+automatic strategy execution, and real live remain future or unauthorized
+tracks.
+
 2026-05-25 PLC execution-stage update:
 
 - PLC Phase 0 local sandbox, Phase 1 read-only runtime adapter, Phase 2 paper

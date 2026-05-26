@@ -1443,3 +1443,36 @@ Use this file for session progress and handoff notes.
   LifecycleStrategy/ExitMonitor runtime, and further paper/testnet runtime.
 - No runtime start, exchange call, order path, strategy implementation, testnet
   action, real live action, commit, or push was performed.
+
+## 2026-05-26 (BRC-R4 API Surface Cleanup + Local Operator Console)
+
+- Implemented BRC-R4 as the current local operation-governance console slice.
+- Backend:
+  - slimmed `src/interfaces/api.py` into a BRC-first FastAPI app assembly;
+  - added single-Owner operator auth with username, PBKDF2 password hash,
+    Google Authenticator-compatible TOTP, and signed HttpOnly session cookie;
+  - added helper script `scripts/brc_auth_setup.py`;
+  - mounted only auth, BRC, operator, LLM workflow, runtime safety, and
+    dev/testnet BRC routers in the main API app;
+  - legacy research/config/runtime routes are no longer mounted by the main
+    control-console API.
+- Frontend:
+  - rebuilt `gemimi-web-front` as `BRC Operator Console`;
+  - kept the compact workbench visual style;
+  - removed legacy runtime/research/config pages and unused dependencies;
+  - added login, dashboard, operator, workflow, review, ledger, and runtime
+    safety pages;
+  - added human-readable chain explanations, blocked-state reasons, stage/next
+    step/global planning panels, and expandable JSON/evidence details.
+- Boundaries preserved:
+  - no user table;
+  - no real live/mainnet;
+  - no withdrawal/transfer;
+  - no automatic strategy execution;
+  - no automatic sizing/leverage/side override;
+  - no strategy pool implementation;
+  - no testnet order was executed by this implementation update.
+- Verification completed:
+  - targeted backend auth/API/runtime-context tests passed;
+  - frontend `npm run lint` passed;
+  - frontend `npm run build` passed.

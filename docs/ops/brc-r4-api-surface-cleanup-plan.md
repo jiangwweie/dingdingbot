@@ -1,9 +1,43 @@
 # BRC-R4 API Surface Cleanup Plan
 
 Date: 2026-05-26
-Status: DESIGN_REVIEW
-Scope: backend API architecture planning only. No code changes, no runtime
-profile changes, no exchange action, no testnet order, no real live authority.
+Status: IMPLEMENTED_LOCAL_R4
+Scope: backend API + local Web operator console cleanup. No runtime profile
+changes, no exchange action, no testnet order, no real live authority.
+
+## 0. Implementation Update - 2026-05-26
+
+BRC-R4 has been implemented as a local API/control-console slice:
+
+- `src/interfaces/api.py` is now a BRC-first FastAPI app assembly shell.
+- Operator auth is single-Owner, environment-configured:
+  username + PBKDF2 password hash + Google Authenticator-compatible TOTP +
+  signed HttpOnly session cookie.
+- The mounted API surface is reduced to:
+  - `/api/auth/*`;
+  - `/api/brc/*`;
+  - `/api/brc/operator/*`;
+  - `/api/brc/llm/workflows/*`;
+  - `/api/runtime/safety`;
+  - `/api/dev/testnet/brc/*`.
+- Legacy research/config/runtime pages are removed from the local Web console.
+- `gemimi-web-front` is rebuilt as `BRC Operator Console`, preserving the
+  existing compact workbench style while making the chain human-readable:
+  current stage, next suggested step, global planning stage, blocked reasons,
+  confirmation explanation, and expandable evidence JSON.
+- Direct testnet entry/close/mock/finalize controls are not exposed as normal
+  Web buttons. Fixed BRC testnet rehearsal remains workflow-confirmation gated.
+
+Implementation compromise:
+
+- `api_console_runtime.py` is still retained as the source of existing BRC and
+  controlled-testnet endpoint behavior, and the new routers wrap those
+  functions. A later low-risk cleanup can move schemas/functions into smaller
+  files after the local console is accepted.
+- New routers still rely on the compatibility globals populated by
+  `bind_runtime_context()`. Full dependency conversion to direct
+  `request.app.state.runtime` is deferred because it touches more execution
+  surface and is not required for the BRC-R4 local console acceptance.
 
 ## 1. Why This Plan Exists
 
@@ -117,35 +151,24 @@ Notes:
 - Web must not auto-fill either phrase.
 - Testnet rehearsal remains fixed, server-owned, and profile-gated.
 
-### 4.4 Runtime Read
+### 4.4 Runtime Safety Read
 
 | Method | Path | Purpose | Web usage |
 | --- | --- | --- | --- |
-| `GET` | `/api/runtime/overview` | Runtime summary | Status header. |
-| `GET` | `/api/runtime/health` | Runtime health | Safety panel. |
-| `GET` | `/api/runtime/positions` | Current positions | Inventory view. |
-| `GET` | `/api/runtime/execution/orders` | Orders | Execution table. |
-| `GET` | `/api/runtime/execution/intents` | Execution intents | Intent table. |
-| `GET` | `/api/runtime/events` | Timeline | Event stream. |
-| `GET` | `/api/runtime/inventory/brc` | BRC ETH/BTC exchange + PG flatness | Preflight/final flatness. |
+| `GET` | `/api/runtime/safety` | Runtime binding, profile, testnet, GKS, startup guard summary | Safety panel. |
 
 Notes:
 
 - This surface is read-only.
-- It may expose status and evidence but must not perform cleanup.
+- It may expose status and human-readable explanation but must not perform
+  cleanup, arm, unblock, close, cancel, or place orders.
 
 ### 4.5 Runtime Control
 
-| Method | Path | Purpose | Web usage |
-| --- | --- | --- | --- |
-| `GET` | `/api/runtime/control/global-kill-switch` | Read GKS | Safety panel. |
-| `GET` | `/api/runtime/control/startup-trading-guard` | Read startup guard | Safety panel. |
-| `GET` | `/api/runtime/control/campaign-state` | Read runtime campaign state | Gate panel. |
-| `GET` | `/api/runtime/control/campaign-state/replay-evidence` | Read replay proof | Audit panel. |
-
-For BRC-R4 local console, mutation controls should remain hidden by default.
-If exposed locally, they must stay under a separate "danger/control" section
-and require explicit typed confirmation.
+Direct runtime-control mutation is not exposed in the BRC-R4 Web console.
+Existing lower-level control/test endpoints remain available only through
+their test modules or the `/api/dev/testnet/brc/*` development surface, and are
+still protected by auth plus the existing runtime/testnet/profile gates.
 
 ## 5. Endpoint Disposition
 
@@ -269,4 +292,3 @@ The first implementation slice should be router extraction and dependency
 cleanup for BRC campaign/operator/workflow read surfaces only. Direct testnet
 mutation endpoints should be moved last, because they are higher risk and
 already have working gates.
-
