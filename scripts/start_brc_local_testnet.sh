@@ -4,19 +4,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-if [[ -f ".env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source ".env"
-  set +a
-fi
+load_env_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == *"="* ]] || continue
+    export "$line"
+  done < "$file"
+}
 
-if [[ -f ".env.local" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source ".env.local"
-  set +a
-fi
+load_env_file ".env"
+load_env_file ".env.local"
 
 # Local acceptance defaults. Production/cloud must override these explicitly.
 export EXCHANGE_TESTNET=true
@@ -46,7 +45,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-python3 src/main.py &
+python3 -m src.main &
 BACKEND_PID=$!
 
 (

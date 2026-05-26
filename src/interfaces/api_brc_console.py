@@ -219,7 +219,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
     mutation_env_ready = _env_enabled("RUNTIME_CONTROL_API_ENABLED") and _env_enabled(
         "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"
     )
-    testnet_ready = runtime_ready and gks_active is False and startup_guard_armed is True and mutation_env_ready
+    testnet_ready = runtime_ready and mutation_env_ready
 
     if runtime_context is None:
         mode: Literal["standalone_console", "runtime_bound_console", "brc_ready", "testnet_ready", "blocked"] = "standalone_console"
@@ -246,15 +246,11 @@ async def get_brc_readiness() -> BrcReadinessResponse:
     testnet_missing = []
     if not runtime_ready:
         testnet_missing.append(no_runtime_reason)
-    if gks_active is not False:
-        testnet_missing.append("全局安全开关 GKS 必须处于未阻断状态。")
-    if startup_guard_armed is not True:
-        testnet_missing.append("启动保护 Startup Guard 必须完成受控 armed 状态。")
     if not _env_enabled("RUNTIME_CONTROL_API_ENABLED"):
         testnet_missing.append("本地 runtime control mutation 开关未开启。")
     if not _env_enabled("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"):
         testnet_missing.append("本地 test signal injection 开关未开启。")
-    no_testnet_reason = " ".join(testnet_missing) or "受控 testnet workflow 需要 BRC profile、Exchange Testnet、GKS 和 Startup Guard 同时满足。"
+    no_testnet_reason = " ".join(testnet_missing) or "受控 testnet workflow 需要 BRC profile、Exchange Testnet 和本地 mutation/test-signal 开关同时满足。"
 
     actions = [
         _action(
@@ -315,7 +311,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             disabled_reason=no_testnet_reason,
             route="/workflow",
             button_label="准备 testnet 演练",
-            what_happens="只有在专用确认短语输入后，才可能进入固定 testnet rehearsal。",
+            what_happens="只有在专用确认短语输入后，固定 workflow 才会临时打开 entry window，并在结束后恢复 GKS/Startup Guard 保护态。",
             risk_level="controlled_testnet",
         ),
     ]
