@@ -197,6 +197,12 @@ class BrcAccountFactsResponse(BaseModel):
     source: AccountFactsSource
     truth_level: AccountFactsTruthLevel
     generated_at_ms: int
+    evidence_refs: list[str] = Field(default_factory=list)
+    checked_sources: list[str] = Field(default_factory=list)
+    source_snapshots: dict[str, Any] = Field(default_factory=dict)
+    reconciliation_checked_at_ms: int
+    mismatch_count: int = 0
+    unknown_unmanaged_counts: dict[str, int] = Field(default_factory=dict)
     account_summary: dict[str, Any] = Field(default_factory=dict)
     positions: list[dict[str, Any]] = Field(default_factory=list)
     open_orders: list[dict[str, Any]] = Field(default_factory=list)
@@ -327,6 +333,7 @@ async def _operation_markets_orders_summary() -> dict[str, Any]:
     facts = await _account_facts(_api_module())
     payload = facts.model_dump(mode="json")
     account = dict(payload.get("account_summary") or {})
+    unknown_counts = dict(payload.get("unknown_unmanaged_counts") or {})
     payload.update(
         {
             "active_positions": payload.get("positions", []),
@@ -335,8 +342,14 @@ async def _operation_markets_orders_summary() -> dict[str, Any]:
             "all_local_flat": account.get("all_local_flat", False),
             "data_source": payload.get("source"),
             "reconciliation_status_value": (payload.get("reconciliation_status") or {}).get("status"),
-            "unknown_or_unmanaged_order_count": len(payload.get("unknown_or_unmanaged_orders") or []),
-            "unknown_or_unmanaged_position_count": len(payload.get("unknown_or_unmanaged_positions") or []),
+            "unknown_or_unmanaged_order_count": unknown_counts.get(
+                "orders",
+                len(payload.get("unknown_or_unmanaged_orders") or []),
+            ),
+            "unknown_or_unmanaged_position_count": unknown_counts.get(
+                "positions",
+                len(payload.get("unknown_or_unmanaged_positions") or []),
+            ),
         }
     )
     return payload
@@ -798,6 +811,37 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
         local_available=local_available,
         exchange_available=exchange_available,
     )
+    checked_sources = list(reconciliation_status.get("checked_sources") or [])
+    mismatch_count = len(reconciliation_status.get("mismatches") or [])
+    unknown_unmanaged_counts = {
+        "orders": len(unknown_orders),
+        "positions": len(unknown_positions),
+    }
+    source_snapshots = {
+        "local_pg": {
+            "available": local_available,
+            "position_count": len(local_positions),
+            "open_order_count": len(local_open_orders),
+            "read_errors": errors,
+        },
+        "exchange_testnet": {
+            "available": exchange_available,
+            "position_count": len(exchange["positions"]) if exchange_available else 0,
+            "open_order_count": len(exchange["open_orders"]) if exchange_available else 0,
+            "recent_order_count": len(exchange["recent_orders"]) if exchange_available else 0,
+            "recent_fill_count": len(exchange["recent_fills"]) if exchange_available else 0,
+            "reason": exchange["reason"],
+            "read_errors": exchange["errors"],
+        },
+        "exchange_live": {
+            "available": False,
+            "reason": "forbidden in Owner Console account facts slice",
+        },
+    }
+    evidence_refs = [
+        f"account_facts:{source}:{truth_level}:{generated_at_ms}",
+        f"reconciliation:{reconciliation_status.get('status', 'unknown')}:{generated_at_ms}",
+    ]
     exposure_by_symbol = _exposure_by_symbol_from_facts(
         local_summary=local_summary,
         positions=positions,
@@ -830,6 +874,12 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
         source=source,
         truth_level=truth_level,
         generated_at_ms=generated_at_ms,
+        evidence_refs=evidence_refs,
+        checked_sources=checked_sources,
+        source_snapshots=source_snapshots,
+        reconciliation_checked_at_ms=generated_at_ms,
+        mismatch_count=mismatch_count,
+        unknown_unmanaged_counts=unknown_unmanaged_counts,
         account_summary={
             "controlled_symbols": _CONTROLLED_SYMBOLS,
             "active_position_count": len(positions),

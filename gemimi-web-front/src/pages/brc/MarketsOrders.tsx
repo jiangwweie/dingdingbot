@@ -23,6 +23,7 @@ export default function MarketsOrders() {
 
   const account = data.account_summary || {};
   const reconciliationStatus = String(data.reconciliation_status?.status || 'unknown');
+  const unknownCounts = data.unknown_unmanaged_counts || {};
   const localSummaryOnly = data.source === 'local_pg' && data.truth_level === 'summary';
   const attention = data.blockers.length > 0
     || data.positions.length > 0
@@ -53,6 +54,7 @@ export default function MarketsOrders() {
           ['truth_level', data.truth_level],
           ['reconciliation', reconciliationStatus],
           ['generated', new Date(data.generated_at_ms).toLocaleString()],
+          ['checked_sources', data.checked_sources.length ? data.checked_sources.join(', ') : 'none'],
         ]} />
         <FactCard title="Account Summary" rows={[
           ['active positions', String(account.active_position_count ?? 0)],
@@ -60,11 +62,25 @@ export default function MarketsOrders() {
           ['local flat', String(account.all_local_flat ?? false)],
           ['complete truth', String(account.complete_exchange_account_truth ?? false)],
         ]} />
+        <FactCard title="Evidence Summary" rows={[
+          ['mismatches', String(data.mismatch_count ?? 0)],
+          ['unknown orders', String(unknownCounts.orders ?? data.unknown_or_unmanaged_orders.length)],
+          ['unknown positions', String(unknownCounts.positions ?? data.unknown_or_unmanaged_positions.length)],
+          ['reconciled_at', new Date(data.reconciliation_checked_at_ms || data.generated_at_ms).toLocaleString()],
+        ]} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <FactCard title="Connection Health" rows={[
           ['local_pg', String(recordAt(data.connection_health, 'local_pg').available ?? false)],
           ['exchange_testnet', String(recordAt(data.connection_health, 'exchange_testnet_read').available ?? false)],
           ['exchange_live', String(recordAt(data.connection_health, 'exchange_live_read').available ?? false)],
           ['mutation', String(data.connection_health?.mutation_enabled ?? false)],
+        ]} />
+        <FactCard title="Source Snapshots" rows={[
+          ['local_pg', <JsonDetails data={recordAt(data.source_snapshots, 'local_pg')} label="Local PG source" />],
+          ['exchange_testnet', <JsonDetails data={recordAt(data.source_snapshots, 'exchange_testnet')} label="Exchange testnet source" />],
+          ['exchange_live', <JsonDetails data={recordAt(data.source_snapshots, 'exchange_live')} label="Exchange live boundary" />],
         ]} />
       </div>
 
@@ -106,6 +122,7 @@ export default function MarketsOrders() {
           <List title="Limitations" items={data.limitations} />
           <List title="Warnings" items={data.warnings} />
           <List title="Blockers" items={data.blockers} />
+          <List title="Evidence refs" items={data.evidence_refs} />
           <JsonDetails data={data.reconciliation_status} label="Reconciliation details" />
         </CardContent>
       </Card>

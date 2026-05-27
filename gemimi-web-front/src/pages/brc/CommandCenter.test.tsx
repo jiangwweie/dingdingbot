@@ -42,6 +42,9 @@ function planningState(operationType: 'emergency_flatten' | 'emergency_stop_runt
         source: 'mixed',
         truth_level: 'reconciled',
         reconciliation_status: { status: 'clean' },
+        checked_sources: ['local_pg', 'exchange_testnet'],
+        mismatch_count: 0,
+        evidence_refs: ['account_facts:mixed:reconciled:test'],
         unknown_or_unmanaged_orders: [],
         unknown_or_unmanaged_positions: [],
       },
@@ -200,6 +203,9 @@ describe('OperationPreflightModal emergency planning', () => {
     expect(screen.getByText(/diagnostic candidates, not executable actions/)).toBeTruthy();
     expect(screen.getByText('actual_execution')).toBeTruthy();
     expect(screen.getAllByText('unavailable').length).toBeGreaterThan(0);
+    expect(screen.getByText('checked_sources')).toBeTruthy();
+    expect(screen.getByText('mismatch_count')).toBeTruthy();
+    expect(screen.getByText('evidence_refs')).toBeTruthy();
     expect(screen.getByText('Dry-run candidates')).toBeTruthy();
     expect((screen.getByText('Confirm dry-run record') as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByRole('button', { name: /^Flatten$/i })).toBeNull();

@@ -1683,3 +1683,24 @@ Use this file for session progress and handoff notes.
   - `withdrawal_executed=false`, `live_ready=false`.
 - Current acceptance status:
   `APPROVE_UI_AND_API_WITH_TESTNET_BLOCKER_RECORDED`.
+
+## 2026-05-27 (BRC-R5-001A/B/C Evidence Hardening)
+
+- Implemented `BRC-R5-001A` as a bounded Owner Console smoke evidence mode:
+  `python3 scripts/brc_owner_console_smoke.py --mode runtime-bound-evidence --output /tmp/brc-owner-console-evidence.json`.
+- The evidence mode stays in a bounded runtime-bound service context and covers
+  capabilities, account facts evidence summary, `switch_playbook`
+  preflight/confirm refs, operation get/list, emergency stop runtime envelope,
+  and emergency flatten dry-run record only.
+- Implemented `BRC-R5-001B` as
+  `docs/ops/brc-r5-001-tf001-carrier-full-chain-validation-plan.md`.
+  TF-001 remains a carrier validation object only; it is not alpha proof,
+  profitability evidence, strategy-pool construction, or live readiness.
+- Implemented `BRC-R5-001C` as read-only account facts/reconciliation evidence
+  hardening. `/api/brc/account/facts` now exposes evidence refs, checked
+  sources, source snapshots, reconciliation timestamp, mismatch count, and
+  unknown/unmanaged counts for Owner Console display and Operation preflight
+  summaries.
+- No live/mainnet, actual flatten, order cancel/close, withdrawal/transfer,
+  arbitrary trading, strategy-pool execution, or LLM direct execution authority
+  was added.

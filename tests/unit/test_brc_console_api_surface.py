@@ -464,6 +464,12 @@ def test_brc_account_facts_returns_local_pg_summary_without_mocking_history(monk
     assert payload["live_ready"] is False
     assert payload["source"] == "local_pg"
     assert payload["truth_level"] == "summary"
+    assert payload["checked_sources"] == ["local_pg"]
+    assert payload["mismatch_count"] == 0
+    assert payload["unknown_unmanaged_counts"] == {"orders": 0, "positions": 0}
+    assert payload["reconciliation_checked_at_ms"] == payload["generated_at_ms"]
+    assert any(item.startswith("account_facts:local_pg:summary:") for item in payload["evidence_refs"])
+    assert payload["source_snapshots"]["exchange_live"]["available"] is False
     assert payload["account_summary"]["active_position_count"] == 1
     assert payload["account_summary"]["open_order_count"] == 1
     assert payload["account_summary"]["complete_exchange_account_truth"] is False
@@ -556,6 +562,8 @@ def test_brc_account_facts_reconciliation_detects_unknown_exchange_order(monkeyp
     assert payload["source"] == "mixed"
     assert payload["truth_level"] == "reconciled"
     assert payload["reconciliation_status"]["status"] == "mismatch"
+    assert payload["mismatch_count"] == 1
+    assert payload["unknown_unmanaged_counts"]["orders"] == 1
     assert payload["unknown_or_unmanaged_orders"][0]["record"]["id"] == "exchange-orphan"
     assert any(
         item["type"] == "exchange_order_missing_locally"
@@ -575,6 +583,24 @@ def test_brc_account_facts_does_not_add_trading_endpoints(monkeypatch):
         assert client.post("/api/brc/account/runtime/stop").status_code == 404
         assert client.post("/api/brc/account/withdrawal").status_code == 404
         assert client.post("/api/brc/account/transfer").status_code == 404
+
+
+def test_runtime_bound_evidence_smoke_payload_is_bounded():
+    from scripts.brc_owner_console_smoke import run_runtime_bound_evidence_smoke
+
+    payload = asyncio.run(run_runtime_bound_evidence_smoke())
+
+    assert payload["mode"] == "runtime-bound-evidence"
+    assert payload["safety_boundary"]["live_ready"] is False
+    assert payload["safety_boundary"]["actual_flatten_executed"] is False
+    assert payload["safety_boundary"]["order_cancel_executed"] is False
+    assert payload["switch_playbook"]["confirm"]["status"] == "executed"
+    assert payload["switch_playbook"]["preflight"]["idempotency_key_present"] is True
+    assert payload["emergency_stop_runtime"]["does_not_flatten"] is True
+    assert payload["emergency_stop_runtime"]["does_not_cancel_orders"] is True
+    assert payload["emergency_flatten"]["preflight"]["dry_run_only"] is True
+    assert payload["emergency_flatten"]["actual_flatten_executed"] is False
+    assert payload["account_facts_summary"]["mismatch_count"] == 0
 
 
 def test_brc_audit_and_investigator_are_read_only(monkeypatch):

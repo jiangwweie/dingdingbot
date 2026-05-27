@@ -47,6 +47,16 @@ function accountFactsPayload() {
     source: 'local_pg',
     truth_level: 'summary',
     generated_at_ms: Date.now(),
+    evidence_refs: ['account_facts:local_pg:summary:test'],
+    checked_sources: ['local_pg'],
+    source_snapshots: {
+      local_pg: { available: true, position_count: 0, open_order_count: 0 },
+      exchange_testnet: { available: false },
+      exchange_live: { available: false, reason: 'forbidden in Owner Console account facts slice' },
+    },
+    reconciliation_checked_at_ms: Date.now(),
+    mismatch_count: 0,
+    unknown_unmanaged_counts: { orders: 0, positions: 0 },
     account_summary: {
       active_position_count: 0,
       open_order_count: 0,
@@ -103,6 +113,10 @@ describe('MarketsOrders', () => {
     expect(screen.getAllByText('local_pg').length).toBeGreaterThan(0);
     expect(screen.getAllByText('summary').length).toBeGreaterThan(0);
     expect(screen.getAllByText('not_available').length).toBeGreaterThan(0);
+    expect(screen.getByText('Evidence Summary')).toBeTruthy();
+    expect(screen.getByText('checked_sources')).toBeTruthy();
+    expect(screen.getByText('mismatches')).toBeTruthy();
+    expect(screen.getByText('Evidence refs')).toBeTruthy();
     expect(screen.getByText('Recent orders are unavailable; they are not mocked.')).toBeTruthy();
     expect(screen.getByText('Recent fills are unavailable; they are not mocked.')).toBeTruthy();
     expect(screen.getByText(/Cannot place orders, cancel orders, close positions, flatten, withdraw, transfer, enable live/)).toBeTruthy();

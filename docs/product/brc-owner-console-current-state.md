@@ -77,6 +77,20 @@ not a generic exchange terminal.
 Unknown or unmanaged exchange orders/positions block medium and high risk
 operations.
 
+Current account facts also expose read-only evidence metadata:
+
+- `evidence_refs`: stable refs for the generated account facts and
+  reconciliation snapshot;
+- `checked_sources`: sources included in the reconciliation verdict;
+- `source_snapshots`: per-source availability and count summary;
+- `reconciliation_checked_at_ms`: timestamp for the reconciliation evidence;
+- `mismatch_count`: number of reconciliation mismatches;
+- `unknown_unmanaged_counts`: counts of unknown/unmanaged orders and positions.
+
+These fields are evidence and audit aids only. They do not expose write
+capability, generic exchange terminal behavior, or complete exchange account
+truth.
+
 ## Migration Notes
 
 The project migration runner is Alembic (`alembic.ini`, `migrations/`). The BRC
@@ -214,10 +228,34 @@ Expected runtime-bound behavior:
 - Operation result refs are returned from the ledger and can feed Recent
   Operation Results.
 
-Do not use the smoke helpers to run actual fixed testnet rehearsal,
-Operation-backed runtime stop, or flatten dry-run by default. Do not run
-live/mainnet, actual flatten, order cancel, close position, withdrawal,
-transfer, arbitrary trading, or LLM direct execution from these paths.
+Runtime-bound evidence smoke:
+
+```bash
+python3 scripts/brc_owner_console_smoke.py \
+  --mode runtime-bound-evidence \
+  --output /tmp/brc-owner-console-evidence.json
+```
+
+This emits a local JSON evidence packet covering:
+
+- operation capabilities;
+- account facts source/truth/reconciliation evidence summary;
+- `switch_playbook` preflight and confirm with operation/preflight/idempotency
+  binding;
+- operation get/list refs;
+- emergency stop runtime preflight/result envelope without flatten/cancel/close
+  semantics;
+- emergency flatten dry-run record only.
+
+The output path should be outside the repo or otherwise ignored. Do not commit
+local evidence packets unless a task explicitly requests a sanitized artifact.
+
+Do not use the smoke helpers to run actual fixed testnet rehearsal or
+Operation-backed runtime stop by default. The runtime-bound evidence mode may
+persist an emergency flatten dry-run record, but it must not execute actual
+flatten. Do not run live/mainnet, actual flatten, order cancel, close position,
+withdrawal, transfer, arbitrary trading, or LLM direct execution from these
+paths.
 
 ## Current API Surface
 
@@ -268,9 +306,11 @@ dry-run records.
 
 Next work should stay explicit and separately authorized:
 
-- harden runtime-bound smoke beyond the in-memory test context before treating
+- complete `BRC-R5-001A` runtime-bound smoke evidence hardening before treating
   the console as a long-running runtime console;
-- improve account facts reconciliation coverage and evidence display without
+- use `BRC-R5-001B` to plan TF-001 as a carrier validation only, not alpha proof
+  or live readiness;
+- complete `BRC-R5-001C` account facts reconciliation evidence hardening without
   exposing a generic exchange terminal;
 - keep any future actual flatten, order cancel, close position, or live/mainnet
   capability behind a separate design, safety review, migration, and Owner

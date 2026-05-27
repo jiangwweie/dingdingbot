@@ -530,8 +530,11 @@ export function OperationPreflightModal({
                 <QuickFact label="account_source" value={stringAt(preflight.account_order_summary, 'source', stringAt(preflight.account_order_summary, 'data_source', 'unknown'))} />
                 <QuickFact label="truth_level" value={stringAt(preflight.account_order_summary, 'truth_level', 'summary')} />
                 <QuickFact label="reconciliation" value={stringAt(recordAt(preflight.account_order_summary, 'reconciliation_status'), 'status', stringAt(preflight.account_order_summary, 'reconciliation_status_value', 'unknown'))} />
+                <QuickFact label="checked_sources" value={arrayAt(preflight.account_order_summary, 'checked_sources').length ? arrayAt(preflight.account_order_summary, 'checked_sources').join(', ') : 'none'} />
+                <QuickFact label="mismatch_count" value={String(valueAt(preflight.account_order_summary, 'mismatch_count', 0))} />
                 <QuickFact label="unmanaged_orders" value={String(arrayAt(preflight.account_order_summary, 'unknown_or_unmanaged_orders').length || valueAt(preflight.account_order_summary, 'unknown_or_unmanaged_order_count', 0))} />
                 <QuickFact label="unmanaged_positions" value={String(arrayAt(preflight.account_order_summary, 'unknown_or_unmanaged_positions').length || valueAt(preflight.account_order_summary, 'unknown_or_unmanaged_position_count', 0))} />
+                <QuickFact label="evidence_refs" value={String(arrayAt(preflight.account_order_summary, 'evidence_refs').length)} />
               </div>
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                 <JsonDetails data={preflight.before} label="Before" />

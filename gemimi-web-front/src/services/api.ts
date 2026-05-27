@@ -159,6 +159,12 @@ export type AccountFactsResponse = {
   source: AccountFactsSource;
   truth_level: AccountFactsTruthLevel;
   generated_at_ms: number;
+  evidence_refs: string[];
+  checked_sources: string[];
+  source_snapshots: Record<string, unknown>;
+  reconciliation_checked_at_ms: number;
+  mismatch_count: number;
+  unknown_unmanaged_counts: Record<string, number>;
   account_summary: Record<string, unknown>;
   positions: Array<Record<string, unknown>>;
   open_orders: Array<Record<string, unknown>>;
