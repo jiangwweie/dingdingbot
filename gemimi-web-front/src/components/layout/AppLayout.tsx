@@ -1,14 +1,17 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BookOpenCheck,
   Bot,
+  BookOpenCheck,
+  ChevronDown,
   GitBranch,
   History,
   ListChecks,
   LogOut,
   Moon,
   Monitor,
+  MoreHorizontal,
+  PlayCircle,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -16,6 +19,7 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import { Badge } from '@/src/components/ui/Badge';
 import { brcApi } from '@/src/services/api';
 import { useTheme } from './ThemeContext';
 
@@ -32,9 +36,9 @@ function ThemeToggle() {
   return (
     <div className="flex rounded border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-800 dark:bg-zinc-900">
       {[
-        ['light', Sun, 'Light Mode'],
-        ['dark', Moon, 'Dark Mode'],
-        ['system', Monitor, 'System Preference'],
+        ['light', Sun, 'Light'],
+        ['dark', Moon, 'Dark'],
+        ['system', Monitor, 'System'],
       ].map(([value, Icon, title]) => (
         <button
           key={String(value)}
@@ -52,51 +56,46 @@ function ThemeToggle() {
   );
 }
 
-const navItems = [
-  {
-    domain: 'P0 Owner Console',
-    links: [
-      { name: 'Command Center 控制台', to: '/command-center', icon: Monitor },
-      { name: 'LLM Copilot 对话', to: '/llm-copilot', icon: Bot },
-      { name: 'Strategy / Playbook 打法', to: '/strategy-playbook', icon: GitBranch },
-      { name: 'Risk & Account 风险账户', to: '/risk-account', icon: ShieldCheck },
-      { name: 'Runtime Control 运行控制', to: '/runtime-control', icon: ShieldAlert },
-    ],
-  },
-  {
-    domain: 'P1 Review / Audit',
-    links: [
-      { name: 'Campaigns 轮次', to: '/campaigns', icon: ListChecks },
-      { name: 'Review 复盘决策', to: '/review', icon: BookOpenCheck },
-      { name: 'Audit Trail 审计', to: '/audit-trail', icon: History },
-      { name: 'Ledger 操作记录', to: '/ledger', icon: History },
-    ],
-  },
-  {
-    domain: 'P2 Developer',
-    links: [
-      { name: 'Guide 操作向导', to: '/guide', icon: ListChecks },
-      { name: 'Operator Plan 只读计划', to: '/operator', icon: TerminalSquare },
-      { name: 'Workflow 旧流程', to: '/workflow', icon: GitBranch },
-      { name: 'Developer Detail 技术详情', to: '/developer', icon: TerminalSquare },
-    ],
-  },
+const primaryNav = [
+  { name: 'Command Center', to: '/command-center', icon: Monitor },
+  { name: 'Markets & Orders', to: '/markets-orders', icon: ShieldCheck },
+  { name: 'Campaign', to: '/campaign', icon: ListChecks },
+  { name: 'Review / Evidence', to: '/review-evidence', icon: BookOpenCheck },
+  { name: 'Fixed Rehearsal', to: '/fixed-testnet-rehearsal', icon: PlayCircle },
+];
+
+const moreNav = [
+  { name: 'Strategy / Playbook', to: '/strategy-playbook', icon: GitBranch },
+  { name: 'Campaigns legacy', to: '/campaigns', icon: ListChecks },
+  { name: 'Review legacy', to: '/review', icon: BookOpenCheck },
+  { name: 'Audit Trail', to: '/audit-trail', icon: History },
+  { name: 'Ledger', to: '/ledger', icon: History },
+  { name: 'Guide legacy', to: '/guide', icon: ListChecks },
+  { name: 'Read-only Operator', to: '/operator', icon: TerminalSquare },
+  { name: 'LLM legacy', to: '/llm-copilot', icon: Bot },
+  { name: 'Workflow legacy', to: '/workflow', icon: GitBranch },
+  { name: 'Runtime Control', to: '/runtime-control', icon: ShieldAlert },
+  { name: 'Developer Detail', to: '/developer', icon: TerminalSquare },
 ];
 
 const routeTitles: Record<string, string> = {
-  '/command-center': 'Command Center 控制台',
-  '/llm-copilot': 'LLM Copilot 对话',
-  '/strategy-playbook': 'Strategy / Playbook 打法',
-  '/risk-account': 'Risk & Account 风险账户',
-  '/runtime-control': 'Runtime Control 运行控制',
-  '/guide': 'Guide 操作向导',
-  '/operator': 'Operator Plan 只读计划',
-  '/workflow': 'Workflow 受控流程',
-  '/review': 'Review 复盘决策',
-  '/ledger': 'Ledger 操作记录',
-  '/campaigns': 'Campaigns 轮次管理',
-  '/audit-trail': 'Audit Trail 审计链路',
-  '/developer': 'Developer Detail 技术详情',
+  '/command-center': 'Command Center',
+  '/markets-orders': 'Markets & Orders',
+  '/campaign': 'Campaign',
+  '/review-evidence': 'Review / Evidence',
+  '/fixed-testnet-rehearsal': 'Fixed Testnet Rehearsal',
+  '/llm-copilot': 'LLM legacy',
+  '/strategy-playbook': 'Strategy / Playbook',
+  '/risk-account': 'Risk & Account legacy',
+  '/runtime-control': 'Runtime Control legacy',
+  '/guide': 'Guide legacy',
+  '/operator': 'Read-only Operator legacy',
+  '/workflow': 'Workflow legacy',
+  '/review': 'Review legacy',
+  '/ledger': 'Ledger',
+  '/campaigns': 'Campaigns legacy',
+  '/audit-trail': 'Audit Trail',
+  '/developer': 'Developer Detail',
 };
 
 export default function AppLayout() {
@@ -116,90 +115,107 @@ export default function AppLayout() {
   return (
     <RefreshContext.Provider value={{ refreshCount }}>
       <div className="flex h-screen w-full overflow-hidden bg-white font-sans text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-        <aside className="z-20 flex w-64 flex-shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-900/30">
-          <div className="border-b border-zinc-200 bg-zinc-100/50 p-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80">
-            <h1 className="text-[11px] font-bold uppercase tracking-widest text-blue-500">BRC Owner Console</h1>
-            <div className="mt-1 flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-              <p className="font-mono text-[10px] uppercase tracking-tighter text-zinc-500">Local Console</p>
-            </div>
+        <aside className="z-20 flex w-56 flex-shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
+            <Link to="/command-center" className="block">
+              <h1 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">BRC Console</h1>
+              <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Local Owner</p>
+            </Link>
           </div>
 
-          <nav className="flex-1 space-y-6 overflow-y-auto px-2 py-4">
-            {navItems.map((group) => (
-              <div key={group.domain}>
-                <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
-                  {group.domain}
-                </p>
-                <ul className="space-y-0.5">
-                  {group.links.map((link) => {
-                    const Icon = link.icon;
-                    return (
-                      <li key={link.to}>
-                        <NavLink
-                          to={link.to}
-                          className={({ isActive }) => cn(
-                            'flex items-center gap-2 rounded-sm border-l-2 px-2 py-[6px] text-[11px] font-medium transition-colors',
-                            isActive
-                              ? 'border-blue-500 bg-blue-600/10 font-bold text-blue-500 dark:text-blue-400'
-                              : 'border-transparent text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-100',
-                          )}
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                          {link.name}
-                        </NavLink>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
+          <nav className="flex-1 overflow-y-auto px-2 py-3">
+            <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Phase 0</p>
+            <ul className="space-y-1">
+              {primaryNav.map((link) => (
+                <NavItem key={link.to} {...link} />
+              ))}
+            </ul>
+
+            <details className="mt-5" open={moreNav.some((item) => item.to === location.pathname)}>
+              <summary className="flex cursor-pointer list-none items-center justify-between px-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                <span className="flex items-center gap-1.5"><MoreHorizontal className="h-3 w-3" /> Legacy / Developer</span>
+                <ChevronDown className="h-3 w-3" />
+              </summary>
+              <ul className="mt-2 space-y-1">
+                {moreNav.map((link) => (
+                  <NavItem key={link.to} {...link} compact />
+                ))}
+              </ul>
+            </details>
           </nav>
 
-          <div className="border-t border-zinc-200 bg-zinc-100/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
-            <p className="text-[10px] leading-4 text-zinc-500">
-              Live / withdrawal / strategy execution: <span className="font-bold text-rose-500">unauthorized</span>
-            </p>
+          <div className="space-y-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="flex items-center justify-between">
+              <Badge variant="info">testnet</Badge>
+              <Badge variant="danger">live 未授权</Badge>
+            </div>
+            <p className="text-[10px] leading-4 text-zinc-500">Phase 0：readiness summary + fixed testnet carrier。No live, transfer, or generic operation execute.</p>
           </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-[#09090b]">
-          <header className="z-10 flex h-[38px] items-center justify-between border-b border-zinc-200 bg-zinc-50/80 px-4 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/80">
-            <div className="flex items-center space-x-3">
-              <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-700 dark:text-zinc-300">
+          <header className="z-10 flex h-12 items-center justify-between border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                 {routeTitles[location.pathname] || 'BRC Console'}
               </h2>
-              <div className="h-3.5 w-px bg-zinc-300 dark:bg-zinc-700" />
-              <span className="rounded border border-zinc-300/50 bg-zinc-200/50 px-1.5 py-0.5 font-mono text-[9px] font-bold text-zinc-600 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-400">
-                OWNER-GATED
-              </span>
+              <Badge variant="outline">Owner gated</Badge>
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center gap-2">
               <button
                 onClick={handleManualRefresh}
-                className="flex items-center space-x-1.5 rounded-sm border border-zinc-300 px-2 py-1 text-zinc-700 transition-colors hover:bg-zinc-200 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                className="inline-flex items-center gap-1.5 rounded-sm border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
-                <RefreshCw className="h-3 w-3" />
-                <span className="text-[10px] font-bold uppercase">Refresh</span>
+                <RefreshCw className="h-3.5 w-3.5" />
+                刷新
               </button>
-              <div className="h-4 w-px bg-zinc-300 dark:bg-zinc-700" />
               <ThemeToggle />
               <button
                 onClick={logout}
-                className="flex items-center space-x-1.5 rounded-sm border border-zinc-300 px-2 py-1 text-zinc-700 transition-colors hover:bg-zinc-200 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                className="inline-flex items-center gap-1.5 rounded-sm border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
-                <LogOut className="h-3 w-3" />
-                <span className="text-[10px] font-bold uppercase">Logout</span>
+                <LogOut className="h-3.5 w-3.5" />
+                退出
               </button>
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          <main className="flex-1 overflow-y-auto p-4">
             <Outlet />
           </main>
         </div>
       </div>
     </RefreshContext.Provider>
+  );
+}
+
+function NavItem({
+  name,
+  to,
+  icon: Icon,
+  compact = false,
+}: {
+  name: string;
+  to: string;
+  icon: React.ComponentType<{ className?: string }>;
+  compact?: boolean;
+}) {
+  return (
+    <li>
+      <NavLink
+        to={to}
+        className={({ isActive }) => cn(
+          'flex items-center gap-2 rounded-sm px-2 text-sm font-medium transition-colors',
+          compact ? 'py-1.5 text-xs' : 'py-2.5',
+          isActive
+            ? 'bg-blue-600 text-white'
+            : 'text-zinc-600 hover:bg-zinc-200/70 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100',
+        )}
+      >
+        <Icon className="h-4 w-4" />
+        {name}
+      </NavLink>
+    </li>
   );
 }

@@ -134,10 +134,44 @@ export type ReadinessResponse = {
 export type MarketsOrdersResponse = {
   conclusion: string;
   account_impact: string;
+  source: AccountFactsSource;
+  truth_level: AccountFactsTruthLevel;
+  reconciliation_status: Record<string, unknown>;
   symbols: Array<Record<string, unknown>>;
   open_orders: Array<Record<string, unknown>>;
   active_positions: Array<Record<string, unknown>>;
+  recent_orders: Array<Record<string, unknown>>;
+  recent_fills: Array<Record<string, unknown>>;
+  exposure_by_symbol: Record<string, Record<string, unknown>>;
+  unknown_or_unmanaged_orders: Array<Record<string, unknown>>;
+  unknown_or_unmanaged_positions: Array<Record<string, unknown>>;
+  limitations: string[];
+  warnings: string[];
+  blockers: string[];
   developer_details: Record<string, unknown>;
+  live_ready: false;
+};
+
+export type AccountFactsSource = 'local_pg' | 'exchange_testnet' | 'exchange_live' | 'mixed' | 'unavailable';
+export type AccountFactsTruthLevel = 'summary' | 'exchange_read' | 'reconciled' | 'unavailable';
+
+export type AccountFactsResponse = {
+  source: AccountFactsSource;
+  truth_level: AccountFactsTruthLevel;
+  generated_at_ms: number;
+  account_summary: Record<string, unknown>;
+  positions: Array<Record<string, unknown>>;
+  open_orders: Array<Record<string, unknown>>;
+  recent_orders: Array<Record<string, unknown>>;
+  recent_fills: Array<Record<string, unknown>>;
+  exposure_by_symbol: Record<string, Record<string, unknown>>;
+  unknown_or_unmanaged_orders: Array<Record<string, unknown>>;
+  unknown_or_unmanaged_positions: Array<Record<string, unknown>>;
+  connection_health: Record<string, unknown>;
+  reconciliation_status: Record<string, unknown>;
+  limitations: string[];
+  warnings: string[];
+  blockers: string[];
   live_ready: false;
 };
 
@@ -145,6 +179,7 @@ export type AuditTrailResponse = {
   conclusion: string;
   account_impact: string;
   timeline: Array<Record<string, unknown>>;
+  operation_results: Array<Record<string, unknown>>;
   operator_actions: Array<Record<string, unknown>>;
   workflow_runs: Array<Record<string, unknown>>;
   review_decisions: Array<Record<string, unknown>>;
@@ -190,6 +225,74 @@ export type ReviewDecisionResponse = {
   review_decision: Record<string, unknown>;
   live_ready: false;
   access_boundary?: string;
+};
+
+export type OperationCapabilityStatus =
+  | 'enabled'
+  | 'available'
+  | 'operation_preflight_available'
+  | 'preflight_planning_available'
+  | 'preflight_dry_run_available'
+  | 'legacy_dev_path'
+  | 'requires_operation_layer'
+  | 'design_surface_with_preflight'
+  | 'design_surface'
+  | 'unavailable'
+  | 'forbidden'
+  | 'not_implemented';
+
+export type OperationCapability = {
+  operation_type: string;
+  status: OperationCapabilityStatus;
+  display_name: string;
+  risk_level: 'read_only' | 'low' | 'medium' | 'high' | 'forbidden';
+  allowed_env: string[];
+  confirmation_required: boolean;
+  backend_executor?: string | null;
+  current_reason: string;
+  requires_operation_layer: boolean;
+  executable_through_operation: boolean;
+  dry_run_only?: boolean;
+};
+
+export type OperationPreflightResponse = {
+  operation_id: string;
+  preflight_id: string;
+  operation_type: string;
+  decision: 'allow' | 'warn' | 'block' | 'unavailable' | 'expired';
+  summary: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  account_order_summary: Record<string, unknown>;
+  runtime_summary: Record<string, unknown>;
+  campaign_summary: Record<string, unknown>;
+  playbook_summary: Record<string, unknown>;
+  risk_summary: {
+    passed?: string[];
+    warnings?: string[];
+    blockers?: string[];
+    [key: string]: unknown;
+  };
+  confirmation_requirement: {
+    required: boolean;
+    phrase?: string | null;
+    expires_at_ms: number;
+    totp_freshness_required: boolean;
+  };
+  idempotency_key: string;
+  status: 'draft' | 'awaiting_confirmation' | 'executing' | 'executed' | 'blocked' | 'failed' | 'cancelled' | 'expired' | 'noop';
+};
+
+export type OperationConfirmResponse = {
+  operation_id: string;
+  preflight_id: string;
+  status: 'executed' | 'blocked' | 'failed' | 'cancelled' | 'expired' | 'noop';
+  rechecked: boolean;
+  result_summary: Record<string, unknown>;
+  audit_refs: Array<Record<string, unknown>>;
+  campaign_refs: Array<Record<string, unknown>>;
+  review_refs: Array<Record<string, unknown>>;
+  next_state: Record<string, unknown>;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -244,6 +347,9 @@ export const brcApi = {
   },
   marketsOrders() {
     return request<MarketsOrdersResponse>('/api/brc/markets-orders');
+  },
+  accountFacts() {
+    return request<AccountFactsResponse>('/api/brc/account/facts');
   },
   auditTrail(limit = 50) {
     return request<AuditTrailResponse>(`/api/brc/audit-trail?limit=${limit}`);
@@ -307,5 +413,43 @@ export const brcApi = {
       method: 'POST',
       body: JSON.stringify({ ...input, created_by: 'owner', metadata: { source: 'brc_operator_console' } }),
     });
+  },
+  operationCapabilities() {
+    return request<{ capabilities: OperationCapability[]; live_ready: false }>('/api/brc/operations/capabilities');
+  },
+  preflightOperation(input: {
+    operation_type: string;
+    input_params: Record<string, unknown>;
+    requested_by?: string;
+    source?: Record<string, unknown>;
+  }) {
+    return request<OperationPreflightResponse>('/api/brc/operations/preflight', {
+      method: 'POST',
+      body: JSON.stringify({
+        requested_by: 'owner',
+        source: { kind: 'ui' },
+        ...input,
+      }),
+    });
+  },
+  confirmOperation(operationId: string, input: {
+    preflight_id: string;
+    confirmation_phrase: string;
+    idempotency_key: string;
+    confirmed_by?: string;
+  }) {
+    return request<OperationConfirmResponse>(`/api/brc/operations/${encodeURIComponent(operationId)}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed_by: 'owner', ...input }),
+    });
+  },
+  cancelOperation(operationId: string) {
+    return request<OperationConfirmResponse>(`/api/brc/operations/${encodeURIComponent(operationId)}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ requested_by: 'owner' }),
+    });
+  },
+  listOperations(limit = 20) {
+    return request<{ operations: Array<Record<string, unknown>>; live_ready: false }>(`/api/brc/operations?limit=${limit}`);
   },
 };

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -137,6 +138,30 @@ class _FakeOrder:
         self.status = "OPEN"
 
 
+class _FakeExchangeGateway:
+    def __init__(self, *, positions=None, open_orders=None, recent_orders=None, recent_fills=None) -> None:
+        self.positions = list(positions or [])
+        self.open_orders = list(open_orders or [])
+        self.recent_orders = list(recent_orders or [])
+        self.recent_fills = list(recent_fills or [])
+        self.position_symbols: list[str] = []
+        self.open_order_calls: list[tuple[str, dict | None]] = []
+
+    async def fetch_positions(self, symbol=None):
+        self.position_symbols.append(symbol)
+        return [item for item in self.positions if getattr(item, "symbol", item.get("symbol") if isinstance(item, dict) else None) == symbol]
+
+    async def fetch_open_orders(self, symbol, params=None):
+        self.open_order_calls.append((symbol, params))
+        return [item for item in self.open_orders if item.get("symbol") == symbol]
+
+    async def fetch_orders(self, symbol, limit=20):
+        return [item for item in self.recent_orders if item.get("symbol") == symbol][:limit]
+
+    async def fetch_my_trades(self, symbol, limit=20):
+        return [item for item in self.recent_fills if item.get("symbol") == symbol][:limit]
+
+
 class _EmptyPositionRepo:
     async def list_active(self, *, symbol=None, limit: int = 20):
         return []
@@ -147,7 +172,17 @@ class _EmptyOrderRepo:
         return []
 
 
-def _patch_runtime(monkeypatch, *, campaign=None, position_repo=None, order_repo=None):
+class _FailingPositionRepo:
+    async def list_active(self, *, symbol=None, limit: int = 20):
+        raise RuntimeError("position db offline")
+
+
+class _FailingOrderRepo:
+    async def get_open_orders(self, symbol=None):
+        raise RuntimeError("order db offline")
+
+
+def _patch_runtime(monkeypatch, *, campaign=None, position_repo=None, order_repo=None, exchange_gateway=None):
     from src.interfaces import api as api_module
 
     service = _FakeBrcService(campaign=campaign)
@@ -158,6 +193,7 @@ def _patch_runtime(monkeypatch, *, campaign=None, position_repo=None, order_repo
     monkeypatch.setattr(api_module, "_startup_trading_guard_service", _FakeStartupGuard(armed=True))
     monkeypatch.setattr(api_module, "_position_repo", position_repo or _EmptyPositionRepo())
     monkeypatch.setattr(api_module, "_order_repo", order_repo or _EmptyOrderRepo())
+    monkeypatch.setattr(api_module, "_exchange_gateway", exchange_gateway)
     return service
 
 
@@ -185,6 +221,84 @@ def test_brc_console_dashboard_is_human_readable_after_login(monkeypatch):
         assert payload["current_stage"]
         assert "Risk Envelope" in payload["terminology"]
         assert "现在能不能做？" in payload["owner_questions"]
+
+
+def test_brc_operations_api_switch_playbook_flow(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api as api_module
+    from src.interfaces.api import app
+    from tests.unit.test_brc_operation_layer import _operation_service
+
+    service, _, brc_repo, _ = asyncio.run(_operation_service())
+    monkeypatch.setattr(api_module, "_brc_operation_service", service)
+    monkeypatch.setattr(api_module, "_brc_campaign_service", getattr(service, "_brc"))
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+
+        capabilities = client.get("/api/brc/operations/capabilities")
+        assert capabilities.status_code == 200
+        capability_payload = capabilities.json()
+        switch_capability = next(
+            item for item in capability_payload["capabilities"] if item["operation_type"] == "switch_playbook"
+        )
+        assert switch_capability["executable_through_operation"] is True
+
+        preflight = client.post(
+            "/api/brc/operations/preflight",
+            json={
+                "operation_type": "switch_playbook",
+                "requested_by": "owner",
+                "input_params": {
+                    "target_playbook_id": "PB-004-BRC-CONTROLLED-TESTNET",
+                    "reason_text": "owner authorized controlled rehearsal",
+                    "evidence_refs": ["evidence"],
+                },
+                "source": {"kind": "ui"},
+            },
+        )
+        assert preflight.status_code == 200
+        preflight_payload = preflight.json()
+        assert preflight_payload["status"] == "awaiting_confirmation"
+
+        confirmed = client.post(
+            f"/api/brc/operations/{preflight_payload['operation_id']}/confirm",
+            json={
+                "preflight_id": preflight_payload["preflight_id"],
+                "confirmation_phrase": "CONFIRM_SWITCH_PLAYBOOK",
+                "idempotency_key": preflight_payload["idempotency_key"],
+            },
+        )
+        assert confirmed.status_code == 200
+        assert confirmed.json()["status"] == "executed"
+        assert brc_repo.campaign.current_playbook_id == "PB-004-BRC-CONTROLLED-TESTNET"
+
+        repeated = client.post(
+            f"/api/brc/operations/{preflight_payload['operation_id']}/confirm",
+            json={
+                "preflight_id": preflight_payload["preflight_id"],
+                "confirmation_phrase": "CONFIRM_SWITCH_PLAYBOOK",
+                "idempotency_key": preflight_payload["idempotency_key"],
+            },
+        )
+        assert repeated.status_code == 200
+        assert repeated.json()["status"] == "executed"
+        assert len(brc_repo.switches) == 1
+
+        get_result = client.get(f"/api/brc/operations/{preflight_payload['operation_id']}")
+        assert get_result.status_code == 200
+        assert get_result.json()["operation"]["status"] == "executed"
+
+        listed = client.get("/api/brc/operations?limit=10")
+        assert listed.status_code == 200
+        assert listed.json()["operations"][0]["operation_id"] == preflight_payload["operation_id"]
+
+        audit = client.get("/api/brc/audit-trail?limit=10")
+        assert audit.status_code == 200
+        audit_payload = audit.json()
+        operation_items = [item for item in audit_payload["timeline"] if item["type"] == "operation"]
+        assert operation_items[0]["id"] == preflight_payload["operation_id"]
+        assert audit_payload["operation_results"][0]["campaign_refs"]
 
 
 def test_brc_readiness_standalone_returns_owner_safe_summary(monkeypatch):
@@ -320,9 +434,147 @@ def test_brc_markets_orders_is_read_only_owner_summary(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["live_ready"] is False
+    assert payload["source"] == "local_pg"
+    assert payload["truth_level"] == "summary"
+    assert payload["reconciliation_status"]["status"] == "not_available"
     assert payload["symbols"][0]["display_symbol"] == "ETHUSDT"
     assert payload["open_orders"] == []
     assert payload["active_positions"] == []
+    assert payload["recent_orders"] == []
+    assert payload["recent_fills"] == []
+    assert any("not complete exchange account truth" in item for item in payload["limitations"])
+
+
+def test_brc_account_facts_returns_local_pg_summary_without_mocking_history(monkeypatch):
+    _configure_auth(monkeypatch)
+    _patch_runtime(
+        monkeypatch,
+        campaign=None,
+        position_repo=_FakePositionRepo([_FakePosition("ETH/USDT:USDT")]),
+        order_repo=_FakeOrderRepo([_FakeOrder("BTC/USDT:USDT")]),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/account/facts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["live_ready"] is False
+    assert payload["source"] == "local_pg"
+    assert payload["truth_level"] == "summary"
+    assert payload["account_summary"]["active_position_count"] == 1
+    assert payload["account_summary"]["open_order_count"] == 1
+    assert payload["account_summary"]["complete_exchange_account_truth"] is False
+    assert payload["recent_orders"] == []
+    assert payload["recent_fills"] == []
+    assert payload["unknown_or_unmanaged_orders"] == []
+    assert payload["reconciliation_status"]["status"] == "not_available"
+    assert payload["reconciliation_status"]["checked_sources"] == ["local_pg"]
+    assert payload["connection_health"]["exchange_live_read"]["available"] is False
+
+
+def test_brc_account_facts_fail_closed_when_local_repositories_error(monkeypatch):
+    _configure_auth(monkeypatch)
+    _patch_runtime(
+        monkeypatch,
+        campaign=None,
+        position_repo=_FailingPositionRepo(),
+        order_repo=_FailingOrderRepo(),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/account/facts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "unavailable"
+    assert payload["truth_level"] == "unavailable"
+    assert payload["connection_health"]["local_pg"]["available"] is False
+    assert any("fail-closed" in item for item in payload["blockers"])
+
+
+def test_brc_account_facts_returns_mixed_reconciled_when_exchange_testnet_matches_local(monkeypatch):
+    _configure_auth(monkeypatch)
+    local_position = _FakePosition("ETH/USDT:USDT")
+    local_order = _FakeOrder("BTC/USDT:USDT")
+    gateway = _FakeExchangeGateway(
+        positions=[{"symbol": "ETH/USDT:USDT", "side": "long", "size": "0.01"}],
+        open_orders=[{"id": "ord_unit", "symbol": "BTC/USDT:USDT", "status": "open", "type": "limit"}],
+        recent_orders=[{"id": "recent-1", "symbol": "ETH/USDT:USDT", "status": "closed"}],
+        recent_fills=[{"id": "fill-1", "symbol": "ETH/USDT:USDT"}],
+    )
+    _patch_runtime(
+        monkeypatch,
+        campaign=None,
+        position_repo=_FakePositionRepo([local_position]),
+        order_repo=_FakeOrderRepo([local_order]),
+        exchange_gateway=gateway,
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/account/facts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "mixed"
+    assert payload["truth_level"] == "reconciled"
+    assert payload["reconciliation_status"]["status"] == "clean"
+    assert payload["reconciliation_status"]["checked_sources"] == ["local_pg", "exchange_testnet"]
+    assert payload["recent_orders"][0]["id"] == "recent-1"
+    assert payload["recent_fills"][0]["id"] == "fill-1"
+    assert payload["unknown_or_unmanaged_orders"] == []
+    assert payload["connection_health"]["exchange_testnet_read"]["available"] is True
+
+
+def test_brc_account_facts_reconciliation_detects_unknown_exchange_order(monkeypatch):
+    _configure_auth(monkeypatch)
+    gateway = _FakeExchangeGateway(
+        positions=[],
+        open_orders=[{"id": "exchange-orphan", "symbol": "BTC/USDT:USDT", "status": "open"}],
+    )
+    _patch_runtime(
+        monkeypatch,
+        campaign=None,
+        position_repo=_EmptyPositionRepo(),
+        order_repo=_EmptyOrderRepo(),
+        exchange_gateway=gateway,
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/account/facts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "mixed"
+    assert payload["truth_level"] == "reconciled"
+    assert payload["reconciliation_status"]["status"] == "mismatch"
+    assert payload["unknown_or_unmanaged_orders"][0]["record"]["id"] == "exchange-orphan"
+    assert any(
+        item["type"] == "exchange_order_missing_locally"
+        for item in payload["reconciliation_status"]["mismatches"]
+    )
+
+
+def test_brc_account_facts_does_not_add_trading_endpoints(monkeypatch):
+    _configure_auth(monkeypatch)
+    _patch_runtime(monkeypatch, campaign=None)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        assert client.post("/api/brc/account/orders/cancel").status_code == 404
+        assert client.post("/api/brc/account/positions/flatten").status_code == 404
+        assert client.post("/api/brc/account/runtime/stop").status_code == 404
+        assert client.post("/api/brc/account/withdrawal").status_code == 404
+        assert client.post("/api/brc/account/transfer").status_code == 404
 
 
 def test_brc_audit_and_investigator_are_read_only(monkeypatch):

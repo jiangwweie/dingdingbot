@@ -1,10 +1,120 @@
 import React from 'react';
-import { AlertCircle, ArrowRight, CheckCircle2, Clock3, LockKeyhole, ShieldAlert } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Clock3, LockKeyhole, ShieldAlert, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Badge } from '@/src/components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
 import { cn } from '@/src/lib/utils';
 import type { BrcActionCard, ReadinessAction } from '@/src/services/api';
+
+export type CapabilityStatus =
+  | 'Available now'
+  | 'Operation Preflight available'
+  | 'Preflight planning'
+  | 'Legacy/dev path'
+  | 'Requires Operation Layer'
+  | 'Design surface'
+  | 'Unavailable'
+  | 'Forbidden';
+
+export function CapabilityBadge({ status }: { status: CapabilityStatus }) {
+  const variant: Record<CapabilityStatus, 'success' | 'info' | 'warning' | 'danger' | 'outline'> = {
+    'Available now': 'success',
+    'Operation Preflight available': 'success',
+    'Preflight planning': 'warning',
+    'Legacy/dev path': 'info',
+    'Requires Operation Layer': 'warning',
+    'Design surface': 'outline',
+    Unavailable: 'danger',
+    Forbidden: 'danger',
+  };
+  return <Badge variant={variant[status]}>{status}</Badge>;
+}
+
+export function capabilityForActionCard(action: BrcActionCard): CapabilityStatus {
+  if (!action.enabled) return 'Unavailable';
+  if (action.action_type === 'testnet_rehearsal') return 'Legacy/dev path';
+  if (
+    action.action_type === 'enter_monitor'
+    || action.action_type === 'pause_new_entries'
+    || action.action_type === 'emergency_stop_runtime'
+    || action.action_type === 'emergency_flatten'
+  ) {
+    return 'Requires Operation Layer';
+  }
+  return 'Design surface';
+}
+
+export function ActionCardSummaryModal({
+  action,
+  onClose,
+}: {
+  action: BrcActionCard | null;
+  onClose: () => void;
+}) {
+  if (!action) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 p-4">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-sm border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-start justify-between gap-3 border-b border-zinc-200 p-4 dark:border-zinc-800">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Action Card Summary</p>
+            <h2 className="mt-1 text-base font-bold text-zinc-950 dark:text-zinc-100">{actionTitle(action)}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-sm border border-zinc-300 p-1.5 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            title="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-3 p-4 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+          <div className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] p-3 text-amber-800 dark:text-amber-200">
+            Phase 0 Action Card Summary. This is assembled from current readiness data.
+            Generic backend Operation Preflight is not enabled yet.
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <CapabilityBadge status={capabilityForActionCard(action)} />
+            <StatusBadge state={action.enabled ? 'enabled by readiness' : 'disabled by readiness'} />
+            {action.final_state_proof_required && <Badge variant="warning">final-state proof</Badge>}
+          </div>
+          <QuickFact label="Current state" value={action.current_state} />
+          <QuickFact label="Allowed next states" value={action.allowed_next_states.join(', ') || 'none'} />
+          <QuickFact label="Blocked next states" value={action.blocked_next_states.join(', ') || 'none'} />
+          <QuickFact label="What will change" value={action.what_will_change} />
+          <QuickFact label="What will not change" value={action.what_will_not_change} />
+          <QuickFact label="Account impact" value={action.account_impact} />
+          {action.confirmation_phrase && (
+            <QuickFact label="Confirmation phrase" value={<span className="font-mono">{action.confirmation_phrase}</span>} />
+          )}
+          {action.disabled_reason && (
+            <div className="rounded-sm border border-rose-500/30 bg-rose-500/[0.05] p-3 text-rose-700 dark:text-rose-300">
+              Disabled reason: {action.disabled_reason}
+            </div>
+          )}
+          {action.advisory_warnings.length > 0 && (
+            <div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Advisory warnings</p>
+              <ul className="list-disc space-y-1 pl-5">
+                {action.advisory_warnings.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
+          )}
+          {action.hard_blocks.length > 0 && (
+            <div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Hard blocks</p>
+              <ul className="list-disc space-y-1 pl-5">
+                {action.hard_blocks.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
+          )}
+          <JsonDetails data={action} label="Readiness action card JSON" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function StageStrip({
   current,
@@ -47,6 +157,91 @@ export function StatusBadge({ state }: { state?: unknown }) {
         ? 'success'
         : 'outline';
   return <Badge variant={variant}>{text}</Badge>;
+}
+
+export function ConsoleStatusBar({
+  items,
+}: {
+  items: Array<{ label: string; value: React.ReactNode; tone?: 'info' | 'success' | 'warning' | 'danger' | 'outline' }>;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
+      {items.map((item) => (
+        <div key={item.label} className="rounded-sm border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">{item.label}</p>
+          <div className="mt-1 text-sm font-bold text-zinc-900 dark:text-zinc-100">
+            {typeof item.value === 'string' ? <Badge variant={item.tone || 'outline'}>{item.value}</Badge> : item.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function PrimaryActionPanel({
+  title,
+  subtitle,
+  to,
+  buttonLabel,
+  enabled = true,
+  disabledReason,
+}: {
+  title: string;
+  subtitle: string;
+  to: string;
+  buttonLabel: string;
+  enabled?: boolean;
+  disabledReason?: string;
+}) {
+  return (
+    <Card className="border-blue-500/30 bg-blue-500/[0.04]">
+      <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500">Next</p>
+          <h2 className="mt-1 text-xl font-bold text-zinc-950 dark:text-zinc-100">{title}</h2>
+          <p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">{subtitle}</p>
+          {!enabled && disabledReason && (
+            <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-300">{disabledReason}</p>
+          )}
+        </div>
+        {enabled ? (
+          <Link
+            to={to}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-sm bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500"
+          >
+            {buttonLabel}
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        ) : (
+          <button
+            className="inline-flex min-h-11 cursor-not-allowed items-center justify-center rounded-sm border border-zinc-300 px-4 py-2 text-sm font-bold text-zinc-500 dark:border-zinc-700"
+            disabled
+          >
+            当前不可用
+          </button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function SafetyControlBar({ actions }: { actions: BrcActionCard[] }) {
+  return (
+    <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
+      {actions.map((action) => (
+        <ApplicationActionCard key={action.action_card_id} action={action} compact />
+      ))}
+    </div>
+  );
+}
+
+export function QuickFact({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex min-h-9 items-center justify-between gap-3 border-b border-zinc-100 py-2 last:border-0 dark:border-zinc-800">
+      <span className="text-xs text-zinc-500">{label}</span>
+      <span className="min-w-0 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-100">{value}</span>
+    </div>
+  );
 }
 
 export function OwnerSummary({
@@ -223,92 +418,65 @@ export function ActionCard({ action }: { action: ReadinessAction }) {
   );
 }
 
-export function ApplicationActionCard({ action }: { action: BrcActionCard }) {
+export function ApplicationActionCard({ action, compact = false }: { action: BrcActionCard; compact?: boolean }) {
   const tone = action.enabled
     ? action.final_state_proof_required
       ? 'border-amber-500/30 bg-amber-500/[0.04]'
       : 'border-emerald-500/30 bg-emerald-500/[0.04]'
     : 'border-zinc-200 bg-zinc-50 opacity-80 dark:border-zinc-800 dark:bg-zinc-900/50';
+  const isDanger = action.action_type === 'emergency_stop_runtime' || action.action_type === 'emergency_flatten';
+  const buttonClass = isDanger
+    ? 'border-rose-600 bg-rose-600 text-white hover:bg-rose-500'
+    : action.final_state_proof_required
+      ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
+      : 'border-blue-600 bg-blue-600 text-white hover:bg-blue-500';
 
   return (
     <Card className={tone}>
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>{actionTitle(action)}</span>
-          <StatusBadge state={action.enabled ? '可用' : '不可用'} />
+          <CapabilityBadge status={capabilityForActionCard(action)} />
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
-        <p>
-          <span className="font-bold">谁说了算：</span>
-          应用检查 application_preflight
-        </p>
-        <p>
-          <span className="font-bold">当前状态：</span>
-          <StatusBadge state={action.current_state} />
-        </p>
-        <p>
-          <span className="font-bold">会改变：</span>
-          {action.what_will_change}
-        </p>
-        <p>
-          <span className="font-bold">不会改变：</span>
-          不会打开 live、提现/转账、自动下单或跳过 Owner 确认。
-        </p>
-        <p>
-          <span className="font-bold">账户影响：</span>
-          {action.account_impact}
-        </p>
-        {action.confirmation_phrase && (
-          <p>
-            <span className="font-bold">确认短语：</span>
-            <span className="font-mono">{action.confirmation_phrase}</span>
-          </p>
-        )}
-        {action.final_state_proof_required && (
-          <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1 text-amber-700 dark:text-amber-300">
-            需要最后证明已经安全结束；如果证明不了，会进入 attention_required。
-          </p>
-        )}
-        {action.advisory_warnings.length > 0 && (
-          <ul className="list-disc space-y-1 pl-4">
-            {action.advisory_warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        )}
-        <details className="rounded-sm border border-zinc-200 bg-white/50 p-2 dark:border-zinc-800 dark:bg-zinc-950/40">
-          <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-widest text-zinc-500">
-            技术数据
-          </summary>
-          <div className="mt-2 space-y-1">
-            <p>本次依据：<span className="font-mono">{action.fact_snapshot_id}</span></p>
-            <p>检查结果：<span className="font-mono">{action.preflight_result_id}</span></p>
-            <p>防重复 ID：<span className="font-mono">{action.idempotency_key}</span></p>
-            <p>允许去到：{action.allowed_next_states.join(', ') || 'none'}</p>
-            <p>明确禁止：{action.blocked_next_states.join(', ') || 'none'}</p>
-          </div>
-        </details>
+        {!compact && <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{shortActionLine(action)}</p>}
         {!action.enabled && (
-          <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1 text-amber-700 dark:text-amber-300">
-            当前不可用：{action.disabled_reason || '应用检查没有放行。'}
+          <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+            {action.disabled_reason || '应用检查未放行。'}
           </p>
         )}
         {action.route && action.enabled ? (
           <Link
             to={action.route}
-            className="mt-2 inline-flex items-center gap-2 rounded-sm border border-blue-500 bg-blue-600 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-white"
+            className={`mt-1 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-sm border px-3 py-2 text-xs font-bold ${buttonClass}`}
           >
-            {action.button_label}
+            {buttonLabel(action)}
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         ) : (
           <button
-            className="mt-2 inline-flex cursor-not-allowed items-center gap-2 rounded-sm border border-zinc-300 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500 dark:border-zinc-700"
+            className="mt-1 inline-flex min-h-9 w-full cursor-not-allowed items-center justify-center rounded-sm border border-zinc-300 px-3 py-2 text-xs font-bold text-zinc-500 dark:border-zinc-700"
             disabled
           >
-            {action.button_label}
+            {action.enabled ? buttonLabel(action) : '当前不可点'}
           </button>
+        )}
+        {!compact && (
+          <details className="rounded-sm border border-zinc-200 bg-white/50 p-2 dark:border-zinc-800 dark:bg-zinc-950/40">
+            <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+              Details
+            </summary>
+            <div className="mt-2 space-y-1">
+              <p>状态：<span className="font-mono">{action.current_state}</span></p>
+              <p>影响：{action.account_impact}</p>
+              <p>会改变：{action.what_will_change}</p>
+              <p>不会改变：{action.what_will_not_change}</p>
+              {action.confirmation_phrase && <p>确认短语：<span className="font-mono">{action.confirmation_phrase}</span></p>}
+              <p>依据：<span className="font-mono">{action.fact_snapshot_id}</span></p>
+              <p>检查：<span className="font-mono">{action.preflight_result_id}</span></p>
+            </div>
+          </details>
         )}
       </CardContent>
     </Card>
@@ -322,9 +490,34 @@ function actionTitle(action: BrcActionCard): string {
     testnet_rehearsal: '准备 testnet 演练',
     pause_new_entries: '暂停新开仓',
     emergency_stop_runtime: '停止 runtime',
-    emergency_flatten: '撤单/平仓 flatten',
+    emergency_flatten: 'Flatten dry-run',
   };
   return labels[action.action_type] || action.title;
+}
+
+function buttonLabel(action: BrcActionCard): string {
+  const labels: Record<BrcActionCard['action_type'], string> = {
+    read_status: '查看状态',
+    enter_monitor: '进入监控',
+    testnet_rehearsal: 'Fixed rehearsal',
+    pause_new_entries: 'Pause',
+    emergency_stop_runtime: 'Stop',
+    emergency_flatten: 'Dry-run plan',
+  };
+  return labels[action.action_type] || action.button_label;
+}
+
+function shortActionLine(action: BrcActionCard): string {
+  if (!action.enabled) return '当前不能执行。';
+  const labels: Record<BrcActionCard['action_type'], string> = {
+    read_status: '只读查看，不改变账户。',
+    enter_monitor: '进入监控，不开新仓。',
+    testnet_rehearsal: '进入固定 testnet 演练流程。',
+    pause_new_entries: '阻止新增风险。',
+    emergency_stop_runtime: '停止 runtime 活动。',
+    emergency_flatten: '仅生成 dry-run plan，不撤单、不平仓。',
+  };
+  return labels[action.action_type] || action.what_will_change;
 }
 
 export function MainFlowCard({

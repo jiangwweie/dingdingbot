@@ -1,24 +1,25 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
-import { brcApi, ReadinessResponse, ReviewDecisionResponse } from '@/src/services/api';
+import { brcApi, ReadinessResponse } from '@/src/services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/Card';
 import { DeveloperDetails, ErrorState, JsonDetails, OwnerSummary, StageStrip, StatusBadge } from './ConsolePrimitives';
 import { actionDisabledReason, isActionEnabled, whyText } from './readiness';
+import { OperationPreflightModal, OperationPreflightState } from './CommandCenter';
 
 export default function Review() {
   const [campaignId, setCampaignId] = useState('');
   const [decision, setDecision] = useState('accepted');
   const [reason, setReason] = useState('BRC R4 local console reviewed');
   const [nextTask, setNextTask] = useState('BRC-R4 local UI/API acceptance');
-  const [result, setResult] = useState<ReviewDecisionResponse | null>(null);
+  const [operationModal, setOperationModal] = useState<OperationPreflightState | null>(null);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [packet, setPacket] = useState<Record<string, unknown> | null>(null);
   const [eligibility, setEligibility] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    brcApi.readiness()
+  const load = useCallback(async () => {
+    await brcApi.readiness()
       .then((payload) => {
         setReadiness(payload);
         const latestCampaignId = String(payload.latest_campaign?.campaign_id || '');
@@ -36,22 +37,47 @@ export default function Review() {
       .catch(setError);
   }, []);
 
+  useEffect(() => {
+    load();
+  }, [load]);
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!canSubmitReview) return;
     setLoading(true);
     setError(null);
     try {
-      setResult(await brcApi.createReviewDecision({
-        campaign_id: campaignId,
-        decision,
-        reason_text: reason,
-        next_recommended_task: nextTask,
-      }));
+      const preflight = await brcApi.preflightOperation({
+        operation_type: 'write_review_decision',
+        input_params: {
+          campaign_id: campaignId,
+          decision,
+          reason_text: reason,
+          next_recommended_task: nextTask,
+          metadata: { source: 'review_page_operation' },
+        },
+        source: { kind: 'review_page', ref: campaignId },
+      });
+      setOperationModal({ loading: false, phrase: '', error: null, preflight, result: null });
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function startReviewOperation() {
+    setOperationModal({ loading: true, phrase: '', error: null, preflight: null, result: null });
+    setError(null);
+    try {
+      const preflight = await brcApi.preflightOperation({
+        operation_type: 'start_review',
+        input_params: { campaign_id: campaignId || undefined },
+        source: { kind: 'review_page', ref: campaignId || 'latest' },
+      });
+      setOperationModal({ loading: false, phrase: '', error: null, preflight, result: null });
+    } catch (err) {
+      setOperationModal({ loading: false, phrase: '', error: String((err as { message?: unknown }).message || err), preflight: null, result: null });
     }
   }
 
@@ -62,9 +88,9 @@ export default function Review() {
   return (
     <div className="space-y-4">
       <StageStrip
-        current="BRC-R4 review decision"
-        next="把 Owner 复盘结论写入数据库事实源。"
-        global="复盘闭环是后续 Feishu 卡片和云部署审批链路的基础。"
+        current="Review / Evidence"
+        next="Review packet, evidence packet, next eligibility, review decisions, and audit-derived facts."
+        global="Phase 0 keeps review and evidence read-heavy; review decisions are ledger records, not execution authorization."
       />
       <OwnerSummary
         conclusion={canSubmitReview ? '可以基于最近 campaign 写复盘结论' : '当前不能写复盘结论'}
@@ -75,6 +101,14 @@ export default function Review() {
         next={canSubmitReview ? '先确认摘要和系统建议，再填写最终决定与原因。' : '等待产生 latest campaign 后再写复盘。'}
         tone={canSubmitReview ? 'success' : 'warning'}
       />
+      <button
+        type="button"
+        onClick={startReviewOperation}
+        disabled={loading}
+        className="inline-flex min-h-9 items-center justify-center rounded-sm border border-zinc-300 px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        Start Review Operation
+      </button>
       {error && <ErrorState error={error} />}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -181,7 +215,12 @@ export default function Review() {
         </CardContent>
       </Card>
 
-      <JsonDetails data={result} label="查看 review decision JSON" />
+      <OperationPreflightModal
+        state={operationModal}
+        onClose={() => setOperationModal(null)}
+        onStateChange={setOperationModal}
+        onRefresh={load}
+      />
     </div>
   );
 }

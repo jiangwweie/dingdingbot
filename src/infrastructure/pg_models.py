@@ -756,6 +756,229 @@ class PGBrcWorkflowRunORM(PGCoreBase):
     )
 
 
+class PGBrcOperationORM(PGCoreBase):
+    """BRC Owner Console operation ledger."""
+
+    __tablename__ = "brc_operations"
+
+    operation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    operation_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    requested_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, default="ui")
+    source_ref: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    input_params_json: Mapped[dict] = mapped_column(
+        "input_params",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    environment: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    current_preflight_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    confirmed_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    executed_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    result_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    result_summary_json: Mapped[dict] = mapped_column(
+        "result_summary",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_audit_refs_json: Mapped[list] = mapped_column(
+        "created_audit_refs",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'awaiting_confirmation', 'executing', 'executed', "
+            "'blocked', 'failed', 'cancelled', 'expired', 'noop')",
+            name="ck_brc_operations_status",
+        ),
+        CheckConstraint(
+            "result_status IS NULL OR result_status IN "
+            "('executed', 'blocked', 'failed', 'cancelled', 'expired', 'noop')",
+            name="ck_brc_operations_result_status",
+        ),
+        CheckConstraint("operation_type NOT IN ('withdrawal', 'transfer')", name="ck_brc_operations_no_withdrawal_transfer"),
+        Index("idx_brc_operations_type_time", "operation_type", "requested_at_ms"),
+        Index("idx_brc_operations_status_time", "status", "requested_at_ms"),
+    )
+
+
+class PGBrcPreflightSnapshotORM(PGCoreBase):
+    """Persisted BRC operation preflight snapshot."""
+
+    __tablename__ = "brc_preflight_snapshots"
+
+    preflight_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    operation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    operation_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    expires_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    current_state_snapshot_json: Mapped[dict] = mapped_column(
+        "current_state_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    target_state_json: Mapped[dict] = mapped_column(
+        "target_state",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    account_snapshot_json: Mapped[dict] = mapped_column(
+        "account_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    order_snapshot_json: Mapped[dict] = mapped_column(
+        "order_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    runtime_snapshot_json: Mapped[dict] = mapped_column(
+        "runtime_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    campaign_snapshot_json: Mapped[dict] = mapped_column(
+        "campaign_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    playbook_snapshot_json: Mapped[dict] = mapped_column(
+        "playbook_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    risk_result_json: Mapped[dict] = mapped_column(
+        "risk_result",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    confirmation_requirement_json: Mapped[dict] = mapped_column(
+        "confirmation_requirement",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    snapshot_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    before_json: Mapped[dict] = mapped_column(
+        "before",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    after_json: Mapped[dict] = mapped_column(
+        "after",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('allow', 'warn', 'block', 'unavailable', 'expired')",
+            name="ck_brc_preflight_snapshots_decision",
+        ),
+        Index("idx_brc_preflight_operation_time", "operation_id", "created_at_ms"),
+        Index("idx_brc_preflight_expires", "expires_at_ms"),
+        Index("uq_brc_preflight_idempotency", "operation_id", "idempotency_key", unique=True),
+    )
+
+
+class PGBrcExecutionResultORM(PGCoreBase):
+    """Persisted unified result envelope for BRC operations."""
+
+    __tablename__ = "brc_execution_results"
+
+    operation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    preflight_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    rechecked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    recheck_result_json: Mapped[dict] = mapped_column(
+        "recheck_result",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    adapter_result_json: Mapped[dict] = mapped_column(
+        "adapter_result",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    failed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result_summary_json: Mapped[dict] = mapped_column(
+        "result_summary",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    audit_refs_json: Mapped[list] = mapped_column(
+        "audit_refs",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    campaign_refs_json: Mapped[list] = mapped_column(
+        "campaign_refs",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    review_refs_json: Mapped[list] = mapped_column(
+        "review_refs",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    final_state_snapshot_json: Mapped[dict] = mapped_column(
+        "final_state_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    occurred_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('executed', 'blocked', 'failed', 'cancelled', 'expired', 'noop')",
+            name="ck_brc_execution_results_status",
+        ),
+        Index("idx_brc_execution_results_status_time", "status", "occurred_at_ms"),
+    )
+
+
 class PGSignalORM(PGCoreBase):
     """PG 版 live signal 表。"""
 

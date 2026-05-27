@@ -343,17 +343,32 @@ class BoundedRiskCampaignService:
             }
         )
         await self._repo.save_campaign(updated)
+        operation_id = next(
+            (ref.split(":", 1)[1] for ref in evidence_refs if ref.startswith("operation:")),
+            None,
+        )
+        preflight_id = next(
+            (ref.split(":", 1)[1] for ref in evidence_refs if ref.startswith("preflight:")),
+            None,
+        )
+        event_metadata = {
+            "from_playbook": campaign.current_playbook_id,
+            "to_playbook": new_playbook_id,
+            "decision_result": decision_result.value,
+            "risk_change_direction": risk_change_direction.value,
+            "switch_id": decision.switch_id,
+            "evidence_refs": list(evidence_refs),
+        }
+        if operation_id is not None:
+            event_metadata["operation_id"] = operation_id
+        if preflight_id is not None:
+            event_metadata["preflight_id"] = preflight_id
         await self._repo.append_campaign_event(
             campaign_id=updated.campaign_id,
             event_type="playbook_switched",
             occurred_at_ms=now,
             reason=reason_text,
-            metadata={
-                "from_playbook": campaign.current_playbook_id,
-                "to_playbook": new_playbook_id,
-                "decision_result": decision_result.value,
-                "risk_change_direction": risk_change_direction.value,
-            },
+            metadata=event_metadata,
         )
         return decision
 

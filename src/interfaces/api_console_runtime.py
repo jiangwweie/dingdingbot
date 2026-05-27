@@ -2762,7 +2762,7 @@ async def _execute_brc_fixed_testnet_rehearsal(
             symbols=_BRC_ALLOWED_SYMBOLS,
         )
         if not preflight_inventory.all_flat:
-            raise BrcRuleViolation("BRC LLM rehearsal preflight requires ETH/BTC flat inventory")
+            raise BrcRuleViolation("BRC Operation fixed rehearsal preflight requires ETH/BTC flat inventory")
         await _step("preflight_flat", preflight_inventory.model_dump(mode="json"))
         await _step(
             "preflight_runtime_gate_closed_if_needed",
@@ -2775,11 +2775,11 @@ async def _execute_brc_fixed_testnet_rehearsal(
         campaign = await create_brc_campaign(
             request,
             BrcCreateCampaignRequest(
-                bucket_id="BRC-R3-LLM-TESTNET-BUCKET",
+                bucket_id="BRC-OPERATION-FIXED-TESTNET-BUCKET",
                 authorized_amount=Decimal("500"),
                 max_campaign_loss=Decimal("120"),
                 profit_protect_trigger=Decimal("100"),
-                reason="BRC R3 LLM operator confirmed controlled testnet rehearsal",
+                reason="BRC Operation authorized fixed testnet rehearsal",
             ),
         )
         campaign_id = campaign.campaign["campaign_id"]
@@ -2788,20 +2788,20 @@ async def _execute_brc_fixed_testnet_rehearsal(
         switch = await switch_brc_playbook(
             request,
             BrcSwitchPlaybookRequest(
-                reason_text="Owner confirmed BRC R3 LLM operator controlled testnet rehearsal",
-                evidence_refs=["BRC-R3-LLM-operator-workflow"],
+                reason_text="Owner confirmed BRC Operation fixed testnet rehearsal",
+                evidence_refs=["BRC-Operation-fixed-testnet-rehearsal"],
             ),
         )
         await _step("playbook_switched", {"decision_result": switch.decision["decision_result"]})
 
         await gks_svc.set_state(
             active=False,
-            reason="BRC R3 LLM confirmed controlled testnet rehearsal",
-            updated_by="brc_llm_workflow",
+            reason="BRC Operation authorized fixed testnet rehearsal",
+            updated_by="brc_operation_fixed_rehearsal",
         )
         guard_svc.manual_arm(
-            reason="BRC R3 LLM confirmed controlled testnet rehearsal",
-            updated_by="brc_llm_workflow",
+            reason="BRC Operation authorized fixed testnet rehearsal",
+            updated_by="brc_operation_fixed_rehearsal",
         )
         await _step("entry_window_opened", {"gks_active": False, "startup_guard_armed": True})
 
@@ -2866,7 +2866,7 @@ async def _execute_brc_fixed_testnet_rehearsal(
                 new_playbook_id="PB-000-OBSERVE-ONLY",
                 reason_category="loss_response",
                 reason_text="BRC R3 loss-locked switch proof",
-                evidence_refs=["BRC-R3-LLM-operator-workflow"],
+                evidence_refs=["BRC-Operation-fixed-testnet-rehearsal"],
                 risk_change_direction=RiskChangeDirection.DECREASED_RISK,
             ),
         )
@@ -2882,7 +2882,7 @@ async def _execute_brc_fixed_testnet_rehearsal(
             request,
             BrcFinalizeRequest(
                 outcome=CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED,
-                reason="BRC R3 LLM operator confirmed rehearsal complete",
+                reason="BRC Operation authorized fixed rehearsal complete",
             ),
         )
         await _step("finalized", final.campaign)
@@ -2890,9 +2890,13 @@ async def _execute_brc_fixed_testnet_rehearsal(
         review_decision = await service.record_review_decision(
             campaign_id=campaign_id,
             decision=BrcReviewDecision.TESTNET_REHEARSAL_AUTHORIZED,
-            reason_text="Owner confirmed BRC R3 LLM workflow controlled testnet rehearsal",
-            next_recommended_task="BRC-R3 review LLM workflow evidence",
-            metadata={"workflow_run_id": workflow_run_id},
+            reason_text="Owner confirmed BRC Operation fixed testnet rehearsal",
+            next_recommended_task="Review BRC Operation fixed rehearsal evidence",
+            metadata={
+                "workflow_run_id": workflow_run_id,
+                "authorization_source": "brc_operation_layer",
+                "workflow_carrier_role": "internal_ref_only",
+            },
         )
         await _step("review_decision", review_decision.model_dump(mode="json"))
 
@@ -2907,7 +2911,7 @@ async def _execute_brc_fixed_testnet_rehearsal(
                 api_module=api_module,
                 service=service,
                 campaign_id=campaign_id,
-                reason=f"BRC LLM rehearsal failed and flat cleanup finalized: {exc}",
+                reason=f"BRC Operation fixed rehearsal failed and flat cleanup finalized: {exc}",
             )
             if cleanup is not None:
                 await _step("failure_cleanup", cleanup)
@@ -2923,12 +2927,12 @@ async def _execute_brc_fixed_testnet_rehearsal(
         try:
             await gks_svc.set_state(
                 active=True,
-                reason="BRC R3 LLM rehearsal restore safe state",
-                updated_by="brc_llm_workflow",
+                reason="BRC Operation fixed rehearsal restore safe state",
+                updated_by="brc_operation_fixed_rehearsal",
             )
             guard_svc.block(
-                reason="BRC R3 LLM rehearsal restore safe state",
-                updated_by="brc_llm_workflow",
+                reason="BRC Operation fixed rehearsal restore safe state",
+                updated_by="brc_operation_fixed_rehearsal",
                 source="manual_block",
             )
         except Exception as exc:

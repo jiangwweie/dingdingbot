@@ -33,9 +33,9 @@ export default function Campaigns() {
   return (
     <div className="space-y-4">
       <StageStrip
-        current="Campaigns 轮次管理"
-        next="查看最近 campaign 的状态、证据包和下一轮资格。"
-        global="BRC 的核心是风险本金隔离、亏损锁定、盈利保护和复盘闭环。"
+        current="Campaign"
+        next="Review the business state, playbook, attempts, timeline evidence, and next campaign eligibility."
+        global="Campaign is the business view. Account and order facts are shown in Markets & Orders."
       />
       <OwnerSummary
         conclusion={campaign ? '已找到最近 Campaign，可查看复盘证据' : '当前没有可复盘 Campaign'}

@@ -6,6 +6,8 @@ import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { ThemeProvider } from './components/layout/ThemeContext';
 import { brcApi } from './services/api';
 import CommandCenter from './pages/brc/CommandCenter';
+import FixedTestnetRehearsal from './pages/brc/FixedTestnetRehearsal';
+import MarketsOrders from './pages/brc/MarketsOrders';
 import DeveloperDetail from './pages/brc/DeveloperDetail';
 import AuditTrail from './pages/brc/AuditTrail';
 import Campaigns from './pages/brc/Campaigns';
@@ -51,6 +53,10 @@ createRoot(document.getElementById('root')!).render(
               <Route path="/" element={<AppLayout />}>
                 <Route index element={<Navigate to="/command-center" replace />} />
                 <Route path="command-center" element={<CommandCenter />} />
+                <Route path="markets-orders" element={<MarketsOrders />} />
+                <Route path="campaign" element={<Campaigns />} />
+                <Route path="review-evidence" element={<Review />} />
+                <Route path="fixed-testnet-rehearsal" element={<FixedTestnetRehearsal />} />
                 <Route path="llm-copilot" element={<LlmCopilot />} />
                 <Route path="strategy-playbook" element={<StrategyPlaybook />} />
                 <Route path="risk-account" element={<RiskAccount />} />
@@ -58,7 +64,6 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="summary" element={<Navigate to="/command-center" replace />} />
                 <Route path="guide" element={<Guide />} />
                 <Route path="dashboard" element={<Navigate to="/command-center" replace />} />
-                <Route path="markets-orders" element={<Navigate to="/risk-account" replace />} />
                 <Route path="campaigns" element={<Campaigns />} />
                 <Route path="playbooks-strategy" element={<Navigate to="/strategy-playbook" replace />} />
                 <Route path="parameters" element={<Navigate to="/risk-account" replace />} />

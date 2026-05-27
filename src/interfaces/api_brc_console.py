@@ -2,11 +2,23 @@ from __future__ import annotations
 
 import os
 import time
+from decimal import Decimal
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from src.application.brc_operation_layer import (
+    BrcOperationService,
+    ConfirmationMismatch,
+    OperationCapability,
+    OperationConfirmResponse,
+    OperationDetailResponse,
+    OperationLayerError,
+    OperationLayerReaders,
+    OperationListResponse,
+    OperationPreflightResponse,
+)
 from src.interfaces.operator_auth import require_operator_session
 from src.interfaces import api_console_runtime as runtime
 
@@ -87,6 +99,9 @@ RuntimeState = Literal[
     "flattening",
     "attention_required",
 ]
+AccountFactsSource = Literal["local_pg", "exchange_testnet", "exchange_live", "mixed", "unavailable"]
+AccountFactsTruthLevel = Literal["summary", "exchange_read", "reconciled", "unavailable"]
+ReconciliationStatusValue = Literal["not_available", "clean", "mismatch", "unknown"]
 ActionCardType = Literal[
     "read_status",
     "enter_monitor",
@@ -160,10 +175,41 @@ class BrcReadinessResponse(BaseModel):
 class BrcMarketsOrdersResponse(BaseModel):
     conclusion: str
     account_impact: str
+    source: AccountFactsSource = "local_pg"
+    truth_level: AccountFactsTruthLevel = "summary"
+    reconciliation_status: dict[str, Any] = Field(default_factory=dict)
     symbols: list[dict[str, Any]] = Field(default_factory=list)
     open_orders: list[dict[str, Any]] = Field(default_factory=list)
     active_positions: list[dict[str, Any]] = Field(default_factory=list)
+    recent_orders: list[dict[str, Any]] = Field(default_factory=list)
+    recent_fills: list[dict[str, Any]] = Field(default_factory=list)
+    exposure_by_symbol: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    unknown_or_unmanaged_orders: list[dict[str, Any]] = Field(default_factory=list)
+    unknown_or_unmanaged_positions: list[dict[str, Any]] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
     developer_details: dict[str, Any] = Field(default_factory=dict)
+    live_ready: Literal[False] = False
+
+
+class BrcAccountFactsResponse(BaseModel):
+    source: AccountFactsSource
+    truth_level: AccountFactsTruthLevel
+    generated_at_ms: int
+    account_summary: dict[str, Any] = Field(default_factory=dict)
+    positions: list[dict[str, Any]] = Field(default_factory=list)
+    open_orders: list[dict[str, Any]] = Field(default_factory=list)
+    recent_orders: list[dict[str, Any]] = Field(default_factory=list)
+    recent_fills: list[dict[str, Any]] = Field(default_factory=list)
+    exposure_by_symbol: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    unknown_or_unmanaged_orders: list[dict[str, Any]] = Field(default_factory=list)
+    unknown_or_unmanaged_positions: list[dict[str, Any]] = Field(default_factory=list)
+    connection_health: dict[str, Any] = Field(default_factory=dict)
+    reconciliation_status: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
     live_ready: Literal[False] = False
 
 
@@ -171,6 +217,7 @@ class BrcAuditTrailResponse(BaseModel):
     conclusion: str
     account_impact: str
     timeline: list[dict[str, Any]] = Field(default_factory=list)
+    operation_results: list[dict[str, Any]] = Field(default_factory=list)
     operator_actions: list[dict[str, Any]] = Field(default_factory=list)
     workflow_runs: list[dict[str, Any]] = Field(default_factory=list)
     review_decisions: list[dict[str, Any]] = Field(default_factory=list)
@@ -193,6 +240,29 @@ class BrcInvestigatorAskResponse(BaseModel):
     trace: list[dict[str, Any]] = Field(default_factory=list)
     next_step: str
     developer_details: dict[str, Any] = Field(default_factory=dict)
+    live_ready: Literal[False] = False
+
+
+class BrcOperationPreflightRequest(BaseModel):
+    operation_type: str = Field(min_length=1, max_length=128)
+    requested_by: str = Field(default="owner", max_length=128)
+    input_params: dict[str, Any] = Field(default_factory=dict)
+    source: dict[str, Any] = Field(default_factory=lambda: {"kind": "ui"})
+
+
+class BrcOperationConfirmRequest(BaseModel):
+    preflight_id: str = Field(min_length=1, max_length=128)
+    confirmation_phrase: str = Field(min_length=1, max_length=128)
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    confirmed_by: str = Field(default="owner", max_length=128)
+
+
+class BrcOperationCancelRequest(BaseModel):
+    requested_by: str = Field(default="owner", max_length=128)
+
+
+class BrcOperationCapabilitiesResponse(BaseModel):
+    capabilities: list[OperationCapability]
     live_ready: Literal[False] = False
 
 
@@ -220,6 +290,262 @@ def _api_module() -> Any:
     from src.interfaces import api as api_module
 
     return api_module
+
+
+async def _operation_runtime_summary() -> dict[str, Any]:
+    api_module = _api_module()
+    profile, testnet, profile_reasons, symbols = _runtime_profile_summary(api_module)
+    gks_active, startup_guard_armed = _guard_summary(api_module)
+    campaign_state = getattr(api_module, "_campaign_state_service", None)
+    current_runtime_state = None
+    if campaign_state is not None and hasattr(campaign_state, "get_state"):
+        try:
+            state = campaign_state.get_state()
+            current_runtime_state = getattr(state, "status", None)
+            if current_runtime_state is None and isinstance(state, dict):
+                current_runtime_state = state.get("status")
+        except Exception:
+            current_runtime_state = None
+    return {
+        "runtime_bound": api_module.get_runtime_context() is not None,
+        "profile": profile,
+        "testnet": testnet,
+        "symbols": symbols,
+        "profile_reasons": profile_reasons,
+        "gks_active": gks_active,
+        "startup_guard_armed": startup_guard_armed,
+        "runtime_control_api_enabled": _env_enabled("RUNTIME_CONTROL_API_ENABLED"),
+        "runtime_test_signal_injection_enabled": _env_enabled("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"),
+        "brc_service_ready": getattr(api_module, "_brc_campaign_service", None) is not None,
+        "campaign_state_service_ready": campaign_state is not None,
+        "current_runtime_state": current_runtime_state,
+        "live_ready": False,
+    }
+
+
+async def _operation_markets_orders_summary() -> dict[str, Any]:
+    facts = await _account_facts(_api_module())
+    payload = facts.model_dump(mode="json")
+    account = dict(payload.get("account_summary") or {})
+    payload.update(
+        {
+            "active_positions": payload.get("positions", []),
+            "active_position_count": account.get("active_position_count", 0),
+            "open_order_count": account.get("open_order_count", 0),
+            "all_local_flat": account.get("all_local_flat", False),
+            "data_source": payload.get("source"),
+            "reconciliation_status_value": (payload.get("reconciliation_status") or {}).get("status"),
+            "unknown_or_unmanaged_order_count": len(payload.get("unknown_or_unmanaged_orders") or []),
+            "unknown_or_unmanaged_position_count": len(payload.get("unknown_or_unmanaged_positions") or []),
+        }
+    )
+    return payload
+
+
+async def _operation_audit_writable() -> bool:
+    service = getattr(_api_module(), "_brc_campaign_service", None)
+    if service is None:
+        return False
+    _, errors = await _audit_summary(service, limit=1)
+    return not errors
+
+
+async def _operation_review_packet(input_params: dict[str, Any]) -> dict[str, Any]:
+    api_module = _api_module()
+    service = getattr(api_module, "_brc_campaign_service", None)
+    campaign = await service.get_latest_campaign() if service is not None else None
+    audit, audit_errors = await _audit_summary(service, limit=10)
+    return {
+        "operation_id": input_params.get("operation_id"),
+        "preflight_id": input_params.get("preflight_id"),
+        "latest_campaign": _campaign_summary(campaign),
+        "audit_timeline": list(audit.get("timeline", [])),
+        "audit_errors": audit_errors,
+        "mutation_executed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_runtime_transition(target_state: str, input_params: dict[str, Any]) -> dict[str, Any]:
+    api_module = _api_module()
+    campaign_state = getattr(api_module, "_campaign_state_service", None)
+    if campaign_state is None or not hasattr(campaign_state, "set_state"):
+        raise RuntimeError("runtime transition adapter unavailable")
+    snapshot = await campaign_state.set_state(
+        status=target_state,
+        reason=str(input_params.get("reason") or f"BRC Operation transition to {target_state}"),
+        updated_by=str(input_params.get("updated_by") or "owner"),
+        metadata={
+            "operation_id": input_params.get("operation_id"),
+            "preflight_id": input_params.get("preflight_id"),
+            "authorization_source": "brc_operation_layer",
+            "places_orders": False,
+            "closes_positions": False,
+            "cancels_orders": False,
+            "live_ready": False,
+        },
+    )
+    return _dump_jsonable(snapshot)
+
+
+def _runtime_stop_adapter_available(api_module: Any) -> bool:
+    campaign_state = getattr(api_module, "_campaign_state_service", None)
+    return campaign_state is not None and hasattr(campaign_state, "get_state") and hasattr(campaign_state, "set_state")
+
+
+async def _operation_runtime_stop(input_params: dict[str, Any]) -> dict[str, Any]:
+    api_module = _api_module()
+    campaign_state = getattr(api_module, "_campaign_state_service", None)
+    if campaign_state is None or not hasattr(campaign_state, "get_state") or not hasattr(campaign_state, "set_state"):
+        raise RuntimeError("runtime stop adapter unavailable")
+    from src.application.campaign_state_service import CampaignTransitionTrigger
+
+    current = campaign_state.get_state()
+    current_payload = _dump_jsonable(current)
+    current_status = str(current_payload.get("status") or "").lower()
+    stopped_states = {"stopped", "stopped_by_owner", "emergency_stop", "hard_locked", "closed"}
+    if current_status in stopped_states:
+        current_payload.update(
+            {
+                "already_stopped": True,
+                "operation_id": input_params.get("operation_id"),
+                "preflight_id": input_params.get("preflight_id"),
+                "authorization_source": "brc_operation_layer",
+                "does_not_flatten": True,
+                "does_not_cancel_orders": True,
+                "does_not_place_orders": True,
+                "live_ready": False,
+            }
+        )
+        return current_payload
+
+    snapshot = await campaign_state.set_state(
+        status="hard_locked",
+        reason=str(input_params.get("reason") or "BRC Operation emergency stop runtime"),
+        updated_by=str(input_params.get("updated_by") or "owner"),
+        trigger=CampaignTransitionTrigger.OWNER_HARD_LOCK,
+        metadata={
+            "operation_id": input_params.get("operation_id"),
+            "preflight_id": input_params.get("preflight_id"),
+            "authorization_source": "brc_operation_layer",
+            "stop_reason": "emergency_stop_runtime",
+            "stopped_by_owner": True,
+            "flatten_executed": False,
+            "orders_cancelled": False,
+            "places_orders": False,
+            "closes_positions": False,
+            "cancels_orders": False,
+            "live_ready": False,
+        },
+    )
+    payload = _dump_jsonable(snapshot)
+    payload.update(
+        {
+            "runtime_state": payload.get("status"),
+            "stopped_by_owner": True,
+            "emergency_stop": True,
+            "flatten_executed": False,
+            "orders_cancelled": False,
+            "places_orders": False,
+            "closes_positions": False,
+            "cancels_orders": False,
+            "live_ready": False,
+            "operation_id": input_params.get("operation_id"),
+            "preflight_id": input_params.get("preflight_id"),
+            "authorization_source": "brc_operation_layer",
+        }
+    )
+    return payload
+
+
+async def _operation_fixed_testnet_rehearsal(request: Request, input_params: dict[str, Any]) -> dict[str, Any]:
+    workflow_run_id = f"op-wf-{input_params['operation_id']}"
+    result = await runtime._execute_brc_fixed_testnet_rehearsal(
+        request=request,
+        workflow_run_id=workflow_run_id,
+    )
+    result.update(
+        {
+            "operation_id": input_params.get("operation_id"),
+            "preflight_id": input_params.get("preflight_id"),
+            "workflow_run_id": result.get("workflow_run_id") or workflow_run_id,
+            "authorization_source": "brc_operation_layer",
+            "workflow_carrier_role": "internal_ref_only",
+            "withdrawal_executed": False,
+            "live_ready": False,
+        }
+    )
+    readiness_summary, readiness_errors = await _readiness_summary_for_operation_result()
+    result["readiness"] = readiness_summary
+    result["readiness_errors"] = readiness_errors
+    return result
+
+
+async def _readiness_summary_for_operation_result() -> tuple[dict[str, Any], list[str]]:
+    try:
+        readiness = await get_brc_readiness()
+        return readiness.model_dump(mode="json"), []
+    except Exception as exc:  # pragma: no cover - defensive result enrichment
+        return {}, [str(exc)]
+
+
+async def _get_operation_service(request: Optional[Request] = None) -> BrcOperationService:
+    api_module = _api_module()
+    existing = getattr(api_module, "_brc_operation_service", None)
+    if existing is not None:
+        return existing
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    try:
+        from src.infrastructure.pg_brc_operation_repository import PgBrcOperationRepository
+
+        repository = PgBrcOperationRepository()
+    except Exception as exc:  # pragma: no cover - configuration-specific fail-closed path
+        raise HTTPException(
+            status_code=503,
+            detail="BRC Operation repository unavailable; persistent Operation Layer is required.",
+        ) from exc
+    service = BrcOperationService(
+        repository=repository,
+        brc_campaign_service=brc_service,
+        readers=OperationLayerReaders(
+            runtime_summary=_operation_runtime_summary,
+            markets_orders_summary=_operation_markets_orders_summary,
+            audit_writable=_operation_audit_writable,
+            review_packet_reader=_operation_review_packet,
+            runtime_transition=_operation_runtime_transition,
+            runtime_stop_executor=(
+                _operation_runtime_stop
+                if _runtime_stop_adapter_available(api_module)
+                else None
+            ),
+            fixed_rehearsal_executor=(
+                (lambda payload: _operation_fixed_testnet_rehearsal(request, payload))
+                if request is not None
+                else None
+            ),
+        ),
+    )
+    try:
+        await service.initialize()
+    except Exception as exc:  # pragma: no cover - configuration-specific fail-closed path
+        raise HTTPException(
+            status_code=503,
+            detail="BRC Operation repository initialization failed; persistent Operation Layer is required.",
+        ) from exc
+    if request is None:
+        setattr(api_module, "_brc_operation_service", service)
+    return service
+
+
+def _raise_operation_error(exc: Exception) -> None:
+    if isinstance(exc, ConfirmationMismatch):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, OperationLayerError):
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+    raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _runtime_profile_summary(api_module: Any) -> tuple[Optional[str], Optional[bool], list[str], list[str]]:
@@ -287,6 +613,54 @@ def _dump_jsonable(value: Any) -> dict[str, Any]:
         else:
             payload[key] = str(attr)
     return payload
+
+
+def _operation_audit_payload(operation: Any, result: Any = None) -> dict[str, Any]:
+    payload = _dump_jsonable(operation)
+    result_payload = _dump_jsonable(result) if result is not None else None
+    payload["result"] = result_payload
+    payload["audit_refs"] = (
+        result_payload.get("audit_refs")
+        if result_payload is not None
+        else payload.get("created_audit_refs", [])
+    )
+    payload["campaign_refs"] = result_payload.get("campaign_refs", []) if result_payload is not None else []
+    payload["review_refs"] = result_payload.get("review_refs", []) if result_payload is not None else []
+    payload["occurred_at_ms"] = (
+        result_payload.get("occurred_at_ms")
+        if result_payload is not None
+        else payload.get("executed_at_ms") or payload.get("confirmed_at_ms") or payload.get("requested_at_ms")
+    )
+    return payload
+
+
+async def _operation_audit_results(limit: int) -> tuple[list[dict[str, Any]], list[str]]:
+    api_module = _api_module()
+    errors: list[str] = []
+    existing = getattr(api_module, "_brc_operation_service", None)
+    try:
+        if existing is not None:
+            listed = await existing.list(limit=limit)
+            payloads = []
+            for operation in listed.operations:
+                detail = await existing.get(operation.operation_id)
+                payloads.append(_operation_audit_payload(detail.operation, detail.result))
+            return payloads, errors
+
+        from src.infrastructure.pg_brc_operation_repository import PgBrcOperationRepository
+
+        repository = PgBrcOperationRepository()
+        await repository.initialize()
+        operations = await repository.list_operations(limit=limit)
+        payloads = []
+        for operation in operations:
+            result = await repository.get_execution_result(operation.operation_id)
+            payloads.append(_operation_audit_payload(operation, result))
+        return payloads, errors
+    except Exception as exc:  # pragma: no cover - defensive audit summary
+        if existing is not None:
+            errors.append(f"operation results read failed: {exc}")
+        return [], errors
 
 
 def _campaign_summary(campaign: Any) -> Optional[dict[str, Any]]:
@@ -364,10 +738,403 @@ async def _markets_orders_summary(api_module: Any) -> tuple[dict[str, Any], list
             "active_position_count": len(all_positions),
             "open_order_count": len(all_open_orders),
             "all_local_flat": len(all_positions) == 0 and len(all_open_orders) == 0,
-            "data_source": "local_pg_repositories_only",
+            "data_source": "local_pg",
         },
         errors,
     )
+
+
+async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
+    generated_at_ms = int(time.time() * 1000)
+    position_repo = getattr(api_module, "_position_repo", None)
+    order_repo = getattr(api_module, "_order_repo", None)
+    local_summary, errors = await _markets_orders_summary(api_module)
+    local_positions = list(local_summary.get("active_positions", []))
+    local_open_orders = list(local_summary.get("open_orders", []))
+    repos_wired = position_repo is not None or order_repo is not None
+    local_read_failed = bool(errors)
+    local_available = repos_wired and not local_read_failed
+    exchange = await _exchange_testnet_facts(api_module)
+    exchange_available = exchange["available"] is True
+    positions = list(exchange["positions"] if exchange_available else local_positions)
+    open_orders = list(exchange["open_orders"] if exchange_available else local_open_orders)
+    recent_orders = list(exchange["recent_orders"] if exchange_available else [])
+    recent_fills = list(exchange["recent_fills"] if exchange_available else [])
+    if exchange_available and local_available:
+        source: AccountFactsSource = "mixed"
+        truth_level: AccountFactsTruthLevel = "reconciled"
+    elif exchange_available:
+        source = "exchange_testnet"
+        truth_level = "exchange_read"
+    elif local_available:
+        source = "local_pg"
+        truth_level = "summary"
+    else:
+        source = "unavailable"
+        truth_level = "unavailable"
+    limitations = [
+        "Current view is local BRC summary, not complete exchange account truth.",
+        "recent_orders is unavailable unless exchange testnet exposes a safe read-only history method.",
+        "recent_fills is unavailable unless exchange testnet exposes a safe read-only trade history method.",
+        "unknown_or_unmanaged_orders require exchange testnet read plus reconciliation.",
+        "No order placement, cancel, close, flatten, withdrawal, transfer, or live enablement is exposed here.",
+    ]
+    warnings = list(errors)
+    warnings.extend(exchange["warnings"])
+    blockers: list[str] = []
+    if not repos_wired:
+        blockers.append("local PG position/order repositories are not available")
+        limitations.append("local PG account summary is unavailable in this process.")
+    if local_read_failed:
+        blockers.append("local PG account facts read failed; account facts are fail-closed")
+        limitations.append("local PG account summary failed to read and cannot be treated as account truth.")
+    limitations.extend(exchange["limitations"])
+
+    reconciliation_status, unknown_orders, unknown_positions = _reconcile_account_facts(
+        local_positions=local_positions,
+        local_open_orders=local_open_orders,
+        exchange_positions=list(exchange["positions"]),
+        exchange_open_orders=list(exchange["open_orders"]),
+        local_available=local_available,
+        exchange_available=exchange_available,
+    )
+    exposure_by_symbol = _exposure_by_symbol_from_facts(
+        local_summary=local_summary,
+        positions=positions,
+        open_orders=open_orders,
+        source=source,
+        truth_level=truth_level,
+    )
+    connection_health = {
+        "local_pg": {
+            "available": local_available,
+            "position_repo_available": position_repo is not None,
+            "order_repo_available": order_repo is not None,
+            "errors": errors,
+        },
+        "exchange_testnet_read": {
+            "available": exchange_available,
+            "reason": exchange["reason"],
+            "profile": exchange["profile"],
+            "testnet": exchange["testnet"],
+            "errors": exchange["errors"],
+        },
+        "exchange_live_read": {
+            "available": False,
+            "reason": "forbidden in Owner Console account facts slice",
+        },
+        "mutation_enabled": False,
+        "live_ready": False,
+    }
+    return BrcAccountFactsResponse(
+        source=source,
+        truth_level=truth_level,
+        generated_at_ms=generated_at_ms,
+        account_summary={
+            "controlled_symbols": _CONTROLLED_SYMBOLS,
+            "active_position_count": len(positions),
+            "open_order_count": len(open_orders),
+            "local_active_position_count": len(local_positions),
+            "local_open_order_count": len(local_open_orders),
+            "exchange_position_count": len(exchange["positions"]) if exchange_available else "not_available",
+            "exchange_open_order_count": len(exchange["open_orders"]) if exchange_available else "not_available",
+            "all_local_flat": local_summary.get("all_local_flat", False),
+            "all_exchange_flat": exchange["all_flat"] if exchange_available else "not_available",
+            "wallet_equity": "not_available",
+            "available_margin": "not_available",
+            "real_account_impact": "none",
+            "complete_exchange_account_truth": exchange_available,
+        },
+        positions=positions,
+        open_orders=open_orders,
+        recent_orders=recent_orders,
+        recent_fills=recent_fills,
+        exposure_by_symbol=exposure_by_symbol,
+        unknown_or_unmanaged_orders=unknown_orders,
+        unknown_or_unmanaged_positions=unknown_positions,
+        connection_health=connection_health,
+        reconciliation_status=reconciliation_status,
+        limitations=limitations,
+        warnings=warnings,
+        blockers=blockers,
+    )
+
+
+async def _exchange_testnet_facts(api_module: Any) -> dict[str, Any]:
+    gateway = getattr(api_module, "_exchange_gateway", None)
+    profile, testnet, profile_reasons, symbols = _runtime_profile_summary(api_module)
+    unavailable = {
+        "available": False,
+        "reason": "exchange testnet read unavailable",
+        "profile": profile,
+        "testnet": testnet,
+        "positions": [],
+        "open_orders": [],
+        "recent_orders": [],
+        "recent_fills": [],
+        "all_flat": "not_available",
+        "warnings": [],
+        "errors": [],
+        "limitations": [],
+    }
+    if gateway is None:
+        unavailable["reason"] = "exchange gateway is not wired"
+        unavailable["limitations"].append("Exchange testnet read source is not wired in this process.")
+        return unavailable
+    if profile != "brc_btc_eth_testnet_runtime" or testnet is not True:
+        unavailable["reason"] = "runtime profile is not confirmed BRC exchange testnet"
+        unavailable["limitations"].extend(profile_reasons or ["Exchange testnet profile is not confirmed."])
+        return unavailable
+    if not hasattr(gateway, "fetch_positions") or not hasattr(gateway, "fetch_open_orders"):
+        unavailable["reason"] = "gateway does not expose required read-only methods"
+        unavailable["limitations"].append("Gateway lacks fetch_positions/fetch_open_orders read methods.")
+        return unavailable
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    positions: list[dict[str, Any]] = []
+    open_orders: list[dict[str, Any]] = []
+    recent_orders: list[dict[str, Any]] = []
+    recent_fills: list[dict[str, Any]] = []
+    for symbol in [str(item["exchange_symbol"]) for item in _CONTROLLED_SYMBOLS]:
+        try:
+            fetched_positions = await gateway.fetch_positions(symbol=symbol)
+            positions.extend(_dump_jsonable(item) for item in fetched_positions if _position_nonzero(item))
+        except TypeError:
+            try:
+                fetched_positions = await gateway.fetch_positions(symbol)
+                positions.extend(_dump_jsonable(item) for item in fetched_positions if _position_nonzero(item))
+            except Exception as exc:  # pragma: no cover - defensive read path
+                errors.append(f"{symbol} exchange positions read failed: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive read path
+            errors.append(f"{symbol} exchange positions read failed: {exc}")
+
+        open_orders.extend(await _safe_fetch_exchange_orders(gateway, symbol, errors=errors))
+        recent_orders.extend(await _safe_fetch_recent_orders(gateway, symbol, warnings=warnings, errors=errors))
+        recent_fills.extend(await _safe_fetch_recent_fills(gateway, symbol, warnings=warnings, errors=errors))
+
+    return {
+        "available": not errors,
+        "reason": "exchange testnet read available" if not errors else "exchange testnet read partially failed",
+        "profile": profile,
+        "testnet": testnet,
+        "positions": positions,
+        "open_orders": open_orders,
+        "recent_orders": recent_orders,
+        "recent_fills": recent_fills,
+        "all_flat": len(positions) == 0 and len(open_orders) == 0,
+        "warnings": warnings,
+        "errors": errors,
+        "limitations": [
+            "Exchange read is limited to BRC controlled BTC/ETH symbols.",
+            "Exchange live read and every write/mutation capability remain forbidden.",
+        ],
+    }
+
+
+async def _safe_fetch_exchange_orders(gateway: Any, symbol: str, *, errors: list[str]) -> list[dict[str, Any]]:
+    orders: list[dict[str, Any]] = []
+    for params in (None, {"stop": True}):
+        try:
+            fetched = await _call_fetch_open_orders(gateway, symbol, params=params)
+            orders.extend(_dump_jsonable(item) for item in fetched)
+        except Exception as exc:  # pragma: no cover - defensive read path
+            errors.append(f"{symbol} exchange open orders read failed: {exc}")
+    return _dedupe_records(orders, key_fn=_order_key)
+
+
+async def _safe_fetch_recent_orders(
+    gateway: Any,
+    symbol: str,
+    *,
+    warnings: list[str],
+    errors: list[str],
+) -> list[dict[str, Any]]:
+    method = getattr(gateway, "fetch_orders", None)
+    if not callable(method):
+        warnings.append(f"{symbol} recent order history read method unavailable")
+        return []
+    try:
+        try:
+            return [_dump_jsonable(item) for item in await method(symbol=symbol, limit=20)]
+        except TypeError:
+            return [_dump_jsonable(item) for item in await method(symbol, limit=20)]
+    except Exception as exc:  # pragma: no cover - defensive read path
+        errors.append(f"{symbol} exchange recent orders read failed: {exc}")
+        return []
+
+
+async def _safe_fetch_recent_fills(
+    gateway: Any,
+    symbol: str,
+    *,
+    warnings: list[str],
+    errors: list[str],
+) -> list[dict[str, Any]]:
+    method = getattr(gateway, "fetch_my_trades", None)
+    if not callable(method):
+        warnings.append(f"{symbol} recent fill history read method unavailable")
+        return []
+    try:
+        try:
+            return [_dump_jsonable(item) for item in await method(symbol=symbol, limit=20)]
+        except TypeError:
+            return [_dump_jsonable(item) for item in await method(symbol, limit=20)]
+    except Exception as exc:  # pragma: no cover - defensive read path
+        errors.append(f"{symbol} exchange recent fills read failed: {exc}")
+        return []
+
+
+async def _call_fetch_open_orders(gateway: Any, symbol: str, *, params: Optional[dict[str, Any]]) -> list[Any]:
+    if params is None:
+        return list(await gateway.fetch_open_orders(symbol))
+    try:
+        return list(await gateway.fetch_open_orders(symbol, params=params))
+    except TypeError:
+        return []
+
+
+def _reconcile_account_facts(
+    *,
+    local_positions: list[dict[str, Any]],
+    local_open_orders: list[dict[str, Any]],
+    exchange_positions: list[dict[str, Any]],
+    exchange_open_orders: list[dict[str, Any]],
+    local_available: bool,
+    exchange_available: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    if not local_available and not exchange_available:
+        return {
+            "status": "unknown",
+            "checked_sources": [],
+            "mismatches": [],
+            "limitations": ["Neither local PG nor exchange testnet read source is available."],
+        }, [], []
+    if not exchange_available:
+        return {
+            "status": "not_available",
+            "checked_sources": ["local_pg"] if local_available else [],
+            "mismatches": [],
+            "limitations": [
+                "Exchange testnet read source is unavailable; reconciliation cannot prove clean or mismatch.",
+            ],
+        }, [], []
+    if not local_available:
+        return {
+            "status": "unknown",
+            "checked_sources": ["exchange_testnet"],
+            "mismatches": [],
+            "limitations": [
+                "Local PG source is unavailable; exchange facts are read-only but cannot be reconciled.",
+            ],
+        }, [], []
+
+    mismatches: list[dict[str, Any]] = []
+    local_position_keys = {_position_key(item) for item in local_positions}
+    exchange_position_by_key = {_position_key(item): item for item in exchange_positions}
+    local_order_keys = {_order_key(item) for item in local_open_orders}
+    exchange_order_by_key = {_order_key(item): item for item in exchange_open_orders}
+
+    unknown_positions = [
+        {"type": "exchange_position_missing_locally", "record": record}
+        for key, record in exchange_position_by_key.items()
+        if key not in local_position_keys
+    ]
+    unknown_orders = [
+        {"type": "exchange_order_missing_locally", "record": record}
+        for key, record in exchange_order_by_key.items()
+        if key not in local_order_keys
+    ]
+    for key in sorted(local_position_keys - set(exchange_position_by_key.keys())):
+        mismatches.append({"type": "local_position_missing_on_exchange", "key": key})
+    for item in unknown_positions:
+        mismatches.append({"type": item["type"], "key": _position_key(item["record"]), "record": item["record"]})
+    for key in sorted(local_order_keys - set(exchange_order_by_key.keys())):
+        mismatches.append({"type": "local_order_missing_on_exchange", "key": key})
+    for item in unknown_orders:
+        mismatches.append({"type": item["type"], "key": _order_key(item["record"]), "record": item["record"]})
+
+    return {
+        "status": "mismatch" if mismatches else "clean",
+        "checked_sources": ["local_pg", "exchange_testnet"],
+        "mismatches": mismatches,
+        "limitations": [
+            "Reconciliation compares BRC local PG active positions/open orders with exchange testnet positions/open orders.",
+            "It does not authorize any write action.",
+        ],
+    }, unknown_orders, unknown_positions
+
+
+def _exposure_by_symbol_from_facts(
+    *,
+    local_summary: dict[str, Any],
+    positions: list[dict[str, Any]],
+    open_orders: list[dict[str, Any]],
+    source: str,
+    truth_level: str,
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for spec in _CONTROLLED_SYMBOLS:
+        symbol = str(spec["exchange_symbol"])
+        symbol_positions = [item for item in positions if str(item.get("symbol") or "") == symbol]
+        symbol_orders = [item for item in open_orders if str(item.get("symbol") or "") == symbol]
+        result[symbol] = {
+            "display_symbol": spec["display_symbol"],
+            "position_count": len(symbol_positions),
+            "open_order_count": len(symbol_orders),
+            "local_flat": len(symbol_positions) == 0 and len(symbol_orders) == 0,
+            "local_position_count": len([item for item in local_summary.get("active_positions", []) if str(item.get("symbol") or "") == symbol]),
+            "local_open_order_count": len([item for item in local_summary.get("open_orders", []) if str(item.get("symbol") or "") == symbol]),
+            "source": source,
+            "truth_level": truth_level,
+            "notional": "not_available",
+        }
+    return result
+
+
+def _dedupe_records(records: list[dict[str, Any]], *, key_fn: Any) -> list[dict[str, Any]]:
+    deduped: dict[str, dict[str, Any]] = {}
+    for record in records:
+        deduped[key_fn(record)] = record
+    return list(deduped.values())
+
+
+def _position_nonzero(item: Any) -> bool:
+    payload = _dump_jsonable(item)
+    for key in ("size", "contracts", "positionAmt", "quantity", "current_qty"):
+        if key in payload and _decimal_value(payload.get(key)) != Decimal("0"):
+            return True
+    return False
+
+
+def _position_key(item: dict[str, Any]) -> str:
+    symbol = str(item.get("symbol") or "unknown")
+    side = str(item.get("side") or item.get("direction") or "long").lower()
+    if side in {"buy", "long"}:
+        side = "long"
+    elif side in {"sell", "short"}:
+        side = "short"
+    return f"{symbol}:{side}"
+
+
+def _order_key(item: dict[str, Any]) -> str:
+    value = (
+        item.get("exchange_order_id")
+        or item.get("order_id")
+        or item.get("id")
+        or item.get("clientOrderId")
+        or item.get("client_order_id")
+    )
+    if value is not None:
+        return str(value)
+    return f"{item.get('symbol', 'unknown')}:{item.get('side', 'unknown')}:{item.get('type', item.get('order_type', 'unknown'))}:{item.get('price', '')}"
+
+
+def _decimal_value(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value or "0"))
+    except Exception:
+        return Decimal("0")
 
 
 async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, Any], list[str]]:
@@ -375,14 +1142,30 @@ async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, An
     actions: list[Any] = []
     workflows: list[Any] = []
     reviews: list[Any] = []
+    operation_payloads, operation_errors = await _operation_audit_results(limit)
+    errors.extend(operation_errors)
+    operation_timeline = [
+        {
+            "type": "operation",
+            "id": item.get("operation_id"),
+            "title": "Owner Operation / Operation Layer",
+            "result": item.get("result_status") or item.get("status"),
+            "occurred_at_ms": item.get("occurred_at_ms"),
+            "summary": (item.get("result_summary") or {}).get("message") or item.get("operation_type"),
+            "account_impact": "Operation Layer result; no live/mainnet/withdrawal/transfer authority.",
+            "raw": item,
+        }
+        for item in operation_payloads
+    ]
     if service is None:
         return {
-            "timeline": [],
+            "timeline": operation_timeline[:limit],
+            "operation_results": operation_payloads,
             "operator_actions": [],
             "workflow_runs": [],
             "review_decisions": [],
-            "latest_event": None,
-        }, ["BRC Campaign service unavailable"]
+            "latest_event": operation_timeline[0] if operation_timeline else None,
+        }, errors + ["BRC Campaign service unavailable"]
 
     for label, method_name, target in [
         ("operator actions", "list_operator_actions", "actions"),
@@ -407,6 +1190,7 @@ async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, An
     workflow_payloads = [_dump_jsonable(item) for item in workflows]
     review_payloads = [_dump_jsonable(item) for item in reviews]
     timeline: list[dict[str, Any]] = []
+    timeline.extend(operation_timeline)
     for item in action_payloads:
         timeline.append(
             {
@@ -449,6 +1233,7 @@ async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, An
     timeline.sort(key=lambda item: int(item.get("occurred_at_ms") or 0), reverse=True)
     return {
         "timeline": timeline[:limit],
+        "operation_results": operation_payloads,
         "operator_actions": action_payloads,
         "workflow_runs": workflow_payloads,
         "review_decisions": review_payloads,
@@ -957,19 +1742,19 @@ async def get_brc_readiness() -> BrcReadinessResponse:
         ),
         _action_card(
             action_type="emergency_flatten",
-            title="Emergency flatten",
+            title="Emergency flatten dry-run",
             enabled=cutoff_enabled,
             disabled_reason=no_runtime_reason,
             route="/runtime-control",
-            button_label="Flatten",
+            button_label="Dry-run plan",
             fact_snapshot_id=fact_snapshot_id,
             current_state=runtime_state,
-            allowed_next_states=["flattening", "attention_required"],
+            allowed_next_states=["attention_required"],
             reversible=False,
-            final_state_proof_required=True,
-            confirmation_phrase="CONFIRM_BRC_TESTNET_REHEARSAL",
-            account_impact="v0 仅允许在 simulation/testnet 边界内执行；真实账户不可用。",
-            what_will_change="尝试撤单/平仓并要求最终 flatness 证明；失败会进入 attention_required。",
+            final_state_proof_required=False,
+            confirmation_phrase="CONFIRM_FLATTEN_DRY_RUN",
+            account_impact="仅持久化 dry-run plan；不会撤单、平仓、下单或影响真实账户。",
+            what_will_change="生成并持久化 emergency flatten dry-run plan；候选项不是可执行交易请求。",
         ),
     ]
 
@@ -1039,27 +1824,124 @@ async def get_brc_readiness() -> BrcReadinessResponse:
     )
 
 
+@router.get("/operations/capabilities", response_model=BrcOperationCapabilitiesResponse)
+async def get_brc_operation_capabilities(request: Request) -> BrcOperationCapabilitiesResponse:
+    service = await _get_operation_service(request)
+    return BrcOperationCapabilitiesResponse(capabilities=service.capabilities())
+
+
+@router.post("/operations/preflight", response_model=OperationPreflightResponse)
+async def preflight_brc_operation(
+    request: Request,
+    body: BrcOperationPreflightRequest,
+) -> OperationPreflightResponse:
+    service = await _get_operation_service(request)
+    try:
+        return await service.preflight(
+            operation_type=body.operation_type,
+            requested_by=body.requested_by,
+            input_params=body.input_params,
+            source=body.source,
+        )
+    except Exception as exc:
+        _raise_operation_error(exc)
+        raise
+
+
+@router.post("/operations/{operation_id}/confirm", response_model=OperationConfirmResponse)
+async def confirm_brc_operation(
+    request: Request,
+    operation_id: str,
+    body: BrcOperationConfirmRequest,
+) -> OperationConfirmResponse:
+    service = await _get_operation_service(request)
+    try:
+        return await service.confirm(
+            operation_id=operation_id,
+            preflight_id=body.preflight_id,
+            confirmation_phrase=body.confirmation_phrase,
+            idempotency_key=body.idempotency_key,
+            confirmed_by=body.confirmed_by,
+        )
+    except Exception as exc:
+        _raise_operation_error(exc)
+        raise
+
+
+@router.post("/operations/{operation_id}/cancel", response_model=OperationConfirmResponse)
+async def cancel_brc_operation(
+    request: Request,
+    operation_id: str,
+    body: BrcOperationCancelRequest,
+) -> OperationConfirmResponse:
+    service = await _get_operation_service(request)
+    try:
+        return await service.cancel(operation_id=operation_id, requested_by=body.requested_by)
+    except Exception as exc:
+        _raise_operation_error(exc)
+        raise
+
+
+@router.get("/operations/{operation_id}", response_model=OperationDetailResponse)
+async def get_brc_operation(request: Request, operation_id: str) -> OperationDetailResponse:
+    service = await _get_operation_service(request)
+    try:
+        return await service.get(operation_id)
+    except Exception as exc:
+        _raise_operation_error(exc)
+        raise
+
+
+@router.get("/operations", response_model=OperationListResponse)
+async def list_brc_operations(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> OperationListResponse:
+    service = await _get_operation_service(request)
+    return await service.list(limit=limit)
+
+
 @router.get("/dashboard", response_model=BrcDashboardResponse)
 async def get_brc_dashboard() -> BrcDashboardResponse:
     return BrcDashboardResponse()
 
 
+@router.get("/account/facts", response_model=BrcAccountFactsResponse)
+async def get_brc_account_facts() -> BrcAccountFactsResponse:
+    return await _account_facts(_api_module())
+
+
 @router.get("/markets-orders", response_model=BrcMarketsOrdersResponse)
 async def get_brc_markets_orders() -> BrcMarketsOrdersResponse:
     api_module = _api_module()
-    summary, errors = await _markets_orders_summary(api_module)
-    all_flat = bool(summary.get("all_local_flat"))
+    facts = await _account_facts(api_module)
+    all_flat = bool(facts.account_summary.get("all_local_flat"))
     return BrcMarketsOrdersResponse(
         conclusion=(
-            "当前本地 PG 未发现 BRC BTC/ETH active position/open order。"
+            "当前本地 PG 摘要未发现 BRC BTC/ETH active position/open order。"
             if all_flat
-            else "当前发现本地 active position 或 open order，需要核对订单触发链路。"
+            else "当前本地 PG 摘要发现 active position 或 open order，需要核对订单触发链路。"
         ),
         account_impact="只读查询，不会下单、平仓、提现、转账或修改仓位。",
-        symbols=list(summary.get("symbols", [])),
-        open_orders=list(summary.get("open_orders", [])),
-        active_positions=list(summary.get("active_positions", [])),
-        developer_details={"errors": errors, "data_source": summary.get("data_source")},
+        source=facts.source,
+        truth_level=facts.truth_level,
+        reconciliation_status=facts.reconciliation_status,
+        symbols=list(facts.account_summary.get("controlled_symbols", [])),
+        open_orders=facts.open_orders,
+        active_positions=facts.positions,
+        recent_orders=facts.recent_orders,
+        recent_fills=facts.recent_fills,
+        exposure_by_symbol=facts.exposure_by_symbol,
+        unknown_or_unmanaged_orders=facts.unknown_or_unmanaged_orders,
+        unknown_or_unmanaged_positions=facts.unknown_or_unmanaged_positions,
+        limitations=facts.limitations,
+        warnings=facts.warnings,
+        blockers=facts.blockers,
+        developer_details={
+            "connection_health": facts.connection_health,
+            "account_summary": facts.account_summary,
+            "generated_at_ms": facts.generated_at_ms,
+        },
     )
 
 
@@ -1076,6 +1958,7 @@ async def get_brc_audit_trail(limit: int = Query(default=50, ge=1, le=200)) -> B
         ),
         account_impact="只读审计查询，不会重放、修改或执行任何历史动作。",
         timeline=timeline,
+        operation_results=list(summary.get("operation_results", [])),
         operator_actions=list(summary.get("operator_actions", [])),
         workflow_runs=list(summary.get("workflow_runs", [])),
         review_decisions=list(summary.get("review_decisions", [])),
