@@ -182,6 +182,21 @@ async def test_brc_switch_records_inferred_fields_and_does_not_reset_pnl():
 
 
 @pytest.mark.asyncio
+async def test_tf001_carrier_playbook_switch_is_allowed_without_controlled_testnet_authority():
+    service, repo = await _campaign_service()
+    decision = await service.switch_playbook(
+        new_playbook_id="TF-001",
+        reason_category="carrier_validation",
+        reason_text="owner selected TF-001 as full-chain carrier only",
+        evidence_refs=["docs/ops/brc-r5-001-tf001-carrier-full-chain-validation-plan.md"],
+    )
+
+    assert decision.decision_result == BrcDecisionResult.ALLOWED
+    assert decision.inferred_fields["loss_counter_reset"] is False
+    assert repo.campaign.current_playbook_id == "TF-001"
+
+
+@pytest.mark.asyncio
 async def test_brc_attempt_sequence_and_third_attempt_block():
     service, _ = await _campaign_service()
     await service.switch_playbook(

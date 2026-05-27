@@ -274,6 +274,41 @@ async def test_switch_playbook_preflight_confirm_executes_once_and_links_refs():
 
 
 @pytest.mark.asyncio
+async def test_tf001_carrier_playbook_can_be_selected_without_trading_authority():
+    service, op_repo, brc_repo, _ = await _operation_service()
+    preflight = await service.preflight(
+        operation_type="switch_playbook",
+        requested_by="owner",
+        input_params={
+            "target_playbook_id": "TF-001",
+            "reason_text": "TF-001 carrier validation selection",
+            "evidence_refs": ["docs/ops/brc-r5-001-tf001-carrier-full-chain-validation-plan.md"],
+        },
+        source={"kind": "unit"},
+    )
+
+    assert preflight.decision == "allow"
+    assert preflight.playbook_summary["known"] is True
+    assert preflight.playbook_summary["target_playbook_id"] == "TF-001"
+
+    result = await service.confirm(
+        operation_id=preflight.operation_id,
+        preflight_id=preflight.preflight_id,
+        confirmation_phrase="CONFIRM_SWITCH_PLAYBOOK",
+        idempotency_key=preflight.idempotency_key,
+    )
+
+    assert result.status == "executed"
+    assert brc_repo.campaign.current_playbook_id == "TF-001"
+    assert len(brc_repo.switches) == 1
+    assert (await op_repo.get_operation(preflight.operation_id)).status == "executed"
+    assert "No orders were placed" in result.result_summary["message"]
+    switch_event = next(item for item in brc_repo.events if item["event_type"] == "playbook_switched")
+    assert switch_event["metadata"]["preflight_id"] == preflight.preflight_id
+    assert f"operation:{preflight.operation_id}" in switch_event["metadata"]["evidence_refs"]
+
+
+@pytest.mark.asyncio
 async def test_unknown_operation_rejected_before_persistence():
     service, op_repo, _, _ = await _operation_service()
 

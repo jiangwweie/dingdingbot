@@ -467,5 +467,12 @@ def default_playbook_catalog() -> dict[str, PlaybookEntry]:
             evidence_state="controlled_rehearsal_only",
             allows_controlled_testnet=True,
         ),
+        PlaybookEntry(
+            playbook_id="TF-001",
+            name="Trend Following Carrier",
+            status="carrier_validation_only",
+            evidence_state="carrier_validation_only",
+            allows_controlled_testnet=False,
+        ),
     ]
     return {entry.playbook_id: entry for entry in entries}
