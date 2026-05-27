@@ -603,21 +603,54 @@ def test_runtime_bound_evidence_smoke_payload_is_bounded():
     assert payload["account_facts_summary"]["mismatch_count"] == 0
 
 
-def test_tf001_carrier_decision_review_is_bounded_and_blocks_switch():
+def test_tf001_carrier_decision_review_is_bounded_and_ready_for_full_chain():
     from scripts.brc_owner_console_smoke import run_tf001_carrier_decision_review
 
     payload = asyncio.run(run_tf001_carrier_decision_review())
 
     assert payload["mode"] == "tf001-carrier-decision-review"
-    assert payload["decision"]["tf001_switch_playbook_ready"] is False
+    assert payload["decision"]["tf001_switch_playbook_ready"] is True
     assert payload["decision"]["tf001_monitor_carrier_ready"] is True
     assert payload["safety_boundary"]["live_ready"] is False
     assert payload["safety_boundary"]["strategy_execution_enabled"] is False
     assert payload["safety_boundary"]["order_cancel_executed"] is False
-    assert payload["tf001_switch_playbook"]["preflight"]["known"] is False
-    assert "unknown playbook: TF-001" in payload["tf001_switch_playbook"]["blocked_reason"]
+    assert payload["tf001_switch_playbook"]["preflight"]["known"] is True
+    assert payload["tf001_switch_playbook"]["preflight"]["decision"] == "allow"
+    assert payload["tf001_switch_playbook"]["blocked_reason"] is None
     assert payload["tf001_monitor_carrier"]["confirm"]["status"] == "noop"
     assert payload["campaign_playbook_after_review"] == "PB-000-OBSERVE-ONLY"
+
+
+def test_tf001_carrier_full_chain_smoke_completes_bounded_trial_flow():
+    from scripts.brc_owner_console_smoke import run_tf001_carrier_full_chain
+
+    payload = asyncio.run(run_tf001_carrier_full_chain())
+
+    assert payload["mode"] == "tf001-carrier-full-chain"
+    assert payload["completed"] is True
+    assert payload["stage_statuses"] == {
+        "select_playbook": "executed",
+        "confirm_selection": "executed",
+        "monitor": "noop",
+        "pause": "executed",
+        "stop": "executed",
+        "review": "executed",
+    }
+    assert payload["campaign_playbook_after_full_chain"] == "TF-001"
+    assert payload["review_decision_count"] == 1
+    assert payload["operation_list"]["all_chain_operations_listed"] is True
+    assert payload["operations"]["switch_playbook"]["preflight_decision"] == "allow"
+    assert payload["operations"]["switch_playbook"]["confirm_status"] == "executed"
+    assert payload["operations"]["enter_strategy_or_monitor"]["confirm_status"] == "noop"
+    assert payload["operations"]["emergency_stop_runtime"]["confirm_status"] == "executed"
+    assert payload["operations"]["emergency_stop_runtime"]["does_not_flatten"] is True
+    assert payload["operations"]["emergency_stop_runtime"]["does_not_cancel_orders"] is True
+    assert payload["safety_boundary"]["live_ready"] is False
+    assert payload["safety_boundary"]["strategy_execution_enabled"] is False
+    assert payload["safety_boundary"]["actual_flatten_executed"] is False
+    assert payload["safety_boundary"]["order_cancel_executed"] is False
+    assert payload["safety_boundary"]["close_position_executed"] is False
+    assert payload["safety_boundary"]["withdrawal_or_transfer_executed"] is False
 
 
 def test_brc_audit_and_investigator_are_read_only(monkeypatch):

@@ -15,9 +15,12 @@ generic trading, actual flatten, order cancel/close, withdrawal/transfer, or
 LLM direct execution.
 
 TF-001 carrier decision review mode checks whether the current Operation Layer
-can carry TF-001 without expanding authority. It records TF-001 switch as
-blocked until the playbook catalog explicitly allows it, and verifies the
-monitor carrier noop path only.
+can carry TF-001 without expanding authority.
+
+TF-001 carrier full-chain mode validates the bounded third-stage trial flow:
+select playbook, confirm, enter monitor carrier, pause, stop runtime, and write
+the review decision. It does not start live/mainnet, generic trading, actual
+flatten, order cancel/close, withdrawal/transfer, or LLM direct execution.
 """
 
 from __future__ import annotations
@@ -108,6 +111,32 @@ def _request(
         body = exc.read().decode("utf-8")
         parsed = json.loads(body) if body else {}
         return exc.code, parsed
+
+
+def _clean_reconciled_market_state(evidence_ref: str) -> dict[str, Any]:
+    return {
+        "active_position_count": 0,
+        "open_order_count": 0,
+        "all_local_flat": True,
+        "source": "mixed",
+        "truth_level": "reconciled",
+        "data_source": "mixed",
+        "reconciliation_status": {"status": "clean", "checked_sources": ["local_pg", "exchange_testnet"]},
+        "reconciliation_status_value": "clean",
+        "checked_sources": ["local_pg", "exchange_testnet"],
+        "source_snapshots": {
+            "local_pg": {"available": True, "position_count": 0, "open_order_count": 0},
+            "exchange_testnet": {"available": True, "position_count": 0, "open_order_count": 0},
+            "exchange_live": {"available": False, "reason": "forbidden in Owner Console account facts slice"},
+        },
+        "evidence_refs": [evidence_ref],
+        "mismatch_count": 0,
+        "unknown_or_unmanaged_orders": [],
+        "unknown_or_unmanaged_positions": [],
+        "unknown_or_unmanaged_order_count": 0,
+        "unknown_or_unmanaged_position_count": 0,
+        "unknown_unmanaged_counts": {"orders": 0, "positions": 0},
+    }
 
 
 def run_http_smoke(base_url: str, cookie: str) -> dict[str, Any]:
@@ -205,29 +234,7 @@ async def run_runtime_bound_evidence_smoke() -> dict[str, Any]:
     from tests.unit.test_brc_operation_layer import _operation_service, _switch_preflight
 
     service, _, brc_repo, market = await _operation_service(
-        market_state={
-            "active_position_count": 0,
-            "open_order_count": 0,
-            "all_local_flat": True,
-            "source": "mixed",
-            "truth_level": "reconciled",
-            "data_source": "mixed",
-            "reconciliation_status": {"status": "clean", "checked_sources": ["local_pg", "exchange_testnet"]},
-            "reconciliation_status_value": "clean",
-            "checked_sources": ["local_pg", "exchange_testnet"],
-            "source_snapshots": {
-                "local_pg": {"available": True, "position_count": 0, "open_order_count": 0},
-                "exchange_testnet": {"available": True, "position_count": 0, "open_order_count": 0},
-                "exchange_live": {"available": False, "reason": "forbidden in Owner Console account facts slice"},
-            },
-            "evidence_refs": ["runtime-bound-evidence:account-facts-clean"],
-            "mismatch_count": 0,
-            "unknown_or_unmanaged_orders": [],
-            "unknown_or_unmanaged_positions": [],
-            "unknown_or_unmanaged_order_count": 0,
-            "unknown_or_unmanaged_position_count": 0,
-            "unknown_unmanaged_counts": {"orders": 0, "positions": 0},
-        }
+        market_state=_clean_reconciled_market_state("runtime-bound-evidence:account-facts-clean")
     )
     capabilities = {item.operation_type: item.model_dump(mode="json") for item in service.capabilities()}
 
@@ -353,29 +360,7 @@ async def run_tf001_carrier_decision_review() -> dict[str, Any]:
     from tests.unit.test_brc_operation_layer import _operation_service
 
     service, _, brc_repo, market = await _operation_service(
-        market_state={
-            "active_position_count": 0,
-            "open_order_count": 0,
-            "all_local_flat": True,
-            "source": "mixed",
-            "truth_level": "reconciled",
-            "data_source": "mixed",
-            "reconciliation_status": {"status": "clean", "checked_sources": ["local_pg", "exchange_testnet"]},
-            "reconciliation_status_value": "clean",
-            "checked_sources": ["local_pg", "exchange_testnet"],
-            "source_snapshots": {
-                "local_pg": {"available": True, "position_count": 0, "open_order_count": 0},
-                "exchange_testnet": {"available": True, "position_count": 0, "open_order_count": 0},
-                "exchange_live": {"available": False, "reason": "forbidden in Owner Console account facts slice"},
-            },
-            "evidence_refs": ["tf001-carrier-decision-review:account-facts-clean"],
-            "mismatch_count": 0,
-            "unknown_or_unmanaged_orders": [],
-            "unknown_or_unmanaged_positions": [],
-            "unknown_or_unmanaged_order_count": 0,
-            "unknown_or_unmanaged_position_count": 0,
-            "unknown_unmanaged_counts": {"orders": 0, "positions": 0},
-        }
+        market_state=_clean_reconciled_market_state("tf001-carrier-decision-review:account-facts-clean")
     )
     capabilities = {item.operation_type: item.model_dump(mode="json") for item in service.capabilities()}
 
@@ -411,14 +396,19 @@ async def run_tf001_carrier_decision_review() -> dict[str, Any]:
 
     listed = await service.list(limit=10)
     switch_result = switch_detail.result
+    switch_ready = switch_preflight.decision == "allow" and switch_preflight.status == "awaiting_confirmation"
     return {
         "mode": "tf001-carrier-decision-review",
         "generated_at_ms": int(time.time() * 1000),
         "decision": {
-            "tf001_switch_playbook_ready": False,
+            "tf001_switch_playbook_ready": switch_ready,
             "tf001_monitor_carrier_ready": monitor_confirm.status == "noop",
-            "recommended_next_task": "BRC-R5-001 TF-001 catalog/Operation design review before any switch_playbook execution",
-            "reason": "TF-001 is documented as a carrier but is not currently in the BRC playbook allowlist.",
+            "recommended_next_task": "BRC-R5-001 TF-001 carrier full-chain validation smoke",
+            "reason": (
+                "TF-001 is available as a carrier-validation playbook."
+                if switch_ready
+                else "TF-001 is not ready for switch_playbook execution."
+            ),
         },
         "safety_boundary": {
             "live_ready": False,
@@ -492,6 +482,220 @@ async def run_tf001_carrier_decision_review() -> dict[str, Any]:
     }
 
 
+async def run_tf001_carrier_full_chain() -> dict[str, Any]:
+    from tests.unit.test_brc_operation_layer import _operation_service
+
+    service, _, brc_repo, market = await _operation_service(
+        market_state=_clean_reconciled_market_state("tf001-carrier-full-chain:account-facts-clean"),
+        runtime_stop_adapter=True,
+    )
+    capabilities = {item.operation_type: item.model_dump(mode="json") for item in service.capabilities()}
+
+    switch_preflight = await service.preflight(
+        operation_type="switch_playbook",
+        requested_by="owner",
+        input_params={
+            "target_playbook_id": "TF-001",
+            "reason_text": "TF-001 carrier full-chain validation selection",
+            "evidence_refs": ["docs/ops/brc-r5-001-tf001-carrier-full-chain-validation-plan.md"],
+        },
+        source={"kind": "tf001_carrier_full_chain", "ref": "brc_owner_console_smoke.py"},
+    )
+    switch_confirm = await service.confirm(
+        operation_id=switch_preflight.operation_id,
+        preflight_id=switch_preflight.preflight_id,
+        confirmation_phrase="CONFIRM_SWITCH_PLAYBOOK",
+        idempotency_key=switch_preflight.idempotency_key,
+    )
+
+    monitor_preflight = await service.preflight(
+        operation_type="enter_strategy_or_monitor",
+        requested_by="owner",
+        input_params={
+            "carrier_playbook_id": "TF-001",
+            "carrier_role": "carrier_validation_only",
+            "reason_text": "Enter monitor carrier only; no strategy execution authority",
+        },
+        source={"kind": "tf001_carrier_full_chain", "ref": "brc_owner_console_smoke.py"},
+    )
+    monitor_confirm = await service.confirm(
+        operation_id=monitor_preflight.operation_id,
+        preflight_id=monitor_preflight.preflight_id,
+        confirmation_phrase="CONFIRM_ENTER_MONITOR",
+        idempotency_key=monitor_preflight.idempotency_key,
+    )
+
+    pause_preflight = await service.preflight(
+        operation_type="enter_pause",
+        requested_by="owner",
+        input_params={"reason_text": "Pause new strategy actions during TF-001 carrier validation"},
+        source={"kind": "tf001_carrier_full_chain", "ref": "brc_owner_console_smoke.py"},
+    )
+    pause_confirm = await service.confirm(
+        operation_id=pause_preflight.operation_id,
+        preflight_id=pause_preflight.preflight_id,
+        confirmation_phrase="CONFIRM_ENTER_PAUSE",
+        idempotency_key=pause_preflight.idempotency_key,
+    )
+
+    stop_preflight = await service.preflight(
+        operation_type="emergency_stop_runtime",
+        requested_by="owner",
+        input_params={"reason_text": "Stop runtime carrier after TF-001 validation"},
+        source={"kind": "tf001_carrier_full_chain", "ref": "brc_owner_console_smoke.py"},
+    )
+    stop_confirm = await service.confirm(
+        operation_id=stop_preflight.operation_id,
+        preflight_id=stop_preflight.preflight_id,
+        confirmation_phrase="CONFIRM_STOP_RUNTIME",
+        idempotency_key=stop_preflight.idempotency_key,
+    )
+
+    review_preflight = await service.preflight(
+        operation_type="write_review_decision",
+        requested_by="owner",
+        input_params={
+            "decision": "accepted",
+            "reason_text": "TF-001 carrier full-chain validation completed as governance smoke only",
+            "next_recommended_task": "Review TF-001 evidence packet before any strategy-family trial expansion",
+            "metadata": {
+                "carrier_playbook_id": "TF-001",
+                "carrier_only": True,
+                "alpha_or_profit_claim": False,
+            },
+        },
+        source={"kind": "tf001_carrier_full_chain", "ref": "brc_owner_console_smoke.py"},
+    )
+    review_confirm = await service.confirm(
+        operation_id=review_preflight.operation_id,
+        preflight_id=review_preflight.preflight_id,
+        confirmation_phrase="CONFIRM_WRITE_REVIEW",
+        idempotency_key=review_preflight.idempotency_key,
+    )
+
+    listed = await service.list(limit=20)
+    operation_ids = [item.operation_id for item in listed.operations]
+    stages = {
+        "select_playbook": switch_confirm.status,
+        "confirm_selection": switch_confirm.status,
+        "monitor": monitor_confirm.status,
+        "pause": pause_confirm.status,
+        "stop": stop_confirm.status,
+        "review": review_confirm.status,
+    }
+    completed = (
+        stages["select_playbook"] == "executed"
+        and stages["confirm_selection"] == "executed"
+        and stages["monitor"] == "noop"
+        and stages["pause"] in {"executed", "noop"}
+        and stages["stop"] == "executed"
+        and stages["review"] == "executed"
+        and brc_repo.campaign.current_playbook_id == "TF-001"
+    )
+    return {
+        "mode": "tf001-carrier-full-chain",
+        "generated_at_ms": int(time.time() * 1000),
+        "objective": "select -> confirm -> monitor -> pause -> stop -> review",
+        "completed": completed,
+        "stage_statuses": stages,
+        "safety_boundary": {
+            "live_ready": False,
+            "strategy_execution_enabled": False,
+            "actual_flatten_executed": False,
+            "order_cancel_executed": False,
+            "close_position_executed": False,
+            "withdrawal_or_transfer_executed": False,
+            "llm_authorized_execution": False,
+        },
+        "account_facts_summary": {
+            "source": market.get("source"),
+            "truth_level": market.get("truth_level"),
+            "reconciliation_status": market.get("reconciliation_status_value"),
+            "checked_sources": market.get("checked_sources"),
+            "mismatch_count": market.get("mismatch_count"),
+            "unknown_unmanaged_counts": market.get("unknown_unmanaged_counts"),
+            "evidence_refs": market.get("evidence_refs"),
+        },
+        "capabilities": {
+            key: {
+                "status": capabilities[key].get("status"),
+                "executable_through_operation": capabilities[key].get("executable_through_operation"),
+                "dry_run_only": capabilities[key].get("dry_run_only"),
+                "reason": capabilities[key].get("current_reason"),
+            }
+            for key in [
+                "switch_playbook",
+                "enter_strategy_or_monitor",
+                "enter_pause",
+                "emergency_stop_runtime",
+                "emergency_flatten",
+                "live_execution",
+            ]
+        },
+        "operations": {
+            "switch_playbook": {
+                "operation_id": switch_preflight.operation_id,
+                "preflight_id": switch_preflight.preflight_id,
+                "preflight_decision": switch_preflight.decision,
+                "confirm_status": switch_confirm.status,
+                "campaign_refs": switch_confirm.campaign_refs,
+                "audit_refs": switch_confirm.audit_refs,
+            },
+            "enter_strategy_or_monitor": {
+                "operation_id": monitor_preflight.operation_id,
+                "preflight_id": monitor_preflight.preflight_id,
+                "preflight_decision": monitor_preflight.decision,
+                "confirm_status": monitor_confirm.status,
+                "result_summary": monitor_confirm.result_summary,
+                "final_state": monitor_confirm.next_state,
+            },
+            "enter_pause": {
+                "operation_id": pause_preflight.operation_id,
+                "preflight_id": pause_preflight.preflight_id,
+                "preflight_decision": pause_preflight.decision,
+                "confirm_status": pause_confirm.status,
+                "runtime_refs": pause_confirm.result_summary.get("runtime_refs", pause_confirm.audit_refs),
+                "final_state": pause_confirm.next_state,
+            },
+            "emergency_stop_runtime": {
+                "operation_id": stop_preflight.operation_id,
+                "preflight_id": stop_preflight.preflight_id,
+                "preflight_decision": stop_preflight.decision,
+                "confirm_status": stop_confirm.status,
+                "runtime_refs": stop_confirm.result_summary.get("runtime_refs", stop_confirm.audit_refs),
+                "audit_refs": stop_confirm.audit_refs,
+                "does_not_flatten": True,
+                "does_not_cancel_orders": True,
+                "runtime_stop_call_count": len(market.get("runtime_stop_calls", [])),
+            },
+            "write_review_decision": {
+                "operation_id": review_preflight.operation_id,
+                "preflight_id": review_preflight.preflight_id,
+                "preflight_decision": review_preflight.decision,
+                "confirm_status": review_confirm.status,
+                "review_refs": review_confirm.review_refs,
+                "audit_refs": review_confirm.audit_refs,
+            },
+        },
+        "campaign_playbook_after_full_chain": brc_repo.campaign.current_playbook_id,
+        "review_decision_count": len(brc_repo.review_decisions),
+        "operation_list": {
+            "count": len(listed.operations),
+            "operation_ids": operation_ids,
+            "all_chain_operations_listed": all(
+                operation_id in operation_ids
+                for operation_id in [
+                    switch_preflight.operation_id,
+                    monitor_preflight.operation_id,
+                    pause_preflight.operation_id,
+                    stop_preflight.operation_id,
+                    review_preflight.operation_id,
+                ]
+            ),
+        },
+    }
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
@@ -505,7 +709,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["http", "runtime-bound-test", "runtime-bound-evidence", "tf001-carrier-decision-review"],
+        choices=[
+            "http",
+            "runtime-bound-test",
+            "runtime-bound-evidence",
+            "tf001-carrier-decision-review",
+            "tf001-carrier-full-chain",
+        ],
         default="http",
     )
     parser.add_argument("--base-url", default="http://127.0.0.1:8765")
@@ -527,6 +737,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.mode == "tf001-carrier-decision-review":
         payload = asyncio.run(run_tf001_carrier_decision_review())
+        if args.output:
+            _write_json(Path(args.output), payload)
+        _print_json(payload)
+        return 0
+    if args.mode == "tf001-carrier-full-chain":
+        payload = asyncio.run(run_tf001_carrier_full_chain())
         if args.output:
             _write_json(Path(args.output), payload)
         _print_json(payload)
