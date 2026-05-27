@@ -603,6 +603,23 @@ def test_runtime_bound_evidence_smoke_payload_is_bounded():
     assert payload["account_facts_summary"]["mismatch_count"] == 0
 
 
+def test_tf001_carrier_decision_review_is_bounded_and_blocks_switch():
+    from scripts.brc_owner_console_smoke import run_tf001_carrier_decision_review
+
+    payload = asyncio.run(run_tf001_carrier_decision_review())
+
+    assert payload["mode"] == "tf001-carrier-decision-review"
+    assert payload["decision"]["tf001_switch_playbook_ready"] is False
+    assert payload["decision"]["tf001_monitor_carrier_ready"] is True
+    assert payload["safety_boundary"]["live_ready"] is False
+    assert payload["safety_boundary"]["strategy_execution_enabled"] is False
+    assert payload["safety_boundary"]["order_cancel_executed"] is False
+    assert payload["tf001_switch_playbook"]["preflight"]["known"] is False
+    assert "unknown playbook: TF-001" in payload["tf001_switch_playbook"]["blocked_reason"]
+    assert payload["tf001_monitor_carrier"]["confirm"]["status"] == "noop"
+    assert payload["campaign_playbook_after_review"] == "PB-000-OBSERVE-ONLY"
+
+
 def test_brc_audit_and_investigator_are_read_only(monkeypatch):
     _configure_auth(monkeypatch)
     service = _patch_runtime(monkeypatch, campaign=_FakeCampaign())

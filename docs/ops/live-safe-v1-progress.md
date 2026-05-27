@@ -1704,3 +1704,19 @@ Use this file for session progress and handoff notes.
 - No live/mainnet, actual flatten, order cancel/close, withdrawal/transfer,
   arbitrary trading, strategy-pool execution, or LLM direct execution authority
   was added.
+
+## 2026-05-27 (BRC-R5-001D TF-001 Carrier Decision Review)
+
+- Added bounded TF-001 decision-review smoke:
+  `python3 scripts/brc_owner_console_smoke.py --mode tf001-carrier-decision-review --output /tmp/brc-tf001-carrier-decision-review.json`.
+- Current validation verdict:
+  - `switch_playbook` to `TF-001` is blocked because `TF-001` is not yet in the
+    BRC playbook allowlist;
+  - `enter_strategy_or_monitor` confirms as `noop` monitor carrier and does not
+    enable strategy execution;
+  - the campaign playbook remains unchanged.
+- This is the expected safe result for the first TF-001 validation step. A
+  later implementation slice must explicitly design any TF-001 catalog entry or
+  Operation semantics before `switch_playbook` can target it.
+- No live/mainnet, strategy-pool, order cancel/close, actual flatten,
+  withdrawal/transfer, or LLM direct execution authority was added.

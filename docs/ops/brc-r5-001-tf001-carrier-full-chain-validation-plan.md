@@ -97,3 +97,27 @@ strategy-pool construction, or live readiness.
 
 Implement `BRC-R5-001A` and `BRC-R5-001C` evidence hardening first. Only then
 use this plan to decide whether to run a bounded TF-001 carrier validation.
+
+## Initial Decision Review
+
+Command:
+
+```bash
+python3 scripts/brc_owner_console_smoke.py \
+  --mode tf001-carrier-decision-review \
+  --output /tmp/brc-tf001-carrier-decision-review.json
+```
+
+Expected current verdict:
+
+- `TF-001` switch-playbook readiness is `false`;
+- `switch_playbook` to `TF-001` is blocked because `TF-001` is not yet in the
+  BRC playbook allowlist;
+- `enter_strategy_or_monitor` can validate the monitor carrier path as `noop`;
+- campaign playbook remains unchanged;
+- no strategy execution, live/mainnet, withdrawal/transfer, order cancel,
+  position close, or actual flatten is executed.
+
+This is the intended first validation result. A future implementation slice
+must explicitly design how `TF-001` enters the BRC playbook catalog before any
+`switch_playbook` execution can target it.
