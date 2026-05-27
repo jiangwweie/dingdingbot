@@ -44,6 +44,30 @@ operations or bypass Operation confirmation.
 | `transfer` | forbidden | No transfer path is exposed. |
 | `llm_direct_execution` | forbidden | LLM cannot execute or authorize operations. |
 
+## TF-001 Carrier Validation
+
+`TF-001` is currently modeled as a BRC `carrier_validation_only` playbook. It is
+available for Operation-backed `switch_playbook` selection so the Owner Console
+can validate the third-stage flow:
+
+`select playbook -> confirm -> monitor -> pause -> stop -> review`
+
+This is governance-chain validation only. It is not alpha proof, profitability
+evidence, strategy-pool construction, controlled-testnet execution authority,
+live readiness, withdrawal/transfer authority, or arbitrary trading authority.
+
+Repeatable local smoke:
+
+```bash
+python3 scripts/brc_owner_console_smoke.py \
+  --mode tf001-carrier-full-chain \
+  --output /tmp/brc-tf001-carrier-full-chain.json
+```
+
+Expected smoke result: `completed=true`, campaign playbook `TF-001`, monitor
+carrier `noop`, runtime stop executed without flatten/cancel/close/order
+behavior, and review decision recorded with audit/review refs.
+
 ## Account Facts Semantics
 
 `GET /api/brc/account/facts` is a read-only BRC-scoped account facts API. It is

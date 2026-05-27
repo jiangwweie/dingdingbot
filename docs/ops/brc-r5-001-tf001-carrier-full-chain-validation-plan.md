@@ -1,6 +1,6 @@
 # BRC-R5-001 TF-001 Carrier Full-chain Validation Plan
 
-Status: SPEC
+Status: REVIEW
 
 ## Goal
 
@@ -93,10 +93,37 @@ strategy-pool construction, or live readiness.
 - No product feature, runtime capability, or trading path is added.
 ```
 
-## Next Step
+## Implemented Local Smoke
 
-Implement `BRC-R5-001A` and `BRC-R5-001C` evidence hardening first. Only then
-use this plan to decide whether to run a bounded TF-001 carrier validation.
+TF-001 is now present in the BRC playbook catalog as a
+`carrier_validation_only` playbook. It is not marked as controlled-testnet
+execution authority and does not create strategy-pool, live, withdrawal,
+transfer, order cancel, position close, or actual flatten authority.
+
+Repeatable bounded smoke command:
+
+```bash
+python3 scripts/brc_owner_console_smoke.py \
+  --mode tf001-carrier-full-chain \
+  --output /tmp/brc-tf001-carrier-full-chain.json
+```
+
+Expected result:
+
+- `completed=true`;
+- `select_playbook=executed` through `switch_playbook`;
+- Owner confirmation is bound to `operation_id + preflight_id +
+  idempotency_key`;
+- `monitor=noop` through `enter_strategy_or_monitor`, with no unrestricted
+  auto trading;
+- `pause=executed` through `enter_pause`;
+- `stop=executed` through `emergency_stop_runtime`, with
+  `does_not_flatten=true` and `does_not_cancel_orders=true`;
+- `review=executed` through `write_review_decision`;
+- operation list includes every chain operation;
+- campaign playbook after the smoke is `TF-001`;
+- safety flags remain false for live, strategy execution, actual flatten,
+  order cancel, position close, withdrawal/transfer, and LLM authorization.
 
 ## Initial Decision Review
 
@@ -110,14 +137,10 @@ python3 scripts/brc_owner_console_smoke.py \
 
 Expected current verdict:
 
-- `TF-001` switch-playbook readiness is `false`;
-- `switch_playbook` to `TF-001` is blocked because `TF-001` is not yet in the
-  BRC playbook allowlist;
-- `enter_strategy_or_monitor` can validate the monitor carrier path as `noop`;
-- campaign playbook remains unchanged;
+- `TF-001` switch-playbook readiness is `true`;
+- `switch_playbook` preflight recognizes `TF-001` as an allowlisted carrier
+  validation playbook;
+- `enter_strategy_or_monitor` validates the monitor carrier path as `noop`;
+- campaign playbook remains unchanged because this mode reviews readiness only;
 - no strategy execution, live/mainnet, withdrawal/transfer, order cancel,
   position close, or actual flatten is executed.
-
-This is the intended first validation result. A future implementation slice
-must explicitly design how `TF-001` enters the BRC playbook catalog before any
-`switch_playbook` execution can target it.

@@ -1720,3 +1720,28 @@ Use this file for session progress and handoff notes.
   Operation semantics before `switch_playbook` can target it.
 - No live/mainnet, strategy-pool, order cancel/close, actual flatten,
   withdrawal/transfer, or LLM direct execution authority was added.
+
+## 2026-05-27 (BRC-R5-001E TF-001 Carrier Full-chain Smoke)
+
+- Added `TF-001` to the BRC playbook catalog as
+  `carrier_validation_only`. It is not controlled-testnet authority, alpha
+  proof, strategy-pool construction, live readiness, withdrawal/transfer
+  authority, or arbitrary trading authority.
+- Added bounded full-chain smoke:
+  `python3 scripts/brc_owner_console_smoke.py --mode tf001-carrier-full-chain --output /tmp/brc-tf001-carrier-full-chain.json`.
+- Validation result:
+  - `select_playbook=executed` through Operation-backed `switch_playbook`;
+  - Owner confirmation is bound to operation/preflight/idempotency ids;
+  - `monitor=noop` through `enter_strategy_or_monitor`;
+  - `pause=executed` through `enter_pause`;
+  - `stop=executed` through Operation-backed `emergency_stop_runtime`;
+  - `review=executed` through Operation-backed `write_review_decision`;
+  - operation list includes all five chain operations;
+  - campaign playbook after the smoke is `TF-001`;
+  - review decision count is `1`.
+- The smoke output records campaign/audit/review/runtime refs and clean
+  account facts evidence (`source=mixed`, `truth_level=reconciled`,
+  `reconciliation_status=clean`).
+- Safety result remains bounded: no live/mainnet, no strategy execution, no
+  actual flatten, no order cancel, no position close, no withdrawal/transfer,
+  and no LLM authorization.
