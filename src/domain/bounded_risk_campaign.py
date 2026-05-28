@@ -416,6 +416,7 @@ class BoundedRiskCampaign(BaseModel):
     attempt_count: int = 0
     attempts: list[CampaignAttempt] = Field(default_factory=list)
     outcome: Optional[CampaignOutcome] = None
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
     created_at_ms: int
     updated_at_ms: int
     finalized_at_ms: Optional[int] = None

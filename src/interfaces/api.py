@@ -67,6 +67,7 @@ _account_risk_service: Optional[Any] = None
 _campaign_state_service: Optional[Any] = None
 _brc_campaign_service: Optional[Any] = None
 _brc_operation_service: Optional[Any] = None
+_brc_admission_service: Optional[Any] = None
 _trace_service: Optional[Any] = None
 _startup_reconciliation_summary: Optional[dict[str, Any]] = None
 _runtime_context: Optional[RuntimeContext] = None

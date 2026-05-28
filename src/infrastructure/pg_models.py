@@ -452,6 +452,12 @@ class PGBrcCampaignORM(PGCoreBase):
         default=list,
     )
     outcome: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
     created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
     updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
     finalized_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
@@ -976,6 +982,446 @@ class PGBrcExecutionResultORM(PGCoreBase):
             name="ck_brc_execution_results_status",
         ),
         Index("idx_brc_execution_results_status_time", "status", "occurred_at_ms"),
+    )
+
+
+class PGBrcStrategyFamilyORM(PGCoreBase):
+    """PG-backed strategy family registry for BRC admission."""
+
+    __tablename__ = "brc_strategy_families"
+
+    strategy_family_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    family_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    owner: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'intake', 'parked', 'rejected')",
+            name="ck_brc_strategy_families_status",
+        ),
+        Index("idx_brc_strategy_families_status_time", "status", "updated_at_ms"),
+    )
+
+
+class PGBrcStrategyFamilyVersionORM(PGCoreBase):
+    """Version-pinned strategy family facts for admission decisions."""
+
+    __tablename__ = "brc_strategy_family_versions"
+
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    hypothesis: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    market_structure: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    entry_logic_family: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    exit_logic_family: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    risk_model: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    supported_symbols_json: Mapped[list] = mapped_column(
+        "supported_symbols",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    supported_timeframes_json: Mapped[list] = mapped_column(
+        "supported_timeframes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    required_data_json: Mapped[list] = mapped_column(
+        "required_data",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    required_execution_capabilities_json: Mapped[list] = mapped_column(
+        "required_execution_capabilities",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    known_failure_modes_json: Mapped[list] = mapped_column(
+        "known_failure_modes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    regime_contract_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    safeguards_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    degradation_policy_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    playbook_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    playbook_catalog_snapshot_json: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_brc_strategy_family_versions_version"),
+        Index(
+            "uq_brc_strategy_family_versions_family_version",
+            "strategy_family_id",
+            "version",
+            unique=True,
+        ),
+        Index("idx_brc_strategy_family_versions_family", "strategy_family_id"),
+    )
+
+
+class PGBrcAdmissionRuleConfigORM(PGCoreBase):
+    """Versioned admission rule config; YAML is not the production source."""
+
+    __tablename__ = "brc_admission_rule_configs"
+
+    admission_rule_config_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    config_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    rule_details_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    system_boundaries_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    relaxable_safeguards_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="system")
+
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_brc_admission_rule_configs_version"),
+        CheckConstraint(
+            "status IN ('active', 'superseded', 'disabled')",
+            name="ck_brc_admission_rule_configs_status",
+        ),
+        Index(
+            "uq_brc_admission_rule_configs_key_version",
+            "config_key",
+            "version",
+            unique=True,
+        ),
+        Index("idx_brc_admission_rule_configs_status_time", "status", "created_at_ms"),
+    )
+
+
+class PGBrcAdmissionEvidencePacketORM(PGCoreBase):
+    """Evidence packet pinned into admission evaluation."""
+
+    __tablename__ = "brc_admission_evidence_packets"
+
+    evidence_packet_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    mandatory_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+
+    __table_args__ = (
+        Index("idx_brc_admission_evidence_packets_version", "strategy_family_version_id"),
+        Index("idx_brc_admission_evidence_packets_time", "created_at_ms"),
+    )
+
+
+class PGBrcOwnerMarketRegimeInputORM(PGCoreBase):
+    """Owner market regime input pinned into admission evaluation."""
+
+    __tablename__ = "brc_owner_market_regime_inputs"
+
+    owner_market_regime_input_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    current_regime: Mapped[str] = mapped_column(String(128), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    market_facts_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+
+    __table_args__ = (
+        Index("idx_brc_owner_market_regime_inputs_time", "created_at_ms"),
+    )
+
+
+class PGBrcAdmissionRequestORM(PGCoreBase):
+    """Admission request with version-pinned inputs."""
+
+    __tablename__ = "brc_admission_requests"
+
+    admission_request_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    evidence_packet_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_market_regime_input_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    trial_env: Mapped[str] = mapped_column(String(16), nullable=False)
+    trial_stage: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_execution_mode: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    requested_risk_profile: Mapped[str] = mapped_column(String(64), nullable=False, default="micro")
+    admission_rule_config_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    account_facts_snapshot_ref: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    account_facts_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    playbook_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    playbook_catalog_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+
+    __table_args__ = (
+        CheckConstraint("trial_env IN ('testnet', 'live')", name="ck_brc_admission_requests_trial_env"),
+        CheckConstraint(
+            "trial_stage IN ('development_validation', 'funded_validation')",
+            name="ck_brc_admission_requests_trial_stage",
+        ),
+        CheckConstraint(
+            "requested_execution_mode IS NULL OR requested_execution_mode IN "
+            "('auto_within_budget', 'owner_confirm_each_entry', 'observe_only', 'no_entry')",
+            name="ck_brc_admission_requests_execution_mode",
+        ),
+        Index("idx_brc_admission_requests_version_time", "strategy_family_version_id", "created_at_ms"),
+        Index("idx_brc_admission_requests_env_stage", "trial_env", "trial_stage"),
+    )
+
+
+class PGBrcTrialConstraintSnapshotORM(PGCoreBase):
+    """Risk/Capital adapter output snapshot for trial installation."""
+
+    __tablename__ = "brc_trial_constraint_snapshots"
+
+    trial_constraint_snapshot_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    admission_request_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk_profile: Mapped[str] = mapped_column(String(64), nullable=False, default="micro")
+    risk_policy_version: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    constraints_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    risk_policy_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    adapter_result_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    expires_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending_risk_capital_resolution', 'installable', 'installed', 'expired', 'invalidated')",
+            name="ck_brc_trial_constraint_snapshots_status",
+        ),
+        Index("idx_brc_trial_constraint_snapshots_request_time", "admission_request_id", "created_at_ms"),
+        Index("idx_brc_trial_constraint_snapshots_status_time", "status", "created_at_ms"),
+    )
+
+
+class PGBrcAdmissionDecisionORM(PGCoreBase):
+    """Admission decision pinned to all facts and constraint snapshot."""
+
+    __tablename__ = "brc_admission_decisions"
+
+    admission_decision_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    admission_request_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    decision: Mapped[str] = mapped_column(String(64), nullable=False)
+    trial_env: Mapped[str] = mapped_column(String(16), nullable=False)
+    trial_stage: Mapped[str] = mapped_column(String(64), nullable=False)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    playbook_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    playbook_catalog_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    owner_market_regime_input_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    evidence_packet_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    admission_rule_config_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    trial_constraint_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    risk_profile: Mapped[str] = mapped_column(String(64), nullable=False, default="micro")
+    execution_mode: Mapped[str] = mapped_column(String(64), nullable=False)
+    degradation_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    risk_intent_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    degradation_intent_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    blockers_json: Mapped[list] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list)
+    warnings_json: Mapped[list] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list)
+    risk_disclosure_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    known_gaps_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    constraints_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    owner_risk_acceptance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    expires_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('admit', 'admit_with_constraints', 'reject', 'park')",
+            name="ck_brc_admission_decisions_decision",
+        ),
+        CheckConstraint("trial_env IN ('testnet', 'live')", name="ck_brc_admission_decisions_trial_env"),
+        CheckConstraint(
+            "trial_stage IN ('development_validation', 'funded_validation')",
+            name="ck_brc_admission_decisions_trial_stage",
+        ),
+        CheckConstraint(
+            "execution_mode IN ('auto_within_budget', 'owner_confirm_each_entry', 'observe_only', 'no_entry')",
+            name="ck_brc_admission_decisions_execution_mode",
+        ),
+        Index("idx_brc_admission_decisions_request_time", "admission_request_id", "created_at_ms"),
+        Index("idx_brc_admission_decisions_decision_time", "decision", "created_at_ms"),
+    )
+
+
+class PGBrcOwnerRiskAcceptanceORM(PGCoreBase):
+    """Owner risk acceptance for funded validation."""
+
+    __tablename__ = "brc_owner_risk_acceptances"
+
+    owner_risk_acceptance_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    admission_request_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    admission_decision_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    trial_env: Mapped[str] = mapped_column(String(16), nullable=False)
+    trial_stage: Mapped[str] = mapped_column(String(64), nullable=False)
+    account_facts_snapshot_ref: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    risk_profile: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk_policy_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    constraint_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    risk_disclosure_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    known_gaps_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    owner_rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    confirmation_phrase: Mapped[str] = mapped_column(String(128), nullable=False)
+    confirmation_marker: Mapped[str] = mapped_column(String(128), nullable=False)
+    confirmed_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+
+    __table_args__ = (
+        CheckConstraint("trial_env IN ('testnet', 'live')", name="ck_brc_owner_risk_acceptances_trial_env"),
+        CheckConstraint(
+            "trial_stage IN ('development_validation', 'funded_validation')",
+            name="ck_brc_owner_risk_acceptances_trial_stage",
+        ),
+        Index("idx_brc_owner_risk_acceptances_request_time", "admission_request_id", "created_at_ms"),
+        Index("idx_brc_owner_risk_acceptances_constraint", "constraint_snapshot_id"),
+    )
+
+
+class PGBrcAdmissionAuditLogORM(PGCoreBase):
+    """Append-only admission audit log."""
+
+    __tablename__ = "brc_admission_audit_log"
+
+    audit_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    ref_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    ref_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    admission_request_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    admission_decision_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False, default="system")
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    metadata_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        Index("idx_brc_admission_audit_log_ref", "ref_type", "ref_id"),
+        Index("idx_brc_admission_audit_log_request_time", "admission_request_id", "created_at_ms"),
+        Index("idx_brc_admission_audit_log_time", "created_at_ms"),
+    )
+
+
+class PGBrcAdmissionTrialBindingORM(PGCoreBase):
+    """Admission-to-future-trial binding reservation.
+
+    This is a planning/carrier-binding fact only. The reserved states must not
+    imply campaign creation, runtime installation, or order execution.
+    """
+
+    __tablename__ = "brc_admission_trial_bindings"
+
+    binding_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    admission_decision_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_risk_acceptance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_constraint_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    playbook_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    playbook_catalog_snapshot_json: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    trial_env: Mapped[str] = mapped_column(String(16), nullable=False)
+    trial_stage: Mapped[str] = mapped_column(String(64), nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(64), nullable=False)
+    binding_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    campaign_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    runtime_carrier_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_by_operation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_by_preflight_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    invalidated_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    invalidation_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("trial_env IN ('testnet', 'live')", name="ck_brc_admission_trial_bindings_trial_env"),
+        CheckConstraint(
+            "trial_stage IN ('development_validation', 'funded_validation')",
+            name="ck_brc_admission_trial_bindings_trial_stage",
+        ),
+        CheckConstraint(
+            "execution_mode IN ('auto_within_budget', 'owner_confirm_each_entry', 'observe_only', 'no_entry')",
+            name="ck_brc_admission_trial_bindings_execution_mode",
+        ),
+        CheckConstraint(
+            "binding_status IN ('planned', 'binding_reserved', 'cancelled', 'expired', "
+            "'invalidated', 'campaign_created', 'runtime_constraints_installed', "
+            "'runtime_installed')",
+            name="ck_brc_admission_trial_bindings_status",
+        ),
+        CheckConstraint(
+            "(binding_status NOT IN ('planned', 'binding_reserved')) "
+            "OR (campaign_id IS NULL AND runtime_carrier_id IS NULL)",
+            name="ck_brc_admission_trial_bindings_reserved_no_runtime",
+        ),
+        Index(
+            "idx_brc_admission_trial_bindings_decision_status",
+            "admission_decision_id",
+            "binding_status",
+        ),
+        Index("idx_brc_admission_trial_bindings_operation", "created_by_operation_id"),
+        Index("idx_brc_admission_trial_bindings_status_time", "binding_status", "created_at_ms"),
+    )
+
+
+class PGBrcTrialTradeIntentORM(PGCoreBase):
+    """Non-executable trial trade intent evidence ledger.
+
+    Rows in this table are not orders and must not feed order execution.
+    """
+
+    __tablename__ = "brc_trial_trade_intents"
+
+    intent_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    admission_decision_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    playbook_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    execution_mode: Mapped[str] = mapped_column(String(64), nullable=False)
+    intended_action: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    signal_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    market_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    risk_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    not_executed_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    created_by_operation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    audit_refs_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+
+    __table_args__ = (
+        CheckConstraint(
+            "execution_mode IN ('auto_within_budget', 'owner_confirm_each_entry', 'observe_only', 'no_entry')",
+            name="ck_brc_trial_trade_intents_execution_mode",
+        ),
+        CheckConstraint(
+            "intended_action IN ('entry', 'increase', 'exit', 'reduce', 'hold', 'unknown')",
+            name="ck_brc_trial_trade_intents_intended_action",
+        ),
+        CheckConstraint(
+            "decision IN ('recorded', 'blocked', 'unavailable')",
+            name="ck_brc_trial_trade_intents_decision",
+        ),
+        Index("idx_brc_trial_trade_intents_campaign_time", "campaign_id", "created_at_ms"),
+        Index("idx_brc_trial_trade_intents_binding_time", "binding_id", "created_at_ms"),
+        Index("idx_brc_trial_trade_intents_decision_time", "decision", "created_at_ms"),
+        Index("idx_brc_trial_trade_intents_operation", "created_by_operation_id"),
     )
 
 

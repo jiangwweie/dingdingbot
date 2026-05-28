@@ -84,6 +84,7 @@ class PgBrcCampaignRepository:
                 row.attempt_count = campaign.attempt_count
                 row.attempts_json = list(payload["attempts"])
                 row.outcome = campaign.outcome.value if campaign.outcome is not None else None
+                row.metadata_json = dict(payload.get("metadata_json") or {})
                 row.created_at_ms = campaign.created_at_ms
                 row.updated_at_ms = campaign.updated_at_ms
                 row.finalized_at_ms = campaign.finalized_at_ms
@@ -441,6 +442,7 @@ class PgBrcCampaignRepository:
                 "attempt_count": row.attempt_count,
                 "attempts": list(row.attempts_json or []),
                 "outcome": row.outcome,
+                "metadata_json": dict(row.metadata_json or {}),
                 "created_at_ms": row.created_at_ms,
                 "updated_at_ms": row.updated_at_ms,
                 "finalized_at_ms": row.finalized_at_ms,

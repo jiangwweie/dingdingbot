@@ -14,6 +14,7 @@ from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from src.application.execution_permission import ExecutionPermission, parse_execution_permission_max
 from src.domain.logic_tree import FilterConfig, FilterLeaf, LogicNode, TriggerConfig, TriggerLeaf
 from src.domain.models import CapitalProtectionConfig, Direction, OrderStrategy, RiskConfig, StrategyDefinition
 from src.domain.validators import coerce_decimal_fields, coerce_decimal_list_fields, stable_config_hash, validate_tp_contract
@@ -28,8 +29,10 @@ class EnvironmentRuntimeConfig(BaseModel):
     core_execution_intent_backend: str = Field(default="postgres")
     core_order_backend: str = Field(default="sqlite")
     core_position_backend: str = Field(default="sqlite")
+    trading_env: str = Field(default="simulation")
     exchange_name: str = Field(default="binance")
     exchange_testnet: bool = Field(default=True)
+    brc_execution_permission_max: ExecutionPermission = Field(default=ExecutionPermission.READ_ONLY)
     exchange_api_key: SecretStr
     exchange_api_secret: SecretStr
     feishu_webhook_url: SecretStr
@@ -289,8 +292,10 @@ class ResolvedRuntimeConfig(BaseModel):
                 "core_execution_intent_backend": self.environment.core_execution_intent_backend,
                 "core_order_backend": self.environment.core_order_backend,
                 "core_position_backend": self.environment.core_position_backend,
+                "trading_env": self.environment.trading_env,
                 "exchange_name": self.environment.exchange_name,
                 "exchange_testnet": self.environment.exchange_testnet,
+                "brc_execution_permission_max": self.environment.brc_execution_permission_max.value_name,
                 "backend_port": self.environment.backend_port,
             },
             "market": self.market.model_dump(mode="json", by_alias=True, exclude_none=True),
@@ -361,8 +366,13 @@ class RuntimeConfigResolver:
             core_execution_intent_backend=self._env.get("CORE_EXECUTION_INTENT_BACKEND", "postgres"),
             core_order_backend=self._env.get("CORE_ORDER_BACKEND", "sqlite"),
             core_position_backend=self._env.get("CORE_POSITION_BACKEND", "sqlite"),
+            trading_env=self._env.get("TRADING_ENV", "simulation").strip().lower() or "simulation",
             exchange_name=self._env.get("EXCHANGE_NAME", "binance"),
             exchange_testnet=self._parse_bool(self._env.get("EXCHANGE_TESTNET", "true")),
+            brc_execution_permission_max=parse_execution_permission_max(
+                self._env.get("BRC_EXECUTION_PERMISSION_MAX"),
+                default=ExecutionPermission.READ_ONLY,
+            ),
             exchange_api_key=self._required_env("EXCHANGE_API_KEY"),
             exchange_api_secret=self._required_env("EXCHANGE_API_SECRET"),
             feishu_webhook_url=self._required_env("FEISHU_WEBHOOK_URL"),
@@ -394,8 +404,10 @@ class RuntimeConfigResolver:
                 # Infra details such as DB DSN, backend port, and repository backend switches
                 # stay out so operational changes do not fork the strategy/risk baseline.
                 "environment": {
+                    "trading_env": environment.trading_env,
                     "exchange_name": environment.exchange_name,
                     "exchange_testnet": environment.exchange_testnet,
+                    "brc_execution_permission_max": environment.brc_execution_permission_max.value_name,
                 },
                 "profile": profile_payload,
             }

@@ -231,6 +231,1613 @@ class BoundedRiskCampaignService:
         )
         return campaign
 
+    async def create_admission_campaign_shell(
+        self,
+        *,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        constraint_snapshot_id: str,
+        trial_env: str,
+        trial_stage: str,
+        execution_mode: str,
+        constraints_json: dict[str, Any],
+        reason: str,
+        operation_id: str,
+        preflight_id: str,
+        created_by: str = "owner",
+    ) -> BoundedRiskCampaign:
+        existing = await self._repo.get_current_campaign()
+        if existing is not None and existing.status != BrcCampaignStatus.ENDED:
+            raise BrcRuleViolation(f"active BRC campaign already exists: {existing.campaign_id}")
+        await self._ensure_new_campaign_allowed_after_latest()
+
+        max_loss_budget = _positive_decimal_constraint(constraints_json, "max_loss_budget")
+        max_notional = _positive_decimal_constraint(
+            constraints_json,
+            "max_notional",
+            fallback=max_loss_budget,
+        )
+        profit_protect_trigger = _positive_decimal_constraint(
+            constraints_json,
+            "profit_protect_trigger",
+            fallback=max_loss_budget,
+        )
+        max_attempts = max(1, int(constraints_json.get("max_attempts") or 1))
+        max_leverage = max(1, int(constraints_json.get("max_leverage") or 1))
+        allowed_symbols = tuple(
+            str(item) for item in constraints_json.get("allowed_symbols") or self.SYMBOL_SEQUENCE
+        )
+        if not allowed_symbols:
+            allowed_symbols = self.SYMBOL_SEQUENCE
+
+        now = _now_ms()
+        metadata = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "constraint_snapshot_id": constraint_snapshot_id,
+            "trial_env": trial_env,
+            "trial_stage": trial_stage,
+            "execution_mode": execution_mode,
+            "runtime_status": "not_installed",
+            "strategy_status": "not_active",
+            "constraints_installed": False,
+            "orders_placed": False,
+            "live_ready": False,
+            "operation_id": operation_id,
+            "preflight_id": preflight_id,
+            "created_by": created_by,
+        }
+        campaign = BoundedRiskCampaign(
+            campaign_id=f"brc-{uuid.uuid4().hex[:12]}",
+            bucket=RiskCapitalBucket(
+                bucket_id=f"admission:{admission_binding_id}",
+                currency=str(constraints_json.get("currency") or "USDT"),
+                authorized_amount=max_notional,
+                refill_allowed=False,
+            ),
+            risk_envelope=RiskEnvelope(
+                max_campaign_loss=max_loss_budget,
+                profit_protect_trigger=profit_protect_trigger,
+                max_attempts=max_attempts,
+                max_leverage=max_leverage,
+                allowed_symbols=allowed_symbols,
+            ),
+            current_playbook_id=playbook_id,
+            status=BrcCampaignStatus.OBSERVE,
+            metadata_json=metadata,
+            created_at_ms=now,
+            updated_at_ms=now,
+        )
+        campaign = await self._repo.save_campaign(campaign)
+        await self._repo.append_campaign_event(
+            campaign_id=campaign.campaign_id,
+            event_type="admission_campaign_shell_created",
+            occurred_at_ms=now,
+            reason=reason,
+            metadata={
+                **metadata,
+                "campaign_id": campaign.campaign_id,
+                "authorized_amount": str(max_notional),
+                "max_campaign_loss": str(max_loss_budget),
+                "profit_protect_trigger": str(profit_protect_trigger),
+                "max_attempts": max_attempts,
+                "max_leverage": max_leverage,
+                "allowed_symbols": list(allowed_symbols),
+            },
+        )
+        return campaign
+
+    async def install_runtime_constraints_from_admission_campaign(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        constraint_snapshot_id: str,
+        constraints_json: dict[str, Any],
+        operation_id: str,
+        preflight_id: str,
+        installed_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "constraint_snapshot_id": constraint_snapshot_id,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        idempotent = (
+            metadata.get("constraints_installed") is True
+            and metadata.get("installed_constraint_snapshot_id") == constraint_snapshot_id
+            and metadata.get("runtime_status") == "constraints_installed_not_started"
+            and metadata.get("strategy_status") == "not_active"
+        )
+        if metadata.get("constraints_installed") is True and not idempotent:
+            raise BrcRuleViolation("runtime constraints already installed for a different snapshot or state")
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "installed_constraints_summary": _constraint_install_summary(constraints_json),
+            }
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "constraints_installed": True,
+            "installed_constraint_snapshot_id": constraint_snapshot_id,
+            "installed_constraints_summary": _constraint_install_summary(constraints_json),
+            "installed_at": now,
+            "installed_by_operation_id": operation_id,
+            "installed_by_preflight_id": preflight_id,
+            "installed_by": installed_by,
+            "runtime_status": "constraints_installed_not_started",
+            "strategy_status": "not_active",
+            "runtime_started": False,
+            "runtime_active": False,
+            "strategy_active": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_runtime_constraints_installed",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 runtime constraints metadata installation",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": constraint_snapshot_id,
+                "installed_by_operation_id": operation_id,
+                "installed_by_preflight_id": preflight_id,
+                "runtime_status": "constraints_installed_not_started",
+                "strategy_status": "not_active",
+                "runtime_started": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "installed_constraints_summary": updated_metadata["installed_constraints_summary"],
+        }
+
+    async def prepare_runtime_carrier_from_admission_campaign(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        prepared_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        if metadata.get("constraints_installed") is not True:
+            raise BrcRuleViolation("campaign constraints are not installed")
+        if metadata.get("runtime_status") not in {
+            "constraints_installed_not_started",
+            "carrier_ready_not_started",
+        }:
+            raise BrcRuleViolation("campaign runtime_status is not constraints_installed_not_started")
+        forbidden_true_flags = {
+            "runtime_started": "runtime already started",
+            "runtime_active": "runtime already active",
+            "strategy_active": "strategy already active",
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        idempotent = (
+            metadata.get("carrier_ready") is True
+            and metadata.get("runtime_status") == "carrier_ready_not_started"
+            and metadata.get("prepared_by_operation_id") is not None
+            and metadata.get("runtime_started") is False
+            and metadata.get("strategy_active") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("orders_placed") is False
+        )
+        carrier_summary = _carrier_readiness_summary(metadata)
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "carrier_readiness_summary": carrier_summary,
+            }
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "carrier_ready": True,
+            "runtime_status": "carrier_ready_not_started",
+            "prepared_at": now,
+            "prepared_by_operation_id": operation_id,
+            "prepared_by_preflight_id": preflight_id,
+            "prepared_by": prepared_by,
+            "runtime_started": False,
+            "runtime_active": False,
+            "strategy_active": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated_metadata["carrier_readiness_summary"] = _carrier_readiness_summary(updated_metadata)
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_runtime_carrier_ready",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 runtime carrier readiness metadata preparation",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "prepared_by_operation_id": operation_id,
+                "prepared_by_preflight_id": preflight_id,
+                "runtime_status": "carrier_ready_not_started",
+                "carrier_ready": True,
+                "runtime_started": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "carrier_readiness_summary": updated_metadata["carrier_readiness_summary"],
+        }
+
+    async def prepare_runtime_start_from_admission_carrier(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        prepared_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        if metadata.get("constraints_installed") is not True:
+            raise BrcRuleViolation("campaign constraints are not installed")
+        if metadata.get("carrier_ready") is not True:
+            raise BrcRuleViolation("campaign carrier is not ready")
+        if metadata.get("runtime_status") not in {
+            "carrier_ready_not_started",
+            "runtime_start_ready_not_started",
+        }:
+            raise BrcRuleViolation("campaign runtime_status is not carrier_ready_not_started")
+        forbidden_true_flags = {
+            "runtime_started": "runtime already started",
+            "runtime_active": "runtime already active",
+            "strategy_active": "strategy already active",
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        idempotent = (
+            metadata.get("runtime_start_ready") is True
+            and metadata.get("runtime_status") == "runtime_start_ready_not_started"
+            and metadata.get("start_ready_by_operation_id") is not None
+            and metadata.get("runtime_started") is False
+            and metadata.get("strategy_active") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("orders_placed") is False
+        )
+        start_summary = _runtime_start_readiness_summary(metadata)
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "runtime_start_readiness_summary": start_summary,
+            }
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "runtime_start_ready": True,
+            "runtime_status": "runtime_start_ready_not_started",
+            "start_ready_at": now,
+            "start_ready_by_operation_id": operation_id,
+            "start_ready_by_preflight_id": preflight_id,
+            "start_ready_by": prepared_by,
+            "runtime_started": False,
+            "runtime_active": False,
+            "strategy_active": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated_metadata["runtime_start_readiness_summary"] = _runtime_start_readiness_summary(updated_metadata)
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_runtime_start_ready",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 runtime start readiness metadata preparation",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "start_ready_by_operation_id": operation_id,
+                "start_ready_by_preflight_id": preflight_id,
+                "runtime_status": "runtime_start_ready_not_started",
+                "runtime_start_ready": True,
+                "runtime_started": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "runtime_start_readiness_summary": updated_metadata["runtime_start_readiness_summary"],
+        }
+
+    async def prepare_runtime_handoff_from_admission_campaign(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        prepared_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        if metadata.get("constraints_installed") is not True:
+            raise BrcRuleViolation("campaign constraints are not installed")
+        if metadata.get("carrier_ready") is not True:
+            raise BrcRuleViolation("campaign carrier is not ready")
+        if metadata.get("runtime_start_ready") is not True:
+            raise BrcRuleViolation("campaign runtime start is not ready")
+        if metadata.get("runtime_status") not in {
+            "runtime_start_ready_not_started",
+            "runtime_handoff_ready_not_started",
+        }:
+            raise BrcRuleViolation("campaign runtime_status is not runtime_start_ready_not_started")
+        forbidden_true_flags = {
+            "runtime_started": "runtime already started",
+            "runtime_active": "runtime already active",
+            "strategy_active": "strategy already active",
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        idempotent = (
+            metadata.get("runtime_handoff_ready") is True
+            and metadata.get("runtime_status") == "runtime_handoff_ready_not_started"
+            and metadata.get("handoff_ready_by_operation_id") is not None
+            and metadata.get("runtime_started") is False
+            and metadata.get("strategy_active") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("orders_placed") is False
+        )
+        handoff_summary = _runtime_handoff_readiness_summary(metadata)
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "runtime_handoff_readiness_summary": handoff_summary,
+            }
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "runtime_handoff_ready": True,
+            "runtime_status": "runtime_handoff_ready_not_started",
+            "handoff_ready_at": now,
+            "handoff_ready_by_operation_id": operation_id,
+            "handoff_ready_by_preflight_id": preflight_id,
+            "handoff_ready_by": prepared_by,
+            "runtime_started": False,
+            "runtime_active": False,
+            "strategy_active": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated_metadata["runtime_handoff_readiness_summary"] = _runtime_handoff_readiness_summary(updated_metadata)
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_runtime_handoff_ready",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 runtime handoff readiness metadata preparation",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "handoff_ready_by_operation_id": operation_id,
+                "handoff_ready_by_preflight_id": preflight_id,
+                "runtime_status": "runtime_handoff_ready_not_started",
+                "runtime_handoff_ready": True,
+                "runtime_started": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "runtime_handoff_readiness_summary": updated_metadata["runtime_handoff_readiness_summary"],
+        }
+
+    async def start_runtime_from_admission_handoff(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        started_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        required_true_flags = {
+            "constraints_installed": "campaign constraints are not installed",
+            "carrier_ready": "campaign carrier is not ready",
+            "runtime_start_ready": "campaign runtime start is not ready",
+            "runtime_handoff_ready": "campaign runtime handoff is not ready",
+        }
+        for key, message in required_true_flags.items():
+            if metadata.get(key) is not True:
+                raise BrcRuleViolation(message)
+        forbidden_true_flags = {
+            "strategy_active": "strategy already active",
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "auto_execution_enabled": "auto execution already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        idempotent = (
+            metadata.get("runtime_started") is True
+            and metadata.get("runtime_status") == "runtime_started_strategy_inactive"
+            and metadata.get("runtime_started_by_operation_id") is not None
+            and metadata.get("strategy_active") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("orders_placed") is False
+            and metadata.get("auto_within_budget_enabled") is not True
+            and metadata.get("auto_execution_enabled") is not True
+        )
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "runtime_start_summary": _runtime_started_summary(metadata),
+            }
+        if metadata.get("runtime_status") != "runtime_handoff_ready_not_started":
+            raise BrcRuleViolation("campaign runtime_status is not runtime_handoff_ready_not_started")
+        if metadata.get("runtime_started") is not False:
+            raise BrcRuleViolation("runtime already started outside runtime_started_strategy_inactive noop path")
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "runtime_started": True,
+            "runtime_status": "runtime_started_strategy_inactive",
+            "runtime_started_at": now,
+            "runtime_started_by_operation_id": operation_id,
+            "runtime_started_by_preflight_id": preflight_id,
+            "runtime_started_by": started_by,
+            "strategy_active": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "auto_execution_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated_metadata["runtime_start_summary"] = _runtime_started_summary(updated_metadata)
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_runtime_started",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 runtime state transition without strategy activation",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "runtime_started_by_operation_id": operation_id,
+                "runtime_started_by_preflight_id": preflight_id,
+                "runtime_status": "runtime_started_strategy_inactive",
+                "runtime_started": True,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "runtime_start_summary": updated_metadata["runtime_start_summary"],
+        }
+
+    async def prepare_strategy_activation_from_admission_runtime(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        prepared_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        required_true_flags = {
+            "constraints_installed": "campaign constraints are not installed",
+            "carrier_ready": "campaign carrier is not ready",
+            "runtime_start_ready": "campaign runtime start is not ready",
+            "runtime_handoff_ready": "campaign runtime handoff is not ready",
+            "runtime_started": "campaign runtime is not started",
+        }
+        for key, message in required_true_flags.items():
+            if metadata.get(key) is not True:
+                raise BrcRuleViolation(message)
+        forbidden_true_flags = {
+            "strategy_active": "strategy already active",
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "auto_execution_enabled": "auto execution already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+            "signal_loop_started": "signal loop already started",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        idempotent = (
+            metadata.get("strategy_activation_ready") is True
+            and metadata.get("runtime_status") == "strategy_activation_ready_not_active"
+            and metadata.get("strategy_activation_ready_by_operation_id") is not None
+            and metadata.get("runtime_started") is True
+            and metadata.get("strategy_active") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("orders_placed") is False
+            and metadata.get("auto_within_budget_enabled") is not True
+            and metadata.get("auto_execution_enabled") is not True
+        )
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "strategy_activation_readiness_summary": _strategy_activation_readiness_summary(metadata),
+            }
+        if metadata.get("runtime_status") != "runtime_started_strategy_inactive":
+            raise BrcRuleViolation("campaign runtime_status is not runtime_started_strategy_inactive")
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "strategy_activation_ready": True,
+            "runtime_status": "strategy_activation_ready_not_active",
+            "strategy_activation_ready_at": now,
+            "strategy_activation_ready_by_operation_id": operation_id,
+            "strategy_activation_ready_by_preflight_id": preflight_id,
+            "strategy_activation_ready_by": prepared_by,
+            "strategy_active": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "auto_execution_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "signal_loop_started": False,
+            "execution_intent_created": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated_metadata["strategy_activation_readiness_summary"] = _strategy_activation_readiness_summary(
+            updated_metadata
+        )
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_strategy_activation_ready",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 strategy activation readiness metadata preparation",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "strategy_activation_ready_by_operation_id": operation_id,
+                "strategy_activation_ready_by_preflight_id": preflight_id,
+                "runtime_status": "strategy_activation_ready_not_active",
+                "runtime_started": True,
+                "strategy_activation_ready": True,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "signal_loop_started": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "strategy_activation_readiness_summary": updated_metadata[
+                "strategy_activation_readiness_summary"
+            ],
+        }
+
+    async def activate_strategy_from_admission_runtime(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        activated_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        required_true_flags = {
+            "constraints_installed": "campaign constraints are not installed",
+            "carrier_ready": "campaign carrier is not ready",
+            "runtime_start_ready": "campaign runtime start is not ready",
+            "runtime_handoff_ready": "campaign runtime handoff is not ready",
+            "runtime_started": "campaign runtime is not started",
+            "strategy_activation_ready": "campaign strategy activation readiness is not prepared",
+        }
+        for key, message in required_true_flags.items():
+            if metadata.get(key) is not True:
+                raise BrcRuleViolation(message)
+
+        idempotent = (
+            metadata.get("strategy_state") == "strategy_active_no_execution"
+            and metadata.get("strategy_activation_state") == "active_no_execution"
+            and metadata.get("runtime_status") == "strategy_active_no_execution"
+            and metadata.get("strategy_active") is True
+            and metadata.get("strategy_execution_enabled") is False
+            and metadata.get("signal_loop_enabled") is False
+            and metadata.get("signal_loop_started") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("orders_placed") is False
+            and metadata.get("auto_within_budget_enabled") is False
+            and metadata.get("auto_execution_enabled") is False
+            and metadata.get("execution_intent_created") is False
+        )
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "strategy_state_activation_summary": _strategy_state_activation_summary(metadata),
+            }
+
+        if metadata.get("runtime_status") != "strategy_activation_ready_not_active":
+            raise BrcRuleViolation("campaign runtime_status is not strategy_activation_ready_not_active")
+        if metadata.get("strategy_active") is not False:
+            raise BrcRuleViolation("campaign strategy_active is not false")
+        forbidden_true_flags = {
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "auto_execution_enabled": "auto execution already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+            "signal_loop_enabled": "signal loop already enabled",
+            "signal_loop_started": "signal loop already started",
+            "strategy_execution_enabled": "strategy execution already enabled",
+            "trade_intent_created": "trade intent already created",
+            "execution_intent_created": "execution intent already created",
+            "order_created": "order already created",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "strategy_state": "strategy_active_no_execution",
+            "strategy_activation_state": "active_no_execution",
+            "runtime_status": "strategy_active_no_execution",
+            "strategy_active": True,
+            "strategy_execution_enabled": False,
+            "signal_loop_enabled": False,
+            "signal_loop_started": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "auto_execution_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "trade_intent_created": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "orders_placed": False,
+            "live_ready": False,
+            "strategy_activated_at": now,
+            "strategy_activated_by_operation_id": operation_id,
+            "strategy_activated_by_preflight_id": preflight_id,
+            "strategy_activated_by": activated_by,
+        }
+        updated_metadata["strategy_state_activation_summary"] = _strategy_state_activation_summary(
+            updated_metadata
+        )
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_strategy_activated_no_execution",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 strategy activation non-execution state transition",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "strategy_activated_by_operation_id": operation_id,
+                "strategy_activated_by_preflight_id": preflight_id,
+                "runtime_status": "strategy_active_no_execution",
+                "strategy_state": "strategy_active_no_execution",
+                "strategy_activation_state": "active_no_execution",
+                "runtime_started": True,
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "trial_started": False,
+                "signal_loop_enabled": False,
+                "signal_loop_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "strategy_state_activation_summary": updated_metadata[
+                "strategy_state_activation_summary"
+            ],
+        }
+
+    async def prepare_signal_loop_from_admission_strategy(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        prepared_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        required_true_flags = {
+            "constraints_installed": "campaign constraints are not installed",
+            "carrier_ready": "campaign carrier is not ready",
+            "runtime_start_ready": "campaign runtime start is not ready",
+            "runtime_handoff_ready": "campaign runtime handoff is not ready",
+            "runtime_started": "campaign runtime is not started",
+            "strategy_activation_ready": "campaign strategy activation readiness is not prepared",
+            "strategy_active": "campaign strategy is not active",
+        }
+        for key, message in required_true_flags.items():
+            if metadata.get(key) is not True:
+                raise BrcRuleViolation(message)
+        expected_state = {
+            "strategy_state": "strategy_active_no_execution",
+            "strategy_activation_state": "active_no_execution",
+        }
+        for key, expected in expected_state.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} is not {expected}")
+
+        idempotent = (
+            metadata.get("signal_loop_ready") is True
+            and metadata.get("runtime_status") == "signal_loop_ready_not_started"
+            and metadata.get("signal_loop_ready_by_operation_id") is not None
+            and metadata.get("strategy_active") is True
+            and metadata.get("strategy_execution_enabled") is False
+            and metadata.get("signal_loop_enabled") is False
+            and metadata.get("signal_loop_started") is False
+            and metadata.get("signal_generated") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("orders_placed") is False
+            and metadata.get("auto_within_budget_enabled") is False
+            and metadata.get("auto_execution_enabled") is False
+            and metadata.get("trade_intent_created") is False
+            and metadata.get("execution_intent_created") is False
+            and metadata.get("order_created") is False
+        )
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "signal_loop_readiness_summary": _signal_loop_readiness_summary(metadata),
+            }
+
+        if metadata.get("runtime_status") != "strategy_active_no_execution":
+            raise BrcRuleViolation("campaign runtime_status is not strategy_active_no_execution")
+        forbidden_true_flags = {
+            "strategy_execution_enabled": "strategy execution already enabled",
+            "signal_loop_enabled": "signal loop already enabled",
+            "signal_loop_started": "signal loop already started",
+            "signal_generated": "strategy signal already generated",
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "auto_execution_enabled": "auto execution already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+            "trade_intent_created": "trade intent already created",
+            "execution_intent_created": "execution intent already created",
+            "order_created": "order already created",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "signal_loop_ready": True,
+            "runtime_status": "signal_loop_ready_not_started",
+            "signal_loop_ready_at": now,
+            "signal_loop_ready_by_operation_id": operation_id,
+            "signal_loop_ready_by_preflight_id": preflight_id,
+            "signal_loop_ready_by": prepared_by,
+            "strategy_execution_enabled": False,
+            "signal_loop_enabled": False,
+            "signal_loop_started": False,
+            "signal_generated": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "auto_execution_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "trade_intent_created": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated_metadata["signal_loop_readiness_summary"] = _signal_loop_readiness_summary(
+            updated_metadata
+        )
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_signal_loop_ready",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 signal loop readiness metadata preparation",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "signal_loop_ready_by_operation_id": operation_id,
+                "signal_loop_ready_by_preflight_id": preflight_id,
+                "runtime_status": "signal_loop_ready_not_started",
+                "signal_loop_ready": True,
+                "runtime_started": True,
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "signal_loop_enabled": False,
+                "signal_loop_started": False,
+                "signal_generated": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "signal_loop_readiness_summary": updated_metadata["signal_loop_readiness_summary"],
+        }
+
+    async def start_signal_loop_from_admission_strategy(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        started_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        required_true_flags = {
+            "runtime_started": "campaign runtime is not started",
+            "strategy_active": "campaign strategy is not active",
+            "signal_loop_ready": "campaign signal loop readiness is not prepared",
+        }
+        for key, message in required_true_flags.items():
+            if metadata.get(key) is not True:
+                raise BrcRuleViolation(message)
+        expected_state = {
+            "strategy_state": "strategy_active_no_execution",
+            "strategy_activation_state": "active_no_execution",
+        }
+        for key, expected in expected_state.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} is not {expected}")
+
+        idempotent = (
+            metadata.get("runtime_status") == "signal_loop_started_no_signal"
+            and metadata.get("signal_loop_started") is True
+            and metadata.get("signal_loop_enabled") is True
+            and metadata.get("signal_loop_enabled_scope") == "non_trading_loop_state"
+            and metadata.get("signal_generated") is False
+            and metadata.get("trade_intent_created") is False
+            and metadata.get("execution_intent_created") is False
+            and metadata.get("order_created") is False
+            and metadata.get("orders_placed") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("auto_execution_enabled") is False
+            and metadata.get("auto_within_budget_enabled") is False
+        )
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "signal_loop_start_summary": _signal_loop_start_summary(metadata),
+            }
+
+        if metadata.get("runtime_status") != "signal_loop_ready_not_started":
+            raise BrcRuleViolation("campaign runtime_status is not signal_loop_ready_not_started")
+        forbidden_true_flags = {
+            "strategy_execution_enabled": "strategy execution already enabled",
+            "signal_loop_enabled": "signal loop already enabled",
+            "signal_loop_started": "signal loop already started",
+            "signal_generated": "strategy signal already generated",
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "auto_execution_enabled": "auto execution already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+            "trade_intent_created": "trade intent already created",
+            "execution_intent_created": "execution intent already created",
+            "order_created": "order already created",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        now = _now_ms()
+        updated_metadata = {
+            **metadata,
+            "signal_loop_started": True,
+            "signal_loop_enabled": True,
+            "signal_loop_enabled_scope": "non_trading_loop_state",
+            "runtime_status": "signal_loop_started_no_signal",
+            "signal_loop_started_at": now,
+            "signal_loop_started_by_operation_id": operation_id,
+            "signal_loop_started_by_preflight_id": preflight_id,
+            "signal_loop_started_by": started_by,
+            "strategy_execution_enabled": False,
+            "signal_generated": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "auto_execution_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "trade_intent_created": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated_metadata["signal_loop_start_summary"] = _signal_loop_start_summary(updated_metadata)
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_signal_loop_started_no_signal",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 signal loop state start without signal generation",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "signal_loop_started_by_operation_id": operation_id,
+                "signal_loop_started_by_preflight_id": preflight_id,
+                "runtime_status": "signal_loop_started_no_signal",
+                "signal_loop_ready": True,
+                "signal_loop_enabled": True,
+                "signal_loop_enabled_scope": "non_trading_loop_state",
+                "signal_loop_started": True,
+                "signal_generated": False,
+                "runtime_started": True,
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "signal_loop_start_summary": updated_metadata["signal_loop_start_summary"],
+        }
+
+    async def evaluate_signal_from_admission_strategy(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        operation_id: str,
+        preflight_id: str,
+        signal_snapshot: Optional[dict[str, Any]] = None,
+        signal_evaluation_input: Optional[dict[str, Any]] = None,
+        evaluated_by: str = "owner",
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+        required_true_flags = {
+            "runtime_started": "campaign runtime is not started",
+            "strategy_active": "campaign strategy is not active",
+            "signal_loop_ready": "campaign signal loop readiness is not prepared",
+            "signal_loop_started": "campaign signal loop state is not started",
+        }
+        for key, message in required_true_flags.items():
+            if metadata.get(key) is not True:
+                raise BrcRuleViolation(message)
+        expected_state = {
+            "strategy_state": "strategy_active_no_execution",
+            "strategy_activation_state": "active_no_execution",
+            "signal_loop_enabled_scope": "non_trading_loop_state",
+        }
+        for key, expected in expected_state.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} is not {expected}")
+
+        idempotent = (
+            metadata.get("runtime_status") == "signal_evaluated_no_intent"
+            and metadata.get("signal_evaluated") is True
+            and metadata.get("signal_generated") is True
+            and metadata.get("trade_intent_created") is False
+            and metadata.get("execution_intent_created") is False
+            and metadata.get("order_created") is False
+            and metadata.get("orders_placed") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("auto_execution_enabled") is False
+            and metadata.get("auto_within_budget_enabled") is False
+        )
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "signal_evaluation_summary": _signal_evaluation_summary(metadata),
+            }
+
+        if metadata.get("runtime_status") != "signal_loop_started_no_signal":
+            raise BrcRuleViolation("campaign runtime_status is not signal_loop_started_no_signal")
+        forbidden_true_flags = {
+            "strategy_execution_enabled": "strategy execution already enabled",
+            "signal_generated": "strategy signal already generated",
+            "signal_evaluated": "strategy signal already evaluated",
+            "trial_started": "trial already started",
+            "orders_placed": "orders already placed",
+            "live_ready": "live already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "auto_execution_enabled": "auto execution already enabled",
+            "owner_confirm_each_entry_enabled": "owner_confirm_each_entry already enabled",
+            "trade_intent_created": "trade intent already created",
+            "execution_intent_created": "execution intent already created",
+            "order_created": "order already created",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        signal_snapshot_json = dict(signal_snapshot or {})
+        signal_evaluation_input_json = dict(signal_evaluation_input or {})
+        now = _now_ms()
+        evaluation_summary = {
+            "signal_evaluated": True,
+            "signal_generated": True,
+            "signal_is_trade_intent": False,
+            "trade_intent_created": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "orders_placed": False,
+            "auto_execution_enabled": False,
+            "auto_within_budget_enabled": False,
+            "trial_started": False,
+            "signal_snapshot_present": bool(signal_snapshot_json),
+            "signal_evaluation_input_present": bool(signal_evaluation_input_json),
+        }
+        updated_metadata = {
+            **metadata,
+            "signal_evaluated": True,
+            "signal_generated": True,
+            "runtime_status": "signal_evaluated_no_intent",
+            "signal_evaluated_at": now,
+            "signal_evaluated_by_operation_id": operation_id,
+            "signal_evaluated_by_preflight_id": preflight_id,
+            "signal_evaluated_by": evaluated_by,
+            "signal_snapshot_json": signal_snapshot_json,
+            "signal_evaluation_input_json": signal_evaluation_input_json,
+            "signal_evaluation_summary_json": evaluation_summary,
+            "strategy_execution_enabled": False,
+            "trial_started": False,
+            "auto_within_budget_enabled": False,
+            "auto_execution_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "trade_intent_created": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "orders_placed": False,
+            "live_ready": False,
+        }
+        updated_metadata["signal_evaluation_summary"] = _signal_evaluation_summary(updated_metadata)
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_signal_evaluated_no_intent",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 signal evaluation recorded without intent or order",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "signal_evaluated_by_operation_id": operation_id,
+                "signal_evaluated_by_preflight_id": preflight_id,
+                "runtime_status": "signal_evaluated_no_intent",
+                "signal_loop_started": True,
+                "signal_loop_enabled_scope": "non_trading_loop_state",
+                "signal_evaluated": True,
+                "signal_generated": True,
+                "signal_is_trade_intent": False,
+                "runtime_started": True,
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "signal_evaluation_summary": updated_metadata["signal_evaluation_summary"],
+        }
+
+    async def record_trial_trade_intent_recorded_no_execution(
+        self,
+        *,
+        campaign_id: str,
+        admission_binding_id: str,
+        admission_decision_id: str,
+        strategy_family_version_id: str,
+        playbook_id: str,
+        installed_constraint_snapshot_id: str,
+        execution_mode: str,
+        trial_trade_intent_id: Optional[str],
+        trial_trade_intent_decision: str,
+        not_executed_reason: str,
+        execution_permission_resolution: dict[str, Any],
+        operation_id: str,
+        preflight_id: str,
+    ) -> dict[str, Any]:
+        campaign = await self.require_current_campaign()
+        if campaign.campaign_id != campaign_id:
+            raise BrcRuleViolation("campaign_id does not match current BRC campaign")
+        metadata = dict(campaign.metadata_json or {})
+        expected_refs = {
+            "created_from_admission": True,
+            "admission_binding_id": admission_binding_id,
+            "admission_decision_id": admission_decision_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "playbook_id": playbook_id,
+            "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+            "execution_mode": execution_mode,
+        }
+        for key, expected in expected_refs.items():
+            if metadata.get(key) != expected:
+                raise BrcRuleViolation(f"campaign metadata {key} mismatch")
+
+        idempotent = (
+            metadata.get("runtime_status") == "trial_trade_intent_recorded_no_execution"
+            and metadata.get("trial_trade_intent_created") is True
+            and metadata.get("execution_intent_created") is False
+            and metadata.get("order_created") is False
+            and metadata.get("orders_placed") is False
+            and metadata.get("trial_started") is False
+            and metadata.get("auto_execution_enabled") is False
+            and metadata.get("auto_within_budget_enabled") is False
+        )
+        if idempotent:
+            return {
+                "campaign": campaign,
+                "idempotent": True,
+                "event": None,
+                "trial_trade_intent_summary": _trial_trade_intent_recording_summary(metadata),
+            }
+
+        if metadata.get("runtime_status") != "signal_evaluated_no_intent":
+            raise BrcRuleViolation("campaign runtime_status is not signal_evaluated_no_intent")
+        if metadata.get("signal_evaluated") is not True:
+            raise BrcRuleViolation("signal evaluation is not recorded")
+        if metadata.get("signal_generated") is not True:
+            raise BrcRuleViolation("signal generation/evaluation metadata is not recorded")
+        forbidden_true_flags = {
+            "trade_intent_created": "trade intent already created",
+            "trial_trade_intent_created": "trial trade intent already created",
+            "execution_intent_created": "execution intent already created",
+            "order_created": "order already created",
+            "orders_placed": "orders already placed",
+            "trial_started": "trial already started",
+            "auto_execution_enabled": "auto execution already enabled",
+            "auto_within_budget_enabled": "auto_within_budget already enabled",
+            "live_ready": "live already enabled",
+        }
+        for key, message in forbidden_true_flags.items():
+            if metadata.get(key) is True:
+                raise BrcRuleViolation(message)
+
+        now = _now_ms()
+        final_permission = str(execution_permission_resolution.get("final_permission") or "")
+        updated_metadata = {
+            **metadata,
+            "runtime_status": "trial_trade_intent_recorded_no_execution",
+            "trial_trade_intent_created": True,
+            "trade_intent_created": True,
+            "trial_trade_intent_id": trial_trade_intent_id,
+            "trial_trade_intent_decision": trial_trade_intent_decision,
+            "trial_trade_intent_not_executed_reason": not_executed_reason,
+            "trial_trade_intent_recorded_at": now,
+            "trial_trade_intent_recorded_by_operation_id": operation_id,
+            "trial_trade_intent_recorded_by_preflight_id": preflight_id,
+            "execution_permission": final_permission,
+            "execution_permission_resolution": dict(execution_permission_resolution or {}),
+            "execution_intent_created": False,
+            "order_created": False,
+            "orders_placed": False,
+            "trial_started": False,
+            "auto_execution_enabled": False,
+            "auto_within_budget_enabled": False,
+            "owner_confirm_each_entry_enabled": False,
+            "live_ready": False,
+        }
+        updated_metadata["trial_trade_intent_summary"] = _trial_trade_intent_recording_summary(updated_metadata)
+        updated = campaign.model_copy(update={"metadata_json": updated_metadata, "updated_at_ms": now})
+        saved = await self._repo.save_campaign(updated)
+        event = await self._repo.append_campaign_event(
+            campaign_id=saved.campaign_id,
+            event_type="admission_trial_trade_intent_recorded_no_execution",
+            occurred_at_ms=now,
+            reason="BRC-R5-002 trial trade intent evidence recorded without execution",
+            metadata={
+                "admission_binding_id": admission_binding_id,
+                "admission_decision_id": admission_decision_id,
+                "strategy_family_version_id": strategy_family_version_id,
+                "playbook_id": playbook_id,
+                "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
+                "execution_mode": execution_mode,
+                "trial_trade_intent_id": trial_trade_intent_id,
+                "trial_trade_intent_decision": trial_trade_intent_decision,
+                "not_executed_reason": not_executed_reason,
+                "execution_permission_resolution": dict(execution_permission_resolution or {}),
+                "runtime_status": "trial_trade_intent_recorded_no_execution",
+                "trial_trade_intent_is_order": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "trial_started": False,
+                "auto_execution_enabled": False,
+                "auto_within_budget_enabled": False,
+                "live_ready": False,
+            },
+        )
+        return {
+            "campaign": saved,
+            "idempotent": False,
+            "event": event,
+            "trial_trade_intent_summary": updated_metadata["trial_trade_intent_summary"],
+        }
+
     async def get_current_campaign(self) -> Optional[BoundedRiskCampaign]:
         return await self._repo.get_current_campaign()
 
@@ -1146,3 +2753,336 @@ class BoundedRiskCampaignService:
         if attempt.symbol != symbol:
             raise BrcRuleViolation(f"last BRC attempt is for {attempt.symbol}, not {symbol}")
         return index, attempt
+
+
+def _positive_decimal_constraint(
+    constraints_json: dict[str, Any],
+    key: str,
+    *,
+    fallback: Optional[Decimal] = None,
+) -> Decimal:
+    raw = constraints_json.get(key)
+    if raw is None:
+        if fallback is not None:
+            return fallback
+        raise BrcRuleViolation(f"installable constraints missing {key}")
+    try:
+        value = Decimal(str(raw))
+    except Exception as exc:
+        raise BrcRuleViolation(f"installable constraints {key} is not decimal") from exc
+    if value <= Decimal("0"):
+        raise BrcRuleViolation(f"installable constraints {key} must be positive")
+    return value
+
+
+def _constraint_install_summary(constraints_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source": constraints_json.get("source"),
+        "risk_policy_version": constraints_json.get("risk_policy_version"),
+        "risk_profile": constraints_json.get("risk_profile"),
+        "max_loss_budget": constraints_json.get("max_loss_budget"),
+        "max_notional": constraints_json.get("max_notional"),
+        "max_leverage": constraints_json.get("max_leverage"),
+        "max_attempts": constraints_json.get("max_attempts"),
+        "allowed_symbols": list(constraints_json.get("allowed_symbols") or []),
+        "allowed_timeframes": list(constraints_json.get("allowed_timeframes") or []),
+        "review_requirements": dict(constraints_json.get("review_requirements") or {}),
+        "cooldowns": dict(constraints_json.get("cooldowns") or {}),
+        "limitations": list(constraints_json.get("limitations") or []),
+    }
+
+
+def _carrier_readiness_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "carrier_ready": metadata_json.get("carrier_ready") is True,
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+    }
+
+
+def _runtime_start_readiness_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "carrier_ready": metadata_json.get("carrier_ready") is True,
+        "runtime_start_ready": metadata_json.get("runtime_start_ready") is True,
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+    }
+
+
+def _runtime_handoff_readiness_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "carrier_ready": metadata_json.get("carrier_ready") is True,
+        "runtime_start_ready": metadata_json.get("runtime_start_ready") is True,
+        "runtime_handoff_ready": metadata_json.get("runtime_handoff_ready") is True,
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+    }
+
+
+def _runtime_started_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "carrier_ready": metadata_json.get("carrier_ready") is True,
+        "runtime_start_ready": metadata_json.get("runtime_start_ready") is True,
+        "runtime_handoff_ready": metadata_json.get("runtime_handoff_ready") is True,
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "runtime_started_at": metadata_json.get("runtime_started_at"),
+        "runtime_started_by_operation_id": metadata_json.get("runtime_started_by_operation_id"),
+        "runtime_started_by_preflight_id": metadata_json.get("runtime_started_by_preflight_id"),
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "auto_execution_enabled": metadata_json.get("auto_execution_enabled") is True,
+        "owner_confirm_each_entry_enabled": metadata_json.get("owner_confirm_each_entry_enabled") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+    }
+
+
+def _strategy_activation_readiness_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "constraints_installed": metadata_json.get("constraints_installed") is True,
+        "carrier_ready": metadata_json.get("carrier_ready") is True,
+        "runtime_start_ready": metadata_json.get("runtime_start_ready") is True,
+        "runtime_handoff_ready": metadata_json.get("runtime_handoff_ready") is True,
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "strategy_activation_ready": metadata_json.get("strategy_activation_ready") is True,
+        "strategy_activation_ready_at": metadata_json.get("strategy_activation_ready_at"),
+        "strategy_activation_ready_by_operation_id": metadata_json.get(
+            "strategy_activation_ready_by_operation_id"
+        ),
+        "strategy_activation_ready_by_preflight_id": metadata_json.get(
+            "strategy_activation_ready_by_preflight_id"
+        ),
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "signal_loop_started": metadata_json.get("signal_loop_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "auto_execution_enabled": metadata_json.get("auto_execution_enabled") is True,
+        "owner_confirm_each_entry_enabled": metadata_json.get("owner_confirm_each_entry_enabled") is True,
+        "execution_intent_created": metadata_json.get("execution_intent_created") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+    }
+
+
+def _strategy_state_activation_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "strategy_state": metadata_json.get("strategy_state"),
+        "strategy_activation_state": metadata_json.get("strategy_activation_state"),
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "strategy_activation_ready": metadata_json.get("strategy_activation_ready") is True,
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "strategy_execution_enabled": metadata_json.get("strategy_execution_enabled") is True,
+        "signal_loop_enabled": metadata_json.get("signal_loop_enabled") is True,
+        "signal_loop_started": metadata_json.get("signal_loop_started") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "auto_execution_enabled": metadata_json.get("auto_execution_enabled") is True,
+        "owner_confirm_each_entry_enabled": metadata_json.get("owner_confirm_each_entry_enabled") is True,
+        "trade_intent_created": metadata_json.get("trade_intent_created") is True,
+        "execution_intent_created": metadata_json.get("execution_intent_created") is True,
+        "order_created": metadata_json.get("order_created") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+        "strategy_activated_at": metadata_json.get("strategy_activated_at"),
+        "strategy_activated_by_operation_id": metadata_json.get("strategy_activated_by_operation_id"),
+        "strategy_activated_by_preflight_id": metadata_json.get("strategy_activated_by_preflight_id"),
+    }
+
+
+def _signal_loop_readiness_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "strategy_state": metadata_json.get("strategy_state"),
+        "strategy_activation_state": metadata_json.get("strategy_activation_state"),
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "signal_loop_ready": metadata_json.get("signal_loop_ready") is True,
+        "strategy_execution_enabled": metadata_json.get("strategy_execution_enabled") is True,
+        "signal_loop_enabled": metadata_json.get("signal_loop_enabled") is True,
+        "signal_loop_started": metadata_json.get("signal_loop_started") is True,
+        "signal_generated": metadata_json.get("signal_generated") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "auto_execution_enabled": metadata_json.get("auto_execution_enabled") is True,
+        "owner_confirm_each_entry_enabled": metadata_json.get("owner_confirm_each_entry_enabled") is True,
+        "trade_intent_created": metadata_json.get("trade_intent_created") is True,
+        "execution_intent_created": metadata_json.get("execution_intent_created") is True,
+        "order_created": metadata_json.get("order_created") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+        "signal_loop_ready_at": metadata_json.get("signal_loop_ready_at"),
+        "signal_loop_ready_by_operation_id": metadata_json.get("signal_loop_ready_by_operation_id"),
+        "signal_loop_ready_by_preflight_id": metadata_json.get("signal_loop_ready_by_preflight_id"),
+    }
+
+
+def _signal_loop_start_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "strategy_state": metadata_json.get("strategy_state"),
+        "strategy_activation_state": metadata_json.get("strategy_activation_state"),
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "signal_loop_ready": metadata_json.get("signal_loop_ready") is True,
+        "signal_loop_enabled": metadata_json.get("signal_loop_enabled") is True,
+        "signal_loop_enabled_scope": metadata_json.get("signal_loop_enabled_scope"),
+        "signal_loop_started": metadata_json.get("signal_loop_started") is True,
+        "signal_generated": metadata_json.get("signal_generated") is True,
+        "strategy_execution_enabled": metadata_json.get("strategy_execution_enabled") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "auto_execution_enabled": metadata_json.get("auto_execution_enabled") is True,
+        "owner_confirm_each_entry_enabled": metadata_json.get("owner_confirm_each_entry_enabled") is True,
+        "trade_intent_created": metadata_json.get("trade_intent_created") is True,
+        "execution_intent_created": metadata_json.get("execution_intent_created") is True,
+        "order_created": metadata_json.get("order_created") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+        "signal_loop_started_at": metadata_json.get("signal_loop_started_at"),
+        "signal_loop_started_by_operation_id": metadata_json.get("signal_loop_started_by_operation_id"),
+        "signal_loop_started_by_preflight_id": metadata_json.get("signal_loop_started_by_preflight_id"),
+    }
+
+
+def _signal_evaluation_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "strategy_state": metadata_json.get("strategy_state"),
+        "strategy_activation_state": metadata_json.get("strategy_activation_state"),
+        "runtime_started": metadata_json.get("runtime_started") is True,
+        "strategy_active": metadata_json.get("strategy_active") is True,
+        "signal_loop_ready": metadata_json.get("signal_loop_ready") is True,
+        "signal_loop_enabled": metadata_json.get("signal_loop_enabled") is True,
+        "signal_loop_enabled_scope": metadata_json.get("signal_loop_enabled_scope"),
+        "signal_loop_started": metadata_json.get("signal_loop_started") is True,
+        "signal_evaluated": metadata_json.get("signal_evaluated") is True,
+        "signal_generated": metadata_json.get("signal_generated") is True,
+        "signal_is_trade_intent": False,
+        "strategy_execution_enabled": metadata_json.get("strategy_execution_enabled") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "auto_execution_enabled": metadata_json.get("auto_execution_enabled") is True,
+        "owner_confirm_each_entry_enabled": metadata_json.get("owner_confirm_each_entry_enabled") is True,
+        "trade_intent_created": metadata_json.get("trade_intent_created") is True,
+        "execution_intent_created": metadata_json.get("execution_intent_created") is True,
+        "order_created": metadata_json.get("order_created") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+        "signal_snapshot_present": bool(metadata_json.get("signal_snapshot_json") or {}),
+        "signal_evaluation_input_present": bool(metadata_json.get("signal_evaluation_input_json") or {}),
+        "signal_evaluated_at": metadata_json.get("signal_evaluated_at"),
+        "signal_evaluated_by_operation_id": metadata_json.get("signal_evaluated_by_operation_id"),
+        "signal_evaluated_by_preflight_id": metadata_json.get("signal_evaluated_by_preflight_id"),
+    }
+
+
+def _trial_trade_intent_recording_summary(metadata_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "admission_binding_id": metadata_json.get("admission_binding_id"),
+        "admission_decision_id": metadata_json.get("admission_decision_id"),
+        "strategy_family_version_id": metadata_json.get("strategy_family_version_id"),
+        "playbook_id": metadata_json.get("playbook_id"),
+        "execution_mode": metadata_json.get("execution_mode"),
+        "installed_constraint_snapshot_id": metadata_json.get("installed_constraint_snapshot_id"),
+        "runtime_status": metadata_json.get("runtime_status"),
+        "signal_evaluated": metadata_json.get("signal_evaluated") is True,
+        "signal_generated": metadata_json.get("signal_generated") is True,
+        "trial_trade_intent_created": metadata_json.get("trial_trade_intent_created") is True,
+        "trade_intent_created": metadata_json.get("trade_intent_created") is True,
+        "trial_trade_intent_id": metadata_json.get("trial_trade_intent_id"),
+        "trial_trade_intent_decision": metadata_json.get("trial_trade_intent_decision"),
+        "trial_trade_intent_not_executed_reason": metadata_json.get(
+            "trial_trade_intent_not_executed_reason"
+        ),
+        "execution_permission": metadata_json.get("execution_permission"),
+        "execution_permission_resolution": dict(
+            metadata_json.get("execution_permission_resolution") or {}
+        ),
+        "execution_intent_created": metadata_json.get("execution_intent_created") is True,
+        "order_created": metadata_json.get("order_created") is True,
+        "orders_placed": metadata_json.get("orders_placed") is True,
+        "trial_started": metadata_json.get("trial_started") is True,
+        "auto_execution_enabled": metadata_json.get("auto_execution_enabled") is True,
+        "auto_within_budget_enabled": metadata_json.get("auto_within_budget_enabled") is True,
+        "live_ready": metadata_json.get("live_ready") is True,
+        "trial_trade_intent_recorded_at": metadata_json.get("trial_trade_intent_recorded_at"),
+        "trial_trade_intent_recorded_by_operation_id": metadata_json.get(
+            "trial_trade_intent_recorded_by_operation_id"
+        ),
+        "trial_trade_intent_recorded_by_preflight_id": metadata_json.get(
+            "trial_trade_intent_recorded_by_preflight_id"
+        ),
+    }

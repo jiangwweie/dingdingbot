@@ -19,6 +19,25 @@ from src.application.brc_operation_layer import (
     OperationListResponse,
     OperationPreflightResponse,
 )
+from src.application.brc_admission_service import (
+    AdmissionRuleViolation,
+    BrcAdmissionService,
+    OwnerRiskAcceptanceInput,
+)
+from src.domain.brc_admission import (
+    AdmissionDecision,
+    AdmissionEvidencePacket,
+    AdmissionExecutionMode,
+    AdmissionRequest as BrcAdmissionRequestModel,
+    AdmissionTrialBinding,
+    OwnerMarketRegimeInput,
+    OwnerRiskAcceptance,
+    StrategyFamily,
+    StrategyFamilyStatus,
+    StrategyFamilyVersion,
+    TrialEnv,
+    TrialStage,
+)
 from src.interfaces.operator_auth import require_operator_session
 from src.interfaces import api_console_runtime as runtime
 
@@ -272,6 +291,74 @@ class BrcOperationCapabilitiesResponse(BaseModel):
     live_ready: Literal[False] = False
 
 
+class BrcStrategyFamilyCreateRequest(BaseModel):
+    family_key: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=256)
+    description: str = Field(default="", max_length=4096)
+    status: StrategyFamilyStatus = StrategyFamilyStatus.INTAKE
+    owner: str = Field(default="owner", max_length=128)
+
+
+class BrcStrategyFamilyVersionCreateRequest(BaseModel):
+    version: int = Field(ge=1)
+    hypothesis: str = Field(default="", max_length=4096)
+    market_structure: str = Field(default="", max_length=4096)
+    entry_logic_family: str = Field(default="", max_length=4096)
+    exit_logic_family: str = Field(default="", max_length=4096)
+    risk_model: str = Field(default="", max_length=4096)
+    supported_symbols: list[str] = Field(default_factory=list)
+    supported_timeframes: list[str] = Field(default_factory=list)
+    required_data: list[str] = Field(default_factory=list)
+    required_execution_capabilities: list[str] = Field(default_factory=list)
+    known_failure_modes: list[str] = Field(default_factory=list)
+    regime_contract_json: dict[str, Any] = Field(default_factory=dict)
+    safeguards_json: dict[str, Any] = Field(default_factory=dict)
+    degradation_policy_json: dict[str, Any] = Field(default_factory=dict)
+    playbook_id: Optional[str] = Field(default=None, max_length=128)
+    playbook_catalog_snapshot_json: dict[str, Any] = Field(default_factory=dict)
+    created_by: str = Field(default="owner", max_length=128)
+
+
+class BrcEvidencePacketCreateRequest(BaseModel):
+    strategy_family_version_id: str = Field(min_length=1, max_length=128)
+    payload_json: dict[str, Any] = Field(default_factory=dict)
+    mandatory_complete: bool = False
+    created_by: str = Field(default="owner", max_length=128)
+
+
+class BrcOwnerRegimeInputCreateRequest(BaseModel):
+    current_regime: str = Field(min_length=1, max_length=128)
+    confidence: str = Field(default="unknown", max_length=64)
+    rationale: str = Field(default="", max_length=4096)
+    market_facts_snapshot_json: dict[str, Any] = Field(default_factory=dict)
+    created_by: str = Field(default="owner", max_length=128)
+
+
+class BrcAdmissionRequestCreateRequest(BaseModel):
+    strategy_family_version_id: str = Field(min_length=1, max_length=128)
+    evidence_packet_id: str = Field(min_length=1, max_length=128)
+    owner_market_regime_input_id: str = Field(min_length=1, max_length=128)
+    trial_env: TrialEnv
+    trial_stage: TrialStage
+    requested_execution_mode: Optional[AdmissionExecutionMode] = None
+    requested_risk_profile: str = Field(default="micro", max_length=64)
+    admission_rule_config_id: Optional[str] = Field(default=None, max_length=128)
+    account_facts_snapshot_ref: Optional[str] = Field(default=None, max_length=256)
+    account_facts_snapshot_json: dict[str, Any] = Field(default_factory=dict)
+    playbook_id: Optional[str] = Field(default=None, max_length=128)
+    playbook_catalog_snapshot_json: dict[str, Any] = Field(default_factory=dict)
+    requested_by: str = Field(default="owner", max_length=128)
+
+
+class BrcOwnerRiskAcceptanceCreateRequest(BaseModel):
+    admission_request_id: str = Field(min_length=1, max_length=128)
+    constraint_snapshot_id: str = Field(min_length=1, max_length=128)
+    admission_decision_id: Optional[str] = Field(default=None, max_length=128)
+    owner_rationale: str = Field(default="", max_length=4096)
+    confirmation_phrase: str = Field(min_length=1, max_length=128)
+    confirmed_by: str = Field(default="owner", max_length=128)
+
+
 _CONTROLLED_SYMBOLS: list[dict[str, Any]] = [
     {
         "symbol_key": "eth",
@@ -375,6 +462,1005 @@ async def _operation_review_packet(input_params: dict[str, Any]) -> dict[str, An
         "audit_timeline": list(audit.get("timeline", [])),
         "audit_errors": audit_errors,
         "mutation_executed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_admission_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    service = await _get_admission_service()
+    return await service.build_gated_trial_preflight_readiness(input_params)
+
+
+async def _operation_admission_binding_reserver(input_params: dict[str, Any]) -> dict[str, Any]:
+    service = await _get_admission_service()
+    binding = await service.reserve_gated_trial_binding(
+        input_params,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    return binding.model_dump(mode="json")
+
+
+async def _operation_admission_campaign_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    service = await _get_admission_service()
+    return await service.build_campaign_carrier_preflight_readiness(input_params)
+
+
+async def _operation_admission_campaign_creator(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+
+    readiness = await admission_service.build_campaign_carrier_preflight_readiness(input_params)
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    decision = await admission_service.get_admission_decision(binding.admission_decision_id)
+    constraint = await admission_service.get_trial_constraint_snapshot(
+        binding.trial_constraint_snapshot_id
+    )
+    campaign = await brc_service.create_admission_campaign_shell(
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        trial_env=binding.trial_env.value,
+        trial_stage=binding.trial_stage.value,
+        execution_mode=binding.execution_mode.value,
+        constraints_json=dict(constraint.constraints_json),
+        reason=(
+            "BRC-R5-002 admission campaign shell creation from Operation "
+            f"{input_params.get('operation_id')}"
+        ),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        created_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    updated_binding = await admission_service.mark_admission_trial_binding_campaign_created(
+        binding_id=binding.binding_id,
+        campaign_id=campaign.campaign_id,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    return {
+        "campaign": _dump_jsonable(campaign),
+        "binding": updated_binding.model_dump(mode="json"),
+        "admission_decision_id": decision.admission_decision_id,
+        "campaign_created": True,
+        "runtime_installed": False,
+        "runtime_started": False,
+        "strategy_active": False,
+        "constraints_installed": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _resolve_admission_campaign_for_constraints(
+    input_params: dict[str, Any],
+) -> Any:
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign_id = str(input_params.get("campaign_id") or "").strip()
+    current = await brc_service.get_current_campaign()
+    latest = await brc_service.get_latest_campaign()
+    candidates = [item for item in (current, latest) if item is not None]
+    if campaign_id:
+        for item in candidates:
+            if item.campaign_id == campaign_id:
+                return item
+        raise AdmissionRuleViolation(f"BRC campaign not found: {campaign_id}")
+    if current is not None:
+        return current
+    if latest is not None:
+        return latest
+    raise AdmissionRuleViolation("BRC campaign not found")
+
+
+async def _operation_runtime_constraint_install_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    runtime_summary = await _operation_runtime_summary()
+    return await admission_service.build_runtime_constraint_install_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=runtime_summary,
+    )
+
+
+async def _operation_runtime_constraint_installer(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_runtime_constraint_install_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    constraint = await admission_service.get_trial_constraint_snapshot(
+        binding.trial_constraint_snapshot_id
+    )
+    installed = await brc_service.install_runtime_constraints_from_admission_campaign(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        constraints_json=dict(constraint.constraints_json),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        installed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    updated_binding = await admission_service.mark_admission_trial_binding_runtime_constraints_installed(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    installed_campaign = installed["campaign"]
+    return {
+        "campaign": _dump_jsonable(installed_campaign),
+        "binding": updated_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "installed_constraint_snapshot_id": binding.trial_constraint_snapshot_id,
+        "installed_constraints_summary": dict(installed.get("installed_constraints_summary") or {}),
+        "idempotent": bool(installed.get("idempotent", False)),
+        "event": dict(installed.get("event") or {}),
+        "constraints_installed": True,
+        "runtime_status": "constraints_installed_not_started",
+        "runtime_started": False,
+        "runtime_active": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_runtime_carrier_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    runtime_summary = await _operation_runtime_summary()
+    return await admission_service.build_runtime_carrier_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=runtime_summary,
+    )
+
+
+async def _operation_runtime_carrier_preparer(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_runtime_carrier_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    prepared = await brc_service.prepare_runtime_carrier_from_admission_campaign(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        prepared_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_runtime_carrier_ready(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    prepared_campaign = prepared["campaign"]
+    return {
+        "campaign": _dump_jsonable(prepared_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "carrier_ready": True,
+        "carrier_readiness_summary": dict(prepared.get("carrier_readiness_summary") or {}),
+        "idempotent": bool(prepared.get("idempotent", False)),
+        "event": dict(prepared.get("event") or {}),
+        "runtime_status": "carrier_ready_not_started",
+        "runtime_started": False,
+        "runtime_active": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "auto_within_budget_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_runtime_start_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    runtime_summary = await _operation_runtime_summary()
+    return await admission_service.build_runtime_start_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=runtime_summary,
+    )
+
+
+async def _operation_runtime_start_preparer(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_runtime_start_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    prepared = await brc_service.prepare_runtime_start_from_admission_carrier(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        prepared_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_runtime_start_ready(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    prepared_campaign = prepared["campaign"]
+    return {
+        "campaign": _dump_jsonable(prepared_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "runtime_start_ready": True,
+        "runtime_start_readiness_summary": dict(
+            prepared.get("runtime_start_readiness_summary") or {}
+        ),
+        "idempotent": bool(prepared.get("idempotent", False)),
+        "event": dict(prepared.get("event") or {}),
+        "runtime_status": "runtime_start_ready_not_started",
+        "runtime_started": False,
+        "runtime_active": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "auto_within_budget_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_trial_trade_intent_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_trial_trade_intent_preflight_readiness(
+        input_params,
+        campaign=campaign,
+    )
+
+
+async def _operation_trial_trade_intent_evaluator(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    evaluated = await admission_service.evaluate_trial_trade_intent(
+        input_params,
+        campaign=campaign,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    return {
+        **evaluated,
+        "campaign_id": input_params.get("campaign_id") or getattr(campaign, "campaign_id", None),
+        "trial_trade_intent_is_order": False,
+        "order_created": False,
+        "execution_intent_created": False,
+        "runtime_started": False,
+        "strategy_active": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_signal_trade_intent_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_signal_trial_trade_intent_preflight_readiness(
+        input_params,
+        campaign=campaign,
+    )
+
+
+async def _operation_signal_trade_intent_recorder(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    recorded = await admission_service.record_trial_trade_intent_from_signal_evaluation(
+        input_params,
+        campaign=campaign,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        execution_permission_resolution=dict(input_params.get("execution_permission_resolution") or {}),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    intent = dict(recorded.get("intent") or {})
+    brc_service = getattr(_api_module(), "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    metadata_result = await brc_service.record_trial_trade_intent_recorded_no_execution(
+        campaign_id=str(recorded.get("campaign_id") or intent.get("campaign_id") or getattr(campaign, "campaign_id")),
+        admission_binding_id=str(recorded.get("binding_id") or intent.get("binding_id")),
+        admission_decision_id=str(intent.get("admission_decision_id")),
+        strategy_family_version_id=str(intent.get("strategy_family_version_id")),
+        playbook_id=str(intent.get("playbook_id")),
+        installed_constraint_snapshot_id=str(
+            (getattr(campaign, "metadata_json", {}) or {}).get("installed_constraint_snapshot_id")
+        ),
+        execution_mode=str(recorded.get("execution_mode") or intent.get("execution_mode")),
+        trial_trade_intent_id=recorded.get("intent_id") or intent.get("intent_id"),
+        trial_trade_intent_decision=str(recorded.get("decision") or intent.get("decision")),
+        not_executed_reason=str(recorded.get("not_executed_reason") or intent.get("not_executed_reason")),
+        execution_permission_resolution=dict(recorded.get("execution_permission_resolution") or {}),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+    )
+    return {
+        **recorded,
+        "campaign": _dump_jsonable(metadata_result.get("campaign")),
+        "campaign_id": getattr(metadata_result.get("campaign"), "campaign_id", None)
+        or recorded.get("campaign_id")
+        or intent.get("campaign_id"),
+        "trial_trade_intent_summary": dict(metadata_result.get("trial_trade_intent_summary") or {}),
+        "metadata_idempotent": bool(metadata_result.get("idempotent", False)),
+        "trial_trade_intent_is_order": False,
+        "order_created": False,
+        "execution_intent_created": False,
+        "orders_placed": False,
+        "trial_started": False,
+        "auto_execution_enabled": False,
+        "auto_within_budget_enabled": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_runtime_handoff_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_runtime_handoff_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+        trade_intent_ledger_available=True,
+    )
+
+
+async def _operation_runtime_handoff_preparer(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_runtime_handoff_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+        trade_intent_ledger_available=True,
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    prepared = await brc_service.prepare_runtime_handoff_from_admission_campaign(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        prepared_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_runtime_handoff_ready(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    prepared_campaign = prepared["campaign"]
+    return {
+        "campaign": _dump_jsonable(prepared_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "runtime_handoff_ready": True,
+        "runtime_handoff_readiness_summary": dict(
+            prepared.get("runtime_handoff_readiness_summary") or {}
+        ),
+        "idempotent": bool(prepared.get("idempotent", False)),
+        "event": dict(prepared.get("event") or {}),
+        "runtime_status": "runtime_handoff_ready_not_started",
+        "runtime_started": False,
+        "runtime_active": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "auto_within_budget_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "order_created": False,
+        "execution_intent_created": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_runtime_start_from_handoff_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_start_runtime_from_handoff_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+        trade_intent_ledger_available=True,
+    )
+
+
+async def _operation_runtime_start_from_handoff_starter(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_start_runtime_from_handoff_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+        trade_intent_ledger_available=True,
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    started = await brc_service.start_runtime_from_admission_handoff(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        started_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_runtime_started(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    started_campaign = started["campaign"]
+    return {
+        "campaign": _dump_jsonable(started_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "runtime_started": True,
+        "runtime_start_summary": dict(started.get("runtime_start_summary") or {}),
+        "idempotent": bool(started.get("idempotent", False)),
+        "event": dict(started.get("event") or {}),
+        "runtime_status": "runtime_started_strategy_inactive",
+        "runtime_active": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "auto_within_budget_enabled": False,
+        "auto_execution_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "order_created": False,
+        "execution_intent_created": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_strategy_activation_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_strategy_activation_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+
+
+async def _operation_strategy_activation_preparer(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_strategy_activation_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    prepared = await brc_service.prepare_strategy_activation_from_admission_runtime(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        prepared_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_strategy_activation_ready(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    prepared_campaign = prepared["campaign"]
+    return {
+        "campaign": _dump_jsonable(prepared_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "strategy_activation_ready": True,
+        "strategy_activation_readiness_summary": dict(
+            prepared.get("strategy_activation_readiness_summary") or {}
+        ),
+        "idempotent": bool(prepared.get("idempotent", False)),
+        "event": dict(prepared.get("event") or {}),
+        "runtime_status": "strategy_activation_ready_not_active",
+        "runtime_started": True,
+        "runtime_active": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "signal_loop_started": False,
+        "auto_within_budget_enabled": False,
+        "auto_execution_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "trade_intent_created": False,
+        "execution_intent_created": False,
+        "order_created": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_strategy_state_activation_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_strategy_state_activation_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+
+
+async def _operation_strategy_state_activator(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_strategy_state_activation_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    activated = await brc_service.activate_strategy_from_admission_runtime(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        activated_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_strategy_activated_no_execution(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    activated_campaign = activated["campaign"]
+    return {
+        "campaign": _dump_jsonable(activated_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "strategy_state": "strategy_active_no_execution",
+        "strategy_activation_state": "active_no_execution",
+        "strategy_state_activation_summary": dict(
+            activated.get("strategy_state_activation_summary") or {}
+        ),
+        "idempotent": bool(activated.get("idempotent", False)),
+        "event": dict(activated.get("event") or {}),
+        "runtime_status": "strategy_active_no_execution",
+        "runtime_started": True,
+        "runtime_active": False,
+        "strategy_active": True,
+        "strategy_execution_enabled": False,
+        "trial_started": False,
+        "signal_loop_enabled": False,
+        "signal_loop_started": False,
+        "auto_within_budget_enabled": False,
+        "auto_execution_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "trade_intent_created": False,
+        "execution_intent_created": False,
+        "order_created": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_signal_loop_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_signal_loop_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+
+
+async def _operation_signal_loop_preparer(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_signal_loop_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    prepared = await brc_service.prepare_signal_loop_from_admission_strategy(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        prepared_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_signal_loop_ready(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    prepared_campaign = prepared["campaign"]
+    return {
+        "campaign": _dump_jsonable(prepared_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "signal_loop_ready": True,
+        "signal_loop_readiness_summary": dict(
+            prepared.get("signal_loop_readiness_summary") or {}
+        ),
+        "idempotent": bool(prepared.get("idempotent", False)),
+        "event": dict(prepared.get("event") or {}),
+        "runtime_status": "signal_loop_ready_not_started",
+        "runtime_started": True,
+        "runtime_active": False,
+        "strategy_active": True,
+        "strategy_execution_enabled": False,
+        "trial_started": False,
+        "signal_loop_enabled": False,
+        "signal_loop_started": False,
+        "signal_generated": False,
+        "auto_within_budget_enabled": False,
+        "auto_execution_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "trade_intent_created": False,
+        "execution_intent_created": False,
+        "order_created": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_signal_loop_start_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_signal_loop_start_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+
+
+async def _operation_signal_loop_starter(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_signal_loop_start_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    started = await brc_service.start_signal_loop_from_admission_strategy(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        started_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_signal_loop_started_no_signal(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    started_campaign = started["campaign"]
+    return {
+        "campaign": _dump_jsonable(started_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "signal_loop_start_summary": dict(
+            started.get("signal_loop_start_summary") or {}
+        ),
+        "idempotent": bool(started.get("idempotent", False)),
+        "event": dict(started.get("event") or {}),
+        "runtime_status": "signal_loop_started_no_signal",
+        "runtime_started": True,
+        "runtime_active": False,
+        "strategy_active": True,
+        "strategy_execution_enabled": False,
+        "signal_loop_ready": True,
+        "signal_loop_enabled": True,
+        "signal_loop_enabled_scope": "non_trading_loop_state",
+        "signal_loop_started": True,
+        "signal_generated": False,
+        "trial_started": False,
+        "auto_within_budget_enabled": False,
+        "auto_execution_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "trade_intent_created": False,
+        "execution_intent_created": False,
+        "order_created": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+async def _operation_signal_evaluation_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    return await admission_service.build_signal_evaluation_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+
+
+async def _operation_signal_evaluator(input_params: dict[str, Any]) -> dict[str, Any]:
+    admission_service = await _get_admission_service()
+    api_module = _api_module()
+    brc_service = getattr(api_module, "_brc_campaign_service", None)
+    if brc_service is None:
+        raise RuntimeError("BRC campaign service unavailable")
+    campaign = await _resolve_admission_campaign_for_constraints(input_params)
+    readiness = await admission_service.build_signal_evaluation_preflight_readiness(
+        input_params,
+        campaign=campaign,
+        runtime_summary=await _operation_runtime_summary(),
+    )
+    blockers = [str(item) for item in readiness.get("blockers") or []]
+    if blockers:
+        raise AdmissionRuleViolation("; ".join(blockers))
+    binding_id = str(
+        input_params.get("admission_binding_id")
+        or input_params.get("binding_id")
+        or readiness.get("binding_summary", {}).get("binding_id")
+        or ""
+    )
+    binding = await admission_service.get_admission_trial_binding(binding_id)
+    evaluated = await brc_service.evaluate_signal_from_admission_strategy(
+        campaign_id=str(binding.campaign_id),
+        admission_binding_id=binding.binding_id,
+        admission_decision_id=binding.admission_decision_id,
+        strategy_family_version_id=binding.strategy_family_version_id,
+        playbook_id=binding.playbook_id,
+        installed_constraint_snapshot_id=binding.trial_constraint_snapshot_id,
+        execution_mode=binding.execution_mode.value,
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        signal_snapshot=dict(input_params.get("signal_snapshot") or {}),
+        signal_evaluation_input=dict(input_params.get("signal_evaluation_input") or {}),
+        evaluated_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    audited_binding = await admission_service.record_admission_signal_evaluated_no_intent(
+        binding_id=binding.binding_id,
+        campaign_id=str(binding.campaign_id),
+        operation_id=str(input_params["operation_id"]),
+        preflight_id=str(input_params["preflight_id"]),
+        confirmed_by=str(input_params.get("confirmed_by") or "owner"),
+    )
+    evaluated_campaign = evaluated["campaign"]
+    return {
+        "campaign": _dump_jsonable(evaluated_campaign),
+        "binding": audited_binding.model_dump(mode="json"),
+        "campaign_id": binding.campaign_id,
+        "binding_id": binding.binding_id,
+        "signal_evaluation_summary": dict(
+            evaluated.get("signal_evaluation_summary") or {}
+        ),
+        "idempotent": bool(evaluated.get("idempotent", False)),
+        "event": dict(evaluated.get("event") or {}),
+        "runtime_status": "signal_evaluated_no_intent",
+        "runtime_started": True,
+        "runtime_active": False,
+        "strategy_active": True,
+        "strategy_execution_enabled": False,
+        "signal_loop_started": True,
+        "signal_loop_enabled": True,
+        "signal_loop_enabled_scope": "non_trading_loop_state",
+        "signal_evaluated": True,
+        "signal_generated": True,
+        "signal_is_trade_intent": False,
+        "trial_started": False,
+        "auto_within_budget_enabled": False,
+        "auto_execution_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+        "trade_intent_created": False,
+        "execution_intent_created": False,
+        "order_created": False,
+        "orders_placed": False,
         "live_ready": False,
     }
 
@@ -536,6 +1622,34 @@ async def _get_operation_service(request: Optional[Request] = None) -> BrcOperat
                 if request is not None
                 else None
             ),
+            admission_readiness=_operation_admission_readiness,
+            admission_binding_reserver=_operation_admission_binding_reserver,
+            admission_campaign_readiness=_operation_admission_campaign_readiness,
+            admission_campaign_creator=_operation_admission_campaign_creator,
+            admission_runtime_constraint_readiness=_operation_runtime_constraint_install_readiness,
+            admission_runtime_constraint_installer=_operation_runtime_constraint_installer,
+            admission_runtime_carrier_readiness=_operation_runtime_carrier_readiness,
+            admission_runtime_carrier_preparer=_operation_runtime_carrier_preparer,
+            admission_runtime_start_readiness=_operation_runtime_start_readiness,
+            admission_runtime_start_preparer=_operation_runtime_start_preparer,
+            trial_trade_intent_readiness=_operation_trial_trade_intent_readiness,
+            trial_trade_intent_evaluator=_operation_trial_trade_intent_evaluator,
+            admission_runtime_handoff_readiness=_operation_runtime_handoff_readiness,
+            admission_runtime_handoff_preparer=_operation_runtime_handoff_preparer,
+            admission_runtime_start_from_handoff_readiness=_operation_runtime_start_from_handoff_readiness,
+            admission_runtime_start_from_handoff_starter=_operation_runtime_start_from_handoff_starter,
+            admission_strategy_activation_readiness=_operation_strategy_activation_readiness,
+            admission_strategy_activation_preparer=_operation_strategy_activation_preparer,
+            admission_strategy_state_activation_readiness=_operation_strategy_state_activation_readiness,
+            admission_strategy_state_activator=_operation_strategy_state_activator,
+            admission_signal_loop_readiness=_operation_signal_loop_readiness,
+            admission_signal_loop_preparer=_operation_signal_loop_preparer,
+            admission_signal_loop_start_readiness=_operation_signal_loop_start_readiness,
+            admission_signal_loop_starter=_operation_signal_loop_starter,
+            admission_signal_evaluation_readiness=_operation_signal_evaluation_readiness,
+            admission_signal_evaluator=_operation_signal_evaluator,
+            signal_trade_intent_readiness=_operation_signal_trade_intent_readiness,
+            signal_trade_intent_recorder=_operation_signal_trade_intent_recorder,
         ),
     )
     try:
@@ -550,10 +1664,45 @@ async def _get_operation_service(request: Optional[Request] = None) -> BrcOperat
     return service
 
 
+async def _get_admission_service() -> BrcAdmissionService:
+    api_module = _api_module()
+    existing = getattr(api_module, "_brc_admission_service", None)
+    if existing is not None:
+        return existing
+    try:
+        from src.infrastructure.pg_brc_admission_repository import PgBrcAdmissionRepository
+
+        repository = PgBrcAdmissionRepository()
+    except Exception as exc:  # pragma: no cover - configuration-specific fail-closed path
+        raise HTTPException(
+            status_code=503,
+            detail="BRC Admission repository unavailable; persistent PG facts are required.",
+        ) from exc
+    service = BrcAdmissionService(repository=repository)
+    try:
+        await service.initialize()
+    except Exception as exc:  # pragma: no cover - configuration-specific fail-closed path
+        raise HTTPException(
+            status_code=503,
+            detail="BRC Admission repository initialization failed; persistent PG facts are required.",
+        ) from exc
+    setattr(api_module, "_brc_admission_service", service)
+    return service
+
+
 def _raise_operation_error(exc: Exception) -> None:
     if isinstance(exc, ConfirmationMismatch):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, OperationLayerError):
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+    raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _raise_admission_error(exc: Exception) -> None:
+    if isinstance(exc, AdmissionRuleViolation):
         message = str(exc)
         if "not found" in message:
             raise HTTPException(status_code=404, detail=message) from exc
@@ -690,6 +1839,7 @@ def _campaign_summary(campaign: Any) -> Optional[dict[str, Any]]:
         "profit_protect_trigger": str(campaign.risk_envelope.profit_protect_trigger),
         "max_campaign_loss": str(campaign.risk_envelope.max_campaign_loss),
         "finalized_at_ms": campaign.finalized_at_ms,
+        "metadata_json": dict(getattr(campaign, "metadata_json", {}) or {}),
     }
 
 
@@ -1878,6 +3028,167 @@ async def get_brc_readiness() -> BrcReadinessResponse:
 async def get_brc_operation_capabilities(request: Request) -> BrcOperationCapabilitiesResponse:
     service = await _get_operation_service(request)
     return BrcOperationCapabilitiesResponse(capabilities=service.capabilities())
+
+
+@router.get("/strategy-families", response_model=list[StrategyFamily])
+async def list_brc_strategy_families(
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[StrategyFamily]:
+    service = await _get_admission_service()
+    return await service.list_strategy_families(limit=limit)
+
+
+@router.post("/strategy-families", response_model=StrategyFamily)
+async def create_brc_strategy_family(
+    body: BrcStrategyFamilyCreateRequest,
+) -> StrategyFamily:
+    service = await _get_admission_service()
+    try:
+        return await service.create_strategy_family(**body.model_dump())
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.get("/strategy-families/{strategy_family_id}", response_model=StrategyFamily)
+async def get_brc_strategy_family(strategy_family_id: str) -> StrategyFamily:
+    service = await _get_admission_service()
+    try:
+        return await service.get_strategy_family(strategy_family_id)
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.post(
+    "/strategy-families/{strategy_family_id}/versions",
+    response_model=StrategyFamilyVersion,
+)
+async def create_brc_strategy_family_version(
+    strategy_family_id: str,
+    body: BrcStrategyFamilyVersionCreateRequest,
+) -> StrategyFamilyVersion:
+    service = await _get_admission_service()
+    try:
+        return await service.create_strategy_family_version(
+            strategy_family_id=strategy_family_id,
+            **body.model_dump(),
+        )
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.post(
+    "/admissions/evidence-packets",
+    response_model=AdmissionEvidencePacket,
+)
+async def create_brc_admission_evidence_packet(
+    body: BrcEvidencePacketCreateRequest,
+) -> AdmissionEvidencePacket:
+    service = await _get_admission_service()
+    try:
+        return await service.create_evidence_packet(**body.model_dump())
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.post(
+    "/admissions/owner-regime-inputs",
+    response_model=OwnerMarketRegimeInput,
+)
+async def create_brc_owner_regime_input(
+    body: BrcOwnerRegimeInputCreateRequest,
+) -> OwnerMarketRegimeInput:
+    service = await _get_admission_service()
+    try:
+        return await service.create_owner_regime_input(**body.model_dump())
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.post("/admissions/requests", response_model=BrcAdmissionRequestModel)
+async def create_brc_admission_request(
+    body: BrcAdmissionRequestCreateRequest,
+) -> BrcAdmissionRequestModel:
+    service = await _get_admission_service()
+    try:
+        return await service.create_admission_request(**body.model_dump())
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.get("/admissions/requests/{admission_request_id}", response_model=BrcAdmissionRequestModel)
+async def get_brc_admission_request(admission_request_id: str) -> BrcAdmissionRequestModel:
+    service = await _get_admission_service()
+    try:
+        return await service.get_admission_request(admission_request_id)
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.post("/admissions/requests/{admission_request_id}/evaluate", response_model=AdmissionDecision)
+async def evaluate_brc_admission_request(admission_request_id: str) -> AdmissionDecision:
+    service = await _get_admission_service()
+    try:
+        return await service.evaluate(admission_request_id)
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.get("/admissions/decisions", response_model=list[AdmissionDecision])
+async def list_brc_admission_decisions(
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[AdmissionDecision]:
+    service = await _get_admission_service()
+    return await service.list_admission_decisions(limit=limit)
+
+
+@router.get("/admissions/decisions/{admission_decision_id}", response_model=AdmissionDecision)
+async def get_brc_admission_decision(admission_decision_id: str) -> AdmissionDecision:
+    service = await _get_admission_service()
+    try:
+        return await service.get_admission_decision(admission_decision_id)
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.post("/admissions/risk-acceptances", response_model=OwnerRiskAcceptance)
+async def create_brc_owner_risk_acceptance(
+    body: BrcOwnerRiskAcceptanceCreateRequest,
+) -> OwnerRiskAcceptance:
+    service = await _get_admission_service()
+    try:
+        return await service.create_owner_risk_acceptance(
+            OwnerRiskAcceptanceInput(**body.model_dump())
+        )
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.get("/admissions/trial-bindings", response_model=list[AdmissionTrialBinding])
+async def list_brc_admission_trial_bindings(
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[AdmissionTrialBinding]:
+    service = await _get_admission_service()
+    return await service.list_admission_trial_bindings(limit=limit)
+
+
+@router.get("/admissions/trial-bindings/{binding_id}", response_model=AdmissionTrialBinding)
+async def get_brc_admission_trial_binding(binding_id: str) -> AdmissionTrialBinding:
+    service = await _get_admission_service()
+    try:
+        return await service.get_admission_trial_binding(binding_id)
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
 
 
 @router.post("/operations/preflight", response_model=OperationPreflightResponse)

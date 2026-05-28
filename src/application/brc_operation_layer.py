@@ -16,6 +16,11 @@ from typing import Any, Awaitable, Callable, Literal, Optional, Protocol
 
 from pydantic import BaseModel, Field
 
+from src.application.execution_permission import (
+    ExecutionPermission,
+    ExecutionPermissionResolver,
+    permission_allows,
+)
 from src.application.bounded_risk_campaign_service import (
     BoundedRiskCampaignService,
     BrcRuleViolation,
@@ -39,6 +44,20 @@ OperationType = Literal[
     "pause_new_entries",
     "emergency_stop_runtime",
     "emergency_flatten",
+    "create_gated_trial_from_admission",
+    "create_campaign_from_admission_binding",
+    "install_runtime_constraints_from_admission_campaign",
+    "prepare_runtime_carrier_from_admission_campaign",
+    "prepare_runtime_start_from_admission_carrier",
+    "evaluate_trial_trade_intent",
+    "prepare_runtime_handoff_from_admission_campaign",
+    "start_runtime_from_admission_handoff",
+    "prepare_strategy_activation_from_admission_runtime",
+    "activate_strategy_from_admission_runtime",
+    "prepare_signal_loop_from_admission_strategy",
+    "start_signal_loop_from_admission_strategy",
+    "evaluate_signal_from_admission_strategy",
+    "record_trial_trade_intent_from_signal_evaluation",
     "live_execution",
     "unrestricted_order_execution",
     "withdrawal",
@@ -51,6 +70,8 @@ OperationType = Literal[
 CapabilityStatus = Literal[
     "enabled",
     "available",
+    "binding_reservation_available",
+    "campaign_shell_creation_available",
     "operation_preflight_available",
     "preflight_planning_available",
     "preflight_dry_run_available",
@@ -215,6 +236,20 @@ class OperationPreflightResponse(BaseModel):
     campaign_summary: dict[str, Any] = Field(default_factory=dict)
     playbook_summary: dict[str, Any] = Field(default_factory=dict)
     risk_summary: dict[str, Any] = Field(default_factory=dict)
+    admission_summary: dict[str, Any] = Field(default_factory=dict)
+    strategy_family_summary: dict[str, Any] = Field(default_factory=dict)
+    constraints_summary: dict[str, Any] = Field(default_factory=dict)
+    owner_risk_acceptance_summary: dict[str, Any] = Field(default_factory=dict)
+    binding_summary: dict[str, Any] = Field(default_factory=dict)
+    campaign_shell_summary: dict[str, Any] = Field(default_factory=dict)
+    runtime_carrier_summary: dict[str, Any] = Field(default_factory=dict)
+    runtime_start_summary: dict[str, Any] = Field(default_factory=dict)
+    runtime_handoff_summary: dict[str, Any] = Field(default_factory=dict)
+    strategy_activation_summary: dict[str, Any] = Field(default_factory=dict)
+    signal_loop_summary: dict[str, Any] = Field(default_factory=dict)
+    signal_evaluation_summary: dict[str, Any] = Field(default_factory=dict)
+    trade_intent_summary: dict[str, Any] = Field(default_factory=dict)
+    next_step: Optional[str] = None
     confirmation_requirement: ConfirmationRequirement
     idempotency_key: str
     status: OperationStatus
@@ -316,6 +351,34 @@ class OperationLayerReaders:
     runtime_transition: Optional[Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     runtime_stop_executor: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     fixed_rehearsal_executor: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_binding_reserver: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_campaign_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_campaign_creator: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_constraint_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_constraint_installer: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_carrier_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_carrier_preparer: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_start_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_start_preparer: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    trial_trade_intent_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    trial_trade_intent_evaluator: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_handoff_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_handoff_preparer: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_start_from_handoff_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_runtime_start_from_handoff_starter: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_strategy_activation_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_strategy_activation_preparer: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_strategy_state_activation_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_strategy_state_activator: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_signal_loop_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_signal_loop_preparer: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_signal_loop_start_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_signal_loop_starter: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_signal_evaluation_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    admission_signal_evaluator: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    signal_trade_intent_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    signal_trade_intent_recorder: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
 
 
 async def _empty_runtime_summary() -> dict[str, Any]:
@@ -357,6 +420,7 @@ class BrcOperationService:
         brc_campaign_service: Optional[BoundedRiskCampaignService],
         readers: Optional[OperationLayerReaders] = None,
         registry: Optional[OperationRegistry] = None,
+        execution_permission_resolver: Optional[ExecutionPermissionResolver] = None,
         ttl_ms: int = 5 * 60 * 1000,
     ) -> None:
         self._repo = repository
@@ -367,6 +431,7 @@ class BrcOperationService:
             audit_writable=_default_audit_writable,
         )
         self._registry = registry or OperationRegistry()
+        self._execution_permission_resolver = execution_permission_resolver or ExecutionPermissionResolver()
         self._ttl_ms = ttl_ms
         self._catalog = default_playbook_catalog()
 
@@ -413,10 +478,87 @@ class BrcOperationService:
         market_summary = await self._readers.markets_orders_summary()
         campaign_summary = await self._campaign_summary()
         playbook_summary = self._playbook_preflight_summary(input_params)
+        admission_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "create_gated_trial_from_admission":
+            admission_readiness = await self._admission_readiness(input_params)
+        admission_campaign_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "create_campaign_from_admission_binding":
+            admission_campaign_readiness = await self._admission_campaign_readiness(input_params)
+        runtime_constraint_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "install_runtime_constraints_from_admission_campaign":
+            runtime_constraint_readiness = await self._admission_runtime_constraint_readiness(input_params)
+        runtime_carrier_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "prepare_runtime_carrier_from_admission_campaign":
+            runtime_carrier_readiness = await self._admission_runtime_carrier_readiness(input_params)
+        runtime_start_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "prepare_runtime_start_from_admission_carrier":
+            runtime_start_readiness = await self._admission_runtime_start_readiness(input_params)
+        trade_intent_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "evaluate_trial_trade_intent":
+            trade_intent_readiness = await self._trial_trade_intent_readiness(input_params)
+        runtime_handoff_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "prepare_runtime_handoff_from_admission_campaign":
+            runtime_handoff_readiness = await self._admission_runtime_handoff_readiness(input_params)
+        start_runtime_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "start_runtime_from_admission_handoff":
+            start_runtime_readiness = await self._admission_runtime_start_from_handoff_readiness(input_params)
+        strategy_activation_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "prepare_strategy_activation_from_admission_runtime":
+            strategy_activation_readiness = await self._admission_strategy_activation_readiness(input_params)
+        strategy_state_activation_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "activate_strategy_from_admission_runtime":
+            strategy_state_activation_readiness = await self._admission_strategy_state_activation_readiness(input_params)
+        signal_loop_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "prepare_signal_loop_from_admission_strategy":
+            signal_loop_readiness = await self._admission_signal_loop_readiness(input_params)
+        signal_loop_start_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "start_signal_loop_from_admission_strategy":
+            signal_loop_start_readiness = await self._admission_signal_loop_start_readiness(input_params)
+        signal_evaluation_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "evaluate_signal_from_admission_strategy":
+            signal_evaluation_readiness = await self._admission_signal_evaluation_readiness(input_params)
+        signal_trade_intent_readiness: Optional[dict[str, Any]] = None
+        if operation_type == "record_trial_trade_intent_from_signal_evaluation":
+            signal_trade_intent_readiness = await self._signal_trade_intent_readiness(input_params)
+            permission_resolution = self._execution_permission_resolver.resolve(
+                requested_permission=ExecutionPermission.INTENT_RECORDING,
+                operation_type=operation_type,
+                operation_permission=ExecutionPermission.INTENT_RECORDING,
+                account_facts=dict(signal_trade_intent_readiness.get("account_facts") or {}),
+                constraints_check=dict(signal_trade_intent_readiness.get("constraints_check") or {}),
+                campaign_metadata=dict(signal_trade_intent_readiness.get("campaign_metadata") or {}),
+                runtime_summary=runtime_summary,
+            )
+            resolution_summary = permission_resolution.to_summary()
+            signal_trade_intent_readiness["execution_permission_resolution"] = resolution_summary
+            if not permission_allows(
+                permission_resolution.final_permission,
+                ExecutionPermission.INTENT_RECORDING,
+            ):
+                signal_trade_intent_readiness.setdefault("blockers", [])
+                signal_trade_intent_readiness["blockers"].extend(permission_resolution.blockers)
+            signal_trade_intent_readiness.setdefault("warnings", [])
+            signal_trade_intent_readiness["warnings"].extend(permission_resolution.warnings)
 
         audit_writable = (
             await self._readers.audit_writable()
-            if operation_type == "emergency_stop_runtime"
+            if operation_type in {
+                "emergency_stop_runtime",
+                "create_gated_trial_from_admission",
+                "create_campaign_from_admission_binding",
+                "install_runtime_constraints_from_admission_campaign",
+                "prepare_runtime_carrier_from_admission_campaign",
+                "prepare_runtime_start_from_admission_carrier",
+                "evaluate_trial_trade_intent",
+                "prepare_runtime_handoff_from_admission_campaign",
+                "start_runtime_from_admission_handoff",
+                "prepare_strategy_activation_from_admission_runtime",
+                "activate_strategy_from_admission_runtime",
+                "prepare_signal_loop_from_admission_strategy",
+                "start_signal_loop_from_admission_strategy",
+                "evaluate_signal_from_admission_strategy",
+                "record_trial_trade_intent_from_signal_evaluation",
+            }
             else None
         )
         decision, blockers, warnings, summary, before, after = self._preflight_decision(
@@ -426,6 +568,20 @@ class BrcOperationService:
             campaign_summary=campaign_summary,
             market_summary=market_summary,
             audit_writable=audit_writable,
+            admission_readiness=admission_readiness,
+            admission_campaign_readiness=admission_campaign_readiness,
+            runtime_constraint_readiness=runtime_constraint_readiness,
+            runtime_carrier_readiness=runtime_carrier_readiness,
+            runtime_start_readiness=runtime_start_readiness,
+            trade_intent_readiness=trade_intent_readiness,
+            runtime_handoff_readiness=runtime_handoff_readiness,
+            start_runtime_readiness=start_runtime_readiness,
+            strategy_activation_readiness=strategy_activation_readiness,
+            strategy_state_activation_readiness=strategy_state_activation_readiness,
+            signal_loop_readiness=signal_loop_readiness,
+            signal_loop_start_readiness=signal_loop_start_readiness,
+            signal_evaluation_readiness=signal_evaluation_readiness,
+            signal_trade_intent_readiness=signal_trade_intent_readiness,
         )
         dry_run_plan = after.get("dry_run_plan")
         if operation_type == "emergency_flatten" and isinstance(dry_run_plan, dict):
@@ -451,6 +607,20 @@ class BrcOperationService:
             "campaign": campaign_summary,
             "playbook": playbook_summary,
             "risk": risk_result,
+            "admission": admission_readiness or {},
+            "admission_campaign": admission_campaign_readiness or {},
+            "runtime_constraint_install": runtime_constraint_readiness or {},
+            "runtime_carrier_prepare": runtime_carrier_readiness or {},
+            "runtime_start_prepare": runtime_start_readiness or {},
+            "trial_trade_intent": trade_intent_readiness or {},
+            "runtime_handoff_prepare": runtime_handoff_readiness or {},
+            "start_runtime_from_handoff": start_runtime_readiness or {},
+            "strategy_activation_prepare": strategy_activation_readiness or {},
+            "strategy_state_activation": strategy_state_activation_readiness or {},
+            "signal_loop_prepare": signal_loop_readiness or {},
+            "signal_loop_start": signal_loop_start_readiness or {},
+            "signal_evaluation": signal_evaluation_readiness or {},
+            "signal_trade_intent": signal_trade_intent_readiness or {},
         }
         snapshot_hash = _stable_hash(snapshot_source)
         preflight = PreflightSnapshot(
@@ -516,12 +686,279 @@ class BrcOperationService:
         )
         if failure is not None:
             status: ExecutionStatus = "expired" if failure == "preflight expired" else "blocked"
+            result_summary = None
+            if operation.operation_type == "create_gated_trial_from_admission":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "binding_reserved",
+                    "message": (
+                        "create_gated_trial_from_admission confirmation was blocked before binding reservation. "
+                        "No trial, campaign, runtime carrier, runtime constraints, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "mutation_executed": False,
+                    "binding_persisted": False,
+                    "runtime_creation_executed": False,
+                    "campaign_creation_executed": False,
+                    "runtime_constraints_installed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "create_campaign_from_admission_binding":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "campaign_created",
+                    "message": (
+                        "create_campaign_from_admission_binding confirmation was blocked before campaign shell creation. "
+                        "No runtime carrier, runtime constraints, strategy execution, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "mutation_executed": False,
+                    "campaign_created": False,
+                    "runtime_installed": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "constraints_installed": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "install_runtime_constraints_from_admission_campaign":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_constraints_installed",
+                    "message": (
+                        "install_runtime_constraints_from_admission_campaign confirmation was blocked before "
+                        "constraints metadata installation. Runtime was not started; strategy was not activated; "
+                        "no order, live execution, withdrawal, transfer, cancel, close, or flatten action occurred."
+                    ),
+                    "mutation_executed": False,
+                    "constraints_installed": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "prepare_runtime_carrier_from_admission_campaign":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "carrier_ready",
+                    "message": (
+                        "prepare_runtime_carrier_from_admission_campaign confirmation was blocked before "
+                        "carrier readiness metadata preparation. Runtime was not started; strategy was not "
+                        "activated; auto execution was not enabled; no order, live execution, withdrawal, "
+                        "transfer, cancel, close, or flatten action occurred."
+                    ),
+                    "mutation_executed": False,
+                    "carrier_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "prepare_runtime_start_from_admission_carrier":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_start_ready",
+                    "message": (
+                        "prepare_runtime_start_from_admission_carrier confirmation was blocked before "
+                        "runtime start readiness metadata preparation. Runtime was not started; strategy "
+                        "was not activated; auto execution was not enabled; no order, live execution, "
+                        "withdrawal, transfer, cancel, close, or flatten action occurred."
+                    ),
+                    "mutation_executed": False,
+                    "runtime_start_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "evaluate_trial_trade_intent":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "trial_trade_intent_evaluated",
+                    "message": (
+                        "evaluate_trial_trade_intent confirmation was blocked before non-executable "
+                        "intent evaluation. Runtime was not started; strategy was not activated; no order, "
+                        "execution intent, live execution, withdrawal, transfer, cancel, close, or flatten action occurred."
+                    ),
+                    "mutation_executed": False,
+                    "intent_persisted": False,
+                    "trial_trade_intent_is_order": False,
+                    "order_created": False,
+                    "execution_intent_created": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "prepare_runtime_handoff_from_admission_campaign":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_handoff_ready",
+                    "message": (
+                        "prepare_runtime_handoff_from_admission_campaign confirmation was blocked before "
+                        "runtime handoff readiness metadata preparation. Runtime was not started; "
+                        "runtime_started was not set true; strategy was not activated; no order, "
+                        "execution intent, live execution, withdrawal, transfer, cancel, close, or flatten action occurred."
+                    ),
+                    "mutation_executed": False,
+                    "runtime_handoff_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "start_runtime_from_admission_handoff":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_started_strategy_inactive",
+                    "message": (
+                        "start_runtime_from_admission_handoff confirmation was blocked before runtime state transition. "
+                        "Runtime state was not started; strategy was not activated; no order, execution intent, live execution, withdrawal, transfer, "
+                        "cancel, close, or flatten action occurred."
+                    ),
+                    "mutation_executed": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "order_created": False,
+                    "execution_intent_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "prepare_strategy_activation_from_admission_runtime":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "strategy_activation_ready",
+                    "message": (
+                        "prepare_strategy_activation_from_admission_runtime confirmation was blocked before "
+                        "strategy activation readiness metadata preparation. Strategy was not activated; "
+                        "signal loop was not started; auto execution was not enabled; no trade intent, "
+                        "execution intent, order, or live execution path was created."
+                    ),
+                    "mutation_executed": False,
+                    "strategy_activation_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "signal_loop_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "activate_strategy_from_admission_runtime":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "strategy_active_no_execution",
+                    "message": (
+                        "activate_strategy_from_admission_runtime confirmation was blocked before "
+                        "strategy state activation metadata transition. Strategy runner was not started; "
+                        "signal loop was not started; auto execution was not enabled; no trade intent, "
+                        "execution intent, order, or live execution path was created."
+                    ),
+                    "mutation_executed": False,
+                    "strategy_state": None,
+                    "strategy_active": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "signal_loop_enabled": False,
+                    "signal_loop_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "prepare_signal_loop_from_admission_strategy":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_loop_ready_not_started",
+                    "message": (
+                        "prepare_signal_loop_from_admission_strategy confirmation was blocked before "
+                        "signal loop readiness metadata preparation. Signal loop was not started; no signal was generated; "
+                        "auto execution was not enabled; no trade intent, execution intent, order, or live execution path was created."
+                    ),
+                    "mutation_executed": False,
+                    "signal_loop_ready": False,
+                    "signal_loop_enabled": False,
+                    "signal_loop_started": False,
+                    "signal_generated": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "start_signal_loop_from_admission_strategy":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_loop_started_no_signal",
+                    "message": (
+                        "start_signal_loop_from_admission_strategy confirmation was blocked before "
+                        "signal loop state metadata transition. No signal was generated; auto execution "
+                        "was not enabled; no trade intent, execution intent, order, or live execution path was created."
+                    ),
+                    "mutation_executed": False,
+                    "signal_loop_started": False,
+                    "signal_loop_enabled": False,
+                    "signal_generated": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                }
+            if operation.operation_type == "evaluate_signal_from_admission_strategy":
+                result_summary = {
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_evaluated_no_intent",
+                    "message": (
+                        "evaluate_signal_from_admission_strategy confirmation was blocked before "
+                        "signal evaluation metadata recording. No trade intent, execution intent, "
+                        "order, auto execution, trial start, or live execution path was created."
+                    ),
+                    "mutation_executed": False,
+                    "signal_evaluated": False,
+                    "signal_generated": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "live_ready": False,
+                }
             result = await self._persist_result(
                 operation=operation,
                 preflight=preflight,
                 status=status,
                 blocked_reason=failure if status == "blocked" else None,
                 recheck_result={"passed": False, "reason": failure},
+                result_summary=result_summary,
                 confirmed_by=confirmed_by,
             )
             return self._to_confirm_response(result)
@@ -611,6 +1048,76 @@ class BrcOperationService:
             return await self._execute_emergency_flatten_dry_run(operation=operation, preflight=preflight)
         if operation.operation_type == "emergency_stop_runtime":
             return await self._execute_emergency_stop_runtime(operation=operation, preflight=preflight)
+        if operation.operation_type == "create_gated_trial_from_admission":
+            return await self._execute_gated_trial_binding_reservation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "create_campaign_from_admission_binding":
+            return await self._execute_admission_campaign_shell_creation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "install_runtime_constraints_from_admission_campaign":
+            return await self._execute_admission_runtime_constraint_installation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "prepare_runtime_carrier_from_admission_campaign":
+            return await self._execute_admission_runtime_carrier_preparation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "prepare_runtime_start_from_admission_carrier":
+            return await self._execute_admission_runtime_start_preparation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "evaluate_trial_trade_intent":
+            return await self._execute_trial_trade_intent_evaluation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "prepare_runtime_handoff_from_admission_campaign":
+            return await self._execute_admission_runtime_handoff_preparation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "start_runtime_from_admission_handoff":
+            return await self._execute_admission_runtime_start_from_handoff(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "prepare_strategy_activation_from_admission_runtime":
+            return await self._execute_admission_strategy_activation_preparation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "activate_strategy_from_admission_runtime":
+            return await self._execute_admission_strategy_state_activation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "prepare_signal_loop_from_admission_strategy":
+            return await self._execute_admission_signal_loop_preparation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "start_signal_loop_from_admission_strategy":
+            return await self._execute_admission_signal_loop_start(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "evaluate_signal_from_admission_strategy":
+            return await self._execute_admission_signal_evaluation(
+                operation=operation,
+                preflight=preflight,
+            )
+        if operation.operation_type == "record_trial_trade_intent_from_signal_evaluation":
+            return await self._execute_signal_trade_intent_recording(
+                operation=operation,
+                preflight=preflight,
+            )
         if operation.operation_type != "switch_playbook":
             return await self._execute_no_safe_executor(operation=operation, preflight=preflight)
         if self._brc is None:
@@ -1205,6 +1712,1997 @@ class BrcOperationService:
             },
         )
 
+    async def _execute_gated_trial_binding_reservation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_binding_reserver is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission trial binding reserver unavailable",
+                recheck_result={"passed": False, "reason": "binding_reserver_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "binding_reserved",
+                    "message": (
+                        "Binding reservation adapter is not wired. No trial, campaign, runtime carrier, "
+                        "runtime constraints, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "binding_persisted": False,
+                    "runtime_mutation_executed": False,
+                    "campaign_creation_executed": False,
+                    "runtime_constraints_installed": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"admission_readiness": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            binding = await self._readers.admission_binding_reserver(payload)
+        except ValueError as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "binding_reserved",
+                    "message": (
+                        "Admission-trial binding reservation was blocked. No trial, campaign, runtime carrier, "
+                        "runtime constraints, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "binding_persisted": False,
+                    "runtime_mutation_executed": False,
+                    "campaign_creation_executed": False,
+                    "runtime_constraints_installed": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"admission_readiness": preflight.after},
+            )
+        binding_id = _optional_str(binding.get("binding_id"))
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="executed",
+            recheck_result={"passed": True, "binding_reservation_only": True},
+            adapter_result={"admission_trial_binding": binding},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "binding_reserved",
+                "message": (
+                    "Admission-trial binding reserved only. Trial not started; campaign not created; "
+                    "runtime carrier not created; runtime constraints not installed; no orders placed."
+                ),
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "binding_persisted": True,
+                "runtime_mutation_executed": False,
+                "runtime_creation_executed": False,
+                "campaign_creation_executed": False,
+                "runtime_constraints_installed": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[],
+            review_refs=[],
+            final_state_snapshot={"admission_trial_binding": binding},
+        )
+
+    async def _execute_admission_campaign_shell_creation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_campaign_creator is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission campaign shell creator unavailable",
+                recheck_result={"passed": False, "reason": "campaign_shell_creator_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "campaign_created",
+                    "message": (
+                        "Campaign shell creator is not wired. No campaign, runtime carrier, runtime constraints, "
+                        "strategy execution, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "campaign_created": False,
+                    "runtime_installed": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "constraints_installed": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"campaign_shell_readiness": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            created = await self._readers.admission_campaign_creator(payload)
+        except ValueError as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "campaign_created",
+                    "message": (
+                        "Admission campaign shell creation was blocked. No runtime carrier, runtime constraints, "
+                        "strategy execution, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "campaign_created": False,
+                    "runtime_installed": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "constraints_installed": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"campaign_shell_readiness": preflight.after},
+            )
+
+        campaign = dict(created.get("campaign") or {})
+        binding = dict(created.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        campaign_ref = {
+            "type": "admission_campaign_shell",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="executed",
+            recheck_result={"passed": True, "campaign_shell_creation_only": True},
+            adapter_result={"admission_campaign_shell": created},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "campaign_created",
+                "message": (
+                    "Admission campaign shell created. Runtime not installed; strategy not active; "
+                    "constraints not installed; no orders placed."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "campaign_created": True,
+                "runtime_installed": False,
+                "runtime_started": False,
+                "runtime_creation_executed": False,
+                "strategy_active": False,
+                "constraints_installed": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_installed": False,
+                "strategy_active": False,
+            },
+        )
+
+    async def _execute_admission_runtime_constraint_installation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_runtime_constraint_installer is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission runtime constraint installer unavailable",
+                recheck_result={"passed": False, "reason": "runtime_constraint_installer_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_constraints_installed",
+                    "message": (
+                        "Runtime constraint installer is not wired. No constraints metadata, runtime start, "
+                        "strategy activation, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "constraints_installed": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_constraint_readiness": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            installed = await self._readers.admission_runtime_constraint_installer(payload)
+        except ValueError as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_constraints_installed",
+                    "message": (
+                        "Runtime constraint metadata installation was blocked. Runtime was not started; "
+                        "strategy was not activated; no order, live execution, withdrawal, or transfer occurred."
+                    ),
+                    "constraints_installed": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_constraint_readiness": preflight.after},
+            )
+
+        campaign = dict(installed.get("campaign") or {})
+        binding = dict(installed.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(installed.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_runtime_constraints",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "constraints_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_runtime_constraints": installed},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "runtime_constraints_installed",
+                "message": (
+                    "Runtime constraints metadata already installed. Runtime remains not started; "
+                    "strategy remains inactive; no orders placed."
+                    if idempotent
+                    else "Runtime constraints metadata installed. Runtime not started; strategy not active; no orders placed."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "constraints_installed": True,
+                "installed_constraint_snapshot_id": installed.get("installed_constraint_snapshot_id"),
+                "installed_constraints_summary": dict(installed.get("installed_constraints_summary") or {}),
+                "runtime_status": "constraints_installed_not_started",
+                "runtime_started": False,
+                "runtime_active": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "constraints_installed_not_started",
+                "runtime_started": False,
+                "strategy_active": False,
+                "trial_started": False,
+            },
+        )
+
+    async def _execute_admission_runtime_carrier_preparation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_runtime_carrier_preparer is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission runtime carrier preparer unavailable",
+                recheck_result={"passed": False, "reason": "runtime_carrier_preparer_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "carrier_ready",
+                    "message": (
+                        "Runtime carrier preparer is not wired. No carrier readiness metadata, runtime start, "
+                        "strategy activation, auto execution, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "carrier_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_carrier_readiness": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            prepared = await self._readers.admission_runtime_carrier_preparer(payload)
+        except ValueError as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "carrier_ready",
+                    "message": (
+                        "Runtime carrier readiness preparation was blocked. Runtime was not started; "
+                        "strategy was not activated; auto execution was not enabled; no order, live execution, "
+                        "withdrawal, or transfer occurred."
+                    ),
+                    "carrier_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_carrier_readiness": preflight.after},
+            )
+
+        campaign = dict(prepared.get("campaign") or {})
+        binding = dict(prepared.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(prepared.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_runtime_carrier_ready",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "carrier_readiness_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_runtime_carrier": prepared},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "carrier_ready",
+                "message": (
+                    "Runtime carrier readiness metadata already prepared. Runtime remains not started; "
+                    "strategy remains inactive; auto execution remains disabled; no orders placed."
+                    if idempotent
+                    else "Runtime carrier readiness metadata prepared. Runtime not started; strategy not active; auto execution disabled; no orders placed."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "carrier_ready": True,
+                "carrier_readiness_summary": dict(prepared.get("carrier_readiness_summary") or {}),
+                "runtime_status": "carrier_ready_not_started",
+                "runtime_started": False,
+                "runtime_active": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "carrier_ready_not_started",
+                "runtime_started": False,
+                "strategy_active": False,
+                "trial_started": False,
+            },
+        )
+
+    async def _execute_admission_runtime_start_preparation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_runtime_start_preparer is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission runtime start preparer unavailable",
+                recheck_result={"passed": False, "reason": "runtime_start_preparer_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_start_ready",
+                    "message": (
+                        "Runtime start preparer is not wired. No runtime start readiness metadata, runtime start, "
+                        "strategy activation, auto execution, order, live execution, withdrawal, or transfer was created."
+                    ),
+                    "runtime_start_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_start_readiness": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            prepared = await self._readers.admission_runtime_start_preparer(payload)
+        except ValueError as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_start_ready",
+                    "message": (
+                        "Runtime start readiness preparation was blocked. Runtime was not started; "
+                        "strategy was not activated; auto execution was not enabled; no order, live execution, "
+                        "withdrawal, or transfer occurred."
+                    ),
+                    "runtime_start_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_start_readiness": preflight.after},
+            )
+
+        campaign = dict(prepared.get("campaign") or {})
+        binding = dict(prepared.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(prepared.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_runtime_start_ready",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "runtime_start_readiness_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_runtime_start": prepared},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "runtime_start_ready",
+                "message": (
+                    "Runtime start readiness metadata already prepared. Runtime remains not started; "
+                    "strategy remains inactive; auto execution remains disabled; no orders placed."
+                    if idempotent
+                    else "Runtime start readiness metadata prepared. Runtime not started; strategy not active; auto execution disabled; no orders placed."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "runtime_start_ready": True,
+                "runtime_start_readiness_summary": dict(prepared.get("runtime_start_readiness_summary") or {}),
+                "runtime_status": "runtime_start_ready_not_started",
+                "runtime_started": False,
+                "runtime_active": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "runtime_start_ready_not_started",
+                "runtime_started": False,
+                "strategy_active": False,
+                "trial_started": False,
+            },
+        )
+
+    async def _execute_trial_trade_intent_evaluation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.trial_trade_intent_evaluator is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="trial trade intent evaluator unavailable",
+                recheck_result={"passed": False, "reason": "trial_trade_intent_evaluator_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "trial_trade_intent_evaluated",
+                    "message": (
+                        "Trial trade intent evaluator is not wired. No runtime, strategy, order, "
+                        "execution intent, live action, withdrawal, or transfer was created."
+                    ),
+                    "intent_persisted": False,
+                    "order_created": False,
+                    "execution_intent_created": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"trade_intent": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            evaluated = await self._readers.trial_trade_intent_evaluator(payload)
+        except ValueError as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "trial_trade_intent_evaluated",
+                    "message": (
+                        "Trial trade intent evaluation was blocked. Runtime was not started; strategy was "
+                        "not activated; no order or execution intent was created."
+                    ),
+                    "intent_persisted": False,
+                    "order_created": False,
+                    "execution_intent_created": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"trade_intent": preflight.after},
+            )
+
+        intent = dict(evaluated.get("intent") or {})
+        intent_id = _optional_str(evaluated.get("intent_id") or intent.get("intent_id"))
+        campaign_id = _optional_str(evaluated.get("campaign_id") or operation.input_params.get("campaign_id"))
+        intent_ref = (
+            {
+                "type": "trial_trade_intent",
+                "ref_id": intent_id,
+                "campaign_id": campaign_id or intent.get("campaign_id"),
+                "decision": evaluated.get("decision"),
+                "non_executable_evidence_only": True,
+            }
+            if intent_id is not None
+            else {
+                "type": "trial_trade_intent_check",
+                "ref_id": operation.operation_id,
+                "campaign_id": campaign_id,
+                "decision": evaluated.get("decision"),
+                "non_executable_evidence_only": True,
+            }
+        )
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="executed",
+            recheck_result={
+                "passed": True,
+                "execution_mode_enforcement_contract_only": True,
+                "intent_persisted": bool(evaluated.get("intent_persisted", False)),
+            },
+            adapter_result={"trial_trade_intent": evaluated},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "trial_trade_intent_evaluated",
+                "message": (
+                    "Trial trade intent evaluated as non-executable evidence. Runtime not started; "
+                    "strategy not active; no order or execution intent created."
+                ),
+                "intent_id": intent_id,
+                "intent_persisted": bool(evaluated.get("intent_persisted", False)),
+                "decision": evaluated.get("decision"),
+                "not_executed_reason": evaluated.get("not_executed_reason"),
+                "execution_mode": evaluated.get("execution_mode"),
+                "constraints_check": dict(evaluated.get("constraints_check") or {}),
+                "would_require_runtime_execution": bool(
+                    evaluated.get("would_require_runtime_execution", False)
+                ),
+                "trial_trade_intent_is_order": False,
+                "order_created": False,
+                "execution_intent_created": False,
+                "runtime_started": False,
+                "runtime_active": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+            },
+            audit_refs=[intent_ref],
+            campaign_refs=[intent_ref] if campaign_id is not None else [],
+            review_refs=[],
+            final_state_snapshot={
+                "trial_trade_intent": intent,
+                "execution_mode": evaluated.get("execution_mode"),
+                "runtime_started": False,
+                "strategy_active": False,
+                "orders_placed": False,
+            },
+        )
+
+    async def _execute_admission_runtime_handoff_preparation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_runtime_handoff_preparer is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission runtime handoff preparer unavailable",
+                recheck_result={"passed": False, "reason": "runtime_handoff_preparer_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_handoff_ready",
+                    "message": (
+                        "Runtime handoff preparer is not wired. No runtime handoff readiness metadata, "
+                        "runtime start, strategy activation, auto execution, order, live execution, withdrawal, "
+                        "or transfer was created."
+                    ),
+                    "runtime_handoff_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_handoff_readiness": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            prepared = await self._readers.admission_runtime_handoff_preparer(payload)
+        except ValueError as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_handoff_ready",
+                    "message": (
+                        "Runtime handoff readiness preparation was blocked. Runtime was not started; "
+                        "runtime_started was not set true; strategy was not activated; auto execution was "
+                        "not enabled; no order or execution intent was created."
+                    ),
+                    "runtime_handoff_ready": False,
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_handoff_readiness": preflight.after},
+            )
+
+        campaign = dict(prepared.get("campaign") or {})
+        binding = dict(prepared.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(prepared.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_runtime_handoff_ready",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "runtime_handoff_readiness_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_runtime_handoff": prepared},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "runtime_handoff_ready",
+                "message": (
+                    "Runtime handoff readiness metadata already prepared. Runtime remains not started; "
+                    "strategy remains inactive; auto execution remains disabled; no orders placed."
+                    if idempotent
+                    else "Runtime handoff readiness metadata prepared. Runtime not started; runtime_started false; strategy not active; auto execution disabled; no orders placed."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "runtime_handoff_ready": True,
+                "runtime_handoff_readiness_summary": dict(prepared.get("runtime_handoff_readiness_summary") or {}),
+                "runtime_status": "runtime_handoff_ready_not_started",
+                "runtime_started": False,
+                "runtime_active": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "order_created": False,
+                "execution_intent_created": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "runtime_handoff_ready_not_started",
+                "runtime_started": False,
+                "strategy_active": False,
+                "trial_started": False,
+            },
+        )
+
+    async def _execute_admission_runtime_start_from_handoff(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_runtime_start_from_handoff_starter is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission runtime start from handoff starter unavailable",
+                recheck_result={"passed": False, "reason": "runtime_start_starter_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_started_strategy_inactive",
+                    "message": (
+                        "Runtime start was blocked before metadata transition. Strategy was not activated; "
+                        "trial was not started; auto execution was not enabled; no order or execution intent was created."
+                    ),
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_start": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            started = await self._readers.admission_runtime_start_from_handoff_starter(payload)
+        except Exception as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "runtime_started_strategy_inactive",
+                    "message": (
+                        "Runtime start state transition was blocked. Strategy was not activated; "
+                        "trial was not started; auto execution was not enabled; no order or execution intent was created."
+                    ),
+                    "runtime_started": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"runtime_start": preflight.after},
+            )
+
+        campaign = dict(started.get("campaign") or {})
+        binding = dict(started.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(started.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_runtime_started",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "runtime_state_started_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_runtime_start": started},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "runtime_started_strategy_inactive",
+                "message": (
+                    "Runtime state was already started with strategy inactive. No duplicate transition was written; "
+                    "strategy remains inactive; trial remains not started; auto execution remains disabled; no orders placed."
+                    if idempotent
+                    else "Runtime state started from admission handoff. Strategy remains inactive; trial remains not started; auto execution disabled; no orders placed."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "runtime_start_summary": dict(started.get("runtime_start_summary") or {}),
+                "runtime_status": "runtime_started_strategy_inactive",
+                "runtime_started": True,
+                "runtime_active": False,
+                "strategy_active": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "order_created": False,
+                "execution_intent_created": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "runtime_started_strategy_inactive",
+                "runtime_started": True,
+                "strategy_active": False,
+                "trial_started": False,
+            },
+        )
+
+    async def _execute_admission_strategy_activation_preparation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_strategy_activation_preparer is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission strategy activation preparer unavailable",
+                recheck_result={"passed": False, "reason": "strategy_activation_preparer_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "strategy_activation_ready",
+                    "message": (
+                        "Strategy activation readiness preparation was blocked. Strategy was not activated; "
+                        "signal loop was not started; auto execution was not enabled; no execution intent or order was created."
+                    ),
+                    "strategy_activation_ready": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "signal_loop_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "execution_intent_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"strategy_activation_readiness": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            prepared = await self._readers.admission_strategy_activation_preparer(payload)
+        except Exception as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "strategy_activation_ready",
+                    "message": (
+                        "Strategy activation readiness metadata preparation was blocked. Strategy was not activated; "
+                        "signal loop was not started; auto execution was not enabled; no execution intent or order was created."
+                    ),
+                    "strategy_activation_ready": False,
+                    "strategy_active": False,
+                    "trial_started": False,
+                    "signal_loop_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "execution_intent_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"strategy_activation_readiness": preflight.after},
+            )
+
+        campaign = dict(prepared.get("campaign") or {})
+        binding = dict(prepared.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(prepared.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_strategy_activation_ready",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "strategy_activation_readiness_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_strategy_activation": prepared},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "strategy_activation_ready",
+                "message": (
+                    "Strategy activation readiness metadata already prepared. Strategy remains inactive; "
+                    "signal loop remains inactive; auto execution remains disabled; no execution intent or order was created."
+                    if idempotent
+                    else "Strategy activation readiness metadata prepared. Strategy not active; signal loop inactive; auto execution disabled; no execution intent or order created."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "strategy_activation_ready": True,
+                "strategy_activation_readiness_summary": dict(
+                    prepared.get("strategy_activation_readiness_summary") or {}
+                ),
+                "runtime_status": "strategy_activation_ready_not_active",
+                "runtime_started": True,
+                "strategy_active": False,
+                "trial_started": False,
+                "signal_loop_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "strategy_activation_ready_not_active",
+                "strategy_active": False,
+                "trial_started": False,
+                "signal_loop_started": False,
+            },
+        )
+
+    async def _execute_admission_strategy_state_activation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_strategy_state_activator is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission strategy state activator unavailable",
+                recheck_result={"passed": False, "reason": "strategy_state_activator_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "strategy_active_no_execution",
+                    "message": (
+                        "Strategy state activation was blocked. Strategy runner was not started; "
+                        "signal loop was not started; auto execution was not enabled; no execution intent or order was created."
+                    ),
+                    "strategy_active": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "signal_loop_enabled": False,
+                    "signal_loop_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"strategy_state_activation": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            activated = await self._readers.admission_strategy_state_activator(payload)
+        except Exception as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "strategy_active_no_execution",
+                    "message": (
+                        "Strategy state activation metadata transition was blocked. Strategy runner was not started; "
+                        "signal loop was not started; auto execution was not enabled; no execution intent or order was created."
+                    ),
+                    "strategy_active": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "signal_loop_enabled": False,
+                    "signal_loop_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"strategy_state_activation": preflight.after},
+            )
+
+        campaign = dict(activated.get("campaign") or {})
+        binding = dict(activated.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(activated.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_strategy_activated_no_execution",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "strategy_state_activation_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_strategy_state_activation": activated},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "strategy_active_no_execution",
+                "message": (
+                    "Strategy metadata already active in non-execution state. Signal loop remains inactive; "
+                    "auto execution remains disabled; no execution intent or order was created."
+                    if idempotent
+                    else "Strategy metadata activated in non-execution state. Signal loop inactive; auto execution disabled; no execution intent or order created."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "strategy_state": "strategy_active_no_execution",
+                "strategy_activation_state": "active_no_execution",
+                "strategy_state_activation_summary": dict(
+                    activated.get("strategy_state_activation_summary") or {}
+                ),
+                "runtime_status": "strategy_active_no_execution",
+                "runtime_started": True,
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "trial_started": False,
+                "signal_loop_enabled": False,
+                "signal_loop_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "strategy_active_no_execution",
+                "strategy_state": "strategy_active_no_execution",
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "trial_started": False,
+                "signal_loop_enabled": False,
+                "signal_loop_started": False,
+            },
+        )
+
+    async def _execute_admission_signal_loop_preparation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_signal_loop_preparer is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission signal loop preparer unavailable",
+                recheck_result={"passed": False, "reason": "signal_loop_preparer_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_loop_ready_not_started",
+                    "message": (
+                        "Signal loop readiness preparation was blocked. Signal loop was not started; "
+                        "no signal was generated; no trade intent, execution intent, or order was created."
+                    ),
+                    "signal_loop_ready": False,
+                    "signal_loop_enabled": False,
+                    "signal_loop_started": False,
+                    "signal_generated": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"signal_loop_readiness": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            prepared = await self._readers.admission_signal_loop_preparer(payload)
+        except Exception as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_loop_ready_not_started",
+                    "message": (
+                        "Signal loop readiness metadata preparation was blocked. Signal loop was not started; "
+                        "no signal was generated; no trade intent, execution intent, or order was created."
+                    ),
+                    "signal_loop_ready": False,
+                    "signal_loop_enabled": False,
+                    "signal_loop_started": False,
+                    "signal_generated": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"signal_loop_readiness": preflight.after},
+            )
+
+        campaign = dict(prepared.get("campaign") or {})
+        binding = dict(prepared.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(prepared.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_signal_loop_ready",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "signal_loop_readiness_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_signal_loop_readiness": prepared},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "signal_loop_ready_not_started",
+                "message": (
+                    "Signal loop readiness metadata already prepared. Signal loop remains not started; "
+                    "no signal was generated; no execution intent or order was created."
+                    if idempotent
+                    else "Signal loop readiness metadata prepared. Signal loop not started; no signal generated; no trade intent, execution intent, or order created."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "signal_loop_ready": True,
+                "signal_loop_readiness_summary": dict(
+                    prepared.get("signal_loop_readiness_summary") or {}
+                ),
+                "runtime_status": "signal_loop_ready_not_started",
+                "runtime_started": True,
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "trial_started": False,
+                "signal_loop_enabled": False,
+                "signal_loop_started": False,
+                "signal_generated": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "signal_loop_ready_not_started",
+                "signal_loop_ready": True,
+                "signal_loop_enabled": False,
+                "signal_loop_started": False,
+                "signal_generated": False,
+                "strategy_execution_enabled": False,
+            },
+        )
+
+    async def _execute_admission_signal_loop_start(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_signal_loop_starter is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission signal loop starter unavailable",
+                recheck_result={"passed": False, "reason": "signal_loop_starter_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_loop_started_no_signal",
+                    "message": (
+                        "Signal loop state start was blocked. No signal was generated; "
+                        "no trade intent, execution intent, or order was created."
+                    ),
+                    "signal_loop_started": False,
+                    "signal_loop_enabled": False,
+                    "signal_generated": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"signal_loop_start": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            started = await self._readers.admission_signal_loop_starter(payload)
+        except Exception as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_loop_started_no_signal",
+                    "message": (
+                        "Signal loop state metadata transition was blocked. No signal was generated; "
+                        "no trade intent, execution intent, or order was created."
+                    ),
+                    "signal_loop_started": False,
+                    "signal_loop_enabled": False,
+                    "signal_generated": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"signal_loop_start": preflight.after},
+            )
+
+        campaign = dict(started.get("campaign") or {})
+        binding = dict(started.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(started.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_signal_loop_started_no_signal",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "signal_loop_start_state_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_signal_loop_start": started},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "signal_loop_started_no_signal",
+                "message": (
+                    "Signal loop state metadata already started without signal generation. "
+                    "No trade intent, execution intent, or order was created."
+                    if idempotent
+                    else "Signal loop state metadata started. No signal generated; no trade intent, execution intent, or order created."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "signal_loop_start_summary": dict(
+                    started.get("signal_loop_start_summary") or {}
+                ),
+                "runtime_status": "signal_loop_started_no_signal",
+                "runtime_started": True,
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "signal_loop_ready": True,
+                "signal_loop_enabled": True,
+                "signal_loop_enabled_scope": "non_trading_loop_state",
+                "signal_loop_started": True,
+                "signal_generated": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "signal_loop_started_no_signal",
+                "signal_loop_enabled": True,
+                "signal_loop_enabled_scope": "non_trading_loop_state",
+                "signal_loop_started": True,
+                "signal_generated": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+            },
+        )
+
+    async def _execute_admission_signal_evaluation(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.admission_signal_evaluator is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="admission signal evaluator unavailable",
+                recheck_result={"passed": False, "reason": "signal_evaluator_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_evaluated_no_intent",
+                    "message": (
+                        "Signal evaluation recording was blocked. No trade intent, "
+                        "execution intent, or order was created."
+                    ),
+                    "signal_evaluated": False,
+                    "signal_generated": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"signal_evaluation": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+            }
+        )
+        try:
+            evaluated = await self._readers.admission_signal_evaluator(payload)
+        except Exception as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "signal_evaluated_no_intent",
+                    "message": (
+                        "Signal evaluation metadata recording was blocked. No trade intent, "
+                        "execution intent, or order was created."
+                    ),
+                    "signal_evaluated": False,
+                    "signal_generated": False,
+                    "trade_intent_created": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "strategy_execution_enabled": False,
+                    "trial_started": False,
+                    "auto_within_budget_enabled": False,
+                    "auto_execution_enabled": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"signal_evaluation": preflight.after},
+            )
+
+        campaign = dict(evaluated.get("campaign") or {})
+        binding = dict(evaluated.get("binding") or {})
+        campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
+        binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
+        idempotent = bool(evaluated.get("idempotent", False))
+        campaign_ref = {
+            "type": "admission_signal_evaluated_no_intent",
+            "campaign_id": campaign_id,
+            "ref_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        binding_ref = {
+            "type": "admission_trial_binding",
+            "ref_id": binding_id,
+            "binding_status": binding.get("binding_status"),
+            "campaign_id": campaign_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "signal_evaluation_metadata_only": True,
+                "idempotent": idempotent,
+            },
+            adapter_result={"admission_signal_evaluation": evaluated},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "signal_evaluated_no_intent",
+                "message": (
+                    "Signal evaluation metadata already recorded without intent. No trade intent, execution intent, or order was created."
+                    if idempotent
+                    else "Signal evaluation metadata recorded. No trade intent, execution intent, or order created."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "binding_status": binding.get("binding_status"),
+                "signal_evaluation_summary": dict(
+                    evaluated.get("signal_evaluation_summary") or {}
+                ),
+                "runtime_status": "signal_evaluated_no_intent",
+                "runtime_started": True,
+                "strategy_active": True,
+                "strategy_execution_enabled": False,
+                "signal_loop_started": True,
+                "signal_loop_enabled": True,
+                "signal_loop_enabled_scope": "non_trading_loop_state",
+                "signal_evaluated": True,
+                "signal_generated": True,
+                "signal_is_trade_intent": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "trial_started": False,
+                "auto_within_budget_enabled": False,
+                "auto_execution_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[binding_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "campaign": campaign,
+                "admission_trial_binding": binding,
+                "runtime_status": "signal_evaluated_no_intent",
+                "signal_evaluated": True,
+                "signal_generated": True,
+                "signal_is_trade_intent": False,
+                "trade_intent_created": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+            },
+        )
+
+    async def _execute_signal_trade_intent_recording(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.signal_trade_intent_recorder is None:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason="signal trade intent recorder unavailable",
+                recheck_result={"passed": False, "reason": "signal_trade_intent_recorder_unavailable"},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "trial_trade_intent_recorded_no_execution",
+                    "message": (
+                        "Signal-to-trial-trade-intent recorder is not wired. No execution intent, "
+                        "order, auto execution, live action, withdrawal, or transfer was created."
+                    ),
+                    "intent_persisted": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "trial_started": False,
+                    "auto_execution_enabled": False,
+                    "auto_within_budget_enabled": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"trade_intent": preflight.after},
+            )
+
+        payload = dict(operation.input_params)
+        payload.update(
+            {
+                "operation_id": operation.operation_id,
+                "preflight_id": preflight.preflight_id,
+                "confirmed_by": operation.confirmed_by or "owner",
+                "authorization_source": "brc_operation_layer",
+                "execution_permission_resolution": dict(
+                    preflight.after.get("execution_permission_resolution") or {}
+                ),
+            }
+        )
+        try:
+            recorded = await self._readers.signal_trade_intent_recorder(payload)
+        except Exception as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": False, "reason": str(exc)},
+                result_summary={
+                    "operation_type": operation.operation_type,
+                    "planned_result_status": "trial_trade_intent_recorded_no_execution",
+                    "message": (
+                        "Trial trade intent recording was blocked. No execution intent, "
+                        "order, auto execution, live action, withdrawal, or transfer was created."
+                    ),
+                    "intent_persisted": False,
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "orders_placed": False,
+                    "trial_started": False,
+                    "auto_execution_enabled": False,
+                    "auto_within_budget_enabled": False,
+                    "live_ready": False,
+                },
+                final_state_snapshot={"trade_intent": preflight.after},
+            )
+
+        intent = dict(recorded.get("intent") or {})
+        intent_id = _optional_str(recorded.get("intent_id") or intent.get("intent_id"))
+        campaign = dict(recorded.get("campaign") or {})
+        campaign_id = _optional_str(
+            recorded.get("campaign_id")
+            or campaign.get("campaign_id")
+            or operation.input_params.get("campaign_id")
+            or preflight.after.get("campaign_id")
+        )
+        binding_id = _optional_str(recorded.get("binding_id") or preflight.after.get("binding_id"))
+        idempotent = bool(recorded.get("idempotent", False))
+        intent_ref = {
+            "type": "trial_trade_intent",
+            "ref_id": intent_id,
+            "campaign_id": campaign_id,
+            "decision": recorded.get("decision"),
+            "non_executable_evidence_only": True,
+        }
+        campaign_ref = {
+            "type": "admission_trial_trade_intent_recorded_no_execution",
+            "ref_id": campaign_id,
+            "campaign_id": campaign_id,
+            "admission_binding_id": binding_id,
+        }
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="noop" if idempotent else "executed",
+            recheck_result={
+                "passed": True,
+                "trial_trade_intent_evidence_only": True,
+                "intent_persisted": bool(recorded.get("intent_persisted", False)),
+                "idempotent": idempotent,
+            },
+            adapter_result={"signal_trial_trade_intent": recorded},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "trial_trade_intent_recorded_no_execution",
+                "message": (
+                    "Trial trade intent already recorded as non-executable evidence. No execution intent or order was created."
+                    if idempotent
+                    else "Trial trade intent recorded as non-executable evidence. No execution intent or order created."
+                ),
+                "campaign_id": campaign_id,
+                "binding_id": binding_id,
+                "intent_id": intent_id,
+                "intent_persisted": bool(recorded.get("intent_persisted", False)),
+                "decision": recorded.get("decision"),
+                "not_executed_reason": recorded.get("not_executed_reason"),
+                "execution_mode": recorded.get("execution_mode"),
+                "execution_permission_resolution": dict(
+                    recorded.get("execution_permission_resolution") or preflight.after.get("execution_permission_resolution") or {}
+                ),
+                "runtime_status": "trial_trade_intent_recorded_no_execution",
+                "trial_trade_intent_created": bool(recorded.get("intent_persisted", False)),
+                "trial_trade_intent_is_order": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+                "trial_started": False,
+                "auto_execution_enabled": False,
+                "auto_within_budget_enabled": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+                "idempotent": idempotent,
+            },
+            audit_refs=[intent_ref],
+            campaign_refs=[campaign_ref],
+            review_refs=[],
+            final_state_snapshot={
+                "trial_trade_intent": intent,
+                "campaign": campaign,
+                "runtime_status": "trial_trade_intent_recorded_no_execution",
+                "execution_intent_created": False,
+                "order_created": False,
+                "orders_placed": False,
+            },
+        )
+
+    async def _execute_gated_trial_from_admission_disabled(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status="blocked",
+            blocked_reason="create_gated_trial_from_admission runtime creation is not implemented",
+            recheck_result={"passed": False, "reason": "confirm_disabled"},
+            adapter_result={"phase": "BRC-R5-002 Phase 4", "binding_reservation_only": True},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "planned_result_status": "binding_reserved",
+                "message": (
+                    "Phase 4 only reserves admission-trial bindings. No trial, campaign, runtime carrier, "
+                    "runtime constraints, order, live execution, withdrawal, or transfer was created."
+                ),
+                "mutation_executed": False,
+                "runtime_creation_executed": False,
+                "campaign_creation_executed": False,
+                "runtime_constraints_installed": False,
+                "live_ready": False,
+            },
+            final_state_snapshot={"admission_readiness": preflight.after},
+        )
+
     async def _confirm_failure_reason(
         self,
         *,
@@ -1270,6 +3768,129 @@ class BrcOperationService:
             current_runtime = await self._readers.runtime_summary()
             if current_runtime.get("live_ready") is True:
                 return "live/mainnet runtime stop execution is forbidden"
+        if operation.operation_type == "create_gated_trial_from_admission":
+            if self._readers.admission_binding_reserver is None:
+                return "admission trial binding reserver unavailable"
+            readiness = await self._admission_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "create_campaign_from_admission_binding":
+            if self._readers.admission_campaign_creator is None:
+                return "admission campaign shell creator unavailable"
+            readiness = await self._admission_campaign_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "install_runtime_constraints_from_admission_campaign":
+            if self._readers.admission_runtime_constraint_installer is None:
+                return "admission runtime constraint installer unavailable"
+            readiness = await self._admission_runtime_constraint_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "prepare_runtime_carrier_from_admission_campaign":
+            if self._readers.admission_runtime_carrier_preparer is None:
+                return "admission runtime carrier preparer unavailable"
+            readiness = await self._admission_runtime_carrier_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "prepare_runtime_start_from_admission_carrier":
+            if self._readers.admission_runtime_start_preparer is None:
+                return "admission runtime start preparer unavailable"
+            readiness = await self._admission_runtime_start_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "evaluate_trial_trade_intent":
+            if self._readers.trial_trade_intent_evaluator is None:
+                return "trial trade intent evaluator unavailable"
+            readiness = await self._trial_trade_intent_readiness(operation.input_params)
+            if readiness.get("mode_unavailable") is True:
+                return str(
+                    readiness.get("enforcement", {}).get("not_executed_reason")
+                    or "execution mode unavailable"
+                )
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "prepare_runtime_handoff_from_admission_campaign":
+            if self._readers.admission_runtime_handoff_preparer is None:
+                return "admission runtime handoff preparer unavailable"
+            readiness = await self._admission_runtime_handoff_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "start_runtime_from_admission_handoff":
+            if self._readers.admission_runtime_start_from_handoff_starter is None:
+                return "admission runtime start from handoff starter unavailable"
+            readiness = await self._admission_runtime_start_from_handoff_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "prepare_strategy_activation_from_admission_runtime":
+            if self._readers.admission_strategy_activation_preparer is None:
+                return "admission strategy activation preparer unavailable"
+            readiness = await self._admission_strategy_activation_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "activate_strategy_from_admission_runtime":
+            if self._readers.admission_strategy_state_activator is None:
+                return "admission strategy state activator unavailable"
+            readiness = await self._admission_strategy_state_activation_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "prepare_signal_loop_from_admission_strategy":
+            if self._readers.admission_signal_loop_preparer is None:
+                return "admission signal loop preparer unavailable"
+            readiness = await self._admission_signal_loop_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "start_signal_loop_from_admission_strategy":
+            if self._readers.admission_signal_loop_starter is None:
+                return "admission signal loop starter unavailable"
+            readiness = await self._admission_signal_loop_start_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "evaluate_signal_from_admission_strategy":
+            if self._readers.admission_signal_evaluator is None:
+                return "admission signal evaluator unavailable"
+            readiness = await self._admission_signal_evaluation_readiness(operation.input_params)
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
+        if operation.operation_type == "record_trial_trade_intent_from_signal_evaluation":
+            if self._readers.signal_trade_intent_recorder is None:
+                return "signal trade intent recorder unavailable"
+            readiness = await self._signal_trade_intent_readiness(operation.input_params)
+            if readiness.get("mode_unavailable") is True:
+                return str(
+                    readiness.get("enforcement", {}).get("not_executed_reason")
+                    or "execution mode unavailable"
+                )
+            current_runtime = await self._readers.runtime_summary()
+            permission_resolution = self._execution_permission_resolver.resolve(
+                requested_permission=ExecutionPermission.INTENT_RECORDING,
+                operation_type=operation.operation_type,
+                operation_permission=ExecutionPermission.INTENT_RECORDING,
+                account_facts=dict(readiness.get("account_facts") or {}),
+                constraints_check=dict(readiness.get("constraints_check") or {}),
+                campaign_metadata=dict(readiness.get("campaign_metadata") or {}),
+                runtime_summary=current_runtime,
+            )
+            if not permission_allows(
+                permission_resolution.final_permission,
+                ExecutionPermission.INTENT_RECORDING,
+            ):
+                return permission_resolution.downgrade_reason or "execution permission blocks intent recording"
+            readiness_blockers = [str(item) for item in readiness.get("blockers") or []]
+            if readiness_blockers:
+                return "; ".join(readiness_blockers)
         current_market = await self._readers.markets_orders_summary()
         if _critical_market_drift(preflight.account_snapshot, current_market):
             return "account/order facts changed since preflight"
@@ -1370,6 +3991,278 @@ class BrcOperationService:
             "loss_counter_resets_on_playbook_switch": False,
         }
 
+    async def _admission_readiness(self, input_params: dict[str, Any]) -> dict[str, Any]:
+        if self._readers.admission_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "owner_risk_acceptance_summary": {"required": False, "provided": False, "valid": False},
+                "next_step": "Wire BRC admission facts before gated-trial preflight can run.",
+            }
+        return await self._readers.admission_readiness(input_params)
+
+    async def _admission_campaign_readiness(self, input_params: dict[str, Any]) -> dict[str, Any]:
+        if self._readers.admission_campaign_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission campaign readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "owner_risk_acceptance_summary": {"required": False, "provided": False, "valid": False},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "next_step": "Wire BRC admission binding facts before campaign shell preflight can run.",
+            }
+        return await self._readers.admission_campaign_readiness(input_params)
+
+    async def _admission_runtime_constraint_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_runtime_constraint_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission runtime constraint readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "owner_risk_acceptance_summary": {"required": False, "provided": False, "valid": False},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "next_step": "Wire BRC admission campaign facts before runtime constraint install preflight can run.",
+            }
+        return await self._readers.admission_runtime_constraint_readiness(input_params)
+
+    async def _admission_runtime_carrier_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_runtime_carrier_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission runtime carrier readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "owner_risk_acceptance_summary": {"required": False, "provided": False, "valid": False},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "runtime_carrier_summary": {},
+                "next_step": "Wire BRC admission campaign facts before runtime carrier readiness preflight can run.",
+            }
+        return await self._readers.admission_runtime_carrier_readiness(input_params)
+
+    async def _admission_runtime_start_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_runtime_start_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission runtime start readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "owner_risk_acceptance_summary": {"required": False, "provided": False, "valid": False},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "runtime_carrier_summary": {},
+                "runtime_start_summary": {},
+                "next_step": "Wire BRC admission carrier facts before runtime start readiness preflight can run.",
+            }
+        return await self._readers.admission_runtime_start_readiness(input_params)
+
+    async def _trial_trade_intent_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.trial_trade_intent_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC trial trade intent readiness reader unavailable"],
+                "warnings": [],
+                "constraints_check": {},
+                "enforcement": {
+                    "decision": "unavailable",
+                    "not_executed_reason": "trial trade intent readiness reader unavailable",
+                    "order_would_be_created": False,
+                    "execution_intent_would_be_created": False,
+                },
+                "trade_intent_summary": {},
+                "next_step": "Wire BRC trial trade intent enforcement before evaluation can run.",
+            }
+        return await self._readers.trial_trade_intent_readiness(input_params)
+
+    async def _admission_runtime_handoff_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_runtime_handoff_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission runtime handoff readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "runtime_handoff_summary": {},
+                "next_step": "Wire BRC admission campaign facts before runtime handoff readiness preflight can run.",
+            }
+        return await self._readers.admission_runtime_handoff_readiness(input_params)
+
+    async def _admission_runtime_start_from_handoff_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_runtime_start_from_handoff_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission runtime start-from-handoff readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "runtime_start_summary": {},
+                "next_step": "Wire BRC admission handoff facts before runtime start preflight can run.",
+            }
+        return await self._readers.admission_runtime_start_from_handoff_readiness(input_params)
+
+    async def _admission_strategy_activation_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_strategy_activation_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission strategy activation readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "strategy_activation_summary": {},
+                "next_step": "Wire BRC admission runtime facts before strategy activation readiness preflight can run.",
+            }
+        return await self._readers.admission_strategy_activation_readiness(input_params)
+
+    async def _admission_strategy_state_activation_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_strategy_state_activation_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission strategy state activation readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "strategy_activation_summary": {},
+                "next_step": "Wire BRC admission strategy activation readiness facts before strategy state activation preflight can run.",
+            }
+        return await self._readers.admission_strategy_state_activation_readiness(input_params)
+
+    async def _admission_signal_loop_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_signal_loop_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission signal loop readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "signal_loop_summary": {},
+                "next_step": "Wire BRC admission strategy facts before signal loop readiness preflight can run.",
+            }
+        return await self._readers.admission_signal_loop_readiness(input_params)
+
+    async def _admission_signal_loop_start_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_signal_loop_start_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission signal loop start readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "signal_loop_summary": {},
+                "next_step": "Wire BRC admission signal loop readiness facts before signal loop start preflight can run.",
+            }
+        return await self._readers.admission_signal_loop_start_readiness(input_params)
+
+    async def _admission_signal_evaluation_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.admission_signal_evaluation_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC admission signal evaluation readiness reader unavailable"],
+                "warnings": [],
+                "admission_summary": {},
+                "strategy_family_summary": {},
+                "constraints_summary": {},
+                "binding_summary": {},
+                "campaign_shell_summary": {},
+                "signal_evaluation_summary": {},
+                "next_step": "Wire BRC admission signal loop started facts before signal evaluation preflight can run.",
+            }
+        return await self._readers.admission_signal_evaluation_readiness(input_params)
+
+    async def _signal_trade_intent_readiness(
+        self,
+        input_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._readers.signal_trade_intent_readiness is None:
+            return {
+                "available": False,
+                "ready": False,
+                "blockers": ["BRC signal trade intent readiness reader unavailable"],
+                "warnings": [],
+                "trade_intent_summary": {},
+                "next_step": "Wire BRC signal evaluation facts before trade intent recording preflight can run.",
+            }
+        return await self._readers.signal_trade_intent_readiness(input_params)
+
     def _effective_policy(self, operation_type: str) -> OperationPolicy:
         policy = self._registry.get_policy(operation_type)
         if operation_type == "run_fixed_testnet_rehearsal":
@@ -1423,6 +4316,20 @@ class BrcOperationService:
         campaign_summary: dict[str, Any],
         market_summary: dict[str, Any],
         audit_writable: Optional[bool] = None,
+        admission_readiness: Optional[dict[str, Any]] = None,
+        admission_campaign_readiness: Optional[dict[str, Any]] = None,
+        runtime_constraint_readiness: Optional[dict[str, Any]] = None,
+        runtime_carrier_readiness: Optional[dict[str, Any]] = None,
+        runtime_start_readiness: Optional[dict[str, Any]] = None,
+        trade_intent_readiness: Optional[dict[str, Any]] = None,
+        runtime_handoff_readiness: Optional[dict[str, Any]] = None,
+        start_runtime_readiness: Optional[dict[str, Any]] = None,
+        strategy_activation_readiness: Optional[dict[str, Any]] = None,
+        strategy_state_activation_readiness: Optional[dict[str, Any]] = None,
+        signal_loop_readiness: Optional[dict[str, Any]] = None,
+        signal_loop_start_readiness: Optional[dict[str, Any]] = None,
+        signal_evaluation_readiness: Optional[dict[str, Any]] = None,
+        signal_trade_intent_readiness: Optional[dict[str, Any]] = None,
     ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
         blockers: list[str] = []
         warnings: list[str] = []
@@ -1559,10 +4466,1129 @@ class BrcOperationService:
                 warnings=warnings,
                 audit_writable=audit_writable,
             )
+        elif policy.operation_type == "create_gated_trial_from_admission":
+            return self._gated_trial_from_admission_preflight_decision(
+                policy=policy,
+                admission_readiness=admission_readiness or {},
+                campaign_summary=campaign_summary,
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "create_campaign_from_admission_binding":
+            return self._campaign_from_admission_binding_preflight_decision(
+                policy=policy,
+                admission_campaign_readiness=admission_campaign_readiness or {},
+                campaign_summary=campaign_summary,
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "install_runtime_constraints_from_admission_campaign":
+            return self._runtime_constraints_from_admission_campaign_preflight_decision(
+                policy=policy,
+                runtime_constraint_readiness=runtime_constraint_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "prepare_runtime_carrier_from_admission_campaign":
+            return self._runtime_carrier_from_admission_campaign_preflight_decision(
+                policy=policy,
+                runtime_carrier_readiness=runtime_carrier_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "prepare_runtime_start_from_admission_carrier":
+            return self._runtime_start_from_admission_carrier_preflight_decision(
+                policy=policy,
+                runtime_start_readiness=runtime_start_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "evaluate_trial_trade_intent":
+            return self._trial_trade_intent_preflight_decision(
+                policy=policy,
+                trade_intent_readiness=trade_intent_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "prepare_runtime_handoff_from_admission_campaign":
+            return self._runtime_handoff_from_admission_campaign_preflight_decision(
+                policy=policy,
+                runtime_handoff_readiness=runtime_handoff_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "start_runtime_from_admission_handoff":
+            return self._start_runtime_from_admission_handoff_preflight_decision(
+                policy=policy,
+                start_runtime_readiness=start_runtime_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "prepare_strategy_activation_from_admission_runtime":
+            return self._strategy_activation_from_admission_runtime_preflight_decision(
+                policy=policy,
+                strategy_activation_readiness=strategy_activation_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "activate_strategy_from_admission_runtime":
+            return self._strategy_state_activation_from_admission_runtime_preflight_decision(
+                policy=policy,
+                strategy_state_activation_readiness=strategy_state_activation_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "prepare_signal_loop_from_admission_strategy":
+            return self._signal_loop_from_admission_strategy_preflight_decision(
+                policy=policy,
+                signal_loop_readiness=signal_loop_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "start_signal_loop_from_admission_strategy":
+            return self._signal_loop_start_from_admission_strategy_preflight_decision(
+                policy=policy,
+                signal_loop_start_readiness=signal_loop_start_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "evaluate_signal_from_admission_strategy":
+            return self._signal_evaluation_from_admission_strategy_preflight_decision(
+                policy=policy,
+                signal_evaluation_readiness=signal_evaluation_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
+        elif policy.operation_type == "record_trial_trade_intent_from_signal_evaluation":
+            return self._signal_trade_intent_from_evaluation_preflight_decision(
+                policy=policy,
+                signal_trade_intent_readiness=signal_trade_intent_readiness or {},
+                before=before,
+                blockers=blockers,
+                warnings=warnings,
+                audit_writable=audit_writable,
+            )
         if blockers:
             return "block", blockers, warnings, "; ".join(blockers), before, after
         summary = _operation_summary(policy.operation_type, after)
         return ("warn" if warnings else "allow"), blockers, warnings, summary, before, after
+
+    def _gated_trial_from_admission_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        admission_readiness: dict[str, Any],
+        campaign_summary: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not admission_readiness.get("available", False):
+            blockers.append("admission readiness unavailable")
+        blockers.extend(str(item) for item in admission_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in admission_readiness.get("warnings") or [])
+        if campaign_summary.get("available"):
+            blockers.append("active BRC campaign already exists")
+        after = {
+            "phase": "BRC-R5-002 Phase 4",
+            "preflight_only": False,
+            "binding_reservation_only": True,
+            "confirm_disabled": False,
+            "actual_execution_available": True,
+            "actual_runtime_execution_available": False,
+            "binding_reservation_available": not blockers,
+            "runtime_creation_implemented": False,
+            "campaign_creation_implemented": False,
+            "runtime_constraints_installation_implemented": False,
+            "planned_result_status": "binding_reserved",
+            "admission_summary": dict(admission_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(admission_readiness.get("strategy_family_summary") or {}),
+            "trial_env": admission_readiness.get("trial_env"),
+            "trial_stage": admission_readiness.get("trial_stage"),
+            "execution_mode": admission_readiness.get("execution_mode"),
+            "constraints_summary": dict(admission_readiness.get("constraints_summary") or {}),
+            "owner_risk_acceptance_summary": dict(
+                admission_readiness.get("owner_risk_acceptance_summary") or {}
+            ),
+            "binding_summary": dict(admission_readiness.get("binding_summary") or {}),
+            "next_step": admission_readiness.get("next_step")
+            or "Confirm can reserve an admission-trial binding only; runtime creation remains future work.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_runtime_creation": False,
+                "owner_confirmation_required_for_binding_reservation": not blockers,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm reserves an admission-trial binding only. It does not create a campaign, "
+                    "runtime carrier, install constraints, place orders, enable live, withdraw, or transfer."
+                ),
+            },
+        }
+        if blockers:
+            return "block", list(dict.fromkeys(blockers)), list(dict.fromkeys(warnings)), "; ".join(dict.fromkeys(blockers)), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if warnings else "allow", blockers, list(dict.fromkeys(warnings)), summary, before, after
+
+    def _campaign_from_admission_binding_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        admission_campaign_readiness: dict[str, Any],
+        campaign_summary: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not admission_campaign_readiness.get("available", False):
+            blockers.append("admission campaign readiness unavailable")
+        blockers.extend(str(item) for item in admission_campaign_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in admission_campaign_readiness.get("warnings") or [])
+        if campaign_summary.get("available"):
+            blockers.append("active BRC campaign already exists")
+        after = {
+            "phase": "BRC-R5-002 Phase 5",
+            "campaign_shell_creation_only": True,
+            "binding_reservation_required": True,
+            "actual_execution_available": True,
+            "actual_runtime_execution_available": False,
+            "campaign_shell_creation_available": not blockers,
+            "runtime_creation_implemented": False,
+            "runtime_carrier_switch_implemented": False,
+            "runtime_constraints_installation_implemented": False,
+            "strategy_execution_implemented": False,
+            "planned_result_status": "campaign_created",
+            "admission_summary": dict(admission_campaign_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(admission_campaign_readiness.get("strategy_family_summary") or {}),
+            "trial_env": admission_campaign_readiness.get("trial_env"),
+            "trial_stage": admission_campaign_readiness.get("trial_stage"),
+            "execution_mode": admission_campaign_readiness.get("execution_mode"),
+            "constraints_summary": dict(admission_campaign_readiness.get("constraints_summary") or {}),
+            "owner_risk_acceptance_summary": dict(
+                admission_campaign_readiness.get("owner_risk_acceptance_summary") or {}
+            ),
+            "binding_summary": dict(admission_campaign_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(
+                admission_campaign_readiness.get("campaign_shell_summary") or {}
+            ),
+            "next_step": admission_campaign_readiness.get("next_step")
+            or "Confirm can create a campaign shell only; runtime installation remains future work.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_campaign_shell": not blockers,
+                "owner_confirmation_required_for_runtime_creation": False,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm creates a campaign carrier shell only. Runtime will not start; "
+                    "constraints will not be installed; strategy will not execute; no orders will be placed."
+                ),
+            },
+        }
+        if blockers:
+            unique_blockers = list(dict.fromkeys(blockers))
+            return "block", unique_blockers, list(dict.fromkeys(warnings)), "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if warnings else "allow", blockers, list(dict.fromkeys(warnings)), summary, before, after
+
+    def _runtime_constraints_from_admission_campaign_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        runtime_constraint_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not runtime_constraint_readiness.get("available", False):
+            blockers.append("admission runtime constraint readiness unavailable")
+        blockers.extend(str(item) for item in runtime_constraint_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in runtime_constraint_readiness.get("warnings") or [])
+        idempotent_install = bool(runtime_constraint_readiness.get("idempotent_install", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 6",
+            "runtime_constraint_installation_only": True,
+            "admission_campaign_required": True,
+            "actual_execution_available": True,
+            "actual_runtime_execution_available": False,
+            "runtime_constraint_installation_available": not blockers,
+            "idempotent_install": idempotent_install,
+            "runtime_creation_implemented": False,
+            "runtime_carrier_switch_implemented": False,
+            "strategy_execution_implemented": False,
+            "planned_result_status": "runtime_constraints_installed",
+            "admission_summary": dict(runtime_constraint_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(
+                runtime_constraint_readiness.get("strategy_family_summary") or {}
+            ),
+            "trial_env": runtime_constraint_readiness.get("trial_env"),
+            "trial_stage": runtime_constraint_readiness.get("trial_stage"),
+            "execution_mode": runtime_constraint_readiness.get("execution_mode"),
+            "constraints_summary": dict(runtime_constraint_readiness.get("constraints_summary") or {}),
+            "owner_risk_acceptance_summary": dict(
+                runtime_constraint_readiness.get("owner_risk_acceptance_summary") or {}
+            ),
+            "binding_summary": dict(runtime_constraint_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(
+                runtime_constraint_readiness.get("campaign_shell_summary") or {}
+            ),
+            "safety_statement": {
+                "constraints_would_be_installed": not blockers and not idempotent_install,
+                "runtime_will_start": False,
+                "strategy_will_activate": False,
+                "orders_will_be_placed": False,
+                "trial_remains_inactive_after_install": True,
+                "auto_within_budget_enabled": False,
+                "owner_confirm_each_entry_enabled": False,
+            },
+            "next_step": runtime_constraint_readiness.get("next_step")
+            or "Confirm can install constraints metadata only; runtime start remains future work.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_constraints_metadata_install": not blockers,
+                "owner_confirmation_required_for_runtime_start": False,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm installs constraints metadata only. Runtime will not start; strategy will not "
+                    "activate; trial remains inactive; no orders will be placed."
+                ),
+            },
+        }
+        if blockers:
+            unique_blockers = list(dict.fromkeys(blockers))
+            return "block", unique_blockers, list(dict.fromkeys(warnings)), "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if warnings else "allow", blockers, list(dict.fromkeys(warnings)), summary, before, after
+
+    def _runtime_carrier_from_admission_campaign_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        runtime_carrier_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not runtime_carrier_readiness.get("available", False):
+            blockers.append("admission runtime carrier readiness unavailable")
+        blockers.extend(str(item) for item in runtime_carrier_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in runtime_carrier_readiness.get("warnings") or [])
+        idempotent_prepare = bool(runtime_carrier_readiness.get("idempotent_prepare", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 7",
+            "runtime_carrier_readiness_only": True,
+            "admission_campaign_required": True,
+            "actual_execution_available": True,
+            "actual_runtime_execution_available": False,
+            "runtime_carrier_readiness_available": not blockers,
+            "idempotent_prepare": idempotent_prepare,
+            "runtime_start_implemented": False,
+            "runtime_carrier_switch_implemented": False,
+            "strategy_execution_implemented": False,
+            "auto_execution_implemented": False,
+            "planned_result_status": "carrier_ready",
+            "admission_summary": dict(runtime_carrier_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(
+                runtime_carrier_readiness.get("strategy_family_summary") or {}
+            ),
+            "trial_env": runtime_carrier_readiness.get("trial_env"),
+            "trial_stage": runtime_carrier_readiness.get("trial_stage"),
+            "execution_mode": runtime_carrier_readiness.get("execution_mode"),
+            "constraints_summary": dict(runtime_carrier_readiness.get("constraints_summary") or {}),
+            "owner_risk_acceptance_summary": dict(
+                runtime_carrier_readiness.get("owner_risk_acceptance_summary") or {}
+            ),
+            "binding_summary": dict(runtime_carrier_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(
+                runtime_carrier_readiness.get("campaign_shell_summary") or {}
+            ),
+            "runtime_carrier_summary": dict(
+                runtime_carrier_readiness.get("runtime_carrier_summary") or {}
+            ),
+            "safety_statement": {
+                "carrier_readiness_would_be_prepared": not blockers and not idempotent_prepare,
+                "runtime_will_start": False,
+                "strategy_will_activate": False,
+                "auto_execution_will_be_enabled": False,
+                "orders_will_be_placed": False,
+                "trial_remains_inactive_after_readiness_preparation": True,
+            },
+            "next_step": runtime_carrier_readiness.get("next_step")
+            or "Confirm can prepare carrier readiness metadata only; runtime start remains future work.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_carrier_readiness_metadata": not blockers,
+                "owner_confirmation_required_for_runtime_start": False,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm prepares runtime carrier readiness metadata only. Runtime will not start; "
+                    "strategy will not activate; auto execution will not be enabled; trial remains inactive; "
+                    "no orders will be placed."
+                ),
+            },
+        }
+        if blockers:
+            unique_blockers = list(dict.fromkeys(blockers))
+            return "block", unique_blockers, list(dict.fromkeys(warnings)), "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if warnings else "allow", blockers, list(dict.fromkeys(warnings)), summary, before, after
+
+    def _runtime_start_from_admission_carrier_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        runtime_start_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not runtime_start_readiness.get("available", False):
+            blockers.append("admission runtime start readiness unavailable")
+        blockers.extend(str(item) for item in runtime_start_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in runtime_start_readiness.get("warnings") or [])
+        idempotent_prepare = bool(runtime_start_readiness.get("idempotent_prepare", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 8",
+            "runtime_start_readiness_only": True,
+            "admission_carrier_required": True,
+            "actual_execution_available": True,
+            "actual_runtime_execution_available": False,
+            "runtime_start_readiness_available": not blockers,
+            "idempotent_prepare": idempotent_prepare,
+            "runtime_start_implemented": False,
+            "runtime_carrier_switch_implemented": False,
+            "strategy_execution_implemented": False,
+            "auto_execution_implemented": False,
+            "planned_result_status": "runtime_start_ready",
+            "admission_summary": dict(runtime_start_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(
+                runtime_start_readiness.get("strategy_family_summary") or {}
+            ),
+            "trial_env": runtime_start_readiness.get("trial_env"),
+            "trial_stage": runtime_start_readiness.get("trial_stage"),
+            "execution_mode": runtime_start_readiness.get("execution_mode"),
+            "constraints_summary": dict(runtime_start_readiness.get("constraints_summary") or {}),
+            "owner_risk_acceptance_summary": dict(
+                runtime_start_readiness.get("owner_risk_acceptance_summary") or {}
+            ),
+            "binding_summary": dict(runtime_start_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(
+                runtime_start_readiness.get("campaign_shell_summary") or {}
+            ),
+            "runtime_carrier_summary": dict(
+                runtime_start_readiness.get("runtime_carrier_summary") or {}
+            ),
+            "runtime_start_summary": dict(
+                runtime_start_readiness.get("runtime_start_summary") or {}
+            ),
+            "safety_statement": {
+                "runtime_start_readiness_would_be_prepared": not blockers and not idempotent_prepare,
+                "runtime_will_start": False,
+                "strategy_will_activate": False,
+                "auto_execution_will_be_enabled": False,
+                "orders_will_be_placed": False,
+                "next_phase_must_handle_execution_mode_enforcement": True,
+            },
+            "next_step": runtime_start_readiness.get("next_step")
+            or "Confirm can prepare runtime start readiness metadata only; runtime start remains future work.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_runtime_start_readiness_metadata": not blockers,
+                "owner_confirmation_required_for_runtime_start": False,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm prepares runtime start readiness metadata only. Runtime will not start; "
+                    "strategy will not activate; auto execution will not be enabled; no orders will be placed. "
+                    "The next phase must handle execution mode enforcement."
+                ),
+            },
+        }
+        if blockers:
+            unique_blockers = list(dict.fromkeys(blockers))
+            return "block", unique_blockers, list(dict.fromkeys(warnings)), "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if warnings else "allow", blockers, list(dict.fromkeys(warnings)), summary, before, after
+
+    def _trial_trade_intent_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        trade_intent_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not trade_intent_readiness.get("available", False):
+            blockers.append("trial trade intent enforcement unavailable")
+        blockers.extend(str(item) for item in trade_intent_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in trade_intent_readiness.get("warnings") or [])
+        enforcement = dict(trade_intent_readiness.get("enforcement") or {})
+        mode_unavailable = bool(trade_intent_readiness.get("mode_unavailable", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 9",
+            "execution_mode_enforcement_contract_only": True,
+            "actual_runtime_execution_available": False,
+            "actual_order_execution_available": False,
+            "trial_trade_intent_ledger_only": True,
+            "trial_trade_intent_is_order": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "runtime_started": False,
+            "strategy_active": False,
+            "orders_placed": False,
+            "live_ready": False,
+            "campaign_id": trade_intent_readiness.get("campaign_id"),
+            "binding_id": trade_intent_readiness.get("binding_id"),
+            "execution_mode": trade_intent_readiness.get("execution_mode"),
+            "intended_action": trade_intent_readiness.get("intended_action"),
+            "symbol": trade_intent_readiness.get("symbol"),
+            "side": trade_intent_readiness.get("side"),
+            "constraints_check": dict(trade_intent_readiness.get("constraints_check") or {}),
+            "enforcement": enforcement,
+            "trade_intent_summary": dict(
+                trade_intent_readiness.get("trade_intent_summary") or {}
+            ),
+            "safety_statement": {
+                "runtime_will_start": False,
+                "strategy_will_activate": False,
+                "auto_execution_will_be_enabled": False,
+                "orders_will_be_placed": False,
+                "trial_trade_intent_is_executable_order": False,
+                "auto_within_budget_check_enables_trading": False,
+            },
+            "next_step": trade_intent_readiness.get("next_step")
+            or "Confirm can record non-executable intent evidence only.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_non_executable_evidence": not blockers and not mode_unavailable,
+                "owner_confirmation_required_for_order_execution": False,
+                "confirm_disabled": mode_unavailable,
+                "reason": (
+                    "Confirm evaluates execution-mode contract only. It does not start runtime, activate "
+                    "strategy, create an order, create an execution intent, enable auto execution, or trade."
+                ),
+            },
+        }
+        unique_blockers = list(dict.fromkeys(blockers))
+        unique_warnings = list(dict.fromkeys(warnings))
+        if mode_unavailable:
+            reason = str(enforcement.get("not_executed_reason") or "execution mode unavailable")
+            if reason not in unique_blockers:
+                unique_blockers.append(reason)
+            return "unavailable", unique_blockers, unique_warnings, reason, before, after
+        if unique_blockers:
+            return "block", unique_blockers, unique_warnings, "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if unique_warnings else "allow", unique_blockers, unique_warnings, summary, before, after
+
+    def _signal_trade_intent_from_evaluation_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        signal_trade_intent_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not signal_trade_intent_readiness.get("available", False):
+            blockers.append("signal trade intent recording unavailable")
+        blockers.extend(str(item) for item in signal_trade_intent_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in signal_trade_intent_readiness.get("warnings") or [])
+        enforcement = dict(signal_trade_intent_readiness.get("enforcement") or {})
+        resolution = dict(signal_trade_intent_readiness.get("execution_permission_resolution") or {})
+        mode_unavailable = bool(signal_trade_intent_readiness.get("mode_unavailable", False))
+        idempotent_intent = bool(signal_trade_intent_readiness.get("idempotent_intent", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 18",
+            "trial_trade_intent_recording_only": True,
+            "actual_runtime_execution_available": False,
+            "actual_order_execution_available": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "orders_placed": False,
+            "trial_started": False,
+            "auto_execution_enabled": False,
+            "auto_within_budget_enabled": False,
+            "live_ready": False,
+            "campaign_id": signal_trade_intent_readiness.get("campaign_id"),
+            "binding_id": signal_trade_intent_readiness.get("binding_id"),
+            "execution_mode": signal_trade_intent_readiness.get("execution_mode"),
+            "intended_action": signal_trade_intent_readiness.get("intended_action"),
+            "symbol": signal_trade_intent_readiness.get("symbol"),
+            "side": signal_trade_intent_readiness.get("side"),
+            "constraints_check": dict(signal_trade_intent_readiness.get("constraints_check") or {}),
+            "execution_permission_resolution": resolution,
+            "enforcement": enforcement,
+            "idempotent_intent": idempotent_intent,
+            "trade_intent_summary": dict(
+                signal_trade_intent_readiness.get("trade_intent_summary") or {}
+            ),
+            "safety_statement": {
+                "trial_trade_intent_is_evidence_only": True,
+                "execution_intent_will_be_created": False,
+                "order_will_be_created": False,
+                "auto_execution_will_be_enabled": False,
+                "owner_confirmation_can_raise_permission": False,
+            },
+            "next_step": signal_trade_intent_readiness.get("next_step")
+            or "Confirm can record non-executable trial trade intent evidence only.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_non_executable_evidence": not blockers and not mode_unavailable,
+                "owner_confirmation_required_for_order_execution": False,
+                "confirm_disabled": mode_unavailable,
+                "reason": (
+                    "Confirm records trial trade intent evidence only. It does not create an execution intent, "
+                    "create an order, enable auto execution, enable live, or trade."
+                ),
+            },
+        }
+        unique_blockers = list(dict.fromkeys(blockers))
+        unique_warnings = list(dict.fromkeys(warnings))
+        if mode_unavailable:
+            reason = str(enforcement.get("not_executed_reason") or "execution mode unavailable")
+            if reason not in unique_blockers:
+                unique_blockers.append(reason)
+            return "unavailable", unique_blockers, unique_warnings, reason, before, after
+        if unique_blockers:
+            return "block", unique_blockers, unique_warnings, "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if unique_warnings else "allow", unique_blockers, unique_warnings, summary, before, after
+
+    def _runtime_handoff_from_admission_campaign_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        runtime_handoff_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not runtime_handoff_readiness.get("available", False):
+            blockers.append("admission runtime handoff readiness unavailable")
+        blockers.extend(str(item) for item in runtime_handoff_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in runtime_handoff_readiness.get("warnings") or [])
+        idempotent_prepare = bool(runtime_handoff_readiness.get("idempotent_prepare", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 10",
+            "runtime_handoff_readiness_only": True,
+            "runtime_start_ready_required": True,
+            "actual_execution_available": True,
+            "actual_runtime_execution_available": False,
+            "actual_order_execution_available": False,
+            "runtime_handoff_readiness_available": not blockers,
+            "idempotent_prepare": idempotent_prepare,
+            "runtime_start_implemented": False,
+            "runtime_carrier_switch_implemented": False,
+            "strategy_execution_implemented": False,
+            "auto_execution_implemented": False,
+            "planned_result_status": "runtime_handoff_ready",
+            "admission_summary": dict(runtime_handoff_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(
+                runtime_handoff_readiness.get("strategy_family_summary") or {}
+            ),
+            "trial_env": runtime_handoff_readiness.get("trial_env"),
+            "trial_stage": runtime_handoff_readiness.get("trial_stage"),
+            "execution_mode": runtime_handoff_readiness.get("execution_mode"),
+            "constraints_summary": dict(runtime_handoff_readiness.get("constraints_summary") or {}),
+            "binding_summary": dict(runtime_handoff_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(
+                runtime_handoff_readiness.get("campaign_shell_summary") or {}
+            ),
+            "runtime_handoff_summary": dict(
+                runtime_handoff_readiness.get("runtime_handoff_summary") or {}
+            ),
+            "safety_statement": {
+                "runtime_handoff_readiness_would_be_prepared": not blockers and not idempotent_prepare,
+                "runtime_will_start": False,
+                "runtime_started_will_be_set_true": False,
+                "strategy_will_activate": False,
+                "strategy_active_will_be_set_true": False,
+                "auto_execution_will_be_enabled": False,
+                "orders_will_be_placed": False,
+                "trial_started_will_be_set_true": False,
+                "next_phase_must_explicitly_start_runtime": True,
+            },
+            "next_step": runtime_handoff_readiness.get("next_step")
+            or "Confirm can prepare runtime handoff readiness metadata only; runtime start remains future work.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_runtime_handoff_readiness_metadata": not blockers,
+                "owner_confirmation_required_for_runtime_start": False,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm prepares runtime handoff readiness metadata only. Runtime will not start; "
+                    "runtime_started remains false; strategy will not activate; auto execution will not be enabled; "
+                    "no orders will be placed. The next phase must explicitly start runtime through a separate Operation."
+                ),
+            },
+        }
+        if blockers:
+            unique_blockers = list(dict.fromkeys(blockers))
+            return "block", unique_blockers, list(dict.fromkeys(warnings)), "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if warnings else "allow", blockers, list(dict.fromkeys(warnings)), summary, before, after
+
+    def _start_runtime_from_admission_handoff_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        start_runtime_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not start_runtime_readiness.get("available", False):
+            blockers.append("admission runtime start handoff readiness unavailable")
+        blockers.extend(str(item) for item in start_runtime_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in start_runtime_readiness.get("warnings") or [])
+        start_conditions_summary = dict(start_runtime_readiness.get("runtime_start_summary") or {})
+        idempotent_start = bool(start_runtime_readiness.get("idempotent_start", False))
+        start_would_be_possible = not blockers and bool(start_runtime_readiness.get("ready", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 12",
+            "runtime_start_preflight_only": False,
+            "confirm_disabled": False,
+            "actual_execution_available": True,
+            "actual_runtime_execution_available": True,
+            "actual_order_execution_available": False,
+            "runtime_state_start_only": True,
+            "runtime_start_confirm_implemented": True,
+            "idempotent_start": idempotent_start,
+            "runtime_start_would_be_possible": start_would_be_possible,
+            "planned_result_status": "runtime_started_strategy_inactive",
+            "admission_summary": dict(start_runtime_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(
+                start_runtime_readiness.get("strategy_family_summary") or {}
+            ),
+            "trial_env": start_runtime_readiness.get("trial_env"),
+            "trial_stage": start_runtime_readiness.get("trial_stage"),
+            "execution_mode": start_runtime_readiness.get("execution_mode"),
+            "constraints_summary": dict(start_runtime_readiness.get("constraints_summary") or {}),
+            "binding_summary": dict(start_runtime_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(
+                start_runtime_readiness.get("campaign_shell_summary") or {}
+            ),
+            "runtime_start_summary": start_conditions_summary,
+            "safety_statement": {
+                "runtime_start_conditions_met": start_would_be_possible,
+                "runtime_state_can_be_started": start_would_be_possible and not idempotent_start,
+                "runtime_started_will_be_set_true": start_would_be_possible and not idempotent_start,
+                "strategy_will_activate": False,
+                "strategy_active_will_be_set_true": False,
+                "trial_started_will_be_set_true": False,
+                "auto_execution_will_be_enabled": False,
+                "orders_will_be_placed": False,
+                "execution_intent_will_be_created": False,
+                "next_required_implementation": "strategy activation / execution mode runtime enforcement Operation",
+            },
+            "next_step": start_runtime_readiness.get("next_step")
+            or "Confirm can start runtime state only; a separate future Operation must activate strategy.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_runtime_start_state": not idempotent_start and start_would_be_possible,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm starts runtime state only. It cannot activate strategy, start trial, "
+                    "enable auto execution, create orders, or create execution intents."
+                ),
+            },
+        }
+        unique_blockers = list(dict.fromkeys(blockers))
+        unique_warnings = list(dict.fromkeys(warnings))
+        if unique_blockers:
+            return "block", unique_blockers, unique_warnings, "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if unique_warnings else "allow", unique_blockers, unique_warnings, summary, before, after
+
+    def _strategy_activation_from_admission_runtime_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        strategy_activation_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not strategy_activation_readiness.get("available", False):
+            blockers.append("admission strategy activation readiness unavailable")
+        blockers.extend(str(item) for item in strategy_activation_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in strategy_activation_readiness.get("warnings") or [])
+        idempotent_prepare = bool(strategy_activation_readiness.get("idempotent_prepare", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 13",
+            "strategy_activation_readiness_only": True,
+            "confirm_disabled": False,
+            "actual_strategy_activation_available": False,
+            "actual_signal_loop_available": False,
+            "actual_order_execution_available": False,
+            "planned_result_status": "strategy_activation_ready",
+            "idempotent_prepare": idempotent_prepare,
+            "admission_summary": dict(strategy_activation_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(
+                strategy_activation_readiness.get("strategy_family_summary") or {}
+            ),
+            "trial_env": strategy_activation_readiness.get("trial_env"),
+            "trial_stage": strategy_activation_readiness.get("trial_stage"),
+            "execution_mode": strategy_activation_readiness.get("execution_mode"),
+            "constraints_summary": dict(strategy_activation_readiness.get("constraints_summary") or {}),
+            "binding_summary": dict(strategy_activation_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(
+                strategy_activation_readiness.get("campaign_shell_summary") or {}
+            ),
+            "strategy_activation_summary": dict(
+                strategy_activation_readiness.get("strategy_activation_summary") or {}
+            ),
+            "safety_statement": {
+                "strategy_activation_readiness_would_be_prepared": not blockers and not idempotent_prepare,
+                "strategy_will_activate": False,
+                "strategy_active_will_be_set_true": False,
+                "signal_loop_will_start": False,
+                "trial_started_will_be_set_true": False,
+                "auto_execution_will_be_enabled": False,
+                "auto_within_budget_will_be_enabled": False,
+                "execution_intent_will_be_created": False,
+                "orders_will_be_placed": False,
+                "live_ready_will_be_enabled": False,
+                "next_required_implementation": "separate strategy activation Operation",
+            },
+            "next_step": strategy_activation_readiness.get("next_step")
+            or "Confirm can prepare strategy activation readiness metadata only.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_strategy_activation_readiness_metadata": not blockers,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm prepares strategy activation readiness metadata only. Strategy will not activate; "
+                    "signal loop will not start; auto execution will not be enabled; no execution intent or order will be created."
+                ),
+            },
+        }
+        unique_blockers = list(dict.fromkeys(blockers))
+        unique_warnings = list(dict.fromkeys(warnings))
+        if unique_blockers:
+            return "block", unique_blockers, unique_warnings, "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if unique_warnings else "allow", unique_blockers, unique_warnings, summary, before, after
+
+    def _strategy_state_activation_from_admission_runtime_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        strategy_state_activation_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not strategy_state_activation_readiness.get("available", False):
+            blockers.append("admission strategy state activation readiness unavailable")
+        blockers.extend(str(item) for item in strategy_state_activation_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in strategy_state_activation_readiness.get("warnings") or [])
+        idempotent_activate = bool(strategy_state_activation_readiness.get("idempotent_activate", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 14",
+            "strategy_state_activation_only": True,
+            "confirm_disabled": False,
+            "order_capable_strategy_available": False,
+            "actual_signal_loop_available": False,
+            "actual_order_execution_available": False,
+            "planned_result_status": "strategy_active_no_execution",
+            "idempotent_activate": idempotent_activate,
+            "admission_summary": dict(strategy_state_activation_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(
+                strategy_state_activation_readiness.get("strategy_family_summary") or {}
+            ),
+            "trial_env": strategy_state_activation_readiness.get("trial_env"),
+            "trial_stage": strategy_state_activation_readiness.get("trial_stage"),
+            "execution_mode": strategy_state_activation_readiness.get("execution_mode"),
+            "constraints_summary": dict(strategy_state_activation_readiness.get("constraints_summary") or {}),
+            "binding_summary": dict(strategy_state_activation_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(
+                strategy_state_activation_readiness.get("campaign_shell_summary") or {}
+            ),
+            "strategy_activation_summary": dict(
+                strategy_state_activation_readiness.get("strategy_activation_summary") or {}
+            ),
+            "safety_statement": {
+                "strategy_metadata_activation_would_occur": not blockers and not idempotent_activate,
+                "strategy_active_will_be_set_true": not blockers,
+                "strategy_state_after_confirm": "strategy_active_no_execution",
+                "strategy_execution_enabled_after_confirm": False,
+                "strategy_runner_will_start": False,
+                "signal_loop_will_start": False,
+                "signal_loop_will_be_enabled": False,
+                "trial_started_will_be_set_true": False,
+                "auto_execution_will_be_enabled": False,
+                "auto_within_budget_will_be_enabled": False,
+                "trade_intent_will_be_created": False,
+                "execution_intent_will_be_created": False,
+                "orders_will_be_placed": False,
+                "live_ready_will_be_enabled": False,
+                "next_required_implementation": "separate signal loop / observe gate Operation",
+            },
+            "next_step": strategy_state_activation_readiness.get("next_step")
+            or "Confirm can activate strategy metadata in non-execution state only.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_strategy_state_activation_metadata": not blockers,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm activates strategy state metadata only. Strategy runner will not start; "
+                    "signal loop will not start; auto execution will not be enabled; no execution intent or order will be created."
+                ),
+            },
+        }
+        unique_blockers = list(dict.fromkeys(blockers))
+        unique_warnings = list(dict.fromkeys(warnings))
+        if unique_blockers:
+            return "block", unique_blockers, unique_warnings, "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if unique_warnings else "allow", unique_blockers, unique_warnings, summary, before, after
+
+    def _signal_loop_from_admission_strategy_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        signal_loop_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not signal_loop_readiness.get("available", False):
+            blockers.append("admission signal loop readiness unavailable")
+        blockers.extend(str(item) for item in signal_loop_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in signal_loop_readiness.get("warnings") or [])
+        idempotent_prepare = bool(signal_loop_readiness.get("idempotent_prepare", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 15",
+            "signal_loop_readiness_only": True,
+            "confirm_disabled": False,
+            "actual_signal_loop_available": False,
+            "actual_signal_generation_available": False,
+            "actual_order_execution_available": False,
+            "planned_result_status": "signal_loop_ready_not_started",
+            "idempotent_prepare": idempotent_prepare,
+            "admission_summary": dict(signal_loop_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(signal_loop_readiness.get("strategy_family_summary") or {}),
+            "trial_env": signal_loop_readiness.get("trial_env"),
+            "trial_stage": signal_loop_readiness.get("trial_stage"),
+            "execution_mode": signal_loop_readiness.get("execution_mode"),
+            "constraints_summary": dict(signal_loop_readiness.get("constraints_summary") or {}),
+            "binding_summary": dict(signal_loop_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(signal_loop_readiness.get("campaign_shell_summary") or {}),
+            "signal_loop_summary": dict(signal_loop_readiness.get("signal_loop_summary") or {}),
+            "safety_statement": {
+                "signal_loop_readiness_would_be_prepared": not blockers and not idempotent_prepare,
+                "signal_loop_will_start": False,
+                "signal_loop_will_be_enabled": False,
+                "signal_will_be_generated": False,
+                "trade_intent_will_be_created": False,
+                "execution_intent_will_be_created": False,
+                "orders_will_be_placed": False,
+                "trial_started_will_be_set_true": False,
+                "auto_execution_will_be_enabled": False,
+                "auto_within_budget_will_be_enabled": False,
+                "live_ready_will_be_enabled": False,
+                "next_required_implementation": "separate observe gate / signal loop start Operation",
+            },
+            "next_step": signal_loop_readiness.get("next_step")
+            or "Confirm can prepare signal loop readiness metadata only.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_signal_loop_readiness_metadata": not blockers,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm prepares signal loop readiness metadata only. Signal loop will not start; "
+                    "no signal will be generated; no trade intent, execution intent, or order will be created."
+                ),
+            },
+        }
+        unique_blockers = list(dict.fromkeys(blockers))
+        unique_warnings = list(dict.fromkeys(warnings))
+        if unique_blockers:
+            return "block", unique_blockers, unique_warnings, "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if unique_warnings else "allow", unique_blockers, unique_warnings, summary, before, after
+
+    def _signal_loop_start_from_admission_strategy_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        signal_loop_start_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not signal_loop_start_readiness.get("available", False):
+            blockers.append("admission signal loop start readiness unavailable")
+        blockers.extend(str(item) for item in signal_loop_start_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in signal_loop_start_readiness.get("warnings") or [])
+        idempotent_start = bool(signal_loop_start_readiness.get("idempotent_start", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 16",
+            "signal_loop_start_state_only": True,
+            "confirm_disabled": False,
+            "actual_signal_generation_available": False,
+            "actual_trade_intent_available": False,
+            "actual_order_execution_available": False,
+            "planned_result_status": "signal_loop_started_no_signal",
+            "idempotent_start": idempotent_start,
+            "admission_summary": dict(signal_loop_start_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(signal_loop_start_readiness.get("strategy_family_summary") or {}),
+            "trial_env": signal_loop_start_readiness.get("trial_env"),
+            "trial_stage": signal_loop_start_readiness.get("trial_stage"),
+            "execution_mode": signal_loop_start_readiness.get("execution_mode"),
+            "constraints_summary": dict(signal_loop_start_readiness.get("constraints_summary") or {}),
+            "binding_summary": dict(signal_loop_start_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(signal_loop_start_readiness.get("campaign_shell_summary") or {}),
+            "signal_loop_summary": dict(signal_loop_start_readiness.get("signal_loop_summary") or {}),
+            "safety_statement": {
+                "signal_loop_state_would_start": not blockers and not idempotent_start,
+                "signal_loop_enabled_scope_after_confirm": "non_trading_loop_state",
+                "signal_will_be_generated": False,
+                "trade_intent_will_be_created": False,
+                "execution_intent_will_be_created": False,
+                "orders_will_be_placed": False,
+                "trial_started_will_be_set_true": False,
+                "auto_execution_will_be_enabled": False,
+                "auto_within_budget_will_be_enabled": False,
+                "live_ready_will_be_enabled": False,
+                "next_required_implementation": "separate signal generation / evaluation Operation",
+            },
+            "next_step": signal_loop_start_readiness.get("next_step")
+            or "Confirm can start signal loop state metadata only.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_signal_loop_state_metadata": not blockers,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm starts signal loop state metadata only. No signal will be generated; "
+                    "no trade intent, execution intent, or order will be created."
+                ),
+            },
+        }
+        unique_blockers = list(dict.fromkeys(blockers))
+        unique_warnings = list(dict.fromkeys(warnings))
+        if unique_blockers:
+            return "block", unique_blockers, unique_warnings, "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if unique_warnings else "allow", unique_blockers, unique_warnings, summary, before, after
+
+    def _signal_evaluation_from_admission_strategy_preflight_decision(
+        self,
+        *,
+        policy: OperationPolicy,
+        signal_evaluation_readiness: dict[str, Any],
+        before: dict[str, Any],
+        blockers: list[str],
+        warnings: list[str],
+        audit_writable: Optional[bool],
+    ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
+        if audit_writable is False:
+            blockers.append("audit is not writable")
+        if not signal_evaluation_readiness.get("available", False):
+            blockers.append("admission signal evaluation readiness unavailable")
+        blockers.extend(str(item) for item in signal_evaluation_readiness.get("blockers") or [])
+        warnings.extend(str(item) for item in signal_evaluation_readiness.get("warnings") or [])
+        idempotent_evaluation = bool(signal_evaluation_readiness.get("idempotent_evaluation", False))
+        after = {
+            "phase": "BRC-R5-002 Phase 17",
+            "signal_evaluation_metadata_only": True,
+            "confirm_disabled": False,
+            "actual_trade_intent_available": False,
+            "actual_order_execution_available": False,
+            "planned_result_status": "signal_evaluated_no_intent",
+            "idempotent_evaluation": idempotent_evaluation,
+            "admission_summary": dict(signal_evaluation_readiness.get("admission_summary") or {}),
+            "strategy_family_summary": dict(signal_evaluation_readiness.get("strategy_family_summary") or {}),
+            "trial_env": signal_evaluation_readiness.get("trial_env"),
+            "trial_stage": signal_evaluation_readiness.get("trial_stage"),
+            "execution_mode": signal_evaluation_readiness.get("execution_mode"),
+            "constraints_summary": dict(signal_evaluation_readiness.get("constraints_summary") or {}),
+            "binding_summary": dict(signal_evaluation_readiness.get("binding_summary") or {}),
+            "campaign_shell_summary": dict(signal_evaluation_readiness.get("campaign_shell_summary") or {}),
+            "signal_evaluation_summary": dict(
+                signal_evaluation_readiness.get("signal_evaluation_summary") or {}
+            ),
+            "safety_statement": {
+                "signal_evaluation_would_be_recorded": not blockers and not idempotent_evaluation,
+                "signal_is_trade_intent": False,
+                "trade_intent_will_be_created": False,
+                "execution_intent_will_be_created": False,
+                "orders_will_be_placed": False,
+                "trial_started_will_be_set_true": False,
+                "auto_execution_will_be_enabled": False,
+                "auto_within_budget_will_be_enabled": False,
+                "live_ready_will_be_enabled": False,
+                "next_required_implementation": "separate signal-to-trial-trade-intent Operation",
+            },
+            "next_step": signal_evaluation_readiness.get("next_step")
+            or "Confirm can record signal evaluation metadata only.",
+            "confirmation_requirement": {
+                "owner_confirmation_required_for_signal_evaluation_metadata": not blockers,
+                "confirm_disabled": False,
+                "reason": (
+                    "Confirm records signal evaluation metadata only. No trade intent, "
+                    "execution intent, or order will be created."
+                ),
+            },
+        }
+        unique_blockers = list(dict.fromkeys(blockers))
+        unique_warnings = list(dict.fromkeys(warnings))
+        if unique_blockers:
+            return "block", unique_blockers, unique_warnings, "; ".join(unique_blockers), before, after
+        summary = _operation_summary(policy.operation_type, after)
+        return "warn" if unique_warnings else "allow", unique_blockers, unique_warnings, summary, before, after
 
     def _emergency_flatten_preflight_decision(
         self,
@@ -1788,6 +5814,22 @@ class BrcOperationService:
             campaign_summary=preflight.campaign_snapshot,
             playbook_summary=preflight.playbook_snapshot,
             risk_summary=preflight.risk_result,
+            admission_summary=dict(preflight.after.get("admission_summary") or {}),
+            strategy_family_summary=dict(preflight.after.get("strategy_family_summary") or {}),
+            constraints_summary=dict(preflight.after.get("constraints_summary") or {}),
+            owner_risk_acceptance_summary=dict(
+                preflight.after.get("owner_risk_acceptance_summary") or {}
+            ),
+            binding_summary=dict(preflight.after.get("binding_summary") or {}),
+            campaign_shell_summary=dict(preflight.after.get("campaign_shell_summary") or {}),
+            runtime_carrier_summary=dict(preflight.after.get("runtime_carrier_summary") or {}),
+            runtime_start_summary=dict(preflight.after.get("runtime_start_summary") or {}),
+            runtime_handoff_summary=dict(preflight.after.get("runtime_handoff_summary") or {}),
+            strategy_activation_summary=dict(preflight.after.get("strategy_activation_summary") or {}),
+            signal_loop_summary=dict(preflight.after.get("signal_loop_summary") or {}),
+            signal_evaluation_summary=dict(preflight.after.get("signal_evaluation_summary") or {}),
+            trade_intent_summary=dict(preflight.after.get("trade_intent_summary") or {}),
+            next_step=_optional_str(preflight.after.get("next_step")),
             confirmation_requirement=preflight.confirmation_requirement,
             idempotency_key=preflight.idempotency_key,
             status=operation.status,
@@ -1928,6 +5970,201 @@ def _build_default_policies() -> dict[str, OperationPolicy]:
             backend_executor="flatten_dry_run_plan_only",
             dry_run_only=True,
         ),
+        OperationPolicy(
+            operation_type="create_gated_trial_from_admission",
+            display_name="Admission Binding Reservation",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_RESERVE_ADMISSION_BINDING",
+            capability_status="binding_reservation_available",
+            current_reason=(
+                "Confirm reserves admission-trial binding only. It does not create a campaign or runtime carrier."
+            ),
+            backend_executor="admission_trial_binding_reservation",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="create_campaign_from_admission_binding",
+            display_name="Admission Campaign Shell",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_CREATE_ADMISSION_CAMPAIGN_SHELL",
+            capability_status="campaign_shell_creation_available",
+            current_reason=(
+                "Confirm creates a campaign shell from a reserved admission binding only. "
+                "It does not install runtime constraints, start a runtime carrier, execute strategy, or place orders."
+            ),
+            backend_executor="admission_campaign_shell_creation",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="install_runtime_constraints_from_admission_campaign",
+            display_name="Install Admission Campaign Constraints",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_INSTALL_ADMISSION_CAMPAIGN_CONSTRAINTS",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm installs constraints metadata only from an admission-created campaign. "
+                "It does not start runtime or strategy and does not place orders."
+            ),
+            backend_executor="admission_runtime_constraint_metadata_install",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="prepare_runtime_carrier_from_admission_campaign",
+            display_name="Prepare Admission Runtime Carrier",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_PREPARE_ADMISSION_RUNTIME_CARRIER",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm prepares runtime carrier readiness metadata only from an admission campaign. "
+                "It does not start runtime, strategy, or trading."
+            ),
+            backend_executor="admission_runtime_carrier_readiness_metadata_prepare",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="prepare_runtime_start_from_admission_carrier",
+            display_name="Prepare Admission Runtime Start",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_PREPARE_ADMISSION_RUNTIME_START",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm prepares runtime start readiness only from a carrier-ready admission campaign. "
+                "It does not start runtime, strategy, or trading."
+            ),
+            backend_executor="admission_runtime_start_readiness_metadata_prepare",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="evaluate_trial_trade_intent",
+            display_name="Evaluate Trial Trade Intent",
+            risk_level="low",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_EVALUATE_TRIAL_TRADE_INTENT",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm evaluates execution-mode enforcement and may record non-executable "
+                "trial trade intent evidence only. It does not start runtime, strategy, or trading."
+            ),
+            backend_executor="admission_trial_trade_intent_enforcement_evaluate",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="prepare_runtime_handoff_from_admission_campaign",
+            display_name="Prepare Admission Runtime Handoff",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_PREPARE_ADMISSION_RUNTIME_HANDOFF",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm prepares runtime handoff readiness only from a runtime-start-ready admission campaign. "
+                "It does not start runtime, strategy, or trading."
+            ),
+            backend_executor="admission_runtime_handoff_readiness_metadata_prepare",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="start_runtime_from_admission_handoff",
+            display_name="Start Runtime From Admission Handoff",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_START_ADMISSION_RUNTIME",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm starts admission-backed runtime state only. It does not activate strategy, "
+                "enable auto execution, create execution intents, or place orders."
+            ),
+            backend_executor="admission_runtime_state_start",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="prepare_strategy_activation_from_admission_runtime",
+            display_name="Prepare Strategy Activation From Admission Runtime",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_PREPARE_STRATEGY_ACTIVATION",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm prepares strategy activation readiness metadata only. It does not activate strategy, "
+                "start signal loop, enable auto execution, create execution intents, or place orders."
+            ),
+            backend_executor="admission_strategy_activation_readiness_metadata_prepare",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="activate_strategy_from_admission_runtime",
+            display_name="Activate Strategy From Admission Runtime",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_ACTIVATE_STRATEGY_NO_EXECUTION",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm activates strategy state metadata only. It does not enable signal loop, "
+                "auto execution, execution intents, or orders."
+            ),
+            backend_executor="admission_strategy_state_activation_metadata_only",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="prepare_signal_loop_from_admission_strategy",
+            display_name="Prepare Signal Loop From Admission Strategy",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_PREPARE_SIGNAL_LOOP",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm prepares signal loop readiness metadata only. It does not start signal loop, "
+                "generate signals, create trade intents, execution intents, or orders."
+            ),
+            backend_executor="admission_signal_loop_readiness_metadata_prepare",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="start_signal_loop_from_admission_strategy",
+            display_name="Start Signal Loop From Admission Strategy",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_START_SIGNAL_LOOP_NO_SIGNAL",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm starts signal loop state metadata only. It does not generate signals, "
+                "create trade intents, execution intents, or orders."
+            ),
+            backend_executor="admission_signal_loop_state_start_no_signal",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="evaluate_signal_from_admission_strategy",
+            display_name="Evaluate Signal From Admission Strategy",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_EVALUATE_SIGNAL_NO_INTENT",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm evaluates and records signal snapshot metadata only. It does not create "
+                "trade intents, execution intents, or orders."
+            ),
+            backend_executor="admission_signal_evaluation_metadata_no_intent",
+            executable_through_operation=True,
+        ),
+        OperationPolicy(
+            operation_type="record_trial_trade_intent_from_signal_evaluation",
+            display_name="Record Trial Trade Intent From Signal Evaluation",
+            risk_level="medium",
+            allowed_env=["local", "testnet", "live"],
+            confirmation_phrase="CONFIRM_RECORD_TRIAL_TRADE_INTENT",
+            capability_status="operation_preflight_available",
+            current_reason=(
+                "Confirm records non-executable trial trade intent evidence only after execution permission "
+                "resolution. It does not create execution intents, enable auto execution, or place orders."
+            ),
+            backend_executor="admission_signal_trial_trade_intent_recording_no_execution",
+            executable_through_operation=True,
+        ),
     ]
     for op_type in sorted(_FORBIDDEN_OPERATION_TYPES):
         policies.append(
@@ -2001,6 +6238,83 @@ def _operation_summary(operation_type: str, after: dict[str, Any]) -> str:
             "Emergency stop runtime preflight planning only. No actual runtime stop is executed without an explicit "
             "safe backend adapter; it does not flatten or cancel orders."
         )
+    if operation_type == "create_gated_trial_from_admission":
+        return (
+            "Reserve an admission-trial binding after Owner confirmation. This validates admission decision, "
+            "installable constraints, risk acceptance, and account facts; it does not create a trial/campaign, "
+            "install runtime constraints, or place orders."
+        )
+    if operation_type == "create_campaign_from_admission_binding":
+        return (
+            "Create a BRC campaign carrier shell from a reserved admission binding after Owner confirmation. "
+            "This does not install runtime constraints, start strategy execution, or place orders."
+        )
+    if operation_type == "install_runtime_constraints_from_admission_campaign":
+        return (
+            "Install constraints metadata from an admission-created campaign after Owner confirmation. "
+            "Runtime will not start, strategy will not activate, no orders will be placed, and trial remains inactive."
+        )
+    if operation_type == "prepare_runtime_carrier_from_admission_campaign":
+        return (
+            "Prepare runtime carrier readiness metadata from an admission campaign after Owner confirmation. "
+            "Runtime will not start, strategy will not activate, auto execution will not be enabled, "
+            "no orders will be placed, and trial remains inactive."
+        )
+    if operation_type == "prepare_runtime_start_from_admission_carrier":
+        return (
+            "Prepare runtime start readiness metadata from a carrier-ready admission campaign after Owner confirmation. "
+            "Runtime will not start, strategy will not activate, auto execution will not be enabled, "
+            "and no orders will be placed."
+        )
+    if operation_type == "evaluate_trial_trade_intent":
+        return (
+            "Evaluate execution-mode enforcement after Owner confirmation. This may record a non-executable "
+            "trial trade intent evidence row, but it will not create an order or execution intent."
+        )
+    if operation_type == "prepare_runtime_handoff_from_admission_campaign":
+        return (
+            "Prepare runtime handoff readiness metadata from a runtime-start-ready admission campaign after Owner confirmation. "
+            "Runtime will not start, runtime_started remains false, strategy will not activate, "
+            "auto execution will not be enabled, and no orders will be placed."
+        )
+    if operation_type == "start_runtime_from_admission_handoff":
+        return (
+            "Start admission-backed runtime state after Owner confirmation. Strategy stays inactive, "
+            "trial remains not started, auto execution stays disabled, and no orders will be placed."
+        )
+    if operation_type == "prepare_strategy_activation_from_admission_runtime":
+        return (
+            "Prepare strategy activation readiness metadata from an admission runtime after Owner confirmation. "
+            "Strategy will not activate, the signal loop will not start, auto execution stays disabled, "
+            "and no execution intent or order will be created."
+        )
+    if operation_type == "activate_strategy_from_admission_runtime":
+        return (
+            "Activate strategy metadata into strategy_active_no_execution after Owner confirmation. "
+            "No strategy runner, signal loop, auto execution, execution intent, or order capability is enabled."
+        )
+    if operation_type == "prepare_signal_loop_from_admission_strategy":
+        return (
+            "Prepare signal loop readiness metadata from an admission strategy after Owner confirmation. "
+            "Signal loop will not start, no signal will be generated, auto execution stays disabled, "
+            "and no trade intent, execution intent, or order will be created."
+        )
+    if operation_type == "start_signal_loop_from_admission_strategy":
+        return (
+            "Start signal loop state metadata from an admission strategy after Owner confirmation. "
+            "No signal will be generated, auto execution stays disabled, and no trade intent, "
+            "execution intent, or order will be created."
+        )
+    if operation_type == "evaluate_signal_from_admission_strategy":
+        return (
+            "Evaluate and record signal metadata from an admission strategy after Owner confirmation. "
+            "No trade intent, execution intent, order, trial start, or auto execution is created."
+        )
+    if operation_type == "record_trial_trade_intent_from_signal_evaluation":
+        return (
+            "Record a non-executable trial trade intent from signal evaluation after permission resolution. "
+            "No execution intent, order, trial start, live enablement, or auto execution is created."
+        )
     return "Operation requires Owner confirmation; no live/mainnet/withdrawal/transfer authority is granted."
 
 
@@ -2064,6 +6378,9 @@ def _critical_market_drift(before: dict[str, Any], after: dict[str, Any]) -> boo
 
 def _preflight_planning_available(policy: OperationPolicy) -> bool:
     return policy.capability_status in {
+        "binding_reservation_available",
+        "campaign_shell_creation_available",
+        "operation_preflight_available",
         "preflight_planning_available",
         "preflight_dry_run_available",
         "design_surface_with_preflight",
