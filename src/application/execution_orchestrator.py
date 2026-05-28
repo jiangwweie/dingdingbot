@@ -43,6 +43,7 @@ from src.application.account_risk_service import (
 )
 from src.application.global_kill_switch import KILL_SWITCH_BLOCK_REASON, GlobalKillSwitchService
 from src.application.campaign_state_service import CampaignRuntimeEvent
+from src.application.execution_permission import ExecutionPermission
 from src.application.order_lifecycle_service import OrderLifecycleService
 from src.application.protection_health_monitor import (
     PROTECTION_HEALTH_REASON_CODES,
@@ -57,6 +58,9 @@ from src.domain.exceptions import OrderNotFoundError
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.logger import logger
 from src.infrastructure.repository_ports import ExecutionIntentRepositoryPort
+
+
+BRC_EXECUTION_PERMISSION_BLOCK_REASON = "BRC_EXECUTION_PERMISSION_NOT_ORDER_ALLOWED"
 
 
 class ExecutionOrchestrator:
@@ -84,6 +88,7 @@ class ExecutionOrchestrator:
         startup_trading_guard: Optional[StartupTradingGuardService] = None,
         account_risk_service: Optional[AccountRiskService] = None,
         campaign_state_service: Optional[Any] = None,
+        brc_execution_permission_max: Optional[ExecutionPermission] = None,
     ):
         """
         初始化执行编排器
@@ -107,6 +112,7 @@ class ExecutionOrchestrator:
         self._startup_trading_guard = startup_trading_guard
         self._account_risk_service = account_risk_service
         self._campaign_state_service = campaign_state_service
+        self._brc_execution_permission_max = brc_execution_permission_max
 
         # 热缓存：当 PG 仓储可用时，内存仅用于当前进程快速回读与回退。
         self._intents: Dict[str, ExecutionIntent] = {}
@@ -122,6 +128,11 @@ class ExecutionOrchestrator:
         )
         self._order_lifecycle.set_entry_filled_callback(self._handle_entry_filled)
         self._order_lifecycle.set_exit_progressed_callback(self._handle_exit_filled)
+
+    def _current_brc_execution_permission_max(self) -> ExecutionPermission:
+        if self._brc_execution_permission_max is not None:
+            return self._brc_execution_permission_max
+        return ExecutionPermission.ORDER_ALLOWED
 
     def _get_intent_lock(self, intent_id: str) -> asyncio.Lock:
         lock = self._intent_locks.get(intent_id)
@@ -1057,6 +1068,29 @@ class ExecutionOrchestrator:
         Returns:
             ExecutionIntent: 执行意图（包含最终状态）
         """
+        permission = self._current_brc_execution_permission_max()
+        if permission < ExecutionPermission.ORDER_ALLOWED:
+            intent = ExecutionIntent(
+                id=f"intent_{uuid.uuid4().hex[:12]}",
+                signal_id=f"sig_{uuid.uuid4().hex[:12]}",
+                signal=signal,
+                status=ExecutionIntentStatus.BLOCKED,
+                strategy=strategy.model_copy(deep=True) if strategy else None,
+                blocked_reason=BRC_EXECUTION_PERMISSION_BLOCK_REASON,
+                blocked_message=(
+                    "BRC execution permission is below order_allowed; signal-to-order "
+                    f"path is blocked. permission={permission.value_name}"
+                ),
+            )
+            logger.warning(
+                "[ExecutionOrchestrator] BRC execution permission blocked signal: "
+                "intent_id=%s symbol=%s permission=%s required=order_allowed",
+                intent.id,
+                signal.symbol,
+                permission.value_name,
+            )
+            return intent
+
         # 1. 创建 ExecutionIntent
         intent_id = f"intent_{uuid.uuid4().hex[:12]}"
         signal_id = f"sig_{uuid.uuid4().hex[:12]}"

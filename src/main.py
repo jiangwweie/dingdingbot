@@ -42,6 +42,7 @@ from src.application.capital_protection import (
 from src.application.campaign_state_service import CampaignStateService
 from src.application.bounded_risk_campaign_service import BoundedRiskCampaignService
 from src.application.decision_trace import TraceService
+from src.application.execution_permission import ExecutionPermission
 from src.application.execution_orchestrator import ExecutionOrchestrator
 from src.application.external_close_monitor import ExternalCloseMonitor
 from src.application.global_kill_switch import GlobalKillSwitchService
@@ -518,6 +519,23 @@ def get_signal_pipeline() -> Optional[SignalPipeline]:
     return _signal_pipeline
 
 
+def _signal_executor_for_brc_permission(
+    execution_orchestrator: Optional[ExecutionOrchestrator],
+    permission: ExecutionPermission,
+):
+    if execution_orchestrator is None:
+        return None
+    if permission >= ExecutionPermission.ORDER_ALLOWED:
+        return execution_orchestrator.execute_signal
+    logger.warning(
+        "SignalPipeline signal_executor disabled by BRC execution permission: "
+        "permission=%s required=order_allowed. BRC read-only/intent-recording modes "
+        "must not bind signal-to-order execution.",
+        permission.value_name,
+    )
+    return None
+
+
 async def _close_runtime_resource(name: str, resource: object) -> None:
     """Close an optional runtime resource without masking later cleanup."""
     close_method = getattr(resource, "close", None)
@@ -896,6 +914,11 @@ async def run_application():
             startup_trading_guard=_startup_trading_guard_service,
             account_risk_service=_account_risk_service,
             campaign_state_service=_campaign_state_service,
+            brc_execution_permission_max=(
+                _runtime_config_provider.resolved_config.environment.brc_execution_permission_max
+                if _runtime_config_provider is not None
+                else ExecutionPermission.ORDER_ALLOWED
+            ),
         )
         _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
         _protection_health_monitor = ProtectionHealthMonitor(
@@ -1044,13 +1067,22 @@ async def run_application():
                 f"max_total_exposure={risk_config.max_total_exposure}"
             )
         strategy_signal_v2_observe_writer = _build_strategy_signal_v2_observe_writer()
+        brc_execution_permission = (
+            _runtime_config_provider.resolved_config.environment.brc_execution_permission_max
+            if _runtime_config_provider is not None
+            else ExecutionPermission.ORDER_ALLOWED
+        )
+        signal_executor = _signal_executor_for_brc_permission(
+            _execution_orchestrator,
+            brc_execution_permission,
+        )
         global _signal_pipeline
         _signal_pipeline = SignalPipeline(
             config_manager=config_manager,
             risk_config=risk_config,
             notification_service=_notification_service,
             signal_repository=signal_repository,
-            signal_executor=_execution_orchestrator.execute_signal if _execution_orchestrator else None,
+            signal_executor=signal_executor,
             cooldown_seconds=core_config.signal_pipeline.cooldown_seconds,
             runtime_strategy_definitions=runtime_strategy_definitions,
             runtime_allowed_directions=runtime_allowed_directions,
