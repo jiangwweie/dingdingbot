@@ -139,6 +139,133 @@ secret-manager integration, strategy pool construction, withdrawal interfaces,
 automatic strategy execution, and real live remain future or unauthorized
 tracks.
 
+2026-05-27 BRC-R5-002 admission update:
+
+BRC-R5-002 is framed as a `Funded Validation Admission System`, not a strict
+strategy approval gate. When uncertainty can be bounded by budget, execution
+mode, review, evidence, and constraints, the default posture is
+`admit_with_constraints` rather than rejection.
+
+Admission Gate persists PG-backed, versioned, auditable strategy-family,
+evidence, request, decision, constraint-snapshot, risk-acceptance, and audit
+facts. It emits risk intent and requested risk profile but does not compute
+sizing or install runtime state. Concrete budget/notional/leverage/exposure
+constraints belong behind a Risk/Capital adapter and future Operation Layer
+installation. Phase 2 adds a resolution contract: non-live development may use
+conservative fallback constraints, while live funded validation requires clean
+account facts and explicit concrete risk/capital resolution before constraints
+can be marked installable. Phase 3 adds an Operation Layer Admission readiness
+preflight for `create_gated_trial_from_admission`. Phase 4 adds
+`brc_admission_trial_bindings` and permits confirm to reserve `binding_reserved`
+only. `binding_reserved` is not trial start and does not create campaigns,
+runtime carriers, or install runtime constraints. Phase 5 adds a separate
+`create_campaign_from_admission_binding` Operation that can create a BRC campaign
+carrier shell and advance the binding to `campaign_created`; this is metadata
+only and still means runtime not installed, strategy not active, constraints not
+installed, and no orders placed. Phase 6 adds
+`install_runtime_constraints_from_admission_campaign`, which installs the
+installable constraint snapshot into campaign metadata and advances the binding
+to `runtime_constraints_installed`. This means constraints metadata installed
+only; runtime is not started, strategy is not active, trial is not started,
+`auto_within_budget` remains future work, and no orders are placed. No runtime
+execution, live enablement, trading endpoint, runtime trial creation,
+withdrawal/transfer, or LLM direct execution is authorized by this admission
+work. Phase 7 adds `prepare_runtime_carrier_from_admission_campaign`, which
+marks campaign metadata `carrier_ready=true` and
+`runtime_status=carrier_ready_not_started` only after constraints are installed.
+`carrier_ready` is not runtime started, not strategy active, not trial started,
+not `auto_within_budget`, and not order-capable. Phase 8 adds
+`prepare_runtime_start_from_admission_carrier`, which marks campaign metadata
+`runtime_start_ready=true` and
+`runtime_status=runtime_start_ready_not_started` only after carrier readiness.
+`runtime_start_ready` is not runtime started, not strategy active, not trial
+started, not `auto_within_budget`, and not order-capable. Phase 9 adds
+`evaluate_trial_trade_intent` and `brc_trial_trade_intents` as a non-executable
+execution-mode enforcement contract: observe_only records would-have-traded
+evidence, no_entry blocks entry/increase evidence, auto_within_budget checks
+constraint completeness only, and owner_confirm_each_entry remains unavailable.
+Phase 10 adds `prepare_runtime_handoff_from_admission_campaign`, which marks
+campaign metadata `runtime_handoff_ready=true` and
+`runtime_status=runtime_handoff_ready_not_started` only after runtime start
+readiness and execution-mode contract checks. `runtime_handoff_ready` is not
+runtime started, not strategy active, not trial started, not `auto_within_budget`,
+and not order-capable. Actual runtime start, auto execution, runtime order
+planning, and owner-confirm-each-entry execution remain future runtime-gate work.
+
+Phase 11 adds preflight-only `start_runtime_from_admission_handoff`, which checks
+whether a handoff-ready admission campaign satisfies future runtime start
+conditions. Confirm is disabled/not implemented and must return blocked
+semantics. `runtime_handoff_ready_not_started` remains the latest actual state;
+`runtime_started=true`, strategy activation, live enablement, order or execution
+intent creation, and auto execution all remain future work requiring separate
+Owner authorization and implementation.
+
+Phase 12 upgrades `start_runtime_from_admission_handoff` to a runtime-state-only
+transition. Confirm can set `runtime_started=true` and
+`runtime_status=runtime_started_strategy_inactive`, plus runtime-start audit
+refs, while keeping `strategy_active=false`, `trial_started=false`,
+`orders_placed=false`, and auto execution disabled. Runtime started is not
+strategy active, not trial started, not live enabled, and not order-capable.
+Strategy activation and execution-mode runtime enforcement remain separate
+future phases.
+
+Phase 12.5 alignment review confirms the state ownership split: admission
+binding status remains the admission/constraints milestone
+`runtime_constraints_installed`, while campaign metadata carries runtime state.
+`runtime_started_strategy_inactive` is therefore a runtime-state marker only. It
+must not be interpreted as strategy activation, trial start, live enablement,
+auto execution, order capability, or execution-intent creation.
+
+Phase 13 adds `prepare_strategy_activation_from_admission_runtime` as a
+metadata-only readiness operation. Confirm may set
+`strategy_activation_ready=true` and
+`runtime_status=strategy_activation_ready_not_active` after runtime has started
+in strategy-inactive mode, while keeping strategy/trial/order/auto/live flags
+false. It does not start a strategy runner, start a signal loop, create trade
+intents, create execution intents, create orders, enable auto execution, or
+enable live execution. Actual strategy activation and `auto_within_budget`
+execution remain later explicit runtime phases.
+
+Phase 14 adds `activate_strategy_from_admission_runtime` as a metadata-only
+non-execution strategy state transition. Confirm may set
+`strategy_state=strategy_active_no_execution`,
+`strategy_activation_state=active_no_execution`, and
+`runtime_status=strategy_active_no_execution`, with `strategy_active=true` only
+when `strategy_execution_enabled=false`, `signal_loop_enabled=false`,
+`signal_loop_started=false`, `trial_started=false`, auto flags false, and
+trade/execution-intent/order flags false. `strategy_active_no_execution` is not
+order-capable, not signal-loop active, not live enabled, and not auto execution.
+Signal loop / observe-gate enablement and `auto_within_budget` execution remain
+later explicit runtime phases.
+
+Phase 15 adds `prepare_signal_loop_from_admission_strategy` as metadata-only
+signal loop readiness. Confirm may set `signal_loop_ready=true` and
+`runtime_status=signal_loop_ready_not_started` after
+`strategy_active_no_execution`, while keeping `signal_loop_enabled=false`,
+`signal_loop_started=false`, `signal_generated=false`,
+`strategy_execution_enabled=false`, trial/order/intent flags false, and auto
+flags false. `signal_loop_ready` is not signal-loop started, not signal
+generation, not observe-only/no-entry intent behavior, not auto execution, and
+not order-capable.
+
+Phase 16 adds `start_signal_loop_from_admission_strategy` as metadata-only
+signal loop start state. Confirm may set `signal_loop_started=true`,
+`signal_loop_enabled=true`, `signal_loop_enabled_scope=non_trading_loop_state`,
+and `runtime_status=signal_loop_started_no_signal` after
+`signal_loop_ready_not_started`, while keeping `signal_generated=false`,
+`trade_intent_created=false`, `execution_intent_created=false`,
+`order_created=false`, `orders_placed=false`, `trial_started=false`, and auto
+flags false. `signal_loop_started_no_signal` is not signal generation, not
+order-capable, and not observe-only/no-entry actual intent behavior.
+
+Phase 17 adds `evaluate_signal_from_admission_strategy` as metadata-only signal
+evaluation. Confirm may set `signal_evaluated=true`, `signal_generated=true`,
+and `runtime_status=signal_evaluated_no_intent`, plus signal snapshot/evaluation
+summary metadata, while keeping trade-intent/execution-intent/order/trial/auto
+flags false. `signal_evaluated_no_intent` is not a trade intent, not an
+execution intent, not order-capable, and not observe-only/no-entry actual intent
+conversion.
+
 2026-05-26 BRC-R4.1 delivery-console amendment:
 
 The current product stage is now `BRC-R4.1 Delivery Owner Guide`. The console

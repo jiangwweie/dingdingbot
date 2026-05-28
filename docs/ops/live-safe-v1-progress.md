@@ -190,6 +190,128 @@ Use this file for session progress and handoff notes.
 - No runtime code, runtime profile, env file, exchange gateway, credentials, or
   order path was changed by this boundary clarification.
 
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 1)
+
+- Added ADR-0013 and Phase 1 state doc for BRC-R5-002 Strategy Family Trial Admission Gate.
+- Framed Admission Gate as funded validation admission, not strict strategy approval; default decision bias is `admit_with_constraints`.
+- Added PG-backed admission facts, repository, RiskCapitalAdapter interface, evaluation skeleton, BRC admission APIs, Owner risk acceptance persistence, and focused tests.
+- Phase 1 explicitly does not implement runtime execution, live enablement, trading endpoints, auto execution, `create_gated_trial_from_admission`, campaign/trial creation, withdrawal/transfer, or LLM direct execution.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 2)
+
+- Added `BrcAdmissionRiskCapitalAdapter` as the default Phase 2 resolution adapter while keeping `PendingRiskCapitalAdapter` available for unresolved/fail-safe behavior.
+- Defined the installable constraint contract in `trial_constraint_snapshot.constraints_json`, including source, risk profile, execution mode, env/stage, account facts status, budgets/notional/leverage/attempts, allowed symbols/timeframes, review requirements, cooldowns, blockers, warnings, and limitations.
+- Testnet development validation can now produce conservative `fallback_policy` installable constraints marked non-live. Live funded validation remains strict: unavailable account facts, reconciliation mismatch, or unknown unmanaged exposure block; missing concrete risk/capital resolution stays pending.
+- Owner risk acceptance remains limited to installable constraints only. Phase 2 still does not create campaigns/trials, install runtime constraints, add trading endpoints, enable live, or implement auto execution.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 3)
+
+- Added `create_gated_trial_from_admission` to Operation Layer as a preflight-only Admission readiness check.
+- Preflight validates admissible decision, non-expired/installable constraint snapshot, Owner risk acceptance for funded validation, playbook pinning, account facts ref, live funded account facts boundaries, audit writability, and active-campaign conflict when checkable.
+- Preflight response now exposes admission, strategy family, constraints, risk acceptance, env/stage, execution mode, and next-step summaries.
+- Confirm remains disabled/not implemented and persists a blocked result confirming no trial, campaign, runtime carrier, runtime constraints, order, live execution, withdrawal, or transfer was created.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 4)
+
+- Added `brc_admission_trial_bindings` as the admission-to-future-carrier binding skeleton.
+- Upgraded `create_gated_trial_from_admission` from preflight-only to binding-reservation-only: capability status is `binding_reservation_available`, confirm phrase is `CONFIRM_RESERVE_ADMISSION_BINDING`, and confirm can persist `binding_reserved` only.
+- Preflight now blocks an existing active admission-trial binding for the same admission decision and states that no runtime trial will start, no campaign will be created, no runtime constraints will be installed, and no orders will be placed.
+- Confirm returns binding/audit refs and explicitly records no campaign creation, runtime carrier creation, runtime constraint installation, order placement, live execution, withdrawal, or transfer.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 5)
+
+- Added a separate `create_campaign_from_admission_binding` Operation for campaign carrier shell creation, keeping binding reservation and campaign shell creation distinct in audit and idempotency semantics.
+- Added BRC campaign metadata for admission-created carrier shells: admission binding, decision, strategy family version, playbook, constraint snapshot, env/stage, execution mode, and explicit non-runtime flags.
+- Confirm can create only a BRC campaign shell and advance the binding to `campaign_created`; it does not install runtime constraints, switch runtime carrier, start strategy execution, place orders, enable live, withdraw, or transfer.
+- Preflight blocks missing/non-reserved bindings, pending constraints, missing or mismatched funded risk acceptance, rejected/parked admissions, live funded account fact blockers, duplicate campaign creation, and active campaign conflicts.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 6)
+
+- Added `install_runtime_constraints_from_admission_campaign` as a metadata-only Operation for campaign-created admission bindings.
+- Confirm installs the installable constraint snapshot into campaign metadata and advances the binding to `runtime_constraints_installed`.
+- This state remains not runtime started, not strategy active, not trial started, not live enabled, not auto execution, and not order-capable.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 7)
+
+- Added `prepare_runtime_carrier_from_admission_campaign` as a metadata-only Operation for constraints-installed admission campaigns.
+- Confirm writes `carrier_ready=true`, `runtime_status=carrier_ready_not_started`, preparation refs, and explicit false runtime/strategy/trial/order flags.
+- `carrier_ready` is not runtime started, not strategy active, not trial started, not live enabled, not `auto_within_budget`, and not order-capable.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 8)
+
+- Added `prepare_runtime_start_from_admission_carrier` as a metadata-only Operation for carrier-ready admission campaigns.
+- Confirm writes `runtime_start_ready=true`, `runtime_status=runtime_start_ready_not_started`, start-readiness refs, and explicit false runtime/strategy/trial/order flags.
+- `runtime_start_ready` is not runtime started, not strategy active, not trial started, not live enabled, and not order-capable. Observe-only/no-entry enforcement and auto-within-budget execution remain future phases.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 9)
+
+- Added `evaluate_trial_trade_intent` as an Operation-backed execution-mode enforcement contract.
+- Added `brc_trial_trade_intents` as a PG-backed non-executable evidence ledger for observe_only/no_entry decisions.
+- `observe_only` records would-have-traded evidence, `no_entry` blocks entry/increase while allowing non-executable exit/reduce evidence, `auto_within_budget` checks constraints completeness only, and `owner_confirm_each_entry` remains unavailable.
+- No runtime start, strategy activation, order, execution intent, live path, auto execution, cancel/close/flatten, withdrawal, or transfer is added.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 10)
+
+- Added `prepare_runtime_handoff_from_admission_campaign` as a metadata-only Operation for runtime-start-ready admission campaigns.
+- Confirm writes `runtime_handoff_ready=true`, `runtime_status=runtime_handoff_ready_not_started`, handoff-readiness refs, and explicit false runtime/strategy/trial/order flags.
+- `runtime_handoff_ready` is not runtime started, not strategy active, not trial started, not live enabled, and not order-capable. Actual runtime start and auto-within-budget execution remain future phases.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 11)
+
+- Added preflight-only `start_runtime_from_admission_handoff` for handoff-ready admission campaigns.
+- Capability is `operation_preflight_available` with `executable_through_operation=false`; confirm is disabled/not implemented and returns blocked semantics.
+- Preflight checks runtime handoff readiness, false runtime/strategy/trial/order flags, installed constraints, execution-mode contract availability, account facts freshness, audit writability, runtime profile/env safety, and conflicting runtime/hard-lock conditions.
+- Phase 11 does not start runtime, set `runtime_started=true`, activate strategy, enable auto execution, create orders, create execution intents, or change the latest actual campaign state beyond `runtime_handoff_ready_not_started`.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 12)
+
+- Upgraded `start_runtime_from_admission_handoff` from preflight-only to runtime-state-only execution.
+- Confirm writes `runtime_started=true`, `runtime_status=runtime_started_strategy_inactive`, runtime-start refs, and explicit false strategy/trial/order/auto flags.
+- New operations against an already `runtime_started_strategy_inactive` campaign return noop semantics rather than duplicating the transition.
+- Runtime started is not strategy active, not trial started, not live enabled, not auto-execution-enabled, and not order-capable. Strategy activation and execution-mode runtime enforcement remain future phases.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 12.5)
+
+- Completed runtime state alignment review without adding operations or changing runtime execution.
+- Clarified that binding status remains `runtime_constraints_installed`; runtime state is expressed by campaign metadata.
+- Hardened tests around `runtime_started_strategy_inactive`: strategy/trial/order/auto/live flags remain false and no execution-intent or order surface is added.
+- At the Phase 12.5 checkpoint, strategy activation readiness was still future work; `auto_within_budget` actual execution remains a later runtime-enforcement phase.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 13)
+
+- Added `prepare_strategy_activation_from_admission_runtime` as metadata-only strategy activation readiness.
+- Confirm writes `strategy_activation_ready=true`, `runtime_status=strategy_activation_ready_not_active`, readiness refs, and explicit false strategy/trial/order/auto/signal-loop/live flags.
+- `strategy_activation_ready` is not strategy active, not trial started, not signal-loop active, not auto-execution-enabled, and not order-capable.
+- Actual strategy activation and `auto_within_budget` actual execution remain future explicitly authorized runtime phases.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 14)
+
+- Added `activate_strategy_from_admission_runtime` as metadata-only non-execution strategy state activation.
+- Confirm writes `strategy_state=strategy_active_no_execution`, `strategy_activation_state=active_no_execution`, `runtime_status=strategy_active_no_execution`, activation refs, and explicit false execution/signal-loop/trial/order/auto/live flags.
+- `strategy_active_no_execution` is not order-capable strategy, not signal-loop active, not trial started, not auto-execution-enabled, and not live enabled.
+- Signal loop / observe-gate enablement and `auto_within_budget` actual execution remain future explicitly authorized runtime phases.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 15)
+
+- Added `prepare_signal_loop_from_admission_strategy` as metadata-only signal loop readiness.
+- Confirm writes `signal_loop_ready=true`, `runtime_status=signal_loop_ready_not_started`, readiness refs, and explicit false signal-generation/trade-intent/execution-intent/order/auto/trial/live flags.
+- `signal_loop_ready` is not signal-loop started, not signal generation, not observe-only/no-entry intent behavior, not auto execution, and not order-capable.
+- Signal loop start, observe-gate runtime integration, and `auto_within_budget` actual execution remain future explicitly authorized runtime phases.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 16)
+
+- Added `start_signal_loop_from_admission_strategy` as metadata-only signal loop start state.
+- Confirm writes `signal_loop_started=true`, `signal_loop_enabled=true`, `signal_loop_enabled_scope=non_trading_loop_state`, `runtime_status=signal_loop_started_no_signal`, start refs, and explicit false signal-generation/trade-intent/execution-intent/order/auto/trial/live flags.
+- `signal_loop_started_no_signal` is not signal generation, not observe-only/no-entry actual intent behavior, not auto execution, not trial started, and not order-capable.
+- Signal generation/evaluation, executable observe-only/no-entry runtime integration, and `auto_within_budget` actual execution remain future explicitly authorized runtime phases.
+
+## 2026-05-27 (BRC-R5-002 Admission Gate Phase 17)
+
+- Added `evaluate_signal_from_admission_strategy` as metadata-only signal evaluation.
+- Confirm writes `signal_evaluated=true`, `signal_generated=true`, `runtime_status=signal_evaluated_no_intent`, evaluation refs, signal snapshot/evaluation summary metadata, and explicit false trade-intent/execution-intent/order/auto/trial/live flags.
+- `signal_evaluated_no_intent` is not a trade intent, not an execution intent, not an order-capable state, not auto execution, and not trial started.
+- Signal-to-trial-trade-intent conversion, executable observe-only/no-entry runtime integration, and `auto_within_budget` actual execution remain future explicitly authorized runtime phases.
+
 ## 2026-05-25 (BRC-R0/R1 Bounded Risk Campaign Implementation)
 
 - Accepted ADR-0012 and reframed PLC from "Strategy Execution Platform" toward
