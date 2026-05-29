@@ -6,6 +6,7 @@ import {
 } from '@/src/services/api';
 import type {
   AccountFactsResponse,
+  Mi001SolReadinessResponse,
   OperationCapability,
   OperationCapabilityStatus,
   OperationConfirmResponse,
@@ -32,20 +33,24 @@ import { actionCardDisabledReason, isActionCardEnabled } from './readiness';
 export default function CommandCenter() {
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [accountFacts, setAccountFacts] = useState<AccountFactsResponse | null>(null);
+  const [mi001, setMi001] = useState<Mi001SolReadinessResponse | null>(null);
   const [capabilities, setCapabilities] = useState<OperationCapability[]>([]);
   const [selectedAction, setSelectedAction] = useState<ReadinessResponse['action_cards'][number] | null>(null);
   const [operationModal, setOperationModal] = useState<OperationPreflightState | null>(null);
+  const [startupGuardActionResult, setStartupGuardActionResult] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    const [readinessPayload, capabilityPayload, accountFactsPayload] = await Promise.all([
+    const [readinessPayload, capabilityPayload, accountFactsPayload, mi001Payload] = await Promise.all([
       brcApi.readiness(),
       brcApi.operationCapabilities(),
       brcApi.accountFacts().catch(() => null),
+      brcApi.mi001SolReadiness().catch(() => null),
     ]);
     setReadiness(readinessPayload);
     setCapabilities(capabilityPayload.capabilities);
     setAccountFacts(accountFactsPayload);
+    setMi001(mi001Payload);
   }, []);
 
   useEffect(() => {
@@ -93,6 +98,17 @@ export default function CommandCenter() {
     }
   };
 
+  const runStartupGuardPreflight = async () => {
+    setStartupGuardActionResult('Submitting startup guard preflight...');
+    try {
+      const result = await brcApi.armStartupGuardPreflight();
+      setStartupGuardActionResult(`${result.status}: ${result.next_checklist_verdict}`);
+      await load();
+    } catch (err) {
+      setStartupGuardActionResult(messageFromError(err));
+    }
+  };
+
   return (
     <div className="space-y-3">
       <ConsoleStatusBar
@@ -111,6 +127,14 @@ export default function CommandCenter() {
         to="/fixed-testnet-rehearsal"
         buttonLabel="Open Fixed Rehearsal"
       />
+
+      {mi001 && (
+        <Mi001SolReadinessPanel
+          data={mi001}
+          actionResult={startupGuardActionResult}
+          onPreflightArm={runStartupGuardPreflight}
+        />
+      )}
 
       <section className="space-y-2">
         <div className="flex items-center justify-between">
@@ -242,6 +266,84 @@ export default function CommandCenter() {
       setOperationModal({ loading: false, phrase: '', error: messageFromError(err), preflight: null, result: null });
     }
   }
+}
+
+function Mi001SolReadinessPanel({
+  data,
+  actionResult,
+  onPreflightArm,
+}: {
+  data: Mi001SolReadinessResponse;
+  actionResult: string | null;
+  onPreflightArm: () => void;
+}) {
+  const startupAction = data.startup_guard_action;
+  const blockingChecks = data.readiness.checks.filter((item) => item.blocking);
+  return (
+    <Card className="border-amber-500/30 bg-amber-500/[0.04]">
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>MI-001 SOL bounded trial readiness</span>
+          <StatusBadge state={data.readiness.verdict} />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+          <QuickFact label="Candidate" value={`${data.candidate.candidate_id} · ${data.candidate.symbol} · ${data.candidate.side}`} />
+          <QuickFact label="Evidence" value={`${data.evidence.signal_count} signals · 72h mean ${data.evidence.mean_72h}`} />
+          <QuickFact label="Risk cap" value={`max ${data.risk_policy.operation_layer_notional_cap} @ ${data.risk_policy.max_leverage}x policy`} />
+        </div>
+
+        <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Current blocker</p>
+          {blockingChecks.length > 0 ? (
+            <ul className="list-disc space-y-1 pl-5">
+              {blockingChecks.map((item) => (
+                <li key={item.check}>
+                  <span className="font-semibold">{item.check}:</span> {item.evidence}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>No blocking checks currently reported.</p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div>
+            <p className="font-semibold">{startupAction.label}</p>
+            <p className="text-zinc-500">{startupAction.safety_text}</p>
+            {!startupAction.enabled && (
+              <p className="mt-1 text-amber-700 dark:text-amber-300">
+                Requires: {startupAction.enabled_when.join('; ')}.
+              </p>
+            )}
+            {actionResult && (
+              <p className="mt-1 rounded-sm border border-zinc-200 bg-white/70 p-2 font-mono text-[11px] dark:border-zinc-800 dark:bg-zinc-950">
+                {actionResult}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onPreflightArm}
+            disabled={!startupAction.enabled}
+            className={startupAction.enabled
+              ? 'inline-flex min-h-10 items-center justify-center rounded-sm border border-amber-600 bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-500'
+              : 'inline-flex min-h-10 cursor-not-allowed items-center justify-center rounded-sm border border-zinc-300 px-3 py-2 text-xs font-bold text-zinc-500 dark:border-zinc-700'}
+          >
+            Arm startup guard preflight
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 text-[11px] md:grid-cols-3">
+          <QuickFact label="No execution permission" value={data.non_permissions.no_execution_permission ? 'true' : 'false'} />
+          <QuickFact label="No order permission" value={data.non_permissions.no_order_permission ? 'true' : 'false'} />
+          <QuickFact label="No runtime start" value={data.non_permissions.no_runtime_start ? 'true' : 'false'} />
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function Phase0ActionCard({

@@ -492,6 +492,67 @@ def test_startup_guard_readiness_arm_requires_runtime_guard(monkeypatch):
     assert payload["next_checklist_verdict"] == "blocked_runtime_start_required"
 
 
+def test_mi001_sol_owner_console_view_exposes_safe_mainline(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api as api_module
+    from src.interfaces.api import app
+
+    monkeypatch.setattr(api_module, "get_runtime_context", lambda: None)
+    monkeypatch.setattr(api_module, "_global_kill_switch_service", _FakeGks(active=False))
+    monkeypatch.setattr(api_module, "_startup_trading_guard_service", None)
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/readiness/mi001-sol")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["live_ready"] is False
+    assert payload["candidate"]["candidate_id"] == "MI-001-SOL-LONG"
+    assert payload["candidate"]["symbol"] == "SOL/USDT:USDT"
+    assert payload["candidate"]["side"] == "long"
+    assert payload["evidence"]["signal_count"] == 8135
+    assert payload["readiness"]["verdict"] == "blocked_startup_guard_runtime_coupled"
+    assert payload["startup_guard_action"]["endpoint"] == "/api/brc/readiness/startup-guard/preflight-arm"
+    assert payload["startup_guard_action"]["enabled"] is False
+    assert payload["startup_guard_action"]["does_not_start_trial"] is True
+    assert payload["startup_guard_action"]["does_not_create_execution_intent"] is True
+    assert payload["startup_guard_action"]["does_not_place_order"] is True
+    assert payload["non_permissions"]["no_execution_permission"] is True
+    assert payload["non_permissions"]["no_order_permission"] is True
+    assert payload["non_permissions"]["no_runtime_start"] is True
+    disabled = payload["owner_actions"]["disabled_actions"]
+    assert {item["action_id"] for item in disabled} >= {
+        "start_trial",
+        "place_order",
+        "grant_execution_permission",
+    }
+
+
+def test_mi001_sol_owner_console_view_marks_guard_action_enabled_when_runtime_ready(monkeypatch):
+    _configure_auth(monkeypatch)
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")
+    guard = _FakeStartupGuard(armed=False)
+    _patch_runtime(monkeypatch, campaign=None, startup_guard=guard)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/readiness/mi001-sol")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["readiness"]["verdict"] == "blocked_startup_guard_runtime_coupled"
+    assert payload["startup_guard_action"]["enabled"] is True
+    action = next(
+        item for item in payload["owner_actions"]["allowed_actions"]
+        if item["action_id"] == "arm_startup_guard_preflight"
+    )
+    assert action["enabled"] is True
+    assert action["endpoint"] == "/api/brc/readiness/startup-guard/preflight-arm"
+    assert guard.arm_calls == []
+
+
 def test_startup_guard_readiness_arm_requires_control_env(monkeypatch):
     _configure_auth(monkeypatch)
     monkeypatch.delenv("RUNTIME_CONTROL_API_ENABLED", raising=False)

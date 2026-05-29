@@ -131,6 +131,100 @@ export type ReadinessResponse = {
   live_ready: false;
 };
 
+export type Mi001SolReadinessResponse = {
+  candidate: {
+    id: string;
+    candidate_id: string;
+    strategy_family: string;
+    variant_label: string;
+    symbol: string;
+    side: 'long';
+    status: string;
+  };
+  evidence: {
+    signal_count: number;
+    mean_72h: string;
+    positive_rate_72h: string;
+    mean_7d: string;
+    positive_rate_7d: string;
+    limitations: string[];
+  };
+  risk_policy: {
+    capital_source: string;
+    account_equity: string;
+    available_margin: string;
+    max_leverage: number;
+    operation_layer_notional_cap: string;
+    max_notional_rule: string;
+    max_total_loss_rule: string;
+    prohibitions: string[];
+  };
+  readiness: {
+    verdict: string;
+    blockers: string[];
+    checks: Array<{ check: string; status: string; evidence: string; blocking: boolean }>;
+  };
+  owner_actions: {
+    allowed_actions: Array<{
+      action_id: string;
+      label: string;
+      enabled: boolean;
+      endpoint?: string | null;
+      disabled_reason?: string | null;
+      safety_text: string;
+    }>;
+    disabled_actions: Array<{
+      action_id: string;
+      label: string;
+      enabled: boolean;
+      endpoint?: string | null;
+      disabled_reason?: string | null;
+      safety_text: string;
+    }>;
+  };
+  non_permissions: {
+    no_execution_permission: true;
+    no_order_permission: true;
+    no_runtime_start: true;
+    no_leverage_change: true;
+    no_order_capability: true;
+    no_automatic_trial_start: true;
+  };
+  startup_guard_action: {
+    endpoint: string;
+    label: string;
+    enabled: boolean;
+    enabled_when: string[];
+    safety_text: string;
+    does_not_start_trial: true;
+    does_not_create_execution_intent: true;
+    does_not_place_order: true;
+  };
+  terminal_state: string;
+  source_refs: string[];
+  live_ready: false;
+};
+
+export type StartupGuardReadinessArmResponse = {
+  action: 'startup_guard_preflight_arm';
+  status: 'armed' | 'already_armed' | 'blocked';
+  armed_before?: boolean | null;
+  armed_after?: boolean | null;
+  runtime_bound: boolean;
+  runtime_control_api_enabled: boolean;
+  runtime_effect: 'startup_guard_process_state_only' | 'none';
+  execution_permission_granted: false;
+  order_permission_granted: false;
+  trial_started: false;
+  strategy_runtime_started: false;
+  execution_intent_created: false;
+  order_created: false;
+  exchange_write_methods_called: false;
+  next_checklist_verdict: string;
+  notes: string[];
+  live_ready: false;
+};
+
 export type MarketsOrdersResponse = {
   conclusion: string;
   account_impact: string;
@@ -347,6 +441,15 @@ export const brcApi = {
   },
   readiness() {
     return request<ReadinessResponse>('/api/brc/readiness');
+  },
+  mi001SolReadiness() {
+    return request<Mi001SolReadinessResponse>('/api/brc/readiness/mi001-sol');
+  },
+  armStartupGuardPreflight(reason = 'MI-001 SOL Owner Console readiness preflight') {
+    return request<StartupGuardReadinessArmResponse>('/api/brc/readiness/startup-guard/preflight-arm', {
+      method: 'POST',
+      body: JSON.stringify({ reason, updated_by: 'owner_console' }),
+    });
   },
   runtimeSafety() {
     return request<RuntimeSafetyResponse>('/api/runtime/safety');

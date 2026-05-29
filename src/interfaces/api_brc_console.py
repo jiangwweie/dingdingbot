@@ -220,6 +220,112 @@ class StartupGuardReadinessArmResponse(BaseModel):
     live_ready: Literal[False] = False
 
 
+class Mi001SolCandidateView(BaseModel):
+    id: str = "MI-001"
+    candidate_id: str = "MI-001-SOL-LONG"
+    strategy_family: str = "Momentum Impulse"
+    variant_label: str = "12h close-to-close momentum impulse"
+    symbol: str = "SOL/USDT:USDT"
+    side: Literal["long"] = "long"
+    status: str = "startup_guard_runtime_coupled_blocked"
+
+
+class Mi001SolEvidenceView(BaseModel):
+    signal_count: int = 8135
+    mean_72h: str = "1.9531"
+    positive_rate_72h: str = "0.5175"
+    mean_7d: str = "4.7372"
+    positive_rate_7d: str = "0.5398"
+    limitations: list[str] = Field(
+        default_factory=lambda: [
+            "broad smoke only",
+            "no costs/slippage/funding/random baseline in broad smoke",
+            "research evidence is not execution permission",
+        ]
+    )
+
+
+class Mi001SolRiskPolicyView(BaseModel):
+    capital_source: str = "dedicated_subaccount"
+    account_equity: str = "4663.39779623"
+    available_margin: str = "3652.57096292"
+    max_leverage: int = 5
+    operation_layer_notional_cap: str = "18262.85481460"
+    max_notional_rule: str = (
+        "min(current_dedicated_subaccount_equity * 5, "
+        "available_margin * 5, Operation Layer notional cap)"
+    )
+    max_total_loss_rule: str = "current_dedicated_subaccount_equity"
+    prohibitions: list[str] = Field(
+        default_factory=lambda: [
+            "no_auto_top_up",
+            "no_transfer",
+            "no_withdrawal",
+            "no_symbol_expansion",
+            "no_side_expansion",
+            "no_leverage_expansion_above_5x",
+        ]
+    )
+
+
+class Mi001SolCheckView(BaseModel):
+    check: str
+    status: str
+    evidence: str
+    blocking: bool = False
+
+
+class Mi001SolReadinessView(BaseModel):
+    verdict: str
+    blockers: list[str] = Field(default_factory=list)
+    checks: list[Mi001SolCheckView] = Field(default_factory=list)
+
+
+class Mi001SolOwnerActionView(BaseModel):
+    action_id: str
+    label: str
+    enabled: bool
+    endpoint: Optional[str] = None
+    disabled_reason: Optional[str] = None
+    safety_text: str
+
+
+class Mi001SolStartupGuardActionView(BaseModel):
+    endpoint: str = "/api/brc/readiness/startup-guard/preflight-arm"
+    label: str = "Arm startup guard preflight"
+    enabled: bool
+    enabled_when: list[str] = Field(default_factory=list)
+    safety_text: str = (
+        "Arms only an existing runtime-owned StartupTradingGuardService; "
+        "does not start trial, create execution intent, place orders, or grant permissions."
+    )
+    does_not_start_trial: Literal[True] = True
+    does_not_create_execution_intent: Literal[True] = True
+    does_not_place_order: Literal[True] = True
+
+
+class Mi001SolNonPermissionsView(BaseModel):
+    no_execution_permission: Literal[True] = True
+    no_order_permission: Literal[True] = True
+    no_runtime_start: Literal[True] = True
+    no_leverage_change: Literal[True] = True
+    no_order_capability: Literal[True] = True
+    no_automatic_trial_start: Literal[True] = True
+
+
+class Mi001SolOwnerConsoleE2EResponse(BaseModel):
+    candidate: Mi001SolCandidateView
+    evidence: Mi001SolEvidenceView
+    risk_policy: Mi001SolRiskPolicyView
+    readiness: Mi001SolReadinessView
+    owner_actions: dict[str, list[Mi001SolOwnerActionView]]
+    non_permissions: Mi001SolNonPermissionsView
+    startup_guard_action: Mi001SolStartupGuardActionView
+    terminal_state: str
+    source_refs: list[str] = Field(default_factory=list)
+    live_ready: Literal[False] = False
+
+
 class BrcMarketsOrdersResponse(BaseModel):
     conclusion: str
     account_impact: str
@@ -3228,6 +3334,160 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             },
             "live_ready": False,
         },
+    )
+
+
+@router.get("/readiness/mi001-sol", response_model=Mi001SolOwnerConsoleE2EResponse)
+async def get_mi001_sol_owner_console_e2e() -> Mi001SolOwnerConsoleE2EResponse:
+    """Return a read-only Owner Console view for the MI-001 SOL trial chain."""
+    api_module = _api_module()
+    runtime_bound = api_module.get_runtime_context() is not None
+    gks_active, startup_guard_armed = _guard_summary(api_module)
+    control_enabled = _env_enabled("RUNTIME_CONTROL_API_ENABLED")
+    startup_action_enabled = (
+        runtime_bound
+        and startup_guard_armed is not True
+        and control_enabled
+        and getattr(api_module, "_startup_trading_guard_service", None) is not None
+    )
+
+    if gks_active is True:
+        verdict = "blocked_gks_active"
+        blockers = ["GKS active=True blocks new entries"]
+    elif startup_guard_armed is True:
+        verdict = "ready_for_trial_start_after_owner_approval"
+        blockers = []
+    else:
+        verdict = "blocked_startup_guard_runtime_coupled"
+        blockers = [
+            "StartupTradingGuardService is runtime-owned and is not armed in this console process"
+        ]
+
+    checks = [
+        Mi001SolCheckView(
+            check="PG registration",
+            status="pass",
+            evidence="MI-001 registration chain applied to PG metadata/admission records",
+        ),
+        Mi001SolCheckView(
+            check="Owner trial-start metadata approval",
+            status="pass",
+            evidence="MI-001-SOL-LONG-owner-trial-start-approval-v1",
+        ),
+        Mi001SolCheckView(
+            check="Account facts",
+            status="pass",
+            evidence="live read-only Binance USDT futures account facts available",
+        ),
+        Mi001SolCheckView(
+            check="Operation Layer notional cap",
+            status="pass",
+            evidence="18262.85481460",
+        ),
+        Mi001SolCheckView(
+            check="GKS",
+            status="pass" if gks_active is False else "blocked",
+            evidence=f"active={gks_active}",
+            blocking=gks_active is True,
+        ),
+        Mi001SolCheckView(
+            check="Startup guard",
+            status="pass" if startup_guard_armed is True else "blocked",
+            evidence=(
+                "armed=True"
+                if startup_guard_armed is True
+                else "runtime-owned guard not armed; use guard-only preflight endpoint"
+            ),
+            blocking=startup_guard_armed is not True,
+        ),
+        Mi001SolCheckView(
+            check="SOL active position / open orders",
+            status="pass",
+            evidence="SOL active position=0; SOL open orders=0",
+        ),
+    ]
+
+    allowed_actions = [
+        Mi001SolOwnerActionView(
+            action_id="review_mi001_sol",
+            label="Review MI-001 SOL readiness",
+            enabled=True,
+            safety_text="Read-only review of candidate, evidence, policy, and blockers.",
+        ),
+        Mi001SolOwnerActionView(
+            action_id="arm_startup_guard_preflight",
+            label="Arm startup guard preflight",
+            enabled=startup_action_enabled,
+            endpoint="/api/brc/readiness/startup-guard/preflight-arm",
+            disabled_reason=(
+                None
+                if startup_action_enabled
+                else "Requires bound runtime context, initialized runtime-owned startup guard, and RUNTIME_CONTROL_API_ENABLED=true."
+            ),
+            safety_text="Readiness-only guard action; not trial start and not order permission.",
+        ),
+    ]
+    disabled_actions = [
+        Mi001SolOwnerActionView(
+            action_id="start_trial",
+            label="Start trial",
+            enabled=False,
+            disabled_reason="Not exposed by this Owner Console acceptance view.",
+            safety_text="Trial start remains a separate manual control path.",
+        ),
+        Mi001SolOwnerActionView(
+            action_id="place_order",
+            label="Place order",
+            enabled=False,
+            disabled_reason="Order capability is not granted by readiness.",
+            safety_text="No order endpoint is exposed here.",
+        ),
+        Mi001SolOwnerActionView(
+            action_id="grant_execution_permission",
+            label="Grant execution permission",
+            enabled=False,
+            disabled_reason="Execution permission is not modified by readiness.",
+            safety_text="No execution permission mutation is exposed here.",
+        ),
+    ]
+
+    return Mi001SolOwnerConsoleE2EResponse(
+        candidate=Mi001SolCandidateView(
+            status=verdict,
+        ),
+        evidence=Mi001SolEvidenceView(),
+        risk_policy=Mi001SolRiskPolicyView(),
+        readiness=Mi001SolReadinessView(
+            verdict=verdict,
+            blockers=blockers,
+            checks=checks,
+        ),
+        owner_actions={
+            "allowed_actions": allowed_actions,
+            "disabled_actions": disabled_actions,
+        },
+        non_permissions=Mi001SolNonPermissionsView(),
+        startup_guard_action=Mi001SolStartupGuardActionView(
+            enabled=startup_action_enabled,
+            enabled_when=[
+                "runtime context is bound",
+                "_startup_trading_guard_service is initialized",
+                "RUNTIME_CONTROL_API_ENABLED=true",
+                "BRC operator session is authenticated",
+            ],
+        ),
+        terminal_state=(
+            "ready_for_trial_start_after_owner_approval"
+            if verdict == "ready_for_trial_start_after_owner_approval"
+            else "blocked_until_startup_guard_preflight"
+        ),
+        source_refs=[
+            "brc_strategy_family_registry:MI-001:MI-001-smoke-v0",
+            "brc_admission_requests:MI-001-SOL-LONG-admission-request-v1",
+            "brc_trial_constraint_snapshots:MI-001-SOL-LONG-trial-constraints-v1",
+            "brc_owner_risk_acceptances:MI-001-SOL-LONG-owner-trial-start-approval-v1",
+            "reports/directional-opportunity-broad-smoke-20260529/trial_start_checklist_mi001_sol_long.md",
+        ],
     )
 
 
