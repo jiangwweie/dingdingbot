@@ -15,7 +15,7 @@ It does not start a trial, grant execution permission, create orders, connect to
 | input | status |
 | --- | --- |
 | pg_registration_records | available |
-| cached_account_facts | unsafe_to_read |
+| cached_account_facts | missing |
 | operation_layer_facts | missing |
 | kill_switch_facts | available |
 | owner_trial_start_approval | blocked |
@@ -65,11 +65,12 @@ It does not start a trial, grant execution permission, create orders, connect to
 
 | check | status | source | timestamp | blocking | notes |
 | --- | --- | --- | --- | --- | --- |
-| cached AccountSnapshot exists | unsafe_to_read | runtime_exchange_gateway_cache_path_not_invoked | missing | yes | The only visible runtime account snapshot helper reads through `_exchange_gateway.get_account_snapshot`; this task did not invoke it because the standalone safety boundary requires cached/local/PG facts only and no runtime/exchange gateway access. |
-| wallet_equity/account_equity available | blocked | runtime_exchange_gateway_cache_path_not_invoked | missing | yes | No safe cached account facts provider was supplied, so trial risk capital cannot be derived. |
-| available_margin available | blocked | runtime_exchange_gateway_cache_path_not_invoked | missing | yes | No safe cached account facts provider was supplied, so available margin cannot be derived. |
-| freshness acceptable | blocked | runtime_exchange_gateway_cache_path_not_invoked | missing | yes | No timestamped cached AccountSnapshot was available through a safe read-only path. |
-| read-only source | unsafe_to_read | unsafe_to_read | missing | yes | The runtime cache helper was not called; no real exchange or account API call was made. |
+| cached AccountSnapshot exists | missing | trial_readiness_account_facts_source_missing | missing | yes | A safe injectable account facts read model now exists, but no real PG/local source is wired for this checklist run. |
+| wallet_equity/account_equity available | blocked | trial_readiness_account_facts_source_missing | missing | yes | Cannot derive trial risk capital without safe account equity facts. |
+| available_margin available | blocked | trial_readiness_account_facts_source_missing | missing | yes | Cannot compute readiness max_notional candidate without safe available margin facts. |
+| freshness acceptable | blocked | trial_readiness_account_facts_source_missing | missing | yes | No timestamped safe AccountSnapshot was available. |
+| read-only source | not_checked | trial_readiness_account_facts_source_missing | missing | yes | The runtime `_exchange_gateway.get_account_snapshot` helper was not called; no real exchange or account API call was made. |
+| reconciliation acceptable | not_checked | trial_readiness_account_facts_source_missing | missing | yes | No account reconciliation fact was available from a safe source. |
 
 ## 6. Capital Readiness
 

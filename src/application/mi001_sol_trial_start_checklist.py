@@ -37,6 +37,12 @@ from src.domain.strategy_family_registry import (
     StrategyFamilyMetadata,
     StrategyFamilyPlaybookMetadata,
 )
+from src.application.trial_readiness_account_facts import (
+    AccountFactsReconciliationStatus,
+    AccountFactsSourceType,
+    TrialReadinessAccountFacts,
+    TrialReadinessAccountFactsSource,
+)
 
 
 class TrialStartChecklistModel(BaseModel):
@@ -99,6 +105,7 @@ class CachedAccountFacts(TrialStartChecklistModel):
     source: str = "not_provided"
     read_method: str = "not_checked"
     read_only: bool = True
+    reconciliation_status: Literal["clean", "mismatch", "not_available", "unknown"] = "unknown"
     notes: str = ""
 
 
@@ -325,6 +332,29 @@ class Mi001SolTrialStartChecklistGenerator:
             ],
         )
 
+    async def generate_with_account_facts_source(
+        self,
+        *,
+        generated_at_ms: int,
+        account_facts_source: TrialReadinessAccountFactsSource,
+        operation_layer_facts: Optional[OperationLayerFacts] = None,
+        kill_switch_facts: Optional[KillSwitchFacts] = None,
+    ) -> TrialStartChecklist:
+        account_facts = await account_facts_source.read_trial_readiness_account_facts(
+            candidate_id=MI001_CANDIDATE_ID,
+            symbol=MI001_SYMBOL,
+            side=MI001_SIDE,
+            generated_at_ms=generated_at_ms,
+        )
+        return await self.generate(
+            TrialStartChecklistInputs(
+                generated_at_ms=generated_at_ms,
+                account_facts=_cached_account_facts_from_readiness(account_facts),
+                operation_layer_facts=operation_layer_facts,
+                kill_switch_facts=kill_switch_facts,
+            )
+        )
+
 
 def _pg_checks(
     *,
@@ -479,6 +509,14 @@ def _account_checks(account_facts: Optional[CachedAccountFacts]) -> list[Account
                 True,
                 "No safe cache-only account facts read path was invoked.",
             ),
+            _account(
+                "reconciliation acceptable",
+                ChecklistStatus.NOT_CHECKED,
+                "not_provided",
+                None,
+                True,
+                "No account reconciliation fact was available.",
+            ),
         ]
     if account_facts.read_method == "unsafe_to_read":
         note = account_facts.notes or (
@@ -491,13 +529,16 @@ def _account_checks(account_facts: Optional[CachedAccountFacts]) -> list[Account
             _account("available_margin available", ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, True, note),
             _account("freshness acceptable", ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, True, note),
             _account("read-only source", ChecklistStatus.UNSAFE_TO_READ, account_facts.read_method, account_facts.timestamp_ms, True, note),
+            _account("reconciliation acceptable", ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, True, note),
         ]
+    reconciliation_ok = account_facts.reconciliation_status in {"clean"}
     return [
         _account("cached AccountSnapshot exists", ChecklistStatus.PASS if account_facts.available else ChecklistStatus.MISSING, account_facts.source, account_facts.timestamp_ms, not account_facts.available, account_facts.notes),
         _account("wallet_equity/account_equity available", ChecklistStatus.PASS if account_facts.wallet_equity is not None else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.wallet_equity is None, account_facts.notes),
         _account("available_margin available", ChecklistStatus.PASS if account_facts.available_margin is not None else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.available_margin is None, account_facts.notes),
         _account("freshness acceptable", ChecklistStatus.PASS if account_facts.freshness == "fresh" else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.freshness != "fresh", account_facts.notes),
         _account("read-only source", ChecklistStatus.PASS if account_facts.read_only else ChecklistStatus.BLOCKED, account_facts.read_method, account_facts.timestamp_ms, not account_facts.read_only, account_facts.notes),
+        _account("reconciliation acceptable", ChecklistStatus.PASS if reconciliation_ok else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, not reconciliation_ok, account_facts.notes),
     ]
 
 
@@ -512,6 +553,7 @@ def _capital_readiness(
         or account_facts.wallet_equity is None
         or account_facts.available_margin is None
         or account_facts.freshness != "fresh"
+        or account_facts.reconciliation_status != "clean"
     ):
         return CapitalReadiness(
             status=ChecklistStatus.BLOCKED,
@@ -684,6 +726,36 @@ def _account(
         source=source,
         timestamp_ms=timestamp_ms,
         blocking=blocking,
+        notes=notes,
+    )
+
+
+def _cached_account_facts_from_readiness(
+    facts: TrialReadinessAccountFacts,
+) -> CachedAccountFacts:
+    blockers = facts.readiness_blockers()
+    notes = "; ".join([*facts.notes, *blockers])
+    if facts.external_call_performed or not facts.read_only_guarantee:
+        return CachedAccountFacts(
+            available=False,
+            timestamp_ms=facts.timestamp_ms,
+            freshness=facts.freshness_status.value,
+            source=f"{facts.source_type.value}:{facts.source_id}",
+            read_method="unsafe_to_read",
+            read_only=False,
+            reconciliation_status=facts.reconciliation_status.value,
+            notes=notes or "Account facts source is not safe for readiness evaluation.",
+        )
+    return CachedAccountFacts(
+        available=facts.source_type != AccountFactsSourceType.UNAVAILABLE,
+        wallet_equity=facts.account_equity,
+        available_margin=facts.available_margin,
+        timestamp_ms=facts.timestamp_ms,
+        freshness=facts.freshness_status.value,
+        source=f"{facts.source_type.value}:{facts.source_id}",
+        read_method=facts.source_type.value,
+        read_only=True,
+        reconciliation_status=facts.reconciliation_status.value,
         notes=notes,
     )
 

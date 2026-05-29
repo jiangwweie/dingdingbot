@@ -21,6 +21,13 @@ from src.application.mi001_sol_trial_start_checklist import (
     TrialStartChecklistVerdict,
     render_trial_start_checklist_markdown,
 )
+from src.application.trial_readiness_account_facts import (
+    AccountFactsFreshnessStatus,
+    AccountFactsReconciliationStatus,
+    AccountFactsSourceType,
+    StaticTrialReadinessAccountFactsSource,
+    TrialReadinessAccountFacts,
+)
 from src.domain.mi001_sol_pg_registration import build_mi001_sol_pg_registration_dry_run
 from src.infrastructure.pg_brc_admission_repository import PgBrcAdmissionRepository
 from src.infrastructure.pg_models import (
@@ -167,6 +174,7 @@ async def test_checklist_computes_capital_when_facts_are_fresh_but_keeps_owner_b
                 source="cached_account_snapshot",
                 read_method="cache_only",
                 read_only=True,
+                reconciliation_status="clean",
             ),
             operation_layer_facts=OperationLayerFacts(
                 available=True,
@@ -198,15 +206,112 @@ async def test_checklist_computes_capital_when_facts_are_fresh_but_keeps_owner_b
     assert "Owner trial start approved" in checklist.blockers
 
 
+@pytest.mark.asyncio
+async def test_checklist_reads_injected_account_facts_source_without_runtime_dependency(
+    seeded_repositories,
+):
+    registry_repo, admission_repo = seeded_repositories
+    generator = Mi001SolTrialStartChecklistGenerator(
+        registry_repository=registry_repo,
+        admission_repository=admission_repo,
+    )
+    source = StaticTrialReadinessAccountFactsSource(
+        TrialReadinessAccountFacts(
+            account_id="dedicated_subaccount",
+            source_id="unit-cache-1",
+            source_type=AccountFactsSourceType.INJECTED_FAKE,
+            account_equity=Decimal("100"),
+            available_margin=Decimal("70"),
+            timestamp_ms=1770000000000,
+            freshness_status=AccountFactsFreshnessStatus.FRESH,
+            reconciliation_status=AccountFactsReconciliationStatus.CLEAN,
+            read_only_guarantee=True,
+            external_call_performed=False,
+            notes=("unit fake source only",),
+        )
+    )
+
+    checklist = await generator.generate_with_account_facts_source(
+        generated_at_ms=1770000000000,
+        account_facts_source=source,
+        operation_layer_facts=OperationLayerFacts(
+            available=True,
+            gate_available=True,
+            notional_cap_available=True,
+            notional_cap=Decimal("250"),
+            evidence_logging_available=True,
+            no_active_trial_position=True,
+            startup_guard_available=True,
+            startup_guard_armed=False,
+            source="fake_operation_layer_facts",
+        ),
+        kill_switch_facts=KillSwitchFacts(
+            available=True,
+            active=True,
+            source="fake_pg_gks",
+            updated_at_ms=1770000000000,
+        ),
+    )
+
+    assert checklist.source_inputs["cached_account_facts"] == "available"
+    assert checklist.capital_readiness.current_dedicated_subaccount_equity == Decimal("100")
+    assert checklist.capital_readiness.available_margin == Decimal("70")
+    assert checklist.capital_readiness.computed_max_notional_candidate == Decimal("250")
+    assert checklist.final_verdict == (
+        TrialStartChecklistVerdict.BLOCKED_OWNER_TRIAL_START_APPROVAL_REQUIRED
+    )
+
+
+@pytest.mark.asyncio
+async def test_checklist_blocks_injected_account_facts_external_call(
+    seeded_repositories,
+):
+    registry_repo, admission_repo = seeded_repositories
+    generator = Mi001SolTrialStartChecklistGenerator(
+        registry_repository=registry_repo,
+        admission_repository=admission_repo,
+    )
+    source = StaticTrialReadinessAccountFactsSource(
+        TrialReadinessAccountFacts(
+            account_id="dedicated_subaccount",
+            source_id="bad-source",
+            source_type=AccountFactsSourceType.CACHED_SNAPSHOT,
+            account_equity=Decimal("100"),
+            available_margin=Decimal("70"),
+            timestamp_ms=1770000000000,
+            freshness_status=AccountFactsFreshnessStatus.FRESH,
+            reconciliation_status=AccountFactsReconciliationStatus.CLEAN,
+            read_only_guarantee=False,
+            external_call_performed=True,
+        )
+    )
+
+    checklist = await generator.generate_with_account_facts_source(
+        generated_at_ms=1770000000000,
+        account_facts_source=source,
+    )
+
+    assert checklist.final_verdict == TrialStartChecklistVerdict.BLOCKED_FRESH_ACCOUNT_FACTS_REQUIRED
+    assert checklist.source_inputs["cached_account_facts"] == "unsafe_to_read"
+    assert any(
+        row.check == "read-only source"
+        and row.status == ChecklistStatus.UNSAFE_TO_READ
+        and row.blocking
+        for row in checklist.account_facts_checks
+    )
+
+
 def test_checklist_generator_has_no_execution_order_or_exchange_dependencies() -> None:
     source = Path("src/application/mi001_sol_trial_start_checklist.py").read_text()
+    account_source = Path("src/application/trial_readiness_account_facts.py").read_text()
+    combined_source = source + account_source
 
-    assert "exchange_gateway" not in source
-    assert "ExecutionIntent" not in source
-    assert "OrderRepository" not in source
-    assert "place_order" not in source
-    assert "cancel_order" not in source
-    assert "submit_order" not in source
-    assert "set_leverage" not in source
-    assert "withdraw(" not in source
-    assert "transfer(" not in source
+    assert "exchange_gateway" not in combined_source
+    assert "ExecutionIntent" not in combined_source
+    assert "OrderRepository" not in combined_source
+    assert "place_order" not in combined_source
+    assert "cancel_order" not in combined_source
+    assert "submit_order" not in combined_source
+    assert "set_leverage" not in combined_source
+    assert "withdraw(" not in combined_source
+    assert "transfer(" not in combined_source
