@@ -1867,3 +1867,26 @@ Use this file for session progress and handoff notes.
 - Safety result remains bounded: no live/mainnet, no strategy execution, no
   actual flatten, no order cancel, no position close, no withdrawal/transfer,
   and no LLM authorization.
+
+## 2026-05-29 (BRC-R5-003 Broad OHLCV-only Directional Smoke)
+
+- Owner reframed the current goal as a fast trial-and-review research system
+  for small risk-capital Campaigns, not a fully automated general strategy
+  system.
+- The next research priority is broad coarse screening rather than deeper
+  TB-001 year/regime digging or full cost/baseline/campaign machinery.
+- Extended the one-off OHLCV smoke screen from 3 to 9 fixed variants:
+  `TB-001`, `TB-002`, `VB-001`, `PC-001`, `PC-002`, `MR-001`, `RB-001`,
+  `VI-001`, and `MI-001`.
+- Ran BTC/ETH/SOL/BNB 1h local-data long/short screening and wrote:
+  - `reports/directional-opportunity-broad-smoke-20260529/evidence.md`
+  - `reports/directional-opportunity-broad-smoke-20260529/ranked_summary.md`
+  - `reports/directional-opportunity-broad-smoke-20260529/trial_candidate_with_known_risks.md`
+- Selected 3 `trial_candidate_with_known_risks` for next review:
+  `MI-001 BNB long`, `MI-001 SOL long`, and `VI-001 ETH long`.
+- Current evidence is historical OHLCV-only and intentionally incomplete:
+  no cost/slippage/funding/liquidation modeling, no random/buy-hold baseline,
+  no rolling campaign ruin-rate, and no Owner-reviewed event examples yet.
+- This work did not persist to PG, create admission/campaign facts, start
+  runtime, call an exchange, authorize live, or widen symbol/side/leverage
+  authority.
