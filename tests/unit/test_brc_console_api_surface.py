@@ -512,7 +512,16 @@ def test_mi001_sol_owner_console_view_exposes_safe_mainline(monkeypatch):
     assert payload["candidate"]["symbol"] == "SOL/USDT:USDT"
     assert payload["candidate"]["side"] == "long"
     assert payload["evidence"]["signal_count"] == 8135
+    assert payload["evidence"]["positive_rate_72h"] == "0.5175"
+    assert payload["evidence"]["mean_7d"] == "4.7372"
+    assert "no campaign replay" in payload["evidence"]["limitations"]
+    assert payload["risk_policy"]["operation_layer_notional_cap"] == "18262.85481460"
     assert payload["readiness"]["verdict"] == "blocked_startup_guard_runtime_coupled"
+    checks = {item["check"]: item for item in payload["readiness"]["checks"]}
+    assert checks["PG registration"]["status"] == "pass"
+    assert checks["Account facts"]["status"] == "pass"
+    assert checks["Operation Layer notional cap"]["status"] == "pass"
+    assert checks["Startup guard"]["blocking"] is True
     assert payload["startup_guard_action"]["endpoint"] == "/api/brc/readiness/startup-guard/preflight-arm"
     assert payload["startup_guard_action"]["enabled"] is False
     assert payload["startup_guard_action"]["does_not_start_trial"] is True
@@ -521,6 +530,8 @@ def test_mi001_sol_owner_console_view_exposes_safe_mainline(monkeypatch):
     assert payload["non_permissions"]["no_execution_permission"] is True
     assert payload["non_permissions"]["no_order_permission"] is True
     assert payload["non_permissions"]["no_runtime_start"] is True
+    assert payload["non_permissions"]["no_leverage_change"] is True
+    assert payload["non_permissions"]["no_automatic_trial_start"] is True
     disabled = payload["owner_actions"]["disabled_actions"]
     assert {item["action_id"] for item in disabled} >= {
         "start_trial",

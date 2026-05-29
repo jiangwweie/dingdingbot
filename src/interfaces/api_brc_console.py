@@ -238,8 +238,11 @@ class Mi001SolEvidenceView(BaseModel):
     positive_rate_7d: str = "0.5398"
     limitations: list[str] = Field(
         default_factory=lambda: [
-            "broad smoke only",
-            "no costs/slippage/funding/random baseline in broad smoke",
+            "no cost",
+            "no slippage",
+            "no funding",
+            "no random baseline",
+            "no campaign replay",
             "research evidence is not execution permission",
         ]
     )
@@ -3362,6 +3365,12 @@ async def get_mi001_sol_owner_console_e2e() -> Mi001SolOwnerConsoleE2EResponse:
         blockers = [
             "StartupTradingGuardService is runtime-owned and is not armed in this console process"
         ]
+    gks_status = "pass" if gks_active is False else "blocked" if gks_active is True else "not_checked"
+    gks_evidence = (
+        f"active={gks_active}"
+        if gks_active is not None
+        else "runtime GKS service is not bound in this console process"
+    )
 
     checks = [
         Mi001SolCheckView(
@@ -3386,8 +3395,8 @@ async def get_mi001_sol_owner_console_e2e() -> Mi001SolOwnerConsoleE2EResponse:
         ),
         Mi001SolCheckView(
             check="GKS",
-            status="pass" if gks_active is False else "blocked",
-            evidence=f"active={gks_active}",
+            status=gks_status,
+            evidence=gks_evidence,
             blocking=gks_active is True,
         ),
         Mi001SolCheckView(

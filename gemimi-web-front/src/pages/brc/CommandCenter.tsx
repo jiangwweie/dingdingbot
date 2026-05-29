@@ -279,6 +279,7 @@ function Mi001SolReadinessPanel({
 }) {
   const startupAction = data.startup_guard_action;
   const blockingChecks = data.readiness.checks.filter((item) => item.blocking);
+  const disabledActionIds = new Set(data.owner_actions.disabled_actions.map((item) => item.action_id));
   return (
     <Card className="border-amber-500/30 bg-amber-500/[0.04]">
       <CardHeader>
@@ -288,10 +289,31 @@ function Mi001SolReadinessPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-          <QuickFact label="Candidate" value={`${data.candidate.candidate_id} · ${data.candidate.symbol} · ${data.candidate.side}`} />
-          <QuickFact label="Evidence" value={`${data.evidence.signal_count} signals · 72h mean ${data.evidence.mean_72h}`} />
-          <QuickFact label="Risk cap" value={`max ${data.risk_policy.operation_layer_notional_cap} @ ${data.risk_policy.max_leverage}x policy`} />
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
+          <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Candidate</p>
+            <QuickFact label="Candidate id" value={data.candidate.candidate_id} />
+            <QuickFact label="Strategy family" value={`${data.candidate.id} / ${data.candidate.strategy_family}`} />
+            <QuickFact label="Symbol" value={data.candidate.symbol} />
+            <QuickFact label="Side" value={data.candidate.side} />
+            <QuickFact label="Terminal state" value={<StatusBadge state={data.terminal_state} />} />
+          </div>
+          <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Evidence</p>
+            <QuickFact label="Signals" value={String(data.evidence.signal_count)} />
+            <QuickFact label="72h mean" value={data.evidence.mean_72h} />
+            <QuickFact label="72h positive" value={data.evidence.positive_rate_72h} />
+            <QuickFact label="7d mean" value={data.evidence.mean_7d} />
+            <QuickFact label="7d positive" value={data.evidence.positive_rate_7d} />
+          </div>
+          <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Risk policy</p>
+            <QuickFact label="Capital source" value={data.risk_policy.capital_source} />
+            <QuickFact label="Account equity" value={data.risk_policy.account_equity} />
+            <QuickFact label="Available margin" value={data.risk_policy.available_margin} />
+            <QuickFact label="Max leverage" value={`${data.risk_policy.max_leverage}x`} />
+            <QuickFact label="Operation cap" value={data.risk_policy.operation_layer_notional_cap} />
+          </div>
         </div>
 
         <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
@@ -307,6 +329,36 @@ function Mi001SolReadinessPanel({
           ) : (
             <p>No blocking checks currently reported.</p>
           )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+          <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Readiness checklist</p>
+            <div className="space-y-2">
+              {data.readiness.checks.map((item) => (
+                <div key={item.check} className="grid grid-cols-[1fr_auto] gap-2 border-b border-zinc-100 pb-2 last:border-0 last:pb-0 dark:border-zinc-800">
+                  <div>
+                    <p className="font-semibold text-zinc-900 dark:text-zinc-100">{item.check}</p>
+                    <p className="text-zinc-500">{item.evidence}</p>
+                  </div>
+                  <div className="text-right">
+                    <StatusBadge state={item.status} />
+                    {item.blocking && <p className="mt-1 text-[10px] font-bold uppercase text-rose-600 dark:text-rose-300">blocking</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Evidence limitations</p>
+            <ul className="list-disc space-y-1 pl-5">
+              {data.evidence.limitations.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+            <p className="mt-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Risk prohibitions</p>
+            <ul className="list-disc space-y-1 pl-5">
+              {data.risk_policy.prohibitions.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-2 lg:grid-cols-[1fr_auto] lg:items-center">
@@ -336,14 +388,43 @@ function Mi001SolReadinessPanel({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 text-[11px] md:grid-cols-3">
-          <QuickFact label="No execution permission" value={data.non_permissions.no_execution_permission ? 'true' : 'false'} />
-          <QuickFact label="No order permission" value={data.non_permissions.no_order_permission ? 'true' : 'false'} />
-          <QuickFact label="No runtime start" value={data.non_permissions.no_runtime_start ? 'true' : 'false'} />
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+          <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Owner actions</p>
+            <div className="space-y-2">
+              {[...data.owner_actions.allowed_actions, ...data.owner_actions.disabled_actions].map((item) => (
+                <div key={item.action_id} className="grid grid-cols-[1fr_auto] gap-2 border-b border-zinc-100 pb-2 last:border-0 last:pb-0 dark:border-zinc-800">
+                  <div>
+                    <p className="font-semibold text-zinc-900 dark:text-zinc-100">{item.label}</p>
+                    <p className="text-zinc-500">{item.safety_text}</p>
+                    {item.disabled_reason && <p className="text-amber-700 dark:text-amber-300">{item.disabled_reason}</p>}
+                  </div>
+                  <Badge variant={item.enabled ? 'success' : disabledActionIds.has(item.action_id) ? 'danger' : 'warning'}>
+                    {item.enabled ? 'enabled' : 'disabled'}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Non-permissions</p>
+            <div className="grid grid-cols-1 gap-2 text-[11px] md:grid-cols-2">
+              <QuickFact label="No execution permission" value={boolText(data.non_permissions.no_execution_permission)} />
+              <QuickFact label="No order permission" value={boolText(data.non_permissions.no_order_permission)} />
+              <QuickFact label="No runtime start" value={boolText(data.non_permissions.no_runtime_start)} />
+              <QuickFact label="No leverage change" value={boolText(data.non_permissions.no_leverage_change)} />
+              <QuickFact label="No order capability" value={boolText(data.non_permissions.no_order_capability)} />
+              <QuickFact label="No automatic trial start" value={boolText(data.non_permissions.no_automatic_trial_start)} />
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>
   );
+}
+
+function boolText(value: boolean) {
+  return value ? 'true' : 'false';
 }
 
 function Phase0ActionCard({
