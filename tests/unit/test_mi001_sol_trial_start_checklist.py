@@ -13,11 +13,13 @@ from src.application.mi001_sol_pg_registration_apply import (
 )
 from src.application.mi001_sol_trial_start_checklist import (
     CachedAccountFacts,
+    ChecklistStatus,
     KillSwitchFacts,
     Mi001SolTrialStartChecklistGenerator,
     OperationLayerFacts,
     TrialStartChecklistInputs,
     TrialStartChecklistVerdict,
+    render_trial_start_checklist_markdown,
 )
 from src.domain.mi001_sol_pg_registration import build_mi001_sol_pg_registration_dry_run
 from src.infrastructure.pg_brc_admission_repository import PgBrcAdmissionRepository
@@ -100,6 +102,47 @@ async def test_checklist_blocks_when_cached_account_facts_are_missing(seeded_rep
     assert any(row.check == "cached AccountSnapshot exists" and row.blocking for row in checklist.account_facts_checks)
     assert "Owner trial start approved" in checklist.blockers
     assert checklist.capital_readiness.computed_max_notional_candidate is None
+
+
+@pytest.mark.asyncio
+async def test_checklist_marks_unsafe_account_fact_path_blocked(seeded_repositories):
+    registry_repo, admission_repo = seeded_repositories
+    generator = Mi001SolTrialStartChecklistGenerator(
+        registry_repository=registry_repo,
+        admission_repository=admission_repo,
+    )
+
+    checklist = await generator.generate(
+        TrialStartChecklistInputs(
+            generated_at_ms=1770000000000,
+            account_facts=CachedAccountFacts(
+                available=False,
+                freshness="missing",
+                source="runtime_exchange_gateway_cache_path_not_invoked",
+                read_method="unsafe_to_read",
+                read_only=False,
+                notes="Only visible account snapshot path touches runtime exchange gateway state.",
+            ),
+            kill_switch_facts=KillSwitchFacts(
+                available=True,
+                active=True,
+                source="fake_pg_gks",
+                updated_at_ms=1770000000000,
+            ),
+        )
+    )
+
+    assert checklist.final_verdict == TrialStartChecklistVerdict.BLOCKED_FRESH_ACCOUNT_FACTS_REQUIRED
+    assert checklist.source_inputs["cached_account_facts"] == "unsafe_to_read"
+    assert any(
+        row.status == ChecklistStatus.UNSAFE_TO_READ
+        and row.check == "read-only source"
+        and row.blocking
+        for row in checklist.account_facts_checks
+    )
+    rendered = render_trial_start_checklist_markdown(checklist)
+    assert "active=True means Global Kill Switch blocks all new entries" in rendered
+    assert "Only visible account snapshot path touches runtime exchange gateway state." in rendered
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ It does not start a trial, grant execution permission, create orders, connect to
 | input | status |
 | --- | --- |
 | pg_registration_records | available |
-| cached_account_facts | missing |
+| cached_account_facts | unsafe_to_read |
 | operation_layer_facts | missing |
 | kill_switch_facts | available |
 | owner_trial_start_approval | blocked |
@@ -63,13 +63,13 @@ It does not start a trial, grant execution permission, create orders, connect to
 
 ## 5. Account Facts Checks
 
-| check | status | source | timestamp | blocking |
-| --- | --- | --- | --- | --- |
-| cached AccountSnapshot exists | missing | not_provided | missing | yes |
-| wallet_equity/account_equity available | blocked | not_provided | missing | yes |
-| available_margin available | blocked | not_provided | missing | yes |
-| freshness acceptable | blocked | not_provided | missing | yes |
-| read-only source | not_checked | not_provided | missing | yes |
+| check | status | source | timestamp | blocking | notes |
+| --- | --- | --- | --- | --- | --- |
+| cached AccountSnapshot exists | unsafe_to_read | runtime_exchange_gateway_cache_path_not_invoked | missing | yes | The only visible runtime account snapshot helper reads through `_exchange_gateway.get_account_snapshot`; this task did not invoke it because the standalone safety boundary requires cached/local/PG facts only and no runtime/exchange gateway access. |
+| wallet_equity/account_equity available | blocked | runtime_exchange_gateway_cache_path_not_invoked | missing | yes | No safe cached account facts provider was supplied, so trial risk capital cannot be derived. |
+| available_margin available | blocked | runtime_exchange_gateway_cache_path_not_invoked | missing | yes | No safe cached account facts provider was supplied, so available margin cannot be derived. |
+| freshness acceptable | blocked | runtime_exchange_gateway_cache_path_not_invoked | missing | yes | No timestamped cached AccountSnapshot was available through a safe read-only path. |
+| read-only source | unsafe_to_read | unsafe_to_read | missing | yes | The runtime cache helper was not called; no real exchange or account API call was made. |
 
 ## 6. Capital Readiness
 
@@ -85,23 +85,33 @@ It does not start a trial, grant execution permission, create orders, connect to
 
 ## 7. Operation Layer / Safety Checks
 
-| check | status | evidence | blocking |
-| --- | --- | --- | --- |
-| Operation Layer gate available | missing | not_provided | yes |
-| Operation Layer notional cap available | missing | not_provided | yes |
-| startup guard state available | not_checked | not_provided | yes |
-| evidence logging available | missing | not_provided | yes |
-| no active trial position | not_checked | not_provided | yes |
-| kill switch state available | pass | active=True,source=pg:BRC R3 LLM rehearsal restore safe state | no |
+| check | status | evidence | blocking | notes |
+| --- | --- | --- | --- | --- |
+| Operation Layer gate available | missing | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
+| Operation Layer notional cap available | missing | not_provided | yes | No safe Operation Layer cap source was available for this checklist evaluation. |
+| startup guard state available | not_checked | not_provided | yes | Startup guard is process-local/runtime state; this task did not inspect or mutate runtime. |
+| evidence logging available | missing | not_provided | yes | Evidence logging readiness was not checked through Operation Layer facts. |
+| no active trial position | not_checked | not_provided | yes | No runtime/position repository was queried; this remains blocked until a safe no-active-trial-position fact is available. |
+| kill switch state available | pass | active=True,source=pg:BRC R3 LLM rehearsal restore safe state | no | active=True means Global Kill Switch blocks all new entries. This is safe fail-closed state, not trial-start readiness. |
 
-## 8. Owner Trial-start Approval
+## 8. GKS Interpretation
+
+`active=True` means the Global Kill Switch is engaged and blocks all new entries.
+
+Checklist consequence:
+
+- GKS state is readable from PG and therefore the state check is available.
+- The current `active=True` state is fail-closed and does not authorize trial start.
+- Any future bounded trial start would still require separate Owner trial-start approval and a separate authorized safety transition; this checklist does not perform that transition.
+
+## 9. Owner Trial-start Approval
 
 | check | status | evidence | blocking |
 | --- | --- | --- | --- |
 | Owner plan preparation approved | pass | True | no |
 | Owner trial start approved | blocked | False | yes |
 
-## 9. Final Verdict
+## 10. Final Verdict
 
 Verdict: `blocked_fresh_account_facts_required`
 
@@ -120,7 +130,7 @@ Blockers:
 - no active trial position
 - Owner trial start approved
 
-## 10. Non-permissions
+## 11. Non-permissions
 
 This checklist does not grant:
 

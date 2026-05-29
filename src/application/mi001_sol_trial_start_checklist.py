@@ -49,6 +49,7 @@ class ChecklistStatus(str, Enum):
     BLOCKED = "blocked"
     MISSING = "missing"
     NOT_CHECKED = "not_checked"
+    UNSAFE_TO_READ = "unsafe_to_read"
 
 
 class TrialStartChecklistVerdict(str, Enum):
@@ -68,6 +69,7 @@ class ChecklistRow(TrialStartChecklistModel):
     status: ChecklistStatus
     evidence: str = Field(default="", max_length=2048)
     blocking: bool = False
+    notes: str = Field(default="", max_length=2048)
 
 
 class ScopeCheckRow(TrialStartChecklistModel):
@@ -76,6 +78,7 @@ class ScopeCheckRow(TrialStartChecklistModel):
     actual: str = Field(default="", max_length=1024)
     status: ChecklistStatus
     blocking: bool = False
+    notes: str = Field(default="", max_length=2048)
 
 
 class AccountFactsCheckRow(TrialStartChecklistModel):
@@ -84,6 +87,7 @@ class AccountFactsCheckRow(TrialStartChecklistModel):
     source: str = Field(default="", max_length=512)
     timestamp_ms: Optional[int] = None
     blocking: bool = False
+    notes: str = Field(default="", max_length=2048)
 
 
 class CachedAccountFacts(TrialStartChecklistModel):
@@ -95,6 +99,7 @@ class CachedAccountFacts(TrialStartChecklistModel):
     source: str = "not_provided"
     read_method: str = "not_checked"
     read_only: bool = True
+    notes: str = ""
 
 
 class OperationLayerFacts(TrialStartChecklistModel):
@@ -107,6 +112,7 @@ class OperationLayerFacts(TrialStartChecklistModel):
     startup_guard_available: bool = False
     startup_guard_armed: Optional[bool] = None
     source: str = "not_provided"
+    notes: str = ""
 
 
 class KillSwitchFacts(TrialStartChecklistModel):
@@ -114,6 +120,7 @@ class KillSwitchFacts(TrialStartChecklistModel):
     active: Optional[bool] = None
     source: str = "not_provided"
     updated_at_ms: Optional[int] = None
+    notes: str = ""
 
 
 class TrialStartChecklistInputs(TrialStartChecklistModel):
@@ -432,18 +439,65 @@ def _scope_checks(
 def _account_checks(account_facts: Optional[CachedAccountFacts]) -> list[AccountFactsCheckRow]:
     if account_facts is None:
         return [
-            _account("cached AccountSnapshot exists", ChecklistStatus.MISSING, "not_provided", None, True),
-            _account("wallet_equity/account_equity available", ChecklistStatus.BLOCKED, "not_provided", None, True),
-            _account("available_margin available", ChecklistStatus.BLOCKED, "not_provided", None, True),
-            _account("freshness acceptable", ChecklistStatus.BLOCKED, "not_provided", None, True),
-            _account("read-only source", ChecklistStatus.NOT_CHECKED, "not_provided", None, True),
+            _account(
+                "cached AccountSnapshot exists",
+                ChecklistStatus.MISSING,
+                "not_provided",
+                None,
+                True,
+                "No cached/local/PG account facts provider was supplied.",
+            ),
+            _account(
+                "wallet_equity/account_equity available",
+                ChecklistStatus.BLOCKED,
+                "not_provided",
+                None,
+                True,
+                "Cannot derive trial risk capital without cached account equity.",
+            ),
+            _account(
+                "available_margin available",
+                ChecklistStatus.BLOCKED,
+                "not_provided",
+                None,
+                True,
+                "Cannot compute readiness max_notional candidate without cached available margin.",
+            ),
+            _account(
+                "freshness acceptable",
+                ChecklistStatus.BLOCKED,
+                "not_provided",
+                None,
+                True,
+                "Freshness cannot be evaluated without a timestamped cached AccountSnapshot.",
+            ),
+            _account(
+                "read-only source",
+                ChecklistStatus.NOT_CHECKED,
+                "not_provided",
+                None,
+                True,
+                "No safe cache-only account facts read path was invoked.",
+            ),
+        ]
+    if account_facts.read_method == "unsafe_to_read":
+        note = account_facts.notes or (
+            "Account facts source was intentionally not read because the only visible "
+            "path may touch runtime/exchange gateway state."
+        )
+        return [
+            _account("cached AccountSnapshot exists", ChecklistStatus.UNSAFE_TO_READ, account_facts.source, account_facts.timestamp_ms, True, note),
+            _account("wallet_equity/account_equity available", ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, True, note),
+            _account("available_margin available", ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, True, note),
+            _account("freshness acceptable", ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, True, note),
+            _account("read-only source", ChecklistStatus.UNSAFE_TO_READ, account_facts.read_method, account_facts.timestamp_ms, True, note),
         ]
     return [
-        _account("cached AccountSnapshot exists", ChecklistStatus.PASS if account_facts.available else ChecklistStatus.MISSING, account_facts.source, account_facts.timestamp_ms, not account_facts.available),
-        _account("wallet_equity/account_equity available", ChecklistStatus.PASS if account_facts.wallet_equity is not None else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.wallet_equity is None),
-        _account("available_margin available", ChecklistStatus.PASS if account_facts.available_margin is not None else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.available_margin is None),
-        _account("freshness acceptable", ChecklistStatus.PASS if account_facts.freshness == "fresh" else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.freshness != "fresh"),
-        _account("read-only source", ChecklistStatus.PASS if account_facts.read_only else ChecklistStatus.BLOCKED, account_facts.read_method, account_facts.timestamp_ms, not account_facts.read_only),
+        _account("cached AccountSnapshot exists", ChecklistStatus.PASS if account_facts.available else ChecklistStatus.MISSING, account_facts.source, account_facts.timestamp_ms, not account_facts.available, account_facts.notes),
+        _account("wallet_equity/account_equity available", ChecklistStatus.PASS if account_facts.wallet_equity is not None else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.wallet_equity is None, account_facts.notes),
+        _account("available_margin available", ChecklistStatus.PASS if account_facts.available_margin is not None else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.available_margin is None, account_facts.notes),
+        _account("freshness acceptable", ChecklistStatus.PASS if account_facts.freshness == "fresh" else ChecklistStatus.BLOCKED, account_facts.source, account_facts.timestamp_ms, account_facts.freshness != "fresh", account_facts.notes),
+        _account("read-only source", ChecklistStatus.PASS if account_facts.read_only else ChecklistStatus.BLOCKED, account_facts.read_method, account_facts.timestamp_ms, not account_facts.read_only, account_facts.notes),
     ]
 
 
@@ -484,32 +538,35 @@ def _operation_layer_safety_checks(
     kill_switch_facts: Optional[KillSwitchFacts],
 ) -> list[ChecklistRow]:
     if operation_layer_facts is None:
+        missing_note = "No safe Operation Layer facts provider was supplied; runtime preflight was not invoked."
         operation = [
-            ChecklistRow(check="Operation Layer gate available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True),
-            ChecklistRow(check="Operation Layer notional cap available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True),
-            ChecklistRow(check="startup guard state available", status=ChecklistStatus.NOT_CHECKED, evidence="not_provided", blocking=True),
-            ChecklistRow(check="evidence logging available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True),
-            ChecklistRow(check="no active trial position", status=ChecklistStatus.NOT_CHECKED, evidence="not_provided", blocking=True),
+            ChecklistRow(check="Operation Layer gate available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True, notes=missing_note),
+            ChecklistRow(check="Operation Layer notional cap available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True, notes=missing_note),
+            ChecklistRow(check="startup guard state available", status=ChecklistStatus.NOT_CHECKED, evidence="not_provided", blocking=True, notes=missing_note),
+            ChecklistRow(check="evidence logging available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True, notes=missing_note),
+            ChecklistRow(check="no active trial position", status=ChecklistStatus.NOT_CHECKED, evidence="not_provided", blocking=True, notes=missing_note),
         ]
     else:
         operation = [
-            _safety("Operation Layer gate available", operation_layer_facts.gate_available, operation_layer_facts.source),
-            _safety("Operation Layer notional cap available", operation_layer_facts.notional_cap_available, str(operation_layer_facts.notional_cap)),
-            _safety("startup guard state available", operation_layer_facts.startup_guard_available, str(operation_layer_facts.startup_guard_armed)),
-            _safety("evidence logging available", operation_layer_facts.evidence_logging_available, operation_layer_facts.source),
-            _safety("no active trial position", operation_layer_facts.no_active_trial_position is True, str(operation_layer_facts.no_active_trial_position)),
+            _safety("Operation Layer gate available", operation_layer_facts.gate_available, operation_layer_facts.source, operation_layer_facts.notes),
+            _safety("Operation Layer notional cap available", operation_layer_facts.notional_cap_available, str(operation_layer_facts.notional_cap), operation_layer_facts.notes),
+            _safety("startup guard state available", operation_layer_facts.startup_guard_available, str(operation_layer_facts.startup_guard_armed), operation_layer_facts.notes),
+            _safety("evidence logging available", operation_layer_facts.evidence_logging_available, operation_layer_facts.source, operation_layer_facts.notes),
+            _safety("no active trial position", operation_layer_facts.no_active_trial_position is True, str(operation_layer_facts.no_active_trial_position), operation_layer_facts.notes),
         ]
 
     if kill_switch_facts is None:
         operation.append(
-            ChecklistRow(check="kill switch state available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True)
+            ChecklistRow(check="kill switch state available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True, notes="PG GKS state was not supplied.")
         )
     else:
+        notes = kill_switch_facts.notes or _kill_switch_interpretation(kill_switch_facts)
         operation.append(
             _safety(
                 "kill switch state available",
                 kill_switch_facts.available,
                 f"active={kill_switch_facts.active},source={kill_switch_facts.source}",
+                notes,
             )
         )
     return operation
@@ -619,6 +676,7 @@ def _account(
     source: str,
     timestamp_ms: Optional[int],
     blocking: bool,
+    notes: str = "",
 ) -> AccountFactsCheckRow:
     return AccountFactsCheckRow(
         check=check,
@@ -626,15 +684,17 @@ def _account(
         source=source,
         timestamp_ms=timestamp_ms,
         blocking=blocking,
+        notes=notes,
     )
 
 
-def _safety(check: str, passed: bool, evidence: str) -> ChecklistRow:
+def _safety(check: str, passed: bool, evidence: str, notes: str = "") -> ChecklistRow:
     return ChecklistRow(
         check=check,
         status=ChecklistStatus.PASS if passed else ChecklistStatus.BLOCKED,
         evidence=evidence,
         blocking=not passed,
+        notes=notes,
     )
 
 
@@ -645,10 +705,26 @@ def _all_pass(rows: list[ChecklistRow]) -> bool:
 def _input_status(value: object) -> str:
     if value is None:
         return "missing"
+    if getattr(value, "read_method", None) == "unsafe_to_read":
+        return "unsafe_to_read"
     available = getattr(value, "available", None)
     if available is False:
         return "blocked"
     return "available"
+
+
+def _kill_switch_interpretation(kill_switch_facts: KillSwitchFacts) -> str:
+    if kill_switch_facts.active is True:
+        return (
+            "active=True means Global Kill Switch blocks all new entries. "
+            "This is safe fail-closed state, not trial-start readiness."
+        )
+    if kill_switch_facts.active is False:
+        return (
+            "active=False means Global Kill Switch is open for new entries; "
+            "this checklist still does not grant trial start or execution permission."
+        )
+    return "GKS active state is unavailable; readiness remains blocked until clarified."
 
 
 def _owner_input_status(owner_checks: list[ChecklistRow]) -> str:
@@ -693,9 +769,9 @@ def render_trial_start_checklist_markdown(checklist: TrialStartChecklist) -> str
     for row in checklist.scope_checks:
         lines.append(f"| {row.check} | {row.expected} | {row.actual} | {row.status.value} | {_yes_no(row.blocking)} |")
 
-    lines.extend(["", "## 5. Account Facts Checks", "", "| check | status | source | timestamp | blocking |", "| --- | --- | --- | --- | --- |"])
+    lines.extend(["", "## 5. Account Facts Checks", "", "| check | status | source | timestamp | blocking | notes |", "| --- | --- | --- | --- | --- | --- |"])
     for row in checklist.account_facts_checks:
-        lines.append(f"| {row.check} | {row.status.value} | {row.source} | {row.timestamp_ms or 'missing'} | {_yes_no(row.blocking)} |")
+        lines.append(f"| {row.check} | {row.status.value} | {row.source} | {row.timestamp_ms or 'missing'} | {_yes_no(row.blocking)} | {row.notes} |")
 
     cap = checklist.capital_readiness
     lines.extend([
@@ -713,17 +789,38 @@ def render_trial_start_checklist_markdown(checklist: TrialStartChecklist) -> str
         f"| evidence | {cap.evidence} |",
     ])
 
-    lines.extend(["", "## 7. Operation Layer / Safety Checks", "", "| check | status | evidence | blocking |", "| --- | --- | --- | --- |"])
+    lines.extend(["", "## 7. Operation Layer / Safety Checks", "", "| check | status | evidence | blocking | notes |", "| --- | --- | --- | --- | --- |"])
     for row in checklist.operation_layer_safety_checks:
-        lines.append(f"| {row.check} | {row.status.value} | {row.evidence} | {_yes_no(row.blocking)} |")
+        lines.append(f"| {row.check} | {row.status.value} | {row.evidence} | {_yes_no(row.blocking)} | {row.notes} |")
 
-    lines.extend(["", "## 8. Owner Trial-start Approval", "", "| check | status | evidence | blocking |", "| --- | --- | --- | --- |"])
+    gks_notes = next(
+        (
+            row.notes
+            for row in checklist.operation_layer_safety_checks
+            if "kill switch" in row.check.lower()
+        ),
+        "GKS state was not interpreted.",
+    )
+    lines.extend([
+        "",
+        "## 8. GKS Interpretation",
+        "",
+        gks_notes,
+        "",
+        "Checklist consequence:",
+        "",
+        "- GKS state availability is a readiness fact, not execution permission.",
+        "- This checklist does not change GKS state.",
+        "- Any future trial start still requires separate Owner trial-start approval and an authorized safety transition.",
+    ])
+
+    lines.extend(["", "## 9. Owner Trial-start Approval", "", "| check | status | evidence | blocking |", "| --- | --- | --- | --- |"])
     for row in checklist.owner_trial_start_approval_checks:
         lines.append(f"| {row.check} | {row.status.value} | {row.evidence} | {_yes_no(row.blocking)} |")
 
     lines.extend([
         "",
-        "## 9. Final Verdict",
+        "## 10. Final Verdict",
         "",
         f"Verdict: `{checklist.final_verdict.value}`",
         "",
@@ -734,7 +831,7 @@ def render_trial_start_checklist_markdown(checklist: TrialStartChecklist) -> str
 
     lines.extend([
         "",
-        "## 10. Non-permissions",
+        "## 11. Non-permissions",
         "",
         "This checklist does not grant:",
     ])
