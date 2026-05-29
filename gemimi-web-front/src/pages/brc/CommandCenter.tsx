@@ -34,6 +34,9 @@ export default function CommandCenter() {
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [accountFacts, setAccountFacts] = useState<AccountFactsResponse | null>(null);
   const [mi001, setMi001] = useState<Mi001SolReadinessResponse | null>(null);
+  const [currentCampaign, setCurrentCampaign] = useState<Record<string, unknown> | null>(null);
+  const [reviewPacket, setReviewPacket] = useState<Record<string, unknown> | null>(null);
+  const [evidence, setEvidence] = useState<Record<string, unknown> | null>(null);
   const [capabilities, setCapabilities] = useState<OperationCapability[]>([]);
   const [selectedAction, setSelectedAction] = useState<ReadinessResponse['action_cards'][number] | null>(null);
   const [operationModal, setOperationModal] = useState<OperationPreflightState | null>(null);
@@ -41,16 +44,22 @@ export default function CommandCenter() {
   const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    const [readinessPayload, capabilityPayload, accountFactsPayload, mi001Payload] = await Promise.all([
+    const [readinessPayload, capabilityPayload, accountFactsPayload, mi001Payload, currentCampaignPayload, reviewPacketPayload, evidencePayload] = await Promise.all([
       brcApi.readiness(),
       brcApi.operationCapabilities(),
       brcApi.accountFacts().catch(() => null),
       brcApi.mi001SolReadiness().catch(() => null),
+      brcApi.currentCampaign().then((payload) => payload.campaign || null).catch(() => null),
+      brcApi.reviewPacket().catch(() => null),
+      brcApi.evidence().catch(() => null),
     ]);
     setReadiness(readinessPayload);
     setCapabilities(capabilityPayload.capabilities);
     setAccountFacts(accountFactsPayload);
     setMi001(mi001Payload);
+    setCurrentCampaign(currentCampaignPayload);
+    setReviewPacket(reviewPacketPayload);
+    setEvidence(evidencePayload);
   }, []);
 
   useEffect(() => {
@@ -115,59 +124,22 @@ export default function CommandCenter() {
         items={[
           { label: '安全', value: riskText(readiness.risk_decision), tone: riskTone(readiness.risk_decision) },
           { label: 'Runtime', value: stateText(readiness.runtime_state), tone: stateTone(readiness.runtime_state) },
-          { label: 'Testnet', value: testnetReady ? '可准备' : '阻断', tone: testnetReady ? 'success' : 'warning' },
-          { label: 'Operation', value: `${operationLayerReadyCount} enabled`, tone: operationLayerReadyCount > 0 ? 'success' : 'warning' },
-          { label: 'Live', value: '未授权', tone: 'danger' },
+          { label: 'TRADING_ENV', value: envText(environment), tone: envText(environment) === 'live' ? 'warning' : 'info' },
+          { label: 'Permission', value: permissionText(environment), tone: permissionText(environment) === 'intent_recording' ? 'warning' : 'outline' },
+          { label: 'Orders', value: boolFrom(environment, 'order_allowed') ? 'allowed' : 'disabled', tone: boolFrom(environment, 'order_allowed') ? 'danger' : 'success' },
         ]}
       />
 
-      <PrimaryActionPanel
-        title="Owner Operation Workbench"
-        subtitle={switchCapability?.executable_through_operation ? 'Switch Playbook and supported actions are authorized through backend Operation Preflight.' : `Current blocker: ${testnetReason || readiness.next_step}`}
-        to="/fixed-testnet-rehearsal"
-        buttonLabel="Open Fixed Rehearsal"
-      />
+      <ExecutionPermissionPanel readiness={readiness} accountFacts={accountFacts} />
 
       {mi001 && (
         <Mi001SolReadinessPanel
           data={mi001}
-          actionResult={startupGuardActionResult}
-          onPreflightArm={runStartupGuardPreflight}
+          currentCampaign={currentCampaign}
+          reviewPacket={reviewPacket}
+          evidence={evidence}
         />
       )}
-
-      <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Operation Layer</h3>
-          <Badge variant={operationLayerReadyCount > 0 ? 'success' : 'warning'}>{operationLayerReadyCount} executable</Badge>
-        </div>
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[1fr_1fr]">
-          <OperationActionCard
-            capability={switchCapability}
-            onOpen={openSwitchPlaybookPreflight}
-            currentPlaybookId={stringAt(playbook, 'current_playbook_id', 'PB-000-OBSERVE-ONLY')}
-          />
-          <CapabilityMatrix capabilities={capabilities} />
-        </div>
-      </section>
-
-      <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-bold text-zinc-700 dark:text-zinc-300">安全按钮</h3>
-          <Badge variant="outline">全局可见</Badge>
-        </div>
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
-          {readiness.global_cutoff_controls.map((action) => (
-            <Phase0ActionCard
-              key={action.action_card_id}
-              action={action}
-              capability={capabilityByType.get(operationTypeForAction(action.action_type))}
-              onOpen={() => setSelectedAction(action)}
-              onOperationOpen={() => openActionOperationPreflight(action)}
-            />
-          ))}
-        </div>
-      </section>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_1fr_1fr]">
         <CompactPanel
@@ -192,52 +164,18 @@ export default function CommandCenter() {
         />
         <CompactPanel
           icon={<GitBranch className="h-4 w-4 text-blue-500" />}
-          title="打法"
+          title="Signal / Intent / Evidence"
           rows={[
-            ['Playbook', stringAt(playbook, 'current_playbook_id', 'PB-000')],
-            ['模式', stringAt(playbook, 'current_mode', readiness.runtime_state)],
-            ['R5', stringAt(recordAt(playbook, 'r5_carrier'), 'implementation_status', 'later')],
+            ['signal loop', signalLoopStatus(currentCampaign)],
+            ['signal evaluated', evidence ? 'reported' : 'not reported yet'],
+            ['trial trade intent', trialTradeIntentStatus(currentCampaign, evidence)],
           ]}
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.15fr_0.85fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-blue-500" />
-              当前动作
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-2 md:grid-cols-2">
-            {mainActions.length > 0
-              ? mainActions.map((action) => (
-                <Phase0ActionCard
-                  key={action.action_card_id}
-                  action={action}
-                  capability={capabilityByType.get(operationTypeForAction(action.action_type))}
-                  onOpen={() => setSelectedAction(action)}
-                  onOperationOpen={() => openActionOperationPreflight(action)}
-                />
-              ))
-              : <div className="text-sm text-zinc-500">暂无可操作动作。</div>}
-          </CardContent>
-        </Card>
+      <BoundaryPanel latestAudit={latestAudit} nextStep={readiness.next_step} testnetReason={testnetReason} operationLayerReadyCount={operationLayerReadyCount} />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>边界</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            <QuickFact label="环境" value={stringAt(environment, 'current', 'simulation')} />
-            <QuickFact label="交易所" value={stringAt(environment, 'exchange_mode', 'unknown')} />
-            <QuickFact label="可执行" value={arrayAt(environment, 'executable_modes').join(', ') || 'local / mock / testnet'} />
-            <QuickFact label="最近记录" value={latestAudit ? stringAt(latestAudit, 'title', stringAt(latestAudit, 'type', 'event')) : '无'} />
-          </CardContent>
-        </Card>
-      </div>
-
-      <DeveloperDetails data={{ readiness, account_facts: accountFacts }} label="Details" />
+      <DeveloperDetails data={{ readiness, account_facts: accountFacts, current_campaign: currentCampaign, review_packet: reviewPacket, evidence }} label="Details" />
       <ActionCardSummaryModal action={selectedAction} onClose={() => setSelectedAction(null)} />
       <OperationPreflightModal
         state={operationModal}
@@ -270,25 +208,44 @@ export default function CommandCenter() {
 
 function Mi001SolReadinessPanel({
   data,
-  actionResult,
-  onPreflightArm,
+  currentCampaign,
+  reviewPacket,
+  evidence,
 }: {
   data: Mi001SolReadinessResponse;
-  actionResult: string | null;
-  onPreflightArm: () => void;
+  currentCampaign: Record<string, unknown> | null;
+  reviewPacket: Record<string, unknown> | null;
+  evidence: Record<string, unknown> | null;
 }) {
-  const startupAction = data.startup_guard_action;
   const blockingChecks = data.readiness.checks.filter((item) => item.blocking);
-  const disabledActionIds = new Set(data.owner_actions.disabled_actions.map((item) => item.action_id));
   return (
     <Card className="border-amber-500/30 bg-amber-500/[0.04]">
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center justify-between gap-2">
-          <span>MI-001 SOL bounded trial readiness</span>
+          <span>MI-001 SOL Golden Path</span>
           <StatusBadge state={data.readiness.verdict} />
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+        <div className="rounded-sm border border-blue-500/30 bg-blue-500/[0.05] p-3 text-sm leading-6 text-blue-900 dark:text-blue-100">
+          MI-001 SOL 已完成试验前准备和最终 review；当前 trial 未启动。唯一阻断项是 runtime-owned Startup Guard preflight。当前系统处于 Live 只读 / Intent Recording，不能下单。
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            <Badge variant="outline">technical: {data.readiness.verdict}</Badge>
+            <Badge variant="outline">trial not started</Badge>
+            <Badge variant="outline">no execution intent</Badge>
+            <Badge variant="outline">no order</Badge>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-4">
+          <QuickFact label="trial" value="not started" />
+          <QuickFact label="execution intent" value="none" />
+          <QuickFact label="order" value="none" />
+          <QuickFact label="live trading" value="disabled" />
+        </div>
+        <p className="rounded-sm border border-rose-500/30 bg-rose-500/[0.04] p-2 text-rose-800 dark:text-rose-200">
+          trial not started; no execution intent; no order; live trading disabled.
+        </p>
+
         <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
           <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Candidate</p>
@@ -317,7 +274,19 @@ function Mi001SolReadinessPanel({
         </div>
 
         <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Current blocker</p>
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Terminal blocker</p>
+          <div className="mb-2 rounded-sm border border-amber-500/30 bg-amber-500/[0.05] p-3 text-amber-900 dark:text-amber-100">
+            <p className="font-semibold">Startup Guard 未在 runtime 中完成预检。</p>
+            <p className="mt-1">
+              这是 runtime-owned startup guard blocker，不是策略失败，不是 PG 注册失败，也不是账户事实失败。离线报告、PG metadata、Markdown packet 只能说明准备材料已存在，不能代表 runtime guard 已 armed。
+            </p>
+            <p className="mt-1">
+              当前 Owner 选择是继续完善控制台验收，不继续 runtime-bound preflight；因此 trial 仍然未启动，execution intent 和 order 都不存在。
+            </p>
+            <div className="mt-2">
+              <Badge variant="outline">technical: blocked_startup_guard_runtime_coupled</Badge>
+            </div>
+          </div>
           {blockingChecks.length > 0 ? (
             <ul className="list-disc space-y-1 pl-5">
               {blockingChecks.map((item) => (
@@ -342,7 +311,7 @@ function Mi001SolReadinessPanel({
                     <p className="text-zinc-500">{item.evidence}</p>
                   </div>
                   <div className="text-right">
-                    <StatusBadge state={item.status} />
+                    <StatusBadge state={checkStatus(item.status, item.blocking)} />
                     {item.blocking && <p className="mt-1 text-[10px] font-bold uppercase text-rose-600 dark:text-rose-300">blocking</p>}
                   </div>
                 </div>
@@ -361,50 +330,10 @@ function Mi001SolReadinessPanel({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div>
-            <p className="font-semibold">{startupAction.label}</p>
-            <p className="text-zinc-500">{startupAction.safety_text}</p>
-            {!startupAction.enabled && (
-              <p className="mt-1 text-amber-700 dark:text-amber-300">
-                Requires: {startupAction.enabled_when.join('; ')}.
-              </p>
-            )}
-            {actionResult && (
-              <p className="mt-1 rounded-sm border border-zinc-200 bg-white/70 p-2 font-mono text-[11px] dark:border-zinc-800 dark:bg-zinc-950">
-                {actionResult}
-              </p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onPreflightArm}
-            disabled={!startupAction.enabled}
-            className={startupAction.enabled
-              ? 'inline-flex min-h-10 items-center justify-center rounded-sm border border-amber-600 bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-500'
-              : 'inline-flex min-h-10 cursor-not-allowed items-center justify-center rounded-sm border border-zinc-300 px-3 py-2 text-xs font-bold text-zinc-500 dark:border-zinc-700'}
-          >
-            Arm startup guard preflight
-          </button>
-        </div>
-
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
           <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Owner actions</p>
-            <div className="space-y-2">
-              {[...data.owner_actions.allowed_actions, ...data.owner_actions.disabled_actions].map((item) => (
-                <div key={item.action_id} className="grid grid-cols-[1fr_auto] gap-2 border-b border-zinc-100 pb-2 last:border-0 last:pb-0 dark:border-zinc-800">
-                  <div>
-                    <p className="font-semibold text-zinc-900 dark:text-zinc-100">{item.label}</p>
-                    <p className="text-zinc-500">{item.safety_text}</p>
-                    {item.disabled_reason && <p className="text-amber-700 dark:text-amber-300">{item.disabled_reason}</p>}
-                  </div>
-                  <Badge variant={item.enabled ? 'success' : disabledActionIds.has(item.action_id) ? 'danger' : 'warning'}>
-                    {item.enabled ? 'enabled' : 'disabled'}
-                  </Badge>
-                </div>
-              ))}
-            </div>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Golden path progress</p>
+            <GoldenPathRows data={data} currentCampaign={currentCampaign} reviewPacket={reviewPacket} evidence={evidence} />
           </div>
           <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Non-permissions</p>
@@ -418,6 +347,117 @@ function Mi001SolReadinessPanel({
             </div>
           </div>
         </div>
+        <div className="rounded-sm border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/50">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Allowed next / forbidden next</p>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <p className="rounded-sm border border-emerald-500/30 bg-emerald-500/[0.04] p-2 text-emerald-800 dark:text-emerald-200">
+              Allowed: read readiness, review MI-001 SOL evidence, inspect account facts, inspect campaign metadata, and resolve the startup guard blocker in a separately authorized runtime-control task.
+            </p>
+            <p className="rounded-sm border border-rose-500/30 bg-rose-500/[0.04] p-2 text-rose-800 dark:text-rose-200">
+              Forbidden: live trading, runtime start, trial start, execution intent creation, order creation, order placement, cancel, close, flatten, transfer, withdrawal, or permission mutation.
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExecutionPermissionPanel({
+  readiness,
+  accountFacts,
+}: {
+  readiness: ReadinessResponse;
+  accountFacts: AccountFactsResponse | null;
+}) {
+  const boundary = readiness.environment_boundary || {};
+  return (
+    <Card className="border-blue-500/30 bg-blue-500/[0.04]">
+      <CardHeader>
+        <CardTitle>Execution Permission</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-4">
+          <QuickFact label="TRADING_ENV" value={envText(boundary)} />
+          <QuickFact label="BRC_EXECUTION_PERMISSION_MAX" value={stringAt(boundary, 'brc_execution_permission_max', 'read_only')} />
+          <QuickFact label="resolved permission" value={permissionText(boundary)} />
+          <QuickFact label="live read-only" value={boolFrom(boundary, 'live_read_only') ? 'Live 只读 / Intent Recording' : 'not active'} />
+        </div>
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+          <p className="rounded-sm border border-emerald-500/30 bg-emerald-500/[0.04] p-2 text-emerald-800 dark:text-emerald-200">
+            Execution intent allowed: {boolFrom(boundary, 'execution_intent_allowed') ? 'yes' : 'no'}; order allowed: {boolFrom(boundary, 'order_allowed') ? 'yes' : 'no'}.
+          </p>
+          <p className="rounded-sm border border-zinc-200 bg-white/70 p-2 dark:border-zinc-800 dark:bg-zinc-950/50">
+            Account fact source: {accountFacts?.source || 'not reported yet'}; truth level: {accountFacts?.truth_level || 'not reported yet'}.
+          </p>
+        </div>
+        <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] p-2 text-amber-800 dark:text-amber-200">
+          live 只表示当前环境字段；这里的 live 是 Live 只读 / Intent Recording，不是 live trading enabled。signal_loop_enabled、signal_generated、strategy_active、runtime_started 或 trial_trade_intent evidence 都不会授予下单权限。
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function GoldenPathRows({
+  data,
+  currentCampaign,
+  reviewPacket,
+  evidence,
+}: {
+  data: Mi001SolReadinessResponse;
+  currentCampaign: Record<string, unknown> | null;
+  reviewPacket: Record<string, unknown> | null;
+  evidence: Record<string, unknown> | null;
+}) {
+  const rows = [
+    ['broad smoke', 'ready', `${data.evidence.signal_count} signal rows; research evidence only`],
+    ['Owner acceptance', 'ready', data.source_refs.find((ref) => ref.includes('owner')) || 'reported by MI-001 readiness'],
+    ['bounded trial plan', 'ready', 'funded validation plan reported; not trial started'],
+    ['account equity mapping', 'ready', `${data.risk_policy.account_equity} equity / ${data.risk_policy.available_margin} available margin`],
+    ['PG registration refs', 'ready', data.source_refs.filter((ref) => ref.includes('brc_')).join(', ') || 'not reported yet'],
+    ['final pre-start review', reviewPacket ? 'ready' : 'warning', reviewPacket ? 'review packet reported' : 'not reported yet'],
+    ['campaign metadata', currentCampaign ? 'ready' : 'warning', currentCampaign ? stringAt(currentCampaign, 'campaign_id', 'current campaign reported') : 'not reported yet'],
+    ['signal / trial trade intent evidence', evidence ? 'warning' : 'warning', evidence ? 'evidence reported; not order' : 'not reported yet'],
+    ['terminal state', data.readiness.verdict.includes('blocked') ? 'blocked' : 'ready', data.readiness.verdict],
+  ];
+  return (
+    <div className="space-y-2">
+      {rows.map(([label, status, value]) => (
+        <div key={label} className="grid grid-cols-[1fr_auto] gap-2 border-b border-zinc-100 pb-2 last:border-0 last:pb-0 dark:border-zinc-800">
+          <div>
+            <p className="font-semibold text-zinc-900 dark:text-zinc-100">{label}</p>
+            <p className="text-zinc-500">{value}</p>
+          </div>
+          <StatusBadge state={status} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BoundaryPanel({
+  latestAudit,
+  nextStep,
+  testnetReason,
+  operationLayerReadyCount,
+}: {
+  latestAudit?: Record<string, unknown> | null;
+  nextStep: string;
+  testnetReason: string;
+  operationLayerReadyCount: number;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Why trial has not started</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+        <p>Trial has not started because the terminal blocker is startup guard/runtime coupling. No execution intent exists and no order exists.</p>
+        <p>Next allowed work is inspection and resolving the runtime-owned guard blocker under explicit Owner authorization. Current next step: {nextStep}</p>
+        {testnetReason && <p className="text-amber-700 dark:text-amber-300">Readiness reason: {testnetReason}</p>}
+        <QuickFact label="operation preflight capability count" value={String(operationLayerReadyCount)} />
+        <QuickFact label="latest audit" value={latestAudit ? stringAt(latestAudit, 'title', stringAt(latestAudit, 'type', 'event')) : 'not reported yet'} />
       </CardContent>
     </Card>
   );
@@ -425,6 +465,38 @@ function Mi001SolReadinessPanel({
 
 function boolText(value: boolean) {
   return value ? 'true' : 'false';
+}
+
+function boolFrom(source: Record<string, unknown>, key: string): boolean {
+  const value = source[key];
+  return value === true || value === 'true';
+}
+
+function envText(source: Record<string, unknown>): string {
+  return stringAt(source, 'trading_env', stringAt(source, 'current', 'unknown'));
+}
+
+function permissionText(source: Record<string, unknown>): string {
+  return stringAt(source, 'resolved_permission', stringAt(source, 'brc_execution_permission_max', 'read_only'));
+}
+
+function checkStatus(status: string, blocking: boolean): string {
+  if (blocking) return 'blocked';
+  if (status === 'pass') return 'ready';
+  if (status === 'not_checked') return 'future_phase';
+  if (status === 'warning') return 'warning';
+  return status;
+}
+
+function signalLoopStatus(campaign: Record<string, unknown> | null): string {
+  const metadata = recordAt(campaign, 'metadata_json');
+  return stringAt(metadata, 'signal_loop_status', stringAt(campaign, 'signal_loop_status', 'not reported yet'));
+}
+
+function trialTradeIntentStatus(campaign: Record<string, unknown> | null, evidence: Record<string, unknown> | null): string {
+  const metadata = recordAt(campaign, 'metadata_json');
+  const value = stringAt(metadata, 'trial_trade_intent', stringAt(evidence, 'trial_trade_intent', 'not reported yet'));
+  return value === 'not reported yet' ? value : `${value} (evidence, not order)`;
 }
 
 function Phase0ActionCard({

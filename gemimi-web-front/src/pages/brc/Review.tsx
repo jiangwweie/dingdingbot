@@ -14,6 +14,11 @@ export default function Review() {
   const [operationModal, setOperationModal] = useState<OperationPreflightState | null>(null);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [packet, setPacket] = useState<Record<string, unknown> | null>(null);
+  const [evidence, setEvidence] = useState<Record<string, unknown> | null>(null);
+  const [accountFacts, setAccountFacts] = useState<Record<string, unknown> | null>(null);
+  const [mi001, setMi001] = useState<Record<string, unknown> | null>(null);
+  const [decisions, setDecisions] = useState<Array<Record<string, unknown>>>([]);
+  const [bindings, setBindings] = useState<Array<Record<string, unknown>>>([]);
   const [eligibility, setEligibility] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
@@ -24,15 +29,15 @@ export default function Review() {
         setReadiness(payload);
         const latestCampaignId = String(payload.latest_campaign?.campaign_id || '');
         setCampaignId(latestCampaignId);
-        if (isActionEnabled(payload, 'write_review_decision')) {
-          return Promise.all([
-            brcApi.reviewPacket().then(setPacket).catch(() => setPacket(null)),
-            brcApi.nextEligibility().then(setEligibility).catch(() => setEligibility(null)),
-          ]);
-        }
-        setPacket(null);
-        setEligibility(null);
-        return undefined;
+        return Promise.all([
+          brcApi.reviewPacket().then(setPacket).catch(() => setPacket(null)),
+          brcApi.evidence().then(setEvidence).catch(() => setEvidence(null)),
+          brcApi.accountFacts().then((result) => setAccountFacts(result as unknown as Record<string, unknown>)).catch(() => setAccountFacts(null)),
+          brcApi.mi001SolReadiness().then((result) => setMi001(result as unknown as Record<string, unknown>)).catch(() => setMi001(null)),
+          brcApi.listAdmissionDecisions().then((result) => setDecisions(result as unknown as Array<Record<string, unknown>>)).catch(() => setDecisions([])),
+          brcApi.listTrialBindings().then((result) => setBindings(result as unknown as Array<Record<string, unknown>>)).catch(() => setBindings([])),
+          brcApi.nextEligibility().then(setEligibility).catch(() => setEligibility(null)),
+        ]);
       })
       .catch(setError);
   }, []);
@@ -84,6 +89,11 @@ export default function Review() {
   const canSubmitReview = isActionEnabled(readiness, 'write_review_decision') && Boolean(campaignId);
   const reviewDisabledReason = actionDisabledReason(readiness, 'write_review_decision');
   const latestCampaign = readiness?.latest_campaign || null;
+  const latestDecision = decisions[0] || {};
+  const latestBinding = bindings[0] || {};
+  const metadata = recordAt(latestCampaign, 'metadata_json');
+  const miReadiness = recordAt(mi001, 'readiness');
+  const miRisk = recordAt(mi001, 'risk_policy');
 
   return (
     <div className="space-y-4">
@@ -110,6 +120,48 @@ export default function Review() {
         Start Review Operation
       </button>
       {error && <ErrorState error={error} />}
+
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Final pre-start review packet</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+            <div className="rounded-sm border border-blue-500/30 bg-blue-500/[0.05] p-3 text-sm leading-6 text-blue-900 dark:text-blue-100">
+              Final pre-start review 已完成；当前 blocker 是 startup guard runtime-coupled。Review / Evidence 仅用于复盘和验收，不授权 execution intent 或 order。
+              <div className="mt-2">
+                <StatusBadge state={stringAt(miReadiness, 'verdict', 'blocked_startup_guard_runtime_coupled')} />
+              </div>
+            </div>
+            <ReviewFact label="review packet" value={packet ? 'reported' : 'not reported yet'} />
+            <ReviewFact label="risk disclosure" value={stringAt(latestDecision, 'risk_disclosure_json', 'not reported yet')} />
+            <ReviewFact label="Owner acceptance" value={stringAt(latestDecision, 'owner_risk_acceptance_id', stringAt(latestBinding, 'owner_risk_acceptance_id', 'not reported yet'))} />
+            <ReviewFact label="account equity mapping" value={stringAt(miRisk, 'account_equity', stringAt(accountFacts, 'account_summary', 'not reported yet'))} />
+            <ReviewFact label="terminal blocker" value={stringAt(miReadiness, 'verdict', 'not reported yet')} />
+            <p className="rounded-sm border border-amber-500/30 bg-amber-500/[0.05] p-2 text-amber-800 dark:text-amber-200">
+              Startup Guard runtime-coupled blocker 是 runtime-owned safety blocker，不是策略失败。技术标签：blocked_startup_guard_runtime_coupled。
+            </p>
+            <JsonDetails data={{ packet, mi001, latestDecision, latestBinding, accountFacts }} label="展开 final pre-start evidence" />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Signal / trial trade intent evidence</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+            <ReviewFact label="signal evaluation" value={evidence ? 'reported' : 'not reported yet'} />
+            <ReviewFact label="signal_evaluated" value={stringAt(metadata, 'signal_evaluated', evidence ? 'reported' : 'not reported yet')} />
+            <ReviewFact label="trial_trade_intent" value={`${stringAt(metadata, 'trial_trade_intent', 'not reported yet')} (evidence, not order)`} />
+            <ReviewFact label="execution intent" value="none" />
+            <ReviewFact label="order" value="none" />
+            <p className="rounded-sm border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-950">
+              trial_trade_intent 只是 evidence，不是 order、order request、execution intent、live permission 或 runtime command。signal / intent 缺失时保持 not reported yet，不伪造数据。
+            </p>
+            <JsonDetails data={evidence} label="展开 signal / trial evidence" />
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Card>
@@ -221,6 +273,28 @@ export default function Review() {
         onStateChange={setOperationModal}
         onRefresh={load}
       />
+      <DeveloperDetails data={{ readiness, packet, evidence, accountFacts, mi001, decisions, bindings, eligibility }} />
+    </div>
+  );
+}
+
+function recordAt(source: Record<string, unknown> | undefined | null, key: string): Record<string, unknown> {
+  const value = source?.[key];
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringAt(source: Record<string, unknown> | undefined | null, key: string, fallback: string): string {
+  const value = source?.[key];
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function ReviewFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-2 last:border-0 dark:border-zinc-800">
+      <span className="text-zinc-500">{label}</span>
+      <span className="max-w-[60%] break-words text-right font-medium">{value}</span>
     </div>
   );
 }
