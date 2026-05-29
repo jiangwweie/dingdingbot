@@ -1,7 +1,16 @@
-# 盯盘狗项目 - 记忆索引
+# 个人量化项目 - 记忆索引
+
+> [!IMPORTANT]
+> **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
+> **Current positioning** (Owner 2026-05-29): BRC fast trial-and-review research system for small risk-capital Campaigns.
+> **Docs governance commit**: `3df699b` — establishes current canon and archives stale knowledge-pack v0.
+>
+> The memory entries below are from an earlier project phase (v3 migration / Phase 1-2, updated 2026-03-30).
+> They are preserved as historical context but do not represent current project state.
+> For current facts, blockers, and read order, start from the knowledge-pack canon above.
 
 > 本项目使用文件化记忆系统，记录用户偏好、项目决策和参考资源。
-> 最后更新：2026-03-30
+> 最后更新：2026-03-30（历史内容）。当前基准见上方 knowledge-pack 链接。
 
 ---
 

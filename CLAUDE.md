@@ -1,7 +1,7 @@
 # CLAUDE.md - Dingdingbot Claude Operating Guide
 
-Last updated: 2026-04-29
-Current phase: Live-safe v1 replanning and execution-safety hardening
+Last updated: 2026-05-29
+Current phase: BRC fast trial-and-review research system
 
 ## Role
 
@@ -17,6 +17,9 @@ System goals are capability goals. Annual return and max drawdown numbers are in
 
 Before starting work, read:
 
+- `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — current project baseline
+- `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts
+- `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — trial blockers
 - `docs/ops/project-roadmap-v2.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/live-safe-v1-task-board.md`

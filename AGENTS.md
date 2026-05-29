@@ -1,7 +1,24 @@
 # AGENTS.md - Dingdingbot Agent Operating Guide
 
-Last updated: 2026-04-29
-Current phase: Live-safe v1 replanning and execution-safety hardening
+Last updated: 2026-05-29
+Current phase: BRC fast trial-and-review research system
+
+## Current Document Authority
+
+When project documents conflict, follow this order:
+
+1. Owner explicit correction / decision
+2. Current tracked code + current git status
+3. Current verified reports
+4. ADR / decision records
+5. Historical docs
+6. Archived knowledge-pack v0
+
+Current project baseline starts from:
+`docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
+
+Untracked files must never be described as integrated capabilities.
+Real live trading is prohibited unless Owner explicitly authorizes (ADR-0009).
 
 ## Operating Model
 
@@ -17,7 +34,14 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 
 ## Current Program SSOT
 
-Read these first for current work:
+**Current canon (start here)**:
+
+- `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
+- `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
+- `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
+- `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
+
+**Operational context (still valid)**:
 
 - `docs/ops/project-roadmap-v2.md`
 - `docs/ops/live-safe-v1-program.md`
@@ -27,7 +51,6 @@ Read these first for current work:
 - `docs/ops/agent-working-rules.md`
 - `docs/ops/codex-claude-handoff-template.md`
 - `docs/adr/0001-live-safe-v1-scope.md`
-- `docs/gpt/`
 
 Archived pre-reset material lives under:
 

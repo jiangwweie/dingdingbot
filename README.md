@@ -1,6 +1,19 @@
-# 盯盘狗 🐶
+> [!IMPORTANT]
+> **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
+> **Current fact registry**: `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
+> **Current readiness blockers**: `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
+> **Document governance rules**: `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
+>
+> This README was originally written for an earlier "fully automated trading system" phase.
+> Current project positioning (Owner 2026-05-29): **BRC fast trial-and-review research system for small risk-capital Campaigns**.
+> Do not read old wording about "automated execution" or "信号监控、执行与回测平台" as current capability.
 
-**加密货币量化交易自动化系统** - 完全动态化、高并发、强状态一致性的交易信号监控、执行与回测平台。
+---
+
+# BRC Fast Trial-and-Review Research System
+
+**Bounded Risk Campaign (BRC) fast trial-and-review research system** for small risk-capital Campaigns.
+Isolated risk capital → playbook → bounded attempts → hard risk envelope.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
@@ -8,9 +21,31 @@
 
 ---
 
+## Current Status (2026-05-29)
+
+- Broad OHLCV screening completed
+- 3 trial candidates pending cost/baseline enrichment
+- Pre-trial readiness blocked by `account_equity` (wallet_equity / available_margin = not_available)
+- Real live trading: **NO** — prohibited by ADR-0009 unless Owner explicitly authorizes
+- Automated strategy execution: **NO** — `auto_execution_enabled=False`, `auto_within_budget_enabled=False`
+- signal-to-order: **NO**
+- signal-to-intent: **PARTIAL** (furthest state: `signal_evaluated_no_intent`)
+- Tracked migrations: 001-021 (current schema); 022-027 untracked and not integrated
+
+## Start Here
+
+1. `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — project definition and current state
+2. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
+3. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
+4. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
+5. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — detailed position analysis with evidence
+6. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
+
+---
+
 ## 🎯 核心原则
 
-**Automated Execution（自动执行）** - 量化交易自动化平台，支持信号监控、订单执行、仓位管理全流程。安全边界：API 密钥仅开交易权限，严禁提现权限。
+**Research-Only Boundary** — 本系统当前为研究和有限风险资本试验平台。安全边界：无 Owner 明确授权不执行真实交易，自动化执行禁用，API 密钥仅开交易权限、严禁提现权限。
 
 ---
 
@@ -83,6 +118,9 @@ python tests/backtest.py
 ---
 
 ## 📦 项目结构
+
+> **注意**: 以下目录结构包含历史遗留的 execution/order 模块。当前 BRC 研究系统不执行真实交易。
+> `auto_execution_enabled=False`, `auto_within_budget_enabled=False`。
 
 ```
 dingdingbot/
@@ -265,6 +303,9 @@ pytest tests/unit/test_strategy_engine.py -v
 ## 📚 开发文档
 
 - `CLAUDE.md` - 开发者快速指南
+- `AGENTS.md` - Agent 工作规则
+- `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` - 项目当前基准
+- `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` - 事实注册表
 - `docs/arch/` - 架构规范与设计文档
 - `docs/tasks/` - 子任务说明与演进路线
 
@@ -297,10 +338,12 @@ pytest tests/unit/test_strategy_engine.py -v
 - RuntimeConfigResolver + runtime_profiles 配置真源
 - Sim-1 模拟盘观察部署
 
-### 🎯 当前阶段：Sim-1 观察期
+### 🎯 当前阶段：BRC Fast Trial-and-Review Research
+
+- 历史回测研究与 Campaign 候选评估
+- Pre-trial readiness blocked by account_equity
 - 策略研究与运行治理
-- 前端 runtime / research 观察面完善
-- PG / 边界治理后续减熵
+- Real live trading prohibited unless Owner explicitly authorizes
 
 ---
 
@@ -310,4 +353,4 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ---
 
-*本系统为量化交易自动化平台，具备自动执行能力，不构成任何投资建议。*
+*本项目为 BRC fast trial-and-review research system，Real live trading prohibited unless Owner explicitly authorizes. 不构成任何投资建议。*
