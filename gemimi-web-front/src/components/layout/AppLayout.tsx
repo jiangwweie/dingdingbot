@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Outlet, NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bot,
@@ -61,10 +61,11 @@ const primaryNav = [
   { name: 'Markets & Orders', to: '/markets-orders', icon: ShieldCheck },
   { name: 'Campaign', to: '/campaign', icon: ListChecks },
   { name: 'Review / Evidence', to: '/review-evidence', icon: BookOpenCheck },
-  { name: 'Fixed Rehearsal', to: '/fixed-testnet-rehearsal', icon: PlayCircle },
+  { name: 'Strategy Families', to: '/strategy-families', icon: GitBranch },
 ];
 
 const moreNav = [
+  { name: 'Fixed Rehearsal', to: '/fixed-testnet-rehearsal', icon: PlayCircle },
   { name: 'Strategy / Playbook', to: '/strategy-playbook', icon: GitBranch },
   { name: 'Campaigns legacy', to: '/campaigns', icon: ListChecks },
   { name: 'Review legacy', to: '/review', icon: BookOpenCheck },
@@ -83,6 +84,7 @@ const routeTitles: Record<string, string> = {
   '/markets-orders': 'Markets & Orders',
   '/campaign': 'Campaign',
   '/review-evidence': 'Review / Evidence',
+  '/strategy-families': 'Strategy Families',
   '/fixed-testnet-rehearsal': 'Fixed Testnet Rehearsal',
   '/llm-copilot': 'LLM legacy',
   '/strategy-playbook': 'Strategy / Playbook',
@@ -100,8 +102,23 @@ const routeTitles: Record<string, string> = {
 
 export default function AppLayout() {
   const [refreshCount, setRefreshCount] = useState(0);
+  const [boundary, setBoundary] = useState<Record<string, unknown> | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let cancelled = false;
+    brcApi.readiness()
+      .then((payload) => {
+        if (!cancelled) setBoundary(payload.environment_boundary || {});
+      })
+      .catch(() => {
+        if (!cancelled) setBoundary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshCount, location.pathname]);
 
   const handleManualRefresh = useCallback(() => {
     setRefreshCount((count) => count + 1);
@@ -146,10 +163,14 @@ export default function AppLayout() {
 
           <div className="space-y-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
             <div className="flex items-center justify-between">
-              <Badge variant="info">testnet</Badge>
-              <Badge variant="danger">live 未授权</Badge>
+              <Badge variant="info">{displayValue(boundary, 'trading_env', displayValue(boundary, 'current', 'unknown'))}</Badge>
+              <Badge variant={displayValue(boundary, 'resolved_permission', 'read_only') === 'intent_recording' ? 'warning' : 'outline'}>
+                {permissionDisplay(boundary)}
+              </Badge>
             </div>
-            <p className="text-[10px] leading-4 text-zinc-500">Phase 0：readiness summary + fixed testnet carrier。No live, transfer, or generic operation execute.</p>
+            <p className="text-[10px] leading-4 text-zinc-500">
+              Owner view is read-only for trading. Live 只读 / Intent Recording does not mean live trading enabled.
+            </p>
           </div>
         </aside>
 
@@ -159,7 +180,10 @@ export default function AppLayout() {
               <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                 {routeTitles[location.pathname] || 'BRC Console'}
               </h2>
-              <Badge variant="outline">Owner gated</Badge>
+              <Badge variant="outline">TRADING_ENV {displayValue(boundary, 'trading_env', 'unknown')}</Badge>
+              <Badge variant={displayValue(boundary, 'order_allowed', 'false') === 'true' ? 'danger' : 'success'}>
+                orders {displayValue(boundary, 'order_allowed', 'false') === 'true' ? 'allowed' : 'disabled'}
+              </Badge>
             </div>
 
             <div className="flex items-center gap-2">
@@ -188,6 +212,19 @@ export default function AppLayout() {
       </div>
     </RefreshContext.Provider>
   );
+}
+
+function displayValue(source: Record<string, unknown> | null, key: string, fallback: string): string {
+  const value = source?.[key];
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value);
+}
+
+function permissionDisplay(boundary: Record<string, unknown> | null): string {
+  const permission = displayValue(boundary, 'resolved_permission', 'read_only');
+  const liveReadOnly = displayValue(boundary, 'live_read_only', 'false') === 'true';
+  if (liveReadOnly && permission === 'intent_recording') return 'Live 只读 / Intent Recording';
+  return permission;
 }
 
 function NavItem({

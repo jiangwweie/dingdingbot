@@ -3105,6 +3105,25 @@ async def get_brc_readiness() -> BrcReadinessResponse:
     }
     parameter_summary = _parameter_summary(profile, testnet)
     environment_boundary = {
+        "trading_env": os.environ.get("TRADING_ENV", "simulation").strip().lower() or "simulation",
+        "brc_execution_permission_max": os.environ.get(
+            "BRC_EXECUTION_PERMISSION_MAX",
+            "read_only",
+        ).strip().lower() or "read_only",
+        "resolved_permission": "intent_recording"
+        if (
+            os.environ.get("TRADING_ENV", "simulation").strip().lower() == "live"
+            and os.environ.get("BRC_EXECUTION_PERMISSION_MAX", "read_only").strip().lower()
+            == "intent_recording"
+        )
+        else "read_only",
+        "live_read_only": (
+            os.environ.get("TRADING_ENV", "simulation").strip().lower() == "live"
+            and os.environ.get("BRC_EXECUTION_PERMISSION_MAX", "read_only").strip().lower()
+            == "intent_recording"
+        ),
+        "execution_intent_allowed": False,
+        "order_allowed": False,
         "current": "simulation",
         "exchange_mode": "binance_testnet" if testnet is True else "unknown_or_not_testnet",
         "executable_modes": ["local", "mock", "binance_testnet"],

@@ -19,6 +19,7 @@ import Review from './pages/brc/Review';
 import RiskAccount from './pages/brc/RiskAccount';
 import RuntimeControl from './pages/brc/RuntimeControl';
 import StrategyPlaybook from './pages/brc/StrategyPlaybook';
+import StrategyFamilies from './pages/brc/StrategyFamilies';
 import Workflow from './pages/brc/Workflow';
 import Login from './pages/Login';
 import './index.css';
@@ -56,6 +57,7 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="markets-orders" element={<MarketsOrders />} />
                 <Route path="campaign" element={<Campaigns />} />
                 <Route path="review-evidence" element={<Review />} />
+                <Route path="strategy-families" element={<StrategyFamilies />} />
                 <Route path="fixed-testnet-rehearsal" element={<FixedTestnetRehearsal />} />
                 <Route path="llm-copilot" element={<LlmCopilot />} />
                 <Route path="strategy-playbook" element={<StrategyPlaybook />} />

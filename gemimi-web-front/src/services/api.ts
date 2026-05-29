@@ -275,6 +275,58 @@ export type AccountFactsResponse = {
   live_ready: false;
 };
 
+export type StrategyFamily = {
+  strategy_family_id: string;
+  family_key: string;
+  name: string;
+  description?: string;
+  status: string;
+  owner?: string;
+  created_at_ms?: number;
+  updated_at_ms?: number;
+};
+
+export type AdmissionDecision = {
+  admission_decision_id: string;
+  admission_request_id: string;
+  decision: string;
+  trial_env: string;
+  trial_stage: string;
+  strategy_family_version_id: string;
+  playbook_id?: string | null;
+  evidence_packet_id: string;
+  owner_market_regime_input_id: string;
+  trial_constraint_snapshot_id: string;
+  execution_mode: string;
+  risk_profile?: string;
+  blockers_json?: string[];
+  warnings_json?: string[];
+  risk_disclosure_json?: Record<string, unknown>;
+  known_gaps_json?: Record<string, unknown>;
+  constraints_snapshot_json?: Record<string, unknown>;
+  owner_risk_acceptance_id?: string | null;
+  created_at_ms?: number;
+};
+
+export type AdmissionTrialBinding = {
+  binding_id: string;
+  admission_decision_id: string;
+  owner_risk_acceptance_id?: string | null;
+  trial_constraint_snapshot_id: string;
+  strategy_family_version_id: string;
+  playbook_id: string;
+  trial_env: string;
+  trial_stage: string;
+  execution_mode: string;
+  binding_status: string;
+  campaign_id?: string | null;
+  runtime_carrier_id?: string | null;
+  created_by_operation_id?: string;
+  created_by_preflight_id?: string;
+  created_at_ms?: number;
+  updated_at_ms?: number;
+};
+
 export type AuditTrailResponse = {
   conclusion: string;
   account_impact: string;
@@ -511,6 +563,24 @@ export const brcApi = {
   listReviewDecisions(limit = 20) {
     return request<{ review_decisions: Array<Record<string, unknown>>; live_ready: false }>(`/api/brc/review-decisions?limit=${limit}`);
   },
+  listStrategyFamilies(limit = 100) {
+    return request<StrategyFamily[]>(`/api/brc/strategy-families?limit=${limit}`);
+  },
+  listAdmissionDecisions(limit = 100) {
+    return request<AdmissionDecision[]>(`/api/brc/admissions/decisions?limit=${limit}`);
+  },
+  getAdmissionDecision(admissionDecisionId: string) {
+    return request<AdmissionDecision>(`/api/brc/admissions/decisions/${encodeURIComponent(admissionDecisionId)}`);
+  },
+  listTrialBindings(limit = 100) {
+    return request<AdmissionTrialBinding[]>(`/api/brc/admissions/trial-bindings?limit=${limit}`);
+  },
+  getTrialBinding(bindingId: string) {
+    return request<AdmissionTrialBinding>(`/api/brc/admissions/trial-bindings/${encodeURIComponent(bindingId)}`);
+  },
+  currentCampaign() {
+    return request<{ campaign: Record<string, unknown>; live_ready?: false }>('/api/brc/campaigns/current');
+  },
   createReviewDecision(input: {
     campaign_id: string;
     source_action_id?: string;
@@ -560,5 +630,8 @@ export const brcApi = {
   },
   listOperations(limit = 20) {
     return request<{ operations: Array<Record<string, unknown>>; live_ready: false }>(`/api/brc/operations?limit=${limit}`);
+  },
+  operationDetail(operationId: string) {
+    return request<OperationConfirmResponse | Record<string, unknown>>(`/api/brc/operations/${encodeURIComponent(operationId)}`);
   },
 };
