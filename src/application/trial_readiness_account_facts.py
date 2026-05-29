@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import Enum
-from typing import Optional, Protocol
+from typing import Literal, Optional, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,6 +21,7 @@ class TrialReadinessAccountFactsModel(BaseModel):
 class AccountFactsSourceType(str, Enum):
     PG_ACCOUNT_FACTS = "pg_account_facts"
     CACHED_SNAPSHOT = "cached_snapshot"
+    BINANCE_USDT_FUTURES_READ_ONLY = "binance_usdt_futures_read_only"
     INJECTED_FAKE = "injected_fake"
     UNAVAILABLE = "unavailable"
 
@@ -41,6 +42,7 @@ class AccountFactsReconciliationStatus(str, Enum):
 
 class TrialReadinessAccountFacts(TrialReadinessAccountFactsModel):
     account_id: Optional[str] = Field(default=None, max_length=128)
+    account_type: Optional[str] = Field(default=None, max_length=128)
     source_id: str = Field(default="unavailable", max_length=256)
     source_type: AccountFactsSourceType = AccountFactsSourceType.UNAVAILABLE
     account_equity: Optional[Decimal] = None
@@ -52,12 +54,13 @@ class TrialReadinessAccountFacts(TrialReadinessAccountFactsModel):
     )
     read_only_guarantee: bool = True
     external_call_performed: bool = False
+    external_call_type: Literal["none", "read_only_account_query", "unknown"] = "none"
     notes: tuple[str, ...] = Field(default_factory=tuple)
 
     def readiness_blockers(self) -> tuple[str, ...]:
         blockers: list[str] = []
-        if self.external_call_performed:
-            blockers.append("external account call performed")
+        if self.external_call_performed and self.external_call_type != "read_only_account_query":
+            blockers.append(f"external call type {self.external_call_type}")
         if not self.read_only_guarantee:
             blockers.append("read-only guarantee missing")
         if self.account_equity is None:

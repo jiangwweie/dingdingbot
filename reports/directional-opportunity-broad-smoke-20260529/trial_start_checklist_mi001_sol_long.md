@@ -8,14 +8,14 @@ This file is a review/checklist artifact. It is not runtime source of truth and 
 
 This is a PG-backed trial start readiness checklist for `MI-001 SOL/USDT:USDT long`.
 
-It does not start a trial, grant execution permission, create orders, connect to an exchange, or call account APIs.
+It does not start a trial, grant execution permission, create orders, or modify account/exchange state. Any account facts shown here are read-only readiness inputs only.
 
 ## 2. Source Inputs
 
 | input | status |
 | --- | --- |
 | pg_registration_records | available |
-| cached_account_facts | missing |
+| cached_account_facts | available |
 | operation_layer_facts | missing |
 | kill_switch_facts | available |
 | owner_trial_start_approval | blocked |
@@ -65,45 +65,45 @@ It does not start a trial, grant execution permission, create orders, connect to
 
 | check | status | source | timestamp | blocking | notes |
 | --- | --- | --- | --- | --- | --- |
-| cached AccountSnapshot exists | missing | trial_readiness_account_facts_source_missing | missing | yes | A safe injectable account facts read model now exists, but no real PG/local source is wired for this checklist run. |
-| wallet_equity/account_equity available | blocked | trial_readiness_account_facts_source_missing | missing | yes | Cannot derive trial risk capital without safe account equity facts. |
-| available_margin available | blocked | trial_readiness_account_facts_source_missing | missing | yes | Cannot compute readiness max_notional candidate without safe available margin facts. |
-| freshness acceptable | blocked | trial_readiness_account_facts_source_missing | missing | yes | No timestamped safe AccountSnapshot was available. |
-| read-only source | not_checked | trial_readiness_account_facts_source_missing | missing | yes | The runtime `_exchange_gateway.get_account_snapshot` helper was not called; no real exchange or account API call was made. |
-| reconciliation acceptable | not_checked | trial_readiness_account_facts_source_missing | missing | yes | No account reconciliation fact was available from a safe source. |
+| cached AccountSnapshot exists | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| wallet_equity/account_equity available | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| available_margin available | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| freshness acceptable | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| read-only source | pass | read_only_account_query | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| reconciliation acceptable | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
 
 ## 6. Capital Readiness
 
 | field | value |
 | --- | --- |
-| status | blocked |
-| current_dedicated_subaccount_equity | blocked |
-| available_margin | blocked |
+| status | pass |
+| current_dedicated_subaccount_equity | 4661.34666567 |
+| available_margin | 3650.39404603 |
 | max_leverage | 5 |
-| computed_max_notional_candidate | blocked |
+| computed_max_notional_candidate | 18251.97023015 |
 | max_total_loss_rule | current_dedicated_subaccount_equity |
-| evidence | fresh cached account equity and available margin are required |
+| evidence | readiness calculation only; not persisted as execution config |
 
 ## 7. Operation Layer / Safety Checks
 
 | check | status | evidence | blocking | notes |
 | --- | --- | --- | --- | --- |
 | Operation Layer gate available | missing | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
-| Operation Layer notional cap available | missing | not_provided | yes | No safe Operation Layer cap source was available for this checklist evaluation. |
-| startup guard state available | not_checked | not_provided | yes | Startup guard is process-local/runtime state; this task did not inspect or mutate runtime. |
-| evidence logging available | missing | not_provided | yes | Evidence logging readiness was not checked through Operation Layer facts. |
-| no active trial position | not_checked | not_provided | yes | No runtime/position repository was queried; this remains blocked until a safe no-active-trial-position fact is available. |
+| Operation Layer notional cap available | missing | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
+| startup guard state available | not_checked | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
+| evidence logging available | missing | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
+| no active trial position | not_checked | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
 | kill switch state available | pass | active=True,source=pg:BRC R3 LLM rehearsal restore safe state | no | active=True means Global Kill Switch blocks all new entries. This is safe fail-closed state, not trial-start readiness. |
 
 ## 8. GKS Interpretation
 
-`active=True` means the Global Kill Switch is engaged and blocks all new entries.
+active=True means Global Kill Switch blocks all new entries. This is safe fail-closed state, not trial-start readiness.
 
 Checklist consequence:
 
-- GKS state is readable from PG and therefore the state check is available.
-- The current `active=True` state is fail-closed and does not authorize trial start.
-- Any future bounded trial start would still require separate Owner trial-start approval and a separate authorized safety transition; this checklist does not perform that transition.
+- GKS state availability is a readiness fact, not execution permission.
+- This checklist does not change GKS state.
+- Any future trial start still requires separate Owner trial-start approval and an authorized safety transition.
 
 ## 9. Owner Trial-start Approval
 
@@ -114,16 +114,9 @@ Checklist consequence:
 
 ## 10. Final Verdict
 
-Verdict: `blocked_fresh_account_facts_required`
+Verdict: `blocked_operation_layer_facts_required`
 
 Blockers:
-
-- cached AccountSnapshot exists
-- wallet_equity/account_equity available
-- available_margin available
-- freshness acceptable
-- read-only source
-- capital readiness calculation unavailable
 - Operation Layer gate available
 - Operation Layer notional cap available
 - startup guard state available
@@ -134,7 +127,6 @@ Blockers:
 ## 11. Non-permissions
 
 This checklist does not grant:
-
 - execution permission
 - order permission
 - runtime start

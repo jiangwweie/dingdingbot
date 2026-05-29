@@ -734,8 +734,13 @@ def _cached_account_facts_from_readiness(
     facts: TrialReadinessAccountFacts,
 ) -> CachedAccountFacts:
     blockers = facts.readiness_blockers()
-    notes = "; ".join([*facts.notes, *blockers])
-    if facts.external_call_performed or not facts.read_only_guarantee:
+    external_note = (
+        f"external_call_type={facts.external_call_type}"
+        if facts.external_call_performed
+        else "external_call_type=none"
+    )
+    notes = "; ".join([*facts.notes, external_note, *blockers])
+    if blockers or not facts.read_only_guarantee:
         return CachedAccountFacts(
             available=False,
             timestamp_ms=facts.timestamp_ms,
@@ -753,7 +758,11 @@ def _cached_account_facts_from_readiness(
         timestamp_ms=facts.timestamp_ms,
         freshness=facts.freshness_status.value,
         source=f"{facts.source_type.value}:{facts.source_id}",
-        read_method=facts.source_type.value,
+        read_method=(
+            facts.external_call_type
+            if facts.external_call_performed
+            else facts.source_type.value
+        ),
         read_only=True,
         reconciliation_status=facts.reconciliation_status.value,
         notes=notes,
@@ -823,7 +832,11 @@ def render_trial_start_checklist_markdown(checklist: TrialStartChecklist) -> str
         "",
         "This is a PG-backed trial start readiness checklist for `MI-001 SOL/USDT:USDT long`.",
         "",
-        "It does not start a trial, grant execution permission, create orders, connect to an exchange, or call account APIs.",
+        (
+            "It does not start a trial, grant execution permission, create orders, "
+            "or modify account/exchange state. Any account facts shown here are "
+            "read-only readiness inputs only."
+        ),
         "",
         "## 2. Source Inputs",
         "",

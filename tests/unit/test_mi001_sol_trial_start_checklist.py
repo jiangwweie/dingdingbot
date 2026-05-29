@@ -11,6 +11,9 @@ from sqlalchemy.pool import StaticPool
 from src.application.mi001_sol_pg_registration_apply import (
     Mi001SolPgRegistrationApplyService,
 )
+from src.application.binance_usdt_futures_account_facts import (
+    BinanceUsdtFuturesAccountFactsSource,
+)
 from src.application.mi001_sol_trial_start_checklist import (
     CachedAccountFacts,
     ChecklistStatus,
@@ -315,3 +318,81 @@ def test_checklist_generator_has_no_execution_order_or_exchange_dependencies() -
     assert "set_leverage" not in combined_source
     assert "withdraw(" not in combined_source
     assert "transfer(" not in combined_source
+
+
+class _FakeBinanceBalanceClient:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.closed = False
+
+    async def fetch_balance(self, params=None):
+        assert params == {"type": "future"}
+        return self.payload
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_binance_read_only_account_facts_source_is_allowed_for_checklist(
+    seeded_repositories,
+):
+    registry_repo, admission_repo = seeded_repositories
+    generator = Mi001SolTrialStartChecklistGenerator(
+        registry_repository=registry_repo,
+        admission_repository=admission_repo,
+    )
+    source = BinanceUsdtFuturesAccountFactsSource(
+        balance_client=_FakeBinanceBalanceClient(
+            {
+                "timestamp": 1770000000000,
+                "info": {
+                    "totalMarginBalance": "123.45",
+                    "availableBalance": "100.00",
+                },
+            }
+        )
+    )
+
+    checklist = await generator.generate_with_account_facts_source(
+        generated_at_ms=1770000000000,
+        account_facts_source=source,
+        operation_layer_facts=OperationLayerFacts(
+            available=True,
+            gate_available=True,
+            notional_cap_available=True,
+            notional_cap=Decimal("400"),
+            evidence_logging_available=True,
+            no_active_trial_position=True,
+            startup_guard_available=True,
+            startup_guard_armed=False,
+            source="fake_operation_layer_facts",
+        ),
+        kill_switch_facts=KillSwitchFacts(
+            available=True,
+            active=True,
+            source="fake_pg_gks",
+            updated_at_ms=1770000000000,
+        ),
+    )
+
+    assert checklist.source_inputs["cached_account_facts"] == "available"
+    assert checklist.capital_readiness.current_dedicated_subaccount_equity == Decimal("123.45")
+    assert checklist.capital_readiness.available_margin == Decimal("100.00")
+    assert checklist.capital_readiness.computed_max_notional_candidate == Decimal("400")
+    assert all(not row.blocking for row in checklist.account_facts_checks)
+    assert any(
+        row.check == "read-only source"
+        and row.status == ChecklistStatus.PASS
+        and row.source == "read_only_account_query"
+        for row in checklist.account_facts_checks
+    )
+    assert checklist.final_verdict == (
+        TrialStartChecklistVerdict.BLOCKED_OWNER_TRIAL_START_APPROVAL_REQUIRED
+    )
+
+
+def test_binance_read_only_source_exposes_no_mutating_methods() -> None:
+    public_names = {name for name in dir(BinanceUsdtFuturesAccountFactsSource) if not name.startswith("_")}
+
+    assert public_names == {"close", "read_trial_readiness_account_facts"}
