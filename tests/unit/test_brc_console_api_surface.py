@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -139,13 +140,23 @@ class _FakeOrder:
 
 
 class _FakeExchangeGateway:
-    def __init__(self, *, positions=None, open_orders=None, recent_orders=None, recent_fills=None) -> None:
+    def __init__(
+        self,
+        *,
+        positions=None,
+        open_orders=None,
+        recent_orders=None,
+        recent_fills=None,
+        account_snapshot=None,
+    ) -> None:
         self.positions = list(positions or [])
         self.open_orders = list(open_orders or [])
         self.recent_orders = list(recent_orders or [])
         self.recent_fills = list(recent_fills or [])
+        self.account_snapshot = account_snapshot
         self.position_symbols: list[str] = []
         self.open_order_calls: list[tuple[str, dict | None]] = []
+        self.account_snapshot_calls = 0
 
     async def fetch_positions(self, symbol=None):
         self.position_symbols.append(symbol)
@@ -160,6 +171,19 @@ class _FakeExchangeGateway:
 
     async def fetch_my_trades(self, symbol, limit=20):
         return [item for item in self.recent_fills if item.get("symbol") == symbol][:limit]
+
+    def get_account_snapshot(self):
+        self.account_snapshot_calls += 1
+        return self.account_snapshot
+
+    async def fetch_account_balance(self):  # pragma: no cover - must not be called by account facts
+        raise AssertionError("account facts must use cached AccountSnapshot only")
+
+    async def place_order(self, *_args, **_kwargs):  # pragma: no cover - must never be called
+        raise AssertionError("account facts must not place orders")
+
+    async def cancel_order(self, *_args, **_kwargs):  # pragma: no cover - must never be called
+        raise AssertionError("account facts must not cancel orders")
 
 
 class _EmptyPositionRepo:
@@ -473,12 +497,55 @@ def test_brc_account_facts_returns_local_pg_summary_without_mocking_history(monk
     assert payload["account_summary"]["active_position_count"] == 1
     assert payload["account_summary"]["open_order_count"] == 1
     assert payload["account_summary"]["complete_exchange_account_truth"] is False
+    assert payload["account_summary"]["wallet_equity"] == "not_available"
+    assert payload["account_summary"]["available_margin"] == "not_available"
     assert payload["recent_orders"] == []
     assert payload["recent_fills"] == []
     assert payload["unknown_or_unmanaged_orders"] == []
     assert payload["reconciliation_status"]["status"] == "not_available"
     assert payload["reconciliation_status"]["checked_sources"] == ["local_pg"]
     assert payload["connection_health"]["exchange_live_read"]["available"] is False
+
+
+def test_brc_account_facts_maps_cached_account_snapshot_equity_without_balance_fetch(monkeypatch):
+    _configure_auth(monkeypatch)
+    snapshot = SimpleNamespace(
+        total_balance=Decimal("1234.56"),
+        available_balance=Decimal("987.65"),
+        unrealized_pnl=Decimal("12.34"),
+        positions=[],
+        timestamp=int(time.time() * 1000),
+    )
+    gateway = _FakeExchangeGateway(account_snapshot=snapshot)
+    _patch_runtime(
+        monkeypatch,
+        campaign=None,
+        position_repo=_EmptyPositionRepo(),
+        order_repo=_EmptyOrderRepo(),
+        exchange_gateway=gateway,
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/account/facts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["account_summary"]
+    assert summary["account_equity"] == "1234.56"
+    assert summary["wallet_equity"] == "1234.56"
+    assert summary["available_margin"] == "987.65"
+    assert summary["account_equity_available"] is True
+    assert summary["wallet_equity_available"] is True
+    assert summary["available_margin_available"] is True
+    assert summary["account_equity_source"] == "runtime_cached_account_snapshot"
+    assert summary["account_equity_truth_level"] == "cached_exchange_read"
+    assert summary["account_equity_read_method"] == "exchange_gateway.get_account_snapshot"
+    assert payload["source_snapshots"]["runtime_account_snapshot"]["available"] is True
+    assert payload["connection_health"]["account_equity_snapshot"]["available"] is True
+    assert payload["connection_health"]["account_equity_snapshot"]["real_account_api_called_by_endpoint"] is False
+    assert gateway.account_snapshot_calls == 1
 
 
 def test_brc_account_facts_fail_closed_when_local_repositories_error(monkeypatch):

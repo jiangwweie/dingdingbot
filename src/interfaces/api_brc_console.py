@@ -1911,6 +1911,7 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
     generated_at_ms = int(time.time() * 1000)
     position_repo = getattr(api_module, "_position_repo", None)
     order_repo = getattr(api_module, "_order_repo", None)
+    equity_snapshot = _cached_account_equity_snapshot(api_module, generated_at_ms=generated_at_ms)
     local_summary, errors = await _markets_orders_summary(api_module)
     local_positions = list(local_summary.get("active_positions", []))
     local_open_orders = list(local_summary.get("open_orders", []))
@@ -1937,6 +1938,7 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
         truth_level = "unavailable"
     limitations = [
         "Current view is local BRC summary, not complete exchange account truth.",
+        "wallet_equity and available_margin are mapped from cached AccountSnapshot only; this endpoint does not fetch balances.",
         "recent_orders is unavailable unless exchange testnet exposes a safe read-only history method.",
         "recent_fills is unavailable unless exchange testnet exposes a safe read-only trade history method.",
         "unknown_or_unmanaged_orders require exchange testnet read plus reconciliation.",
@@ -1952,6 +1954,8 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
         blockers.append("local PG account facts read failed; account facts are fail-closed")
         limitations.append("local PG account summary failed to read and cannot be treated as account truth.")
     limitations.extend(exchange["limitations"])
+    limitations.extend(equity_snapshot["limitations"])
+    warnings.extend(equity_snapshot["warnings"])
 
     reconciliation_status, unknown_orders, unknown_positions = _reconcile_account_facts(
         local_positions=local_positions,
@@ -1987,6 +1991,7 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
             "available": False,
             "reason": "forbidden in Owner Console account facts slice",
         },
+        "runtime_account_snapshot": equity_snapshot["source_snapshot"],
     }
     evidence_refs = [
         f"account_facts:{source}:{truth_level}:{generated_at_ms}",
@@ -2017,6 +2022,15 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
             "available": False,
             "reason": "forbidden in Owner Console account facts slice",
         },
+        "account_equity_snapshot": {
+            "available": equity_snapshot["available"],
+            "source": equity_snapshot["source"],
+            "truth_level": equity_snapshot["truth_level"],
+            "timestamp_ms": equity_snapshot["timestamp_ms"],
+            "freshness": equity_snapshot["freshness"],
+            "read_method": equity_snapshot["read_method"],
+            "real_account_api_called_by_endpoint": False,
+        },
         "mutation_enabled": False,
         "live_ready": False,
     }
@@ -2040,8 +2054,17 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
             "exchange_open_order_count": len(exchange["open_orders"]) if exchange_available else "not_available",
             "all_local_flat": local_summary.get("all_local_flat", False),
             "all_exchange_flat": exchange["all_flat"] if exchange_available else "not_available",
-            "wallet_equity": "not_available",
-            "available_margin": "not_available",
+            "account_equity": equity_snapshot["wallet_equity"],
+            "wallet_equity": equity_snapshot["wallet_equity"],
+            "available_margin": equity_snapshot["available_margin"],
+            "account_equity_available": equity_snapshot["available"],
+            "wallet_equity_available": equity_snapshot["available"],
+            "available_margin_available": equity_snapshot["available_margin_available"],
+            "account_equity_source": equity_snapshot["source"],
+            "account_equity_truth_level": equity_snapshot["truth_level"],
+            "account_equity_timestamp_ms": equity_snapshot["timestamp_ms"],
+            "account_equity_freshness": equity_snapshot["freshness"],
+            "account_equity_read_method": equity_snapshot["read_method"],
             "real_account_impact": "none",
             "complete_exchange_account_truth": exchange_available,
         },
@@ -2058,6 +2081,131 @@ async def _account_facts(api_module: Any) -> BrcAccountFactsResponse:
         warnings=warnings,
         blockers=blockers,
     )
+
+
+def _cached_account_equity_snapshot(api_module: Any, *, generated_at_ms: int) -> dict[str, Any]:
+    gateway = getattr(api_module, "_exchange_gateway", None)
+    unavailable = {
+        "available": False,
+        "available_margin_available": False,
+        "wallet_equity": "not_available",
+        "available_margin": "not_available",
+        "source": "unavailable",
+        "truth_level": "unavailable",
+        "timestamp_ms": None,
+        "freshness": "unavailable",
+        "read_method": "none",
+        "warnings": [],
+        "limitations": [
+            "No cached AccountSnapshot is available for ratio-based trial budgeting in this process.",
+        ],
+        "source_snapshot": {
+            "available": False,
+            "reason": "cached AccountSnapshot unavailable",
+            "read_method": "none",
+        },
+    }
+    if gateway is None:
+        unavailable["source_snapshot"]["reason"] = "exchange gateway is not wired"
+        return unavailable
+    getter = getattr(gateway, "get_account_snapshot", None)
+    if not callable(getter):
+        unavailable["source_snapshot"]["reason"] = "gateway does not expose get_account_snapshot cache reader"
+        unavailable["read_method"] = "missing_get_account_snapshot"
+        unavailable["source_snapshot"]["read_method"] = "missing_get_account_snapshot"
+        return unavailable
+    try:
+        snapshot = getter()
+    except Exception as exc:  # pragma: no cover - defensive cache read path
+        unavailable["source_snapshot"]["reason"] = f"cached AccountSnapshot read failed: {exc}"
+        unavailable["read_method"] = "exchange_gateway.get_account_snapshot"
+        unavailable["source_snapshot"]["read_method"] = "exchange_gateway.get_account_snapshot"
+        unavailable["warnings"].append("Cached AccountSnapshot read failed; account equity remains unavailable.")
+        return unavailable
+    if snapshot is None:
+        unavailable["source_snapshot"]["reason"] = "gateway cache returned no AccountSnapshot"
+        unavailable["read_method"] = "exchange_gateway.get_account_snapshot"
+        unavailable["source_snapshot"]["read_method"] = "exchange_gateway.get_account_snapshot"
+        return unavailable
+
+    total_balance = _snapshot_decimal(snapshot, "total_balance")
+    available_balance = _snapshot_decimal(snapshot, "available_balance")
+    timestamp_ms = _snapshot_int(snapshot, "timestamp")
+    freshness = _snapshot_freshness(timestamp_ms, generated_at_ms=generated_at_ms)
+    warnings: list[str] = []
+    if freshness == "stale":
+        warnings.append("Cached AccountSnapshot is stale; Owner must refresh account facts before trial start.")
+    if total_balance is None:
+        unavailable["source_snapshot"] = {
+            "available": False,
+            "reason": "cached AccountSnapshot missing total_balance",
+            "read_method": "exchange_gateway.get_account_snapshot",
+            "timestamp_ms": timestamp_ms,
+            "freshness": freshness,
+        }
+        unavailable["read_method"] = "exchange_gateway.get_account_snapshot"
+        unavailable["timestamp_ms"] = timestamp_ms
+        unavailable["freshness"] = freshness
+        unavailable["warnings"].extend(warnings)
+        return unavailable
+
+    return {
+        "available": True,
+        "available_margin_available": available_balance is not None,
+        "wallet_equity": str(total_balance),
+        "available_margin": str(available_balance) if available_balance is not None else "not_available",
+        "source": "runtime_cached_account_snapshot",
+        "truth_level": "cached_exchange_read",
+        "timestamp_ms": timestamp_ms,
+        "freshness": freshness,
+        "read_method": "exchange_gateway.get_account_snapshot",
+        "warnings": warnings,
+        "limitations": [
+            "Account equity is derived from the runtime cached AccountSnapshot and may require a fresh read-only account poll before trial start.",
+            "This endpoint does not call fetch_account_balance, place_order, cancel_order, close, flatten, transfer, or withdrawal methods.",
+        ],
+        "source_snapshot": {
+            "available": True,
+            "read_method": "exchange_gateway.get_account_snapshot",
+            "timestamp_ms": timestamp_ms,
+            "freshness": freshness,
+            "has_total_balance": total_balance is not None,
+            "has_available_balance": available_balance is not None,
+        },
+    }
+
+
+def _snapshot_decimal(snapshot: Any, field_name: str) -> Optional[Decimal]:
+    value = getattr(snapshot, field_name, None)
+    if value is None and isinstance(snapshot, dict):
+        value = snapshot.get(field_name)
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _snapshot_int(snapshot: Any, field_name: str) -> Optional[int]:
+    value = getattr(snapshot, field_name, None)
+    if value is None and isinstance(snapshot, dict):
+        value = snapshot.get(field_name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _snapshot_freshness(timestamp_ms: Optional[int], *, generated_at_ms: int) -> str:
+    if timestamp_ms is None:
+        return "unknown"
+    max_age_ms = 5 * 60 * 1000
+    if timestamp_ms > generated_at_ms + 60_000:
+        return "unknown"
+    return "fresh" if generated_at_ms - timestamp_ms <= max_age_ms else "stale"
 
 
 async def _exchange_testnet_facts(api_module: Any) -> dict[str, Any]:
@@ -2631,6 +2779,11 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             service_error = str(exc)
 
     markets_summary, market_errors = await _markets_orders_summary(api_module)
+    readiness_generated_at_ms = int(time.time() * 1000)
+    equity_snapshot = _cached_account_equity_snapshot(
+        api_module,
+        generated_at_ms=readiness_generated_at_ms,
+    )
     audit_summary, audit_errors = await _audit_summary(service, limit=5)
 
     reasons: list[str] = []
@@ -2815,8 +2968,16 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             "environment": environment_boundary["current"],
             "exchange_mode": environment_boundary["exchange_mode"],
             "real_account_impact": "none",
-            "wallet_equity_available": False,
-            "available_margin_available": False,
+            "wallet_equity_available": equity_snapshot["available"],
+            "available_margin_available": equity_snapshot["available_margin_available"],
+            "wallet_equity": equity_snapshot["wallet_equity"],
+            "available_margin": equity_snapshot["available_margin"],
+            "account_equity_source": equity_snapshot["source"],
+            "account_equity_truth_level": equity_snapshot["truth_level"],
+            "account_equity_timestamp_ms": equity_snapshot["timestamp_ms"],
+            "account_equity_freshness": equity_snapshot["freshness"],
+            "account_equity_read_method": equity_snapshot["read_method"],
+            "real_account_api_called_by_readiness": False,
         },
         "exposure_orders": {
             "symbols": markets_summary.get("symbols", []),
