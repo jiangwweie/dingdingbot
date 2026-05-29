@@ -1,14 +1,39 @@
+> [!IMPORTANT]
+> **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
+> **Current fact registry**: `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
+> **Current readiness blockers**: `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
+> **Document governance rules**: `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
+>
+> Older docs may be historical, superseded, or research-only. Use the governance rules to determine authority.
+> Project definition (Owner 2026-05-29): "fast trial-and-review research system for small risk-capital Campaigns".
+
+---
+
 # Docs Index
 
-Last updated: 2026-05-25
+Last updated: 2026-05-29
 
-## Current Mainline
+## Current Baseline (start here)
 
-The current Owner-facing project mainline is:
+Read the current baseline documents first:
+
+1. `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — project definition and current state
+2. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
+3. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
+4. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
+5. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — detailed position analysis with evidence
+6. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
+7. `docs/ops/knowledge-pack/DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
+
+## Historical Mainline (superseded)
+
+The following was the previous mainline pointer. It is preserved for historical context but is no longer the current entry point:
+
+The previous Owner-facing project mainline was:
 
 `Personal Leveraged Campaign Mainline v0`
 
-Start here:
+Previous reading list:
 
 - `docs/ops/personal-leveraged-campaign-mainline-v0.md`
 - `docs/ops/personal-leveraged-campaign-local-sandbox-v0.md`

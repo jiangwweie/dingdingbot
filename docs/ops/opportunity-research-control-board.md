@@ -1,3 +1,12 @@
+> [!WARNING]
+> **PARTIALLY STALE**: This control board may contain stale phase labels.
+> Current baseline and readiness blockers are maintained in:
+> - `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
+> - `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
+> Current active target (Owner 2026-05-29): "fast trial-and-review research system for small risk-capital Campaigns".
+
+---
+
 # Opportunity Research Control Board
 
 Last updated: 2026-05-25

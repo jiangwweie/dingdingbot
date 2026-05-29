@@ -1,3 +1,11 @@
+> [!IMPORTANT]
+> This roadmap contains both historical labels and later Owner amendments.
+> For the current project baseline, read `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`.
+> Current active target (Owner 2026-05-29): "fast trial-and-review research system for small risk-capital Campaigns".
+> The 2026-05-29 Owner amendment is at line 540+ of this file.
+
+---
+
 # Project Roadmap v2
 
 Last updated: 2026-05-26
@@ -536,6 +544,37 @@ It may compare opportunity mechanisms, edge hypotheses, failure hypotheses,
 capital-shape ideas, manual-event workflows, observe-only indicators, and
 no-long/risk-off contexts before deciding whether anything deserves deeper
 study.
+
+2026-05-29 Owner-facing amendment:
+
+The project target is not a fully automated general strategy system at this
+stage. The active target is a fast trial-and-review research system for small
+risk-capital Campaigns.
+
+The preferred research funnel is:
+
+`wide admission -> broad coarse screen -> candidate -> risk disclosure -> Owner risk acceptance -> bounded live trial or continued fine screen -> review -> promote / revise / park`
+
+Strategy families do not need perfect historical boundary proof before they can
+be considered for bounded trial. Flawed families may advance when the risk is
+explicit, capped, Owner-accepted, and routed through the Operation Layer.
+
+Hard boundaries remain non-negotiable:
+
+- no uncontrolled capital risk;
+- no strategy self-elevation;
+- no bypass around the Operation Layer;
+- no infinite add-to-position behavior;
+- no automatic symbol, side, or leverage expansion;
+- no missing kill switch;
+- no missing review record.
+
+The immediate research priority is a broad OHLCV-only smoke screen across
+roughly 8-10 strategy variants, selecting 1-3
+`trial_candidate_with_known_risks` outputs. Do not continue deep TB-001
+year/regime digging as the default next step, and do not start full
+cost/baseline/campaign machinery before the broad smoke screen has produced
+candidate direction.
 
 This stage does not pre-assume small-capital heavy swing, 1h entry, Campaign,
 OKX MCP, Direction A, HTF/LTF trend baseline, Owner-Gated execution, or
