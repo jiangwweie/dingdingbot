@@ -89,7 +89,7 @@ It does not start a trial, grant execution permission, create orders, or modify 
 | Operation Layer gate available | pass | pg_readiness_transition_apply | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
 | Operation Layer notional cap available | pass | 18262.85481460 | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
 | Operation Layer loss cap available | pass | 4663.39779623 | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
-| startup guard armed | blocked | False | yes | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
+| startup guard armed | blocked | False | yes | startup_guard_runtime_coupled; process_local_only; no_pg_persistence; manual_arm_requires_runtime_control_surface; no_runtime_started |
 | evidence logging available | pass | pg_readiness_transition_apply | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
 | no active trial position | pass | True | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
 | no open orders | pass | 0 | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
@@ -118,7 +118,7 @@ Checklist consequence:
 Verdict: `blocked_startup_guard`
 
 Blockers:
-- startup guard armed
+- startup guard armed (blocked_startup_guard_runtime_coupled: process-local runtime guard is not armed; no persistent PG startup-guard source exists; no runtime was started)
 
 ## 11. Non-permissions
 
