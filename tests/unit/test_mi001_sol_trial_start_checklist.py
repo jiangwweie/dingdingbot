@@ -11,6 +11,9 @@ from sqlalchemy.pool import StaticPool
 from src.application.mi001_sol_pg_registration_apply import (
     Mi001SolPgRegistrationApplyService,
 )
+from src.application.mi001_sol_owner_trial_start_approval import (
+    Mi001SolOwnerTrialStartApprovalService,
+)
 from src.application.binance_usdt_futures_account_facts import (
     BinanceUsdtFuturesAccountFactsSource,
 )
@@ -184,15 +187,20 @@ async def test_checklist_computes_capital_when_facts_are_fresh_but_keeps_owner_b
                 gate_available=True,
                 notional_cap_available=True,
                 notional_cap=Decimal("300"),
+                loss_cap_available=True,
+                loss_cap=Decimal("100"),
                 evidence_logging_available=True,
                 no_active_trial_position=True,
+                active_position_count=0,
+                open_order_count=0,
+                no_active_trial_or_runtime_binding=True,
                 startup_guard_available=True,
-                startup_guard_armed=False,
+                startup_guard_armed=True,
                 source="fake_operation_layer_facts",
             ),
             kill_switch_facts=KillSwitchFacts(
                 available=True,
-                active=True,
+                active=False,
                 source="fake_pg_gks",
                 updated_at_ms=1770000000000,
             ),
@@ -242,15 +250,20 @@ async def test_checklist_reads_injected_account_facts_source_without_runtime_dep
             gate_available=True,
             notional_cap_available=True,
             notional_cap=Decimal("250"),
+            loss_cap_available=True,
+            loss_cap=Decimal("100"),
             evidence_logging_available=True,
             no_active_trial_position=True,
+            active_position_count=0,
+            open_order_count=0,
+            no_active_trial_or_runtime_binding=True,
             startup_guard_available=True,
-            startup_guard_armed=False,
+            startup_guard_armed=True,
             source="fake_operation_layer_facts",
         ),
         kill_switch_facts=KillSwitchFacts(
             available=True,
-            active=True,
+            active=False,
             source="fake_pg_gks",
             updated_at_ms=1770000000000,
         ),
@@ -362,15 +375,20 @@ async def test_binance_read_only_account_facts_source_is_allowed_for_checklist(
             gate_available=True,
             notional_cap_available=True,
             notional_cap=Decimal("400"),
+            loss_cap_available=True,
+            loss_cap=Decimal("100"),
             evidence_logging_available=True,
             no_active_trial_position=True,
+            active_position_count=0,
+            open_order_count=0,
+            no_active_trial_or_runtime_binding=True,
             startup_guard_available=True,
-            startup_guard_armed=False,
+            startup_guard_armed=True,
             source="fake_operation_layer_facts",
         ),
         kill_switch_facts=KillSwitchFacts(
             available=True,
-            active=True,
+            active=False,
             source="fake_pg_gks",
             updated_at_ms=1770000000000,
         ),
@@ -389,6 +407,133 @@ async def test_binance_read_only_account_facts_source_is_allowed_for_checklist(
     )
     assert checklist.final_verdict == (
         TrialStartChecklistVerdict.BLOCKED_OWNER_TRIAL_START_APPROVAL_REQUIRED
+    )
+
+
+@pytest.mark.asyncio
+async def test_checklist_blocks_gks_active_before_trial_start_even_with_owner_approval(
+    seeded_repositories,
+):
+    registry_repo, admission_repo = seeded_repositories
+    approval_service = Mi001SolOwnerTrialStartApprovalService(
+        admission_repository=admission_repo,
+    )
+    await approval_service.record_metadata_only_approval(
+        now_ms=1770000000000,
+        account_facts_snapshot_ref="unit-account-facts",
+    )
+    generator = Mi001SolTrialStartChecklistGenerator(
+        registry_repository=registry_repo,
+        admission_repository=admission_repo,
+    )
+
+    checklist = await generator.generate(
+        TrialStartChecklistInputs(
+            generated_at_ms=1770000000000,
+            account_facts=CachedAccountFacts(
+                available=True,
+                wallet_equity=Decimal("100"),
+                available_margin=Decimal("80"),
+                timestamp_ms=1770000000000,
+                freshness="fresh",
+                source="cached_account_snapshot",
+                read_method="cache_only",
+                read_only=True,
+                reconciliation_status="clean",
+            ),
+            operation_layer_facts=OperationLayerFacts(
+                available=True,
+                gate_available=True,
+                notional_cap_available=True,
+                notional_cap=Decimal("300"),
+                loss_cap_available=True,
+                loss_cap=Decimal("100"),
+                evidence_logging_available=True,
+                no_active_trial_position=True,
+                active_position_count=0,
+                open_order_count=0,
+                no_active_trial_or_runtime_binding=True,
+                startup_guard_available=True,
+                startup_guard_armed=True,
+                source="fake_operation_layer_facts",
+            ),
+            kill_switch_facts=KillSwitchFacts(
+                available=True,
+                active=True,
+                source="fake_pg_gks",
+                updated_at_ms=1770000000000,
+            ),
+        )
+    )
+
+    assert checklist.final_verdict == TrialStartChecklistVerdict.BLOCKED_GKS_ACTIVE
+    assert "GKS allows new entries" in checklist.blockers
+    assert checklist.source_inputs["owner_trial_start_approval"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_checklist_ready_after_metadata_owner_approval_when_all_facts_pass(
+    seeded_repositories,
+):
+    registry_repo, admission_repo = seeded_repositories
+    approval_service = Mi001SolOwnerTrialStartApprovalService(
+        admission_repository=admission_repo,
+    )
+    result = await approval_service.record_metadata_only_approval(
+        now_ms=1770000000000,
+        account_facts_snapshot_ref="unit-account-facts",
+    )
+    generator = Mi001SolTrialStartChecklistGenerator(
+        registry_repository=registry_repo,
+        admission_repository=admission_repo,
+    )
+
+    checklist = await generator.generate(
+        TrialStartChecklistInputs(
+            generated_at_ms=1770000000000,
+            account_facts=CachedAccountFacts(
+                available=True,
+                wallet_equity=Decimal("100"),
+                available_margin=Decimal("80"),
+                timestamp_ms=1770000000000,
+                freshness="fresh",
+                source="cached_account_snapshot",
+                read_method="cache_only",
+                read_only=True,
+                reconciliation_status="clean",
+            ),
+            operation_layer_facts=OperationLayerFacts(
+                available=True,
+                gate_available=True,
+                notional_cap_available=True,
+                notional_cap=Decimal("300"),
+                loss_cap_available=True,
+                loss_cap=Decimal("100"),
+                evidence_logging_available=True,
+                no_active_trial_position=True,
+                active_position_count=0,
+                open_order_count=0,
+                no_active_trial_or_runtime_binding=True,
+                startup_guard_available=True,
+                startup_guard_armed=True,
+                source="fake_operation_layer_facts",
+            ),
+            kill_switch_facts=KillSwitchFacts(
+                available=True,
+                active=False,
+                source="fake_pg_gks",
+                updated_at_ms=1770000000000,
+            ),
+        )
+    )
+
+    assert result.approval.risk_disclosure_snapshot_json["approval_scope"] == (
+        "trial_start_metadata_only"
+    )
+    assert result.approval.risk_disclosure_snapshot_json["order_permission_granted"] is False
+    assert result.approval.risk_disclosure_snapshot_json["runtime_start_granted"] is False
+    assert checklist.final_verdict == (
+        TrialStartChecklistVerdict.READY_FOR_TRIAL_START_AFTER_OWNER_APPROVAL
     )
 
 

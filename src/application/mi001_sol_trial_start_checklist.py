@@ -28,6 +28,7 @@ from src.domain.brc_admission import (
 from src.domain.mi001_sol_pg_registration import (
     MI001_CANDIDATE_ID,
     MI001_FAMILY_ID,
+    MI001_OWNER_TRIAL_START_APPROVAL_ID,
     MI001_PLAYBOOK_ID,
     MI001_SIDE,
     MI001_SYMBOL,
@@ -65,6 +66,12 @@ class TrialStartChecklistVerdict(str, Enum):
     BLOCKED_FRESH_ACCOUNT_FACTS_REQUIRED = "blocked_fresh_account_facts_required"
     BLOCKED_OPERATION_LAYER_FACTS_REQUIRED = "blocked_operation_layer_facts_required"
     BLOCKED_KILL_SWITCH_STATE_REQUIRED = "blocked_kill_switch_state_required"
+    BLOCKED_GKS_ACTIVE = "blocked_gks_active"
+    BLOCKED_STARTUP_GUARD = "blocked_startup_guard"
+    BLOCKED_OPERATION_LAYER_CAP = "blocked_operation_layer_cap"
+    BLOCKED_EVIDENCE_LOGGING = "blocked_evidence_logging"
+    BLOCKED_ACTIVE_POSITION_OR_ORDERS = "blocked_active_position_or_orders"
+    BLOCKED_ACTIVE_POSITION_UNKNOWN = "blocked_active_position_unknown"
     BLOCKED_PG_REGISTRATION_MISSING = "blocked_pg_registration_missing"
     READY_FOR_OWNER_TRIAL_START_APPROVAL = "ready_for_owner_trial_start_approval"
     READY_FOR_TRIAL_START_AFTER_OWNER_APPROVAL = "ready_for_trial_start_after_owner_approval"
@@ -114,8 +121,13 @@ class OperationLayerFacts(TrialStartChecklistModel):
     gate_available: bool = False
     notional_cap_available: bool = False
     notional_cap: Optional[Decimal] = None
+    loss_cap_available: bool = False
+    loss_cap: Optional[Decimal] = None
     evidence_logging_available: bool = False
     no_active_trial_position: Optional[bool] = None
+    active_position_count: Optional[int] = None
+    open_order_count: Optional[int] = None
+    no_active_trial_or_runtime_binding: Optional[bool] = None
     startup_guard_available: bool = False
     startup_guard_armed: Optional[bool] = None
     source: str = "not_provided"
@@ -256,6 +268,9 @@ class Mi001SolTrialStartChecklistGenerator:
         acceptance = await self._admission_repository.get_owner_risk_acceptance(
             f"{MI001_CANDIDATE_ID}-owner-risk-acceptance-v1"
         )
+        trial_start_acceptance = await self._admission_repository.get_owner_risk_acceptance(
+            MI001_OWNER_TRIAL_START_APPROVAL_ID
+        )
         binding = await self._admission_repository.get_admission_trial_binding(
             f"{MI001_CANDIDATE_ID}-planned-binding-v1"
         )
@@ -289,6 +304,7 @@ class Mi001SolTrialStartChecklistGenerator:
         owner_checks = _owner_trial_start_checks(
             decision=decision,
             acceptance=acceptance,
+            trial_start_acceptance=trial_start_acceptance,
         )
         blockers = _blockers(
             pg_checks=pg_checks,
@@ -325,7 +341,7 @@ class Mi001SolTrialStartChecklistGenerator:
                 "execution permission",
                 "order permission",
                 "runtime start",
-                "exchange API permission",
+                "exchange API write permission",
                 "leverage change permission",
                 "symbol/side expansion",
                 "automatic trial start",
@@ -584,17 +600,23 @@ def _operation_layer_safety_checks(
         operation = [
             ChecklistRow(check="Operation Layer gate available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True, notes=missing_note),
             ChecklistRow(check="Operation Layer notional cap available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True, notes=missing_note),
+            ChecklistRow(check="Operation Layer loss cap available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True, notes=missing_note),
             ChecklistRow(check="startup guard state available", status=ChecklistStatus.NOT_CHECKED, evidence="not_provided", blocking=True, notes=missing_note),
             ChecklistRow(check="evidence logging available", status=ChecklistStatus.MISSING, evidence="not_provided", blocking=True, notes=missing_note),
             ChecklistRow(check="no active trial position", status=ChecklistStatus.NOT_CHECKED, evidence="not_provided", blocking=True, notes=missing_note),
+            ChecklistRow(check="no open orders", status=ChecklistStatus.NOT_CHECKED, evidence="not_provided", blocking=True, notes=missing_note),
+            ChecklistRow(check="no active trial/campaign binding", status=ChecklistStatus.NOT_CHECKED, evidence="not_provided", blocking=True, notes=missing_note),
         ]
     else:
         operation = [
             _safety("Operation Layer gate available", operation_layer_facts.gate_available, operation_layer_facts.source, operation_layer_facts.notes),
             _safety("Operation Layer notional cap available", operation_layer_facts.notional_cap_available, str(operation_layer_facts.notional_cap), operation_layer_facts.notes),
-            _safety("startup guard state available", operation_layer_facts.startup_guard_available, str(operation_layer_facts.startup_guard_armed), operation_layer_facts.notes),
+            _safety("Operation Layer loss cap available", operation_layer_facts.loss_cap_available, str(operation_layer_facts.loss_cap), operation_layer_facts.notes),
+            _safety("startup guard armed", operation_layer_facts.startup_guard_available and operation_layer_facts.startup_guard_armed is True, str(operation_layer_facts.startup_guard_armed), operation_layer_facts.notes),
             _safety("evidence logging available", operation_layer_facts.evidence_logging_available, operation_layer_facts.source, operation_layer_facts.notes),
             _safety("no active trial position", operation_layer_facts.no_active_trial_position is True, str(operation_layer_facts.no_active_trial_position), operation_layer_facts.notes),
+            _safety("no open orders", operation_layer_facts.open_order_count == 0, str(operation_layer_facts.open_order_count), operation_layer_facts.notes),
+            _safety("no active trial/campaign binding", operation_layer_facts.no_active_trial_or_runtime_binding is True, str(operation_layer_facts.no_active_trial_or_runtime_binding), operation_layer_facts.notes),
         ]
 
     if kill_switch_facts is None:
@@ -604,11 +626,16 @@ def _operation_layer_safety_checks(
     else:
         notes = kill_switch_facts.notes or _kill_switch_interpretation(kill_switch_facts)
         operation.append(
-            _safety(
-                "kill switch state available",
-                kill_switch_facts.available,
-                f"active={kill_switch_facts.active},source={kill_switch_facts.source}",
-                notes,
+            ChecklistRow(
+                check="GKS allows new entries",
+                status=(
+                    ChecklistStatus.PASS
+                    if kill_switch_facts.available and kill_switch_facts.active is False
+                    else ChecklistStatus.BLOCKED
+                ),
+                evidence=f"active={kill_switch_facts.active},source={kill_switch_facts.source}",
+                blocking=not (kill_switch_facts.available and kill_switch_facts.active is False),
+                notes=notes,
             )
         )
     return operation
@@ -618,6 +645,7 @@ def _owner_trial_start_checks(
     *,
     decision: Optional[AdmissionDecision],
     acceptance: Optional[OwnerRiskAcceptance],
+    trial_start_acceptance: Optional[OwnerRiskAcceptance],
 ) -> list[ChecklistRow]:
     plan_preparation_approved = (
         acceptance is not None
@@ -626,9 +654,8 @@ def _owner_trial_start_checks(
         )
         is True
     )
-    trial_start_approved = (
-        decision is not None
-        and decision.risk_intent_json.get("owner_approved_trial_start") is True
+    trial_start_approved = _trial_start_acceptance_is_metadata_only(
+        trial_start_acceptance
     )
     return [
         _check(
@@ -640,10 +667,36 @@ def _owner_trial_start_checks(
         ChecklistRow(
             check="Owner trial start approved",
             status=ChecklistStatus.PASS if trial_start_approved else ChecklistStatus.BLOCKED,
-            evidence=str(trial_start_approved),
+            evidence=(
+                trial_start_acceptance.owner_risk_acceptance_id
+                if trial_start_acceptance is not None
+                else "missing"
+            ),
             blocking=not trial_start_approved,
+            notes=(
+                "metadata-only approval; does not grant runtime start or execution permission"
+                if trial_start_approved
+                else "separate metadata-only Owner trial-start approval is still required"
+            ),
         ),
     ]
+
+
+def _trial_start_acceptance_is_metadata_only(
+    acceptance: Optional[OwnerRiskAcceptance],
+) -> bool:
+    if acceptance is None:
+        return False
+    disclosure = acceptance.risk_disclosure_snapshot_json
+    return (
+        disclosure.get("owner_approved_trial_start") is True
+        and disclosure.get("approval_scope") == "trial_start_metadata_only"
+        and disclosure.get("automatic_execution_approved") is False
+        and disclosure.get("execution_permission_granted") is False
+        and disclosure.get("order_permission_granted") is False
+        and disclosure.get("runtime_start_granted") is False
+        and disclosure.get("exchange_write_permission_granted") is False
+    )
 
 
 def _final_verdict(
@@ -657,6 +710,18 @@ def _final_verdict(
         return TrialStartChecklistVerdict.BLOCKED_PG_REGISTRATION_MISSING
     if any(row.blocking for row in account_checks):
         return TrialStartChecklistVerdict.BLOCKED_FRESH_ACCOUNT_FACTS_REQUIRED
+    if any(row.blocking for row in safety_checks if row.check == "GKS allows new entries"):
+        return TrialStartChecklistVerdict.BLOCKED_GKS_ACTIVE
+    if any(row.blocking for row in safety_checks if "startup guard" in row.check.lower()):
+        return TrialStartChecklistVerdict.BLOCKED_STARTUP_GUARD
+    if any(row.blocking for row in safety_checks if "cap" in row.check.lower()):
+        return TrialStartChecklistVerdict.BLOCKED_OPERATION_LAYER_CAP
+    if any(row.blocking for row in safety_checks if "evidence logging" in row.check.lower()):
+        return TrialStartChecklistVerdict.BLOCKED_EVIDENCE_LOGGING
+    if any(row.blocking for row in safety_checks if row.check in {"no active trial position", "no open orders", "no active trial/campaign binding"} and row.status == ChecklistStatus.NOT_CHECKED):
+        return TrialStartChecklistVerdict.BLOCKED_ACTIVE_POSITION_UNKNOWN
+    if any(row.blocking for row in safety_checks if row.check in {"no active trial position", "no open orders", "no active trial/campaign binding"}):
+        return TrialStartChecklistVerdict.BLOCKED_ACTIVE_POSITION_OR_ORDERS
     if any(
         row.blocking
         for row in safety_checks
@@ -667,7 +732,7 @@ def _final_verdict(
         return TrialStartChecklistVerdict.BLOCKED_KILL_SWITCH_STATE_REQUIRED
     if any(row.blocking for row in owner_checks):
         return TrialStartChecklistVerdict.BLOCKED_OWNER_TRIAL_START_APPROVAL_REQUIRED
-    return TrialStartChecklistVerdict.READY_FOR_OWNER_TRIAL_START_APPROVAL
+    return TrialStartChecklistVerdict.READY_FOR_TRIAL_START_AFTER_OWNER_APPROVAL
 
 
 def _blockers(
@@ -882,7 +947,7 @@ def render_trial_start_checklist_markdown(checklist: TrialStartChecklist) -> str
         (
             row.notes
             for row in checklist.operation_layer_safety_checks
-            if "kill switch" in row.check.lower()
+            if "kill switch" in row.check.lower() or "gks" in row.check.lower()
         ),
         "GKS state was not interpreted.",
     )

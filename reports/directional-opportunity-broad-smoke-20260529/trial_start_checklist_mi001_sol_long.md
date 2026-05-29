@@ -16,9 +16,9 @@ It does not start a trial, grant execution permission, create orders, or modify 
 | --- | --- |
 | pg_registration_records | available |
 | cached_account_facts | available |
-| operation_layer_facts | missing |
+| operation_layer_facts | available |
 | kill_switch_facts | available |
-| owner_trial_start_approval | blocked |
+| owner_trial_start_approval | available |
 
 ## 3. PG Registration Checks
 
@@ -65,22 +65,22 @@ It does not start a trial, grant execution permission, create orders, or modify 
 
 | check | status | source | timestamp | blocking | notes |
 | --- | --- | --- | --- | --- | --- |
-| cached AccountSnapshot exists | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
-| wallet_equity/account_equity available | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
-| available_margin available | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
-| freshness acceptable | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
-| read-only source | pass | read_only_account_query | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
-| reconciliation acceptable | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060099041 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| cached AccountSnapshot exists | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060724639 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| wallet_equity/account_equity available | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060724639 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| available_margin available | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060724639 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| freshness acceptable | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060724639 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| read-only source | pass | read_only_account_query | 1780060724639 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
+| reconciliation acceptable | pass | binance_usdt_futures_read_only:binance_usdt_futures_live_read_only | 1780060724639 | no | candidate=MI-001-SOL-LONG; symbol=SOL/USDT:USDT; side=long; source=Binance USDT futures balance read; account_equity_prefers_totalMarginBalance; available_margin_prefers_availableBalance; exchange timestamp missing; using local read timestamp; external_call_type=read_only_account_query |
 
 ## 6. Capital Readiness
 
 | field | value |
 | --- | --- |
 | status | pass |
-| current_dedicated_subaccount_equity | 4661.34666567 |
-| available_margin | 3650.39404603 |
+| current_dedicated_subaccount_equity | 4663.88006276 |
+| available_margin | 3653.11368275 |
 | max_leverage | 5 |
-| computed_max_notional_candidate | 18251.97023015 |
+| computed_max_notional_candidate | 18265.56841375 |
 | max_total_loss_rule | current_dedicated_subaccount_equity |
 | evidence | readiness calculation only; not persisted as execution config |
 
@@ -88,12 +88,15 @@ It does not start a trial, grant execution permission, create orders, or modify 
 
 | check | status | evidence | blocking | notes |
 | --- | --- | --- | --- | --- |
-| Operation Layer gate available | missing | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
-| Operation Layer notional cap available | missing | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
-| startup guard state available | not_checked | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
-| evidence logging available | missing | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
-| no active trial position | not_checked | not_provided | yes | No safe Operation Layer facts provider was supplied; runtime preflight was not invoked. |
-| kill switch state available | pass | active=True,source=pg:BRC R3 LLM rehearsal restore safe state | no | active=True means Global Kill Switch blocks all new entries. This is safe fail-closed state, not trial-start readiness. |
+| Operation Layer gate available | pass | pg_readonly_closeout_facts | no | pg_brc_operation_repository_available; operation_layer_gate_code_available_but_no_live_start_preflight_invoked; operation_layer_notional_cap_fact_missing; startup_guard_default_fail_closed_not_armed; positions_orders_read_from_pg_only |
+| Operation Layer notional cap available | blocked | None | yes | pg_brc_operation_repository_available; operation_layer_gate_code_available_but_no_live_start_preflight_invoked; operation_layer_notional_cap_fact_missing; startup_guard_default_fail_closed_not_armed; positions_orders_read_from_pg_only |
+| Operation Layer loss cap available | pass | 4663.88006276 | no | pg_brc_operation_repository_available; operation_layer_gate_code_available_but_no_live_start_preflight_invoked; operation_layer_notional_cap_fact_missing; startup_guard_default_fail_closed_not_armed; positions_orders_read_from_pg_only |
+| startup guard armed | blocked | False | yes | pg_brc_operation_repository_available; operation_layer_gate_code_available_but_no_live_start_preflight_invoked; operation_layer_notional_cap_fact_missing; startup_guard_default_fail_closed_not_armed; positions_orders_read_from_pg_only |
+| evidence logging available | pass | pg_readonly_closeout_facts | no | pg_brc_operation_repository_available; operation_layer_gate_code_available_but_no_live_start_preflight_invoked; operation_layer_notional_cap_fact_missing; startup_guard_default_fail_closed_not_armed; positions_orders_read_from_pg_only |
+| no active trial position | pass | True | no | pg_brc_operation_repository_available; operation_layer_gate_code_available_but_no_live_start_preflight_invoked; operation_layer_notional_cap_fact_missing; startup_guard_default_fail_closed_not_armed; positions_orders_read_from_pg_only |
+| no open orders | pass | 0 | no | pg_brc_operation_repository_available; operation_layer_gate_code_available_but_no_live_start_preflight_invoked; operation_layer_notional_cap_fact_missing; startup_guard_default_fail_closed_not_armed; positions_orders_read_from_pg_only |
+| no active trial/campaign binding | pass | True | no | pg_brc_operation_repository_available; operation_layer_gate_code_available_but_no_live_start_preflight_invoked; operation_layer_notional_cap_fact_missing; startup_guard_default_fail_closed_not_armed; positions_orders_read_from_pg_only |
+| GKS allows new entries | blocked | active=True,source=pg:BRC R3 LLM rehearsal restore safe state | yes | active=True means Global Kill Switch blocks all new entries. This is safe fail-closed state, not trial-start readiness. |
 
 ## 8. GKS Interpretation
 
@@ -110,19 +113,16 @@ Checklist consequence:
 | check | status | evidence | blocking |
 | --- | --- | --- | --- |
 | Owner plan preparation approved | pass | True | no |
-| Owner trial start approved | blocked | False | yes |
+| Owner trial start approved | pass | MI-001-SOL-LONG-owner-trial-start-approval-v1 | no |
 
 ## 10. Final Verdict
 
-Verdict: `blocked_operation_layer_facts_required`
+Verdict: `blocked_gks_active`
 
 Blockers:
-- Operation Layer gate available
 - Operation Layer notional cap available
-- startup guard state available
-- evidence logging available
-- no active trial position
-- Owner trial start approved
+- startup guard armed
+- GKS allows new entries
 
 ## 11. Non-permissions
 
@@ -130,7 +130,7 @@ This checklist does not grant:
 - execution permission
 - order permission
 - runtime start
-- exchange API permission
+- exchange API write permission
 - leverage change permission
 - symbol/side expansion
 - automatic trial start
