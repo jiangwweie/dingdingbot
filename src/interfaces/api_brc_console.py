@@ -191,6 +191,35 @@ class BrcReadinessResponse(BaseModel):
     live_ready: Literal[False] = False
 
 
+class StartupGuardReadinessArmRequest(BaseModel):
+    reason: str = Field(
+        default="MI-001 SOL startup guard readiness preflight",
+        min_length=1,
+        max_length=256,
+    )
+    updated_by: str = Field(default="owner_console", min_length=1, max_length=128)
+
+
+class StartupGuardReadinessArmResponse(BaseModel):
+    action: Literal["startup_guard_preflight_arm"] = "startup_guard_preflight_arm"
+    status: Literal["armed", "already_armed", "blocked"]
+    armed_before: Optional[bool] = None
+    armed_after: Optional[bool] = None
+    runtime_bound: bool
+    runtime_control_api_enabled: bool
+    runtime_effect: Literal["startup_guard_process_state_only", "none"]
+    execution_permission_granted: Literal[False] = False
+    order_permission_granted: Literal[False] = False
+    trial_started: Literal[False] = False
+    strategy_runtime_started: Literal[False] = False
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+    exchange_write_methods_called: Literal[False] = False
+    next_checklist_verdict: str
+    notes: list[str] = Field(default_factory=list)
+    live_ready: Literal[False] = False
+
+
 class BrcMarketsOrdersResponse(BaseModel):
     conclusion: str
     account_impact: str
@@ -1750,6 +1779,23 @@ def _guard_summary(api_module: Any) -> tuple[Optional[bool], Optional[bool]]:
     return gks_active, startup_guard_armed
 
 
+def _startup_guard_armed_state(guard: Any) -> Optional[bool]:
+    if guard is None:
+        return None
+    if hasattr(guard, "get_state"):
+        state = guard.get_state()
+        return bool(
+            getattr(
+                state,
+                "armed",
+                state.get("armed") if isinstance(state, dict) else None,
+            )
+        )
+    if hasattr(guard, "is_armed"):
+        return bool(guard.is_armed())
+    return None
+
+
 def _env_enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -3182,6 +3228,112 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             },
             "live_ready": False,
         },
+    )
+
+
+@router.post(
+    "/readiness/startup-guard/preflight-arm",
+    response_model=StartupGuardReadinessArmResponse,
+)
+async def arm_startup_guard_readiness(
+    body: StartupGuardReadinessArmRequest,
+) -> StartupGuardReadinessArmResponse:
+    """Arm only the runtime-owned startup guard for readiness preflight.
+
+    This is not trial start and does not touch execution/order/exchange-write
+    paths. It fails closed unless a runtime-owned guard object already exists.
+    """
+    api_module = _api_module()
+    runtime_bound = api_module.get_runtime_context() is not None
+    control_enabled = _env_enabled("RUNTIME_CONTROL_API_ENABLED")
+    guard = getattr(api_module, "_startup_trading_guard_service", None)
+    armed_before = _startup_guard_armed_state(guard)
+
+    base_notes = [
+        "readiness_action_only",
+        "does_not_start_trial",
+        "does_not_create_execution_intent",
+        "does_not_create_order",
+        "does_not_grant_execution_permission",
+        "does_not_call_exchange_write_methods",
+    ]
+
+    if not runtime_bound or guard is None:
+        return StartupGuardReadinessArmResponse(
+            status="blocked",
+            armed_before=armed_before,
+            armed_after=armed_before,
+            runtime_bound=runtime_bound,
+            runtime_control_api_enabled=control_enabled,
+            runtime_effect="none",
+            next_checklist_verdict="blocked_runtime_start_required",
+            notes=[
+                *base_notes,
+                "runtime_owned_startup_guard_unavailable",
+                "no_runtime_started_by_this_endpoint",
+            ],
+        )
+
+    if not control_enabled:
+        return StartupGuardReadinessArmResponse(
+            status="blocked",
+            armed_before=armed_before,
+            armed_after=armed_before,
+            runtime_bound=runtime_bound,
+            runtime_control_api_enabled=False,
+            runtime_effect="none",
+            next_checklist_verdict="blocked_startup_guard_runtime_coupled",
+            notes=[
+                *base_notes,
+                "runtime_control_api_disabled",
+                "set_RUNTIME_CONTROL_API_ENABLED_true_for_local_owner_control",
+            ],
+        )
+
+    if armed_before is True:
+        return StartupGuardReadinessArmResponse(
+            status="already_armed",
+            armed_before=True,
+            armed_after=True,
+            runtime_bound=True,
+            runtime_control_api_enabled=True,
+            runtime_effect="none",
+            next_checklist_verdict="ready_for_trial_start_after_owner_approval",
+            notes=[*base_notes, "startup_guard_already_armed"],
+        )
+
+    manual_arm = getattr(guard, "manual_arm", None)
+    if not callable(manual_arm):
+        return StartupGuardReadinessArmResponse(
+            status="blocked",
+            armed_before=armed_before,
+            armed_after=armed_before,
+            runtime_bound=True,
+            runtime_control_api_enabled=True,
+            runtime_effect="none",
+            next_checklist_verdict="blocked_boundary_risk",
+            notes=[*base_notes, "startup_guard_manual_arm_unavailable"],
+        )
+
+    manual_arm(reason=body.reason, updated_by=body.updated_by)
+    armed_after = _startup_guard_armed_state(guard)
+    return StartupGuardReadinessArmResponse(
+        status="armed" if armed_after is True else "blocked",
+        armed_before=armed_before,
+        armed_after=armed_after,
+        runtime_bound=True,
+        runtime_control_api_enabled=True,
+        runtime_effect="startup_guard_process_state_only" if armed_after is True else "none",
+        next_checklist_verdict=(
+            "ready_for_trial_start_after_owner_approval"
+            if armed_after is True
+            else "blocked_startup_guard_runtime_coupled"
+        ),
+        notes=[
+            *base_notes,
+            "armed_actual_runtime_owned_startup_guard",
+            "checklist_must_be_regenerated_from_runtime_safety_state",
+        ],
     )
 
 

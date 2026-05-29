@@ -59,9 +59,20 @@ class _FakeGks:
 class _FakeStartupGuard:
     def __init__(self, *, armed: bool = True) -> None:
         self._armed = armed
+        self.arm_calls: list[dict[str, str]] = []
 
     def is_armed(self) -> bool:
         return self._armed
+
+    def manual_arm(self, *, reason, updated_by):
+        self.arm_calls.append({"reason": reason, "updated_by": updated_by})
+        self._armed = True
+        return SimpleNamespace(
+            armed=True,
+            reason=reason,
+            updated_by=updated_by,
+            source="manual_arm",
+        )
 
 
 class _FakeCampaign:
@@ -206,7 +217,15 @@ class _FailingOrderRepo:
         raise RuntimeError("order db offline")
 
 
-def _patch_runtime(monkeypatch, *, campaign=None, position_repo=None, order_repo=None, exchange_gateway=None):
+def _patch_runtime(
+    monkeypatch,
+    *,
+    campaign=None,
+    position_repo=None,
+    order_repo=None,
+    exchange_gateway=None,
+    startup_guard=None,
+):
     from src.interfaces import api as api_module
 
     service = _FakeBrcService(campaign=campaign)
@@ -214,7 +233,8 @@ def _patch_runtime(monkeypatch, *, campaign=None, position_repo=None, order_repo
     monkeypatch.setattr(api_module, "_runtime_config_provider", _config_provider())
     monkeypatch.setattr(api_module, "_brc_campaign_service", service)
     monkeypatch.setattr(api_module, "_global_kill_switch_service", _FakeGks(active=False))
-    monkeypatch.setattr(api_module, "_startup_trading_guard_service", _FakeStartupGuard(armed=True))
+    guard = startup_guard or _FakeStartupGuard(armed=True)
+    monkeypatch.setattr(api_module, "_startup_trading_guard_service", guard)
     monkeypatch.setattr(api_module, "_position_repo", position_repo or _EmptyPositionRepo())
     monkeypatch.setattr(api_module, "_order_repo", order_repo or _EmptyOrderRepo())
     monkeypatch.setattr(api_module, "_exchange_gateway", exchange_gateway)
@@ -444,6 +464,90 @@ def test_brc_readiness_attention_required_blocks_testnet_when_exposure_unknown(m
     assert card["enabled"] is False
     assert card["authority_source"] == "application_preflight"
     assert card["allowed_next_states"] == []
+
+
+def test_startup_guard_readiness_arm_requires_runtime_guard(monkeypatch):
+    _configure_auth(monkeypatch)
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")
+    from src.interfaces import api as api_module
+    from src.interfaces.api import app
+
+    monkeypatch.setattr(api_module, "get_runtime_context", lambda: None)
+    monkeypatch.setattr(api_module, "_startup_trading_guard_service", None)
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/brc/readiness/startup-guard/preflight-arm",
+            json={"reason": "unit", "updated_by": "owner"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["runtime_bound"] is False
+    assert payload["trial_started"] is False
+    assert payload["execution_intent_created"] is False
+    assert payload["order_created"] is False
+    assert payload["next_checklist_verdict"] == "blocked_runtime_start_required"
+
+
+def test_startup_guard_readiness_arm_requires_control_env(monkeypatch):
+    _configure_auth(monkeypatch)
+    monkeypatch.delenv("RUNTIME_CONTROL_API_ENABLED", raising=False)
+    guard = _FakeStartupGuard(armed=False)
+    _patch_runtime(monkeypatch, campaign=None, startup_guard=guard)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/brc/readiness/startup-guard/preflight-arm",
+            json={"reason": "unit", "updated_by": "owner"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["runtime_bound"] is True
+    assert payload["runtime_control_api_enabled"] is False
+    assert payload["armed_before"] is False
+    assert payload["armed_after"] is False
+    assert guard.arm_calls == []
+    assert payload["execution_permission_granted"] is False
+    assert payload["order_permission_granted"] is False
+
+
+def test_startup_guard_readiness_arm_only_touches_guard(monkeypatch):
+    _configure_auth(monkeypatch)
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")
+    guard = _FakeStartupGuard(armed=False)
+    service = _patch_runtime(monkeypatch, campaign=None, startup_guard=guard)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/brc/readiness/startup-guard/preflight-arm",
+            json={"reason": "MI-001 readiness", "updated_by": "owner"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "armed"
+    assert payload["armed_before"] is False
+    assert payload["armed_after"] is True
+    assert payload["runtime_effect"] == "startup_guard_process_state_only"
+    assert payload["next_checklist_verdict"] == "ready_for_trial_start_after_owner_approval"
+    assert payload["trial_started"] is False
+    assert payload["strategy_runtime_started"] is False
+    assert payload["execution_intent_created"] is False
+    assert payload["order_created"] is False
+    assert payload["exchange_write_methods_called"] is False
+    assert payload["execution_permission_granted"] is False
+    assert payload["order_permission_granted"] is False
+    assert guard.arm_calls == [{"reason": "MI-001 readiness", "updated_by": "owner"}]
+    assert service.mutation_calls == 0
 
 
 def test_brc_markets_orders_is_read_only_owner_summary(monkeypatch):

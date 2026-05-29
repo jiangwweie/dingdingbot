@@ -89,7 +89,7 @@ It does not start a trial, grant execution permission, create orders, or modify 
 | Operation Layer gate available | pass | pg_readiness_transition_apply | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
 | Operation Layer notional cap available | pass | 18262.85481460 | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
 | Operation Layer loss cap available | pass | 4663.39779623 | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
-| startup guard armed | blocked | False | yes | startup_guard_runtime_coupled; process_local_only; no_pg_persistence; manual_arm_requires_runtime_control_surface; no_runtime_started |
+| startup guard armed | blocked | False | yes | startup_guard_runtime_coupled; process_local_only; no_pg_persistence; guard_only_control_surface_added=/api/brc/readiness/startup-guard/preflight-arm; actual_runtime_guard_not_armed_in_this_session |
 | evidence logging available | pass | pg_readiness_transition_apply | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
 | no active trial position | pass | True | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
 | no open orders | pass | 0 | no | operation_layer_notional_cap_pg_applied; gks_pg_set_inactive; startup_guard_not_armed_no_runtime_process; positions_orders_read_from_pg_only |
@@ -118,7 +118,7 @@ Checklist consequence:
 Verdict: `blocked_startup_guard_runtime_coupled`
 
 Blockers:
-- startup guard armed (blocked_startup_guard_runtime_coupled: process-local runtime guard is not armed; no persistent PG startup-guard source exists; no runtime was started)
+- startup guard armed (blocked_startup_guard_runtime_coupled: process-local runtime guard is not armed in this session; guard-only control surface exists at `/api/brc/readiness/startup-guard/preflight-arm` but was not run against an actual runtime listener here)
 
 ## 11. Non-permissions
 
