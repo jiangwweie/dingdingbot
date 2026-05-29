@@ -1076,6 +1076,506 @@ class PGBrcStrategyFamilyVersionORM(PGCoreBase):
     )
 
 
+class PGBrcStrategyFamilyRegistryORM(PGCoreBase):
+    """Metadata-only strategy family registry for read-only observation."""
+
+    __tablename__ = "brc_strategy_family_registry"
+
+    family_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    version_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    family_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    family_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    hypothesis: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    alpha_claim: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    carrier_validation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    supported_symbols_json: Mapped[list] = mapped_column(
+        "supported_symbols",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    primary_timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
+    context_timeframes_json: Mapped[list] = mapped_column(
+        "context_timeframes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    input_requirements_json: Mapped[list] = mapped_column(
+        "input_requirements",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    allowed_signal_types_json: Mapped[list] = mapped_column(
+        "allowed_signal_types",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    reason_code_taxonomy_json: Mapped[dict] = mapped_column(
+        "reason_code_taxonomy",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    review_metrics_json: Mapped[list] = mapped_column(
+        "review_metrics",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    known_failure_modes_json: Mapped[list] = mapped_column(
+        "known_failure_modes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    evidence_requirements_json: Mapped[list] = mapped_column(
+        "evidence_requirements",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('registered_hypothesis_only', 'active_observation_candidate', "
+            "'live_readonly_observation', 'parked', 'retired')",
+            name="ck_brc_strategy_family_registry_status",
+        ),
+        CheckConstraint(
+            "family_type IN ('trend_following', 'volatility_breakout', "
+            "'pullback_continuation', 'event_driven_discretionary', "
+            "'funding_oi_dislocation', 'unknown')",
+            name="ck_brc_strategy_family_registry_type",
+        ),
+        Index("idx_brc_strategy_family_registry_family", "family_id"),
+        Index("idx_brc_strategy_family_registry_status", "status", "updated_at_ms"),
+        Index("idx_brc_strategy_family_registry_type", "family_type"),
+    )
+
+
+class PGBrcStrategyFamilyPlaybookORM(PGCoreBase):
+    """Metadata-only strategy family playbook registry."""
+
+    __tablename__ = "brc_strategy_family_playbooks"
+
+    playbook_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    playbook_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    playbook_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol_universe_json: Mapped[list] = mapped_column(
+        "symbol_universe",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    primary_timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
+    context_timeframes_json: Mapped[list] = mapped_column(
+        "context_timeframes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    signal_contract_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    allowed_signal_types_json: Mapped[list] = mapped_column(
+        "allowed_signal_types",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    review_windows_json: Mapped[list] = mapped_column(
+        "review_windows",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    review_metrics_json: Mapped[list] = mapped_column(
+        "review_metrics",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    input_requirements_json: Mapped[list] = mapped_column(
+        "input_requirements",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    evidence_requirements_json: Mapped[list] = mapped_column(
+        "evidence_requirements",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    parameter_profile_json: Mapped[dict] = mapped_column(
+        "parameter_profile",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "playbook_status IN ('registered_hypothesis_only', 'active_observation_candidate', "
+            "'live_readonly_observation', 'parked', 'retired')",
+            name="ck_brc_strategy_family_playbooks_status",
+        ),
+        Index("idx_brc_strategy_family_playbooks_family", "family_id", "version_id"),
+        Index("idx_brc_strategy_family_playbooks_status", "playbook_status", "updated_at_ms"),
+    )
+
+
+class PGBrcHistoricalOhlcvDatasetORM(PGCoreBase):
+    """Catalog of historical OHLCV datasets available for BRC research."""
+
+    __tablename__ = "brc_historical_ohlcv_datasets"
+
+    dataset_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source: Mapped[str] = mapped_column(String(128), nullable=False)
+    market: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
+    start_time_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    end_time_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    storage_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_ref: Mapped[str] = mapped_column(String(512), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    data_quality_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    missing_intervals_json: Mapped[list] = mapped_column(
+        "missing_intervals",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    __table_args__ = (
+        CheckConstraint("end_time_ms >= start_time_ms", name="ck_brc_historical_ohlcv_time_range"),
+        CheckConstraint("row_count >= 0", name="ck_brc_historical_ohlcv_row_count"),
+        CheckConstraint(
+            "storage_kind IN ('pg_table', 'local_file', 'external_ref')",
+            name="ck_brc_historical_ohlcv_storage_kind",
+        ),
+        CheckConstraint(
+            "data_quality_status IN ('ok', 'degraded', 'invalid', 'unknown')",
+            name="ck_brc_historical_ohlcv_quality",
+        ),
+        Index("idx_brc_historical_ohlcv_symbol_tf", "symbol", "timeframe"),
+        Index("idx_brc_historical_ohlcv_source_market", "source", "market"),
+        Index("idx_brc_historical_ohlcv_time_range", "start_time_ms", "end_time_ms"),
+    )
+
+
+class PGBrcHistoricalResearchSamplingRunORM(PGCoreBase):
+    """Historical input-construction sampling run metadata."""
+
+    __tablename__ = "brc_historical_research_sampling_runs"
+
+    run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    playbook_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    dataset_ids_json: Mapped[list] = mapped_column(
+        "dataset_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    symbols_json: Mapped[list] = mapped_column(
+        "symbols",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    primary_timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
+    context_timeframes_json: Mapped[list] = mapped_column(
+        "context_timeframes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    start_time_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    end_time_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    sampling_method: Mapped[str] = mapped_column(String(64), nullable=False)
+    sampling_interval_bars: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    summary_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    __table_args__ = (
+        CheckConstraint("end_time_ms >= start_time_ms", name="ck_brc_hist_sampling_runs_time_range"),
+        CheckConstraint("sampling_interval_bars >= 1", name="ck_brc_hist_sampling_runs_interval"),
+        CheckConstraint("sample_limit >= 1", name="ck_brc_hist_sampling_runs_sample_limit"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed')",
+            name="ck_brc_hist_sampling_runs_status",
+        ),
+        Index("idx_brc_hist_sampling_runs_strategy", "strategy_family_id", "created_at_ms"),
+        Index("idx_brc_hist_sampling_runs_status", "status", "updated_at_ms"),
+    )
+
+
+class PGBrcHistoricalResearchSamplingPointORM(PGCoreBase):
+    """Compact data-quality point result for historical input-construction sampling."""
+
+    __tablename__ = "brc_historical_research_sampling_points"
+
+    point_id: Mapped[str] = mapped_column(String(192), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    timestamp_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    primary_timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
+    context_timeframes_json: Mapped[list] = mapped_column(
+        "context_timeframes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    point_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    market_snapshot_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    signal_input_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    data_quality_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    missing_fields_json: Mapped[list] = mapped_column(
+        "missing_fields",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    stale_fields_json: Mapped[list] = mapped_column(
+        "stale_fields",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    atr_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    candle_context_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    input_contract_valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "point_status IN ('ok', 'degraded', 'invalid')",
+            name="ck_brc_hist_sampling_points_status",
+        ),
+        CheckConstraint(
+            "market_snapshot_status IN ('ok', 'degraded', 'invalid')",
+            name="ck_brc_hist_sampling_points_market_status",
+        ),
+        CheckConstraint(
+            "signal_input_status IN ('ok', 'degraded', 'invalid')",
+            name="ck_brc_hist_sampling_points_input_status",
+        ),
+        CheckConstraint(
+            "data_quality_status IN ('ok', 'degraded', 'invalid')",
+            name="ck_brc_hist_sampling_points_quality_status",
+        ),
+        Index("idx_brc_hist_sampling_points_run", "run_id", "timestamp_ms"),
+        Index("idx_brc_hist_sampling_points_symbol_time", "symbol", "timestamp_ms"),
+        Index("idx_brc_hist_sampling_points_status", "point_status"),
+    )
+
+
+class PGBrcHistoricalSignalEvaluationRunORM(PGCoreBase):
+    """Historical CPM/signal evaluation experiment run metadata."""
+
+    __tablename__ = "brc_historical_signal_evaluation_runs"
+
+    run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    playbook_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    symbols_json: Mapped[list] = mapped_column(
+        "symbols",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    primary_timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
+    context_timeframes_json: Mapped[list] = mapped_column(
+        "context_timeframes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    start_time_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    end_time_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    sampling_method: Mapped[str] = mapped_column(String(64), nullable=False)
+    sampling_interval_bars: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    summary_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    owner_report_json: Mapped[dict] = mapped_column(
+        "owner_report",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    __table_args__ = (
+        CheckConstraint("end_time_ms >= start_time_ms", name="ck_brc_hist_signal_eval_runs_time_range"),
+        CheckConstraint("sampling_interval_bars >= 1", name="ck_brc_hist_signal_eval_runs_interval"),
+        CheckConstraint("sample_limit >= 1", name="ck_brc_hist_signal_eval_runs_sample_limit"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed')",
+            name="ck_brc_hist_signal_eval_runs_status",
+        ),
+        Index("idx_brc_hist_signal_eval_runs_strategy", "strategy_family_id", "created_at_ms"),
+        Index("idx_brc_hist_signal_eval_runs_status", "status", "updated_at_ms"),
+    )
+
+
+class PGBrcHistoricalSignalOutputORM(PGCoreBase):
+    """Compact historical StrategyFamilySignalOutput summary."""
+
+    __tablename__ = "brc_historical_signal_outputs"
+
+    signal_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    evaluation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    timestamp_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
+    signal_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    side: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    reason_codes_json: Mapped[list] = mapped_column(
+        "reason_codes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    data_quality_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    evidence_payload_json: Mapped[dict] = mapped_column(
+        "evidence_payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    review_plan_json: Mapped[dict] = mapped_column(
+        "review_plan",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    not_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_execution_intent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "signal_type IN ('no_action', 'would_enter', 'would_exit', 'would_reduce', 'would_cancel', 'invalid')",
+            name="ck_brc_hist_signal_outputs_type",
+        ),
+        CheckConstraint("side IN ('long', 'short', 'none')", name="ck_brc_hist_signal_outputs_side"),
+        CheckConstraint(
+            "data_quality_status IN ('ok', 'degraded', 'invalid')",
+            name="ck_brc_hist_signal_outputs_quality",
+        ),
+        CheckConstraint("not_order IS TRUE", name="ck_brc_hist_signal_outputs_not_order"),
+        CheckConstraint("not_execution_intent IS TRUE", name="ck_brc_hist_signal_outputs_not_exec_intent"),
+        Index("idx_brc_hist_signal_outputs_run", "run_id", "timestamp_ms"),
+        Index("idx_brc_hist_signal_outputs_symbol", "symbol", "timestamp_ms"),
+        Index("idx_brc_hist_signal_outputs_type", "signal_type", "side"),
+    )
+
+
+class PGBrcHistoricalForwardOutcomeORM(PGCoreBase):
+    """Compact forward outcome review for historical would-enter signals."""
+
+    __tablename__ = "brc_historical_forward_outcomes"
+
+    outcome_id: Mapped[str] = mapped_column(String(192), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    signal_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    timestamp_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    side: Mapped[str] = mapped_column(String(16), nullable=False)
+    window_label: Mapped[str] = mapped_column(String(32), nullable=False)
+    bars_ahead: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    mfe_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    mae_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    time_to_mfe_bars: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    time_to_mae_bars: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pain_before_profit_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    profit_giveback_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    follow_through: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    invalidation_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    return_time_curve_json: Mapped[list] = mapped_column(
+        "return_time_curve",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint("side IN ('long', 'short')", name="ck_brc_hist_forward_outcomes_side"),
+        CheckConstraint(
+            "status IN ('complete', 'incomplete', 'invalid')",
+            name="ck_brc_hist_forward_outcomes_status",
+        ),
+        CheckConstraint("bars_ahead >= 1", name="ck_brc_hist_forward_outcomes_bars"),
+        Index("idx_brc_hist_forward_outcomes_run", "run_id", "window_label"),
+        Index("idx_brc_hist_forward_outcomes_signal", "signal_id"),
+        Index("idx_brc_hist_forward_outcomes_symbol", "symbol", "timestamp_ms"),
+    )
+
+
+class PGBrcHistoricalRegimeSplitReportORM(PGCoreBase):
+    """Compact cross-window regime-split comparison report."""
+
+    __tablename__ = "brc_historical_regime_split_reports"
+
+    comparison_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    child_run_ids_json: Mapped[dict] = mapped_column(
+        "child_run_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    weighted_owner_verdict: Mapped[str] = mapped_column(String(64), nullable=False)
+    report_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "weighted_owner_verdict IN ('continue', 'park', 'needs_refinement', 'regime_dependent_continue')",
+            name="ck_brc_hist_regime_split_reports_verdict",
+        ),
+        Index("idx_brc_hist_regime_split_reports_strategy", "strategy_family_id", "created_at_ms"),
+        Index("idx_brc_hist_regime_split_reports_verdict", "weighted_owner_verdict"),
+    )
+
+
 class PGBrcAdmissionRuleConfigORM(PGCoreBase):
     """Versioned admission rule config; YAML is not the production source."""
 
