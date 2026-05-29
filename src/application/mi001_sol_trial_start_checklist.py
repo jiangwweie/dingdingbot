@@ -68,6 +68,7 @@ class TrialStartChecklistVerdict(str, Enum):
     BLOCKED_KILL_SWITCH_STATE_REQUIRED = "blocked_kill_switch_state_required"
     BLOCKED_GKS_ACTIVE = "blocked_gks_active"
     BLOCKED_STARTUP_GUARD = "blocked_startup_guard"
+    BLOCKED_STARTUP_GUARD_RUNTIME_COUPLED = "blocked_startup_guard_runtime_coupled"
     BLOCKED_OPERATION_LAYER_CAP = "blocked_operation_layer_cap"
     BLOCKED_EVIDENCE_LOGGING = "blocked_evidence_logging"
     BLOCKED_ACTIVE_POSITION_OR_ORDERS = "blocked_active_position_or_orders"
@@ -712,7 +713,12 @@ def _final_verdict(
         return TrialStartChecklistVerdict.BLOCKED_FRESH_ACCOUNT_FACTS_REQUIRED
     if any(row.blocking for row in safety_checks if row.check == "GKS allows new entries"):
         return TrialStartChecklistVerdict.BLOCKED_GKS_ACTIVE
-    if any(row.blocking for row in safety_checks if "startup guard" in row.check.lower()):
+    startup_guard_blockers = [
+        row for row in safety_checks if row.blocking and "startup guard" in row.check.lower()
+    ]
+    if any(_startup_guard_runtime_coupled(row) for row in startup_guard_blockers):
+        return TrialStartChecklistVerdict.BLOCKED_STARTUP_GUARD_RUNTIME_COUPLED
+    if startup_guard_blockers:
         return TrialStartChecklistVerdict.BLOCKED_STARTUP_GUARD
     if any(row.blocking for row in safety_checks if "cap" in row.check.lower()):
         return TrialStartChecklistVerdict.BLOCKED_OPERATION_LAYER_CAP
@@ -753,6 +759,19 @@ def _blockers(
     blockers.extend(row.check for row in safety_checks if row.blocking)
     blockers.extend(row.check for row in owner_checks if row.blocking)
     return blockers
+
+
+def _startup_guard_runtime_coupled(row: ChecklistRow) -> bool:
+    marker_text = f"{row.evidence} {row.notes}".lower()
+    return any(
+        marker in marker_text
+        for marker in {
+            "startup_guard_runtime_coupled",
+            "runtime_coupled",
+            "process_local_only",
+            "manual_arm_requires_runtime_control_surface",
+        }
+    )
 
 
 def _check(check: str, passed: bool, evidence: str, *, blocking: bool = True) -> ChecklistRow:

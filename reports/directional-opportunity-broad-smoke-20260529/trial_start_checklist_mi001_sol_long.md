@@ -115,7 +115,7 @@ Checklist consequence:
 
 ## 10. Final Verdict
 
-Verdict: `blocked_startup_guard`
+Verdict: `blocked_startup_guard_runtime_coupled`
 
 Blockers:
 - startup guard armed (blocked_startup_guard_runtime_coupled: process-local runtime guard is not armed; no persistent PG startup-guard source exists; no runtime was started)

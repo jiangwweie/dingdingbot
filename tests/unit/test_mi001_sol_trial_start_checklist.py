@@ -472,6 +472,72 @@ async def test_checklist_blocks_gks_active_before_trial_start_even_with_owner_ap
 
 
 @pytest.mark.asyncio
+async def test_checklist_marks_startup_guard_runtime_coupled_blocker(
+    seeded_repositories,
+):
+    registry_repo, admission_repo = seeded_repositories
+    approval_service = Mi001SolOwnerTrialStartApprovalService(
+        admission_repository=admission_repo,
+    )
+    await approval_service.record_metadata_only_approval(
+        now_ms=1770000000000,
+        account_facts_snapshot_ref="unit-account-facts",
+    )
+    generator = Mi001SolTrialStartChecklistGenerator(
+        registry_repository=registry_repo,
+        admission_repository=admission_repo,
+    )
+
+    checklist = await generator.generate(
+        TrialStartChecklistInputs(
+            generated_at_ms=1770000000000,
+            account_facts=CachedAccountFacts(
+                available=True,
+                wallet_equity=Decimal("100"),
+                available_margin=Decimal("80"),
+                timestamp_ms=1770000000000,
+                freshness="fresh",
+                source="cached_account_snapshot",
+                read_method="cache_only",
+                read_only=True,
+                reconciliation_status="clean",
+            ),
+            operation_layer_facts=OperationLayerFacts(
+                available=True,
+                gate_available=True,
+                notional_cap_available=True,
+                notional_cap=Decimal("300"),
+                loss_cap_available=True,
+                loss_cap=Decimal("100"),
+                evidence_logging_available=True,
+                no_active_trial_position=True,
+                active_position_count=0,
+                open_order_count=0,
+                no_active_trial_or_runtime_binding=True,
+                startup_guard_available=True,
+                startup_guard_armed=False,
+                source="fake_operation_layer_facts",
+                notes=(
+                    "startup_guard_runtime_coupled; process_local_only; "
+                    "manual_arm_requires_runtime_control_surface"
+                ),
+            ),
+            kill_switch_facts=KillSwitchFacts(
+                available=True,
+                active=False,
+                source="fake_pg_gks",
+                updated_at_ms=1770000000000,
+            ),
+        )
+    )
+
+    assert checklist.final_verdict == (
+        TrialStartChecklistVerdict.BLOCKED_STARTUP_GUARD_RUNTIME_COUPLED
+    )
+    assert "startup guard armed" in checklist.blockers
+
+
+@pytest.mark.asyncio
 async def test_checklist_ready_after_metadata_owner_approval_when_all_facts_pass(
     seeded_repositories,
 ):
