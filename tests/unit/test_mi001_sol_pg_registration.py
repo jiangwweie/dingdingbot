@@ -143,8 +143,29 @@ def test_planned_binding_cannot_imply_campaign_runtime_or_order_capability() -> 
     assert binding.campaign_id is None
     assert binding.runtime_carrier_id is None
     assert binding.execution_mode == AdmissionExecutionMode.OWNER_CONFIRM_EACH_ENTRY
-    assert "fresh cached AccountSnapshot.total_balance" in payload.apply_blockers[0]
+    assert "explicit repository transaction" in payload.apply_blockers[0]
     assert payload.source_of_truth_status["trial_start_approval"] == "not_granted"
+
+
+def test_capital_policy_is_rule_only_until_trial_start_checklist() -> None:
+    payload = build_mi001_sol_pg_registration_dry_run(now_ms=1770000000000)
+
+    account_policy = payload.admission_request.account_facts_snapshot_json["risk_capital_policy"]
+    constraints = payload.trial_constraint_snapshot.constraints_json
+
+    assert payload.admission_request.account_facts_snapshot_ref.endswith(
+        "required-before-trial-start-checklist"
+    )
+    assert account_policy["concrete_amounts_resolved"] is False
+    assert account_policy["trial_risk_capital_rule"] == "current_dedicated_subaccount_equity"
+    assert account_policy["max_total_loss_rule"] == "current_dedicated_subaccount_equity"
+    assert account_policy["max_leverage"] == 5
+    assert "current_dedicated_subaccount_equity * 5" in account_policy["max_notional_rule"]
+
+    assert "max_loss_budget" not in constraints
+    assert "max_notional" not in constraints
+    assert constraints["max_total_loss_rule"] == "current_dedicated_subaccount_equity"
+    assert "trial_start_checklist" in constraints["blockers"][0]
 
 
 def test_builder_has_no_execution_order_or_exchange_dependencies() -> None:

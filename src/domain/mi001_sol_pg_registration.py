@@ -47,7 +47,7 @@ MI001_PLAYBOOK_ID = "MI-001-SOL-LONG-BT-001"
 MI001_SYMBOL = "SOL/USDT:USDT"
 MI001_SIDE = "long"
 
-_ACCOUNT_FACTS_REF_REQUIRED = "account-facts:required-before-registration-apply"
+_ACCOUNT_FACTS_REF_REQUIRED = "account-facts:required-before-trial-start-checklist"
 _ADMISSION_RULE_CONFIG_ID = "brc-admission-rules-default-v1"
 _REPORT_ROOT = "reports/directional-opportunity-broad-smoke-20260529"
 
@@ -148,14 +148,12 @@ def build_mi001_sol_pg_registration_dry_run(*, now_ms: int) -> Mi001SolPgRegistr
             "candidate_admission": "dry_run_pg_payload_ready",
             "broad_smoke_evidence": "dry_run_pg_payload_ready",
             "owner_plan_preparation_approval": "dry_run_pg_payload_ready",
-            "trial_constraints": "dry_run_pending_fresh_account_facts_before_apply",
+            "trial_constraints": "dry_run_policy_rule_payload_ready",
             "planned_binding": "dry_run_pg_payload_ready",
             "trial_start_approval": "not_granted",
         },
         apply_blockers=[
-            "fresh cached AccountSnapshot.total_balance is required before applying concrete risk capital",
-            "fresh cached AccountSnapshot.available_balance or explicit unavailable-margin policy is required",
-            "Operation Layer notional cap must be read before computing max_notional",
+            "dry-run payload must be applied through an explicit repository transaction or apply helper",
             "separate Owner trial-start approval is still required",
         ],
         safety_assertions={
@@ -318,7 +316,7 @@ def _admission_strategy_family_version(
         market_structure="High-beta SOL impulse continuation candidate from broad smoke.",
         entry_logic_family="Closed 1h bar; compare current close with close 12 hours earlier; long when return >= 3 percent.",
         exit_logic_family="Not defined by registration; future bounded trial review only.",
-        risk_model="Dedicated-subaccount risk capital policy must be resolved from fresh account facts before apply.",
+        risk_model="Dedicated-subaccount risk capital policy must be resolved from fresh account facts before trial start.",
         supported_symbols=[MI001_SYMBOL],
         supported_timeframes=["1h"],
         required_data=["1h OHLCV", "12h prior close", "bar-close timestamp"],
@@ -359,7 +357,7 @@ def _admission_rule_config(*, now_ms: int) -> AdmissionRuleConfig:
         status="active",
         rule_details_json={
             "registration_mode": "dry_run",
-            "requires_fresh_account_facts_before_apply": True,
+            "requires_fresh_account_facts_before_trial_start_checklist": True,
             "requires_separate_trial_start_approval": True,
         },
         system_boundaries_json={
@@ -452,23 +450,30 @@ def _admission_request(
         admission_rule_config_id=_ADMISSION_RULE_CONFIG_ID,
         account_facts_snapshot_ref=_ACCOUNT_FACTS_REF_REQUIRED,
         account_facts_snapshot_json={
-            "source": "runtime_cached_account_snapshot_required_before_apply",
-            "truth_level": "cached_exchange_read_required_before_apply",
+            "source": "runtime_cached_account_snapshot_required_before_trial_start_checklist",
+            "truth_level": "cached_exchange_read_required_before_trial_start_checklist",
             "account_status": "not_read_by_registration_dry_run",
-            "reconciliation_status": {"status": "required_before_apply"},
-            "unknown_unmanaged_counts": {"orders": "required_before_apply", "positions": "required_before_apply"},
+            "reconciliation_status": {"status": "required_before_trial_start_checklist"},
+            "unknown_unmanaged_counts": {
+                "orders": "required_before_trial_start_checklist",
+                "positions": "required_before_trial_start_checklist",
+            },
             "account_equity_source": "cached AccountSnapshot.total_balance",
             "available_margin_source": "cached AccountSnapshot.available_balance",
             "real_account_api_called_by_registration": False,
-            "risk_capital_resolution": {
+            "risk_capital_policy": {
                 "risk_policy_version": "mi001-dedicated-subaccount-v1",
                 "capital_source": "dedicated_subaccount",
                 "trial_risk_capital_rule": "current_dedicated_subaccount_equity",
-                "max_loss_budget": "resolve_from_current_dedicated_subaccount_equity_at_apply_time",
-                "max_notional": "resolve_min_equity_times_5_available_margin_times_5_operation_cap_at_apply_time",
+                "max_total_loss_rule": "current_dedicated_subaccount_equity",
+                "max_notional_rule": (
+                    "min(current_dedicated_subaccount_equity * 5, "
+                    "available_margin * 5, operation_layer_notional_cap_if_exists)"
+                ),
                 "max_leverage": 5,
                 "max_attempts": 3,
-                "warnings": ["dry-run payload; concrete capital must be resolved before PG apply"],
+                "concrete_amounts_resolved": False,
+                "warnings": ["concrete capital must be resolved by the trial_start_checklist"],
                 "limitations": ["trial start still requires separate Owner approval"],
             },
         },
@@ -486,13 +491,11 @@ def _trial_constraint_snapshot(*, now_ms: int) -> TrialConstraintSnapshot:
         "capital_source": "dedicated_subaccount",
         "trial_risk_capital_rule": "current_dedicated_subaccount_equity",
         "max_total_loss_rule": "current_dedicated_subaccount_equity",
-        "max_loss_budget": "resolve_from_current_dedicated_subaccount_equity_at_apply_time",
         "max_leverage": 5,
         "max_notional_rule": (
             "min(current_dedicated_subaccount_equity * 5, "
             "available_margin * 5 if available, operation_layer_notional_cap_if_exists)"
         ),
-        "max_notional": "resolve_at_apply_time",
         "allowed_symbols": [MI001_SYMBOL],
         "allowed_symbol": MI001_SYMBOL,
         "allowed_side": MI001_SIDE,
@@ -501,7 +504,7 @@ def _trial_constraint_snapshot(*, now_ms: int) -> TrialConstraintSnapshot:
         "one_active_trial_position": True,
         **_safeguards(),
         "blockers": [
-            "fresh account facts required before registration apply",
+            "fresh account facts required before trial_start_checklist",
             "Operation Layer cap required before trial start",
             "separate Owner trial-start approval required",
         ],
@@ -519,7 +522,7 @@ def _trial_constraint_snapshot(*, now_ms: int) -> TrialConstraintSnapshot:
         constraints_json=constraints,
         risk_policy_snapshot_json={
             "source": "owner_confirmed_policy",
-            "policy_status": "dry_run_pending_account_facts_resolution",
+            "policy_status": "policy_rule_registered_pending_trial_start_facts",
             "capital_source": "dedicated_subaccount",
             "trial_risk_capital_source": "current_subaccount_equity",
             "account_equity_source": "cached AccountSnapshot.total_balance",
@@ -534,7 +537,7 @@ def _trial_constraint_snapshot(*, now_ms: int) -> TrialConstraintSnapshot:
         },
         adapter_result_json={
             "adapter": "MI001SolPgRegistrationDryRunBuilder",
-            "resolution": "pending_apply_time_account_facts",
+            "resolution": "policy_rules_only_pending_trial_start_account_facts",
             "sizing_computed": False,
             "pg_write_performed": False,
             "order_capable": False,
@@ -580,8 +583,8 @@ def _admission_decision(
             "if_kill_switch_unavailable": "no_entry",
         },
         blockers_json=[
-            "dry-run registration not applied to PG",
-            "fresh account facts required before concrete trial constraints can be installed",
+            "fresh account facts required before trial-start checklist can resolve concrete capital",
+            "Operation Layer cap required before trial start",
             "separate Owner trial-start approval required",
         ],
         warnings_json=[
@@ -647,7 +650,7 @@ def _owner_risk_acceptance(*, now_ms: int) -> OwnerRiskAcceptance:
                 "no campaign replay",
                 "research-only",
             ],
-            "fresh_account_facts_required_before_apply": True,
+            "fresh_account_facts_required_before_trial_start_checklist": True,
         },
         owner_rationale="Owner accepted MI-001 SOL long for bounded trial plan preparation only.",
         confirmation_phrase="I ACCEPT MI-001 SOL PLAN PREPARATION RISK ONLY",
@@ -745,10 +748,10 @@ def _record_chain() -> list[PgRegistrationRecordStatus]:
         PgRegistrationRecordStatus(
             record_type="trial_constraint_snapshot",
             pg_table_or_repository="brc_trial_constraint_snapshots / PgBrcAdmissionRepository",
-            status="dry_run_pending_account_facts",
+            status="dry_run_policy_rule_payload_ready",
             content_summary="Dedicated subaccount policy, max leverage 5, max attempts 3, no expansion rules.",
             runtime_effect="none",
-            notes="Concrete capital values must be resolved from fresh cached account facts before apply.",
+            notes="Policy rules can be applied now; concrete capital values are resolved by trial_start_checklist.",
         ),
         PgRegistrationRecordStatus(
             record_type="trial_binding",
