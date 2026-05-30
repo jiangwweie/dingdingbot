@@ -4,6 +4,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from src.application.strategy_group_live_readonly_observation import (
+    build_strategy_group_live_readonly_observation_v1,
+)
+
 
 class StrategyGroupCandidateEvidence(BaseModel):
     candidate_id: str
@@ -74,6 +78,7 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
     route.
     """
 
+    observation_v1 = build_strategy_group_live_readonly_observation_v1()
     primary_groups = [
         StrategyGroupReviewabilityItem(
             strategy_group_id="MI-001",
@@ -112,14 +117,20 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
                 "strategy self-elevation",
             ],
             evidence_reviewability="reviewable_with_known_risks",
-            live_readonly_observation_readiness="live_readonly_candidate_requires_signal_glue",
+            live_readonly_observation_readiness="live_readonly_observation_v1_evaluator_ready_requires_runner_binding",
             bounded_trial_readiness="SOL chain sample has bounded-trial metadata; BNB remains review-only after coverage repair",
             main_blockers=[
-                "MI signal evaluator glue is not wired into live read-only observation",
+                "MI read-only evaluator glue is wired, but live observation runner/sink is not bound or scheduled",
                 "SOL signal density/dedup review remains open",
                 "BNB repaired evidence still needs Owner review for 2025 weakness, top-tail dependence, and campaign replay gap",
             ],
-            source_refs=[_BNB_SOL_REVIEW, _COST_BASELINE, _TRIAL_CANDIDATES, _SHELF_REPORT],
+            source_refs=[
+                "src/application/strategy_group_live_readonly_observation.py",
+                _BNB_SOL_REVIEW,
+                _COST_BASELINE,
+                _TRIAL_CANDIDATES,
+                _SHELF_REPORT,
+            ],
         ),
         StrategyGroupReviewabilityItem(
             strategy_group_id="VI-001",
@@ -136,7 +147,7 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             next_recommended_action="Keep as backup observation; do not replace MI automatically.",
             not_allowed_now=["trial start", "automatic MI replacement", "execution path wiring"],
             evidence_reviewability="reviewable_but_cost_sensitive",
-            live_readonly_observation_readiness="live_readonly_candidate_requires_signal_glue",
+            live_readonly_observation_readiness="backup_requires_signal_glue",
             bounded_trial_readiness="not_first_trial_line",
             main_blockers=["VI signal evaluator glue is not wired", "edge is cost-sensitive"],
             source_refs=[_COST_BASELINE, _SHELF_REPORT],
@@ -156,10 +167,19 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             next_recommended_action="Keep as special read-only observation; do not promote to runtime eligibility.",
             not_allowed_now=["runtime eligibility by default", "trial start", "execution wiring", "alpha claim"],
             evidence_reviewability="reviewable_with_negative_oos_disclosure",
-            live_readonly_observation_readiness="live_readonly_candidate_requires_signal_glue",
+            live_readonly_observation_readiness="live_readonly_observation_v1_evaluator_ready_requires_runner_binding",
             bounded_trial_readiness="not_runtime_eligible_by_default",
-            main_blockers=["negative OOS disclosure", "CPM signal glue not wired for observation"],
-            source_refs=[_CPM_OOS, _CPM_CONTEXT, _SHELF_REPORT],
+            main_blockers=[
+                "negative OOS disclosure",
+                "CPM evaluator glue is wired, but live observation runner/sink is not bound or scheduled",
+                "not runtime eligible by default",
+            ],
+            source_refs=[
+                "src/application/strategy_group_live_readonly_observation.py",
+                _CPM_OOS,
+                _CPM_CONTEXT,
+                _SHELF_REPORT,
+            ],
         ),
         StrategyGroupReviewabilityItem(
             strategy_group_id="TB",
@@ -348,7 +368,11 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             side="long",
             review_status="owner_special_observation_not_proven_alpha",
             evidence_summary="Owner special observation despite negative CPM historical OOS 2021/2022; not runtime eligible by default.",
-            metrics={"historical_oos_2021_2022": "negative"},
+            metrics={
+                "historical_oos_2021_2022": "negative",
+                "current_observation_hypothesis": "calmer pullback-continuation validation",
+                "useful_validation": "clean no-action/would-enter samples with follow-through review",
+            },
             limitations=["not proven alpha", "not runtime eligible by default", "negative OOS disclosure required"],
             confidence_flags=["owner_special_observation", "not_proven_alpha", "oos_negative_warning"],
             source_refs=[_CPM_OOS, _CPM_CONTEXT],
@@ -364,9 +388,13 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             "existing_runner_source": _RUNNER,
             "can_record_metadata_and_evidence_without_orders": True,
             "active_live_readonly_observation": False,
-            "strategy_specific_signal_evaluator_glue_wired": False,
+            "strategy_specific_signal_evaluator_glue_wired": True,
             "observation_sink_wired_for_strategy_specific_events": False,
-            "readiness_status": "live_readonly_candidate_requires_signal_glue",
+            "observation_v1_endpoint": "/api/brc/strategy-groups/live-readonly-observation/v1",
+            "observation_v1_candidates": [
+                candidate.model_dump(mode="json") for candidate in observation_v1.candidates
+            ],
+            "readiness_status": "evaluator_ready_requires_runner_binding",
             "execution_intent_created": False,
             "order_created": False,
             "runtime_started": False,

@@ -23,6 +23,7 @@ import {
   brcApi,
   Mi001SolReadinessResponse,
   ReadinessResponse,
+  StrategyGroupLiveReadOnlyObservationResponse,
   StrategyGroupReviewabilityResponse,
   StrategyFamily,
 } from '@/src/services/api';
@@ -33,6 +34,7 @@ type ConsoleData = {
   accountFacts: AccountFactsResponse | null;
   mi001: Mi001SolReadinessResponse | null;
   strategyGroupReviewability: StrategyGroupReviewabilityResponse | null;
+  liveObservation: StrategyGroupLiveReadOnlyObservationResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
   bindings: AdmissionTrialBinding[];
@@ -84,6 +86,7 @@ const EMPTY_DATA: ConsoleData = {
   accountFacts: null,
   mi001: null,
   strategyGroupReviewability: null,
+  liveObservation: null,
   families: [],
   decisions: [],
   bindings: [],
@@ -260,7 +263,7 @@ export function StrategyGroupsV2() {
       </section>
 
       <CandidateEvidenceComparison data={data.strategyGroupReviewability} />
-      <ObservationReadinessPanel data={data.strategyGroupReviewability} />
+      <ObservationReadinessPanel data={data.strategyGroupReviewability} liveObservation={data.liveObservation} />
 
       <DataTable
         columns={['策略组', '具体策略', '状态', '标的', '方向', '最近信号', '最近意图', '下一步']}
@@ -304,6 +307,7 @@ export function StrategyGroupsV2() {
 
       <TechnicalDetails data={{
         strategy_group_reviewability: data.strategyGroupReviewability,
+        live_observation_v1: data.liveObservation,
         strategy_group_shelf: shelf,
         families: data.families,
         decisions: data.decisions,
@@ -516,6 +520,7 @@ function useConsoleData(): ViewState {
         accountFacts,
         mi001,
         strategyGroupReviewability,
+        liveObservation,
         families,
         decisions,
         bindings,
@@ -538,6 +543,10 @@ function useConsoleData(): ViewState {
         }),
         brcApi.strategyGroupReviewability().catch((error) => {
           gaps.push(`strategy group reviewability: ${message(error)}`);
+          return null;
+        }),
+        brcApi.strategyGroupLiveObservationV1().catch((error) => {
+          gaps.push(`live read-only observation v1: ${message(error)}`);
           return null;
         }),
         brcApi.listStrategyFamilies().catch((error) => {
@@ -577,6 +586,7 @@ function useConsoleData(): ViewState {
             accountFacts,
             mi001,
             strategyGroupReviewability,
+            liveObservation,
             families,
             decisions,
             bindings,
@@ -887,8 +897,15 @@ function CandidateEvidenceComparison({ data }: { data: StrategyGroupReviewabilit
   );
 }
 
-function ObservationReadinessPanel({ data }: { data: StrategyGroupReviewabilityResponse | null }) {
+function ObservationReadinessPanel({
+  data,
+  liveObservation,
+}: {
+  data: StrategyGroupReviewabilityResponse | null;
+  liveObservation: StrategyGroupLiveReadOnlyObservationResponse | null;
+}) {
   const summary = data?.observation_chain_summary || {};
+  const candidates = liveObservation?.candidates || [];
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">Live Read-only Observation Readiness</h3>
@@ -900,8 +917,22 @@ function ObservationReadinessPanel({ data }: { data: StrategyGroupReviewabilityR
         <ShelfMiniFact label="Execution intent" value={String(Boolean(summary.execution_intent_created))} />
         <ShelfMiniFact label="Order created" value={String(Boolean(summary.order_created))} />
       </div>
+      {candidates.length ? (
+        <DataTable
+          compact
+          columns={['candidate', 'contract', 'glue', 'preview', 'readiness', 'blockers']}
+          rows={candidates.map((candidate) => [
+            candidate.candidate_id,
+            candidate.signal_contract.join(' / '),
+            candidate.evaluator_glue_status,
+            String(candidate.latest_signal_preview.signal_type || 'not_checked'),
+            candidate.readiness_status,
+            candidate.blockers.join(' / '),
+          ])}
+        />
+      ) : null}
       <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-        Existing runner can record metadata/evidence without order creation, but strategy-specific signal evaluator glue and observation sink wiring remain blockers.
+        Existing runner can record metadata/evidence without order creation. MI/CPM evaluator glue is now available for read-only candle snapshots, but live observation runner binding and scheduled observation sink remain blockers.
       </div>
       <ChipBlock
         label="Non-permissions"

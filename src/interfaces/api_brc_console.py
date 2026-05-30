@@ -23,6 +23,10 @@ from src.application.strategy_group_reviewability import (
     StrategyGroupReviewabilityResponse,
     build_strategy_group_reviewability_snapshot,
 )
+from src.application.strategy_group_live_readonly_observation import (
+    StrategyGroupLiveReadOnlyObservationResponse,
+    build_strategy_group_live_readonly_observation_v1,
+)
 from src.application.brc_admission_service import (
     AdmissionRuleViolation,
     BrcAdmissionService,
@@ -3530,6 +3534,15 @@ async def get_mi001_sol_owner_console_e2e() -> Mi001SolOwnerConsoleE2EResponse:
 async def get_strategy_group_reviewability() -> StrategyGroupReviewabilityResponse:
     """Return the read-only Owner-reviewable strategy group shelf."""
     return build_strategy_group_reviewability_snapshot()
+
+
+@router.get(
+    "/strategy-groups/live-readonly-observation/v1",
+    response_model=StrategyGroupLiveReadOnlyObservationResponse,
+)
+async def get_strategy_group_live_readonly_observation_v1() -> StrategyGroupLiveReadOnlyObservationResponse:
+    """Return MI/CPM read-only observation v1 status without starting runtime."""
+    return build_strategy_group_live_readonly_observation_v1()
 
 
 @router.post(

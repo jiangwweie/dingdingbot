@@ -68,6 +68,17 @@ Rerun scope: BNB/USDT:USDT long and SOL/USDT:USDT long only; windows 24h, 72h, a
 | SOL/USDT:USDT | 2025 | 1174 | -0.7494 | 0.4302 | -0.4766 | available |
 | SOL/USDT:USDT | 2026 | 275 | -1.9987 | 0.3636 | -1.2961 | available |
 
+### Representative 72h Cases
+
+| symbol | case_type | timestamp | entry_close | 72h_return | 72h_MFE | 72h_MAE | note |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- |
+| BNB/USDT:USDT | positive_case | 2021-02-17 09:00 | 133.7780 | 121.5050 | 161.6275 | -0.1458 | largest 72h forward return among MI-001 long signals |
+| BNB/USDT:USDT | negative_adverse_case | 2021-05-16 12:00 | 591.4800 | -43.2491 | 0.6458 | -56.0425 | worst 72h forward return among MI-001 long signals |
+| BNB/USDT:USDT | typical_case | 2022-01-23 12:00 | 383.6900 | 0.7324 | 1.6081 | -12.4293 | closest to median 72h forward return |
+| SOL/USDT:USDT | positive_case | 2021-01-07 07:00 | 2.0439 | 82.7927 | 88.2675 | -8.8263 | largest 72h forward return among MI-001 long signals |
+| SOL/USDT:USDT | negative_adverse_case | 2021-05-20 17:00 | 48.3380 | -53.7714 | 0.0290 | -60.4307 | worst 72h forward return among MI-001 long signals |
+| SOL/USDT:USDT | typical_case | 2021-11-06 07:00 | 245.8940 | 0.3554 | 5.7626 | -3.4007 | closest to median 72h forward return |
+
 ## 6. Comparison / Reviewability
 
 - BNB remains important because its repaired-coverage MI-001 72h/7d evidence remains stronger than SOL on mean forward return and random-spread checks, while showing weaker 24h positive rate and a negative 2025 year split.

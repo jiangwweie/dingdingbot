@@ -571,7 +571,7 @@ def test_strategy_group_reviewability_api_exposes_safe_shelf(monkeypatch):
     assert "MI-001 SOL long" in mi["representative_candidates"]
     assert "MI-001 BNB long" in mi["representative_candidates"]
     assert "coverage repaired" in " ".join(mi["confidence_flags"]).lower()
-    assert mi["live_readonly_observation_readiness"] == "live_readonly_candidate_requires_signal_glue"
+    assert mi["live_readonly_observation_readiness"] == "live_readonly_observation_v1_evaluator_ready_requires_runner_binding"
     assert mi["no_execution_permission"] is True
     assert mi["no_order_permission"] is True
     assert mi["no_runtime_start"] is True
@@ -589,11 +589,38 @@ def test_strategy_group_reviewability_api_exposes_safe_shelf(monkeypatch):
     observation = payload["observation_chain_summary"]
     assert observation["can_record_metadata_and_evidence_without_orders"] is True
     assert observation["active_live_readonly_observation"] is False
-    assert observation["strategy_specific_signal_evaluator_glue_wired"] is False
+    assert observation["strategy_specific_signal_evaluator_glue_wired"] is True
+    assert observation["observation_v1_endpoint"] == "/api/brc/strategy-groups/live-readonly-observation/v1"
     assert observation["execution_intent_created"] is False
     assert observation["order_created"] is False
     assert payload["non_permissions"]["no_trial_start"] is True
     assert payload["non_permissions"]["no_execution_intent"] is True
+
+    raw_payload = json.dumps(payload)
+    assert "Start Trading" not in raw_payload
+    assert "Place Order" not in raw_payload
+    assert "Run Strategy" not in raw_payload
+    assert "execution_permission_granted" not in raw_payload
+    assert "order_permission_granted" not in raw_payload
+
+
+def test_strategy_group_live_readonly_observation_v1_api_is_safe(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/strategy-groups/live-readonly-observation/v1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["live_ready"] is False
+    assert payload["live_observation_active"] is False
+    candidate_ids = {item["candidate_id"] for item in payload["candidates"]}
+    assert {"MI-001-SOL-LONG", "MI-001-BNB-LONG", "CPM-RO-001"} <= candidate_ids
+    assert payload["runner_mapping"]["strategy_specific_signal_evaluator_glue_wired"] is True
+    assert payload["non_permissions"]["no_execution_intent"] is True
+    assert payload["non_permissions"]["no_order_permission"] is True
 
     raw_payload = json.dumps(payload)
     assert "Start Trading" not in raw_payload

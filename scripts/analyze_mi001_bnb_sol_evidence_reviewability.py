@@ -76,6 +76,17 @@ class WindowReview:
 
 
 @dataclass(frozen=True)
+class CaseReview:
+    case_type: str
+    timestamp: str
+    entry_close: Decimal
+    forward_return: Decimal
+    mfe: Decimal
+    mae: Decimal
+    note: str
+
+
+@dataclass(frozen=True)
 class CandidateReview:
     symbol: str
     signal_count: int
@@ -83,6 +94,7 @@ class CandidateReview:
     buy_and_hold_return: Decimal | None
     windows: dict[str, WindowReview]
     year_72h: dict[str, WindowReview]
+    representative_cases_72h: list[CaseReview]
 
 
 def main() -> int:
@@ -173,7 +185,15 @@ def _coverage(symbol: str, bars: list[HistoricalOhlcvBar]) -> CoverageSummary:
 
 def _candidate_review(symbol: str, bars: list[HistoricalOhlcvBar]) -> CandidateReview:
     if not bars:
-        return CandidateReview(symbol=symbol, signal_count=0, dedup_signal_count=0, buy_and_hold_return=None, windows={}, year_72h={})
+        return CandidateReview(
+            symbol=symbol,
+            signal_count=0,
+            dedup_signal_count=0,
+            buy_and_hold_return=None,
+            windows={},
+            year_72h={},
+            representative_cases_72h=[],
+        )
 
     signals = _detect_signals(variant="MI-001", symbol=symbol, bars=bars, side=SignalSide.LONG)
     signal_indices = [signal.bar_index for signal in signals]
@@ -209,6 +229,11 @@ def _candidate_review(symbol: str, bars: list[HistoricalOhlcvBar]) -> CandidateR
         buy_and_hold_return=_return_pct(bars[-1].close, bars[0].close),
         windows=windows,
         year_72h=year_72h,
+        representative_cases_72h=_case_reviews(
+            bars=bars,
+            signal_indices=signal_indices,
+            bars_ahead=WINDOWS["72h"],
+        ),
     )
 
 
@@ -281,6 +306,51 @@ def _outcomes(
         mfe.append(_return_pct(max(bar.high for bar in future), entry))
         mae.append(_return_pct(min(bar.low for bar in future), entry))
     return returns, mfe, mae
+
+
+def _case_reviews(
+    *,
+    bars: list[HistoricalOhlcvBar],
+    signal_indices: list[int],
+    bars_ahead: int,
+) -> list[CaseReview]:
+    cases: list[tuple[int, Decimal, Decimal, Decimal]] = []
+    for index in signal_indices:
+        if index + bars_ahead >= len(bars):
+            continue
+        entry = bars[index].close
+        future = bars[index + 1 : index + 1 + bars_ahead]
+        if entry <= 0 or not future:
+            continue
+        forward_return = _return_pct(future[-1].close, entry)
+        mfe = _return_pct(max(bar.high for bar in future), entry)
+        mae = _return_pct(min(bar.low for bar in future), entry)
+        cases.append((index, forward_return, mfe, mae))
+    if not cases:
+        return []
+
+    sorted_by_return = sorted(cases, key=lambda item: item[1])
+    median_return = median([item[1] for item in cases])
+    typical = min(cases, key=lambda item: abs(item[1] - median_return))
+    selected = [
+        ("positive_case", sorted_by_return[-1], "largest 72h forward return among MI-001 long signals"),
+        ("negative_adverse_case", sorted_by_return[0], "worst 72h forward return among MI-001 long signals"),
+        ("typical_case", typical, "closest to median 72h forward return"),
+    ]
+    result: list[CaseReview] = []
+    for case_type, (index, forward_return, mfe, mae), note in selected:
+        result.append(
+            CaseReview(
+                case_type=case_type,
+                timestamp=_dt(bars[index].open_time_ms).strftime("%Y-%m-%d %H:%M"),
+                entry_close=bars[index].close,
+                forward_return=forward_return,
+                mfe=mfe,
+                mae=mae,
+                note=note,
+            )
+        )
+    return result
 
 
 def _return_pct(exit_price: Decimal, entry_price: Decimal) -> Decimal:
@@ -360,6 +430,21 @@ def _render_report(
         for year, item in reviews[symbol].year_72h.items():
             lines.append(
                 f"| {symbol} | {year} | {item.complete} | {_fmt(item.mean)} | {_fmt(item.positive_rate)} | {_fmt(item.random_spread)} | {_year_split_note(symbol, year, coverage[symbol])} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "### Representative 72h Cases",
+            "",
+            "| symbol | case_type | timestamp | entry_close | 72h_return | 72h_MFE | 72h_MAE | note |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
+        ]
+    )
+    for symbol in SYMBOLS:
+        for case in reviews[symbol].representative_cases_72h:
+            lines.append(
+                f"| {symbol} | {case.case_type} | {case.timestamp} | {_fmt(case.entry_close)} | {_fmt(case.forward_return)} | {_fmt(case.mfe)} | {_fmt(case.mae)} | {case.note} |"
             )
 
     lines.extend(
