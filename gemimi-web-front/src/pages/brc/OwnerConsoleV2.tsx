@@ -906,6 +906,10 @@ function ObservationReadinessPanel({
 }) {
   const summary = data?.observation_chain_summary || {};
   const candidates = liveObservation?.candidates || [];
+  const currentSignals = liveObservation?.current_signals || [];
+  const signalHistory = liveObservation?.signal_history || [];
+  const sinkSummary = liveObservation?.sink_summary || {};
+  const inputSource = liveObservation?.input_source_summary || {};
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">Live Read-only Observation Readiness</h3>
@@ -914,6 +918,8 @@ function ObservationReadinessPanel({
         <ShelfMiniFact label="Active observation" value={String(Boolean(summary.active_live_readonly_observation))} />
         <ShelfMiniFact label="Signal glue" value={String(Boolean(summary.strategy_specific_signal_evaluator_glue_wired))} />
         <ShelfMiniFact label="Evidence without order" value={String(Boolean(summary.can_record_metadata_and_evidence_without_orders))} />
+        <ShelfMiniFact label="Market source" value={String(inputSource.source_id || 'api_unavailable')} />
+        <ShelfMiniFact label="Sink status" value={String(sinkSummary.sink_status || 'api_unavailable')} />
         <ShelfMiniFact label="Execution intent" value={String(Boolean(summary.execution_intent_created))} />
         <ShelfMiniFact label="Order created" value={String(Boolean(summary.order_created))} />
       </div>
@@ -931,8 +937,39 @@ function ObservationReadinessPanel({
           ])}
         />
       ) : null}
+      {currentSignals.length ? (
+        <div className="mt-4">
+          <DataTable
+            compact
+            columns={['current signal', 'symbol', 'type', 'confidence', 'review hook', 'sink']}
+            rows={currentSignals.map((record) => [
+              record.candidate_id,
+              record.symbol,
+              record.signal_type,
+              record.confidence,
+              record.review_windows.join(' / '),
+              record.sink_status,
+            ])}
+          />
+        </div>
+      ) : null}
+      {signalHistory.length ? (
+        <div className="mt-4">
+          <DataTable
+            compact
+            columns={['history record', 'candidate', 'type', 'recorded', 'non-permission']}
+            rows={signalHistory.slice(0, 5).map((record) => [
+              record.record_id,
+              record.candidate_id,
+              record.signal_type,
+              record.recorded_at_ms ? new Date(record.recorded_at_ms).toISOString() : 'preview',
+              record.no_execution_permission && record.no_order_permission ? 'no execution / no order' : 'invalid',
+            ])}
+          />
+        </div>
+      ) : null}
       <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-        Existing runner can record metadata/evidence without order creation. MI/CPM evaluator glue is now available for read-only candle snapshots, but live observation runner binding and scheduled observation sink remain blockers.
+        Existing runner can record metadata/evidence without order creation. MI/CPM evaluator glue now produces read-only current signal records from closed candle snapshots. Scheduler binding and PG observation sink remain blockers; this panel does not start runtime or create execution intent.
       </div>
       <ChipBlock
         label="Non-permissions"

@@ -119,7 +119,9 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
     expect(screen.getAllByText('CPM-RO-001').length).toBeGreaterThan(0);
     expect(screen.getAllByText('wired_read_only_v1').length).toBeGreaterThan(0);
-    expect(screen.getByText(/live observation runner binding and scheduled observation sink remain blockers/)).toBeTruthy();
+    expect(screen.getByText('local_sqlite_v3_dev_closed_klines_read_only')).toBeTruthy();
+    expect(screen.getByText('process_local_sink_available_not_recorded_by_get')).toBeTruthy();
+    expect(screen.getByText(/MI\/CPM evaluator glue now produces read-only current signal records/)).toBeTruthy();
     cleanup();
 
     renderWithRouter(<IntentsV2 />);
@@ -406,6 +408,27 @@ function liveObservationPayload() {
       observationCandidate('MI-001-BNB-LONG', 'MI-001', 'BNB/USDT:USDT', 'would_enter'),
       observationCandidate('CPM-RO-001', 'CPM-RO-001', 'ETH/USDT:USDT', 'no_action'),
     ],
+    current_signals: [
+      observationRecord('MI-001-SOL-LONG', 'MI-001', 'SOL/USDT:USDT', 'would_enter'),
+      observationRecord('MI-001-BNB-LONG', 'MI-001', 'BNB/USDT:USDT', 'would_enter'),
+      observationRecord('CPM-RO-001', 'CPM-RO-001', 'ETH/USDT:USDT', 'no_action'),
+    ],
+    signal_history: [
+      observationRecord('MI-001-SOL-LONG', 'MI-001', 'SOL/USDT:USDT', 'would_enter', 'recorded_process_local'),
+    ],
+    sink_summary: {
+      sink_id: 'process_local_in_memory_strategy_group_observation_sink',
+      sink_status: 'process_local_sink_available_not_recorded_by_get',
+      writes_execution_or_order_tables: false,
+    },
+    input_source_summary: {
+      source_id: 'local_sqlite_v3_dev_closed_klines_read_only',
+      external_exchange_write: false,
+      runtime_started: false,
+    },
+    review_hook_summary: {
+      review_hook_status: 'records_include_pending_forward_outcome_windows',
+    },
     runner_mapping: {
       existing_runner: 'brc_live_read_only_detection_runner',
       strategy_specific_signal_evaluator_glue_wired: true,
@@ -425,6 +448,35 @@ function liveObservationPayload() {
     },
     live_observation_active: false,
     live_ready: false,
+  };
+}
+
+function observationRecord(candidateId: string, strategyGroupId: string, symbol: string, signalType: string, sinkStatus = 'preview_not_recorded') {
+  return {
+    record_id: `${candidateId}-record`,
+    candidate_id: candidateId,
+    strategy_group_id: strategyGroupId,
+    symbol,
+    side: signalType === 'would_enter' ? 'long' : 'none',
+    evaluated_at_ms: 1770000000000,
+    recorded_at_ms: sinkStatus === 'recorded_process_local' ? 1770000001000 : null,
+    source: 'strategy_group_live_readonly_observation_v1',
+    market_source: 'local_sqlite_v3_dev_closed_klines_read_only',
+    signal_type: signalType,
+    confidence: '0.65',
+    reason_codes: ['observe_only_review_required'],
+    human_summary: 'observe-only signal record',
+    evidence_payload: {},
+    signal_snapshot: {},
+    review_windows: ['24h', '72h', '7d'],
+    review_status_by_window: { '24h': 'pending_forward_outcome_capture' },
+    input_refs: {},
+    sink_status: sinkStatus,
+    not_order: true,
+    not_execution_intent: true,
+    no_execution_permission: true,
+    no_order_permission: true,
+    no_runtime_start: true,
   };
 }
 

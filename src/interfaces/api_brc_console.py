@@ -26,7 +26,9 @@ from src.application.strategy_group_reviewability import (
 from src.application.strategy_group_live_readonly_observation import (
     StrategyGroupLiveReadOnlyObservationResponse,
     build_strategy_group_live_readonly_observation_v1,
+    run_strategy_group_live_readonly_observation_once,
 )
+from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.application.brc_admission_service import (
     AdmissionRuleViolation,
     BrcAdmissionService,
@@ -3542,7 +3544,20 @@ async def get_strategy_group_reviewability() -> StrategyGroupReviewabilityRespon
 )
 async def get_strategy_group_live_readonly_observation_v1() -> StrategyGroupLiveReadOnlyObservationResponse:
     """Return MI/CPM read-only observation v1 status without starting runtime."""
-    return build_strategy_group_live_readonly_observation_v1()
+    return build_strategy_group_live_readonly_observation_v1(
+        market_source=LocalSqliteObservationMarketSource(),
+    )
+
+
+@router.post(
+    "/strategy-groups/live-readonly-observation/v1/run-once",
+    response_model=StrategyGroupLiveReadOnlyObservationResponse,
+)
+async def run_strategy_group_live_readonly_observation_v1_once() -> StrategyGroupLiveReadOnlyObservationResponse:
+    """Record one observe-only MI/CPM signal snapshot without runtime start."""
+    return run_strategy_group_live_readonly_observation_once(
+        market_source=LocalSqliteObservationMarketSource(),
+    )
 
 
 @router.post(

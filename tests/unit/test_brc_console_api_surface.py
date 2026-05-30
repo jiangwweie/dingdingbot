@@ -619,6 +619,35 @@ def test_strategy_group_live_readonly_observation_v1_api_is_safe(monkeypatch):
     candidate_ids = {item["candidate_id"] for item in payload["candidates"]}
     assert {"MI-001-SOL-LONG", "MI-001-BNB-LONG", "CPM-RO-001"} <= candidate_ids
     assert payload["runner_mapping"]["strategy_specific_signal_evaluator_glue_wired"] is True
+    assert len(payload["current_signals"]) == 3
+    assert payload["sink_summary"]["writes_execution_or_order_tables"] is False
+    assert payload["input_source_summary"]["external_exchange_write"] is False
+    assert payload["non_permissions"]["no_execution_intent"] is True
+    assert payload["non_permissions"]["no_order_permission"] is True
+
+    raw_payload = json.dumps(payload)
+    assert "Start Trading" not in raw_payload
+    assert "Place Order" not in raw_payload
+    assert "Run Strategy" not in raw_payload
+    assert "execution_permission_granted" not in raw_payload
+    assert "order_permission_granted" not in raw_payload
+
+
+def test_strategy_group_live_readonly_observation_run_once_records_history_without_execution(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post("/api/brc/strategy-groups/live-readonly-observation/v1/run-once")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["live_ready"] is False
+    assert payload["live_observation_active"] is False
+    assert len(payload["signal_history"]) >= 3
+    assert payload["sink_summary"]["sink_status"] == "process_local_sink_recording_enabled"
+    assert payload["sink_summary"]["writes_execution_or_order_tables"] is False
     assert payload["non_permissions"]["no_execution_intent"] is True
     assert payload["non_permissions"]["no_order_permission"] is True
 

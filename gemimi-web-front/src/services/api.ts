@@ -274,9 +274,41 @@ export type StrategyGroupObservationCandidate = {
   source_refs: string[];
 };
 
+export type StrategyGroupObservationRecord = {
+  record_id: string;
+  candidate_id: string;
+  strategy_group_id: string;
+  symbol: string;
+  side: string;
+  evaluated_at_ms: number;
+  recorded_at_ms?: number | null;
+  source: string;
+  market_source: string;
+  signal_type: string;
+  confidence: string;
+  reason_codes: string[];
+  human_summary: string;
+  evidence_payload: Record<string, unknown>;
+  signal_snapshot: Record<string, unknown>;
+  review_windows: string[];
+  review_status_by_window: Record<string, string>;
+  input_refs: Record<string, unknown>;
+  sink_status: string;
+  not_order: true;
+  not_execution_intent: true;
+  no_execution_permission: true;
+  no_order_permission: true;
+  no_runtime_start: true;
+};
+
 export type StrategyGroupLiveReadOnlyObservationResponse = {
   generated_from: string;
   candidates: StrategyGroupObservationCandidate[];
+  current_signals: StrategyGroupObservationRecord[];
+  signal_history: StrategyGroupObservationRecord[];
+  sink_summary: Record<string, unknown>;
+  input_source_summary: Record<string, unknown>;
+  review_hook_summary: Record<string, unknown>;
   runner_mapping: Record<string, unknown>;
   observation_chain_summary: Record<string, unknown>;
   non_permissions: Record<string, boolean>;
@@ -581,6 +613,11 @@ export const brcApi = {
   },
   strategyGroupLiveObservationV1() {
     return request<StrategyGroupLiveReadOnlyObservationResponse>('/api/brc/strategy-groups/live-readonly-observation/v1');
+  },
+  runStrategyGroupLiveObservationV1Once() {
+    return request<StrategyGroupLiveReadOnlyObservationResponse>('/api/brc/strategy-groups/live-readonly-observation/v1/run-once', {
+      method: 'POST',
+    });
   },
   armStartupGuardPreflight(reason = 'MI-001 SOL Owner Console readiness preflight') {
     return request<StartupGuardReadinessArmResponse>('/api/brc/readiness/startup-guard/preflight-arm', {

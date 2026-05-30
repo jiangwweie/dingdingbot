@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from decimal import Decimal
 from hashlib import sha1
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -61,11 +61,43 @@ class StrategyGroupObservationCandidate(BaseModel):
 class StrategyGroupLiveReadOnlyObservationResponse(BaseModel):
     generated_from: str = OBSERVATION_V1_SOURCE
     candidates: list[StrategyGroupObservationCandidate]
+    current_signals: list["StrategyGroupObservationRecord"] = Field(default_factory=list)
+    signal_history: list["StrategyGroupObservationRecord"] = Field(default_factory=list)
+    sink_summary: dict[str, Any] = Field(default_factory=dict)
+    input_source_summary: dict[str, Any] = Field(default_factory=dict)
+    review_hook_summary: dict[str, Any] = Field(default_factory=dict)
     runner_mapping: dict[str, Any] = Field(default_factory=dict)
     observation_chain_summary: dict[str, Any] = Field(default_factory=dict)
     non_permissions: dict[str, bool] = Field(default_factory=dict)
     live_observation_active: Literal[False] = False
     live_ready: Literal[False] = False
+
+
+class StrategyGroupObservationRecord(BaseModel):
+    record_id: str
+    candidate_id: str
+    strategy_group_id: str
+    symbol: str
+    side: str
+    evaluated_at_ms: int
+    recorded_at_ms: int | None = None
+    source: str
+    market_source: str
+    signal_type: str
+    confidence: str
+    reason_codes: list[str] = Field(default_factory=list)
+    human_summary: str
+    evidence_payload: dict[str, Any] = Field(default_factory=dict)
+    signal_snapshot: dict[str, Any] = Field(default_factory=dict)
+    review_windows: list[str] = Field(default_factory=list)
+    review_status_by_window: dict[str, str] = Field(default_factory=dict)
+    input_refs: dict[str, Any] = Field(default_factory=dict)
+    sink_status: str = "preview_not_recorded"
+    not_order: Literal[True] = True
+    not_execution_intent: Literal[True] = True
+    no_execution_permission: Literal[True] = True
+    no_order_permission: Literal[True] = True
+    no_runtime_start: Literal[True] = True
 
 
 @dataclass(frozen=True)
@@ -76,6 +108,72 @@ class RecentCandle:
     low: Decimal
     close: Decimal
     volume: Decimal = Decimal("0")
+
+
+class StrategyGroupMarketBarSource(Protocol):
+    """Read-only closed-candle source for one-shot observation evaluation."""
+
+    source_id: str
+
+    def latest_closed_candles(self, *, symbol: str, timeframe: str, limit: int) -> list[RecentCandle]:
+        """Return latest closed candles without exchange writes or runtime start."""
+
+
+class StrategyGroupObservationSink(Protocol):
+    """Observation evidence sink that cannot create orders or execution intents."""
+
+    sink_id: str
+
+    def record(self, record: StrategyGroupObservationRecord) -> StrategyGroupObservationRecord:
+        """Persist or buffer observe-only record metadata."""
+
+    def list_recent(self, *, limit: int = 50) -> list[StrategyGroupObservationRecord]:
+        """Return recent observe-only records."""
+
+
+class InMemoryStrategyGroupObservationSink:
+    """Process-local observation sink for tests and safe console previews.
+
+    This is intentionally not a runtime source of truth. It gives the Owner
+    Console a harmless current/history shape while the PG observation schema is
+    still not present.
+    """
+
+    sink_id = "process_local_in_memory_strategy_group_observation_sink"
+
+    def __init__(self, *, max_records: int = 200) -> None:
+        self._max_records = max_records
+        self._records: list[StrategyGroupObservationRecord] = []
+
+    def record(self, record: StrategyGroupObservationRecord) -> StrategyGroupObservationRecord:
+        recorded = record.model_copy(update={"recorded_at_ms": now_ms(), "sink_status": "recorded_process_local"})
+        self._records = [item for item in self._records if item.record_id != recorded.record_id]
+        self._records.append(recorded)
+        if len(self._records) > self._max_records:
+            self._records = self._records[-self._max_records :]
+        return recorded
+
+    def list_recent(self, *, limit: int = 50) -> list[StrategyGroupObservationRecord]:
+        return list(reversed(self._records[-limit:]))
+
+
+class SampleStrategyGroupMarketBarSource:
+    """Deterministic read-only source used when no local market source is bound."""
+
+    source_id = "sample_closed_candle_source_display_model_only"
+
+    def latest_closed_candles(self, *, symbol: str, timeframe: str, limit: int) -> list[RecentCandle]:
+        if symbol == "ETH/USDT:USDT" and timeframe == "4h":
+            raw = _sample_cpm_candles_4h()
+        elif symbol == "ETH/USDT:USDT":
+            raw = _sample_cpm_candles_1h()
+        else:
+            raw = _sample_mi_candles()
+        candles = [_parse_candle(item) for item in raw]
+        return candles[-limit:]
+
+
+_DEFAULT_OBSERVATION_SINK = InMemoryStrategyGroupObservationSink()
 
 
 class MI001MomentumImpulseReadOnlyEvaluator:
@@ -186,95 +284,88 @@ class CPMRO001LiveReadOnlyEvaluator:
         return self._delegate.evaluate(signal_input)
 
 
-def build_strategy_group_live_readonly_observation_v1() -> StrategyGroupLiveReadOnlyObservationResponse:
-    """Return current observation v1 status without running observation."""
+@dataclass(frozen=True)
+class _ObservationSpec:
+    candidate_id: str
+    strategy_group_id: str
+    strategy_family_version_id: str
+    playbook_id: str
+    symbol: str
+    side: SignalSide
+    side_label: str
+    observation_role: str
+    review_windows: list[str]
+    evidence_payload_fields: list[str]
+    source_refs: list[str]
+    candidate_blockers: list[str]
+    evaluator: Any
 
-    mi_preview = MI001MomentumImpulseReadOnlyEvaluator().evaluate(
-        _sample_signal_input(
-            family_id=MI001_FAMILY_ID,
-            version_id=MI001_VERSION_ID,
+
+def _observation_specs() -> list[_ObservationSpec]:
+    mi_evaluator = MI001MomentumImpulseReadOnlyEvaluator()
+    return [
+        _ObservationSpec(
+            candidate_id="MI-001-SOL-LONG",
+            strategy_group_id=MI001_FAMILY_ID,
+            strategy_family_version_id=MI001_VERSION_ID,
             playbook_id="MI-001-SOL-LONG-BT-001",
             symbol="SOL/USDT:USDT",
             side=SignalSide.LONG,
-            market_snapshot=_market_snapshot(
-                symbol="SOL/USDT:USDT",
-                candles=_sample_mi_candles(),
-                timestamp_ms=1770000000000,
-            ),
-        )
-    )
-    cpm_preview = CPMRO001LiveReadOnlyEvaluator().evaluate(
-        _sample_signal_input(
-            family_id=CPM_FAMILY_ID,
-            version_id=CPM_VERSION_ID,
+            side_label="long",
+            observation_role="primary_chain_sample",
+            review_windows=["24h", "72h", "7d"],
+            evidence_payload_fields=[
+                "lookback_bars",
+                "return_threshold_pct",
+                "lookback_close",
+                "latest_close",
+                "impulse_return_pct",
+            ],
+            source_refs=[
+                "src/application/strategy_group_live_readonly_observation.py",
+                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md",
+            ],
+            candidate_blockers=["scheduled live read-only observation not started", "PG observation sink schema gap"],
+            evaluator=mi_evaluator,
+        ),
+        _ObservationSpec(
+            candidate_id="MI-001-BNB-LONG",
+            strategy_group_id=MI001_FAMILY_ID,
+            strategy_family_version_id=MI001_VERSION_ID,
+            playbook_id="MI-001-BNB-LONG-OBS-001",
+            symbol="BNB/USDT:USDT",
+            side=SignalSide.LONG,
+            side_label="long",
+            observation_role="strong_repaired_coverage_observation_candidate",
+            review_windows=["24h", "72h", "7d"],
+            evidence_payload_fields=[
+                "lookback_bars",
+                "return_threshold_pct",
+                "lookback_close",
+                "latest_close",
+                "impulse_return_pct",
+            ],
+            source_refs=[
+                "src/application/strategy_group_live_readonly_observation.py",
+                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md",
+            ],
+            candidate_blockers=[
+                "scheduled live read-only observation not started",
+                "PG observation sink schema gap",
+                "Owner review of repaired BNB evidence remains pending",
+            ],
+            evaluator=mi_evaluator,
+        ),
+        _ObservationSpec(
+            candidate_id="CPM-RO-001",
+            strategy_group_id=CPM_FAMILY_ID,
+            strategy_family_version_id=CPM_VERSION_ID,
             playbook_id="CPM-RO-001",
             symbol="ETH/USDT:USDT",
             side=SignalSide.NONE,
-            market_snapshot=_market_snapshot(
-                symbol="ETH/USDT:USDT",
-                candles=_sample_cpm_candles_1h(),
-                four_hour_candles=_sample_cpm_candles_4h(),
-                timestamp_ms=1770000000000,
-            ),
-        )
-    )
-
-    candidates = [
-        StrategyGroupObservationCandidate(
-            candidate_id="MI-001-SOL-LONG",
-            strategy_group_id=MI001_FAMILY_ID,
-            symbol="SOL/USDT:USDT",
-            side="long",
-            observation_role="primary_chain_sample",
-            evaluator_glue_status="wired_read_only_v1",
-            latest_signal_preview=_signal_preview(mi_preview),
-            evidence_payload_fields=[
-                "lookback_bars",
-                "return_threshold_pct",
-                "lookback_close",
-                "latest_close",
-                "impulse_return_pct",
-            ],
-            readiness_status="evaluator_ready_requires_runner_binding",
-            blockers=["live observation runner is not started", "observation sink is not bound to scheduler"],
-            not_allowed_now=_not_allowed_now(),
-            source_refs=[
-                "src/application/strategy_group_live_readonly_observation.py",
-                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md",
-            ],
-        ),
-        StrategyGroupObservationCandidate(
-            candidate_id="MI-001-BNB-LONG",
-            strategy_group_id=MI001_FAMILY_ID,
-            symbol="BNB/USDT:USDT",
-            side="long",
-            observation_role="strong_repaired_coverage_observation_candidate",
-            evaluator_glue_status="wired_read_only_v1",
-            latest_signal_preview=_signal_preview(mi_preview).copy() | {"symbol": "BNB/USDT:USDT", "candidate_note": "same MI evaluator; BNB observation not active"},
-            evidence_payload_fields=[
-                "lookback_bars",
-                "return_threshold_pct",
-                "lookback_close",
-                "latest_close",
-                "impulse_return_pct",
-            ],
-            readiness_status="evaluator_ready_requires_runner_binding",
-            blockers=["live observation runner is not started", "Owner review of repaired BNB evidence remains pending"],
-            not_allowed_now=_not_allowed_now(),
-            source_refs=[
-                "src/application/strategy_group_live_readonly_observation.py",
-                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md",
-            ],
-        ),
-        StrategyGroupObservationCandidate(
-            candidate_id="CPM-RO-001",
-            strategy_group_id=CPM_FAMILY_ID,
-            symbol="ETH/USDT:USDT",
-            side="long_or_short_observation",
+            side_label="long_or_short_observation",
             observation_role="owner_special_observation",
-            evaluator_glue_status="wired_read_only_v1",
             review_windows=["4h", "24h", "72h", "7d"],
-            latest_signal_preview=_signal_preview(cpm_preview),
             evidence_payload_fields=[
                 "htf_trend",
                 "primary_trend",
@@ -283,32 +374,215 @@ def build_strategy_group_live_readonly_observation_v1() -> StrategyGroupLiveRead
                 "long_reclaim_confirmed",
                 "short_loss_confirmed",
             ],
-            readiness_status="evaluator_ready_requires_runner_binding",
-            blockers=["live observation runner is not started", "CPM remains not proven alpha and not runtime eligible by default"],
-            not_allowed_now=_not_allowed_now(),
             source_refs=[
                 "src/domain/cpm_historical_evaluator.py",
                 "docs/ops/crypto-pullback-module-v1-oos-failure-classification.md",
             ],
+            candidate_blockers=[
+                "scheduled live read-only observation not started",
+                "PG observation sink schema gap",
+                "CPM remains not proven alpha and not runtime eligible by default",
+            ],
+            evaluator=CPMRO001LiveReadOnlyEvaluator(),
         ),
     ]
 
+
+def _evaluate_observation_candidate(
+    spec: _ObservationSpec,
+    market_source: StrategyGroupMarketBarSource,
+) -> tuple[StrategyGroupObservationRecord | None, StrategyGroupObservationCandidate, list[str]]:
+    blockers: list[str] = []
+    try:
+        one_hour = market_source.latest_closed_candles(
+            symbol=spec.symbol,
+            timeframe="1h",
+            limit=96 if spec.strategy_group_id == CPM_FAMILY_ID else 30,
+        )
+        four_hour = (
+            market_source.latest_closed_candles(symbol=spec.symbol, timeframe="4h", limit=40)
+            if spec.strategy_group_id == CPM_FAMILY_ID
+            else []
+        )
+        if spec.strategy_group_id == CPM_FAMILY_ID and not four_hour:
+            blockers.append("missing_4h_candle_context")
+        if not one_hour:
+            blockers.append("missing_1h_candle_context")
+            raise ValueError("market source returned no 1h closed candles")
+
+        timestamp_ms = one_hour[-1].open_time_ms
+        signal_input = _sample_signal_input(
+            family_id=spec.strategy_group_id,
+            version_id=spec.strategy_family_version_id,
+            playbook_id=spec.playbook_id,
+            symbol=spec.symbol,
+            side=spec.side,
+            market_snapshot=_market_snapshot(
+                symbol=spec.symbol,
+                candles=_raw_candles_from_recent(one_hour),
+                four_hour_candles=_raw_candles_from_recent(four_hour) if four_hour else None,
+                timestamp_ms=timestamp_ms,
+                source=getattr(market_source, "source_id", "read_only_market_bar_source"),
+                freshness="latest_available_closed_bar",
+            ),
+            input_source=getattr(market_source, "source_id", "read_only_market_bar_source"),
+            freshness="latest_available_closed_bar",
+        )
+        output = spec.evaluator.evaluate(signal_input)
+        record = _observation_record_from_output(spec, output, getattr(market_source, "source_id", "unknown"))
+        preview = _signal_preview(output)
+    except Exception as exc:
+        blockers.append("market_source_evaluation_failed")
+        record = None
+        preview = {
+            "signal_type": "invalid",
+            "side": "none",
+            "reason_codes": ["observation_source_unavailable"],
+            "human_summary": f"Observation unavailable: {type(exc).__name__}",
+            "not_order": True,
+            "not_execution_intent": True,
+            "symbol": spec.symbol,
+        }
+
+    readiness_status = (
+        "one_shot_observation_ready_pg_sink_gap"
+        if record is not None
+        else "blocked_market_source_or_context_unavailable"
+    )
+    all_blockers = sorted(set(spec.candidate_blockers + blockers))
+    candidate = StrategyGroupObservationCandidate(
+        candidate_id=spec.candidate_id,
+        strategy_group_id=spec.strategy_group_id,
+        symbol=spec.symbol,
+        side=spec.side_label,
+        observation_role=spec.observation_role,
+        evaluator_glue_status="wired_read_only_v1",
+        review_windows=list(spec.review_windows),
+        latest_signal_preview=preview,
+        evidence_payload_fields=list(spec.evidence_payload_fields),
+        evidence_record_mapping="observe_only_signal_record_ready_pg_schema_gap",
+        readiness_status=readiness_status,
+        blockers=all_blockers,
+        not_allowed_now=_not_allowed_now(),
+        source_refs=list(spec.source_refs),
+    )
+    return record, candidate, blockers
+
+
+def _observation_record_from_output(
+    spec: _ObservationSpec,
+    output: StrategyFamilySignalOutput,
+    market_source_id: str,
+) -> StrategyGroupObservationRecord:
+    review_status = {
+        window: (
+            "pending_forward_outcome_capture"
+            if output.review_plan.review_required
+            else "not_required_for_no_action_or_invalid"
+        )
+        for window in spec.review_windows
+    }
+    return StrategyGroupObservationRecord(
+        record_id=f"{spec.candidate_id}:{output.signal_id}:{output.timestamp_ms}",
+        candidate_id=spec.candidate_id,
+        strategy_group_id=spec.strategy_group_id,
+        symbol=output.symbol,
+        side=output.side.value,
+        evaluated_at_ms=output.timestamp_ms,
+        source=OBSERVATION_V1_SOURCE,
+        market_source=market_source_id,
+        signal_type=output.signal_type.value,
+        confidence=str(output.confidence),
+        reason_codes=list(output.reason_codes),
+        human_summary=output.human_summary,
+        evidence_payload=output.evidence_payload,
+        signal_snapshot=output.signal_snapshot,
+        review_windows=list(spec.review_windows),
+        review_status_by_window=review_status,
+        input_refs=output.input_refs.model_dump(mode="json"),
+    )
+
+
+def build_strategy_group_live_readonly_observation_v1(
+    *,
+    market_source: StrategyGroupMarketBarSource | None = None,
+    sink: StrategyGroupObservationSink | None = None,
+    record_observation: bool = False,
+) -> StrategyGroupLiveReadOnlyObservationResponse:
+    """Return current observation v1 status without starting runtime.
+
+    When ``record_observation`` is true the function writes only observe-only
+    signal records to the provided sink. It never creates execution intents,
+    grants permissions, places orders, starts runtime, or calls exchange writes.
+    """
+
+    source = market_source or SampleStrategyGroupMarketBarSource()
+    observation_sink = sink or _DEFAULT_OBSERVATION_SINK
+    candidates: list[StrategyGroupObservationCandidate] = []
+    current_signals: list[StrategyGroupObservationRecord] = []
+    source_blockers: list[str] = []
+
+    for spec in _observation_specs():
+        record, candidate, blockers = _evaluate_observation_candidate(spec, source)
+        source_blockers.extend(blockers)
+        if record is not None:
+            if record_observation:
+                record = observation_sink.record(record)
+            current_signals.append(record)
+        candidates.append(candidate)
+
+    history = observation_sink.list_recent(limit=50)
+    sink_status = (
+        "process_local_sink_recording_enabled"
+        if record_observation
+        else "process_local_sink_available_not_recorded_by_get"
+    )
+    if source_blockers:
+        sink_status = "source_blocked_no_recording"
+
     return StrategyGroupLiveReadOnlyObservationResponse(
         candidates=candidates,
+        current_signals=current_signals,
+        signal_history=history,
+        sink_summary={
+            "sink_id": getattr(observation_sink, "sink_id", "unknown_observation_sink"),
+            "sink_status": sink_status,
+            "record_count": len(history),
+            "pg_observation_sink": "blocked_schema_gap_no_live_observation_table_found",
+            "writes_execution_or_order_tables": False,
+            "runtime_effect": "none",
+        },
+        input_source_summary={
+            "source_id": getattr(source, "source_id", "unknown_market_source"),
+            "source_kind": "closed_candle_read_only",
+            "external_exchange_write": False,
+            "runtime_started": False,
+            "source_blockers": sorted(set(source_blockers)),
+        },
+        review_hook_summary={
+            "review_windows": ["24h", "72h", "7d"],
+            "cpm_extra_windows": ["4h"],
+            "review_hook_status": "records_include_pending_forward_outcome_windows",
+            "review_calculation_status": "pending_future_outcome_capture",
+            "not_runtime_source_of_truth": True,
+        },
         runner_mapping={
             "existing_runner": "brc_live_read_only_detection_runner",
             "runner_source": "src/application/brc_live_read_only_detection_runner.py",
             "can_record_metadata_and_evidence_without_orders": True,
             "strategy_specific_signal_evaluator_glue_wired": True,
-            "observation_sink_wiring_status": "metadata_mapping_ready_not_scheduled",
+            "observation_sink_wiring_status": "process_local_sink_ready_pg_sink_schema_gap",
+            "one_shot_observation_api_ready": True,
             "live_runner_started_by_this_endpoint": False,
             "live_observation_active": False,
         },
         observation_chain_summary={
-            "MI-001": "MI evaluator glue ready for read-only candle snapshots; live observation not active.",
-            "CPM-RO-001": "CPM evaluator glue ready for read-only candle snapshots; live observation not active.",
+            "MI-001": "MI evaluator glue can evaluate SOL and BNB from read-only closed candle snapshots.",
+            "CPM-RO-001": "CPM evaluator glue can evaluate ETH 1h/4h read-only closed candle snapshots.",
             "active_live_readonly_observation": False,
-            "main_blocker": "runner_binding_and_observation_sink_scheduler_not_started",
+            "current_signal_available": bool(current_signals),
+            "signal_history_available": bool(history),
+            "main_blocker": "scheduler_and_pg_observation_sink_not_bound",
         },
         non_permissions={
             "no_trial_start": True,
@@ -318,6 +592,20 @@ def build_strategy_group_live_readonly_observation_v1() -> StrategyGroupLiveRead
             "no_automatic_strategy_routing": True,
             "no_exchange_write": True,
         },
+    )
+
+
+def run_strategy_group_live_readonly_observation_once(
+    *,
+    market_source: StrategyGroupMarketBarSource | None = None,
+    sink: StrategyGroupObservationSink | None = None,
+) -> StrategyGroupLiveReadOnlyObservationResponse:
+    """Evaluate and record one observe-only snapshot for MI/CPM candidates."""
+
+    return build_strategy_group_live_readonly_observation_v1(
+        market_source=market_source,
+        sink=sink,
+        record_observation=True,
     )
 
 
@@ -390,6 +678,8 @@ def _sample_signal_input(
     symbol: str,
     side: SignalSide,
     market_snapshot: MarketSnapshot,
+    input_source: str = "read_only_observation_preview",
+    freshness: str = "sample_preview",
 ) -> StrategyFamilySignalInput:
     timestamp_ms = market_snapshot.timestamp_ms
     return StrategyFamilySignalInput(
@@ -403,17 +693,17 @@ def _sample_signal_input(
         context_timeframes=["4h", "24h", "72h", "7d"],
         market_snapshot=market_snapshot,
         account_facts_snapshot=AccountFactsSnapshot(
-            source="read_only_observation_preview",
+            source=input_source,
             truth_level="summary",
             timestamp_ms=timestamp_ms,
-            freshness="sample_preview",
+            freshness=freshness,
             account_status="not_checked",
             position_count=0,
             open_order_count=0,
             unknown_unmanaged_counts={"orders": 0, "positions": 0},
             reconciliation_status={"status": "not_checked"},
-            read_only_provider=OBSERVATION_V1_SOURCE,
-            limitations=["sample preview does not read account facts"],
+            read_only_provider=input_source,
+            limitations=["observation signal input does not require account facts"],
         ),
         position_open_order_summary={"position_count": 0, "open_order_count": 0},
         reconciliation_status={"status": "not_checked"},
@@ -423,7 +713,7 @@ def _sample_signal_input(
         playbook_snapshot={"playbook_id": playbook_id, "runtime_eligible": False},
         strategy_family_metadata={"family_id": family_id, "owner_review_only": True},
         source=OBSERVATION_V1_SOURCE,
-        freshness="sample_preview",
+        freshness=freshness,
         input_quality=SignalDataQuality(status=SignalDataQualityStatus.OK),
     )
 
@@ -434,6 +724,8 @@ def _market_snapshot(
     candles: list[dict[str, Any]],
     timestamp_ms: int,
     four_hour_candles: list[dict[str, Any]] | None = None,
+    source: str = "read_only_observation_preview",
+    freshness: str = "sample_preview",
 ) -> MarketSnapshot:
     latest = Decimal(str(candles[-1]["close"]))
     windows: dict[str, list[dict[str, Any]]] = {"1h": candles}
@@ -442,13 +734,27 @@ def _market_snapshot(
     return MarketSnapshot(
         symbol=symbol,
         timestamp_ms=timestamp_ms,
-        source="read_only_observation_preview",
-        freshness="sample_preview",
+        source=source,
+        freshness=freshness,
         last_price=latest,
         mark_price=latest,
         timeframe="1h",
         candle_context={"windows": windows, "closed_bar": True},
     )
+
+
+def _raw_candles_from_recent(candles: list[RecentCandle]) -> list[dict[str, Any]]:
+    return [
+        {
+            "open_time_ms": candle.open_time_ms,
+            "open": str(candle.open),
+            "high": str(candle.high),
+            "low": str(candle.low),
+            "close": str(candle.close),
+            "volume": str(candle.volume),
+        }
+        for candle in candles
+    ]
 
 
 def _sample_mi_candles() -> list[dict[str, Any]]:
