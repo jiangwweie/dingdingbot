@@ -5,24 +5,44 @@ import AppLayout from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { ThemeProvider } from './components/layout/ThemeContext';
 import { brcApi } from './services/api';
-import CommandCenter from './pages/brc/CommandCenter';
-import FixedTestnetRehearsal from './pages/brc/FixedTestnetRehearsal';
-import MarketsOrders from './pages/brc/MarketsOrders';
-import DeveloperDetail from './pages/brc/DeveloperDetail';
-import AuditTrail from './pages/brc/AuditTrail';
-import Campaigns from './pages/brc/Campaigns';
-import Guide from './pages/brc/Guide';
-import Ledger from './pages/brc/Ledger';
-import LlmCopilot from './pages/brc/LlmCopilot';
-import Operator from './pages/brc/Operator';
-import Review from './pages/brc/Review';
-import RiskAccount from './pages/brc/RiskAccount';
-import RuntimeControl from './pages/brc/RuntimeControl';
-import StrategyPlaybook from './pages/brc/StrategyPlaybook';
-import StrategyFamilies from './pages/brc/StrategyFamilies';
-import Workflow from './pages/brc/Workflow';
+import {
+  AccountOrdersV2,
+  AnalysisV2,
+  HomeV2,
+  IntentsV2,
+  StrategyGroupsV2,
+  TraceV2,
+} from './pages/brc/OwnerConsoleV2';
 import Login from './pages/Login';
 import './index.css';
+
+const retiredRoutes = [
+  'command-center',
+  'markets-orders',
+  'campaign',
+  'review-evidence',
+  'strategy-families',
+  'fixed-testnet-rehearsal',
+  'llm-copilot',
+  'strategy-playbook',
+  'risk-account',
+  'runtime-control',
+  'summary',
+  'guide',
+  'dashboard',
+  'campaigns',
+  'playbooks-strategy',
+  'parameters',
+  'audit-trail',
+  'ai-investigator',
+  'operator',
+  'workflow',
+  'review',
+  'ledger',
+  'audit',
+  'runtime-safety',
+  'developer',
+];
 
 function RequireAuth() {
   const location = useLocation();
@@ -35,7 +55,7 @@ function RequireAuth() {
   }, [location.pathname]);
 
   if (state === 'checking') {
-    return <div className="p-6 text-xs text-zinc-500">检查 Owner 会话...</div>;
+    return <div className="p-6 text-sm text-zinc-500">检查 Owner 会话...</div>;
   }
   if (state === 'blocked') {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
@@ -52,34 +72,19 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/login" element={<Login />} />
             <Route element={<RequireAuth />}>
               <Route path="/" element={<AppLayout />}>
-                <Route index element={<Navigate to="/command-center" replace />} />
-                <Route path="command-center" element={<CommandCenter />} />
-                <Route path="markets-orders" element={<MarketsOrders />} />
-                <Route path="campaign" element={<Campaigns />} />
-                <Route path="review-evidence" element={<Review />} />
-                <Route path="strategy-families" element={<StrategyFamilies />} />
-                <Route path="fixed-testnet-rehearsal" element={<FixedTestnetRehearsal />} />
-                <Route path="llm-copilot" element={<LlmCopilot />} />
-                <Route path="strategy-playbook" element={<StrategyPlaybook />} />
-                <Route path="risk-account" element={<RiskAccount />} />
-                <Route path="runtime-control" element={<RuntimeControl />} />
-                <Route path="summary" element={<Navigate to="/command-center" replace />} />
-                <Route path="guide" element={<Guide />} />
-                <Route path="dashboard" element={<Navigate to="/command-center" replace />} />
-                <Route path="campaigns" element={<Campaigns />} />
-                <Route path="playbooks-strategy" element={<Navigate to="/strategy-playbook" replace />} />
-                <Route path="parameters" element={<Navigate to="/risk-account" replace />} />
-                <Route path="audit-trail" element={<AuditTrail />} />
-                <Route path="ai-investigator" element={<Navigate to="/llm-copilot" replace />} />
-                <Route path="operator" element={<Operator />} />
-                <Route path="workflow" element={<Workflow />} />
-                <Route path="review" element={<Review />} />
-                <Route path="ledger" element={<Ledger />} />
-                <Route path="runtime-safety" element={<Navigate to="/runtime-control" replace />} />
-                <Route path="developer" element={<DeveloperDetail />} />
+                <Route index element={<Navigate to="/home" replace />} />
+                <Route path="home" element={<HomeV2 />} />
+                <Route path="strategy-groups" element={<StrategyGroupsV2 />} />
+                <Route path="intents" element={<IntentsV2 />} />
+                <Route path="account-orders" element={<AccountOrdersV2 />} />
+                <Route path="analysis" element={<AnalysisV2 />} />
+                <Route path="trace" element={<TraceV2 />} />
+                {retiredRoutes.map((route) => (
+                  <Route key={route} path={route} element={<Navigate to="/home" replace />} />
+                ))}
               </Route>
             </Route>
-            <Route path="*" element={<Navigate to="/command-center" replace />} />
+            <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
         </BrowserRouter>
       </ThemeProvider>
