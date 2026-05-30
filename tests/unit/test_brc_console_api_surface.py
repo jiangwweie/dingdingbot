@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from decimal import Decimal
 from types import SimpleNamespace
@@ -538,6 +539,68 @@ def test_mi001_sol_owner_console_view_exposes_safe_mainline(monkeypatch):
         "place_order",
         "grant_execution_permission",
     }
+
+
+def test_strategy_group_reviewability_api_exposes_safe_shelf(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/strategy-groups/reviewability")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["live_ready"] is False
+    assert len(payload["primary_groups"]) == 6
+    assert len(payload["secondary_groups"]) == 2
+    assert {item["strategy_group_id"] for item in payload["primary_groups"]} == {
+        "MI-001",
+        "VI-001",
+        "CPM-RO-001",
+        "TB",
+        "PC",
+        "VB",
+    }
+    assert {item["strategy_group_id"] for item in payload["secondary_groups"]} == {
+        "MR/RB",
+        "Tier1-Data-Families",
+    }
+
+    mi = next(item for item in payload["primary_groups"] if item["strategy_group_id"] == "MI-001")
+    assert "MI-001 SOL long" in mi["representative_candidates"]
+    assert "MI-001 BNB long" in mi["representative_candidates"]
+    assert "coverage gap is a confidence flag" in " ".join(mi["confidence_flags"]).lower()
+    assert mi["live_readonly_observation_readiness"] == "live_readonly_candidate_requires_signal_glue"
+    assert mi["no_execution_permission"] is True
+    assert mi["no_order_permission"] is True
+    assert mi["no_runtime_start"] is True
+
+    bnb = next(item for item in payload["candidate_evidence"] if item["candidate_id"] == "MI-001-BNB-LONG")
+    assert bnb["metrics"]["signal_count"] == "2683"
+    assert "coverage_gap_confidence_flag_not_elimination" in bnb["confidence_flags"]
+    assert "2023-2025 coverage gap" in bnb["limitations"]
+
+    cpm = next(item for item in payload["primary_groups"] if item["strategy_group_id"] == "CPM-RO-001")
+    assert cpm["current_status"] == "owner_special_observation"
+    assert "not_proven_alpha" in cpm["confidence_flags"]
+    assert cpm["bounded_trial_readiness"] == "not_runtime_eligible_by_default"
+
+    observation = payload["observation_chain_summary"]
+    assert observation["can_record_metadata_and_evidence_without_orders"] is True
+    assert observation["active_live_readonly_observation"] is False
+    assert observation["strategy_specific_signal_evaluator_glue_wired"] is False
+    assert observation["execution_intent_created"] is False
+    assert observation["order_created"] is False
+    assert payload["non_permissions"]["no_trial_start"] is True
+    assert payload["non_permissions"]["no_execution_intent"] is True
+
+    raw_payload = json.dumps(payload)
+    assert "Start Trading" not in raw_payload
+    assert "Place Order" not in raw_payload
+    assert "Run Strategy" not in raw_payload
+    assert "execution_permission_granted" not in raw_payload
+    assert "order_permission_granted" not in raw_payload
 
 
 def test_mi001_sol_owner_console_view_marks_guard_action_enabled_when_runtime_ready(monkeypatch):

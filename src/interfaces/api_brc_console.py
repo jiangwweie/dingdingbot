@@ -19,6 +19,10 @@ from src.application.brc_operation_layer import (
     OperationListResponse,
     OperationPreflightResponse,
 )
+from src.application.strategy_group_reviewability import (
+    StrategyGroupReviewabilityResponse,
+    build_strategy_group_reviewability_snapshot,
+)
 from src.application.brc_admission_service import (
     AdmissionRuleViolation,
     BrcAdmissionService,
@@ -3517,6 +3521,15 @@ async def get_mi001_sol_owner_console_e2e() -> Mi001SolOwnerConsoleE2EResponse:
             "reports/directional-opportunity-broad-smoke-20260529/trial_start_checklist_mi001_sol_long.md",
         ],
     )
+
+
+@router.get(
+    "/strategy-groups/reviewability",
+    response_model=StrategyGroupReviewabilityResponse,
+)
+async def get_strategy_group_reviewability() -> StrategyGroupReviewabilityResponse:
+    """Return the read-only Owner-reviewable strategy group shelf."""
+    return build_strategy_group_reviewability_snapshot()
 
 
 @router.post(

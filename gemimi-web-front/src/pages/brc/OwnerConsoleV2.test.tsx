@@ -18,6 +18,7 @@ const mockBrcApi = vi.hoisted(() => ({
   readiness: vi.fn(),
   accountFacts: vi.fn(),
   mi001SolReadiness: vi.fn(),
+  strategyGroupReviewability: vi.fn(),
   listStrategyFamilies: vi.fn(),
   listAdmissionDecisions: vi.fn(),
   listTrialBindings: vi.fn(),
@@ -38,6 +39,7 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.readiness.mockResolvedValue(readinessPayload());
     mockBrcApi.accountFacts.mockResolvedValue(accountFactsPayload());
     mockBrcApi.mi001SolReadiness.mockResolvedValue(mi001Payload());
+    mockBrcApi.strategyGroupReviewability.mockResolvedValue(strategyGroupReviewabilityPayload());
     mockBrcApi.listStrategyFamilies.mockResolvedValue([]);
     mockBrcApi.listAdmissionDecisions.mockResolvedValue([{ owner_risk_acceptance_id: 'owner-acceptance-1' }]);
     mockBrcApi.listTrialBindings.mockResolvedValue([]);
@@ -91,10 +93,18 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getAllByText('MI-001 动量冲击').length).toBeGreaterThan(0);
     expect(screen.getAllByText('MI-001 SOL long').length).toBeGreaterThan(0);
     expect(screen.getAllByText('MI-001 BNB long').length).toBeGreaterThan(0);
+    expect(screen.getByText('Primary Strategy Groups')).toBeTruthy();
+    expect(screen.getByText(/Exactly six primary groups/)).toBeTruthy();
+    expect(screen.getByText('Secondary / Extended Shelf')).toBeTruthy();
+    expect(screen.getAllByText('live_readonly_candidate_requires_signal_glue').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('coverage_gap_confidence_flag_not_elimination').length).toBeGreaterThan(0);
     expect(screen.getAllByText('VI-001 ETH long').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Owner Special Observation').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/CPM historical OOS 2021\/2022 negative/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/CPM historical OOS 2021\/2022 was negative/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('not_proven_alpha').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('not_runtime_eligible_by_default').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Trend Breakout').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('research_pool / keep_for_later').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Pullback Continuation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Volatility Breakout').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Mean Reversion / Range Boundary').length).toBeGreaterThan(0);
@@ -102,6 +112,9 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getAllByText(/Funding/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Taker flow/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Attention \/ search/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Candidate Evidence Comparison')).toBeTruthy();
+    expect(screen.getByText('Live Read-only Observation Readiness')).toBeTruthy();
+    expect(screen.getByText(/strategy-specific signal evaluator glue and observation sink wiring remain blockers/)).toBeTruthy();
     cleanup();
 
     renderWithRouter(<IntentsV2 />);
@@ -262,5 +275,165 @@ function mi001Payload() {
     terminal_state: 'blocked_until_startup_guard_preflight',
     source_refs: [],
     live_ready: false,
+  };
+}
+
+function strategyGroupReviewabilityPayload() {
+  return {
+    generated_from: 'read_only_strategy_group_reviewability_snapshot',
+    primary_groups: [
+      groupPayload({
+        strategy_group_id: 'MI-001',
+        strategy_group_name: 'Momentum Impulse',
+        representative_candidates: ['MI-001 SOL long', 'MI-001 BNB long'],
+        current_status: 'primary_chain_candidate / strong_smoke_candidate',
+        evidence_summary: 'SOL current chain sample; BNB strongest smoke with coverage gap.',
+        confidence_flags: ['BNB coverage gap is a confidence flag, not elimination'],
+        live_readonly_observation_readiness: 'live_readonly_candidate_requires_signal_glue',
+        bounded_trial_readiness: 'SOL chain sample has bounded-trial metadata',
+      }),
+      groupPayload({
+        strategy_group_id: 'VI-001',
+        strategy_group_name: 'Volume Impulse',
+        representative_candidates: ['VI-001 ETH long'],
+        current_status: 'backup_observation_candidate',
+        evidence_summary: 'ETH positive but cost-sensitive backup.',
+        confidence_flags: ['cost-sensitive backup observation'],
+        live_readonly_observation_readiness: 'live_readonly_candidate_requires_signal_glue',
+      }),
+      groupPayload({
+        strategy_group_id: 'CPM-RO-001',
+        strategy_group_name: 'Owner Special Observation',
+        representative_candidates: ['CPM read-only observation'],
+        current_status: 'owner_special_observation',
+        evidence_summary: 'CPM historical OOS 2021/2022 was negative; not proven alpha.',
+        confidence_flags: ['Owner special observation rationale', 'not_proven_alpha'],
+        bounded_trial_readiness: 'not_runtime_eligible_by_default',
+        live_readonly_observation_readiness: 'live_readonly_candidate_requires_signal_glue',
+      }),
+      groupPayload({
+        strategy_group_id: 'TB',
+        strategy_group_name: 'Trend Breakout',
+        representative_candidates: ['TB-001', 'TB-002'],
+        current_status: 'research_pool / keep_for_later',
+        evidence_summary: 'TB remains research pool.',
+        live_readonly_observation_readiness: 'live_readonly_candidate_requires_signal_glue',
+      }),
+      groupPayload({
+        strategy_group_id: 'PC',
+        strategy_group_name: 'Pullback Continuation',
+        representative_candidates: ['PC-001', 'PC-002'],
+        current_status: 'research_pool',
+        evidence_summary: 'PC remains research pool.',
+      }),
+      groupPayload({
+        strategy_group_id: 'VB',
+        strategy_group_name: 'Volatility Breakout',
+        representative_candidates: ['VB-001'],
+        current_status: 'research_pool',
+        evidence_summary: 'VB remains research pool.',
+      }),
+    ],
+    secondary_groups: [
+      groupPayload({
+        strategy_group_id: 'MR/RB',
+        strategy_group_name: 'Mean Reversion / Range Boundary',
+        representative_candidates: ['MR-001', 'RB-001'],
+        current_status: 'weak_or_secondary / needs better variant',
+        evidence_summary: 'Secondary shelf only.',
+      }),
+      groupPayload({
+        strategy_group_id: 'Tier1-Data-Families',
+        strategy_group_name: 'Tier 1 Data Families',
+        representative_candidates: ['Funding', 'OI', 'Taker flow', 'Long-short ratio', 'Basis / premium', 'Attention / search'],
+        current_status: 'data_request_ready / not_downloaded / not_admitted',
+        evidence_summary: 'Data request ready; not downloaded.',
+      }),
+    ],
+    candidate_evidence: [
+      candidatePayload('MI-001-SOL-LONG', 'MI-001', {
+        signal_count: '8135',
+        mean_72h: '1.9531',
+        positive_rate_72h: '0.5175',
+        mean_7d: '4.7372',
+      }, ['chain sample']),
+      candidatePayload('MI-001-BNB-LONG', 'MI-001', {
+        signal_count: '2683',
+        mean_72h: '3.5342',
+        positive_rate_72h: '0.5617',
+        mean_7d: '7.9309',
+      }, ['coverage_gap_confidence_flag_not_elimination']),
+      candidatePayload('VI-001-ETH-LONG', 'VI-001', {
+        signal_count: '1277',
+        mean_72h: '1.1164',
+        positive_rate_72h: '0.5348',
+        mean_7d: '2.2386',
+      }, ['cost-sensitive backup observation']),
+      candidatePayload('CPM-RO-001', 'CPM-RO-001', {
+        historical_oos_2021_2022: 'negative',
+      }, ['owner_special_observation', 'not_proven_alpha']),
+    ],
+    observation_chain_summary: {
+      existing_runner: 'brc_live_read_only_detection_runner',
+      can_record_metadata_and_evidence_without_orders: true,
+      active_live_readonly_observation: false,
+      strategy_specific_signal_evaluator_glue_wired: false,
+      execution_intent_created: false,
+      order_created: false,
+    },
+    non_permissions: {
+      no_trial_start: true,
+      no_execution_intent: true,
+      no_order_permission: true,
+      no_runtime_start: true,
+      no_automatic_strategy_routing: true,
+    },
+    source_refs: [],
+    live_ready: false,
+  };
+}
+
+function groupPayload(overrides: Partial<Record<string, unknown>>) {
+  return {
+    strategy_group_id: 'GROUP',
+    strategy_group_name: 'Group',
+    plain_language_summary: 'Owner-readable summary.',
+    market_regime_it_eats: 'clean regime',
+    market_regime_it_hates: 'hostile regime',
+    representative_candidates: [],
+    current_status: 'research_pool',
+    evidence_summary: 'evidence summary',
+    key_risks: ['risk'],
+    confidence_flags: ['flag'],
+    owner_action_options: ['review'],
+    next_recommended_action: 'review',
+    not_allowed_now: ['trial start', 'order placement'],
+    evidence_reviewability: 'reviewable',
+    live_readonly_observation_readiness: 'research_pool_requires_frozen_evaluator',
+    bounded_trial_readiness: 'not_current_trial_candidate',
+    main_blockers: ['signal glue missing'],
+    source_refs: [],
+    display_model_only: true,
+    not_runtime_source_of_truth: true,
+    no_execution_permission: true,
+    no_order_permission: true,
+    no_runtime_start: true,
+    no_automatic_strategy_routing: true,
+    ...overrides,
+  };
+}
+
+function candidatePayload(candidateId: string, strategyGroupId: string, metrics: Record<string, string>, confidenceFlags: string[]) {
+  return {
+    candidate_id: candidateId,
+    strategy_group_id: strategyGroupId,
+    symbol: candidateId.includes('BNB') ? 'BNB/USDT:USDT' : candidateId.includes('ETH') ? 'ETH/USDT:USDT' : 'SOL/USDT:USDT',
+    side: 'long',
+    review_status: 'reviewable',
+    evidence_summary: 'candidate evidence',
+    metrics,
+    limitations: [],
+    confidence_flags: confidenceFlags,
+    source_refs: [],
   };
 }

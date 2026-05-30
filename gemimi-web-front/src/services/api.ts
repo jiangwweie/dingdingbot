@@ -205,6 +205,57 @@ export type Mi001SolReadinessResponse = {
   live_ready: false;
 };
 
+export type StrategyGroupCandidateEvidence = {
+  candidate_id: string;
+  strategy_group_id: string;
+  symbol: string;
+  side: string;
+  review_status: string;
+  evidence_summary: string;
+  metrics: Record<string, string>;
+  limitations: string[];
+  confidence_flags: string[];
+  source_refs: string[];
+};
+
+export type StrategyGroupReviewabilityItem = {
+  strategy_group_id: string;
+  strategy_group_name: string;
+  plain_language_summary: string;
+  market_regime_it_eats: string;
+  market_regime_it_hates: string;
+  representative_candidates: string[];
+  current_status: string;
+  evidence_summary: string;
+  key_risks: string[];
+  confidence_flags: string[];
+  owner_action_options: string[];
+  next_recommended_action: string;
+  not_allowed_now: string[];
+  evidence_reviewability: string;
+  live_readonly_observation_readiness: string;
+  bounded_trial_readiness: string;
+  main_blockers: string[];
+  source_refs: string[];
+  display_model_only: true;
+  not_runtime_source_of_truth: true;
+  no_execution_permission: true;
+  no_order_permission: true;
+  no_runtime_start: true;
+  no_automatic_strategy_routing: true;
+};
+
+export type StrategyGroupReviewabilityResponse = {
+  generated_from: string;
+  primary_groups: StrategyGroupReviewabilityItem[];
+  secondary_groups: StrategyGroupReviewabilityItem[];
+  candidate_evidence: StrategyGroupCandidateEvidence[];
+  observation_chain_summary: Record<string, unknown>;
+  non_permissions: Record<string, boolean>;
+  source_refs: string[];
+  live_ready: false;
+};
+
 export type StartupGuardReadinessArmResponse = {
   action: 'startup_guard_preflight_arm';
   status: 'armed' | 'already_armed' | 'blocked';
@@ -496,6 +547,9 @@ export const brcApi = {
   },
   mi001SolReadiness() {
     return request<Mi001SolReadinessResponse>('/api/brc/readiness/mi001-sol');
+  },
+  strategyGroupReviewability() {
+    return request<StrategyGroupReviewabilityResponse>('/api/brc/strategy-groups/reviewability');
   },
   armStartupGuardPreflight(reason = 'MI-001 SOL Owner Console readiness preflight') {
     return request<StartupGuardReadinessArmResponse>('/api/brc/readiness/startup-guard/preflight-arm', {

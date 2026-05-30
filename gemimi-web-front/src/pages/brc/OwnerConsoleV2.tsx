@@ -23,6 +23,7 @@ import {
   brcApi,
   Mi001SolReadinessResponse,
   ReadinessResponse,
+  StrategyGroupReviewabilityResponse,
   StrategyFamily,
 } from '@/src/services/api';
 import { ErrorState, JsonDetails } from './ConsolePrimitives';
@@ -31,6 +32,7 @@ type ConsoleData = {
   readiness: ReadinessResponse | null;
   accountFacts: AccountFactsResponse | null;
   mi001: Mi001SolReadinessResponse | null;
+  strategyGroupReviewability: StrategyGroupReviewabilityResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
   bindings: AdmissionTrialBinding[];
@@ -62,12 +64,26 @@ type StrategyGroupShelfItem = {
   owner_action_options: string[];
   next_recommended_action: string;
   not_allowed_now: string[];
+  confidence_flags?: string[];
+  evidence_reviewability?: string;
+  live_readonly_observation_readiness?: string;
+  bounded_trial_readiness?: string;
+  main_blockers?: string[];
+  source_refs?: string[];
+  display_model_only?: boolean;
+  not_runtime_source_of_truth?: boolean;
+  no_execution_permission?: boolean;
+  no_order_permission?: boolean;
+  no_runtime_start?: boolean;
+  no_automatic_strategy_routing?: boolean;
+  shelf_section?: 'primary' | 'secondary';
 };
 
 const EMPTY_DATA: ConsoleData = {
   readiness: null,
   accountFacts: null,
   mi001: null,
+  strategyGroupReviewability: null,
   families: [],
   decisions: [],
   bindings: [],
@@ -190,43 +206,32 @@ export function StrategyGroupsV2() {
   if (!data) return <Loading label="加载策略组..." />;
 
   const rows = buildStrategyRows(data);
-  const shelf = buildStrategyGroupShelf(data);
+  const { primaryShelf, secondaryShelf, allShelf, apiUnavailable } = strategyGroupShelves(data);
+  const shelf = allShelf;
   const selectedGroup = shelf.find((item) => item.strategy_group_id === selectedGroupId) || shelf[0]!;
   return (
     <PageShell title="策略组" subtitle="策略组货架 / 选择器。这里只用于观察和复盘，不会自动选择策略。">
+      {apiUnavailable ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+          display_model_only / api_unavailable：当前使用前端回退模型。回退模型不是 runtime source of truth，也不授予任何执行或订单权限。
+        </section>
+      ) : null}
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {shelf.map((item) => (
-            <button
-              type="button"
-              key={item.strategy_group_id}
-              onClick={() => setSelectedGroupId(item.strategy_group_id)}
-              className={`rounded-xl border bg-white p-4 text-left shadow-sm transition-colors hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/40 ${
-                selectedGroup.strategy_group_id === item.strategy_group_id
-                  ? 'border-indigo-300 ring-2 ring-indigo-500/20 dark:border-indigo-500/50'
-                  : 'border-slate-200 dark:border-slate-800'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">{item.strategy_group_id}</p>
-                  <h3 className="mt-1 text-base font-bold text-slate-950 dark:text-slate-100">{item.strategy_group_name}</h3>
-                </div>
-                <StatePill tone={item.status_tone}>{item.current_status}</StatePill>
-              </div>
-              <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{item.plain_language_summary}</p>
-              <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-slate-500 dark:text-slate-400">
-                <ShelfMiniFact label="吃什么行情" value={item.market_regime_it_eats} />
-                <ShelfMiniFact label="证据" value={item.evidence_summary} />
-                <ShelfMiniFact label="下一步" value={item.next_recommended_action} />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {item.representative_candidates.slice(0, 3).map((candidate) => (
-                  <StatePill key={candidate} tone="slate">{candidate}</StatePill>
-                ))}
-              </div>
-            </button>
-          ))}
+        <div className="space-y-5">
+          <ShelfSection
+            title="Primary Strategy Groups"
+            subtitle="Exactly six primary groups: MI, VI, CPM, TB, PC, VB."
+            items={primaryShelf}
+            selectedGroupId={selectedGroup.strategy_group_id}
+            onSelect={setSelectedGroupId}
+          />
+          <ShelfSection
+            title="Secondary / Extended Shelf"
+            subtitle="Secondary MR/RB and Tier 1 data families remain visible but not admitted."
+            items={secondaryShelf}
+            selectedGroupId={selectedGroup.strategy_group_id}
+            onSelect={setSelectedGroupId}
+          />
         </div>
 
         <StrategyGroupDetail item={selectedGroup} />
@@ -253,6 +258,9 @@ export function StrategyGroupsV2() {
           MI-001 SOL long 仍是当前主链路候选；MI-001 BNB long 是强 smoke 候选，历史覆盖短只是 confidence flag，不是淘汰理由。
         </p>
       </section>
+
+      <CandidateEvidenceComparison data={data.strategyGroupReviewability} />
+      <ObservationReadinessPanel data={data.strategyGroupReviewability} />
 
       <DataTable
         columns={['策略组', '具体策略', '状态', '标的', '方向', '最近信号', '最近意图', '下一步']}
@@ -294,7 +302,14 @@ export function StrategyGroupsV2() {
         </div>
       </section>
 
-      <TechnicalDetails data={{ strategy_group_shelf: shelf, families: data.families, decisions: data.decisions, bindings: data.bindings, mi001: data.mi001 }} />
+      <TechnicalDetails data={{
+        strategy_group_reviewability: data.strategyGroupReviewability,
+        strategy_group_shelf: shelf,
+        families: data.families,
+        decisions: data.decisions,
+        bindings: data.bindings,
+        mi001: data.mi001,
+      }} />
     </PageShell>
   );
 }
@@ -500,6 +515,7 @@ function useConsoleData(): ViewState {
         readiness,
         accountFacts,
         mi001,
+        strategyGroupReviewability,
         families,
         decisions,
         bindings,
@@ -518,6 +534,10 @@ function useConsoleData(): ViewState {
         }),
         brcApi.mi001SolReadiness().catch((error) => {
           gaps.push(`MI-001: ${message(error)}`);
+          return null;
+        }),
+        brcApi.strategyGroupReviewability().catch((error) => {
+          gaps.push(`strategy group reviewability: ${message(error)}`);
           return null;
         }),
         brcApi.listStrategyFamilies().catch((error) => {
@@ -556,6 +576,7 @@ function useConsoleData(): ViewState {
             readiness,
             accountFacts,
             mi001,
+            strategyGroupReviewability,
             families,
             decisions,
             bindings,
@@ -657,6 +678,85 @@ function DataTable({ columns, rows, compact = false }: { columns: string[]; rows
   );
 }
 
+function ShelfSection({
+  title,
+  subtitle,
+  items,
+  selectedGroupId,
+  onSelect,
+}: {
+  title: string;
+  subtitle: string;
+  items: StrategyGroupShelfItem[];
+  selectedGroupId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <section>
+      <div className="mb-3">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">{title}</h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {items.map((item) => (
+          <StrategyGroupCard
+            key={item.strategy_group_id}
+            item={item}
+            selected={selectedGroupId === item.strategy_group_id}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StrategyGroupCard({
+  item,
+  selected,
+  onSelect,
+}: {
+  item: StrategyGroupShelfItem;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(item.strategy_group_id)}
+      className={`rounded-xl border bg-white p-4 text-left shadow-sm transition-colors hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/40 ${
+        selected
+          ? 'border-indigo-300 ring-2 ring-indigo-500/20 dark:border-indigo-500/50'
+          : 'border-slate-200 dark:border-slate-800'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">{item.strategy_group_id}</p>
+          <h3 className="mt-1 text-base font-bold text-slate-950 dark:text-slate-100">{item.strategy_group_name}</h3>
+        </div>
+        <StatePill tone={item.status_tone}>{item.current_status}</StatePill>
+      </div>
+      <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{item.plain_language_summary}</p>
+      <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-slate-500 dark:text-slate-400">
+        <ShelfMiniFact label="吃什么行情" value={item.market_regime_it_eats} />
+        <ShelfMiniFact label="证据" value={item.evidence_summary} />
+        <ShelfMiniFact label="观察 readiness" value={item.live_readonly_observation_readiness || 'display_model_only'} />
+        <ShelfMiniFact label="bounded readiness" value={item.bounded_trial_readiness || 'display_model_only'} />
+        <ShelfMiniFact label="下一步" value={item.next_recommended_action} />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {item.representative_candidates.slice(0, 4).map((candidate) => (
+          <StatePill key={candidate} tone="slate">{candidate}</StatePill>
+        ))}
+        {(item.confidence_flags || []).slice(0, 2).map((flag) => (
+          <StatePill key={flag} tone="amber">{flag}</StatePill>
+        ))}
+      </div>
+    </button>
+  );
+}
+
 function RecordPanel({ title, items, empty }: { title: string; items: Array<Record<string, unknown>>; empty: string }) {
   return (
     <Panel title={title}>
@@ -736,9 +836,84 @@ function StrategyGroupDetail({ item }: { item: StrategyGroupShelfItem }) {
         <DetailBlock label="下一步建议" value={item.next_recommended_action} />
         <ChipBlock label="代表候选" values={item.representative_candidates} />
         <ChipBlock label="关键风险" values={item.key_risks} tone="amber" />
+        <ChipBlock label="Confidence flags" values={item.confidence_flags || ['display_model_only']} tone="amber" />
+        <DetailBlock label="Evidence reviewability" value={item.evidence_reviewability || 'display_model_only'} />
+        <DetailBlock label="Live read-only observation readiness" value={item.live_readonly_observation_readiness || 'display_model_only'} />
+        <DetailBlock label="Bounded-trial readiness" value={item.bounded_trial_readiness || 'display_model_only'} />
+        <ChipBlock label="Main blockers" values={item.main_blockers || ['api_unavailable']} tone="rose" />
         <ChipBlock label="Owner 可选动作" values={item.owner_action_options} tone="indigo" />
         <ChipBlock label="当前禁止" values={item.not_allowed_now} tone="rose" />
+        <ChipBlock
+          label="Non-permissions"
+          values={[
+            item.no_execution_permission ? 'no execution permission' : 'execution permission not asserted',
+            item.no_order_permission ? 'no order permission' : 'order permission not asserted',
+            item.no_runtime_start ? 'no runtime start' : 'runtime start not asserted',
+            item.no_automatic_strategy_routing ? 'no automatic strategy routing' : 'routing not asserted',
+          ]}
+          tone="rose"
+        />
       </div>
+    </section>
+  );
+}
+
+function CandidateEvidenceComparison({ data }: { data: StrategyGroupReviewabilityResponse | null }) {
+  const candidates = data?.candidate_evidence || [];
+  if (!candidates.length) {
+    return (
+      <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+        Candidate evidence comparison is display_model_only / api_unavailable.
+      </section>
+    );
+  }
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">Candidate Evidence Comparison</h3>
+      <DataTable
+        compact
+        columns={['candidate', 'group', 'status', '72h mean', '72h positive', '7d mean', 'flags']}
+        rows={candidates.map((candidate) => [
+          candidate.candidate_id,
+          candidate.strategy_group_id,
+          candidate.review_status,
+          candidate.metrics.mean_72h || candidate.metrics.historical_oos_2021_2022 || 'n/a',
+          candidate.metrics.positive_rate_72h || 'n/a',
+          candidate.metrics.mean_7d || 'n/a',
+          candidate.confidence_flags.join(' / '),
+        ])}
+      />
+    </section>
+  );
+}
+
+function ObservationReadinessPanel({ data }: { data: StrategyGroupReviewabilityResponse | null }) {
+  const summary = data?.observation_chain_summary || {};
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">Live Read-only Observation Readiness</h3>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <ShelfMiniFact label="Existing runner" value={firstText(summary.existing_runner, 'api_unavailable')} />
+        <ShelfMiniFact label="Active observation" value={String(Boolean(summary.active_live_readonly_observation))} />
+        <ShelfMiniFact label="Signal glue" value={String(Boolean(summary.strategy_specific_signal_evaluator_glue_wired))} />
+        <ShelfMiniFact label="Evidence without order" value={String(Boolean(summary.can_record_metadata_and_evidence_without_orders))} />
+        <ShelfMiniFact label="Execution intent" value={String(Boolean(summary.execution_intent_created))} />
+        <ShelfMiniFact label="Order created" value={String(Boolean(summary.order_created))} />
+      </div>
+      <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+        Existing runner can record metadata/evidence without order creation, but strategy-specific signal evaluator glue and observation sink wiring remain blockers.
+      </div>
+      <ChipBlock
+        label="Non-permissions"
+        values={[
+          'no trial start',
+          'no execution intent',
+          'no order permission',
+          'no runtime start',
+          'no automatic strategy routing',
+        ]}
+        tone="rose"
+      />
     </section>
   );
 }
@@ -878,6 +1053,53 @@ function buildStrategyRows(data: ConsoleData) {
       next: '查看证据',
     },
   ];
+}
+
+function strategyGroupShelves(data: ConsoleData) {
+  if (data.strategyGroupReviewability) {
+    const primaryShelf = data.strategyGroupReviewability.primary_groups.map((item) => ({
+      ...item,
+      status_tone: toneForStrategyStatus(item.current_status),
+      shelf_section: 'primary' as const,
+    }));
+    const secondaryShelf = data.strategyGroupReviewability.secondary_groups.map((item) => ({
+      ...item,
+      status_tone: toneForStrategyStatus(item.current_status),
+      shelf_section: 'secondary' as const,
+    }));
+    return {
+      primaryShelf,
+      secondaryShelf,
+      allShelf: [...primaryShelf, ...secondaryShelf],
+      apiUnavailable: false,
+    };
+  }
+
+  const fallback = buildStrategyGroupShelf(data).map((item, index) => ({
+    ...item,
+    display_model_only: true,
+    not_runtime_source_of_truth: true,
+    no_execution_permission: true,
+    no_order_permission: true,
+    no_runtime_start: true,
+    no_automatic_strategy_routing: true,
+    shelf_section: index < 6 ? 'primary' as const : 'secondary' as const,
+  }));
+  return {
+    primaryShelf: fallback.slice(0, 6),
+    secondaryShelf: fallback.slice(6),
+    allShelf: fallback,
+    apiUnavailable: true,
+  };
+}
+
+function toneForStrategyStatus(status: string): Tone {
+  const value = status.toLowerCase();
+  if (value.includes('owner_special') || value.includes('coverage') || value.includes('cost')) return 'amber';
+  if (value.includes('primary') || value.includes('strong')) return 'teal';
+  if (value.includes('backup') || value.includes('data_request')) return 'indigo';
+  if (value.includes('blocked') || value.includes('negative')) return 'rose';
+  return 'slate';
 }
 
 function buildStrategyGroupShelf(data: ConsoleData): StrategyGroupShelfItem[] {
