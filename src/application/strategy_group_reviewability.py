@@ -57,6 +57,7 @@ class StrategyGroupReviewabilityResponse(BaseModel):
 
 
 _COST_BASELINE = "reports/directional-opportunity-broad-smoke-20260529/cost_baseline_enrichment.md"
+_BNB_SOL_REVIEW = "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md"
 _SHELF_REPORT = "reports/directional-opportunity-broad-smoke-20260529/strategy_group_shelf_result.md"
 _TRIAL_CANDIDATES = "reports/directional-opportunity-broad-smoke-20260529/trial_candidate_with_known_risks_v2.md"
 _CPM_OOS = "docs/ops/crypto-pullback-module-v1-oos-failure-classification.md"
@@ -84,25 +85,25 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             current_status="primary_chain_candidate / strong_smoke_candidate",
             evidence_summary=(
                 "SOL is the current chain sample with continuous 2021-2026 coverage; "
-                "BNB has the strongest smoke metrics but a severe 2023-2025 coverage gap."
+                "BNB coverage was repaired with public Binance UM futures 1h klines and remains a strong review-only observation candidate."
             ),
             key_risks=[
                 "high MAE / adverse path risk",
                 "right-tail dependence",
                 "signal density and dedup still need review",
-                "BNB coverage comparability gap",
+                "BNB year-split fragility after coverage repair",
             ],
             confidence_flags=[
                 "SOL chain sample, not the only primary strategy",
                 "SOL high MAE remains a bounded-trial risk disclosure",
-                "BNB coverage gap is a confidence flag, not elimination",
+                "BNB coverage repaired; review 2025 weakness and top-tail dependence before any admission",
             ],
             owner_action_options=[
                 "Review MI-001 SOL current chain sample",
-                "Compare BNB strong smoke evidence",
+                "Compare BNB repaired-coverage evidence",
                 "Keep BNB in MI as a strong observation candidate",
             ],
-            next_recommended_action="BNB data coverage repair plan",
+            next_recommended_action="Owner review of BNB repaired coverage evidence",
             not_allowed_now=[
                 "trial start",
                 "execution intent creation",
@@ -112,13 +113,13 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             ],
             evidence_reviewability="reviewable_with_known_risks",
             live_readonly_observation_readiness="live_readonly_candidate_requires_signal_glue",
-            bounded_trial_readiness="SOL chain sample has bounded-trial metadata; BNB remains coverage-repair candidate",
+            bounded_trial_readiness="SOL chain sample has bounded-trial metadata; BNB remains review-only after coverage repair",
             main_blockers=[
                 "MI signal evaluator glue is not wired into live read-only observation",
                 "SOL signal density/dedup review remains open",
-                "BNB 2023-2025 coverage gap",
+                "BNB repaired evidence still needs Owner review for 2025 weakness, top-tail dependence, and campaign replay gap",
             ],
-            source_refs=[_COST_BASELINE, _TRIAL_CANDIDATES, _SHELF_REPORT],
+            source_refs=[_BNB_SOL_REVIEW, _COST_BASELINE, _TRIAL_CANDIDATES, _SHELF_REPORT],
         ),
         StrategyGroupReviewabilityItem(
             strategy_group_id="VI-001",
@@ -299,21 +300,25 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             strategy_group_id="MI-001",
             symbol="BNB/USDT:USDT",
             side="long",
-            review_status="strong_smoke_candidate_with_coverage_gap",
-            evidence_summary="Strongest broad smoke metrics among current candidates, but local history has a severe 2023-2025 coverage gap.",
+            review_status="strong_smoke_candidate_with_repaired_coverage",
+            evidence_summary="BNB coverage repaired across the 2021-2026 local review span; evidence remains strong but review-only due 2025 weakness, top-tail sensitivity, and campaign replay gap.",
             metrics={
-                "signal_count": "2683",
-                "mean_72h": "3.5342",
-                "positive_rate_72h": "0.5617",
-                "mean_7d": "7.9309",
-                "positive_rate_7d": "0.5739",
-                "net_72h_baseline": "3.1642",
-                "net_72h_stress": "2.9992",
-                "mae_72h": "-6.75",
+                "signal_count": "4166",
+                "mean_24h": "0.8087",
+                "positive_rate_24h": "0.4851",
+                "mean_72h": "2.4074",
+                "positive_rate_72h": "0.5470",
+                "mean_7d": "5.4482",
+                "positive_rate_7d": "0.5552",
+                "net_72h_baseline": "2.0374",
+                "net_72h_stress": "1.8724",
+                "mae_72h": "-5.9467",
+                "mfe_72h": "8.7626",
+                "dedup_signal_count": "714",
             },
-            limitations=["2023-2025 coverage gap", "coverage comparability unresolved"],
-            confidence_flags=["coverage_gap_confidence_flag_not_elimination"],
-            source_refs=[_COST_BASELINE, _TRIAL_CANDIDATES],
+            limitations=["2025 72h year split negative", "top-tail dependency", "campaign replay missing"],
+            confidence_flags=["coverage_repaired_not_runtime_ready", "review_2025_weakness_before_admission"],
+            source_refs=[_BNB_SOL_REVIEW, _COST_BASELINE, _TRIAL_CANDIDATES],
         ),
         StrategyGroupCandidateEvidence(
             candidate_id="VI-001-ETH-LONG",
@@ -374,5 +379,5 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             "no_automatic_strategy_routing": True,
             "no_symbol_side_leverage_expansion": True,
         },
-        source_refs=[_COST_BASELINE, _SHELF_REPORT, _TRIAL_CANDIDATES, _CPM_OOS, _RUNNER],
+        source_refs=[_BNB_SOL_REVIEW, _COST_BASELINE, _SHELF_REPORT, _TRIAL_CANDIDATES, _CPM_OOS, _RUNNER],
     )

@@ -570,16 +570,16 @@ def test_strategy_group_reviewability_api_exposes_safe_shelf(monkeypatch):
     mi = next(item for item in payload["primary_groups"] if item["strategy_group_id"] == "MI-001")
     assert "MI-001 SOL long" in mi["representative_candidates"]
     assert "MI-001 BNB long" in mi["representative_candidates"]
-    assert "coverage gap is a confidence flag" in " ".join(mi["confidence_flags"]).lower()
+    assert "coverage repaired" in " ".join(mi["confidence_flags"]).lower()
     assert mi["live_readonly_observation_readiness"] == "live_readonly_candidate_requires_signal_glue"
     assert mi["no_execution_permission"] is True
     assert mi["no_order_permission"] is True
     assert mi["no_runtime_start"] is True
 
     bnb = next(item for item in payload["candidate_evidence"] if item["candidate_id"] == "MI-001-BNB-LONG")
-    assert bnb["metrics"]["signal_count"] == "2683"
-    assert "coverage_gap_confidence_flag_not_elimination" in bnb["confidence_flags"]
-    assert "2023-2025 coverage gap" in bnb["limitations"]
+    assert bnb["metrics"]["signal_count"] == "4166"
+    assert "coverage_repaired_not_runtime_ready" in bnb["confidence_flags"]
+    assert "2025 72h year split negative" in bnb["limitations"]
 
     cpm = next(item for item in payload["primary_groups"] if item["strategy_group_id"] == "CPM-RO-001")
     assert cpm["current_status"] == "owner_special_observation"

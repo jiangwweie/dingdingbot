@@ -97,7 +97,7 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText(/Exactly six primary groups/)).toBeTruthy();
     expect(screen.getByText('Secondary / Extended Shelf')).toBeTruthy();
     expect(screen.getAllByText('live_readonly_candidate_requires_signal_glue').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('coverage_gap_confidence_flag_not_elimination').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('coverage_repaired_not_runtime_ready').length).toBeGreaterThan(0);
     expect(screen.getAllByText('VI-001 ETH long').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Owner Special Observation').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/CPM historical OOS 2021\/2022 was negative/).length).toBeGreaterThan(0);
@@ -287,8 +287,8 @@ function strategyGroupReviewabilityPayload() {
         strategy_group_name: 'Momentum Impulse',
         representative_candidates: ['MI-001 SOL long', 'MI-001 BNB long'],
         current_status: 'primary_chain_candidate / strong_smoke_candidate',
-        evidence_summary: 'SOL current chain sample; BNB strongest smoke with coverage gap.',
-        confidence_flags: ['BNB coverage gap is a confidence flag, not elimination'],
+        evidence_summary: 'SOL current chain sample; BNB repaired coverage remains review-only.',
+        confidence_flags: ['BNB coverage repaired; review 2025 weakness and top-tail dependence before admission'],
         live_readonly_observation_readiness: 'live_readonly_candidate_requires_signal_glue',
         bounded_trial_readiness: 'SOL chain sample has bounded-trial metadata',
       }),
@@ -358,11 +358,11 @@ function strategyGroupReviewabilityPayload() {
         mean_7d: '4.7372',
       }, ['chain sample']),
       candidatePayload('MI-001-BNB-LONG', 'MI-001', {
-        signal_count: '2683',
-        mean_72h: '3.5342',
-        positive_rate_72h: '0.5617',
-        mean_7d: '7.9309',
-      }, ['coverage_gap_confidence_flag_not_elimination']),
+        signal_count: '4166',
+        mean_72h: '2.4074',
+        positive_rate_72h: '0.5470',
+        mean_7d: '5.4482',
+      }, ['coverage_repaired_not_runtime_ready']),
       candidatePayload('VI-001-ETH-LONG', 'VI-001', {
         signal_count: '1277',
         mean_72h: '1.1164',
