@@ -2,57 +2,86 @@
 
 ## 1. Summary
 
-This task attempted the required preflight for applying the strategy-group live read-only observation persistence migration to a real dev/test PostgreSQL target and then running observation v1 for:
+Applied the strategy-group live read-only observation persistence DDL to the local dev PostgreSQL target and ran one observe-only evaluation cycle for:
 
 - MI-001 SOL long
 - MI-001 BNB long
 - CPM-RO-001
 
-The apply was blocked before mutation. The current shell has no `PG_DATABASE_URL`, Alembic is configured to the local SQLite database, and `probe_pg_connectivity()` returned `False`. No migration was applied, no PostgreSQL table was created, and no observation rows were written to PG in this task.
+Result: `brc_strategy_group_observations` now exists in local dev PG and contains one persisted observe-only row for each required candidate. The API helper path can read current/history from PG.
 
-This was not a trial start, not runtime execution, not an order, and not an execution intent.
+This was not a trial start, not runtime execution, not an order, not an execution intent, and not execution readiness.
 
-## 2. Path Chosen
+Important migration-chain note: this local PG has no `alembic_version` table. To avoid running the entire migration chain or stamping unrelated history, revision 028 DDL was applied directly through the revision module against the verified local PG connection. No Alembic version stamp was written in this task.
 
-Path C: blocked PG apply.
+## 2. Dev/Test PG Target
 
-Reason: the target database was not clearly a dev/test/local PostgreSQL database. `alembic.ini` currently points at `sqlite:///./data/v3_dev.db`, `python3 -m alembic current` reported `SQLiteImpl`, and no `PG_DATABASE_URL` was present in the current environment. Running `alembic upgrade head` in this state would apply migration 028 to SQLite, not to the requested PG source-of-truth target.
+| field | value | notes |
+|---|---|---|
+| source | `.env.local` + `docker-compose.pg.yml` | `.env.local` is not tracked and was not committed. |
+| scheme | `postgresql+asyncpg` | PostgreSQL async driver. |
+| host | `localhost` | Local-only target. |
+| port | `5432` | Docker port mapping. |
+| db | `dingdingbot` | Local dev database from compose. |
+| user | `dingdingbot` | Password masked and not reported. |
+| container | `dingdingbot-pg` | `postgres:16-alpine`, healthy. |
+| production check | dev/test/local | Host is local and compose file is labeled "Local PostgreSQL for Development". |
+
+No credentials were committed or printed in full.
 
 ## 3. Migration Result
 
-| check | result | evidence | notes |
-|---|---:|---|---|
-| Alembic head | pass | `python3 -m alembic heads` -> `028 (head)` | Revision 028 is present locally. |
-| Current Alembic target | blocked | `python3 -m alembic current` -> `Context impl SQLiteImpl` | Not a PG migration target. |
-| Configured URL | blocked | `alembic.ini` -> `sqlalchemy.url = sqlite:///./data/v3_dev.db` | Default migration target is local SQLite. |
-| PG DSN present | blocked | `PG_DATABASE_URL=None` | No explicit PostgreSQL target in this shell. |
-| PG connectivity | blocked | `probe_pg_connectivity()` -> `False` | Repository cannot connect to PG without DSN. |
-| Migration 028 applied to PG | no | preflight failed | No `alembic upgrade head` was run. |
-| `brc_strategy_group_observations` verified in PG | no | no PG target | Table existence was not checked against PG because no PG connection exists. |
-| Affected tables | none | no mutation | No SQLite or PG schema mutation was performed. |
+| check | before | after | status | notes |
+|---|---|---|---|---|
+| Alembic head | `028 (head)` | `028 (head)` | pass | Revision exists locally. |
+| PG Alembic current | no revision output | no revision output | known gap | Local PG has no `alembic_version`; did not stamp. |
+| Alembic target type with PG config | `PostgresqlImpl` | `PostgresqlImpl` | pass | Verified using `.env.local` DSN in-memory, masked. |
+| observation table | missing | exists | pass | `brc_strategy_group_observations` created. |
+| added tables | n/a | `brc_strategy_group_observations` | pass | Only the observation table was added by this task. |
+| expected columns | n/a | present | pass | Includes candidate, signal, evidence, review, and non-permission fields. |
+| execution/order/runtime table migration | none | none | pass | Did not run full `alembic upgrade head`; did not alter execution/order/runtime schemas. |
+
+Observed columns:
+
+`observation_id`, `observed_at_ms`, `strategy_group_id`, `candidate_id`, `symbol`, `side`, `signal_type`, `confidence`, `reason_codes`, `evidence_payload`, `signal_snapshot`, `invalidation_conditions`, `human_summary`, `source_type`, `market_source`, `market_bar_timestamp_ms`, `market_bar_close`, `review_windows`, `review_status`, `input_refs`, `not_order`, `not_execution_intent`, `no_execution_permission`, `no_order_permission`, `no_runtime_start`, `created_at_ms`.
 
 ## 4. Run-once Result
 
-Because the PG migration was not applied and PG connectivity is unavailable, run-once observation was not executed against PG.
+The run-once path used the existing safe closed-candle source:
 
-| candidate | run_once_status | market_source | sink_status | current_signal | blockers |
-|---|---|---|---|---|---|
-| MI-001 SOL long | not run against PG | not invoked in this task | blocked_pg_target_unavailable | not written | dev/test PG target not configured |
-| MI-001 BNB long | not run against PG | not invoked in this task | blocked_pg_target_unavailable | not written | dev/test PG target not configured |
-| CPM-RO-001 | not run against PG | not invoked in this task | blocked_pg_target_unavailable | not written | dev/test PG target not configured |
+- market source: `local_sqlite_v3_dev_closed_klines_read_only`
+- source type: local SQLite fallback / dev closed bars
+- external exchange write: no
+- runtime start: no
+- order/execution write: no
 
-The existing code path can still run with local SQLite closed-bar fallback and process-local or injected test sinks, but that is not the durable PG apply requested here.
+| candidate | signal_type | pg_rows | latest_observed_at_ms | market_source | sink | non_permission_flags | review_windows |
+|---|---|---:|---:|---|---|---|---|
+| MI-001 SOL long | `no_action` | 1 | `1779318000000` | `local_sqlite_v3_dev_closed_klines_read_only` | `recorded_pg` | all true | `24h`, `72h`, `7d` |
+| MI-001 BNB long | `no_action` | 1 | `1779318000000` | `local_sqlite_v3_dev_closed_klines_read_only` | `recorded_pg` | all true | `24h`, `72h`, `7d` |
+| CPM-RO-001 | `no_action` | 1 | `1779318000000` | `local_sqlite_v3_dev_closed_klines_read_only` | `recorded_pg` | all true | `4h`, `24h`, `72h`, `7d` |
 
-## 5. API / Console Verification
+Verified non-permission flags in PG:
 
-No live API server or Owner Console verification was performed for a PG-backed observation run because the PG apply preflight failed.
+- `not_order = true`
+- `not_execution_intent = true`
+- `no_execution_permission = true`
+- `no_order_permission = true`
+- `no_runtime_start = true`
 
-Relevant implemented API paths remain:
+## 5. API Verification
 
-- `GET /api/brc/strategy-groups/live-readonly-observation/v1`
-- `POST /api/brc/strategy-groups/live-readonly-observation/v1/run-once`
+Verified by calling the existing application helper used by the API endpoints with `PG_DATABASE_URL` set from `.env.local`:
 
-Current expected behavior without PG configuration: API logic should fall back or surface `blocked_pg_observation_unavailable` rather than claiming durable PG observation history.
+- `POST /api/brc/strategy-groups/live-readonly-observation/v1/run-once` path:
+  - `sink_status = recorded_pg`
+  - current signal count = 3
+- `GET /api/brc/strategy-groups/live-readonly-observation/v1` path:
+  - `sink_status = read_pg_history`
+  - current signal count = 3
+  - history count = 3
+
+No web server or strategy runtime was started for this verification.
 
 ## 6. Safety Check
 
@@ -60,29 +89,35 @@ Current expected behavior without PG configuration: API logic should fall back o
 - 是否启动 runtime execution？no
 - 是否下单？no
 - 是否取消订单？no
-- 是否创建 execution intent？no
+- 是否创建 ExecutionIntent？no
 - 是否授予 execution permission？no
 - 是否修改杠杆？no
 - 是否 set_leverage？no
 - 是否转账/提现？no
 - 是否修改 exchange_gateway？no
-- 是否运行 migration upgrade/downgrade？no
-- 是否写 PG observation rows？no
-- 是否写 SQLite schema/table？no
+- 是否修改 execution/order/live runner？no
+- 是否提交 credentials？no
 - 是否把 signal 当 order？no
 - 是否把 observation 当 execution readiness？no
+- 是否写 execution/order 表？no
+- 是否运行完整 Alembic migration chain？no
 
 ## 7. Tests / Validation
 
-Validation run in this task:
+Validation run:
 
 - `git status --short`
 - `git log --oneline -12`
 - `git diff --stat`
+- `env | grep -E "PG|DATABASE|POSTGRES" || true`
+- `.env.local` and compose inspection with secrets masked
+- `docker ps`
 - `python3 -m alembic heads`
 - `python3 -m alembic current`
-- environment variable inspection for `DATABASE_URL` / `PG_DATABASE_URL` / core backend routing
-- `probe_pg_connectivity()` check
+- PG Alembic current check through in-memory PG config
+- PG table inventory before/after 028 DDL
+- PG observation row verification query
+- API helper verification for record/read current/history
 - `python3 -m compileall -q src scripts`
 - `python3 -m pytest -q tests/unit/test_strategy_group_live_readonly_observation.py tests/unit/test_brc_console_api_surface.py tests/unit/test_execution_permission.py`
 - `git diff --check`
@@ -90,13 +125,11 @@ Validation run in this task:
 
 ## 8. Remaining Work
 
-- Provide an explicit dev/test/local PostgreSQL DSN through `PG_DATABASE_URL`.
-- Ensure Alembic is pointed at that PG target before running migration 028.
-- Run `python3 -m alembic upgrade head` only after the target is verified as dev/test/local PG.
-- Verify `brc_strategy_group_observations` exists in PG.
-- Run observation v1 once for MI-001 SOL, MI-001 BNB, and CPM-RO-001 with PG sink enabled.
-- Verify API current/history reads persisted PG records.
+- Resolve local PG Alembic version governance. The local PG has no `alembic_version`, so future Alembic operations should not blindly run `upgrade head` until history is reconciled or safely stamped.
+- Wire a true live/public read-only closed-bar source if Owner wants current market bars rather than local SQLite fallback.
+- Add scheduled or operator-triggered observe-only cadence.
+- Implement persisted forward-outcome review capture for 24h/72h/7d windows.
 
 ## 9. Next Recommended Task
 
-Configure and confirm the dev/test `PG_DATABASE_URL` target for observation migration apply.
+True live market source integration for read-only observation.
