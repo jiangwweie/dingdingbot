@@ -666,6 +666,32 @@ def test_strategy_group_live_readonly_observation_run_once_records_history_witho
     assert "order_permission_granted" not in raw_payload
 
 
+def test_strategy_group_observation_case_queue_api_is_review_only(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/strategy-groups/observation-cases/v1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_from"] == "strategy_group_observation_case_queue_v1"
+    assert payload["non_permissions"]["no_trial_start"] is True
+    assert payload["non_permissions"]["no_execution_intent"] is True
+    assert payload["non_permissions"]["no_order_permission"] is True
+    assert payload["non_permissions"]["no_runtime_start"] is True
+    assert "no_action" in payload["excluded_signal_types"]
+    assert "CPM-RO-001" in payload["supported_future_cases"]
+
+    raw_payload = json.dumps(payload)
+    assert "Start Trading" not in raw_payload
+    assert "Place Order" not in raw_payload
+    assert "Run Strategy" not in raw_payload
+    assert "execution_permission_granted" not in raw_payload
+    assert "order_permission_granted" not in raw_payload
+
+
 def test_mi001_sol_owner_console_view_marks_guard_action_enabled_when_runtime_ready(monkeypatch):
     _configure_auth(monkeypatch)
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")

@@ -22,6 +22,7 @@ import {
   AdmissionTrialBinding,
   brcApi,
   Mi001SolReadinessResponse,
+  ObservationCaseQueueResponse,
   ReadinessResponse,
   StrategyGroupLiveReadOnlyObservationResponse,
   StrategyGroupReviewabilityResponse,
@@ -35,6 +36,7 @@ type ConsoleData = {
   mi001: Mi001SolReadinessResponse | null;
   strategyGroupReviewability: StrategyGroupReviewabilityResponse | null;
   liveObservation: StrategyGroupLiveReadOnlyObservationResponse | null;
+  observationCaseQueue: ObservationCaseQueueResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
   bindings: AdmissionTrialBinding[];
@@ -87,6 +89,7 @@ const EMPTY_DATA: ConsoleData = {
   mi001: null,
   strategyGroupReviewability: null,
   liveObservation: null,
+  observationCaseQueue: null,
   families: [],
   decisions: [],
   bindings: [],
@@ -263,7 +266,11 @@ export function StrategyGroupsV2() {
       </section>
 
       <CandidateEvidenceComparison data={data.strategyGroupReviewability} />
-      <ObservationReadinessPanel data={data.strategyGroupReviewability} liveObservation={data.liveObservation} />
+      <ObservationReadinessPanel
+        data={data.strategyGroupReviewability}
+        liveObservation={data.liveObservation}
+        caseQueue={data.observationCaseQueue}
+      />
 
       <DataTable
         columns={['策略组', '具体策略', '状态', '标的', '方向', '最近信号', '最近意图', '下一步']}
@@ -521,6 +528,7 @@ function useConsoleData(): ViewState {
         mi001,
         strategyGroupReviewability,
         liveObservation,
+        observationCaseQueue,
         families,
         decisions,
         bindings,
@@ -547,6 +555,10 @@ function useConsoleData(): ViewState {
         }),
         brcApi.strategyGroupLiveObservationV1().catch((error) => {
           gaps.push(`live read-only observation v1: ${message(error)}`);
+          return null;
+        }),
+        brcApi.strategyGroupObservationCasesV1().catch((error) => {
+          gaps.push(`observation case queue v1: ${message(error)}`);
           return null;
         }),
         brcApi.listStrategyFamilies().catch((error) => {
@@ -587,6 +599,7 @@ function useConsoleData(): ViewState {
             mi001,
             strategyGroupReviewability,
             liveObservation,
+            observationCaseQueue,
             families,
             decisions,
             bindings,
@@ -900,14 +913,17 @@ function CandidateEvidenceComparison({ data }: { data: StrategyGroupReviewabilit
 function ObservationReadinessPanel({
   data,
   liveObservation,
+  caseQueue,
 }: {
   data: StrategyGroupReviewabilityResponse | null;
   liveObservation: StrategyGroupLiveReadOnlyObservationResponse | null;
+  caseQueue: ObservationCaseQueueResponse | null;
 }) {
   const summary = data?.observation_chain_summary || {};
   const candidates = liveObservation?.candidates || [];
   const currentSignals = liveObservation?.current_signals || [];
   const signalHistory = liveObservation?.signal_history || [];
+  const cases = caseQueue?.cases || [];
   const sinkSummary = liveObservation?.sink_summary || {};
   const inputSource = liveObservation?.input_source_summary || {};
   return (
@@ -968,8 +984,40 @@ function ObservationReadinessPanel({
           />
         </div>
       ) : null}
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Observation Case Queue v1</h4>
+          <StatePill tone={caseQueue?.queue_status === 'available' ? 'teal' : 'amber'}>
+            {caseQueue?.queue_status || 'api_unavailable'}
+          </StatePill>
+        </div>
+        {cases.length ? (
+          <DataTable
+            compact
+            columns={['case', 'candidate', 'status', 'completed', 'pending', 'risk tags', 'non-permission']}
+            rows={cases.map((item) => [
+              item.case_id,
+              item.candidate_id,
+              item.case_status,
+              item.completed_review_windows.join(' / ') || 'none',
+              item.pending_review_windows.join(' / ') || 'none',
+              item.risk_tags.join(' / '),
+              item.no_execution_permission && item.no_order_permission ? 'no execution / no order' : 'invalid',
+            ])}
+          />
+        ) : (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+            No would-enter case is currently queued from the API. No-action and invalid observations stay excluded from Owner case review.
+          </p>
+        )}
+        {caseQueue?.supported_future_cases?.['CPM-RO-001'] ? (
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            CPM: {caseQueue.supported_future_cases['CPM-RO-001']}
+          </p>
+        ) : null}
+      </div>
       <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-        Existing runner can record metadata/evidence without order creation. MI/CPM evaluator glue now produces read-only current signal records from closed candle snapshots. Scheduler binding and PG observation sink remain blockers; this panel does not start runtime or create execution intent.
+        Existing runner can record metadata/evidence without order creation. MI/CPM evaluator glue now produces read-only current signal records from closed candle snapshots. The case queue only promotes would-enter observations into Owner review; it does not start runtime or create execution intent.
       </div>
       <ChipBlock
         label="Non-permissions"

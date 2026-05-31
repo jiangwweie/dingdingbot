@@ -20,6 +20,7 @@ const mockBrcApi = vi.hoisted(() => ({
   mi001SolReadiness: vi.fn(),
   strategyGroupReviewability: vi.fn(),
   strategyGroupLiveObservationV1: vi.fn(),
+  strategyGroupObservationCasesV1: vi.fn(),
   listStrategyFamilies: vi.fn(),
   listAdmissionDecisions: vi.fn(),
   listTrialBindings: vi.fn(),
@@ -42,6 +43,7 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.mi001SolReadiness.mockResolvedValue(mi001Payload());
     mockBrcApi.strategyGroupReviewability.mockResolvedValue(strategyGroupReviewabilityPayload());
     mockBrcApi.strategyGroupLiveObservationV1.mockResolvedValue(liveObservationPayload());
+    mockBrcApi.strategyGroupObservationCasesV1.mockResolvedValue(observationCaseQueuePayload());
     mockBrcApi.listStrategyFamilies.mockResolvedValue([]);
     mockBrcApi.listAdmissionDecisions.mockResolvedValue([{ owner_risk_acceptance_id: 'owner-acceptance-1' }]);
     mockBrcApi.listTrialBindings.mockResolvedValue([]);
@@ -116,6 +118,11 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getAllByText(/Attention \/ search/).length).toBeGreaterThan(0);
     expect(screen.getByText('Candidate Evidence Comparison')).toBeTruthy();
     expect(screen.getByText('Live Read-only Observation Readiness')).toBeTruthy();
+    expect(screen.getByText('Observation Case Queue v1')).toBeTruthy();
+    expect(screen.getAllByText('MI-001-BNB-LONG-live-case-001').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('pending_forward_review').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/no_chase_required/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('CPM-RO-001:future-would-enter')).toBeNull();
     expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
     expect(screen.getAllByText('CPM-RO-001').length).toBeGreaterThan(0);
     expect(screen.getAllByText('wired_read_only_v1').length).toBeGreaterThan(0);
@@ -448,6 +455,70 @@ function liveObservationPayload() {
     },
     live_observation_active: false,
     live_ready: false,
+  };
+}
+
+function observationCaseQueuePayload() {
+  return {
+    generated_from: 'strategy_group_observation_case_queue_v1',
+    queue_status: 'available',
+    sink_source: 'pg_brc_strategy_group_observations',
+    forward_review_source: 'pg_brc_strategy_group_forward_reviews',
+    case_count: 1,
+    cases: [
+      {
+        case_id: 'MI-001-BNB-LONG-live-case-001',
+        observation_id: 'MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000',
+        strategy_group_id: 'MI-001',
+        candidate_id: 'MI-001-BNB-LONG',
+        symbol: 'BNB/USDT:USDT',
+        side: 'long',
+        signal_type: 'would_enter',
+        case_status: 'pending_forward_review',
+        owner_review_status: 'owner_review_pending',
+        observed_at_ms: 1780196400000,
+        recorded_at_ms: 1780196400100,
+        market_bar_timestamp_ms: 1780196400000,
+        market_bar_close: '672.90',
+        source_type: 'live_market_read_only',
+        market_source: 'binance_usdm_public_klines_read_only',
+        review_windows: ['1h', '4h', '12h', '24h', '72h'],
+        completed_review_windows: ['1h', '4h'],
+        pending_review_windows: ['12h', '24h', '72h'],
+        forward_reviews: [
+          { review_window: '1h', review_status: 'completed', review_due_at_ms: 1780203600000, forward_return_pct: '-0.7593', mfe_pct: '0.3121', mae_pct: '-1.1483' },
+          { review_window: '4h', review_status: 'completed', review_due_at_ms: 1780214400000, forward_return_pct: '-0.9821', mfe_pct: '0.3121', mae_pct: '-1.5512' },
+          { review_window: '12h', review_status: 'pending', review_due_at_ms: 1780243200000 },
+          { review_window: '24h', review_status: 'pending', review_due_at_ms: 1780286400000 },
+          { review_window: '72h', review_status: 'pending', review_due_at_ms: 1780459200000 },
+        ],
+        risk_tags: ['adverse_path_watch', 'bnb_live_case_001', 'local_exhaustion_watch', 'no_chase_required', 'owner_review_required', 'signal_not_order', 'wait_for_confirmation_required'],
+        reason_codes: ['mi001_12h_momentum_impulse', 'observe_only_review_required'],
+        human_summary: 'MI-001 would-enter long observation.',
+        owner_interpretation: 'BNB live case #001 remains an Owner-review case, not a trade.',
+        source_refs: ['src/application/strategy_group_observation_case_queue.py'],
+        not_order: true,
+        not_execution_intent: true,
+        no_execution_permission: true,
+        no_order_permission: true,
+        no_runtime_start: true,
+      },
+    ],
+    excluded_signal_types: ['no_action', 'invalid'],
+    supported_future_cases: {
+      'CPM-RO-001': 'future CPM would_enter signals will enter the same Owner review queue with owner_special_observation / OOS-negative risk tags',
+    },
+    non_permissions: {
+      no_trial_start: true,
+      no_execution_intent: true,
+      no_order_permission: true,
+      no_execution_permission: true,
+      no_runtime_start: true,
+      no_automatic_strategy_routing: true,
+      signal_not_order: true,
+      observation_not_execution_readiness: true,
+    },
+    source_refs: ['src/application/strategy_group_observation_case_queue.py'],
   };
 }
 

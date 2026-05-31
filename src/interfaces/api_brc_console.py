@@ -28,6 +28,11 @@ from src.application.strategy_group_live_readonly_observation import (
     build_strategy_group_live_readonly_observation_v1,
     run_strategy_group_live_readonly_observation_once,
 )
+from src.application.strategy_group_observation_case_queue import (
+    ObservationCaseQueueResponse,
+    blocked_observation_case_queue,
+    build_observation_case_queue,
+)
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.database import probe_pg_connectivity
@@ -3566,6 +3571,43 @@ async def run_strategy_group_live_readonly_observation_v1_once(
         record_observation=True,
         source_name=source,
     )
+
+
+@router.get(
+    "/strategy-groups/observation-cases/v1",
+    response_model=ObservationCaseQueueResponse,
+)
+async def get_strategy_group_observation_cases_v1(
+    candidate_id: str | None = Query(default=None),
+    strategy_group_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+) -> ObservationCaseQueueResponse:
+    """Return the Owner-review case queue for would-enter observations only."""
+    try:
+        pg_available = await probe_pg_connectivity()
+        if not pg_available:
+            return blocked_observation_case_queue(reason="pg_unavailable")
+        observation_repo = PgStrategyGroupObservationRepository()
+        forward_review_repo = PgStrategyGroupForwardReviewRepository()
+        observations = await observation_repo.list_recent(limit=200)
+        would_enter_ids = [record.record_id for record in observations if record.signal_type == "would_enter"]
+        reviews = await forward_review_repo.list_by_observation_ids(would_enter_ids)
+        return build_observation_case_queue(
+            observations,
+            reviews,
+            candidate_id=candidate_id,
+            strategy_group_id=strategy_group_id,
+            status=status,
+        )
+    except Exception as exc:
+        reason = f"pg_read_failed_{type(exc).__name__}"
+        response = blocked_observation_case_queue(reason=reason)
+        return response.model_copy(
+            update={
+                "source_refs": response.source_refs
+                + [f"error: {type(exc).__name__}: {str(exc)[:160]}"],
+            }
+        )
 
 
 async def _strategy_group_live_readonly_observation_response(

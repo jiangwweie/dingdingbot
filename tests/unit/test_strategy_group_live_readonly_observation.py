@@ -21,12 +21,16 @@ from src.application.strategy_group_live_readonly_observation import (
     _sample_mi_candles,
     _sample_signal_input,
 )
-from src.application.strategy_group_forward_review import calculate_forward_reviews_for_observation
+from src.application.strategy_group_forward_review import (
+    StrategyGroupForwardReviewRecord,
+    calculate_forward_reviews_for_observation,
+)
 from src.domain.strategy_family_signal import SignalSide, SignalType
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.pg_models import PGBrcStrategyGroupForwardReviewORM, PGBrcStrategyGroupObservationORM
 from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
+from src.application.strategy_group_observation_case_queue import build_observation_case_queue
 from src.application.strategy_group_readonly_observation_scheduler import (
     run_scheduled_readonly_observation_once,
 )
@@ -293,6 +297,80 @@ async def test_forward_review_calculates_completed_and_pending_windows(forward_r
     assert all(review.no_order_permission is True for review in recorded)
 
 
+def test_observation_case_queue_includes_bnb_would_enter_and_excludes_cpm_no_action():
+    payload = run_strategy_group_live_readonly_observation_once(
+        market_source=SampleStrategyGroupMarketBarSource(),
+        sink=InMemoryStrategyGroupObservationSink(),
+    )
+    bnb = next(record for record in payload.current_signals if record.candidate_id == "MI-001-BNB-LONG").model_copy(
+        update={
+            "record_id": "MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000",
+            "signal_type": "would_enter",
+            "side": "long",
+            "market_bar_timestamp_ms": 1_780_196_400_000,
+            "market_bar_close": "672.90",
+            "review_windows": ["1h", "4h", "12h", "24h", "72h"],
+        }
+    )
+    cpm_no_action = next(
+        record for record in payload.current_signals if record.candidate_id == "CPM-RO-001"
+    ).model_copy(update={"signal_type": "no_action"})
+    reviews = [
+        _review(bnb, "1h", "completed", 1_780_203_600_000, "-0.7593", "0.3121", "-1.1483"),
+        _review(bnb, "4h", "completed", 1_780_214_400_000, "-0.9821", "0.3121", "-1.5512"),
+        _review(bnb, "12h", "pending", 1_780_243_200_000),
+        _review(bnb, "24h", "pending", 1_780_286_400_000),
+        _review(bnb, "72h", "pending", 1_780_459_200_000),
+    ]
+
+    queue = build_observation_case_queue([cpm_no_action, bnb], reviews)
+
+    assert queue.case_count == 1
+    case = queue.cases[0]
+    assert case.case_id == "MI-001-BNB-LONG-live-case-001"
+    assert case.observation_id == bnb.record_id
+    assert case.case_status == "pending_forward_review"
+    assert case.completed_review_windows == ["1h", "4h"]
+    assert case.pending_review_windows == ["12h", "24h", "72h"]
+    assert "local_exhaustion_watch" in case.risk_tags
+    assert "no_chase_required" in case.risk_tags
+    assert "wait_for_confirmation_required" in case.risk_tags
+    assert "CPM-RO-001" in queue.supported_future_cases
+    assert queue.non_permissions["no_order_permission"] is True
+    assert case.not_order is True
+    assert case.not_execution_intent is True
+
+
+def test_observation_case_queue_supports_future_cpm_would_enter_with_special_risk_tags():
+    cpm = next(
+        record
+        for record in run_strategy_group_live_readonly_observation_once(
+            market_source=SampleStrategyGroupMarketBarSource(),
+            sink=InMemoryStrategyGroupObservationSink(),
+        ).current_signals
+        if record.candidate_id == "CPM-RO-001"
+    ).model_copy(
+        update={
+            "record_id": "CPM-RO-001:future-would-enter:1780196400000",
+            "signal_type": "would_enter",
+            "side": "long",
+            "human_summary": "CPM owner-special observation would-enter preview.",
+        }
+    )
+
+    queue = build_observation_case_queue([cpm], [])
+
+    assert queue.case_count == 1
+    case = queue.cases[0]
+    assert case.candidate_id == "CPM-RO-001"
+    assert "owner_special_observation" in case.risk_tags
+    assert "historical_oos_negative_warning" in case.risk_tags
+    assert "not_proven_alpha" in case.risk_tags
+    assert "not_runtime_eligible_by_default" in case.risk_tags
+    assert case.no_execution_permission is True
+    assert case.no_order_permission is True
+
+
 def test_strategy_group_observation_migration_creates_observe_only_table():
     migration_path = (
         Path(__file__).resolve().parents[2]
@@ -444,4 +522,33 @@ def _candle(open_time_ms: int, open_: str, high: str, low: str, close: str):
         volume=Decimal("1"),
         close_time_ms=open_time_ms + 3_600_000 - 1,
         is_closed=True,
+    )
+
+
+def _review(
+    observation,
+    window: str,
+    status: str,
+    due_at_ms: int,
+    forward_return_pct: str | None = None,
+    mfe_pct: str | None = None,
+    mae_pct: str | None = None,
+) -> StrategyGroupForwardReviewRecord:
+    return StrategyGroupForwardReviewRecord(
+        review_id=f"{observation.record_id}:{window}",
+        observation_id=observation.record_id,
+        candidate_id=observation.candidate_id,
+        symbol=observation.symbol,
+        side=observation.side,
+        signal_type=observation.signal_type,
+        market_bar_timestamp_ms=observation.market_bar_timestamp_ms,
+        review_window=window,
+        review_due_at_ms=due_at_ms,
+        review_status=status,
+        forward_return_pct=forward_return_pct,
+        mfe_pct=mfe_pct,
+        mae_pct=mae_pct,
+        source="unit_test_forward_reviews",
+        calculated_at_ms=due_at_ms if status == "completed" else None,
+        notes=f"{status} unit test review",
     )

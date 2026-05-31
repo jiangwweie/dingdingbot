@@ -320,6 +320,62 @@ export type StrategyGroupLiveReadOnlyObservationResponse = {
   live_ready: false;
 };
 
+export type ObservationCaseForwardReview = {
+  review_window: string;
+  review_status: string;
+  review_due_at_ms: number;
+  forward_return_pct?: string | null;
+  mfe_pct?: string | null;
+  mae_pct?: string | null;
+  calculated_at_ms?: number | null;
+  notes?: string | null;
+};
+
+export type ObservationCaseQueueItem = {
+  case_id: string;
+  observation_id: string;
+  strategy_group_id: string;
+  candidate_id: string;
+  symbol: string;
+  side: string;
+  signal_type: 'would_enter';
+  case_status: string;
+  owner_review_status: string;
+  observed_at_ms: number;
+  recorded_at_ms?: number | null;
+  market_bar_timestamp_ms: number;
+  market_bar_close?: string | null;
+  source_type: string;
+  market_source: string;
+  review_windows: string[];
+  completed_review_windows: string[];
+  pending_review_windows: string[];
+  forward_reviews: ObservationCaseForwardReview[];
+  risk_tags: string[];
+  reason_codes: string[];
+  human_summary: string;
+  owner_interpretation: string;
+  source_refs: string[];
+  not_order: true;
+  not_execution_intent: true;
+  no_execution_permission: true;
+  no_order_permission: true;
+  no_runtime_start: true;
+};
+
+export type ObservationCaseQueueResponse = {
+  generated_from: string;
+  queue_status: string;
+  sink_source: string;
+  forward_review_source: string;
+  case_count: number;
+  cases: ObservationCaseQueueItem[];
+  excluded_signal_types: string[];
+  supported_future_cases: Record<string, string>;
+  non_permissions: Record<string, boolean>;
+  source_refs: string[];
+};
+
 export type StartupGuardReadinessArmResponse = {
   action: 'startup_guard_preflight_arm';
   status: 'armed' | 'already_armed' | 'blocked';
@@ -617,6 +673,9 @@ export const brcApi = {
   },
   strategyGroupLiveObservationV1() {
     return request<StrategyGroupLiveReadOnlyObservationResponse>('/api/brc/strategy-groups/live-readonly-observation/v1');
+  },
+  strategyGroupObservationCasesV1() {
+    return request<ObservationCaseQueueResponse>('/api/brc/strategy-groups/observation-cases/v1');
   },
   runStrategyGroupLiveObservationV1Once() {
     return request<StrategyGroupLiveReadOnlyObservationResponse>('/api/brc/strategy-groups/live-readonly-observation/v1/run-once', {
