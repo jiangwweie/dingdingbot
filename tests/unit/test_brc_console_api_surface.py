@@ -692,6 +692,50 @@ def test_strategy_group_observation_case_queue_api_is_review_only(monkeypatch):
     assert "order_permission_granted" not in raw_payload
 
 
+def test_mi001_bnb_trial_readiness_gap_api_is_design_only(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/readiness/mi001-bnb/trial-gap")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidate_id"] == "MI-001-BNB-LONG"
+    assert payload["readiness_verdict"] == "not_testnet_ready_not_live_ready"
+    assert len(payload["gap_matrix"]) >= 19
+    gate_ids = {item["gate_id"] for item in payload["gap_matrix"]}
+    assert {"G01", "G02", "G05", "G06", "G18", "G19"} <= gate_ids
+    assert payload["testnet_rehearsal_design"]["status"] == [
+        "design_only",
+        "not_started",
+        "not_live_authorized",
+        "not_execution_ready",
+    ]
+    assert payload["small_live_trial_readiness_draft"]["status"] == [
+        "draft_only",
+        "not_authorized",
+        "not_started",
+        "requires_owner_final_approval",
+    ]
+    assert any(
+        item["boundary"] == "ExecutionIntent path exists"
+        and item["bnb_chain_touches_path"] is False
+        for item in payload["execution_boundary_audit"]
+    )
+    assert payload["non_permissions"]["no_trial_start"] is True
+    assert payload["non_permissions"]["no_execution_intent"] is True
+    assert payload["non_permissions"]["no_order_permission"] is True
+
+    raw_payload = json.dumps(payload)
+    assert "Start Trading" not in raw_payload
+    assert "Place Order" not in raw_payload
+    assert "Run Strategy" not in raw_payload
+    assert "execution_permission_granted" not in raw_payload
+    assert "order_permission_granted" not in raw_payload
+
+
 def test_mi001_sol_owner_console_view_marks_guard_action_enabled_when_runtime_ready(monkeypatch):
     _configure_auth(monkeypatch)
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")

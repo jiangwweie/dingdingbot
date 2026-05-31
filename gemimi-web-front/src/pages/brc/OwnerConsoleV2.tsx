@@ -22,6 +22,7 @@ import {
   AdmissionTrialBinding,
   brcApi,
   Mi001SolReadinessResponse,
+  Mi001BnbTrialReadinessGapResponse,
   ObservationCaseQueueResponse,
   ReadinessResponse,
   StrategyGroupLiveReadOnlyObservationResponse,
@@ -37,6 +38,7 @@ type ConsoleData = {
   strategyGroupReviewability: StrategyGroupReviewabilityResponse | null;
   liveObservation: StrategyGroupLiveReadOnlyObservationResponse | null;
   observationCaseQueue: ObservationCaseQueueResponse | null;
+  bnbTrialGap: Mi001BnbTrialReadinessGapResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
   bindings: AdmissionTrialBinding[];
@@ -90,6 +92,7 @@ const EMPTY_DATA: ConsoleData = {
   strategyGroupReviewability: null,
   liveObservation: null,
   observationCaseQueue: null,
+  bnbTrialGap: null,
   families: [],
   decisions: [],
   bindings: [],
@@ -271,6 +274,7 @@ export function StrategyGroupsV2() {
         liveObservation={data.liveObservation}
         caseQueue={data.observationCaseQueue}
       />
+      <BnbTrialReadinessGapPanel data={data.bnbTrialGap} />
 
       <DataTable
         columns={['策略组', '具体策略', '状态', '标的', '方向', '最近信号', '最近意图', '下一步']}
@@ -529,6 +533,7 @@ function useConsoleData(): ViewState {
         strategyGroupReviewability,
         liveObservation,
         observationCaseQueue,
+        bnbTrialGap,
         families,
         decisions,
         bindings,
@@ -559,6 +564,10 @@ function useConsoleData(): ViewState {
         }),
         brcApi.strategyGroupObservationCasesV1().catch((error) => {
           gaps.push(`observation case queue v1: ${message(error)}`);
+          return null;
+        }),
+        brcApi.mi001BnbTrialReadinessGap().catch((error) => {
+          gaps.push(`MI-001 BNB trial gap: ${message(error)}`);
           return null;
         }),
         brcApi.listStrategyFamilies().catch((error) => {
@@ -600,6 +609,7 @@ function useConsoleData(): ViewState {
             strategyGroupReviewability,
             liveObservation,
             observationCaseQueue,
+            bnbTrialGap,
             families,
             decisions,
             bindings,
@@ -1030,6 +1040,66 @@ function ObservationReadinessPanel({
         ]}
         tone="rose"
       />
+    </section>
+  );
+}
+
+function BnbTrialReadinessGapPanel({ data }: { data: Mi001BnbTrialReadinessGapResponse | null }) {
+  const gates = data?.gap_matrix || [];
+  const blockers = gates.filter((gate) => gate.required_for_testnet_rehearsal || gate.required_for_small_live_trial);
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+        <div>
+          <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">MI-001 BNB Trial Readiness Gap</h3>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Read-only Owner review map for testnet/manual-live prerequisites. This panel is not authorization.
+          </p>
+        </div>
+        <StatePill tone={data ? 'amber' : 'slate'}>{data?.readiness_verdict || 'api_unavailable'}</StatePill>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <ShelfMiniFact label="Candidate" value={data?.candidate_id || 'MI-001-BNB-LONG'} />
+        <ShelfMiniFact label="Current phase" value={data?.current_phase || 'api_unavailable'} />
+        <ShelfMiniFact label="Testnet design" value={data?.testnet_rehearsal_design.status.join(' / ') || 'api_unavailable'} />
+        <ShelfMiniFact label="Small live draft" value={data?.small_live_trial_readiness_draft.status.join(' / ') || 'api_unavailable'} />
+      </div>
+      {gates.length ? (
+        <DataTable
+          compact
+          columns={['gate', 'status', 'testnet', 'small live', 'gap', 'owner']}
+          rows={gates.slice(0, 8).map((gate) => [
+            `${gate.gate_id} ${gate.gate_name}`,
+            gate.current_status,
+            gate.required_for_testnet_rehearsal ? 'required' : 'not required',
+            gate.required_for_small_live_trial ? 'required' : 'not required',
+            gate.gap,
+            gate.owner_decision_required ? 'required' : 'not required',
+          ])}
+        />
+      ) : (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+          BNB readiness gap API is unavailable; keep BNB in observation/design-only state.
+        </p>
+      )}
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <ChipBlock
+          label="Key blockers"
+          values={blockers.slice(0, 8).map((gate) => `${gate.gate_id}: ${gate.current_status}`)}
+          tone="amber"
+        />
+        <ChipBlock
+          label="Non-permissions"
+          values={[
+            'no trial start',
+            'no execution intent',
+            'no order permission',
+            'no runtime start',
+            'no live authorization',
+          ]}
+          tone="rose"
+        />
+      </div>
     </section>
   );
 }

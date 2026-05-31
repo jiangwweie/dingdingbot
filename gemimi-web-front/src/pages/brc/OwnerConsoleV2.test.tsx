@@ -21,6 +21,7 @@ const mockBrcApi = vi.hoisted(() => ({
   strategyGroupReviewability: vi.fn(),
   strategyGroupLiveObservationV1: vi.fn(),
   strategyGroupObservationCasesV1: vi.fn(),
+  mi001BnbTrialReadinessGap: vi.fn(),
   listStrategyFamilies: vi.fn(),
   listAdmissionDecisions: vi.fn(),
   listTrialBindings: vi.fn(),
@@ -44,6 +45,7 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.strategyGroupReviewability.mockResolvedValue(strategyGroupReviewabilityPayload());
     mockBrcApi.strategyGroupLiveObservationV1.mockResolvedValue(liveObservationPayload());
     mockBrcApi.strategyGroupObservationCasesV1.mockResolvedValue(observationCaseQueuePayload());
+    mockBrcApi.mi001BnbTrialReadinessGap.mockResolvedValue(bnbTrialGapPayload());
     mockBrcApi.listStrategyFamilies.mockResolvedValue([]);
     mockBrcApi.listAdmissionDecisions.mockResolvedValue([{ owner_risk_acceptance_id: 'owner-acceptance-1' }]);
     mockBrcApi.listTrialBindings.mockResolvedValue([]);
@@ -123,6 +125,10 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getAllByText('pending_forward_review').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/no_chase_required/).length).toBeGreaterThan(0);
     expect(screen.queryByText('CPM-RO-001:future-would-enter')).toBeNull();
+    expect(screen.getByText('MI-001 BNB Trial Readiness Gap')).toBeTruthy();
+    expect(screen.getAllByText('not_testnet_ready_not_live_ready').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/BNB Operation Layer cap/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/missing_bnb_specific_cap/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
     expect(screen.getAllByText('CPM-RO-001').length).toBeGreaterThan(0);
     expect(screen.getAllByText('wired_read_only_v1').length).toBeGreaterThan(0);
@@ -519,6 +525,104 @@ function observationCaseQueuePayload() {
       observation_not_execution_readiness: true,
     },
     source_refs: ['src/application/strategy_group_observation_case_queue.py'],
+  };
+}
+
+function bnbTrialGapPayload() {
+  return {
+    generated_from: 'mi001_bnb_trial_readiness_gap_v1',
+    candidate_id: 'MI-001-BNB-LONG',
+    strategy_group_id: 'MI-001',
+    symbol: 'BNB/USDT:USDT',
+    side: 'long',
+    current_phase: 'live_observation_case_plus_trial_design_draft',
+    current_status: ['live_readonly_observation_active_as_evidence', 'no execution intent, no order'],
+    readiness_verdict: 'not_testnet_ready_not_live_ready',
+    gap_matrix: [
+      bnbGate('G01', 'Account facts', 'partially_available_needs_bnb_refresh'),
+      bnbGate('G02', 'BNB Operation Layer cap', 'missing_bnb_specific_cap'),
+      bnbGate('G05', 'Execution permission', 'read_only_by_default'),
+      bnbGate('G06', 'Order path', 'not_touched_by_observation_chain'),
+      bnbGate('G18', 'Testnet rehearsal', 'design_only_not_started'),
+      bnbGate('G19', 'Small live trial', 'draft_only_not_authorized'),
+    ],
+    testnet_rehearsal_design: {
+      design_id: 'MI-001-BNB-owner-confirmed-testnet-rehearsal-v0',
+      status: ['design_only', 'not_started', 'not_live_authorized', 'not_execution_ready'],
+      mode: 'Owner confirms each entry',
+      trigger: 'BNB live observation would_enter plus explicit Owner review decision',
+      allowed_scope: ['BNB/USDT:USDT long testnet only'],
+      risk_controls: ['max_leverage=5x'],
+      exit_controls: ['time stop', 'manual stop'],
+      recordkeeping: ['order id', 'fill/reject'],
+      blockers: ['BNB-specific Operation Layer cap missing'],
+      non_permissions: ['no_trial_start', 'no_order_permission'],
+    },
+    small_live_trial_readiness_draft: {
+      design_id: 'MI-001-BNB-small-live-trial-readiness-draft-v0',
+      status: ['draft_only', 'not_authorized', 'not_started', 'requires_owner_final_approval'],
+      mode: 'Owner manually confirms each entry',
+      trigger: 'separate final Owner approval',
+      allowed_scope: ['BNB/USDT:USDT long only'],
+      risk_controls: ['max_leverage=5x'],
+      exit_controls: ['kill-switch rollback'],
+      recordkeeping: ['Owner final approval record'],
+      blockers: ['not authorized'],
+      non_permissions: ['no_trial_start', 'no_order_permission'],
+    },
+    execution_boundary_audit: [
+      {
+        boundary: 'ExecutionIntent path exists',
+        code_path: 'src/infrastructure/pg_execution_intent_repository.py',
+        current_assessment: 'available in repo but not touched',
+        bnb_chain_touches_path: false,
+        required_control: 'separate Owner authorization',
+      },
+    ],
+    owner_decision_checklist: [
+      {
+        decision_id: 'D01',
+        question: 'Continue observation only?',
+        options: ['continue_observation_only'],
+        recommended_default: 'continue_observation_only',
+        authorization_effect: 'No execution or order permission.',
+      },
+    ],
+    api_console_impact: {
+      endpoint: '/api/brc/readiness/mi001-bnb/trial-gap',
+      console_surface: '/strategy-groups read-only panel',
+      runtime_effect: 'none',
+      execution_or_order_effect: 'none',
+      display_only: true,
+    },
+    non_permissions: {
+      no_trial_start: true,
+      no_testnet_rehearsal_start: true,
+      no_small_live_authorization: true,
+      no_execution_intent: true,
+      no_order_permission: true,
+      no_execution_permission: true,
+      no_runtime_start: true,
+      no_leverage_change: true,
+      no_transfer_or_withdrawal: true,
+    },
+    source_refs: ['src/application/mi001_bnb_trial_readiness_gap.py'],
+    live_ready: false,
+  };
+}
+
+function bnbGate(gateId: string, gateName: string, currentStatus: string) {
+  return {
+    gate_id: gateId,
+    gate_name: gateName,
+    current_status: currentStatus,
+    required_for_testnet_rehearsal: true,
+    required_for_small_live_trial: true,
+    existing_source_or_code_path: 'source',
+    gap: `${gateName} gap`,
+    recommended_action: `${gateName} action`,
+    risk_if_skipped: `${gateName} risk`,
+    owner_decision_required: true,
   };
 }
 

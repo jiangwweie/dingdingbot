@@ -376,6 +376,68 @@ export type ObservationCaseQueueResponse = {
   source_refs: string[];
 };
 
+export type BnbTrialReadinessGate = {
+  gate_id: string;
+  gate_name: string;
+  current_status: string;
+  required_for_testnet_rehearsal: boolean;
+  required_for_small_live_trial: boolean;
+  existing_source_or_code_path: string;
+  gap: string;
+  recommended_action: string;
+  risk_if_skipped: string;
+  owner_decision_required: boolean;
+};
+
+export type BnbTrialDesignSummary = {
+  design_id: string;
+  status: string[];
+  mode: string;
+  trigger: string;
+  allowed_scope: string[];
+  risk_controls: string[];
+  exit_controls: string[];
+  recordkeeping: string[];
+  blockers: string[];
+  non_permissions: string[];
+};
+
+export type BnbExecutionBoundaryItem = {
+  boundary: string;
+  code_path: string;
+  current_assessment: string;
+  bnb_chain_touches_path: boolean;
+  required_control: string;
+};
+
+export type BnbOwnerDecisionItem = {
+  decision_id: string;
+  question: string;
+  options: string[];
+  recommended_default: string;
+  authorization_effect: string;
+};
+
+export type Mi001BnbTrialReadinessGapResponse = {
+  generated_from: 'mi001_bnb_trial_readiness_gap_v1';
+  candidate_id: 'MI-001-BNB-LONG';
+  strategy_group_id: 'MI-001';
+  symbol: 'BNB/USDT:USDT';
+  side: 'long';
+  current_phase: string;
+  current_status: string[];
+  readiness_verdict: 'not_testnet_ready_not_live_ready';
+  gap_matrix: BnbTrialReadinessGate[];
+  testnet_rehearsal_design: BnbTrialDesignSummary;
+  small_live_trial_readiness_draft: BnbTrialDesignSummary;
+  execution_boundary_audit: BnbExecutionBoundaryItem[];
+  owner_decision_checklist: BnbOwnerDecisionItem[];
+  api_console_impact: Record<string, string | boolean>;
+  non_permissions: Record<string, boolean>;
+  source_refs: string[];
+  live_ready: false;
+};
+
 export type StartupGuardReadinessArmResponse = {
   action: 'startup_guard_preflight_arm';
   status: 'armed' | 'already_armed' | 'blocked';
@@ -676,6 +738,9 @@ export const brcApi = {
   },
   strategyGroupObservationCasesV1() {
     return request<ObservationCaseQueueResponse>('/api/brc/strategy-groups/observation-cases/v1');
+  },
+  mi001BnbTrialReadinessGap() {
+    return request<Mi001BnbTrialReadinessGapResponse>('/api/brc/readiness/mi001-bnb/trial-gap');
   },
   runStrategyGroupLiveObservationV1Once() {
     return request<StrategyGroupLiveReadOnlyObservationResponse>('/api/brc/strategy-groups/live-readonly-observation/v1/run-once', {

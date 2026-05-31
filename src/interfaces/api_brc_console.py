@@ -33,6 +33,10 @@ from src.application.strategy_group_observation_case_queue import (
     blocked_observation_case_queue,
     build_observation_case_queue,
 )
+from src.application.mi001_bnb_trial_readiness_gap import (
+    Mi001BnbTrialReadinessGapResponse,
+    build_mi001_bnb_trial_readiness_gap,
+)
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.database import probe_pg_connectivity
@@ -3608,6 +3612,15 @@ async def get_strategy_group_observation_cases_v1(
                 + [f"error: {type(exc).__name__}: {str(exc)[:160]}"],
             }
         )
+
+
+@router.get(
+    "/readiness/mi001-bnb/trial-gap",
+    response_model=Mi001BnbTrialReadinessGapResponse,
+)
+async def get_mi001_bnb_trial_readiness_gap() -> Mi001BnbTrialReadinessGapResponse:
+    """Return BNB trial-readiness gap map without granting execution authority."""
+    return build_mi001_bnb_trial_readiness_gap()
 
 
 async def _strategy_group_live_readonly_observation_response(
