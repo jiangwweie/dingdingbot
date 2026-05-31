@@ -29,6 +29,7 @@ from src.application.strategy_group_live_readonly_observation import (
     run_strategy_group_live_readonly_observation_once,
 )
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
+from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.database import probe_pg_connectivity
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.brc_admission_service import (
@@ -3546,25 +3547,34 @@ async def get_strategy_group_reviewability() -> StrategyGroupReviewabilityRespon
 )
 async def get_strategy_group_live_readonly_observation_v1() -> StrategyGroupLiveReadOnlyObservationResponse:
     """Return MI/CPM read-only observation v1 status without starting runtime."""
-    return await _strategy_group_live_readonly_observation_response(record_observation=False)
+    return await _strategy_group_live_readonly_observation_response(
+        record_observation=False,
+        source_name="local_sqlite_fallback",
+    )
 
 
 @router.post(
     "/strategy-groups/live-readonly-observation/v1/run-once",
     response_model=StrategyGroupLiveReadOnlyObservationResponse,
 )
-async def run_strategy_group_live_readonly_observation_v1_once() -> StrategyGroupLiveReadOnlyObservationResponse:
+async def run_strategy_group_live_readonly_observation_v1_once(
+    source: Literal["local_sqlite_fallback", "live_market"] = Query(default="local_sqlite_fallback"),
+) -> StrategyGroupLiveReadOnlyObservationResponse:
     """Record one observe-only MI/CPM signal snapshot without runtime start."""
-    return await _strategy_group_live_readonly_observation_response(record_observation=True)
+    return await _strategy_group_live_readonly_observation_response(
+        record_observation=True,
+        source_name=source,
+    )
 
 
 async def _strategy_group_live_readonly_observation_response(
     *,
     record_observation: bool,
+    source_name: Literal["local_sqlite_fallback", "live_market"] = "local_sqlite_fallback",
 ) -> StrategyGroupLiveReadOnlyObservationResponse:
-    source = LocalSqliteObservationMarketSource()
-    preview = build_strategy_group_live_readonly_observation_v1(market_source=source)
     try:
+        source = _observation_market_source(source_name)
+        preview = build_strategy_group_live_readonly_observation_v1(market_source=source)
         repo = PgStrategyGroupObservationRepository()
         pg_available = await probe_pg_connectivity()
         if not pg_available:
@@ -3585,6 +3595,8 @@ async def _strategy_group_live_readonly_observation_response(
             record_observation=record_observation,
         )
     except Exception as exc:
+        fallback_source = LocalSqliteObservationMarketSource()
+        preview = build_strategy_group_live_readonly_observation_v1(market_source=fallback_source)
         sink_summary = dict(preview.sink_summary)
         sink_summary.update(
             {
@@ -3597,12 +3609,23 @@ async def _strategy_group_live_readonly_observation_response(
         )
         input_source_summary = dict(preview.input_source_summary)
         input_source_summary["source_type"] = "local_sqlite_fallback"
+        input_source_summary["fallback_used"] = True
+        input_source_summary["requested_source"] = source_name
+        input_source_summary["source_error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
         return preview.model_copy(
             update={
                 "sink_summary": sink_summary,
                 "input_source_summary": input_source_summary,
             }
         )
+
+
+def _observation_market_source(
+    source_name: Literal["local_sqlite_fallback", "live_market"],
+):
+    if source_name == "live_market":
+        return BinancePublicKlineMarketSource()
+    return LocalSqliteObservationMarketSource()
 
 
 def _with_pg_observation_payload(
@@ -3633,7 +3656,6 @@ def _with_pg_observation_payload(
         }
     )
     input_source_summary = dict(response.input_source_summary)
-    input_source_summary["source_type"] = "local_sqlite_fallback"
     return response.model_copy(
         update={
             "current_signals": current_signals,

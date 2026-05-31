@@ -22,6 +22,7 @@ from src.application.strategy_group_live_readonly_observation import (
     _sample_signal_input,
 )
 from src.domain.strategy_family_signal import SignalSide, SignalType
+from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.pg_models import PGBrcStrategyGroupObservationORM
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 
@@ -78,6 +79,89 @@ def test_run_once_records_observe_only_signal_history_without_runtime_effect():
     assert all(record.not_order is True for record in payload.signal_history)
     assert all(record.not_execution_intent is True for record in payload.signal_history)
     assert all(record.no_runtime_start is True for record in payload.signal_history)
+
+
+def test_binance_public_kline_source_returns_only_closed_public_bars():
+    now_ms = 1_800_000_000_000
+    rows = []
+    for index in range(6):
+        open_time = now_ms - (6 - index) * 60 * 60 * 1000
+        rows.append(
+            [
+                open_time,
+                "100",
+                "102",
+                "99",
+                str(100 + index),
+                "1234",
+                open_time + 60 * 60 * 1000 - 1,
+            ]
+        )
+    rows.append(
+        [
+            now_ms,
+            "200",
+            "202",
+            "199",
+            "201",
+            "999",
+            now_ms + 60 * 60 * 1000 - 1,
+        ]
+    )
+    requested_urls: list[str] = []
+
+    def transport(url: str, timeout: float) -> list:
+        requested_urls.append(url)
+        assert timeout == 10.0
+        return rows
+
+    source = BinancePublicKlineMarketSource(now_ms=lambda: now_ms, transport=transport)
+
+    candles = source.latest_closed_candles(symbol="SOL/USDT:USDT", timeframe="1h", limit=3)
+
+    assert "symbol=SOLUSDT" in requested_urls[0]
+    assert "interval=1h" in requested_urls[0]
+    assert source.source_type == "live_market_read_only"
+    assert source.is_live_read_only is True
+    assert [str(candle.close) for candle in candles] == ["103", "104", "105"]
+    assert all(candle.is_closed is True for candle in candles)
+
+
+def test_live_market_source_records_observe_only_history_with_live_source_metadata():
+    def transport(url: str, _timeout: float) -> list:
+        interval_ms = 4 * 60 * 60 * 1000 if "interval=4h" in url else 60 * 60 * 1000
+        now_ms = 1_800_000_000_000
+        rows = []
+        for index in range(140):
+            open_time = now_ms - (140 - index) * interval_ms
+            close = 100 + index * 0.1
+            rows.append(
+                [
+                    open_time,
+                    str(close - 0.2),
+                    str(close + 0.3),
+                    str(close - 0.4),
+                    str(close),
+                    "500",
+                    open_time + interval_ms - 1,
+                ]
+            )
+        return rows
+
+    source = BinancePublicKlineMarketSource(now_ms=lambda: 1_800_000_000_000, transport=transport)
+    payload = run_strategy_group_live_readonly_observation_once(
+        market_source=source,
+        sink=InMemoryStrategyGroupObservationSink(),
+    )
+
+    assert len(payload.current_signals) == 3
+    assert payload.input_source_summary["source_type"] == "live_market_read_only"
+    assert payload.input_source_summary["is_live_read_only"] is True
+    assert payload.input_source_summary["fallback_used"] is False
+    assert all(record.source_type == "live_market_read_only" for record in payload.signal_history)
+    assert all(record.market_source == "binance_usdm_public_klines_read_only" for record in payload.signal_history)
+    assert all(record.not_order is True for record in payload.signal_history)
+    assert all(record.not_execution_intent is True for record in payload.signal_history)
 
 
 @pytest.mark.asyncio

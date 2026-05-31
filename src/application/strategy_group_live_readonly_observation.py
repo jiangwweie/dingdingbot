@@ -112,6 +112,8 @@ class RecentCandle:
     low: Decimal
     close: Decimal
     volume: Decimal = Decimal("0")
+    close_time_ms: int | None = None
+    is_closed: bool = True
 
 
 class StrategyGroupMarketBarSource(Protocol):
@@ -433,7 +435,12 @@ def _evaluate_observation_candidate(
             freshness="latest_available_closed_bar",
         )
         output = spec.evaluator.evaluate(signal_input)
-        record = _observation_record_from_output(spec, output, getattr(market_source, "source_id", "unknown"))
+        record = _observation_record_from_output(
+            spec,
+            output,
+            getattr(market_source, "source_id", "unknown"),
+            getattr(market_source, "source_type", None),
+        )
         preview = _signal_preview(output)
     except Exception as exc:
         blockers.append("market_source_evaluation_failed")
@@ -477,6 +484,7 @@ def _observation_record_from_output(
     spec: _ObservationSpec,
     output: StrategyFamilySignalOutput,
     market_source_id: str,
+    source_type: str | None = None,
 ) -> StrategyGroupObservationRecord:
     review_status = {
         window: (
@@ -494,7 +502,8 @@ def _observation_record_from_output(
         side=output.side.value,
         evaluated_at_ms=output.timestamp_ms,
         source=OBSERVATION_V1_SOURCE,
-        source_type="local_sqlite_fallback" if "sqlite" in market_source_id else "read_only_market_source",
+        source_type=source_type
+        or ("local_sqlite_fallback" if "sqlite" in market_source_id else "read_only_market_source"),
         market_source=market_source_id,
         market_bar_timestamp_ms=output.timestamp_ms,
         market_bar_close=output.evidence_payload.get("latest_close")
@@ -549,6 +558,16 @@ def build_strategy_group_live_readonly_observation_v1(
     if source_blockers:
         sink_status = "source_blocked_no_recording"
 
+    source_id = getattr(source, "source_id", "unknown_market_source")
+    source_type = getattr(
+        source,
+        "source_type",
+        "local_sqlite_fallback" if "sqlite" in source_id else "read_only_market_source",
+    )
+    fallback_used = bool(getattr(source, "fallback_used", source_type == "local_sqlite_fallback"))
+    is_live_read_only = bool(getattr(source, "is_live_read_only", source_type == "live_market_read_only"))
+    latest_bar_timestamp_ms = max((record.market_bar_timestamp_ms for record in current_signals), default=None)
+
     return StrategyGroupLiveReadOnlyObservationResponse(
         candidates=candidates,
         current_signals=current_signals,
@@ -562,8 +581,13 @@ def build_strategy_group_live_readonly_observation_v1(
             "runtime_effect": "none",
         },
         input_source_summary={
-            "source_id": getattr(source, "source_id", "unknown_market_source"),
+            "source_id": source_id,
+            "source_type": source_type,
             "source_kind": "closed_candle_read_only",
+            "freshness": getattr(source, "freshness", "latest_available_closed_bar"),
+            "is_live_read_only": is_live_read_only,
+            "fallback_used": fallback_used,
+            "latest_market_bar_timestamp_ms": latest_bar_timestamp_ms,
             "external_exchange_write": False,
             "runtime_started": False,
             "source_blockers": sorted(set(source_blockers)),
