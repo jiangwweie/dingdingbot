@@ -1,12 +1,12 @@
 # MI-001 BNB Long Live Signal Case #001
 
-Generated: 2026-05-31 15:13 CST
+Generated: 2026-05-31 15:28 CST
 
 ## 1. Summary
 
 This is the first Owner-readable case review for a live read-only MI-001 BNB observation signal.
 
-It is not a trial start, execution intent, order, execution permission, or runtime start. The source record is a PG observation row with all non-permission flags set.
+It is not a trial start, execution intent, order, execution permission, or runtime start. The source record is a PG observation row with all non-permission flags set. Forward reviews are now persisted in `brc_strategy_group_forward_reviews`.
 
 ## 2. Case Metadata
 
@@ -23,7 +23,7 @@ It is not a trial start, execution intent, order, execution permission, or runti
 | PG observation row | `MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000` |
 | market_bar_timestamp_ms | `1780196400000` |
 | market_bar_close | `740.200` |
-| review_status | `pending_with_1h_outcome_available` |
+| review_status | `1h_completed_remaining_windows_pending` |
 
 ## 3. Market Bar
 
@@ -47,33 +47,55 @@ Public Binance USD-M `BNBUSDT` 1h kline at `1780196400000`:
 | reason_codes | `mi001_12h_momentum_impulse`, `observe_only_review_required` |
 | human_summary | MI-001 would-enter long observation: 12h close-to-close momentum impulse crossed threshold. |
 
-## 5. Forward Tracking
+## 5. Forward Review Table
 
-Forward outcomes are only recorded when the required future closed bars are available. They are not inferred.
+Forward outcomes are recorded only when the required future closed bars are available. Pending windows are not inferred.
 
-| window | status | close / outcome | MFE | MAE | notes |
-| --- | --- | --- | --- | --- | --- |
-| 1h | available | close `734.580`, return `-0.7593%` | `0.3121%` | `-1.1483%` | next closed 1h bar after signal |
-| 4h | pending | n/a | n/a | n/a | full 4h forward close not yet available from latest closed-bar source |
-| 12h | pending | n/a | n/a | n/a | future window not complete |
-| 24h | pending | n/a | n/a | n/a | future window not complete |
-| 72h | pending | n/a | n/a | n/a | future window not complete |
+| window | status | review_due_at_utc | forward_return | MFE | MAE | source | notes |
+| --- | --- | --- | ---: | ---: | ---: | --- | --- |
+| 1h | `completed` | `2026-05-31T05:00:00Z` | `-0.7593%` | `0.3121%` | `-1.1483%` | `binance_usdm_public_klines_read_only` | calculated from 1 closed 1h public/read-only bar |
+| 4h | `pending` | `2026-05-31T08:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | review window has not reached due time |
+| 12h | `pending` | `2026-05-31T16:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | review window has not reached due time |
+| 24h | `pending` | `2026-06-01T04:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | review window has not reached due time |
+| 72h | `pending` | `2026-06-03T04:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | review window has not reached due time |
+
+PG forward review ids:
+
+- `MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000:1h`
+- `MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000:4h`
+- `MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000:12h`
+- `MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000:24h`
+- `MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000:72h`
 
 ## 6. Owner-readable Interpretation
 
-This signal looks like the historical MI-001 BNB signal family in that the 12h impulse is well above the 3% trigger threshold, and BNB repaired-coverage historical evidence has stronger 72h/7d mean outcomes than SOL.
+This signal looks like the historical MI-001 BNB signal family in that the 12h impulse was well above the 3% trigger threshold, and BNB repaired-coverage historical evidence has stronger 72h/7d mean outcomes than SOL.
 
-Risk notes:
+The persisted 1h review is adverse:
 
-- The first available 1h forward result is negative, which is compatible with local exhaustion risk after a sharp impulse.
-- Historical BNB evidence still has top-tail dependence and weak 2025/2026 year-split evidence.
-- The signal is observation-only. It should enter Owner review, not order creation.
+- 1h return: `-0.7593%`
+- 1h MFE: `0.3121%`
+- 1h MAE: `-1.1483%`
 
-Initial conclusion: `pending`.
+Interpretation:
+
+- The 1h adverse move does not prove the strategy failed.
+- It does strengthen the local exhaustion risk tag after a sharp 12h impulse.
+- It supports adding a wait-for-confirmation or no-chase note to the BNB bounded trial design.
+- It makes the 4h and 12h windows more important than a single 1h snapshot.
+
+Initial conclusion remains: `pending`.
 
 The case is valid as a live observation case, but not yet validated as a trade case.
 
-## 7. Non-permissions
+## 7. What To Watch Next
+
+- Whether 4h forward outcome recovers above the signal close or confirms exhaustion.
+- Whether 12h/24h windows show follow-through consistent with historical MI-001 BNB winners.
+- Whether MAE expands beyond historical path-risk expectations.
+- Whether repeated BNB `would_enter` signals cluster too densely and need a dedup/no-chase rule.
+
+## 8. Non-permissions
 
 - no trial start
 - no execution intent

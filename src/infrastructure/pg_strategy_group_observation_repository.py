@@ -50,6 +50,11 @@ class PgStrategyGroupObservationRepository:
                 await session.flush()
                 return self._to_record(row)
 
+    async def get(self, observation_id: str) -> StrategyGroupObservationRecord | None:
+        async with self._session_maker() as session:
+            row = await session.get(PGBrcStrategyGroupObservationORM, observation_id)
+            return self._to_record(row) if row is not None else None
+
     async def list_recent(self, *, limit: int = 50) -> list[StrategyGroupObservationRecord]:
         async with self._session_maker() as session:
             result = await session.execute(

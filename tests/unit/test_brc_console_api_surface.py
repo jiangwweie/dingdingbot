@@ -621,6 +621,8 @@ def test_strategy_group_live_readonly_observation_v1_api_is_safe(monkeypatch):
     assert payload["runner_mapping"]["strategy_specific_signal_evaluator_glue_wired"] is True
     assert len(payload["current_signals"]) == 3
     assert payload["sink_summary"]["writes_execution_or_order_tables"] is False
+    assert payload["forward_review_summary"]["writes_execution_or_order_tables"] is False
+    assert payload["forward_review_summary"]["runtime_effect"] == "none"
     assert payload["input_source_summary"]["external_exchange_write"] is False
     assert payload["non_permissions"]["no_execution_intent"] is True
     assert payload["non_permissions"]["no_order_permission"] is True
@@ -651,6 +653,8 @@ def test_strategy_group_live_readonly_observation_run_once_records_history_witho
         "blocked_pg_observation_unavailable",
     }
     assert payload["sink_summary"]["writes_execution_or_order_tables"] is False
+    assert payload["forward_review_summary"]["writes_execution_or_order_tables"] is False
+    assert payload["forward_review_summary"]["runtime_effect"] == "none"
     assert payload["non_permissions"]["no_execution_intent"] is True
     assert payload["non_permissions"]["no_order_permission"] is True
 

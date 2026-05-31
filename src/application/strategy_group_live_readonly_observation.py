@@ -63,6 +63,7 @@ class StrategyGroupLiveReadOnlyObservationResponse(BaseModel):
     candidates: list[StrategyGroupObservationCandidate]
     current_signals: list["StrategyGroupObservationRecord"] = Field(default_factory=list)
     signal_history: list["StrategyGroupObservationRecord"] = Field(default_factory=list)
+    forward_review_summary: dict[str, Any] = Field(default_factory=dict)
     sink_summary: dict[str, Any] = Field(default_factory=dict)
     input_source_summary: dict[str, Any] = Field(default_factory=dict)
     review_hook_summary: dict[str, Any] = Field(default_factory=dict)

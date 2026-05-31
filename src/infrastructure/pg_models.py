@@ -1600,6 +1600,65 @@ class PGBrcStrategyGroupObservationORM(PGCoreBase):
     )
 
 
+class PGBrcStrategyGroupForwardReviewORM(PGCoreBase):
+    """Durable forward review evidence for read-only observation signals."""
+
+    __tablename__ = "brc_strategy_group_forward_reviews"
+
+    review_id: Mapped[str] = mapped_column(String(224), primary_key=True)
+    observation_id: Mapped[str] = mapped_column(String(192), nullable=False)
+    candidate_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    signal_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    market_bar_timestamp_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    review_window: Mapped[str] = mapped_column(String(32), nullable=False)
+    review_due_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    forward_return_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    mfe_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    mae_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    source: Mapped[str] = mapped_column(String(128), nullable=False)
+    calculated_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    not_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_execution_intent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    no_execution_permission: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    no_order_permission: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    no_runtime_start: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "signal_type IN ('no_action', 'would_enter', 'invalid')",
+            name="ck_brc_strategy_group_forward_reviews_signal_type",
+        ),
+        CheckConstraint("side IN ('long', 'short', 'none')", name="ck_brc_strategy_group_forward_reviews_side"),
+        CheckConstraint(
+            "review_status IN ('pending', 'completed', 'not_applicable', 'failed')",
+            name="ck_brc_strategy_group_forward_reviews_status",
+        ),
+        CheckConstraint("not_order IS TRUE", name="ck_brc_strategy_group_forward_reviews_not_order"),
+        CheckConstraint(
+            "not_execution_intent IS TRUE",
+            name="ck_brc_strategy_group_forward_reviews_not_exec_intent",
+        ),
+        CheckConstraint(
+            "no_execution_permission IS TRUE",
+            name="ck_brc_strategy_group_forward_reviews_no_exec_permission",
+        ),
+        CheckConstraint(
+            "no_order_permission IS TRUE",
+            name="ck_brc_strategy_group_forward_reviews_no_order_permission",
+        ),
+        CheckConstraint("no_runtime_start IS TRUE", name="ck_brc_strategy_group_forward_reviews_no_runtime"),
+        Index("idx_brc_strategy_group_forward_reviews_observation", "observation_id", "review_window"),
+        Index("idx_brc_strategy_group_forward_reviews_candidate", "candidate_id", "market_bar_timestamp_ms"),
+        Index("idx_brc_strategy_group_forward_reviews_status", "review_status", "review_due_at_ms"),
+    )
+
+
 class PGBrcHistoricalForwardOutcomeORM(PGCoreBase):
     """Compact forward outcome review for historical would-enter signals."""
 

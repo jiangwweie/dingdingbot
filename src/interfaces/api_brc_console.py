@@ -31,6 +31,7 @@ from src.application.strategy_group_live_readonly_observation import (
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.database import probe_pg_connectivity
+from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.brc_admission_service import (
     AdmissionRuleViolation,
@@ -3588,10 +3589,15 @@ async def _strategy_group_live_readonly_observation_response(
             if not current:
                 current = preview.current_signals
         history = await repo.list_recent(limit=50)
+        review_repo = PgStrategyGroupForwardReviewRepository()
+        reviews = await review_repo.list_by_observation_ids(
+            [record.record_id for record in current + history]
+        )
         return _with_pg_observation_payload(
             preview,
             current_signals=current,
             signal_history=history,
+            forward_reviews=reviews,
             record_observation=record_observation,
         )
     except Exception as exc:
@@ -3633,6 +3639,7 @@ def _with_pg_observation_payload(
     *,
     current_signals: list,
     signal_history: list,
+    forward_reviews: list | None = None,
     record_observation: bool,
 ) -> StrategyGroupLiveReadOnlyObservationResponse:
     sink_summary = dict(response.sink_summary)
@@ -3656,10 +3663,23 @@ def _with_pg_observation_payload(
         }
     )
     input_source_summary = dict(response.input_source_summary)
+    reviews = forward_reviews or []
+    review_summary = {
+        "sink_id": "pg_brc_strategy_group_forward_reviews",
+        "review_count": len(reviews),
+        "by_observation_id": {},
+        "writes_execution_or_order_tables": False,
+        "runtime_effect": "none",
+    }
+    for review in reviews:
+        review_summary["by_observation_id"].setdefault(review.observation_id, []).append(
+            review.model_dump(mode="json")
+        )
     return response.model_copy(
         update={
             "current_signals": current_signals,
             "signal_history": signal_history,
+            "forward_review_summary": review_summary,
             "sink_summary": sink_summary,
             "input_source_summary": input_source_summary,
             "observation_chain_summary": observation_chain_summary,

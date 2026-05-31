@@ -21,9 +21,11 @@ from src.application.strategy_group_live_readonly_observation import (
     _sample_mi_candles,
     _sample_signal_input,
 )
+from src.application.strategy_group_forward_review import calculate_forward_reviews_for_observation
 from src.domain.strategy_family_signal import SignalSide, SignalType
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
-from src.infrastructure.pg_models import PGBrcStrategyGroupObservationORM
+from src.infrastructure.pg_models import PGBrcStrategyGroupForwardReviewORM, PGBrcStrategyGroupObservationORM
+from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.strategy_group_readonly_observation_scheduler import (
     run_scheduled_readonly_observation_once,
@@ -42,6 +44,22 @@ async def observation_repo():
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
         yield PgStrategyGroupObservationRepository(session_maker=session_maker)
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture()
+async def forward_review_repo():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(PGBrcStrategyGroupForwardReviewORM.__table__.create)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield PgStrategyGroupForwardReviewRepository(session_maker=session_maker)
     finally:
         await engine.dispose()
 
@@ -224,6 +242,57 @@ async def test_scheduled_readonly_observation_is_idempotent_by_closed_bar(observ
     assert all(record.no_order_permission is True for record in recent)
 
 
+@pytest.mark.asyncio
+async def test_forward_review_calculates_completed_and_pending_windows(forward_review_repo):
+    observation = next(
+        record
+        for record in run_strategy_group_live_readonly_observation_once(
+            market_source=SampleStrategyGroupMarketBarSource(),
+            sink=InMemoryStrategyGroupObservationSink(),
+        ).current_signals
+        if record.candidate_id == "MI-001-BNB-LONG"
+    ).model_copy(
+        update={
+            "record_id": "case-1",
+            "signal_type": "would_enter",
+            "side": "long",
+            "market_bar_timestamp_ms": 1_000_000_000_000,
+            "market_bar_close": "100",
+        }
+    )
+
+    class ForwardSource:
+        source_id = "unit_test_public_closed_bars"
+
+        def latest_closed_candles(self, *, symbol: str, timeframe: str, limit: int):
+            assert symbol == "BNB/USDT:USDT"
+            assert timeframe == "1h"
+            return [
+                _candle(1_000_000_000_000, "99", "101", "98", "100"),
+                _candle(1_000_003_600_000, "100", "103", "97", "102"),
+            ]
+
+    reviews = calculate_forward_reviews_for_observation(
+        observation,
+        market_source=ForwardSource(),
+        windows=["1h", "4h"],
+        now_ms=1_000_007_200_000,
+    )
+    recorded = await forward_review_repo.record_many(reviews)
+    loaded = await forward_review_repo.list_by_observation_id("case-1")
+
+    assert [review.review_window for review in loaded] == ["1h", "4h"]
+    one_hour = loaded[0]
+    assert one_hour.review_status == "completed"
+    assert one_hour.forward_return_pct == "2.00000000"
+    assert one_hour.mfe_pct == "3.00000000"
+    assert one_hour.mae_pct == "-3.00000000"
+    assert loaded[1].review_status == "pending"
+    assert all(review.not_order is True for review in recorded)
+    assert all(review.not_execution_intent is True for review in recorded)
+    assert all(review.no_order_permission is True for review in recorded)
+
+
 def test_strategy_group_observation_migration_creates_observe_only_table():
     migration_path = (
         Path(__file__).resolve().parents[2]
@@ -257,6 +326,52 @@ def test_strategy_group_observation_migration_creates_observe_only_table():
             "signal_type",
             "evidence_payload",
             "review_windows",
+            "not_order",
+            "not_execution_intent",
+            "no_execution_permission",
+            "no_order_permission",
+            "no_runtime_start",
+        } <= columns
+    finally:
+        engine.dispose()
+
+
+def test_strategy_group_forward_review_migration_creates_observe_only_table():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/2026-05-31-029_create_strategy_group_forward_reviews.py"
+    )
+    spec = importlib.util.spec_from_file_location("strategy_group_forward_review_migration", migration_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    from sqlalchemy import create_engine
+
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            context = MigrationContext.configure(connection)
+            operations = Operations(context)
+            original_op = module.op
+            module.op = operations
+            try:
+                module.upgrade()
+            finally:
+                module.op = original_op
+
+        inspector = inspect(engine)
+        assert "brc_strategy_group_forward_reviews" in inspector.get_table_names()
+        columns = {column["name"] for column in inspector.get_columns("brc_strategy_group_forward_reviews")}
+        assert {
+            "review_id",
+            "observation_id",
+            "review_window",
+            "review_due_at_ms",
+            "review_status",
+            "forward_return_pct",
+            "mfe_pct",
+            "mae_pct",
             "not_order",
             "not_execution_intent",
             "no_execution_permission",
@@ -313,3 +428,20 @@ def test_mi001_readonly_evaluator_returns_invalid_for_missing_context():
     assert "mi001_invalid_insufficient_candles" in output.reason_codes
     assert output.not_order is True
     assert output.not_execution_intent is True
+
+
+def _candle(open_time_ms: int, open_: str, high: str, low: str, close: str):
+    from decimal import Decimal
+
+    from src.application.strategy_group_live_readonly_observation import RecentCandle
+
+    return RecentCandle(
+        open_time_ms=open_time_ms,
+        open=Decimal(open_),
+        high=Decimal(high),
+        low=Decimal(low),
+        close=Decimal(close),
+        volume=Decimal("1"),
+        close_time_ms=open_time_ms + 3_600_000 - 1,
+        is_closed=True,
+    )
