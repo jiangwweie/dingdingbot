@@ -645,8 +645,11 @@ def test_strategy_group_live_readonly_observation_run_once_records_history_witho
     payload = response.json()
     assert payload["live_ready"] is False
     assert payload["live_observation_active"] is False
-    assert len(payload["signal_history"]) >= 3
-    assert payload["sink_summary"]["sink_status"] == "process_local_sink_recording_enabled"
+    assert len(payload["current_signals"]) == 3
+    assert payload["sink_summary"]["sink_status"] in {
+        "recorded_pg",
+        "blocked_pg_observation_unavailable",
+    }
     assert payload["sink_summary"]["writes_execution_or_order_tables"] is False
     assert payload["non_permissions"]["no_execution_intent"] is True
     assert payload["non_permissions"]["no_order_permission"] is True

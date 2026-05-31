@@ -82,13 +82,17 @@ class StrategyGroupObservationRecord(BaseModel):
     evaluated_at_ms: int
     recorded_at_ms: int | None = None
     source: str
+    source_type: str = "local_sqlite_fallback"
     market_source: str
+    market_bar_timestamp_ms: int
+    market_bar_close: str | None = None
     signal_type: str
     confidence: str
     reason_codes: list[str] = Field(default_factory=list)
     human_summary: str
     evidence_payload: dict[str, Any] = Field(default_factory=dict)
     signal_snapshot: dict[str, Any] = Field(default_factory=dict)
+    invalidation_conditions: list[dict[str, Any]] = Field(default_factory=list)
     review_windows: list[str] = Field(default_factory=list)
     review_status_by_window: dict[str, str] = Field(default_factory=dict)
     input_refs: dict[str, Any] = Field(default_factory=dict)
@@ -490,13 +494,18 @@ def _observation_record_from_output(
         side=output.side.value,
         evaluated_at_ms=output.timestamp_ms,
         source=OBSERVATION_V1_SOURCE,
+        source_type="local_sqlite_fallback" if "sqlite" in market_source_id else "read_only_market_source",
         market_source=market_source_id,
+        market_bar_timestamp_ms=output.timestamp_ms,
+        market_bar_close=output.evidence_payload.get("latest_close")
+        or output.evidence_payload.get("latest_1h_close"),
         signal_type=output.signal_type.value,
         confidence=str(output.confidence),
         reason_codes=list(output.reason_codes),
         human_summary=output.human_summary,
         evidence_payload=output.evidence_payload,
         signal_snapshot=output.signal_snapshot,
+        invalidation_conditions=list(output.invalidation_conditions),
         review_windows=list(spec.review_windows),
         review_status_by_window=review_status,
         input_refs=output.input_refs.model_dump(mode="json"),

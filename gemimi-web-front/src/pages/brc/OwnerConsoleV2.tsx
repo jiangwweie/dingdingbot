@@ -941,12 +941,12 @@ function ObservationReadinessPanel({
         <div className="mt-4">
           <DataTable
             compact
-            columns={['current signal', 'symbol', 'type', 'confidence', 'review hook', 'sink']}
+            columns={['current signal', 'symbol', 'type', 'bar time', 'review hook', 'sink']}
             rows={currentSignals.map((record) => [
               record.candidate_id,
               record.symbol,
               record.signal_type,
-              record.confidence,
+              new Date(record.market_bar_timestamp_ms).toISOString(),
               record.review_windows.join(' / '),
               record.sink_status,
             ])}

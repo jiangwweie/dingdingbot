@@ -1506,6 +1506,100 @@ class PGBrcHistoricalSignalOutputORM(PGCoreBase):
     )
 
 
+class PGBrcStrategyGroupObservationORM(PGCoreBase):
+    """Durable read-only strategy group observation evidence."""
+
+    __tablename__ = "brc_strategy_group_observations"
+
+    observation_id: Mapped[str] = mapped_column(String(192), primary_key=True)
+    observed_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    strategy_group_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    candidate_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    signal_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    reason_codes_json: Mapped[list] = mapped_column(
+        "reason_codes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    evidence_payload_json: Mapped[dict] = mapped_column(
+        "evidence_payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    signal_snapshot_json: Mapped[dict] = mapped_column(
+        "signal_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    invalidation_conditions_json: Mapped[list] = mapped_column(
+        "invalidation_conditions",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    human_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    market_source: Mapped[str] = mapped_column(String(128), nullable=False)
+    market_bar_timestamp_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    market_bar_close: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    review_windows_json: Mapped[list] = mapped_column(
+        "review_windows",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    review_status_json: Mapped[dict] = mapped_column(
+        "review_status",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    input_refs_json: Mapped[dict] = mapped_column(
+        "input_refs",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    not_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_execution_intent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    no_execution_permission: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    no_order_permission: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    no_runtime_start: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "signal_type IN ('no_action', 'would_enter', 'invalid')",
+            name="ck_brc_strategy_group_observations_signal_type",
+        ),
+        CheckConstraint("side IN ('long', 'short', 'none')", name="ck_brc_strategy_group_observations_side"),
+        CheckConstraint("not_order IS TRUE", name="ck_brc_strategy_group_observations_not_order"),
+        CheckConstraint(
+            "not_execution_intent IS TRUE",
+            name="ck_brc_strategy_group_observations_not_exec_intent",
+        ),
+        CheckConstraint(
+            "no_execution_permission IS TRUE",
+            name="ck_brc_strategy_group_observations_no_exec_permission",
+        ),
+        CheckConstraint(
+            "no_order_permission IS TRUE",
+            name="ck_brc_strategy_group_observations_no_order_permission",
+        ),
+        CheckConstraint("no_runtime_start IS TRUE", name="ck_brc_strategy_group_observations_no_runtime"),
+        Index("idx_brc_strategy_group_observations_candidate", "candidate_id", "observed_at_ms"),
+        Index("idx_brc_strategy_group_observations_group", "strategy_group_id", "observed_at_ms"),
+        Index("idx_brc_strategy_group_observations_symbol", "symbol", "observed_at_ms"),
+        Index("idx_brc_strategy_group_observations_signal", "signal_type", "side"),
+    )
+
+
 class PGBrcHistoricalForwardOutcomeORM(PGCoreBase):
     """Compact forward outcome review for historical would-enter signals."""
 

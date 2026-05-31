@@ -29,6 +29,8 @@ from src.application.strategy_group_live_readonly_observation import (
     run_strategy_group_live_readonly_observation_once,
 )
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
+from src.infrastructure.database import probe_pg_connectivity
+from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.brc_admission_service import (
     AdmissionRuleViolation,
     BrcAdmissionService,
@@ -3544,9 +3546,7 @@ async def get_strategy_group_reviewability() -> StrategyGroupReviewabilityRespon
 )
 async def get_strategy_group_live_readonly_observation_v1() -> StrategyGroupLiveReadOnlyObservationResponse:
     """Return MI/CPM read-only observation v1 status without starting runtime."""
-    return build_strategy_group_live_readonly_observation_v1(
-        market_source=LocalSqliteObservationMarketSource(),
-    )
+    return await _strategy_group_live_readonly_observation_response(record_observation=False)
 
 
 @router.post(
@@ -3555,8 +3555,93 @@ async def get_strategy_group_live_readonly_observation_v1() -> StrategyGroupLive
 )
 async def run_strategy_group_live_readonly_observation_v1_once() -> StrategyGroupLiveReadOnlyObservationResponse:
     """Record one observe-only MI/CPM signal snapshot without runtime start."""
-    return run_strategy_group_live_readonly_observation_once(
-        market_source=LocalSqliteObservationMarketSource(),
+    return await _strategy_group_live_readonly_observation_response(record_observation=True)
+
+
+async def _strategy_group_live_readonly_observation_response(
+    *,
+    record_observation: bool,
+) -> StrategyGroupLiveReadOnlyObservationResponse:
+    source = LocalSqliteObservationMarketSource()
+    preview = build_strategy_group_live_readonly_observation_v1(market_source=source)
+    try:
+        repo = PgStrategyGroupObservationRepository()
+        pg_available = await probe_pg_connectivity()
+        if not pg_available:
+            raise RuntimeError("PG observation repository unavailable")
+        if record_observation:
+            recorded = [await repo.record(record) for record in preview.current_signals]
+            current = recorded
+        else:
+            candidate_ids = [candidate.candidate_id for candidate in preview.candidates]
+            current = await repo.list_current_by_candidate(candidate_ids=candidate_ids)
+            if not current:
+                current = preview.current_signals
+        history = await repo.list_recent(limit=50)
+        return _with_pg_observation_payload(
+            preview,
+            current_signals=current,
+            signal_history=history,
+            record_observation=record_observation,
+        )
+    except Exception as exc:
+        sink_summary = dict(preview.sink_summary)
+        sink_summary.update(
+            {
+                "sink_id": "pg_brc_strategy_group_observations",
+                "sink_status": "blocked_pg_observation_unavailable",
+                "pg_observation_sink": "unavailable",
+                "pg_error": f"{type(exc).__name__}: {str(exc)[:240]}",
+                "fallback_sink_id": "process_local_in_memory_strategy_group_observation_sink",
+            }
+        )
+        input_source_summary = dict(preview.input_source_summary)
+        input_source_summary["source_type"] = "local_sqlite_fallback"
+        return preview.model_copy(
+            update={
+                "sink_summary": sink_summary,
+                "input_source_summary": input_source_summary,
+            }
+        )
+
+
+def _with_pg_observation_payload(
+    response: StrategyGroupLiveReadOnlyObservationResponse,
+    *,
+    current_signals: list,
+    signal_history: list,
+    record_observation: bool,
+) -> StrategyGroupLiveReadOnlyObservationResponse:
+    sink_summary = dict(response.sink_summary)
+    sink_summary.update(
+        {
+            "sink_id": "pg_brc_strategy_group_observations",
+            "sink_status": "recorded_pg" if record_observation else "read_pg_history",
+            "pg_observation_sink": "brc_strategy_group_observations",
+            "record_count": len(signal_history),
+            "writes_execution_or_order_tables": False,
+            "runtime_effect": "none",
+        }
+    )
+    observation_chain_summary = dict(response.observation_chain_summary)
+    observation_chain_summary.update(
+        {
+            "signal_history_available": bool(signal_history),
+            "main_blocker": "true_live_market_source_missing"
+            if response.input_source_summary.get("source_id") == "local_sqlite_v3_dev_closed_klines_read_only"
+            else "none_for_pg_observation_sink",
+        }
+    )
+    input_source_summary = dict(response.input_source_summary)
+    input_source_summary["source_type"] = "local_sqlite_fallback"
+    return response.model_copy(
+        update={
+            "current_signals": current_signals,
+            "signal_history": signal_history,
+            "sink_summary": sink_summary,
+            "input_source_summary": input_source_summary,
+            "observation_chain_summary": observation_chain_summary,
+        }
     )
 
 

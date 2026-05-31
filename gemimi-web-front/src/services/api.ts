@@ -283,13 +283,17 @@ export type StrategyGroupObservationRecord = {
   evaluated_at_ms: number;
   recorded_at_ms?: number | null;
   source: string;
+  source_type: string;
   market_source: string;
+  market_bar_timestamp_ms: number;
+  market_bar_close?: string | null;
   signal_type: string;
   confidence: string;
   reason_codes: string[];
   human_summary: string;
   evidence_payload: Record<string, unknown>;
   signal_snapshot: Record<string, unknown>;
+  invalidation_conditions: Array<Record<string, unknown>>;
   review_windows: string[];
   review_status_by_window: Record<string, string>;
   input_refs: Record<string, unknown>;
