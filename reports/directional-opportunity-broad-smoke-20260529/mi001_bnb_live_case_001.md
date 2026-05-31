@@ -1,6 +1,6 @@
 # MI-001 BNB Long Live Signal Case #001
 
-Generated: 2026-05-31 15:28 CST
+Generated: 2026-05-31 15:36 CST
 
 ## 1. Summary
 
@@ -23,7 +23,7 @@ It is not a trial start, execution intent, order, execution permission, or runti
 | PG observation row | `MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000` |
 | market_bar_timestamp_ms | `1780196400000` |
 | market_bar_close | `740.200` |
-| review_status | `1h_completed_remaining_windows_pending` |
+| review_status | `1h_completed_remaining_windows_pending_after_continuation_check` |
 
 ## 3. Market Bar
 
@@ -53,8 +53,8 @@ Forward outcomes are recorded only when the required future closed bars are avai
 
 | window | status | review_due_at_utc | forward_return | MFE | MAE | source | notes |
 | --- | --- | --- | ---: | ---: | ---: | --- | --- |
-| 1h | `completed` | `2026-05-31T05:00:00Z` | `-0.7593%` | `0.3121%` | `-1.1483%` | `binance_usdm_public_klines_read_only` | calculated from 1 closed 1h public/read-only bar |
-| 4h | `pending` | `2026-05-31T08:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | review window has not reached due time |
+| 1h | `completed` | `2026-05-31T05:00:00Z` | `-0.7593%` | `0.3121%` | `-1.1483%` | `binance_usdm_public_klines_read_only` | refreshed at `2026-05-31T07:35:56.909Z`; calculated from 1 closed 1h public/read-only bar |
+| 4h | `pending` | `2026-05-31T08:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | current check time `2026-05-31T07:35:31Z`; review window has not reached due time |
 | 12h | `pending` | `2026-05-31T16:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | review window has not reached due time |
 | 24h | `pending` | `2026-06-01T04:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | review window has not reached due time |
 | 72h | `pending` | `2026-06-03T04:00:00Z` | n/a | n/a | n/a | `binance_usdm_public_klines_read_only` | review window has not reached due time |
@@ -81,10 +81,10 @@ Interpretation:
 
 - The 1h adverse move does not prove the strategy failed.
 - It does strengthen the local exhaustion risk tag after a sharp 12h impulse.
-- It supports adding a wait-for-confirmation or no-chase note to the BNB bounded trial design.
+- It supports adding explicit wait-for-confirmation and no-chase rules to the BNB bounded trial design.
 - It makes the 4h and 12h windows more important than a single 1h snapshot.
 
-Initial conclusion remains: `pending`.
+Initial conclusion remains: `pending_path_review`.
 
 The case is valid as a live observation case, but not yet validated as a trade case.
 
@@ -94,6 +94,7 @@ The case is valid as a live observation case, but not yet validated as a trade c
 - Whether 12h/24h windows show follow-through consistent with historical MI-001 BNB winners.
 - Whether MAE expands beyond historical path-risk expectations.
 - Whether repeated BNB `would_enter` signals cluster too densely and need a dedup/no-chase rule.
+- Whether a future Owner review should require a confirmation bar above the signal close before even considering rehearsal design updates.
 
 ## 8. Non-permissions
 

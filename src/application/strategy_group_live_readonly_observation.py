@@ -63,7 +63,16 @@ class StrategyGroupLiveReadOnlyObservationResponse(BaseModel):
     candidates: list[StrategyGroupObservationCandidate]
     current_signals: list["StrategyGroupObservationRecord"] = Field(default_factory=list)
     signal_history: list["StrategyGroupObservationRecord"] = Field(default_factory=list)
-    forward_review_summary: dict[str, Any] = Field(default_factory=dict)
+    forward_review_summary: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "sink_id": "pg_brc_strategy_group_forward_reviews",
+            "review_count": 0,
+            "by_observation_id": {},
+            "writes_execution_or_order_tables": False,
+            "runtime_effect": "none",
+            "status": "not_loaded",
+        }
+    )
     sink_summary: dict[str, Any] = Field(default_factory=dict)
     input_source_summary: dict[str, Any] = Field(default_factory=dict)
     review_hook_summary: dict[str, Any] = Field(default_factory=dict)
