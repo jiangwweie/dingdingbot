@@ -62,6 +62,34 @@ class PgStrategyGroupObservationRepository:
             )
             return [self._to_record(row) for row in result.scalars().all()]
 
+    async def find_by_observation_identity(
+        self,
+        *,
+        candidate_id: str,
+        symbol: str,
+        side: str,
+        market_bar_timestamp_ms: int,
+    ) -> StrategyGroupObservationRecord | None:
+        """Return an existing observe-only row for the same closed-bar identity.
+
+        The scheduled read-only runner uses this before writing so repeated cron
+        invocations for the same latest closed bar do not create duplicate
+        evidence rows. This identity intentionally excludes order/execution
+        concepts.
+        """
+        async with self._session_maker() as session:
+            result = await session.execute(
+                select(PGBrcStrategyGroupObservationORM)
+                .where(PGBrcStrategyGroupObservationORM.candidate_id == candidate_id)
+                .where(PGBrcStrategyGroupObservationORM.symbol == symbol)
+                .where(PGBrcStrategyGroupObservationORM.side == side)
+                .where(PGBrcStrategyGroupObservationORM.market_bar_timestamp_ms == market_bar_timestamp_ms)
+                .order_by(PGBrcStrategyGroupObservationORM.created_at_ms.desc())
+                .limit(1)
+            )
+            row = result.scalar_one_or_none()
+            return self._to_record(row) if row is not None else None
+
     async def list_current_by_candidate(
         self,
         *,

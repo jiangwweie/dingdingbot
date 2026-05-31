@@ -25,6 +25,9 @@ from src.domain.strategy_family_signal import SignalSide, SignalType
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.pg_models import PGBrcStrategyGroupObservationORM
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
+from src.application.strategy_group_readonly_observation_scheduler import (
+    run_scheduled_readonly_observation_once,
+)
 
 
 @pytest_asyncio.fixture()
@@ -191,6 +194,34 @@ async def test_pg_observation_repository_round_trip(observation_repo):
     assert all(record.no_execution_permission is True for record in recent)
     assert all(record.no_order_permission is True for record in recent)
     assert all(record.no_runtime_start is True for record in recent)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_readonly_observation_is_idempotent_by_closed_bar(observation_repo):
+    first = await run_scheduled_readonly_observation_once(
+        source_name="local_sqlite_fallback",
+        market_source=SampleStrategyGroupMarketBarSource(),
+        repository=observation_repo,
+    )
+    second = await run_scheduled_readonly_observation_once(
+        source_name="local_sqlite_fallback",
+        market_source=SampleStrategyGroupMarketBarSource(),
+        repository=observation_repo,
+    )
+
+    assert first.inserted_count == 3
+    assert first.skipped_duplicate_count == 0
+    assert first.failed_count == 0
+    assert second.inserted_count == 0
+    assert second.skipped_duplicate_count == 3
+    assert second.failed_count == 0
+    assert all(item.existing_record_id for item in second.candidate_results)
+
+    recent = await observation_repo.list_recent(limit=10)
+    assert len(recent) == 3
+    assert all(record.not_order is True for record in recent)
+    assert all(record.not_execution_intent is True for record in recent)
+    assert all(record.no_order_permission is True for record in recent)
 
 
 def test_strategy_group_observation_migration_creates_observe_only_table():
