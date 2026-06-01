@@ -3,6 +3,12 @@
 Date: 2026-05-29
 Method: read-only, no code changes, no PG mutation, no exchange calls
 
+2026-06-01 governance note: this document remains useful as a historical
+position rebuild, but its research-only/read-only and blanket testnet Owner
+authorization wording is superseded by `docs/ops/agent-current-brc-baseline.md`
+and the 2026-06-01 amendment to ADR-0009. Use current tracked code, current
+verified reports, and the agent baseline for execution/testnet behavior.
+
 ---
 
 ## 1. Owner 纠正
@@ -164,11 +170,11 @@ fe33e45 feat(brc): add brc r3 operator layer
 | 能力 | 是否具备 | 证据 | 备注 |
 |---|---|---|---|
 | 实盘交易 | **NO** | ADR-0009 禁止；无 live infrastructure wired | 绝对禁止 |
-| testnet 交易 | **YES** | Binance testnet，受控 endpoint，多次验证 | 需 Owner authorization + testnet profile |
+| testnet 交易 | **YES** | Binance testnet，受控 endpoint，多次验证 | 当前基线为 scoped verification + hard safety gates，不再 blanket Owner authorization |
 | 自动化策略执行 | **NO** | `auto_within_budget_enabled=False`, `auto_execution_enabled=False`（hardcoded） | `bounded_risk_campaign_service.py` |
 | signal-to-order 链路 | **NO** | 未实现 | — |
 | signal-to-intent 链路 | **PARTIAL** | `brc_trial_trade_intents` 表存在，但最远状态为 `signal_evaluated_no_intent` | 无自动 signal→intent 转换 |
-| account equity 读取 | **NO** | `_account_facts()` 中 `wallet_equity` 和 `available_margin` 为 `not_available` | 已知 blocker |
+| account equity 读取 | **YES when cached** | cached `AccountSnapshot` 可映射 `wallet_equity` / `available_margin` | 缺失或 stale 时是 profile/preflight-scoped blocker |
 | account balance 读取 (exchange) | **YES** | `AccountService.get_balance()` 调用 exchange gateway | 需 API key + testnet |
 | account facts (positions/orders, PG) | **YES** | `_account_facts()` 有 local PG 路径 | positions 和 orders 有 dual path |
 | BRC campaign lifecycle | **YES** | campaign state machine + PG persistence | testnet verified |

@@ -2,13 +2,14 @@
 title: PROJECT_BASELINE_CURRENT
 status: CURRENT_CANON
 authority: owner-correction + current-position-rebuild
-last_verified: 2026-05-29
+last_verified: 2026-06-01
 supersedes:
   - docs/ops/knowledge-pack/PROJECT_OVERVIEW.md
 source_of_truth:
   - docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md
   - docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md
   - docs/ops/project-roadmap-v2.md (2026-05-29 amendment, line 540+)
+  - docs/ops/agent-current-brc-baseline.md
   - docs/adr/0009-non-real-live-execution-authorization-boundary.md
   - docs/adr/0012-bounded-risk-campaign-system.md
 ---
@@ -22,24 +23,33 @@ Supersedes all prior knowledge-pack documents for project positioning and capabi
 
 ## 1. Current definition
 
-Bounded Risk Campaign (BRC) fast trial-and-review research system for small risk-capital Campaigns.
+Bounded Risk Campaign (BRC) fast small-capital live trial system.
 
-Source: Owner 2026-05-29 amendment in `docs/ops/project-roadmap-v2.md`.
+Source: Owner 2026-06-01 instruction governance baseline.
 
-The old positioning "BRC Reset / Opportunity Structure Discovery v0" is **no longer the formal current positioning**.
-It has been explicitly superseded by the Owner correction above.
+The old positioning "BRC Reset / Opportunity Structure Discovery v0" and the
+intermediate "research-only signal detection" framing are **no longer the
+formal current positioning**. They are historical or scope-limited to research
+tasks.
 
-The preferred research funnel is:
+The current core chain is:
 
 ```
-wide admission -> broad coarse screen -> candidate -> risk disclosure -> Owner risk acceptance -> bounded live trial or continued fine screen -> review -> promote / revise / park
+StrategyFamily
+-> Carrier
+-> Owner risk acknowledgement
+-> BoundedLiveTrialAuthorization
+-> hard safety gates
+-> entry / protection / record / exit / review
 ```
 
 Hard boundaries:
 
 - no uncontrolled capital risk
+- no real live trading / real-funds order placement without separate explicit Owner authorization
 - no strategy self-elevation
 - no bypass around Operation Layer
+- no withdrawal / transfer
 
 ---
 
@@ -47,9 +57,11 @@ Hard boundaries:
 
 ```
 BRC governance framework exists.
-Broad OHLCV screening completed.
-3 candidates are pending cost/baseline enrichment.
-Pre-trial readiness has known account_equity blocker.
+Strategy-family / carrier chain is active.
+BNB first carrier has advanced through live observation, strategy trial
+readiness, preflight facts, controlled testnet carrier path, and protected
+testnet same-path rehearsal.
+Real live / real-funds authorization remains the hard boundary.
 ```
 
 Sub-phase breakdown:
@@ -61,9 +73,10 @@ Sub-phase breakdown:
 | Admission Gate Phase 1-17 | Metadata operations complete |
 | TF-001 Carrier Full-chain Smoke | Passed |
 | Broad OHLCV Smoke Screen (BRC-R5-003) | Completed, 3 candidates selected |
-| Cost/baseline enrichment for candidates | Not started |
-| Trial readiness (account_equity, signal-to-intent) | Known blocker present |
-| Signal-to-trade conversion | Not implemented |
+| Cost/baseline enrichment for candidates | Completed for the initial broad-smoke candidates; outcomes remain evidence/warnings, not automatic promotion |
+| Account equity mapping | Cached AccountSnapshot mapping available for readiness inputs |
+| BNB StrategyTrialReadiness / controlled testnet carrier | Implemented, tested, and exercised through protected testnet same-path rehearsal |
+| Signal-to-trade conversion | Live/real-funds conversion remains Owner-authorized only |
 
 ---
 
@@ -72,11 +85,11 @@ Sub-phase breakdown:
 | ID | Fact |
 |---|---|
 | CF-001 | BRC governance framework is implemented and testnet verified |
-| CF-002 | Real live trading is prohibited unless Owner separately authorizes (ADR-0009) |
-| CF-003 | Testnet trading capability exists but only for controlled scenarios with Owner authorization |
+| CF-002 | Real live trading / real-funds order placement is prohibited unless Owner separately authorizes the live action |
+| CF-003 | Testnet/dev/readiness/controlled rehearsal work may proceed through scoped verification and hard safety gates without additional testnet authorization |
 | CF-004 | Broad OHLCV screening completed: 9 variants x 4 assets x 2 sides |
 | CF-005 | 3 trial candidates selected: MI-001 BNB long, MI-001 SOL long, VI-001 ETH long |
-| CF-006 | 3 candidates have no cost/slippage/funding/baseline enrichment |
+| CF-006 | Initial candidate cost/baseline enrichment was completed; weak evidence remains a disclosed warning, not a permanent blocker after Owner acknowledgement |
 | CF-007 | `auto_within_budget_enabled=False` (hardcoded) |
 | CF-008 | `auto_execution_enabled=False` (hardcoded) |
 | CF-009 | `trial_started` is only READ in service code, never SET to True |
@@ -84,7 +97,7 @@ Sub-phase breakdown:
 | CF-011 | 6 untracked migrations (022-027) exist but are not integrated into the tracked codebase |
 | CF-012 | No tracked file imports any of the new untracked PG repositories or services |
 | CF-013 | GKS (Global Kill Switch) is fail-closed by design |
-| CF-014 | Execution permission system gates all actions (READ_ONLY / INTENT_RECORDING / EXECUTION_INTENT_ALLOWED / ORDER_CAPABLE) |
+| CF-014 | Execution permission system gates action depth (READ_ONLY / SIGNAL_ONLY / INTENT_RECORDING / EXECUTION_INTENT_ALLOWED / ORDER_ALLOWED) |
 | CF-015 | CPM-1 (ETH Pinbar Pullback) is PAUSED (OOS negative) |
 
 ---
@@ -93,9 +106,8 @@ Sub-phase breakdown:
 
 | Blocker | Impact | Status |
 |---|---|---|
-| `account_equity` unavailable (`wallet_equity` / `available_margin` = `not_available`) | Pre-trial readiness blocked | Known P0 blocker |
-| 3 trial candidates have no cost/slippage/funding/baseline | Cannot judge if candidates are worth deepening | P0 research task |
-| signal-to-intent conversion not implemented / not scoped | Cannot convert signals to trial trade intents | P1 design decision |
+| live / real-funds authorization missing | Real live order placement must not proceed | Hard blocker until explicit Owner live authorization |
+| strategy evidence weakness / incomplete observation | Must be disclosed and acknowledged | Warning after Owner acknowledgement, not a hard blocker |
 | 022-027 migrations not integrated | Historical research tables unavailable if trial depends on them | P1 Owner decision |
 
 ---
@@ -121,10 +133,10 @@ These **must not be described as integrated capabilities**.
 
 | Capability | Status | Why |
 |---|---|---|
-| Automated strategy execution | DISABLED | `auto_within_budget_enabled=False`, `auto_execution_enabled=False` (hardcoded) |
-| signal-to-order | NOT IMPLEMENTED | No code path exists |
-| signal-to-intent | PARTIAL | Furthest state: `signal_evaluated_no_intent`; no automatic signal-to-intent conversion |
-| account_equity read | NOT AVAILABLE | `wallet_equity` and `available_margin` are `not_available` in `_account_facts()` |
+| Live automated strategy execution | DISABLED | Real live / real-funds action requires separate explicit Owner authorization |
+| uncontrolled signal-to-order | FORBIDDEN | Strategy self-elevation and Operation Layer bypass are prohibited |
+| trial intent / readiness paths | PARTIAL | Evidence and readiness paths exist, but live conversion remains gated |
+| account_equity read | AVAILABLE WHEN CACHED | `wallet_equity` / `account_equity` and `available_margin` map from cached AccountSnapshot when present |
 | Production deployment | NOT AVAILABLE | Local runtime only, no cloud/daemon infrastructure |
 | Scheduler / daemon | NOT AVAILABLE | Process-local only in `src/main.py` |
 
@@ -136,7 +148,7 @@ These **must not be described as integrated capabilities**.
 |---|---|---|
 | FORBID-001 | Real live trading | ADR-0009 |
 | FORBID-002 | Using real funds to place orders | ADR-0009 |
-| FORBID-003 | Automated strategy execution | No runtime-eligible strategy exists |
+| FORBID-003 | Uncontrolled automated strategy execution | No strategy self-elevation or Operation Layer bypass |
 | FORBID-004 | Modifying execution permission | Codex-owned core file |
 | FORBID-005 | Withdrawal / transfer | Out-of-scope |
 | FORBID-006 | Strategy self-elevation | ADR-0012 |
@@ -147,16 +159,13 @@ These **must not be described as integrated capabilities**.
 
 ---
 
-## 8. Current next actions
+## 8. Current governance priorities
 
 | Priority | Action | Type | Safety |
 |---|---|---|---|
-| P0 | 3 trial candidates: cost/slippage/funding/baseline enrichment | research-only | no execution, no trading |
-| P0 | 3 trial candidates: random-entry/hold baseline comparison | research-only | no execution |
+| P0 | Preserve hard live / real-funds authorization boundary | governance | hard stop without explicit Owner live authorization |
+| P0 | Continue testnet/dev/readiness/profile-scoped repair when blockers are bounded | engineering | no real funds |
 | P1 | Decide whether 022-027 and untracked files should be committed | Owner decision | — |
-| P1 | Resolve account_equity blocker (determine read source) | infrastructure | no execution |
-| P1 | Decide whether signal-to-intent conversion is in current scope | Owner decision | — |
-| P2 | Owner reviews 3 trial candidate event samples | owner review | read-only |
 
 ---
 
@@ -169,7 +178,8 @@ These **must not be described as integrated capabilities**.
 | "Strategy Family Registry PG chain pending verification" | Untracked files, no tracked imports | Not integrated |
 | "Historical Research Sampling pending verification" | Same | Not integrated |
 | "Historical Signal Evaluation pending verification" | Same | Not integrated |
-| "exchange + PG dual path for account facts" | `account_service.py` only has exchange path; `_account_facts()` dual path is positions/orders only; equity = not_available | account_equity unavailable |
+| "account_equity is unavailable" | cached AccountSnapshot mapping was added after this claim | account_equity / wallet_equity and available_margin are available when the runtime cached snapshot exists |
+| "testnet requires Owner authorization" | 2026-06-01 Owner baseline supersedes blanket testnet authorization stops | testnet/dev/readiness work proceeds via scoped verification and safety gates |
 
 ---
 
