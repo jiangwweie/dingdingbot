@@ -4567,6 +4567,34 @@ async def execute_testnet_close(symbol_key: str, request: Request) -> runtime.Co
     return await runtime.execute_brc_controlled_close(symbol_key, request)
 
 
+@dev_testnet_router.get("/carriers", response_model=runtime.StrategyTrialCarrierListResponse)
+async def list_strategy_trial_testnet_carriers(request: Request) -> runtime.StrategyTrialCarrierListResponse:
+    return await runtime.list_strategy_trial_controlled_testnet_carriers(request)
+
+
+@dev_testnet_router.post(
+    "/carriers/{carrier_id}/execute-controlled-entry",
+    response_model=runtime.StrategyTrialCarrierEntryResponse,
+)
+async def execute_strategy_trial_testnet_carrier_entry(
+    carrier_id: str,
+    request: Request,
+    body: runtime.StrategyTrialCarrierEntryRequest = runtime.StrategyTrialCarrierEntryRequest(),
+) -> runtime.StrategyTrialCarrierEntryResponse:
+    return await runtime.execute_strategy_trial_carrier_controlled_entry(carrier_id, request, body)
+
+
+@dev_testnet_router.post(
+    "/carriers/{carrier_id}/execute-controlled-close",
+    response_model=runtime.StrategyTrialCarrierCloseResponse,
+)
+async def execute_strategy_trial_testnet_carrier_close(
+    carrier_id: str,
+    request: Request,
+) -> runtime.StrategyTrialCarrierCloseResponse:
+    return await runtime.execute_strategy_trial_carrier_controlled_close(carrier_id, request)
+
+
 @dev_testnet_router.post("/mock-pnl", response_model=runtime.BrcMockPnlResponse)
 async def inject_testnet_mock_pnl(
     request: Request,

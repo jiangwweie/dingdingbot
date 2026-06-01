@@ -72,7 +72,7 @@ BNB_STRATEGY_TRIAL_PROFILE = {
     "risk": {
         "max_loss_percent": "0.01",
         "max_leverage": 1,
-        "max_total_exposure": "20",
+        "max_total_exposure": "10",
         "daily_max_trades": 1,
         "daily_max_loss_percent": "0.01",
     },

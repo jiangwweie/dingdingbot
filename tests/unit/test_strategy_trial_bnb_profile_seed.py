@@ -55,6 +55,7 @@ async def test_bnb_strategy_trial_profile_resolves_to_testnet_bnb_only_scope():
     assert resolved.market.primary_symbol == "BNB/USDT:USDT"
     assert resolved.market.symbols == ["BNB/USDT:USDT"]
     assert resolved.risk.max_leverage == 1
+    assert resolved.risk.max_total_exposure == 10
     assert resolved.risk.daily_max_trades == 1
 
 

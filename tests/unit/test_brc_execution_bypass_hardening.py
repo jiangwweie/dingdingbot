@@ -163,10 +163,16 @@ def test_dev_testnet_router_has_no_generic_production_trading_or_transfer_endpoi
         "/api/dev/testnet/brc/{symbol_key}/arm-attempt",
         "/api/dev/testnet/brc/{symbol_key}/execute-controlled-entry",
         "/api/dev/testnet/brc/{symbol_key}/execute-controlled-close",
+        "/api/dev/testnet/brc/carriers",
+        "/api/dev/testnet/brc/carriers/{carrier_id}/execute-controlled-entry",
+        "/api/dev/testnet/brc/carriers/{carrier_id}/execute-controlled-close",
         "/api/dev/testnet/brc/mock-pnl",
         "/api/dev/testnet/brc/finalize",
     }
-    assert all(route["methods"] == {"POST"} for route in routes)
+    assert all(
+        route["methods"] == ({"GET"} if route["path"] == "/api/dev/testnet/brc/carriers" else {"POST"})
+        for route in routes
+    )
     assert not any(
         token in route["path"]
         for route in routes
@@ -175,5 +181,7 @@ def test_dev_testnet_router_has_no_generic_production_trading_or_transfer_endpoi
     controlled_paths = {
         "/api/dev/testnet/brc/{symbol_key}/execute-controlled-entry",
         "/api/dev/testnet/brc/{symbol_key}/execute-controlled-close",
+        "/api/dev/testnet/brc/carriers/{carrier_id}/execute-controlled-entry",
+        "/api/dev/testnet/brc/carriers/{carrier_id}/execute-controlled-close",
     }
     assert {route["path"] for route in routes if "execute-controlled" in route["path"]} == controlled_paths

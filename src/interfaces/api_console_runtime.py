@@ -47,6 +47,7 @@ from src.application.brc_operator_workflow import (
     TESTNET_REHEARSAL_CONFIRMATION,
 )
 from src.domain.bounded_risk_campaign import (
+    BrcAttemptStatus,
     BrcLlmIntentAction,
     BrcReviewDecision,
     BrcWorkflowStatus,
@@ -580,6 +581,18 @@ class StrategyTrialCarrierEntryResponse(BaseModel):
     order_permission_granted: Literal[False] = False
 
 
+class StrategyTrialCarrierCloseResponse(BaseModel):
+    carrier_id: str
+    readiness_verdict: Literal["testnet_rehearsal_closed"]
+    close: ControlledCloseResponse
+    campaign: dict
+    live_ready: Literal[False] = False
+    auto_execution_ready: Literal[False] = False
+    no_real_funds: Literal[True] = True
+    execution_permission_granted: Literal[False] = False
+    order_permission_granted: Literal[False] = False
+
+
 class BrcLlmWorkflowCreateRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2048)
 
@@ -1070,12 +1083,25 @@ def _strategy_trial_reconciliation_fact(api_module) -> dict[str, Any]:
         or ""
     ).lower()
     failed_count = _to_int_or_none(_dict_or_attr(summary, "failed_reconciliations_count"))
+    if failed_count is None:
+        failed_count = _to_int_or_none(_dict_or_attr(summary, "failure_count"))
+    pg_failed_count = _to_int_or_none(_dict_or_attr(summary, "pg_recovery_failed_count"))
+    pg_retrying_count = _to_int_or_none(_dict_or_attr(summary, "pg_recovery_retrying_count"))
     if status in {"clean", "passed", "ok"} or failed_count == 0:
-        return {"clean": True, "status": status or "clean", "failed_reconciliations_count": failed_count}
+        if (pg_failed_count or 0) == 0 and (pg_retrying_count or 0) == 0:
+            return {
+                "clean": True,
+                "status": status or "clean",
+                "failed_reconciliations_count": failed_count,
+                "pg_recovery_failed_count": pg_failed_count,
+                "pg_recovery_retrying_count": pg_retrying_count,
+            }
     return {
         "clean": False,
         "status": status or "unknown",
         "failed_reconciliations_count": failed_count,
+        "pg_recovery_failed_count": pg_failed_count,
+        "pg_recovery_retrying_count": pg_retrying_count,
         "blocker": "reconciliation_not_clean",
     }
 
@@ -2443,6 +2469,7 @@ async def execute_strategy_trial_carrier_controlled_entry(
             metadata={
                 "owner_review": True,
                 "owner_review_verified": True,
+                "flat_proof": preflight_facts.get("inventory"),
                 "carrier_id": carrier.carrier_id,
                 "preflight_facts": preflight_facts,
             },
@@ -2489,6 +2516,120 @@ async def execute_strategy_trial_carrier_controlled_entry(
         entry=entry,
         runtime_campaign_state=_to_campaign_state_response(runtime_state).model_dump(mode="json"),
         preflight_facts=preflight_facts,
+    )
+
+
+@router.post(
+    "/test/brc/carriers/{carrier_id}/execute-controlled-close",
+    response_model=StrategyTrialCarrierCloseResponse,
+)
+async def execute_strategy_trial_carrier_controlled_close(
+    carrier_id: str,
+    request: Request,
+) -> StrategyTrialCarrierCloseResponse:
+    """Close one allowlisted strategy-trial controlled testnet carrier position.
+
+    This is a cleanup path for the finite testnet carrier rehearsal. It keeps
+    the same carrier/profile/symbol/amount boundaries as the entry path and
+    delegates only to the existing reduce-only controlled close.
+    """
+    carrier = _resolve_strategy_trial_carrier(carrier_id)
+    api_module, resolved = _require_strategy_trial_carrier_mutation_gates(request, carrier)
+    spec = _carrier_controlled_spec(carrier, profile_name=resolved.profile_name)
+    await _reject_controlled_entry_body(request)
+    service = _get_brc_campaign_service(api_module)
+    campaign = await service.require_current_campaign()
+    if not campaign.last_attempt or campaign.last_attempt.symbol != spec.symbol:
+        raise HTTPException(status_code=409, detail="BLOCKED: no strategy-trial carrier attempt for this symbol")
+    attempt_status = campaign.last_attempt.status
+    if attempt_status not in {BrcAttemptStatus.ENTRY_FILLED, BrcAttemptStatus.BLOCKED}:
+        raise HTTPException(status_code=409, detail="BLOCKED: strategy-trial carrier attempt has no recorded entry")
+    if _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL.get(spec.lock_key):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Controlled close already executed for {spec.symbol} in this runtime session",
+        )
+
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None or not hasattr(position_repo, "list_active"):
+        raise HTTPException(status_code=503, detail="Position repository not initialized")
+    try:
+        active_positions = await position_repo.list_active(symbol=spec.symbol, limit=10)
+    except Exception as exc:
+        logger.error("Failed to load active positions for strategy-trial carrier close: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="Failed to load active positions") from exc
+    if len(active_positions) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Controlled close requires exactly one active local position for {spec.symbol}; "
+                f"found {len(active_positions)}"
+            ),
+        )
+    position = active_positions[0]
+    amount = Decimal(str(getattr(position, "current_qty", "0")))
+    if amount <= Decimal("0") or amount > spec.amount_max:
+        raise HTTPException(status_code=409, detail=f"Controlled close amount out of bounds: {amount}")
+
+    orchestrator = _get_orchestrator(api_module)
+    _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL[spec.lock_key] = True
+    try:
+        result = await orchestrator.execute_controlled_close(
+            position=position,
+            reason="strategy_trial_carrier_controlled_testnet_close",
+            max_amount=spec.amount_max,
+        )
+        close_order = result["close_order"]
+        if attempt_status == BrcAttemptStatus.ENTRY_FILLED:
+            await service.record_attempt_close(
+                symbol=spec.symbol,
+                record=AttemptCloseRecord(
+                    close_order_id=close_order.id,
+                    exchange_order_id=close_order.exchange_order_id,
+                ),
+            )
+        else:
+            repo = getattr(service, "_repo", None)
+            if repo is not None and hasattr(repo, "append_campaign_event"):
+                await repo.append_campaign_event(
+                    campaign_id=campaign.campaign_id,
+                    event_type="strategy_trial_carrier_cleanup_close_recorded",
+                    occurred_at_ms=int(time.time() * 1000),
+                    symbol=spec.symbol,
+                    attempt_id=campaign.last_attempt.attempt_id,
+                    metadata={
+                        "carrier_id": carrier.carrier_id,
+                        "close_order_id": close_order.id,
+                        "exchange_order_id": close_order.exchange_order_id,
+                        "prior_attempt_status": attempt_status.value,
+                    },
+                )
+    except Exception as exc:
+        _CONTROLLED_CLOSE_EXECUTED_BY_SYMBOL.pop(spec.lock_key, None)
+        logger.error("Strategy-trial carrier controlled close failed: %s", exc, exc_info=True)
+        if isinstance(exc, BrcRuleViolation):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Strategy-trial carrier controlled close failed") from exc
+
+    terminalized = result.get("terminalized_protection_orders") or []
+    close_response = ControlledCloseResponse(
+        status=close_order.status.value if hasattr(close_order.status, "value") else str(close_order.status),
+        signal_id=close_order.signal_id,
+        close_order_id=close_order.id,
+        exchange_order_id=close_order.exchange_order_id,
+        amount=amount,
+        average_exec_price=close_order.average_exec_price,
+        terminalized_protection_orders=len(terminalized),
+        profile=spec.profile,
+        attempt_locked=True,
+        symbol=spec.symbol,
+    )
+    campaign = await service.require_current_campaign()
+    return StrategyTrialCarrierCloseResponse(
+        carrier_id=carrier.carrier_id,
+        readiness_verdict="testnet_rehearsal_closed",
+        close=close_response,
+        campaign=campaign.model_dump(mode="json"),
     )
 
 
