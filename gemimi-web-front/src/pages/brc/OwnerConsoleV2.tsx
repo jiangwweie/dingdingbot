@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   BarChart3,
@@ -9,9 +9,15 @@ import {
   ChevronRight,
   FileSearch,
   GitBranch,
+  HelpCircle,
   Info,
   ListChecks,
+  PlayCircle,
   Route,
+  RotateCcw,
+  ShieldCheck,
+  Star,
+  Users,
   Wallet,
   Zap,
 } from 'lucide-react';
@@ -27,6 +33,7 @@ import {
   ReadinessResponse,
   StrategyGroupLiveReadOnlyObservationResponse,
   StrategyGroupReviewabilityResponse,
+  StrategyTrialArchitectureGovernanceResponse,
   StrategyTrialReadinessResponse,
   StrategyFamily,
 } from '@/src/services/api';
@@ -41,6 +48,7 @@ type ConsoleData = {
   observationCaseQueue: ObservationCaseQueueResponse | null;
   bnbTrialGap: Mi001BnbTrialReadinessGapResponse | null;
   strategyTrialReadiness: StrategyTrialReadinessResponse | null;
+  strategyTrialGovernance: StrategyTrialArchitectureGovernanceResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
   bindings: AdmissionTrialBinding[];
@@ -57,6 +65,33 @@ type ViewState = {
 };
 
 type Tone = 'teal' | 'indigo' | 'amber' | 'rose' | 'slate';
+type DataSource = 'backend_api' | 'derived_from_backend' | 'frontend_local_state' | 'static_product_copy' | 'sample_data' | 'unavailable';
+
+type FieldValue<T> = {
+  value: T;
+  source: DataSource;
+};
+
+type MarketViewInput = {
+  symbol: string;
+  regime: string;
+  direction: string;
+  riskMode: string;
+};
+
+type OwnerFlowState = {
+  marketView: MarketViewInput;
+  selectedCarrierId: string;
+  riskAcknowledgements: Record<string, Record<string, boolean>>;
+};
+
+const OWNER_FLOW_STORAGE_KEY = 'brc-owner-console-main-flow-v1';
+const DEFAULT_MARKET_VIEW: MarketViewInput = {
+  symbol: 'BNB',
+  regime: '震荡',
+  direction: '都可',
+  riskMode: '极小资金试错',
+};
 
 type StrategyGroupShelfItem = {
   strategy_group_id: string;
@@ -87,6 +122,47 @@ type StrategyGroupShelfItem = {
   shelf_section?: 'primary' | 'secondary';
 };
 
+type CarrierDecisionView = {
+  carrierId: string;
+  strategyFamily: string;
+  strategyId: string;
+  candidateId: string;
+  symbol: string;
+  runtimeSymbol: string;
+  side: string;
+  quantity: string;
+  maxNotional: string;
+  leverage: string;
+  protectionPlan: string;
+  testnetState: string;
+  authorizationState: string;
+  pendingOwnerLiveAuthorization: boolean;
+  liveReady: boolean;
+  hardBlockers: string[];
+  strategyWarnings: string[];
+  hardBlockerCount: number;
+  warningCount: number;
+  primaryAction: string;
+  liveAuthorizationEffect: string;
+  executionIntentState: string;
+  orderState: string;
+  testnetEvidence: Array<[string, string]>;
+  canAuthorizeLiveTrial: boolean;
+  authorizationButtonDisabledReason: string;
+  evidenceSource: DataSource;
+  safetyGateSource: DataSource;
+  accountFactsSource: DataSource;
+  provenance: Record<string, DataSource>;
+  timeline: Array<{
+    id: string;
+    title: string;
+    status: string;
+    desc: string;
+    tech: string;
+    tone: Tone;
+  }>;
+};
+
 const EMPTY_DATA: ConsoleData = {
   readiness: null,
   accountFacts: null,
@@ -96,6 +172,7 @@ const EMPTY_DATA: ConsoleData = {
   observationCaseQueue: null,
   bnbTrialGap: null,
   strategyTrialReadiness: null,
+  strategyTrialGovernance: null,
   families: [],
   decisions: [],
   bindings: [],
@@ -116,98 +193,419 @@ export function HomeV2() {
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading label="加载首页..." />;
 
-  const account = data.accountFacts?.account_summary || {};
-  const positions = firstText(account.active_position_count, data.accountFacts?.positions.length, 0);
-  const orders = firstText(account.open_order_count, data.accountFacts?.open_orders.length, 0);
-  const totalEquity = withUsdt(firstText(data.mi001?.risk_policy.account_equity, account.total_equity, account.equity));
-  const available = withUsdt(firstText(data.mi001?.risk_policy.available_margin, account.available_balance, account.available_margin));
-  const margin = withUsdt(firstText(account.margin_balance, account.available_margin));
-  const unrealized = withUsdt(firstText(account.unrealized_pnl, account.unrealized_profit));
+  const carrierDecision = carrierDecisionView(data);
+  const workbench = ownerWorkbenchView(carrierDecision);
 
   return (
-    <>
-      <section className="flex flex-col justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900 p-6 text-white shadow-sm dark:bg-slate-800/80 md:flex-row md:items-center">
-        <div className="flex flex-col gap-2">
-          <div className="mb-1 flex items-center gap-2">
-            <div className="flex h-5 w-5 items-center justify-center rounded-full border border-teal-500/30 bg-teal-500/20 text-xs font-bold text-teal-400">!</div>
-            <h2 className="text-lg font-bold text-slate-50">
-              MI-001 SOL 已完成试验前准备，当前因运行时启动保护未预检而阻断，试验未启动。
-            </h2>
+    <PageShell title="Owner 工作台" subtitle="一句话看清当前进展与下一步。">
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-6 shadow-lg shadow-black/20">
+        <div className="flex items-center gap-5">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+            <Star className="h-8 w-8" />
           </div>
-          <div className="flex flex-wrap items-center gap-4 text-sm text-slate-300">
-            <DotText tone="teal" text="实盘只读" />
-            <span className="text-slate-600">·</span>
-            <DotText tone="indigo" text="记录意图" />
-            <span className="text-slate-600">·</span>
-            <DotText tone="rose" text="禁止下单" />
+          <div>
+            <p className="text-sm font-bold text-slate-500 dark:text-slate-400">当前最重要的事</p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-950 dark:text-slate-50">{workbench.priority}</h2>
           </div>
+        </div>
+      </section>
+
+      <FlowProgress currentStep={workbench.currentStep} />
+
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <WorkbenchCard
+          icon={<Users className="h-7 w-7" />}
+          title="当前候选"
+          body={workbench.candidateName}
+          facts={[
+            ['方向', workbench.direction],
+            ['仓位上限', workbench.cap],
+            ['试验类型', 'BNB 小额试验'],
+          ]}
+          to="/strategy-candidates"
+          linkText="重新选择候选"
+        />
+        <WorkbenchCard
+          icon={<ShieldCheck className="h-7 w-7" />}
+          title="当前能否执行"
+          body={workbench.canExecute}
+          centered
+          facts={[
+            ['原因', workbench.readinessReason],
+          ]}
+          to="/trial-confirmation"
+          linkText="查看原因"
+        />
+        <WorkbenchCard
+          icon={<PlayCircle className="h-7 w-7" />}
+          title="下一步动作"
+          body="进入授权前确认"
+          facts={[
+            ['完成度', '2 / 5 步'],
+          ]}
+          to="/trial-confirmation"
+          linkText="继续"
+        />
+      </section>
+
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <PlainListPanel
+          icon={<AlertCircle className="h-5 w-5" />}
+          title="为什么现在还不能实盘"
+          items={workbench.plainBlockers}
+          link="/trial-confirmation"
+          linkText="查看全部原因"
+        />
+        <PlainListPanel
+          icon={<Info className="h-5 w-5" />}
+          title="需要你知情的风险"
+          items={workbench.plainRisks}
+          link="/trial-confirmation"
+          linkText="查看全部风险"
+        />
+      </section>
+
+      <section className="flex flex-col gap-4 md:flex-row">
+        <Link
+          to="/trial-confirmation"
+          className="inline-flex min-h-14 items-center justify-center gap-3 rounded-xl bg-slate-950 px-8 py-4 text-base font-bold text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
+        >
+          <Wallet className="h-5 w-5" />
+          进入授权前确认
+        </Link>
+        <Link
+          to="/strategy-candidates"
+          className="inline-flex min-h-14 items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-8 py-4 text-base font-bold text-slate-900 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
+        >
+          <RotateCcw className="h-5 w-5" />
+          重新选择候选
+        </Link>
+      </section>
+
+      <details className="rounded-xl border border-slate-200 bg-white p-5 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <summary className="cursor-pointer font-bold text-slate-800 dark:text-slate-100">查看详细证据 / 技术详情</summary>
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <CarrierAuthorizationPanel view={carrierDecision} />
+          <DecisionBoundaryPanel view={carrierDecision} />
+        </div>
+        <TechnicalDetails data={technicalPayload(data)} />
+      </details>
+    </PageShell>
+  );
+}
+
+export function StrategyCandidatesV2() {
+  const { data, error } = useConsoleData();
+  const [batch, setBatch] = useState(0);
+  const navigate = useNavigate();
+  const { flowState, updateFlowState } = useOwnerFlowState();
+
+  if (error) return <ErrorState error={error} />;
+  if (!data) return <Loading label="加载策略候选..." />;
+
+  const carrierDecision = carrierDecisionView(data);
+  const marketView = flowState.marketView;
+  const candidates = strategyCandidateView(carrierDecision, { ...marketView, batch });
+  const updateMarketView = (patch: Partial<MarketViewInput>) => {
+    updateFlowState((current) => ({
+      ...current,
+      marketView: { ...current.marketView, ...patch },
+    }));
+  };
+  const selectForConfirmation = (candidate: RecommendedCandidate) => {
+    updateFlowState((current) => ({
+      ...current,
+      selectedCarrierId: candidate.id,
+    }));
+    navigate('/trial-confirmation');
+  };
+
+  return (
+    <PageShell title="策略候选" subtitle="先说你的判断，系统只给候选建议；不会自动选择，也不会创建执行计划。">
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="mb-4 flex items-center gap-3">
+          <StepBadge value="1" />
+          <div>
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">先说你的判断</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">越清晰的判断，推荐越容易复盘。随时可以调整后重新生成。</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] lg:items-end">
+          <SegmentedControl label="币种" value={marketView.symbol} options={['BTC', 'ETH', 'SOL', 'BNB']} onChange={(value) => updateMarketView({ symbol: value })} />
+          <SegmentedControl label="行情判断" value={marketView.regime} options={['下跌趋势', '震荡', '反弹', '不确定']} onChange={(value) => updateMarketView({ regime: value })} />
+          <SegmentedControl label="方向" value={marketView.direction} options={['只做多', '只做空', '都可']} onChange={(value) => updateMarketView({ direction: value })} />
+          <label className="space-y-2">
+            <span className="text-sm font-bold text-slate-800 dark:text-slate-100">风险模式</span>
+            <select
+              value={marketView.riskMode}
+              onChange={(event) => updateMarketView({ riskMode: event.target.value })}
+              className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option>极小资金试错</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => setBatch((value) => value + 1)}
+            className="h-11 rounded-lg bg-slate-950 px-5 text-sm font-bold text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950"
+          >
+            生成候选
+          </button>
+        </div>
+        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          基于你的判断：{marketView.symbol} + {marketView.regime} + {marketView.direction} + {marketView.riskMode}。系统给出以下候选。这是候选建议，不是执行授权。
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-4 flex items-center gap-3">
+          <StepBadge value="2" />
+          <div>
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">系统推荐候选</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">基于你的判断，为你挑选最匹配的候选。</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {candidates.map((candidate, index) => (
+            <CandidateCard
+              key={`${candidate.id}-${batch}`}
+              candidate={candidate}
+              rank={index + 1}
+              onConfirm={selectForConfirmation}
+            />
+          ))}
         </div>
         <button
           type="button"
-          disabled
-          className="whitespace-nowrap rounded-lg border border-white/10 bg-white/10 px-5 py-2.5 text-sm font-medium text-white opacity-60"
+          onClick={() => setBatch((value) => value + 1)}
+          className="mx-auto mt-4 flex items-center gap-2 text-sm font-bold text-slate-700 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white"
         >
-          新建观察稍后开放
+          换一批候选 <RotateCcw className="h-4 w-4" />
         </button>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatusCard title="系统状态" value="安全" note="禁止下单" tone="teal" />
-        <StatusCard title="账户状态" value={data.accountFacts ? '读取正常' : '暂未上报'} note={`持仓 ${positions} / 挂单 ${orders}`} tone="teal" />
-        <StatusCard title="当前策略组" value="MI-001 SOL" note="MI-001 动量冲击 / 多头观察" tone="indigo" />
-        <StatusCard title="当前阻断" value={blockerCopy} note="试验未启动" tone="amber" accent />
-      </section>
-
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Panel title="全仓账户概览">
-          <div className="grid flex-grow grid-cols-2 gap-6 p-5">
-            <Metric label="总权益" value={totalEquity} />
-            <Metric label="可用余额" value={available} />
-            <Metric label="保证金占用" value={margin} />
-            <div className="flex gap-8">
-              <Metric label="持仓" value={positions} />
-              <Metric label="挂单" value={orders} />
-            </div>
-            <Metric label="未实现盈亏" value={unrealized} />
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_0.72fr]">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-4 flex items-center gap-3">
+            <StepBadge value="3" />
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">全部策略类型</h3>
           </div>
-        </Panel>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {strategyTypeShelf().map((item) => (
+              <div key={item.title} className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-900">
+                  <GitBranch className="h-5 w-5" />
+                </div>
+                <h4 className="font-bold text-slate-950 dark:text-slate-50">{item.title}</h4>
+                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
-        <Panel
-          title="最近执行意图"
-          action={<Link to="/intents" className="text-xs font-medium text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300">查看全部</Link>}
-        >
-          <div className="flex flex-grow flex-col items-center justify-center p-10 text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
-              <Zap className="h-6 w-6 text-slate-400 dark:text-slate-500" />
-            </div>
-            <h4 className="mb-2 font-bold text-slate-800 dark:text-slate-200">暂无新意图</h4>
-            <p className="mb-5 max-w-xs text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-              策略还没有产生可记录的意图，或当前仍处于准备阶段。没有执行指令，没有订单。
-            </p>
-            <div className="flex gap-4 text-xs font-medium text-slate-400 dark:text-slate-500">
-              <span>最近信号：{signalText(data)}</span>
-              <span>最近阻断：启动保护</span>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-4 flex items-center gap-3">
+            <StepBadge value="4" />
+            <div>
+              <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">看不懂术语？</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">用大白话解释给你听。</p>
             </div>
           </div>
-        </Panel>
+          <PlainTerm term="策略类型" desc="不同的赚钱思路或打法，比如趋势类、波动类。" />
+          <PlainTerm term="候选" desc="系统为你挑选的具体币种和方向，可以先看看再决定。" />
+          <PlainTerm term="试验" desc="用极小资金先跑一段时间，看效果再加大资金。" />
+        </section>
       </section>
 
-      <section className="flex flex-col justify-between gap-4 rounded-xl border border-indigo-100 bg-indigo-50/80 p-6 dark:border-indigo-900/50 dark:bg-indigo-950/30 md:flex-row md:items-center">
-        <div>
-          <h3 className="mb-1 text-sm font-bold text-indigo-900 dark:text-indigo-300">当前可做</h3>
-          <p className="text-xs text-indigo-700/80 dark:text-indigo-400/80">
-            您可以继续查看详细信息。当前不可做：启动试验 / 创建执行指令 / 下单。
+      <TechnicalDetails data={{ currentCandidate: carrierDecision, marketView, selectedCarrierId: flowState.selectedCarrierId, rawGovernance: data.strategyTrialGovernance }} />
+    </PageShell>
+  );
+}
+
+export function TrialConfirmationV2() {
+  const { data, error } = useConsoleData();
+  const { flowState, updateFlowState } = useOwnerFlowState();
+  if (error) return <ErrorState error={error} />;
+  if (!data) return <Loading label="加载授权前确认单..." />;
+
+  const carrierDecision = carrierDecisionView(data);
+  const selectedCarrierId = flowState.selectedCarrierId || carrierDecision.carrierId;
+  const confirmationCarrier = selectedCarrierId === carrierDecision.carrierId
+    ? carrierDecision
+    : selectedCarrierFallback(carrierDecision, selectedCarrierId);
+  const acknowledgements = flowState.riskAcknowledgements[selectedCarrierId] || {};
+  const confirmation = trialConfirmationView(confirmationCarrier, data, acknowledgements);
+  const setRiskAcknowledged = (riskId: string, acknowledged: boolean) => {
+    updateFlowState((current) => ({
+      ...current,
+      selectedCarrierId,
+      riskAcknowledgements: {
+        ...current.riskAcknowledgements,
+        [selectedCarrierId]: {
+          ...(current.riskAcknowledgements[selectedCarrierId] || {}),
+          [riskId]: acknowledged,
+        },
+      },
+    }));
+  };
+
+  return (
+    <PageShell title="授权前确认单 / 发起试验" subtitle="授权前，请确认试验内容、风险与所有硬门槛均已通过。">
+      <FlowStepper currentStep={3} />
+      <p className="text-sm text-slate-600 dark:text-slate-300">在授权前，请确认试验内容、风险与所有硬门槛均已通过。</p>
+
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-4 flex items-center gap-3">
+            <StepBadge value="1" />
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">本次试验内容</h3>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {confirmation.content.map(([label, value]) => (
+              <TrialFact key={label} label={label} value={value} />
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-4 flex items-center gap-3">
+            <StepBadge value="2" />
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">为什么推荐它</h3>
+          </div>
+          <ul className="space-y-4 text-sm leading-6 text-slate-700 dark:text-slate-300">
+            {confirmation.reasons.map((reason) => (
+              <li key={reason} className="flex gap-3">
+                <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-700 dark:bg-slate-300" />
+                <span>{reason}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </section>
+
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-4 flex items-center gap-3">
+            <StepBadge value="3A" />
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">策略风险 <span className="text-sm font-normal text-slate-500">（你可知情接受）</span></h3>
+          </div>
+          <div className="space-y-3">
+            {confirmation.risks.map((risk) => (
+              <label key={risk.id} className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                <span className="flex items-start gap-4">
+                  <AlertCircle className="mt-1 h-5 w-5 text-slate-600 dark:text-slate-300" />
+                  <span>
+                    <span className="block font-bold text-slate-950 dark:text-slate-50">{risk.title}</span>
+                    <span className="mt-1 block text-sm text-slate-600 dark:text-slate-300">{risk.desc}</span>
+                    <StatePill tone={acknowledgements[risk.id] ? 'teal' : 'amber'}>
+                      {acknowledgements[risk.id] ? '已在本地确认' : '未确认'}
+                    </StatePill>
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(acknowledgements[risk.id])}
+                    onChange={(event) => setRiskAcknowledged(risk.id, event.target.checked)}
+                    className="h-5 w-5 rounded border-slate-300"
+                  />
+                  我已知晓
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+            风险确认仅保存在本地界面，尚未写入后端授权记录。
           </p>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-4 flex items-center gap-3">
+            <StepBadge value="3B" />
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">硬安全门 <span className="text-sm font-normal text-slate-500">（必须通过）</span></h3>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+            {confirmation.gates.map((gate) => (
+              <div key={gate.label} className="grid grid-cols-[1fr_auto] border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 dark:border-slate-800">
+                <span className="text-slate-700 dark:text-slate-300">{gate.label}</span>
+                <span className={`inline-flex items-center gap-2 font-bold ${gate.tone === 'teal' ? 'text-emerald-600' : gate.tone === 'rose' ? 'text-rose-600' : 'text-amber-600'}`}>
+                  {gate.tone === 'teal' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                  {gate.result}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="mb-4 flex items-center gap-3">
+          <StepBadge value="4" />
+          <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">测试网验证结果</h3>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <SoftLink to="/strategy-groups">查看策略组</SoftLink>
-          <SoftLink to="/analysis">查看复盘证据</SoftLink>
-          <SoftLink to="/trace">查看链路追踪</SoftLink>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+          {confirmation.testnet.map((item) => (
+            <div key={item.label} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-4 text-sm dark:border-slate-800">
+              {item.result === '通过'
+                ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                : <AlertCircle className="h-4 w-4 text-amber-600" />}
+              <span className="font-bold text-slate-950 dark:text-slate-50">{item.label}</span>
+              <span className="text-slate-500">{item.result}</span>
+            </div>
+          ))}
         </div>
       </section>
 
-      <TechnicalDetails data={technicalPayload(data)} />
-    </>
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_0.52fr]">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-4 flex items-center gap-3">
+            <StepBadge value="5" />
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">你的最终动作</h3>
+          </div>
+          <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+            确认以上信息均已阅读并理解，且所有硬安全门均通过后，才可授权本次小额试验。
+          </p>
+          <button
+            type="button"
+            disabled
+            className="mb-3 flex w-full cursor-not-allowed items-center justify-center gap-3 rounded-xl bg-slate-300 px-5 py-4 text-base font-bold text-white dark:bg-slate-700 dark:text-slate-300"
+          >
+            <Wallet className="h-5 w-5" />
+            授权这一次小额试验
+            <span className="text-sm font-normal">（当前未接入真实资金环境，暂不可点击）</span>
+          </button>
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+            {confirmation.disabledReason}
+          </p>
+          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
+            <p className="mb-2 font-bold text-slate-900 dark:text-slate-100">暂不能授权真实资金，还差：</p>
+            <ol className="list-decimal space-y-1 pl-5 text-slate-700 dark:text-slate-300">
+              {confirmation.remainingConditions.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ol>
+          </div>
+          <Link
+            to="/strategy-candidates"
+            className="flex w-full items-center justify-center rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-900"
+          >
+            返回重新选候选
+          </Link>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-3 flex items-center gap-2">
+            <HelpCircle className="h-5 w-5" />
+            <h3 className="font-bold text-slate-950 dark:text-slate-50">为什么按钮是灰色的？</h3>
+          </div>
+          <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+            {confirmation.disabledReason}
+          </p>
+        </section>
+      </section>
+
+      <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: acknowledgements, rawGovernance: data.strategyTrialGovernance }} />
+    </PageShell>
   );
 }
 
@@ -221,6 +619,7 @@ export function StrategyGroupsV2() {
   const { primaryShelf, secondaryShelf, allShelf, apiUnavailable } = strategyGroupShelves(data);
   const shelf = allShelf;
   const selectedGroup = shelf.find((item) => item.strategy_group_id === selectedGroupId) || shelf[0]!;
+  const carrierDecision = carrierDecisionView(data);
   return (
     <PageShell title="策略组" subtitle="StrategyFamily / Carrier 货架。这里只用于 Owner 观察、比较和复盘，不会自动选择策略。">
       {apiUnavailable ? (
@@ -234,6 +633,8 @@ export function StrategyGroupsV2() {
         primaryCount={primaryShelf.length}
         secondaryCount={secondaryShelf.length}
       />
+
+      <CarrierHierarchyPanel view={carrierDecision} />
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="space-y-5">
@@ -256,17 +657,17 @@ export function StrategyGroupsV2() {
         <StrategyGroupDetail item={selectedGroup} />
       </section>
 
-      <details className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <summary className="flex cursor-pointer items-center justify-between gap-3 px-5 py-4 text-sm font-bold text-slate-800 transition-colors hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800/40">
+      <details className="rounded-2xl border border-amber-500/15 bg-slate-950/85 shadow-lg shadow-black/20">
+        <summary className="flex cursor-pointer items-center justify-between gap-3 px-5 py-4 text-sm font-bold text-slate-800 transition-colors hover:bg-slate-900/70 dark:text-slate-100 dark:hover:bg-slate-800/40">
           <span className="flex items-center gap-2">
             <FileSearch className="h-4 w-4 text-indigo-500" />
             证据与技术面板
           </span>
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">默认折叠，不影响 Owner 首屏判断</span>
+          <span className="text-xs font-medium text-slate-400">默认折叠，不影响 Owner 首屏判断</span>
         </summary>
-        <div className="space-y-5 border-t border-slate-100 p-5 dark:border-slate-800">
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">策略组列表</h3>
+        <div className="space-y-5 border-t border-slate-100 p-5 ">
+          <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+            <h3 className="mb-4 text-base font-bold text-slate-50">策略组列表</h3>
             <DataTable
               columns={['strategy_group_id', '策略组', '代表候选', '状态', '证据强度', '下一步']}
               rows={shelf.map((item) => [
@@ -320,12 +721,25 @@ export function StrategyGroupsV2() {
 
 export function IntentsV2() {
   const { data, error } = useConsoleData();
+  const { flowState } = useOwnerFlowState();
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading label="加载执行意图..." />;
 
   const rows = buildIntentRows(data);
+  const carrierDecision = carrierDecisionView(data);
+  const selectedCarrierId = flowState.selectedCarrierId || carrierDecision.carrierId;
+  const selectedAcknowledgements = flowState.riskAcknowledgements[selectedCarrierId] || {};
+  const acknowledgedCount = Object.values(selectedAcknowledgements).filter(Boolean).length;
+  const noIntentText = carrierDecision.provenance.executionIntentState === 'unavailable'
+    ? '执行计划状态数据未接入，无法判断是否存在真实资金执行计划。'
+    : `当前还没有真实资金执行计划，因为你尚未完成真实资金授权。当前等待确认的候选是 ${selectedCarrierId}；执行计划不是订单，不会触发交易。`;
   return (
-    <PageShell title="执行意图" subtitle="这里只记录策略意图，不会触发交易。">
+    <PageShell title="执行计划" subtitle="这里展示策略想做什么；执行计划不是订单，不会触发交易。">
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <ReviewCard title="当前待确认候选" value={selectedCarrierId} />
+        <ReviewCard title="当前确认阶段" value="风险确认 / 授权草案 / 等待 live 环境" />
+        <ReviewCard title="本地风险确认" value={`${acknowledgedCount} / 3 项`} />
+      </section>
       {rows.length ? (
         <DataTable
           columns={['时间', '策略', '标的', '方向', '意图', '状态', '原因', '后续表现']}
@@ -334,15 +748,39 @@ export function IntentsV2() {
       ) : (
         <EmptyState
           icon={<Zap className="h-6 w-6" />}
-          title="暂无执行意图记录"
-          subtitle="策略还没有产生可记录的意图，或当前仍处于准备阶段。执行意图不是订单，不会触发交易。"
+          title={carrierDecision.provenance.executionIntentState === 'unavailable' ? '执行计划状态未接入' : '暂无执行计划记录'}
+          subtitle={noIntentText}
         />
       )}
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">图表复盘</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400">TradingView 类图表稍后支持。当前仅保留只读复盘位置。</p>
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+        <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+          <div>
+            <h3 className="text-base font-bold text-slate-50">授权链路状态</h3>
+            <p className="mt-1 text-sm text-slate-400">
+              {carrierDecision.provenance.executionIntentState === 'unavailable'
+                ? '执行链路状态必须以后端为准；当前数据未接入，无法用于真实授权。'
+                : '当前停在“等待授权”。只有你明确授权后，才可能进入后续链路；当前没有真实资金执行计划或订单。'}
+            </p>
+          </div>
+          <StatePill tone="amber">{humanAuthorizationState(carrierDecision.authorizationState)}</StatePill>
+        </div>
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
+          {['等待授权', '执行计划', '入场订单', '保护订单', '退出 / 复盘'].map((step, index) => (
+            <div key={step} className="rounded-xl border border-amber-500/10 bg-slate-900/70 p-3">
+              <div className="mb-2 text-xs font-bold text-amber-200/60">Step {index + 1}</div>
+              <div className="text-sm font-semibold text-slate-100">{step}</div>
+              <div className="mt-2">
+                <StatePill tone={index === 0 ? 'amber' : 'slate'}>{index === 0 ? '当前' : '未创建'}</StatePill>
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
-      <TechnicalDetails data={{ evidence: data.evidence, currentCampaign: data.currentCampaign }} />
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+        <h3 className="mb-2 text-sm font-bold text-slate-100">图表复盘</h3>
+        <p className="text-sm text-slate-400">TradingView 类图表稍后支持。当前仅保留只读复盘位置。</p>
+      </section>
+      <TechnicalDetails data={{ selectedCarrierId, localRiskAcknowledgements: selectedAcknowledgements, evidence: data.evidence, currentCampaign: data.currentCampaign }} />
     </PageShell>
   );
 }
@@ -353,32 +791,59 @@ export function AccountOrdersV2() {
   if (!data) return <Loading label="加载账户订单..." />;
 
   const account = data.accountFacts?.account_summary || {};
+  const accountFactsAvailable = Boolean(data.accountFacts);
   const unknown = data.accountFacts?.unknown_unmanaged_counts || {};
-  const positions = data.accountFacts?.positions || [];
-  const openOrders = data.accountFacts?.open_orders || [];
-  const abnormal = Number(unknown.orders || 0) + Number(unknown.positions || 0);
+  const positions = accountFactsAvailable ? data.accountFacts?.positions || [] : [];
+  const openOrders = accountFactsAvailable ? data.accountFacts?.open_orders || [] : [];
+  const abnormal = accountFactsAvailable ? Number(unknown.orders || 0) + Number(unknown.positions || 0) : null;
+  const carrierDecision = carrierDecisionView(data);
+  const bnbPositions = recordsForSymbol(positions, 'BNB');
+  const bnbOrders = recordsForSymbol(openOrders, 'BNB');
+  const accountUnavailable = '账户事实数据未接入';
 
   return (
     <PageShell title="账户订单" subtitle="当前只读取账户信息，不提供交易操作，禁止下单。">
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+        <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+          <div>
+            <h3 className="text-base font-bold text-slate-50">当前候选账户上下文</h3>
+            <p className="mt-1 text-sm text-slate-400">
+              {carrierDecision.carrierId} 只用于只读核对。这里显示 BNB 持仓、挂单、账户事实和对账状态，不提供交易动作。
+            </p>
+          </div>
+          <StatePill tone={carrierDecision.pendingOwnerLiveAuthorization ? 'amber' : 'slate'}>{humanAuthorizationState(carrierDecision.authorizationState)}</StatePill>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <ShelfMiniFact label="Carrier" value={carrierDecision.carrierId} />
+          <ShelfMiniFact label="BNB 持仓" value={accountFactsAvailable ? bnbPositions.length ? `${bnbPositions.length} 条` : '后端确认暂无 BNB 持仓' : accountUnavailable} />
+          <ShelfMiniFact label="BNB 挂单" value={accountFactsAvailable ? bnbOrders.length ? `${bnbOrders.length} 条` : '后端确认暂无 BNB 挂单' : accountUnavailable} />
+          <ShelfMiniFact label="Reconciliation" value={accountFactsAvailable ? String(recordAt(data.accountFacts?.reconciliation_status, 'status').status || data.accountFacts?.reconciliation_status?.status || '暂未上报') : accountUnavailable} />
+          <ShelfMiniFact label="source" value={data.accountFacts?.source || '暂未上报'} />
+          <ShelfMiniFact label="truth level" value={data.accountFacts?.truth_level || '暂未上报'} />
+          <ShelfMiniFact label="facts freshness" value={data.accountFacts?.generated_at_ms ? new Date(data.accountFacts.generated_at_ms).toISOString() : '暂未上报'} />
+          <ShelfMiniFact label="reconciled at" value={data.accountFacts?.reconciliation_checked_at_ms ? new Date(data.accountFacts.reconciliation_checked_at_ms).toISOString() : '暂未上报'} />
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-6 shadow-lg shadow-black/20">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-4 md:gap-8">
-          <Metric bordered label="总权益" value={withUsdt(firstText(data.mi001?.risk_policy.account_equity, account.total_equity, account.equity))} />
-          <Metric bordered label="可用余额" value={withUsdt(firstText(data.mi001?.risk_policy.available_margin, account.available_balance, account.available_margin))} />
-          <Metric bordered label="保证金占用" value={withUsdt(firstText(account.margin_balance, account.available_margin))} />
-          <Metric label="未实现盈亏" value={withUsdt(firstText(account.unrealized_pnl, account.unrealized_profit))} />
+          <Metric bordered label="总权益" value={accountFactsAvailable ? withUsdt(firstText(account.total_equity, account.equity)) : accountUnavailable} />
+          <Metric bordered label="可用余额" value={accountFactsAvailable ? withUsdt(firstText(account.available_balance, account.available_margin)) : accountUnavailable} />
+          <Metric bordered label="保证金占用" value={accountFactsAvailable ? withUsdt(firstText(account.margin_balance, account.available_margin)) : accountUnavailable} />
+          <Metric label="未实现盈亏" value={accountFactsAvailable ? withUsdt(firstText(account.unrealized_pnl, account.unrealized_profit)) : accountUnavailable} />
         </div>
       </section>
 
       <section className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <RecordPanel title="持仓" items={positions} empty="暂无持仓" />
-        <RecordPanel title="挂单" items={openOrders} empty="暂无挂单" />
+        <RecordPanel title="持仓" items={positions} empty={accountFactsAvailable ? '后端确认暂无持仓' : accountUnavailable} />
+        <RecordPanel title="挂单" items={openOrders} empty={accountFactsAvailable ? '后端确认暂无挂单' : accountUnavailable} />
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">异常敞口</h3>
-        <div className={toneBox(abnormal > 0 ? 'rose' : 'teal')}>
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-6 shadow-lg shadow-black/20">
+        <h3 className="mb-2 text-sm font-bold text-slate-100">异常敞口</h3>
+        <div className={toneBox(abnormal === null || abnormal > 0 ? 'rose' : 'teal')}>
           <span className="h-2 w-2 flex-shrink-0 rounded-full bg-current" />
-          {abnormal > 0 ? `发现 ${abnormal} 个异常敞口` : '未发现异常敞口。'}
+          {abnormal === null ? '账户事实数据未接入，无法判断异常敞口。' : abnormal > 0 ? `发现 ${abnormal} 个异常敞口` : '后端确认未发现异常敞口。'}
         </div>
       </section>
 
@@ -400,60 +865,65 @@ export function AnalysisV2() {
 
   const latestDecision = (data.decisions[0] || {}) as Record<string, unknown>;
   const latestBinding = (data.bindings[0] || {}) as Record<string, unknown>;
+  const carrierDecision = carrierDecisionView(data);
   return (
-    <PageShell title="复盘分析" subtitle="MI-001 SOL 已完成试验前复核，尚未开始试验。">
+    <PageShell title="复盘分析" subtitle={`${carrierDecision.carrierId} 是当前候选复盘对象；复盘证据不授权真实资金执行计划或订单。`}>
       <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <ReviewCard title="试验前复核" value="已完成" />
+        <ReviewCard title="试验前复核" value={data.reviewPacket || data.strategyTrialGovernance ? '后端已上报' : '数据未接入'} />
         <ReviewCard title="风险披露" value={latestDecision.risk_disclosure_json ? '已完成' : '暂未上报'} />
-        <ReviewCard title="Owner 接受" value={firstText(latestDecision.owner_risk_acceptance_id, latestBinding.owner_risk_acceptance_id, '已完成')} />
+        <ReviewCard title="Owner 接受" value={firstText(latestDecision.owner_risk_acceptance_id, latestBinding.owner_risk_acceptance_id, '数据未接入')} />
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-4 flex items-center gap-2 text-base font-bold text-slate-900 dark:text-slate-100">
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-6 shadow-lg shadow-black/20">
+        <h3 className="mb-4 flex items-center gap-2 text-base font-bold text-slate-50">
           <AlertCircle className="h-4.5 w-4.5 text-amber-500" />
           当前结论
         </h3>
-        <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-5 text-sm text-slate-700 dark:border-slate-700/50 dark:bg-slate-800/50 dark:text-slate-300">
-          <p className="font-medium text-slate-900 dark:text-slate-100">策略候选已完成准备，但运行时启动保护未完成预检。</p>
-          <p>当前只适合继续查看证据或等待下一次授权。</p>
+        <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-900/70 p-5 text-sm text-slate-700 dark:border-slate-700/50 dark:bg-slate-800/50 dark:text-slate-300">
+          <p className="font-medium text-slate-50">BNB 测试网保护演练已完成；当前必须解决的问题是真实资金尚未授权。</p>
+          <p>复盘证据只用于授权前检查，不创建真实资金执行计划或订单。</p>
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">证据摘要</h3>
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-6 shadow-lg shadow-black/20">
+        <h3 className="mb-4 text-base font-bold text-slate-50">BNB 测试网证据</h3>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {carrierDecision.testnetEvidence.map(([label, value]) => (
+            <ShelfMiniFact key={label} label={label} value={value} />
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-6 shadow-lg shadow-black/20">
+        <h3 className="mb-4 text-base font-bold text-slate-50">证据摘要</h3>
         <ul className="space-y-3">
           <EvidenceItem label="broad smoke" value={data.mi001 ? '已完成' : '暂未上报'} />
-          <EvidenceItem label="Owner acceptance" value={firstText(latestDecision.owner_risk_acceptance_id, latestBinding.owner_risk_acceptance_id, '已完成')} />
+          <EvidenceItem label="Owner acceptance" value={firstText(latestDecision.owner_risk_acceptance_id, latestBinding.owner_risk_acceptance_id, '数据未接入')} />
           <EvidenceItem label="PG 注册" value={data.mi001?.source_refs.some((ref) => ref.includes('brc_')) ? '已完成' : '暂未上报'} />
-          <EvidenceItem label="final review" value={data.reviewPacket ? '已上报' : '已完成'} />
+          <EvidenceItem label="final review" value={data.reviewPacket || data.strategyTrialGovernance ? '后端已上报' : '数据未接入'} />
           <EvidenceItem label="trial_trade_intent evidence" value={intentEvidenceText(data)} />
-          <EvidenceItem label="订单" value="无订单" />
+          <EvidenceItem label="订单" value={carrierDecision.orderState} />
         </ul>
       </section>
 
-      <TechnicalDetails data={{ reviewPacket: data.reviewPacket, evidence: data.evidence, decisions: data.decisions, bindings: data.bindings }} />
+      <TechnicalDetails data={{ strategyTrialGovernance: data.strategyTrialGovernance, reviewPacket: data.reviewPacket, evidence: data.evidence, decisions: data.decisions, bindings: data.bindings }} />
     </PageShell>
   );
 }
 
 export function TraceV2() {
-  const [expandedNode, setExpandedNode] = useState<string | null>('startup');
+  const [expandedNode, setExpandedNode] = useState<string | null>(null);
   const { data, error } = useConsoleData();
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading label="加载链路追踪..." />;
 
-  const steps = [
-    { id: 'candidate', title: '策略候选形成', status: '已完成', desc: 'MI-001 SOL 多头', tone: 'teal' as const },
-    { id: 'risk', title: 'Owner 风险接受', status: '已完成', desc: '已接受进入准备阶段', tone: 'teal' as const },
-    { id: 'pg', title: 'PG 注册', status: '已完成', desc: '已写入主数据源', tone: 'teal' as const },
-    { id: 'review', title: '最终复核', status: '已完成', desc: 'final pre-start review', tone: 'teal' as const },
-    { id: 'startup', title: '启动保护', status: '阻断', desc: '需要运行时预检', tone: 'amber' as const },
-  ];
+  const carrierDecision = carrierDecisionView(data);
+  const steps = carrierDecision.timeline;
 
   return (
-    <PageShell title="链路追踪" subtitle="查看 MI-001 SOL 从候选到当前阻断状态的完整过程。">
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="relative ml-5 space-y-10 border-l-2 border-slate-200 py-4 dark:border-slate-800">
+    <PageShell title="链路追踪" subtitle={`查看 ${carrierDecision.carrierId} 从观察、测试网保护演练到等待真实资金授权的完整过程。`}>
+      <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-6 shadow-lg shadow-black/20">
+        <div className="relative ml-5 space-y-10 border-l-2 border-slate-200 py-4 ">
           {steps.map((step) => (
             <div key={step.id} className="relative pl-8">
               <div className={timelineDot(step.tone)}>
@@ -462,25 +932,25 @@ export function TraceV2() {
               <button
                 type="button"
                 onClick={() => setExpandedNode((current) => current === step.id ? null : step.id)}
-                className="w-full rounded-xl border border-slate-100 bg-slate-50 p-4 text-left transition-colors hover:bg-slate-100 dark:border-slate-700/50 dark:bg-slate-800/30 dark:hover:bg-slate-800/50"
+                className="w-full rounded-xl border border-slate-100 bg-slate-900/70 p-4 text-left transition-colors hover:bg-slate-100 dark:border-slate-700/50 dark:bg-slate-800/30 dark:hover:bg-slate-800/50"
               >
                 <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
                   <div className="flex items-center gap-3">
-                    <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">{step.title}</h3>
+                    <h3 className="text-base font-bold text-slate-50">{step.title}</h3>
                     <StatePill tone={step.tone}>{step.status}</StatePill>
                   </div>
                   {expandedNode === step.id ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                 </div>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{step.desc}</p>
+                <p className="mt-2 text-sm text-slate-400">{step.desc}</p>
                 {expandedNode === step.id ? (
-                  <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+                  <div className="mt-4 rounded-lg border border-amber-500/15 bg-slate-950/85 p-4 dark:border-slate-700 ">
                     <p className="text-sm text-slate-600 dark:text-slate-300">
-                      说明：{step.id === 'startup' ? '运行时启动保护还没有完成预检。' : '节点已完成，技术来源可在下方展开。'}
+                      说明：{step.desc}
                     </p>
-                    <div className="mt-4 rounded border border-slate-200 bg-slate-100/50 p-3 dark:border-slate-800 dark:bg-slate-950">
+                    <div className="mt-4 rounded border border-slate-200 bg-slate-100/50 p-3  dark:bg-slate-950">
                       <p className="mb-1 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-500">技术状态</p>
                       <p className="break-all font-mono text-xs text-amber-600 dark:text-amber-400">
-                        {step.id === 'startup' ? 'blocked_startup_guard_runtime_coupled' : 'reported'}
+                        {step.tech}
                       </p>
                     </div>
                   </div>
@@ -500,6 +970,7 @@ export function TraceV2() {
         currentCampaign: data.currentCampaign,
         reviewPacket: data.reviewPacket,
         evidence: data.evidence,
+        strategyTrialGovernance: data.strategyTrialGovernance,
         operations: data.operations,
         gaps: data.gaps,
       }} />
@@ -524,6 +995,7 @@ function useConsoleData(): ViewState {
         observationCaseQueue,
         bnbTrialGap,
         strategyTrialReadiness,
+        strategyTrialGovernance,
         families,
         decisions,
         bindings,
@@ -562,6 +1034,10 @@ function useConsoleData(): ViewState {
         }),
         brcApi.strategyTrialReadinessV1().catch((error) => {
           gaps.push(`strategy trial readiness v1: ${message(error)}`);
+          return null;
+        }),
+        brcApi.strategyTrialArchitectureGovernance().catch((error) => {
+          gaps.push(`strategy trial architecture governance: ${message(error)}`);
           return null;
         }),
         brcApi.listStrategyFamilies().catch((error) => {
@@ -605,6 +1081,7 @@ function useConsoleData(): ViewState {
             observationCaseQueue,
             bnbTrialGap,
             strategyTrialReadiness,
+            strategyTrialGovernance,
             families,
             decisions,
             bindings,
@@ -627,6 +1104,57 @@ function useConsoleData(): ViewState {
   }, [refreshCount]);
 
   return state;
+}
+
+function useOwnerFlowState(defaultCarrierId = '') {
+  const [flowState, setFlowState] = useState<OwnerFlowState>(() => readOwnerFlowState(defaultCarrierId));
+
+  useEffect(() => {
+    if (!flowState.selectedCarrierId && defaultCarrierId) {
+      setFlowState((current) => ({ ...current, selectedCarrierId: defaultCarrierId }));
+    }
+  }, [defaultCarrierId, flowState.selectedCarrierId]);
+
+  const updateFlowState = (updater: (current: OwnerFlowState) => OwnerFlowState) => {
+    setFlowState((current) => {
+      const next = updater(current);
+      writeOwnerFlowState(next);
+      return next;
+    });
+  };
+
+  return { flowState, updateFlowState };
+}
+
+function readOwnerFlowState(defaultCarrierId: string): OwnerFlowState {
+  const fallback: OwnerFlowState = {
+    marketView: DEFAULT_MARKET_VIEW,
+    selectedCarrierId: defaultCarrierId,
+    riskAcknowledgements: {},
+  };
+  try {
+    const raw = window.localStorage.getItem(OWNER_FLOW_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<OwnerFlowState>;
+    return {
+      marketView: {
+        ...DEFAULT_MARKET_VIEW,
+        ...(parsed.marketView || {}),
+      },
+      selectedCarrierId: parsed.selectedCarrierId || defaultCarrierId,
+      riskAcknowledgements: parsed.riskAcknowledgements || {},
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeOwnerFlowState(state: OwnerFlowState) {
+  try {
+    window.localStorage.setItem(OWNER_FLOW_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Local persistence is best-effort UI state only.
+  }
 }
 
 function PageShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
@@ -712,6 +1240,382 @@ function DataTable({ columns, rows, compact = false }: { columns: string[]; rows
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+function StepBadge({ value }: { value: string }) {
+  return (
+    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-sm font-bold text-white dark:bg-slate-100 dark:text-slate-950">
+      {value}
+    </span>
+  );
+}
+
+function FlowProgress({ currentStep }: { currentStep: number }) {
+  const steps = ['市场判断', '选择候选', '风险确认', '授权', '执行/复盘'];
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+        {steps.map((step, index) => {
+          const stepIndex = index + 1;
+          const completed = stepIndex < currentStep;
+          const active = stepIndex === currentStep;
+          return (
+            <div key={step} className="relative flex flex-col items-center text-center">
+              {index > 0 ? <div className="absolute right-1/2 top-5 hidden h-px w-full bg-slate-300 md:block dark:bg-slate-700" /> : null}
+              <div className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-full border text-sm font-bold ${
+                active
+                  ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950'
+                  : completed
+                    ? 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                    : 'border-slate-300 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300'
+              }`}>
+                {completed ? <Check className="h-4 w-4" /> : stepIndex}
+              </div>
+              <h3 className="mt-3 font-bold text-slate-950 dark:text-slate-50">{step}</h3>
+              <p className="mt-1 text-sm text-slate-500">{active ? '当前步骤' : completed ? '已完成' : '待进行'}</p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function FlowStepper({ currentStep }: { currentStep: number }) {
+  const steps = ['市场判断', '已选候选', '风险确认', '授权草案', '执行/复盘'];
+  return (
+    <section className="grid grid-cols-1 gap-2 md:grid-cols-5">
+      {steps.map((step, index) => {
+        const active = index + 1 === currentStep;
+        return (
+          <div
+            key={step}
+            className={`flex items-center justify-center gap-3 rounded-xl border px-4 py-3 text-sm font-bold ${
+              active
+                ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950'
+                : 'border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200'
+            }`}
+          >
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-current">{index + 1}</span>
+            {step}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+function WorkbenchCard({
+  icon,
+  title,
+  body,
+  facts,
+  to,
+  linkText,
+  centered,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  facts: Array<[string, string]>;
+  to: string;
+  linkText: string;
+  centered?: boolean;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+            {icon}
+          </div>
+          <h3 className="text-lg font-bold text-slate-950 dark:text-slate-50">{title}</h3>
+        </div>
+        <ChevronRight className="h-5 w-5 text-slate-500" />
+      </div>
+      <div className={centered ? 'py-4 text-center' : ''}>
+        <p className="text-2xl font-bold text-slate-950 dark:text-slate-50">{body}</p>
+      </div>
+      <div className="mt-4 space-y-2 text-sm">
+        {facts.map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-4">
+            <span className="text-slate-500">{label}</span>
+            <span className="font-medium text-slate-800 dark:text-slate-200">{value}</span>
+          </div>
+        ))}
+      </div>
+      <Link to={to} className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-slate-800 hover:text-slate-950 dark:text-slate-200 dark:hover:text-white">
+        {linkText} <ChevronRight className="h-4 w-4" />
+      </Link>
+    </section>
+  );
+}
+
+function PlainListPanel({
+  icon,
+  title,
+  items,
+  link,
+  linkText,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  items: string[];
+  link: string;
+  linkText: string;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="mb-4 flex items-center gap-3">
+        {icon}
+        <h3 className="text-lg font-bold text-slate-950 dark:text-slate-50">{title}</h3>
+      </div>
+      <ul className="space-y-3 text-sm leading-6 text-slate-700 dark:text-slate-300">
+        {items.map((item) => (
+          <li key={item} className="flex gap-3">
+            <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-700 dark:bg-slate-300" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+      <Link to={link} className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-slate-800 hover:text-slate-950 dark:text-slate-200 dark:hover:text-white">
+        {linkText} <ChevronRight className="h-4 w-4" />
+      </Link>
+    </section>
+  );
+}
+
+function SegmentedControl({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+              value === option
+                ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950'
+                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900'
+            }`}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type RecommendedCandidate = {
+  id: string;
+  name: string;
+  category: string;
+  summary: string;
+  reason: string;
+  status: string;
+  risk: string;
+  source: DataSource;
+  sourceLabel: string;
+  action: 'confirm' | 'observe' | 'details' | 'not_recommended';
+  actionLabel: string;
+};
+
+function CandidateCard({
+  candidate,
+  rank,
+  onConfirm,
+}: {
+  candidate: RecommendedCandidate;
+  rank: number;
+  onConfirm: (candidate: RecommendedCandidate) => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="mb-4 flex items-start gap-4">
+        <StepBadge value={String(rank)} />
+        <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-slate-950 dark:text-slate-50">{candidate.name}</h3>
+            <StatePill tone="slate">{candidate.category}</StatePill>
+            <StatePill tone={candidate.source === 'sample_data' ? 'amber' : 'teal'}>{candidate.sourceLabel}</StatePill>
+          </div>
+        </div>
+      </div>
+      <p className="mb-4 text-sm leading-6 text-slate-700 dark:text-slate-300">{candidate.summary}</p>
+      <div className="space-y-3 border-t border-dashed border-slate-300 pt-4 text-sm dark:border-slate-700">
+        <MiniReason label="适合当前判断的原因" value={candidate.reason} />
+        <MiniReason label="当前状态" value={candidate.status} dot />
+        <MiniReason label="主要风险" value={candidate.risk} />
+      </div>
+      <button
+        type="button"
+        onClick={() => candidate.action === 'confirm' ? onConfirm(candidate) : undefined}
+        disabled={candidate.action !== 'confirm'}
+        className={`mt-5 flex h-11 w-full items-center justify-center rounded-lg border text-sm font-bold transition ${
+          candidate.action === 'confirm'
+            ? 'cursor-pointer border-slate-800 text-slate-900 hover:bg-slate-50 dark:border-slate-200 dark:text-slate-100 dark:hover:bg-slate-900'
+            : 'cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-500'
+        }`}
+      >
+        {candidate.actionLabel}
+      </button>
+      <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">
+        候选建议不是执行授权，不会自动选择策略，也不会创建执行计划或订单。
+      </p>
+    </section>
+  );
+}
+
+function MiniReason({ label, value, dot }: { label: string; value: string; dot?: boolean }) {
+  return (
+    <div className="grid grid-cols-[auto_1fr] gap-3">
+      {dot ? <span className="mt-2 h-2 w-2 rounded-full bg-emerald-500" /> : <Info className="mt-0.5 h-4 w-4 text-slate-500" />}
+      <div>
+        <p className="font-bold text-slate-800 dark:text-slate-100">{label}</p>
+        <p className="mt-1 text-slate-600 dark:text-slate-300">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function PlainTerm({ term, desc }: { term: string; desc: string }) {
+  return (
+    <div className="mb-3 grid grid-cols-[44px_1fr] gap-4 rounded-xl border border-slate-200 p-4 last:mb-0 dark:border-slate-800">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-900">
+        <Info className="h-5 w-5" />
+      </div>
+      <div>
+        <h4 className="font-bold text-slate-950 dark:text-slate-50">{term}</h4>
+        <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{desc}</p>
+      </div>
+    </div>
+  );
+}
+
+function TrialFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[44px_1fr] gap-4 rounded-xl p-3">
+      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-900">
+        <Star className="h-5 w-5" />
+      </div>
+      <div>
+        <p className="text-sm text-slate-500">{label}</p>
+        <p className="font-bold text-slate-950 dark:text-slate-50">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function CarrierAuthorizationPanel({ view }: { view: CarrierDecisionView }) {
+  return (
+    <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+      <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <div>
+          <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-amber-200/75">Carrier Trial Authorization</p>
+          <h3 className="text-xl font-bold text-slate-50">{view.carrierId}</h3>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            {view.strategyFamily} 是策略逻辑本身；Carrier 才是策略族 + 标的 + 方向 + 风险上限。当前 Carrier 已完成 testnet 保护演练，但仍等待 Owner live authorization。
+          </p>
+        </div>
+        <StatePill tone="amber">{view.authorizationState}</StatePill>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <ShelfMiniFact label="StrategyFamily" value={view.strategyFamily} />
+        <ShelfMiniFact label="Carrier" value={view.carrierId} />
+        <ShelfMiniFact label="Candidate" value={view.candidateId} />
+        <ShelfMiniFact label="标的 / 方向" value={`${view.symbol} / ${view.side}`} />
+        <ShelfMiniFact label="数量 / cap" value={`${view.quantity} / ${view.maxNotional}`} />
+        <ShelfMiniFact label="杠杆 / 保护" value={`${view.leverage} / ${view.protectionPlan}`} />
+        <ShelfMiniFact label="Testnet result" value={view.testnetState} />
+        <ShelfMiniFact label="ExecutionIntent" value={view.executionIntentState} />
+        <ShelfMiniFact label="Order" value={view.orderState} />
+      </div>
+      <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/10 p-4 text-sm text-indigo-100">
+        <span className="font-bold">Owner 主动作：</span>
+        {view.primaryAction}
+      </div>
+    </section>
+  );
+}
+
+function DecisionBoundaryPanel({ view }: { view: CarrierDecisionView }) {
+  return (
+    <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+      <h3 className="mb-2 text-base font-bold text-slate-50">阻断与警告</h3>
+      <p className="mb-4 text-sm leading-6 text-slate-400">
+        Warning 可以被 Owner 确认；Hard Blocker 不能绕过。确认 Warning 不等于 live authorization。
+      </p>
+      <div className="space-y-4">
+        <ChipBlock
+          label={`Hard Blocker (${view.hardBlockerCount})`}
+          values={view.hardBlockers.length ? view.hardBlockers : ['none_reported']}
+          tone={view.hardBlockers.length ? 'rose' : 'teal'}
+        />
+        <ChipBlock
+          label={`Strategy Warning (${view.warningCount})`}
+          values={view.strategyWarnings.length ? view.strategyWarnings : ['none_reported']}
+          tone={view.strategyWarnings.length ? 'amber' : 'teal'}
+        />
+        <ChipBlock
+          label="当前不可做"
+          values={['create live ExecutionIntent', 'place order', 'start runtime', 'auto-select strategy']}
+          tone="rose"
+        />
+      </div>
+    </section>
+  );
+}
+
+function CarrierHierarchyPanel({ view }: { view: CarrierDecisionView }) {
+  return (
+    <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+      <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+        <div>
+          <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-amber-200/75">StrategyFamily → Carrier</p>
+          <h3 className="text-xl font-bold text-slate-50">MI-001 Carrier 架构</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            BNB 是 first execution Carrier；SOL 是同一 StrategyFamily 下的历史主链路候选。BNB 不是整个架构。
+          </p>
+        </div>
+        <StatePill tone="rose">无交易入口</StatePill>
+      </div>
+      <DataTable
+        compact
+        columns={['StrategyFamily', 'Carrier', '角色', '状态', '证据', '授权']}
+        rows={[
+          [
+            view.strategyFamily,
+            view.carrierId,
+            <StatePill key="role" tone="teal">first execution Carrier</StatePill>,
+            'pending Owner live authorization',
+            view.testnetState,
+            'live_ready=false',
+          ],
+          [
+            view.strategyFamily,
+            'MI-001-SOL-LONG',
+            <StatePill key="role" tone="slate">same family candidate</StatePill>,
+            'historical primary chain evidence',
+            'final review / PG metadata available',
+            'not current live authorization target',
+          ],
+        ]}
+      />
     </section>
   );
 }
@@ -869,14 +1773,14 @@ function RecordPanel({ title, items, empty }: { title: string; items: Array<Reco
       {items.length ? (
         <div className="space-y-2 p-5">
           {items.slice(0, 4).map((item, index) => (
-            <div key={index} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
+            <div key={index} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm ">
               <span>{firstText(item.symbol, item.display_symbol, `记录 ${index + 1}`)}</span>
               <StatePill tone="slate">{firstText(item.status, item.side, '已上报')}</StatePill>
             </div>
           ))}
         </div>
       ) : (
-        <div className="flex min-h-[160px] flex-grow flex-col items-center justify-center p-6 text-sm text-slate-500 dark:text-slate-400">
+        <div className="flex min-h-[160px] flex-grow flex-col items-center justify-center p-6 text-sm text-slate-400">
           <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
             <Info className="h-4 w-4" />
           </div>
@@ -889,25 +1793,25 @@ function RecordPanel({ title, items, empty }: { title: string; items: Array<Reco
 
 function EmptyState({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {
   return (
-    <section className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
+    <section className="flex flex-col items-center justify-center rounded-xl border border-amber-500/15 bg-slate-950/85 p-10 text-center shadow-sm  ">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-slate-900/70 text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
         {icon}
       </div>
-      <h4 className="mb-2 text-lg font-bold text-slate-800 dark:text-slate-200">{title}</h4>
-      <p className="max-w-sm text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>
+      <h4 className="mb-2 text-lg font-bold text-slate-100">{title}</h4>
+      <p className="max-w-sm text-sm text-slate-400">{subtitle}</p>
     </section>
   );
 }
 
 function ReviewCard({ title, value }: { title: string; value: string }) {
   return (
-    <section className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="flex items-center gap-4 rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/10 dark:text-teal-400">
         <CheckCircle2 className="h-6 w-6" />
       </div>
       <div>
-        <h3 className="mb-1 text-[13px] font-bold tracking-wider text-slate-500 dark:text-slate-400">{title}</h3>
-        <p className="text-base font-bold text-slate-900 dark:text-slate-100">{value}</p>
+        <h3 className="mb-1 text-[13px] font-bold tracking-wider text-slate-400">{title}</h3>
+        <p className="text-base font-bold text-slate-50">{value}</p>
       </div>
     </section>
   );
@@ -917,7 +1821,7 @@ function EvidenceItem({ label, value }: { label: string; value: string }) {
   return (
     <li className="flex items-center gap-3 text-sm">
       <CheckCircle2 className="h-4 w-4 text-teal-500" />
-      <span className="w-44 font-mono text-slate-600 dark:text-slate-400">{label}</span>
+      <span className="w-44 font-mono text-slate-400">{label}</span>
       <span className="border-l border-slate-200 pl-3 font-medium text-slate-800 dark:border-slate-700 dark:text-slate-200">{value}</span>
     </li>
   );
@@ -925,40 +1829,49 @@ function EvidenceItem({ label, value }: { label: string; value: string }) {
 
 function StrategyGroupDetail({ item }: { item: StrategyGroupShelfItem }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">{item.strategy_group_id}</p>
-          <h3 className="mt-1 text-xl font-bold text-slate-950 dark:text-slate-100">{item.strategy_group_name}</h3>
+          <p className="text-xs font-semibold text-amber-200/75">{item.strategy_group_id}</p>
+          <h3 className="mt-1 text-xl font-bold text-slate-50">{item.strategy_group_name}</h3>
         </div>
         <StatePill tone={item.status_tone}>{item.current_status}</StatePill>
       </div>
 
-      <div className="mt-5 space-y-4">
-        <DetailBlock label="Owner 能读懂的总结" value={item.plain_language_summary} />
+      <div className="mt-5 space-y-5">
+        <div className="rounded-xl border border-purple-500/20 bg-purple-500/10 p-4">
+          <p className="mb-1 text-xs font-bold uppercase tracking-[0.16em] text-purple-200">Next Action</p>
+          <p className="text-sm leading-6 text-slate-100">{item.next_recommended_action}</p>
+        </div>
+        <DetailBlock label="Owner 总结" value={item.plain_language_summary} />
         <DetailBlock label="吃什么行情" value={item.market_regime_it_eats} />
         <DetailBlock label="怕什么行情" value={item.market_regime_it_hates} />
         <DetailBlock label="证据摘要" value={item.evidence_summary} />
-        <DetailBlock label="下一步建议" value={item.next_recommended_action} />
+        <DetailBlock label="准入边界" value={item.bounded_trial_readiness || 'display_model_only'} />
         <ChipBlock label="代表候选" values={item.representative_candidates} />
         <ChipBlock label="关键风险" values={item.key_risks} tone="amber" />
-        <ChipBlock label="Confidence flags" values={item.confidence_flags || ['display_model_only']} tone="amber" />
-        <DetailBlock label="Evidence reviewability" value={item.evidence_reviewability || 'display_model_only'} />
-        <DetailBlock label="Live read-only observation readiness" value={item.live_readonly_observation_readiness || 'display_model_only'} />
-        <DetailBlock label="Bounded-trial readiness" value={item.bounded_trial_readiness || 'display_model_only'} />
+        <ChipBlock label="可确认警告" values={item.confidence_flags || ['display_model_only']} tone="amber" />
         <ChipBlock label="Main blockers" values={item.main_blockers || ['api_unavailable']} tone="rose" />
         <ChipBlock label="Owner 可选动作" values={item.owner_action_options} tone="indigo" />
         <ChipBlock label="当前禁止" values={item.not_allowed_now} tone="rose" />
-        <ChipBlock
-          label="Non-permissions"
-          values={[
-            item.no_execution_permission ? 'no execution permission' : 'execution permission not asserted',
-            item.no_order_permission ? 'no order permission' : 'order permission not asserted',
-            item.no_runtime_start ? 'no runtime start' : 'runtime start not asserted',
-            item.no_automatic_strategy_routing ? 'no automatic strategy routing' : 'routing not asserted',
-          ]}
-          tone="rose"
-        />
+        <details className="rounded-xl border border-amber-500/10 bg-slate-900/60 p-3">
+          <summary className="cursor-pointer text-xs font-bold text-slate-300">技术详情</summary>
+          <div className="mt-3 space-y-3">
+            <DetailBlock label="Evidence reviewability" value={item.evidence_reviewability || 'display_model_only'} />
+            <DetailBlock label="Live read-only observation readiness" value={item.live_readonly_observation_readiness || 'display_model_only'} />
+            <DetailBlock label="Bounded-trial readiness" value={item.bounded_trial_readiness || 'display_model_only'} />
+            <ChipBlock
+              label="Non-permissions"
+              values={[
+                item.no_execution_permission ? 'no execution permission' : 'execution permission not asserted',
+                item.no_order_permission ? 'no order permission' : 'order permission not asserted',
+                item.no_runtime_start ? 'no runtime start' : 'runtime start not asserted',
+                item.no_automatic_strategy_routing ? 'no automatic strategy routing' : 'routing not asserted',
+              ]}
+              tone="rose"
+            />
+          </div>
+        </details>
       </div>
     </section>
   );
@@ -974,8 +1887,8 @@ function CandidateEvidenceComparison({ data }: { data: StrategyGroupReviewabilit
     );
   }
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">Candidate Evidence Comparison</h3>
+    <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+      <h3 className="mb-4 text-base font-bold text-slate-50">Candidate Evidence Comparison</h3>
       <DataTable
         compact
         columns={['candidate', 'group', 'status', '72h mean', '72h positive', '7d mean', 'flags']}
@@ -1010,8 +1923,8 @@ function ObservationReadinessPanel({
   const sinkSummary = liveObservation?.sink_summary || {};
   const inputSource = liveObservation?.input_source_summary || {};
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">Live Read-only Observation Readiness</h3>
+    <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
+      <h3 className="mb-4 text-base font-bold text-slate-50">Live Read-only Observation Readiness</h3>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <ShelfMiniFact label="Existing runner" value={firstText(summary.existing_runner, 'api_unavailable')} />
         <ShelfMiniFact label="Active observation" value={String(Boolean(summary.active_live_readonly_observation))} />
@@ -1089,12 +2002,12 @@ function ObservationReadinessPanel({
             ])}
           />
         ) : (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+          <p className="rounded-lg border border-slate-200 bg-slate-900/70 px-4 py-3 text-sm text-slate-600  dark:bg-slate-950/40 dark:text-slate-300">
             No would-enter case is currently queued from the API. No-action and invalid observations stay excluded from Owner case review.
           </p>
         )}
         {caseQueue?.supported_future_cases?.['CPM-RO-001'] ? (
-          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-2 text-xs text-slate-400">
             CPM: {caseQueue.supported_future_cases['CPM-RO-001']}
           </p>
         ) : null}
@@ -1121,18 +2034,18 @@ function BnbTrialReadinessGapPanel({ data }: { data: Mi001BnbTrialReadinessGapRe
   const gates = data?.gap_matrix || [];
   const blockers = gates.filter((gate) => gate.required_for_testnet_rehearsal || gate.required_for_small_live_trial);
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
       <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
         <div>
-          <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">MI-001 BNB Trial Readiness Gap</h3>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <h3 className="text-base font-bold text-slate-50">MI-001 BNB Trial Readiness Gap</h3>
+          <p className="mt-1 text-sm text-slate-400">
             Read-only Owner review map for testnet/manual-live prerequisites. This panel is not authorization.
           </p>
         </div>
         <StatePill tone={data ? 'amber' : 'slate'}>{data?.readiness_verdict || 'api_unavailable'}</StatePill>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <ShelfMiniFact label="Candidate" value={data?.candidate_id || 'MI-001-BNB-LONG'} />
+        <ShelfMiniFact label="Candidate" value={data?.candidate_id || '数据未接入'} />
         <ShelfMiniFact label="Current phase" value={data?.current_phase || 'api_unavailable'} />
         <ShelfMiniFact label="Testnet design" value={data?.testnet_rehearsal_design.status.join(' / ') || 'api_unavailable'} />
         <ShelfMiniFact label="Small live draft" value={data?.small_live_trial_readiness_draft.status.join(' / ') || 'api_unavailable'} />
@@ -1151,7 +2064,7 @@ function BnbTrialReadinessGapPanel({ data }: { data: Mi001BnbTrialReadinessGapRe
           ])}
         />
       ) : (
-        <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+        <p className="rounded-lg border border-slate-200 bg-slate-900/70 px-4 py-3 text-sm text-slate-600  dark:bg-slate-950/40 dark:text-slate-300">
           BNB readiness gap API is unavailable; keep BNB in observation/design-only state.
         </p>
       )}
@@ -1185,11 +2098,11 @@ function StrategyTrialReadinessPanel({ data }: { data: StrategyTrialReadinessRes
     ? data.fact_checks.facts.map((fact) => `${fact.fact_id}: ${fact.status}${fact.blocker ? ` (${fact.blocker})` : ''}`)
     : ['api_unavailable'];
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
       <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
         <div>
-          <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Strategy Trial Readiness Framework</h3>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <h3 className="text-base font-bold text-slate-50">Strategy Trial Readiness Framework</h3>
+          <p className="mt-1 text-sm text-slate-400">
             Generic readiness surface using MI-001 BNB as first carrier. Observation remains review-only.
           </p>
         </div>
@@ -1238,8 +2151,8 @@ function StrategyTrialReadinessPanel({ data }: { data: StrategyTrialReadinessRes
 function DetailBlock({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="mb-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{label}</p>
-      <p className="text-sm leading-6 text-slate-700 dark:text-slate-300">{value}</p>
+      <p className="mb-1 text-xs font-semibold text-amber-200/70">{label}</p>
+      <p className="text-sm leading-6 text-slate-300">{value}</p>
     </div>
   );
 }
@@ -1247,7 +2160,7 @@ function DetailBlock({ label, value }: { label: string; value: string }) {
 function ChipBlock({ label, values, tone = 'slate' }: { label: string; values: string[]; tone?: Tone }) {
   return (
     <div>
-      <p className="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="mb-2 text-xs font-semibold text-amber-200/70">{label}</p>
       <div className="flex flex-wrap gap-1.5">
         {values.map((value) => (
           <StatePill key={value} tone={tone}>{value}</StatePill>
@@ -1259,9 +2172,9 @@ function ChipBlock({ label, values, tone = 'slate' }: { label: string; values: s
 
 function ShelfMiniFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
-      <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-500">{label}</div>
-      <div className="mt-1 text-sm font-medium text-slate-700 dark:text-slate-300">{value}</div>
+    <div className="rounded-lg border border-amber-500/10 bg-slate-900/70 px-3 py-2">
+      <div className="text-[11px] font-semibold text-amber-200/60">{label}</div>
+      <div className="mt-1 text-sm font-medium text-slate-300">{value}</div>
     </div>
   );
 }
@@ -1269,10 +2182,10 @@ function ShelfMiniFact({ label, value }: { label: string; value: string }) {
 function TechnicalDetails({ data, label = '技术详情' }: { data: unknown; label?: string }) {
   return (
     <details className="text-sm">
-      <summary className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200">
+      <summary className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium text-slate-400 transition-colors duration-200 hover:bg-slate-900 hover:text-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400/50">
         {label}
       </summary>
-      <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900 p-5 text-[13px] text-slate-300 shadow-inner">
+      <div className="mt-2 rounded-lg border border-amber-500/15 bg-slate-950 p-5 text-[13px] text-slate-300 shadow-inner">
         <JsonDetails data={data} label="JSON" />
       </div>
     </details>
@@ -1283,7 +2196,7 @@ function SoftLink({ to, children }: { to: string; children: React.ReactNode }) {
   return (
     <Link
       to={to}
-      className="rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-indigo-800 dark:bg-slate-800 dark:text-indigo-300 dark:hover:bg-slate-700"
+      className="rounded-lg border border-purple-400/30 bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-purple-950/30 transition-colors duration-200 hover:bg-purple-400 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
     >
       {children}
     </Link>
@@ -1292,11 +2205,11 @@ function SoftLink({ to, children }: { to: string; children: React.ReactNode }) {
 
 function StatePill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
   const classes = {
-    teal: 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/20',
-    indigo: 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/20',
-    amber: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20',
-    rose: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/20',
-    slate: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+    teal: 'bg-teal-500/10 text-teal-300 border-teal-400/25',
+    indigo: 'bg-purple-500/15 text-purple-200 border-purple-400/30',
+    amber: 'bg-amber-500/10 text-amber-200 border-amber-400/30',
+    rose: 'bg-rose-500/10 text-rose-300 border-rose-400/25',
+    slate: 'bg-slate-900 text-slate-300 border-slate-700',
   };
   return <span className={`inline-flex items-center rounded border px-2.5 py-0.5 text-xs font-medium ${classes[tone]}`}>{children}</span>;
 }
@@ -1321,21 +2234,548 @@ function toneBox(tone: 'teal' | 'rose') {
     : 'flex items-center gap-2 rounded-md border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-900/50 dark:bg-rose-500/10 dark:text-rose-400';
 }
 
-function timelineDot(tone: 'teal' | 'amber') {
-  return `absolute -left-[17px] top-1 flex h-8 w-8 items-center justify-center rounded-full border-4 border-white dark:border-slate-900 ${
-    tone === 'teal'
-      ? 'bg-teal-100 text-teal-600 dark:bg-teal-900/50 dark:text-teal-400'
-      : 'bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400'
-  }`;
+function timelineDot(tone: Tone) {
+  const colors = {
+    teal: 'bg-teal-100 text-teal-600 dark:bg-teal-900/50 dark:text-teal-400',
+    amber: 'bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400',
+    rose: 'bg-rose-100 text-rose-600 dark:bg-rose-900/50 dark:text-rose-400',
+    indigo: 'bg-purple-100 text-purple-600 dark:bg-purple-900/50 dark:text-purple-300',
+    slate: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+  };
+  return `absolute -left-[17px] top-1 flex h-8 w-8 items-center justify-center rounded-full border-4 border-white dark:border-slate-900 ${colors[tone]}`;
 }
 
 function Loading({ label }: { label: string }) {
   return <div className="text-sm text-slate-500">{label}</div>;
 }
 
+function ownerWorkbenchView(view: CarrierDecisionView) {
+  const hasCarrier = view.carrierId !== '数据未接入';
+  const plainBlockers = view.safetyGateSource === 'unavailable'
+    ? ['授权门槛数据未接入', '无法用于真实授权']
+    : view.hardBlockers.length
+      ? view.hardBlockers.map(ownerSafeText).slice(0, 3)
+      : view.pendingOwnerLiveAuthorization
+        ? ['真实资金尚未授权']
+        : ['后端未报告硬阻断'];
+  const plainRisks = view.strategyWarnings.length
+    ? view.strategyWarnings.map(ownerSafeText).slice(0, 3)
+    : ['策略不保证盈利', '市场波动可能导致回撤扩大', '这是极小资金试验，结果可能与真实交易表现不同'];
+  return {
+    priority: hasCarrier
+      ? `${shortSymbol(view.symbol)} 小额试验准备已完成，等待你的真实资金授权`
+      : '当前候选数据未接入，无法用于真实授权',
+    currentStep: view.safetyGateSource === 'unavailable' ? 2 : 3,
+    candidateName: hasCarrier ? `${view.strategyId} ${shortSymbol(view.symbol)} ${humanSide(view.side)}` : '数据未接入',
+    direction: `${humanSide(view.side)}（做多）`,
+    cap: `${view.quantity} / ${plainCap(view.maxNotional, view.symbol)}`,
+    canExecute: view.canAuthorizeLiveTrial ? '可授权' : '未就绪',
+    readinessReason: view.canAuthorizeLiveTrial ? '后端已确认授权门槛' : view.authorizationButtonDisabledReason,
+    plainBlockers,
+    plainRisks,
+    provenance: view.provenance,
+  };
+}
+
+function strategyCandidateView(
+  current: CarrierDecisionView,
+  marketView: { symbol: string; regime: string; direction: string; batch: number },
+): RecommendedCandidate[] {
+  const primary: RecommendedCandidate = {
+    id: current.carrierId,
+    name: current.carrierId,
+    category: '趋势类',
+    summary: `${shortSymbol(current.symbol)} 处于当前小额试验候选，测试网保护路径已验证。`,
+    reason: `${marketView.regime} 判断下，优先选择已经完成测试网保护演练的候选。`,
+    status: '可进入授权前确认',
+    risk: '小样本试验不代表长期盈利。',
+    source: current.provenance.carrierId === 'unavailable' ? 'unavailable' : 'derived_from_backend',
+    sourceLabel: current.provenance.carrierId === 'unavailable' ? '数据未接入' : '后端候选',
+    action: current.provenance.carrierId === 'unavailable' ? 'not_recommended' : 'confirm',
+    actionLabel: current.provenance.carrierId === 'unavailable' ? '暂不建议' : '查看确认单',
+  };
+  const pool: RecommendedCandidate[] = [
+    primary,
+    {
+      id: 'MI-001-SOL-LONG',
+      name: 'MI-001-SOL-LONG',
+      category: '趋势类',
+      summary: 'SOL 动量候选，适合强趋势延续时继续观察。',
+      reason: '当行情偏强或反弹延续时，可作为同策略族对照候选。',
+      status: '可复盘，暂不作为当前授权对象',
+      risk: '波动较大，追高后可能快速回撤。',
+      source: 'sample_data',
+      sourceLabel: '示例候选',
+      action: 'observe',
+      actionLabel: '加入观察',
+    },
+    {
+      id: 'TB-BTC-SHORT',
+      name: 'TB-BTC-SHORT',
+      category: '突破跟随类',
+      summary: 'BTC 下破后顺势跟随的研究候选。',
+      reason: marketView.regime === '下跌趋势' ? '与你选择的下跌趋势更匹配。' : '可作为方向变化后的备用候选。',
+      status: '研究池，不能直接试验',
+      risk: '假突破可能导致止损。',
+      source: 'sample_data',
+      sourceLabel: '示例候选',
+      action: 'details',
+      actionLabel: '查看候选详情',
+    },
+    {
+      id: 'VB-SOL-SHORT',
+      name: 'VB-SOL-SHORT',
+      category: '波动类',
+      summary: '波动扩张后的方向候选，只适合后续复盘。',
+      reason: '如果波动放大，可观察是否出现更明确方向。',
+      status: '研究池',
+      risk: '波动放大末端容易反转。',
+      source: 'sample_data',
+      sourceLabel: '示例候选',
+      action: 'not_recommended',
+      actionLabel: '暂不建议',
+    },
+    {
+      id: 'VI-001-ETH-LONG',
+      name: 'VI-001-ETH-LONG',
+      category: '量价冲击类',
+      summary: 'ETH 量价冲击后的温和延续候选。',
+      reason: '比高 beta 候选更温和，可作为备用观察。',
+      status: '备用候选',
+      risk: '成交量尖峰后可能回落。',
+      source: 'sample_data',
+      sourceLabel: '示例候选',
+      action: 'observe',
+      actionLabel: '加入观察',
+    },
+  ];
+  if (marketView.symbol === 'SOL') return [pool[1], primary, pool[3]];
+  if (marketView.symbol === 'ETH') return [pool[4], primary, pool[1]];
+  if (marketView.regime === '下跌趋势') return [pool[2], pool[3], primary];
+  return marketView.batch % 2 === 0 ? pool.slice(0, 3) : [primary, pool[4], pool[1]];
+}
+
+function strategyTypeShelf() {
+  return [
+    { title: '趋势类', desc: '顺着趋势，跟随上涨或下跌获取收益。' },
+    { title: '波动类', desc: '利用价格波动，在区间内反复操作。' },
+    { title: '回调类', desc: '在趋势中的回调位置，寻找反弹机会。' },
+    { title: '均值回归类', desc: '价格偏离均值时，等待回归均值获利。' },
+    { title: '相对强弱类', desc: '比较不同资产强弱，选择更强的做多。' },
+  ];
+}
+
+function trialConfirmationView(
+  view: CarrierDecisionView,
+  data: ConsoleData,
+  acknowledgements: Record<string, boolean>,
+) {
+  const unavailableGates = view.safetyGateSource === 'unavailable';
+  const hasHardBlockers = view.hardBlockers.length > 0;
+  const gateTone = (passed: boolean): Tone => unavailableGates ? 'amber' : passed ? 'teal' : 'rose';
+  const gateResult = (passed: boolean) => unavailableGates ? '未接入' : passed ? '通过' : '阻断';
+  const gateToneFromResult = (result: string): Tone => result === '通过' ? 'teal' : result === '阻断' ? 'rose' : 'amber';
+  const noExecutionIntent = view.executionIntentState.includes('未创建');
+  const noOrder = view.orderState.includes('未创建');
+  const accountFactsAvailable = Boolean(data.accountFacts);
+  const accountPositions = data.accountFacts?.positions || [];
+  const accountOrders = data.accountFacts?.open_orders || [];
+  const candidateSymbol = shortSymbol(view.symbol);
+  const noConflictPositions = accountFactsAvailable ? recordsForSymbol(accountPositions, candidateSymbol).length === 0 : null;
+  const noConflictOrders = accountFactsAvailable ? recordsForSymbol(accountOrders, candidateSymbol).length === 0 : null;
+  const liveEnv = stringAt(data.readiness?.environment_boundary, 'trading_env', '');
+  const liveEnvVisible = Boolean(liveEnv);
+  const risks = [
+    { id: 'strategy_not_proven_profitable', title: '策略不保证盈利', desc: '即使过去表现良好，未来仍可能亏损。' },
+    { id: 'market_volatility', title: '市场剧烈波动风险', desc: '极端行情可能导致滑点或跳空，造成超出预期的损失。' },
+    { id: 'capital_position_risk', title: '资金与仓位风险', desc: '虽然是小额试验，但仍可能全部亏损，请勿投入无法承受损失的资金。' },
+  ];
+  const allRisksAcknowledged = risks.every((risk) => acknowledgements[risk.id]);
+  const accountGateResult = (value: boolean | null) => value === null ? '未接入' : value ? '通过' : '阻断';
+  const remainingConditions = [
+    ...(!allRisksAcknowledged ? ['策略风险仍未全部确认'] : []),
+    ...(!view.liveReady ? ['尚未完成正式 Owner live 授权'] : []),
+    ...(hasHardBlockers ? ['最终硬安全门未全部通过'] : []),
+    ...(!accountFactsAvailable ? ['账户事实未接入，无法检查余额、持仓和挂单'] : []),
+    ...(noConflictPositions === false ? [`${candidateSymbol} 仍存在冲突持仓，需后端确认`] : []),
+    ...(noConflictOrders === false ? [`${candidateSymbol} 仍存在冲突挂单，需后端确认`] : []),
+    ...(!liveEnvVisible ? ['服务器 / live 环境状态未接入'] : []),
+    'live key / IP 白名单状态未接入',
+  ];
+  return {
+    content: [
+      ['候选', view.carrierId],
+      ['币种', view.runtimeSymbol],
+      ['方向', humanSide(view.side)],
+      ['资金上限', plainCap(view.maxNotional, view.symbol)],
+      ['杠杆', view.leverage],
+      ['保护方案', '单止盈 + 止损'],
+    ] as Array<[string, string]>,
+    reasons: view.evidenceSource === 'backend_api'
+      ? ['测试网链路已验证', '保护单和退出路径已验证', '适合极小资金试验']
+      : ['测试网证据未接入，无法用于真实授权', '仅可作为页面流程预览', '必须等待后端证据上报'],
+    risks,
+    gates: [
+      { label: '真实资金授权是否已通过', result: gateResult(view.liveReady), tone: gateTone(view.liveReady) },
+      { label: '硬安全门是否全部通过', result: gateResult(!hasHardBlockers), tone: gateTone(!hasHardBlockers) },
+      { label: '测试网验证是否全部通过', result: view.evidenceSource === 'backend_api' ? '通过' : '未接入', tone: view.evidenceSource === 'backend_api' ? 'teal' as Tone : 'amber' as Tone },
+      { label: '账户事实是否可用', result: accountFactsAvailable ? '通过' : '未接入', tone: accountFactsAvailable ? 'teal' as Tone : 'amber' as Tone },
+      { label: `${candidateSymbol} 是否无冲突持仓`, result: accountGateResult(noConflictPositions), tone: gateToneFromResult(accountGateResult(noConflictPositions)) },
+      { label: `${candidateSymbol} 是否无冲突挂单`, result: accountGateResult(noConflictOrders), tone: gateToneFromResult(accountGateResult(noConflictOrders)) },
+      { label: 'GKS / key / IP 白名单是否正常', result: '未接入', tone: 'amber' as Tone },
+      { label: 'live 环境是否可见', result: liveEnvVisible ? '通过' : '未接入', tone: liveEnvVisible ? 'teal' as Tone : 'amber' as Tone },
+      { label: '是否尚未创建真实资金执行计划', result: gateResult(noExecutionIntent), tone: gateTone(noExecutionIntent) },
+      { label: '是否尚未创建订单', result: gateResult(noOrder), tone: gateTone(noOrder) },
+    ],
+    testnet: [
+      { label: '入场', result: view.evidenceSource === 'backend_api' ? '通过' : '数据未接入' },
+      { label: '保护单', result: view.evidenceSource === 'backend_api' ? '通过' : '数据未接入' },
+      { label: '平仓', result: view.evidenceSource === 'backend_api' ? '通过' : '数据未接入' },
+      { label: '最终空仓', result: view.evidenceSource === 'backend_api' ? '通过' : '数据未接入' },
+      { label: '对账一致', result: view.evidenceSource === 'backend_api' ? '通过' : '数据未接入' },
+    ],
+    disabledReason: view.authorizationButtonDisabledReason,
+    remainingConditions: uniqueTexts(remainingConditions).length
+      ? uniqueTexts(remainingConditions)
+      : ['等待后端确认所有真实资金授权门槛通过'],
+  };
+}
+
+function selectedCarrierFallback(base: CarrierDecisionView, selectedCarrierId: string): CarrierDecisionView {
+  const symbol = symbolFromCarrierId(selectedCarrierId);
+  const strategyId = selectedCarrierId.split('-').slice(0, 2).join('-') || selectedCarrierId;
+  return {
+    ...base,
+    carrierId: selectedCarrierId,
+    strategyFamily: strategyId,
+    strategyId,
+    candidateId: selectedCarrierId,
+    symbol: symbol ? `${symbol}/USDT:USDT` : '数据未接入',
+    runtimeSymbol: symbol ? `${symbol}USDT` : '数据未接入',
+    side: selectedCarrierId.toUpperCase().includes('SHORT') ? 'short' : 'long',
+    quantity: '数据未接入',
+    maxNotional: '数据未接入',
+    leverage: '数据未接入',
+    protectionPlan: '数据未接入',
+    testnetState: '当前选择不是后端确认的可授权候选',
+    authorizationState: 'local_selection_not_backend_authorized',
+    pendingOwnerLiveAuthorization: false,
+    liveReady: false,
+    hardBlockers: ['当前选择不是后端确认的可授权候选，不能用于真实资金授权'],
+    hardBlockerCount: 1,
+    primaryAction: '返回策略候选，选择后端确认的候选进入授权前确认。',
+    executionIntentState: '后端确认未创建真实资金执行计划',
+    orderState: '后端确认未创建订单',
+    testnetEvidence: [
+      ['state', '未接入'],
+      ['entry filled', '未接入'],
+      ['TP accepted', '未接入'],
+      ['SL accepted', '未接入'],
+      ['cleanup close filled', '未接入'],
+      ['final position flat', '未接入'],
+      ['local positions', '未接入'],
+      ['local open orders', '未接入'],
+      ['reconciliation', '未接入'],
+    ],
+    canAuthorizeLiveTrial: false,
+    authorizationButtonDisabledReason: '当前选择不是后端确认的可授权候选，不能授权真实资金试验。',
+    evidenceSource: 'unavailable',
+    safetyGateSource: 'unavailable',
+    provenance: {
+      ...base.provenance,
+      carrierId: 'frontend_local_state',
+      strategyFamily: 'frontend_local_state',
+      strategyId: 'frontend_local_state',
+      candidateId: 'frontend_local_state',
+      symbol: 'frontend_local_state',
+      runtimeSymbol: 'frontend_local_state',
+      side: 'frontend_local_state',
+      quantity: 'unavailable',
+      maxNotional: 'unavailable',
+      leverage: 'unavailable',
+      protectionPlan: 'unavailable',
+      testnetState: 'unavailable',
+      liveReady: 'unavailable',
+      hardBlockers: 'unavailable',
+      executionIntentState: 'derived_from_backend',
+      orderState: 'derived_from_backend',
+    },
+    timeline: carrierTimeline(selectedCarrierId, 'unavailable'),
+  };
+}
+
+function symbolFromCarrierId(carrierId: string) {
+  const upper = carrierId.toUpperCase();
+  for (const symbol of ['BTC', 'ETH', 'SOL', 'BNB']) {
+    if (upper.includes(`-${symbol}-`) || upper.includes(`${symbol}-`) || upper.includes(symbol)) return symbol;
+  }
+  return '';
+}
+
+function carrierDecisionView(data: ConsoleData): CarrierDecisionView {
+  const governance = data.strategyTrialGovernance;
+  const packet = governance?.owner_review_packet;
+  const carrier = packet?.carrier;
+  const auth = governance?.authorization_draft || {};
+  const gate = governance?.minimal_live_trial_gate;
+  const activeHardFromPacket = (packet?.hard_safety_blockers || [])
+    .filter((blocker) => blocker.active)
+    .map((blocker) => `${blocker.blocker_id}: ${blocker.description}`);
+  const activeHardFromGate = gate?.hard_blockers || [];
+  const activeHard = [
+    ...activeHardFromPacket,
+    ...activeHardFromGate,
+  ];
+  const warnings = [
+    ...(packet?.strategy_warnings || []).map((warning) => `${warning.warning_id}: ${warning.description}`),
+    ...(gate?.warnings || []),
+    ...(gate?.acknowledgement_blockers || []),
+  ];
+  const evidence = packet?.testnet_rehearsal_evidence || {};
+  const evidenceValue = (key: string) => evidence[key] === undefined || evidence[key] === null || evidence[key] === ''
+    ? '数据未接入'
+    : display(evidence[key]);
+  const carrierId = provenanceText([
+    [carrier?.carrier_id, 'backend_api'],
+    [data.strategyTrialReadiness?.strategy_profile.candidate_id, 'backend_api'],
+  ], '数据未接入');
+  const strategyFamily = provenanceText([
+    [carrier?.strategy_family, 'backend_api'],
+    [data.strategyTrialReadiness?.strategy_profile.strategy_group, 'backend_api'],
+  ], '数据未接入');
+  const strategyId = provenanceText([
+    [carrier?.strategy_id, 'backend_api'],
+    [data.strategyTrialReadiness?.strategy_profile.strategy_id, 'backend_api'],
+  ], '数据未接入');
+  const candidateId = provenanceText([
+    [carrier?.candidate_id, 'backend_api'],
+    [data.strategyTrialReadiness?.strategy_profile.candidate_id, 'backend_api'],
+  ], '数据未接入');
+  const symbol = provenanceText([
+    [carrier?.symbol, 'backend_api'],
+    [data.strategyTrialReadiness?.strategy_profile.symbol, 'backend_api'],
+  ], '数据未接入');
+  const runtimeSymbol = provenanceText([[carrier?.runtime_symbol, 'backend_api']], '数据未接入');
+  const side = provenanceText([
+    [carrier?.side, 'backend_api'],
+    [data.strategyTrialReadiness?.strategy_profile.side, 'backend_api'],
+  ], '数据未接入');
+  const quantity = provenanceText([[carrier?.quantity, 'backend_api']], '数据未接入');
+  const maxNotional = provenanceText([
+    [carrier?.max_notional, 'backend_api'],
+    [data.strategyTrialReadiness?.risk_cap_profile.max_notional_usdt, 'backend_api'],
+  ], '数据未接入');
+  const leverage = provenanceText([
+    [carrier?.leverage, 'backend_api'],
+    [data.strategyTrialReadiness?.risk_cap_profile.leverage, 'backend_api'],
+  ], '数据未接入');
+  const protectionPlan = provenanceText([[carrier?.protection_plan_type, 'backend_api']], '数据未接入');
+  const testnetState = provenanceText([
+    [packet?.testnet_rehearsal_result, 'backend_api'],
+    [evidence.result, 'backend_api'],
+  ], '数据未接入');
+  const liveReady = Boolean(carrier?.live_ready || packet?.live_ready || gate?.live_ready);
+  const hasSafetyBackend = Boolean(packet || gate);
+  const hardBlockers = hasSafetyBackend
+    ? uniqueTexts(activeHard)
+    : ['硬安全门数据未接入，无法用于真实授权'];
+  const strategyWarnings = hasSafetyBackend
+    ? uniqueTexts(warnings)
+    : ['策略风险数据未接入，无法用于真实授权'];
+  const authorizationStateField: FieldValue<string> = Boolean(auth.pending_owner_live_authorization)
+    ? { value: 'pending_owner_live_authorization', source: 'backend_api' }
+    : provenanceText([
+        [auth.authorization_status, 'backend_api'],
+        [auth.status, 'backend_api'],
+        [gate?.final_state, 'backend_api'],
+      ], '数据未接入');
+  const authorizationState = authorizationStateField.value;
+  const canAuthorizeLiveTrial = Boolean(gate?.can_execute_bounded_live_trial && liveReady && hardBlockers.length === 0);
+  const authorizationButtonDisabledReason = gate
+    ? '后端未确认真实资金授权、执行权限和硬安全门全部通过，暂不可授权真实资金试验。'
+    : '授权门槛数据未接入，无法用于真实授权。';
+  const executionIntentState = gate
+    ? gate.execution_intent_created
+      ? '后端报告已创建执行计划'
+      : '后端确认未创建真实资金执行计划'
+    : '执行计划状态数据未接入，无法判断';
+  const orderState = gate
+    ? gate.order_created
+      ? '后端报告已创建订单'
+      : '后端确认未创建订单'
+    : '订单状态数据未接入，无法判断';
+  const evidenceSource: DataSource = packet ? 'backend_api' : 'unavailable';
+  const safetyGateSource: DataSource = gate ? 'backend_api' : 'unavailable';
+  const accountFactsSource: DataSource = data.accountFacts ? 'backend_api' : 'unavailable';
+  return {
+    carrierId: carrierId.value,
+    strategyFamily: strategyFamily.value,
+    strategyId: strategyId.value,
+    candidateId: candidateId.value,
+    symbol: symbol.value,
+    runtimeSymbol: runtimeSymbol.value,
+    side: side.value,
+    quantity: quantity.value,
+    maxNotional: maxNotional.value,
+    leverage: leverage.value,
+    protectionPlan: protectionPlan.value,
+    testnetState: testnetState.value,
+    authorizationState,
+    pendingOwnerLiveAuthorization: authorizationState.includes('pending'),
+    liveReady,
+    hardBlockers,
+    strategyWarnings,
+    hardBlockerCount: hardBlockers.length,
+    warningCount: strategyWarnings.length,
+    primaryAction: '查看授权前确认单；确认策略风险与硬安全门的区别。',
+    liveAuthorizationEffect: packet?.live_authorization_effect || '真实资金授权效果数据未接入，无法用于真实授权。',
+    executionIntentState,
+    orderState,
+    testnetEvidence: [
+      ['状态', testnetState.value === 'completed_with_valid_protection' ? '测试网保护演练已通过' : ownerSafeText(testnetState.value)],
+      ['入场', `${plainEvidenceValue(evidence.entry_status)} / 数量 ${evidenceValue('entry_filled_quantity')}`],
+      ['止盈保护', plainEvidenceValue(evidence.tp_status)],
+      ['止损保护', plainEvidenceValue(evidence.sl_status)],
+      ['清理平仓', evidence.cleanup_close_order_id ? '已完成' : '暂未上报'],
+      ['最终空仓', plainEvidenceValue(evidence.final_position_flat)],
+      ['本地 BNB 持仓', `${plainEvidenceValue(evidence.final_local_active_bnb_positions)} 条`],
+      ['本地 BNB 挂单', `${plainEvidenceValue(evidence.final_local_open_bnb_orders)} 条`],
+      ['对账', plainEvidenceValue(evidence.periodic_reconciliation)],
+    ],
+    canAuthorizeLiveTrial,
+    authorizationButtonDisabledReason,
+    evidenceSource,
+    safetyGateSource,
+    accountFactsSource,
+    provenance: {
+      carrierId: carrierId.source,
+      strategyFamily: strategyFamily.source,
+      strategyId: strategyId.source,
+      candidateId: candidateId.source,
+      symbol: symbol.source,
+      runtimeSymbol: runtimeSymbol.source,
+      side: side.source,
+      quantity: quantity.source,
+      maxNotional: maxNotional.source,
+      leverage: leverage.source,
+      protectionPlan: protectionPlan.source,
+      testnetState: testnetState.source,
+      authorizationState: authorizationStateField.source,
+      liveReady: hasSafetyBackend ? 'backend_api' : 'unavailable',
+      hardBlockers: hasSafetyBackend ? 'backend_api' : 'unavailable',
+      strategyWarnings: hasSafetyBackend ? 'backend_api' : 'unavailable',
+      executionIntentState: gate ? 'backend_api' : 'unavailable',
+      orderState: gate ? 'backend_api' : 'unavailable',
+      candidateRecommendations: 'derived_from_backend',
+      marketInput: 'frontend_local_state',
+      plainCopy: 'static_product_copy',
+      accountFacts: accountFactsSource,
+    },
+    timeline: carrierTimeline(carrierId.value, evidenceSource),
+  };
+}
+
+function carrierTimeline(carrierId: string, source: DataSource): CarrierDecisionView['timeline'] {
+  const unavailable = source === 'unavailable';
+  return [
+    {
+      id: 'live-observation',
+      title: '实盘只读观察',
+      status: unavailable ? '数据未接入' : '已完成',
+      desc: unavailable ? '链路证据数据未接入，无法作为真实授权依据。' : `${carrierId} 先作为 live read-only observation case 被记录；signal 不是订单。`,
+      tech: 'live_read_only_observation_case_recorded',
+      tone: unavailable ? 'amber' : 'teal',
+    },
+    {
+      id: 'readiness-framework',
+      title: '就绪框架',
+      status: '已完成',
+      desc: '策略逻辑、具体候选、可知情风险、必须解决的问题、授权草案已经拆分。',
+      tech: 'strategy_trial_architecture_governance_complete',
+      tone: 'teal',
+    },
+    {
+      id: 'preflight-facts',
+      title: '授权前事实检查',
+      status: '已完成',
+      desc: '授权前事实检查结构已就绪，仍不启动 runtime。',
+      tech: 'preflight_facts_read_only_surface',
+      tone: 'teal',
+    },
+    {
+      id: 'account-facts',
+      title: '账户事实新鲜度',
+      status: '已读取',
+      desc: '账户事实和对账状态只用于核对，不给订单权限。',
+      tech: 'account_facts_read_only',
+      tone: 'teal',
+    },
+    {
+      id: 'first-testnet-path',
+      title: '受控测试网路径',
+      status: '已演练',
+      desc: 'BNB 同路径测试网演练覆盖入场与保护单路径。',
+      tech: 'controlled_testnet_carrier_path',
+      tone: 'teal',
+    },
+    {
+      id: 'protection-defect',
+      title: '首轮保护缺陷',
+      status: '已发现',
+      desc: '第一轮演练暴露 protection defect，未进入 live。',
+      tech: 'first_rehearsal_protection_defect_found',
+      tone: 'amber',
+    },
+    {
+      id: 'protection-fixed',
+      title: '保护规划已修复',
+      status: '已修复',
+      desc: '保护单规划修复后重新演练。',
+      tech: 'protection_planner_fixed',
+      tone: 'teal',
+    },
+    {
+      id: 'valid-protection',
+      title: '第二轮有效保护',
+      status: unavailable ? '数据未接入' : '已完成',
+      desc: unavailable ? '测试网保护证据未接入。' : 'entry filled、TP accepted、SL accepted、cleanup close filled、final position flat。',
+      tech: 'completed_with_valid_protection',
+      tone: unavailable ? 'amber' : 'teal',
+    },
+    {
+      id: 'pending-live-auth',
+      title: '等待真实资金授权',
+      status: '阻断',
+      desc: '架构治理已完成；当前缺少你的真实资金授权，所以没有真实资金执行计划或订单。',
+      tech: 'not_live_ready_until_explicit_owner_live_authorization',
+      tone: 'rose',
+    },
+  ];
+}
+
+function uniqueTexts(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function recordsForSymbol(items: Array<Record<string, unknown>>, symbol: string) {
+  return items.filter((item) => JSON.stringify(item).toUpperCase().includes(symbol.toUpperCase()));
+}
+
 function buildStrategyRows(data: ConsoleData) {
   const mi001 = data.mi001;
+  const carrierDecision = carrierDecisionView(data);
   return [
+    {
+      group: strategyGroupName,
+      strategy: `${carrierDecision.carrierId} first execution Carrier`,
+      symbol: carrierDecision.symbol,
+      side: '多头',
+      status: '等待 Owner live authorization',
+      tone: 'amber' as Tone,
+      signal: 'testnet 保护演练已完成',
+      intent: 'no live ExecutionIntent',
+      next: '查看 Carrier Authorization packet',
+    },
     {
       group: strategyGroupName,
       strategy: strategySol,
@@ -1373,9 +2813,10 @@ function buildStrategyRows(data: ConsoleData) {
 }
 
 function strategyGroupShelves(data: ConsoleData) {
+  const carrierDecision = carrierDecisionView(data);
   if (data.strategyGroupReviewability) {
     const primaryShelf = data.strategyGroupReviewability.primary_groups.map((item) => ({
-      ...item,
+      ...carrierAdjustedShelfItem(item, carrierDecision),
       status_tone: toneForStrategyStatus(item.current_status),
       shelf_section: 'primary' as const,
     }));
@@ -1417,6 +2858,28 @@ function toneForStrategyStatus(status: string): Tone {
   if (value.includes('backup') || value.includes('data_request')) return 'indigo';
   if (value.includes('blocked') || value.includes('negative')) return 'rose';
   return 'slate';
+}
+
+function carrierAdjustedShelfItem(
+  item: Omit<StrategyGroupShelfItem, 'status_tone'> & Partial<Pick<StrategyGroupShelfItem, 'status_tone'>>,
+  carrierDecision: CarrierDecisionView,
+): Omit<StrategyGroupShelfItem, 'status_tone'> & Partial<Pick<StrategyGroupShelfItem, 'status_tone'>> {
+  if (item.strategy_group_id !== 'MI-001') return item;
+  return {
+    ...item,
+    representative_candidates: uniqueTexts([carrierDecision.carrierId, 'MI-001 SOL long', ...item.representative_candidates]),
+    current_status: 'BNB first execution Carrier / pending Owner live authorization',
+    evidence_summary: `${carrierDecision.carrierId}: ${carrierDecision.testnetState}; SOL keeps historical primary-chain evidence. BNB is a Carrier, not the whole architecture.`,
+    confidence_flags: uniqueTexts([
+      ...(item.confidence_flags || []),
+      'BNB pending explicit Owner live authorization',
+      'Warning acknowledgement is not live authorization',
+    ]),
+    main_blockers: carrierDecision.hardBlockers,
+    bounded_trial_readiness: 'BNB protected testnet same-path rehearsal completed; live_ready=false',
+    next_recommended_action: '查看 Carrier Trial Authorization packet；不要自动选择或自动提升策略。',
+    not_allowed_now: uniqueTexts([...item.not_allowed_now, 'create live ExecutionIntent', 'place order', 'start runtime']),
+  };
 }
 
 function buildStrategyGroupShelf(data: ConsoleData): StrategyGroupShelfItem[] {
@@ -1579,8 +3042,23 @@ function technicalPayload(data: ConsoleData) {
     runtime_status: data.readiness?.runtime_state,
     source_refs: data.mi001?.source_refs,
     permission: data.readiness?.environment_boundary,
+    strategy_trial_governance: data.strategyTrialGovernance,
     gaps: data.gaps,
   };
+}
+
+function plainEvidenceValue(value: unknown) {
+  if (value === undefined || value === null || value === '') return '暂未上报';
+  if (value === true) return '是';
+  if (value === false) return '否';
+  const text = String(value);
+  const dictionary: Record<string, string> = {
+    FILLED: '已成交',
+    ACCEPTED: '已接受',
+    consistent: '一致',
+    completed_with_valid_protection: '测试网保护演练已通过',
+  };
+  return dictionary[text] || ownerSafeText(text);
 }
 
 function firstText(...values: unknown[]) {
@@ -1594,12 +3072,61 @@ function firstText(...values: unknown[]) {
   return '暂未上报';
 }
 
+function provenanceText(values: Array<[unknown, DataSource]>, fallback: string): FieldValue<string> {
+  for (const [value, source] of values) {
+    if (value !== undefined && value !== null && value !== '') {
+      const text = String(value);
+      if (['not_available', 'unknown', 'undefined', 'null', 'nan'].includes(text.toLowerCase())) continue;
+      return { value: text, source };
+    }
+  }
+  return { value: fallback, source: 'unavailable' };
+}
+
 function withUsdt(value: string) {
-  if (value === '暂未上报') return value;
+  if (value === '暂未上报' || value === '数据未接入') return value;
   if (value.toUpperCase().includes('USDT')) return value;
   const numeric = Number(value);
   if (Number.isFinite(numeric)) return `${numeric.toFixed(2)} USDT`;
   return `${value} USDT`;
+}
+
+function shortSymbol(symbol: string) {
+  return symbol.split('/')[0].replace('USDT', '') || symbol;
+}
+
+function humanSide(side: string) {
+  if (side === '数据未接入' || side === '暂未上报') return side;
+  return side.toLowerCase() === 'short' ? '空' : '多';
+}
+
+function humanAuthorizationState(state: string) {
+  return state.includes('pending') ? '等待真实资金授权' : state;
+}
+
+function ownerSafeText(value: string) {
+  return value
+    .replace(/^live_authorization_missing$/, '真实资金授权缺失')
+    .replace('live_authorization_missing:', '真实资金授权缺失：')
+    .replace(/^strategy_not_proven_profitable$/, '策略不保证盈利')
+    .replace('strategy_not_proven_profitable:', '策略不保证盈利：')
+    .replace(/^limited_live_observation_sample$/, '实盘观察样本有限')
+    .replace('limited_live_observation_sample:', '实盘观察样本有限：')
+    .replace(/^regime_may_be_unfavorable$/, '当前行情可能不利')
+    .replace('regime_may_be_unfavorable:', '当前行情可能不利：')
+    .replace(/^forward_review_incomplete$/, '前向复盘仍需继续')
+    .replace('forward_review_incomplete:', '前向复盘仍需继续：')
+    .replace(/^historical_fragility_known$/, '历史脆弱性已知')
+    .replace('historical_fragility_known:', '历史脆弱性已知：');
+}
+
+function plainCap(maxNotional: string, symbol: string) {
+  if (maxNotional === '数据未接入' || maxNotional === '暂未上报') return maxNotional;
+  const numeric = Number(maxNotional);
+  if (Number.isFinite(numeric)) return `${numeric.toFixed(0)} USDT`;
+  if (maxNotional.includes('USDT')) return maxNotional;
+  if (maxNotional && !maxNotional.includes('owner_authorization')) return `${maxNotional} USDT`;
+  return '数据未接入';
 }
 
 function display(value: unknown) {

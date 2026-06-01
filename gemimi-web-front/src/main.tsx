@@ -10,8 +10,10 @@ import {
   AnalysisV2,
   HomeV2,
   IntentsV2,
+  StrategyCandidatesV2,
   StrategyGroupsV2,
   TraceV2,
+  TrialConfirmationV2,
 } from './pages/brc/OwnerConsoleV2';
 import Login from './pages/Login';
 import './index.css';
@@ -66,7 +68,7 @@ function RequireAuth() {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="dark" storageKey="brc-console-theme">
+      <ThemeProvider defaultTheme="light" storageKey="brc-console-theme">
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -74,7 +76,9 @@ createRoot(document.getElementById('root')!).render(
               <Route path="/" element={<AppLayout />}>
                 <Route index element={<Navigate to="/home" replace />} />
                 <Route path="home" element={<HomeV2 />} />
-                <Route path="strategy-groups" element={<StrategyGroupsV2 />} />
+                <Route path="trial-confirmation" element={<TrialConfirmationV2 />} />
+                <Route path="strategy-candidates" element={<StrategyCandidatesV2 />} />
+                <Route path="strategy-groups" element={<StrategyCandidatesV2 />} />
                 <Route path="intents" element={<IntentsV2 />} />
                 <Route path="account-orders" element={<AccountOrdersV2 />} />
                 <Route path="analysis" element={<AnalysisV2 />} />

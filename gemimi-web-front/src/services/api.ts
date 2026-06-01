@@ -520,6 +520,77 @@ export type StrategyTrialReadinessResponse = {
   auto_execution_ready: false;
 };
 
+export type StrategyTrialArchitectureGovernanceResponse = {
+  generated_from: 'strategy_trial_architecture_governance_v1';
+  final_state: string;
+  bnb_state: 'bnb_first_carrier_consolidated';
+  owner_review_packet: {
+    packet_id: string;
+    carrier: {
+      carrier_id: string;
+      strategy_family: string;
+      strategy_id: string;
+      candidate_id: string;
+      symbol: string;
+      runtime_symbol: string;
+      side: 'long' | 'short';
+      execution_mode: 'owner_confirm_each_entry';
+      quantity: string;
+      max_notional: string;
+      leverage: string;
+      max_leverage_allowed: string;
+      protection_plan_type: 'single_tp_plus_sl';
+      strategy_family_order_authority: false;
+      carrier_is_order_authority: false;
+      live_ready: false;
+      auto_execution_ready: false;
+    };
+    testnet_rehearsal_result: 'completed_with_valid_protection';
+    testnet_rehearsal_evidence: Record<string, string | boolean>;
+    strategy_warnings: Array<{
+      warning_id: string;
+      severity: 'info' | 'warning';
+      owner_ack_required: boolean;
+      acknowledged: boolean;
+      blocks_after_ack: false;
+      description: string;
+    }>;
+    hard_safety_blockers: Array<{
+      blocker_id: string;
+      active: boolean;
+      blocks_after_ack: true;
+      description: string;
+      source: string;
+    }>;
+    next_owner_action: 'explicit_owner_live_authorization_required';
+    live_authorization_effect: string;
+    no_execution_permission: true;
+    no_order_permission: true;
+    no_runtime_start: true;
+    live_ready: false;
+  };
+  authorization_draft: Record<string, string | boolean>;
+  minimal_live_trial_gate: {
+    can_execute_bounded_live_trial: boolean;
+    final_state: string;
+    hard_blockers: string[];
+    acknowledgement_blockers: string[];
+    warnings: string[];
+    live_ready: false;
+    execution_intent_created: false;
+    order_created: false;
+    execution_permission_granted: false;
+  };
+  architecture_classification: Array<Record<string, string>>;
+  generic_now: string[];
+  carrier_specific_by_design: string[];
+  technical_debt_later: string[];
+  not_live_ready_until_explicit_owner_live_authorization: true;
+  not_auto_execution_ready: true;
+  no_real_funds: true;
+  non_permissions: Record<string, boolean>;
+};
+
 export type StartupGuardReadinessArmResponse = {
   action: 'startup_guard_preflight_arm';
   status: 'armed' | 'already_armed' | 'blocked';
@@ -826,6 +897,9 @@ export const brcApi = {
   },
   strategyTrialReadinessV1() {
     return request<StrategyTrialReadinessResponse>('/api/brc/strategy-trial-readiness/v1');
+  },
+  strategyTrialArchitectureGovernance() {
+    return request<StrategyTrialArchitectureGovernanceResponse>('/api/brc/strategy-trial-architecture/bnb-first-carrier');
   },
   runStrategyGroupLiveObservationV1Once() {
     return request<StrategyGroupLiveReadOnlyObservationResponse>('/api/brc/strategy-groups/live-readonly-observation/v1/run-once', {

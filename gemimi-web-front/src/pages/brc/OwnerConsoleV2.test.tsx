@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,8 +10,10 @@ import {
   AnalysisV2,
   HomeV2,
   IntentsV2,
+  StrategyCandidatesV2,
   StrategyGroupsV2,
   TraceV2,
+  TrialConfirmationV2,
 } from './OwnerConsoleV2';
 
 const mockBrcApi = vi.hoisted(() => ({
@@ -23,6 +25,7 @@ const mockBrcApi = vi.hoisted(() => ({
   strategyGroupObservationCasesV1: vi.fn(),
   mi001BnbTrialReadinessGap: vi.fn(),
   strategyTrialReadinessV1: vi.fn(),
+  strategyTrialArchitectureGovernance: vi.fn(),
   listStrategyFamilies: vi.fn(),
   listAdmissionDecisions: vi.fn(),
   listTrialBindings: vi.fn(),
@@ -40,6 +43,7 @@ vi.mock('@/src/services/api', () => ({
 describe('Owner Console v2 shell', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     mockBrcApi.readiness.mockResolvedValue(readinessPayload());
     mockBrcApi.accountFacts.mockResolvedValue(accountFactsPayload());
     mockBrcApi.mi001SolReadiness.mockResolvedValue(mi001Payload());
@@ -48,6 +52,7 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.strategyGroupObservationCasesV1.mockResolvedValue(observationCaseQueuePayload());
     mockBrcApi.mi001BnbTrialReadinessGap.mockResolvedValue(bnbTrialGapPayload());
     mockBrcApi.strategyTrialReadinessV1.mockResolvedValue(strategyTrialReadinessPayload());
+    mockBrcApi.strategyTrialArchitectureGovernance.mockResolvedValue(strategyTrialGovernancePayload());
     mockBrcApi.listStrategyFamilies.mockResolvedValue([]);
     mockBrcApi.listAdmissionDecisions.mockResolvedValue([{ owner_risk_acceptance_id: 'owner-acceptance-1' }]);
     mockBrcApi.listTrialBindings.mockResolvedValue([]);
@@ -58,7 +63,10 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.logout.mockResolvedValue({ authenticated: false });
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+  });
 
   it('renders only the new primary navigation labels and status capsule', async () => {
     render(
@@ -71,7 +79,7 @@ describe('Owner Console v2 shell', () => {
       </MemoryRouter>,
     );
 
-    for (const label of ['首页', '策略组', '执行意图', '账户订单', '复盘分析', '链路追踪']) {
+    for (const label of ['首页', '发起试验', '策略候选', '执行计划', '账户与订单', '复盘', '链路追踪']) {
       expect(await screen.findByRole('link', { name: new RegExp(`^${label}$`) })).toBeTruthy();
     }
     expect(await screen.findByRole('button', { name: /实盘只读 · 记录意图.*禁止下单/ })).toBeTruthy();
@@ -83,85 +91,155 @@ describe('Owner Console v2 shell', () => {
   it('renders the home control panel without dangerous buttons', async () => {
     renderWithRouter(<HomeV2 />);
 
-    expect(await screen.findByText(/MI-001 SOL 已完成试验前准备/)).toBeTruthy();
-    expect(screen.getAllByText(/MI-001 动量冲击/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/运行时启动保护未预检/)).toBeTruthy();
-    expect(screen.getAllByText('禁止下单').length).toBeGreaterThan(0);
-    expect(screen.getByText('暂无新意图')).toBeTruthy();
-    expect(screen.getByText(/没有执行指令，没有订单/)).toBeTruthy();
-    expect(screen.getByText('最近执行意图')).toBeTruthy();
-    expect(screen.getByText('查看链路追踪')).toBeTruthy();
+    expect(await screen.findByText('Owner 工作台')).toBeTruthy();
+    expect(screen.getByText('BNB 小额试验准备已完成，等待你的真实资金授权')).toBeTruthy();
+    expect(screen.getByText('市场判断')).toBeTruthy();
+    expect(screen.getByText('选择候选')).toBeTruthy();
+    expect(screen.getByText('风险确认')).toBeTruthy();
+    expect(screen.getByText('授权')).toBeTruthy();
+    expect(screen.getByText('执行/复盘')).toBeTruthy();
+    expect(screen.getByText('当前候选')).toBeTruthy();
+    expect(screen.getByText('当前能否执行')).toBeTruthy();
+    expect(screen.getByText('下一步动作')).toBeTruthy();
+    expect(screen.getByText('未就绪')).toBeTruthy();
+    expect(screen.getAllByText(/真实资金授权缺失/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('进入授权前确认').length).toBeGreaterThan(0);
+    expect(screen.getByText('为什么现在还不能实盘')).toBeTruthy();
+    expect(screen.getByText('需要你知情的风险')).toBeTruthy();
+    expect(screen.getByText('查看详细证据 / 技术详情')).toBeTruthy();
     assertNoDangerButtons();
   });
 
-  it('renders strategy groups, intents, account orders, analysis, and trace shells', async () => {
-    renderWithRouter(<StrategyGroupsV2 />);
-    expect((await screen.findAllByText('策略组')).length).toBeGreaterThan(0);
-    expect(screen.getByText('策略组货架 / 选择器。这里只用于观察和复盘，不会自动选择策略。')).toBeTruthy();
-    expect(screen.getAllByText('MI-001 动量冲击').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('MI-001 SOL long').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('MI-001 BNB long').length).toBeGreaterThan(0);
-    expect(screen.getByText('Primary Strategy Groups')).toBeTruthy();
-    expect(screen.getByText(/Exactly six primary groups/)).toBeTruthy();
-    expect(screen.getByText('Secondary / Extended Shelf')).toBeTruthy();
-    expect(screen.getAllByText('live_readonly_observation_v1_evaluator_ready_requires_runner_binding').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('coverage_repaired_not_runtime_ready').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('VI-001 ETH long').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Owner Special Observation').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/CPM historical OOS 2021\/2022 was negative/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('not_proven_alpha').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('not_runtime_eligible_by_default').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Trend Breakout').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('research_pool / keep_for_later').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Pullback Continuation').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Volatility Breakout').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Mean Reversion / Range Boundary').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Tier 1 Data Families').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Funding/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Taker flow/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Attention \/ search/).length).toBeGreaterThan(0);
-    expect(screen.getByText('Candidate Evidence Comparison')).toBeTruthy();
-    expect(screen.getByText('Live Read-only Observation Readiness')).toBeTruthy();
-    expect(screen.getByText('Observation Case Queue v1')).toBeTruthy();
-    expect(screen.getAllByText('MI-001-BNB-LONG-live-case-001').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('pending_forward_review').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/no_chase_required/).length).toBeGreaterThan(0);
-    expect(screen.queryByText('CPM-RO-001:future-would-enter')).toBeNull();
-    expect(screen.getByText('MI-001 BNB Trial Readiness Gap')).toBeTruthy();
-    expect(screen.getAllByText('not_testnet_ready_not_live_ready').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/BNB Operation Layer cap/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/missing_bnb_specific_cap/).length).toBeGreaterThan(0);
-    expect(screen.getByText('Strategy Trial Readiness Framework')).toBeTruthy();
-    expect(screen.getAllByText('testnet_rehearsal_blocked_with_explicit_reasons').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('owner_confirm_each_entry').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('websocket not required').length).toBeGreaterThan(0);
+  it('renders strategy candidates and authorization packet as Owner decision flow', async () => {
+    renderWithRouter(<StrategyCandidatesV2 />);
+    expect(await screen.findByText('策略候选')).toBeTruthy();
+    expect(screen.getByText('先说你的判断')).toBeTruthy();
+    expect(screen.getByText('币种')).toBeTruthy();
+    expect(screen.getByText('行情判断')).toBeTruthy();
+    expect(screen.getByText('风险模式')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '生成候选' })).toBeTruthy();
+    expect(screen.getByText('系统推荐候选')).toBeTruthy();
+    expect(screen.getByText('基于你的判断：BNB + 震荡 + 都可 + 极小资金试错。系统给出以下候选。这是候选建议，不是执行授权。')).toBeTruthy();
     expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('CPM-RO-001').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('wired_read_only_v1').length).toBeGreaterThan(0);
-    expect(screen.getByText('local_sqlite_v3_dev_closed_klines_read_only')).toBeTruthy();
-    expect(screen.getByText('process_local_sink_available_not_recorded_by_get')).toBeTruthy();
-    expect(screen.getByText(/MI\/CPM evaluator glue now produces read-only current signal records/)).toBeTruthy();
+    expect(screen.getByText('后端候选')).toBeTruthy();
+    expect(screen.getAllByText('示例候选').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/候选建议不是执行授权/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('查看确认单').length).toBeGreaterThan(0);
+    expect(screen.getByText('全部策略类型')).toBeTruthy();
+    expect(screen.getByText('看不懂术语？')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'SOL' }));
+    fireEvent.click(screen.getByRole('button', { name: '生成候选' }));
+    expect(screen.getByText('基于你的判断：SOL + 震荡 + 都可 + 极小资金试错。系统给出以下候选。这是候选建议，不是执行授权。')).toBeTruthy();
+    expect(screen.getAllByText('MI-001-SOL-LONG').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '查看确认单' }));
+    expect(JSON.parse(window.localStorage.getItem('brc-owner-console-main-flow-v1') || '{}').selectedCarrierId).toBe('MI-001-BNB-LONG');
+    assertNoDangerButtons();
+    cleanup();
+
+    renderWithRouter(<TrialConfirmationV2 />);
+    expect(await screen.findByText('授权前确认单 / 发起试验')).toBeTruthy();
+    expect(screen.getByText('本次试验内容')).toBeTruthy();
+    expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
+    expect(screen.getByText('为什么推荐它')).toBeTruthy();
+    expect(screen.getByText('策略风险')).toBeTruthy();
+    expect(screen.getByText('硬安全门')).toBeTruthy();
+    expect(screen.getByText('测试网验证结果')).toBeTruthy();
+    expect(screen.getByText('授权这一次小额试验')).toBeTruthy();
+    expect(screen.getByText(/当前未接入真实资金环境，暂不可点击/)).toBeTruthy();
+    expect(screen.getAllByText(/后端未确认真实资金授权/).length).toBeGreaterThan(0);
+    expect(screen.getByText('暂不能授权真实资金，还差：')).toBeTruthy();
+    expect(screen.getByText('策略风险仍未全部确认')).toBeTruthy();
+    expect(screen.getByText('live key / IP 白名单状态未接入')).toBeTruthy();
+    expect(screen.getAllByText('阻断').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    expect(screen.getByText('已在本地确认')).toBeTruthy();
+    const persisted = JSON.parse(window.localStorage.getItem('brc-owner-console-main-flow-v1') || '{}');
+    expect(persisted.riskAcknowledgements['MI-001-BNB-LONG'].strategy_not_proven_profitable).toBe(true);
+    expect((screen.getByRole('button', { name: /授权这一次小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
+    assertNoDangerButtons();
     cleanup();
 
     renderWithRouter(<IntentsV2 />);
-    expect(await screen.findByText('执行意图')).toBeTruthy();
-    expect(screen.getByText('暂无执行意图记录')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '执行计划' })).toBeTruthy();
+    expect(screen.getByText('当前待确认候选')).toBeTruthy();
+    expect(screen.getByText('当前确认阶段')).toBeTruthy();
+    expect(screen.getByText('本地风险确认')).toBeTruthy();
+    expect(screen.getByText('1 / 3 项')).toBeTruthy();
+    expect(screen.getByText('暂无执行计划记录')).toBeTruthy();
+    expect(screen.getByText(/当前还没有真实资金执行计划/)).toBeTruthy();
+    expect(screen.getByText('授权链路状态')).toBeTruthy();
+    expect(screen.getByText('等待授权')).toBeTruthy();
+    expect(screen.getAllByText('执行计划').length).toBeGreaterThan(0);
+    expect(screen.getByText('入场订单')).toBeTruthy();
+    expect(screen.getByText('保护订单')).toBeTruthy();
     cleanup();
 
     renderWithRouter(<AccountOrdersV2 />);
     expect(await screen.findByText('账户订单')).toBeTruthy();
+    expect(screen.getByText('当前候选账户上下文')).toBeTruthy();
+    expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
+    expect(screen.getByText('后端确认暂无 BNB 持仓')).toBeTruthy();
+    expect(screen.getByText('后端确认暂无 BNB 挂单')).toBeTruthy();
     expect(screen.getByText('总权益')).toBeTruthy();
     cleanup();
 
     renderWithRouter(<AnalysisV2 />);
     expect(await screen.findByText('复盘分析')).toBeTruthy();
     expect(screen.getByText('当前结论')).toBeTruthy();
+    expect(screen.getByText('BNB 测试网证据')).toBeTruthy();
+    expect(screen.getAllByText('测试网保护演练已通过').length).toBeGreaterThan(0);
+    expect(screen.getByText(/已成交 \/ 数量 0.01/)).toBeTruthy();
+    expect(screen.getByText('止盈保护')).toBeTruthy();
+    expect(screen.getByText('止损保护')).toBeTruthy();
+    expect(screen.getByText('清理平仓')).toBeTruthy();
+    expect(screen.getByText('最终空仓')).toBeTruthy();
+    expect(screen.getByText('一致')).toBeTruthy();
     cleanup();
 
     renderWithRouter(<TraceV2 />);
     expect(await screen.findByText('链路追踪')).toBeTruthy();
-    expect(screen.getByText('策略候选形成')).toBeTruthy();
-    expect(screen.getAllByText('启动保护').length).toBeGreaterThan(0);
+    expect(screen.getByText('实盘只读观察')).toBeTruthy();
+    expect(screen.getByText('受控测试网路径')).toBeTruthy();
+    expect(screen.getByText('第二轮有效保护')).toBeTruthy();
+    expect(screen.getByText('等待真实资金授权')).toBeTruthy();
+    expect(screen.queryByText('not_live_ready_until_explicit_owner_live_authorization')).toBeNull();
+    assertNoDangerButtons();
+  });
+
+  it('marks missing decision-critical backend data as unavailable instead of using silent mock facts', async () => {
+    mockBrcApi.strategyTrialArchitectureGovernance.mockRejectedValueOnce(new Error('not found'));
+    mockBrcApi.strategyTrialReadinessV1.mockRejectedValueOnce(new Error('not found'));
+    mockBrcApi.accountFacts.mockRejectedValueOnce(new Error('not found'));
+
+    renderWithRouter(<HomeV2 />);
+    expect(await screen.findByText('当前候选数据未接入，无法用于真实授权')).toBeTruthy();
+    expect(screen.getAllByText('数据未接入').length).toBeGreaterThan(0);
+    expect(screen.getByText('授权门槛数据未接入')).toBeTruthy();
+    expect(screen.getByText('无法用于真实授权')).toBeTruthy();
+    assertNoDangerButtons();
+    cleanup();
+
+    mockBrcApi.strategyTrialArchitectureGovernance.mockRejectedValueOnce(new Error('not found'));
+    mockBrcApi.strategyTrialReadinessV1.mockRejectedValueOnce(new Error('not found'));
+    mockBrcApi.accountFacts.mockRejectedValueOnce(new Error('not found'));
+
+    renderWithRouter(<TrialConfirmationV2 />);
+    expect(await screen.findByText('授权前确认单 / 发起试验')).toBeTruthy();
+    expect(screen.getAllByText('数据未接入').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/授权门槛数据未接入，无法用于真实授权/).length).toBeGreaterThan(0);
+    expect((screen.getByRole('button', { name: /授权这一次小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
+    assertNoDangerButtons();
+    cleanup();
+
+    mockBrcApi.strategyTrialArchitectureGovernance.mockRejectedValueOnce(new Error('not found'));
+    mockBrcApi.strategyTrialReadinessV1.mockRejectedValueOnce(new Error('not found'));
+    mockBrcApi.accountFacts.mockRejectedValueOnce(new Error('not found'));
+
+    renderWithRouter(<AccountOrdersV2 />);
+    expect(await screen.findByText('账户订单')).toBeTruthy();
+    expect(screen.getAllByText('账户事实数据未接入').length).toBeGreaterThan(0);
+    expect(screen.queryByText('后端确认暂无 BNB 持仓')).toBeNull();
+    expect(screen.queryByText('后端确认暂无 BNB 挂单')).toBeNull();
     assertNoDangerButtons();
   });
 });
@@ -774,6 +852,136 @@ function strategyTrialReadinessPayload() {
     reusable_for_future_profiles: true,
     live_ready: false,
     auto_execution_ready: false,
+  };
+}
+
+function strategyTrialGovernancePayload() {
+  return {
+    generated_from: 'strategy_trial_architecture_governance_v1',
+    final_state: 'not_live_ready_until_explicit_owner_live_authorization',
+    bnb_state: 'bnb_first_carrier_consolidated',
+    owner_review_packet: {
+      packet_id: 'MI-001-BNB-LONG-owner-review-packet-v1',
+      carrier: {
+        carrier_id: 'MI-001-BNB-LONG',
+        strategy_family: 'MI-001',
+        strategy_id: 'MI-001',
+        candidate_id: 'MI-001-BNB-LONG',
+        symbol: 'BNB/USDT:USDT',
+        runtime_symbol: 'BNBUSDT',
+        side: 'long',
+        execution_mode: 'owner_confirm_each_entry',
+        quantity: '0.01',
+        max_notional: 'bounded_owner_scoped',
+        leverage: '1x',
+        max_leverage_allowed: '5x',
+        protection_plan_type: 'single_tp_plus_sl',
+        strategy_family_order_authority: false,
+        carrier_is_order_authority: false,
+        live_ready: false,
+        auto_execution_ready: false,
+      },
+      testnet_rehearsal_result: 'completed_with_valid_protection',
+      testnet_rehearsal_evidence: {
+        result: 'completed_with_valid_protection',
+        entry_order_id: 'testnet-entry-1',
+        entry_filled_quantity: '0.01',
+        entry_status: 'FILLED',
+        tp_order_id: 'testnet-tp-1',
+        tp_status: 'ACCEPTED',
+        sl_order_id: 'testnet-sl-1',
+        sl_status: 'ACCEPTED',
+        cleanup_close_order_id: 'testnet-cleanup-1',
+        cleanup_status: 'FILLED',
+        final_position_flat: true,
+        final_local_active_bnb_positions: '0',
+        final_local_open_bnb_orders: '0',
+        periodic_reconciliation: 'consistent',
+        campaign_id: 'bnb-testnet-carrier-path-2',
+        campaign_outcome: 'completed_with_valid_protection',
+      },
+      strategy_warnings: [
+        {
+          warning_id: 'strategy_not_proven_profitable',
+          severity: 'warning',
+          owner_ack_required: true,
+          acknowledged: false,
+          blocks_after_ack: false,
+          description: 'Strategy warning is acknowledgeable and not a hard safety blocker.',
+        },
+        {
+          warning_id: 'limited_live_observation_sample',
+          severity: 'warning',
+          owner_ack_required: true,
+          acknowledged: false,
+          blocks_after_ack: false,
+          description: 'BNB live observation sample is limited.',
+        },
+      ],
+      hard_safety_blockers: [
+        {
+          blocker_id: 'live_authorization_missing',
+          active: true,
+          blocks_after_ack: true,
+          description: 'Explicit Owner live authorization is missing.',
+          source: 'authorization_gate',
+        },
+      ],
+      next_owner_action: 'explicit_owner_live_authorization_required',
+      live_authorization_effect: 'Owner live authorization may create a single-use bounded authorization, but it does not place an order by itself.',
+      no_execution_permission: true,
+      no_order_permission: true,
+      no_runtime_start: true,
+      live_ready: false,
+    },
+    authorization_draft: {
+      authorization_id: 'MI-001-BNB-LONG-bounded-live-trial-draft-v1',
+      carrier_id: 'MI-001-BNB-LONG',
+      pending_owner_live_authorization: true,
+      owner_confirmed: false,
+      live_ready: false,
+      execution_permission_granted: false,
+      order_permission_granted: false,
+    },
+    minimal_live_trial_gate: {
+      can_execute_bounded_live_trial: false,
+      final_state: 'blocked_missing_owner_live_authorization',
+      hard_blockers: ['live_authorization_missing'],
+      acknowledgement_blockers: ['strategy_not_proven_profitable'],
+      warnings: ['limited_live_observation_sample'],
+      live_ready: false,
+      execution_intent_created: false,
+      order_created: false,
+      execution_permission_granted: false,
+    },
+    architecture_classification: [
+      {
+        concept: 'StrategyFamily',
+        current_item: 'MI-001',
+        classification: 'generic_now',
+        decision: 'StrategyFamily has no order authority.',
+      },
+      {
+        concept: 'Carrier',
+        current_item: 'MI-001-BNB-LONG',
+        classification: 'carrier_specific_by_design',
+        decision: 'Carrier combines family, symbol, side, and risk cap.',
+      },
+    ],
+    generic_now: ['StrategyFamily', 'BoundedLiveTrialAuthorization'],
+    carrier_specific_by_design: ['MI-001-BNB-LONG'],
+    technical_debt_later: [],
+    not_live_ready_until_explicit_owner_live_authorization: true,
+    not_auto_execution_ready: true,
+    no_real_funds: true,
+    non_permissions: {
+      no_live_order: true,
+      no_execution_intent: true,
+      no_order_creation: true,
+      no_runtime_start: true,
+      authorization_draft_is_not_order_permission: true,
+      warning_acknowledgement_is_not_live_authorization: true,
+    },
   };
 }
 
