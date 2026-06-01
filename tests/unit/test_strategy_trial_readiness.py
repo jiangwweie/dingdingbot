@@ -9,6 +9,7 @@ from src.application.strategy_trial_readiness import (
     build_bnb_strategy_trial_readiness,
     evaluate_strategy_trial_preflight,
 )
+from src.application.strategy_trial_preflight_facts import TrialPreflightFactCollector
 
 
 def test_bnb_strategy_trial_readiness_links_observation_without_execution_authority():
@@ -24,7 +25,8 @@ def test_bnb_strategy_trial_readiness_links_observation_without_execution_author
     assert readiness.non_permissions["no_execution_intent"] is True
     assert readiness.preflight_result.execution_intent_created is False
     assert readiness.preflight_result.order_created is False
-    assert "active_conflicting_position_check_not_checked" in readiness.blockers
+    assert "active_position_check_required_before_rehearsal" in readiness.blockers
+    assert "account_facts_required_before_rehearsal" in readiness.blockers
 
 
 def test_preflight_can_reach_ready_pending_owner_authorization_when_safety_facts_clear():
@@ -39,6 +41,7 @@ def test_preflight_can_reach_ready_pending_owner_authorization_when_safety_facts
         gks_status="clear",
         startup_guard_status="clear",
         reconciliation_status="clean",
+        account_facts_status="clear",
         owner_authorized_testnet_rehearsal=False,
     )
 
@@ -53,7 +56,7 @@ def test_preflight_can_reach_ready_pending_owner_authorization_when_safety_facts
     )
 
     assert preflight.status == "ready"
-    assert "owner_authorization_missing_for_testnet_rehearsal" in preflight.warnings
+    assert "owner_testnet_authorization_missing" in preflight.warnings
     assert readiness.readiness_verdict == "testnet_rehearsal_ready_pending_owner_authorization"
     assert readiness.rehearsal_readiness_state["testnet_rehearsal_status"] == "pending_owner_authorization"
     assert readiness.live_ready is False
@@ -131,12 +134,120 @@ def test_generic_model_can_represent_non_bnb_profile():
             gks_status="clear",
             startup_guard_status="clear",
             reconciliation_status="clean",
+            account_facts_status="clear",
         ),
     )
 
     assert sol_profile.candidate_id == "MI-001-SOL-LONG"
     assert preflight.status == "ready"
     assert preflight.execution_permission_granted is False
+
+
+async def test_fact_collector_unknown_sources_become_concrete_preflight_blockers():
+    profile = bnb_first_carrier_profile()
+    snapshot = await TrialPreflightFactCollector().collect(profile)
+    readiness = build_bnb_strategy_trial_readiness(
+        observation_case=_bnb_case(),
+        preflight_input=snapshot.to_preflight_input(
+            requested_mode=profile.execution_mode,
+        ),
+        fact_checks=snapshot.to_response_dict(),
+    )
+
+    assert readiness.readiness_verdict == "testnet_rehearsal_not_ready_with_explicit_blockers"
+    assert "active_position_check_required_before_rehearsal" in readiness.blockers
+    assert "open_order_check_required_before_rehearsal" in readiness.blockers
+    assert "gks_status_required_before_rehearsal" in readiness.blockers
+    assert "startup_guard_status_required_before_rehearsal" in readiness.blockers
+    assert "reconciliation_status_required_before_rehearsal" in readiness.blockers
+    assert "account_facts_required_before_rehearsal" in readiness.blockers
+    assert readiness.fact_checks["candidate_id"] == "MI-001-BNB-LONG"
+    assert readiness.live_ready is False
+    assert readiness.preflight_result.order_created is False
+
+
+async def test_fact_collector_clear_facts_reaches_ready_pending_owner_authorization():
+    profile = bnb_first_carrier_profile()
+
+    async def empty(_profile):
+        return []
+
+    async def gks(_profile):
+        return {"active": False, "source": "fake_gks", "updated_at_ms": 1}
+
+    async def startup(_profile):
+        return {"armed": True, "source": "fake_startup", "updated_at_ms": 2}
+
+    async def reconciliation(_profile):
+        return {"status": "clean", "failed_reconciliations_count": 0}
+
+    async def account(_profile):
+        return {
+            "freshness_status": "fresh",
+            "source_type": "fake_read_only",
+            "timestamp_ms": 3,
+        }
+
+    snapshot = await TrialPreflightFactCollector(
+        position_reader=empty,
+        open_order_reader=empty,
+        gks_reader=gks,
+        startup_guard_reader=startup,
+        reconciliation_reader=reconciliation,
+        account_facts_reader=account,
+    ).collect(profile)
+    readiness = build_bnb_strategy_trial_readiness(
+        observation_case=_bnb_case(),
+        preflight_input=snapshot.to_preflight_input(
+            requested_mode=profile.execution_mode,
+        ),
+        fact_checks=snapshot.to_response_dict(),
+    )
+
+    assert snapshot.blockers == []
+    assert readiness.preflight_result.status == "ready"
+    assert readiness.readiness_verdict == "testnet_rehearsal_ready_pending_owner_authorization"
+    assert "owner_testnet_authorization_missing" in readiness.warnings
+    assert readiness.non_permissions["no_execution_permission"] is True
+
+
+async def test_fact_collector_conflicting_position_and_order_block_rehearsal():
+    profile = bnb_first_carrier_profile()
+
+    async def one(_profile):
+        return [{"id": "existing"}]
+
+    async def gks(_profile):
+        return {"active": False}
+
+    async def startup(_profile):
+        return {"armed": True}
+
+    async def reconciliation(_profile):
+        return {"status": "clean"}
+
+    async def account(_profile):
+        return {"freshness_status": "fresh", "timestamp_ms": 3}
+
+    snapshot = await TrialPreflightFactCollector(
+        position_reader=one,
+        open_order_reader=one,
+        gks_reader=gks,
+        startup_guard_reader=startup,
+        reconciliation_reader=reconciliation,
+        account_facts_reader=account,
+    ).collect(profile)
+    readiness = build_bnb_strategy_trial_readiness(
+        observation_case=_bnb_case(),
+        preflight_input=snapshot.to_preflight_input(
+            requested_mode=profile.execution_mode,
+        ),
+        fact_checks=snapshot.to_response_dict(),
+    )
+
+    assert "conflicting_position_exists" in readiness.blockers
+    assert "conflicting_open_order_exists" in readiness.blockers
+    assert readiness.readiness_verdict == "testnet_rehearsal_not_ready_with_explicit_blockers"
 
 
 def _bnb_case() -> ObservationCaseQueueItem:

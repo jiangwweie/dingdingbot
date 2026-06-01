@@ -41,9 +41,13 @@ from src.application.strategy_trial_readiness import (
     StrategyTrialReadinessResponse,
     build_bnb_strategy_trial_readiness,
 )
+from src.application.strategy_trial_preflight_facts import TrialPreflightFactCollector
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.database import probe_pg_connectivity
+from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
+from src.infrastructure.pg_order_repository import PgOrderRepository
+from src.infrastructure.pg_position_repository import PgPositionRepository
 from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.brc_admission_service import (
@@ -3663,7 +3667,86 @@ async def get_strategy_trial_readiness_v1(
             observation_case = queue.cases[0] if queue.cases else None
     except Exception:
         observation_case = None
-    return build_bnb_strategy_trial_readiness(observation_case=observation_case)
+    profile_readiness = build_bnb_strategy_trial_readiness(observation_case=observation_case)
+    collector = _strategy_trial_preflight_fact_collector(_api_module())
+    fact_snapshot = await collector.collect(profile_readiness.strategy_profile)
+    return build_bnb_strategy_trial_readiness(
+        observation_case=observation_case,
+        preflight_input=fact_snapshot.to_preflight_input(
+            requested_mode=profile_readiness.strategy_profile.execution_mode,
+        ),
+        fact_checks=fact_snapshot.to_response_dict(),
+    )
+
+
+def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightFactCollector:
+    return TrialPreflightFactCollector(
+        position_reader=_bnb_preflight_position_reader(api_module),
+        open_order_reader=_bnb_preflight_open_order_reader(api_module),
+        gks_reader=_bnb_preflight_gks_reader(api_module),
+        startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
+        reconciliation_reader=_bnb_preflight_reconciliation_reader(api_module),
+        account_facts_reader=None,
+    )
+
+
+def _bnb_preflight_position_reader(api_module: Any):
+    async def _read(profile):
+        repo = getattr(api_module, "_position_repo", None)
+        if repo is not None and hasattr(repo, "list_active"):
+            return await repo.list_active(symbol=profile.symbol)
+        if await probe_pg_connectivity():
+            return await PgPositionRepository().list_active(symbol=profile.symbol)
+        raise RuntimeError("position_repository_unavailable")
+
+    return _read
+
+
+def _bnb_preflight_open_order_reader(api_module: Any):
+    async def _read(profile):
+        repo = getattr(api_module, "_order_repo", None)
+        if repo is not None and hasattr(repo, "get_open_orders"):
+            return await repo.get_open_orders(symbol=profile.symbol)
+        if await probe_pg_connectivity():
+            return await PgOrderRepository().get_open_orders(symbol=profile.symbol)
+        raise RuntimeError("order_repository_unavailable")
+
+    return _read
+
+
+def _bnb_preflight_gks_reader(api_module: Any):
+    async def _read(_profile):
+        service = getattr(api_module, "_global_kill_switch_service", None)
+        if service is not None and hasattr(service, "get_state"):
+            return service.get_state()
+        if await probe_pg_connectivity():
+            repo = PgGlobalKillSwitchRepository()
+            return await repo.get_state()
+        raise RuntimeError("gks_repository_unavailable")
+
+    return _read
+
+
+def _bnb_preflight_startup_guard_reader(api_module: Any):
+    service = getattr(api_module, "_startup_trading_guard_service", None)
+    if service is None or not hasattr(service, "get_state"):
+        return None
+
+    async def _read(_profile):
+        return service.get_state()
+
+    return _read
+
+
+def _bnb_preflight_reconciliation_reader(api_module: Any):
+    summary = getattr(api_module, "_startup_reconciliation_summary", None)
+    if summary is None:
+        return None
+
+    async def _read(_profile):
+        return summary
+
+    return _read
 
 
 async def _strategy_group_live_readonly_observation_response(

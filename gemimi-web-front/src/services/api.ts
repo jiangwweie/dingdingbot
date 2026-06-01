@@ -486,6 +486,28 @@ export type StrategyTrialReadinessResponse = {
   };
   owner_decision_state: Record<string, string | boolean | string[]>;
   rehearsal_readiness_state: Record<string, string | boolean | string[]>;
+  fact_checks: {
+    generated_at_ms: number;
+    candidate_id: string;
+    symbol: string;
+    side: string;
+    facts: Array<{
+      fact_id: 'active_position' | 'open_order' | 'gks' | 'startup_guard' | 'reconciliation' | 'account_facts';
+      status: 'clear' | 'blocked' | 'unknown' | 'unavailable' | 'not_checked';
+      source: string;
+      blocking: boolean;
+      blocker?: string | null;
+      observed_at_ms?: number | null;
+      evidence: Record<string, string | number | boolean | null>;
+      notes: string[];
+    }>;
+    blockers: string[];
+    warnings: string[];
+    execution_intent_created: false;
+    order_created: false;
+    execution_permission_granted: false;
+    live_ready: false;
+  };
   readiness_verdict: 'testnet_rehearsal_ready_pending_owner_authorization' | 'testnet_rehearsal_not_ready_with_explicit_blockers';
   blockers: string[];
   warnings: string[];

@@ -1118,6 +1118,9 @@ function StrategyTrialReadinessPanel({ data }: { data: StrategyTrialReadinessRes
   const profile = data?.strategy_profile;
   const cap = data?.risk_cap_profile;
   const preflight = data?.preflight_result;
+  const factValues = data?.fact_checks?.facts?.length
+    ? data.fact_checks.facts.map((fact) => `${fact.fact_id}: ${fact.status}${fact.blocker ? ` (${fact.blocker})` : ''}`)
+    : ['api_unavailable'];
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
@@ -1144,6 +1147,7 @@ function StrategyTrialReadinessPanel({ data }: { data: StrategyTrialReadinessRes
       <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
         <ChipBlock label="Blockers" values={(data?.blockers.length ? data.blockers : ['none_reported']).slice(0, 10)} tone="amber" />
         <ChipBlock label="Warnings" values={(data?.warnings.length ? data.warnings : ['none_reported']).slice(0, 10)} tone="slate" />
+        <ChipBlock label="Preflight facts" values={factValues.slice(0, 10)} tone="amber" />
         <ChipBlock
           label="Non-permissions"
           values={[

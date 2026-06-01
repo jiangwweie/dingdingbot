@@ -8,7 +8,7 @@ intents, place orders, grant execution permission, or start runtime.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -68,6 +68,7 @@ class TrialReadinessPreflightInput(BaseModel):
     gks_status: Literal["clear", "blocking", "unknown", "not_checked"] = "not_checked"
     startup_guard_status: Literal["clear", "blocking", "unknown", "not_checked"] = "not_checked"
     reconciliation_status: Literal["clean", "mismatch", "unknown", "not_checked"] = "not_checked"
+    account_facts_status: Literal["clear", "blocked", "unknown", "not_checked"] = "not_checked"
 
 
 class StrategyTrialPreflightResult(BaseModel):
@@ -90,6 +91,7 @@ class StrategyTrialReadinessResponse(BaseModel):
     preflight_result: StrategyTrialPreflightResult
     owner_decision_state: dict[str, str | bool | list[str]]
     rehearsal_readiness_state: dict[str, str | bool | list[str]]
+    fact_checks: dict[str, Any] = Field(default_factory=dict)
     readiness_verdict: ReadinessVerdict
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -129,6 +131,7 @@ def build_bnb_strategy_trial_readiness(
     observation_case: ObservationCaseQueueItem | None = None,
     preflight_input: TrialReadinessPreflightInput | None = None,
     risk_cap_profile: RiskCapProfile | None = None,
+    fact_checks: dict[str, Any] | None = None,
 ) -> StrategyTrialReadinessResponse:
     profile = bnb_first_carrier_profile()
     cap_profile = risk_cap_profile or bnb_first_carrier_cap_profile()
@@ -187,6 +190,7 @@ def build_bnb_strategy_trial_readiness(
             "same_path_rehearsal": True,
             "requires_owner_authorization": True,
         },
+        fact_checks=dict(fact_checks or {}),
         readiness_verdict=verdict,
         blockers=blockers,
         warnings=warnings,
@@ -234,19 +238,23 @@ def evaluate_strategy_trial_preflight(
         blockers.append("auto_execution_enabled_unexpectedly")
     if preflight_input.active_conflicting_position_status != "clear":
         blockers.append(
-            f"active_conflicting_position_check_{preflight_input.active_conflicting_position_status}"
+            _active_position_blocker(preflight_input.active_conflicting_position_status)
         )
     if preflight_input.open_conflicting_order_status != "clear":
-        blockers.append(f"open_conflicting_order_check_{preflight_input.open_conflicting_order_status}")
+        blockers.append(
+            _open_order_blocker(preflight_input.open_conflicting_order_status)
+        )
     if preflight_input.gks_status != "clear":
-        blockers.append(f"gks_status_{preflight_input.gks_status}")
+        blockers.append(_gks_blocker(preflight_input.gks_status))
     if preflight_input.startup_guard_status != "clear":
-        blockers.append(f"startup_guard_status_{preflight_input.startup_guard_status}")
+        blockers.append(_startup_guard_blocker(preflight_input.startup_guard_status))
     if preflight_input.reconciliation_status != "clean":
-        blockers.append(f"reconciliation_status_{preflight_input.reconciliation_status}")
+        blockers.append(_reconciliation_blocker(preflight_input.reconciliation_status))
+    if preflight_input.account_facts_status != "clear":
+        blockers.append(_account_facts_blocker(preflight_input.account_facts_status))
 
     if not preflight_input.owner_authorized_testnet_rehearsal:
-        warnings.append("owner_authorization_missing_for_testnet_rehearsal")
+        warnings.append("owner_testnet_authorization_missing")
 
     return StrategyTrialPreflightResult(
         status="blocked" if blockers else "ready",
@@ -259,6 +267,7 @@ def evaluate_strategy_trial_preflight(
             "live_trading_requested": preflight_input.live_trading_requested,
             "auto_execution_enabled": preflight_input.auto_execution_enabled,
             "owner_authorized_testnet_rehearsal": preflight_input.owner_authorized_testnet_rehearsal,
+            "account_facts_status": preflight_input.account_facts_status,
             "risk_cap_profile_present": risk_cap_profile is not None
             and risk_cap_profile.profile_status == "present",
         },
@@ -280,6 +289,40 @@ def _cap_profile_valid(profile: RiskCapProfile) -> bool:
         and profile.owner_confirm_each_entry
         and profile.live_ready is False
     )
+
+
+def _active_position_blocker(status: str) -> str:
+    if status == "blocked":
+        return "conflicting_position_exists"
+    return "active_position_check_required_before_rehearsal"
+
+
+def _open_order_blocker(status: str) -> str:
+    if status == "blocked":
+        return "conflicting_open_order_exists"
+    return "open_order_check_required_before_rehearsal"
+
+
+def _gks_blocker(status: str) -> str:
+    if status == "blocking":
+        return "gks_blocked"
+    return "gks_status_required_before_rehearsal"
+
+
+def _startup_guard_blocker(status: str) -> str:
+    if status == "blocking":
+        return "startup_guard_blocked"
+    return "startup_guard_status_required_before_rehearsal"
+
+
+def _reconciliation_blocker(status: str) -> str:
+    if status == "mismatch":
+        return "reconciliation_not_clean"
+    return "reconciliation_status_required_before_rehearsal"
+
+
+def _account_facts_blocker(status: str) -> str:
+    return "account_facts_required_before_rehearsal"
 
 
 def _observation_case_summary(

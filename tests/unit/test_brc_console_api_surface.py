@@ -761,6 +761,17 @@ def test_strategy_trial_readiness_api_exposes_bnb_carrier_without_execution(monk
     assert payload["preflight_result"]["execution_intent_created"] is False
     assert payload["preflight_result"]["order_created"] is False
     assert payload["market_data_architecture"]["current_source_is_public_read_only"] is True
+    assert payload["fact_checks"]["candidate_id"] == "MI-001-BNB-LONG"
+    fact_ids = {fact["fact_id"] for fact in payload["fact_checks"]["facts"]}
+    assert {
+        "active_position",
+        "open_order",
+        "gks",
+        "startup_guard",
+        "reconciliation",
+        "account_facts",
+    }.issubset(fact_ids)
+    assert "account_facts_required_before_rehearsal" in payload["blockers"]
 
     raw_payload = json.dumps(payload)
     assert "Start Trading" not in raw_payload
