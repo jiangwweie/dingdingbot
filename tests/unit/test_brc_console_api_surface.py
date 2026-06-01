@@ -751,9 +751,11 @@ def test_strategy_trial_readiness_api_exposes_bnb_carrier_without_execution(monk
     assert payload["strategy_profile"]["execution_mode"] == "owner_confirm_each_entry"
     assert payload["risk_cap_profile"]["profile_status"] == "present"
     assert payload["readiness_verdict"] in {
-        "testnet_rehearsal_ready_pending_owner_authorization",
-        "testnet_rehearsal_not_ready_with_explicit_blockers",
+        "testnet_rehearsal_ready",
+        "testnet_rehearsal_blocked_with_explicit_reasons",
+        "testnet_rehearsal_completed",
     }
+    assert payload["owner_decision_state"]["owner_authorization_required"] is False
     assert payload["live_ready"] is False
     assert payload["auto_execution_ready"] is False
     assert payload["non_permissions"]["no_execution_intent"] is True
@@ -815,7 +817,8 @@ def test_strategy_trial_readiness_api_uses_cached_account_facts_when_fresh(monke
     assert account_fact["source"] == "runtime_cached_account_snapshot"
     assert account_fact["evidence"]["equity_available"] is True
     assert account_fact["evidence"]["available_margin_available"] is True
-    assert payload["readiness_verdict"] == "testnet_rehearsal_ready_pending_owner_authorization"
+    assert payload["readiness_verdict"] == "testnet_rehearsal_ready"
+    assert payload["owner_decision_state"]["owner_authorization_required"] is False
     assert payload["live_ready"] is False
     assert payload["preflight_result"]["execution_intent_created"] is False
     assert payload["preflight_result"]["order_created"] is False

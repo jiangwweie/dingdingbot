@@ -132,7 +132,7 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getAllByText(/BNB Operation Layer cap/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/missing_bnb_specific_cap/).length).toBeGreaterThan(0);
     expect(screen.getByText('Strategy Trial Readiness Framework')).toBeTruthy();
-    expect(screen.getAllByText('testnet_rehearsal_not_ready_with_explicit_blockers').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('testnet_rehearsal_blocked_with_explicit_reasons').length).toBeGreaterThan(0);
     expect(screen.getAllByText('owner_confirm_each_entry').length).toBeGreaterThan(0);
     expect(screen.getAllByText('websocket not required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
@@ -654,12 +654,12 @@ function strategyTrialReadinessPayload() {
       no_withdrawal: true,
       owner_confirm_each_entry: true,
       live_ready: false,
-      testnet_rehearsal_requires_owner_authorization: true,
+      testnet_rehearsal_requires_owner_authorization: false,
     },
     preflight_result: {
       status: 'blocked',
       blockers: ['active_position_check_required_before_rehearsal', 'gks_status_required_before_rehearsal'],
-      warnings: ['owner_testnet_authorization_missing'],
+      warnings: [],
       evidence: {
         requested_symbol: 'BNBUSDT',
         requested_side: 'long',
@@ -667,24 +667,25 @@ function strategyTrialReadinessPayload() {
         live_trading_requested: false,
         auto_execution_enabled: false,
       },
-      next_owner_action: 'Resolve blockers before Owner can authorize testnet same-path rehearsal.',
+      next_owner_action: 'Resolve blockers before BNB testnet same-path rehearsal.',
       execution_intent_created: false,
       order_created: false,
       live_order_created: false,
       execution_permission_granted: false,
     },
     owner_decision_state: {
-      owner_authorization_status: 'missing',
-      owner_authorization_required: true,
-      owner_can_authorize_testnet_rehearsal_next: false,
-      allowed_decisions: ['continue_observation_only', 'prepare_owner_authorized_testnet_rehearsal'],
+      owner_authorization_status: 'not_required_for_testnet',
+      owner_authorization_required: false,
+      testnet_rehearsal_can_proceed_if_runtime_gate_passes: false,
+      allowed_decisions: ['continue_observation_only', 'run_testnet_rehearsal_if_runtime_gates_pass'],
     },
     rehearsal_readiness_state: {
       testnet_rehearsal_status: 'blocked',
       live_status: 'blocked',
       auto_execution_status: 'disabled',
       same_path_rehearsal: true,
-      requires_owner_authorization: true,
+      requires_owner_authorization: false,
+      requires_runtime_testnet_gates: true,
     },
     fact_checks: {
       generated_at_ms: Date.now(),
@@ -737,9 +738,9 @@ function strategyTrialReadinessPayload() {
       execution_permission_granted: false,
       live_ready: false,
     },
-    readiness_verdict: 'testnet_rehearsal_not_ready_with_explicit_blockers',
+    readiness_verdict: 'testnet_rehearsal_blocked_with_explicit_reasons',
     blockers: ['active_position_check_required_before_rehearsal', 'gks_status_required_before_rehearsal'],
-    warnings: ['owner_testnet_authorization_missing'],
+    warnings: [],
     evidence: {
       latest_signal: 'would_enter',
       observation_case_id: 'MI-001-BNB-LONG-live-case-001',

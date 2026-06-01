@@ -465,7 +465,7 @@ export type RiskCapProfile = {
   no_withdrawal: boolean;
   owner_confirm_each_entry: boolean;
   live_ready: false;
-  testnet_rehearsal_requires_owner_authorization: true;
+  testnet_rehearsal_requires_owner_authorization: boolean;
 };
 
 export type StrategyTrialReadinessResponse = {
@@ -509,7 +509,7 @@ export type StrategyTrialReadinessResponse = {
     execution_permission_granted: false;
     live_ready: false;
   };
-  readiness_verdict: 'testnet_rehearsal_ready_pending_owner_authorization' | 'testnet_rehearsal_not_ready_with_explicit_blockers';
+  readiness_verdict: 'testnet_rehearsal_ready' | 'testnet_rehearsal_blocked_with_explicit_reasons' | 'testnet_rehearsal_completed';
   blockers: string[];
   warnings: string[];
   evidence: Record<string, string | boolean | number | null>;

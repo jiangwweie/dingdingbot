@@ -1130,7 +1130,7 @@ function StrategyTrialReadinessPanel({ data }: { data: StrategyTrialReadinessRes
             Generic readiness surface using MI-001 BNB as first carrier. Observation remains review-only.
           </p>
         </div>
-        <StatePill tone={data?.readiness_verdict === 'testnet_rehearsal_ready_pending_owner_authorization' ? 'teal' : 'amber'}>
+        <StatePill tone={data?.readiness_verdict === 'testnet_rehearsal_ready' ? 'teal' : 'amber'}>
           {data?.readiness_verdict || 'api_unavailable'}
         </StatePill>
       </div>

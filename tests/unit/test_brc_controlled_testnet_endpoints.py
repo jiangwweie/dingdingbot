@@ -460,6 +460,29 @@ async def test_brc_entry_rejects_body_override(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_brc_controlled_entry_rejects_bnb_symbol_without_order_path(monkeypatch):
+    service = await _brc_service()
+    orch = _orchestrator()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(),
+        _brc_campaign_service=service,
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(),
+        _startup_trading_guard_service=_guard(),
+        _global_kill_switch_service=_gks(),
+        _position_repo=MutablePositionRepo(),
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/bnb/execute-controlled-entry")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Unsupported BRC controlled symbol key; use eth or btc."
+    orch.execute_signal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_brc_evidence_returns_404_without_active_campaign(monkeypatch):
     _patch_api_module(
         monkeypatch,

@@ -18,12 +18,13 @@ from src.application.strategy_group_observation_case_queue import (
 
 
 ReadinessVerdict = Literal[
-    "testnet_rehearsal_ready_pending_owner_authorization",
-    "testnet_rehearsal_not_ready_with_explicit_blockers",
+    "testnet_rehearsal_ready",
+    "testnet_rehearsal_blocked_with_explicit_reasons",
+    "testnet_rehearsal_completed",
 ]
 PreflightStatus = Literal["ready", "blocked", "unknown"]
-OwnerAuthorizationStatus = Literal["missing", "granted_metadata_only"]
-TestnetRehearsalStatus = Literal["pending_owner_authorization", "blocked"]
+OwnerAuthorizationStatus = Literal["not_required_for_testnet", "granted_metadata_only"]
+TestnetRehearsalStatus = Literal["ready", "blocked", "completed"]
 
 
 class StrategyProfile(BaseModel):
@@ -53,7 +54,7 @@ class RiskCapProfile(BaseModel):
     no_withdrawal: bool = True
     owner_confirm_each_entry: bool = True
     live_ready: Literal[False] = False
-    testnet_rehearsal_requires_owner_authorization: Literal[True] = True
+    testnet_rehearsal_requires_owner_authorization: bool = False
 
 
 class TrialReadinessPreflightInput(BaseModel):
@@ -151,20 +152,17 @@ def build_bnb_strategy_trial_readiness(
     if observation_case is None:
         warnings.append("observation_case_missing_or_pg_unavailable")
 
-    auth_status: OwnerAuthorizationStatus = (
-        "granted_metadata_only"
-        if (preflight_input and preflight_input.owner_authorized_testnet_rehearsal)
-        else "missing"
-    )
-    ready_except_owner = preflight.status == "ready"
+    auth_status: OwnerAuthorizationStatus = "not_required_for_testnet"
+    if preflight_input and preflight_input.owner_authorized_testnet_rehearsal:
+        auth_status = "granted_metadata_only"
     verdict: ReadinessVerdict = (
-        "testnet_rehearsal_ready_pending_owner_authorization"
-        if ready_except_owner and auth_status == "missing"
-        else "testnet_rehearsal_not_ready_with_explicit_blockers"
+        "testnet_rehearsal_ready"
+        if preflight.status == "ready"
+        else "testnet_rehearsal_blocked_with_explicit_reasons"
     )
     rehearsal_status: TestnetRehearsalStatus = (
-        "pending_owner_authorization"
-        if verdict == "testnet_rehearsal_ready_pending_owner_authorization"
+        "ready"
+        if verdict == "testnet_rehearsal_ready"
         else "blocked"
     )
     return StrategyTrialReadinessResponse(
@@ -174,12 +172,13 @@ def build_bnb_strategy_trial_readiness(
         preflight_result=preflight,
         owner_decision_state={
             "owner_authorization_status": auth_status,
-            "owner_authorization_required": True,
-            "owner_can_authorize_testnet_rehearsal_next": verdict
-            == "testnet_rehearsal_ready_pending_owner_authorization",
+            "owner_authorization_required": False,
+            "owner_authorization_boundary": "Owner granted blanket non-live/testnet authorization; live trading still requires separate explicit authorization.",
+            "testnet_rehearsal_can_proceed_if_runtime_gate_passes": verdict
+            == "testnet_rehearsal_ready",
             "allowed_decisions": [
                 "continue_observation_only",
-                "prepare_owner_authorized_testnet_rehearsal",
+                "run_testnet_rehearsal_if_runtime_gates_pass",
                 "wait_for_forward_review",
                 "pause_bnb_case",
             ],
@@ -189,7 +188,8 @@ def build_bnb_strategy_trial_readiness(
             "live_status": "blocked",
             "auto_execution_status": "disabled",
             "same_path_rehearsal": True,
-            "requires_owner_authorization": True,
+            "requires_owner_authorization": False,
+            "requires_runtime_testnet_gates": True,
         },
         fact_checks=dict(fact_checks or {}),
         readiness_verdict=verdict,
@@ -254,9 +254,6 @@ def evaluate_strategy_trial_preflight(
     if preflight_input.account_facts_status != "clear":
         blockers.append(_account_facts_blocker(preflight_input.account_facts_status))
 
-    if not preflight_input.owner_authorized_testnet_rehearsal:
-        warnings.append("owner_testnet_authorization_missing")
-
     return StrategyTrialPreflightResult(
         status="blocked" if blockers else "ready",
         blockers=blockers,
@@ -273,9 +270,9 @@ def evaluate_strategy_trial_preflight(
             and risk_cap_profile.profile_status == "present",
         },
         next_owner_action=(
-            "Authorize BNB testnet same-path rehearsal only after reviewing cap/profile/preflight facts."
+            "Run BNB testnet same-path rehearsal only after runtime/testnet gates pass."
             if not blockers
-            else "Resolve blockers before Owner can authorize testnet same-path rehearsal."
+            else "Resolve blockers before BNB testnet same-path rehearsal."
         ),
     )
 
