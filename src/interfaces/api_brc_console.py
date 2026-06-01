@@ -3686,7 +3686,7 @@ def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightF
         gks_reader=_bnb_preflight_gks_reader(api_module),
         startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
         reconciliation_reader=_bnb_preflight_reconciliation_reader(api_module),
-        account_facts_reader=None,
+        account_facts_reader=_bnb_preflight_account_facts_reader(api_module),
     )
 
 
@@ -3719,6 +3719,11 @@ def _bnb_preflight_gks_reader(api_module: Any):
         service = getattr(api_module, "_global_kill_switch_service", None)
         if service is not None and hasattr(service, "get_state"):
             return service.get_state()
+        if service is not None and hasattr(service, "is_active"):
+            return {
+                "active": bool(service.is_active()),
+                "source": "runtime_global_kill_switch_service",
+            }
         if await probe_pg_connectivity():
             repo = PgGlobalKillSwitchRepository()
             return await repo.get_state()
@@ -3729,11 +3734,16 @@ def _bnb_preflight_gks_reader(api_module: Any):
 
 def _bnb_preflight_startup_guard_reader(api_module: Any):
     service = getattr(api_module, "_startup_trading_guard_service", None)
-    if service is None or not hasattr(service, "get_state"):
+    if service is None or not (hasattr(service, "get_state") or hasattr(service, "is_armed")):
         return None
 
     async def _read(_profile):
-        return service.get_state()
+        if hasattr(service, "get_state"):
+            return service.get_state()
+        return {
+            "armed": bool(service.is_armed()),
+            "source": "runtime_startup_trading_guard_service",
+        }
 
     return _read
 
@@ -3745,6 +3755,36 @@ def _bnb_preflight_reconciliation_reader(api_module: Any):
 
     async def _read(_profile):
         return summary
+
+    return _read
+
+
+def _bnb_preflight_account_facts_reader(api_module: Any):
+    async def _read(_profile):
+        generated_at_ms = int(time.time() * 1000)
+        snapshot = _cached_account_equity_snapshot(
+            api_module,
+            generated_at_ms=generated_at_ms,
+        )
+        return {
+            "source": snapshot["source"],
+            "account_equity_source": snapshot["source"],
+            "truth_level": snapshot["truth_level"],
+            "timestamp_ms": snapshot["timestamp_ms"],
+            "freshness": snapshot["freshness"],
+            "account_equity_freshness": snapshot["freshness"],
+            "account_equity_available": snapshot["available"],
+            "wallet_equity_available": snapshot["available"],
+            "available_margin_available": snapshot["available_margin_available"],
+            "account_equity": snapshot["wallet_equity"],
+            "wallet_equity": snapshot["wallet_equity"],
+            "available_margin": snapshot["available_margin"],
+            "read_method": snapshot["read_method"],
+            "read_only_guarantee": True,
+            "external_call_performed": False,
+            "real_account_api_called_by_endpoint": False,
+            "reconciliation_status": "not_checked",
+        }
 
     return _read
 

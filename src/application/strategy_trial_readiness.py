@@ -68,7 +68,7 @@ class TrialReadinessPreflightInput(BaseModel):
     gks_status: Literal["clear", "blocking", "unknown", "not_checked"] = "not_checked"
     startup_guard_status: Literal["clear", "blocking", "unknown", "not_checked"] = "not_checked"
     reconciliation_status: Literal["clean", "mismatch", "unknown", "not_checked"] = "not_checked"
-    account_facts_status: Literal["clear", "blocked", "unknown", "not_checked"] = "not_checked"
+    account_facts_status: Literal["clear", "stale", "unavailable", "unknown", "not_checked"] = "not_checked"
 
 
 class StrategyTrialPreflightResult(BaseModel):
@@ -145,7 +145,8 @@ def build_bnb_strategy_trial_readiness(
             requested_mode=profile.execution_mode,
         ),
     )
-    blockers = list(preflight.blockers)
+    fact_blockers = list((fact_checks or {}).get("blockers") or [])
+    blockers = _dedupe([*preflight.blockers, *fact_blockers])
     warnings = list(preflight.warnings)
     if observation_case is None:
         warnings.append("observation_case_missing_or_pg_unavailable")
@@ -322,7 +323,19 @@ def _reconciliation_blocker(status: str) -> str:
 
 
 def _account_facts_blocker(status: str) -> str:
+    if status == "stale":
+        return "account_facts_stale"
+    if status == "unavailable":
+        return "account_facts_unavailable"
     return "account_facts_required_before_rehearsal"
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
 
 
 def _observation_case_summary(

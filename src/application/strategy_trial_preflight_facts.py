@@ -20,7 +20,15 @@ from src.application.strategy_trial_readiness import (
 )
 
 
-FactStatus = Literal["clear", "blocked", "unknown", "unavailable", "not_checked"]
+FactStatus = Literal[
+    "clear",
+    "blocked",
+    "stale",
+    "unknown",
+    "unavailable",
+    "required_before_rehearsal",
+    "not_checked",
+]
 PreflightFactId = Literal[
     "active_position",
     "open_order",
@@ -39,6 +47,7 @@ class TrialPreflightFact(BaseModel):
     source: str
     blocking: bool
     blocker: Optional[str] = None
+    blockers: list[str] = Field(default_factory=list)
     observed_at_ms: Optional[int] = None
     evidence: dict[str, str | int | bool | None] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
@@ -122,7 +131,11 @@ class TrialPreflightFactCollector:
             await self._collect_reconciliation(profile, generated_at_ms),
             await self._collect_account_facts(profile, generated_at_ms),
         ]
-        blockers = [fact.blocker for fact in facts if fact.blocker]
+        blockers: list[str] = []
+        for fact in facts:
+            blockers.extend(fact.blockers)
+            if fact.blocker:
+                blockers.append(fact.blocker)
         return TrialPreflightFactsSnapshot(
             generated_at_ms=generated_at_ms,
             candidate_id=profile.candidate_id,
@@ -383,25 +396,88 @@ class TrialPreflightFactCollector:
         freshness = str(
             _get_value(facts, "freshness_status")
             or _get_value(facts, "freshness")
+            or _get_value(facts, "account_equity_freshness")
             or ""
         ).lower()
-        ready = bool(_get_value(facts, "is_ready")) if _get_value(facts, "is_ready") is not None else None
+        ready = (
+            bool(_get_value(facts, "is_ready"))
+            if _get_value(facts, "is_ready") is not None
+            else None
+        )
         timestamp_ms = _get_int(facts, "timestamp_ms") or generated_at_ms
-        if freshness == "fresh" or ready is True:
+        source = str(
+            _get_value(facts, "source_type")
+            or _get_value(facts, "source")
+            or _get_value(facts, "account_equity_source")
+            or "read_only_account_facts"
+        )
+        equity_available = _availability(
+            facts,
+            "account_equity_available",
+            "wallet_equity_available",
+            value_keys=("account_equity", "wallet_equity"),
+        )
+        margin_available = _availability(
+            facts,
+            "available_margin_available",
+            value_keys=("available_margin",),
+        )
+        age_seconds = (
+            max(0, (generated_at_ms - timestamp_ms) // 1000)
+            if timestamp_ms is not None
+            else None
+        )
+        reconciliation_status = str(
+            _get_value(facts, "reconciliation_status")
+            or _get_value(facts, "reconciliation_status_value")
+            or "unknown"
+        ).lower()
+        evidence = {
+            "freshness": freshness or "unknown",
+            "age_seconds": age_seconds,
+            "equity_available": equity_available,
+            "available_margin_available": margin_available,
+            "timestamp_ms": timestamp_ms,
+            "reconciliation_status": reconciliation_status,
+            "external_call_performed": _get_bool(facts, "external_call_performed"),
+            "read_only_guarantee": _get_bool(facts, "read_only_guarantee"),
+        }
+        if (freshness == "fresh" or ready is True) and equity_available and margin_available:
             return _clear(
                 "account_facts",
                 timestamp_ms,
-                str(_get_value(facts, "source_type") or _get_value(facts, "source") or "read_only_account_facts"),
-                {"freshness": freshness or "fresh"},
+                source,
+                evidence,
             )
+        blockers: list[str] = []
+        status: FactStatus = "required_before_rehearsal"
+        primary_blocker = "account_facts_required_before_rehearsal"
+        if freshness == "stale":
+            status = "stale"
+            primary_blocker = "account_facts_stale"
+            blockers.append(primary_blocker)
+        elif source == "unavailable" or freshness in {"unavailable", "missing"}:
+            status = "unavailable"
+            primary_blocker = "account_facts_unavailable"
+            blockers.append(primary_blocker)
+        elif freshness in {"unknown", ""}:
+            status = "unknown"
+            blockers.append(primary_blocker)
+        else:
+            blockers.append(primary_blocker)
+        if not equity_available:
+            blockers.append("account_equity_unavailable")
+        if not margin_available:
+            blockers.append("available_margin_unavailable")
         return TrialPreflightFact(
             fact_id="account_facts",
-            status="blocked",
-            source=str(_get_value(facts, "source_type") or _get_value(facts, "source") or "read_only_account_facts"),
+            status=status,
+            source=source,
             blocking=True,
-            blocker="account_facts_required_before_rehearsal",
+            blocker=primary_blocker,
+            blockers=_dedupe(blockers),
             observed_at_ms=timestamp_ms,
-            evidence={"freshness": freshness or "unknown"},
+            evidence=evidence,
             notes=["Fresh read-only account facts are required before rehearsal."],
         )
 
@@ -434,6 +510,7 @@ def _unavailable(
         source="unavailable",
         blocking=True,
         blocker=blocker,
+        blockers=[blocker],
         observed_at_ms=observed_at_ms,
         notes=[note],
     )
@@ -491,11 +568,13 @@ def _reconciliation_preflight_status(
 
 def _account_facts_preflight_status(
     fact: TrialPreflightFact,
-) -> Literal["clear", "blocked", "unknown", "not_checked"]:
+) -> Literal["clear", "stale", "unavailable", "unknown", "not_checked"]:
     if fact.status == "clear":
         return "clear"
-    if fact.status == "blocked":
-        return "blocked"
+    if fact.status == "stale":
+        return "stale"
+    if fact.status in {"unavailable", "required_before_rehearsal"}:
+        return "unavailable"
     return "unknown"
 
 
@@ -528,6 +607,30 @@ def _get_int(obj: Any, key: str) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _availability(
+    obj: Any,
+    *flag_keys: str,
+    value_keys: tuple[str, ...],
+) -> bool:
+    for key in flag_keys:
+        value = _get_value(obj, key)
+        if isinstance(value, bool):
+            return value
+    for key in value_keys:
+        value = _get_value(obj, key)
+        if value is not None and str(value).lower() not in {"not_available", "none", ""}:
+            return True
+    return False
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
 
 
 def _now_ms() -> int:

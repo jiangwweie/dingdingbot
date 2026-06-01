@@ -771,7 +771,7 @@ def test_strategy_trial_readiness_api_exposes_bnb_carrier_without_execution(monk
         "reconciliation",
         "account_facts",
     }.issubset(fact_ids)
-    assert "account_facts_required_before_rehearsal" in payload["blockers"]
+    assert "account_facts_unavailable" in payload["blockers"]
 
     raw_payload = json.dumps(payload)
     assert "Start Trading" not in raw_payload
@@ -779,6 +779,47 @@ def test_strategy_trial_readiness_api_exposes_bnb_carrier_without_execution(monk
     assert "Run Strategy" not in raw_payload
     assert "execution_permission_granted\": true" not in raw_payload
     assert "order_permission_granted" not in raw_payload
+
+
+def test_strategy_trial_readiness_api_uses_cached_account_facts_when_fresh(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api as api_module
+    from src.interfaces.api import app
+
+    snapshot = SimpleNamespace(
+        total_balance=Decimal("321.00"),
+        available_balance=Decimal("210.50"),
+        timestamp=int(time.time() * 1000),
+    )
+    gateway = _FakeExchangeGateway(account_snapshot=snapshot)
+    _patch_runtime(
+        monkeypatch,
+        campaign=None,
+        position_repo=_EmptyPositionRepo(),
+        order_repo=_EmptyOrderRepo(),
+        exchange_gateway=gateway,
+        startup_guard=_FakeStartupGuard(armed=True),
+    )
+    monkeypatch.setattr(api_module, "_startup_reconciliation_summary", {"status": "clean"})
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/strategy-trial-readiness/v1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    account_fact = next(
+        fact for fact in payload["fact_checks"]["facts"] if fact["fact_id"] == "account_facts"
+    )
+    assert account_fact["status"] == "clear"
+    assert account_fact["source"] == "runtime_cached_account_snapshot"
+    assert account_fact["evidence"]["equity_available"] is True
+    assert account_fact["evidence"]["available_margin_available"] is True
+    assert payload["readiness_verdict"] == "testnet_rehearsal_ready_pending_owner_authorization"
+    assert payload["live_ready"] is False
+    assert payload["preflight_result"]["execution_intent_created"] is False
+    assert payload["preflight_result"]["order_created"] is False
+    assert gateway.account_snapshot_calls == 1
 
 
 def test_mi001_sol_owner_console_view_marks_guard_action_enabled_when_runtime_ready(monkeypatch):

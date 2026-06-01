@@ -493,10 +493,11 @@ export type StrategyTrialReadinessResponse = {
     side: string;
     facts: Array<{
       fact_id: 'active_position' | 'open_order' | 'gks' | 'startup_guard' | 'reconciliation' | 'account_facts';
-      status: 'clear' | 'blocked' | 'unknown' | 'unavailable' | 'not_checked';
+      status: 'clear' | 'blocked' | 'stale' | 'unknown' | 'unavailable' | 'required_before_rehearsal' | 'not_checked';
       source: string;
       blocking: boolean;
       blocker?: string | null;
+      blockers: string[];
       observed_at_ms?: number | null;
       evidence: Record<string, string | number | boolean | null>;
       notes: string[];

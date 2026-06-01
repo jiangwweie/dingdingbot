@@ -186,6 +186,8 @@ async def test_fact_collector_clear_facts_reaches_ready_pending_owner_authorizat
             "freshness_status": "fresh",
             "source_type": "fake_read_only",
             "timestamp_ms": 3,
+            "account_equity": "1000",
+            "available_margin": "800",
         }
 
     snapshot = await TrialPreflightFactCollector(
@@ -211,6 +213,92 @@ async def test_fact_collector_clear_facts_reaches_ready_pending_owner_authorizat
     assert readiness.non_permissions["no_execution_permission"] is True
 
 
+async def test_fact_collector_stale_account_facts_block_rehearsal():
+    profile = bnb_first_carrier_profile()
+
+    async def empty(_profile):
+        return []
+
+    async def gks(_profile):
+        return {"active": False}
+
+    async def startup(_profile):
+        return {"armed": True}
+
+    async def reconciliation(_profile):
+        return {"status": "clean"}
+
+    async def account(_profile):
+        return {
+            "freshness_status": "stale",
+            "source": "cached_account_snapshot",
+            "timestamp_ms": 1,
+            "account_equity": "1000",
+            "available_margin": "800",
+        }
+
+    snapshot = await TrialPreflightFactCollector(
+        position_reader=empty,
+        open_order_reader=empty,
+        gks_reader=gks,
+        startup_guard_reader=startup,
+        reconciliation_reader=reconciliation,
+        account_facts_reader=account,
+    ).collect(profile)
+    readiness = build_bnb_strategy_trial_readiness(
+        observation_case=_bnb_case(),
+        preflight_input=snapshot.to_preflight_input(
+            requested_mode=profile.execution_mode,
+        ),
+        fact_checks=snapshot.to_response_dict(),
+    )
+
+    account_fact = snapshot.fact_map()["account_facts"]
+    assert account_fact.status == "stale"
+    assert "account_facts_stale" in readiness.blockers
+    assert readiness.readiness_verdict == "testnet_rehearsal_not_ready_with_explicit_blockers"
+
+
+async def test_fact_collector_surfaces_missing_equity_and_margin():
+    profile = bnb_first_carrier_profile()
+
+    async def empty(_profile):
+        return []
+
+    async def account(_profile):
+        return {
+            "freshness_status": "fresh",
+            "source": "cached_account_snapshot",
+            "timestamp_ms": 3,
+            "account_equity": "not_available",
+            "available_margin": "not_available",
+        }
+
+    snapshot = await TrialPreflightFactCollector(
+        position_reader=empty,
+        open_order_reader=empty,
+        gks_reader=lambda profile: {"active": False},
+        startup_guard_reader=lambda profile: {"armed": True},
+        reconciliation_reader=lambda profile: {"status": "clean"},
+        account_facts_reader=account,
+    ).collect(profile)
+    readiness = build_bnb_strategy_trial_readiness(
+        observation_case=_bnb_case(),
+        preflight_input=snapshot.to_preflight_input(
+            requested_mode=profile.execution_mode,
+        ),
+        fact_checks=snapshot.to_response_dict(),
+    )
+
+    account_fact = snapshot.fact_map()["account_facts"]
+    assert account_fact.evidence["equity_available"] is False
+    assert account_fact.evidence["available_margin_available"] is False
+    assert "account_equity_unavailable" in readiness.blockers
+    assert "available_margin_unavailable" in readiness.blockers
+    assert readiness.preflight_result.execution_intent_created is False
+    assert readiness.preflight_result.order_created is False
+
+
 async def test_fact_collector_conflicting_position_and_order_block_rehearsal():
     profile = bnb_first_carrier_profile()
 
@@ -227,7 +315,12 @@ async def test_fact_collector_conflicting_position_and_order_block_rehearsal():
         return {"status": "clean"}
 
     async def account(_profile):
-        return {"freshness_status": "fresh", "timestamp_ms": 3}
+        return {
+            "freshness_status": "fresh",
+            "timestamp_ms": 3,
+            "account_equity": "1000",
+            "available_margin": "800",
+        }
 
     snapshot = await TrialPreflightFactCollector(
         position_reader=one,
