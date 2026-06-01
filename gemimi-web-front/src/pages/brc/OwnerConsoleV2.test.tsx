@@ -26,6 +26,9 @@ const mockBrcApi = vi.hoisted(() => ({
   mi001BnbTrialReadinessGap: vi.fn(),
   strategyTrialReadinessV1: vi.fn(),
   strategyTrialArchitectureGovernance: vi.fn(),
+  ownerTrialFlowCurrent: vi.fn(),
+  createOwnerRiskAcknowledgement: vi.fn(),
+  createOwnerAuthorizationDraft: vi.fn(),
   listStrategyFamilies: vi.fn(),
   listAdmissionDecisions: vi.fn(),
   listTrialBindings: vi.fn(),
@@ -53,6 +56,9 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.mi001BnbTrialReadinessGap.mockResolvedValue(bnbTrialGapPayload());
     mockBrcApi.strategyTrialReadinessV1.mockResolvedValue(strategyTrialReadinessPayload());
     mockBrcApi.strategyTrialArchitectureGovernance.mockResolvedValue(strategyTrialGovernancePayload());
+    mockBrcApi.ownerTrialFlowCurrent.mockResolvedValue(ownerTrialFlowPayload());
+    mockBrcApi.createOwnerRiskAcknowledgement.mockResolvedValue(ownerRiskAcknowledgementPayload());
+    mockBrcApi.createOwnerAuthorizationDraft.mockResolvedValue(ownerAuthorizationDraftPayload());
     mockBrcApi.listStrategyFamilies.mockResolvedValue([]);
     mockBrcApi.listAdmissionDecisions.mockResolvedValue([{ owner_risk_acceptance_id: 'owner-acceptance-1' }]);
     mockBrcApi.listTrialBindings.mockResolvedValue([]);
@@ -162,9 +168,9 @@ describe('Owner Console v2 shell', () => {
     renderWithRouter(<IntentsV2 />);
     expect(await screen.findByRole('heading', { name: '执行计划' })).toBeTruthy();
     expect(screen.getByText('当前待确认候选')).toBeTruthy();
-    expect(screen.getByText('当前确认阶段')).toBeTruthy();
+    expect(screen.getByText('授权草案')).toBeTruthy();
     expect(screen.getByText('本地风险确认')).toBeTruthy();
-    expect(screen.getByText('1 / 3 项')).toBeTruthy();
+    expect(screen.getByText('1 / 5 项')).toBeTruthy();
     expect(screen.getByText('暂无执行计划记录')).toBeTruthy();
     expect(screen.getByText(/当前还没有真实资金执行计划/)).toBeTruthy();
     expect(screen.getByText('授权链路状态')).toBeTruthy();
@@ -203,6 +209,44 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText('第二轮有效保护')).toBeTruthy();
     expect(screen.getByText('等待真实资金授权')).toBeTruthy();
     expect(screen.queryByText('not_live_ready_until_explicit_owner_live_authorization')).toBeNull();
+    assertNoDangerButtons();
+  });
+
+  it('persists Owner risk acknowledgement and pending authorization draft through backend metadata APIs', async () => {
+    renderWithRouter(<TrialConfirmationV2 />);
+
+    expect(await screen.findByText('授权前确认单 / 发起试验')).toBeTruthy();
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      fireEvent.click(checkbox);
+    }
+    fireEvent.click(screen.getByRole('button', { name: /后端记录风险确认并生成授权草案/ }));
+
+    expect(await screen.findByText(/风险确认已由后端记录：ack-unit/)).toBeTruthy();
+    expect(await screen.findByText(/授权草案已生成：draft-unit/)).toBeTruthy();
+    expect(screen.getAllByText(/pending_owner_live_authorization/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/不会下单，不会创建 live ExecutionIntent/)).toBeTruthy();
+    expect(mockBrcApi.createOwnerRiskAcknowledgement).toHaveBeenCalledWith({
+      carrier_id: 'MI-001-BNB-LONG',
+      acknowledged_warning_codes: [
+        'strategy_not_proven_profitable',
+        'limited_live_observation_sample',
+        'regime_may_be_unfavorable',
+        'forward_review_incomplete',
+        'historical_fragility_known',
+      ],
+      acknowledgement_scope: 'strategy_trial_warnings',
+    });
+    expect(mockBrcApi.createOwnerAuthorizationDraft).toHaveBeenCalledWith({
+      carrier_id: 'MI-001-BNB-LONG',
+      linked_acknowledgement_id: 'ack-unit',
+      symbol: 'BNB/USDT:USDT',
+      side: 'long',
+      max_notional: '20',
+      quantity: '0.01',
+      leverage: '1',
+      protection_plan_type: 'single_tp_plus_sl',
+    });
+    expect((screen.getByRole('button', { name: /授权这一次小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
     assertNoDangerButtons();
   });
 
@@ -867,14 +911,14 @@ function strategyTrialGovernancePayload() {
         strategy_family: 'MI-001',
         strategy_id: 'MI-001',
         candidate_id: 'MI-001-BNB-LONG',
-        symbol: 'BNB/USDT:USDT',
-        runtime_symbol: 'BNBUSDT',
+        symbol: 'BNBUSDT',
+        runtime_symbol: 'BNB/USDT:USDT',
         side: 'long',
         execution_mode: 'owner_confirm_each_entry',
         quantity: '0.01',
-        max_notional: 'bounded_owner_scoped',
-        leverage: '1x',
-        max_leverage_allowed: '5x',
+        max_notional: '20',
+        leverage: '1',
+        max_leverage_allowed: '5',
         protection_plan_type: 'single_tp_plus_sl',
         strategy_family_order_authority: false,
         carrier_is_order_authority: false,
@@ -982,6 +1026,126 @@ function strategyTrialGovernancePayload() {
       authorization_draft_is_not_order_permission: true,
       warning_acknowledgement_is_not_live_authorization: true,
     },
+  };
+}
+
+function ownerTrialFlowPayload() {
+  return {
+    generated_from: 'owner_trial_flow_v1',
+    selected_carrier_id: 'MI-001-BNB-LONG',
+    carrier: {
+      carrier_id: 'MI-001-BNB-LONG',
+      strategy_family_id: 'MI-001',
+      strategy_id: 'MI-001',
+      candidate_id: 'MI-001-BNB-LONG',
+      symbol: 'BNBUSDT',
+      runtime_symbol: 'BNB/USDT:USDT',
+      side: 'long',
+      execution_mode: 'owner_confirm_each_entry',
+      max_notional: '20',
+      quantity: '0.01',
+      leverage: '1',
+      protection_plan_type: 'single_tp_plus_sl',
+      live_ready: false,
+      order_permission_granted: false,
+    },
+    strategy_warnings: [
+      ownerTrialWarning('strategy_not_proven_profitable', 'BNB carrier evidence is sufficient for Owner review, not proof of durable alpha.'),
+      ownerTrialWarning('limited_live_observation_sample', 'Live read-only observation sample remains small.'),
+      ownerTrialWarning('regime_may_be_unfavorable', 'Current regime may differ from historical high-quality samples.'),
+      ownerTrialWarning('forward_review_incomplete', 'Forward review is evidence for disclosure, not a permanent execution blocker.'),
+      ownerTrialWarning('historical_fragility_known', 'Historical fragility and adverse early path risk must be acknowledged.'),
+    ],
+    hard_blockers: [
+      {
+        blocker_id: 'missing_explicit_live_authorization',
+        active: true,
+        blocks_after_ack: true,
+        description: 'Real live / real-funds authorization has not been explicitly granted.',
+        source: 'owner_trial_flow',
+        classification: 'hard_safety_blocker',
+      },
+    ],
+    acknowledged_warnings: [],
+    unacknowledged_warnings: [
+      'strategy_not_proven_profitable',
+      'limited_live_observation_sample',
+      'regime_may_be_unfavorable',
+      'forward_review_incomplete',
+      'historical_fragility_known',
+    ],
+    latest_acknowledgement: null,
+    authorization_draft: null,
+    authorization_status: 'not_started',
+    live_ready: false,
+    execution_permission_granted: false,
+    order_permission_granted: false,
+    execution_intent_created: false,
+    order_created: false,
+    hard_blockers_remain_blocking: true,
+    risk_acknowledgement_is_not_live_authorization: true,
+    authorization_draft_is_not_executable: true,
+    source: 'backend_metadata',
+  };
+}
+
+function ownerTrialWarning(warning_id: string, description: string) {
+  return {
+    warning_id,
+    severity: 'warning',
+    description,
+    owner_ack_required: true,
+    blocks_after_ack: false,
+    classification: 'strategy_warning',
+  };
+}
+
+function ownerRiskAcknowledgementPayload() {
+  return {
+    acknowledgement_id: 'ack-unit',
+    carrier_id: 'MI-001-BNB-LONG',
+    strategy_family_id: 'MI-001',
+    acknowledged_warning_codes: [
+      'strategy_not_proven_profitable',
+      'limited_live_observation_sample',
+      'regime_may_be_unfavorable',
+      'forward_review_incomplete',
+      'historical_fragility_known',
+    ],
+    owner_id: 'owner',
+    acknowledged_at_ms: Date.now(),
+    acknowledgement_scope: 'strategy_trial_warnings',
+    source: 'owner_console',
+    non_live_metadata_only: true,
+  };
+}
+
+function ownerAuthorizationDraftPayload() {
+  return {
+    draft_id: 'draft-unit',
+    carrier_id: 'MI-001-BNB-LONG',
+    strategy_family_id: 'MI-001',
+    symbol: 'BNB/USDT:USDT',
+    side: 'long',
+    max_notional: '20',
+    quantity: '0.01',
+    leverage: '1',
+    protection_plan_type: 'single_tp_plus_sl',
+    single_use: true,
+    status: 'pending_owner_live_authorization',
+    live_ready: false,
+    order_permission_granted: false,
+    execution_permission_granted: false,
+    execution_intent_created: false,
+    order_created: false,
+    auto_execution_enabled: false,
+    consumed: false,
+    expires_at_ms: null,
+    linked_acknowledgement_id: 'ack-unit',
+    created_at_ms: Date.now(),
+    updated_at_ms: Date.now(),
+    source: 'owner_console',
+    non_live_metadata_only: true,
   };
 }
 

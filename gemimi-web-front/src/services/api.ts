@@ -591,6 +591,67 @@ export type StrategyTrialArchitectureGovernanceResponse = {
   non_permissions: Record<string, boolean>;
 };
 
+export type OwnerRiskAcknowledgement = {
+  acknowledgement_id: string;
+  carrier_id: string;
+  strategy_family_id: string;
+  acknowledged_warning_codes: string[];
+  owner_id: string;
+  acknowledged_at_ms: number;
+  acknowledgement_scope: string;
+  source: 'owner_console';
+  non_live_metadata_only: true;
+};
+
+export type BoundedLiveTrialAuthorizationDraft = {
+  draft_id: string;
+  carrier_id: string;
+  strategy_family_id: string;
+  symbol: string;
+  side: 'long' | 'short';
+  max_notional: string;
+  quantity: string;
+  leverage: string;
+  protection_plan_type: 'single_tp_plus_sl';
+  single_use: true;
+  status: 'pending_owner_live_authorization';
+  live_ready: false;
+  order_permission_granted: false;
+  execution_permission_granted: false;
+  execution_intent_created: false;
+  order_created: false;
+  auto_execution_enabled: false;
+  consumed: false;
+  expires_at_ms?: number | null;
+  linked_acknowledgement_id: string;
+  created_at_ms: number;
+  updated_at_ms: number;
+  source: 'owner_console';
+  non_live_metadata_only: true;
+};
+
+export type OwnerTrialFlowCurrentResponse = {
+  generated_from: 'owner_trial_flow_v1';
+  selected_carrier_id: string;
+  carrier: Record<string, string | boolean>;
+  strategy_warnings: Array<Record<string, string | boolean>>;
+  hard_blockers: Array<Record<string, string | boolean>>;
+  acknowledged_warnings: string[];
+  unacknowledged_warnings: string[];
+  latest_acknowledgement?: OwnerRiskAcknowledgement | null;
+  authorization_draft?: BoundedLiveTrialAuthorizationDraft | null;
+  authorization_status: 'not_started' | 'pending_owner_live_authorization';
+  live_ready: false;
+  execution_permission_granted: false;
+  order_permission_granted: false;
+  execution_intent_created: false;
+  order_created: false;
+  hard_blockers_remain_blocking: true;
+  risk_acknowledgement_is_not_live_authorization: true;
+  authorization_draft_is_not_executable: true;
+  source: 'backend_metadata';
+};
+
 export type StartupGuardReadinessArmResponse = {
   action: 'startup_guard_preflight_arm';
   status: 'armed' | 'already_armed' | 'blocked';
@@ -900,6 +961,34 @@ export const brcApi = {
   },
   strategyTrialArchitectureGovernance() {
     return request<StrategyTrialArchitectureGovernanceResponse>('/api/brc/strategy-trial-architecture/bnb-first-carrier');
+  },
+  ownerTrialFlowCurrent(carrierId = 'MI-001-BNB-LONG') {
+    return request<OwnerTrialFlowCurrentResponse>(`/api/brc/owner-trial-flow/current?carrier_id=${encodeURIComponent(carrierId)}`);
+  },
+  createOwnerRiskAcknowledgement(input: {
+    carrier_id: string;
+    acknowledged_warning_codes: string[];
+    acknowledgement_scope?: string;
+  }) {
+    return request<OwnerRiskAcknowledgement>('/api/brc/owner-trial-flow/risk-acknowledgement', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  createOwnerAuthorizationDraft(input: {
+    carrier_id: string;
+    linked_acknowledgement_id: string;
+    symbol: string;
+    side: 'long' | 'short';
+    max_notional: string;
+    quantity: string;
+    leverage: string;
+    protection_plan_type: 'single_tp_plus_sl';
+  }) {
+    return request<BoundedLiveTrialAuthorizationDraft>('/api/brc/owner-trial-flow/authorization-draft', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   },
   runStrategyGroupLiveObservationV1Once() {
     return request<StrategyGroupLiveReadOnlyObservationResponse>('/api/brc/strategy-groups/live-readonly-observation/v1/run-once', {

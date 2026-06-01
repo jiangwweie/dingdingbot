@@ -30,6 +30,8 @@ import {
   Mi001SolReadinessResponse,
   Mi001BnbTrialReadinessGapResponse,
   ObservationCaseQueueResponse,
+  OwnerRiskAcknowledgement,
+  OwnerTrialFlowCurrentResponse,
   ReadinessResponse,
   StrategyGroupLiveReadOnlyObservationResponse,
   StrategyGroupReviewabilityResponse,
@@ -49,6 +51,7 @@ type ConsoleData = {
   bnbTrialGap: Mi001BnbTrialReadinessGapResponse | null;
   strategyTrialReadiness: StrategyTrialReadinessResponse | null;
   strategyTrialGovernance: StrategyTrialArchitectureGovernanceResponse | null;
+  ownerTrialFlow: OwnerTrialFlowCurrentResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
   bindings: AdmissionTrialBinding[];
@@ -173,6 +176,7 @@ const EMPTY_DATA: ConsoleData = {
   bnbTrialGap: null,
   strategyTrialReadiness: null,
   strategyTrialGovernance: null,
+  ownerTrialFlow: null,
   families: [],
   decisions: [],
   bindings: [],
@@ -425,6 +429,10 @@ export function StrategyCandidatesV2() {
 export function TrialConfirmationV2() {
   const { data, error } = useConsoleData();
   const { flowState, updateFlowState } = useOwnerFlowState();
+  const [backendAcknowledgement, setBackendAcknowledgement] = useState<OwnerRiskAcknowledgement | null>(null);
+  const [backendDraftId, setBackendDraftId] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submittingMetadata, setSubmittingMetadata] = useState(false);
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading label="加载授权前确认单..." />;
 
@@ -433,8 +441,25 @@ export function TrialConfirmationV2() {
   const confirmationCarrier = selectedCarrierId === carrierDecision.carrierId
     ? carrierDecision
     : selectedCarrierFallback(carrierDecision, selectedCarrierId);
-  const acknowledgements = flowState.riskAcknowledgements[selectedCarrierId] || {};
+  const localAcknowledgements = flowState.riskAcknowledgements[selectedCarrierId] || {};
+  const persistedAcknowledgement = backendAcknowledgement?.carrier_id === selectedCarrierId
+    ? backendAcknowledgement
+    : data.ownerTrialFlow?.latest_acknowledgement?.carrier_id === selectedCarrierId
+      ? data.ownerTrialFlow.latest_acknowledgement
+      : null;
+  const backendAcknowledgements = Object.fromEntries(
+    (persistedAcknowledgement?.acknowledged_warning_codes || []).map((code) => [code, true]),
+  );
+  const acknowledgements = {
+    ...localAcknowledgements,
+    ...backendAcknowledgements,
+  };
+  const persistedDraft = data.ownerTrialFlow?.authorization_draft?.carrier_id === selectedCarrierId
+    ? data.ownerTrialFlow.authorization_draft
+    : null;
   const confirmation = trialConfirmationView(confirmationCarrier, data, acknowledgements);
+  const allRisksAcknowledged = confirmation.risks.every((risk) => acknowledgements[risk.id]);
+  const canPersistMetadata = selectedCarrierId === carrierDecision.carrierId && allRisksAcknowledged;
   const setRiskAcknowledged = (riskId: string, acknowledged: boolean) => {
     updateFlowState((current) => ({
       ...current,
@@ -447,6 +472,34 @@ export function TrialConfirmationV2() {
         },
       },
     }));
+  };
+  const submitBackendMetadata = async () => {
+    setSubmittingMetadata(true);
+    setSubmitError(null);
+    try {
+      const ack = await brcApi.createOwnerRiskAcknowledgement({
+        carrier_id: selectedCarrierId,
+        acknowledged_warning_codes: confirmation.risks.map((risk) => risk.id),
+        acknowledgement_scope: 'strategy_trial_warnings',
+      });
+      setBackendAcknowledgement(ack);
+      const side = confirmationCarrier.side === 'short' ? 'short' : 'long';
+      const draft = await brcApi.createOwnerAuthorizationDraft({
+        carrier_id: selectedCarrierId,
+        linked_acknowledgement_id: ack.acknowledgement_id,
+        symbol: confirmationCarrier.runtimeSymbol || confirmationCarrier.symbol,
+        side,
+        max_notional: confirmationCarrier.maxNotional,
+        quantity: confirmationCarrier.quantity,
+        leverage: confirmationCarrier.leverage,
+        protection_plan_type: 'single_tp_plus_sl',
+      });
+      setBackendDraftId(draft.draft_id);
+    } catch (error) {
+      setSubmitError(message(error));
+    } finally {
+      setSubmittingMetadata(false);
+    }
   };
 
   return (
@@ -498,7 +551,7 @@ export function TrialConfirmationV2() {
                     <span className="block font-bold text-slate-950 dark:text-slate-50">{risk.title}</span>
                     <span className="mt-1 block text-sm text-slate-600 dark:text-slate-300">{risk.desc}</span>
                     <StatePill tone={acknowledgements[risk.id] ? 'teal' : 'amber'}>
-                      {acknowledgements[risk.id] ? '已在本地确认' : '未确认'}
+                      {backendAcknowledgements[risk.id] ? '已由后端记录' : acknowledgements[risk.id] ? '已在本地确认' : '未确认'}
                     </StatePill>
                   </span>
                 </span>
@@ -514,9 +567,33 @@ export function TrialConfirmationV2() {
               </label>
             ))}
           </div>
-          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-            风险确认仅保存在本地界面，尚未写入后端授权记录。
-          </p>
+          {persistedAcknowledgement ? (
+            <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
+              风险确认已由后端记录：{persistedAcknowledgement.acknowledgement_id}。这不是真实资金授权。
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              当前风险确认仍是本地勾选。全部勾选后可写入后端 metadata，并生成不可执行的授权草案。
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={submitBackendMetadata}
+            disabled={!canPersistMetadata || submittingMetadata}
+            className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition ${
+              canPersistMetadata && !submittingMetadata
+                ? 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white'
+                : 'cursor-not-allowed bg-slate-300 text-white dark:bg-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <ShieldCheck className="h-4 w-4" />
+            {persistedAcknowledgement ? '更新后端风险确认 / 授权草案' : '后端记录风险确认并生成授权草案'}
+          </button>
+          {submitError ? (
+            <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+              {submitError}
+            </p>
+          ) : null}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
@@ -565,6 +642,15 @@ export function TrialConfirmationV2() {
           <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
             确认以上信息均已阅读并理解，且所有硬安全门均通过后，才可授权本次小额试验。
           </p>
+          {persistedDraft || backendDraftId ? (
+            <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
+              授权草案已生成：{backendDraftId || persistedDraft?.draft_id}。状态为 pending_owner_live_authorization；不会下单，不会创建 live ExecutionIntent。
+            </div>
+          ) : (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+              尚未生成后端授权草案。风险确认写入后端后，草案会保持等待真实资金授权。
+            </div>
+          )}
           <button
             type="button"
             disabled
@@ -604,7 +690,7 @@ export function TrialConfirmationV2() {
         </section>
       </section>
 
-      <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: acknowledgements, rawGovernance: data.strategyTrialGovernance }} />
+      <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: localAcknowledgements, backendAcknowledgement: persistedAcknowledgement, backendDraft: persistedDraft || backendDraftId, ownerTrialFlow: data.ownerTrialFlow, rawGovernance: data.strategyTrialGovernance }} />
     </PageShell>
   );
 }
@@ -729,16 +815,24 @@ export function IntentsV2() {
   const carrierDecision = carrierDecisionView(data);
   const selectedCarrierId = flowState.selectedCarrierId || carrierDecision.carrierId;
   const selectedAcknowledgements = flowState.riskAcknowledgements[selectedCarrierId] || {};
-  const acknowledgedCount = Object.values(selectedAcknowledgements).filter(Boolean).length;
+  const backendAcknowledgedCount = data.ownerTrialFlow?.latest_acknowledgement?.carrier_id === selectedCarrierId
+    ? data.ownerTrialFlow.latest_acknowledgement.acknowledged_warning_codes.length
+    : 0;
+  const acknowledgedCount = Math.max(Object.values(selectedAcknowledgements).filter(Boolean).length, backendAcknowledgedCount);
+  const draft = data.ownerTrialFlow?.authorization_draft?.carrier_id === selectedCarrierId
+    ? data.ownerTrialFlow.authorization_draft
+    : null;
   const noIntentText = carrierDecision.provenance.executionIntentState === 'unavailable'
     ? '执行计划状态数据未接入，无法判断是否存在真实资金执行计划。'
-    : `当前还没有真实资金执行计划，因为你尚未完成真实资金授权。当前等待确认的候选是 ${selectedCarrierId}；执行计划不是订单，不会触发交易。`;
+    : draft
+      ? `当前有后端授权草案 ${draft.draft_id}，但仍等待真实资金授权；没有 live ExecutionIntent，没有订单。`
+      : `当前还没有真实资金执行计划，因为你尚未完成真实资金授权。当前等待确认的候选是 ${selectedCarrierId}；执行计划不是订单，不会触发交易。`;
   return (
     <PageShell title="执行计划" subtitle="这里展示策略想做什么；执行计划不是订单，不会触发交易。">
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <ReviewCard title="当前待确认候选" value={selectedCarrierId} />
-        <ReviewCard title="当前确认阶段" value="风险确认 / 授权草案 / 等待 live 环境" />
-        <ReviewCard title="本地风险确认" value={`${acknowledgedCount} / 3 项`} />
+        <ReviewCard title="授权草案" value={draft ? '后端已生成' : '尚未生成'} />
+        <ReviewCard title={backendAcknowledgedCount ? '后端风险确认' : '本地风险确认'} value={`${acknowledgedCount} / ${data.ownerTrialFlow?.strategy_warnings.length || 5} 项`} />
       </section>
       {rows.length ? (
         <DataTable
@@ -759,7 +853,9 @@ export function IntentsV2() {
             <p className="mt-1 text-sm text-slate-400">
               {carrierDecision.provenance.executionIntentState === 'unavailable'
                 ? '执行链路状态必须以后端为准；当前数据未接入，无法用于真实授权。'
-                : '当前停在“等待授权”。只有你明确授权后，才可能进入后续链路；当前没有真实资金执行计划或订单。'}
+                : draft
+                  ? '当前有授权草案，但尚未获得真实资金授权；当前没有 live ExecutionIntent 或订单。'
+                  : '当前停在“等待授权”。只有你明确授权后，才可能进入后续链路；当前没有真实资金执行计划或订单。'}
             </p>
           </div>
           <StatePill tone="amber">{humanAuthorizationState(carrierDecision.authorizationState)}</StatePill>
@@ -780,7 +876,7 @@ export function IntentsV2() {
         <h3 className="mb-2 text-sm font-bold text-slate-100">图表复盘</h3>
         <p className="text-sm text-slate-400">TradingView 类图表稍后支持。当前仅保留只读复盘位置。</p>
       </section>
-      <TechnicalDetails data={{ selectedCarrierId, localRiskAcknowledgements: selectedAcknowledgements, evidence: data.evidence, currentCampaign: data.currentCampaign }} />
+      <TechnicalDetails data={{ selectedCarrierId, localRiskAcknowledgements: selectedAcknowledgements, ownerTrialFlow: data.ownerTrialFlow, authorizationDraft: draft, evidence: data.evidence, currentCampaign: data.currentCampaign }} />
     </PageShell>
   );
 }
@@ -996,6 +1092,7 @@ function useConsoleData(): ViewState {
         bnbTrialGap,
         strategyTrialReadiness,
         strategyTrialGovernance,
+        ownerTrialFlow,
         families,
         decisions,
         bindings,
@@ -1040,6 +1137,10 @@ function useConsoleData(): ViewState {
           gaps.push(`strategy trial architecture governance: ${message(error)}`);
           return null;
         }),
+        brcApi.ownerTrialFlowCurrent().catch((error) => {
+          gaps.push(`owner trial flow: ${message(error)}`);
+          return null;
+        }),
         brcApi.listStrategyFamilies().catch((error) => {
           gaps.push(`strategy families: ${message(error)}`);
           return [];
@@ -1082,6 +1183,7 @@ function useConsoleData(): ViewState {
             bnbTrialGap,
             strategyTrialReadiness,
             strategyTrialGovernance,
+            ownerTrialFlow,
             families,
             decisions,
             bindings,
@@ -2385,11 +2487,19 @@ function trialConfirmationView(
   const noConflictOrders = accountFactsAvailable ? recordsForSymbol(accountOrders, candidateSymbol).length === 0 : null;
   const liveEnv = stringAt(data.readiness?.environment_boundary, 'trading_env', '');
   const liveEnvVisible = Boolean(liveEnv);
-  const risks = [
-    { id: 'strategy_not_proven_profitable', title: '策略不保证盈利', desc: '即使过去表现良好，未来仍可能亏损。' },
-    { id: 'market_volatility', title: '市场剧烈波动风险', desc: '极端行情可能导致滑点或跳空，造成超出预期的损失。' },
-    { id: 'capital_position_risk', title: '资金与仓位风险', desc: '虽然是小额试验，但仍可能全部亏损，请勿投入无法承受损失的资金。' },
-  ];
+  const risks = data.ownerTrialFlow?.strategy_warnings.length
+    ? data.ownerTrialFlow.strategy_warnings.map((warning) => ({
+        id: String(warning.warning_id),
+        title: ownerSafeText(String(warning.warning_id)),
+        desc: String(warning.description || '策略风险需要 Owner 知情确认。'),
+      }))
+    : [
+        { id: 'strategy_not_proven_profitable', title: '策略不保证盈利', desc: '即使过去表现良好，未来仍可能亏损。' },
+        { id: 'limited_live_observation_sample', title: '实盘观察样本有限', desc: 'live read-only observation 样本仍小，不能证明长期有效。' },
+        { id: 'regime_may_be_unfavorable', title: '行情环境可能不利', desc: '当前行情可能不同于历史高质量样本。' },
+        { id: 'forward_review_incomplete', title: '前向复核尚不完整', desc: '前向复核是披露证据，不是确认后仍永久阻断的硬门槛。' },
+        { id: 'historical_fragility_known', title: '历史脆弱性已知', desc: '历史样本存在脆弱性和不利早期路径风险。' },
+      ];
   const allRisksAcknowledged = risks.every((risk) => acknowledgements[risk.id]);
   const accountGateResult = (value: boolean | null) => value === null ? '未接入' : value ? '通过' : '阻断';
   const remainingConditions = [
@@ -2517,6 +2627,7 @@ function carrierDecisionView(data: ConsoleData): CarrierDecisionView {
   const packet = governance?.owner_review_packet;
   const carrier = packet?.carrier;
   const auth = governance?.authorization_draft || {};
+  const persistedDraft = data.ownerTrialFlow?.authorization_draft || null;
   const gate = governance?.minimal_live_trial_gate;
   const activeHardFromPacket = (packet?.hard_safety_blockers || [])
     .filter((blocker) => blocker.active)
@@ -2582,7 +2693,9 @@ function carrierDecisionView(data: ConsoleData): CarrierDecisionView {
   const strategyWarnings = hasSafetyBackend
     ? uniqueTexts(warnings)
     : ['策略风险数据未接入，无法用于真实授权'];
-  const authorizationStateField: FieldValue<string> = Boolean(auth.pending_owner_live_authorization)
+  const authorizationStateField: FieldValue<string> = persistedDraft
+    ? { value: persistedDraft.status, source: 'backend_api' }
+    : Boolean(auth.pending_owner_live_authorization)
     ? { value: 'pending_owner_live_authorization', source: 'backend_api' }
     : provenanceText([
         [auth.authorization_status, 'backend_api'],
