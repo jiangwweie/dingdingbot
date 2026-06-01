@@ -12,6 +12,7 @@ P0-004: 订单参数合理性检查
 - 极端行情检测与放宽逻辑（波动率检测）
 """
 import asyncio
+import re
 import time
 from datetime import datetime, timezone, date
 from decimal import Decimal, localcontext
@@ -52,8 +53,23 @@ DAILY_RISK_STATS_UNAVAILABLE_MESSAGE = (
 DAILY_RISK_STATS_DECIMAL_QUANT = Decimal("0.000000000000000001")
 
 
-def resolve_daily_risk_stats_scope_key(*, profile_name: Optional[str] = None) -> str:
-    """Daily risk stats are account-level in v1, not profile/session scoped."""
+def resolve_daily_risk_stats_scope_key(
+    *,
+    profile_name: Optional[str] = None,
+    trading_env: Optional[str] = None,
+    exchange_testnet: Optional[bool] = None,
+) -> str:
+    """Resolve the persisted daily-risk stats scope.
+
+    Live/unknown environments stay on the existing account-level default. A
+    confirmed testnet runtime profile receives an isolated scope so testnet
+    rehearsals can be cleaned up without touching live/global daily risk rows.
+    """
+    normalized_env = (trading_env or "").strip().lower()
+    if profile_name and normalized_env == "testnet" and exchange_testnet is True:
+        normalized_profile = re.sub(r"[^A-Za-z0-9_.:-]+", "_", profile_name.strip())
+        if normalized_profile:
+            return f"runtime_profile:{normalized_profile}"
     return DAILY_RISK_STATS_SCOPE_KEY
 
 

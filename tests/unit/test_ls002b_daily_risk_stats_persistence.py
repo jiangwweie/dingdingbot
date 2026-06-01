@@ -141,15 +141,30 @@ def _manager(**kwargs) -> CapitalProtectionManager:
     )
 
 
-def test_daily_risk_stats_scope_stays_account_level_across_runtime_profiles():
+def test_daily_risk_stats_scope_stays_account_level_without_confirmed_testnet_profile():
     assert resolve_daily_risk_stats_scope_key(profile_name=None) == DAILY_RISK_STATS_SCOPE_KEY
     assert (
         resolve_daily_risk_stats_scope_key(profile_name="sim1_eth_runtime")
         == DAILY_RISK_STATS_SCOPE_KEY
     )
     assert (
-        resolve_daily_risk_stats_scope_key(profile_name="phase5e_btc_eth_testnet_runtime")
+        resolve_daily_risk_stats_scope_key(
+            profile_name="phase5e_btc_eth_testnet_runtime",
+            trading_env="live",
+            exchange_testnet=False,
+        )
         == DAILY_RISK_STATS_SCOPE_KEY
+    )
+
+
+def test_daily_risk_stats_scope_is_profile_scoped_for_confirmed_testnet_runtime():
+    assert (
+        resolve_daily_risk_stats_scope_key(
+            profile_name="strategy_trial_bnb_testnet_runtime",
+            trading_env="testnet",
+            exchange_testnet=True,
+        )
+        == "runtime_profile:strategy_trial_bnb_testnet_runtime"
     )
 
 

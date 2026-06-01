@@ -380,6 +380,7 @@ def _orchestrator_with_position_updates(position_repo: MutablePositionRepo):
 
     async def close(position, reason, max_amount):
         result = await _orchestrator().execute_controlled_close(position, reason, max_amount)
+        result["terminalized_protection_orders"] = [object(), object()]
         position_repo.active = []
         return result
 
@@ -857,6 +858,90 @@ async def test_strategy_trial_carrier_reset_from_closed_includes_flat_proof(monk
 
 
 @pytest.mark.asyncio
+async def test_strategy_trial_carrier_cleans_stale_armed_state_only_when_flat(monkeypatch):
+    service = await _brc_service()
+    campaign_state = FakeCampaignStateService()
+    campaign_state.state.status = "armed"
+    campaign_state.state.active_strategy_contract_id = "carrier:MI-001-BNB-LONG"
+    campaign_state.state.active_session_id = "brc-attempt-stale"
+    orch = _orchestrator()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+        _brc_campaign_service=service,
+        _campaign_state_service=campaign_state,
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(price=Decimal("600"), min_notional=Decimal("5")),
+        _startup_trading_guard_service=_guard(),
+        _global_kill_switch_service=_gks(),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+        _account_getter=_fresh_account_snapshot,
+        _startup_reconciliation_summary={"status": "clean"},
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 200, resp.text
+    statuses = [call["status"] for call in campaign_state.set_state_calls]
+    assert statuses[:3] == ["closed", "observe", "armed"]
+    cleanup_call = campaign_state.set_state_calls[0]
+    assert cleanup_call["trigger"].value == "position_closed"
+    assert cleanup_call["metadata"]["stale_armed_cleanup"] is True
+    assert cleanup_call["metadata"]["flat_proof"]["all_flat"] is True
+    reset_call = campaign_state.set_state_calls[1]
+    assert reset_call["metadata"]["owner_review_verified"] is True
+    assert resp.json()["preflight_facts"]["runtime_campaign_state_cleanup"]["status"] == (
+        "stale_armed_flat_reset_to_observe"
+    )
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_finalizes_stale_empty_campaign_before_retry(monkeypatch):
+    service = await _brc_service()
+    stale = await service.create_campaign(
+        bucket_id="MI-001-BNB-LONG-TESTNET-BUCKET",
+        authorized_amount=Decimal("20"),
+        max_campaign_loss=Decimal("20"),
+        profit_protect_trigger=Decimal("20"),
+        reason="stale empty testnet campaign",
+        max_attempts=1,
+        max_simultaneous_positions=1,
+        max_leverage=1,
+        allowed_profile=STRATEGY_TRIAL_BNB_PROFILE,
+        allowed_symbols=(BNB,),
+    )
+    orch = _orchestrator()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+        _brc_campaign_service=service,
+        _campaign_state_service=FakeCampaignStateService(),
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(price=Decimal("600"), min_notional=Decimal("5")),
+        _startup_trading_guard_service=_guard(),
+        _global_kill_switch_service=_gks(),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+        _account_getter=_fresh_account_snapshot,
+        _startup_reconciliation_summary={"status": "clean"},
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["preflight_facts"]["brc_campaign_cleanup"]["campaign_id"] == stale.campaign_id
+    assert payload["preflight_facts"]["brc_campaign_cleanup"]["live_ready"] is False
+    current = await service.require_current_campaign()
+    assert current.campaign_id != stale.campaign_id
+    assert current.last_attempt is not None
+    assert current.last_attempt.status == BrcAttemptStatus.ENTRY_FILLED
+
+
+@pytest.mark.asyncio
 async def test_strategy_trial_carrier_controlled_close_uses_allowlisted_bnb_scope(monkeypatch):
     service = await _brc_service()
     position_repo = MutablePositionRepo()
@@ -868,6 +953,7 @@ async def test_strategy_trial_carrier_controlled_close_uses_allowlisted_bnb_scop
 
     async def close(position, reason, max_amount):
         result = await _orchestrator().execute_controlled_close(position, reason, max_amount)
+        result["terminalized_protection_orders"] = [object(), object()]
         position_repo.active = []
         return result
 
@@ -896,7 +982,8 @@ async def test_strategy_trial_carrier_controlled_close_uses_allowlisted_bnb_scop
     assert close_resp.status_code == 200, close_resp.text
     payload = close_resp.json()
     assert payload["carrier_id"] == "MI-001-BNB-LONG"
-    assert payload["readiness_verdict"] == "testnet_rehearsal_closed"
+    assert payload["readiness_verdict"] == "testnet_rehearsal_completed_with_valid_protection"
+    assert payload["campaign"]["status"] == "ended"
     assert payload["close"]["symbol"] == BNB
     assert payload["close"]["amount"] == "0.01"
     assert payload["live_ready"] is False

@@ -594,7 +594,10 @@ class StrategyTrialCarrierEntryResponse(BaseModel):
 
 class StrategyTrialCarrierCloseResponse(BaseModel):
     carrier_id: str
-    readiness_verdict: Literal["testnet_rehearsal_closed"]
+    readiness_verdict: Literal[
+        "testnet_rehearsal_closed",
+        "testnet_rehearsal_completed_with_valid_protection",
+    ]
     close: ControlledCloseResponse
     campaign: dict
     live_ready: Literal[False] = False
@@ -2579,6 +2582,31 @@ async def execute_strategy_trial_carrier_controlled_entry(
 
     service = _get_brc_campaign_service(api_module)
     campaign_state_service = _get_campaign_state_service(api_module)
+    existing_campaign = await service.get_current_campaign()
+    if (
+        existing_campaign is not None
+        and existing_campaign.status.value == "observe"
+        and existing_campaign.attempt_count == 0
+        and existing_campaign.risk_envelope.allowed_profile == resolved.profile_name
+        and tuple(existing_campaign.risk_envelope.allowed_symbols) == (spec.symbol,)
+        and preflight_facts.get("inventory", {}).get("all_flat") is True
+    ):
+        existing_campaign = await service.finalize(
+            outcome=CampaignOutcome.ENDED_MANUAL_STOP,
+            reason=(
+                "Strategy trial carrier stale empty campaign cleanup before retry: "
+                f"{carrier.carrier_id}"
+            ),
+            final_flat=True,
+        )
+        preflight_facts["brc_campaign_cleanup"] = {
+            "status": "stale_empty_observe_campaign_finalized",
+            "campaign_id": existing_campaign.campaign_id,
+            "runtime_effect": "testnet_profile_campaign_metadata_cleanup",
+            "live_ready": False,
+            "execution_permission_granted": False,
+            "order_permission_granted": False,
+        }
     campaign = await service.create_campaign(
         bucket_id=f"{carrier.carrier_id}-TESTNET-BUCKET",
         authorized_amount=carrier.max_notional,
@@ -2620,6 +2648,49 @@ async def execute_strategy_trial_carrier_controlled_entry(
             profile_id=resolved.profile_name,
             symbol=spec.symbol,
         )
+    elif (
+        runtime_state.status == CampaignRuntimeState.ARMED.value
+        and getattr(runtime_state, "active_strategy_contract_id", None)
+        == f"carrier:{carrier.carrier_id}"
+        and preflight_facts.get("inventory", {}).get("all_flat") is True
+    ):
+        runtime_state = await campaign_state_service.set_state(
+            status=CampaignRuntimeState.CLOSED.value,
+            reason=f"Strategy trial carrier stale armed flat cleanup: {carrier.carrier_id}",
+            updated_by="strategy_trial_carrier_endpoint",
+            trigger=CampaignTransitionTrigger.POSITION_CLOSED,
+            metadata={
+                "stale_armed_cleanup": True,
+                "flat_proof": preflight_facts.get("inventory"),
+                "carrier_id": carrier.carrier_id,
+                "preflight_facts": preflight_facts,
+            },
+            profile_id=resolved.profile_name,
+            symbol=spec.symbol,
+        )
+        runtime_state = await campaign_state_service.set_state(
+            status=CampaignRuntimeState.OBSERVE.value,
+            reason=f"Strategy trial carrier stale armed reset: {carrier.carrier_id}",
+            updated_by="strategy_trial_carrier_endpoint",
+            trigger=CampaignTransitionTrigger.OWNER_REVIEW_RESET,
+            metadata={
+                "owner_review": True,
+                "owner_review_verified": True,
+                "stale_armed_cleanup": True,
+                "flat_proof": preflight_facts.get("inventory"),
+                "carrier_id": carrier.carrier_id,
+                "preflight_facts": preflight_facts,
+            },
+            profile_id=resolved.profile_name,
+            symbol=spec.symbol,
+        )
+        preflight_facts["runtime_campaign_state_cleanup"] = {
+            "status": "stale_armed_flat_reset_to_observe",
+            "runtime_effect": "testnet_profile_runtime_state_cleanup",
+            "live_ready": False,
+            "execution_permission_granted": False,
+            "order_permission_granted": False,
+        }
     if runtime_state.status != CampaignRuntimeState.OBSERVE.value:
         raise HTTPException(
             status_code=409,
@@ -2777,9 +2848,29 @@ async def execute_strategy_trial_carrier_controlled_close(
         symbol=spec.symbol,
     )
     campaign = await service.require_current_campaign()
+    readiness_verdict = "testnet_rehearsal_closed"
+    try:
+        remaining_positions = await position_repo.list_active(symbol=spec.symbol, limit=10)
+    except Exception:
+        remaining_positions = []
+    valid_protection_cleanup = (
+        attempt_status == BrcAttemptStatus.ENTRY_FILLED
+        and len(terminalized) >= 2
+        and not remaining_positions
+        and campaign.last_attempt is not None
+        and campaign.last_attempt.status == BrcAttemptStatus.CLOSED
+        and campaign.attempt_count >= campaign.risk_envelope.max_attempts
+    )
+    if valid_protection_cleanup:
+        campaign = await service.finalize(
+            outcome=CampaignOutcome.ENDED_MANUAL_STOP,
+            reason=f"Strategy trial carrier completed with valid protection cleanup: {carrier.carrier_id}",
+            final_flat=True,
+        )
+        readiness_verdict = "testnet_rehearsal_completed_with_valid_protection"
     return StrategyTrialCarrierCloseResponse(
         carrier_id=carrier.carrier_id,
-        readiness_verdict="testnet_rehearsal_closed",
+        readiness_verdict=readiness_verdict,
         close=close_response,
         campaign=campaign.model_dump(mode="json"),
     )

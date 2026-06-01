@@ -790,7 +790,17 @@ async def run_application():
                 _runtime_config_provider.resolved_config.profile_name
                 if _runtime_config_provider is not None
                 else None
-            )
+            ),
+            trading_env=(
+                _runtime_config_provider.resolved_config.environment.trading_env
+                if _runtime_config_provider is not None
+                else None
+            ),
+            exchange_testnet=(
+                _runtime_config_provider.resolved_config.environment.exchange_testnet
+                if _runtime_config_provider is not None
+                else None
+            ),
         )
         try:
             daily_risk_stats_repo = create_runtime_daily_risk_stats_repository()
