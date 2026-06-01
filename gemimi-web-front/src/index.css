@@ -1,13 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @custom-variant dark (&:is(.dark *));
 
 @layer base {
+  :root {
+    --color-primary: #F59E0B;
+    --color-secondary: #FBBF24;
+    --color-cta: #8B5CF6;
+    --color-background: #0F172A;
+    --color-text: #F8FAFC;
+  }
+
   body {
-    @apply bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans antialiased;
+    font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif;
+    @apply bg-slate-950 text-slate-50 antialiased;
   }
   
   h1, h2, h3, h4, h5, h6 {
-    @apply text-zinc-900 dark:text-zinc-100;
+    font-family: "Fira Code", ui-monospace, monospace;
+    @apply text-slate-50;
   }
 }
