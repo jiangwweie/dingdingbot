@@ -233,7 +233,7 @@ def build_bnb_strategy_trial_architecture_governance(
         ],
         technical_debt_later=[
             "Controlled testnet runtime endpoints remain BNB-first allowlisted",
-            "Authorization draft is application/read-model only, not PG persisted yet",
+            "Governance response remains a static review packet; Owner trial-flow endpoints persist acknowledgement and draft metadata",
             "Owner Console can consume the governance API before a polished live packet UI",
         ],
     )

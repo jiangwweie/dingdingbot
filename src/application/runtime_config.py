@@ -27,8 +27,8 @@ class EnvironmentRuntimeConfig(BaseModel):
 
     pg_database_url: SecretStr
     core_execution_intent_backend: str = Field(default="postgres")
-    core_order_backend: str = Field(default="sqlite")
-    core_position_backend: str = Field(default="sqlite")
+    core_order_backend: str = Field(default="postgres")
+    core_position_backend: str = Field(default="postgres")
     trading_env: str = Field(default="simulation")
     exchange_name: str = Field(default="binance")
     exchange_testnet: bool = Field(default=True)
@@ -51,9 +51,30 @@ class EnvironmentRuntimeConfig(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_sim1_backend_policy(self) -> "EnvironmentRuntimeConfig":
-        if self.core_execution_intent_backend != "postgres":
-            raise ValueError("Sim-1 requires CORE_EXECUTION_INTENT_BACKEND=postgres")
+    def validate_mainline_environment_policy(self) -> "EnvironmentRuntimeConfig":
+        backends = {
+            "CORE_EXECUTION_INTENT_BACKEND": self.core_execution_intent_backend,
+            "CORE_ORDER_BACKEND": self.core_order_backend,
+            "CORE_POSITION_BACKEND": self.core_position_backend,
+        }
+        non_postgres = {
+            name: backend
+            for name, backend in backends.items()
+            if backend != "postgres"
+        }
+        if non_postgres:
+            raise ValueError(
+                "mainline runtime requires PostgreSQL core backends: "
+                + ", ".join(f"{name}={backend}" for name, backend in non_postgres.items())
+            )
+        if (
+            self.trading_env.strip().lower() == "live"
+            and self.brc_execution_permission_max > ExecutionPermission.INTENT_RECORDING
+        ):
+            raise ValueError(
+                "TRADING_ENV=live cannot use BRC_EXECUTION_PERMISSION_MAX above intent_recording; "
+                "live execution scope must come from PG-backed Owner authorization"
+            )
         return self
 
 
@@ -364,8 +385,8 @@ class RuntimeConfigResolver:
         return EnvironmentRuntimeConfig(
             pg_database_url=self._required_env("PG_DATABASE_URL"),
             core_execution_intent_backend=self._env.get("CORE_EXECUTION_INTENT_BACKEND", "postgres"),
-            core_order_backend=self._env.get("CORE_ORDER_BACKEND", "sqlite"),
-            core_position_backend=self._env.get("CORE_POSITION_BACKEND", "sqlite"),
+            core_order_backend=self._env.get("CORE_ORDER_BACKEND", "postgres"),
+            core_position_backend=self._env.get("CORE_POSITION_BACKEND", "postgres"),
             trading_env=self._env.get("TRADING_ENV", "simulation").strip().lower() or "simulation",
             exchange_name=self._env.get("EXCHANGE_NAME", "binance"),
             exchange_testnet=self._parse_bool(self._env.get("EXCHANGE_TESTNET", "true")),

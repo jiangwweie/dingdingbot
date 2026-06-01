@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Mapping, Optional
 import os
 
 
@@ -33,7 +33,7 @@ PG_DATABASE_URL = os.getenv("PG_DATABASE_URL")
 
 
 def _default_pg_backend() -> str:
-    return "postgres" if PG_DATABASE_URL else "sqlite"
+    return "postgres"
 
 
 CORE_ORDER_BACKEND = os.getenv("CORE_ORDER_BACKEND", _default_pg_backend()).lower()
@@ -157,12 +157,26 @@ def create_pg_engine(db_url: Optional[str] = None) -> AsyncEngine:
     )
 
 
-def get_core_backend_settings() -> dict[str, str]:
+def _env_value(env: Mapping[str, str], name: str, default: str = "") -> str:
+    value = env.get(name, default)
+    return str(value).strip()
+
+
+def _env_enabled(env: Mapping[str, str], name: str) -> bool:
+    return _env_value(env, name).lower() in {"1", "true", "yes", "on"}
+
+
+def get_core_backend_settings(env: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     """获取核心链路后端配置。"""
+    source = env or os.environ
     return {
-        "order": CORE_ORDER_BACKEND,
-        "execution_intent": CORE_EXECUTION_INTENT_BACKEND,
-        "position": CORE_POSITION_BACKEND,
+        "order": _env_value(source, "CORE_ORDER_BACKEND", _default_pg_backend()).lower(),
+        "execution_intent": _env_value(
+            source,
+            "CORE_EXECUTION_INTENT_BACKEND",
+            _default_pg_backend(),
+        ).lower(),
+        "position": _env_value(source, "CORE_POSITION_BACKEND", _default_pg_backend()).lower(),
     }
 
 
@@ -175,13 +189,15 @@ def should_use_pg_for_default_repository() -> bool:
     return bool(PG_DATABASE_URL and MIGRATE_ALL_STATE_TO_PG)
 
 
-def validate_pg_core_configuration() -> None:
+def validate_pg_core_configuration(env: Optional[Mapping[str, str]] = None) -> None:
     """严格校验 PG 核心链路配置。
 
-    仅当任一核心后端明确设置为 `postgres` 时才要求 `PG_DATABASE_URL`。
-    默认 SQLite 链路不受影响。
+    Mainline runtime state must be PostgreSQL-backed. SQLite/local files are
+    reserved for explicit test fixtures or developer-only mocks, not process
+    startup.
     """
-    backends = get_core_backend_settings()
+    source = env or os.environ
+    backends = get_core_backend_settings(source)
     invalid = {name: backend for name, backend in backends.items() if backend not in {"sqlite", "postgres"}}
     if invalid:
         raise ValueError(
@@ -189,17 +205,46 @@ def validate_pg_core_configuration() -> None:
             + ", ".join(f"{name}={backend}" for name, backend in invalid.items())
         )
 
-    if "postgres" not in backends.values():
-        return
+    non_postgres = {name: backend for name, backend in backends.items() if backend != "postgres"}
+    if non_postgres:
+        raise ValueError(
+            "主线核心后端必须使用 postgres；SQLite/local 仅允许测试夹具或开发 mock: "
+            + ", ".join(f"{name}={backend}" for name, backend in non_postgres.items())
+        )
 
-    if not PG_DATABASE_URL:
+    pg_database_url = _env_value(source, "PG_DATABASE_URL")
+    if not pg_database_url:
         raise ValueError(
             "PG_DATABASE_URL 未配置，但核心后端已选择 postgres；请显式配置 PostgreSQL DSN"
         )
 
-    if not PG_DATABASE_URL.startswith("postgresql"):
+    if not pg_database_url.startswith("postgresql"):
         raise ValueError(
-            f"PG_DATABASE_URL 必须是 PostgreSQL DSN，当前为: {PG_DATABASE_URL}"
+            f"PG_DATABASE_URL 必须是 PostgreSQL DSN，当前为: {pg_database_url}"
+        )
+
+    trading_env = _env_value(source, "TRADING_ENV", "simulation").lower() or "simulation"
+    app_env = _env_value(source, "APP_ENV").lower()
+    live_like = trading_env == "live" or app_env == "production"
+    if live_like and _env_enabled(source, "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"):
+        raise ValueError(
+            "production/live 环境不得启用 RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"
+        )
+    if live_like and _env_enabled(source, "RUNTIME_CONTROL_API_ENABLED"):
+        raise ValueError(
+            "production/live 环境不得默认启用 RUNTIME_CONTROL_API_ENABLED mutation surface"
+        )
+
+    permission_max = _env_value(source, "BRC_EXECUTION_PERMISSION_MAX", "read_only").lower()
+    if live_like and permission_max in {"execution_intent_allowed", "order_allowed"}:
+        raise ValueError(
+            "production/live 环境不得通过 BRC_EXECUTION_PERMISSION_MAX 全局授予 execution/order 权限"
+        )
+
+    if live_like and _env_value(source, "RUNTIME_PROFILE"):
+        raise ValueError(
+            "production/live 环境不得使用 RUNTIME_PROFILE 作为可执行 live scope 选择器；"
+            "live scope 必须来自 PG-backed BoundedLiveTrialAuthorization"
         )
 
 

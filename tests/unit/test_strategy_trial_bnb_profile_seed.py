@@ -35,8 +35,8 @@ async def test_bnb_strategy_trial_profile_resolves_to_testnet_bnb_only_scope():
     env = {
         "PG_DATABASE_URL": "postgresql://user:pass@localhost:5432/test",
         "CORE_EXECUTION_INTENT_BACKEND": "postgres",
-        "CORE_ORDER_BACKEND": "sqlite",
-        "CORE_POSITION_BACKEND": "sqlite",
+        "CORE_ORDER_BACKEND": "postgres",
+        "CORE_POSITION_BACKEND": "postgres",
         "TRADING_ENV": "testnet",
         "EXCHANGE_NAME": "binance",
         "EXCHANGE_TESTNET": "true",

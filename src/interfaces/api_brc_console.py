@@ -41,6 +41,16 @@ from src.application.strategy_trial_architecture_governance import (
     StrategyTrialArchitectureGovernanceResponse,
     build_bnb_strategy_trial_architecture_governance,
 )
+from src.application.owner_trial_flow import (
+    BoundedLiveTrialAuthorizationDraft,
+    BoundedLiveTrialAuthorizationDraftCreateRequest,
+    OwnerRiskAcknowledgement,
+    OwnerRiskAcknowledgementCreateRequest,
+    OwnerTrialFlowCurrentResponse,
+    OwnerTrialFlowError,
+    OwnerTrialFlowInfrastructureError,
+    OwnerTrialFlowService,
+)
 from src.application.strategy_trial_readiness import (
     StrategyTrialReadinessResponse,
     build_bnb_strategy_trial_readiness,
@@ -52,6 +62,7 @@ from src.infrastructure.database import probe_pg_connectivity
 from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
+from src.infrastructure.owner_trial_flow_repository import PgOwnerTrialFlowRepository
 from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.brc_admission_service import (
@@ -73,7 +84,7 @@ from src.domain.brc_admission import (
     TrialEnv,
     TrialStage,
 )
-from src.interfaces.operator_auth import require_operator_session
+from src.interfaces.operator_auth import OperatorSessionDependency, require_operator_session
 from src.interfaces import api_console_runtime as runtime
 
 
@@ -100,6 +111,8 @@ dev_testnet_router = APIRouter(
     tags=["BRC Controlled Testnet"],
     dependencies=[Depends(require_operator_session)],
 )
+
+_owner_trial_flow_service: OwnerTrialFlowService | None = None
 
 
 class BrcDashboardResponse(BaseModel):
@@ -3650,6 +3663,82 @@ async def get_bnb_first_carrier_architecture_governance() -> StrategyTrialArchit
 
 
 @router.get(
+    "/owner-trial-flow/current",
+    response_model=OwnerTrialFlowCurrentResponse,
+)
+async def get_owner_trial_flow_current(
+    carrier_id: str = Query(default="MI-001-BNB-LONG"),
+) -> OwnerTrialFlowCurrentResponse:
+    """Return persisted Owner trial-flow metadata without execution authority."""
+    try:
+        return await _owner_trial_flow_service_instance().current(carrier_id=carrier_id)
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+
+
+@router.post(
+    "/owner-trial-flow/risk-acknowledgement",
+    response_model=OwnerRiskAcknowledgement,
+)
+async def create_owner_trial_flow_risk_acknowledgement(
+    body: OwnerRiskAcknowledgementCreateRequest,
+    session: OperatorSessionDependency,
+) -> OwnerRiskAcknowledgement:
+    """Persist Owner strategy-risk acknowledgement metadata only."""
+    try:
+        return await _owner_trial_flow_service_instance().create_risk_acknowledgement(
+            body,
+            operator_id=session.username,
+        )
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+
+
+@router.post(
+    "/owner-trial-flow/authorization-draft",
+    response_model=BoundedLiveTrialAuthorizationDraft,
+)
+async def create_owner_trial_flow_authorization_draft(
+    body: BoundedLiveTrialAuthorizationDraftCreateRequest,
+    session: OperatorSessionDependency,
+) -> BoundedLiveTrialAuthorizationDraft:
+    """Persist a pending bounded live-trial authorization draft.
+
+    The draft is non-executable and never grants live readiness, execution
+    permission, or order permission.
+    """
+    try:
+        return await _owner_trial_flow_service_instance().create_authorization_draft(
+            body,
+            operator_id=session.username,
+        )
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+
+
+@router.get(
+    "/owner-trial-flow/authorization-draft/{draft_id}",
+    response_model=BoundedLiveTrialAuthorizationDraft,
+)
+async def get_owner_trial_flow_authorization_draft(
+    draft_id: str,
+) -> BoundedLiveTrialAuthorizationDraft:
+    """Return a persisted non-executable authorization draft."""
+    try:
+        return await _owner_trial_flow_service_instance().get_draft(draft_id)
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+
+
+@router.get(
     "/strategy-trial-readiness/v1",
     response_model=StrategyTrialReadinessResponse,
 )
@@ -3694,6 +3783,30 @@ async def get_strategy_trial_readiness_v1(
             requested_mode=profile_readiness.strategy_profile.execution_mode,
         ),
         fact_checks=fact_snapshot.to_response_dict(),
+    )
+
+
+def _owner_trial_flow_service_instance() -> OwnerTrialFlowService:
+    global _owner_trial_flow_service
+    if _owner_trial_flow_service is None:
+        _owner_trial_flow_service = OwnerTrialFlowService(
+            PgOwnerTrialFlowRepository(),
+        )
+    return _owner_trial_flow_service
+
+
+def _owner_trial_flow_http_error(exc: OwnerTrialFlowError) -> HTTPException:
+    status = 404 if exc.code == "draft_not_found" else 400
+    return HTTPException(
+        status_code=status,
+        detail={"code": exc.code, "message": exc.message},
+    )
+
+
+def _owner_trial_flow_infrastructure_http_error(exc: OwnerTrialFlowInfrastructureError) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={"code": exc.code, "message": exc.message},
     )
 
 

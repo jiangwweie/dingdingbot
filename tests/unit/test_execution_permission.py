@@ -158,8 +158,8 @@ def test_runtime_config_parses_trading_env_and_brc_execution_permission_max():
         env={
             "PG_DATABASE_URL": "postgresql://example",
             "CORE_EXECUTION_INTENT_BACKEND": "postgres",
-            "CORE_ORDER_BACKEND": "sqlite",
-            "CORE_POSITION_BACKEND": "sqlite",
+            "CORE_ORDER_BACKEND": "postgres",
+            "CORE_POSITION_BACKEND": "postgres",
             "TRADING_ENV": "live",
             "EXCHANGE_NAME": "binance",
             "EXCHANGE_TESTNET": "false",
@@ -176,3 +176,56 @@ def test_runtime_config_parses_trading_env_and_brc_execution_permission_max():
     assert environment.trading_env == "live"
     assert environment.exchange_testnet is False
     assert environment.brc_execution_permission_max == ExecutionPermission.INTENT_RECORDING
+
+
+def test_runtime_config_rejects_non_postgres_mainline_storage_backend():
+    resolver = RuntimeConfigResolver(
+        profile_repository=object(),
+        env={
+            "PG_DATABASE_URL": "postgresql://example",
+            "CORE_EXECUTION_INTENT_BACKEND": "postgres",
+            "CORE_ORDER_BACKEND": "sqlite",
+            "CORE_POSITION_BACKEND": "postgres",
+            "TRADING_ENV": "testnet",
+            "EXCHANGE_NAME": "binance",
+            "EXCHANGE_TESTNET": "true",
+            "BRC_EXECUTION_PERMISSION_MAX": "intent_recording",
+            "EXCHANGE_API_KEY": "key",
+            "EXCHANGE_API_SECRET": "secret",
+            "FEISHU_WEBHOOK_URL": "https://example.invalid/hook",
+        },
+    )
+
+    try:
+        resolver._resolve_environment()
+    except ValueError as exc:
+        assert "mainline runtime requires PostgreSQL core backends" in str(exc)
+        assert "CORE_ORDER_BACKEND=sqlite" in str(exc)
+    else:
+        raise AssertionError("expected non-postgres mainline backend to be rejected")
+
+
+def test_live_runtime_config_rejects_global_order_permission_env():
+    resolver = RuntimeConfigResolver(
+        profile_repository=object(),
+        env={
+            "PG_DATABASE_URL": "postgresql://example",
+            "CORE_EXECUTION_INTENT_BACKEND": "postgres",
+            "CORE_ORDER_BACKEND": "postgres",
+            "CORE_POSITION_BACKEND": "postgres",
+            "TRADING_ENV": "live",
+            "EXCHANGE_NAME": "binance",
+            "EXCHANGE_TESTNET": "false",
+            "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
+            "EXCHANGE_API_KEY": "key",
+            "EXCHANGE_API_SECRET": "secret",
+            "FEISHU_WEBHOOK_URL": "https://example.invalid/hook",
+        },
+    )
+
+    try:
+        resolver._resolve_environment()
+    except ValueError as exc:
+        assert "TRADING_ENV=live cannot use BRC_EXECUTION_PERMISSION_MAX above intent_recording" in str(exc)
+    else:
+        raise AssertionError("expected live global order permission to be rejected")

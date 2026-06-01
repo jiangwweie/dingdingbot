@@ -1659,6 +1659,143 @@ class PGBrcStrategyGroupForwardReviewORM(PGCoreBase):
     )
 
 
+class PGBrcOwnerRiskAcknowledgementORM(PGCoreBase):
+    """PG-backed Owner strategy-warning acknowledgement metadata.
+
+    This is audit metadata only. It is not a live authorization and cannot grant
+    execution or order permission.
+    """
+
+    __tablename__ = "brc_owner_risk_acknowledgements"
+
+    acknowledgement_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    carrier_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    acknowledged_warning_codes_json: Mapped[list] = mapped_column(
+        "acknowledged_warning_codes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    owner_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    acknowledged_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    acknowledgement_scope: Mapped[str] = mapped_column(String(128), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False, default="owner_console")
+    non_live_metadata_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint("source = 'owner_console'", name="ck_brc_owner_risk_ack_source"),
+        CheckConstraint(
+            "non_live_metadata_only IS TRUE",
+            name="ck_brc_owner_risk_ack_non_live_metadata_only",
+        ),
+        Index("idx_brc_owner_risk_ack_carrier_time", "carrier_id", "acknowledged_at_ms"),
+        Index("idx_brc_owner_risk_ack_strategy_family", "strategy_family_id", "acknowledged_at_ms"),
+        Index("idx_brc_owner_risk_ack_owner", "owner_id", "acknowledged_at_ms"),
+    )
+
+
+class PGBrcBoundedLiveTrialAuthorizationDraftORM(PGCoreBase):
+    """PG-backed non-executable bounded live-trial authorization draft."""
+
+    __tablename__ = "brc_bounded_live_trial_authorization_drafts"
+
+    draft_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    carrier_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    max_notional: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    leverage: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    protection_plan_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    single_use: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="pending_owner_live_authorization")
+    live_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_permission_granted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_permission_granted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_intent_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    auto_execution_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    consumed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    expires_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    linked_acknowledgement_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("brc_owner_risk_acknowledgements.acknowledgement_id", deferrable=True, initially="DEFERRED"),
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(String(64), nullable=False, default="owner_console")
+    non_live_metadata_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    hard_gate_snapshot_json: Mapped[dict] = mapped_column(
+        "hard_gate_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    warning_acknowledgement_snapshot_json: Mapped[dict] = mapped_column(
+        "warning_acknowledgement_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint("side IN ('long', 'short')", name="ck_brc_trial_auth_drafts_side"),
+        CheckConstraint(
+            "protection_plan_type IN ('single_tp_plus_sl')",
+            name="ck_brc_trial_auth_drafts_protection_plan",
+        ),
+        CheckConstraint(
+            "status IN ('pending_owner_live_authorization')",
+            name="ck_brc_trial_auth_drafts_status",
+        ),
+        CheckConstraint("max_notional > 0", name="ck_brc_trial_auth_drafts_max_notional_positive"),
+        CheckConstraint("quantity > 0", name="ck_brc_trial_auth_drafts_quantity_positive"),
+        CheckConstraint("leverage > 0", name="ck_brc_trial_auth_drafts_leverage_positive"),
+        CheckConstraint("single_use IS TRUE", name="ck_brc_trial_auth_drafts_single_use"),
+        CheckConstraint("live_ready IS FALSE", name="ck_brc_trial_auth_drafts_live_not_ready"),
+        CheckConstraint(
+            "order_permission_granted IS FALSE",
+            name="ck_brc_trial_auth_drafts_no_order_permission",
+        ),
+        CheckConstraint(
+            "execution_permission_granted IS FALSE",
+            name="ck_brc_trial_auth_drafts_no_execution_permission",
+        ),
+        CheckConstraint(
+            "execution_intent_created IS FALSE",
+            name="ck_brc_trial_auth_drafts_no_execution_intent",
+        ),
+        CheckConstraint("order_created IS FALSE", name="ck_brc_trial_auth_drafts_no_order"),
+        CheckConstraint("auto_execution_enabled IS FALSE", name="ck_brc_trial_auth_drafts_no_auto_execution"),
+        CheckConstraint("consumed IS FALSE", name="ck_brc_trial_auth_drafts_not_consumed"),
+        CheckConstraint("source = 'owner_console'", name="ck_brc_trial_auth_drafts_source"),
+        CheckConstraint(
+            "non_live_metadata_only IS TRUE",
+            name="ck_brc_trial_auth_drafts_non_live_metadata_only",
+        ),
+        Index("idx_brc_trial_auth_drafts_carrier_time", "carrier_id", "updated_at_ms"),
+        Index("idx_brc_trial_auth_drafts_ack", "linked_acknowledgement_id"),
+        Index("idx_brc_trial_auth_drafts_status_time", "status", "updated_at_ms"),
+    )
+
+
 class PGBrcHistoricalForwardOutcomeORM(PGCoreBase):
     """Compact forward outcome review for historical would-enter signals."""
 
