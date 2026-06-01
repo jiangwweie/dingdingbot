@@ -632,9 +632,19 @@ function useConsoleData(): ViewState {
 function PageShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
     <>
-      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-white shadow-sm">
-        <h2 className="mb-1 text-lg font-bold">{title}</h2>
-        <p className="text-sm text-slate-400">{subtitle}</p>
+      <section className="overflow-hidden rounded-2xl border border-amber-500/20 bg-slate-950 p-6 text-white shadow-xl shadow-black/20">
+        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-amber-300">Owner Console</p>
+            <h2 className="text-3xl font-bold tracking-tight text-slate-50">{title}</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">{subtitle}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <StatePill tone="teal">环境可见</StatePill>
+            <StatePill tone="indigo">证据优先</StatePill>
+            <StatePill tone="rose">无交易入口</StatePill>
+          </div>
+        </div>
       </section>
       {children}
     </>
@@ -643,9 +653,9 @@ function PageShell({ title, subtitle, children }: { title: string; subtitle: str
 
 function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/20">
-        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">{title}</h3>
+    <section className="flex h-full flex-col overflow-hidden rounded-2xl border border-amber-500/15 bg-slate-950/85 shadow-lg shadow-black/20">
+      <div className="flex items-center justify-between border-b border-amber-500/10 bg-slate-900/70 px-5 py-4">
+        <h3 className="text-sm font-bold text-slate-100">{title}</h3>
         {action}
       </div>
       {children}
@@ -655,9 +665,9 @@ function Panel({ title, action, children }: { title: string; action?: React.Reac
 
 function StatusCard({ title, value, note, tone, accent }: { title: string; value: string; note: string; tone: Tone; accent?: boolean }) {
   return (
-    <section className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 ${accent ? 'border-l-4 border-l-amber-400' : ''}`}>
-      <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{title}</h3>
-      <div className="mb-1 flex items-center gap-2 text-xl font-bold text-slate-900 dark:text-slate-50">
+    <section className={`rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20 ${accent ? 'border-l-4 border-l-amber-400' : ''}`}>
+      <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-amber-200/80">{title}</h3>
+      <div className="mb-1 flex items-center gap-2 text-xl font-bold text-slate-50">
         {value}
         {tone === 'teal' ? <span className="h-2 w-2 rounded-full bg-teal-500 shadow-[0_0_8px_rgba(20,184,166,0.65)]" /> : null}
       </div>
@@ -668,32 +678,32 @@ function StatusCard({ title, value, note, tone, accent }: { title: string; value
 
 function Metric({ label, value, bordered }: { label: string; value: unknown; bordered?: boolean }) {
   return (
-    <div className={`space-y-1 ${bordered ? "relative md:after:absolute md:after:right-[-16px] md:after:top-2 md:after:bottom-2 md:after:w-px md:after:bg-slate-100 dark:md:after:bg-slate-800 md:after:content-['']" : ''}`}>
-      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</p>
-      <p className="break-words text-2xl font-bold text-slate-800 dark:text-white">{display(value)}</p>
+    <div className={`space-y-1 ${bordered ? "relative md:after:absolute md:after:right-[-16px] md:after:top-2 md:after:bottom-2 md:after:w-px md:after:bg-amber-500/10 md:after:content-['']" : ''}`}>
+      <p className="text-xs font-medium text-slate-400">{label}</p>
+      <p className="break-words text-2xl font-bold text-slate-50">{display(value)}</p>
     </div>
   );
 }
 
 function DataTable({ columns, rows, compact = false }: { columns: string[]; rows: Array<Array<React.ReactNode>>; compact?: boolean }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="overflow-hidden rounded-2xl border border-amber-500/15 bg-slate-950/85 shadow-lg shadow-black/20">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-left">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/50">
+            <tr className="border-b border-amber-500/10 bg-slate-900/80">
               {columns.map((column) => (
-                <th key={column} className={`${compact ? 'px-4 py-3 text-xs' : 'px-5 py-4 text-[13px]'} font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400`}>
+                <th key={column} className={`${compact ? 'px-4 py-3 text-xs' : 'px-5 py-4 text-[13px]'} font-bold uppercase tracking-wider text-amber-200/75`}>
                   {column}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          <tbody className="divide-y divide-amber-500/10">
             {rows.map((row, index) => (
-              <tr key={index} className="transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
+              <tr key={index} className="transition-colors duration-200 hover:bg-slate-900/70">
                 {row.map((cell, cellIndex) => (
-                  <td key={cellIndex} className={`${compact ? 'px-4 py-3' : 'px-5 py-4'} text-sm text-slate-700 dark:text-slate-300`}>
+                  <td key={cellIndex} className={`${compact ? 'px-4 py-3' : 'px-5 py-4'} text-sm text-slate-300`}>
                     {cell}
                   </td>
                 ))}
@@ -719,12 +729,12 @@ function StrategyShelfHero({
   const warnings = selectedGroup.confidence_flags?.length ? selectedGroup.confidence_flags : selectedGroup.key_risks.slice(0, 3);
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="rounded-2xl border border-amber-500/15 bg-slate-950/85 p-5 shadow-lg shadow-black/20">
         <div className="mb-5 flex flex-col justify-between gap-4 md:flex-row md:items-start">
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-indigo-500 dark:text-indigo-400">Owner 决策货架</p>
-            <h3 className="text-2xl font-bold text-slate-950 dark:text-white">先看策略族，再看 Carrier</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+            <h3 className="text-2xl font-bold text-slate-50">先看策略族，再看 Carrier</h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
               当前页面用于比较 StrategyFamily / Carrier 的证据、风险和下一步。它不是自动路由，不会启动 trial，也不会创建执行指令或订单。
             </p>
           </div>
@@ -742,14 +752,14 @@ function StrategyShelfHero({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30">
+      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 shadow-lg shadow-black/20">
         <div className="mb-4 flex items-center gap-2">
-          <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-          <h3 className="text-base font-bold text-amber-950 dark:text-amber-100">阻断与警告分开看</h3>
+          <AlertCircle className="h-5 w-5 text-amber-300" />
+          <h3 className="text-base font-bold text-amber-100">阻断与警告分开看</h3>
         </div>
         <div className="space-y-4">
           <div>
-            <p className="mb-2 text-xs font-bold text-amber-700 dark:text-amber-300">Hard Blocker</p>
+            <p className="mb-2 text-xs font-bold text-amber-200">Hard Blocker</p>
             <div className="flex flex-wrap gap-1.5">
               {hardBlockers.slice(0, 3).map((blocker) => (
                 <StatePill key={blocker} tone="rose">{blocker}</StatePill>
@@ -757,7 +767,7 @@ function StrategyShelfHero({
             </div>
           </div>
           <div>
-            <p className="mb-2 text-xs font-bold text-amber-700 dark:text-amber-300">Warning</p>
+            <p className="mb-2 text-xs font-bold text-amber-200">Warning</p>
             <div className="flex flex-wrap gap-1.5">
               {warnings.slice(0, 3).map((warning) => (
                 <StatePill key={warning} tone="amber">{warning}</StatePill>
@@ -772,10 +782,10 @@ function StrategyShelfHero({
 
 function StrategyInsightCard({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/50">
-      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</p>
-      <p className="mt-2 truncate text-xl font-bold text-slate-950 dark:text-white">{value}</p>
-      <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{note}</p>
+    <div className="rounded-xl border border-amber-500/10 bg-slate-900/70 p-4">
+      <p className="text-xs font-medium text-slate-400">{label}</p>
+      <p className="mt-2 truncate text-xl font-bold text-slate-50">{value}</p>
+      <p className="mt-1 truncate text-xs text-slate-400">{note}</p>
     </div>
   );
 }
@@ -796,8 +806,8 @@ function ShelfSection({
   return (
     <section>
       <div className="mb-3">
-        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{title}</h3>
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
+        <h3 className="text-sm font-bold text-slate-100">{title}</h3>
+        <p className="mt-1 text-xs text-slate-400">{subtitle}</p>
       </div>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {items.map((item) => (
@@ -826,21 +836,21 @@ function StrategyGroupCard({
     <button
       type="button"
       onClick={() => onSelect(item.strategy_group_id)}
-      className={`cursor-pointer rounded-2xl border bg-white p-4 text-left shadow-sm transition-colors duration-200 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/40 ${
+      className={`cursor-pointer rounded-2xl border bg-slate-950/85 p-4 text-left shadow-lg shadow-black/20 transition-colors duration-200 hover:bg-slate-900/90 focus:outline-none focus:ring-2 focus:ring-amber-400/50 ${
         selected
-          ? 'border-indigo-300 ring-2 ring-indigo-500/20 dark:border-indigo-500/50'
-          : 'border-slate-200 dark:border-slate-800'
+          ? 'border-amber-400/60 ring-2 ring-purple-500/25'
+          : 'border-amber-500/15'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">{item.strategy_group_id}</p>
-          <h3 className="mt-1 text-base font-bold text-slate-950 dark:text-slate-100">{item.strategy_group_name}</h3>
+          <p className="text-xs font-semibold text-amber-200/75">{item.strategy_group_id}</p>
+          <h3 className="mt-1 text-base font-bold text-slate-50">{item.strategy_group_name}</h3>
         </div>
         <StatePill tone={item.status_tone}>{item.shelf_section === 'primary' ? '主策略族' : '扩展层'}</StatePill>
       </div>
-      <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{item.plain_language_summary}</p>
-      <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-slate-500 dark:text-slate-400">
+      <p className="mt-3 text-sm text-slate-300">{item.plain_language_summary}</p>
+      <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-slate-400">
         <ShelfMiniFact label="吃什么行情" value={item.market_regime_it_eats} />
         <ShelfMiniFact label="下一步" value={item.next_recommended_action} />
       </div>
