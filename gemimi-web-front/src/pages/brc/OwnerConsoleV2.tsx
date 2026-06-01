@@ -222,24 +222,31 @@ export function StrategyGroupsV2() {
   const shelf = allShelf;
   const selectedGroup = shelf.find((item) => item.strategy_group_id === selectedGroupId) || shelf[0]!;
   return (
-    <PageShell title="策略组" subtitle="策略组货架 / 选择器。这里只用于观察和复盘，不会自动选择策略。">
+    <PageShell title="策略组" subtitle="StrategyFamily / Carrier 货架。这里只用于 Owner 观察、比较和复盘，不会自动选择策略。">
       {apiUnavailable ? (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
           display_model_only / api_unavailable：当前使用前端回退模型。回退模型不是 runtime source of truth，也不授予任何执行或订单权限。
         </section>
       ) : null}
+
+      <StrategyShelfHero
+        selectedGroup={selectedGroup}
+        primaryCount={primaryShelf.length}
+        secondaryCount={secondaryShelf.length}
+      />
+
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="space-y-5">
           <ShelfSection
-            title="Primary Strategy Groups"
-            subtitle="Exactly six primary groups: MI, VI, CPM, TB, PC, VB."
+            title="主策略族"
+            subtitle="MI / VI / CPM / TB / PC / VB。BNB 只是首个 Carrier，不是全部架构。"
             items={primaryShelf}
             selectedGroupId={selectedGroup.strategy_group_id}
             onSelect={setSelectedGroupId}
           />
           <ShelfSection
-            title="Secondary / Extended Shelf"
-            subtitle="Secondary MR/RB and Tier 1 data families remain visible but not admitted."
+            title="扩展观察层"
+            subtitle="MR/RB 与 Tier 1 数据族保持可见，但未 admission。"
             items={secondaryShelf}
             selectedGroupId={selectedGroup.strategy_group_id}
             onSelect={setSelectedGroupId}
@@ -249,86 +256,64 @@ export function StrategyGroupsV2() {
         <StrategyGroupDetail item={selectedGroup} />
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">策略组列表</h3>
-        <DataTable
-          columns={['strategy_group_id', '策略组', '代表候选', '状态', '证据强度', '下一步']}
-          rows={shelf.map((item) => [
-            item.strategy_group_id,
-            item.strategy_group_name,
-            item.representative_candidates.join(' / '),
-            <StatePill key={`${item.strategy_group_id}-status`} tone={item.status_tone}>{item.current_status}</StatePill>,
-            item.evidence_summary,
-            item.next_recommended_action,
-          ])}
-        />
-      </section>
+      <details className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <summary className="flex cursor-pointer items-center justify-between gap-3 px-5 py-4 text-sm font-bold text-slate-800 transition-colors hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800/40">
+          <span className="flex items-center gap-2">
+            <FileSearch className="h-4 w-4 text-indigo-500" />
+            证据与技术面板
+          </span>
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">默认折叠，不影响 Owner 首屏判断</span>
+        </summary>
+        <div className="space-y-5 border-t border-slate-100 p-5 dark:border-slate-800">
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h3 className="mb-4 text-base font-bold text-slate-900 dark:text-slate-100">策略组列表</h3>
+            <DataTable
+              columns={['strategy_group_id', '策略组', '代表候选', '状态', '证据强度', '下一步']}
+              rows={shelf.map((item) => [
+                item.strategy_group_id,
+                item.strategy_group_name,
+                item.representative_candidates.join(' / '),
+                <StatePill key={`${item.strategy_group_id}-status`} tone={item.status_tone}>{item.current_status}</StatePill>,
+                item.evidence_summary,
+                item.next_recommended_action,
+              ])}
+            />
+          </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-2 text-lg font-bold text-slate-900 dark:text-slate-100">当前代表候选链路</h3>
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          MI-001 SOL long 仍是当前主链路候选；MI-001 BNB long 是强 smoke 候选，历史覆盖短只是 confidence flag，不是淘汰理由。
-        </p>
-      </section>
+          <CandidateEvidenceComparison data={data.strategyGroupReviewability} />
+          <ObservationReadinessPanel
+            data={data.strategyGroupReviewability}
+            liveObservation={data.liveObservation}
+            caseQueue={data.observationCaseQueue}
+          />
+          <BnbTrialReadinessGapPanel data={data.bnbTrialGap} />
+          <StrategyTrialReadinessPanel data={data.strategyTrialReadiness} />
 
-      <CandidateEvidenceComparison data={data.strategyGroupReviewability} />
-      <ObservationReadinessPanel
-        data={data.strategyGroupReviewability}
-        liveObservation={data.liveObservation}
-        caseQueue={data.observationCaseQueue}
-      />
-      <BnbTrialReadinessGapPanel data={data.bnbTrialGap} />
-      <StrategyTrialReadinessPanel data={data.strategyTrialReadiness} />
+          <DataTable
+            columns={['策略组', '具体策略', '状态', '标的', '方向', '最近信号', '最近意图', '下一步']}
+            rows={rows.map((row) => [
+              row.group,
+              row.strategy,
+              <StatePill key="status" tone={row.tone}>{row.status}</StatePill>,
+              row.symbol,
+              row.side,
+              row.signal,
+              row.intent,
+              row.next,
+            ])}
+          />
 
-      <DataTable
-        columns={['策略组', '具体策略', '状态', '标的', '方向', '最近信号', '最近意图', '下一步']}
-        rows={rows.map((row) => [
-          row.group,
-          row.strategy,
-          <StatePill key="status" tone={row.tone}>{row.status}</StatePill>,
-          row.symbol,
-          row.side,
-          row.signal,
-          row.intent,
-          row.next,
-        ])}
-      />
-
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-6">
-          <h3 className="mb-2 text-xl font-bold text-slate-900 dark:text-slate-50">{strategyGroupName}</h3>
-          <p className="mb-1 text-sm text-slate-600 dark:text-slate-400">
-            <span className="font-medium text-slate-800 dark:text-slate-300">假设：</span>价格出现动量冲击后，短期有延续概率。
-          </p>
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            <span className="font-medium text-slate-800 dark:text-slate-300">当前主策略：</span>SOL 多头观察
-          </p>
+          <TechnicalDetails data={{
+            strategy_group_reviewability: data.strategyGroupReviewability,
+            live_observation_v1: data.liveObservation,
+            strategy_group_shelf: shelf,
+            families: data.families,
+            decisions: data.decisions,
+            bindings: data.bindings,
+            mi001: data.mi001,
+          }} />
         </div>
-        <DataTable
-          compact
-          columns={['具体策略', '状态', '观察模式', '阻断']}
-          rows={[
-            ['SOL 多头', '试验前准备完成', '只读 / 记录意图', blockerCopy],
-            ['BNB 多头', '候选', '未开始', '暂未上报'],
-            ['ETH 多头', '候选', '未开始', '暂未上报'],
-          ]}
-        />
-        <div className="mt-6 flex flex-wrap gap-3">
-          <SoftLink to="/analysis">查看证据</SoftLink>
-          <SoftLink to="/intents">查看执行意图</SoftLink>
-          <SoftLink to="/trace">查看链路</SoftLink>
-        </div>
-      </section>
-
-      <TechnicalDetails data={{
-        strategy_group_reviewability: data.strategyGroupReviewability,
-        live_observation_v1: data.liveObservation,
-        strategy_group_shelf: shelf,
-        families: data.families,
-        decisions: data.decisions,
-        bindings: data.bindings,
-        mi001: data.mi001,
-      }} />
+      </details>
     </PageShell>
   );
 }
@@ -721,6 +706,80 @@ function DataTable({ columns, rows, compact = false }: { columns: string[]; rows
   );
 }
 
+function StrategyShelfHero({
+  selectedGroup,
+  primaryCount,
+  secondaryCount,
+}: {
+  selectedGroup: StrategyGroupShelfItem;
+  primaryCount: number;
+  secondaryCount: number;
+}) {
+  const hardBlockers = selectedGroup.main_blockers?.length ? selectedGroup.main_blockers : ['当前未授予执行 / 下单 / runtime start 权限'];
+  const warnings = selectedGroup.confidence_flags?.length ? selectedGroup.confidence_flags : selectedGroup.key_risks.slice(0, 3);
+  return (
+    <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="mb-5 flex flex-col justify-between gap-4 md:flex-row md:items-start">
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-indigo-500 dark:text-indigo-400">Owner 决策货架</p>
+            <h3 className="text-2xl font-bold text-slate-950 dark:text-white">先看策略族，再看 Carrier</h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+              当前页面用于比较 StrategyFamily / Carrier 的证据、风险和下一步。它不是自动路由，不会启动 trial，也不会创建执行指令或订单。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <StatePill tone="teal">实盘只读</StatePill>
+            <StatePill tone="indigo">记录意图</StatePill>
+            <StatePill tone="rose">禁止下单</StatePill>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StrategyInsightCard label="主策略族" value={`${primaryCount} 个`} note="可比较，不自动选择" />
+          <StrategyInsightCard label="扩展观察" value={`${secondaryCount} 个`} note="未 admission" />
+          <StrategyInsightCard label="当前选中" value={selectedGroup.strategy_group_id} note={selectedGroup.current_status} />
+          <StrategyInsightCard label="下一步" value="Owner 判断" note="查看证据 / 风险 / 阻断" />
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30">
+        <div className="mb-4 flex items-center gap-2">
+          <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+          <h3 className="text-base font-bold text-amber-950 dark:text-amber-100">阻断与警告分开看</h3>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <p className="mb-2 text-xs font-bold text-amber-700 dark:text-amber-300">Hard Blocker</p>
+            <div className="flex flex-wrap gap-1.5">
+              {hardBlockers.slice(0, 3).map((blocker) => (
+                <StatePill key={blocker} tone="rose">{blocker}</StatePill>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-bold text-amber-700 dark:text-amber-300">Warning</p>
+            <div className="flex flex-wrap gap-1.5">
+              {warnings.slice(0, 3).map((warning) => (
+                <StatePill key={warning} tone="amber">{warning}</StatePill>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StrategyInsightCard({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/50">
+      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="mt-2 truncate text-xl font-bold text-slate-950 dark:text-white">{value}</p>
+      <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{note}</p>
+    </div>
+  );
+}
+
 function ShelfSection({
   title,
   subtitle,
@@ -737,7 +796,7 @@ function ShelfSection({
   return (
     <section>
       <div className="mb-3">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">{title}</h3>
+        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{title}</h3>
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
       </div>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -767,7 +826,7 @@ function StrategyGroupCard({
     <button
       type="button"
       onClick={() => onSelect(item.strategy_group_id)}
-      className={`rounded-xl border bg-white p-4 text-left shadow-sm transition-colors hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/40 ${
+      className={`cursor-pointer rounded-2xl border bg-white p-4 text-left shadow-sm transition-colors duration-200 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/40 ${
         selected
           ? 'border-indigo-300 ring-2 ring-indigo-500/20 dark:border-indigo-500/50'
           : 'border-slate-200 dark:border-slate-800'
@@ -778,22 +837,16 @@ function StrategyGroupCard({
           <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">{item.strategy_group_id}</p>
           <h3 className="mt-1 text-base font-bold text-slate-950 dark:text-slate-100">{item.strategy_group_name}</h3>
         </div>
-        <StatePill tone={item.status_tone}>{item.current_status}</StatePill>
+        <StatePill tone={item.status_tone}>{item.shelf_section === 'primary' ? '主策略族' : '扩展层'}</StatePill>
       </div>
       <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{item.plain_language_summary}</p>
       <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-slate-500 dark:text-slate-400">
         <ShelfMiniFact label="吃什么行情" value={item.market_regime_it_eats} />
-        <ShelfMiniFact label="证据" value={item.evidence_summary} />
-        <ShelfMiniFact label="观察 readiness" value={item.live_readonly_observation_readiness || 'display_model_only'} />
-        <ShelfMiniFact label="bounded readiness" value={item.bounded_trial_readiness || 'display_model_only'} />
         <ShelfMiniFact label="下一步" value={item.next_recommended_action} />
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {item.representative_candidates.slice(0, 4).map((candidate) => (
           <StatePill key={candidate} tone="slate">{candidate}</StatePill>
-        ))}
-        {(item.confidence_flags || []).slice(0, 2).map((flag) => (
-          <StatePill key={flag} tone="amber">{flag}</StatePill>
         ))}
       </div>
     </button>
