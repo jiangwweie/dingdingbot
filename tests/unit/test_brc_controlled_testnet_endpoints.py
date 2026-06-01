@@ -310,6 +310,11 @@ def _gateway(price=Decimal("2100"), min_notional=Decimal("20")):
     gw = MagicMock()
     gw.fetch_ticker_price = AsyncMock(return_value=price)
     gw.get_min_notional = MagicMock(return_value=min_notional)
+    gw.markets = {
+        BNB: {"limits": {"amount": {"min": "0.01"}}, "precision": {"amount": "0.01"}},
+        ETH: {"limits": {"amount": {"min": "0.01"}}, "precision": {"amount": "0.01"}},
+        BTC: {"limits": {"amount": {"min": "0.001"}}, "precision": {"amount": "0.001"}},
+    }
     gw.fetch_positions = AsyncMock(return_value=[])
     gw.fetch_open_orders = AsyncMock(return_value=[])
     return gw
@@ -774,10 +779,49 @@ async def test_strategy_trial_carrier_bnb_controlled_route_executes_when_gates_p
     assert payload["readiness_verdict"] == "testnet_rehearsal_completed"
     assert payload["entry"]["symbol"] == BNB
     assert payload["entry"]["testnet"] is True
+    assert payload["protection_plan"]["plan_type"] == "single_tp_plus_sl"
+    assert payload["protection_plan"]["fallback_reason"] == "split_tp_quantity_below_min_amount"
+    assert payload["entry"]["protection_plan"]["planned_tp_quantities"] == ["0.01"]
     assert payload["live_ready"] is False
     assert payload["auto_execution_ready"] is False
     assert payload["execution_permission_granted"] is False
     orch.execute_signal.assert_awaited_once()
+    _, strategy = orch.execute_signal.await_args.args
+    assert strategy.tp_levels == 1
+    assert strategy.tp_ratios == [Decimal("1.0")]
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_blocks_before_entry_when_size_unprotectable(monkeypatch):
+    service = await _brc_service()
+    orch = _orchestrator()
+    gateway = _gateway(price=Decimal("600"), min_notional=Decimal("5"))
+    gateway.markets[BNB]["limits"]["amount"]["min"] = "0.02"
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+        _brc_campaign_service=service,
+        _campaign_state_service=FakeCampaignStateService(),
+        _execution_orchestrator=orch,
+        _exchange_gateway=gateway,
+        _startup_trading_guard_service=_guard(),
+        _global_kill_switch_service=_gks(),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+        _account_getter=_fresh_account_snapshot,
+        _startup_reconciliation_summary={"status": "clean"},
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["readiness_verdict"] == "testnet_rehearsal_blocked_before_entry_due_to_unprotectable_size"
+    assert "entry_quantity_cannot_create_valid_sl" in detail["blockers"]
+    assert detail["protection_plan"]["plan_type"] == "blocked_unprotectable_size"
+    orch.execute_signal.assert_not_awaited()
+    assert await service.get_current_campaign() is None
 
 
 @pytest.mark.asyncio
@@ -912,6 +956,55 @@ async def test_strategy_trial_carrier_controlled_close_cleans_blocked_attempt_wi
     assert repo.events[-1]["metadata"]["prior_attempt_status"] == "blocked"
     campaign = await service.require_current_campaign()
     assert campaign.last_attempt.status == BrcAttemptStatus.BLOCKED
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_failed_entry_triggers_bounded_cleanup(monkeypatch):
+    service = await _brc_service()
+    position_repo = MutablePositionRepo()
+    orch = _orchestrator()
+
+    async def execute_signal(signal, strategy):
+        position_repo.active = [_position(BNB, Decimal("0.01"))]
+        failed = _intent(signal.symbol)
+        failed.status = ExecutionIntentStatus.FAILED
+        failed.failed_reason = "protection_attach_failed"
+        return failed
+
+    async def close(position, reason, max_amount):
+        result = await _orchestrator().execute_controlled_close(position, reason, max_amount)
+        position_repo.active = []
+        return result
+
+    orch.execute_signal = AsyncMock(side_effect=execute_signal)
+    orch.execute_controlled_close = AsyncMock(side_effect=close)
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+        _brc_campaign_service=service,
+        _campaign_state_service=FakeCampaignStateService(),
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(price=Decimal("600"), min_notional=Decimal("5")),
+        _startup_trading_guard_service=_guard(),
+        _global_kill_switch_service=_gks(),
+        _position_repo=position_repo,
+        _order_repo=EmptyOrderRepo(),
+        _account_getter=_fresh_account_snapshot,
+        _startup_reconciliation_summary={"status": "clean"},
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["readiness_verdict"] == "testnet_rehearsal_blocked_with_explicit_reasons"
+    assert payload["entry"]["status"] == "failed"
+    assert payload["entry"]["cleanup_result"]["attempted"] is True
+    assert payload["entry"]["cleanup_result"]["status"] == "closed"
+    assert position_repo.active == []
+    assert service._repo.events[-1]["event_type"] == "strategy_trial_carrier_failed_entry_cleanup_close_recorded"
+    orch.execute_controlled_close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

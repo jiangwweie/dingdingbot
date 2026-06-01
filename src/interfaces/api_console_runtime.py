@@ -59,6 +59,10 @@ from src.application.phase5e_rehearsal_feasibility import (
     Phase5EControlledSymbolFeasibility,
     assess_controlled_symbol_feasibility,
 )
+from src.application.protection_order_planner import (
+    ProtectionOrderPlan,
+    plan_precision_aware_protection_orders,
+)
 from src.application.strategy_trial_controlled_testnet_carrier import (
     StrategyTrialControlledTestnetCarrier,
     get_strategy_trial_controlled_testnet_carrier,
@@ -363,6 +367,7 @@ class ControlledSymbolSpec:
     min_notional_default: Decimal
     max_notional: Decimal | None = None
     amount_step: Decimal | None = None
+    min_amount_default: Decimal | None = None
 
     @property
     def lock_key(self) -> str:
@@ -453,6 +458,8 @@ class ControlledEntryResponse(BaseModel):
     notional: Optional[Decimal] = None
     min_notional: Optional[Decimal] = None
     symbol: Optional[str] = None
+    protection_plan: Optional[dict[str, Any]] = None
+    cleanup_result: Optional[dict[str, Any]] = None
 
 
 class ControlledCloseResponse(BaseModel):
@@ -567,13 +574,17 @@ class StrategyTrialCarrierListResponse(BaseModel):
 
 class StrategyTrialCarrierEntryResponse(BaseModel):
     carrier_id: str
-    readiness_verdict: Literal["testnet_rehearsal_completed"]
+    readiness_verdict: Literal[
+        "testnet_rehearsal_completed",
+        "testnet_rehearsal_blocked_with_explicit_reasons",
+    ]
     campaign: dict
     switch_decision: dict
     attempt: dict
     entry: ControlledEntryResponse
     runtime_campaign_state: Optional[dict[str, Any]] = None
     preflight_facts: dict[str, Any] = Field(default_factory=dict)
+    protection_plan: dict[str, Any] = Field(default_factory=dict)
     live_ready: Literal[False] = False
     auto_execution_ready: Literal[False] = False
     no_real_funds: Literal[True] = True
@@ -774,6 +785,99 @@ def _extract_min_notional_from_market(market) -> Optional[Decimal]:
     return value
 
 
+def _decimal_step_from_precision(value) -> Optional[Decimal]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    decimal_value = _to_decimal(value)
+    if decimal_value is None:
+        return None
+    if decimal_value > 0 and decimal_value < 1:
+        return decimal_value
+    try:
+        places = int(decimal_value)
+    except Exception:
+        return None
+    if places < 0 or places > 18:
+        return None
+    return Decimal("1").scaleb(-places)
+
+
+def _extract_amount_constraints_from_market(
+    market,
+) -> tuple[Optional[Decimal], Optional[Decimal], Optional[str]]:
+    if not isinstance(market, dict):
+        return None, None, None
+
+    min_amount: Optional[Decimal] = None
+    amount_step: Optional[Decimal] = None
+    source: Optional[str] = None
+
+    limits = market.get("limits")
+    if isinstance(limits, dict):
+        amount_limits = limits.get("amount")
+        if isinstance(amount_limits, dict):
+            min_amount = _to_decimal(amount_limits.get("min"))
+            if min_amount is not None:
+                source = "market.limits.amount.min"
+
+    precision = market.get("precision")
+    if isinstance(precision, dict):
+        amount_step = _decimal_step_from_precision(precision.get("amount"))
+        if amount_step is not None:
+            source = f"{source}+market.precision.amount" if source else "market.precision.amount"
+
+    for key in ("min_amount", "minAmount", "amount_min", "amountMin"):
+        if min_amount is None:
+            min_amount = _to_decimal(market.get(key))
+            if min_amount is not None:
+                source = key
+
+    for key in ("amount_step", "amountStep", "step_size", "stepSize"):
+        if amount_step is None:
+            amount_step = _to_decimal(market.get(key))
+            if amount_step is not None:
+                source = f"{source}+{key}" if source else key
+
+    return min_amount, amount_step, source
+
+
+def _get_controlled_amount_constraints(
+    gateway,
+    spec: ControlledSymbolSpec,
+) -> tuple[Optional[Decimal], Optional[Decimal], str]:
+    for attr_name in ("get_amount_constraints", "amount_constraints_for_symbol"):
+        attr = getattr(gateway, attr_name, None)
+        if callable(attr):
+            try:
+                raw = attr(spec.symbol)
+            except Exception:
+                raw = None
+            if isinstance(raw, dict):
+                min_amount = _to_decimal(raw.get("min_amount") or raw.get("minAmount"))
+                amount_step = _to_decimal(raw.get("amount_step") or raw.get("step_size") or raw.get("stepSize"))
+                if min_amount is not None or amount_step is not None:
+                    return min_amount, amount_step, attr_name
+
+    markets = getattr(gateway, "markets", None)
+    if isinstance(markets, dict):
+        min_amount, amount_step, source = _extract_amount_constraints_from_market(markets.get(spec.symbol))
+        if min_amount is not None or amount_step is not None:
+            return min_amount, amount_step, f"gateway.markets.{source or 'amount_constraints'}"
+
+    market_metadata = getattr(gateway, "market_metadata", None)
+    if isinstance(market_metadata, dict):
+        min_amount, amount_step, source = _extract_amount_constraints_from_market(market_metadata.get(spec.symbol))
+        if min_amount is not None or amount_step is not None:
+            return min_amount, amount_step, f"gateway.market_metadata.{source or 'amount_constraints'}"
+
+    if spec.min_amount_default is not None or spec.amount_step is not None:
+        return spec.min_amount_default, spec.amount_step, "controlled_spec_default"
+
+    return None, spec.amount_step, "unavailable"
+
+
 def _get_controlled_min_notional(
     gateway,
     spec: ControlledSymbolSpec = _LEGACY_CONTROLLED_SPEC,
@@ -929,6 +1033,7 @@ def _carrier_controlled_spec(
         min_notional_default=carrier.min_notional_default,
         max_notional=carrier.max_notional,
         amount_step=carrier.amount_step,
+        min_amount_default=carrier.min_amount_default,
     )
 
 
@@ -1217,6 +1322,29 @@ async def _build_brc_feasibility(
     spec: ControlledSymbolSpec,
 ) -> Phase5EControlledSymbolFeasibility:
     return await _build_phase5e_feasibility(api_module=api_module, spec=spec)
+
+
+def _build_strategy_trial_protection_plan(
+    *,
+    api_module,
+    spec: ControlledSymbolSpec,
+    feasibility: Phase5EControlledSymbolFeasibility,
+) -> ProtectionOrderPlan:
+    gateway = _get_gateway(api_module)
+    min_amount, amount_step, amount_source = _get_controlled_amount_constraints(gateway, spec)
+    if amount_step is None:
+        amount_step = spec.amount_step
+    return plan_precision_aware_protection_orders(
+        entry_quantity=feasibility.amount,
+        entry_price=feasibility.price,
+        min_amount=min_amount,
+        amount_step=amount_step,
+        min_notional=feasibility.min_notional,
+        min_notional_source=f"{feasibility.min_notional_source}; amount_source={amount_source}",
+        intended_tp_ratios=(Decimal("0.5"), Decimal("0.5")),
+        intended_tp_targets=(Decimal("1.0"), Decimal("3.5")),
+        allow_sl_only=False,
+    )
 
 
 def _position_size_is_nonzero(position) -> bool:
@@ -2432,6 +2560,22 @@ async def execute_strategy_trial_carrier_controlled_entry(
                 "live_ready": False,
             },
         )
+    protection_plan = _build_strategy_trial_protection_plan(
+        api_module=api_module,
+        spec=spec,
+        feasibility=feasibility,
+    )
+    preflight_facts["protection_plan"] = protection_plan.model_dump(mode="json")
+    if protection_plan.status == "blocked":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "readiness_verdict": "testnet_rehearsal_blocked_before_entry_due_to_unprotectable_size",
+                "blockers": [protection_plan.blocked_reason or "blocked_unprotectable_size"],
+                "protection_plan": protection_plan.model_dump(mode="json"),
+                "live_ready": False,
+            },
+        )
 
     service = _get_brc_campaign_service(api_module)
     campaign_state_service = _get_campaign_state_service(api_module)
@@ -2505,17 +2649,25 @@ async def execute_strategy_trial_carrier_controlled_entry(
         carrier=carrier,
         spec=spec,
         feasibility=feasibility,
+        protection_plan=protection_plan,
     )
     campaign = await service.require_current_campaign()
+    entry_status = entry.status
+    readiness_verdict = (
+        "testnet_rehearsal_blocked_with_explicit_reasons"
+        if entry_status in {"blocked", "failed"}
+        else "testnet_rehearsal_completed"
+    )
     return StrategyTrialCarrierEntryResponse(
         carrier_id=carrier.carrier_id,
-        readiness_verdict="testnet_rehearsal_completed",
+        readiness_verdict=readiness_verdict,
         campaign=campaign.model_dump(mode="json"),
         switch_decision=decision.model_dump(mode="json"),
         attempt=attempt.model_dump(mode="json"),
         entry=entry,
         runtime_campaign_state=_to_campaign_state_response(runtime_state).model_dump(mode="json"),
         preflight_facts=preflight_facts,
+        protection_plan=protection_plan.model_dump(mode="json"),
     )
 
 
@@ -2855,6 +3007,7 @@ async def _execute_strategy_trial_carrier_entry(
     carrier: StrategyTrialControlledTestnetCarrier,
     spec: ControlledSymbolSpec,
     feasibility: Phase5EControlledSymbolFeasibility,
+    protection_plan: ProtectionOrderPlan,
 ) -> ControlledEntryResponse:
     """Execute an already-preflighted allowlisted carrier entry."""
     from src.domain.models import Direction, OrderStrategy, SignalResult
@@ -2879,9 +3032,18 @@ async def _execute_strategy_trial_carrier_entry(
 
     entry_price = feasibility.price
     sl_price = entry_price * Decimal("0.99")
-    tp1_price = entry_price * Decimal("1.01")
-    tp2_price = entry_price * Decimal("1.035")
     amount = feasibility.amount
+    tp_targets = list(protection_plan.tp_targets or (Decimal("1.0"),))
+    tp_ratios = list(protection_plan.planned_tp_ratios)
+    take_profit_levels = []
+    for index, ratio in enumerate(tp_ratios, start=1):
+        target = tp_targets[index - 1] if index <= len(tp_targets) else tp_targets[-1]
+        take_profit_levels.append(
+            {
+                "price": str(entry_price * (Decimal("1") + (target / Decimal("100")))),
+                "ratio": str(ratio),
+            }
+        )
     signal = SignalResult(
         symbol=spec.symbol,
         timeframe="1h",
@@ -2895,22 +3057,20 @@ async def _execute_strategy_trial_carrier_entry(
             {"key": "carrier_id", "value": carrier.carrier_id},
             {"key": "candidate_id", "value": carrier.strategy_profile.candidate_id},
             {"key": "brc_attempt_id", "value": campaign.last_attempt.attempt_id},
+            {"key": "protection_plan_type", "value": protection_plan.plan_type},
         ],
         risk_reward_info=f"strategy_trial_controlled_testnet:{carrier.carrier_id}:1h:LONG",
         status="PENDING",
         strategy_name=f"strategy_trial_controlled_testnet/{carrier.carrier_id}",
         score=1.0,
-        take_profit_levels=[
-            {"price": str(tp1_price), "ratio": "0.5"},
-            {"price": str(tp2_price), "ratio": "0.5"},
-        ],
+        take_profit_levels=take_profit_levels,
     )
     strategy = OrderStrategy(
         id=f"strat_strategy_trial_{carrier.carrier_id.lower().replace('-', '_')}",
         name=f"strategy_trial_controlled_testnet/{spec.profile}/{spec.symbol}",
-        tp_levels=2,
-        tp_ratios=[Decimal("0.5"), Decimal("0.5")],
-        tp_targets=[Decimal("1.0"), Decimal("3.5")],
+        tp_levels=len(tp_ratios),
+        tp_ratios=tp_ratios,
+        tp_targets=tp_targets,
         initial_stop_loss_rr=Decimal("-1.0"),
         trailing_stop_enabled=False,
         oco_enabled=True,
@@ -2936,6 +3096,13 @@ async def _execute_strategy_trial_carrier_entry(
                 )
             except Exception:
                 logger.warning("Failed to record blocked strategy-trial carrier attempt", exc_info=True)
+            cleanup_result = await _try_cleanup_strategy_trial_carrier_failed_entry(
+                api_module=api_module,
+                service=service,
+                carrier=carrier,
+                spec=spec,
+                reason=f"intent_status={intent_status}",
+            )
             return ControlledEntryResponse(
                 status=intent_status,
                 intent_id=intent.id,
@@ -2950,6 +3117,8 @@ async def _execute_strategy_trial_carrier_entry(
                 notional=feasibility.notional,
                 min_notional=feasibility.min_notional,
                 symbol=spec.symbol,
+                protection_plan=protection_plan.model_dump(mode="json"),
+                cleanup_result=cleanup_result,
             )
         await service.record_attempt_entry(
             symbol=spec.symbol,
@@ -2980,7 +3149,84 @@ async def _execute_strategy_trial_carrier_entry(
         notional=feasibility.notional,
         min_notional=feasibility.min_notional,
         symbol=spec.symbol,
+        protection_plan=protection_plan.model_dump(mode="json"),
     )
+
+
+async def _try_cleanup_strategy_trial_carrier_failed_entry(
+    *,
+    api_module,
+    service: BoundedRiskCampaignService,
+    carrier: StrategyTrialControlledTestnetCarrier,
+    spec: ControlledSymbolSpec,
+    reason: str,
+) -> dict[str, Any]:
+    """Best-effort testnet cleanup after an entry path reports failed/blocked.
+
+    This path is only reached after the strategy-trial carrier mutation gates
+    have already confirmed testnet scope. It does not support arbitrary symbols
+    or sizes.
+    """
+
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None or not hasattr(position_repo, "list_active"):
+        return {"attempted": False, "reason": "position_repository_unavailable"}
+    try:
+        active_positions = await position_repo.list_active(symbol=spec.symbol, limit=10)
+    except Exception as exc:
+        logger.warning("Failed-entry cleanup inventory read failed: %s", exc, exc_info=True)
+        return {"attempted": False, "reason": "position_read_failed"}
+    if not active_positions:
+        return {"attempted": False, "reason": "no_active_position"}
+    if len(active_positions) != 1:
+        return {"attempted": False, "reason": "unexpected_active_position_count", "count": len(active_positions)}
+
+    position = active_positions[0]
+    amount = Decimal(str(getattr(position, "current_qty", "0")))
+    if amount <= Decimal("0") or amount > spec.amount_max:
+        return {
+            "attempted": False,
+            "reason": "cleanup_amount_out_of_bounds",
+            "amount": str(amount),
+            "max_amount": str(spec.amount_max),
+        }
+
+    orchestrator = _get_orchestrator(api_module)
+    try:
+        result = await orchestrator.execute_controlled_close(
+            position=position,
+            reason="strategy_trial_carrier_failed_entry_cleanup",
+            max_amount=spec.amount_max,
+        )
+    except Exception as exc:
+        logger.error("Failed-entry cleanup close failed: %s", exc, exc_info=True)
+        return {"attempted": True, "status": "failed", "reason": str(exc)}
+
+    close_order = result.get("close_order")
+    repo = getattr(service, "_repo", None)
+    if repo is not None and hasattr(repo, "append_campaign_event") and close_order is not None:
+        campaign = await service.require_current_campaign()
+        await repo.append_campaign_event(
+            campaign_id=campaign.campaign_id,
+            event_type="strategy_trial_carrier_failed_entry_cleanup_close_recorded",
+            occurred_at_ms=int(time.time() * 1000),
+            symbol=spec.symbol,
+            attempt_id=campaign.last_attempt.attempt_id if campaign.last_attempt else None,
+            metadata={
+                "carrier_id": carrier.carrier_id,
+                "close_order_id": close_order.id,
+                "exchange_order_id": close_order.exchange_order_id,
+                "reason": reason,
+            },
+        )
+
+    return {
+        "attempted": True,
+        "status": "closed",
+        "close_order_id": getattr(close_order, "id", None),
+        "exchange_order_id": getattr(close_order, "exchange_order_id", None),
+        "terminalized_protection_orders": len(result.get("terminalized_protection_orders") or []),
+    }
 
 
 @router.post(

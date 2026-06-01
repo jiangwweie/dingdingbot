@@ -23,6 +23,7 @@ class StrategyTrialControlledTestnetCarrier(BaseModel):
     amount_max: Decimal = Field(gt=Decimal("0"))
     min_notional_default: Decimal = Field(gt=Decimal("0"))
     max_notional: Decimal = Field(gt=Decimal("0"))
+    min_amount_default: Decimal | None = Field(default=None, gt=Decimal("0"))
     amount_step: Decimal | None = Field(default=None, gt=Decimal("0"))
     leverage: Literal[1] = 1
     testnet_rehearsal_enabled: Literal[True] = True
@@ -67,7 +68,8 @@ def mi001_bnb_long_testnet_carrier() -> StrategyTrialControlledTestnetCarrier:
         amount_max=Decimal("0.01"),
         min_notional_default=Decimal("5"),
         max_notional=Decimal("20"),
-        amount_step=Decimal("0.001"),
+        min_amount_default=Decimal("0.01"),
+        amount_step=Decimal("0.01"),
     )
 
 
