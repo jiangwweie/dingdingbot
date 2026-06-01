@@ -41,6 +41,18 @@ from src.application.strategy_trial_architecture_governance import (
     StrategyTrialArchitectureGovernanceResponse,
     build_bnb_strategy_trial_architecture_governance,
 )
+from src.application.strategy_trial_carrier_expansion import (
+    SecondCarrierExpansionResponse,
+    build_second_carrier_expansion_bootstrap,
+)
+from src.application.multi_carrier_budget_authorization import (
+    MultiCarrierBudgetAuthorization,
+    MultiCarrierBudgetAuthorizationCreateRequest,
+    MultiCarrierBudgetAuthorizationCurrentResponse,
+    MultiCarrierBudgetAuthorizationError,
+    MultiCarrierBudgetAuthorizationInfrastructureError,
+    MultiCarrierBudgetAuthorizationService,
+)
 from src.application.owner_trial_flow import (
     BoundedLiveTrialAuthorization,
     BoundedLiveTrialAuthorizationDraft,
@@ -65,6 +77,9 @@ from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwit
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
 from src.infrastructure.owner_trial_flow_repository import PgOwnerTrialFlowRepository
+from src.infrastructure.pg_multi_carrier_budget_authorization_repository import (
+    PgMultiCarrierBudgetAuthorizationRepository,
+)
 from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.brc_admission_service import (
@@ -115,6 +130,7 @@ dev_testnet_router = APIRouter(
 )
 
 _owner_trial_flow_service: OwnerTrialFlowService | None = None
+_multi_carrier_budget_authorization_service: MultiCarrierBudgetAuthorizationService | None = None
 
 
 class BrcDashboardResponse(BaseModel):
@@ -3665,6 +3681,20 @@ async def get_bnb_first_carrier_architecture_governance() -> StrategyTrialArchit
 
 
 @router.get(
+    "/strategy-trial-architecture/second-carrier-expansion",
+    response_model=SecondCarrierExpansionResponse,
+)
+async def get_second_carrier_expansion_bootstrap() -> SecondCarrierExpansionResponse:
+    """Return generic second-carrier bootstrap metadata.
+
+    This endpoint is read-only and non-live. It does not create a live
+    authorization, execution intent, order, runtime start, or execution
+    permission.
+    """
+    return build_second_carrier_expansion_bootstrap()
+
+
+@router.get(
     "/owner-trial-flow/current",
     response_model=OwnerTrialFlowCurrentResponse,
 )
@@ -3678,6 +3708,36 @@ async def get_owner_trial_flow_current(
         raise _owner_trial_flow_infrastructure_http_error(exc) from exc
     except OwnerTrialFlowError as exc:
         raise _owner_trial_flow_http_error(exc) from exc
+
+
+@router.get(
+    "/budget-authorizations/current",
+    response_model=MultiCarrierBudgetAuthorizationCurrentResponse,
+)
+async def get_multi_carrier_budget_authorization_current() -> MultiCarrierBudgetAuthorizationCurrentResponse:
+    """Return PG-backed disabled multi-carrier budget metadata."""
+    try:
+        return await _multi_carrier_budget_authorization_service_instance().current()
+    except MultiCarrierBudgetAuthorizationInfrastructureError as exc:
+        raise _multi_carrier_budget_authorization_infrastructure_http_error(exc) from exc
+
+
+@router.post(
+    "/budget-authorizations/foundation",
+    response_model=MultiCarrierBudgetAuthorization,
+)
+async def create_multi_carrier_budget_authorization_foundation(
+    body: MultiCarrierBudgetAuthorizationCreateRequest,
+    session: OperatorSessionDependency,
+) -> MultiCarrierBudgetAuthorization:
+    """Persist disabled multi-carrier budget authorization metadata only."""
+    _ = session
+    try:
+        return await _multi_carrier_budget_authorization_service_instance().create_foundation(body)
+    except MultiCarrierBudgetAuthorizationInfrastructureError as exc:
+        raise _multi_carrier_budget_authorization_infrastructure_http_error(exc) from exc
+    except MultiCarrierBudgetAuthorizationError as exc:
+        raise _multi_carrier_budget_authorization_http_error(exc) from exc
 
 
 @router.post(
@@ -3824,6 +3884,15 @@ def _owner_trial_flow_service_instance() -> OwnerTrialFlowService:
     return _owner_trial_flow_service
 
 
+def _multi_carrier_budget_authorization_service_instance() -> MultiCarrierBudgetAuthorizationService:
+    global _multi_carrier_budget_authorization_service
+    if _multi_carrier_budget_authorization_service is None:
+        _multi_carrier_budget_authorization_service = MultiCarrierBudgetAuthorizationService(
+            PgMultiCarrierBudgetAuthorizationRepository(),
+        )
+    return _multi_carrier_budget_authorization_service
+
+
 def _owner_trial_flow_http_error(exc: OwnerTrialFlowError) -> HTTPException:
     status = 404 if exc.code == "draft_not_found" else 400
     return HTTPException(
@@ -3833,6 +3902,24 @@ def _owner_trial_flow_http_error(exc: OwnerTrialFlowError) -> HTTPException:
 
 
 def _owner_trial_flow_infrastructure_http_error(exc: OwnerTrialFlowInfrastructureError) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={"code": exc.code, "message": exc.message},
+    )
+
+
+def _multi_carrier_budget_authorization_http_error(
+    exc: MultiCarrierBudgetAuthorizationError,
+) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={"code": exc.code, "message": exc.message},
+    )
+
+
+def _multi_carrier_budget_authorization_infrastructure_http_error(
+    exc: MultiCarrierBudgetAuthorizationInfrastructureError,
+) -> HTTPException:
     return HTTPException(
         status_code=503,
         detail={"code": exc.code, "message": exc.message},

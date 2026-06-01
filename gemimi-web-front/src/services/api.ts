@@ -591,6 +591,55 @@ export type StrategyTrialArchitectureGovernanceResponse = {
   non_permissions: Record<string, boolean>;
 };
 
+export type CarrierExpansionCandidate = {
+  carrier_id: string;
+  strategy_family: string;
+  symbol: string;
+  runtime_symbol: string;
+  side: 'long' | 'short';
+  role: 'first_carrier' | 'second_carrier_bootstrap' | 'comparison_only';
+  regime_fit: string;
+  risk_cap_draft: {
+    cap_profile_id: string;
+    per_carrier_cap: string;
+    max_trial_attempts: number;
+    max_daily_attempts: number;
+    max_concurrent_positions: number;
+    daily_loss_limit: string;
+    leverage: string;
+    status: 'draft_metadata_only';
+  };
+  protection_feasibility: {
+    protection_plan_type: 'single_tp_plus_sl';
+    feasibility: 'feasible_pending_testnet_rehearsal' | 'comparison_only_not_ready';
+    required_before_live: string[];
+    live_ready: false;
+  };
+  observation_readiness_state: string;
+  testnet_rehearsal_gap_summary: string[];
+  api_visibility: string;
+  owner_console_visibility: string;
+  budget_foundation_eligible: boolean;
+  evidence_gap_warning: boolean;
+  live_ready: false;
+  auto_execution_enabled: false;
+  order_permission_granted: false;
+  execution_intent_created: false;
+  order_created: false;
+};
+
+export type SecondCarrierExpansionResponse = {
+  generated_from: 'second_carrier_expansion_bootstrap_v1';
+  final_state: 'second_carrier_represented_generically';
+  first_carrier_id: 'MI-001-BNB-LONG';
+  selected_second_carrier_id: 'TB-BTC-SHORT';
+  owner_market_view: string;
+  generic_chain: string[];
+  carriers: CarrierExpansionCandidate[];
+  warnings: string[];
+  non_permissions: Record<string, boolean>;
+};
+
 export type OwnerRiskAcknowledgement = {
   acknowledgement_id: string;
   carrier_id: string;
@@ -663,6 +712,55 @@ export type BoundedLiveTrialAuthorization = {
   updated_at_ms: number;
   source: 'owner_console';
   metadata_only: true;
+};
+
+export type CarrierBudgetScope = {
+  carrier_id: string;
+  strategy_family_id: string;
+  symbol: string;
+  side: 'long' | 'short';
+  per_carrier_cap: string;
+  risk_cap_profile_id: string;
+  protection_plan_type: 'single_tp_plus_sl';
+  status: 'allowed_metadata_only';
+  live_ready: false;
+  auto_execution_enabled: false;
+  order_permission_granted: false;
+  execution_intent_created: false;
+  order_created: false;
+};
+
+export type MultiCarrierBudgetAuthorization = {
+  budget_authorization_id: string;
+  allowed_carriers: CarrierBudgetScope[];
+  global_budget: string;
+  max_attempts: number;
+  daily_loss_limit: string;
+  max_concurrent_positions: number;
+  cooldown_seconds: number;
+  valid_from_ms?: number | null;
+  valid_until_ms?: number | null;
+  status: 'draft_disabled_pending_owner_authorization';
+  linked_acknowledgement_id?: string | null;
+  linked_authorization_id?: string | null;
+  live_ready: false;
+  auto_execution_enabled: false;
+  order_permission_granted: false;
+  execution_permission_granted: false;
+  execution_intent_created: false;
+  order_created: false;
+  source: 'owner_console';
+  metadata_only: true;
+  created_at_ms: number;
+  updated_at_ms: number;
+};
+
+export type MultiCarrierBudgetAuthorizationCurrentResponse = {
+  generated_from: 'multi_carrier_budget_authorization_foundation_v1';
+  latest_budget_authorization?: MultiCarrierBudgetAuthorization | null;
+  eligible_carrier_ids: string[];
+  disabled_execution_state: Record<string, boolean>;
+  budget_scope_source: 'pg_metadata';
 };
 
 export type OwnerTrialFlowCurrentResponse = {
@@ -999,6 +1097,12 @@ export const brcApi = {
   },
   strategyTrialArchitectureGovernance() {
     return request<StrategyTrialArchitectureGovernanceResponse>('/api/brc/strategy-trial-architecture/bnb-first-carrier');
+  },
+  secondCarrierExpansion() {
+    return request<SecondCarrierExpansionResponse>('/api/brc/strategy-trial-architecture/second-carrier-expansion');
+  },
+  multiCarrierBudgetAuthorizationCurrent() {
+    return request<MultiCarrierBudgetAuthorizationCurrentResponse>('/api/brc/budget-authorizations/current');
   },
   ownerTrialFlowCurrent(carrierId = 'MI-001-BNB-LONG') {
     return request<OwnerTrialFlowCurrentResponse>(`/api/brc/owner-trial-flow/current?carrier_id=${encodeURIComponent(carrierId)}`);

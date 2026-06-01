@@ -1905,6 +1905,96 @@ class PGBrcBoundedLiveTrialAuthorizationORM(PGCoreBase):
     )
 
 
+class PGBrcMultiCarrierBudgetAuthorizationORM(PGCoreBase):
+    """PG-backed disabled multi-carrier budget authorization foundation."""
+
+    __tablename__ = "brc_multi_carrier_budget_authorizations"
+
+    budget_authorization_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    allowed_carriers_json: Mapped[list] = mapped_column(
+        "allowed_carriers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    global_budget: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    daily_loss_limit: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    max_concurrent_positions: Mapped[int] = mapped_column(Integer, nullable=False)
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    valid_from_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    valid_until_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    linked_acknowledgement_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        ForeignKey("brc_owner_risk_acknowledgements.acknowledgement_id", deferrable=True, initially="DEFERRED"),
+        nullable=True,
+    )
+    linked_authorization_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        ForeignKey("brc_bounded_live_trial_authorizations.authorization_id", deferrable=True, initially="DEFERRED"),
+        nullable=True,
+    )
+    live_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    auto_execution_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_permission_granted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_permission_granted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_intent_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False, default="owner_console")
+    metadata_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint("global_budget > 0", name="ck_brc_budget_auth_global_budget_positive"),
+        CheckConstraint("max_attempts > 0", name="ck_brc_budget_auth_max_attempts_positive"),
+        CheckConstraint("daily_loss_limit > 0", name="ck_brc_budget_auth_daily_loss_positive"),
+        CheckConstraint(
+            "max_concurrent_positions > 0",
+            name="ck_brc_budget_auth_max_concurrent_positive",
+        ),
+        CheckConstraint("cooldown_seconds >= 0", name="ck_brc_budget_auth_cooldown_nonnegative"),
+        CheckConstraint(
+            "valid_until_ms IS NULL OR valid_from_ms IS NULL OR valid_until_ms > valid_from_ms",
+            name="ck_brc_budget_auth_validity_window",
+        ),
+        CheckConstraint(
+            "status IN ('draft_disabled_pending_owner_authorization')",
+            name="ck_brc_budget_auth_status",
+        ),
+        CheckConstraint("live_ready IS FALSE", name="ck_brc_budget_auth_live_not_ready"),
+        CheckConstraint(
+            "auto_execution_enabled IS FALSE",
+            name="ck_brc_budget_auth_no_auto_execution",
+        ),
+        CheckConstraint(
+            "order_permission_granted IS FALSE",
+            name="ck_brc_budget_auth_no_order_permission",
+        ),
+        CheckConstraint(
+            "execution_permission_granted IS FALSE",
+            name="ck_brc_budget_auth_no_execution_permission",
+        ),
+        CheckConstraint(
+            "execution_intent_created IS FALSE",
+            name="ck_brc_budget_auth_no_execution_intent",
+        ),
+        CheckConstraint("order_created IS FALSE", name="ck_brc_budget_auth_no_order"),
+        CheckConstraint("source = 'owner_console'", name="ck_brc_budget_auth_source"),
+        CheckConstraint("metadata_only IS TRUE", name="ck_brc_budget_auth_metadata_only"),
+        Index("idx_brc_budget_auth_status_time", "status", "updated_at_ms"),
+        Index("idx_brc_budget_auth_ack", "linked_acknowledgement_id"),
+        Index("idx_brc_budget_auth_live_auth", "linked_authorization_id"),
+    )
+
+
 class PGBrcHistoricalForwardOutcomeORM(PGCoreBase):
     """Compact forward outcome review for historical would-enter signals."""
 

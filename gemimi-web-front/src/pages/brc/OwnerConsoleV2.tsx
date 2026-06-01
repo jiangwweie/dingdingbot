@@ -34,6 +34,8 @@ import {
   OwnerRiskAcknowledgement,
   OwnerTrialFlowCurrentResponse,
   ReadinessResponse,
+  MultiCarrierBudgetAuthorizationCurrentResponse,
+  SecondCarrierExpansionResponse,
   StrategyGroupLiveReadOnlyObservationResponse,
   StrategyGroupReviewabilityResponse,
   StrategyTrialArchitectureGovernanceResponse,
@@ -52,6 +54,8 @@ type ConsoleData = {
   bnbTrialGap: Mi001BnbTrialReadinessGapResponse | null;
   strategyTrialReadiness: StrategyTrialReadinessResponse | null;
   strategyTrialGovernance: StrategyTrialArchitectureGovernanceResponse | null;
+  secondCarrierExpansion: SecondCarrierExpansionResponse | null;
+  budgetAuthorizationFoundation: MultiCarrierBudgetAuthorizationCurrentResponse | null;
   ownerTrialFlow: OwnerTrialFlowCurrentResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
@@ -177,6 +181,8 @@ const EMPTY_DATA: ConsoleData = {
   bnbTrialGap: null,
   strategyTrialReadiness: null,
   strategyTrialGovernance: null,
+  secondCarrierExpansion: null,
+  budgetAuthorizationFoundation: null,
   ownerTrialFlow: null,
   families: [],
   decisions: [],
@@ -684,6 +690,11 @@ export function TrialConfirmationV2() {
         </div>
       </section>
 
+      <CarrierExpansionBudgetPanel
+        expansion={data.secondCarrierExpansion}
+        budget={data.budgetAuthorizationFoundation}
+      />
+
       <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_0.52fr]">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="mb-4 flex items-center gap-3">
@@ -771,6 +782,79 @@ export function TrialConfirmationV2() {
 
       <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: localAcknowledgements, backendAcknowledgement: persistedAcknowledgement, backendDraft: activeDraft, liveAuthorization: persistedLiveAuthorization, ownerTrialFlow: data.ownerTrialFlow, rawGovernance: data.strategyTrialGovernance }} />
     </PageShell>
+  );
+}
+
+function CarrierExpansionBudgetPanel({
+  expansion,
+  budget,
+}: {
+  expansion: SecondCarrierExpansionResponse | null;
+  budget: MultiCarrierBudgetAuthorizationCurrentResponse | null;
+}) {
+  const secondCarrier = expansion?.carriers.find((carrier) => carrier.carrier_id === expansion.selected_second_carrier_id) || null;
+  const budgetAuthorization = budget?.latest_budget_authorization || null;
+  const budgetCarrierIds = budgetAuthorization?.allowed_carriers.map((carrier) => carrier.carrier_id) || [];
+  const disabledState = budget?.disabled_execution_state || expansion?.non_permissions || {};
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <StepBadge value="4B" />
+          <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">Second Carrier / Budget</h3>
+        </div>
+        <StatePill tone="slate">non-live metadata</StatePill>
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_0.9fr]">
+        <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <StatePill tone={secondCarrier ? 'teal' : 'amber'}>
+              {secondCarrier ? secondCarrier.carrier_id : '数据未接入'}
+            </StatePill>
+            <StatePill tone="amber">
+              {secondCarrier?.testnet_rehearsal_gap_summary.length ? 'rehearsal gap' : 'no rehearsal data'}
+            </StatePill>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <TrialFact label="Family" value={secondCarrier?.strategy_family || '数据未接入'} />
+            <TrialFact label="Symbol / Side" value={secondCarrier ? `${secondCarrier.runtime_symbol} ${secondCarrier.side}` : '数据未接入'} />
+            <TrialFact label="Risk cap" value={secondCarrier ? `${secondCarrier.risk_cap_draft.per_carrier_cap} USDT` : '数据未接入'} />
+            <TrialFact label="Protection" value={secondCarrier?.protection_feasibility.protection_plan_type || '数据未接入'} />
+          </div>
+          <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+            {secondCarrier?.regime_fit || 'Second carrier bootstrap data is unavailable.'}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <StatePill tone={budgetAuthorization ? 'teal' : 'amber'}>
+              {budgetAuthorization ? budgetAuthorization.status : 'no PG budget object'}
+            </StatePill>
+            <StatePill tone="slate">auto off</StatePill>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <TrialFact label="Budget ID" value={budgetAuthorization?.budget_authorization_id || '未创建'} />
+            <TrialFact label="Allowed carriers" value={budgetCarrierIds.length ? budgetCarrierIds.join(', ') : (budget?.eligible_carrier_ids || []).join(', ') || '数据未接入'} />
+            <TrialFact label="Global budget" value={budgetAuthorization ? `${budgetAuthorization.global_budget} USDT` : '未创建'} />
+            <TrialFact label="Daily loss" value={budgetAuthorization ? `${budgetAuthorization.daily_loss_limit} USDT` : '未创建'} />
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+            {[
+              { label: 'live_ready', value: disabledState.live_ready },
+              { label: 'auto_execution', value: disabledState.auto_execution_enabled },
+              { label: 'order_created', value: disabledState.order_created },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
+                <span className="text-slate-600 dark:text-slate-300">{label}</span>
+                <span className="font-bold text-slate-950 dark:text-slate-50">{String(Boolean(value))}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1180,6 +1264,8 @@ function useConsoleData(): ViewState {
         bnbTrialGap,
         strategyTrialReadiness,
         strategyTrialGovernance,
+        secondCarrierExpansion,
+        budgetAuthorizationFoundation,
         ownerTrialFlow,
         families,
         decisions,
@@ -1223,6 +1309,14 @@ function useConsoleData(): ViewState {
         }),
         brcApi.strategyTrialArchitectureGovernance().catch((error) => {
           gaps.push(`strategy trial architecture governance: ${message(error)}`);
+          return null;
+        }),
+        brcApi.secondCarrierExpansion().catch((error) => {
+          gaps.push(`second carrier expansion: ${message(error)}`);
+          return null;
+        }),
+        brcApi.multiCarrierBudgetAuthorizationCurrent().catch((error) => {
+          gaps.push(`budget authorization foundation: ${message(error)}`);
           return null;
         }),
         brcApi.ownerTrialFlowCurrent().catch((error) => {
@@ -1271,6 +1365,8 @@ function useConsoleData(): ViewState {
             bnbTrialGap,
             strategyTrialReadiness,
             strategyTrialGovernance,
+            secondCarrierExpansion,
+            budgetAuthorizationFoundation,
             ownerTrialFlow,
             families,
             decisions,
