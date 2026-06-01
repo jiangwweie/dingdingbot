@@ -42,8 +42,10 @@ from src.application.strategy_trial_architecture_governance import (
     build_bnb_strategy_trial_architecture_governance,
 )
 from src.application.owner_trial_flow import (
+    BoundedLiveTrialAuthorization,
     BoundedLiveTrialAuthorizationDraft,
     BoundedLiveTrialAuthorizationDraftCreateRequest,
+    OwnerLiveAuthorizationActivationRequest,
     OwnerRiskAcknowledgement,
     OwnerRiskAcknowledgementCreateRequest,
     OwnerTrialFlowCurrentResponse,
@@ -3732,6 +3734,33 @@ async def get_owner_trial_flow_authorization_draft(
     """Return a persisted non-executable authorization draft."""
     try:
         return await _owner_trial_flow_service_instance().get_draft(draft_id)
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+
+
+@router.post(
+    "/owner-trial-flow/authorization-draft/{draft_id}/activate-live-authorization",
+    response_model=BoundedLiveTrialAuthorization,
+)
+async def activate_owner_trial_flow_live_authorization(
+    draft_id: str,
+    body: OwnerLiveAuthorizationActivationRequest,
+    session: OperatorSessionDependency,
+) -> BoundedLiveTrialAuthorization:
+    """Persist explicit Owner bounded live authorization metadata only.
+
+    This endpoint records Owner authorization for one bounded live trial scope.
+    It never creates an execution intent, creates an order, starts runtime, calls
+    exchange APIs, or grants global execution/order permission.
+    """
+    try:
+        return await _owner_trial_flow_service_instance().activate_live_authorization(
+            draft_id,
+            body,
+            operator_id=session.username,
+        )
     except OwnerTrialFlowInfrastructureError as exc:
         raise _owner_trial_flow_infrastructure_http_error(exc) from exc
     except OwnerTrialFlowError as exc:

@@ -10,12 +10,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.owner_trial_flow import (
+    BoundedLiveTrialAuthorization,
     BoundedLiveTrialAuthorizationDraft,
     OwnerRiskAcknowledgement,
     OwnerTrialFlowInfrastructureError,
 )
 from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
 from src.infrastructure.pg_models import (
+    PGBrcBoundedLiveTrialAuthorizationORM,
     PGBrcBoundedLiveTrialAuthorizationDraftORM,
     PGBrcOwnerRiskAcknowledgementORM,
 )
@@ -156,6 +158,89 @@ class PgOwnerTrialFlowRepository:
         except SQLAlchemyError as exc:
             raise _pg_error(exc) from exc
 
+    async def create_live_authorization(
+        self,
+        authorization: BoundedLiveTrialAuthorization,
+    ) -> BoundedLiveTrialAuthorization:
+        row = PGBrcBoundedLiveTrialAuthorizationORM(
+            authorization_id=authorization.authorization_id,
+            draft_id=authorization.draft_id,
+            carrier_id=authorization.carrier_id,
+            strategy_family_id=authorization.strategy_family_id,
+            symbol=authorization.symbol,
+            side=authorization.side,
+            max_notional=Decimal(str(authorization.max_notional)),
+            quantity=Decimal(str(authorization.quantity)),
+            leverage=Decimal(str(authorization.leverage)),
+            protection_plan_type=authorization.protection_plan_type,
+            single_use=authorization.single_use,
+            status=authorization.status,
+            live_authorized=authorization.live_authorized,
+            owner_live_authorized_by=authorization.owner_live_authorized_by,
+            owner_live_authorized_at_ms=authorization.owner_live_authorized_at_ms,
+            live_ready=authorization.live_ready,
+            order_permission_granted=authorization.order_permission_granted,
+            execution_permission_granted=authorization.execution_permission_granted,
+            execution_intent_created=authorization.execution_intent_created,
+            order_created=authorization.order_created,
+            auto_execution_enabled=authorization.auto_execution_enabled,
+            consumed=authorization.consumed,
+            expires_at_ms=authorization.expires_at_ms,
+            linked_acknowledgement_id=authorization.linked_acknowledgement_id,
+            source_draft_id=authorization.source_draft_id,
+            final_preflight_required=authorization.final_preflight_required,
+            hard_blockers_json=list(authorization.hard_blockers),
+            next_executable=authorization.next_executable,
+            source=authorization.source,
+            metadata_only=authorization.metadata_only,
+            metadata_json=authorization.model_dump(mode="json"),
+            created_at_ms=authorization.created_at_ms,
+            updated_at_ms=authorization.updated_at_ms,
+        )
+        try:
+            async with self._session_maker() as session:
+                async with session.begin():
+                    session.add(row)
+                return self._to_authorization(row)
+        except SQLAlchemyError as exc:
+            raise _pg_error(exc) from exc
+
+    async def latest_live_authorization(
+        self,
+        carrier_id: str,
+    ) -> BoundedLiveTrialAuthorization | None:
+        try:
+            async with self._session_maker() as session:
+                result = await session.execute(
+                    select(PGBrcBoundedLiveTrialAuthorizationORM)
+                    .where(PGBrcBoundedLiveTrialAuthorizationORM.carrier_id == carrier_id)
+                    .order_by(
+                        PGBrcBoundedLiveTrialAuthorizationORM.owner_live_authorized_at_ms.desc(),
+                        PGBrcBoundedLiveTrialAuthorizationORM.authorization_id.desc(),
+                    )
+                    .limit(1)
+                )
+                row = result.scalar_one_or_none()
+                return self._to_authorization(row) if row is not None else None
+        except SQLAlchemyError as exc:
+            raise _pg_error(exc) from exc
+
+    async def live_authorization_for_draft(
+        self,
+        draft_id: str,
+    ) -> BoundedLiveTrialAuthorization | None:
+        try:
+            async with self._session_maker() as session:
+                result = await session.execute(
+                    select(PGBrcBoundedLiveTrialAuthorizationORM)
+                    .where(PGBrcBoundedLiveTrialAuthorizationORM.draft_id == draft_id)
+                    .limit(1)
+                )
+                row = result.scalar_one_or_none()
+                return self._to_authorization(row) if row is not None else None
+        except SQLAlchemyError as exc:
+            raise _pg_error(exc) from exc
+
     @staticmethod
     def _apply_draft(
         row: PGBrcBoundedLiveTrialAuthorizationDraftORM,
@@ -239,6 +324,43 @@ class PgOwnerTrialFlowRepository:
             updated_at_ms=row.updated_at_ms,
             source="owner_console",
             non_live_metadata_only=True,
+        )
+
+    @staticmethod
+    def _to_authorization(row: PGBrcBoundedLiveTrialAuthorizationORM) -> BoundedLiveTrialAuthorization:
+        return BoundedLiveTrialAuthorization(
+            authorization_id=row.authorization_id,
+            draft_id=row.draft_id,
+            carrier_id=row.carrier_id,
+            strategy_family_id=row.strategy_family_id,
+            symbol=row.symbol,
+            side=row.side,
+            max_notional=row.max_notional,
+            quantity=row.quantity,
+            leverage=row.leverage,
+            protection_plan_type=row.protection_plan_type,
+            single_use=True,
+            status="owner_live_authorized_pending_final_preflight",
+            live_authorized=True,
+            owner_live_authorized_by=row.owner_live_authorized_by,
+            owner_live_authorized_at_ms=row.owner_live_authorized_at_ms,
+            live_ready=False,
+            order_permission_granted=False,
+            execution_permission_granted=False,
+            execution_intent_created=False,
+            order_created=False,
+            auto_execution_enabled=False,
+            consumed=False,
+            expires_at_ms=row.expires_at_ms,
+            linked_acknowledgement_id=row.linked_acknowledgement_id,
+            source_draft_id=row.source_draft_id,
+            final_preflight_required=True,
+            hard_blockers=list(row.hard_blockers_json or []),
+            next_executable=False,
+            created_at_ms=row.created_at_ms,
+            updated_at_ms=row.updated_at_ms,
+            source="owner_console",
+            metadata_only=True,
         )
 
 

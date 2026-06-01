@@ -100,6 +100,56 @@ class BoundedLiveTrialAuthorizationDraft(BaseModel):
     non_live_metadata_only: Literal[True] = True
 
 
+class OwnerLiveAuthorizationActivationRequest(BaseModel):
+    carrier_id: str
+    symbol: str
+    side: Literal["long", "short"]
+    max_notional: Decimal = Field(gt=Decimal("0"))
+    quantity: Decimal = Field(gt=Decimal("0"))
+    leverage: Decimal = Field(gt=Decimal("0"))
+    protection_plan_type: Literal["single_tp_plus_sl"]
+    owner_id: str | None = None
+
+
+class BoundedLiveTrialAuthorization(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    authorization_id: str
+    draft_id: str
+    carrier_id: str
+    strategy_family_id: str
+    symbol: str
+    side: Literal["long", "short"]
+    max_notional: Decimal = Field(gt=Decimal("0"))
+    quantity: Decimal = Field(gt=Decimal("0"))
+    leverage: Decimal = Field(gt=Decimal("0"))
+    protection_plan_type: Literal["single_tp_plus_sl"]
+    single_use: Literal[True] = True
+    status: Literal["owner_live_authorized_pending_final_preflight"] = (
+        "owner_live_authorized_pending_final_preflight"
+    )
+    live_authorized: Literal[True] = True
+    owner_live_authorized_by: str
+    owner_live_authorized_at_ms: int
+    live_ready: Literal[False] = False
+    order_permission_granted: Literal[False] = False
+    execution_permission_granted: Literal[False] = False
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+    auto_execution_enabled: Literal[False] = False
+    consumed: Literal[False] = False
+    expires_at_ms: int | None = None
+    linked_acknowledgement_id: str
+    source_draft_id: str
+    final_preflight_required: Literal[True] = True
+    hard_blockers: list[str] = Field(default_factory=list)
+    next_executable: Literal[False] = False
+    created_at_ms: int
+    updated_at_ms: int
+    source: Literal["owner_console"] = OWNER_TRIAL_FLOW_SOURCE
+    metadata_only: Literal[True] = True
+
+
 class OwnerTrialFlowCurrentResponse(BaseModel):
     generated_from: Literal["owner_trial_flow_v1"] = "owner_trial_flow_v1"
     selected_carrier_id: str
@@ -110,7 +160,12 @@ class OwnerTrialFlowCurrentResponse(BaseModel):
     unacknowledged_warnings: list[str] = Field(default_factory=list)
     latest_acknowledgement: OwnerRiskAcknowledgement | None = None
     authorization_draft: BoundedLiveTrialAuthorizationDraft | None = None
-    authorization_status: Literal["not_started", "pending_owner_live_authorization"]
+    live_authorization: BoundedLiveTrialAuthorization | None = None
+    authorization_status: Literal[
+        "not_started",
+        "pending_owner_live_authorization",
+        "owner_live_authorized_pending_final_preflight",
+    ]
     live_ready: Literal[False] = False
     execution_permission_granted: Literal[False] = False
     order_permission_granted: Literal[False] = False
@@ -119,6 +174,8 @@ class OwnerTrialFlowCurrentResponse(BaseModel):
     hard_blockers_remain_blocking: Literal[True] = True
     risk_acknowledgement_is_not_live_authorization: Literal[True] = True
     authorization_draft_is_not_executable: Literal[True] = True
+    live_authorization_is_not_execution_intent: Literal[True] = True
+    live_authorization_does_not_create_order: Literal[True] = True
     source: Literal["backend_metadata"] = "backend_metadata"
 
 
@@ -159,6 +216,24 @@ class OwnerTrialFlowRepository(Protocol):
     ) -> BoundedLiveTrialAuthorizationDraft | None:
         ...
 
+    async def create_live_authorization(
+        self,
+        authorization: BoundedLiveTrialAuthorization,
+    ) -> BoundedLiveTrialAuthorization:
+        ...
+
+    async def latest_live_authorization(
+        self,
+        carrier_id: str,
+    ) -> BoundedLiveTrialAuthorization | None:
+        ...
+
+    async def live_authorization_for_draft(
+        self,
+        draft_id: str,
+    ) -> BoundedLiveTrialAuthorization | None:
+        ...
+
 
 class OwnerTrialFlowService:
     def __init__(self, repository: OwnerTrialFlowRepository) -> None:
@@ -168,6 +243,7 @@ class OwnerTrialFlowService:
         carrier = _supported_carrier(carrier_id)
         acknowledgement = await self._repository.latest_acknowledgement(carrier.carrier_id)
         draft = await self._repository.latest_draft(carrier.carrier_id)
+        authorization = await self._repository.latest_live_authorization(carrier.carrier_id)
         warnings = _warning_rows()
         warning_ids = [str(row["warning_id"]) for row in warnings]
         acknowledged = [
@@ -180,13 +256,16 @@ class OwnerTrialFlowService:
             selected_carrier_id=carrier.carrier_id,
             carrier=_carrier_summary(carrier),
             strategy_warnings=warnings,
-            hard_blockers=_hard_blocker_rows(),
+            hard_blockers=_hard_blocker_rows(live_authorization=authorization),
             acknowledged_warnings=acknowledged,
             unacknowledged_warnings=unacknowledged,
             latest_acknowledgement=acknowledgement,
             authorization_draft=draft,
+            live_authorization=authorization,
             authorization_status=(
-                "pending_owner_live_authorization" if draft else "not_started"
+                "owner_live_authorized_pending_final_preflight"
+                if authorization
+                else "pending_owner_live_authorization" if draft else "not_started"
             ),
         )
 
@@ -279,6 +358,89 @@ class OwnerTrialFlowService:
             raise OwnerTrialFlowError("draft_not_found", "Authorization draft not found.")
         return draft
 
+    async def activate_live_authorization(
+        self,
+        draft_id: str,
+        request: OwnerLiveAuthorizationActivationRequest,
+        *,
+        operator_id: str = "owner",
+    ) -> BoundedLiveTrialAuthorization:
+        draft = await self.get_draft(draft_id)
+        if draft.status != "pending_owner_live_authorization":
+            raise OwnerTrialFlowError(
+                "draft_not_pending_owner_live_authorization",
+                "Only a pending Owner live authorization draft can be activated.",
+            )
+        if draft.consumed:
+            raise OwnerTrialFlowError("draft_already_consumed", "Authorization draft is already consumed.")
+        if draft.expires_at_ms is not None and draft.expires_at_ms <= _now_ms():
+            raise OwnerTrialFlowError("draft_expired", "Authorization draft has expired.")
+        if (
+            draft.live_ready
+            or draft.order_permission_granted
+            or draft.execution_permission_granted
+            or draft.execution_intent_created
+            or draft.order_created
+            or draft.auto_execution_enabled
+        ):
+            raise OwnerTrialFlowError(
+                "draft_has_executable_state",
+                "Authorization draft contains executable state and cannot be activated.",
+            )
+        existing = await self._repository.live_authorization_for_draft(draft.draft_id)
+        if existing is not None:
+            raise OwnerTrialFlowError(
+                "live_authorization_already_exists",
+                "This authorization draft has already been explicitly authorized.",
+            )
+        carrier = _supported_carrier(request.carrier_id)
+        if draft.carrier_id != carrier.carrier_id:
+            raise OwnerTrialFlowError("draft_carrier_mismatch", "Draft carrier does not match activation request.")
+        _validate_activation_scope(request, draft, carrier)
+        acknowledgement = await self._repository.get_acknowledgement(draft.linked_acknowledgement_id)
+        if acknowledgement is None:
+            raise OwnerTrialFlowError(
+                "linked_acknowledgement_missing",
+                "Explicit live authorization requires a backend-recorded risk acknowledgement.",
+            )
+        if acknowledgement.carrier_id != draft.carrier_id:
+            raise OwnerTrialFlowError(
+                "acknowledgement_carrier_mismatch",
+                "Linked acknowledgement belongs to a different carrier.",
+            )
+        missing = [
+            code
+            for code in _required_warning_ids()
+            if code not in acknowledgement.acknowledged_warning_codes
+        ]
+        if missing:
+            raise OwnerTrialFlowError(
+                "strategy_warning_acknowledgement_incomplete",
+                f"Required strategy warning(s) are not acknowledged: {', '.join(missing)}",
+            )
+        now = _now_ms()
+        authorization = BoundedLiveTrialAuthorization(
+            authorization_id=f"auth-{uuid.uuid4().hex}",
+            draft_id=draft.draft_id,
+            carrier_id=draft.carrier_id,
+            strategy_family_id=draft.strategy_family_id,
+            symbol=draft.symbol,
+            side=draft.side,
+            max_notional=draft.max_notional,
+            quantity=draft.quantity,
+            leverage=draft.leverage,
+            protection_plan_type=draft.protection_plan_type,
+            owner_live_authorized_by=request.owner_id or operator_id,
+            owner_live_authorized_at_ms=now,
+            expires_at_ms=draft.expires_at_ms,
+            linked_acknowledgement_id=draft.linked_acknowledgement_id,
+            source_draft_id=draft.draft_id,
+            hard_blockers=["startup_guard_status_unavailable_runtime_not_started"],
+            created_at_ms=now,
+            updated_at_ms=now,
+        )
+        return await self._repository.create_live_authorization(authorization)
+
 
 def _supported_carrier(carrier_id: str) -> StrategyTrialCarrierView:
     if carrier_id != SUPPORTED_OWNER_TRIAL_CARRIER_ID:
@@ -310,6 +472,42 @@ def _validate_draft_scope(
         )
 
 
+def _validate_activation_scope(
+    request: OwnerLiveAuthorizationActivationRequest,
+    draft: BoundedLiveTrialAuthorizationDraft,
+    carrier: StrategyTrialCarrierView,
+) -> None:
+    _validate_draft_scope(
+        BoundedLiveTrialAuthorizationDraftCreateRequest(
+            carrier_id=request.carrier_id,
+            linked_acknowledgement_id=draft.linked_acknowledgement_id,
+            symbol=request.symbol,
+            side=request.side,
+            max_notional=request.max_notional,
+            quantity=request.quantity,
+            leverage=request.leverage,
+            protection_plan_type=request.protection_plan_type,
+            expires_at_ms=draft.expires_at_ms,
+        ),
+        carrier,
+    )
+    if request.symbol not in {draft.symbol, carrier.symbol, carrier.runtime_symbol}:
+        raise OwnerTrialFlowError("symbol_mismatch", "Activation symbol does not match draft.")
+    if request.side != draft.side:
+        raise OwnerTrialFlowError("side_mismatch", "Activation side does not match draft.")
+    if request.max_notional != draft.max_notional:
+        raise OwnerTrialFlowError("cap_violation", "Activation max notional does not match draft.")
+    if request.quantity != draft.quantity:
+        raise OwnerTrialFlowError("cap_violation", "Activation quantity does not match draft.")
+    if request.leverage != draft.leverage:
+        raise OwnerTrialFlowError("cap_violation", "Activation leverage does not match draft.")
+    if request.protection_plan_type != draft.protection_plan_type:
+        raise OwnerTrialFlowError(
+            "protection_not_executable",
+            "Activation protection plan does not match draft.",
+        )
+
+
 def _required_warning_ids() -> list[str]:
     return [
         warning.warning_id
@@ -332,7 +530,21 @@ def _warning_rows() -> list[dict[str, str | bool]]:
     ]
 
 
-def _hard_blocker_rows() -> list[dict[str, str | bool]]:
+def _hard_blocker_rows(
+    *,
+    live_authorization: BoundedLiveTrialAuthorization | None = None,
+) -> list[dict[str, str | bool]]:
+    if live_authorization is not None:
+        return [
+            {
+                "blocker_id": "startup_guard_status_unavailable_runtime_not_started",
+                "active": True,
+                "blocks_after_ack": True,
+                "description": "Owner live authorization is recorded; final startup guard preflight is still required before any execution intent or order.",
+                "source": "owner_trial_flow",
+                "classification": "hard_safety_blocker",
+            }
+        ]
     return [
         {
             "blocker_id": "missing_explicit_live_authorization",

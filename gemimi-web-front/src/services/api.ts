@@ -630,6 +630,41 @@ export type BoundedLiveTrialAuthorizationDraft = {
   non_live_metadata_only: true;
 };
 
+export type BoundedLiveTrialAuthorization = {
+  authorization_id: string;
+  draft_id: string;
+  carrier_id: string;
+  strategy_family_id: string;
+  symbol: string;
+  side: 'long' | 'short';
+  max_notional: string;
+  quantity: string;
+  leverage: string;
+  protection_plan_type: 'single_tp_plus_sl';
+  single_use: true;
+  status: 'owner_live_authorized_pending_final_preflight';
+  live_authorized: true;
+  owner_live_authorized_by: string;
+  owner_live_authorized_at_ms: number;
+  live_ready: false;
+  order_permission_granted: false;
+  execution_permission_granted: false;
+  execution_intent_created: false;
+  order_created: false;
+  auto_execution_enabled: false;
+  consumed: false;
+  expires_at_ms?: number | null;
+  linked_acknowledgement_id: string;
+  source_draft_id: string;
+  final_preflight_required: true;
+  hard_blockers: string[];
+  next_executable: false;
+  created_at_ms: number;
+  updated_at_ms: number;
+  source: 'owner_console';
+  metadata_only: true;
+};
+
 export type OwnerTrialFlowCurrentResponse = {
   generated_from: 'owner_trial_flow_v1';
   selected_carrier_id: string;
@@ -640,7 +675,8 @@ export type OwnerTrialFlowCurrentResponse = {
   unacknowledged_warnings: string[];
   latest_acknowledgement?: OwnerRiskAcknowledgement | null;
   authorization_draft?: BoundedLiveTrialAuthorizationDraft | null;
-  authorization_status: 'not_started' | 'pending_owner_live_authorization';
+  live_authorization?: BoundedLiveTrialAuthorization | null;
+  authorization_status: 'not_started' | 'pending_owner_live_authorization' | 'owner_live_authorized_pending_final_preflight';
   live_ready: false;
   execution_permission_granted: false;
   order_permission_granted: false;
@@ -649,6 +685,8 @@ export type OwnerTrialFlowCurrentResponse = {
   hard_blockers_remain_blocking: true;
   risk_acknowledgement_is_not_live_authorization: true;
   authorization_draft_is_not_executable: true;
+  live_authorization_is_not_execution_intent: true;
+  live_authorization_does_not_create_order: true;
   source: 'backend_metadata';
 };
 
@@ -986,6 +1024,20 @@ export const brcApi = {
     protection_plan_type: 'single_tp_plus_sl';
   }) {
     return request<BoundedLiveTrialAuthorizationDraft>('/api/brc/owner-trial-flow/authorization-draft', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  activateOwnerLiveAuthorization(draftId: string, input: {
+    carrier_id: string;
+    symbol: string;
+    side: 'long' | 'short';
+    max_notional: string;
+    quantity: string;
+    leverage: string;
+    protection_plan_type: 'single_tp_plus_sl';
+  }) {
+    return request<BoundedLiveTrialAuthorization>(`/api/brc/owner-trial-flow/authorization-draft/${encodeURIComponent(draftId)}/activate-live-authorization`, {
       method: 'POST',
       body: JSON.stringify(input),
     });

@@ -30,6 +30,7 @@ import {
   Mi001SolReadinessResponse,
   Mi001BnbTrialReadinessGapResponse,
   ObservationCaseQueueResponse,
+  BoundedLiveTrialAuthorization,
   OwnerRiskAcknowledgement,
   OwnerTrialFlowCurrentResponse,
   ReadinessResponse,
@@ -431,8 +432,11 @@ export function TrialConfirmationV2() {
   const { flowState, updateFlowState } = useOwnerFlowState();
   const [backendAcknowledgement, setBackendAcknowledgement] = useState<OwnerRiskAcknowledgement | null>(null);
   const [backendDraftId, setBackendDraftId] = useState<string | null>(null);
+  const [backendLiveAuthorization, setBackendLiveAuthorization] = useState<BoundedLiveTrialAuthorization | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [activationError, setActivationError] = useState<string | null>(null);
   const [submittingMetadata, setSubmittingMetadata] = useState(false);
+  const [activatingAuthorization, setActivatingAuthorization] = useState(false);
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading label="加载授权前确认单..." />;
 
@@ -457,9 +461,35 @@ export function TrialConfirmationV2() {
   const persistedDraft = data.ownerTrialFlow?.authorization_draft?.carrier_id === selectedCarrierId
     ? data.ownerTrialFlow.authorization_draft
     : null;
+  const activeDraft = persistedDraft || (backendDraftId ? {
+    draft_id: backendDraftId,
+    carrier_id: selectedCarrierId,
+    symbol: confirmationCarrier.runtimeSymbol || confirmationCarrier.symbol,
+    side: confirmationCarrier.side === 'short' ? 'short' as const : 'long' as const,
+    max_notional: confirmationCarrier.maxNotional,
+    quantity: confirmationCarrier.quantity,
+    leverage: confirmationCarrier.leverage,
+    protection_plan_type: 'single_tp_plus_sl' as const,
+  } : null);
+  const persistedLiveAuthorization = backendLiveAuthorization?.carrier_id === selectedCarrierId
+    ? backendLiveAuthorization
+    : data.ownerTrialFlow?.live_authorization?.carrier_id === selectedCarrierId
+      ? data.ownerTrialFlow.live_authorization
+      : null;
   const confirmation = trialConfirmationView(confirmationCarrier, data, acknowledgements);
   const allRisksAcknowledged = confirmation.risks.every((risk) => acknowledgements[risk.id]);
   const canPersistMetadata = selectedCarrierId === carrierDecision.carrierId && allRisksAcknowledged;
+  const activationBlockers = [
+    ...(!persistedAcknowledgement ? ['风险确认尚未由后端记录'] : []),
+    ...(!activeDraft ? ['授权草案尚未生成'] : []),
+    ...(!allRisksAcknowledged ? ['策略风险尚未全部确认'] : []),
+    ...(persistedLiveAuthorization ? ['这一次真实小额试验已授权'] : []),
+  ];
+  const canActivateLiveAuthorization = selectedCarrierId === carrierDecision.carrierId
+    && Boolean(persistedAcknowledgement)
+    && Boolean(activeDraft)
+    && allRisksAcknowledged
+    && !persistedLiveAuthorization;
   const setRiskAcknowledged = (riskId: string, acknowledged: boolean) => {
     updateFlowState((current) => ({
       ...current,
@@ -499,6 +529,27 @@ export function TrialConfirmationV2() {
       setSubmitError(message(error));
     } finally {
       setSubmittingMetadata(false);
+    }
+  };
+  const activateLiveAuthorization = async () => {
+    if (!activeDraft) return;
+    setActivatingAuthorization(true);
+    setActivationError(null);
+    try {
+      const authorization = await brcApi.activateOwnerLiveAuthorization(activeDraft.draft_id, {
+        carrier_id: selectedCarrierId,
+        symbol: activeDraft.symbol,
+        side: activeDraft.side,
+        max_notional: activeDraft.max_notional,
+        quantity: activeDraft.quantity,
+        leverage: activeDraft.leverage,
+        protection_plan_type: activeDraft.protection_plan_type,
+      });
+      setBackendLiveAuthorization(authorization);
+    } catch (error) {
+      setActivationError(message(error));
+    } finally {
+      setActivatingAuthorization(false);
     }
   };
 
@@ -642,31 +693,55 @@ export function TrialConfirmationV2() {
           <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
             确认以上信息均已阅读并理解，且所有硬安全门均通过后，才可授权本次小额试验。
           </p>
-          {persistedDraft || backendDraftId ? (
+          {activeDraft ? (
             <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
-              授权草案已生成：{backendDraftId || persistedDraft?.draft_id}。状态为 pending_owner_live_authorization；不会下单，不会创建 live ExecutionIntent。
+              授权草案已生成：{activeDraft.draft_id}。状态为 pending_owner_live_authorization；不会下单，不会创建 live ExecutionIntent。
             </div>
           ) : (
             <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
               尚未生成后端授权草案。风险确认写入后端后，草案会保持等待真实资金授权。
             </div>
           )}
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+            风险确认 ≠ 真实资金授权；真实资金授权 ≠ 立即下单。授权后仍需最终硬安全检查。
+          </div>
           <button
             type="button"
-            disabled
-            className="mb-3 flex w-full cursor-not-allowed items-center justify-center gap-3 rounded-xl bg-slate-300 px-5 py-4 text-base font-bold text-white dark:bg-slate-700 dark:text-slate-300"
+            onClick={activateLiveAuthorization}
+            disabled={!canActivateLiveAuthorization || activatingAuthorization}
+            className={`mb-3 flex w-full items-center justify-center gap-3 rounded-xl px-5 py-4 text-base font-bold transition ${
+              canActivateLiveAuthorization && !activatingAuthorization
+                ? 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white'
+                : 'cursor-not-allowed bg-slate-300 text-white dark:bg-slate-700 dark:text-slate-300'
+            }`}
           >
             <Wallet className="h-5 w-5" />
-            授权这一次小额试验
-            <span className="text-sm font-normal">（当前未接入真实资金环境，暂不可点击）</span>
+            {persistedLiveAuthorization ? '已授权这一次真实小额试验' : '确认授权这一次真实小额试验'}
           </button>
+          {persistedLiveAuthorization ? (
+            <div className="mb-3 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
+              已授权这一次真实小额试验；等待最终硬安全检查。尚未创建执行计划，尚未下单。
+            </div>
+          ) : null}
+          {activationError ? (
+            <p className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+              {activationError}
+            </p>
+          ) : null}
           <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-            {confirmation.disabledReason}
+            {persistedLiveAuthorization
+              ? '真实资金授权已记录，但它不是执行计划或订单；最终硬安全检查仍未完成。'
+              : activationBlockers.length
+                ? activationBlockers.join('；')
+                : '可以记录 Owner 对这一次 bounded live trial 的显式授权。记录后仍不会下单。'}
           </p>
           <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
-            <p className="mb-2 font-bold text-slate-900 dark:text-slate-100">暂不能授权真实资金，还差：</p>
+            <p className="mb-2 font-bold text-slate-900 dark:text-slate-100">{persistedLiveAuthorization ? '授权后仍需等待：' : '暂不能授权真实资金，还差：'}</p>
             <ol className="list-decimal space-y-1 pl-5 text-slate-700 dark:text-slate-300">
-              {confirmation.remainingConditions.map((item) => (
+              {(persistedLiveAuthorization
+                ? ['最终硬安全检查', '启动保护确认', '后续单独创建执行计划；当前尚未创建']
+                : activationBlockers.length ? activationBlockers : confirmation.remainingConditions
+              ).map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ol>
@@ -685,12 +760,16 @@ export function TrialConfirmationV2() {
             <h3 className="font-bold text-slate-950 dark:text-slate-50">为什么按钮是灰色的？</h3>
           </div>
           <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-            {confirmation.disabledReason}
+            {persistedLiveAuthorization
+              ? '按钮已完成本次授权记录，但授权记录不是订单，也不会自动创建执行计划。'
+              : activationBlockers.length
+                ? activationBlockers.join('；')
+                : '真实资金授权只记录本次 bounded live trial 的 Owner 授权，后续仍需最终硬安全检查。'}
           </p>
         </section>
       </section>
 
-      <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: localAcknowledgements, backendAcknowledgement: persistedAcknowledgement, backendDraft: persistedDraft || backendDraftId, ownerTrialFlow: data.ownerTrialFlow, rawGovernance: data.strategyTrialGovernance }} />
+      <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: localAcknowledgements, backendAcknowledgement: persistedAcknowledgement, backendDraft: activeDraft, liveAuthorization: persistedLiveAuthorization, ownerTrialFlow: data.ownerTrialFlow, rawGovernance: data.strategyTrialGovernance }} />
     </PageShell>
   );
 }
@@ -822,16 +901,21 @@ export function IntentsV2() {
   const draft = data.ownerTrialFlow?.authorization_draft?.carrier_id === selectedCarrierId
     ? data.ownerTrialFlow.authorization_draft
     : null;
+  const liveAuthorization = data.ownerTrialFlow?.live_authorization?.carrier_id === selectedCarrierId
+    ? data.ownerTrialFlow.live_authorization
+    : null;
   const noIntentText = carrierDecision.provenance.executionIntentState === 'unavailable'
     ? '执行计划状态数据未接入，无法判断是否存在真实资金执行计划。'
-    : draft
+    : liveAuthorization
+      ? 'Owner 已授权一笔 bounded live trial，但尚未创建执行计划；最终硬安全检查仍未完成 / 等待启动保护确认。执行计划不是订单，不会触发交易。'
+      : draft
       ? `当前有后端授权草案 ${draft.draft_id}，但仍等待真实资金授权；没有 live ExecutionIntent，没有订单。`
       : `当前还没有真实资金执行计划，因为你尚未完成真实资金授权。当前等待确认的候选是 ${selectedCarrierId}；执行计划不是订单，不会触发交易。`;
   return (
     <PageShell title="执行计划" subtitle="这里展示策略想做什么；执行计划不是订单，不会触发交易。">
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <ReviewCard title="当前待确认候选" value={selectedCarrierId} />
-        <ReviewCard title="授权草案" value={draft ? '后端已生成' : '尚未生成'} />
+        <ReviewCard title="真实资金授权" value={liveAuthorization ? '已授权，待硬检查' : draft ? '等待真实资金授权' : '尚未生成草案'} />
         <ReviewCard title={backendAcknowledgedCount ? '后端风险确认' : '本地风险确认'} value={`${acknowledgedCount} / ${data.ownerTrialFlow?.strategy_warnings.length || 5} 项`} />
       </section>
       {rows.length ? (
@@ -853,12 +937,16 @@ export function IntentsV2() {
             <p className="mt-1 text-sm text-slate-400">
               {carrierDecision.provenance.executionIntentState === 'unavailable'
                 ? '执行链路状态必须以后端为准；当前数据未接入，无法用于真实授权。'
-                : draft
+                : liveAuthorization
+                  ? 'Owner 已授权一笔 bounded live trial，但尚未创建执行计划；最终硬安全检查仍未完成 / 等待启动保护确认。'
+                  : draft
                   ? '当前有授权草案，但尚未获得真实资金授权；当前没有 live ExecutionIntent 或订单。'
                   : '当前停在“等待授权”。只有你明确授权后，才可能进入后续链路；当前没有真实资金执行计划或订单。'}
             </p>
           </div>
-          <StatePill tone="amber">{humanAuthorizationState(carrierDecision.authorizationState)}</StatePill>
+          <StatePill tone={liveAuthorization ? 'teal' : 'amber'}>
+            {liveAuthorization ? '已授权，等待最终硬安全检查' : humanAuthorizationState(carrierDecision.authorizationState)}
+          </StatePill>
         </div>
         <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
           {['等待授权', '执行计划', '入场订单', '保护订单', '退出 / 复盘'].map((step, index) => (
@@ -866,7 +954,7 @@ export function IntentsV2() {
               <div className="mb-2 text-xs font-bold text-amber-200/60">Step {index + 1}</div>
               <div className="text-sm font-semibold text-slate-100">{step}</div>
               <div className="mt-2">
-                <StatePill tone={index === 0 ? 'amber' : 'slate'}>{index === 0 ? '当前' : '未创建'}</StatePill>
+                <StatePill tone={index === 0 ? liveAuthorization ? 'teal' : 'amber' : 'slate'}>{index === 0 ? liveAuthorization ? '已授权' : '当前' : '未创建'}</StatePill>
               </div>
             </div>
           ))}
@@ -876,7 +964,7 @@ export function IntentsV2() {
         <h3 className="mb-2 text-sm font-bold text-slate-100">图表复盘</h3>
         <p className="text-sm text-slate-400">TradingView 类图表稍后支持。当前仅保留只读复盘位置。</p>
       </section>
-      <TechnicalDetails data={{ selectedCarrierId, localRiskAcknowledgements: selectedAcknowledgements, ownerTrialFlow: data.ownerTrialFlow, authorizationDraft: draft, evidence: data.evidence, currentCampaign: data.currentCampaign }} />
+      <TechnicalDetails data={{ selectedCarrierId, localRiskAcknowledgements: selectedAcknowledgements, ownerTrialFlow: data.ownerTrialFlow, authorizationDraft: draft, liveAuthorization, evidence: data.evidence, currentCampaign: data.currentCampaign }} />
     </PageShell>
   );
 }
@@ -3214,6 +3302,7 @@ function humanSide(side: string) {
 }
 
 function humanAuthorizationState(state: string) {
+  if (state === 'owner_live_authorized_pending_final_preflight') return '已授权，等待最终硬安全检查';
   return state.includes('pending') ? '等待真实资金授权' : state;
 }
 

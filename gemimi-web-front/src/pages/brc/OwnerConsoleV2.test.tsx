@@ -29,6 +29,7 @@ const mockBrcApi = vi.hoisted(() => ({
   ownerTrialFlowCurrent: vi.fn(),
   createOwnerRiskAcknowledgement: vi.fn(),
   createOwnerAuthorizationDraft: vi.fn(),
+  activateOwnerLiveAuthorization: vi.fn(),
   listStrategyFamilies: vi.fn(),
   listAdmissionDecisions: vi.fn(),
   listTrialBindings: vi.fn(),
@@ -59,6 +60,7 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.ownerTrialFlowCurrent.mockResolvedValue(ownerTrialFlowPayload());
     mockBrcApi.createOwnerRiskAcknowledgement.mockResolvedValue(ownerRiskAcknowledgementPayload());
     mockBrcApi.createOwnerAuthorizationDraft.mockResolvedValue(ownerAuthorizationDraftPayload());
+    mockBrcApi.activateOwnerLiveAuthorization.mockResolvedValue(ownerLiveAuthorizationPayload());
     mockBrcApi.listStrategyFamilies.mockResolvedValue([]);
     mockBrcApi.listAdmissionDecisions.mockResolvedValue([{ owner_risk_acceptance_id: 'owner-acceptance-1' }]);
     mockBrcApi.listTrialBindings.mockResolvedValue([]);
@@ -150,25 +152,24 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText('策略风险')).toBeTruthy();
     expect(screen.getByText('硬安全门')).toBeTruthy();
     expect(screen.getByText('测试网验证结果')).toBeTruthy();
-    expect(screen.getByText('授权这一次小额试验')).toBeTruthy();
-    expect(screen.getByText(/当前未接入真实资金环境，暂不可点击/)).toBeTruthy();
-    expect(screen.getAllByText(/后端未确认真实资金授权/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /确认授权这一次真实小额试验/ })).toBeTruthy();
+    expect(screen.getAllByText(/风险确认尚未由后端记录/).length).toBeGreaterThan(0);
     expect(screen.getByText('暂不能授权真实资金，还差：')).toBeTruthy();
-    expect(screen.getByText('策略风险仍未全部确认')).toBeTruthy();
-    expect(screen.getByText('live key / IP 白名单状态未接入')).toBeTruthy();
+    expect(screen.getByText('授权草案尚未生成')).toBeTruthy();
+    expect(screen.getByText('策略风险尚未全部确认')).toBeTruthy();
     expect(screen.getAllByText('阻断').length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
     expect(screen.getByText('已在本地确认')).toBeTruthy();
     const persisted = JSON.parse(window.localStorage.getItem('brc-owner-console-main-flow-v1') || '{}');
     expect(persisted.riskAcknowledgements['MI-001-BNB-LONG'].strategy_not_proven_profitable).toBe(true);
-    expect((screen.getByRole('button', { name: /授权这一次小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
     assertNoDangerButtons();
     cleanup();
 
     renderWithRouter(<IntentsV2 />);
     expect(await screen.findByRole('heading', { name: '执行计划' })).toBeTruthy();
     expect(screen.getByText('当前待确认候选')).toBeTruthy();
-    expect(screen.getByText('授权草案')).toBeTruthy();
+    expect(screen.getByText('真实资金授权')).toBeTruthy();
     expect(screen.getByText('本地风险确认')).toBeTruthy();
     expect(screen.getByText('1 / 5 项')).toBeTruthy();
     expect(screen.getByText('暂无执行计划记录')).toBeTruthy();
@@ -246,7 +247,50 @@ describe('Owner Console v2 shell', () => {
       leverage: '1',
       protection_plan_type: 'single_tp_plus_sl',
     });
-    expect((screen.getByRole('button', { name: /授权这一次小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/风险确认 ≠ 真实资金授权/)).toBeTruthy();
+    const liveAuthorizationButton = screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement;
+    expect(liveAuthorizationButton.disabled).toBe(false);
+    fireEvent.click(liveAuthorizationButton);
+    expect(await screen.findByText(/已授权这一次真实小额试验；等待最终硬安全检查/)).toBeTruthy();
+    expect(screen.getByText(/尚未创建执行计划，尚未下单/)).toBeTruthy();
+    expect(mockBrcApi.activateOwnerLiveAuthorization).toHaveBeenCalledWith('draft-unit', {
+      carrier_id: 'MI-001-BNB-LONG',
+      symbol: 'BNB/USDT:USDT',
+      side: 'long',
+      max_notional: '20',
+      quantity: '0.01',
+      leverage: '1',
+      protection_plan_type: 'single_tp_plus_sl',
+    });
+    assertNoDangerButtons();
+  });
+
+  it('shows explicit live authorization on intents without implying an order exists', async () => {
+    mockBrcApi.ownerTrialFlowCurrent.mockResolvedValueOnce({
+      ...ownerTrialFlowPayload(),
+      latest_acknowledgement: ownerRiskAcknowledgementPayload(),
+      authorization_draft: ownerAuthorizationDraftPayload(),
+      live_authorization: ownerLiveAuthorizationPayload(),
+      authorization_status: 'owner_live_authorized_pending_final_preflight',
+      hard_blockers: [
+        {
+          blocker_id: 'startup_guard_status_unavailable_runtime_not_started',
+          active: true,
+          blocks_after_ack: true,
+          description: 'Owner live authorization is recorded; final startup guard preflight is still required.',
+          source: 'owner_trial_flow',
+          classification: 'hard_safety_blocker',
+        },
+      ],
+    });
+
+    renderWithRouter(<IntentsV2 />);
+
+    expect(await screen.findByRole('heading', { name: '执行计划' })).toBeTruthy();
+    expect(screen.getByText('已授权，待硬检查')).toBeTruthy();
+    expect(screen.getAllByText(/Owner 已授权一笔 bounded live trial/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/尚未创建执行计划/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/等待启动保护确认/).length).toBeGreaterThan(0);
     assertNoDangerButtons();
   });
 
@@ -271,7 +315,7 @@ describe('Owner Console v2 shell', () => {
     expect(await screen.findByText('授权前确认单 / 发起试验')).toBeTruthy();
     expect(screen.getAllByText('数据未接入').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/授权门槛数据未接入，无法用于真实授权/).length).toBeGreaterThan(0);
-    expect((screen.getByRole('button', { name: /授权这一次小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
     assertNoDangerButtons();
     cleanup();
 
@@ -1076,6 +1120,7 @@ function ownerTrialFlowPayload() {
     ],
     latest_acknowledgement: null,
     authorization_draft: null,
+    live_authorization: null,
     authorization_status: 'not_started',
     live_ready: false,
     execution_permission_granted: false,
@@ -1085,6 +1130,8 @@ function ownerTrialFlowPayload() {
     hard_blockers_remain_blocking: true,
     risk_acknowledgement_is_not_live_authorization: true,
     authorization_draft_is_not_executable: true,
+    live_authorization_is_not_execution_intent: true,
+    live_authorization_does_not_create_order: true,
     source: 'backend_metadata',
   };
 }
@@ -1146,6 +1193,43 @@ function ownerAuthorizationDraftPayload() {
     updated_at_ms: Date.now(),
     source: 'owner_console',
     non_live_metadata_only: true,
+  };
+}
+
+function ownerLiveAuthorizationPayload() {
+  return {
+    authorization_id: 'auth-unit',
+    draft_id: 'draft-unit',
+    carrier_id: 'MI-001-BNB-LONG',
+    strategy_family_id: 'MI-001',
+    symbol: 'BNB/USDT:USDT',
+    side: 'long',
+    max_notional: '20',
+    quantity: '0.01',
+    leverage: '1',
+    protection_plan_type: 'single_tp_plus_sl',
+    single_use: true,
+    status: 'owner_live_authorized_pending_final_preflight',
+    live_authorized: true,
+    owner_live_authorized_by: 'owner',
+    owner_live_authorized_at_ms: Date.now(),
+    live_ready: false,
+    order_permission_granted: false,
+    execution_permission_granted: false,
+    execution_intent_created: false,
+    order_created: false,
+    auto_execution_enabled: false,
+    consumed: false,
+    expires_at_ms: null,
+    linked_acknowledgement_id: 'ack-unit',
+    source_draft_id: 'draft-unit',
+    final_preflight_required: true,
+    hard_blockers: ['startup_guard_status_unavailable_runtime_not_started'],
+    next_executable: false,
+    created_at_ms: Date.now(),
+    updated_at_ms: Date.now(),
+    source: 'owner_console',
+    metadata_only: true,
   };
 }
 
