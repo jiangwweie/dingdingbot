@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import time
 from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock
@@ -20,7 +21,9 @@ from src.interfaces.api_console_runtime import router as runtime_router
 
 ETH = "ETH/USDT:USDT"
 BTC = "BTC/USDT:USDT"
+BNB = "BNB/USDT:USDT"
 PROFILE = "brc_btc_eth_testnet_runtime"
+STRATEGY_TRIAL_BNB_PROFILE = "strategy_trial_bnb_testnet_runtime"
 
 
 class InMemoryBrcRepo:
@@ -165,6 +168,11 @@ class EmptyOrderRepo:
         return []
 
 
+class OneOpenOrderRepo:
+    async def get_open_orders(self, symbol=None):
+        return [SimpleNamespace(symbol=symbol or BNB)]
+
+
 class FakeReadOnlyLlmProvider:
     provider_name = "fake_llm"
     model_name = "fake-model"
@@ -260,10 +268,10 @@ def _patch_api_module(monkeypatch, **attrs):
         monkeypatch.setattr(api_module, name, value)
 
 
-def _config_provider(*, profile=PROFILE, symbols=(ETH, BTC), testnet=True):
+def _config_provider(*, profile=PROFILE, symbols=(ETH, BTC), testnet=True, trading_env="testnet"):
     resolved = SimpleNamespace(
         profile_name=profile,
-        environment=SimpleNamespace(exchange_testnet=testnet),
+        environment=SimpleNamespace(exchange_testnet=testnet, trading_env=trading_env),
         market=SimpleNamespace(symbols=list(symbols)),
     )
     return SimpleNamespace(resolved_config=resolved)
@@ -279,6 +287,14 @@ def _gks(active=False):
     svc = MagicMock()
     svc.is_active = MagicMock(return_value=active)
     return svc
+
+
+def _fresh_account_snapshot(*, age_ms=1_000):
+    return SimpleNamespace(
+        total_balance=Decimal("100"),
+        available_balance=Decimal("90"),
+        timestamp=int(time.time() * 1000) - age_ms,
+    )
 
 
 def _position(symbol, qty):
@@ -480,6 +496,251 @@ async def test_brc_controlled_entry_rejects_bnb_symbol_without_order_path(monkey
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Unsupported BRC controlled symbol key; use eth or btc."
     orch.execute_signal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_list_exposes_bnb_allowlist():
+    with TestClient(_app()) as client:
+        resp = client.get("/api/runtime/test/brc/carriers")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    carrier_ids = {item["carrier_id"] for item in payload["carriers"]}
+    assert "MI-001-BNB-LONG" in carrier_ids
+    carrier = next(item for item in payload["carriers"] if item["carrier_id"] == "MI-001-BNB-LONG")
+    assert carrier["runtime_symbol"] == BNB
+    assert carrier["strategy_profile"]["side"] == "long"
+    assert carrier["live_ready"] is False
+    assert carrier["auto_execution_ready"] is False
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_rejects_unsupported_carrier():
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/UNKNOWN/execute-controlled-entry")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "unsupported_strategy_trial_carrier"
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_rejects_wrong_symbol_and_side_before_runtime(monkeypatch):
+    with TestClient(_app()) as client:
+        wrong_symbol = client.post(
+            "/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry",
+            json={"requested_symbol": ETH, "requested_side": "long"},
+        )
+        wrong_side = client.post(
+            "/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry",
+            json={"requested_symbol": "BNBUSDT", "requested_side": "short"},
+        )
+
+    assert wrong_symbol.status_code == 409
+    assert wrong_symbol.json()["detail"] == "wrong_symbol"
+    assert wrong_side.status_code == 409
+    assert wrong_side.json()["detail"] == "wrong_side"
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_blocks_when_runtime_flags_disabled(monkeypatch):
+    monkeypatch.delenv("RUNTIME_CONTROL_API_ENABLED", raising=False)
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "runtime_control_api_disabled"
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_blocks_when_test_signal_injection_disabled(monkeypatch):
+    monkeypatch.delenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", raising=False)
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "runtime_test_signal_injection_disabled"
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_rejects_non_testnet_runtime(monkeypatch):
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(
+            profile=STRATEGY_TRIAL_BNB_PROFILE,
+            symbols=(BNB,),
+            testnet=False,
+        ),
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "exchange_testnet_not_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_rejects_live_trading_env(monkeypatch):
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(
+            profile=STRATEGY_TRIAL_BNB_PROFILE,
+            symbols=(BNB,),
+            trading_env="live",
+        ),
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "trading_env_live_or_unknown"
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_rejects_wrong_runtime_profile(monkeypatch):
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=PROFILE, symbols=(ETH, BTC)),
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 403
+    assert "testnet_profile_not_configured" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_blocks_stale_account_facts_before_orchestrator(monkeypatch):
+    orch = _orchestrator()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+        _brc_campaign_service=await _brc_service(),
+        _campaign_state_service=FakeCampaignStateService(),
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(price=Decimal("600"), min_notional=Decimal("5")),
+        _startup_trading_guard_service=_guard(),
+        _global_kill_switch_service=_gks(),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+        _account_getter=lambda: _fresh_account_snapshot(age_ms=600_000),
+        _startup_reconciliation_summary={"status": "clean"},
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 409
+    assert "account_facts_stale" in resp.json()["detail"]["blockers"]
+    orch.execute_signal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_blocks_conflicting_position_and_open_order(monkeypatch):
+    orch = _orchestrator()
+    position_repo = MutablePositionRepo()
+    position_repo.active = [_position(BNB, Decimal("0.01"))]
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+        _brc_campaign_service=await _brc_service(),
+        _campaign_state_service=FakeCampaignStateService(),
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(price=Decimal("600"), min_notional=Decimal("5")),
+        _startup_trading_guard_service=_guard(),
+        _global_kill_switch_service=_gks(),
+        _position_repo=position_repo,
+        _order_repo=OneOpenOrderRepo(),
+        _account_getter=_fresh_account_snapshot,
+        _startup_reconciliation_summary={"status": "clean"},
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 409
+    blockers = resp.json()["detail"]["blockers"]
+    assert "conflicting_position_exists" in blockers
+    assert "conflicting_open_order_exists" in blockers
+    orch.execute_signal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_blocks_gks_startup_and_reconciliation(monkeypatch):
+    orch = _orchestrator()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+        _brc_campaign_service=await _brc_service(),
+        _campaign_state_service=FakeCampaignStateService(),
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(price=Decimal("600"), min_notional=Decimal("5")),
+        _startup_trading_guard_service=_guard(armed=False),
+        _global_kill_switch_service=_gks(active=True),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+        _account_getter=_fresh_account_snapshot,
+        _startup_reconciliation_summary={"status": "dirty", "failed_reconciliations_count": 1},
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post("/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry")
+
+    assert resp.status_code == 409
+    blockers = resp.json()["detail"]["blockers"]
+    assert "gks_blocked" in blockers
+    assert "startup_guard_blocked" in blockers
+    assert "reconciliation_not_clean" in blockers
+    orch.execute_signal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_strategy_trial_carrier_bnb_controlled_route_executes_when_gates_pass(monkeypatch):
+    service = await _brc_service()
+    orch = _orchestrator()
+    _patch_api_module(
+        monkeypatch,
+        _runtime_config_provider=_config_provider(profile=STRATEGY_TRIAL_BNB_PROFILE, symbols=(BNB,)),
+        _brc_campaign_service=service,
+        _campaign_state_service=FakeCampaignStateService(),
+        _execution_orchestrator=orch,
+        _exchange_gateway=_gateway(price=Decimal("600"), min_notional=Decimal("5")),
+        _startup_trading_guard_service=_guard(),
+        _global_kill_switch_service=_gks(),
+        _position_repo=MutablePositionRepo(),
+        _order_repo=EmptyOrderRepo(),
+        _account_getter=_fresh_account_snapshot,
+        _startup_reconciliation_summary={"status": "clean"},
+    )
+
+    with TestClient(_app()) as client:
+        resp = client.post(
+            "/api/runtime/test/brc/carriers/MI-001-BNB-LONG/execute-controlled-entry",
+            json={"requested_symbol": "BNBUSDT", "requested_side": "long"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["carrier_id"] == "MI-001-BNB-LONG"
+    assert payload["readiness_verdict"] == "testnet_rehearsal_completed"
+    assert payload["entry"]["symbol"] == BNB
+    assert payload["entry"]["testnet"] is True
+    assert payload["live_ready"] is False
+    assert payload["auto_execution_ready"] is False
+    assert payload["execution_permission_granted"] is False
+    orch.execute_signal.assert_awaited_once()
 
 
 @pytest.mark.asyncio

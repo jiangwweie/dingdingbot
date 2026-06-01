@@ -192,6 +192,11 @@ class BoundedRiskCampaignService:
         profit_protect_trigger: Decimal,
         reason: str,
         currency: str = "USDT",
+        max_attempts: int = 2,
+        max_simultaneous_positions: int = 1,
+        max_leverage: int = 1,
+        allowed_profile: str = "brc_btc_eth_testnet_runtime",
+        allowed_symbols: Optional[tuple[str, ...]] = None,
     ) -> BoundedRiskCampaign:
         existing = await self._repo.get_current_campaign()
         if existing is not None and existing.status != BrcCampaignStatus.ENDED:
@@ -209,6 +214,11 @@ class BoundedRiskCampaignService:
             risk_envelope=RiskEnvelope(
                 max_campaign_loss=max_campaign_loss,
                 profit_protect_trigger=profit_protect_trigger,
+                max_attempts=max_attempts,
+                max_simultaneous_positions=max_simultaneous_positions,
+                max_leverage=max_leverage,
+                allowed_profile=allowed_profile,
+                allowed_symbols=allowed_symbols or self.SYMBOL_SEQUENCE,
             ),
             current_playbook_id="PB-000-OBSERVE-ONLY",
             status=BrcCampaignStatus.OBSERVE,
@@ -227,6 +237,11 @@ class BoundedRiskCampaignService:
                 "max_campaign_loss": str(max_campaign_loss),
                 "profit_protect_trigger": str(profit_protect_trigger),
                 "initial_playbook_id": campaign.current_playbook_id,
+                "max_attempts": max_attempts,
+                "max_simultaneous_positions": max_simultaneous_positions,
+                "max_leverage": max_leverage,
+                "allowed_profile": allowed_profile,
+                "allowed_symbols": list(allowed_symbols or self.SYMBOL_SEQUENCE),
             },
         )
         return campaign
@@ -2733,7 +2748,10 @@ class BoundedRiskCampaignService:
             raise BrcRuleViolation("risk envelope blocks third attempt")
         if symbol not in campaign.risk_envelope.allowed_symbols:
             raise BrcRuleViolation(f"symbol not allowed by risk envelope: {symbol}")
-        expected = self.SYMBOL_SEQUENCE[campaign.attempt_count]
+        allowed_sequence = campaign.risk_envelope.allowed_symbols or self.SYMBOL_SEQUENCE
+        if campaign.attempt_count >= len(allowed_sequence):
+            raise BrcRuleViolation("risk envelope allowed symbol sequence is exhausted")
+        expected = allowed_sequence[campaign.attempt_count]
         if symbol != expected:
             raise BrcRuleViolation(f"BRC sequence requires {expected} before {symbol}")
         last_attempt = campaign.last_attempt

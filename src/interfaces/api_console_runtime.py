@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import logging
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -56,6 +57,11 @@ from src.domain.bounded_risk_campaign import (
 from src.application.phase5e_rehearsal_feasibility import (
     Phase5EControlledSymbolFeasibility,
     assess_controlled_symbol_feasibility,
+)
+from src.application.strategy_trial_controlled_testnet_carrier import (
+    StrategyTrialControlledTestnetCarrier,
+    get_strategy_trial_controlled_testnet_carrier,
+    strategy_trial_controlled_testnet_carriers,
 )
 
 logger = logging.getLogger(__name__)
@@ -534,6 +540,46 @@ class BrcReviewDecisionRequest(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class StrategyTrialCarrierEntryRequest(BaseModel):
+    """Server-controlled carrier entry request.
+
+    Optional requested symbol/side fields are accepted only as assertions. They
+    cannot override the allowlisted carrier profile.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    requested_symbol: Optional[str] = Field(default=None, max_length=64)
+    requested_side: Optional[Literal["long", "short"]] = None
+    reason: str = Field(default="Strategy trial controlled testnet carrier rehearsal", max_length=512)
+
+
+class StrategyTrialCarrierListResponse(BaseModel):
+    carriers: list[dict[str, Any]]
+    live_ready: Literal[False] = False
+    auto_execution_ready: Literal[False] = False
+    access_boundary: str = (
+        "Finite allowlisted strategy-trial controlled testnet carriers only. "
+        "No live, arbitrary symbol, leverage, transfer, or withdrawal authority."
+    )
+
+
+class StrategyTrialCarrierEntryResponse(BaseModel):
+    carrier_id: str
+    readiness_verdict: Literal["testnet_rehearsal_completed"]
+    campaign: dict
+    switch_decision: dict
+    attempt: dict
+    entry: ControlledEntryResponse
+    runtime_campaign_state: Optional[dict[str, Any]] = None
+    preflight_facts: dict[str, Any] = Field(default_factory=dict)
+    live_ready: Literal[False] = False
+    auto_execution_ready: Literal[False] = False
+    no_real_funds: Literal[True] = True
+    execution_permission_granted: Literal[False] = False
+    order_permission_granted: Literal[False] = False
+
+
 class BrcLlmWorkflowCreateRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2048)
 
@@ -847,6 +893,248 @@ def _require_brc_read_gates(request: Request):
         raise HTTPException(status_code=403, detail="Endpoint requires EXCHANGE_TESTNET=true")
     _require_brc_runtime_scope(resolved)
     return api_module, resolved
+
+
+def _resolve_strategy_trial_carrier(carrier_id: str) -> StrategyTrialControlledTestnetCarrier:
+    carrier = get_strategy_trial_controlled_testnet_carrier(carrier_id.strip())
+    if carrier is None:
+        raise HTTPException(status_code=404, detail="unsupported_strategy_trial_carrier")
+    if not carrier.testnet_rehearsal_enabled:
+        raise HTTPException(status_code=409, detail="carrier_testnet_rehearsal_disabled")
+    return carrier
+
+
+def _carrier_controlled_spec(
+    carrier: StrategyTrialControlledTestnetCarrier,
+    *,
+    profile_name: str,
+) -> ControlledSymbolSpec:
+    return ControlledSymbolSpec(
+        symbol=carrier.runtime_symbol,
+        amount_max=carrier.amount_max,
+        profile=profile_name,
+        min_notional_default=carrier.min_notional_default,
+        max_notional=carrier.max_notional,
+        amount_step=carrier.amount_step,
+    )
+
+
+def _require_strategy_trial_carrier_runtime_scope(
+    resolved,
+    carrier: StrategyTrialControlledTestnetCarrier,
+) -> None:
+    if resolved.profile_name not in set(carrier.allowed_runtime_profiles):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "testnet_profile_not_configured: expected one of "
+                f"{list(carrier.allowed_runtime_profiles)}, got {resolved.profile_name}"
+            ),
+        )
+    environment = getattr(resolved, "environment", None)
+    trading_env = str(getattr(environment, "trading_env", "") or "").strip().lower()
+    if not trading_env or trading_env in {"live", "prod", "production", "mainnet", "real"}:
+        raise HTTPException(status_code=403, detail="trading_env_live_or_unknown")
+    if not bool(getattr(environment, "exchange_testnet", False)):
+        raise HTTPException(status_code=403, detail="exchange_testnet_not_confirmed")
+    market = getattr(resolved, "market", None)
+    symbols = set(getattr(market, "symbols", []) or [])
+    required = set(carrier.required_market_symbols)
+    if symbols != required:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "testnet_profile_symbols_mismatch: expected "
+                f"{sorted(required)}, got {sorted(symbols)}"
+            ),
+        )
+
+
+def _require_strategy_trial_carrier_mutation_gates(
+    request: Request,
+    carrier: StrategyTrialControlledTestnetCarrier,
+):
+    if not _test_signal_injection_enabled():
+        raise HTTPException(status_code=403, detail="runtime_test_signal_injection_disabled")
+    if not _runtime_control_api_enabled():
+        raise HTTPException(status_code=403, detail="runtime_control_api_disabled")
+    _require_internal_runtime_control(request)
+    api_module = _load_api_module()
+    config_provider = getattr(api_module, "_runtime_config_provider", None)
+    resolved = config_provider.resolved_config if config_provider else None
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="runtime_config_not_resolved")
+    _require_strategy_trial_carrier_runtime_scope(resolved, carrier)
+    return api_module, resolved
+
+
+def _validate_strategy_trial_carrier_entry_request(
+    carrier: StrategyTrialControlledTestnetCarrier,
+    body: StrategyTrialCarrierEntryRequest,
+) -> None:
+    requested_symbol = body.requested_symbol.strip() if body.requested_symbol else None
+    allowed_symbol_assertions = {
+        carrier.strategy_profile.symbol,
+        carrier.runtime_symbol,
+        carrier.runtime_symbol.replace("/", "").replace(":USDT", ""),
+    }
+    if requested_symbol is not None and requested_symbol not in allowed_symbol_assertions:
+        raise HTTPException(status_code=409, detail="wrong_symbol")
+    if body.requested_side is not None and body.requested_side != carrier.strategy_profile.side:
+        raise HTTPException(status_code=409, detail="wrong_side")
+
+
+async def _require_strategy_trial_carrier_preflight(
+    *,
+    api_module,
+    carrier: StrategyTrialControlledTestnetCarrier,
+    spec: ControlledSymbolSpec,
+) -> dict[str, Any]:
+    facts: dict[str, Any] = {"carrier_id": carrier.carrier_id, "symbol": spec.symbol}
+    blockers: list[str] = []
+
+    gks_svc = getattr(api_module, "_global_kill_switch_service", None)
+    if gks_svc is None:
+        blockers.append("gks_status_required_before_rehearsal")
+        facts["gks"] = {"status": "unavailable"}
+    elif gks_svc.is_active():
+        blockers.append("gks_blocked")
+        facts["gks"] = {"active": True}
+    else:
+        facts["gks"] = {"active": False}
+
+    guard_svc = getattr(api_module, "_startup_trading_guard_service", None)
+    if guard_svc is None:
+        blockers.append("startup_guard_status_required_before_rehearsal")
+        facts["startup_guard"] = {"status": "unavailable"}
+    elif not guard_svc.is_armed():
+        blockers.append("startup_guard_blocked")
+        facts["startup_guard"] = {"armed": False}
+    else:
+        facts["startup_guard"] = {"armed": True}
+
+    reconciliation = _strategy_trial_reconciliation_fact(api_module)
+    facts["reconciliation"] = reconciliation
+    if not reconciliation["clean"]:
+        blockers.append(reconciliation["blocker"])
+
+    account_facts = _strategy_trial_account_facts(api_module)
+    facts["account_facts"] = account_facts
+    if not account_facts["fresh"]:
+        blockers.append(account_facts["blocker"])
+
+    inventory = await _build_controlled_inventory(
+        api_module=api_module,
+        profile=spec.profile,
+        symbols={spec.symbol},
+    )
+    facts["inventory"] = inventory.model_dump(mode="json")
+    if not inventory.all_flat:
+        for state in inventory.symbols:
+            if state.local_active_position_count or state.exchange_position_count:
+                blockers.append("conflicting_position_exists")
+            if (
+                state.local_open_order_count
+                or state.exchange_normal_open_order_count
+                or state.exchange_conditional_open_order_count
+            ):
+                blockers.append("conflicting_open_order_exists")
+
+    deduped = list(dict.fromkeys(blockers))
+    facts["blockers"] = deduped
+    if deduped:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "readiness_verdict": "testnet_rehearsal_blocked_with_explicit_reasons",
+                "blockers": deduped,
+                "facts": facts,
+                "live_ready": False,
+                "auto_execution_ready": False,
+            },
+        )
+    return facts
+
+
+def _strategy_trial_reconciliation_fact(api_module) -> dict[str, Any]:
+    summary = getattr(api_module, "_startup_reconciliation_summary", None)
+    if summary is None:
+        return {
+            "clean": False,
+            "status": "unavailable",
+            "blocker": "reconciliation_status_required_before_rehearsal",
+        }
+    status = str(
+        _dict_or_attr(summary, "status")
+        or _dict_or_attr(summary, "reconciliation_status")
+        or ""
+    ).lower()
+    failed_count = _to_int_or_none(_dict_or_attr(summary, "failed_reconciliations_count"))
+    if status in {"clean", "passed", "ok"} or failed_count == 0:
+        return {"clean": True, "status": status or "clean", "failed_reconciliations_count": failed_count}
+    return {
+        "clean": False,
+        "status": status or "unknown",
+        "failed_reconciliations_count": failed_count,
+        "blocker": "reconciliation_not_clean",
+    }
+
+
+def _strategy_trial_account_facts(api_module) -> dict[str, Any]:
+    snapshot = _get_account_snapshot(api_module)
+    if snapshot is None:
+        return {"fresh": False, "status": "unavailable", "blocker": "account_facts_unavailable"}
+    now_ms = int(time.time() * 1000)
+    timestamp_ms = _to_int_or_none(getattr(snapshot, "timestamp", None))
+    freshness = _strategy_trial_snapshot_freshness(timestamp_ms, generated_at_ms=now_ms)
+    total_balance = _to_decimal(getattr(snapshot, "total_balance", None))
+    available_balance = _to_decimal(getattr(snapshot, "available_balance", None))
+    if freshness == "stale":
+        blocker = "account_facts_stale"
+    elif freshness != "fresh":
+        blocker = "account_facts_unavailable"
+    elif total_balance is None:
+        blocker = "account_equity_unavailable"
+    elif available_balance is None:
+        blocker = "available_margin_unavailable"
+    else:
+        blocker = None
+    return {
+        "fresh": blocker is None,
+        "freshness": freshness,
+        "timestamp_ms": timestamp_ms,
+        "account_equity_available": total_balance is not None,
+        "available_margin_available": available_balance is not None,
+        "source": "runtime_cached_account_snapshot",
+        "blocker": blocker,
+    }
+
+
+def _strategy_trial_snapshot_freshness(
+    timestamp_ms: Optional[int],
+    *,
+    generated_at_ms: int,
+) -> str:
+    if timestamp_ms is None:
+        return "unknown"
+    if timestamp_ms > generated_at_ms + 60_000:
+        return "unknown"
+    return "fresh" if generated_at_ms - timestamp_ms <= 5 * 60 * 1000 else "stale"
+
+
+def _dict_or_attr(obj: Any, key: str) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _to_int_or_none(value: Any) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 async def _require_no_phase5e_active_positions(api_module, spec: ControlledSymbolSpec) -> None:
@@ -2049,6 +2337,161 @@ async def switch_brc_playbook(
     )
 
 
+@router.get("/test/brc/carriers", response_model=StrategyTrialCarrierListResponse)
+async def list_strategy_trial_controlled_testnet_carriers(
+    request: Request,
+) -> StrategyTrialCarrierListResponse:
+    """List finite allowlisted strategy-trial controlled testnet carriers."""
+    _require_internal_runtime_control(request)
+    return StrategyTrialCarrierListResponse(
+        carriers=[
+            carrier.model_dump(mode="json")
+            for carrier in strategy_trial_controlled_testnet_carriers().values()
+        ],
+    )
+
+
+@router.post(
+    "/test/brc/carriers/{carrier_id}/execute-controlled-entry",
+    response_model=StrategyTrialCarrierEntryResponse,
+)
+async def execute_strategy_trial_carrier_controlled_entry(
+    carrier_id: str,
+    request: Request,
+    body: StrategyTrialCarrierEntryRequest = StrategyTrialCarrierEntryRequest(),
+) -> StrategyTrialCarrierEntryResponse:
+    """Execute one allowlisted strategy-trial controlled testnet carrier entry.
+
+    This is a testnet-only carrier path. It rejects arbitrary symbol, side,
+    amount, leverage, and live runtime profiles before touching the
+    orchestrator.
+    """
+    carrier = _resolve_strategy_trial_carrier(carrier_id)
+    _validate_strategy_trial_carrier_entry_request(carrier, body)
+    api_module, resolved = _require_strategy_trial_carrier_mutation_gates(request, carrier)
+    spec = _carrier_controlled_spec(carrier, profile_name=resolved.profile_name)
+    preflight_facts = await _require_strategy_trial_carrier_preflight(
+        api_module=api_module,
+        carrier=carrier,
+        spec=spec,
+    )
+    feasibility = await _build_brc_feasibility(api_module=api_module, spec=spec)
+    if feasibility.reason == "MIN_NOTIONAL_EXCEEDS_CAP":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "readiness_verdict": "testnet_rehearsal_blocked_with_explicit_reasons",
+                "blockers": ["operation_layer_cap_below_min_notional"],
+                "reason": f"min_notional {feasibility.min_notional} exceeds cap {feasibility.max_notional}",
+                "live_ready": False,
+            },
+        )
+    if feasibility.reason == "NOTIONAL_BELOW_MIN_NOTIONAL":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "readiness_verdict": "testnet_rehearsal_blocked_with_explicit_reasons",
+                "blockers": ["testnet_notional_below_min_notional"],
+                "reason": f"notional {feasibility.notional} below min_notional {feasibility.min_notional}",
+                "live_ready": False,
+            },
+        )
+    if feasibility.reason == "NOTIONAL_ABOVE_CAP":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "readiness_verdict": "testnet_rehearsal_blocked_with_explicit_reasons",
+                "blockers": ["operation_layer_cap_exceeded"],
+                "reason": f"notional {feasibility.notional} above cap {feasibility.max_notional}",
+                "live_ready": False,
+            },
+        )
+
+    service = _get_brc_campaign_service(api_module)
+    campaign_state_service = _get_campaign_state_service(api_module)
+    campaign = await service.create_campaign(
+        bucket_id=f"{carrier.carrier_id}-TESTNET-BUCKET",
+        authorized_amount=carrier.max_notional,
+        max_campaign_loss=carrier.max_notional,
+        profit_protect_trigger=carrier.max_notional,
+        reason=f"Strategy trial controlled testnet carrier: {carrier.carrier_id}",
+        max_attempts=carrier.risk_cap_profile.max_trial_attempts,
+        max_simultaneous_positions=carrier.risk_cap_profile.max_concurrent_position,
+        max_leverage=carrier.leverage,
+        allowed_profile=resolved.profile_name,
+        allowed_symbols=(spec.symbol,),
+    )
+    decision = await service.switch_playbook(
+        new_playbook_id=_BRC_CONTROLLED_PLAYBOOK,
+        reason_category="strategy_trial_controlled_testnet_carrier",
+        reason_text=f"Strategy trial controlled testnet carrier path for {carrier.carrier_id}",
+        evidence_refs=[
+            f"carrier:{carrier.carrier_id}",
+            "operation_layer:controlled_testnet_carrier_path",
+        ],
+    )
+    if decision.decision_result.value != "allowed":
+        raise HTTPException(status_code=409, detail=decision.blocked_reason or "playbook_switch_blocked")
+
+    runtime_state = campaign_state_service.get_state()
+    if runtime_state.status == CampaignRuntimeState.CLOSED.value:
+        runtime_state = await campaign_state_service.set_state(
+            status=CampaignRuntimeState.OBSERVE.value,
+            reason=f"Strategy trial carrier flat reset: {carrier.carrier_id}",
+            updated_by="strategy_trial_carrier_endpoint",
+            trigger=CampaignTransitionTrigger.OWNER_REVIEW_RESET,
+            metadata={
+                "owner_review": True,
+                "owner_review_verified": True,
+                "carrier_id": carrier.carrier_id,
+                "preflight_facts": preflight_facts,
+            },
+            profile_id=resolved.profile_name,
+            symbol=spec.symbol,
+        )
+    if runtime_state.status != CampaignRuntimeState.OBSERVE.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"runtime campaign state must be observe before arming; got {runtime_state.status}",
+        )
+
+    attempt = await service.arm_attempt(symbol=spec.symbol, reason=body.reason)
+    runtime_state = await campaign_state_service.set_state(
+        status=CampaignRuntimeState.ARMED.value,
+        reason=f"Strategy trial controlled testnet carrier arm: {carrier.carrier_id}",
+        updated_by="strategy_trial_carrier_endpoint",
+        trigger=CampaignTransitionTrigger.OWNER_ARM,
+        active_strategy_contract_id=f"carrier:{carrier.carrier_id}",
+        active_session_id=attempt.attempt_id,
+        metadata={
+            "carrier_id": carrier.carrier_id,
+            "candidate_id": carrier.strategy_profile.candidate_id,
+            "runtime_symbol": spec.symbol,
+            "playbook_id": _BRC_CONTROLLED_PLAYBOOK,
+        },
+        profile_id=resolved.profile_name,
+        symbol=spec.symbol,
+    )
+    entry = await _execute_strategy_trial_carrier_entry(
+        api_module=api_module,
+        service=service,
+        carrier=carrier,
+        spec=spec,
+        feasibility=feasibility,
+    )
+    campaign = await service.require_current_campaign()
+    return StrategyTrialCarrierEntryResponse(
+        carrier_id=carrier.carrier_id,
+        readiness_verdict="testnet_rehearsal_completed",
+        campaign=campaign.model_dump(mode="json"),
+        switch_decision=decision.model_dump(mode="json"),
+        attempt=attempt.model_dump(mode="json"),
+        entry=entry,
+        runtime_campaign_state=_to_campaign_state_response(runtime_state).model_dump(mode="json"),
+        preflight_facts=preflight_facts,
+    )
+
+
 @router.post("/test/brc/{symbol_key}/arm-attempt", response_model=BrcAttemptResponse)
 async def arm_brc_attempt(
     symbol_key: str,
@@ -2247,6 +2690,141 @@ async def execute_brc_controlled_entry(
         if isinstance(exc, BrcRuleViolation):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise HTTPException(status_code=500, detail="Execution failed") from exc
+
+    return ControlledEntryResponse(
+        status=intent.status.value if hasattr(intent.status, "value") else str(intent.status),
+        intent_id=intent.id,
+        signal_id=intent.signal_id,
+        entry_price=entry_price,
+        stop_loss=sl_price,
+        amount=amount,
+        profile=spec.profile,
+        blocked_reason=getattr(intent, "blocked_reason", None),
+        attempt_locked=True,
+        notional=feasibility.notional,
+        min_notional=feasibility.min_notional,
+        symbol=spec.symbol,
+    )
+
+
+async def _execute_strategy_trial_carrier_entry(
+    *,
+    api_module,
+    service: BoundedRiskCampaignService,
+    carrier: StrategyTrialControlledTestnetCarrier,
+    spec: ControlledSymbolSpec,
+    feasibility: Phase5EControlledSymbolFeasibility,
+) -> ControlledEntryResponse:
+    """Execute an already-preflighted allowlisted carrier entry."""
+    from src.domain.models import Direction, OrderStrategy, SignalResult
+
+    campaign = await service.require_current_campaign()
+    if not campaign.last_attempt or campaign.last_attempt.symbol != spec.symbol:
+        raise HTTPException(status_code=409, detail="BLOCKED: no armed strategy-trial carrier attempt for this symbol")
+    if campaign.last_attempt.status.value != "armed":
+        raise HTTPException(status_code=409, detail="BLOCKED: strategy-trial carrier attempt is not armed")
+    if _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL.get(spec.lock_key):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Controlled entry already executed for {spec.symbol} in this runtime session",
+        )
+
+    orchestrator = _get_orchestrator(api_module)
+    blocks = orchestrator.list_protection_health_blocks()
+    if spec.symbol in blocks:
+        raise HTTPException(status_code=409, detail=f"BLOCKED: protection-health block active for {spec.symbol}")
+    if orchestrator.is_symbol_blocked(spec.symbol):
+        raise HTTPException(status_code=409, detail=f"BLOCKED: circuit breaker active for {spec.symbol}")
+
+    entry_price = feasibility.price
+    sl_price = entry_price * Decimal("0.99")
+    tp1_price = entry_price * Decimal("1.01")
+    tp2_price = entry_price * Decimal("1.035")
+    amount = feasibility.amount
+    signal = SignalResult(
+        symbol=spec.symbol,
+        timeframe="1h",
+        direction=Direction.LONG,
+        entry_price=entry_price,
+        suggested_stop_loss=sl_price,
+        suggested_position_size=amount,
+        current_leverage=carrier.leverage,
+        tags=[
+            {"key": "source", "value": "strategy_trial_controlled_testnet_carrier"},
+            {"key": "carrier_id", "value": carrier.carrier_id},
+            {"key": "candidate_id", "value": carrier.strategy_profile.candidate_id},
+            {"key": "brc_attempt_id", "value": campaign.last_attempt.attempt_id},
+        ],
+        risk_reward_info=f"strategy_trial_controlled_testnet:{carrier.carrier_id}:1h:LONG",
+        status="PENDING",
+        strategy_name=f"strategy_trial_controlled_testnet/{carrier.carrier_id}",
+        score=1.0,
+        take_profit_levels=[
+            {"price": str(tp1_price), "ratio": "0.5"},
+            {"price": str(tp2_price), "ratio": "0.5"},
+        ],
+    )
+    strategy = OrderStrategy(
+        id=f"strat_strategy_trial_{carrier.carrier_id.lower().replace('-', '_')}",
+        name=f"strategy_trial_controlled_testnet/{spec.profile}/{spec.symbol}",
+        tp_levels=2,
+        tp_ratios=[Decimal("0.5"), Decimal("0.5")],
+        tp_targets=[Decimal("1.0"), Decimal("3.5")],
+        initial_stop_loss_rr=Decimal("-1.0"),
+        trailing_stop_enabled=False,
+        oco_enabled=True,
+    )
+
+    _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL[spec.lock_key] = True
+    try:
+        intent = await orchestrator.execute_signal(signal, strategy)
+        intent_status = intent.status.value if hasattr(intent.status, "value") else str(intent.status)
+        if intent_status in {"blocked", "failed"}:
+            _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL.pop(spec.lock_key, None)
+            try:
+                await service.mark_attempt_blocked(
+                    symbol=spec.symbol,
+                    reason=getattr(intent, "blocked_reason", None)
+                    or getattr(intent, "failed_reason", None)
+                    or f"intent_status={intent_status}",
+                    metadata={
+                        "carrier_id": carrier.carrier_id,
+                        "intent_id": intent.id,
+                        "signal_id": intent.signal_id,
+                    },
+                )
+            except Exception:
+                logger.warning("Failed to record blocked strategy-trial carrier attempt", exc_info=True)
+            return ControlledEntryResponse(
+                status=intent_status,
+                intent_id=intent.id,
+                signal_id=intent.signal_id,
+                entry_price=entry_price,
+                stop_loss=sl_price,
+                amount=amount,
+                profile=spec.profile,
+                blocked_reason=getattr(intent, "blocked_reason", None)
+                or getattr(intent, "failed_reason", None),
+                attempt_locked=False,
+                notional=feasibility.notional,
+                min_notional=feasibility.min_notional,
+                symbol=spec.symbol,
+            )
+        await service.record_attempt_entry(
+            symbol=spec.symbol,
+            record=AttemptOpenRecord(
+                intent_id=intent.id,
+                signal_id=intent.signal_id,
+                amount=amount,
+                notional=feasibility.notional,
+            ),
+        )
+    except Exception as exc:
+        _CONTROLLED_ENTRY_EXECUTED_BY_SYMBOL.pop(spec.lock_key, None)
+        logger.error("Strategy-trial carrier controlled entry failed: %s", exc, exc_info=True)
+        if isinstance(exc, BrcRuleViolation):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Strategy-trial carrier execution failed") from exc
 
     return ControlledEntryResponse(
         status=intent.status.value if hasattr(intent.status, "value") else str(intent.status),
