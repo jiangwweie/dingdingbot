@@ -1,6 +1,6 @@
 # Codex-Claude Handoff Template
 
-Last updated: 2026-04-29
+Last updated: 2026-06-01
 
 ## Purpose
 
@@ -16,6 +16,18 @@ The user should not need to remember or recreate handoff wording. Codex should g
 4. Claude executes only the task card.
 5. Claude returns the required result format.
 6. Codex reviews Claude output before merge or integration decisions.
+
+Current execution boundary:
+
+- read `docs/ops/agent-current-brc-baseline.md`;
+- real live trading / real-funds order placement requires separate explicit
+  Owner authorization;
+- testnet/dev/readiness/controlled rehearsal/profile-scoped cleanup work does
+  not require additional Owner authorization just because it touches
+  execution-chain concepts;
+- blocker handling is progress-first: live/real-funds stops, testnet/dev scope
+  is repaired/reset/cleaned when safe, unknown unsafe blockers are investigated
+  before blocking.
 
 ## Delegation Size Rule
 
@@ -48,6 +60,7 @@ Use this when starting or resuming a task:
 ```markdown
 Read:
 - AGENTS.md
+- docs/ops/agent-current-brc-baseline.md
 - docs/ops/live-safe-v1-program.md
 - docs/ops/live-safe-v1-task-board.md
 - docs/ops/agent-working-rules.md
@@ -100,6 +113,9 @@ Why this worker task exists and how it fits the Codex-owned plan.
 - Codex owns architecture and merge readiness.
 - Claude owns only this bounded implementation/test task.
 - Return/drawdown numbers are evaluation dimensions, not hard constraints.
+- Real live / real-funds order placement requires separate explicit Owner authorization.
+- Testnet/dev/readiness/profile-scoped cleanup does not require additional Owner authorization when the task card allows it.
+- Do not stop at the first blocker: classify live/real-funds, testnet/dev/profile-scoped, or unknown unsafe.
 
 ## Allowed files
 - path/to/file_a.py
@@ -120,6 +136,9 @@ Why this worker task exists and how it fits the Codex-owned plan.
 1. ...
 2. ...
 3. ...
+- Preserve real live / real-funds safety boundaries.
+- Do not ask Owner for testnet authorization.
+- Do not output a next recommended task.
 
 ## Tests
 - Exact command or targeted verification.
@@ -131,8 +150,10 @@ Why this worker task exists and how it fits the Codex-owned plan.
 
 ## Stop And Ask If
 - A required change falls outside Allowed files.
-- The task requires architecture, runtime profile, strategy parameter, or merge decisions.
+- The task requires architecture, live runtime profile, real-funds permission,
+  strategy parameter, or merge decisions.
 - Existing behavior conflicts with the task card.
+- A blocker is live/real-funds or remains unknown unsafe after investigation.
 ```
 
 Codex should prefer worker tasks like tests, local adapters, local serializers, narrow reports, and scoped integrations. Codex should not delegate an entire stream, a cross-core refactor, or a task that bundles several independent outcomes.
@@ -158,9 +179,15 @@ Claude must return:
 ## Risks
 - ...
 
-## Out-of-scope needs
+## Hard blockers
+- ...
+
+## Safety proof
 - ...
 ```
+
+Claude must not include "Next recommended task", "Recommended next step", or
+"What should we do next".
 
 ## Codex Review Prompt
 

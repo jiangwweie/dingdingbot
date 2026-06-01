@@ -24,12 +24,12 @@ Further Strategy Contract/runtime implementation is deferred until playbook
 switching governance, decision logs, cooldown/hard-lock rules, and CPV0_2
 continuity exist as paper-only governance artifacts.
 
-Live-safe v1 work may support future execution safety. Under
-`ADR-0009`, runtime, paper, testnet, tiny-live-style rehearsal, read-only
-exchange sync, and other non-real-live steps are allowed only after reasonable
-scoped verification and explicit Owner authorization for the specific action.
-Real live trading remains prohibited unless separately and explicitly
-authorized.
+Live-safe v1 work may support future execution safety. Under `ADR-0009` as
+amended on 2026-06-01, real live trading / real-funds order placement remains
+prohibited unless separately and explicitly authorized. Runtime, paper, testnet,
+tiny-live-style rehearsal, read-only exchange sync, and other non-real-live
+steps are governed by scoped verification and hard safety gates, not a blanket
+Owner-authorization stop.
 
 ## Role Of This Document
 
@@ -44,15 +44,16 @@ business mainline.
 ## Goal
 
 Preserve and harden the execution-safety foundation. Runtime and testnet
-execution may be used when it is the appropriate verification boundary, but
-only after scoped verification and explicit Owner authorization.
+execution may be used when it is the appropriate verification boundary after
+scoped verification and applicable safety gates.
 
 The scope of this program is `Live-safe Foundation`, not the full long-term
 platform roadmap. Current work must not start real live trading, real-funds
 deployment, portfolio/router work, SOL Phase 2, CPM reopening, short-side work,
 or parameter optimization. Runtime, paper, testnet, or tiny-live-style
-non-real-live execution requires a separate scoped action request and Owner
-authorization before execution.
+non-real-live execution requires scoped verification, profile/environment gates,
+and cleanup/exit safety, but not an additional Owner authorization step merely
+because it is testnet/dev/readiness work.
 
 The current Owner-facing stage starts from docs/design/sandbox preparation for
 the Personal Leveraged Campaign chain. Live-safe implementation tasks may remain
@@ -100,11 +101,11 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Do not connect real funds or execute real live trading without a separate
   explicit Owner authorization decision.
 - Do not rewrite the architecture.
-- Do not change live/runtime profile trading parameters.
+- Do not change live profile trading parameters.
 - Do not turn investor preference numbers into hard-coded engineering constraints.
-- Do not start any runtime, paper/testnet, tiny-live-style, exchange-connected,
-  or account-action step without scoped verification and explicit Owner
-  authorization for that step.
+- Do not start real live or real-funds action without separate explicit Owner
+  authorization. For testnet/dev/profile-scoped work, verify scope and safety
+  gates, then continue without asking for additional testnet authorization.
 - Do not promote SOL Phase 2, CPM, short-side, portfolio/router, or
   multi-strategy work into current mainline without a separate Owner decision.
 
@@ -129,10 +130,11 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 ## Runtime Safety
 
 - Default to sim/testnet behavior.
-- Runtime profile changes require a separate task card and explicit user approval.
+- Live runtime profile changes require a separate task card and explicit user approval.
 - Exchange credentials, order sizing defaults, and live profile changes must not be mixed with code logic changes.
 - Real live trading remains the hard execution red line. Non-real-live runtime
-  and testnet work is permitted only through the ADR-0009 action gate.
+  and testnet work is permitted through scoped verification, profile gates, and
+  hard safety checks under the current agent baseline.
 
 ## Core Files
 

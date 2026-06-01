@@ -1,7 +1,7 @@
 # CLAUDE.md - Dingdingbot Claude Operating Guide
 
-Last updated: 2026-05-29
-Current phase: BRC fast trial-and-review research system
+Last updated: 2026-06-01
+Current phase: BRC fast small-capital live trial system
 
 ## Role
 
@@ -18,6 +18,7 @@ System goals are capability goals. Annual return and max drawdown numbers are in
 Before starting work, read:
 
 - `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — current project baseline
+- `docs/ops/agent-current-brc-baseline.md` — current agent execution baseline
 - `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts
 - `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — trial blockers
 - `docs/ops/project-roadmap-v2.md`
@@ -83,10 +84,14 @@ Do not edit these unless the task card explicitly allows it.
 - Do not tune ETH Pinbar parameters.
 - Do not add multi-asset expansion.
 - Do not activate real funds.
-- Do not edit runtime/live trading profiles.
-- Do not change exchange credentials or order sizing defaults.
-- Do not mix config/profile changes with code logic changes.
+- Do not edit live trading profiles.
+- Do not change exchange credentials or real-funds order sizing defaults.
+- Do not mix live config/profile changes with code logic changes.
 - Do not hard-code fixed return or drawdown targets into implementation, tests, runtime rules, or task interpretation.
+- Do not treat controlled testnet/dev/readiness work as prohibited merely
+  because it touches execution-chain concepts. Classify blocker scope first:
+  live/real-funds stops; testnet/dev/profile-scoped blockers may be safely
+  repaired, reset, or cleaned up when the task card allows it.
 
 ## Testing
 
@@ -109,7 +114,11 @@ Return:
 - Tests run.
 - Tests not run and why.
 - Risks.
-- Any out-of-scope needs.
+- Hard blockers, if any.
+- Safety proof.
+
+Do not include "Next recommended task", "Recommended next step", or "What
+should we do next". The project controller decides sequencing.
 
 Do not make merge decisions. Codex reviews and decides.
 

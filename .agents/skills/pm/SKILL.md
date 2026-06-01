@@ -9,6 +9,7 @@ user-invocable: true
 ## Read First
 
 - `AGENTS.md`
+- `docs/ops/agent-current-brc-baseline.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/live-safe-v1-task-board.md`
 - `docs/ops/agent-working-rules.md`
@@ -47,5 +48,8 @@ Claude must stop if it needs files outside `Allowed files`.
 
 - Do not route core execution/risk ownership away from Codex unless explicitly approved.
 - Do not optimize strategy returns during P0 Live-safe work.
-- Do not modify runtime/live profiles without explicit user approval.
+- Do not modify live profiles or real-funds permissions without explicit user
+  approval.
+- Do not treat controlled testnet/dev/readiness work as prohibited merely
+  because it touches execution-chain concepts.
 - Ask before long test suites.

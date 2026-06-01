@@ -10,6 +10,11 @@ Runtime effect: boundary clarification only
 
 Trading permission effect: no real live trading permission
 
+2026-06-01 amendment: supersedes the original requirement that every
+non-real-live runtime/testnet/account-action step must request separate Owner
+authorization. Current agent baseline distinguishes real live / real funds from
+testnet/dev/readiness/controlled rehearsal work.
+
 ## Context
 
 The previous Personal Leveraged Campaign and Live-safe documents used a
@@ -19,28 +24,30 @@ runtime or testnet work.
 
 The project still needs explicit gates because runtime, paper, testnet, and
 tiny-live style work can mutate state, contact external services, or create
-operational risk even when no real live capital is used.
+operational risk even when no real live capital is used. Those gates are now
+implemented as scoped verification, profile checks, safety gates, and hard
+live/real-funds boundaries rather than a blanket Owner-authorization stop for
+every testnet/dev action.
 
 ## Decision
 
 All development and research work except real live trading may be executed when
-it satisfies both conditions:
+it satisfies scoped safety verification:
 
 1. reasonable scoped testing or verification has been completed for the work;
-2. Codex requests and receives explicit Owner authorization for the specific
-   runtime, paper, testnet, tiny-live, exchange-connectivity, or account-action
-   step before executing it.
+2. the work is not real live trading and does not place real-funds orders;
+3. profile, symbol, side, cap, protection, exit/cleanup, logging, GKS, and
+   credential safety gates pass where applicable.
 
 Real live trading remains prohibited unless the Owner later gives a separate
 explicit real-live authorization decision.
 
-## Required Gate For Non-Real-Live Execution
+## Required Gate For Real Live / Real Funds
 
-Before executing a non-real-live runtime or exchange-connected step, the request
-to Owner must state:
+Before executing any real live or real-funds order step, the request to Owner
+must state:
 
-- intended mode: local runtime, demo, paper, testnet, tiny-live, read-only
-  exchange sync, or other non-real-live mode;
+- intended mode and whether real funds are touched;
 - exact command, endpoint, script, or operational step;
 - expected external systems touched;
 - whether credentials, account state, orders, cancellations, transfers, or
@@ -49,6 +56,20 @@ to Owner must state:
   are involved;
 - verification already run;
 - stop condition and rollback path.
+
+## Non-Real-Live Execution Handling
+
+Testnet, dev, readiness, controlled rehearsal, PG non-live, console/API, and
+profile-scoped cleanup/reset/repair work does not require an additional Owner
+authorization step merely because it touches execution-chain concepts.
+
+Agents must classify blockers before stopping:
+
+- live / real-funds: hard stop unless separate explicit Owner authorization
+  exists;
+- testnet / dev / profile-scoped: inspect scope, safely repair/reset/cleanup
+  where bounded, and continue;
+- unknown unsafe: investigate; block only if safety cannot be established.
 
 ## Still Prohibited Without Separate Real-Live Authorization
 
@@ -64,8 +85,8 @@ to Owner must state:
 
 - Runtime, paper, testnet, tiny-live, and read-only exchange-sync work are not
   globally blocked anymore.
-- Each such execution still requires scoped verification and Owner approval at
-  the action boundary.
+- Such work requires scoped verification and applicable hard safety gates, not a
+  blanket Owner authorization step.
 - Existing docs-only or local-sandbox artifacts remain local until a promotion
   request explicitly names the next non-real-live execution mode.
 - The promotion gate should distinguish `not yet promoted` from `forbidden`.

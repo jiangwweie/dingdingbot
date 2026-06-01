@@ -126,7 +126,8 @@ continuity before any new execution-oriented branch.
 - all non-real-live development and research work, including runtime, paper,
   testnet, tiny-live-style rehearsal, read-only exchange sync, and other
   exchange-connected tests, may be executed after reasonable scoped
-  verification and explicit Owner authorization for the specific action;
+  verification and applicable hard safety gates; the 2026-06-01 agent baseline
+  supersedes the prior blanket Owner-authorization stop for testnet/dev work;
 - this does not authorize automatic strategy promotion, real-funds deployment,
   live order placement, live transfer, withdrawal, or LLM/agent autonomous
   buy/sell/short/size/leverage decisions.
@@ -634,10 +635,12 @@ explicit Owner authorization.
 This status does not by itself change runtime profiles, strategy parameters,
 risk rules, live enablement, or live-safe control logic. Research and
 classification evidence must continue to use explicit labels and promotion
-gates. Owner confirmation is required before any runtime, paper, testnet,
-tiny-live, exchange-connected, account-action, push, deployment, or direct
-research-to-order step; real live trading remains separately prohibited unless
-explicitly authorized.
+gates. Owner confirmation is required before real live trading, real-funds
+order placement, live account permission changes, push/deployment, withdrawal,
+transfer, or direct research-to-real-order steps. Testnet/dev/readiness and
+profile-scoped controlled rehearsal work should proceed through scoped
+verification, hard safety gates, and safe cleanup/repair rather than a blanket
+Owner-authorization stop.
 
 ## Core Design Principles
 

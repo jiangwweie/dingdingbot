@@ -26,6 +26,7 @@ Plan-with-files remains required, but it is program-scoped.
 For Live-safe v1, use:
 
 - `docs/ops/project-roadmap-v2.md`
+- `docs/ops/agent-current-brc-baseline.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/live-safe-v1-task-board.md`
 - `docs/ops/live-safe-v1-findings.md`
@@ -61,6 +62,9 @@ Do not write fixed annual return or max drawdown numbers as system constraints. 
 ## Scope Framing
 
 Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority.
+Treat `docs/ops/agent-current-brc-baseline.md` as the current worker execution
+boundary. Older research-only/read-only instructions are scope-limited unless
+the active task itself is research-only or read-only.
 
 Default rule:
 
@@ -123,7 +127,12 @@ Claude should return:
 - Tests run.
 - Tests not run and why.
 - Risks.
-- Any out-of-scope needs.
+- Hard blockers, if any.
+- Safety proof.
+
+Claude and Codex worker outputs must not include "Next recommended task",
+"Recommended next step", or "What should we do next". The project controller
+decides sequencing.
 
 ## Core File Discipline
 
@@ -141,10 +150,20 @@ Only Codex should modify core execution files unless a task card explicitly allo
 
 - Do not optimize strategy returns.
 - Do not tune ETH Pinbar parameters.
-- Do not edit live/runtime trading profiles.
-- Do not mix runtime profile changes with code logic changes.
+- Do not edit live trading profiles or real-funds permissions without explicit
+  Owner authorization.
+- Do not mix live runtime profile changes with code logic changes. Bounded
+  testnet/dev/profile-scoped cleanup/reset/repair may be included when the task
+  explicitly scopes and verifies it.
 - Do not let multiple agents modify core execution files concurrently.
 - Do not run long test suites without user confirmation.
 - Do not merge execution or risk changes without review.
 - Do not hard-code return or drawdown targets into architecture, task cards, runtime rules, or agent instructions.
 - Do not send oversized or architecture-shaping tasks to Claude unless the user explicitly approves that exception.
+
+Do not stop at the first blocker. Classify the blocker scope:
+
+- live/real-funds: stop unless explicit Owner authorization exists;
+- testnet/dev/profile-scoped: inspect, safely repair/reset/cleanup where
+  bounded, and continue;
+- unknown unsafe: investigate, then block only if safety cannot be established.

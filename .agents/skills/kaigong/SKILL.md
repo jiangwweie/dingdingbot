@@ -9,6 +9,7 @@ user-invocable: true
 ## Read
 
 - `AGENTS.md`
+- `docs/ops/agent-current-brc-baseline.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/live-safe-v1-task-board.md`
 - `docs/ops/live-safe-v1-progress.md`
@@ -20,7 +21,10 @@ user-invocable: true
 
 - Current git branch and status summary.
 - Current Live-safe v1 task board summary.
-- Recommended next task and why.
 - Whether the task should stay with Codex or be handed to Claude via task card.
+- Current hard blockers, if any.
+- Safety boundary summary.
 
 Do not use old `docs/planning/*` as active state.
+Do not output a next recommended task. The project controller decides
+sequencing.

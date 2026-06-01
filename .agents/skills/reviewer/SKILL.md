@@ -9,6 +9,7 @@ user-invocable: true
 ## Read First
 
 - `AGENTS.md`
+- `docs/ops/agent-current-brc-baseline.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/agent-working-rules.md`
 - Relevant task card and diff
@@ -23,6 +24,8 @@ Do not patch code during review unless the user explicitly asks.
 
 - Did the change stay inside `Allowed files`?
 - Did it touch a Codex-owned core file?
-- Did it modify runtime/live profiles or strategy parameters?
+- Did it modify live profiles, real-funds permissions, or strategy parameters?
+- If it touched testnet/dev/profile-scoped execution-chain code, did it stay
+  inside the allowed scoped safety gates?
 - Were tests appropriate and approved?
 - Are Decimal, logging, async, and domain purity constraints preserved?

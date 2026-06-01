@@ -1,29 +1,31 @@
 > [!IMPORTANT]
 > **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
+> **Current agent baseline**: `docs/ops/agent-current-brc-baseline.md`
 > **Current fact registry**: `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
 > **Current readiness blockers**: `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
 > **Document governance rules**: `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
 >
 > Older docs may be historical, superseded, or research-only. Use the governance rules to determine authority.
-> Project definition (Owner 2026-05-29): "fast trial-and-review research system for small risk-capital Campaigns".
+> Project definition (Owner 2026-06-01): "BRC fast small-capital live trial system".
 
 ---
 
 # Docs Index
 
-Last updated: 2026-05-29
+Last updated: 2026-06-01
 
 ## Current Baseline (start here)
 
 Read the current baseline documents first:
 
 1. `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — project definition and current state
-2. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
-3. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
-4. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
-5. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — detailed position analysis with evidence
-6. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
-7. `docs/ops/knowledge-pack/DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
+2. `docs/ops/agent-current-brc-baseline.md` — current agent/task execution boundary
+3. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
+4. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
+5. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
+6. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — detailed position analysis with evidence
+7. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
+8. `docs/ops/knowledge-pack/DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
 
 ## Historical Mainline (superseded)
 
@@ -59,8 +61,11 @@ Current research context is tracked in:
 - `docs/ops/opportunity-hypothesis-register.md`
 
 Research documents may inform strategy-contract design, but they do not
-authorize runtime, paper, testnet, live, tiny-live, real API keys, real account
-actions, leverage advice, sizing advice, or direct research-to-order wiring.
+authorize real live trading, real-funds orders, real API key changes, live
+account permission changes, withdrawal, transfer, leverage expansion, sizing
+advice, or direct research-to-real-order wiring. Research-only/read-only labels
+are scope-limited to those documents and do not globally prohibit controlled
+testnet/dev/readiness work under `agent-current-brc-baseline.md`.
 
 ## Runtime Safety Context
 

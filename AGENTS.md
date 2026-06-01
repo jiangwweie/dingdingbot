@@ -1,7 +1,7 @@
 # AGENTS.md - Dingdingbot Agent Operating Guide
 
-Last updated: 2026-05-29
-Current phase: BRC fast trial-and-review research system
+Last updated: 2026-06-01
+Current phase: BRC fast small-capital live trial system
 
 ## Current Document Authority
 
@@ -17,8 +17,12 @@ When project documents conflict, follow this order:
 Current project baseline starts from:
 `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
 
+Current agent execution baseline starts from:
+`docs/ops/agent-current-brc-baseline.md`
+
 Untracked files must never be described as integrated capabilities.
-Real live trading is prohibited unless Owner explicitly authorizes (ADR-0009).
+Real live trading / real-funds order placement is prohibited unless Owner
+explicitly authorizes that live action.
 
 ## Operating Model
 
@@ -87,14 +91,21 @@ Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority. Only c
 2. Task decomposition must identify dependencies and possible parallel work, but execution-chain core files must not be modified concurrently by multiple agents.
 3. Long or expensive tests require user confirmation before running.
 4. P0 Live-safe work must not optimize strategy returns or tune ETH Pinbar parameters.
-5. Runtime profile, live trading config, exchange credentials, and order-sizing default changes require explicit user approval and a separate task.
+5. Live runtime profile, live trading config, exchange credentials, and
+   real-funds order-sizing default changes require explicit user approval and a
+   separate task. Testnet/dev/profile-scoped cleanup/reset/repair can proceed
+   within the active task boundary after scoped verification.
 6. Claude may implement only from a task card with `Allowed files`, `Forbidden files`, `Requirements`, `Tests`, and `Done When`.
 7. Do not hard-code fixed return or drawdown targets into system constraints, task cards, runtime rules, or agent instructions.
 8. Claude subtasks must stay small: one primary outcome, small file surface, low architecture coupling, and clear acceptance.
-9. Real live trading is the absolute execution red line. Runtime, paper,
-   testnet, tiny-live, read-only exchange sync, and other non-real-live work may
-   proceed only after reasonable scoped verification and explicit Owner
-   authorization for the specific action.
+9. Real live trading / real-funds order placement is the absolute execution
+   red line. Testnet, dev, readiness, controlled rehearsal, PG non-live,
+   console/API, and profile-scoped cleanup/reset/repair work may proceed after
+   scoped verification without an additional Owner authorization step.
+10. Blocker handling must be progress-first: live/real-funds blockers stop;
+    testnet/dev/profile-scoped blockers should be inspected, safely repaired,
+    reset, or cleaned up where bounded, then work should continue; unknown
+    unsafe blockers stop only after investigation cannot establish safety.
 
 ## Core Files
 
@@ -153,7 +164,12 @@ Claude should return:
 - Tests run.
 - Tests not run and why.
 - Risks.
-- Any out-of-scope needs.
+- Hard blockers, if any.
+- Safety proof.
+
+Claude and Codex worker reports should not include "Next recommended task",
+"Recommended next step", or "What should we do next". The project controller
+decides sequencing.
 
 Codex reviews the result before merge decisions.
 
@@ -172,8 +188,10 @@ Codex reviews the result before merge decisions.
 - No multi-asset expansion.
 - No real live trading or real-funds activation without a separate explicit
   Owner authorization decision.
+- Testnet/dev/readiness/controlled rehearsal work is not a live authorization
+  boundary by itself.
 - No architecture rewrite.
-- No live/runtime profile changes without a separate explicit Owner
+- No live runtime profile changes without a separate explicit Owner
   authorization decision.
 
 ## Testing

@@ -9,6 +9,7 @@ user-invocable: true
 ## Read First
 
 - `AGENTS.md`
+- `docs/ops/agent-current-brc-baseline.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/agent-working-rules.md`
 - Relevant `docs/gpt/` evidence
@@ -33,4 +34,6 @@ For Live-safe v1, prefer ADRs in `docs/adr/` over old product-contract documents
 
 - Do not force OpenAPI or PRD artifacts unless the task actually changes an API/product contract.
 - Do not optimize strategies during P0 Live-safe work.
-- Do not change runtime/live profiles without explicit user approval.
+- Do not change live profiles or real-funds permissions without explicit user
+  approval. Testnet/dev/profile-scoped readiness or cleanup is governed by the
+  current agent baseline.
