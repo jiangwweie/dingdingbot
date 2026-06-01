@@ -438,6 +438,65 @@ export type Mi001BnbTrialReadinessGapResponse = {
   live_ready: false;
 };
 
+export type StrategyProfile = {
+  strategy_group: string;
+  strategy_id: string;
+  candidate_id: string;
+  symbol: string;
+  side: string;
+  execution_mode: 'observe_only' | 'owner_confirm_each_entry' | 'auto_within_budget';
+  auto_within_budget: false;
+  owner_confirm_each_entry: true;
+  not_runtime_source_of_truth: true;
+};
+
+export type RiskCapProfile = {
+  cap_profile_id: string;
+  profile_status: 'present' | 'missing';
+  max_concurrent_position: number;
+  max_daily_attempts: number;
+  max_trial_attempts: number;
+  max_notional_usdt: string;
+  leverage: string;
+  no_auto_reentry: boolean;
+  no_averaging_down: boolean;
+  no_auto_top_up: boolean;
+  no_transfer: boolean;
+  no_withdrawal: boolean;
+  owner_confirm_each_entry: boolean;
+  live_ready: false;
+  testnet_rehearsal_requires_owner_authorization: true;
+};
+
+export type StrategyTrialReadinessResponse = {
+  generated_from: 'strategy_trial_readiness_v1';
+  strategy_profile: StrategyProfile;
+  observation_case: Record<string, string | number | string[] | null>;
+  risk_cap_profile: RiskCapProfile;
+  preflight_result: {
+    status: 'ready' | 'blocked' | 'unknown';
+    blockers: string[];
+    warnings: string[];
+    evidence: Record<string, string | boolean>;
+    next_owner_action: string;
+    execution_intent_created: false;
+    order_created: false;
+    live_order_created: false;
+    execution_permission_granted: false;
+  };
+  owner_decision_state: Record<string, string | boolean | string[]>;
+  rehearsal_readiness_state: Record<string, string | boolean | string[]>;
+  readiness_verdict: 'testnet_rehearsal_ready_pending_owner_authorization' | 'testnet_rehearsal_not_ready_with_explicit_blockers';
+  blockers: string[];
+  warnings: string[];
+  evidence: Record<string, string | boolean | number | null>;
+  market_data_architecture: Record<string, string | boolean>;
+  non_permissions: Record<string, boolean>;
+  reusable_for_future_profiles: true;
+  live_ready: false;
+  auto_execution_ready: false;
+};
+
 export type StartupGuardReadinessArmResponse = {
   action: 'startup_guard_preflight_arm';
   status: 'armed' | 'already_armed' | 'blocked';
@@ -741,6 +800,9 @@ export const brcApi = {
   },
   mi001BnbTrialReadinessGap() {
     return request<Mi001BnbTrialReadinessGapResponse>('/api/brc/readiness/mi001-bnb/trial-gap');
+  },
+  strategyTrialReadinessV1() {
+    return request<StrategyTrialReadinessResponse>('/api/brc/strategy-trial-readiness/v1');
   },
   runStrategyGroupLiveObservationV1Once() {
     return request<StrategyGroupLiveReadOnlyObservationResponse>('/api/brc/strategy-groups/live-readonly-observation/v1/run-once', {

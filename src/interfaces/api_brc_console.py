@@ -37,6 +37,10 @@ from src.application.mi001_bnb_trial_readiness_gap import (
     Mi001BnbTrialReadinessGapResponse,
     build_mi001_bnb_trial_readiness_gap,
 )
+from src.application.strategy_trial_readiness import (
+    StrategyTrialReadinessResponse,
+    build_bnb_strategy_trial_readiness,
+)
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.database import probe_pg_connectivity
@@ -3621,6 +3625,45 @@ async def get_strategy_group_observation_cases_v1(
 async def get_mi001_bnb_trial_readiness_gap() -> Mi001BnbTrialReadinessGapResponse:
     """Return BNB trial-readiness gap map without granting execution authority."""
     return build_mi001_bnb_trial_readiness_gap()
+
+
+@router.get(
+    "/strategy-trial-readiness/v1",
+    response_model=StrategyTrialReadinessResponse,
+)
+async def get_strategy_trial_readiness_v1(
+    carrier: Literal["mi001-bnb-long"] = Query(default="mi001-bnb-long"),
+) -> StrategyTrialReadinessResponse:
+    """Return generic trial-readiness state for a strategy carrier.
+
+    This endpoint is read-only and currently exposes BNB as the first carrier
+    instance of the generic readiness model.
+    """
+    if carrier != "mi001-bnb-long":
+        # Literal query validation should make this unreachable, but keep a
+        # fail-closed branch to avoid accidental carrier expansion.
+        raise HTTPException(status_code=400, detail="unsupported strategy trial readiness carrier")
+    observation_case = None
+    try:
+        if await probe_pg_connectivity():
+            observation_repo = PgStrategyGroupObservationRepository()
+            forward_review_repo = PgStrategyGroupForwardReviewRepository()
+            observations = await observation_repo.list_recent(limit=200)
+            would_enter_ids = [
+                record.record_id
+                for record in observations
+                if record.signal_type == "would_enter"
+            ]
+            reviews = await forward_review_repo.list_by_observation_ids(would_enter_ids)
+            queue = build_observation_case_queue(
+                observations,
+                reviews,
+                candidate_id="MI-001-BNB-LONG",
+            )
+            observation_case = queue.cases[0] if queue.cases else None
+    except Exception:
+        observation_case = None
+    return build_bnb_strategy_trial_readiness(observation_case=observation_case)
 
 
 async def _strategy_group_live_readonly_observation_response(

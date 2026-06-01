@@ -22,6 +22,7 @@ const mockBrcApi = vi.hoisted(() => ({
   strategyGroupLiveObservationV1: vi.fn(),
   strategyGroupObservationCasesV1: vi.fn(),
   mi001BnbTrialReadinessGap: vi.fn(),
+  strategyTrialReadinessV1: vi.fn(),
   listStrategyFamilies: vi.fn(),
   listAdmissionDecisions: vi.fn(),
   listTrialBindings: vi.fn(),
@@ -46,6 +47,7 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.strategyGroupLiveObservationV1.mockResolvedValue(liveObservationPayload());
     mockBrcApi.strategyGroupObservationCasesV1.mockResolvedValue(observationCaseQueuePayload());
     mockBrcApi.mi001BnbTrialReadinessGap.mockResolvedValue(bnbTrialGapPayload());
+    mockBrcApi.strategyTrialReadinessV1.mockResolvedValue(strategyTrialReadinessPayload());
     mockBrcApi.listStrategyFamilies.mockResolvedValue([]);
     mockBrcApi.listAdmissionDecisions.mockResolvedValue([{ owner_risk_acceptance_id: 'owner-acceptance-1' }]);
     mockBrcApi.listTrialBindings.mockResolvedValue([]);
@@ -129,6 +131,10 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getAllByText('not_testnet_ready_not_live_ready').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/BNB Operation Layer cap/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/missing_bnb_specific_cap/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Strategy Trial Readiness Framework')).toBeTruthy();
+    expect(screen.getAllByText('testnet_rehearsal_not_ready_with_explicit_blockers').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('owner_confirm_each_entry').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('websocket not required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
     expect(screen.getAllByText('CPM-RO-001').length).toBeGreaterThan(0);
     expect(screen.getAllByText('wired_read_only_v1').length).toBeGreaterThan(0);
@@ -608,6 +614,114 @@ function bnbTrialGapPayload() {
     },
     source_refs: ['src/application/mi001_bnb_trial_readiness_gap.py'],
     live_ready: false,
+  };
+}
+
+function strategyTrialReadinessPayload() {
+  return {
+    generated_from: 'strategy_trial_readiness_v1',
+    strategy_profile: {
+      strategy_group: 'MI',
+      strategy_id: 'MI-001',
+      candidate_id: 'MI-001-BNB-LONG',
+      symbol: 'BNBUSDT',
+      side: 'long',
+      execution_mode: 'owner_confirm_each_entry',
+      auto_within_budget: false,
+      owner_confirm_each_entry: true,
+      not_runtime_source_of_truth: true,
+    },
+    observation_case: {
+      case_id: 'MI-001-BNB-LONG-live-case-001',
+      observation_id: 'MI-001-BNB-LONG:mi001-5bb8b1c1b14437d7bddbacab:1780196400000',
+      latest_signal: 'would_enter',
+      case_status: 'pending_forward_review',
+      completed_review_windows: ['1h', '4h'],
+      pending_review_windows: ['12h', '24h', '72h'],
+    },
+    risk_cap_profile: {
+      cap_profile_id: 'MI-001-BNB-LONG-testnet-rehearsal-cap-v0',
+      profile_status: 'present',
+      max_concurrent_position: 1,
+      max_daily_attempts: 1,
+      max_trial_attempts: 3,
+      max_notional_usdt: 'tiny_configurable_placeholder_requires_owner_confirmation',
+      leverage: '1x_testnet_default_or_lower_until_owner_changes',
+      no_auto_reentry: true,
+      no_averaging_down: true,
+      no_auto_top_up: true,
+      no_transfer: true,
+      no_withdrawal: true,
+      owner_confirm_each_entry: true,
+      live_ready: false,
+      testnet_rehearsal_requires_owner_authorization: true,
+    },
+    preflight_result: {
+      status: 'blocked',
+      blockers: ['active_conflicting_position_check_not_checked', 'gks_status_not_checked'],
+      warnings: ['owner_authorization_missing_for_testnet_rehearsal'],
+      evidence: {
+        requested_symbol: 'BNBUSDT',
+        requested_side: 'long',
+        requested_mode: 'owner_confirm_each_entry',
+        live_trading_requested: false,
+        auto_execution_enabled: false,
+      },
+      next_owner_action: 'Resolve blockers before Owner can authorize testnet same-path rehearsal.',
+      execution_intent_created: false,
+      order_created: false,
+      live_order_created: false,
+      execution_permission_granted: false,
+    },
+    owner_decision_state: {
+      owner_authorization_status: 'missing',
+      owner_authorization_required: true,
+      owner_can_authorize_testnet_rehearsal_next: false,
+      allowed_decisions: ['continue_observation_only', 'prepare_owner_authorized_testnet_rehearsal'],
+    },
+    rehearsal_readiness_state: {
+      testnet_rehearsal_status: 'blocked',
+      live_status: 'blocked',
+      auto_execution_status: 'disabled',
+      same_path_rehearsal: true,
+      requires_owner_authorization: true,
+    },
+    readiness_verdict: 'testnet_rehearsal_not_ready_with_explicit_blockers',
+    blockers: ['active_conflicting_position_check_not_checked', 'gks_status_not_checked'],
+    warnings: ['owner_authorization_missing_for_testnet_rehearsal'],
+    evidence: {
+      latest_signal: 'would_enter',
+      observation_case_id: 'MI-001-BNB-LONG-live-case-001',
+      cap_profile_present: true,
+      public_rest_kline_observation_source: true,
+      exchange_gateway_used: false,
+      private_account_api_used: false,
+    },
+    market_data_architecture: {
+      provider_abstraction: 'StrategyGroupMarketBarSource',
+      current_provider: 'BinancePublicKlineMarketSource / public REST USD-M klines',
+      current_source_is_public_read_only: true,
+      websocket_required_for_this_sprint: false,
+      evaluator_source_agnostic: true,
+      exchange_gateway_market_provider: 'future controlled runtime/testnet/live context only',
+    },
+    non_permissions: {
+      no_live_order: true,
+      no_real_funds: true,
+      no_withdrawal_or_transfer: true,
+      no_credential_change: true,
+      no_execution_intent: true,
+      no_order_creation: true,
+      no_execution_permission: true,
+      no_runtime_start: true,
+      no_auto_execution: true,
+      would_enter_is_not_order: true,
+      testnet_rehearsal_not_started: true,
+      live_ready_false: true,
+    },
+    reusable_for_future_profiles: true,
+    live_ready: false,
+    auto_execution_ready: false,
   };
 }
 

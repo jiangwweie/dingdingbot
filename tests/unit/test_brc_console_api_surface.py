@@ -736,6 +736,40 @@ def test_mi001_bnb_trial_readiness_gap_api_is_design_only(monkeypatch):
     assert "order_permission_granted" not in raw_payload
 
 
+def test_strategy_trial_readiness_api_exposes_bnb_carrier_without_execution(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/strategy-trial-readiness/v1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_from"] == "strategy_trial_readiness_v1"
+    assert payload["strategy_profile"]["candidate_id"] == "MI-001-BNB-LONG"
+    assert payload["strategy_profile"]["execution_mode"] == "owner_confirm_each_entry"
+    assert payload["risk_cap_profile"]["profile_status"] == "present"
+    assert payload["readiness_verdict"] in {
+        "testnet_rehearsal_ready_pending_owner_authorization",
+        "testnet_rehearsal_not_ready_with_explicit_blockers",
+    }
+    assert payload["live_ready"] is False
+    assert payload["auto_execution_ready"] is False
+    assert payload["non_permissions"]["no_execution_intent"] is True
+    assert payload["non_permissions"]["no_order_creation"] is True
+    assert payload["preflight_result"]["execution_intent_created"] is False
+    assert payload["preflight_result"]["order_created"] is False
+    assert payload["market_data_architecture"]["current_source_is_public_read_only"] is True
+
+    raw_payload = json.dumps(payload)
+    assert "Start Trading" not in raw_payload
+    assert "Place Order" not in raw_payload
+    assert "Run Strategy" not in raw_payload
+    assert "execution_permission_granted\": true" not in raw_payload
+    assert "order_permission_granted" not in raw_payload
+
+
 def test_mi001_sol_owner_console_view_marks_guard_action_enabled_when_runtime_ready(monkeypatch):
     _configure_auth(monkeypatch)
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")

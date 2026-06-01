@@ -27,6 +27,7 @@ import {
   ReadinessResponse,
   StrategyGroupLiveReadOnlyObservationResponse,
   StrategyGroupReviewabilityResponse,
+  StrategyTrialReadinessResponse,
   StrategyFamily,
 } from '@/src/services/api';
 import { ErrorState, JsonDetails } from './ConsolePrimitives';
@@ -39,6 +40,7 @@ type ConsoleData = {
   liveObservation: StrategyGroupLiveReadOnlyObservationResponse | null;
   observationCaseQueue: ObservationCaseQueueResponse | null;
   bnbTrialGap: Mi001BnbTrialReadinessGapResponse | null;
+  strategyTrialReadiness: StrategyTrialReadinessResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
   bindings: AdmissionTrialBinding[];
@@ -93,6 +95,7 @@ const EMPTY_DATA: ConsoleData = {
   liveObservation: null,
   observationCaseQueue: null,
   bnbTrialGap: null,
+  strategyTrialReadiness: null,
   families: [],
   decisions: [],
   bindings: [],
@@ -275,6 +278,7 @@ export function StrategyGroupsV2() {
         caseQueue={data.observationCaseQueue}
       />
       <BnbTrialReadinessGapPanel data={data.bnbTrialGap} />
+      <StrategyTrialReadinessPanel data={data.strategyTrialReadiness} />
 
       <DataTable
         columns={['策略组', '具体策略', '状态', '标的', '方向', '最近信号', '最近意图', '下一步']}
@@ -534,6 +538,7 @@ function useConsoleData(): ViewState {
         liveObservation,
         observationCaseQueue,
         bnbTrialGap,
+        strategyTrialReadiness,
         families,
         decisions,
         bindings,
@@ -568,6 +573,10 @@ function useConsoleData(): ViewState {
         }),
         brcApi.mi001BnbTrialReadinessGap().catch((error) => {
           gaps.push(`MI-001 BNB trial gap: ${message(error)}`);
+          return null;
+        }),
+        brcApi.strategyTrialReadinessV1().catch((error) => {
+          gaps.push(`strategy trial readiness v1: ${message(error)}`);
           return null;
         }),
         brcApi.listStrategyFamilies().catch((error) => {
@@ -610,6 +619,7 @@ function useConsoleData(): ViewState {
             liveObservation,
             observationCaseQueue,
             bnbTrialGap,
+            strategyTrialReadiness,
             families,
             decisions,
             bindings,
@@ -1098,6 +1108,60 @@ function BnbTrialReadinessGapPanel({ data }: { data: Mi001BnbTrialReadinessGapRe
             'no live authorization',
           ]}
           tone="rose"
+        />
+      </div>
+    </section>
+  );
+}
+
+function StrategyTrialReadinessPanel({ data }: { data: StrategyTrialReadinessResponse | null }) {
+  const profile = data?.strategy_profile;
+  const cap = data?.risk_cap_profile;
+  const preflight = data?.preflight_result;
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+        <div>
+          <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Strategy Trial Readiness Framework</h3>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Generic readiness surface using MI-001 BNB as first carrier. Observation remains review-only.
+          </p>
+        </div>
+        <StatePill tone={data?.readiness_verdict === 'testnet_rehearsal_ready_pending_owner_authorization' ? 'teal' : 'amber'}>
+          {data?.readiness_verdict || 'api_unavailable'}
+        </StatePill>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <ShelfMiniFact label="Strategy" value={profile ? `${profile.strategy_id} ${profile.symbol} ${profile.side}` : 'api_unavailable'} />
+        <ShelfMiniFact label="Mode" value={profile?.execution_mode || 'api_unavailable'} />
+        <ShelfMiniFact label="Latest signal" value={String(data?.observation_case.latest_signal || 'missing')} />
+        <ShelfMiniFact label="Preflight" value={preflight?.status || 'api_unavailable'} />
+        <ShelfMiniFact label="Cap profile" value={cap?.profile_status || 'api_unavailable'} />
+        <ShelfMiniFact label="Max notional" value={cap?.max_notional_usdt || 'api_unavailable'} />
+        <ShelfMiniFact label="Testnet" value={String(data?.rehearsal_readiness_state.testnet_rehearsal_status || 'api_unavailable')} />
+        <ShelfMiniFact label="Live" value={data?.live_ready === false ? 'blocked' : 'api_unavailable'} />
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <ChipBlock label="Blockers" values={(data?.blockers.length ? data.blockers : ['none_reported']).slice(0, 10)} tone="amber" />
+        <ChipBlock label="Warnings" values={(data?.warnings.length ? data.warnings : ['none_reported']).slice(0, 10)} tone="slate" />
+        <ChipBlock
+          label="Non-permissions"
+          values={[
+            'no live order',
+            'no execution intent',
+            'no order creation',
+            'no runtime start',
+            'no auto execution',
+          ]}
+          tone="rose"
+        />
+        <ChipBlock
+          label="Market data"
+          values={[
+            String(data?.market_data_architecture.current_provider || 'api_unavailable'),
+            data?.market_data_architecture.websocket_required_for_this_sprint === false ? 'websocket not required' : 'websocket unknown',
+          ]}
+          tone="teal"
         />
       </div>
     </section>
