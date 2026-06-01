@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.strategy_group_live_readonly_observation import StrategyGroupObservationRecord
-from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
+from src.infrastructure.database import get_pg_engine, get_pg_session_maker
 from src.infrastructure.pg_models import PGBrcStrategyGroupObservationORM
 
 
@@ -32,7 +32,9 @@ class PgStrategyGroupObservationRepository:
     async def initialize(self) -> None:
         if self._uses_injected_session_maker:
             return
-        await init_pg_core_db()
+        engine = get_pg_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(PGBrcStrategyGroupObservationORM.__table__.create, checkfirst=True)
 
     async def record(self, record: StrategyGroupObservationRecord) -> StrategyGroupObservationRecord:
         payload = record.model_dump(mode="json")

@@ -36,6 +36,31 @@ from src.application.strategy_group_readonly_observation_scheduler import (
 )
 
 
+class _CaptureRunSyncConnection:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def run_sync(self, fn, *args, **kwargs):
+        self.calls.append((getattr(fn, "__self__", None), kwargs))
+
+
+class _CaptureEngine:
+    def __init__(self) -> None:
+        self.connection = _CaptureRunSyncConnection()
+
+    def begin(self):
+        connection = self.connection
+
+        class _Context:
+            async def __aenter__(self):
+                return connection
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        return _Context()
+
+
 @pytest_asyncio.fixture()
 async def observation_repo():
     engine = create_async_engine(
@@ -66,6 +91,36 @@ async def forward_review_repo():
         yield PgStrategyGroupForwardReviewRepository(session_maker=session_maker)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_observation_repository_initialize_only_creates_observation_table(monkeypatch):
+    import src.infrastructure.pg_strategy_group_observation_repository as repository_module
+
+    engine = _CaptureEngine()
+    monkeypatch.setattr(repository_module, "get_pg_engine", lambda: engine)
+    monkeypatch.setattr(repository_module, "get_pg_session_maker", lambda: object())
+
+    await PgStrategyGroupObservationRepository().initialize()
+
+    assert engine.connection.calls == [
+        (PGBrcStrategyGroupObservationORM.__table__, {"checkfirst": True})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_forward_review_repository_initialize_only_creates_forward_review_table(monkeypatch):
+    import src.infrastructure.pg_strategy_group_forward_review_repository as repository_module
+
+    engine = _CaptureEngine()
+    monkeypatch.setattr(repository_module, "get_pg_engine", lambda: engine)
+    monkeypatch.setattr(repository_module, "get_pg_session_maker", lambda: object())
+
+    await PgStrategyGroupForwardReviewRepository().initialize()
+
+    assert engine.connection.calls == [
+        (PGBrcStrategyGroupForwardReviewORM.__table__, {"checkfirst": True})
+    ]
 
 
 def test_live_readonly_observation_v1_exposes_mi_and_cpm_without_execution_fields():
