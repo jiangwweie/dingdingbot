@@ -825,6 +825,41 @@ def test_strategy_trial_readiness_api_uses_cached_account_facts_when_fresh(monke
     assert gateway.account_snapshot_calls == 1
 
 
+def test_bnb_first_carrier_architecture_governance_api_is_non_executable(monkeypatch):
+    _configure_auth(monkeypatch)
+    _patch_runtime(monkeypatch, campaign=None)
+    # Importing the app loads .env.local with override=True, so reset the
+    # unit-test operator credentials after runtime patching.
+    _configure_auth(monkeypatch)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/strategy-trial-architecture/bnb-first-carrier")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["final_state"] == "strategy_trial_architecture_governed"
+    assert payload["bnb_state"] == "bnb_first_carrier_consolidated"
+    assert payload["owner_review_packet"]["carrier"]["carrier_id"] == "MI-001-BNB-LONG"
+    assert payload["owner_review_packet"]["carrier"]["strategy_family"] == "MI-001"
+    assert payload["owner_review_packet"]["carrier"]["strategy_family_order_authority"] is False
+    assert payload["owner_review_packet"]["testnet_rehearsal_result"] == "completed_with_valid_protection"
+    assert payload["authorization_draft"]["pending_owner_live_authorization"] is True
+    assert payload["authorization_draft"]["owner_confirmed"] is False
+    assert payload["authorization_draft"]["live_ready"] is False
+    assert payload["minimal_live_trial_gate"]["can_execute_bounded_live_trial"] is False
+    assert "live_authorization_missing" in payload["minimal_live_trial_gate"]["hard_blockers"]
+    assert payload["non_permissions"]["authorization_draft_is_not_order_permission"] is True
+    assert payload["not_live_ready_until_explicit_owner_live_authorization"] is True
+
+    raw_payload = json.dumps(payload)
+    assert "live_ready\": true" not in raw_payload
+    assert "execution_intent_created\": true" not in raw_payload
+    assert "order_created\": true" not in raw_payload
+    assert "execution_permission_granted\": true" not in raw_payload
+
+
 def test_mi001_sol_owner_console_view_marks_guard_action_enabled_when_runtime_ready(monkeypatch):
     _configure_auth(monkeypatch)
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")

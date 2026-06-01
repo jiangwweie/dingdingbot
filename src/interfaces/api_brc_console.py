@@ -37,6 +37,10 @@ from src.application.mi001_bnb_trial_readiness_gap import (
     Mi001BnbTrialReadinessGapResponse,
     build_mi001_bnb_trial_readiness_gap,
 )
+from src.application.strategy_trial_architecture_governance import (
+    StrategyTrialArchitectureGovernanceResponse,
+    build_bnb_strategy_trial_architecture_governance,
+)
 from src.application.strategy_trial_readiness import (
     StrategyTrialReadinessResponse,
     build_bnb_strategy_trial_readiness,
@@ -3629,6 +3633,20 @@ async def get_strategy_group_observation_cases_v1(
 async def get_mi001_bnb_trial_readiness_gap() -> Mi001BnbTrialReadinessGapResponse:
     """Return BNB trial-readiness gap map without granting execution authority."""
     return build_mi001_bnb_trial_readiness_gap()
+
+
+@router.get(
+    "/strategy-trial-architecture/bnb-first-carrier",
+    response_model=StrategyTrialArchitectureGovernanceResponse,
+)
+async def get_bnb_first_carrier_architecture_governance() -> StrategyTrialArchitectureGovernanceResponse:
+    """Return the generic StrategyFamily/Carrier governance state for BNB.
+
+    This endpoint is an Owner-review surface only. It does not create a live
+    authorization, execution intent, order, runtime start, or execution
+    permission.
+    """
+    return build_bnb_strategy_trial_architecture_governance()
 
 
 @router.get(
