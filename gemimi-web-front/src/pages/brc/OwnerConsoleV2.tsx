@@ -31,6 +31,7 @@ import {
   Mi001BnbTrialReadinessGapResponse,
   ObservationCaseQueueResponse,
   BoundedLiveTrialAuthorization,
+  BnbLiveExecutionBridgeResponse,
   OwnerRiskAcknowledgement,
   OwnerTrialFlowCurrentResponse,
   ReadinessResponse,
@@ -57,6 +58,7 @@ type ConsoleData = {
   secondCarrierExpansion: SecondCarrierExpansionResponse | null;
   budgetAuthorizationFoundation: MultiCarrierBudgetAuthorizationCurrentResponse | null;
   ownerTrialFlow: OwnerTrialFlowCurrentResponse | null;
+  bnbLiveExecutionBridge: BnbLiveExecutionBridgeResponse | null;
   families: StrategyFamily[];
   decisions: AdmissionDecision[];
   bindings: AdmissionTrialBinding[];
@@ -184,6 +186,7 @@ const EMPTY_DATA: ConsoleData = {
   secondCarrierExpansion: null,
   budgetAuthorizationFoundation: null,
   ownerTrialFlow: null,
+  bnbLiveExecutionBridge: null,
   families: [],
   decisions: [],
   bindings: [],
@@ -672,6 +675,8 @@ export function TrialConfirmationV2() {
         </section>
       </section>
 
+      <FinalGateReadModelPanel bridge={data.bnbLiveExecutionBridge} />
+
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
         <div className="mb-4 flex items-center gap-3">
           <StepBadge value="4" />
@@ -780,9 +785,175 @@ export function TrialConfirmationV2() {
         </section>
       </section>
 
-      <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: localAcknowledgements, backendAcknowledgement: persistedAcknowledgement, backendDraft: activeDraft, liveAuthorization: persistedLiveAuthorization, ownerTrialFlow: data.ownerTrialFlow, rawGovernance: data.strategyTrialGovernance }} />
+      <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: localAcknowledgements, backendAcknowledgement: persistedAcknowledgement, backendDraft: activeDraft, liveAuthorization: persistedLiveAuthorization, ownerTrialFlow: data.ownerTrialFlow, bnbLiveExecutionBridge: data.bnbLiveExecutionBridge, rawGovernance: data.strategyTrialGovernance }} />
     </PageShell>
   );
+}
+
+function FinalGateReadModelPanel({ bridge }: { bridge: BnbLiveExecutionBridgeResponse | null }) {
+  const gate = bridge?.final_gate_read_model || null;
+  const authorization = bridge?.authorization_state || null;
+  const persistence = gate?.persistence_readiness || null;
+  const preview = bridge?.execution_plan_preview || null;
+  const authorizedLabel = authorization?.exists && authorization.live_authorized
+    ? '已授权但尚未执行'
+    : '尚未记录 Owner 授权';
+  const gateLabel = gate
+    ? gate.result === 'passed' ? '最终硬安全检查通过（仅预览）' : '等待最终硬安全检查'
+    : '等待最终硬安全检查';
+  const boundaryLabel = gate?.execution_boundary_status === 'dry_run_reached_execution_boundary'
+    ? '已到达执行边界预览'
+    : '阻断在执行边界之前';
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <StepBadge value="3C" />
+          <div>
+            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">最终硬安全检查</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Owner 可见的最终 gate 状态；这里不会创建执行计划或订单。</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <StatePill tone={authorization?.exists ? 'teal' : 'amber'}>{authorizedLabel}</StatePill>
+          <StatePill tone={gate?.result === 'passed' ? 'teal' : 'amber'}>{gateLabel}</StatePill>
+        </div>
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+        <ReviewCard title="执行边界" value={bridge ? boundaryLabel : '数据未接入'} />
+        <ReviewCard title="运行时安全" value={gate ? runtimeSafetyCopy(gate.runtime_safety_state) : '数据未接入'} />
+        <ReviewCard title="执行计划" value={gate?.no_executable_execution_intent_created ? '尚未创建执行计划' : '状态异常'} />
+        <ReviewCard title="订单" value={gate?.no_order_created ? '尚未下单' : '状态异常'} />
+        <ReviewCard title="权限" value={gate?.no_permission_granted ? '未授予执行/下单权限' : '状态异常'} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <GateFactTile label="Startup Guard" fact={gate?.startup_guard} />
+        <GateFactTile label="GKS" fact={gate?.gks} />
+        <GateFactTile label="账户事实新鲜度" fact={gate?.account_facts} />
+        <GateFactTile label="BNB 持仓" fact={gate?.bnb_position} />
+        <GateFactTile label="BNB 挂单" fact={gate?.bnb_open_order} />
+        <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+          <p className="text-xs font-bold uppercase text-slate-500">Persistence</p>
+          <div className="mt-3 space-y-2 text-sm">
+            <PersistenceLine label="execution_intents" ready={persistence?.execution_intents} />
+            <PersistenceLine label="orders" ready={persistence?.orders} />
+            <PersistenceLine label="result/review logging" ready={persistence?.result_review_logging} />
+          </div>
+        </div>
+      </div>
+
+      {preview ? (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-500">Execution Plan Preview</p>
+              <h4 className="mt-1 text-base font-bold text-slate-950 dark:text-slate-50">执行计划预览</h4>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <StatePill tone="amber">仅预览，不可执行</StatePill>
+              <StatePill tone={preview.status === 'preview_ready' ? 'teal' : 'amber'}>{planPreviewStatusCopy(preview.status)}</StatePill>
+            </div>
+          </div>
+
+          <p className="mb-3 text-sm text-slate-600 dark:text-slate-300">仅展示最终门通过后系统会准备的动作；不会创建执行计划或订单。</p>
+          <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
+            <PreviewLine label="授权 / 草稿" value={`${preview.authorization_id || '未接入'} / ${preview.draft_id || '未接入'}`} />
+            <PreviewLine label="Carrier" value={preview.carrier_id} />
+            <PreviewLine label="交易对 / 方向" value={`${preview.symbol} / ${preview.side === 'long' ? '多' : '空'}`} />
+            <PreviewLine label="最大名义本金" value={`${preview.max_notional} USDT`} />
+            <PreviewLine label="数量 / 杠杆" value={`${preview.quantity} / ${preview.leverage}x`} />
+            <PreviewLine label="入场" value={`${preview.entry_order.order_type.toUpperCase()}，最终门通过后才允许进入边界`} />
+            <PreviewLine label="保护计划" value={`单止盈 + 止损；TP ${preview.protection_plan.take_profit_quantity} / SL ${preview.protection_plan.stop_loss_quantity}`} />
+            <PreviewLine label="记录路径" value={preview.expected_record_path.join(' -> ')} />
+            <PreviewLine label="复盘状态" value={preview.expected_review_state} />
+          </div>
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">保护挂载失败处理：{preview.cleanup_behavior_if_protection_attach_fails}</p>
+          <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">尚未创建执行计划，尚未下单，未授予执行/下单权限。</p>
+        </div>
+      ) : null}
+
+      <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
+        <summary className="cursor-pointer font-bold text-slate-800 dark:text-slate-100">查看技术 blocker codes</summary>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(gate?.exact_blockers.length ? gate.exact_blockers : ['no_blocker_codes']).map((code) => (
+            <StatePill key={code} tone={gate?.exact_blockers.length ? 'rose' : 'teal'}>{code}</StatePill>
+          ))}
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function PreviewLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg bg-white px-3 py-2 dark:bg-slate-950">
+      <p className="text-xs font-semibold text-slate-500">{label}</p>
+      <p className="mt-1 break-words font-semibold text-slate-900 dark:text-slate-100">{value}</p>
+    </div>
+  );
+}
+
+function GateFactTile({ label, fact }: { label: string; fact?: BnbLiveExecutionBridgeResponse['final_gate_read_model']['startup_guard'] }) {
+  const displayState = fact ? gateStateCopy(fact.state) : '数据未接入';
+  const tone: Tone = !fact ? 'amber' : fact.state === 'clear' ? 'teal' : fact.state === 'missing' || fact.state === 'unavailable' ? 'amber' : 'rose';
+  return (
+    <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
+        <StatePill tone={tone}>{displayState}</StatePill>
+      </div>
+      <p className="text-sm text-slate-600 dark:text-slate-300">{fact ? `source: ${fact.source}` : '后端 dry-run read model 未接入。'}</p>
+    </div>
+  );
+}
+
+function PersistenceLine({ label, ready }: { label: string; ready?: boolean }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900/80">
+      <span className="text-slate-600 dark:text-slate-300">{label}</span>
+      <StatePill tone={ready ? 'teal' : ready === false ? 'rose' : 'amber'}>{ready === undefined ? '未接入' : ready ? 'ready' : 'missing'}</StatePill>
+    </div>
+  );
+}
+
+function gateStateCopy(state: string) {
+  const copy: Record<string, string> = {
+    clear: '已通过',
+    unavailable: '不可用',
+    missing: '未上报',
+    blocked: '阻断',
+    stale: '已过期',
+    conflict: '有冲突',
+    not_armed: '未 armed',
+    not_started: '未启动',
+  };
+  return copy[state] || state;
+}
+
+function runtimeSafetyCopy(state: string) {
+  const copy: Record<string, string> = {
+    clear: '已通过',
+    startup_guard_not_started: '启动保护未启动',
+    startup_guard_not_armed: '启动保护未 armed',
+    startup_guard_blocked: '启动保护阻断',
+    startup_guard_unavailable: '启动保护不可用',
+    startup_guard_missing: '启动保护未上报',
+    gks_unavailable: 'GKS 不可用',
+    gks_blocked: 'GKS 阻断',
+  };
+  return copy[state] || state;
+}
+
+function planPreviewStatusCopy(status: string) {
+  const copy: Record<string, string> = {
+    preview_ready: '预览可生成',
+    preview_blocked_by_hard_gates: '硬安全门阻断，仅展示预览',
+    preview_unavailable_invalid_scope: '授权范围不匹配',
+  };
+  return copy[status] || status;
 }
 
 function CarrierExpansionBudgetPanel({
@@ -1267,6 +1438,7 @@ function useConsoleData(): ViewState {
         secondCarrierExpansion,
         budgetAuthorizationFoundation,
         ownerTrialFlow,
+        bnbLiveExecutionBridge,
         families,
         decisions,
         bindings,
@@ -1323,6 +1495,10 @@ function useConsoleData(): ViewState {
           gaps.push(`owner trial flow: ${message(error)}`);
           return null;
         }),
+        brcApi.bnbLiveExecutionBridgeDryRun().catch((error) => {
+          gaps.push(`BNB live execution bridge dry-run: ${message(error)}`);
+          return null;
+        }),
         brcApi.listStrategyFamilies().catch((error) => {
           gaps.push(`strategy families: ${message(error)}`);
           return [];
@@ -1368,6 +1544,7 @@ function useConsoleData(): ViewState {
             secondCarrierExpansion,
             budgetAuthorizationFoundation,
             ownerTrialFlow,
+            bnbLiveExecutionBridge,
             families,
             decisions,
             bindings,

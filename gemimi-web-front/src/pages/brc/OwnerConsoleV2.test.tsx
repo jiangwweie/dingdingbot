@@ -26,7 +26,10 @@ const mockBrcApi = vi.hoisted(() => ({
   mi001BnbTrialReadinessGap: vi.fn(),
   strategyTrialReadinessV1: vi.fn(),
   strategyTrialArchitectureGovernance: vi.fn(),
+  secondCarrierExpansion: vi.fn(),
+  multiCarrierBudgetAuthorizationCurrent: vi.fn(),
   ownerTrialFlowCurrent: vi.fn(),
+  bnbLiveExecutionBridgeDryRun: vi.fn(),
   createOwnerRiskAcknowledgement: vi.fn(),
   createOwnerAuthorizationDraft: vi.fn(),
   activateOwnerLiveAuthorization: vi.fn(),
@@ -57,7 +60,10 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.mi001BnbTrialReadinessGap.mockResolvedValue(bnbTrialGapPayload());
     mockBrcApi.strategyTrialReadinessV1.mockResolvedValue(strategyTrialReadinessPayload());
     mockBrcApi.strategyTrialArchitectureGovernance.mockResolvedValue(strategyTrialGovernancePayload());
+    mockBrcApi.secondCarrierExpansion.mockResolvedValue(secondCarrierExpansionPayload());
+    mockBrcApi.multiCarrierBudgetAuthorizationCurrent.mockResolvedValue(multiCarrierBudgetAuthorizationPayload());
     mockBrcApi.ownerTrialFlowCurrent.mockResolvedValue(ownerTrialFlowPayload());
+    mockBrcApi.bnbLiveExecutionBridgeDryRun.mockResolvedValue(bnbLiveExecutionBridgePayload());
     mockBrcApi.createOwnerRiskAcknowledgement.mockResolvedValue(ownerRiskAcknowledgementPayload());
     mockBrcApi.createOwnerAuthorizationDraft.mockResolvedValue(ownerAuthorizationDraftPayload());
     mockBrcApi.activateOwnerLiveAuthorization.mockResolvedValue(ownerLiveAuthorizationPayload());
@@ -151,6 +157,25 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText('为什么推荐它')).toBeTruthy();
     expect(screen.getByText('策略风险')).toBeTruthy();
     expect(screen.getByText('硬安全门')).toBeTruthy();
+    expect(screen.getByText('最终硬安全检查')).toBeTruthy();
+    expect(screen.getByText('已授权但尚未执行')).toBeTruthy();
+    expect(screen.getAllByText('等待最终硬安全检查').length).toBeGreaterThan(0);
+    expect(screen.getByText('运行时安全')).toBeTruthy();
+    expect(screen.getByText('启动保护不可用')).toBeTruthy();
+    expect(screen.getByText('尚未创建执行计划')).toBeTruthy();
+    expect(screen.getByText('尚未下单')).toBeTruthy();
+    expect(screen.getByText('未授予执行/下单权限')).toBeTruthy();
+    expect(screen.getByText('执行计划预览')).toBeTruthy();
+    expect(screen.getByText('仅预览，不可执行')).toBeTruthy();
+    expect(screen.getByText('硬安全门阻断，仅展示预览')).toBeTruthy();
+    expect(screen.getAllByText(/单止盈 \+ 止损/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/不会创建执行计划或订单/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Startup Guard')).toBeTruthy();
+    expect(screen.getByText('GKS')).toBeTruthy();
+    expect(screen.getByText('账户事实新鲜度')).toBeTruthy();
+    expect(screen.getByText('BNB 持仓')).toBeTruthy();
+    expect(screen.getByText('BNB 挂单')).toBeTruthy();
+    expect(screen.getByText('Persistence')).toBeTruthy();
     expect(screen.getByText('测试网验证结果')).toBeTruthy();
     expect(screen.getByRole('button', { name: /确认授权这一次真实小额试验/ })).toBeTruthy();
     expect(screen.getAllByText(/风险确认尚未由后端记录/).length).toBeGreaterThan(0);
@@ -252,7 +277,7 @@ describe('Owner Console v2 shell', () => {
     expect(liveAuthorizationButton.disabled).toBe(false);
     fireEvent.click(liveAuthorizationButton);
     expect(await screen.findByText(/已授权这一次真实小额试验；等待最终硬安全检查/)).toBeTruthy();
-    expect(screen.getByText(/尚未创建执行计划，尚未下单/)).toBeTruthy();
+    expect(screen.getAllByText(/尚未创建执行计划，尚未下单/).length).toBeGreaterThan(0);
     expect(mockBrcApi.activateOwnerLiveAuthorization).toHaveBeenCalledWith('draft-unit', {
       carrier_id: 'MI-001-BNB-LONG',
       symbol: 'BNB/USDT:USDT',
@@ -1230,6 +1255,180 @@ function ownerLiveAuthorizationPayload() {
     updated_at_ms: Date.now(),
     source: 'owner_console',
     metadata_only: true,
+  };
+}
+
+function secondCarrierExpansionPayload() {
+  return {
+    generated_from: 'second_carrier_expansion_v1',
+    selected_second_carrier_id: 'TB-BTC-SHORT',
+    carriers: [
+      {
+        carrier_id: 'TB-BTC-SHORT',
+        strategy_family: 'TB',
+        strategy_id: 'TB-001',
+        symbol: 'BTCUSDT',
+        runtime_symbol: 'BTC/USDT:USDT',
+        side: 'short',
+        regime_fit: 'bearish 1-2 month view fit',
+        risk_cap_draft: { per_carrier_cap: '20' },
+        protection_feasibility: { protection_plan_type: 'single_tp_plus_sl' },
+        testnet_rehearsal_gap_summary: ['rehearsal_not_run'],
+      },
+    ],
+    non_permissions: {
+      live_ready: false,
+      auto_execution_enabled: false,
+      order_created: false,
+    },
+  };
+}
+
+function multiCarrierBudgetAuthorizationPayload() {
+  return {
+    generated_from: 'multi_carrier_budget_authorization_foundation_v1',
+    latest_budget_authorization: {
+      budget_authorization_id: 'budget-unit',
+      allowed_carriers: [
+        { carrier_id: 'MI-001-BNB-LONG' },
+        { carrier_id: 'TB-BTC-SHORT' },
+      ],
+      global_budget: '40',
+      daily_loss_limit: '10',
+      status: 'draft_disabled_pending_owner_authorization',
+    },
+    eligible_carrier_ids: ['MI-001-BNB-LONG', 'TB-BTC-SHORT'],
+    disabled_execution_state: {
+      live_ready: false,
+      auto_execution_enabled: false,
+      order_created: false,
+    },
+    budget_scope_source: 'pg_metadata',
+  };
+}
+
+function bnbLiveExecutionBridgePayload() {
+  const fact = (state: string, status = 'clear', source = 'unit', evidence: Record<string, unknown> = {}) => ({
+    state,
+    status,
+    source,
+    blockers: state === 'clear' ? [] : [`${state}_blocker`],
+    evidence,
+  });
+  return {
+    generated_from: 'bnb_live_execution_bridge_dry_run_v1',
+    generated_at_ms: Date.now(),
+    carrier_id: 'MI-001-BNB-LONG',
+    symbol: 'BNB/USDT:USDT',
+    side: 'long',
+    bridge_status: 'blocked_before_execution_boundary',
+    final_preflight_result: 'blocked',
+    hard_blockers: ['startup_guard_status_required_before_rehearsal'],
+    authorization_state: {
+      exists: true,
+      status: 'owner_live_authorized_pending_final_preflight',
+      live_authorized: true,
+      single_use: true,
+      unconsumed: true,
+      live_ready: false,
+      execution_permission_granted: false,
+      order_permission_granted: false,
+      execution_intent_created: false,
+      order_created: false,
+    },
+    final_gate_read_model: {
+      result: 'blocked',
+      exact_blockers: ['startup_guard_status_required_before_rehearsal'],
+      runtime_safety_state: 'startup_guard_unavailable',
+      startup_guard: fact('unavailable', 'unavailable', 'unavailable'),
+      gks: fact('clear', 'clear', 'unit_gks', { active: false }),
+      account_facts: fact('clear', 'clear', 'unit_account', { freshness: 'fresh', read_only_guarantee: true }),
+      bnb_position: fact('clear', 'clear', 'unit_position', { active_position_count: 0 }),
+      bnb_open_order: fact('clear', 'clear', 'unit_order', { open_order_count: 0 }),
+      persistence_readiness: {
+        execution_intents: true,
+        orders: true,
+        result_review_logging: true,
+        source: 'pg_table_audit',
+      },
+      execution_boundary_status: 'blocked_before_execution_boundary',
+      no_order_created: true,
+      no_executable_execution_intent_created: true,
+      no_permission_granted: true,
+    },
+    authorization_hard_blockers_snapshot: ['startup_guard_status_unavailable_runtime_not_started'],
+    acknowledged_strategy_warnings: [
+      'strategy_not_proven_profitable',
+      'limited_live_observation_sample',
+    ],
+    strategy_warnings_block_execution: false,
+    execution_plan_preview: {
+      status: 'preview_blocked_by_hard_gates',
+      authorization_id: 'auth-mi001-bnb',
+      draft_id: 'draft-mi001-bnb',
+      carrier_id: 'MI-001-BNB-LONG',
+      symbol: 'BNB/USDT:USDT',
+      side: 'long',
+      max_notional: '20',
+      quantity: '0.01',
+      leverage: '1',
+      entry_order: {
+        order_type: 'market',
+        intended_behavior: 'one-shot BNB entry only after final hard gates',
+        quantity: '0.01',
+        max_notional: '20',
+        leverage: '1',
+      },
+      protection_plan: {
+        plan_type: 'single_tp_plus_sl',
+        take_profit_quantity: '0.01',
+        stop_loss_quantity: '0.01',
+        safety_assumptions: [
+          'single TP and SL cover the full preview entry quantity',
+          'preview does not grant order permission',
+        ],
+      },
+      expected_record_path: [
+        'pg_execution_intents_non_preview_only_after_separate_executable_authorization',
+        'pg_orders_after_exchange_write_boundary_only',
+        'pg_brc_execution_results',
+        'owner_review_record',
+      ],
+      expected_review_state: 'pending_owner_review_after_execution_result',
+      cleanup_behavior_if_protection_attach_fails: 'record failed protection attach and require owner review',
+      exact_blockers: ['startup_guard_status_required_before_rehearsal'],
+      flags: {
+        preview_only: true,
+        execution_intent_created: false,
+        order_created: false,
+        order_permission_granted: false,
+        auto_execution_enabled: false,
+      },
+      executable: false,
+    },
+    execution_boundary: {
+      would_create_execution_intent_if_all_gates_passed: false,
+      would_create_order: false,
+      order_path_enabled: false,
+    },
+    table_audit: {
+      execution_intents: true,
+      orders: true,
+      brc_execution_results: true,
+    },
+    environment_checks: {
+      live_environment_valid: true,
+      exchange_testnet_false: true,
+    },
+    preflight_fact_checks: {},
+    non_permissions: {
+      live_ready: false,
+      execution_permission_granted: false,
+      order_permission_granted: false,
+      execution_intent_created: false,
+      order_created: false,
+    },
+    dry_run_only: true,
   };
 }
 

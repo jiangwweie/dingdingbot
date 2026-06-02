@@ -33,6 +33,11 @@ BridgeStatus = Literal[
     "dry_run_reached_execution_boundary",
     "blocked_before_execution_boundary",
 ]
+PlanPreviewStatus = Literal[
+    "preview_ready",
+    "preview_blocked_by_hard_gates",
+    "preview_unavailable_invalid_scope",
+]
 
 
 class BnbLiveExecutionBridgeDryRunRequest(BaseModel):
@@ -55,6 +60,93 @@ class BnbLiveExecutionBridgeTableAudit(BaseModel):
     correct_pg_database_checked: bool = True
 
 
+class BnbLiveExecutionBridgeAuthorizationState(BaseModel):
+    exists: bool
+    status: str
+    live_authorized: bool
+    single_use: bool
+    unconsumed: bool
+    live_ready: Literal[False] = False
+    execution_permission_granted: Literal[False] = False
+    order_permission_granted: Literal[False] = False
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+
+
+class BnbLiveExecutionBridgeGateFactState(BaseModel):
+    state: str
+    status: str
+    source: str
+    blockers: list[str] = Field(default_factory=list)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class BnbLiveExecutionBridgePersistenceReadiness(BaseModel):
+    execution_intents: bool
+    orders: bool
+    result_review_logging: bool
+    source: Literal["pg_table_audit"] = "pg_table_audit"
+
+
+class BnbExecutionPlanEntryOrderPreview(BaseModel):
+    order_type: Literal["market"]
+    intended_behavior: str
+    quantity: Decimal
+    max_notional: Decimal
+    leverage: Decimal
+
+
+class BnbExecutionPlanProtectionPreview(BaseModel):
+    plan_type: Literal["single_tp_plus_sl"]
+    take_profit_quantity: Decimal
+    stop_loss_quantity: Decimal
+    safety_assumptions: list[str]
+
+
+class BnbExecutionPlanPreviewFlags(BaseModel):
+    preview_only: Literal[True] = True
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+    order_permission_granted: Literal[False] = False
+    auto_execution_enabled: Literal[False] = False
+
+
+class BnbExecutionPlanPreview(BaseModel):
+    status: PlanPreviewStatus
+    authorization_id: str | None = None
+    draft_id: str | None = None
+    carrier_id: str
+    symbol: str
+    side: Literal["long", "short"]
+    max_notional: Decimal
+    quantity: Decimal
+    leverage: Decimal
+    entry_order: BnbExecutionPlanEntryOrderPreview
+    protection_plan: BnbExecutionPlanProtectionPreview
+    expected_record_path: list[str]
+    expected_review_state: str
+    cleanup_behavior_if_protection_attach_fails: str
+    exact_blockers: list[str] = Field(default_factory=list)
+    flags: BnbExecutionPlanPreviewFlags = Field(default_factory=BnbExecutionPlanPreviewFlags)
+    executable: Literal[False] = False
+
+
+class BnbLiveExecutionBridgeFinalGateReadModel(BaseModel):
+    result: Literal["passed", "blocked"]
+    exact_blockers: list[str] = Field(default_factory=list)
+    runtime_safety_state: str
+    startup_guard: BnbLiveExecutionBridgeGateFactState
+    gks: BnbLiveExecutionBridgeGateFactState
+    account_facts: BnbLiveExecutionBridgeGateFactState
+    bnb_position: BnbLiveExecutionBridgeGateFactState
+    bnb_open_order: BnbLiveExecutionBridgeGateFactState
+    persistence_readiness: BnbLiveExecutionBridgePersistenceReadiness
+    execution_boundary_status: BridgeStatus
+    no_order_created: Literal[True] = True
+    no_executable_execution_intent_created: Literal[True] = True
+    no_permission_granted: Literal[True] = True
+
+
 class BnbLiveExecutionBridgeDryRunResponse(BaseModel):
     generated_from: Literal["bnb_live_execution_bridge_dry_run_v1"] = (
         "bnb_live_execution_bridge_dry_run_v1"
@@ -66,9 +158,12 @@ class BnbLiveExecutionBridgeDryRunResponse(BaseModel):
     bridge_status: BridgeStatus
     final_preflight_result: Literal["passed", "blocked"]
     hard_blockers: list[str] = Field(default_factory=list)
+    authorization_state: BnbLiveExecutionBridgeAuthorizationState
+    final_gate_read_model: BnbLiveExecutionBridgeFinalGateReadModel
     authorization_hard_blockers_snapshot: list[str] = Field(default_factory=list)
     acknowledged_strategy_warnings: list[str] = Field(default_factory=list)
     strategy_warnings_block_execution: Literal[False] = False
+    execution_plan_preview: BnbExecutionPlanPreview
     execution_boundary: dict[str, Any]
     table_audit: BnbLiveExecutionBridgeTableAudit
     environment_checks: dict[str, bool | str]
@@ -191,9 +286,21 @@ class BnbLiveExecutionBridgeDryRunService:
             bridge_status=bridge_status,
             final_preflight_result="blocked" if hard_blockers else "passed",
             hard_blockers=hard_blockers,
+            authorization_state=_authorization_state(authorization),
+            final_gate_read_model=_final_gate_read_model(
+                fact_checks=fact_checks,
+                table_audit=table_audit,
+                bridge_status=bridge_status,
+                hard_blockers=hard_blockers,
+            ),
             authorization_hard_blockers_snapshot=authorization_hard_blockers_snapshot,
             acknowledged_strategy_warnings=(
                 current.acknowledged_warnings if current is not None else []
+            ),
+            execution_plan_preview=_execution_plan_preview(
+                request=request,
+                authorization=authorization,
+                hard_blockers=hard_blockers,
             ),
             execution_boundary={
                 "would_create_execution_intent_if_all_gates_passed": False,
@@ -291,6 +398,202 @@ def _fact_checks(
     return checks
 
 
+def _authorization_state(authorization: Any | None) -> BnbLiveExecutionBridgeAuthorizationState:
+    if authorization is None:
+        return BnbLiveExecutionBridgeAuthorizationState(
+            exists=False,
+            status="missing_explicit_owner_live_authorization",
+            live_authorized=False,
+            single_use=False,
+            unconsumed=False,
+        )
+    return BnbLiveExecutionBridgeAuthorizationState(
+        exists=True,
+        status=str(authorization.status),
+        live_authorized=bool(authorization.live_authorized),
+        single_use=bool(authorization.single_use),
+        unconsumed=not bool(authorization.consumed),
+    )
+
+
+def _final_gate_read_model(
+    *,
+    fact_checks: dict[str, dict[str, Any]],
+    table_audit: BnbLiveExecutionBridgeTableAudit,
+    bridge_status: BridgeStatus,
+    hard_blockers: list[str],
+) -> BnbLiveExecutionBridgeFinalGateReadModel:
+    startup_guard = _gate_fact_state(fact_checks, "startup_guard")
+    gks = _gate_fact_state(fact_checks, "gks")
+    return BnbLiveExecutionBridgeFinalGateReadModel(
+        result="blocked" if hard_blockers else "passed",
+        exact_blockers=hard_blockers,
+        runtime_safety_state=_runtime_safety_state(startup_guard, gks),
+        startup_guard=startup_guard,
+        gks=gks,
+        account_facts=_gate_fact_state(fact_checks, "account_facts"),
+        bnb_position=_gate_fact_state(fact_checks, "active_position"),
+        bnb_open_order=_gate_fact_state(fact_checks, "open_order"),
+        persistence_readiness=BnbLiveExecutionBridgePersistenceReadiness(
+            execution_intents=table_audit.execution_intents,
+            orders=table_audit.orders,
+            result_review_logging=table_audit.brc_execution_results,
+        ),
+        execution_boundary_status=bridge_status,
+    )
+
+
+def _execution_plan_preview(
+    *,
+    request: BnbLiveExecutionBridgeDryRunRequest,
+    authorization: Any | None,
+    hard_blockers: list[str],
+) -> BnbExecutionPlanPreview:
+    status: PlanPreviewStatus = (
+        "preview_unavailable_invalid_scope"
+        if _has_scope_blocker(hard_blockers)
+        else "preview_blocked_by_hard_gates"
+        if hard_blockers
+        else "preview_ready"
+    )
+    return BnbExecutionPlanPreview(
+        status=status,
+        authorization_id=getattr(authorization, "authorization_id", None),
+        draft_id=getattr(authorization, "draft_id", None),
+        carrier_id=request.carrier_id,
+        symbol=request.symbol,
+        side=request.side,
+        max_notional=request.max_notional,
+        quantity=request.quantity,
+        leverage=request.leverage,
+        entry_order=BnbExecutionPlanEntryOrderPreview(
+            order_type="market",
+            intended_behavior=(
+                "one-shot BNB entry only after explicit Owner authorization and final hard gates; "
+                "this preview creates no execution intent or order"
+            ),
+            quantity=request.quantity,
+            max_notional=request.max_notional,
+            leverage=request.leverage,
+        ),
+        protection_plan=BnbExecutionPlanProtectionPreview(
+            plan_type="single_tp_plus_sl",
+            take_profit_quantity=request.quantity,
+            stop_loss_quantity=request.quantity,
+            safety_assumptions=[
+                "single TP and SL cover the full preview entry quantity",
+                "protection attach failure must stop/record/review before any further action",
+                "preview does not reserve balance and does not grant order permission",
+            ],
+        ),
+        expected_record_path=[
+            "pg_execution_intents_non_preview_only_after_separate_executable_authorization",
+            "pg_orders_after_exchange_write_boundary_only",
+            "pg_brc_execution_results",
+            "owner_review_record",
+        ],
+        expected_review_state="pending_owner_review_after_execution_result",
+        cleanup_behavior_if_protection_attach_fails=(
+            "record failed protection attach, block further order action, require owner review and cleanup path"
+        ),
+        exact_blockers=hard_blockers,
+    )
+
+
+def _has_scope_blocker(hard_blockers: list[str]) -> bool:
+    scope_blockers = {
+        "unsupported_carrier",
+        "symbol_mismatch",
+        "side_mismatch",
+        "cap_mismatch",
+        "quantity_mismatch",
+        "leverage_mismatch",
+        "protection_plan_mismatch",
+        "authorization_carrier_mismatch",
+        "authorization_symbol_mismatch",
+        "authorization_side_mismatch",
+        "authorization_cap_mismatch",
+        "authorization_quantity_mismatch",
+        "authorization_leverage_mismatch",
+        "authorization_protection_plan_mismatch",
+    }
+    return any(blocker in scope_blockers for blocker in hard_blockers)
+
+
+def _gate_fact_state(
+    fact_checks: dict[str, dict[str, Any]],
+    fact_id: str,
+) -> BnbLiveExecutionBridgeGateFactState:
+    fact = fact_checks.get(fact_id)
+    if fact is None:
+        return BnbLiveExecutionBridgeGateFactState(
+            state="missing",
+            status="missing",
+            source="not_supplied",
+            blockers=[f"{fact_id}_fact_missing"],
+        )
+    blockers = [str(code) for code in fact.get("blockers", [])]
+    evidence = dict(fact.get("evidence") or {})
+    status = str(fact.get("status") or "unknown")
+    state = _gate_state_name(fact_id, status, evidence, blockers)
+    return BnbLiveExecutionBridgeGateFactState(
+        state=state,
+        status=status,
+        source=str(fact.get("source") or "unknown"),
+        blockers=blockers,
+        evidence=evidence,
+    )
+
+
+def _gate_state_name(
+    fact_id: str,
+    status: str,
+    evidence: dict[str, Any],
+    blockers: list[str],
+) -> str:
+    if fact_id == "startup_guard":
+        if evidence.get("runtime_started") is False or evidence.get("runtime_state") in {
+            "not_started",
+            "stopped",
+        }:
+            return "not_started"
+        if evidence.get("armed") is False:
+            return "not_armed"
+        if status == "unavailable":
+            return "unavailable"
+        if blockers or status in {"blocked", "failed"}:
+            return "blocked"
+    if status == "unavailable":
+        return "unavailable"
+    if fact_id == "gks" and evidence.get("active") is True:
+        return "blocked"
+    if fact_id == "account_facts":
+        if evidence.get("freshness") != "fresh":
+            return "stale"
+        if evidence.get("read_only_guarantee") is not True:
+            return "blocked"
+    if fact_id == "active_position" and _int_from_mapping(evidence, "active_position_count") not in {None, 0}:
+        return "conflict"
+    if fact_id == "open_order" and _int_from_mapping(evidence, "open_order_count") not in {None, 0}:
+        return "conflict"
+    if status == "clear" and not blockers:
+        return "clear"
+    if blockers or status in {"blocked", "failed"}:
+        return "blocked"
+    return status or "unknown"
+
+
+def _runtime_safety_state(
+    startup_guard: BnbLiveExecutionBridgeGateFactState,
+    gks: BnbLiveExecutionBridgeGateFactState,
+) -> str:
+    if startup_guard.state != "clear":
+        return f"startup_guard_{startup_guard.state}"
+    if gks.state != "clear":
+        return f"gks_{gks.state}"
+    return "clear"
+
+
 def _fact_gate_blockers(fact_checks: dict[str, dict[str, Any]]) -> list[str]:
     if "preflight_facts" in fact_checks:
         return []
@@ -333,6 +636,14 @@ def _fact_gate_blockers(fact_checks: dict[str, dict[str, Any]]) -> list[str]:
             blockers.append("account_facts_not_fresh")
         if evidence.get("read_only_guarantee") is not True:
             blockers.append("account_facts_read_only_unverified")
+    startup_guard = fact_checks.get("startup_guard")
+    if startup_guard is not None and _bool_evidence(startup_guard, "armed") is False:
+        blockers.append("startup_guard_not_armed")
+    if startup_guard is not None and (
+        _bool_evidence(startup_guard, "runtime_started") is False
+        or (startup_guard.get("evidence") or {}).get("runtime_state") in {"not_started", "stopped"}
+    ):
+        blockers.append("startup_guard_not_started")
 
     return blockers
 
@@ -348,6 +659,10 @@ def _status_blockers(fact: dict[str, Any], fact_id: str) -> list[str]:
 
 def _int_evidence(fact: dict[str, Any], key: str) -> int | None:
     evidence = fact.get("evidence") or {}
+    return _int_from_mapping(evidence, key)
+
+
+def _int_from_mapping(evidence: Mapping[str, Any], key: str) -> int | None:
     value = evidence.get(key)
     if value is None:
         return None

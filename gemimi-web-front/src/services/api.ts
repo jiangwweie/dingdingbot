@@ -788,6 +788,104 @@ export type OwnerTrialFlowCurrentResponse = {
   source: 'backend_metadata';
 };
 
+export type BnbLiveExecutionBridgeGateFactState = {
+  state: string;
+  status: string;
+  source: string;
+  blockers: string[];
+  evidence: Record<string, unknown>;
+};
+
+export type BnbExecutionPlanPreview = {
+  status: 'preview_ready' | 'preview_blocked_by_hard_gates' | 'preview_unavailable_invalid_scope';
+  authorization_id?: string | null;
+  draft_id?: string | null;
+  carrier_id: string;
+  symbol: string;
+  side: 'long' | 'short';
+  max_notional: string;
+  quantity: string;
+  leverage: string;
+  entry_order: {
+    order_type: 'market';
+    intended_behavior: string;
+    quantity: string;
+    max_notional: string;
+    leverage: string;
+  };
+  protection_plan: {
+    plan_type: 'single_tp_plus_sl';
+    take_profit_quantity: string;
+    stop_loss_quantity: string;
+    safety_assumptions: string[];
+  };
+  expected_record_path: string[];
+  expected_review_state: string;
+  cleanup_behavior_if_protection_attach_fails: string;
+  exact_blockers: string[];
+  flags: {
+    preview_only: true;
+    execution_intent_created: false;
+    order_created: false;
+    order_permission_granted: false;
+    auto_execution_enabled: false;
+  };
+  executable: false;
+};
+
+export type BnbLiveExecutionBridgeResponse = {
+  generated_from: 'bnb_live_execution_bridge_dry_run_v1';
+  generated_at_ms: number;
+  carrier_id: string;
+  symbol: string;
+  side: 'long' | 'short';
+  bridge_status: 'dry_run_reached_execution_boundary' | 'blocked_before_execution_boundary';
+  final_preflight_result: 'passed' | 'blocked';
+  hard_blockers: string[];
+  authorization_state: {
+    exists: boolean;
+    status: string;
+    live_authorized: boolean;
+    single_use: boolean;
+    unconsumed: boolean;
+    live_ready: false;
+    execution_permission_granted: false;
+    order_permission_granted: false;
+    execution_intent_created: false;
+    order_created: false;
+  };
+  final_gate_read_model: {
+    result: 'passed' | 'blocked';
+    exact_blockers: string[];
+    runtime_safety_state: string;
+    startup_guard: BnbLiveExecutionBridgeGateFactState;
+    gks: BnbLiveExecutionBridgeGateFactState;
+    account_facts: BnbLiveExecutionBridgeGateFactState;
+    bnb_position: BnbLiveExecutionBridgeGateFactState;
+    bnb_open_order: BnbLiveExecutionBridgeGateFactState;
+    persistence_readiness: {
+      execution_intents: boolean;
+      orders: boolean;
+      result_review_logging: boolean;
+      source: 'pg_table_audit';
+    };
+    execution_boundary_status: 'dry_run_reached_execution_boundary' | 'blocked_before_execution_boundary';
+    no_order_created: true;
+    no_executable_execution_intent_created: true;
+    no_permission_granted: true;
+  };
+  authorization_hard_blockers_snapshot: string[];
+  acknowledged_strategy_warnings: string[];
+  strategy_warnings_block_execution: false;
+  execution_plan_preview: BnbExecutionPlanPreview;
+  execution_boundary: Record<string, unknown>;
+  table_audit: Record<string, unknown>;
+  environment_checks: Record<string, boolean | string>;
+  preflight_fact_checks: Record<string, Record<string, unknown>>;
+  non_permissions: Record<string, boolean>;
+  dry_run_only: true;
+};
+
 export type StartupGuardReadinessArmResponse = {
   action: 'startup_guard_preflight_arm';
   status: 'armed' | 'already_armed' | 'blocked';
@@ -1106,6 +1204,12 @@ export const brcApi = {
   },
   ownerTrialFlowCurrent(carrierId = 'MI-001-BNB-LONG') {
     return request<OwnerTrialFlowCurrentResponse>(`/api/brc/owner-trial-flow/current?carrier_id=${encodeURIComponent(carrierId)}`);
+  },
+  bnbLiveExecutionBridgeDryRun() {
+    return request<BnbLiveExecutionBridgeResponse>('/api/brc/owner-trial-flow/live-execution-bridge/dry-run', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   },
   createOwnerRiskAcknowledgement(input: {
     carrier_id: string;

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -139,6 +140,7 @@ def _activation_request(**patch):
 def _clear_fact_snapshot(
     *,
     startup_guard_clear: bool = False,
+    startup_guard_armed: bool = True,
     active_position_count: int = 0,
     open_order_count: int = 0,
     gks_active: bool = False,
@@ -154,7 +156,7 @@ def _clear_fact_snapshot(
             source="test_startup_guard",
             blocking=False,
             observed_at_ms=now,
-            evidence={"armed": True},
+            evidence={"armed": startup_guard_armed},
         )
         if startup_guard_clear
         else TrialPreflightFact(
@@ -223,6 +225,22 @@ def _clear_fact_snapshot(
         symbol="BNB/USDT:USDT",
         side="long",
         facts=facts,
+    )
+
+
+def _replace_fact(
+    snapshot: TrialPreflightFactsSnapshot,
+    replacement: TrialPreflightFact,
+) -> TrialPreflightFactsSnapshot:
+    return TrialPreflightFactsSnapshot(
+        generated_at_ms=snapshot.generated_at_ms,
+        candidate_id=snapshot.candidate_id,
+        symbol=snapshot.symbol,
+        side=snapshot.side,
+        facts=[
+            replacement if fact.fact_id == replacement.fact_id else fact
+            for fact in snapshot.facts
+        ],
     )
 
 
@@ -629,6 +647,12 @@ def test_bnb_live_execution_bridge_blocks_without_explicit_authorization_and_cre
             assert result.table_audit.brc_execution_results is True
             assert result.non_permissions["execution_intent_created"] is False
             assert result.non_permissions["order_created"] is False
+            assert result.authorization_state.exists is False
+            assert result.final_gate_read_model.result == "blocked"
+            assert result.final_gate_read_model.execution_boundary_status == "blocked_before_execution_boundary"
+            assert result.final_gate_read_model.no_order_created is True
+            assert result.final_gate_read_model.no_executable_execution_intent_created is True
+            assert result.final_gate_read_model.no_permission_granted is True
             assert result.execution_boundary["would_create_execution_intent_if_all_gates_passed"] is False
             assert result.execution_boundary["would_create_order"] is False
 
@@ -665,6 +689,14 @@ def test_bnb_live_execution_bridge_uses_authorization_but_stops_on_startup_guard
                 in result.authorization_hard_blockers_snapshot
             )
             assert "startup_guard_status_required_before_rehearsal" in result.hard_blockers
+            assert result.authorization_state.exists is True
+            assert result.authorization_state.status == "owner_live_authorized_pending_final_preflight"
+            assert result.authorization_state.single_use is True
+            assert result.authorization_state.unconsumed is True
+            assert result.final_gate_read_model.result == "blocked"
+            assert result.final_gate_read_model.runtime_safety_state == "startup_guard_unavailable"
+            assert result.final_gate_read_model.startup_guard.state == "unavailable"
+            assert result.final_gate_read_model.gks.state == "clear"
             assert result.acknowledged_strategy_warnings
             assert result.strategy_warnings_block_execution is False
             assert result.non_permissions["execution_permission_granted"] is False
@@ -678,6 +710,171 @@ def test_bnb_live_execution_bridge_uses_authorization_but_stops_on_startup_guard
                 order_count = await session.scalar(text("SELECT count(*) FROM orders"))
             assert intent_count == 0
             assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_blocks_startup_guard_not_armed_and_gks_blocked():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            result = await bridge.run(
+                fact_snapshot=_clear_fact_snapshot(
+                    startup_guard_clear=True,
+                    startup_guard_armed=False,
+                    gks_active=True,
+                )
+            )
+
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "startup_guard_not_armed" in result.hard_blockers
+            assert "gks_active" in result.hard_blockers
+            assert result.final_gate_read_model.runtime_safety_state == "startup_guard_not_armed"
+            assert result.final_gate_read_model.startup_guard.state == "not_armed"
+            assert result.final_gate_read_model.gks.state == "blocked"
+            assert result.final_gate_read_model.no_executable_execution_intent_created is True
+            assert result.final_gate_read_model.no_order_created is True
+
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_blocks_startup_guard_not_started():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            now = int(time.time() * 1000)
+            snapshot = _replace_fact(
+                _clear_fact_snapshot(startup_guard_clear=True),
+                TrialPreflightFact(
+                    fact_id="startup_guard",
+                    status="unavailable",
+                    source="test_runtime_safety_reader",
+                    blocking=True,
+                    blocker="startup_guard_runtime_not_started",
+                    blockers=["startup_guard_runtime_not_started"],
+                    observed_at_ms=now,
+                    evidence={"runtime_started": False, "runtime_state": "not_started"},
+                ),
+            )
+
+            result = await bridge.run(fact_snapshot=snapshot)
+
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "startup_guard_runtime_not_started" in result.hard_blockers
+            assert "startup_guard_not_started" in result.hard_blockers
+            assert result.final_gate_read_model.runtime_safety_state == "startup_guard_not_started"
+            assert result.final_gate_read_model.startup_guard.state == "not_started"
+            assert result.final_gate_read_model.no_executable_execution_intent_created is True
+            assert result.final_gate_read_model.no_order_created is True
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_blocks_startup_guard_blocked_separately_from_not_armed():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            now = int(time.time() * 1000)
+            snapshot = _replace_fact(
+                _clear_fact_snapshot(startup_guard_clear=True),
+                TrialPreflightFact(
+                    fact_id="startup_guard",
+                    status="blocked",
+                    source="test_startup_guard_reader",
+                    blocking=True,
+                    blocker="startup_guard_blocked",
+                    blockers=["startup_guard_blocked"],
+                    observed_at_ms=now,
+                    evidence={"armed": True, "blocked": True},
+                ),
+            )
+
+            result = await bridge.run(fact_snapshot=snapshot)
+
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "startup_guard_blocked" in result.hard_blockers
+            assert "startup_guard_not_armed" not in result.hard_blockers
+            assert result.final_gate_read_model.runtime_safety_state == "startup_guard_blocked"
+            assert result.final_gate_read_model.startup_guard.state == "blocked"
+            assert result.final_gate_read_model.gks.state == "clear"
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_blocks_gks_unavailable():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            now = int(time.time() * 1000)
+            snapshot = _replace_fact(
+                _clear_fact_snapshot(startup_guard_clear=True),
+                TrialPreflightFact(
+                    fact_id="gks",
+                    status="unavailable",
+                    source="unavailable",
+                    blocking=True,
+                    blocker="gks_status_required_before_rehearsal",
+                    blockers=["gks_status_required_before_rehearsal"],
+                    observed_at_ms=now,
+                ),
+            )
+
+            result = await bridge.run(fact_snapshot=snapshot)
+
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "gks_status_required_before_rehearsal" in result.hard_blockers
+            assert result.execution_plan_preview.status == "preview_blocked_by_hard_gates"
+            assert "gks_status_required_before_rehearsal" in result.execution_plan_preview.exact_blockers
+            assert result.execution_plan_preview.flags.preview_only is True
+            assert result.execution_plan_preview.flags.execution_intent_created is False
+            assert result.execution_plan_preview.flags.order_created is False
+            assert result.final_gate_read_model.runtime_safety_state == "gks_unavailable"
+            assert result.final_gate_read_model.startup_guard.state == "clear"
+            assert result.final_gate_read_model.gks.state == "unavailable"
+            assert result.non_permissions["execution_permission_granted"] is False
+            assert result.non_permissions["order_permission_granted"] is False
         finally:
             await engine.dispose()
 
@@ -728,6 +925,15 @@ def test_bnb_live_execution_bridge_blocks_fact_conflicts_and_missing_tables():
             assert "execution_intents_table_missing" in result.hard_blockers
             assert "orders_table_missing" in result.hard_blockers
             assert "result_logging_table_missing" in result.hard_blockers
+            assert result.final_gate_read_model.runtime_safety_state == "startup_guard_missing"
+            assert result.final_gate_read_model.bnb_position.state == "conflict"
+            assert result.final_gate_read_model.bnb_open_order.state == "conflict"
+            assert result.final_gate_read_model.gks.state == "blocked"
+            assert result.final_gate_read_model.account_facts.state == "stale"
+            assert result.final_gate_read_model.startup_guard.state == "missing"
+            assert result.final_gate_read_model.persistence_readiness.execution_intents is False
+            assert result.final_gate_read_model.persistence_readiness.orders is False
+            assert result.final_gate_read_model.persistence_readiness.result_review_logging is False
             assert result.non_permissions["execution_permission_granted"] is False
             assert result.non_permissions["order_permission_granted"] is False
             assert result.non_permissions["execution_intent_created"] is False
@@ -754,12 +960,56 @@ def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_s
             assert result.bridge_status == "dry_run_reached_execution_boundary"
             assert result.final_preflight_result == "passed"
             assert result.hard_blockers == []
+            assert result.authorization_state.exists is True
+            assert result.authorization_state.live_authorized is True
+            assert result.authorization_state.live_ready is False
+            assert result.authorization_state.execution_permission_granted is False
+            assert result.authorization_state.order_permission_granted is False
             assert (
                 result.authorization_hard_blockers_snapshot
                 == ["startup_guard_status_unavailable_runtime_not_started"]
             )
+            assert result.final_gate_read_model.result == "passed"
+            assert result.final_gate_read_model.runtime_safety_state == "clear"
+            assert result.final_gate_read_model.startup_guard.state == "clear"
+            assert result.final_gate_read_model.gks.state == "clear"
+            assert result.final_gate_read_model.account_facts.state == "clear"
+            assert result.final_gate_read_model.bnb_position.state == "clear"
+            assert result.final_gate_read_model.bnb_open_order.state == "clear"
+            assert result.final_gate_read_model.persistence_readiness.execution_intents is True
+            assert result.final_gate_read_model.persistence_readiness.orders is True
+            assert result.final_gate_read_model.persistence_readiness.result_review_logging is True
             assert result.acknowledged_strategy_warnings
             assert result.strategy_warnings_block_execution is False
+            assert result.execution_plan_preview.status == "preview_ready"
+            assert result.execution_plan_preview.authorization_id is not None
+            assert result.execution_plan_preview.draft_id == draft.draft_id
+            assert result.execution_plan_preview.carrier_id == "MI-001-BNB-LONG"
+            assert result.execution_plan_preview.symbol == "BNB/USDT:USDT"
+            assert result.execution_plan_preview.side == "long"
+            assert result.execution_plan_preview.max_notional == Decimal("20")
+            assert result.execution_plan_preview.quantity == Decimal("0.01")
+            assert result.execution_plan_preview.leverage == Decimal("1")
+            assert result.execution_plan_preview.entry_order.order_type == "market"
+            assert result.execution_plan_preview.entry_order.quantity == Decimal("0.01")
+            assert result.execution_plan_preview.protection_plan.plan_type == "single_tp_plus_sl"
+            assert result.execution_plan_preview.protection_plan.take_profit_quantity == Decimal("0.01")
+            assert result.execution_plan_preview.protection_plan.stop_loss_quantity == Decimal("0.01")
+            assert result.execution_plan_preview.expected_record_path == [
+                "pg_execution_intents_non_preview_only_after_separate_executable_authorization",
+                "pg_orders_after_exchange_write_boundary_only",
+                "pg_brc_execution_results",
+                "owner_review_record",
+            ]
+            assert result.execution_plan_preview.expected_review_state == (
+                "pending_owner_review_after_execution_result"
+            )
+            assert result.execution_plan_preview.flags.preview_only is True
+            assert result.execution_plan_preview.flags.execution_intent_created is False
+            assert result.execution_plan_preview.flags.order_created is False
+            assert result.execution_plan_preview.flags.order_permission_granted is False
+            assert result.execution_plan_preview.flags.auto_execution_enabled is False
+            assert result.execution_plan_preview.executable is False
             assert result.execution_boundary["protection_executable"] is True
             assert result.execution_boundary["exit_cleanup_available"] is True
             assert result.execution_boundary["order_result_logging_available"] is True
@@ -819,6 +1069,14 @@ def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
             assert "side_mismatch" in result.hard_blockers
             assert "cap_mismatch" in result.hard_blockers
             assert "global_permission_not_order_allowed" in result.hard_blockers
+            assert result.execution_plan_preview.status == "preview_unavailable_invalid_scope"
+            assert "symbol_mismatch" in result.execution_plan_preview.exact_blockers
+            assert "side_mismatch" in result.execution_plan_preview.exact_blockers
+            assert "cap_mismatch" in result.execution_plan_preview.exact_blockers
+            assert result.execution_plan_preview.flags.preview_only is True
+            assert result.execution_plan_preview.flags.execution_intent_created is False
+            assert result.execution_plan_preview.flags.order_created is False
+            assert result.execution_plan_preview.executable is False
             assert result.non_permissions["execution_intent_created"] is False
             assert result.non_permissions["order_created"] is False
         finally:
@@ -862,6 +1120,10 @@ def test_bnb_live_execution_bridge_api_dry_run_does_not_create_intent_or_order(m
             assert response.status_code == 200
             payload = response.json()
             assert payload["dry_run_only"] is True
+            assert payload["execution_plan_preview"]["flags"]["preview_only"] is True
+            assert payload["execution_plan_preview"]["flags"]["execution_intent_created"] is False
+            assert payload["execution_plan_preview"]["flags"]["order_created"] is False
+            assert payload["execution_plan_preview"]["executable"] is False
             assert payload["non_permissions"]["execution_intent_created"] is False
             assert payload["non_permissions"]["order_created"] is False
             assert payload["execution_boundary"]["would_create_order"] is False
