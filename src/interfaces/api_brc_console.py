@@ -53,6 +53,11 @@ from src.application.multi_carrier_budget_authorization import (
     MultiCarrierBudgetAuthorizationInfrastructureError,
     MultiCarrierBudgetAuthorizationService,
 )
+from src.application.bnb_live_execution_bridge import (
+    BnbLiveExecutionBridgeDryRunRequest,
+    BnbLiveExecutionBridgeDryRunResponse,
+    BnbLiveExecutionBridgeDryRunService,
+)
 from src.application.owner_trial_flow import (
     BoundedLiveTrialAuthorization,
     BoundedLiveTrialAuthorizationDraft,
@@ -3825,6 +3830,28 @@ async def activate_owner_trial_flow_live_authorization(
         raise _owner_trial_flow_infrastructure_http_error(exc) from exc
     except OwnerTrialFlowError as exc:
         raise _owner_trial_flow_http_error(exc) from exc
+
+
+@router.post(
+    "/owner-trial-flow/live-execution-bridge/dry-run",
+    response_model=BnbLiveExecutionBridgeDryRunResponse,
+)
+async def dry_run_bnb_live_execution_bridge(
+    body: BnbLiveExecutionBridgeDryRunRequest | None = None,
+) -> BnbLiveExecutionBridgeDryRunResponse:
+    """Dry-run the BNB Owner authorization to execution-boundary bridge.
+
+    This endpoint is read-only with respect to execution: it does not create an
+    execution intent, create an order, grant permissions, start runtime, or call
+    exchange write APIs.
+    """
+    profile_readiness = build_bnb_strategy_trial_readiness()
+    collector = _strategy_trial_preflight_fact_collector(_api_module())
+    fact_snapshot = await collector.collect(profile_readiness.strategy_profile)
+    service = BnbLiveExecutionBridgeDryRunService(
+        owner_trial_flow_service=_owner_trial_flow_service_instance(),
+    )
+    return await service.run(body, fact_snapshot=fact_snapshot)
 
 
 @router.get(

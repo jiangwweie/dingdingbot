@@ -17,6 +17,14 @@ from src.application.owner_trial_flow import (
     OwnerTrialFlowError,
     OwnerTrialFlowService,
 )
+from src.application.bnb_live_execution_bridge import (
+    BnbLiveExecutionBridgeDryRunRequest,
+    BnbLiveExecutionBridgeDryRunService,
+)
+from src.application.strategy_trial_preflight_facts import (
+    TrialPreflightFact,
+    TrialPreflightFactsSnapshot,
+)
 from src.infrastructure.owner_trial_flow_repository import PgOwnerTrialFlowRepository
 from src.infrastructure.pg_models import (
     PGBrcBoundedLiveTrialAuthorizationORM,
@@ -41,6 +49,46 @@ async def _service() -> tuple[OwnerTrialFlowService, object]:
         await conn.run_sync(PGBrcBoundedLiveTrialAuthorizationDraftORM.__table__.create)
         await conn.run_sync(PGBrcBoundedLiveTrialAuthorizationORM.__table__.create)
     return OwnerTrialFlowService(PgOwnerTrialFlowRepository(session_maker)), engine
+
+
+async def _bridge_service() -> tuple[OwnerTrialFlowService, BnbLiveExecutionBridgeDryRunService, object]:
+    service, engine = await _service()
+    session_maker = service._repository._session_maker
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "CREATE TABLE orders ("
+                "id TEXT PRIMARY KEY, signal_id TEXT NOT NULL, symbol TEXT NOT NULL"
+                ")"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE TABLE execution_intents ("
+                "id TEXT PRIMARY KEY, signal_id TEXT NOT NULL, symbol TEXT NOT NULL, "
+                "status TEXT NOT NULL"
+                ")"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE TABLE brc_execution_results ("
+                "operation_id TEXT PRIMARY KEY, status TEXT NOT NULL"
+                ")"
+            )
+        )
+    bridge = BnbLiveExecutionBridgeDryRunService(
+        owner_trial_flow_service=service,
+        session_maker=session_maker,
+        env={
+            "TRADING_ENV": "live",
+            "EXCHANGE_TESTNET": "false",
+            "RUNTIME_CONTROL_API_ENABLED": "false",
+            "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+            "BRC_EXECUTION_PERMISSION_MAX": "read_only",
+        },
+    )
+    return service, bridge, engine
 
 
 async def _acknowledge_all(service: OwnerTrialFlowService):
@@ -86,6 +134,96 @@ def _activation_request(**patch):
     }
     payload.update(patch)
     return OwnerLiveAuthorizationActivationRequest(**payload)
+
+
+def _clear_fact_snapshot(
+    *,
+    startup_guard_clear: bool = False,
+    active_position_count: int = 0,
+    open_order_count: int = 0,
+    gks_active: bool = False,
+    account_freshness: str = "fresh",
+    account_read_only_guarantee: bool = True,
+    omit_fact_ids: set[str] | None = None,
+) -> TrialPreflightFactsSnapshot:
+    now = int(time.time() * 1000)
+    startup_guard = (
+        TrialPreflightFact(
+            fact_id="startup_guard",
+            status="clear",
+            source="test_startup_guard",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={"armed": True},
+        )
+        if startup_guard_clear
+        else TrialPreflightFact(
+            fact_id="startup_guard",
+            status="unavailable",
+            source="unavailable",
+            blocking=True,
+            blocker="startup_guard_status_required_before_rehearsal",
+            blockers=["startup_guard_status_required_before_rehearsal"],
+            observed_at_ms=now,
+        )
+    )
+    facts = [
+        TrialPreflightFact(
+            fact_id="active_position",
+            status="clear",
+            source="test_position_reader",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={"active_position_count": active_position_count},
+        ),
+        TrialPreflightFact(
+            fact_id="open_order",
+            status="clear",
+            source="test_order_reader",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={"open_order_count": open_order_count},
+        ),
+        TrialPreflightFact(
+            fact_id="gks",
+            status="clear",
+            source="test_gks_reader",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={"active": gks_active},
+        ),
+        startup_guard,
+        TrialPreflightFact(
+            fact_id="reconciliation",
+            status="clear",
+            source="test_reconciliation",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={"status": "clean", "failed_reconciliations_count": 0},
+        ),
+        TrialPreflightFact(
+            fact_id="account_facts",
+            status="clear",
+            source="test_live_read_only_account_facts",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={
+                "freshness": account_freshness,
+                "equity_available": True,
+                "available_margin_available": True,
+                "read_only_guarantee": account_read_only_guarantee,
+            },
+        ),
+    ]
+    if omit_fact_ids:
+        facts = [fact for fact in facts if fact.fact_id not in omit_fact_ids]
+    return TrialPreflightFactsSnapshot(
+        generated_at_ms=now,
+        candidate_id="MI-001-BNB-LONG",
+        symbol="BNB/USDT:USDT",
+        side="long",
+        facts=facts,
+    )
 
 
 def test_risk_acknowledgement_can_be_persisted_to_pg_for_supported_carrier():
@@ -477,3 +615,258 @@ def test_owner_trial_flow_mainline_repository_is_pg_only():
 
     assert "SqliteOwnerTrialFlowRepository" not in api_brc_console.__dict__
     assert api_brc_console.PgOwnerTrialFlowRepository is PgOwnerTrialFlowRepository
+
+
+def test_bnb_live_execution_bridge_blocks_without_explicit_authorization_and_creates_nothing():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            result = await bridge.run(fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True))
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "missing_explicit_owner_live_authorization" in result.hard_blockers
+            assert result.table_audit.execution_intents is True
+            assert result.table_audit.orders is True
+            assert result.table_audit.brc_execution_results is True
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+            assert result.execution_boundary["would_create_execution_intent_if_all_gates_passed"] is False
+            assert result.execution_boundary["would_create_order"] is False
+
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_uses_authorization_but_stops_on_startup_guard():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            result = await bridge.run(fact_snapshot=_clear_fact_snapshot())
+
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.final_preflight_result == "blocked"
+            assert "startup_guard_status_unavailable_runtime_not_started" not in result.hard_blockers
+            assert (
+                "startup_guard_status_unavailable_runtime_not_started"
+                in result.authorization_hard_blockers_snapshot
+            )
+            assert "startup_guard_status_required_before_rehearsal" in result.hard_blockers
+            assert result.acknowledged_strategy_warnings
+            assert result.strategy_warnings_block_execution is False
+            assert result.non_permissions["execution_permission_granted"] is False
+            assert result.non_permissions["order_permission_granted"] is False
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_blocks_fact_conflicts_and_missing_tables():
+    async def scenario():
+        service, engine = await _service()
+        bridge = BnbLiveExecutionBridgeDryRunService(
+            owner_trial_flow_service=service,
+            session_maker=service._repository._session_maker,
+            env={
+                "TRADING_ENV": "live",
+                "EXCHANGE_TESTNET": "false",
+                "RUNTIME_CONTROL_API_ENABLED": "false",
+                "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                "BRC_EXECUTION_PERMISSION_MAX": "read_only",
+            },
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            result = await bridge.run(
+                fact_snapshot=_clear_fact_snapshot(
+                    startup_guard_clear=True,
+                    active_position_count=1,
+                    open_order_count=2,
+                    gks_active=True,
+                    account_freshness="stale",
+                    account_read_only_guarantee=False,
+                    omit_fact_ids={"startup_guard"},
+                )
+            )
+
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "active_position_conflict" in result.hard_blockers
+            assert "open_order_conflict" in result.hard_blockers
+            assert "gks_active" in result.hard_blockers
+            assert "account_facts_not_fresh" in result.hard_blockers
+            assert "account_facts_read_only_unverified" in result.hard_blockers
+            assert "startup_guard_fact_missing" in result.hard_blockers
+            assert "execution_intents_table_missing" in result.hard_blockers
+            assert "orders_table_missing" in result.hard_blockers
+            assert "result_logging_table_missing" in result.hard_blockers
+            assert result.non_permissions["execution_permission_granted"] is False
+            assert result.non_permissions["order_permission_granted"] is False
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_state():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            result = await bridge.run(fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True))
+
+            assert result.bridge_status == "dry_run_reached_execution_boundary"
+            assert result.final_preflight_result == "passed"
+            assert result.hard_blockers == []
+            assert (
+                result.authorization_hard_blockers_snapshot
+                == ["startup_guard_status_unavailable_runtime_not_started"]
+            )
+            assert result.acknowledged_strategy_warnings
+            assert result.strategy_warnings_block_execution is False
+            assert result.execution_boundary["protection_executable"] is True
+            assert result.execution_boundary["exit_cleanup_available"] is True
+            assert result.execution_boundary["order_result_logging_available"] is True
+            assert result.execution_boundary["would_create_execution_intent_if_all_gates_passed"] is False
+            assert result.execution_boundary["would_create_order"] is False
+            assert result.non_permissions["live_ready"] is False
+            assert result.non_permissions["execution_permission_granted"] is False
+            assert result.non_permissions["order_permission_granted"] is False
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            unsafe_env_bridge = BnbLiveExecutionBridgeDryRunService(
+                owner_trial_flow_service=service,
+                session_maker=service._repository._session_maker,
+                env={
+                    "TRADING_ENV": "live",
+                    "EXCHANGE_TESTNET": "false",
+                    "RUNTIME_CONTROL_API_ENABLED": "false",
+                    "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                    "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
+                },
+            )
+
+            result = await unsafe_env_bridge.run(
+                BnbLiveExecutionBridgeDryRunRequest(
+                    symbol="SOL/USDT:USDT",
+                    side="short",
+                    max_notional="19",
+                ),
+                fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+            )
+
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "symbol_mismatch" in result.hard_blockers
+            assert "side_mismatch" in result.hard_blockers
+            assert "cap_mismatch" in result.hard_blockers
+            assert "global_permission_not_order_allowed" in result.hard_blockers
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_live_execution_bridge_api_dry_run_does_not_create_intent_or_order(monkeypatch):
+    from src.interfaces import api_brc_console
+    from src.interfaces.api import app
+    from src.interfaces.operator_auth import OperatorSession, require_operator_session
+
+    service, bridge_service, engine = asyncio.run(_bridge_service())
+    api_brc_console._owner_trial_flow_service = service
+    app.dependency_overrides[require_operator_session] = lambda: OperatorSession(
+        username="owner",
+        expires_at=int(time.time()) + 3600,
+    )
+
+    async def fake_collect(_profile):
+        return _clear_fact_snapshot()
+
+    class FakeCollector:
+        collect = staticmethod(fake_collect)
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_trial_preflight_fact_collector",
+        lambda _api_module: FakeCollector(),
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "BnbLiveExecutionBridgeDryRunService",
+        lambda **_kwargs: bridge_service,
+    )
+
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/brc/owner-trial-flow/live-execution-bridge/dry-run", json={})
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["dry_run_only"] is True
+            assert payload["non_permissions"]["execution_intent_created"] is False
+            assert payload["non_permissions"]["order_created"] is False
+            assert payload["execution_boundary"]["would_create_order"] is False
+            assert "missing_explicit_owner_live_authorization" in payload["hard_blockers"]
+    finally:
+        app.dependency_overrides.pop(require_operator_session, None)
+        api_brc_console._owner_trial_flow_service = None
+        asyncio.run(engine.dispose())
