@@ -186,7 +186,7 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText('Persistence')).toBeTruthy();
     expect(screen.getByText('测试网验证结果')).toBeTruthy();
     expect(screen.getByText('其他载体 / 预算基础（非本次授权）')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /确认授权这一次真实小额试验/ })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /确认授权这一次真实小额试验/ }).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/风险确认尚未由后端记录/).length).toBeGreaterThan(0);
     expect(screen.getByText('暂不能授权真实资金，还差：')).toBeTruthy();
     expect(screen.getByText('授权草案尚未生成')).toBeTruthy();
@@ -196,7 +196,8 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText('已在本地确认')).toBeTruthy();
     const persisted = JSON.parse(window.localStorage.getItem('brc-owner-console-main-flow-v1') || '{}');
     expect(persisted.riskAcknowledgements['MI-001-BNB-LONG'].strategy_not_proven_profitable).toBe(true);
-    expect((screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByRole('button', { name: /确认授权这一次真实小额试验/ })
+      .every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
     assertNoDangerButtons();
     cleanup();
 
@@ -283,7 +284,7 @@ describe('Owner Console v2 shell', () => {
       protection_plan_type: 'single_tp_plus_sl',
     });
     expect(screen.getByText(/风险确认 ≠ 真实资金授权/)).toBeTruthy();
-    const liveAuthorizationButton = screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement;
+    const liveAuthorizationButton = screen.getAllByRole('button', { name: /确认授权这一次真实小额试验/ })[0] as HTMLButtonElement;
     expect(liveAuthorizationButton.disabled).toBe(false);
     fireEvent.click(liveAuthorizationButton);
     expect(await screen.findByText(/已授权这一次真实小额试验，等待最终硬安全检查/)).toBeTruthy();
@@ -332,7 +333,9 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText(/下一步请在真实资金授权区确认本次授权/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /更新后端风险确认 \/ 授权草案/ })).toBeNull();
     expect(screen.getByText('真实资金授权')).toBeTruthy();
-    const liveAuthorizationButton = screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement;
+    const liveAuthorizationButtons = screen.getAllByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement[];
+    expect(liveAuthorizationButtons.length).toBeGreaterThanOrEqual(2);
+    const liveAuthorizationButton = liveAuthorizationButtons[1];
     expect(liveAuthorizationButton.disabled).toBe(false);
     expect(screen.getAllByText(/启动保护不可用/).length).toBeGreaterThan(0);
 
@@ -402,7 +405,8 @@ describe('Owner Console v2 shell', () => {
     expect(await screen.findByText('授权这一次 BNB 小额试验')).toBeTruthy();
     expect(screen.getAllByText('数据未接入').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/授权门槛数据未接入，无法用于真实授权/).length).toBeGreaterThan(0);
-    expect((screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByRole('button', { name: /确认授权这一次真实小额试验/ })
+      .every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
     assertNoDangerButtons();
     cleanup();
 
