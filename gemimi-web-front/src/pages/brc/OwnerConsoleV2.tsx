@@ -695,6 +695,19 @@ export function TrialConfirmationV2() {
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">我现在能否点击授权：只看风险确认、授权草案、授权范围和是否已授权。</p>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={activateLiveAuthorization}
+            disabled={!canActivateLiveAuthorization || activatingAuthorization}
+            className={`mb-4 flex w-full items-center justify-center gap-3 rounded-xl px-5 py-4 text-base font-bold transition ${
+              canActivateLiveAuthorization && !activatingAuthorization
+                ? 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white'
+                : 'cursor-not-allowed bg-slate-300 text-white dark:bg-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <Wallet className="h-5 w-5" />
+            {persistedLiveAuthorization ? '已授权这一次真实小额试验' : '确认授权这一次真实小额试验'}
+          </button>
           <div className="space-y-3">
             {metadataStatusRows.map((row) => (
               <AuthorizationStatusLine key={row.label} label={row.label} value={row.value} tone={row.tone} />
@@ -712,19 +725,6 @@ export function TrialConfirmationV2() {
           <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
             风险确认 ≠ 真实资金授权；真实资金授权 ≠ 立即下单。授权后仍需最终硬安全检查。
           </div>
-          <button
-            type="button"
-            onClick={activateLiveAuthorization}
-            disabled={!canActivateLiveAuthorization || activatingAuthorization}
-            className={`mb-3 mt-4 flex w-full items-center justify-center gap-3 rounded-xl px-5 py-4 text-base font-bold transition ${
-              canActivateLiveAuthorization && !activatingAuthorization
-                ? 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white'
-                : 'cursor-not-allowed bg-slate-300 text-white dark:bg-slate-700 dark:text-slate-300'
-            }`}
-          >
-            <Wallet className="h-5 w-5" />
-            {persistedLiveAuthorization ? '已授权这一次真实小额试验' : '确认授权这一次真实小额试验'}
-          </button>
           {persistedLiveAuthorization ? (
             <div className="mb-3 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
               已授权这一次真实小额试验，等待最终硬安全检查。尚未创建执行计划，尚未下单。
