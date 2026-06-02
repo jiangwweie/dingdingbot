@@ -58,6 +58,9 @@ from src.application.bnb_live_execution_bridge import (
     BnbLiveExecutionBridgeDryRunResponse,
     BnbLiveExecutionBridgeDryRunService,
 )
+from src.application.binance_usdt_futures_account_facts import (
+    BinanceUsdtFuturesAccountFactsSource,
+)
 from src.application.owner_trial_flow import (
     BoundedLiveTrialAuthorization,
     BoundedLiveTrialAuthorizationDraft,
@@ -3954,36 +3957,33 @@ def _multi_carrier_budget_authorization_infrastructure_http_error(
 
 
 def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightFactCollector:
+    bnb_live_facts = _BnbFinalGateLiveReadOnlyFacts(api_module)
     return TrialPreflightFactCollector(
-        position_reader=_bnb_preflight_position_reader(api_module),
-        open_order_reader=_bnb_preflight_open_order_reader(api_module),
+        position_reader=_bnb_preflight_position_reader(api_module, bnb_live_facts),
+        open_order_reader=_bnb_preflight_open_order_reader(api_module, bnb_live_facts),
         gks_reader=_bnb_preflight_gks_reader(api_module),
         startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
         reconciliation_reader=_bnb_preflight_reconciliation_reader(api_module),
-        account_facts_reader=_bnb_preflight_account_facts_reader(api_module),
+        account_facts_reader=_bnb_preflight_account_facts_reader(api_module, bnb_live_facts),
     )
 
 
-def _bnb_preflight_position_reader(api_module: Any):
+def _bnb_preflight_position_reader(api_module: Any, bnb_live_facts: Any):
     async def _read(profile):
-        repo = getattr(api_module, "_position_repo", None)
-        if repo is not None and hasattr(repo, "list_active"):
-            return await repo.list_active(symbol=profile.symbol)
-        if await probe_pg_connectivity():
-            return await PgPositionRepository().list_active(symbol=profile.symbol)
-        raise RuntimeError("position_repository_unavailable")
+        facts = await bnb_live_facts.read(profile)
+        if facts.get("available") is True:
+            return list(facts.get("positions") or [])
+        raise RuntimeError(str(facts.get("reason") or "bnb_live_position_read_unavailable"))
 
     return _read
 
 
-def _bnb_preflight_open_order_reader(api_module: Any):
+def _bnb_preflight_open_order_reader(api_module: Any, bnb_live_facts: Any):
     async def _read(profile):
-        repo = getattr(api_module, "_order_repo", None)
-        if repo is not None and hasattr(repo, "get_open_orders"):
-            return await repo.get_open_orders(symbol=profile.symbol)
-        if await probe_pg_connectivity():
-            return await PgOrderRepository().get_open_orders(symbol=profile.symbol)
-        raise RuntimeError("order_repository_unavailable")
+        facts = await bnb_live_facts.read(profile)
+        if facts.get("available") is True:
+            return list(facts.get("open_orders") or [])
+        raise RuntimeError(str(facts.get("reason") or "bnb_live_open_order_read_unavailable"))
 
     return _read
 
@@ -4000,7 +4000,15 @@ def _bnb_preflight_gks_reader(api_module: Any):
             }
         if await probe_pg_connectivity():
             repo = PgGlobalKillSwitchRepository()
-            return await repo.get_state()
+            state = await repo.get_state()
+            if state is None:
+                return {
+                    "state": "unavailable",
+                    "status": "unavailable",
+                    "source": "pg_global_kill_switch_repository",
+                    "reason": "global_kill_switch_pg_state_missing",
+                }
+            return state
         raise RuntimeError("gks_repository_unavailable")
 
     return _read
@@ -4009,7 +4017,16 @@ def _bnb_preflight_gks_reader(api_module: Any):
 def _bnb_preflight_startup_guard_reader(api_module: Any):
     service = getattr(api_module, "_startup_trading_guard_service", None)
     if service is None or not (hasattr(service, "get_state") or hasattr(service, "is_armed")):
-        return None
+        async def _runtime_not_started(_profile):
+            return {
+                "armed": False,
+                "runtime_started": False,
+                "runtime_state": "not_started",
+                "source": "console_api_runtime_context_absent",
+                "reason": "startup_guard_runtime_not_started",
+            }
+
+        return _runtime_not_started
 
     async def _read(_profile):
         if hasattr(service, "get_state"):
@@ -4025,7 +4042,14 @@ def _bnb_preflight_startup_guard_reader(api_module: Any):
 def _bnb_preflight_reconciliation_reader(api_module: Any):
     summary = getattr(api_module, "_startup_reconciliation_summary", None)
     if summary is None:
-        return None
+        async def _unavailable(_profile):
+            return {
+                "status": "unavailable",
+                "source": "console_api_runtime_context_absent",
+                "reason": "startup_reconciliation_summary_unavailable",
+            }
+
+        return _unavailable
 
     async def _read(_profile):
         return summary
@@ -4033,34 +4057,300 @@ def _bnb_preflight_reconciliation_reader(api_module: Any):
     return _read
 
 
-def _bnb_preflight_account_facts_reader(api_module: Any):
+def _bnb_preflight_account_facts_reader(api_module: Any, bnb_live_facts: Any):
     async def _read(_profile):
-        generated_at_ms = int(time.time() * 1000)
-        snapshot = _cached_account_equity_snapshot(
-            api_module,
-            generated_at_ms=generated_at_ms,
-        )
+        facts = await bnb_live_facts.read(_profile)
+        account = dict(facts.get("account_facts") or {})
         return {
-            "source": snapshot["source"],
-            "account_equity_source": snapshot["source"],
-            "truth_level": snapshot["truth_level"],
-            "timestamp_ms": snapshot["timestamp_ms"],
-            "freshness": snapshot["freshness"],
-            "account_equity_freshness": snapshot["freshness"],
-            "account_equity_available": snapshot["available"],
-            "wallet_equity_available": snapshot["available"],
-            "available_margin_available": snapshot["available_margin_available"],
-            "account_equity": snapshot["wallet_equity"],
-            "wallet_equity": snapshot["wallet_equity"],
-            "available_margin": snapshot["available_margin"],
-            "read_method": snapshot["read_method"],
+            "source": account.get("source_id") or facts.get("source") or "unavailable",
+            "account_equity_source": account.get("source_id") or facts.get("source") or "unavailable",
+            "truth_level": facts.get("truth_level") or "unavailable",
+            "timestamp_ms": account.get("timestamp_ms"),
+            "freshness": account.get("freshness_status") or "unavailable",
+            "account_equity_freshness": account.get("freshness_status") or "unavailable",
+            "account_equity_available": account.get("account_equity") is not None,
+            "wallet_equity_available": account.get("account_equity") is not None,
+            "available_margin_available": account.get("available_margin") is not None,
+            "account_equity": account.get("account_equity") or "not_available",
+            "wallet_equity": account.get("account_equity") or "not_available",
+            "available_margin": account.get("available_margin") or "not_available",
+            "read_method": facts.get("read_method") or "none",
             "read_only_guarantee": True,
-            "external_call_performed": False,
-            "real_account_api_called_by_endpoint": False,
-            "reconciliation_status": "not_checked",
+            "external_call_performed": bool(account.get("external_call_performed")),
+            "real_account_api_called_by_endpoint": bool(account.get("external_call_performed")),
+            "reconciliation_status": account.get("reconciliation_status") or "unknown",
         }
 
     return _read
+
+
+class _BnbFinalGateLiveReadOnlyFacts:
+    """BNB final-gate facts from live read-only exchange calls.
+
+    This class is deliberately scoped to the Owner-authorized BNB final gate. It
+    exposes no order, cancel, runtime, permission, or execution methods.
+    """
+
+    def __init__(self, api_module: Any) -> None:
+        self._api_module = api_module
+        self._cache: dict[str, Any] | None = None
+
+    async def read(self, profile: Any) -> dict[str, Any]:
+        if self._cache is not None:
+            return self._cache
+        self._cache = await self._read(profile)
+        return self._cache
+
+    async def _read(self, profile: Any) -> dict[str, Any]:
+        generated_at_ms = int(time.time() * 1000)
+        env_status = _bnb_final_gate_live_read_env_status()
+        if env_status["safe"] is not True:
+            return _bnb_live_read_unavailable(
+                generated_at_ms=generated_at_ms,
+                reason="live_read_only_env_not_safe",
+                env_status=env_status,
+            )
+
+        client_info = _bnb_final_gate_read_only_client(self._api_module)
+        client = client_info.get("client")
+        if client is None:
+            return _bnb_live_read_unavailable(
+                generated_at_ms=generated_at_ms,
+                reason=str(client_info.get("reason") or "live_read_only_client_unavailable"),
+                env_status=env_status,
+            )
+
+        should_close = bool(client_info.get("close_after_read"))
+        errors: list[str] = []
+        positions: list[dict[str, Any]] = []
+        open_orders: list[dict[str, Any]] = []
+        try:
+            account_source = BinanceUsdtFuturesAccountFactsSource(
+                balance_client=client,
+                source_id="binance_usdt_futures_live_read_only_final_gate",
+                account_id="configured_bnb_final_gate_account",
+            )
+            account_facts = await account_source.read_trial_readiness_account_facts(
+                candidate_id=str(getattr(profile, "candidate_id", "MI-001-BNB-LONG")),
+                symbol=str(getattr(profile, "symbol", "BNB/USDT:USDT")),
+                side=str(getattr(profile, "side", "long")),
+                generated_at_ms=generated_at_ms,
+            )
+            try:
+                fetched_positions = await _call_fetch_positions(client, str(profile.symbol))
+                positions = [
+                    _dump_jsonable(item)
+                    for item in fetched_positions
+                    if _position_nonzero(item)
+                ]
+            except Exception as exc:  # pragma: no cover - defensive live read path
+                errors.append(f"BNB live position read failed: {type(exc).__name__}")
+            open_orders = await _safe_fetch_exchange_orders(
+                client,
+                str(profile.symbol),
+                errors=errors,
+            )
+            account_payload = account_facts.model_dump(mode="json")
+            available = account_facts.is_ready and not errors
+            return {
+                "available": available,
+                "reason": (
+                    "bnb_live_read_only_facts_available"
+                    if available
+                    else "bnb_live_read_only_facts_partially_unavailable"
+                ),
+                "source": str(client_info.get("source") or "live_read_only_client"),
+                "truth_level": "exchange_read" if available else "unavailable",
+                "read_method": "ccxt_read_only_fetch_balance_positions_open_orders",
+                "generated_at_ms": generated_at_ms,
+                "account_facts": account_payload,
+                "positions": positions,
+                "open_orders": open_orders,
+                "errors": errors,
+                "env_status": env_status,
+            }
+        finally:
+            if should_close and hasattr(client, "close"):
+                await client.close()
+
+
+class _GatewayBnbReadOnlyClient:
+    def __init__(self, gateway: Any) -> None:
+        self._gateway = gateway
+
+    async def fetch_balance(self, params: Optional[dict[str, Any]] = None) -> Any:
+        rest_exchange = getattr(self._gateway, "rest_exchange", None)
+        if rest_exchange is None or not hasattr(rest_exchange, "fetch_balance"):
+            raise RuntimeError("gateway_balance_reader_unavailable")
+        return await rest_exchange.fetch_balance(params or {"type": "future"})
+
+    async def fetch_positions(self, symbol: Optional[str] = None) -> list[Any]:
+        if not hasattr(self._gateway, "fetch_positions"):
+            raise RuntimeError("gateway_position_reader_unavailable")
+        try:
+            return list(await self._gateway.fetch_positions(symbol=symbol))
+        except TypeError:
+            return list(await self._gateway.fetch_positions(symbol))
+
+    async def fetch_open_orders(
+        self,
+        symbol: str,
+        params: Optional[dict[str, Any]] = None,
+    ) -> list[Any]:
+        if not hasattr(self._gateway, "fetch_open_orders"):
+            raise RuntimeError("gateway_open_order_reader_unavailable")
+        try:
+            return list(await self._gateway.fetch_open_orders(symbol, params=params or {}))
+        except TypeError:
+            return list(await self._gateway.fetch_open_orders(symbol=symbol, params=params or {}))
+
+    async def close(self) -> None:
+        return None
+
+
+class _CcxtBnbFinalGateReadOnlyClient:
+    def __init__(
+        self,
+        *,
+        exchange_name: str,
+        api_key: str,
+        api_secret: str,
+        testnet: bool,
+    ) -> None:
+        import ccxt.async_support as ccxt_async
+
+        exchange_class = getattr(ccxt_async, exchange_name)
+        self._exchange = exchange_class(
+            {
+                "apiKey": api_key,
+                "secret": api_secret,
+                "enableRateLimit": True,
+                "timeout": 30000,
+                "options": {
+                    "defaultType": "future",
+                    "adjustForTimeDifference": True,
+                    "recvWindow": 30000,
+                    "warnOnFetchOpenOrdersWithoutSymbol": False,
+                },
+            }
+        )
+        if testnet:
+            self._exchange.enable_demo_trading(True)
+
+    async def fetch_balance(self, params: Optional[dict[str, Any]] = None) -> Any:
+        return await self._exchange.fetch_balance(params or {"type": "future"})
+
+    async def fetch_positions(self, symbol: Optional[str] = None) -> list[Any]:
+        if symbol:
+            try:
+                return list(await self._exchange.fetch_positions([symbol]))
+            except TypeError:
+                return list(await self._exchange.fetch_positions(symbol))
+        return list(await self._exchange.fetch_positions())
+
+    async def fetch_open_orders(
+        self,
+        symbol: str,
+        params: Optional[dict[str, Any]] = None,
+    ) -> list[Any]:
+        return list(await self._exchange.fetch_open_orders(symbol, params=params or {}))
+
+    async def close(self) -> None:
+        await self._exchange.close()
+
+
+def _bnb_final_gate_read_only_client(api_module: Any) -> dict[str, Any]:
+    gateway = getattr(api_module, "_exchange_gateway", None)
+    if gateway is not None:
+        return {
+            "client": _GatewayBnbReadOnlyClient(gateway),
+            "source": "bound_exchange_gateway_read_only_methods",
+            "close_after_read": False,
+        }
+    api_key = os.environ.get("EXCHANGE_API_KEY", "").strip()
+    api_secret = os.environ.get("EXCHANGE_API_SECRET", "").strip()
+    if not api_key or not api_secret:
+        return {
+            "client": None,
+            "reason": "exchange_credentials_not_present_in_api_process",
+        }
+    exchange_name = os.environ.get("EXCHANGE_NAME", "binance").strip() or "binance"
+    if exchange_name != "binance":
+        return {
+            "client": None,
+            "reason": "unsupported_exchange_for_bnb_final_gate_read_only",
+        }
+    return {
+        "client": _CcxtBnbFinalGateReadOnlyClient(
+            exchange_name=exchange_name,
+            api_key=api_key,
+            api_secret=api_secret,
+            testnet=False,
+        ),
+        "source": "ccxt_binance_usdt_futures_read_only_client",
+        "close_after_read": True,
+    }
+
+
+def _bnb_final_gate_live_read_env_status() -> dict[str, Any]:
+    trading_env = os.environ.get("TRADING_ENV", "").strip().lower()
+    exchange_testnet = os.environ.get("EXCHANGE_TESTNET", "").strip().lower()
+    permission_max = os.environ.get("BRC_EXECUTION_PERMISSION_MAX", "read_only").strip().lower()
+    runtime_control = os.environ.get("RUNTIME_CONTROL_API_ENABLED", "false").strip().lower()
+    test_injection = os.environ.get("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false").strip().lower()
+    safe = (
+        trading_env == "live"
+        and exchange_testnet == "false"
+        and permission_max == "read_only"
+        and runtime_control not in {"1", "true", "yes", "on"}
+        and test_injection not in {"1", "true", "yes", "on"}
+    )
+    return {
+        "safe": safe,
+        "trading_env_live": trading_env == "live",
+        "exchange_testnet_false": exchange_testnet == "false",
+        "permission_read_only": permission_max == "read_only",
+        "runtime_control_disabled": runtime_control not in {"1", "true", "yes", "on"},
+        "test_signal_injection_disabled": test_injection not in {"1", "true", "yes", "on"},
+    }
+
+
+def _bnb_live_read_unavailable(
+    *,
+    generated_at_ms: int,
+    reason: str,
+    env_status: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "available": False,
+        "reason": reason,
+        "source": "unavailable",
+        "truth_level": "unavailable",
+        "read_method": "none",
+        "generated_at_ms": generated_at_ms,
+        "account_facts": {
+            "source_id": "unavailable",
+            "source_type": "unavailable",
+            "account_equity": None,
+            "available_margin": None,
+            "timestamp_ms": generated_at_ms,
+            "freshness_status": "unavailable",
+            "reconciliation_status": "unknown",
+            "read_only_guarantee": True,
+            "external_call_performed": False,
+        },
+        "positions": [],
+        "open_orders": [],
+        "errors": [reason],
+        "env_status": env_status,
+    }
+
+
+async def _call_fetch_positions(client: Any, symbol: str) -> list[Any]:
+    try:
+        return list(await client.fetch_positions(symbol=symbol))
+    except TypeError:
+        return list(await client.fetch_positions(symbol))
 
 
 async def _strategy_group_live_readonly_observation_response(

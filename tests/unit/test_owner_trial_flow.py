@@ -1132,3 +1132,123 @@ def test_bnb_live_execution_bridge_api_dry_run_does_not_create_intent_or_order(m
         app.dependency_overrides.pop(require_operator_session, None)
         api_brc_console._owner_trial_flow_service = None
         asyncio.run(engine.dispose())
+
+
+def test_bnb_final_gate_preflight_reads_live_read_only_account_and_flat_bnb(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    class FakeGks:
+        def get_state(self):
+            return {"active": False, "source": "test_gks"}
+
+    class FakeApiModule:
+        _global_kill_switch_service = FakeGks()
+        _startup_trading_guard_service = None
+        _startup_reconciliation_summary = None
+        _exchange_gateway = None
+
+    class FakeBnbReadOnlyClient:
+        closed = False
+
+        async def fetch_balance(self, params=None):
+            assert params == {"type": "future"}
+            return {
+                "info": {
+                    "totalMarginBalance": "100.00",
+                    "availableBalance": "80.00",
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+
+        async def fetch_positions(self, symbol=None):
+            assert symbol in {"BNBUSDT", "BNB/USDT:USDT"}
+            return []
+
+        async def fetch_open_orders(self, symbol, params=None):
+            assert symbol in {"BNBUSDT", "BNB/USDT:USDT"}
+            return []
+
+        async def close(self):
+            self.closed = True
+
+    client = FakeBnbReadOnlyClient()
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_read_only_client",
+        lambda _api_module: {
+            "client": client,
+            "source": "test_bnb_read_only_client",
+            "close_after_read": False,
+        },
+    )
+
+    async def scenario():
+        profile = build_bnb_strategy_trial_readiness().strategy_profile
+        collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+        snapshot = await collector.collect(profile)
+        facts = snapshot.fact_map()
+
+        assert facts["account_facts"].status == "clear"
+        assert facts["account_facts"].source == "binance_usdt_futures_live_read_only_final_gate"
+        assert facts["account_facts"].evidence["freshness"] == "fresh"
+        assert facts["account_facts"].evidence["equity_available"] is True
+        assert facts["account_facts"].evidence["available_margin_available"] is True
+        assert facts["account_facts"].evidence["external_call_performed"] is True
+        assert facts["account_facts"].evidence["read_only_guarantee"] is True
+        assert facts["active_position"].status == "clear"
+        assert facts["active_position"].evidence["active_position_count"] == 0
+        assert facts["open_order"].status == "clear"
+        assert facts["open_order"].evidence["open_order_count"] == 0
+        assert facts["gks"].status == "clear"
+        assert facts["startup_guard"].status == "blocked"
+        assert facts["startup_guard"].evidence["runtime_state"] == "not_started"
+        assert facts["reconciliation"].status == "unavailable"
+        assert facts["reconciliation"].blocker == "reconciliation_unavailable"
+
+    asyncio.run(scenario())
+
+
+def test_bnb_final_gate_live_read_only_env_fail_closed_without_client(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    class FakeGks:
+        def get_state(self):
+            return {"active": False, "source": "test_gks"}
+
+    class FakeApiModule:
+        _global_kill_switch_service = FakeGks()
+        _startup_trading_guard_service = None
+        _startup_reconciliation_summary = None
+        _exchange_gateway = None
+
+    def fail_if_called(_api_module):
+        raise AssertionError("live read client must not be created when env is unsafe")
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "true")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(api_brc_console, "_bnb_final_gate_read_only_client", fail_if_called)
+
+    async def scenario():
+        profile = build_bnb_strategy_trial_readiness().strategy_profile
+        collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+        snapshot = await collector.collect(profile)
+        facts = snapshot.fact_map()
+
+        assert facts["account_facts"].status == "unavailable"
+        assert facts["account_facts"].blocker == "account_facts_unavailable"
+        assert facts["active_position"].status == "unavailable"
+        assert facts["open_order"].status == "unavailable"
+        assert facts["gks"].status == "clear"
+        assert facts["startup_guard"].evidence["runtime_state"] == "not_started"
+
+    asyncio.run(scenario())

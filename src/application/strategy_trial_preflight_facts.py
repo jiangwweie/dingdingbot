@@ -248,8 +248,29 @@ class TrialPreflightFactCollector:
                 f"GKS read failed: {type(exc).__name__}",
             )
         active = _get_bool(state, "active")
+        state_name = str(
+            _get_value(state, "state")
+            or _get_value(state, "status")
+            or ""
+        ).lower()
         source = str(_get_value(state, "source") or "read_only_gks_reader")
         observed_at_ms = _get_int(state, "updated_at_ms") or generated_at_ms
+        if state_name in {"unavailable", "not_started", "not_available"}:
+            return TrialPreflightFact(
+                fact_id="gks",
+                status="unavailable",
+                source=source,
+                blocking=True,
+                blocker="gks_unavailable",
+                blockers=["gks_unavailable"],
+                observed_at_ms=observed_at_ms,
+                evidence={
+                    "state": state_name or "unavailable",
+                    "active": active,
+                    "reason": _get_str(state, "reason"),
+                },
+                notes=["GKS state is unavailable and cannot be assumed clear."],
+            )
         if active is True:
             return TrialPreflightFact(
                 fact_id="gks",
@@ -297,14 +318,44 @@ class TrialPreflightFactCollector:
                 f"startup guard read failed: {type(exc).__name__}",
             )
         armed = _get_bool(state, "armed")
+        state_name = str(
+            _get_value(state, "state")
+            or _get_value(state, "status")
+            or ""
+        ).lower()
         source = str(_get_value(state, "source") or "read_only_startup_guard_reader")
         observed_at_ms = _get_int(state, "updated_at_ms") or generated_at_ms
+        runtime_started = _get_bool(state, "runtime_started")
+        runtime_state = _get_str(state, "runtime_state")
+        reason = _get_str(state, "reason") or _get_str(state, "block_reason")
+        if state_name in {"unavailable", "not_available"}:
+            return TrialPreflightFact(
+                fact_id="startup_guard",
+                status="unavailable",
+                source=source,
+                blocking=True,
+                blocker="startup_guard_unavailable",
+                blockers=["startup_guard_unavailable"],
+                observed_at_ms=observed_at_ms,
+                evidence={
+                    "armed": armed,
+                    "runtime_started": runtime_started,
+                    "runtime_state": runtime_state or state_name,
+                    "reason": reason,
+                },
+                notes=["Startup guard state is unavailable and cannot be assumed clear."],
+            )
         if armed is True:
             return _clear(
                 "startup_guard",
                 observed_at_ms,
                 source,
-                {"armed": True},
+                {
+                    "armed": True,
+                    "runtime_started": runtime_started,
+                    "runtime_state": runtime_state,
+                    "reason": reason,
+                },
             )
         if armed is False:
             return TrialPreflightFact(
@@ -314,7 +365,12 @@ class TrialPreflightFactCollector:
                 blocking=True,
                 blocker="startup_guard_blocked",
                 observed_at_ms=observed_at_ms,
-                evidence={"armed": False},
+                evidence={
+                    "armed": False,
+                    "runtime_started": runtime_started,
+                    "runtime_state": runtime_state,
+                    "reason": reason,
+                },
                 notes=["Startup guard must be armed before rehearsal preflight can pass."],
             )
         return _unavailable(
@@ -346,24 +402,41 @@ class TrialPreflightFactCollector:
                 f"reconciliation read failed: {type(exc).__name__}",
             )
         status = str(_get_value(summary, "status") or _get_value(summary, "reconciliation_status") or "").lower()
+        source = str(_get_value(summary, "source") or "read_only_reconciliation_summary")
         failed = _get_int(summary, "failed_reconciliations_count")
         if status in {"clean", "passed", "ok"} or failed == 0:
             return _clear(
                 "reconciliation",
                 generated_at_ms,
-                "read_only_reconciliation_summary",
+                source,
                 {"status": status or "clean", "failed_reconciliations_count": failed},
             )
         if status in {"mismatch", "failed", "dirty"} or (failed is not None and failed > 0):
             return TrialPreflightFact(
                 fact_id="reconciliation",
                 status="blocked",
-                source="read_only_reconciliation_summary",
+                source=source,
                 blocking=True,
                 blocker="reconciliation_not_clean",
                 observed_at_ms=generated_at_ms,
                 evidence={"status": status or "unknown", "failed_reconciliations_count": failed},
                 notes=["Reconciliation is not clean."],
+            )
+        if status in {"unavailable", "not_started", "not_available"}:
+            return TrialPreflightFact(
+                fact_id="reconciliation",
+                status="unavailable",
+                source=source,
+                blocking=True,
+                blocker="reconciliation_unavailable",
+                blockers=["reconciliation_unavailable"],
+                observed_at_ms=generated_at_ms,
+                evidence={
+                    "status": status or "unavailable",
+                    "failed_reconciliations_count": failed,
+                    "reason": _get_str(summary, "reason"),
+                },
+                notes=["Reconciliation state is unavailable and cannot be assumed clean."],
             )
         return _unavailable(
             "reconciliation",
@@ -607,6 +680,13 @@ def _get_int(obj: Any, key: str) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _get_str(obj: Any, key: str) -> Optional[str]:
+    value = _get_value(obj, key)
+    if value is None:
+        return None
+    return str(value)
 
 
 def _availability(
