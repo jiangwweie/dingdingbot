@@ -488,13 +488,13 @@ export function TrialConfirmationV2() {
   const confirmation = trialConfirmationView(confirmationCarrier, data, acknowledgements);
   const allRisksAcknowledged = confirmation.risks.every((risk) => acknowledgements[risk.id]);
   const canPersistMetadata = selectedCarrierId === carrierDecision.carrierId && allRisksAcknowledged;
+  const scopeMatchesSelectedCarrier = selectedCarrierId === carrierDecision.carrierId;
   const activationBlockers = [
+    ...(!scopeMatchesSelectedCarrier ? ['授权范围不匹配'] : []),
     ...(!persistedAcknowledgement ? ['风险确认尚未由后端记录'] : []),
     ...(!activeDraft ? ['授权草案尚未生成'] : []),
-    ...(!allRisksAcknowledged ? ['策略风险尚未全部确认'] : []),
     ...(persistedLiveAuthorization ? ['这一次真实小额试验已授权'] : []),
   ];
-  const scopeMatchesSelectedCarrier = selectedCarrierId === carrierDecision.carrierId;
   const authorizationStateCopy = persistedLiveAuthorization
     ? '已授权，等待最终执行前检查'
     : '等待 Owner 授权';
@@ -515,10 +515,9 @@ export function TrialConfirmationV2() {
       tone: persistedLiveAuthorization ? 'teal' as Tone : scopeMatchesSelectedCarrier ? 'amber' as Tone : 'rose' as Tone,
     },
   ];
-  const canActivateLiveAuthorization = selectedCarrierId === carrierDecision.carrierId
+  const canActivateLiveAuthorization = scopeMatchesSelectedCarrier
     && Boolean(persistedAcknowledgement)
     && Boolean(activeDraft)
-    && allRisksAcknowledged
     && !persistedLiveAuthorization;
   const setRiskAcknowledged = (riskId: string, acknowledged: boolean) => {
     updateFlowState((current) => ({
@@ -692,8 +691,8 @@ export function TrialConfirmationV2() {
           <div className="mb-4 flex items-center gap-3">
             <StepBadge value="3" />
             <div>
-              <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">我现在能否点击授权</h3>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">只看风险确认、授权草案、授权范围和是否已授权。</p>
+              <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">真实资金授权</h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">我现在能否点击授权：只看风险确认、授权草案、授权范围和是否已授权。</p>
             </div>
           </div>
           <div className="space-y-3">
@@ -717,7 +716,7 @@ export function TrialConfirmationV2() {
             type="button"
             onClick={activateLiveAuthorization}
             disabled={!canActivateLiveAuthorization || activatingAuthorization}
-            className={`mb-3 flex w-full items-center justify-center gap-3 rounded-xl px-5 py-4 text-base font-bold transition ${
+            className={`mb-3 mt-4 flex w-full items-center justify-center gap-3 rounded-xl px-5 py-4 text-base font-bold transition ${
               canActivateLiveAuthorization && !activatingAuthorization
                 ? 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white'
                 : 'cursor-not-allowed bg-slate-300 text-white dark:bg-slate-700 dark:text-slate-300'
@@ -728,7 +727,7 @@ export function TrialConfirmationV2() {
           </button>
           {persistedLiveAuthorization ? (
             <div className="mb-3 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
-              已授权这一次真实小额试验；等待最终硬安全检查。尚未创建执行计划，尚未下单。
+              已授权这一次真实小额试验，等待最终硬安全检查。尚未创建执行计划，尚未下单。
             </div>
           ) : null}
           {activationError ? (
