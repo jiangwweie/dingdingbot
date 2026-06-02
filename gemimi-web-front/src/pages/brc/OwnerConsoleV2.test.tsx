@@ -151,24 +151,31 @@ describe('Owner Console v2 shell', () => {
     cleanup();
 
     renderWithRouter(<TrialConfirmationV2 />);
-    expect(await screen.findByText('授权前确认单 / 发起试验')).toBeTruthy();
-    expect(screen.getByText('本次试验内容')).toBeTruthy();
+    expect(await screen.findByText('授权这一次 BNB 小额试验')).toBeTruthy();
+    expect(screen.getByText('点击授权只记录本次授权，不会立即下单。')).toBeTruthy();
+    expect(screen.getByText('本次我要授权什么')).toBeTruthy();
     expect(screen.getAllByText('MI-001-BNB-LONG').length).toBeGreaterThan(0);
-    expect(screen.getByText('为什么推荐它')).toBeTruthy();
-    expect(screen.getByText('策略风险')).toBeTruthy();
-    expect(screen.getByText('硬安全门')).toBeTruthy();
+    expect(screen.getAllByText('BNB/USDT').length).toBeGreaterThan(0);
+    expect(screen.getByText('long / 做多')).toBeTruthy();
+    expect(screen.getByText('0.01 BNB')).toBeTruthy();
+    expect(screen.getAllByText('20 USDT').length).toBeGreaterThan(0);
+    expect(screen.getByText('1x')).toBeTruthy();
+    expect(screen.getAllByText(/单止盈 \+ 止损/).length).toBeGreaterThan(0);
+    expect(screen.getByText('一次性授权')).toBeTruthy();
+    expect(screen.getByText('我是否已确认风险')).toBeTruthy();
+    expect(screen.getByText('我现在能否点击授权')).toBeTruthy();
+    expect(screen.getByText('授权后执行前仍需通过')).toBeTruthy();
     expect(screen.getByText('最终硬安全检查')).toBeTruthy();
     expect(screen.getByText('已授权但尚未执行')).toBeTruthy();
     expect(screen.getAllByText('等待最终硬安全检查').length).toBeGreaterThan(0);
     expect(screen.getByText('运行时安全')).toBeTruthy();
     expect(screen.getByText('启动保护不可用')).toBeTruthy();
-    expect(screen.getByText('尚未创建执行计划')).toBeTruthy();
-    expect(screen.getByText('尚未下单')).toBeTruthy();
+    expect(screen.getAllByText('尚未创建执行计划').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('尚未下单').length).toBeGreaterThan(0);
     expect(screen.getByText('未授予执行/下单权限')).toBeTruthy();
     expect(screen.getByText('执行计划预览')).toBeTruthy();
     expect(screen.getByText('仅预览，不可执行')).toBeTruthy();
     expect(screen.getByText('硬安全门阻断，仅展示预览')).toBeTruthy();
-    expect(screen.getAllByText(/单止盈 \+ 止损/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/不会创建执行计划或订单/).length).toBeGreaterThan(0);
     expect(screen.getByText('Startup Guard')).toBeTruthy();
     expect(screen.getByText('GKS')).toBeTruthy();
@@ -177,6 +184,7 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText('BNB 挂单')).toBeTruthy();
     expect(screen.getByText('Persistence')).toBeTruthy();
     expect(screen.getByText('测试网验证结果')).toBeTruthy();
+    expect(screen.getByText('其他载体 / 预算基础（非本次授权）')).toBeTruthy();
     expect(screen.getByRole('button', { name: /确认授权这一次真实小额试验/ })).toBeTruthy();
     expect(screen.getAllByText(/风险确认尚未由后端记录/).length).toBeGreaterThan(0);
     expect(screen.getByText('暂不能授权真实资金，还差：')).toBeTruthy();
@@ -241,7 +249,7 @@ describe('Owner Console v2 shell', () => {
   it('persists Owner risk acknowledgement and pending authorization draft through backend metadata APIs', async () => {
     renderWithRouter(<TrialConfirmationV2 />);
 
-    expect(await screen.findByText('授权前确认单 / 发起试验')).toBeTruthy();
+    expect(await screen.findByText('授权这一次 BNB 小额试验')).toBeTruthy();
     for (const checkbox of screen.getAllByRole('checkbox')) {
       fireEvent.click(checkbox);
     }
@@ -337,7 +345,7 @@ describe('Owner Console v2 shell', () => {
     mockBrcApi.accountFacts.mockRejectedValueOnce(new Error('not found'));
 
     renderWithRouter(<TrialConfirmationV2 />);
-    expect(await screen.findByText('授权前确认单 / 发起试验')).toBeTruthy();
+    expect(await screen.findByText('授权这一次 BNB 小额试验')).toBeTruthy();
     expect(screen.getAllByText('数据未接入').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/授权门槛数据未接入，无法用于真实授权/).length).toBeGreaterThan(0);
     expect((screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement).disabled).toBe(true);

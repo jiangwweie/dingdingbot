@@ -494,6 +494,27 @@ export function TrialConfirmationV2() {
     ...(!allRisksAcknowledged ? ['策略风险尚未全部确认'] : []),
     ...(persistedLiveAuthorization ? ['这一次真实小额试验已授权'] : []),
   ];
+  const scopeMatchesSelectedCarrier = selectedCarrierId === carrierDecision.carrierId;
+  const authorizationStateCopy = persistedLiveAuthorization
+    ? '已授权，等待最终执行前检查'
+    : '等待 Owner 授权';
+  const metadataStatusRows = [
+    {
+      label: '风险确认',
+      value: persistedAcknowledgement ? `已记录：${persistedAcknowledgement.acknowledgement_id}` : allRisksAcknowledged ? '已勾选，可写入后端' : '等待勾选风险',
+      tone: persistedAcknowledgement ? 'teal' as Tone : allRisksAcknowledged ? 'amber' as Tone : 'rose' as Tone,
+    },
+    {
+      label: '授权草案',
+      value: activeDraft ? `已生成：${activeDraft.draft_id}` : allRisksAcknowledged ? '可生成草案' : '尚未生成',
+      tone: activeDraft ? 'teal' as Tone : 'amber' as Tone,
+    },
+    {
+      label: '授权状态',
+      value: persistedLiveAuthorization ? '已授权但尚未执行' : scopeMatchesSelectedCarrier ? '尚未授权' : '授权范围不匹配',
+      tone: persistedLiveAuthorization ? 'teal' as Tone : scopeMatchesSelectedCarrier ? 'amber' as Tone : 'rose' as Tone,
+    },
+  ];
   const canActivateLiveAuthorization = selectedCarrierId === carrierDecision.carrierId
     && Boolean(persistedAcknowledgement)
     && Boolean(activeDraft)
@@ -563,48 +584,59 @@ export function TrialConfirmationV2() {
   };
 
   return (
-    <PageShell title="授权前确认单 / 发起试验" subtitle="授权前，请确认试验内容、风险与所有硬门槛均已通过。">
+    <PageShell title="Owner 授权确认" subtitle="这页只记录本次 Owner 授权；授权不会立即下单。">
       <FlowStepper currentStep={3} />
-      <p className="text-sm text-slate-600 dark:text-slate-300">在授权前，请确认试验内容、风险与所有硬门槛均已通过。</p>
 
-      <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div className="mb-4 flex items-center gap-3">
-            <StepBadge value="1" />
-            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">本次试验内容</h3>
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <StatePill tone={persistedLiveAuthorization ? 'teal' : 'amber'}>{authorizationStateCopy}</StatePill>
+              <StatePill tone="slate">Carrier: MI-001-BNB-LONG</StatePill>
+            </div>
+            <h2 className="text-2xl font-bold text-slate-950 dark:text-slate-50">授权这一次 BNB 小额试验</h2>
+            <p className="mt-2 text-base font-semibold text-slate-700 dark:text-slate-200">点击授权只记录本次授权，不会立即下单。</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+              风险确认、授权草案和 Owner 授权是 metadata 记录。启动保护、GKS、账户事实、持仓和挂单检查会在授权后、执行前继续阻断。
+            </p>
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {confirmation.content.map(([label, value]) => (
-              <TrialFact key={label} label={label} value={value} />
-            ))}
+          <div className="grid min-w-[260px] grid-cols-1 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-1">
+            <StatePill tone="amber">尚未创建执行计划</StatePill>
+            <StatePill tone="amber">尚未下单</StatePill>
+            <StatePill tone="slate">自动执行关闭</StatePill>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div className="mb-4 flex items-center gap-3">
-            <StepBadge value="2" />
-            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">为什么推荐它</h3>
-          </div>
-          <ul className="space-y-4 text-sm leading-6 text-slate-700 dark:text-slate-300">
-            {confirmation.reasons.map((reason) => (
-              <li key={reason} className="flex gap-3">
-                <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-700 dark:bg-slate-300" />
-                <span>{reason}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="mb-4 flex items-center gap-3">
+          <StepBadge value="1" />
+          <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">本次我要授权什么</h3>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <TrialFact label="Carrier" value="MI-001-BNB-LONG" />
+          <TrialFact label="Symbol" value="BNB/USDT" />
+          <TrialFact label="方向" value="long / 做多" />
+          <TrialFact label="数量" value="0.01 BNB" />
+          <TrialFact label="最大名义本金" value="20 USDT" />
+          <TrialFact label="杠杆" value="1x" />
+          <TrialFact label="保护" value="单止盈 + 止损" />
+          <TrialFact label="模式" value="一次性授权" />
+        </div>
       </section>
 
       <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="mb-4 flex items-center gap-3">
-            <StepBadge value="3A" />
-            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">策略风险 <span className="text-sm font-normal text-slate-500">（你可知情接受）</span></h3>
+            <StepBadge value="2" />
+            <div>
+              <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">我是否已确认风险</h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">风险确认和真实资金授权分开记录。</p>
+            </div>
           </div>
           <div className="space-y-3">
             {confirmation.risks.map((risk) => (
-              <label key={risk.id} className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+              <label key={risk.id} className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-slate-200 p-4 transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900">
                 <span className="flex items-start gap-4">
                   <AlertCircle className="mt-1 h-5 w-5 text-slate-600 dark:text-slate-300" />
                   <span>
@@ -633,7 +665,7 @@ export function TrialConfirmationV2() {
             </div>
           ) : (
             <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-              当前风险确认仍是本地勾选。全部勾选后可写入后端 metadata，并生成不可执行的授权草案。
+              当前风险确认仍是本地勾选。全部勾选后可写入后端，并生成等待 Owner 授权的草案。
             </div>
           )}
           <button
@@ -658,67 +690,27 @@ export function TrialConfirmationV2() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="mb-4 flex items-center gap-3">
-            <StepBadge value="3B" />
-            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">硬安全门 <span className="text-sm font-normal text-slate-500">（必须通过）</span></h3>
+            <StepBadge value="3" />
+            <div>
+              <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">我现在能否点击授权</h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">只看风险确认、授权草案、授权范围和是否已授权。</p>
+            </div>
           </div>
-          <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
-            {confirmation.gates.map((gate) => (
-              <div key={gate.label} className="grid grid-cols-[1fr_auto] border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 dark:border-slate-800">
-                <span className="text-slate-700 dark:text-slate-300">{gate.label}</span>
-                <span className={`inline-flex items-center gap-2 font-bold ${gate.tone === 'teal' ? 'text-emerald-600' : gate.tone === 'rose' ? 'text-rose-600' : 'text-amber-600'}`}>
-                  {gate.tone === 'teal' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                  {gate.result}
-                </span>
-              </div>
+          <div className="space-y-3">
+            {metadataStatusRows.map((row) => (
+              <AuthorizationStatusLine key={row.label} label={row.label} value={row.value} tone={row.tone} />
             ))}
           </div>
-        </section>
-      </section>
-
-      <FinalGateReadModelPanel bridge={data.bnbLiveExecutionBridge} />
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-        <div className="mb-4 flex items-center gap-3">
-          <StepBadge value="4" />
-          <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">测试网验证结果</h3>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
-          {confirmation.testnet.map((item) => (
-            <div key={item.label} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-4 text-sm dark:border-slate-800">
-              {item.result === '通过'
-                ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                : <AlertCircle className="h-4 w-4 text-amber-600" />}
-              <span className="font-bold text-slate-950 dark:text-slate-50">{item.label}</span>
-              <span className="text-slate-500">{item.result}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <CarrierExpansionBudgetPanel
-        expansion={data.secondCarrierExpansion}
-        budget={data.budgetAuthorizationFoundation}
-      />
-
-      <section className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_0.52fr]">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div className="mb-4 flex items-center gap-3">
-            <StepBadge value="5" />
-            <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">你的最终动作</h3>
-          </div>
-          <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
-            确认以上信息均已阅读并理解，且所有硬安全门均通过后，才可授权本次小额试验。
-          </p>
           {activeDraft ? (
-            <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
+            <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
               授权草案已生成：{activeDraft.draft_id}。状态为 pending_owner_live_authorization；不会下单，不会创建 live ExecutionIntent。
             </div>
           ) : (
-            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
               尚未生成后端授权草案。风险确认写入后端后，草案会保持等待真实资金授权。
             </div>
           )}
-          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
             风险确认 ≠ 真实资金授权；真实资金授权 ≠ 立即下单。授权后仍需最终硬安全检查。
           </div>
           <button
@@ -751,17 +743,16 @@ export function TrialConfirmationV2() {
                 ? activationBlockers.join('；')
                 : '可以记录 Owner 对这一次 bounded live trial 的显式授权。记录后仍不会下单。'}
           </p>
-          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
-            <p className="mb-2 font-bold text-slate-900 dark:text-slate-100">{persistedLiveAuthorization ? '授权后仍需等待：' : '暂不能授权真实资金，还差：'}</p>
-            <ol className="list-decimal space-y-1 pl-5 text-slate-700 dark:text-slate-300">
-              {(persistedLiveAuthorization
-                ? ['最终硬安全检查', '启动保护确认', '后续单独创建执行计划；当前尚未创建']
-                : activationBlockers.length ? activationBlockers : confirmation.remainingConditions
-              ).map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ol>
-          </div>
+          {activationBlockers.length && !persistedLiveAuthorization ? (
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
+              <p className="mb-2 font-bold text-slate-900 dark:text-slate-100">暂不能授权真实资金，还差：</p>
+              <ol className="list-decimal space-y-1 pl-5 text-slate-700 dark:text-slate-300">
+                {activationBlockers.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
           <Link
             to="/strategy-candidates"
             className="flex w-full items-center justify-center rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-900"
@@ -785,8 +776,63 @@ export function TrialConfirmationV2() {
         </section>
       </section>
 
+      <details className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950" open={Boolean(persistedLiveAuthorization)}>
+        <summary className="cursor-pointer text-lg font-bold text-slate-950 dark:text-slate-50">授权后执行前仍需通过</summary>
+        <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+          这些状态只决定是否能进入执行边界，不决定上面的 Owner 授权按钮是否可点击。
+        </p>
+        <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+          {confirmation.gates.map((gate) => (
+            <div key={gate.label} className="grid grid-cols-[1fr_auto] border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 dark:border-slate-800">
+              <span className="text-slate-700 dark:text-slate-300">{gate.label}</span>
+              <span className={`inline-flex items-center gap-2 font-bold ${gate.tone === 'teal' ? 'text-emerald-600' : gate.tone === 'rose' ? 'text-rose-600' : 'text-amber-600'}`}>
+                {gate.tone === 'teal' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                {gate.result}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4">
+          <FinalGateReadModelPanel bridge={data.bnbLiveExecutionBridge} />
+        </div>
+      </details>
+
+      <details className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <summary className="cursor-pointer text-lg font-bold text-slate-950 dark:text-slate-50">测试网验证结果</summary>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-5">
+          {confirmation.testnet.map((item) => (
+            <div key={item.label} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-4 text-sm dark:border-slate-800">
+              {item.result === '通过'
+                ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                : <AlertCircle className="h-4 w-4 text-amber-600" />}
+              <span className="font-bold text-slate-950 dark:text-slate-50">{item.label}</span>
+              <span className="text-slate-500">{item.result}</span>
+            </div>
+          ))}
+        </div>
+      </details>
+
+      <details className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <summary className="cursor-pointer text-lg font-bold text-slate-950 dark:text-slate-50">其他载体 / 预算基础（非本次授权）</summary>
+        <div className="mt-4">
+          <CarrierExpansionBudgetPanel
+            expansion={data.secondCarrierExpansion}
+            budget={data.budgetAuthorizationFoundation}
+          />
+        </div>
+      </details>
+
       <TechnicalDetails data={{ trialConfirmation: confirmation, selectedCarrierId, localRiskAcknowledgements: localAcknowledgements, backendAcknowledgement: persistedAcknowledgement, backendDraft: activeDraft, liveAuthorization: persistedLiveAuthorization, ownerTrialFlow: data.ownerTrialFlow, bnbLiveExecutionBridge: data.bnbLiveExecutionBridge, rawGovernance: data.strategyTrialGovernance }} />
     </PageShell>
+  );
+}
+
+function AuthorizationStatusLine({ label, value, tone }: { label: string; value: string; tone: Tone }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3 text-sm dark:border-slate-800">
+      <span className="font-semibold text-slate-700 dark:text-slate-300">{label}</span>
+      <StatePill tone={tone}>{value}</StatePill>
+    </div>
   );
 }
 
