@@ -260,6 +260,7 @@ describe('Owner Console v2 shell', () => {
     expect(await screen.findByText(/授权草案已生成：draft-unit/)).toBeTruthy();
     expect(screen.getAllByText(/pending_owner_live_authorization/).length).toBeGreaterThan(0);
     expect(screen.getByText(/不会下单，不会创建 live ExecutionIntent/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /更新后端风险确认 \/ 授权草案/ })).toBeNull();
     expect(mockBrcApi.createOwnerRiskAcknowledgement).toHaveBeenCalledWith({
       carrier_id: 'MI-001-BNB-LONG',
       acknowledged_warning_codes: [
@@ -328,6 +329,8 @@ describe('Owner Console v2 shell', () => {
 
     expect(await screen.findByText(/风险确认已由后端记录：ack-unit/)).toBeTruthy();
     expect(screen.getByText(/授权草案已生成：draft-unit/)).toBeTruthy();
+    expect(screen.getByText(/下一步请在真实资金授权区确认本次授权/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /更新后端风险确认 \/ 授权草案/ })).toBeNull();
     expect(screen.getByText('真实资金授权')).toBeTruthy();
     const liveAuthorizationButton = screen.getByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement;
     expect(liveAuthorizationButton.disabled).toBe(false);

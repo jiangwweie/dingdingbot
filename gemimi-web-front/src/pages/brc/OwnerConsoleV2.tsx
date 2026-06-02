@@ -489,6 +489,7 @@ export function TrialConfirmationV2() {
   const allRisksAcknowledged = confirmation.risks.every((risk) => acknowledgements[risk.id]);
   const canPersistMetadata = selectedCarrierId === carrierDecision.carrierId && allRisksAcknowledged;
   const scopeMatchesSelectedCarrier = selectedCarrierId === carrierDecision.carrierId;
+  const riskMetadataComplete = Boolean(persistedAcknowledgement && activeDraft);
   const activationBlockers = [
     ...(!scopeMatchesSelectedCarrier ? ['授权范围不匹配'] : []),
     ...(!persistedAcknowledgement ? ['风险确认尚未由后端记录'] : []),
@@ -661,25 +662,28 @@ export function TrialConfirmationV2() {
           {persistedAcknowledgement ? (
             <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
               风险确认已由后端记录：{persistedAcknowledgement.acknowledgement_id}。这不是真实资金授权。
+              {activeDraft ? ' 授权草案已生成，下一步请在真实资金授权区确认本次授权。' : ''}
             </div>
           ) : (
             <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
               当前风险确认仍是本地勾选。全部勾选后可写入后端，并生成等待 Owner 授权的草案。
             </div>
           )}
-          <button
-            type="button"
-            onClick={submitBackendMetadata}
-            disabled={!canPersistMetadata || submittingMetadata}
-            className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition ${
-              canPersistMetadata && !submittingMetadata
-                ? 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white'
-                : 'cursor-not-allowed bg-slate-300 text-white dark:bg-slate-700 dark:text-slate-300'
-            }`}
-          >
-            <ShieldCheck className="h-4 w-4" />
-            {persistedAcknowledgement ? '更新后端风险确认 / 授权草案' : '后端记录风险确认并生成授权草案'}
-          </button>
+          {!riskMetadataComplete ? (
+            <button
+              type="button"
+              onClick={submitBackendMetadata}
+              disabled={!canPersistMetadata || submittingMetadata}
+              className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition ${
+                canPersistMetadata && !submittingMetadata
+                  ? 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white'
+                  : 'cursor-not-allowed bg-slate-300 text-white dark:bg-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {persistedAcknowledgement ? '生成授权草案' : '后端记录风险确认并生成授权草案'}
+            </button>
+          ) : null}
           {submitError ? (
             <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
               {submitError}
