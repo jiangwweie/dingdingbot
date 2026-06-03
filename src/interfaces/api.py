@@ -34,6 +34,7 @@ from src.infrastructure.connection_pool import close_all_connections
 from src.infrastructure.database import close_db
 from src.interfaces import api_config_globals as _config_globals
 from src.interfaces.api_brc_console import (
+    close_owner_bounded_exchange_gateway,
     dev_testnet_router,
     operator_router,
     router as brc_router,
@@ -241,6 +242,7 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await close_owner_bounded_exchange_gateway()
         if get_runtime_context() is None:
             await close_db()
             await close_all_connections()

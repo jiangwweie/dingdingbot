@@ -4028,6 +4028,21 @@ def _owner_bounded_gateway_env_blockers() -> list[str]:
     return blockers
 
 
+async def close_owner_bounded_exchange_gateway() -> None:
+    api_module = _api_module()
+    gateway = getattr(api_module, "_owner_bounded_exchange_gateway", None)
+    if gateway is None:
+        return
+    close = getattr(gateway, "close", None)
+    if callable(close):
+        try:
+            await close()
+        finally:
+            setattr(api_module, "_owner_bounded_exchange_gateway", None)
+    else:
+        setattr(api_module, "_owner_bounded_exchange_gateway", None)
+
+
 @router.get(
     "/strategy-trial-readiness/v1",
     response_model=StrategyTrialReadinessResponse,
