@@ -58,6 +58,10 @@ class ExecutionIntent(BaseModel):
     # 关联订单（执行成功后填充）
     order_id: Optional[str] = Field(None, description="本地订单 ID")
     exchange_order_id: Optional[str] = Field(None, description="交易所订单 ID")
+    authorization_id: Optional[str] = Field(
+        None,
+        description="Owner bounded live-trial authorization ID, when intent is created from Owner execution.",
+    )
 
     # 拦截原因（被 CapitalProtection 拦截时填充）
     blocked_reason: Optional[str] = Field(None, description="拦截原因代码")

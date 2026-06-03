@@ -444,8 +444,10 @@ export function TrialConfirmationV2() {
   const [backendLiveAuthorization, setBackendLiveAuthorization] = useState<BoundedLiveTrialAuthorization | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [activationError, setActivationError] = useState<string | null>(null);
+  const [executionError, setExecutionError] = useState<string | null>(null);
   const [submittingMetadata, setSubmittingMetadata] = useState(false);
   const [activatingAuthorization, setActivatingAuthorization] = useState(false);
+  const [executingOwnerTrial, setExecutingOwnerTrial] = useState(false);
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading label="加载授权前确认单..." />;
 
@@ -583,6 +585,18 @@ export function TrialConfirmationV2() {
       setActivationError(message(error));
     } finally {
       setActivatingAuthorization(false);
+    }
+  };
+  const executeOwnerBoundedTrial = async () => {
+    if (!persistedLiveAuthorization || !executionTrigger?.enabled) return;
+    setExecutingOwnerTrial(true);
+    setExecutionError(null);
+    try {
+      await brcApi.executeOwnerTrialAuthorization(persistedLiveAuthorization.authorization_id);
+    } catch (error) {
+      setExecutionError(message(error));
+    } finally {
+      setExecutingOwnerTrial(false);
     }
   };
   const renderLiveAuthorizationButton = (spacingClass = 'mb-4') => (
@@ -810,7 +824,13 @@ export function TrialConfirmationV2() {
           <FinalGateReadModelPanel bridge={data.bnbLiveExecutionBridge} />
         </div>
         {executionTrigger?.visible ? (
-          <OwnerExecutionTriggerPanel trigger={executionTrigger} finalGatePassed={finalGatePassed} />
+          <OwnerExecutionTriggerPanel
+            trigger={executionTrigger}
+            finalGatePassed={finalGatePassed}
+            executing={executingOwnerTrial}
+            executionError={executionError}
+            onExecute={executeOwnerBoundedTrial}
+          />
         ) : null}
       </details>
 
@@ -856,31 +876,49 @@ function AuthorizationStatusLine({ label, value, tone }: { label: string; value:
 function OwnerExecutionTriggerPanel({
   trigger,
   finalGatePassed,
+  executing,
+  executionError,
+  onExecute,
 }: {
   trigger: BnbLiveExecutionBridgeResponse['owner_execution_trigger'];
   finalGatePassed: boolean;
+  executing: boolean;
+  executionError: string | null;
+  onExecute: () => void;
 }) {
   const scope = trigger.exact_scope || {};
+  const canExecute = Boolean(trigger.enabled && finalGatePassed && !executing);
+  const statusTone: Tone = trigger.enabled ? 'rose' : finalGatePassed ? 'amber' : 'slate';
+  const statusCopy = trigger.enabled
+    ? 'Owner 可手动执行'
+    : trigger.status === 'blocked_execution_readiness'
+      ? '执行入口已接入但被阻断'
+      : '等待最终硬安全检查';
   return (
-    <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20">
+    <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20" aria-label="Owner 执行触发">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="mb-2 flex flex-wrap gap-2">
             <StatePill tone={finalGatePassed ? 'teal' : 'amber'}>{finalGatePassed ? '最终硬安全检查已通过' : '等待最终硬安全检查'}</StatePill>
-            <StatePill tone="amber">执行入口未接入</StatePill>
+            <StatePill tone={statusTone}>{statusCopy}</StatePill>
           </div>
           <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">Owner 执行触发</h3>
           <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-200">
-            这里是 Owner 手动执行动作的位置；当前不会创建执行计划，不会下单。
+            点击这个按钮会提交本次真实 BNB 小额实盘订单；未满足条件时不会创建执行计划，不会下单。
           </p>
         </div>
         <button
           type="button"
-          disabled
-          className="flex min-h-12 min-w-[260px] items-center justify-center gap-2 rounded-xl bg-slate-300 px-5 py-3 text-sm font-bold text-white dark:bg-slate-700 dark:text-slate-300"
+          onClick={onExecute}
+          disabled={!canExecute}
+          className={`flex min-h-12 min-w-[260px] items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold text-white transition ${
+            canExecute
+              ? 'bg-rose-700 hover:bg-rose-800'
+              : 'cursor-not-allowed bg-slate-300 dark:bg-slate-700 dark:text-slate-300'
+          }`}
         >
           <Zap className="h-4 w-4" />
-          {trigger.label}
+          {executing ? '正在提交执行请求...' : trigger.label}
         </button>
       </div>
       <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
@@ -888,9 +926,27 @@ function OwnerExecutionTriggerPanel({
         <PreviewLine label="方向 / 数量" value={`${scope.side || '未接入'} / ${scope.quantity || '未接入'}`} />
         <PreviewLine label="上限 / 保护" value={`${scope.max_notional || '未接入'} USDT / ${scope.protection_plan_type || '未接入'}`} />
       </div>
-      <p className="mt-4 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-slate-950 dark:text-amber-200">
+      <p className="mt-4 rounded-xl border border-rose-300 bg-white px-4 py-3 text-sm font-semibold text-rose-900 dark:border-rose-900/60 dark:bg-slate-950 dark:text-rose-200">
+        点击会尝试创建一个 scoped ExecutionIntent，并提交一笔 BNB long 0.01 的真实订单；只能由 Owner 手动点击。
+      </p>
+      <p className="mt-3 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-slate-950 dark:text-amber-200">
         {trigger.reason}
       </p>
+      {trigger.blockers?.length ? (
+        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-800 dark:bg-slate-950">
+          <p className="mb-2 font-bold text-slate-900 dark:text-slate-100">当前阻断：</p>
+          <ul className="list-disc space-y-1 pl-5 text-slate-700 dark:text-slate-300">
+            {trigger.blockers.map((blocker) => (
+              <li key={blocker}>{blocker}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {executionError ? (
+        <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+          {executionError}
+        </p>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <StatePill tone="teal">尚未创建执行计划</StatePill>
         <StatePill tone="teal">尚未下单</StatePill>

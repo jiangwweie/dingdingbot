@@ -152,15 +152,18 @@ class BnbOwnerExecutionTriggerReadModel(BaseModel):
 
     label: Literal["执行这一次小额实盘试验"] = "执行这一次小额实盘试验"
     visible: bool
-    enabled: Literal[False] = False
+    enabled: bool = False
     status: Literal[
         "hidden_until_final_gate_clear",
         "blocked_execution_endpoint_not_available",
+        "blocked_execution_readiness",
+        "ready_for_owner_click",
     ]
-    endpoint: None = None
+    endpoint: str | None = None
     reason: str
-    creates_execution_intent_on_click: Literal[False] = False
-    creates_order_on_click: Literal[False] = False
+    blockers: list[str] = Field(default_factory=list)
+    creates_execution_intent_on_click: bool = False
+    creates_order_on_click: bool = False
     order_permission_granted: Literal[False] = False
     exact_scope: dict[str, str] = Field(default_factory=dict)
 
@@ -545,17 +548,25 @@ def _owner_execution_trigger_read_model(
             visible=False,
             status="hidden_until_final_gate_clear",
             reason="Owner execution trigger remains hidden until authorization and final hard gate are clear.",
+            blockers=hard_blockers,
             exact_scope=exact_scope,
         )
+    endpoint = (
+        f"/api/brc/owner-trial-flow/authorizations/"
+        f"{authorization.authorization_id}/execute"
+    )
     return BnbOwnerExecutionTriggerReadModel(
         visible=True,
-        status="blocked_execution_endpoint_not_available",
+        enabled=True,
+        status="ready_for_owner_click",
+        endpoint=endpoint,
         reason=(
-            "Final hard gate is clear, but the Owner-operated live execution endpoint is not "
-            "implemented in this console. Showing this trigger would be unsafe until the "
-            "scoped ExecutionIntent, entry order, TP/SL protection, cleanup, and review path "
-            "are wired end to end."
+            "Owner can click this button to create one scoped ExecutionIntent, submit one real BNB "
+            "entry order, and attach one TP plus one SL after the final hard gate is rechecked."
         ),
+        blockers=[],
+        creates_execution_intent_on_click=True,
+        creates_order_on_click=True,
         exact_scope=exact_scope,
     )
 

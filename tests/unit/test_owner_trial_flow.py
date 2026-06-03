@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +23,17 @@ from src.application.bnb_live_execution_bridge import (
     BnbLiveExecutionBridgeDryRunRequest,
     BnbLiveExecutionBridgeDryRunService,
 )
+from src.application.owner_bounded_execution import (
+    ExchangeGatewayBoundedOrderExecutor,
+    OwnerBoundedExecutionError,
+    OwnerBoundedExecutionService,
+    default_owner_bounded_execution_registry,
+)
+from src.application.protection_price_planner import (
+    ProtectionExchangeFilters,
+    ProtectionPlannerService,
+    StaticProtectionPriceSource,
+)
 from src.application.strategy_trial_preflight_facts import (
     TrialPreflightFact,
     TrialPreflightFactsSnapshot,
@@ -31,7 +43,30 @@ from src.infrastructure.pg_models import (
     PGBrcBoundedLiveTrialAuthorizationORM,
     PGBrcBoundedLiveTrialAuthorizationDraftORM,
     PGBrcOwnerRiskAcknowledgementORM,
+    PGBrcProtectionPricePlanORM,
 )
+from src.infrastructure.pg_protection_price_plan_repository import PgProtectionPricePlanRepository
+from src.domain.models import Direction, OrderPlacementResult, OrderStatus, OrderType
+
+
+class _RecordingIntentRepository:
+    def __init__(self):
+        self.items = []
+        self.updates = []
+
+    async def save(self, intent):
+        self.items.append(intent)
+
+    async def update(self, intent):
+        self.updates.append(intent.model_copy(deep=True))
+
+
+class _RecordingOrderRepository:
+    def __init__(self):
+        self.items = []
+
+    async def save(self, order):
+        self.items.append(order)
 
 
 async def _service() -> tuple[OwnerTrialFlowService, object]:
@@ -49,6 +84,7 @@ async def _service() -> tuple[OwnerTrialFlowService, object]:
         await conn.run_sync(PGBrcOwnerRiskAcknowledgementORM.__table__.create)
         await conn.run_sync(PGBrcBoundedLiveTrialAuthorizationDraftORM.__table__.create)
         await conn.run_sync(PGBrcBoundedLiveTrialAuthorizationORM.__table__.create)
+        await conn.run_sync(PGBrcProtectionPricePlanORM.__table__.create)
     return OwnerTrialFlowService(PgOwnerTrialFlowRepository(session_maker)), engine
 
 
@@ -67,7 +103,7 @@ async def _bridge_service() -> tuple[OwnerTrialFlowService, BnbLiveExecutionBrid
             text(
                 "CREATE TABLE execution_intents ("
                 "id TEXT PRIMARY KEY, signal_id TEXT NOT NULL, symbol TEXT NOT NULL, "
-                "status TEXT NOT NULL"
+                "status TEXT NOT NULL, authorization_id TEXT"
                 ")"
             )
         )
@@ -982,11 +1018,15 @@ def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_s
             assert result.acknowledged_strategy_warnings
             assert result.strategy_warnings_block_execution is False
             assert result.owner_execution_trigger.visible is True
-            assert result.owner_execution_trigger.enabled is False
-            assert result.owner_execution_trigger.status == "blocked_execution_endpoint_not_available"
-            assert result.owner_execution_trigger.endpoint is None
-            assert result.owner_execution_trigger.creates_execution_intent_on_click is False
-            assert result.owner_execution_trigger.creates_order_on_click is False
+            assert result.owner_execution_trigger.enabled is True
+            assert result.owner_execution_trigger.status == "ready_for_owner_click"
+            assert result.owner_execution_trigger.endpoint == (
+                f"/api/brc/owner-trial-flow/authorizations/"
+                f"{result.execution_plan_preview.authorization_id}/execute"
+            )
+            assert result.owner_execution_trigger.blockers == []
+            assert result.owner_execution_trigger.creates_execution_intent_on_click is True
+            assert result.owner_execution_trigger.creates_order_on_click is True
             assert result.owner_execution_trigger.order_permission_granted is False
             assert result.owner_execution_trigger.exact_scope == {
                 "carrier_id": "MI-001-BNB-LONG",
@@ -1047,6 +1087,558 @@ def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_s
             await engine.dispose()
 
     asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_registry_v1_only_registers_mi001_bnb_long():
+    registry = default_owner_bounded_execution_registry()
+
+    assert registry.supported_carrier_ids == ["MI-001-BNB-LONG"]
+    assert registry.get("MI-001-BNB-LONG") is not None
+    assert registry.get("TB-BTC-SHORT") is None
+
+
+def test_owner_bounded_execution_blocks_missing_protection_price_source_before_intent_or_order():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+
+            assert exc_info.value.code == "owner_bounded_execution_blocked"
+            assert "protection_price_source_missing" in exc_info.value.blockers
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_valid_price_snapshot_clears_protection_source_blocker():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        protection_repo = PgProtectionPricePlanRepository(session_maker)
+        protection_service = ProtectionPlannerService(
+            repository=protection_repo,
+            price_source=StaticProtectionPriceSource(
+                reference_price=Decimal("600.12"),
+                filters=ProtectionExchangeFilters(
+                    min_amount=Decimal("0.01"),
+                    amount_step=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                    min_notional_source="test",
+                    tick_size=Decimal("0.1"),
+                ),
+            ),
+        )
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+            protection_planner_service=protection_service,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+
+            assert "protection_price_source_missing" not in exc_info.value.blockers
+            assert "entry_order_executor_not_enabled" in exc_info.value.blockers
+            plan = await protection_repo.latest_valid_plan(
+                authorization.authorization_id,
+                phase="pre_entry_reference",
+            )
+            assert plan is not None
+            assert plan.reference_price.quantize(Decimal("0.01")) == Decimal("600.12")
+            assert plan.tp_price.quantize(Decimal("0.1")) == Decimal("606.1")
+            assert plan.sl_price.quantize(Decimal("0.1")) == Decimal("594.1")
+            assert plan.tp_quantity.quantize(Decimal("0.01")) == Decimal("0.01")
+            assert plan.sl_quantity.quantize(Decimal("0.01")) == Decimal("0.01")
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and_consumes():
+    class FakeWriteGateway:
+        def __init__(self):
+            self.calls = []
+
+        async def place_order(self, **kwargs):
+            self.calls.append(kwargs)
+            order_type = kwargs["order_type"]
+            role_index = len(self.calls)
+            if order_type == "market":
+                return OrderPlacementResult(
+                    order_id="entry-order-1",
+                    exchange_order_id="x-entry-1",
+                    symbol=kwargs["symbol"],
+                    order_type=OrderType.MARKET,
+                    direction=Direction.LONG,
+                    side=kwargs["side"],
+                    amount=kwargs["amount"],
+                    filled_qty=Decimal("0.01"),
+                    average_exec_price=Decimal("600.20"),
+                    status=OrderStatus.FILLED,
+                    client_order_id=kwargs.get("client_order_id"),
+                )
+            if order_type == "limit":
+                return OrderPlacementResult(
+                    order_id=f"tp-order-{role_index}",
+                    exchange_order_id=f"x-tp-{role_index}",
+                    symbol=kwargs["symbol"],
+                    order_type=OrderType.LIMIT,
+                    direction=Direction.SHORT,
+                    side=kwargs["side"],
+                    amount=kwargs["amount"],
+                    price=kwargs["price"],
+                    reduce_only=kwargs["reduce_only"],
+                    status=OrderStatus.OPEN,
+                    client_order_id=kwargs.get("client_order_id"),
+                )
+            return OrderPlacementResult(
+                order_id=f"sl-order-{role_index}",
+                exchange_order_id=f"x-sl-{role_index}",
+                symbol=kwargs["symbol"],
+                order_type=OrderType.STOP_MARKET,
+                direction=Direction.SHORT,
+                side=kwargs["side"],
+                amount=kwargs["amount"],
+                trigger_price=kwargs["trigger_price"],
+                reduce_only=kwargs["reduce_only"],
+                status=OrderStatus.OPEN,
+                client_order_id=kwargs.get("client_order_id"),
+            )
+
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        protection_repo = PgProtectionPricePlanRepository(session_maker)
+        protection_service = ProtectionPlannerService(
+            repository=protection_repo,
+            price_source=StaticProtectionPriceSource(
+                reference_price=Decimal("600.12"),
+                filters=ProtectionExchangeFilters(
+                    min_amount=Decimal("0.01"),
+                    amount_step=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                    min_notional_source="test",
+                    tick_size=Decimal("0.1"),
+                ),
+            ),
+        )
+        gateway = FakeWriteGateway()
+        intent_repo = _RecordingIntentRepository()
+        order_repo = _RecordingOrderRepository()
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+            protection_planner_service=protection_service,
+            order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
+            intent_repository=intent_repo,
+            order_repository=order_repo,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            result = await execute_service.execute_authorization(
+                authorization.authorization_id,
+                operator_id="owner",
+                fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+            )
+
+            assert result.status == "executed"
+            assert result.consumed is True
+            assert result.execution_intent_id == intent_repo.items[0].id
+            assert len(intent_repo.items) == 1
+            assert intent_repo.updates[-1].status == "completed"
+            assert len(order_repo.items) == 3
+            assert [order.order_role.value for order in order_repo.items] == ["ENTRY", "TP1", "SL"]
+            assert len(gateway.calls) == 3
+            entry_call, tp_call, sl_call = gateway.calls
+            assert entry_call == {
+                "symbol": "BNB/USDT:USDT",
+                "order_type": "market",
+                "side": "buy",
+                "amount": Decimal("0.01"),
+                "client_order_id": entry_call["client_order_id"],
+            }
+            assert tp_call["symbol"] == "BNB/USDT:USDT"
+            assert tp_call["order_type"] == "limit"
+            assert tp_call["side"] == "sell"
+            assert tp_call["amount"] == Decimal("0.01")
+            assert tp_call["reduce_only"] is True
+            assert sl_call["symbol"] == "BNB/USDT:USDT"
+            assert sl_call["order_type"] == "stop_market"
+            assert sl_call["side"] == "sell"
+            assert sl_call["amount"] == Decimal("0.01")
+            assert sl_call["reduce_only"] is True
+            fill_plan = await protection_repo.latest_valid_plan(
+                authorization.authorization_id,
+                phase="post_entry_fill",
+            )
+            assert fill_plan is not None
+            assert fill_plan.fill_price is not None
+            assert fill_plan.fill_price.quantize(Decimal("0.01")) == Decimal("600.20")
+            current = await service.current()
+            assert current.live_authorization is not None
+            assert current.live_authorization.consumed is True
+
+            with pytest.raises(OwnerBoundedExecutionError) as reuse_exc:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+            assert "authorization_already_consumed" in reuse_exc.value.blockers
+            assert len(gateway.calls) == 3
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_rejects_unsupported_carrier_before_intent_or_order():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            async with session_maker() as session:
+                await session.execute(
+                    text(
+                        "UPDATE brc_bounded_live_trial_authorizations "
+                        "SET carrier_id = :carrier_id, symbol = :symbol, side = :side "
+                        "WHERE authorization_id = :authorization_id"
+                    ),
+                    {
+                        "carrier_id": "TB-BTC-SHORT",
+                        "symbol": "BTC/USDT:USDT",
+                        "side": "short",
+                        "authorization_id": authorization.authorization_id,
+                    },
+                )
+                await session.commit()
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+
+            assert "unsupported_carrier" in exc_info.value.blockers
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_rejects_consumed_or_duplicate_authorization():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            async with session_maker() as session:
+                await session.execute(
+                    text(
+                        "UPDATE brc_bounded_live_trial_authorizations "
+                        "SET consumed = 1 WHERE authorization_id = :authorization_id"
+                    ),
+                    {"authorization_id": authorization.authorization_id},
+                )
+                await session.commit()
+
+            with pytest.raises(OwnerBoundedExecutionError) as consumed_exc:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+            assert "authorization_already_consumed" in consumed_exc.value.blockers
+
+            async with session_maker() as session:
+                await session.execute(
+                    text(
+                        "UPDATE brc_bounded_live_trial_authorizations "
+                        "SET consumed = 0 WHERE authorization_id = :authorization_id"
+                    ),
+                    {"authorization_id": authorization.authorization_id},
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO execution_intents "
+                        "(id, signal_id, symbol, status, authorization_id) "
+                        "VALUES ('intent-dup', 'signal-dup', 'BNB/USDT:USDT', 'pending', :authorization_id)"
+                    ),
+                    {"authorization_id": authorization.authorization_id},
+                )
+                await session.commit()
+
+            with pytest.raises(OwnerBoundedExecutionError) as duplicate_exc:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+            assert "duplicate_execution_intent_for_authorization" in duplicate_exc.value.blockers
+            async with session_maker() as session:
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_final_gate_failure_blocks_before_intent_or_order():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=False),
+                )
+
+            assert "startup_guard_status_required_before_rehearsal" in exc_info.value.blockers
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_api_route_blocks_without_intent_or_order(monkeypatch):
+    from src.interfaces import api_brc_console
+    from src.interfaces.api import app
+    from src.interfaces.operator_auth import OperatorSession, require_operator_session
+
+    class FakeFactCollector:
+        async def collect(self, _strategy_profile):
+            return _clear_fact_snapshot(startup_guard_clear=True)
+
+    async def setup():
+        service, _bridge, engine = await _bridge_service()
+        draft = await _create_valid_draft(service)
+        authorization = await service.activate_live_authorization(
+            draft.draft_id,
+            _activation_request(),
+            operator_id="owner",
+        )
+        return service, engine, authorization.authorization_id
+
+    service, engine, authorization_id = asyncio.run(setup())
+    api_brc_console._owner_trial_flow_service = service
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_trial_preflight_fact_collector",
+        lambda _api_module: FakeFactCollector(),
+    )
+    app.dependency_overrides[require_operator_session] = lambda: OperatorSession(
+        username="owner",
+        expires_at=int(time.time()) + 3600,
+    )
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/brc/owner-trial-flow/authorizations/{authorization_id}/execute"
+        )
+        assert response.status_code == 409
+        payload = response.json()
+        assert payload["error_code"] == "409"
+        assert "owner_bounded_execution_blocked" in payload["message"]
+        assert "protection_price_source_missing" in payload["message"]
+        assert "'execution_intent_created': False" in payload["message"]
+        assert "'order_created': False" in payload["message"]
+        assert "'order_permission_granted': False" in payload["message"]
+
+        async def counts():
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                return (
+                    await session.scalar(text("SELECT count(*) FROM execution_intents")),
+                    await session.scalar(text("SELECT count(*) FROM orders")),
+                )
+
+        intent_count, order_count = asyncio.run(counts())
+        assert intent_count == 0
+        assert order_count == 0
+    finally:
+        app.dependency_overrides.pop(require_operator_session, None)
+        api_brc_console._owner_trial_flow_service = None
+        asyncio.run(engine.dispose())
+
+
+def test_owner_bounded_execution_api_route_uses_read_only_price_source(monkeypatch):
+    from src.interfaces import api_brc_console
+    from src.interfaces.api import app
+    from src.interfaces.operator_auth import OperatorSession, require_operator_session
+
+    class FakeFactCollector:
+        async def collect(self, _strategy_profile):
+            return _clear_fact_snapshot(startup_guard_clear=True)
+
+    class FakeReadOnlyGateway:
+        async def fetch_ticker_price(self, symbol: str) -> Decimal:
+            assert symbol == "BNB/USDT:USDT"
+            return Decimal("600.12")
+
+        async def get_market_info(self, symbol: str) -> dict:
+            assert symbol == "BNB/USDT:USDT"
+            return {
+                "min_quantity": Decimal("0.01"),
+                "step_size": Decimal("0.01"),
+                "min_notional": Decimal("5"),
+                "price_precision": 1,
+            }
+
+    async def setup():
+        service, _bridge, engine = await _bridge_service()
+        draft = await _create_valid_draft(service)
+        authorization = await service.activate_live_authorization(
+            draft.draft_id,
+            _activation_request(),
+            operator_id="owner",
+        )
+        return service, engine, authorization.authorization_id
+
+    service, engine, authorization_id = asyncio.run(setup())
+    api_brc_console._owner_trial_flow_service = service
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_api_module",
+        lambda: SimpleNamespace(_exchange_gateway=FakeReadOnlyGateway()),
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_trial_preflight_fact_collector",
+        lambda _api_module: FakeFactCollector(),
+    )
+    app.dependency_overrides[require_operator_session] = lambda: OperatorSession(
+        username="owner",
+        expires_at=int(time.time()) + 3600,
+    )
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/brc/owner-trial-flow/authorizations/{authorization_id}/execute"
+            )
+        assert response.status_code == 409
+        payload = response.json()
+        assert "protection_price_source_missing" not in payload["message"]
+        assert "entry_order_executor_not_enabled" in payload["message"]
+
+        async def facts():
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                return (
+                    await session.scalar(text("SELECT count(*) FROM brc_protection_price_plans")),
+                    await session.scalar(text("SELECT count(*) FROM execution_intents")),
+                    await session.scalar(text("SELECT count(*) FROM orders")),
+                )
+
+        plan_count, intent_count, order_count = asyncio.run(facts())
+        assert plan_count == 1
+        assert intent_count == 0
+        assert order_count == 0
+    finally:
+        app.dependency_overrides.pop(require_operator_session, None)
+        api_brc_console._owner_trial_flow_service = None
+        asyncio.run(engine.dispose())
 
 
 def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():

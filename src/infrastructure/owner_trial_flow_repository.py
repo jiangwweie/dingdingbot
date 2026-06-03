@@ -241,6 +241,49 @@ class PgOwnerTrialFlowRepository:
         except SQLAlchemyError as exc:
             raise _pg_error(exc) from exc
 
+    async def get_live_authorization(
+        self,
+        authorization_id: str,
+    ) -> BoundedLiveTrialAuthorization | None:
+        try:
+            async with self._session_maker() as session:
+                row = await session.get(PGBrcBoundedLiveTrialAuthorizationORM, authorization_id)
+                return self._to_authorization(row) if row is not None else None
+        except SQLAlchemyError as exc:
+            raise _pg_error(exc) from exc
+
+    async def mark_live_authorization_consumed(
+        self,
+        authorization_id: str,
+        *,
+        occurred_at_ms: int,
+    ) -> BoundedLiveTrialAuthorization:
+        try:
+            async with self._session_maker() as session:
+                async with session.begin():
+                    row = await session.get(
+                        PGBrcBoundedLiveTrialAuthorizationORM,
+                        authorization_id,
+                        with_for_update=True,
+                    )
+                    if row is None:
+                        raise OwnerTrialFlowInfrastructureError(
+                            "authorization_not_found",
+                            "Bounded live trial authorization not found.",
+                        )
+                    row.consumed = True
+                    row.updated_at_ms = occurred_at_ms
+                    metadata = dict(row.metadata_json or {})
+                    metadata["consumed"] = True
+                    metadata["consumed_at_ms"] = occurred_at_ms
+                    row.metadata_json = metadata
+                    await session.flush()
+                    return self._to_authorization(row)
+        except OwnerTrialFlowInfrastructureError:
+            raise
+        except SQLAlchemyError as exc:
+            raise _pg_error(exc) from exc
+
     @staticmethod
     def _apply_draft(
         row: PGBrcBoundedLiveTrialAuthorizationDraftORM,
@@ -317,7 +360,7 @@ class PgOwnerTrialFlowRepository:
             execution_intent_created=False,
             order_created=False,
             auto_execution_enabled=False,
-            consumed=False,
+            consumed=bool(row.consumed),
             expires_at_ms=row.expires_at_ms,
             linked_acknowledgement_id=row.linked_acknowledgement_id,
             created_at_ms=row.created_at_ms,
@@ -350,7 +393,7 @@ class PgOwnerTrialFlowRepository:
             execution_intent_created=False,
             order_created=False,
             auto_execution_enabled=False,
-            consumed=False,
+            consumed=bool(row.consumed),
             expires_at_ms=row.expires_at_ms,
             linked_acknowledgement_id=row.linked_acknowledgement_id,
             source_draft_id=row.source_draft_id,

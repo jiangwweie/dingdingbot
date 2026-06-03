@@ -74,6 +74,16 @@ from src.application.owner_trial_flow import (
     OwnerTrialFlowInfrastructureError,
     OwnerTrialFlowService,
 )
+from src.application.owner_bounded_execution import (
+    ExchangeGatewayBoundedOrderExecutor,
+    OwnerBoundedExecutionError,
+    OwnerBoundedExecutionResponse,
+    OwnerBoundedExecutionService,
+)
+from src.application.protection_price_planner import (
+    ExchangeGatewayProtectionPriceSource,
+    ProtectionPlannerService,
+)
 from src.application.strategy_trial_readiness import (
     StrategyTrialReadinessResponse,
     build_bnb_strategy_trial_readiness,
@@ -83,12 +93,14 @@ from src.infrastructure.local_sqlite_observation_market_source import LocalSqlit
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.database import get_pg_session_maker, probe_pg_connectivity
 from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
+from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
 from src.infrastructure.owner_trial_flow_repository import PgOwnerTrialFlowRepository
 from src.infrastructure.pg_multi_carrier_budget_authorization_repository import (
     PgMultiCarrierBudgetAuthorizationRepository,
 )
+from src.infrastructure.pg_protection_price_plan_repository import PgProtectionPricePlanRepository
 from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.brc_admission_service import (
@@ -3856,6 +3868,75 @@ async def dry_run_bnb_live_execution_bridge(
         owner_trial_flow_service=_owner_trial_flow_service_instance(),
     )
     return await service.run(body, fact_snapshot=fact_snapshot)
+
+
+@router.post(
+    "/owner-trial-flow/authorizations/{authorization_id}/execute",
+    response_model=OwnerBoundedExecutionResponse,
+)
+async def execute_owner_bounded_live_trial_authorization(
+    authorization_id: str,
+    session: OperatorSessionDependency,
+) -> OwnerBoundedExecutionResponse:
+    """Owner-operated generic bounded live-trial execution entrypoint.
+
+    This endpoint is intentionally generic and authorization-driven. It reloads
+    the PG authorization, reruns the final hard gate, and then delegates to the
+    carrier execution registry. It must fail before ExecutionIntent/order
+    creation whenever any readiness blocker remains.
+    """
+    profile_readiness = build_bnb_strategy_trial_readiness()
+    collector = _strategy_trial_preflight_fact_collector(_api_module())
+    fact_snapshot = await collector.collect(profile_readiness.strategy_profile)
+    owner_trial_service = _owner_trial_flow_service_instance()
+    injected_session_maker = getattr(
+        getattr(owner_trial_service, "_repository", None),
+        "_session_maker",
+        None,
+    )
+    final_gate_service = BnbLiveExecutionBridgeDryRunService(
+        owner_trial_flow_service=owner_trial_service,
+        session_maker=injected_session_maker,
+    )
+    api_module = _api_module()
+    protection_planner_service = ProtectionPlannerService(
+        repository=PgProtectionPricePlanRepository(injected_session_maker),
+        price_source=ExchangeGatewayProtectionPriceSource(
+            getattr(api_module, "_exchange_gateway", None),
+        ),
+    )
+    execute_service = OwnerBoundedExecutionService(
+        final_gate_service=final_gate_service,
+        session_maker=injected_session_maker,
+        protection_planner_service=protection_planner_service,
+        order_executor=ExchangeGatewayBoundedOrderExecutor(
+            getattr(api_module, "_exchange_gateway", None),
+        ),
+        intent_repository=PgExecutionIntentRepository(injected_session_maker),
+        order_repository=PgOrderRepository(injected_session_maker),
+    )
+    try:
+        return await execute_service.execute_authorization(
+            authorization_id,
+            operator_id=session.username,
+            fact_snapshot=fact_snapshot,
+        )
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+    except OwnerBoundedExecutionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+                "blockers": exc.blockers,
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_permission_granted": False,
+            },
+        ) from exc
 
 
 @router.get(

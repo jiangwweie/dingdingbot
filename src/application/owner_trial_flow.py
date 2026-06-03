@@ -91,7 +91,7 @@ class BoundedLiveTrialAuthorizationDraft(BaseModel):
     execution_intent_created: Literal[False] = False
     order_created: Literal[False] = False
     auto_execution_enabled: Literal[False] = False
-    consumed: Literal[False] = False
+    consumed: bool = False
     expires_at_ms: int | None = None
     linked_acknowledgement_id: str
     created_at_ms: int
@@ -137,7 +137,7 @@ class BoundedLiveTrialAuthorization(BaseModel):
     execution_intent_created: Literal[False] = False
     order_created: Literal[False] = False
     auto_execution_enabled: Literal[False] = False
-    consumed: Literal[False] = False
+    consumed: bool = False
     expires_at_ms: int | None = None
     linked_acknowledgement_id: str
     source_draft_id: str
@@ -232,6 +232,20 @@ class OwnerTrialFlowRepository(Protocol):
         self,
         draft_id: str,
     ) -> BoundedLiveTrialAuthorization | None:
+        ...
+
+    async def get_live_authorization(
+        self,
+        authorization_id: str,
+    ) -> BoundedLiveTrialAuthorization | None:
+        ...
+
+    async def mark_live_authorization_consumed(
+        self,
+        authorization_id: str,
+        *,
+        occurred_at_ms: int,
+    ) -> BoundedLiveTrialAuthorization:
         ...
 
 

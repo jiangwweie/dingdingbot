@@ -124,6 +124,11 @@ class PGExecutionIntentORM(PGCoreBase):
         String(64),
         nullable=True,
     )
+    authorization_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        ForeignKey("brc_bounded_live_trial_authorizations.authorization_id", deferrable=True, initially="DEFERRED"),
+        nullable=True,
+    )
     exchange_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     blocked_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -142,6 +147,7 @@ class PGExecutionIntentORM(PGCoreBase):
         Index("idx_execution_intents_status", "status"),
         Index("idx_execution_intents_symbol", "symbol"),
         Index("idx_execution_intents_created_at", "created_at"),
+        Index("idx_execution_intents_authorization_id", "authorization_id"),
     )
 
 
@@ -1058,6 +1064,73 @@ class PGBrcExecutionResultORM(PGCoreBase):
     )
 
 
+class PGBrcProtectionPricePlanORM(PGCoreBase):
+    """Auditable protection price plan for bounded Owner execution."""
+
+    __tablename__ = "brc_protection_price_plans"
+
+    plan_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    authorization_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("brc_bounded_live_trial_authorizations.authorization_id", deferrable=True, initially="DEFERRED"),
+        nullable=False,
+    )
+    carrier_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    phase: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    planner_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    price_source_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    reference_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    fill_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    tp_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    sl_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    tp_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    sl_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    tick_size: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    amount_step: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    min_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    min_notional: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    rounding_json: Mapped[dict] = mapped_column(
+        "rounding",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    filters_json: Mapped[dict] = mapped_column(
+        "filters",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    computed_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    source_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint("side IN ('long', 'short')", name="ck_brc_protection_price_plans_side"),
+        CheckConstraint(
+            "phase IN ('pre_entry_reference', 'post_entry_fill')",
+            name="ck_brc_protection_price_plans_phase",
+        ),
+        CheckConstraint(
+            "status IN ('valid', 'blocked')",
+            name="ck_brc_protection_price_plans_status",
+        ),
+        CheckConstraint("quantity > 0", name="ck_brc_protection_price_plans_quantity_positive"),
+        Index("idx_brc_protection_price_plans_auth_phase_time", "authorization_id", "phase", "computed_at_ms"),
+        Index("idx_brc_protection_price_plans_carrier_time", "carrier_id", "computed_at_ms"),
+    )
+
+
 class PGBrcStrategyFamilyORM(PGCoreBase):
     """PG-backed strategy family registry for BRC admission."""
 
@@ -1966,7 +2039,6 @@ class PGBrcBoundedLiveTrialAuthorizationORM(PGCoreBase):
         ),
         CheckConstraint("order_created IS FALSE", name="ck_brc_trial_auths_no_order"),
         CheckConstraint("auto_execution_enabled IS FALSE", name="ck_brc_trial_auths_no_auto_execution"),
-        CheckConstraint("consumed IS FALSE", name="ck_brc_trial_auths_not_consumed"),
         CheckConstraint("final_preflight_required IS TRUE", name="ck_brc_trial_auths_final_preflight_required"),
         CheckConstraint("next_executable IS FALSE", name="ck_brc_trial_auths_not_next_executable"),
         CheckConstraint("source = 'owner_console'", name="ck_brc_trial_auths_source"),

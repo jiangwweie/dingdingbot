@@ -880,12 +880,17 @@ export type BnbLiveExecutionBridgeResponse = {
   owner_execution_trigger: {
     label: '执行这一次小额实盘试验';
     visible: boolean;
-    enabled: false;
-    status: 'hidden_until_final_gate_clear' | 'blocked_execution_endpoint_not_available';
-    endpoint: null;
+    enabled: boolean;
+    status:
+      | 'hidden_until_final_gate_clear'
+      | 'blocked_execution_endpoint_not_available'
+      | 'blocked_execution_readiness'
+      | 'ready_for_owner_click';
+    endpoint: string | null;
     reason: string;
-    creates_execution_intent_on_click: false;
-    creates_order_on_click: false;
+    blockers: string[];
+    creates_execution_intent_on_click: boolean;
+    creates_order_on_click: boolean;
     order_permission_granted: false;
     exact_scope: Record<string, string>;
   };
@@ -1260,6 +1265,11 @@ export const brcApi = {
     return request<BoundedLiveTrialAuthorization>(`/api/brc/owner-trial-flow/authorization-draft/${encodeURIComponent(draftId)}/activate-live-authorization`, {
       method: 'POST',
       body: JSON.stringify(input),
+    });
+  },
+  executeOwnerTrialAuthorization(authorizationId: string) {
+    return request<Record<string, unknown>>(`/api/brc/owner-trial-flow/authorizations/${encodeURIComponent(authorizationId)}/execute`, {
+      method: 'POST',
     });
   },
   runStrategyGroupLiveObservationV1Once() {
