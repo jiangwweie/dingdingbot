@@ -214,6 +214,7 @@ class PgOwnerTrialFlowRepository:
                 result = await session.execute(
                     select(PGBrcBoundedLiveTrialAuthorizationORM)
                     .where(PGBrcBoundedLiveTrialAuthorizationORM.carrier_id == carrier_id)
+                    .where(PGBrcBoundedLiveTrialAuthorizationORM.consumed.is_(False))
                     .order_by(
                         PGBrcBoundedLiveTrialAuthorizationORM.owner_live_authorized_at_ms.desc(),
                         PGBrcBoundedLiveTrialAuthorizationORM.authorization_id.desc(),

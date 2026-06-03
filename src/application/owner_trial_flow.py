@@ -348,6 +348,8 @@ class OwnerTrialFlowService:
         _validate_draft_scope(request, carrier)
         now = _now_ms()
         existing = await self._repository.latest_draft(carrier.carrier_id)
+        if existing is not None and await self._repository.live_authorization_for_draft(existing.draft_id):
+            existing = None
         draft = BoundedLiveTrialAuthorizationDraft(
             draft_id=existing.draft_id if existing else f"draft-{uuid.uuid4().hex}",
             carrier_id=carrier.carrier_id,

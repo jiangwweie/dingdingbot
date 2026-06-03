@@ -564,6 +564,36 @@ def test_incomplete_acknowledgement_cannot_create_authorization_draft():
     asyncio.run(scenario())
 
 
+def test_consumed_live_authorization_allows_fresh_draft_rehearsal():
+    async def scenario():
+        service, engine = await _service()
+        try:
+            first_draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                first_draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            await service._repository.mark_live_authorization_consumed(
+                authorization.authorization_id,
+                occurred_at_ms=int(time.time() * 1000),
+            )
+
+            current = await service.current()
+            assert current.live_authorization is None
+            assert current.authorization_status == "pending_owner_live_authorization"
+
+            second_draft = await _create_valid_draft(service)
+            assert second_draft.draft_id != first_draft.draft_id
+            assert second_draft.consumed is False
+            assert second_draft.execution_intent_created is False
+            assert second_draft.order_created is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_owner_trial_flow_api_persists_pg_metadata_without_execution_or_order(monkeypatch):
     from src.interfaces import api_brc_console
     from src.interfaces.api import app
@@ -1342,8 +1372,13 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
             assert fill_plan.fill_price is not None
             assert fill_plan.fill_price.quantize(Decimal("0.01")) == Decimal("600.20")
             current = await service.current()
-            assert current.live_authorization is not None
-            assert current.live_authorization.consumed is True
+            assert current.live_authorization is None
+            assert current.authorization_status == "pending_owner_live_authorization"
+            consumed_authorization = await service._repository.get_live_authorization(
+                authorization.authorization_id
+            )
+            assert consumed_authorization is not None
+            assert consumed_authorization.consumed is True
 
             with pytest.raises(OwnerBoundedExecutionError) as reuse_exc:
                 await execute_service.execute_authorization(
