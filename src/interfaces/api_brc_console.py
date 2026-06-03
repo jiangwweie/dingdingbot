@@ -4429,7 +4429,7 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
                 SELECT count(*)
                 FROM positions
                 WHERE symbol = :symbol
-                  AND is_closed IS FALSE
+                  AND CAST(is_closed AS text) IN ('false', '0', 'f')
                 """
             ),
             {"symbol": symbol},
