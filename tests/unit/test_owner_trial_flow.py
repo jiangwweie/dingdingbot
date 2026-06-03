@@ -2870,6 +2870,19 @@ def test_bnb_final_gate_pg_order_status_blocking_classifier():
     assert api_brc_console._is_blocking_pg_order_status("CANCELED") is False
 
 
+def test_bnb_final_gate_symbol_variants_cover_profile_and_runtime_symbols():
+    from src.interfaces import api_brc_console
+
+    assert api_brc_console._bnb_final_gate_symbol_variants("BNBUSDT") == [
+        "BNB/USDT:USDT",
+        "BNBUSDT",
+    ]
+    assert api_brc_console._bnb_final_gate_symbol_variants("BNB/USDT:USDT") == [
+        "BNB/USDT:USDT",
+        "BNBUSDT",
+    ]
+
+
 def test_bnb_final_gate_scoped_runtime_safety_clearance_reaches_boundary(monkeypatch):
     from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
     from src.interfaces import api_brc_console

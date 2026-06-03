@@ -4793,6 +4793,7 @@ async def _call_fetch_positions(client: Any, symbol: str) -> list[Any]:
 
 
 async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int]:
+    symbol_variants = _bnb_final_gate_symbol_variants(symbol)
     session_maker = get_pg_session_maker()
     async with session_maker() as session:
         required_tables = [
@@ -4862,10 +4863,10 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
                     """
                     SELECT status
                     FROM orders
-                    WHERE symbol = :symbol
+                    WHERE symbol = ANY(:symbols)
                     """
                 ),
-                {"symbol": symbol},
+                {"symbols": symbol_variants},
             )
         ).mappings().all()
         blocking_orders = sum(
@@ -4877,22 +4878,22 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
                 """
                 SELECT count(*)
                 FROM positions
-                WHERE symbol = :symbol
+                WHERE symbol = ANY(:symbols)
                   AND CAST(is_closed AS text) IN ('false', '0', 'f')
                 """
             ),
-            {"symbol": symbol},
+            {"symbols": symbol_variants},
         )
         pg_bnb_open_orders = await session.scalar(
             text(
                 """
                 SELECT count(*)
                 FROM orders
-                WHERE symbol = :symbol
+                WHERE symbol = ANY(:symbols)
                   AND status IN ('OPEN', 'PARTIALLY_FILLED')
                 """
             ),
-            {"symbol": symbol},
+            {"symbols": symbol_variants},
         )
     return {
         "execution_intents": int(execution_intents or 0),
@@ -4905,6 +4906,15 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
         "pg_bnb_active_positions": int(pg_bnb_active_positions or 0),
         "pg_bnb_open_orders": int(pg_bnb_open_orders or 0),
     }
+
+
+def _bnb_final_gate_symbol_variants(symbol: str) -> list[str]:
+    variants = {str(symbol)}
+    if str(symbol).upper() == "BNBUSDT":
+        variants.add("BNB/USDT:USDT")
+    if str(symbol) == "BNB/USDT:USDT":
+        variants.add("BNBUSDT")
+    return sorted(variants)
 
 
 def _is_closed_owner_trial_intent_row(row: Any) -> bool:
