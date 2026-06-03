@@ -39,6 +39,7 @@ from src.application.strategy_trial_preflight_facts import (
     TrialPreflightFactsSnapshot,
 )
 from src.infrastructure.owner_trial_flow_repository import PgOwnerTrialFlowRepository
+from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
 from src.infrastructure.pg_models import (
     PGBrcBoundedLiveTrialAuthorizationORM,
     PGBrcBoundedLiveTrialAuthorizationDraftORM,
@@ -67,6 +68,22 @@ class _RecordingOrderRepository:
 
     async def save(self, order):
         self.items.append(order)
+
+
+@pytest.mark.asyncio
+async def test_pg_execution_intent_repository_update_method_is_available(monkeypatch):
+    repo = PgExecutionIntentRepository(session_maker=object())
+    saved = []
+
+    async def fake_save(intent):
+        saved.append(intent)
+
+    monkeypatch.setattr(repo, "save", fake_save)
+    intent = SimpleNamespace(id="intent-after-entry-fill")
+
+    await repo.update(intent)
+
+    assert saved == [intent]
 
 
 async def _service() -> tuple[OwnerTrialFlowService, object]:

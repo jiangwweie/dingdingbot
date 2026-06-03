@@ -44,6 +44,10 @@ class PgExecutionIntentRepository:
             await session.merge(self._to_orm(intent))
             await session.commit()
 
+    async def update(self, intent: ExecutionIntent) -> None:
+        """Persist a full ExecutionIntent state transition."""
+        await self.save(intent)
+
     async def get(self, intent_id: str) -> Optional[ExecutionIntent]:
         async with self._session_maker() as session:
             orm = await session.get(PGExecutionIntentORM, intent_id)
