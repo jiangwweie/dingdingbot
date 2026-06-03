@@ -4470,9 +4470,17 @@ def _bnb_preflight_reconciliation_reader(api_module: Any, bnb_live_facts: Any):
                 "failed_reconciliations_count": mismatch_count,
                 "pg_execution_intents_count": pg_counts["execution_intents"],
                 "pg_blocking_execution_intents_count": blocking_execution_intents,
+                "pg_closed_execution_intents_count": pg_counts.get(
+                    "closed_execution_intents",
+                    0,
+                ),
                 "retryable_failed_execution_intents_count": retryable_failed_intents,
                 "retry_classification": pg_counts.get("retry_classification"),
                 "pg_orders_count": pg_counts["orders"],
+                "pg_historical_closed_orders_count": pg_counts.get(
+                    "historical_closed_orders",
+                    0,
+                ),
                 "pg_bnb_active_position_count": pg_counts["pg_bnb_active_positions"],
                 "pg_bnb_open_order_count": pg_counts["pg_bnb_open_orders"],
                 "exchange_bnb_active_position_count": exchange_position_count,
@@ -4806,8 +4814,20 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
             await session.execute(
                 text(
                     """
-                    SELECT id, signal_id, symbol, status, order_id, exchange_order_id, failed_reason
-                    FROM execution_intents
+                    SELECT
+                        i.id,
+                        i.signal_id,
+                        i.symbol,
+                        i.status,
+                        i.order_id,
+                        i.exchange_order_id,
+                        i.failed_reason,
+                        i.authorization_id,
+                        a.consumed AS authorization_consumed,
+                        a.metadata AS authorization_metadata
+                    FROM execution_intents i
+                    LEFT JOIN brc_bounded_live_trial_authorizations a
+                      ON a.authorization_id = i.authorization_id
                     """
                 )
             )
@@ -4815,12 +4835,17 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
         execution_intents = len(intent_rows)
         retryable_failed_execution_intents = 0
         blocking_execution_intents = 0
+        closed_execution_intents = 0
         retry_classification = "no_previous_intent"
         for row in intent_rows:
             local_order_count = await session.scalar(
                 text("SELECT count(*) FROM orders WHERE signal_id = :signal_id"),
                 {"signal_id": row["signal_id"]},
             )
+            if _is_closed_owner_trial_intent_row(row):
+                closed_execution_intents += 1
+                retry_classification = "closed_owner_trial_intent_present"
+                continue
             classification = _classify_retryable_pre_order_intent_row(
                 row,
                 local_order_count=int(local_order_count or 0),
@@ -4831,7 +4856,22 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
             else:
                 blocking_execution_intents += 1
                 retry_classification = str(classification["reason"])
-        orders = await session.scalar(text("SELECT count(*) FROM orders"))
+        order_rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT status
+                    FROM orders
+                    WHERE symbol = :symbol
+                    """
+                ),
+                {"symbol": symbol},
+            )
+        ).mappings().all()
+        blocking_orders = sum(
+            1 for row in order_rows if _is_blocking_pg_order_status(row.get("status"))
+        )
+        historical_closed_orders = len(order_rows) - blocking_orders
         pg_bnb_active_positions = await session.scalar(
             text(
                 """
@@ -4858,10 +4898,39 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
         "execution_intents": int(execution_intents or 0),
         "retryable_failed_execution_intents": retryable_failed_execution_intents,
         "blocking_execution_intents": blocking_execution_intents,
+        "closed_execution_intents": closed_execution_intents,
         "retry_classification": retry_classification,
-        "orders": int(orders or 0),
+        "orders": int(blocking_orders or 0),
+        "historical_closed_orders": int(historical_closed_orders or 0),
         "pg_bnb_active_positions": int(pg_bnb_active_positions or 0),
         "pg_bnb_open_orders": int(pg_bnb_open_orders or 0),
+    }
+
+
+def _is_closed_owner_trial_intent_row(row: Any) -> bool:
+    metadata = row.get("authorization_metadata") or {}
+    if not isinstance(metadata, dict):
+        return False
+    if row.get("authorization_consumed") is not True:
+        return False
+    if metadata.get("next_trade_requires_new_owner_authorization") is not True:
+        return False
+    if metadata.get("trial_final_state") not in {
+        "completed_with_recovery_flat",
+        "completed_protected",
+        "completed_flat",
+    }:
+        return False
+    return True
+
+
+def _is_blocking_pg_order_status(status: Any) -> bool:
+    return str(status or "").upper() in {
+        "CREATED",
+        "SUBMITTED",
+        "PENDING",
+        "OPEN",
+        "PARTIALLY_FILLED",
     }
 
 

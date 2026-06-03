@@ -2749,6 +2749,127 @@ def test_bnb_final_gate_reconciliation_allows_retryable_failed_pre_order_intent(
     asyncio.run(scenario())
 
 
+def test_bnb_final_gate_reconciliation_ignores_closed_consumed_owner_trial(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    class FakeGks:
+        def get_state(self):
+            return {"active": False, "source": "test_gks"}
+
+    class FakeApiModule:
+        _global_kill_switch_service = FakeGks()
+        _startup_trading_guard_service = None
+        _startup_reconciliation_summary = None
+        _exchange_gateway = None
+
+    class FakeBnbReadOnlyClient:
+        async def fetch_balance(self, params=None):
+            return {
+                "info": {
+                    "totalMarginBalance": "100.00",
+                    "availableBalance": "80.00",
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+
+        async def fetch_positions(self, symbol=None):
+            return []
+
+        async def fetch_open_orders(self, symbol, params=None):
+            return []
+
+        async def close(self):
+            return None
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_read_only_client",
+        lambda _api_module: {
+            "client": FakeBnbReadOnlyClient(),
+            "source": "test_bnb_read_only_client",
+            "close_after_read": False,
+        },
+    )
+
+    async def fake_pg_counts(_symbol):
+        return {
+            "execution_intents": 3,
+            "retryable_failed_execution_intents": 0,
+            "blocking_execution_intents": 0,
+            "closed_execution_intents": 3,
+            "retry_classification": "closed_owner_trial_intent_present",
+            "orders": 0,
+            "historical_closed_orders": 2,
+            "pg_bnb_active_positions": 0,
+            "pg_bnb_open_orders": 0,
+        }
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_pg_reconciliation_counts",
+        fake_pg_counts,
+    )
+
+    async def scenario():
+        profile = build_bnb_strategy_trial_readiness().strategy_profile
+        collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+        snapshot = await collector.collect(profile)
+        fact = snapshot.fact_map()["reconciliation"]
+
+        assert fact.status == "clear"
+        assert fact.blocker is None
+        assert fact.evidence["status"] == "clean"
+        assert fact.evidence["pg_execution_intents_count"] == 3
+        assert fact.evidence["pg_blocking_execution_intents_count"] == 0
+        assert fact.evidence["pg_closed_execution_intents_count"] == 3
+        assert fact.evidence["pg_orders_count"] == 0
+        assert fact.evidence["pg_historical_closed_orders_count"] == 2
+        assert fact.evidence["retry_classification"] == "closed_owner_trial_intent_present"
+
+    asyncio.run(scenario())
+
+
+def test_bnb_final_gate_closed_owner_trial_intent_classifier_requires_consumed_closeout():
+    from src.interfaces import api_brc_console
+
+    closed_row = {
+        "authorization_consumed": True,
+        "authorization_metadata": {
+            "trial_final_state": "completed_with_recovery_flat",
+            "next_trade_requires_new_owner_authorization": True,
+        },
+    }
+    assert api_brc_console._is_closed_owner_trial_intent_row(closed_row) is True
+
+    not_consumed = dict(closed_row)
+    not_consumed["authorization_consumed"] = False
+    assert api_brc_console._is_closed_owner_trial_intent_row(not_consumed) is False
+
+    ambiguous = {
+        "authorization_consumed": True,
+        "authorization_metadata": {
+            "trial_final_state": "entry_filled_protection_unknown",
+            "next_trade_requires_new_owner_authorization": True,
+        },
+    }
+    assert api_brc_console._is_closed_owner_trial_intent_row(ambiguous) is False
+
+
+def test_bnb_final_gate_pg_order_status_blocking_classifier():
+    from src.interfaces import api_brc_console
+
+    assert api_brc_console._is_blocking_pg_order_status("OPEN") is True
+    assert api_brc_console._is_blocking_pg_order_status("PARTIALLY_FILLED") is True
+    assert api_brc_console._is_blocking_pg_order_status("FILLED") is False
+    assert api_brc_console._is_blocking_pg_order_status("CANCELED") is False
+
+
 def test_bnb_final_gate_scoped_runtime_safety_clearance_reaches_boundary(monkeypatch):
     from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
     from src.interfaces import api_brc_console
