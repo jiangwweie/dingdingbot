@@ -4,6 +4,7 @@ Handles historical data warmup, real-time K-line streaming, and asset polling.
 """
 import asyncio
 import time
+from dataclasses import dataclass
 from typing import List, Dict, Optional, Callable, Awaitable, Any
 from decimal import Decimal
 
@@ -30,6 +31,15 @@ class OrderLocalState(BaseModel):
     filled_qty: Decimal
     status: str
     updated_at: int  # 毫秒时间戳
+
+
+@dataclass(frozen=True)
+class CcxtOrderParamsBuildResult:
+    """Normalized exchange-specific order params passed to ccxt."""
+
+    params: Dict[str, Any]
+    exchange_reduce_only_param_sent: bool = False
+    exchange_reduce_only_omit_reason: Optional[str] = None
 
 
 # ============================================================
@@ -1068,26 +1078,13 @@ class ExchangeGateway:
             # 映射订单类型到 CCXT 格式
             ccxt_type = self._map_order_type_to_ccxt(order_type)
 
-            # 构建 CCXT 下单参数
-            params = {}
-            exchange_reduce_only_param_sent = False
-            exchange_reduce_only_omit_reason = None
-            if reduce_only:
-                if self._should_omit_reduce_only_param(position_side):
-                    exchange_reduce_only_omit_reason = "binance_hedge_mode_position_side"
-                else:
-                    params['reduceOnly'] = True
-                    exchange_reduce_only_param_sent = True
-            if position_side:
-                params['positionSide'] = position_side
-
-            # 止损单需要 triggerPrice 参数
-            if order_type == "stop_market" and trigger_price is not None:
-                params['stopPrice'] = str(trigger_price)
-                params['triggerPrice'] = str(trigger_price)
-
-            if client_order_id:
-                params['clientOrderId'] = client_order_id
+            payload = self._build_ccxt_order_params(
+                order_type=order_type,
+                trigger_price=trigger_price,
+                reduce_only=reduce_only,
+                position_side=position_side,
+                client_order_id=client_order_id,
+            )
 
             # 调用 CCXT create_order 方法
             # P0 修复：使用 str() 而非 float() 避免精度污染 (CCXT 支持字符串输入)
@@ -1097,7 +1094,7 @@ class ExchangeGateway:
                 side=side,
                 amount=str(amount),
                 price=str(price) if price is not None else None,
-                params=params,
+                params=payload.params,
             )
 
             # 解析订单响应
@@ -1118,11 +1115,14 @@ class ExchangeGateway:
                 average_exec_price=average_exec_price,
                 trigger_price=trigger_price,
                 reduce_only=reduce_only,
-                exchange_reduce_only_param_sent=exchange_reduce_only_param_sent,
-                exchange_reduce_only_omit_reason=exchange_reduce_only_omit_reason,
+                exchange_reduce_only_param_sent=payload.exchange_reduce_only_param_sent,
+                exchange_reduce_only_omit_reason=payload.exchange_reduce_only_omit_reason,
                 client_order_id=client_order_id,
                 status=order_status,
             )
+
+        except InvalidOrderError:
+            raise
 
         except ccxt.InsufficientFunds as e:
             logger.warning(f"保证金不足：{e}")
@@ -1767,6 +1767,60 @@ class ExchangeGateway:
     def _should_omit_reduce_only_param(self, position_side: Optional[str]) -> bool:
         """Binance futures hedge mode rejects reduceOnly when positionSide is set."""
         return self.exchange_name.lower() == "binance" and bool(position_side)
+
+    def _build_ccxt_order_params(
+        self,
+        *,
+        order_type: str,
+        trigger_price: Optional[Decimal],
+        reduce_only: bool,
+        position_side: Optional[str],
+        client_order_id: Optional[str],
+    ) -> CcxtOrderParamsBuildResult:
+        """Build the only raw exchange-specific params sent to ccxt.create_order().
+
+        Business code passes normalized intent fields such as ``position_side``
+        and ``reduce_only``. Binance-specific keys such as ``positionSide`` and
+        the hedge-mode reduceOnly omission are governed here.
+        """
+
+        params: Dict[str, Any] = {}
+        exchange_reduce_only_param_sent = False
+        exchange_reduce_only_omit_reason = None
+
+        normalized_position_side = position_side.upper() if position_side else None
+        if normalized_position_side is not None:
+            if normalized_position_side not in {"LONG", "SHORT"}:
+                raise InvalidOrderError(
+                    f"Unsupported hedge position side: {position_side}",
+                    "F-011",
+                )
+            if self.exchange_name.lower() != "binance":
+                raise InvalidOrderError(
+                    "position_side is only supported by the Binance hedge-mode ccxt adapter",
+                    "F-011",
+                )
+            params["positionSide"] = normalized_position_side
+
+        if reduce_only:
+            if self._should_omit_reduce_only_param(normalized_position_side):
+                exchange_reduce_only_omit_reason = "binance_hedge_mode_position_side"
+            else:
+                params["reduceOnly"] = True
+                exchange_reduce_only_param_sent = True
+
+        if order_type == "stop_market" and trigger_price is not None:
+            params["stopPrice"] = str(trigger_price)
+            params["triggerPrice"] = str(trigger_price)
+
+        if client_order_id:
+            params["clientOrderId"] = client_order_id
+
+        return CcxtOrderParamsBuildResult(
+            params=params,
+            exchange_reduce_only_param_sent=exchange_reduce_only_param_sent,
+            exchange_reduce_only_omit_reason=exchange_reduce_only_omit_reason,
+        )
 
     def _map_side_to_direction(self, side: str, reduce_only: bool) -> "Direction":
         """

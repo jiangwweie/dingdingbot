@@ -1,10 +1,13 @@
 import pytest
 import ccxt
+from pathlib import Path
 from decimal import Decimal
 from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.domain.models import OrderType
+from src.domain.exceptions import InvalidOrderError
 
 SYMBOL = "ETH/USDT:USDT"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 class MockRestExchange:
     def __init__(self):
@@ -189,7 +192,7 @@ async def test_place_order_does_not_affect_limit_or_market(gateway, mock_exchang
 
 @pytest.mark.asyncio
 async def test_place_order_omits_reduce_only_when_false(gateway, mock_exchange):
-    await gateway.place_order(
+    result = await gateway.place_order(
         symbol=SYMBOL,
         order_type="market",
         side="buy",
@@ -205,6 +208,71 @@ async def test_place_order_omits_reduce_only_when_false(gateway, mock_exchange):
     assert call["params"].get("positionSide") == "LONG"
     assert call["params"].get("clientOrderId") == "entry-123"
     assert "reduceOnly" not in call["params"]
+    assert result.exchange_reduce_only_param_sent is False
+    assert result.exchange_reduce_only_omit_reason is None
+
+
+@pytest.mark.asyncio
+async def test_place_order_rejects_hedge_position_side_for_non_binance_before_write(
+    gateway,
+    mock_exchange,
+):
+    gateway.exchange_name = "okx"
+
+    with pytest.raises(InvalidOrderError) as exc_info:
+        await gateway.place_order(
+            symbol=SYMBOL,
+            order_type="market",
+            side="buy",
+            amount=Decimal("0.01"),
+            reduce_only=False,
+            position_side="LONG",
+            client_order_id="entry-non-binance",
+        )
+
+    assert "only supported by the Binance hedge-mode ccxt adapter" in str(exc_info.value)
+    assert mock_exchange.create_order_calls == []
+
+
+@pytest.mark.asyncio
+async def test_place_order_rejects_invalid_position_side_before_write(gateway, mock_exchange):
+    with pytest.raises(InvalidOrderError) as exc_info:
+        await gateway.place_order(
+            symbol="BNB/USDT:USDT",
+            order_type="market",
+            side="buy",
+            amount=Decimal("0.01"),
+            reduce_only=False,
+            position_side="BOTH",
+            client_order_id="entry-invalid-position-side",
+        )
+
+    assert "Unsupported hedge position side" in str(exc_info.value)
+    assert mock_exchange.create_order_calls == []
+
+
+def test_business_code_does_not_bypass_exchange_gateway_for_exchange_order_writes():
+    roots = [
+        REPO_ROOT / "src" / "application",
+        REPO_ROOT / "src" / "domain",
+        REPO_ROOT / "src" / "interfaces",
+    ]
+    forbidden_markers = (
+        "rest_exchange.create_order",
+        "privatePost",
+        "private_post",
+        "fapiPrivate",
+        "/fapi/v1/order",
+    )
+    offenders: list[str] = []
+    for root in roots:
+        for path in root.rglob("*.py"):
+            text = path.read_text()
+            if any(marker in text for marker in forbidden_markers):
+                offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert offenders == []
+
 
 @pytest.mark.asyncio
 async def test_confirm_order_exists_metadata_validation(gateway, mock_exchange):
