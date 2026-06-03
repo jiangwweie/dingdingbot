@@ -416,7 +416,7 @@ async def _read_filters(gateway: object, symbol: str) -> ProtectionExchangeFilte
         min_notional=_decimal_or_none(info.get("min_notional")),
         min_notional_source="exchange_market_info",
         tick_size=_tick_from_market_info(info),
-        price_precision=info.get("price_precision"),
+        price_precision=_price_precision_or_none(info.get("price_precision")),
     )
 
 
@@ -451,9 +451,28 @@ def _tick_from_market_info(info: dict) -> Decimal | None:
     if precision is None:
         return None
     try:
-        return Decimal("1").scaleb(-int(precision))
+        precision_decimal = Decimal(str(precision))
     except Exception:
         return None
+    if precision_decimal <= 0:
+        return None
+    if precision_decimal == precision_decimal.to_integral_value():
+        return Decimal("1").scaleb(-int(precision_decimal))
+    return precision_decimal
+
+
+def _price_precision_or_none(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        precision_decimal = Decimal(str(value))
+    except Exception:
+        return None
+    if precision_decimal < 0:
+        return None
+    if precision_decimal == precision_decimal.to_integral_value():
+        return int(precision_decimal)
+    return None
 
 
 def _decimal_or_none(value: object) -> Decimal | None:

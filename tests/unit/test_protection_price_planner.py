@@ -6,6 +6,7 @@ import pytest
 
 from src.application.owner_trial_flow import BoundedLiveTrialAuthorization
 from src.application.protection_price_planner import (
+    ExchangeGatewayProtectionPriceSource,
     ProtectionExchangeFilters,
     ProtectionPlannerConfig,
     ProtectionPlannerService,
@@ -32,6 +33,25 @@ class MemoryProtectionPlanRepository:
             and (phase is None or item.phase == phase)
         ]
         return matches[-1] if matches else None
+
+
+class FakeReadOnlyGateway:
+    def __init__(self, *, price_precision) -> None:
+        self.price_precision = price_precision
+        self.write_calls: list[str] = []
+
+    async def fetch_ticker_price(self, symbol: str) -> Decimal:
+        assert symbol == "BNB/USDT:USDT"
+        return Decimal("600.12")
+
+    async def get_market_info(self, symbol: str) -> dict:
+        assert symbol == "BNB/USDT:USDT"
+        return {
+            "min_quantity": Decimal("0.01"),
+            "step_size": Decimal("0.01"),
+            "min_notional": Decimal("5"),
+            "price_precision": self.price_precision,
+        }
 
 
 def _authorization(**patch) -> BoundedLiveTrialAuthorization:
@@ -105,6 +125,42 @@ async def test_valid_price_snapshot_persists_pre_entry_plan_with_rounding():
     assert plan.rounding["tp_rounding"] == "tick_floor"
     assert plan.filters["tick_size"] == "0.1"
     assert repo.records == [plan]
+
+
+@pytest.mark.asyncio
+async def test_exchange_price_source_accepts_tick_size_style_price_precision():
+    repo = MemoryProtectionPlanRepository()
+    gateway = FakeReadOnlyGateway(price_precision=Decimal("0.01"))
+    service = ProtectionPlannerService(
+        repository=repo,
+        price_source=ExchangeGatewayProtectionPriceSource(gateway=gateway),
+    )
+
+    plan = await service.ensure_pre_entry_plan(_authorization())
+
+    assert plan.status == "valid"
+    assert plan.tick_size == Decimal("0.01")
+    assert plan.tp_price == Decimal("606.12")
+    assert plan.sl_price == Decimal("594.11")
+    assert plan.filters["tick_size"] == "0.01"
+    assert plan.filters["price_precision"] is None
+    assert gateway.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_exchange_price_source_keeps_integer_price_precision_metadata():
+    repo = MemoryProtectionPlanRepository()
+    gateway = FakeReadOnlyGateway(price_precision=2)
+    service = ProtectionPlannerService(
+        repository=repo,
+        price_source=ExchangeGatewayProtectionPriceSource(gateway=gateway),
+    )
+
+    plan = await service.ensure_pre_entry_plan(_authorization())
+
+    assert plan.status == "valid"
+    assert plan.tick_size == Decimal("0.01")
+    assert plan.filters["price_precision"] == "2"
 
 
 @pytest.mark.asyncio
