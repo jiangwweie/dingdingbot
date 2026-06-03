@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from src.application.brc_operation_layer import (
     BrcOperationService,
@@ -80,7 +81,7 @@ from src.application.strategy_trial_readiness import (
 from src.application.strategy_trial_preflight_facts import TrialPreflightFactCollector
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
-from src.infrastructure.database import probe_pg_connectivity
+from src.infrastructure.database import get_pg_session_maker, probe_pg_connectivity
 from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
 from src.infrastructure.pg_position_repository import PgPositionRepository
@@ -3963,7 +3964,7 @@ def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightF
         open_order_reader=_bnb_preflight_open_order_reader(api_module, bnb_live_facts),
         gks_reader=_bnb_preflight_gks_reader(api_module),
         startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
-        reconciliation_reader=_bnb_preflight_reconciliation_reader(api_module),
+        reconciliation_reader=_bnb_preflight_reconciliation_reader(api_module, bnb_live_facts),
         account_facts_reader=_bnb_preflight_account_facts_reader(api_module, bnb_live_facts),
     )
 
@@ -4052,17 +4053,53 @@ def _bnb_preflight_startup_guard_reader(api_module: Any):
     return _read
 
 
-def _bnb_preflight_reconciliation_reader(api_module: Any):
+def _bnb_preflight_reconciliation_reader(api_module: Any, bnb_live_facts: Any):
     summary = getattr(api_module, "_startup_reconciliation_summary", None)
     if summary is None:
-        async def _unavailable(_profile):
+        async def _read_final_gate_reconciliation(profile):
+            facts = await bnb_live_facts.read(profile)
+            if facts.get("available") is not True:
+                return {
+                    "status": "unavailable",
+                    "source": "bnb_final_gate_read_only_reconciliation",
+                    "reason": str(facts.get("reason") or "bnb_live_facts_unavailable"),
+                }
+            try:
+                pg_counts = await _bnb_final_gate_pg_reconciliation_counts(str(profile.symbol))
+            except Exception as exc:  # pragma: no cover - defensive PG read path
+                return {
+                    "status": "unavailable",
+                    "source": "bnb_final_gate_read_only_reconciliation",
+                    "reason": f"pg_reconciliation_read_failed:{type(exc).__name__}",
+                }
+            exchange_position_count = len(list(facts.get("positions") or []))
+            exchange_open_order_count = len(list(facts.get("open_orders") or []))
+            mismatch_count = sum(
+                1
+                for value in [
+                    pg_counts["execution_intents"],
+                    pg_counts["orders"],
+                    pg_counts["pg_bnb_active_positions"],
+                    pg_counts["pg_bnb_open_orders"],
+                    exchange_position_count,
+                    exchange_open_order_count,
+                ]
+                if int(value or 0) != 0
+            )
             return {
-                "status": "unavailable",
-                "source": "console_api_runtime_context_absent",
-                "reason": "startup_reconciliation_summary_unavailable",
+                "status": "clean" if mismatch_count == 0 else "mismatch",
+                "source": "bnb_final_gate_read_only_reconciliation",
+                "failed_reconciliations_count": mismatch_count,
+                "pg_execution_intents_count": pg_counts["execution_intents"],
+                "pg_orders_count": pg_counts["orders"],
+                "pg_bnb_active_position_count": pg_counts["pg_bnb_active_positions"],
+                "pg_bnb_open_order_count": pg_counts["pg_bnb_open_orders"],
+                "exchange_bnb_active_position_count": exchange_position_count,
+                "exchange_bnb_open_order_count": exchange_open_order_count,
+                "read_only": True,
             }
 
-        return _unavailable
+        return _read_final_gate_reconciliation
 
     async def _read(_profile):
         return summary
@@ -4364,6 +4401,56 @@ async def _call_fetch_positions(client: Any, symbol: str) -> list[Any]:
         return list(await client.fetch_positions(symbol=symbol))
     except TypeError:
         return list(await client.fetch_positions(symbol))
+
+
+async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int]:
+    session_maker = get_pg_session_maker()
+    async with session_maker() as session:
+        required_tables = [
+            "execution_intents",
+            "orders",
+            "positions",
+        ]
+        existing: dict[str, bool] = {}
+        for table_name in required_tables:
+            exists = await session.scalar(
+                text("SELECT to_regclass(:table_name)"),
+                {"table_name": f"public.{table_name}"},
+            )
+            existing[table_name] = exists is not None
+        missing = [table_name for table_name, present in existing.items() if not present]
+        if missing:
+            raise RuntimeError(f"pg_reconciliation_tables_missing:{','.join(missing)}")
+        execution_intents = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+        orders = await session.scalar(text("SELECT count(*) FROM orders"))
+        pg_bnb_active_positions = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM positions
+                WHERE symbol = :symbol
+                  AND is_closed IS FALSE
+                """
+            ),
+            {"symbol": symbol},
+        )
+        pg_bnb_open_orders = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM orders
+                WHERE symbol = :symbol
+                  AND status IN ('OPEN', 'PARTIALLY_FILLED')
+                """
+            ),
+            {"symbol": symbol},
+        )
+    return {
+        "execution_intents": int(execution_intents or 0),
+        "orders": int(orders or 0),
+        "pg_bnb_active_positions": int(pg_bnb_active_positions or 0),
+        "pg_bnb_open_orders": int(pg_bnb_open_orders or 0),
+    }
 
 
 async def _strategy_group_live_readonly_observation_response(

@@ -1187,6 +1187,19 @@ def test_bnb_final_gate_preflight_reads_live_read_only_account_and_flat_bnb(monk
             "close_after_read": False,
         },
     )
+    async def fake_pg_counts(_symbol):
+        return {
+            "execution_intents": 0,
+            "orders": 0,
+            "pg_bnb_active_positions": 0,
+            "pg_bnb_open_orders": 0,
+        }
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_pg_reconciliation_counts",
+        fake_pg_counts,
+    )
 
     async def scenario():
         profile = build_bnb_strategy_trial_readiness().strategy_profile
@@ -1209,8 +1222,89 @@ def test_bnb_final_gate_preflight_reads_live_read_only_account_and_flat_bnb(monk
         assert facts["startup_guard"].status == "unavailable"
         assert facts["startup_guard"].blocker == "startup_guard_runtime_not_started"
         assert facts["startup_guard"].evidence["runtime_state"] == "not_started"
-        assert facts["reconciliation"].status == "unavailable"
-        assert facts["reconciliation"].blocker == "reconciliation_unavailable"
+        assert facts["reconciliation"].status == "clear"
+        assert facts["reconciliation"].evidence["status"] == "clean"
+        assert facts["reconciliation"].evidence["pg_execution_intents_count"] == 0
+        assert facts["reconciliation"].evidence["pg_orders_count"] == 0
+        assert facts["reconciliation"].evidence["exchange_bnb_active_position_count"] == 0
+        assert facts["reconciliation"].evidence["exchange_bnb_open_order_count"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_bnb_final_gate_reconciliation_blocks_when_pg_or_exchange_not_flat(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    class FakeGks:
+        def get_state(self):
+            return {"active": False, "source": "test_gks"}
+
+    class FakeApiModule:
+        _global_kill_switch_service = FakeGks()
+        _startup_trading_guard_service = None
+        _startup_reconciliation_summary = None
+        _exchange_gateway = None
+
+    class FakeBnbReadOnlyClient:
+        async def fetch_balance(self, params=None):
+            return {
+                "info": {
+                    "totalMarginBalance": "100.00",
+                    "availableBalance": "80.00",
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+
+        async def fetch_positions(self, symbol=None):
+            return []
+
+        async def fetch_open_orders(self, symbol, params=None):
+            return [{"id": "existing-order", "symbol": symbol, "status": "open"}]
+
+        async def close(self):
+            return None
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_read_only_client",
+        lambda _api_module: {
+            "client": FakeBnbReadOnlyClient(),
+            "source": "test_bnb_read_only_client",
+            "close_after_read": False,
+        },
+    )
+
+    async def fake_pg_counts(_symbol):
+        return {
+            "execution_intents": 1,
+            "orders": 0,
+            "pg_bnb_active_positions": 0,
+            "pg_bnb_open_orders": 0,
+        }
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_pg_reconciliation_counts",
+        fake_pg_counts,
+    )
+
+    async def scenario():
+        profile = build_bnb_strategy_trial_readiness().strategy_profile
+        collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+        snapshot = await collector.collect(profile)
+        fact = snapshot.fact_map()["reconciliation"]
+
+        assert fact.status == "blocked"
+        assert fact.blocker == "reconciliation_not_clean"
+        assert fact.evidence["status"] == "mismatch"
+        assert fact.evidence["pg_execution_intents_count"] == 1
+        assert fact.evidence["exchange_bnb_open_order_count"] == 1
 
     asyncio.run(scenario())
 

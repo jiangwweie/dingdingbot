@@ -430,7 +430,7 @@ class TrialPreflightFactCollector:
                 "reconciliation",
                 generated_at_ms,
                 source,
-                {"status": status or "clean", "failed_reconciliations_count": failed},
+                _reconciliation_evidence(summary, status or "clean", failed),
             )
         if status in {"mismatch", "failed", "dirty"} or (failed is not None and failed > 0):
             return TrialPreflightFact(
@@ -440,7 +440,7 @@ class TrialPreflightFactCollector:
                 blocking=True,
                 blocker="reconciliation_not_clean",
                 observed_at_ms=generated_at_ms,
-                evidence={"status": status or "unknown", "failed_reconciliations_count": failed},
+                evidence=_reconciliation_evidence(summary, status or "unknown", failed),
                 notes=["Reconciliation is not clean."],
             )
         if status in {"unavailable", "not_started", "not_available"}:
@@ -708,6 +708,30 @@ def _get_str(obj: Any, key: str) -> Optional[str]:
     if value is None:
         return None
     return str(value)
+
+
+def _reconciliation_evidence(
+    summary: Any,
+    status: str,
+    failed: Optional[int],
+) -> dict[str, str | int | bool | None]:
+    evidence: dict[str, str | int | bool | None] = {
+        "status": status,
+        "failed_reconciliations_count": failed,
+    }
+    for key in [
+        "pg_execution_intents_count",
+        "pg_orders_count",
+        "pg_bnb_active_position_count",
+        "pg_bnb_open_order_count",
+        "exchange_bnb_active_position_count",
+        "exchange_bnb_open_order_count",
+        "read_only",
+    ]:
+        value = _get_value(summary, key)
+        if isinstance(value, (str, int, bool)) or value is None:
+            evidence[key] = value
+    return evidence
 
 
 def _availability(
