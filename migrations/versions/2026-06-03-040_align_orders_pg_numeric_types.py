@@ -45,6 +45,11 @@ def _has_column(table_name: str, column_name: str) -> bool:
     return _column_type(table_name, column_name) is not None
 
 
+def _drop_default(table_name: str, column_name: str) -> None:
+    # Existing varchar defaults cannot always be cast during ALTER TYPE.
+    op.execute(sa.text(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP DEFAULT"))
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "sqlite" or not sa.inspect(bind).has_table("orders"):
@@ -54,6 +59,7 @@ def upgrade() -> None:
             continue
         if "numeric" in (_column_type("orders", column_name) or ""):
             continue
+        _drop_default("orders", column_name)
         op.alter_column(
             "orders",
             column_name,
@@ -66,6 +72,7 @@ def upgrade() -> None:
             continue
         if "bigint" in (_column_type("orders", column_name) or ""):
             continue
+        _drop_default("orders", column_name)
         op.alter_column(
             "orders",
             column_name,
