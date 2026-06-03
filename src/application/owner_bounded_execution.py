@@ -67,6 +67,10 @@ class OwnerBoundedExecutionError(ValueError):
         execution_intent_id: str | None = None,
         entry_order_id: str | None = None,
         entry_exchange_order_id: str | None = None,
+        execution_intent_status: str | None = None,
+        protection_status: str | None = None,
+        tp_order_ids: list[str] | None = None,
+        sl_order_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -78,6 +82,10 @@ class OwnerBoundedExecutionError(ValueError):
         self.execution_intent_id = execution_intent_id
         self.entry_order_id = entry_order_id
         self.entry_exchange_order_id = entry_exchange_order_id
+        self.execution_intent_status = execution_intent_status
+        self.protection_status = protection_status
+        self.tp_order_ids = tp_order_ids or []
+        self.sl_order_id = sl_order_id
 
 
 class OwnerBoundedExecutionReadiness(BaseModel):
@@ -106,6 +114,8 @@ class OwnerBoundedExecutionResponse(BaseModel):
     tp_order_ids: list[str] = Field(default_factory=list)
     sl_order_id: str | None = None
     review_record_id: str | None = None
+    execution_intent_status: str | None = None
+    protection_status: str | None = None
     consumed: bool = False
     no_permission_granted: bool = True
     auto_execution_enabled: bool = False
@@ -333,6 +343,12 @@ class Mi001BnbLongExecutionAdapter:
             tp_order_ids=[result.tp_order.order_id] if result.tp_order.order_id else [],
             sl_order_id=result.sl_order.order_id or None,
             review_record_id=result.review_record_id,
+            execution_intent_status=(
+                ExecutionIntentStatus.COMPLETED.value
+                if result.status == "executed"
+                else ExecutionIntentStatus.SUBMITTED.value
+            ),
+            protection_status="protected" if result.status == "executed" else "not_complete",
             consumed=False,
             no_permission_granted=True,
             auto_execution_enabled=False,
@@ -382,6 +398,8 @@ async def _execute_mi001_bnb_long(
             execution_intent_id=intent.id,
             entry_order_id=entry_order.id,
             entry_exchange_order_id=entry_order.exchange_order_id,
+            execution_intent_status=ExecutionIntentStatus.FAILED.value,
+            protection_status="not_created",
         )
 
     filled_qty = entry_result.filled_qty or Decimal("0")
@@ -417,11 +435,36 @@ async def _execute_mi001_bnb_long(
     intent.updated_at = _now_ms()
     await intent_repository.update(intent)
 
-    tp_result = await executor.submit_take_profit(
-        authorization=authorization,
+    try:
+        tp_result = await executor.submit_take_profit(
+            authorization=authorization,
             protection_plan=fill_plan,
-        client_order_id=_client_order_id(authorization.authorization_id, "tp"),
-    )
+            client_order_id=_client_order_id(authorization.authorization_id, "tp"),
+        )
+    except Exception as exc:
+        reason = f"tp_order_submit_exception:{type(exc).__name__}"
+        intent.status = ExecutionIntentStatus.PARTIALLY_PROTECTED
+        intent.failed_reason = reason
+        intent.updated_at = _now_ms()
+        await intent_repository.update(intent)
+        raise OwnerBoundedExecutionError(
+            "protection_order_failed",
+            "TP order submission failed after entry order.",
+            _dedupe(
+                [
+                    "protection_attach_failed_after_entry_fill",
+                    reason,
+                    "manual_review_required_before_retry",
+                ]
+            ),
+            execution_intent_created=True,
+            order_created=True,
+            execution_intent_id=intent.id,
+            entry_order_id=entry_order.id,
+            entry_exchange_order_id=entry_order.exchange_order_id,
+            execution_intent_status=ExecutionIntentStatus.PARTIALLY_PROTECTED.value,
+            protection_status="tp_submit_failed",
+        ) from exc
     tp_order = _order_from_placement(
         placement=tp_result,
         intent=intent,
@@ -430,11 +473,37 @@ async def _execute_mi001_bnb_long(
     )
     await order_repository.save(tp_order)
 
-    sl_result = await executor.submit_stop_loss(
-        authorization=authorization,
+    try:
+        sl_result = await executor.submit_stop_loss(
+            authorization=authorization,
             protection_plan=fill_plan,
-        client_order_id=_client_order_id(authorization.authorization_id, "sl"),
-    )
+            client_order_id=_client_order_id(authorization.authorization_id, "sl"),
+        )
+    except Exception as exc:
+        reason = f"sl_order_submit_exception:{type(exc).__name__}"
+        intent.status = ExecutionIntentStatus.PARTIALLY_PROTECTED
+        intent.failed_reason = reason
+        intent.updated_at = _now_ms()
+        await intent_repository.update(intent)
+        raise OwnerBoundedExecutionError(
+            "protection_order_failed",
+            "SL order submission failed after entry order.",
+            _dedupe(
+                [
+                    "protection_attach_failed_after_entry_fill",
+                    reason,
+                    "manual_review_required_before_retry",
+                ]
+            ),
+            execution_intent_created=True,
+            order_created=True,
+            execution_intent_id=intent.id,
+            entry_order_id=entry_order.id,
+            entry_exchange_order_id=entry_order.exchange_order_id,
+            execution_intent_status=ExecutionIntentStatus.PARTIALLY_PROTECTED.value,
+            protection_status="sl_submit_failed",
+            tp_order_ids=[tp_order.id],
+        ) from exc
     sl_order = _order_from_placement(
         placement=sl_result,
         intent=intent,
@@ -468,6 +537,10 @@ async def _execute_mi001_bnb_long(
             execution_intent_id=intent.id,
             entry_order_id=entry_order.id,
             entry_exchange_order_id=entry_order.exchange_order_id,
+            execution_intent_status=ExecutionIntentStatus.PARTIALLY_PROTECTED.value,
+            protection_status="partial_protection_failed",
+            tp_order_ids=[tp_order.id],
+            sl_order_id=sl_order.id,
         )
 
     intent.status = ExecutionIntentStatus.COMPLETED
@@ -588,15 +661,24 @@ class OwnerBoundedExecutionService:
         assert protection_plan is not None
         assert self._order_executor is not None
         assert self._protection_planner_service is not None
-        result = await adapter.execute(
-            authorization,
-            final_gate=final_gate,
-            protection_plan=protection_plan,
-            protection_planner_service=self._protection_planner_service,
-            executor=self._order_executor,
-            intent_repository=self._intent_repository,
-            order_repository=self._order_repository,
-        )
+        try:
+            result = await adapter.execute(
+                authorization,
+                final_gate=final_gate,
+                protection_plan=protection_plan,
+                protection_planner_service=self._protection_planner_service,
+                executor=self._order_executor,
+                intent_repository=self._intent_repository,
+                order_repository=self._order_repository,
+            )
+        except OwnerBoundedExecutionError as exc:
+            if exc.execution_intent_created or exc.order_created:
+                await self._record_execution_failure_result(
+                    authorization=authorization,
+                    exc=exc,
+                    final_gate=final_gate,
+                )
+            raise
         consumed = result.status == "executed"
         if consumed:
             await self._owner_trial_repository.mark_live_authorization_consumed(
@@ -897,6 +979,124 @@ class OwnerBoundedExecutionService:
                     "Execution result/review logging failed.",
                     ["execution_result_logging_failed"],
                 ) from exc
+
+    async def _record_execution_failure_result(
+        self,
+        *,
+        authorization: BoundedLiveTrialAuthorization,
+        exc: OwnerBoundedExecutionError,
+        final_gate: BnbLiveExecutionBridgeDryRunResponse,
+    ) -> None:
+        operation_id = (
+            f"review-{authorization.authorization_id}-{exc.execution_intent_id}"
+            if exc.execution_intent_id
+            else f"review-{authorization.authorization_id}-failed"
+        )
+        async with self._session_maker() as session:
+            bind = session.get_bind()
+            dialect_name = bind.dialect.name if bind is not None else ""
+            try:
+                if dialect_name == "sqlite":
+                    columns_result = await session.execute(text("PRAGMA table_info(brc_execution_results)"))
+                    columns = {str(row[1]) for row in columns_result.fetchall()}
+                else:
+                    rows = await session.execute(
+                        text(
+                            """
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'brc_execution_results'
+                            """
+                        )
+                    )
+                    columns = {str(row[0]) for row in rows.fetchall()}
+                if {"operation_id", "status"} == columns:
+                    await session.execute(
+                        text(
+                            "INSERT INTO brc_execution_results (operation_id, status) "
+                            "VALUES (:operation_id, :status)"
+                        ),
+                        {
+                            "operation_id": operation_id,
+                            "status": "failed",
+                        },
+                    )
+                else:
+                    json_cast = "JSONB" if dialect_name == "postgresql" else "TEXT"
+                    adapter_result = {
+                        "authorization_id": authorization.authorization_id,
+                        "carrier_id": authorization.carrier_id,
+                        "status": "failed",
+                        "code": exc.code,
+                        "blockers": exc.blockers,
+                        "execution_intent_id": exc.execution_intent_id,
+                        "entry_order_id": exc.entry_order_id,
+                        "entry_exchange_order_id": exc.entry_exchange_order_id,
+                        "tp_order_ids": exc.tp_order_ids,
+                        "sl_order_id": exc.sl_order_id,
+                        "execution_intent_status": exc.execution_intent_status,
+                        "protection_status": exc.protection_status,
+                        "consumed": False,
+                        "no_permission_granted": True,
+                        "auto_execution_enabled": False,
+                    }
+                    await session.execute(
+                        text(
+                            f"""
+                            INSERT INTO brc_execution_results (
+                                operation_id, preflight_id, status, rechecked,
+                                recheck_result, adapter_result, result_summary,
+                                audit_refs, campaign_refs, review_refs,
+                                final_state_snapshot, occurred_at_ms
+                            )
+                            VALUES (
+                                :operation_id, :preflight_id, :status, :rechecked,
+                                CAST(:recheck_result AS {json_cast}),
+                                CAST(:adapter_result AS {json_cast}),
+                                CAST(:result_summary AS {json_cast}),
+                                CAST(:audit_refs AS {json_cast}),
+                                CAST(:campaign_refs AS {json_cast}),
+                                CAST(:review_refs AS {json_cast}),
+                                CAST(:final_state_snapshot AS {json_cast}),
+                                :occurred_at_ms
+                            )
+                            """
+                        ),
+                        {
+                            "operation_id": operation_id,
+                            "preflight_id": f"final-gate-{authorization.authorization_id}",
+                            "status": "failed",
+                            "rechecked": True,
+                            "recheck_result": json.dumps(final_gate.model_dump(mode="json")),
+                            "adapter_result": json.dumps(adapter_result),
+                            "result_summary": json.dumps({
+                                "authorization_id": authorization.authorization_id,
+                                "execution_intent_id": exc.execution_intent_id,
+                                "entry_order_id": exc.entry_order_id,
+                                "tp_order_ids": exc.tp_order_ids,
+                                "sl_order_id": exc.sl_order_id,
+                                "protection_status": exc.protection_status,
+                            }),
+                            "audit_refs": json.dumps([authorization.authorization_id, exc.execution_intent_id]),
+                            "campaign_refs": json.dumps([]),
+                            "review_refs": json.dumps([operation_id]),
+                            "final_state_snapshot": json.dumps({
+                                "consumed": False,
+                                "manual_review_required": True,
+                                "protection_status": exc.protection_status,
+                            }),
+                            "occurred_at_ms": _now_ms(),
+                        },
+                    )
+                await session.commit()
+            except SQLAlchemyError as sql_exc:
+                await session.rollback()
+                raise OwnerBoundedExecutionError(
+                    "execution_result_logging_failed",
+                    "Execution failure result/review logging failed.",
+                    ["execution_result_logging_failed"],
+                ) from sql_exc
 
 
 def _v1_scope_blockers(authorization: BoundedLiveTrialAuthorization) -> list[str]:

@@ -3943,6 +3943,10 @@ async def execute_owner_bounded_live_trial_authorization(
                 "execution_intent_id": exc.execution_intent_id,
                 "entry_order_id": exc.entry_order_id,
                 "entry_exchange_order_id": exc.entry_exchange_order_id,
+                "execution_intent_status": exc.execution_intent_status,
+                "protection_status": exc.protection_status,
+                "tp_order_ids": exc.tp_order_ids,
+                "sl_order_id": exc.sl_order_id,
             },
         ) from exc
     except Exception as exc:

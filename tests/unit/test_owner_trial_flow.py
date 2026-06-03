@@ -595,6 +595,58 @@ def test_consumed_live_authorization_allows_fresh_draft_rehearsal():
     asyncio.run(scenario())
 
 
+def test_closed_live_trial_intents_do_not_block_fresh_bnb_authorization_draft():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        try:
+            first_draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                first_draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            await service._repository.mark_live_authorization_consumed(
+                authorization.authorization_id,
+                occurred_at_ms=int(time.time() * 1000),
+            )
+            async with session_maker() as session:
+                await session.execute(
+                    text(
+                        "INSERT INTO execution_intents "
+                        "(id, signal_id, symbol, status, authorization_id, order_id, "
+                        "exchange_order_id, failed_reason) "
+                        "VALUES ('intent-closed', 'signal-closed', 'BNB/USDT:USDT', "
+                        "'failed', :authorization_id, 'entry-closed', 'x-entry-closed', "
+                        "'entry_filled_then_recovered_flat')"
+                    ),
+                    {"authorization_id": authorization.authorization_id},
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO orders (id, signal_id, symbol) "
+                        "VALUES ('entry-closed', 'signal-closed', 'BNB/USDT:USDT')"
+                    )
+                )
+                await session.commit()
+
+            current = await service.current()
+            assert current.live_authorization is None
+            assert current.authorization_status == "pending_owner_live_authorization"
+
+            second_draft = await _create_valid_draft(service)
+            assert second_draft.draft_id != first_draft.draft_id
+            assert second_draft.consumed is False
+            assert second_draft.execution_intent_created is False
+            assert second_draft.order_created is False
+
+            _ = bridge
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_owner_trial_flow_api_persists_pg_metadata_without_execution_or_order(monkeypatch):
     from src.interfaces import api_brc_console
     from src.interfaces.api import app
@@ -1338,6 +1390,10 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
 
             assert result.status == "executed"
             assert result.consumed is True
+            assert result.execution_intent_status == "completed"
+            assert result.protection_status == "protected"
+            assert result.tp_order_ids
+            assert result.sl_order_id
             assert result.execution_intent_id == intent_repo.items[0].id
             assert len(intent_repo.items) == 1
             assert intent_repo.updates[-1].status == "completed"
@@ -1380,6 +1436,13 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
             )
             assert consumed_authorization is not None
             assert consumed_authorization.consumed is True
+            async with session_maker() as session:
+                result_rows = (
+                    await session.execute(
+                        text("SELECT operation_id, status FROM brc_execution_results")
+                    )
+                ).all()
+            assert result_rows == [(f"review-{authorization.authorization_id}", "executed")]
 
             with pytest.raises(OwnerBoundedExecutionError) as reuse_exc:
                 await execute_service.execute_authorization(
@@ -1577,6 +1640,10 @@ def test_owner_bounded_execution_protection_failure_records_partial_state_withou
             assert exc_info.value.order_created is True
             assert exc_info.value.order_permission_granted is False
             assert exc_info.value.entry_exchange_order_id == "x-entry-filled"
+            assert exc_info.value.execution_intent_status == "partially_protected"
+            assert exc_info.value.protection_status == "partial_protection_failed"
+            assert exc_info.value.tp_order_ids == ["tp-order-2"]
+            assert exc_info.value.sl_order_id == "sl-order-3"
             assert "protection_attach_failed_after_entry_fill" in exc_info.value.blockers
             assert "manual_review_required_before_retry" in exc_info.value.blockers
             assert len(gateway.calls) == 3
@@ -1596,6 +1663,143 @@ def test_owner_bounded_execution_protection_failure_records_partial_state_withou
             current = await service.current()
             assert current.live_authorization is not None
             assert current.live_authorization.consumed is False
+            async with session_maker() as session:
+                result_rows = (
+                    await session.execute(
+                        text("SELECT operation_id, status FROM brc_execution_results")
+                    )
+                ).all()
+            assert len(result_rows) == 1
+            assert result_rows[0][1] == "failed"
+            assert intent_repo.items[0].id in result_rows[0][0]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_sl_failure_records_partial_state_without_consuming_authorization():
+    class FakeSlRejectingGateway:
+        def __init__(self):
+            self.calls = []
+
+        async def place_order(self, **kwargs):
+            self.calls.append(kwargs)
+            order_type = kwargs["order_type"]
+            role_index = len(self.calls)
+            if order_type == "market":
+                return OrderPlacementResult(
+                    order_id="entry-order-filled",
+                    exchange_order_id="x-entry-filled",
+                    symbol=kwargs["symbol"],
+                    order_type=OrderType.MARKET,
+                    direction=Direction.LONG,
+                    side=kwargs["side"],
+                    amount=kwargs["amount"],
+                    filled_qty=Decimal("0.01"),
+                    average_exec_price=Decimal("600.20"),
+                    status=OrderStatus.FILLED,
+                    client_order_id=kwargs.get("client_order_id"),
+                )
+            if order_type == "limit":
+                return OrderPlacementResult(
+                    order_id=f"tp-order-{role_index}",
+                    exchange_order_id=f"x-tp-{role_index}",
+                    symbol=kwargs["symbol"],
+                    order_type=OrderType.LIMIT,
+                    direction=Direction.SHORT,
+                    side=kwargs["side"],
+                    amount=kwargs["amount"],
+                    price=kwargs["price"],
+                    reduce_only=kwargs["reduce_only"],
+                    status=OrderStatus.OPEN,
+                    client_order_id=kwargs.get("client_order_id"),
+                )
+            return OrderPlacementResult(
+                order_id=f"sl-order-{role_index}",
+                exchange_order_id=None,
+                symbol=kwargs["symbol"],
+                order_type=OrderType.STOP_MARKET,
+                direction=Direction.SHORT,
+                side=kwargs["side"],
+                amount=kwargs["amount"],
+                trigger_price=kwargs["trigger_price"],
+                reduce_only=kwargs["reduce_only"],
+                status=OrderStatus.REJECTED,
+                client_order_id=kwargs.get("client_order_id"),
+                error_code="sl_rejected_by_exchange",
+                error_message="fake SL rejection",
+            )
+
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        protection_repo = PgProtectionPricePlanRepository(session_maker)
+        protection_service = ProtectionPlannerService(
+            repository=protection_repo,
+            price_source=StaticProtectionPriceSource(
+                reference_price=Decimal("600.12"),
+                filters=ProtectionExchangeFilters(
+                    min_amount=Decimal("0.01"),
+                    amount_step=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                    min_notional_source="test",
+                    tick_size=Decimal("0.1"),
+                ),
+            ),
+        )
+        gateway = FakeSlRejectingGateway()
+        intent_repo = _RecordingIntentRepository()
+        order_repo = _RecordingOrderRepository()
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+            protection_planner_service=protection_service,
+            order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
+            intent_repository=intent_repo,
+            order_repository=order_repo,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+
+            assert exc_info.value.code == "protection_order_failed"
+            assert exc_info.value.execution_intent_status == "partially_protected"
+            assert exc_info.value.protection_status == "partial_protection_failed"
+            assert "sl_rejected_by_exchange" in exc_info.value.blockers
+            assert len(gateway.calls) == 3
+            assert gateway.calls[1]["reduce_only"] is True
+            assert gateway.calls[1]["position_side"] == "LONG"
+            assert gateway.calls[2]["reduce_only"] is True
+            assert gateway.calls[2]["position_side"] == "LONG"
+            assert [order.order_role for order in order_repo.items] == [
+                OrderRole.ENTRY,
+                OrderRole.TP1,
+                OrderRole.SL,
+            ]
+            assert order_repo.items[1].status == OrderStatus.OPEN
+            assert order_repo.items[2].status == OrderStatus.REJECTED
+            assert intent_repo.updates[-1].status.value == "partially_protected"
+            assert intent_repo.updates[-1].failed_reason == "sl_rejected_by_exchange"
+            current = await service.current()
+            assert current.live_authorization is not None
+            assert current.live_authorization.consumed is False
+            async with session_maker() as session:
+                result_status = await session.scalar(
+                    text("SELECT status FROM brc_execution_results")
+                )
+            assert result_status == "failed"
         finally:
             await engine.dispose()
 
