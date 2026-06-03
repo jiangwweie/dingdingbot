@@ -4000,7 +4000,15 @@ def _bnb_preflight_gks_reader(api_module: Any):
             }
         if await probe_pg_connectivity():
             repo = PgGlobalKillSwitchRepository()
-            state = await repo.get_state()
+            try:
+                state = await repo.get_state()
+            except Exception as exc:
+                return {
+                    "state": "unavailable",
+                    "status": "unavailable",
+                    "source": "pg_global_kill_switch_repository",
+                    "reason": f"global_kill_switch_pg_read_failed:{type(exc).__name__}",
+                }
             if state is None:
                 return {
                     "state": "unavailable",
@@ -4009,7 +4017,12 @@ def _bnb_preflight_gks_reader(api_module: Any):
                     "reason": "global_kill_switch_pg_state_missing",
                 }
             return state
-        raise RuntimeError("gks_repository_unavailable")
+        return {
+            "state": "unavailable",
+            "status": "unavailable",
+            "source": "pg_global_kill_switch_repository",
+            "reason": "pg_connectivity_unavailable",
+        }
 
     return _read
 

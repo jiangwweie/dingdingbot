@@ -1206,7 +1206,8 @@ def test_bnb_final_gate_preflight_reads_live_read_only_account_and_flat_bnb(monk
         assert facts["open_order"].status == "clear"
         assert facts["open_order"].evidence["open_order_count"] == 0
         assert facts["gks"].status == "clear"
-        assert facts["startup_guard"].status == "blocked"
+        assert facts["startup_guard"].status == "unavailable"
+        assert facts["startup_guard"].blocker == "startup_guard_runtime_not_started"
         assert facts["startup_guard"].evidence["runtime_state"] == "not_started"
         assert facts["reconciliation"].status == "unavailable"
         assert facts["reconciliation"].blocker == "reconciliation_unavailable"

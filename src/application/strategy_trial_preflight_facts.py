@@ -345,6 +345,27 @@ class TrialPreflightFactCollector:
                 },
                 notes=["Startup guard state is unavailable and cannot be assumed clear."],
             )
+        if (
+            runtime_started is False
+            or runtime_state in {"not_started", "stopped"}
+            or state_name in {"not_started", "stopped"}
+        ):
+            return TrialPreflightFact(
+                fact_id="startup_guard",
+                status="unavailable",
+                source=source,
+                blocking=True,
+                blocker="startup_guard_runtime_not_started",
+                blockers=["startup_guard_runtime_not_started"],
+                observed_at_ms=observed_at_ms,
+                evidence={
+                    "armed": armed,
+                    "runtime_started": runtime_started,
+                    "runtime_state": runtime_state or state_name,
+                    "reason": reason,
+                },
+                notes=["Startup guard runtime state is not started and cannot be assumed clear."],
+            )
         if armed is True:
             return _clear(
                 "startup_guard",
