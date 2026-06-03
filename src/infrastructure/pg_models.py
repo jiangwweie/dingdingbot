@@ -68,6 +68,8 @@ class PGOrderORM(PGCoreBase):
     )
     average_exec_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
     reduce_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_reduce_only_param_sent: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    exchange_reduce_only_omit_reason: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     parent_order_id: Mapped[Optional[str]] = mapped_column(
         String(64),
         ForeignKey("orders.id", deferrable=True, initially="DEFERRED"),

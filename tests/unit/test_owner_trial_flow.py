@@ -45,6 +45,7 @@ from src.infrastructure.pg_models import (
     PGBrcBoundedLiveTrialAuthorizationDraftORM,
     PGBrcOwnerRiskAcknowledgementORM,
     PGBrcProtectionPricePlanORM,
+    PGOrderORM,
 )
 from src.infrastructure.pg_protection_price_plan_repository import PgProtectionPricePlanRepository
 from src.domain.models import Direction, Order, OrderPlacementResult, OrderRole, OrderStatus, OrderType
@@ -1415,12 +1416,14 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
             assert tp_call["order_type"] == "limit"
             assert tp_call["side"] == "sell"
             assert tp_call["amount"] == Decimal("0.01")
+            assert tp_call["price"] == Decimal("606.2")
             assert tp_call["reduce_only"] is True
             assert tp_call["position_side"] == "LONG"
             assert sl_call["symbol"] == "BNB/USDT:USDT"
             assert sl_call["order_type"] == "stop_market"
             assert sl_call["side"] == "sell"
             assert sl_call["amount"] == Decimal("0.01")
+            assert sl_call["trigger_price"] == Decimal("594.1")
             assert sl_call["reduce_only"] is True
             assert sl_call["position_side"] == "LONG"
             fill_plan = await protection_repo.latest_valid_plan(
@@ -1875,6 +1878,62 @@ def test_pg_order_chain_keeps_exit_orders_out_of_take_profit_bucket(monkeypatch)
     assert chain["tps"] == [take_profit]
     assert chain["sl"] == []
     assert chain["exits"] == [exit_order]
+
+
+def test_pg_order_repository_preserves_exchange_reduce_only_audit_fields():
+    async def scenario():
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(PGOrderORM.__table__.create)
+            repo = PgOrderRepository(session_maker=session_maker)
+            now = int(time.time() * 1000)
+            order = Order(
+                id="tp-audit-1",
+                signal_id="intent-audit-1",
+                exchange_order_id="x-tp-audit-1",
+                symbol="BNB/USDT:USDT",
+                direction=Direction.SHORT,
+                order_type=OrderType.LIMIT,
+                order_role=OrderRole.TP1,
+                price=Decimal("649.90"),
+                requested_qty=Decimal("0.01"),
+                filled_qty=Decimal("0"),
+                status=OrderStatus.OPEN,
+                created_at=now,
+                updated_at=now,
+                reduce_only=True,
+                exchange_reduce_only_param_sent=False,
+                exchange_reduce_only_omit_reason="binance_hedge_mode_position_side",
+                parent_order_id="entry-audit-1",
+            )
+
+            await repo.save(order)
+            loaded = await repo.get_order(order.id)
+
+            assert loaded is not None
+            assert loaded.reduce_only is True
+            assert loaded.exchange_reduce_only_param_sent is False
+            assert (
+                loaded.exchange_reduce_only_omit_reason
+                == "binance_hedge_mode_position_side"
+            )
+            response = repo._order_to_response(loaded)
+            assert response["local_reduce_only_intent"] is True
+            assert response["exchange_reduce_only_param_sent"] is False
+            assert (
+                response["exchange_reduce_only_omit_reason"]
+                == "binance_hedge_mode_position_side"
+            )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
 
 
 def test_owner_bounded_execution_rejects_unsupported_carrier_before_intent_or_order():

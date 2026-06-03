@@ -70,7 +70,7 @@ async def test_place_order_stop_market_parameters(gateway, mock_exchange):
     side 正确；
     quantity 正确；
     """
-    await gateway.place_order(
+    result = await gateway.place_order(
         symbol=SYMBOL,
         order_type="stop_market",
         side="sell",
@@ -94,6 +94,9 @@ async def test_place_order_stop_market_parameters(gateway, mock_exchange):
     assert params.get("stopPrice") == "2000.5"
     assert params.get("triggerPrice") == "2000.5"
     assert params.get("clientOrderId") == "sl-123"
+    assert result.reduce_only is True
+    assert result.exchange_reduce_only_param_sent is True
+    assert result.exchange_reduce_only_omit_reason is None
 
 
 @pytest.mark.asyncio
@@ -119,6 +122,40 @@ async def test_place_order_binance_hedge_mode_omits_reduce_only_param(gateway, m
     assert params.get("clientOrderId") == "sl-bnb-hedge"
     assert "reduceOnly" not in params
     assert result.reduce_only is True
+    assert result.exchange_reduce_only_param_sent is False
+    assert result.exchange_reduce_only_omit_reason == "binance_hedge_mode_position_side"
+
+
+@pytest.mark.asyncio
+async def test_place_order_binance_hedge_mode_tp_limit_omits_reduce_only_param(
+    gateway,
+    mock_exchange,
+):
+    result = await gateway.place_order(
+        symbol="BNB/USDT:USDT",
+        order_type="limit",
+        side="sell",
+        amount=Decimal("0.01"),
+        price=Decimal("649.90"),
+        reduce_only=True,
+        position_side="LONG",
+        client_order_id="tp-bnb-hedge",
+    )
+
+    call = mock_exchange.create_order_calls[-1]
+    params = call["params"]
+    assert call["type"] == "limit"
+    assert call["side"] == "sell"
+    assert call["amount"] == "0.01"
+    assert call["price"] == "649.90"
+    assert params.get("positionSide") == "LONG"
+    assert params.get("clientOrderId") == "tp-bnb-hedge"
+    assert "reduceOnly" not in params
+    assert "stopPrice" not in params
+    assert "triggerPrice" not in params
+    assert result.reduce_only is True
+    assert result.exchange_reduce_only_param_sent is False
+    assert result.exchange_reduce_only_omit_reason == "binance_hedge_mode_position_side"
 
 
 @pytest.mark.asyncio

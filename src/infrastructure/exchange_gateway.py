@@ -1070,8 +1070,14 @@ class ExchangeGateway:
 
             # 构建 CCXT 下单参数
             params = {}
-            if reduce_only and not self._should_omit_reduce_only_param(position_side):
-                params['reduceOnly'] = True
+            exchange_reduce_only_param_sent = False
+            exchange_reduce_only_omit_reason = None
+            if reduce_only:
+                if self._should_omit_reduce_only_param(position_side):
+                    exchange_reduce_only_omit_reason = "binance_hedge_mode_position_side"
+                else:
+                    params['reduceOnly'] = True
+                    exchange_reduce_only_param_sent = True
             if position_side:
                 params['positionSide'] = position_side
 
@@ -1112,6 +1118,8 @@ class ExchangeGateway:
                 average_exec_price=average_exec_price,
                 trigger_price=trigger_price,
                 reduce_only=reduce_only,
+                exchange_reduce_only_param_sent=exchange_reduce_only_param_sent,
+                exchange_reduce_only_omit_reason=exchange_reduce_only_omit_reason,
                 client_order_id=client_order_id,
                 status=order_status,
             )
@@ -1144,6 +1152,14 @@ class ExchangeGateway:
                 price=price,
                 trigger_price=trigger_price,
                 reduce_only=reduce_only,
+                exchange_reduce_only_param_sent=(
+                    reduce_only and not self._should_omit_reduce_only_param(position_side)
+                ),
+                exchange_reduce_only_omit_reason=(
+                    "binance_hedge_mode_position_side"
+                    if reduce_only and self._should_omit_reduce_only_param(position_side)
+                    else None
+                ),
                 client_order_id=client_order_id,
                 error_code="F-011",
                 error_message=f"下单失败：{str(e)}",

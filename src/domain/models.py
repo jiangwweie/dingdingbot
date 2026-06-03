@@ -1060,6 +1060,14 @@ class Order(FinancialModel):
     # Phase 3 Reduce Only 约束
     # 契约表 3.1: 所有平仓单 (TP/SL) 必须携带 reduceOnly=True，防止保证金不足错误
     reduce_only: bool = Field(default=False, description="仅减仓平仓 (实盘约束)")
+    exchange_reduce_only_param_sent: Optional[bool] = Field(
+        default=None,
+        description="是否向交易所实际发送 reduceOnly 参数",
+    )
+    exchange_reduce_only_omit_reason: Optional[str] = Field(
+        default=None,
+        description="交易所 reduceOnly 参数省略原因",
+    )
 
     # Phase 4 订单编排扩展
     parent_order_id: Optional[str] = None  # 父订单 ID (用于订单链)
@@ -1095,6 +1103,8 @@ class OrderPlacementResult(FinancialModel):
     average_exec_price: Optional[Decimal] = None
     trigger_price: Optional[Decimal] = None
     reduce_only: bool = False
+    exchange_reduce_only_param_sent: Optional[bool] = None
+    exchange_reduce_only_omit_reason: Optional[str] = None
     client_order_id: Optional[str] = None
     status: OrderStatus = OrderStatus.PENDING
     created_at: int = Field(default_factory=lambda: int(time.time() * 1000))

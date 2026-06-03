@@ -1193,6 +1193,8 @@ def _order_from_placement(
         created_at=placement.created_at or now,
         updated_at=now,
         reduce_only=placement.reduce_only,
+        exchange_reduce_only_param_sent=placement.exchange_reduce_only_param_sent,
+        exchange_reduce_only_omit_reason=placement.exchange_reduce_only_omit_reason,
         parent_order_id=parent_order_id,
     )
 
