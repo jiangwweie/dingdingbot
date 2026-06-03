@@ -1070,7 +1070,7 @@ class ExchangeGateway:
 
             # 构建 CCXT 下单参数
             params = {}
-            if reduce_only:
+            if reduce_only and not self._should_omit_reduce_only_param(position_side):
                 params['reduceOnly'] = True
             if position_side:
                 params['positionSide'] = position_side
@@ -1747,6 +1747,10 @@ class ExchangeGateway:
             "stop_market": "STOP_MARKET",
         }
         return type_mapping.get(order_type.lower(), order_type.lower())
+
+    def _should_omit_reduce_only_param(self, position_side: Optional[str]) -> bool:
+        """Binance futures hedge mode rejects reduceOnly when positionSide is set."""
+        return self.exchange_name.lower() == "binance" and bool(position_side)
 
     def _map_side_to_direction(self, side: str, reduce_only: bool) -> "Direction":
         """

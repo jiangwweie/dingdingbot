@@ -95,6 +95,32 @@ async def test_place_order_stop_market_parameters(gateway, mock_exchange):
     assert params.get("triggerPrice") == "2000.5"
     assert params.get("clientOrderId") == "sl-123"
 
+
+@pytest.mark.asyncio
+async def test_place_order_binance_hedge_mode_omits_reduce_only_param(gateway, mock_exchange):
+    result = await gateway.place_order(
+        symbol="BNB/USDT:USDT",
+        order_type="stop_market",
+        side="sell",
+        amount=Decimal("0.01"),
+        trigger_price=Decimal("637.10"),
+        reduce_only=True,
+        position_side="LONG",
+        client_order_id="sl-bnb-hedge",
+    )
+
+    call = mock_exchange.create_order_calls[-1]
+    params = call["params"]
+    assert call["type"] == "STOP_MARKET"
+    assert call["side"] == "sell"
+    assert params.get("positionSide") == "LONG"
+    assert params.get("stopPrice") == "637.10"
+    assert params.get("triggerPrice") == "637.10"
+    assert params.get("clientOrderId") == "sl-bnb-hedge"
+    assert "reduceOnly" not in params
+    assert result.reduce_only is True
+
+
 @pytest.mark.asyncio
 async def test_place_order_does_not_affect_limit_or_market(gateway, mock_exchange):
     await gateway.place_order(
