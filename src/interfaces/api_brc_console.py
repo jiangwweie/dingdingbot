@@ -3942,6 +3942,27 @@ async def execute_owner_bounded_live_trial_authorization(
                 "order_permission_granted": False,
             },
         ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "owner_bounded_execution_unhandled_exception",
+                "message": (
+                    "Owner bounded execution stopped with an explicit safe failure; "
+                    f"phase requires review: {type(exc).__name__}"
+                ),
+                "blockers": [
+                    "owner_bounded_execution_exception",
+                    f"exception_type:{type(exc).__name__}",
+                    "manual_review_required_before_retry",
+                ],
+                "gateway_binding": gateway_binding.get("status"),
+                "gateway_binding_blockers": gateway_binding.get("blockers", []),
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_permission_granted": False,
+            },
+        ) from exc
 
 
 async def _owner_bounded_exchange_gateway_binding(api_module: Any) -> dict[str, Any]:

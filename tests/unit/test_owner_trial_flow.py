@@ -1855,6 +1855,91 @@ def test_owner_bounded_execution_api_route_uses_read_only_price_source(monkeypat
         asyncio.run(engine.dispose())
 
 
+def test_owner_bounded_execution_api_route_converts_unhandled_exception_to_business_status(monkeypatch):
+    from src.interfaces import api_brc_console
+    from src.interfaces.api import app
+    from src.interfaces.operator_auth import OperatorSession, require_operator_session
+
+    class FakeFactCollector:
+        async def collect(self, _strategy_profile):
+            return _clear_fact_snapshot(startup_guard_clear=True)
+
+    class FakeExecuteService:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def execute_authorization(self, *_args, **_kwargs):
+            raise RuntimeError("simulated recording failure")
+
+    async def setup():
+        service, _bridge, engine = await _bridge_service()
+        draft = await _create_valid_draft(service)
+        authorization = await service.activate_live_authorization(
+            draft.draft_id,
+            _activation_request(),
+            operator_id="owner",
+        )
+        return service, engine, authorization.authorization_id
+
+    service, engine, authorization_id = asyncio.run(setup())
+    api_brc_console._owner_trial_flow_service = service
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+
+    async def fake_gateway_binding(_api_module):
+        return {
+            "status": "ready_for_test",
+            "gateway": object(),
+            "blockers": [],
+        }
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_owner_bounded_exchange_gateway_binding",
+        fake_gateway_binding,
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_trial_preflight_fact_collector",
+        lambda _api_module: FakeFactCollector(),
+    )
+    monkeypatch.setattr(api_brc_console, "OwnerBoundedExecutionService", FakeExecuteService)
+    app.dependency_overrides[require_operator_session] = lambda: OperatorSession(
+        username="owner",
+        expires_at=int(time.time()) + 3600,
+    )
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/brc/owner-trial-flow/authorizations/{authorization_id}/execute"
+            )
+        assert response.status_code == 409
+        payload = response.json()
+        assert payload["error_code"] == "409"
+        assert "owner_bounded_execution_unhandled_exception" in payload["message"]
+        assert "manual_review_required_before_retry" in payload["message"]
+
+        async def counts():
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                return (
+                    await session.scalar(text("SELECT count(*) FROM execution_intents")),
+                    await session.scalar(text("SELECT count(*) FROM orders")),
+                )
+
+        intent_count, order_count = asyncio.run(counts())
+        assert intent_count == 0
+        assert order_count == 0
+    finally:
+        app.dependency_overrides.pop(require_operator_session, None)
+        api_brc_console._owner_trial_flow_service = None
+        asyncio.run(engine.dispose())
+
+
 def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
     async def scenario():
         service, bridge, engine = await _bridge_service()

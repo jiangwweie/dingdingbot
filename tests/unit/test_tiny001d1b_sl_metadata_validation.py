@@ -109,6 +109,7 @@ async def test_place_order_does_not_affect_limit_or_market(gateway, mock_exchang
     assert call["type"] == "limit"
     assert call["price"] == "1900.0"
     assert "stopPrice" not in call["params"]
+    assert "reduceOnly" not in call["params"]
 
     await gateway.place_order(
         symbol=SYMBOL,
@@ -121,6 +122,26 @@ async def test_place_order_does_not_affect_limit_or_market(gateway, mock_exchang
     assert call2["type"] == "market"
     assert call2["price"] is None
     assert call2["params"].get("reduceOnly") is True
+
+
+@pytest.mark.asyncio
+async def test_place_order_omits_reduce_only_when_false(gateway, mock_exchange):
+    await gateway.place_order(
+        symbol=SYMBOL,
+        order_type="market",
+        side="buy",
+        amount=Decimal("0.01"),
+        reduce_only=False,
+        position_side="LONG",
+        client_order_id="entry-123",
+    )
+
+    call = mock_exchange.create_order_calls[-1]
+    assert call["type"] == "market"
+    assert call["side"] == "buy"
+    assert call["params"].get("positionSide") == "LONG"
+    assert call["params"].get("clientOrderId") == "entry-123"
+    assert "reduceOnly" not in call["params"]
 
 @pytest.mark.asyncio
 async def test_confirm_order_exists_metadata_validation(gateway, mock_exchange):

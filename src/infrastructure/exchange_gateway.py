@@ -1069,9 +1069,9 @@ class ExchangeGateway:
             ccxt_type = self._map_order_type_to_ccxt(order_type)
 
             # 构建 CCXT 下单参数
-            params = {
-                'reduceOnly': reduce_only,
-            }
+            params = {}
+            if reduce_only:
+                params['reduceOnly'] = True
             if position_side:
                 params['positionSide'] = position_side
 
