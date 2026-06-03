@@ -770,7 +770,6 @@ export function TrialConfirmationV2() {
                 ? activationBlockers.join('；')
                 : '可以记录 Owner 对这一次 bounded live trial 的显式授权。记录后仍不会下单。'}
           </p>
-          {!persistedLiveAuthorization ? renderLiveAuthorizationButton('mb-3') : null}
           {activationBlockers.length && !persistedLiveAuthorization ? (
             <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
               <p className="mb-2 font-bold text-slate-900 dark:text-slate-100">暂不能授权真实资金，还差：</p>

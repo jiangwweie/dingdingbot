@@ -582,7 +582,8 @@ def test_consumed_live_authorization_allows_fresh_draft_rehearsal():
 
             current = await service.current()
             assert current.live_authorization is None
-            assert current.authorization_status == "pending_owner_live_authorization"
+            assert current.authorization_draft is None
+            assert current.authorization_status == "not_started"
 
             second_draft = await _create_valid_draft(service)
             assert second_draft.draft_id != first_draft.draft_id
@@ -632,7 +633,8 @@ def test_closed_live_trial_intents_do_not_block_fresh_bnb_authorization_draft():
 
             current = await service.current()
             assert current.live_authorization is None
-            assert current.authorization_status == "pending_owner_live_authorization"
+            assert current.authorization_draft is None
+            assert current.authorization_status == "not_started"
 
             second_draft = await _create_valid_draft(service)
             assert second_draft.draft_id != first_draft.draft_id
@@ -1430,7 +1432,8 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
             assert fill_plan.fill_price.quantize(Decimal("0.01")) == Decimal("600.20")
             current = await service.current()
             assert current.live_authorization is None
-            assert current.authorization_status == "pending_owner_live_authorization"
+            assert current.authorization_draft is None
+            assert current.authorization_status == "not_started"
             consumed_authorization = await service._repository.get_live_authorization(
                 authorization.authorization_id
             )

@@ -258,6 +258,13 @@ class OwnerTrialFlowService:
         acknowledgement = await self._repository.latest_acknowledgement(carrier.carrier_id)
         draft = await self._repository.latest_draft(carrier.carrier_id)
         authorization = await self._repository.latest_live_authorization(carrier.carrier_id)
+        if draft is not None:
+            draft_authorization = await self._repository.live_authorization_for_draft(draft.draft_id)
+            if draft_authorization is not None and (
+                authorization is None
+                or draft_authorization.authorization_id != authorization.authorization_id
+            ):
+                draft = None
         warnings = _warning_rows()
         warning_ids = [str(row["warning_id"]) for row in warnings]
         acknowledged = [

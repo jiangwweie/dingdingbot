@@ -186,7 +186,7 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText('Persistence')).toBeTruthy();
     expect(screen.getByText('测试网验证结果')).toBeTruthy();
     expect(screen.getByText('其他载体 / 预算基础（非本次授权）')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: /确认授权这一次真实小额试验/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /确认授权这一次真实小额试验/ }).length).toBe(1);
     expect(screen.getAllByText(/风险确认尚未由后端记录/).length).toBeGreaterThan(0);
     expect(screen.getByText('暂不能授权真实资金，还差：')).toBeTruthy();
     expect(screen.getByText('授权草案尚未生成')).toBeTruthy();
@@ -334,8 +334,8 @@ describe('Owner Console v2 shell', () => {
     expect(screen.queryByRole('button', { name: /更新后端风险确认 \/ 授权草案/ })).toBeNull();
     expect(screen.getByText('真实资金授权')).toBeTruthy();
     const liveAuthorizationButtons = screen.getAllByRole('button', { name: /确认授权这一次真实小额试验/ }) as HTMLButtonElement[];
-    expect(liveAuthorizationButtons.length).toBeGreaterThanOrEqual(2);
-    const liveAuthorizationButton = liveAuthorizationButtons[1];
+    expect(liveAuthorizationButtons.length).toBe(1);
+    const liveAuthorizationButton = liveAuthorizationButtons[0];
     expect(liveAuthorizationButton.disabled).toBe(false);
     expect(screen.getAllByText(/启动保护不可用/).length).toBeGreaterThan(0);
 
@@ -452,10 +452,10 @@ describe('Owner Console v2 shell', () => {
     expect(await screen.findByText(/已授权这一次真实小额试验，最终硬安全检查已通过/)).toBeTruthy();
     expect(screen.getAllByText('最终硬安全检查已通过').length).toBeGreaterThan(0);
     expect(screen.getByText('Owner 执行触发')).toBeTruthy();
-    expect(screen.getByText('执行入口未接入')).toBeTruthy();
+    expect(screen.getByText('执行入口已接入但被阻断')).toBeTruthy();
     const triggerButton = screen.getByRole('button', { name: /执行这一次小额实盘试验/ }) as HTMLButtonElement;
     expect(triggerButton.disabled).toBe(true);
-    expect(screen.getAllByText(/Owner-operated live execution endpoint is not implemented/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/protection_price_source_missing/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('尚未创建执行计划').length).toBeGreaterThan(0);
     expect(screen.getAllByText('尚未下单').length).toBeGreaterThan(0);
     expect(screen.getAllByText('未授予执行/下单权限').length).toBeGreaterThan(0);
