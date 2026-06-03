@@ -164,6 +164,7 @@ class ExchangeGatewayBoundedOrderExecutor:
             order_type="market",
             side="buy" if authorization.side == "long" else "sell",
             amount=authorization.quantity,
+            position_side=_position_side_for_authorization(authorization),
             client_order_id=client_order_id,
         )
 
@@ -188,6 +189,7 @@ class ExchangeGatewayBoundedOrderExecutor:
             amount=protection_plan.tp_quantity,
             price=protection_plan.tp_price,
             reduce_only=True,
+            position_side=_position_side_for_authorization(authorization),
             client_order_id=client_order_id,
         )
 
@@ -212,6 +214,7 @@ class ExchangeGatewayBoundedOrderExecutor:
             amount=protection_plan.sl_quantity,
             trigger_price=protection_plan.sl_price,
             reduce_only=True,
+            position_side=_position_side_for_authorization(authorization),
             client_order_id=client_order_id,
         )
 
@@ -877,6 +880,10 @@ def _order_from_placement(
 
 def _direction_for_authorization(authorization: BoundedLiveTrialAuthorization) -> Direction:
     return Direction.LONG if authorization.side == "long" else Direction.SHORT
+
+
+def _position_side_for_authorization(authorization: BoundedLiveTrialAuthorization) -> str:
+    return "LONG" if authorization.side == "long" else "SHORT"
 
 
 def _filters_from_plan(plan: ProtectionPricePlanRecord) -> ProtectionExchangeFilters:

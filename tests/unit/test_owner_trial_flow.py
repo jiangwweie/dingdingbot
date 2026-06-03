@@ -1301,6 +1301,7 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
                 "order_type": "market",
                 "side": "buy",
                 "amount": Decimal("0.01"),
+                "position_side": "LONG",
                 "client_order_id": entry_call["client_order_id"],
             }
             assert tp_call["symbol"] == "BNB/USDT:USDT"
@@ -1308,11 +1309,13 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
             assert tp_call["side"] == "sell"
             assert tp_call["amount"] == Decimal("0.01")
             assert tp_call["reduce_only"] is True
+            assert tp_call["position_side"] == "LONG"
             assert sl_call["symbol"] == "BNB/USDT:USDT"
             assert sl_call["order_type"] == "stop_market"
             assert sl_call["side"] == "sell"
             assert sl_call["amount"] == Decimal("0.01")
             assert sl_call["reduce_only"] is True
+            assert sl_call["position_side"] == "LONG"
             fill_plan = await protection_repo.latest_valid_plan(
                 authorization.authorization_id,
                 phase="post_entry_fill",
@@ -1332,6 +1335,87 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
                 )
             assert "authorization_already_consumed" in reuse_exc.value.blockers
             assert len(gateway.calls) == 3
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_failed_entry_is_recorded_without_consuming_authorization():
+    class FakeRejectingGateway:
+        def __init__(self):
+            self.calls = []
+
+        async def place_order(self, **kwargs):
+            self.calls.append(kwargs)
+            return OrderPlacementResult(
+                order_id="entry-order-rejected",
+                exchange_order_id=None,
+                symbol=kwargs["symbol"],
+                order_type=OrderType.MARKET,
+                direction=Direction.LONG,
+                side=kwargs["side"],
+                amount=kwargs["amount"],
+                status=OrderStatus.REJECTED,
+                client_order_id=kwargs.get("client_order_id"),
+                error_code="F-011",
+                error_message="Order's position side does not match user's setting.",
+            )
+
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        protection_repo = PgProtectionPricePlanRepository(session_maker)
+        protection_service = ProtectionPlannerService(
+            repository=protection_repo,
+            price_source=StaticProtectionPriceSource(
+                reference_price=Decimal("600.12"),
+                filters=ProtectionExchangeFilters(
+                    min_amount=Decimal("0.01"),
+                    amount_step=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                    min_notional_source="test",
+                    tick_size=Decimal("0.1"),
+                ),
+            ),
+        )
+        gateway = FakeRejectingGateway()
+        intent_repo = _RecordingIntentRepository()
+        order_repo = _RecordingOrderRepository()
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+            protection_planner_service=protection_service,
+            order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
+            intent_repository=intent_repo,
+            order_repository=order_repo,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+
+            assert exc_info.value.code == "entry_order_failed"
+            assert len(gateway.calls) == 1
+            assert gateway.calls[0]["position_side"] == "LONG"
+            assert len(intent_repo.items) == 1
+            assert intent_repo.updates[-1].status == "failed"
+            assert intent_repo.updates[-1].failed_reason == "F-011"
+            assert len(order_repo.items) == 1
+            assert order_repo.items[0].status == OrderStatus.REJECTED
+            current = await service.current()
+            assert current.live_authorization is not None
+            assert current.live_authorization.consumed is False
         finally:
             await engine.dispose()
 

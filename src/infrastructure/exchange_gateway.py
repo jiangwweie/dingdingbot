@@ -1026,6 +1026,7 @@ class ExchangeGateway:
         price: Optional[Decimal] = None,      # 限价单价格
         trigger_price: Optional[Decimal] = None,  # 条件单触发价
         reduce_only: bool = False,  # 仅减仓（平仓单必须设置）
+        position_side: Optional[str] = None,  # Binance futures hedge mode: LONG/SHORT
         client_order_id: Optional[str] = None,  # 客户端订单 ID
     ) -> OrderPlacementResult:
         """
@@ -1039,6 +1040,7 @@ class ExchangeGateway:
             price: 限价单价格（LIMIT 订单必填）
             trigger_price: 条件单触发价（STOP_MARKET 订单必填）
             reduce_only: 是否仅减仓（平仓单必须为 True）
+            position_side: 持仓方向（Binance futures hedge mode 使用 LONG/SHORT）
             client_order_id: 客户端订单 ID（可选）
 
         Returns:
@@ -1070,6 +1072,8 @@ class ExchangeGateway:
             params = {
                 'reduceOnly': reduce_only,
             }
+            if position_side:
+                params['positionSide'] = position_side
 
             # 止损单需要 triggerPrice 参数
             if order_type == "stop_market" and trigger_price is not None:
@@ -1143,6 +1147,7 @@ class ExchangeGateway:
                 client_order_id=client_order_id,
                 error_code="F-011",
                 error_message=f"下单失败：{str(e)}",
+                status=OrderStatus.REJECTED,
             )
 
     async def _cancel_conditional_open_order_if_visible(
