@@ -283,11 +283,23 @@ class TrialPreflightFactCollector:
                 notes=["GKS active=True means new entries are blocked."],
             )
         if active is False:
+            evidence: dict[str, str | int | bool | None] = {"active": False}
+            for key in [
+                "global_active",
+                "scoped_clearance_valid",
+                "authorization_id",
+                "clearance_id",
+                "expires_at_ms",
+                "scope_match",
+            ]:
+                value = _get_value(state, key)
+                if isinstance(value, (str, int, bool)) or value is None:
+                    evidence[key] = value
             return _clear(
                 "gks",
                 observed_at_ms,
                 source,
-                {"active": False},
+                evidence,
             )
         return _unavailable(
             "gks",
@@ -326,6 +338,7 @@ class TrialPreflightFactCollector:
         source = str(_get_value(state, "source") or "read_only_startup_guard_reader")
         observed_at_ms = _get_int(state, "updated_at_ms") or generated_at_ms
         runtime_started = _get_bool(state, "runtime_started")
+        runtime_safety_context_bound = _get_bool(state, "runtime_safety_context_bound")
         runtime_state = _get_str(state, "runtime_state")
         reason = _get_str(state, "reason") or _get_str(state, "block_reason")
         if state_name in {"unavailable", "not_available"}:
@@ -340,13 +353,14 @@ class TrialPreflightFactCollector:
                 evidence={
                     "armed": armed,
                     "runtime_started": runtime_started,
+                    "runtime_safety_context_bound": runtime_safety_context_bound,
                     "runtime_state": runtime_state or state_name,
                     "reason": reason,
                 },
                 notes=["Startup guard state is unavailable and cannot be assumed clear."],
             )
         if (
-            runtime_started is False
+            (runtime_started is False and runtime_safety_context_bound is not True)
             or runtime_state in {"not_started", "stopped"}
             or state_name in {"not_started", "stopped"}
         ):
@@ -361,22 +375,35 @@ class TrialPreflightFactCollector:
                 evidence={
                     "armed": armed,
                     "runtime_started": runtime_started,
+                    "runtime_safety_context_bound": runtime_safety_context_bound,
                     "runtime_state": runtime_state or state_name,
                     "reason": reason,
                 },
                 notes=["Startup guard runtime state is not started and cannot be assumed clear."],
             )
         if armed is True:
+            evidence = {
+                "armed": True,
+                "runtime_started": runtime_started,
+                "runtime_safety_context_bound": runtime_safety_context_bound,
+                "runtime_state": runtime_state,
+                "reason": reason,
+            }
+            for key in [
+                "scoped_arm_valid",
+                "authorization_id",
+                "clearance_id",
+                "expires_at_ms",
+                "scope_match",
+            ]:
+                value = _get_value(state, key)
+                if isinstance(value, (str, int, bool)) or value is None:
+                    evidence[key] = value
             return _clear(
                 "startup_guard",
                 observed_at_ms,
                 source,
-                {
-                    "armed": True,
-                    "runtime_started": runtime_started,
-                    "runtime_state": runtime_state,
-                    "reason": reason,
-                },
+                evidence,
             )
         if armed is False:
             return TrialPreflightFact(
@@ -389,6 +416,7 @@ class TrialPreflightFactCollector:
                 evidence={
                     "armed": False,
                     "runtime_started": runtime_started,
+                    "runtime_safety_context_bound": runtime_safety_context_bound,
                     "runtime_state": runtime_state,
                     "reason": reason,
                 },

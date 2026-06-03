@@ -1309,6 +1309,245 @@ def test_bnb_final_gate_reconciliation_blocks_when_pg_or_exchange_not_flat(monke
     asyncio.run(scenario())
 
 
+def test_bnb_final_gate_scoped_runtime_safety_clearance_reaches_boundary(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    now_ms = int(time.time() * 1000)
+
+    class FakeGks:
+        def get_state(self):
+            return {
+                "active": True,
+                "source": "test_global_gks_stays_active",
+                "reason": "global_fail_closed",
+            }
+
+    class FakeApiModule:
+        _global_kill_switch_service = FakeGks()
+        _startup_trading_guard_service = None
+        _startup_reconciliation_summary = None
+        _exchange_gateway = None
+
+    class FakeBnbReadOnlyClient:
+        async def fetch_balance(self, params=None):
+            return {
+                "info": {
+                    "totalMarginBalance": "100.00",
+                    "availableBalance": "80.00",
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+
+        async def fetch_positions(self, symbol=None):
+            return []
+
+        async def fetch_open_orders(self, symbol, params=None):
+            return []
+
+        async def close(self):
+            return None
+
+    async def fake_scoped_clearance(clearance_type, _profile):
+        return {
+            "clearance_id": f"{clearance_type}-auth-scoped",
+            "authorization_id": "auth-scoped",
+            "expires_at_ms": now_ms + 60_000,
+            "updated_at_ms": now_ms,
+            "reason": "test_scoped_clearance",
+        }
+
+    async def fake_pg_counts(_symbol):
+        return {
+            "execution_intents": 0,
+            "orders": 0,
+            "pg_bnb_active_positions": 0,
+            "pg_bnb_open_orders": 0,
+        }
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_read_only_client",
+        lambda _api_module: {
+            "client": FakeBnbReadOnlyClient(),
+            "source": "test_bnb_read_only_client",
+            "close_after_read": False,
+        },
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_pg_reconciliation_counts",
+        fake_pg_counts,
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_read_active_bnb_scoped_runtime_safety_clearance",
+        fake_scoped_clearance,
+    )
+
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            profile = build_bnb_strategy_trial_readiness().strategy_profile
+            collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+            snapshot = await collector.collect(profile)
+            facts = snapshot.fact_map()
+
+            assert facts["gks"].status == "clear"
+            assert facts["gks"].source == "pg_scoped_gks_clearance"
+            assert facts["gks"].evidence["active"] is False
+            assert facts["gks"].evidence["global_active"] is True
+            assert facts["gks"].evidence["scoped_clearance_valid"] is True
+            assert facts["startup_guard"].status == "clear"
+            assert facts["startup_guard"].source == "pg_scoped_startup_guard_arm"
+            assert facts["startup_guard"].evidence["armed"] is True
+            assert facts["startup_guard"].evidence["runtime_started"] is False
+            assert facts["startup_guard"].evidence["runtime_safety_context_bound"] is True
+
+            result = await bridge.run(fact_snapshot=snapshot)
+            assert result.bridge_status == "dry_run_reached_execution_boundary"
+            assert result.final_preflight_result == "passed"
+            assert result.hard_blockers == []
+            assert result.final_gate_read_model.gks.state == "clear"
+            assert result.final_gate_read_model.gks.evidence["global_active"] is True
+            assert result.final_gate_read_model.startup_guard.state == "clear"
+            assert result.final_gate_read_model.startup_guard.evidence["runtime_started"] is False
+            assert result.final_gate_read_model.startup_guard.evidence["runtime_safety_context_bound"] is True
+            assert result.non_permissions["runtime_started"] is False
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+            assert result.non_permissions["order_permission_granted"] is False
+
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_final_gate_missing_scoped_runtime_safety_clearance_blocks(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    class FakeGks:
+        def get_state(self):
+            return {
+                "active": True,
+                "source": "test_global_gks_stays_active",
+                "reason": "global_fail_closed",
+            }
+
+    class FakeApiModule:
+        _global_kill_switch_service = FakeGks()
+        _startup_trading_guard_service = None
+        _startup_reconciliation_summary = None
+        _exchange_gateway = None
+
+    class FakeBnbReadOnlyClient:
+        async def fetch_balance(self, params=None):
+            return {
+                "info": {
+                    "totalMarginBalance": "100.00",
+                    "availableBalance": "80.00",
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+
+        async def fetch_positions(self, symbol=None):
+            return []
+
+        async def fetch_open_orders(self, symbol, params=None):
+            return []
+
+        async def close(self):
+            return None
+
+    async def no_scoped_clearance(_clearance_type, _profile):
+        return None
+
+    async def fake_pg_counts(_symbol):
+        return {
+            "execution_intents": 0,
+            "orders": 0,
+            "pg_bnb_active_positions": 0,
+            "pg_bnb_open_orders": 0,
+        }
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_read_only_client",
+        lambda _api_module: {
+            "client": FakeBnbReadOnlyClient(),
+            "source": "test_bnb_read_only_client",
+            "close_after_read": False,
+        },
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_pg_reconciliation_counts",
+        fake_pg_counts,
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_read_active_bnb_scoped_runtime_safety_clearance",
+        no_scoped_clearance,
+    )
+
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            profile = build_bnb_strategy_trial_readiness().strategy_profile
+            collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+            snapshot = await collector.collect(profile)
+            facts = snapshot.fact_map()
+
+            assert facts["gks"].status == "blocked"
+            assert facts["gks"].blocker == "gks_blocked"
+            assert facts["startup_guard"].status == "unavailable"
+            assert facts["startup_guard"].blocker == "startup_guard_runtime_not_started"
+
+            result = await bridge.run(fact_snapshot=snapshot)
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "gks_blocked" in result.hard_blockers
+            assert "gks_active" in result.hard_blockers
+            assert "startup_guard_runtime_not_started" in result.hard_blockers
+            assert "startup_guard_not_started" in result.hard_blockers
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+            assert result.non_permissions["order_permission_granted"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_bnb_final_gate_live_read_only_env_fail_closed_without_client(monkeypatch):
     from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
     from src.interfaces import api_brc_console

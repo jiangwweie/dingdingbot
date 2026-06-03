@@ -3990,15 +3990,15 @@ def _bnb_preflight_open_order_reader(api_module: Any, bnb_live_facts: Any):
 
 
 def _bnb_preflight_gks_reader(api_module: Any):
-    async def _read(_profile):
+    async def _read(profile):
         service = getattr(api_module, "_global_kill_switch_service", None)
         if service is not None and hasattr(service, "get_state"):
-            return service.get_state()
+            return await _with_bnb_scoped_gks_clearance(profile, service.get_state())
         if service is not None and hasattr(service, "is_active"):
-            return {
+            return await _with_bnb_scoped_gks_clearance(profile, {
                 "active": bool(service.is_active()),
                 "source": "runtime_global_kill_switch_service",
-            }
+            })
         if await probe_pg_connectivity():
             repo = PgGlobalKillSwitchRepository()
             try:
@@ -4017,7 +4017,7 @@ def _bnb_preflight_gks_reader(api_module: Any):
                     "source": "pg_global_kill_switch_repository",
                     "reason": "global_kill_switch_pg_state_missing",
                 }
-            return state
+            return await _with_bnb_scoped_gks_clearance(profile, state)
         return {
             "state": "unavailable",
             "status": "unavailable",
@@ -4031,7 +4031,29 @@ def _bnb_preflight_gks_reader(api_module: Any):
 def _bnb_preflight_startup_guard_reader(api_module: Any):
     service = getattr(api_module, "_startup_trading_guard_service", None)
     if service is None or not (hasattr(service, "get_state") or hasattr(service, "is_armed")):
-        async def _runtime_not_started(_profile):
+        async def _runtime_not_started(profile):
+            try:
+                scoped_arm = await _read_active_bnb_scoped_runtime_safety_clearance(
+                    "startup_guard",
+                    profile,
+                )
+            except Exception:
+                scoped_arm = None
+            if scoped_arm is not None:
+                return {
+                    "armed": True,
+                    "runtime_started": False,
+                    "runtime_safety_context_bound": True,
+                    "runtime_state": "scoped_safety_context_bound",
+                    "source": "pg_scoped_startup_guard_arm",
+                    "reason": scoped_arm.get("reason"),
+                    "scoped_arm_valid": True,
+                    "authorization_id": scoped_arm.get("authorization_id"),
+                    "clearance_id": scoped_arm.get("clearance_id"),
+                    "expires_at_ms": scoped_arm.get("expires_at_ms"),
+                    "scope_match": True,
+                    "updated_at_ms": scoped_arm.get("updated_at_ms"),
+                }
             return {
                 "armed": False,
                 "runtime_started": False,
@@ -4051,6 +4073,142 @@ def _bnb_preflight_startup_guard_reader(api_module: Any):
         }
 
     return _read
+
+
+async def _with_bnb_scoped_gks_clearance(profile: Any, state: Any) -> Any:
+    active = _value_from_state(state, "active")
+    if active is not True:
+        return state
+    try:
+        scoped_clearance = await _read_active_bnb_scoped_runtime_safety_clearance("gks", profile)
+    except Exception:
+        scoped_clearance = None
+    if scoped_clearance is None:
+        return state
+    return {
+        "active": False,
+        "global_active": True,
+        "source": "pg_scoped_gks_clearance",
+        "reason": scoped_clearance.get("reason"),
+        "scoped_clearance_valid": True,
+        "authorization_id": scoped_clearance.get("authorization_id"),
+        "clearance_id": scoped_clearance.get("clearance_id"),
+        "expires_at_ms": scoped_clearance.get("expires_at_ms"),
+        "scope_match": True,
+        "updated_at_ms": scoped_clearance.get("updated_at_ms"),
+    }
+
+
+def _value_from_state(state: Any, key: str) -> Any:
+    if isinstance(state, dict):
+        return state.get(key)
+    return getattr(state, key, None)
+
+
+async def _read_active_bnb_scoped_runtime_safety_clearance(
+    clearance_type: str,
+    profile: Any,
+) -> dict[str, Any] | None:
+    if clearance_type not in {"gks", "startup_guard"}:
+        return None
+    carrier = build_bnb_strategy_trial_architecture_governance().owner_review_packet.carrier
+    if str(getattr(profile, "candidate_id", "")) != carrier.carrier_id:
+        return None
+    if str(getattr(profile, "side", "")) != carrier.side:
+        return None
+    if str(getattr(profile, "symbol", "")) not in {carrier.symbol, carrier.runtime_symbol}:
+        return None
+    session_maker = get_pg_session_maker()
+    async with session_maker() as session:
+        if not await _pg_table_exists(session, "brc_scoped_runtime_safety_clearances"):
+            return None
+        now_ms = int(time.time() * 1000)
+        result = await session.execute(
+            text(
+                """
+                SELECT
+                    c.clearance_id,
+                    c.clearance_type,
+                    c.authorization_id,
+                    c.carrier_id,
+                    c.symbol,
+                    c.side,
+                    c.max_notional,
+                    c.quantity,
+                    c.leverage,
+                    c.protection_plan_type,
+                    c.expires_at_ms,
+                    c.actor,
+                    c.source,
+                    c.reason,
+                    c.created_at_ms,
+                    c.updated_at_ms
+                FROM brc_scoped_runtime_safety_clearances c
+                JOIN brc_bounded_live_trial_authorizations a
+                  ON a.authorization_id = c.authorization_id
+                WHERE c.clearance_type = :clearance_type
+                  AND c.status = 'active'
+                  AND c.expires_at_ms > :now_ms
+                  AND a.carrier_id = :carrier_id
+                  AND a.symbol IN (:symbol, :runtime_symbol)
+                  AND a.side = :side
+                  AND a.max_notional = :max_notional
+                  AND a.quantity = :quantity
+                  AND a.leverage = :leverage
+                  AND a.protection_plan_type = :protection_plan_type
+                  AND a.single_use = :true_value
+                  AND a.consumed = :false_value
+                  AND a.live_authorized = :true_value
+                  AND a.live_ready = :false_value
+                  AND a.order_permission_granted = :false_value
+                  AND a.execution_permission_granted = :false_value
+                  AND a.execution_intent_created = :false_value
+                  AND a.order_created = :false_value
+                  AND a.auto_execution_enabled = :false_value
+                  AND c.carrier_id = a.carrier_id
+                  AND c.symbol = a.symbol
+                  AND c.side = a.side
+                  AND c.max_notional = a.max_notional
+                  AND c.quantity = a.quantity
+                  AND c.leverage = a.leverage
+                  AND c.protection_plan_type = a.protection_plan_type
+                ORDER BY c.created_at_ms DESC
+                LIMIT 1
+                """
+            ),
+            {
+                "clearance_type": clearance_type,
+                "now_ms": now_ms,
+                "carrier_id": carrier.carrier_id,
+                "symbol": carrier.symbol,
+                "runtime_symbol": carrier.runtime_symbol,
+                "side": carrier.side,
+                "max_notional": carrier.max_notional,
+                "quantity": carrier.quantity,
+                "leverage": carrier.leverage,
+                "protection_plan_type": carrier.protection_plan_type,
+                "true_value": True,
+                "false_value": False,
+            },
+        )
+        row = result.mappings().first()
+        return dict(row) if row is not None else None
+
+
+async def _pg_table_exists(session: Any, table_name: str) -> bool:
+    bind = session.get_bind()
+    dialect_name = bind.dialect.name if bind is not None else ""
+    if dialect_name == "sqlite":
+        exists = await session.scalar(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name = :table_name"),
+            {"table_name": table_name},
+        )
+        return exists is not None
+    exists = await session.scalar(
+        text("SELECT to_regclass(:table_name)"),
+        {"table_name": f"public.{table_name}"},
+    )
+    return exists is not None
 
 
 def _bnb_preflight_reconciliation_reader(api_module: Any, bnb_live_facts: Any):

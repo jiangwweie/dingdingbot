@@ -552,7 +552,11 @@ def _gate_state_name(
     blockers: list[str],
 ) -> str:
     if fact_id == "startup_guard":
-        if evidence.get("runtime_started") is False or evidence.get("runtime_state") in {
+        scoped_context_bound = evidence.get("runtime_safety_context_bound") is True
+        if (
+            evidence.get("runtime_started") is False
+            and not scoped_context_bound
+        ) or evidence.get("runtime_state") in {
             "not_started",
             "stopped",
         }:
@@ -640,7 +644,10 @@ def _fact_gate_blockers(fact_checks: dict[str, dict[str, Any]]) -> list[str]:
     if startup_guard is not None and _bool_evidence(startup_guard, "armed") is False:
         blockers.append("startup_guard_not_armed")
     if startup_guard is not None and (
-        _bool_evidence(startup_guard, "runtime_started") is False
+        (
+            _bool_evidence(startup_guard, "runtime_started") is False
+            and _bool_evidence(startup_guard, "runtime_safety_context_bound") is not True
+        )
         or (startup_guard.get("evidence") or {}).get("runtime_state") in {"not_started", "stopped"}
     ):
         blockers.append("startup_guard_not_started")

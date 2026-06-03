@@ -338,6 +338,79 @@ class PGGlobalKillSwitchStateORM(PGCoreBase):
     )
 
 
+class PGBrcScopedRuntimeSafetyClearanceORM(PGCoreBase):
+    """PG-backed scoped runtime-safety clearance metadata.
+
+    This table records a bounded GKS clearance or startup-guard arm for one
+    Owner live authorization scope. It is not an execution permission, runtime
+    start, execution intent, or order.
+    """
+
+    __tablename__ = "brc_scoped_runtime_safety_clearances"
+
+    clearance_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    clearance_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    authorization_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("brc_bounded_live_trial_authorizations.authorization_id", deferrable=True, initially="DEFERRED"),
+        nullable=False,
+    )
+    carrier_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    max_notional: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    leverage: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    protection_plan_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    expires_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "clearance_type IN ('gks', 'startup_guard')",
+            name="ck_brc_scoped_runtime_safety_clearances_type",
+        ),
+        CheckConstraint(
+            "side IN ('long', 'short')",
+            name="ck_brc_scoped_runtime_safety_clearances_side",
+        ),
+        CheckConstraint(
+            "protection_plan_type IN ('single_tp_plus_sl')",
+            name="ck_brc_scoped_runtime_safety_clearances_protection",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'revoked', 'expired')",
+            name="ck_brc_scoped_runtime_safety_clearances_status",
+        ),
+        Index(
+            "idx_brc_scoped_runtime_safety_clearances_auth_type",
+            "authorization_id",
+            "clearance_type",
+            "status",
+        ),
+        Index(
+            "idx_brc_scoped_runtime_safety_clearances_scope",
+            "carrier_id",
+            "symbol",
+            "side",
+            "clearance_type",
+            "status",
+            "expires_at_ms",
+        ),
+    )
+
+
 class PGRuntimeCampaignStateORM(PGCoreBase):
     """Single-row/multi-scope campaign state for runtime entry control."""
 
