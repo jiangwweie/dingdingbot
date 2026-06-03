@@ -283,9 +283,10 @@ class OwnerBoundedExecutionRegistry:
 class Mi001BnbLongExecutionAdapter:
     """V1 adapter registration for MI-001-BNB-LONG.
 
-    The adapter is intentionally fail-closed until TP/SL price provenance is
-    durable and auditable. It therefore never calls the exchange in the current
-    state, but it reserves the generic adapter boundary.
+    The generic Owner-bounded execution service owns authorization, final-gate,
+    duplicate, and persistence checks. This adapter only supplies the v1
+    supported carrier mapping and remains strict about the exact authorized
+    scope.
     """
 
     carrier_id: str = "MI-001-BNB-LONG"
@@ -685,9 +686,10 @@ class OwnerBoundedExecutionService:
                 authorization.authorization_id,
                 occurred_at_ms=_now_ms(),
             )
+        result = result.model_copy(update={"consumed": consumed})
         _ = operator_id
         await self._record_execution_result(authorization=authorization, result=result, final_gate=final_gate)
-        return result.model_copy(update={"consumed": consumed})
+        return result
 
     async def _protection_plan_readiness(
         self,
@@ -1137,7 +1139,10 @@ def _build_execution_intent(
             {"name": "authorization_id", "value": authorization.authorization_id},
             {"name": "execution_mode", "value": "owner_operated_one_shot"},
         ],
-        risk_reward_info="Owner-authorized bounded live trial; max notional 20 USDT; 1x.",
+        risk_reward_info=(
+            "Owner-authorized bounded live trial; "
+            f"max notional {authorization.max_notional} USDT; {authorization.leverage}x."
+        ),
         strategy_name=authorization.carrier_id,
         take_profit_levels=[
             {

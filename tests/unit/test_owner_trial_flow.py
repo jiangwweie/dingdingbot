@@ -43,6 +43,7 @@ from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentR
 from src.infrastructure.pg_models import (
     PGBrcBoundedLiveTrialAuthorizationORM,
     PGBrcBoundedLiveTrialAuthorizationDraftORM,
+    PGBrcExecutionResultORM,
     PGBrcOwnerRiskAcknowledgementORM,
     PGBrcProtectionPricePlanORM,
     PGOrderORM,
@@ -1458,6 +1459,123 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
                 )
             assert "authorization_already_consumed" in reuse_exc.value.blockers
             assert len(gateway.calls) == 3
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_result_audit_records_consumed_final_state():
+    class FakeWriteGateway:
+        def __init__(self):
+            self.calls = []
+
+        async def place_order(self, **kwargs):
+            self.calls.append(kwargs)
+            if kwargs["order_type"] == "market":
+                return OrderPlacementResult(
+                    order_id="entry-order-1",
+                    exchange_order_id="x-entry-1",
+                    symbol=kwargs["symbol"],
+                    order_type=OrderType.MARKET,
+                    direction=Direction.LONG,
+                    side=kwargs["side"],
+                    amount=kwargs["amount"],
+                    filled_qty=Decimal("0.01"),
+                    average_exec_price=Decimal("600.20"),
+                    status=OrderStatus.FILLED,
+                    client_order_id=kwargs.get("client_order_id"),
+                )
+            if kwargs["order_type"] == "limit":
+                return OrderPlacementResult(
+                    order_id="tp-order-1",
+                    exchange_order_id="x-tp-1",
+                    symbol=kwargs["symbol"],
+                    order_type=OrderType.LIMIT,
+                    direction=Direction.SHORT,
+                    side=kwargs["side"],
+                    amount=kwargs["amount"],
+                    price=kwargs["price"],
+                    reduce_only=kwargs["reduce_only"],
+                    status=OrderStatus.OPEN,
+                    client_order_id=kwargs.get("client_order_id"),
+                )
+            return OrderPlacementResult(
+                order_id="sl-order-1",
+                exchange_order_id="x-sl-1",
+                symbol=kwargs["symbol"],
+                order_type=OrderType.STOP_MARKET,
+                direction=Direction.SHORT,
+                side=kwargs["side"],
+                amount=kwargs["amount"],
+                trigger_price=kwargs["trigger_price"],
+                reduce_only=kwargs["reduce_only"],
+                status=OrderStatus.OPEN,
+                client_order_id=kwargs.get("client_order_id"),
+            )
+
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE brc_execution_results"))
+            await conn.run_sync(PGBrcExecutionResultORM.__table__.create)
+        protection_repo = PgProtectionPricePlanRepository(session_maker)
+        protection_service = ProtectionPlannerService(
+            repository=protection_repo,
+            price_source=StaticProtectionPriceSource(
+                reference_price=Decimal("600.12"),
+                filters=ProtectionExchangeFilters(
+                    min_amount=Decimal("0.01"),
+                    amount_step=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                    min_notional_source="test",
+                    tick_size=Decimal("0.1"),
+                ),
+            ),
+        )
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+            protection_planner_service=protection_service,
+            order_executor=ExchangeGatewayBoundedOrderExecutor(FakeWriteGateway()),
+            intent_repository=_RecordingIntentRepository(),
+            order_repository=_RecordingOrderRepository(),
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            result = await execute_service.execute_authorization(
+                authorization.authorization_id,
+                operator_id="owner",
+                fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+            )
+
+            assert result.consumed is True
+            async with session_maker() as session:
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT adapter_result, final_state_snapshot "
+                            "FROM brc_execution_results "
+                            "WHERE operation_id = :operation_id"
+                        ),
+                        {"operation_id": f"review-{authorization.authorization_id}"},
+                    )
+                ).mappings().one()
+            adapter_result = row["adapter_result"]
+            final_state_snapshot = row["final_state_snapshot"]
+            if isinstance(adapter_result, str):
+                adapter_result = json.loads(adapter_result)
+            if isinstance(final_state_snapshot, str):
+                final_state_snapshot = json.loads(final_state_snapshot)
+            assert adapter_result["consumed"] is True
+            assert final_state_snapshot["consumed"] is True
         finally:
             await engine.dispose()
 
