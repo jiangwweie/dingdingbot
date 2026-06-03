@@ -147,6 +147,24 @@ class BnbLiveExecutionBridgeFinalGateReadModel(BaseModel):
     no_permission_granted: Literal[True] = True
 
 
+class BnbOwnerExecutionTriggerReadModel(BaseModel):
+    """Owner-visible trigger readiness without performing execution."""
+
+    label: Literal["执行这一次小额实盘试验"] = "执行这一次小额实盘试验"
+    visible: bool
+    enabled: Literal[False] = False
+    status: Literal[
+        "hidden_until_final_gate_clear",
+        "blocked_execution_endpoint_not_available",
+    ]
+    endpoint: None = None
+    reason: str
+    creates_execution_intent_on_click: Literal[False] = False
+    creates_order_on_click: Literal[False] = False
+    order_permission_granted: Literal[False] = False
+    exact_scope: dict[str, str] = Field(default_factory=dict)
+
+
 class BnbLiveExecutionBridgeDryRunResponse(BaseModel):
     generated_from: Literal["bnb_live_execution_bridge_dry_run_v1"] = (
         "bnb_live_execution_bridge_dry_run_v1"
@@ -163,6 +181,7 @@ class BnbLiveExecutionBridgeDryRunResponse(BaseModel):
     authorization_hard_blockers_snapshot: list[str] = Field(default_factory=list)
     acknowledged_strategy_warnings: list[str] = Field(default_factory=list)
     strategy_warnings_block_execution: Literal[False] = False
+    owner_execution_trigger: BnbOwnerExecutionTriggerReadModel
     execution_plan_preview: BnbExecutionPlanPreview
     execution_boundary: dict[str, Any]
     table_audit: BnbLiveExecutionBridgeTableAudit
@@ -296,6 +315,11 @@ class BnbLiveExecutionBridgeDryRunService:
             authorization_hard_blockers_snapshot=authorization_hard_blockers_snapshot,
             acknowledged_strategy_warnings=(
                 current.acknowledged_warnings if current is not None else []
+            ),
+            owner_execution_trigger=_owner_execution_trigger_read_model(
+                request=request,
+                authorization=authorization,
+                hard_blockers=hard_blockers,
             ),
             execution_plan_preview=_execution_plan_preview(
                 request=request,
@@ -497,6 +521,42 @@ def _execution_plan_preview(
             "record failed protection attach, block further order action, require owner review and cleanup path"
         ),
         exact_blockers=hard_blockers,
+    )
+
+
+def _owner_execution_trigger_read_model(
+    *,
+    request: BnbLiveExecutionBridgeDryRunRequest,
+    authorization: Any,
+    hard_blockers: list[str],
+) -> BnbOwnerExecutionTriggerReadModel:
+    final_gate_clear = not hard_blockers and authorization is not None
+    exact_scope = {
+        "carrier_id": request.carrier_id,
+        "symbol": request.symbol,
+        "side": request.side,
+        "quantity": str(request.quantity),
+        "max_notional": str(request.max_notional),
+        "leverage": str(request.leverage),
+        "protection_plan_type": request.protection_plan_type,
+    }
+    if not final_gate_clear:
+        return BnbOwnerExecutionTriggerReadModel(
+            visible=False,
+            status="hidden_until_final_gate_clear",
+            reason="Owner execution trigger remains hidden until authorization and final hard gate are clear.",
+            exact_scope=exact_scope,
+        )
+    return BnbOwnerExecutionTriggerReadModel(
+        visible=True,
+        status="blocked_execution_endpoint_not_available",
+        reason=(
+            "Final hard gate is clear, but the Owner-operated live execution endpoint is not "
+            "implemented in this console. Showing this trigger would be unsafe until the "
+            "scoped ExecutionIntent, entry order, TP/SL protection, cleanup, and review path "
+            "are wired end to end."
+        ),
+        exact_scope=exact_scope,
     )
 
 

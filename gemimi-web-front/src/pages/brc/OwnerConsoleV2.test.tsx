@@ -173,7 +173,7 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getByText('启动保护不可用')).toBeTruthy();
     expect(screen.getAllByText('尚未创建执行计划').length).toBeGreaterThan(0);
     expect(screen.getAllByText('尚未下单').length).toBeGreaterThan(0);
-    expect(screen.getByText('未授予执行/下单权限')).toBeTruthy();
+    expect(screen.getAllByText('未授予执行/下单权限').length).toBeGreaterThan(0);
     expect(screen.getByText('执行计划预览')).toBeTruthy();
     expect(screen.getByText('仅预览，不可执行')).toBeTruthy();
     expect(screen.getByText('硬安全门阻断，仅展示预览')).toBeTruthy();
@@ -381,6 +381,83 @@ describe('Owner Console v2 shell', () => {
     expect(screen.getAllByText(/Owner 已授权一笔 bounded live trial/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/尚未创建执行计划/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/等待启动保护确认/).length).toBeGreaterThan(0);
+    assertNoDangerButtons();
+  });
+
+  it('shows the Owner execution trigger location when the final hard gate is clear but execution endpoint is not wired', async () => {
+    mockBrcApi.ownerTrialFlowCurrent.mockResolvedValueOnce({
+      ...ownerTrialFlowPayload(),
+      latest_acknowledgement: ownerRiskAcknowledgementPayload(),
+      authorization_draft: ownerAuthorizationDraftPayload(),
+      live_authorization: ownerLiveAuthorizationPayload(),
+      authorization_status: 'owner_live_authorized_pending_final_preflight',
+      hard_blockers: [],
+    });
+    mockBrcApi.bnbLiveExecutionBridgeDryRun.mockResolvedValueOnce({
+      ...bnbLiveExecutionBridgePayload(),
+      bridge_status: 'dry_run_reached_execution_boundary',
+      final_preflight_result: 'passed',
+      hard_blockers: [],
+      final_gate_read_model: {
+        ...bnbLiveExecutionBridgePayload().final_gate_read_model,
+        result: 'passed',
+        exact_blockers: [],
+        runtime_safety_state: 'clear',
+        startup_guard: {
+          state: 'clear',
+          status: 'clear',
+          source: 'pg_scoped_startup_guard_clearance',
+          blockers: [],
+          evidence: { carrier_id: 'MI-001-BNB-LONG' },
+        },
+        gks: {
+          state: 'clear',
+          status: 'clear',
+          source: 'pg_scoped_gks_clearance',
+          blockers: [],
+          evidence: { carrier_id: 'MI-001-BNB-LONG' },
+        },
+        execution_boundary_status: 'dry_run_reached_execution_boundary',
+      },
+      execution_plan_preview: {
+        ...bnbLiveExecutionBridgePayload().execution_plan_preview,
+        status: 'preview_ready',
+        exact_blockers: [],
+      },
+      owner_execution_trigger: {
+        label: '执行这一次小额实盘试验',
+        visible: true,
+        enabled: false,
+        status: 'blocked_execution_endpoint_not_available',
+        endpoint: null,
+        reason: 'Final hard gate is clear, but the Owner-operated live execution endpoint is not implemented in this console.',
+        creates_execution_intent_on_click: false,
+        creates_order_on_click: false,
+        order_permission_granted: false,
+        exact_scope: {
+          carrier_id: 'MI-001-BNB-LONG',
+          symbol: 'BNB/USDT:USDT',
+          side: 'long',
+          quantity: '0.01',
+          max_notional: '20',
+          leverage: '1',
+          protection_plan_type: 'single_tp_plus_sl',
+        },
+      },
+    });
+
+    renderWithRouter(<TrialConfirmationV2 />);
+
+    expect(await screen.findByText(/已授权这一次真实小额试验，最终硬安全检查已通过/)).toBeTruthy();
+    expect(screen.getAllByText('最终硬安全检查已通过').length).toBeGreaterThan(0);
+    expect(screen.getByText('Owner 执行触发')).toBeTruthy();
+    expect(screen.getByText('执行入口未接入')).toBeTruthy();
+    const triggerButton = screen.getByRole('button', { name: /执行这一次小额实盘试验/ }) as HTMLButtonElement;
+    expect(triggerButton.disabled).toBe(true);
+    expect(screen.getAllByText(/Owner-operated live execution endpoint is not implemented/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('尚未创建执行计划').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('尚未下单').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('未授予执行/下单权限').length).toBeGreaterThan(0);
     assertNoDangerButtons();
   });
 
@@ -1428,6 +1505,26 @@ function bnbLiveExecutionBridgePayload() {
       'limited_live_observation_sample',
     ],
     strategy_warnings_block_execution: false,
+    owner_execution_trigger: {
+      label: '执行这一次小额实盘试验',
+      visible: false,
+      enabled: false,
+      status: 'hidden_until_final_gate_clear',
+      endpoint: null,
+      reason: 'Owner execution trigger remains hidden until authorization and final hard gate are clear.',
+      creates_execution_intent_on_click: false,
+      creates_order_on_click: false,
+      order_permission_granted: false,
+      exact_scope: {
+        carrier_id: 'MI-001-BNB-LONG',
+        symbol: 'BNB/USDT:USDT',
+        side: 'long',
+        quantity: '0.01',
+        max_notional: '20',
+        leverage: '1',
+        protection_plan_type: 'single_tp_plus_sl',
+      },
+    },
     execution_plan_preview: {
       status: 'preview_blocked_by_hard_gates',
       authorization_id: 'auth-mi001-bnb',

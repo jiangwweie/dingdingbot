@@ -877,6 +877,18 @@ export type BnbLiveExecutionBridgeResponse = {
   authorization_hard_blockers_snapshot: string[];
   acknowledged_strategy_warnings: string[];
   strategy_warnings_block_execution: false;
+  owner_execution_trigger: {
+    label: '执行这一次小额实盘试验';
+    visible: boolean;
+    enabled: false;
+    status: 'hidden_until_final_gate_clear' | 'blocked_execution_endpoint_not_available';
+    endpoint: null;
+    reason: string;
+    creates_execution_intent_on_click: false;
+    creates_order_on_click: false;
+    order_permission_granted: false;
+    exact_scope: Record<string, string>;
+  };
   execution_plan_preview: BnbExecutionPlanPreview;
   execution_boundary: Record<string, unknown>;
   table_audit: Record<string, unknown>;

@@ -520,6 +520,9 @@ export function TrialConfirmationV2() {
     && Boolean(persistedAcknowledgement)
     && Boolean(activeDraft)
     && !persistedLiveAuthorization;
+  const finalGatePassed = data.bnbLiveExecutionBridge?.final_preflight_result === 'passed'
+    && data.bnbLiveExecutionBridge?.bridge_status === 'dry_run_reached_execution_boundary';
+  const executionTrigger = data.bnbLiveExecutionBridge?.owner_execution_trigger || null;
   const setRiskAcknowledged = (riskId: string, acknowledged: boolean) => {
     updateFlowState((current) => ({
       ...current,
@@ -734,7 +737,9 @@ export function TrialConfirmationV2() {
           </div>
           {persistedLiveAuthorization ? (
             <div className="mb-3 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
-              已授权这一次真实小额试验，等待最终硬安全检查。尚未创建执行计划，尚未下单。
+              {finalGatePassed
+                ? '已授权这一次真实小额试验，最终硬安全检查已通过。尚未创建执行计划，尚未下单。'
+                : '已授权这一次真实小额试验，等待最终硬安全检查。尚未创建执行计划，尚未下单。'}
             </div>
           ) : null}
           {activationError ? (
@@ -744,7 +749,9 @@ export function TrialConfirmationV2() {
           ) : null}
           <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
             {persistedLiveAuthorization
-              ? '真实资金授权已记录，但它不是执行计划或订单；最终硬安全检查仍未完成。'
+              ? finalGatePassed
+                ? '真实资金授权已记录，最终硬安全检查已通过；真实执行入口仍需单独接入并由 Owner 手动触发。'
+                : '真实资金授权已记录，但它不是执行计划或订单；最终硬安全检查仍未完成。'
               : activationBlockers.length
                 ? activationBlockers.join('；')
                 : '可以记录 Owner 对这一次 bounded live trial 的显式授权。记录后仍不会下单。'}
@@ -802,6 +809,9 @@ export function TrialConfirmationV2() {
         <div className="mt-4">
           <FinalGateReadModelPanel bridge={data.bnbLiveExecutionBridge} />
         </div>
+        {executionTrigger?.visible ? (
+          <OwnerExecutionTriggerPanel trigger={executionTrigger} finalGatePassed={finalGatePassed} />
+        ) : null}
       </details>
 
       <details className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
@@ -840,6 +850,53 @@ function AuthorizationStatusLine({ label, value, tone }: { label: string; value:
       <span className="font-semibold text-slate-700 dark:text-slate-300">{label}</span>
       <StatePill tone={tone}>{value}</StatePill>
     </div>
+  );
+}
+
+function OwnerExecutionTriggerPanel({
+  trigger,
+  finalGatePassed,
+}: {
+  trigger: BnbLiveExecutionBridgeResponse['owner_execution_trigger'];
+  finalGatePassed: boolean;
+}) {
+  const scope = trigger.exact_scope || {};
+  return (
+    <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="mb-2 flex flex-wrap gap-2">
+            <StatePill tone={finalGatePassed ? 'teal' : 'amber'}>{finalGatePassed ? '最终硬安全检查已通过' : '等待最终硬安全检查'}</StatePill>
+            <StatePill tone="amber">执行入口未接入</StatePill>
+          </div>
+          <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">Owner 执行触发</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-200">
+            这里是 Owner 手动执行动作的位置；当前不会创建执行计划，不会下单。
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled
+          className="flex min-h-12 min-w-[260px] items-center justify-center gap-2 rounded-xl bg-slate-300 px-5 py-3 text-sm font-bold text-white dark:bg-slate-700 dark:text-slate-300"
+        >
+          <Zap className="h-4 w-4" />
+          {trigger.label}
+        </button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
+        <PreviewLine label="Carrier / Symbol" value={`${scope.carrier_id || '未接入'} / ${scope.symbol || '未接入'}`} />
+        <PreviewLine label="方向 / 数量" value={`${scope.side || '未接入'} / ${scope.quantity || '未接入'}`} />
+        <PreviewLine label="上限 / 保护" value={`${scope.max_notional || '未接入'} USDT / ${scope.protection_plan_type || '未接入'}`} />
+      </div>
+      <p className="mt-4 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-slate-950 dark:text-amber-200">
+        {trigger.reason}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <StatePill tone="teal">尚未创建执行计划</StatePill>
+        <StatePill tone="teal">尚未下单</StatePill>
+        <StatePill tone="teal">未授予执行/下单权限</StatePill>
+      </div>
+    </section>
   );
 }
 

@@ -981,6 +981,22 @@ def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_s
             assert result.final_gate_read_model.persistence_readiness.result_review_logging is True
             assert result.acknowledged_strategy_warnings
             assert result.strategy_warnings_block_execution is False
+            assert result.owner_execution_trigger.visible is True
+            assert result.owner_execution_trigger.enabled is False
+            assert result.owner_execution_trigger.status == "blocked_execution_endpoint_not_available"
+            assert result.owner_execution_trigger.endpoint is None
+            assert result.owner_execution_trigger.creates_execution_intent_on_click is False
+            assert result.owner_execution_trigger.creates_order_on_click is False
+            assert result.owner_execution_trigger.order_permission_granted is False
+            assert result.owner_execution_trigger.exact_scope == {
+                "carrier_id": "MI-001-BNB-LONG",
+                "symbol": "BNB/USDT:USDT",
+                "side": "long",
+                "quantity": "0.01",
+                "max_notional": "20",
+                "leverage": "1",
+                "protection_plan_type": "single_tp_plus_sl",
+            }
             assert result.execution_plan_preview.status == "preview_ready"
             assert result.execution_plan_preview.authorization_id is not None
             assert result.execution_plan_preview.draft_id == draft.draft_id
