@@ -606,8 +606,15 @@ class OwnerBoundedExecutionService:
         link_state = await self._execution_intent_authorization_link_state()
         if link_state != "ready":
             blockers.append(link_state)
-        elif await self._has_execution_intent_for_authorization(authorization.authorization_id):
-            blockers.append("duplicate_execution_intent_for_authorization")
+        else:
+            retry_classification = await self._execution_intent_retry_classification(
+                authorization.authorization_id,
+            )
+            if not retry_classification["retry_allowed"]:
+                blockers.append("duplicate_execution_intent_for_authorization")
+                reason = retry_classification.get("reason")
+                if reason and reason != "no_previous_intent":
+                    blockers.append(str(reason))
         return blockers
 
     async def _rerun_final_gate(
@@ -680,6 +687,84 @@ class OwnerBoundedExecutionService:
                 {"authorization_id": authorization_id},
             )
             return int(exists or 0) > 0
+
+    async def _execution_intent_retry_classification(self, authorization_id: str) -> dict[str, object]:
+        async with self._session_maker() as session:
+            columns = await _table_columns(session, "execution_intents")
+            if not columns:
+                return {
+                    "retry_allowed": False,
+                    "reason": "execution_intents_table_missing",
+                }
+            optional_selects = {
+                "order_id": "order_id" if "order_id" in columns else "NULL AS order_id",
+                "exchange_order_id": (
+                    "exchange_order_id" if "exchange_order_id" in columns else "NULL AS exchange_order_id"
+                ),
+                "failed_reason": "failed_reason" if "failed_reason" in columns else "NULL AS failed_reason",
+            }
+            rows = (
+                await session.execute(
+                    text(
+                        f"""
+                        SELECT id, signal_id, status,
+                               {optional_selects["order_id"]},
+                               {optional_selects["exchange_order_id"]},
+                               {optional_selects["failed_reason"]}
+                        FROM execution_intents
+                        WHERE authorization_id = :authorization_id
+                        ORDER BY created_at DESC
+                        """
+                        if "created_at" in columns
+                        else f"""
+                        SELECT id, signal_id, status,
+                               {optional_selects["order_id"]},
+                               {optional_selects["exchange_order_id"]},
+                               {optional_selects["failed_reason"]}
+                        FROM execution_intents
+                        WHERE authorization_id = :authorization_id
+                        """
+                    ),
+                    {"authorization_id": authorization_id},
+                )
+            ).mappings().all()
+            if not rows:
+                return {
+                    "retry_allowed": True,
+                    "reason": "no_previous_intent",
+                    "retryable_pre_order_failure": False,
+                }
+            retryable_intents: list[str] = []
+            blocking_reasons: list[str] = []
+            for row in rows:
+                local_order_count = await _local_order_count_for_signal(session, str(row["signal_id"]))
+                classification = _classify_previous_intent_for_retry(
+                    intent_id=str(row["id"]),
+                    status=str(row["status"]),
+                    order_id=row["order_id"],
+                    exchange_order_id=row["exchange_order_id"],
+                    failed_reason=row["failed_reason"],
+                    local_order_count=local_order_count,
+                )
+                if classification["retry_allowed"]:
+                    retryable_intents.append(str(row["id"]))
+                else:
+                    blocking_reasons.append(str(classification["reason"]))
+            if blocking_reasons:
+                return {
+                    "retry_allowed": False,
+                    "reason": blocking_reasons[0],
+                    "blocking_reasons": _dedupe(blocking_reasons),
+                    "retryable_previous_intent_ids": retryable_intents,
+                }
+            return {
+                "retry_allowed": True,
+                "reason": "retryable_pre_order_failure",
+                "failure_phase": "pre_order_rejected",
+                "retryable_pre_order_failure": True,
+                "previous_intent_id": retryable_intents[-1] if retryable_intents else None,
+                "retryable_previous_intent_ids": retryable_intents,
+            }
 
     async def _assert_no_execution_state_created(self, authorization_id: str) -> None:
         if await self._has_execution_intent_for_authorization(authorization_id):
@@ -899,6 +984,101 @@ def _filters_from_plan(plan: ProtectionPricePlanRecord) -> ProtectionExchangeFil
 def _client_order_id(authorization_id: str, role: str) -> str:
     suffix = authorization_id.replace("-", "")[:18]
     return f"brc-{suffix}-{role}"
+
+
+async def _table_columns(session: AsyncSession, table_name: str) -> set[str]:
+    bind = session.get_bind()
+    dialect_name = bind.dialect.name if bind is not None else ""
+    if dialect_name == "sqlite":
+        rows = await session.execute(text(f"PRAGMA table_info({table_name})"))
+        return {str(row[1]) for row in rows.fetchall()}
+    rows = await session.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = :table_name
+            """
+        ),
+        {"table_name": table_name},
+    )
+    return {str(row[0]) for row in rows.fetchall()}
+
+
+async def _local_order_count_for_signal(session: AsyncSession, signal_id: str) -> int:
+    order_columns = await _table_columns(session, "orders")
+    if not order_columns or "signal_id" not in order_columns:
+        return 0
+    count = await session.scalar(
+        text("SELECT count(*) FROM orders WHERE signal_id = :signal_id"),
+        {"signal_id": signal_id},
+    )
+    return int(count or 0)
+
+
+def _classify_previous_intent_for_retry(
+    *,
+    intent_id: str,
+    status: str,
+    order_id: object,
+    exchange_order_id: object,
+    failed_reason: object,
+    local_order_count: int,
+) -> dict[str, object]:
+    status_value = status.lower()
+    reason_value = str(failed_reason or "")
+    if status_value not in {"failed", "rejected"}:
+        return {
+            "retry_allowed": False,
+            "previous_intent_id": intent_id,
+            "reason": f"previous_intent_status_not_retryable:{status_value}",
+        }
+    if order_id:
+        return {
+            "retry_allowed": False,
+            "previous_intent_id": intent_id,
+            "reason": "previous_intent_has_order_id",
+        }
+    if exchange_order_id:
+        return {
+            "retry_allowed": False,
+            "previous_intent_id": intent_id,
+            "reason": "previous_intent_has_exchange_order_id",
+        }
+    if local_order_count > 0:
+        return {
+            "retry_allowed": False,
+            "previous_intent_id": intent_id,
+            "reason": "previous_intent_has_local_order",
+        }
+    if not _failed_reason_is_pre_order(reason_value):
+        return {
+            "retry_allowed": False,
+            "previous_intent_id": intent_id,
+            "reason": "previous_intent_failure_phase_ambiguous",
+        }
+    return {
+        "retry_allowed": True,
+        "retryable_pre_order_failure": True,
+        "failure_phase": "pre_order_rejected",
+        "previous_intent_id": intent_id,
+        "reason": "retryable_pre_order_failure",
+    }
+
+
+def _failed_reason_is_pre_order(reason: str) -> bool:
+    lowered = reason.lower()
+    return any(
+        marker in lowered
+        for marker in [
+            "pre_order",
+            "before_order",
+            "before order",
+            "position_side_mismatch",
+            "position side mismatch",
+        ]
+    )
 
 
 def _dedupe(values: list[str]) -> list[str]:

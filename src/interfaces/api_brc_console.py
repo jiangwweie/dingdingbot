@@ -4417,10 +4417,14 @@ def _bnb_preflight_reconciliation_reader(api_module: Any, bnb_live_facts: Any):
                 }
             exchange_position_count = len(list(facts.get("positions") or []))
             exchange_open_order_count = len(list(facts.get("open_orders") or []))
+            blocking_execution_intents = int(
+                pg_counts.get("blocking_execution_intents", pg_counts["execution_intents"]) or 0
+            )
+            retryable_failed_intents = int(pg_counts.get("retryable_failed_execution_intents", 0) or 0)
             mismatch_count = sum(
                 1
                 for value in [
-                    pg_counts["execution_intents"],
+                    blocking_execution_intents,
                     pg_counts["orders"],
                     pg_counts["pg_bnb_active_positions"],
                     pg_counts["pg_bnb_open_orders"],
@@ -4429,11 +4433,17 @@ def _bnb_preflight_reconciliation_reader(api_module: Any, bnb_live_facts: Any):
                 ]
                 if int(value or 0) != 0
             )
+            reconciliation_status = "clean" if mismatch_count == 0 else "mismatch"
+            if reconciliation_status == "clean" and retryable_failed_intents > 0:
+                reconciliation_status = "clean_for_retry"
             return {
-                "status": "clean" if mismatch_count == 0 else "mismatch",
+                "status": reconciliation_status,
                 "source": "bnb_final_gate_read_only_reconciliation",
                 "failed_reconciliations_count": mismatch_count,
                 "pg_execution_intents_count": pg_counts["execution_intents"],
+                "pg_blocking_execution_intents_count": blocking_execution_intents,
+                "retryable_failed_execution_intents_count": retryable_failed_intents,
+                "retry_classification": pg_counts.get("retry_classification"),
                 "pg_orders_count": pg_counts["orders"],
                 "pg_bnb_active_position_count": pg_counts["pg_bnb_active_positions"],
                 "pg_bnb_open_order_count": pg_counts["pg_bnb_open_orders"],
@@ -4764,7 +4774,35 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
         missing = [table_name for table_name, present in existing.items() if not present]
         if missing:
             raise RuntimeError(f"pg_reconciliation_tables_missing:{','.join(missing)}")
-        execution_intents = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+        intent_rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, signal_id, symbol, status, order_id, exchange_order_id, failed_reason
+                    FROM execution_intents
+                    """
+                )
+            )
+        ).mappings().all()
+        execution_intents = len(intent_rows)
+        retryable_failed_execution_intents = 0
+        blocking_execution_intents = 0
+        retry_classification = "no_previous_intent"
+        for row in intent_rows:
+            local_order_count = await session.scalar(
+                text("SELECT count(*) FROM orders WHERE signal_id = :signal_id"),
+                {"signal_id": row["signal_id"]},
+            )
+            classification = _classify_retryable_pre_order_intent_row(
+                row,
+                local_order_count=int(local_order_count or 0),
+            )
+            if classification["retry_allowed"]:
+                retryable_failed_execution_intents += 1
+                retry_classification = "retryable_failed_intent_present"
+            else:
+                blocking_execution_intents += 1
+                retry_classification = str(classification["reason"])
         orders = await session.scalar(text("SELECT count(*) FROM orders"))
         pg_bnb_active_positions = await session.scalar(
             text(
@@ -4790,9 +4828,42 @@ async def _bnb_final_gate_pg_reconciliation_counts(symbol: str) -> dict[str, int
         )
     return {
         "execution_intents": int(execution_intents or 0),
+        "retryable_failed_execution_intents": retryable_failed_execution_intents,
+        "blocking_execution_intents": blocking_execution_intents,
+        "retry_classification": retry_classification,
         "orders": int(orders or 0),
         "pg_bnb_active_positions": int(pg_bnb_active_positions or 0),
         "pg_bnb_open_orders": int(pg_bnb_open_orders or 0),
+    }
+
+
+def _classify_retryable_pre_order_intent_row(row: Any, *, local_order_count: int) -> dict[str, Any]:
+    status = str(row["status"]).lower()
+    if status not in {"failed", "rejected"}:
+        return {"retry_allowed": False, "reason": f"previous_intent_status_not_retryable:{status}"}
+    if row.get("order_id"):
+        return {"retry_allowed": False, "reason": "previous_intent_has_order_id"}
+    if row.get("exchange_order_id"):
+        return {"retry_allowed": False, "reason": "previous_intent_has_exchange_order_id"}
+    if local_order_count > 0:
+        return {"retry_allowed": False, "reason": "previous_intent_has_local_order"}
+    failed_reason = str(row.get("failed_reason") or "").lower()
+    if not any(
+        marker in failed_reason
+        for marker in [
+            "pre_order",
+            "before_order",
+            "before order",
+            "position_side_mismatch",
+            "position side mismatch",
+        ]
+    ):
+        return {"retry_allowed": False, "reason": "previous_intent_failure_phase_ambiguous"}
+    return {
+        "retry_allowed": True,
+        "reason": "retryable_pre_order_failure",
+        "failure_phase": "pre_order_rejected",
+        "previous_intent_id": row.get("id"),
     }
 
 

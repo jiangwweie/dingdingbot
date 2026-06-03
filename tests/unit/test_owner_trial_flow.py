@@ -103,7 +103,8 @@ async def _bridge_service() -> tuple[OwnerTrialFlowService, BnbLiveExecutionBrid
             text(
                 "CREATE TABLE execution_intents ("
                 "id TEXT PRIMARY KEY, signal_id TEXT NOT NULL, symbol TEXT NOT NULL, "
-                "status TEXT NOT NULL, authorization_id TEXT"
+                "status TEXT NOT NULL, authorization_id TEXT, order_id TEXT, "
+                "exchange_order_id TEXT, failed_reason TEXT"
                 ")"
             )
         )
@@ -1539,6 +1540,124 @@ def test_owner_bounded_execution_rejects_consumed_or_duplicate_authorization():
     asyncio.run(scenario())
 
 
+def test_owner_bounded_execution_allows_retryable_failed_pre_order_intent():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            async with session_maker() as session:
+                await session.execute(
+                    text(
+                        "INSERT INTO execution_intents "
+                        "(id, signal_id, symbol, status, authorization_id, failed_reason) "
+                        "VALUES ('intent-retryable', 'signal-retryable', 'BNB/USDT:USDT', "
+                        "'failed', :authorization_id, "
+                        "'entry_order_rejected_binance_position_side_mismatch_before_order_record')"
+                    ),
+                    {"authorization_id": authorization.authorization_id},
+                )
+                await session.commit()
+
+            blockers = await execute_service._pre_adapter_blockers(authorization)
+
+            assert "duplicate_execution_intent_for_authorization" not in blockers
+            assert blockers == []
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_blocks_ambiguous_failed_retry_state():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            async with session_maker() as session:
+                await session.execute(
+                    text(
+                        "INSERT INTO execution_intents "
+                        "(id, signal_id, symbol, status, authorization_id, exchange_order_id, failed_reason) "
+                        "VALUES ('intent-has-exchange', 'signal-has-exchange', 'BNB/USDT:USDT', "
+                        "'failed', :authorization_id, 'x-order-1', 'pre_order_rejected')"
+                    ),
+                    {"authorization_id": authorization.authorization_id},
+                )
+                await session.commit()
+
+            blockers = await execute_service._pre_adapter_blockers(authorization)
+
+            assert "duplicate_execution_intent_for_authorization" in blockers
+            assert "previous_intent_has_exchange_order_id" in blockers
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_blocks_failed_intent_with_local_order():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            async with session_maker() as session:
+                await session.execute(
+                    text(
+                        "INSERT INTO execution_intents "
+                        "(id, signal_id, symbol, status, authorization_id, failed_reason) "
+                        "VALUES ('intent-has-local-order', 'signal-has-local-order', 'BNB/USDT:USDT', "
+                        "'failed', :authorization_id, 'pre_order_rejected')"
+                    ),
+                    {"authorization_id": authorization.authorization_id},
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO orders (id, signal_id, symbol) "
+                        "VALUES ('local-order-1', 'signal-has-local-order', 'BNB/USDT:USDT')"
+                    )
+                )
+                await session.commit()
+
+            blockers = await execute_service._pre_adapter_blockers(authorization)
+
+            assert "duplicate_execution_intent_for_authorization" in blockers
+            assert "previous_intent_has_local_order" in blockers
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_owner_bounded_execution_final_gate_failure_blocks_before_intent_or_order():
     async def scenario():
         service, bridge, engine = await _bridge_service()
@@ -2008,6 +2127,88 @@ def test_bnb_final_gate_reconciliation_blocks_when_pg_or_exchange_not_flat(monke
         assert fact.evidence["status"] == "mismatch"
         assert fact.evidence["pg_execution_intents_count"] == 1
         assert fact.evidence["exchange_bnb_open_order_count"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_bnb_final_gate_reconciliation_allows_retryable_failed_pre_order_intent(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    class FakeGks:
+        def get_state(self):
+            return {"active": False, "source": "test_gks"}
+
+    class FakeApiModule:
+        _global_kill_switch_service = FakeGks()
+        _startup_trading_guard_service = None
+        _startup_reconciliation_summary = None
+        _exchange_gateway = None
+
+    class FakeBnbReadOnlyClient:
+        async def fetch_balance(self, params=None):
+            return {
+                "info": {
+                    "totalMarginBalance": "100.00",
+                    "availableBalance": "80.00",
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+
+        async def fetch_positions(self, symbol=None):
+            return []
+
+        async def fetch_open_orders(self, symbol, params=None):
+            return []
+
+        async def close(self):
+            return None
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_read_only_client",
+        lambda _api_module: {
+            "client": FakeBnbReadOnlyClient(),
+            "source": "test_bnb_read_only_client",
+            "close_after_read": False,
+        },
+    )
+
+    async def fake_pg_counts(_symbol):
+        return {
+            "execution_intents": 1,
+            "retryable_failed_execution_intents": 1,
+            "blocking_execution_intents": 0,
+            "retry_classification": "retryable_failed_intent_present",
+            "orders": 0,
+            "pg_bnb_active_positions": 0,
+            "pg_bnb_open_orders": 0,
+        }
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_pg_reconciliation_counts",
+        fake_pg_counts,
+    )
+
+    async def scenario():
+        profile = build_bnb_strategy_trial_readiness().strategy_profile
+        collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+        snapshot = await collector.collect(profile)
+        fact = snapshot.fact_map()["reconciliation"]
+
+        assert fact.status == "clear"
+        assert fact.blocker is None
+        assert fact.evidence["status"] == "clean_for_retry"
+        assert fact.evidence["pg_execution_intents_count"] == 1
+        assert fact.evidence["pg_blocking_execution_intents_count"] == 0
+        assert fact.evidence["retryable_failed_execution_intents_count"] == 1
+        assert fact.evidence["retry_classification"] == "retryable_failed_intent_present"
 
     asyncio.run(scenario())
 

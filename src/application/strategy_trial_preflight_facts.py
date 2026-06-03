@@ -749,6 +749,9 @@ def _reconciliation_evidence(
     }
     for key in [
         "pg_execution_intents_count",
+        "pg_blocking_execution_intents_count",
+        "retryable_failed_execution_intents_count",
+        "retry_classification",
         "pg_orders_count",
         "pg_bnb_active_position_count",
         "pg_bnb_open_order_count",
