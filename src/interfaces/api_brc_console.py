@@ -92,6 +92,7 @@ from src.application.strategy_trial_preflight_facts import TrialPreflightFactCol
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.database import get_pg_session_maker, probe_pg_connectivity
+from src.infrastructure.exchange_gateway import ExchangeGateway
 from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
 from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
@@ -3899,10 +3900,12 @@ async def execute_owner_bounded_live_trial_authorization(
         session_maker=injected_session_maker,
     )
     api_module = _api_module()
+    gateway_binding = await _owner_bounded_exchange_gateway_binding(api_module)
+    gateway = gateway_binding.get("gateway")
     protection_planner_service = ProtectionPlannerService(
         repository=PgProtectionPricePlanRepository(injected_session_maker),
         price_source=ExchangeGatewayProtectionPriceSource(
-            getattr(api_module, "_exchange_gateway", None),
+            gateway,
         ),
     )
     execute_service = OwnerBoundedExecutionService(
@@ -3910,7 +3913,7 @@ async def execute_owner_bounded_live_trial_authorization(
         session_maker=injected_session_maker,
         protection_planner_service=protection_planner_service,
         order_executor=ExchangeGatewayBoundedOrderExecutor(
-            getattr(api_module, "_exchange_gateway", None),
+            gateway,
         ),
         intent_repository=PgExecutionIntentRepository(injected_session_maker),
         order_repository=PgOrderRepository(injected_session_maker),
@@ -3932,11 +3935,97 @@ async def execute_owner_bounded_live_trial_authorization(
                 "code": exc.code,
                 "message": exc.message,
                 "blockers": exc.blockers,
+                "gateway_binding": gateway_binding.get("status"),
+                "gateway_binding_blockers": gateway_binding.get("blockers", []),
                 "execution_intent_created": False,
                 "order_created": False,
                 "order_permission_granted": False,
             },
         ) from exc
+
+
+async def _owner_bounded_exchange_gateway_binding(api_module: Any) -> dict[str, Any]:
+    """Return the gateway allowed only for Owner-bounded execution.
+
+    This deliberately does not populate the legacy ``_exchange_gateway`` global.
+    Other runtime and controlled-testnet paths therefore do not gain a write
+    gateway from the Owner Console deployment.
+    """
+    existing = getattr(api_module, "_owner_bounded_exchange_gateway", None)
+    if existing is not None:
+        return _owner_bounded_gateway_status(existing)
+
+    blockers = _owner_bounded_gateway_env_blockers()
+    if blockers:
+        return {"status": "blocked_env", "gateway": None, "blockers": blockers}
+
+    api_key = os.environ.get("EXCHANGE_API_KEY", "").strip()
+    api_secret = os.environ.get("EXCHANGE_API_SECRET", "").strip()
+    if not api_key or not api_secret:
+        return {
+            "status": "blocked_credentials_missing",
+            "gateway": None,
+            "blockers": ["exchange_credentials_missing"],
+        }
+
+    exchange_name = os.environ.get("EXCHANGE_NAME", "binance").strip() or "binance"
+    if exchange_name.lower() != "binance":
+        return {
+            "status": "blocked_unsupported_exchange",
+            "gateway": None,
+            "blockers": [f"unsupported_exchange:{exchange_name}"],
+        }
+
+    gateway = ExchangeGateway(
+        exchange_name=exchange_name,
+        api_key=api_key,
+        api_secret=api_secret,
+        testnet=False,
+    )
+    try:
+        await gateway.initialize()
+    except Exception as exc:
+        close = getattr(gateway, "close", None)
+        if callable(close):
+            try:
+                await close()
+            except Exception:
+                pass
+        return {
+            "status": "blocked_gateway_initialization_failed",
+            "gateway": None,
+            "blockers": [f"exchange_gateway_initialization_failed:{type(exc).__name__}"],
+        }
+
+    setattr(api_module, "_owner_bounded_exchange_gateway", gateway)
+    return _owner_bounded_gateway_status(gateway)
+
+
+def _owner_bounded_gateway_status(gateway: Any) -> dict[str, Any]:
+    required = ["place_order", "fetch_ticker_price", "get_market_info"]
+    missing = [f"gateway_missing_{name}" for name in required if not callable(getattr(gateway, name, None))]
+    return {
+        "status": "ready" if not missing else "blocked_methods_missing",
+        "gateway": gateway if not missing else None,
+        "blockers": missing,
+        "gateway_type": type(gateway).__name__,
+    }
+
+
+def _owner_bounded_gateway_env_blockers() -> list[str]:
+    expected = {
+        "TRADING_ENV": "live",
+        "EXCHANGE_TESTNET": "false",
+        "BRC_EXECUTION_PERMISSION_MAX": "read_only",
+        "RUNTIME_CONTROL_API_ENABLED": "false",
+        "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+    }
+    blockers: list[str] = []
+    for key, expected_value in expected.items():
+        actual = os.environ.get(key, "").strip().lower()
+        if actual != expected_value:
+            blockers.append(f"{key.lower()}_not_{expected_value}")
+    return blockers
 
 
 @router.get(

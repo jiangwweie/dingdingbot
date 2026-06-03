@@ -1600,7 +1600,18 @@ def test_owner_bounded_execution_api_route_uses_read_only_price_source(monkeypat
     monkeypatch.setattr(
         api_brc_console,
         "_api_module",
-        lambda: SimpleNamespace(_exchange_gateway=FakeReadOnlyGateway()),
+        lambda: SimpleNamespace(),
+    )
+    async def fake_gateway_binding(_api_module):
+        return {
+            "status": "ready_for_test_read_source_only",
+            "gateway": FakeReadOnlyGateway(),
+            "blockers": [],
+        }
+    monkeypatch.setattr(
+        api_brc_console,
+        "_owner_bounded_exchange_gateway_binding",
+        fake_gateway_binding,
     )
     monkeypatch.setattr(
         api_brc_console,
