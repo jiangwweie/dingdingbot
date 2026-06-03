@@ -23,6 +23,13 @@ Rollback anchor before this governance pass:
 - Git rollback tag: `brc-bnb-prelive-20260601-r35`
 - Commit: `51f0085b71f8ae4e3e2444da55022bfc9eea3fcb`
 
+Governed code baseline:
+
+- Code hardening commit: `cc19d6fd`
+- Code hardening tag: `brc-bnb-prelive-20260601-r36`
+- Tokyo was checked out to `brc-bnb-prelive-20260601-r36` and backend was restarted
+  with API health `ok`.
+
 ## Live Action Evidence
 
 Third owner-bounded live action:
@@ -104,9 +111,19 @@ Regression added:
   a fake-gateway protected execution.
 
 The existing Tokyo review row was a historical record written before this code
-repair. It requires metadata-only PG correction to align the review JSON with
-the already-consumed authorization. This correction does not touch exchange
-orders or runtime permissions.
+repair. A metadata-only PG correction was applied after deploying the code fix:
+
+- Target row: `review-auth-fc17cf5bbb0c42bbbcc231af5413faa0`
+- Guard condition: matching authorization id, `status='executed'`, and the
+  authorization row already `consumed=true`
+- Updated rows: `1`
+- Before: `adapter_result.consumed=false`,
+  `final_state_snapshot.consumed=false`
+- After: `adapter_result.consumed=true`,
+  `final_state_snapshot.consumed=true`
+
+This correction touched only PG review JSON metadata. It did not touch exchange
+orders, open protection orders, runtime permission, or credentials.
 
 ## Backend Generalization Audit
 
@@ -189,6 +206,11 @@ Tokyo read-only:
 - PG `alembic_version` -> `041`
 - `GET /api/health` -> `ok`
 - Live read-only facts showed BNB long `0.01` with TP and SL open.
+- Deployment update: Tokyo checkout moved to `brc-bnb-prelive-20260601-r36`,
+  HEAD `cc19d6f`; backend restarted and `GET /api/health` returned `ok`.
+- Metadata correction: `brc_execution_results` review row updated from
+  consumed false to consumed true in both `adapter_result` and
+  `final_state_snapshot`.
 
 ## Remaining Risks / Non-Blockers
 
@@ -197,8 +219,9 @@ Tokyo read-only:
 - The final-gate module is still BNB v1 named and should not be reused for
   BTC/ETH/SOL live execution until the fact collector and conflict gate are
   generalized.
-- The historical review JSON for the third live action needs metadata-only
-  correction after the code fix is deployed or otherwise recorded as repaired.
+- `brc-bnb-prelive-20260601-r36` contains the code fix and the first version of
+  this governance report. A later documentation-only tag may point to the final
+  report text that includes the completed Tokyo metadata correction.
 
 ## Safety Proof
 
