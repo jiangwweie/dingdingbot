@@ -41,6 +41,7 @@ from src.interfaces.api_brc_console import (
     workflow_router,
 )
 from src.interfaces.api_runtime_safety import router as runtime_safety_router
+from src.interfaces.api_trading_console import router as trading_console_router
 from src.interfaces.operator_auth import router as auth_router
 
 
@@ -270,6 +271,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(runtime_safety_router)
+app.include_router(trading_console_router)
 app.include_router(brc_router)
 app.include_router(operator_router)
 app.include_router(workflow_router)

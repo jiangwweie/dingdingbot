@@ -4171,6 +4171,16 @@ def _multi_carrier_budget_authorization_infrastructure_http_error(
 
 
 def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightFactCollector:
+    if not _bnb_final_gate_live_read_env_status()["safe"]:
+        return TrialPreflightFactCollector(
+            position_reader=_local_preflight_position_reader(api_module),
+            open_order_reader=_local_preflight_open_order_reader(api_module),
+            gks_reader=_bnb_preflight_gks_reader(api_module),
+            startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
+            reconciliation_reader=_local_preflight_reconciliation_reader(api_module),
+            account_facts_reader=_runtime_cached_account_facts_reader(api_module),
+        )
+
     bnb_live_facts = _BnbFinalGateLiveReadOnlyFacts(api_module)
     return TrialPreflightFactCollector(
         position_reader=_bnb_preflight_position_reader(api_module, bnb_live_facts),
@@ -4180,6 +4190,129 @@ def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightF
         reconciliation_reader=_bnb_preflight_reconciliation_reader(api_module, bnb_live_facts),
         account_facts_reader=_bnb_preflight_account_facts_reader(api_module, bnb_live_facts),
     )
+
+
+def _local_preflight_position_reader(api_module: Any):
+    async def _read(profile):
+        repo = getattr(api_module, "_position_repo", None)
+        if repo is None or not hasattr(repo, "list_active"):
+            raise RuntimeError("local_position_repo_unavailable")
+        return await repo.list_active(symbol=str(profile.symbol), limit=20)
+
+    return _read
+
+
+def _local_preflight_open_order_reader(api_module: Any):
+    async def _read(profile):
+        repo = getattr(api_module, "_order_repo", None)
+        if repo is None or not hasattr(repo, "get_open_orders"):
+            raise RuntimeError("local_order_repo_unavailable")
+        return await repo.get_open_orders(symbol=str(profile.symbol))
+
+    return _read
+
+
+def _local_preflight_reconciliation_reader(api_module: Any):
+    async def _read(_profile):
+        summary = getattr(api_module, "_startup_reconciliation_summary", None)
+        if summary is None:
+            return {
+                "status": "unavailable",
+                "source": "runtime_startup_reconciliation_summary",
+                "reason": "startup_reconciliation_summary_unavailable",
+            }
+        return summary
+
+    return _read
+
+
+def _runtime_cached_account_facts_reader(api_module: Any):
+    async def _read(_profile):
+        generated_at_ms = int(time.time() * 1000)
+        snapshot = _runtime_cached_account_snapshot(api_module)
+        if snapshot is None:
+            return {
+                "source": "unavailable",
+                "account_equity_source": "unavailable",
+                "truth_level": "unavailable",
+                "timestamp_ms": generated_at_ms,
+                "freshness": "unavailable",
+                "account_equity_freshness": "unavailable",
+                "account_equity_available": False,
+                "wallet_equity_available": False,
+                "available_margin_available": False,
+                "read_method": "runtime_cached_snapshot",
+                "read_only_guarantee": True,
+                "external_call_performed": False,
+                "real_account_api_called_by_endpoint": False,
+                "reconciliation_status": "unknown",
+            }
+        timestamp_ms = _int_or_none(_read_obj_value(snapshot, "timestamp"))
+        freshness = _cached_snapshot_freshness(timestamp_ms, generated_at_ms=generated_at_ms)
+        total_balance = _read_obj_value(snapshot, "total_balance")
+        available_balance = _read_obj_value(snapshot, "available_balance")
+        return {
+            "source": "runtime_cached_account_snapshot",
+            "account_equity_source": "runtime_cached_account_snapshot",
+            "truth_level": "runtime_cache",
+            "timestamp_ms": timestamp_ms or generated_at_ms,
+            "freshness": freshness,
+            "account_equity_freshness": freshness,
+            "account_equity_available": total_balance is not None,
+            "wallet_equity_available": total_balance is not None,
+            "available_margin_available": available_balance is not None,
+            "account_equity": total_balance if total_balance is not None else "not_available",
+            "wallet_equity": total_balance if total_balance is not None else "not_available",
+            "available_margin": (
+                available_balance if available_balance is not None else "not_available"
+            ),
+            "read_method": "exchange_gateway.get_account_snapshot",
+            "read_only_guarantee": True,
+            "external_call_performed": False,
+            "real_account_api_called_by_endpoint": False,
+            "reconciliation_status": "unknown",
+        }
+
+    return _read
+
+
+def _runtime_cached_account_snapshot(api_module: Any) -> Any:
+    getter = getattr(api_module, "_account_getter", None)
+    if callable(getter):
+        try:
+            return getter()
+        except Exception:
+            return None
+    gateway = getattr(api_module, "_exchange_gateway", None)
+    if gateway is not None and hasattr(gateway, "get_account_snapshot"):
+        try:
+            return gateway.get_account_snapshot()
+        except Exception:
+            return None
+    return None
+
+
+def _cached_snapshot_freshness(timestamp_ms: Optional[int], *, generated_at_ms: int) -> str:
+    if timestamp_ms is None:
+        return "unknown"
+    if timestamp_ms > generated_at_ms + 60_000:
+        return "unknown"
+    return "fresh" if generated_at_ms - timestamp_ms <= 5 * 60 * 1000 else "stale"
+
+
+def _read_obj_value(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _bnb_preflight_position_reader(api_module: Any, bnb_live_facts: Any):

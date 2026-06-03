@@ -3391,3 +3391,94 @@ def test_bnb_final_gate_live_read_only_env_fail_closed_without_client(monkeypatc
         assert facts["startup_guard"].evidence["runtime_state"] == "not_started"
 
     asyncio.run(scenario())
+
+
+def test_bnb_final_gate_fallback_facts_do_not_bypass_unsafe_live_environment(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    class CleanLocalPositionRepo:
+        async def list_active(self, *, symbol=None, limit=20):
+            return []
+
+    class CleanLocalOrderRepo:
+        async def get_open_orders(self, symbol=None):
+            return []
+
+    class ClearGks:
+        def get_state(self):
+            return {"active": False, "source": "test_gks"}
+
+    class ClearStartupGuard:
+        def get_state(self):
+            return {
+                "armed": True,
+                "runtime_started": False,
+                "runtime_safety_context_bound": True,
+                "runtime_state": "scoped_safety_context_bound",
+                "source": "test_startup_guard",
+            }
+
+    class FakeApiModule:
+        _position_repo = CleanLocalPositionRepo()
+        _order_repo = CleanLocalOrderRepo()
+        _global_kill_switch_service = ClearGks()
+        _startup_trading_guard_service = ClearStartupGuard()
+        _startup_reconciliation_summary = {
+            "status": "clean",
+            "reconciliation_status": "clean",
+            "source": "test_reconciliation",
+        }
+        _exchange_gateway = None
+
+        @staticmethod
+        def _account_getter():
+            return SimpleNamespace(
+                total_balance=Decimal("30.00"),
+                available_balance=Decimal("30.00"),
+                timestamp=int(time.time() * 1000),
+            )
+
+    def fail_if_called(_api_module):
+        raise AssertionError("unsafe env fallback must not create a live read client")
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "true")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(api_brc_console, "_bnb_final_gate_read_only_client", fail_if_called)
+
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            bridge._env = {
+                "TRADING_ENV": "live",
+                "EXCHANGE_TESTNET": "true",
+                "RUNTIME_CONTROL_API_ENABLED": "false",
+                "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                "BRC_EXECUTION_PERMISSION_MAX": "read_only",
+            }
+
+            profile = build_bnb_strategy_trial_readiness().strategy_profile
+            collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+            snapshot = await collector.collect(profile)
+            result = await bridge.run(fact_snapshot=snapshot)
+
+            assert result.final_preflight_result == "blocked"
+            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert "exchange_testnet_false" in result.hard_blockers
+            assert result.environment_checks["exchange_testnet_false"] is False
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+            assert result.non_permissions["order_permission_granted"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
