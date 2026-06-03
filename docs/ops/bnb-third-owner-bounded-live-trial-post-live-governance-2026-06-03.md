@@ -177,6 +177,8 @@ Covered by targeted tests and/or current read-only evidence:
   authorization.
 - API converts unexpected owner-bounded execution exceptions to safe business
   status instead of raw 500.
+- PG result/review write failure is reported as
+  `execution_result_logging_failed` instead of silent success.
 - Binance hedge-mode payload governance keeps exchange writes through
   `ExchangeGateway`.
 - Permission and auto-execution flags remain false.
@@ -196,7 +198,7 @@ Local:
 - `git status -sb` showed `dev...origin/dev` plus this governance worktree.
 - `python3 -m alembic heads` -> `041 (head)`
 - `python3 -m pytest -q tests/unit/test_owner_trial_flow.py -k "owner_bounded_execution"` -> `17 passed, 35 deselected, 1 warning`
-- `python3 -m compileall -q src scripts && python3 -m pytest -q tests/unit/test_owner_trial_flow.py tests/unit/test_protection_price_planner.py tests/unit/test_tiny001d1b_sl_metadata_validation.py tests/unit/test_execution_permission.py && python3 -m alembic heads && git diff --check` -> `80 passed, 1 warning`; Alembic `041 (head)`; diff check passed
+- `python3 -m compileall -q src scripts && python3 -m pytest -q tests/unit/test_owner_trial_flow.py tests/unit/test_protection_price_planner.py tests/unit/test_tiny001d1b_sl_metadata_validation.py tests/unit/test_execution_permission.py && python3 -m alembic heads && git diff --check` -> `81 passed, 1 warning`; Alembic `041 (head)`; diff check passed
 
 Tokyo read-only:
 

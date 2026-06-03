@@ -26,6 +26,7 @@ from src.application.bnb_live_execution_bridge import (
 from src.application.owner_bounded_execution import (
     ExchangeGatewayBoundedOrderExecutor,
     OwnerBoundedExecutionError,
+    OwnerBoundedExecutionResponse,
     OwnerBoundedExecutionService,
     default_owner_bounded_execution_registry,
 )
@@ -1576,6 +1577,56 @@ def test_owner_bounded_execution_result_audit_records_consumed_final_state():
                 final_state_snapshot = json.loads(final_state_snapshot)
             assert adapter_result["consumed"] is True
             assert final_state_snapshot["consumed"] is True
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_result_pg_write_failure_is_explicit_blocker():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            async with engine.begin() as conn:
+                await conn.execute(text("DROP TABLE brc_execution_results"))
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service._record_execution_result(
+                    authorization=authorization,
+                    result=OwnerBoundedExecutionResponse(
+                        authorization_id=authorization.authorization_id,
+                        carrier_id=authorization.carrier_id,
+                        status="executed",
+                        final_gate_result="passed",
+                        execution_intent_id="intent-1",
+                        entry_order_id="entry-1",
+                        entry_exchange_order_id="x-entry-1",
+                        tp_order_ids=["tp-1"],
+                        sl_order_id="sl-1",
+                        review_record_id=f"review-{authorization.authorization_id}",
+                        execution_intent_status="completed",
+                        protection_status="protected",
+                        consumed=True,
+                    ),
+                    final_gate=await bridge.run(
+                        BnbLiveExecutionBridgeDryRunRequest(),
+                        fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                    ),
+                )
+
+            assert exc_info.value.code == "execution_result_logging_failed"
+            assert exc_info.value.blockers == ["execution_result_logging_failed"]
         finally:
             await engine.dispose()
 
