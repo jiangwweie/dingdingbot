@@ -202,13 +202,14 @@ class PgOrderRepository:
     async def get_order_chain(self, signal_id: str) -> Dict[str, List[Order]]:
         orders = await self.get_orders_by_signal(signal_id)
         entry_orders: List[Order] = []
+        exit_orders: List[Order] = []
         tp_orders: List[Order] = []
         sl_orders: List[Order] = []
         for order in orders:
             if order.order_role == OrderRole.ENTRY:
                 entry_orders.append(order)
             elif order.order_role == OrderRole.EXIT:
-                tp_orders.append(order)
+                exit_orders.append(order)
             elif order.order_role in {
                 OrderRole.TP1,
                 OrderRole.TP2,
@@ -219,7 +220,7 @@ class PgOrderRepository:
                 tp_orders.append(order)
             elif order.order_role == OrderRole.SL:
                 sl_orders.append(order)
-        return {"entry": entry_orders, "tps": tp_orders, "sl": sl_orders}
+        return {"entry": entry_orders, "tps": tp_orders, "sl": sl_orders, "exits": exit_orders}
 
     async def get_order_chain_by_order_id(self, order_id: str) -> List[Order]:
         target_order = await self.get_order(order_id)

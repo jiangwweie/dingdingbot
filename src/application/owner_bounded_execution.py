@@ -55,11 +55,29 @@ OWNER_BOUNDED_EXECUTE_ROUTE_TEMPLATE = (
 
 
 class OwnerBoundedExecutionError(ValueError):
-    def __init__(self, code: str, message: str, blockers: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        blockers: list[str] | None = None,
+        *,
+        execution_intent_created: bool = False,
+        order_created: bool = False,
+        order_permission_granted: bool = False,
+        execution_intent_id: str | None = None,
+        entry_order_id: str | None = None,
+        entry_exchange_order_id: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.blockers = blockers or [code]
+        self.execution_intent_created = execution_intent_created
+        self.order_created = order_created
+        self.order_permission_granted = order_permission_granted
+        self.execution_intent_id = execution_intent_id
+        self.entry_order_id = entry_order_id
+        self.entry_exchange_order_id = entry_exchange_order_id
 
 
 class OwnerBoundedExecutionReadiness(BaseModel):
@@ -359,6 +377,11 @@ async def _execute_mi001_bnb_long(
             "entry_order_failed",
             entry_result.error_message or "Entry order submission failed.",
             [entry_result.error_code or "entry_order_failed"],
+            execution_intent_created=True,
+            order_created=bool(entry_order.exchange_order_id),
+            execution_intent_id=intent.id,
+            entry_order_id=entry_order.id,
+            entry_exchange_order_id=entry_order.exchange_order_id,
         )
 
     filled_qty = entry_result.filled_qty or Decimal("0")
@@ -433,7 +456,18 @@ async def _execute_mi001_bnb_long(
         raise OwnerBoundedExecutionError(
             "protection_order_failed",
             "Protection order submission failed after entry order.",
-            failed_protection,
+            _dedupe(
+                [
+                    "protection_attach_failed_after_entry_fill",
+                    *failed_protection,
+                    "manual_review_required_before_retry",
+                ]
+            ),
+            execution_intent_created=True,
+            order_created=True,
+            execution_intent_id=intent.id,
+            entry_order_id=entry_order.id,
+            entry_exchange_order_id=entry_order.exchange_order_id,
         )
 
     intent.status = ExecutionIntentStatus.COMPLETED

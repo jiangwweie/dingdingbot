@@ -3937,9 +3937,12 @@ async def execute_owner_bounded_live_trial_authorization(
                 "blockers": exc.blockers,
                 "gateway_binding": gateway_binding.get("status"),
                 "gateway_binding_blockers": gateway_binding.get("blockers", []),
-                "execution_intent_created": False,
-                "order_created": False,
-                "order_permission_granted": False,
+                "execution_intent_created": exc.execution_intent_created,
+                "order_created": exc.order_created,
+                "order_permission_granted": exc.order_permission_granted,
+                "execution_intent_id": exc.execution_intent_id,
+                "entry_order_id": exc.entry_order_id,
+                "entry_exchange_order_id": exc.entry_exchange_order_id,
             },
         ) from exc
     except Exception as exc:

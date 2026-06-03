@@ -47,7 +47,8 @@ from src.infrastructure.pg_models import (
     PGBrcProtectionPricePlanORM,
 )
 from src.infrastructure.pg_protection_price_plan_repository import PgProtectionPricePlanRepository
-from src.domain.models import Direction, OrderPlacementResult, OrderStatus, OrderType
+from src.domain.models import Direction, Order, OrderPlacementResult, OrderRole, OrderStatus, OrderType
+from src.infrastructure.pg_order_repository import PgOrderRepository
 
 
 class _RecordingIntentRepository:
@@ -1473,6 +1474,200 @@ def test_owner_bounded_execution_failed_entry_is_recorded_without_consuming_auth
             await engine.dispose()
 
     asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_protection_failure_records_partial_state_without_consuming_authorization():
+    class FakeProtectionRejectingGateway:
+        def __init__(self):
+            self.calls = []
+
+        async def place_order(self, **kwargs):
+            self.calls.append(kwargs)
+            order_type = kwargs["order_type"]
+            role_index = len(self.calls)
+            if order_type == "market":
+                return OrderPlacementResult(
+                    order_id="entry-order-filled",
+                    exchange_order_id="x-entry-filled",
+                    symbol=kwargs["symbol"],
+                    order_type=OrderType.MARKET,
+                    direction=Direction.LONG,
+                    side=kwargs["side"],
+                    amount=kwargs["amount"],
+                    filled_qty=Decimal("0.01"),
+                    average_exec_price=Decimal("600.20"),
+                    status=OrderStatus.FILLED,
+                    client_order_id=kwargs.get("client_order_id"),
+                )
+            if order_type == "limit":
+                return OrderPlacementResult(
+                    order_id=f"tp-order-{role_index}",
+                    exchange_order_id=None,
+                    symbol=kwargs["symbol"],
+                    order_type=OrderType.LIMIT,
+                    direction=Direction.SHORT,
+                    side=kwargs["side"],
+                    amount=kwargs["amount"],
+                    price=kwargs["price"],
+                    reduce_only=kwargs["reduce_only"],
+                    status=OrderStatus.REJECTED,
+                    client_order_id=kwargs.get("client_order_id"),
+                    error_code="tp_rejected_by_exchange",
+                    error_message="fake TP rejection",
+                )
+            return OrderPlacementResult(
+                order_id=f"sl-order-{role_index}",
+                exchange_order_id=f"x-sl-{role_index}",
+                symbol=kwargs["symbol"],
+                order_type=OrderType.STOP_MARKET,
+                direction=Direction.SHORT,
+                side=kwargs["side"],
+                amount=kwargs["amount"],
+                trigger_price=kwargs["trigger_price"],
+                reduce_only=kwargs["reduce_only"],
+                status=OrderStatus.OPEN,
+                client_order_id=kwargs.get("client_order_id"),
+            )
+
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        protection_repo = PgProtectionPricePlanRepository(session_maker)
+        protection_service = ProtectionPlannerService(
+            repository=protection_repo,
+            price_source=StaticProtectionPriceSource(
+                reference_price=Decimal("600.12"),
+                filters=ProtectionExchangeFilters(
+                    min_amount=Decimal("0.01"),
+                    amount_step=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                    min_notional_source="test",
+                    tick_size=Decimal("0.1"),
+                ),
+            ),
+        )
+        gateway = FakeProtectionRejectingGateway()
+        intent_repo = _RecordingIntentRepository()
+        order_repo = _RecordingOrderRepository()
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+            protection_planner_service=protection_service,
+            order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
+            intent_repository=intent_repo,
+            order_repository=order_repo,
+        )
+        try:
+            draft = await _create_valid_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+
+            assert exc_info.value.code == "protection_order_failed"
+            assert exc_info.value.execution_intent_created is True
+            assert exc_info.value.order_created is True
+            assert exc_info.value.order_permission_granted is False
+            assert exc_info.value.entry_exchange_order_id == "x-entry-filled"
+            assert "protection_attach_failed_after_entry_fill" in exc_info.value.blockers
+            assert "manual_review_required_before_retry" in exc_info.value.blockers
+            assert len(gateway.calls) == 3
+            assert gateway.calls[1]["reduce_only"] is True
+            assert gateway.calls[1]["position_side"] == "LONG"
+            assert gateway.calls[2]["reduce_only"] is True
+            assert gateway.calls[2]["position_side"] == "LONG"
+            assert [order.order_role for order in order_repo.items] == [
+                OrderRole.ENTRY,
+                OrderRole.TP1,
+                OrderRole.SL,
+            ]
+            assert order_repo.items[1].status == OrderStatus.REJECTED
+            assert order_repo.items[2].status == OrderStatus.OPEN
+            assert intent_repo.updates[-1].status.value == "partially_protected"
+            assert intent_repo.updates[-1].failed_reason == "tp_rejected_by_exchange"
+            current = await service.current()
+            assert current.live_authorization is not None
+            assert current.live_authorization.consumed is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_pg_order_chain_keeps_exit_orders_out_of_take_profit_bucket(monkeypatch):
+    now = int(time.time() * 1000)
+    entry = Order(
+        id="entry-1",
+        signal_id="signal-1",
+        exchange_order_id="x-entry-1",
+        symbol="BNB/USDT:USDT",
+        direction=Direction.LONG,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.ENTRY,
+        requested_qty=Decimal("0.01"),
+        filled_qty=Decimal("0.01"),
+        average_exec_price=Decimal("642.81"),
+        status=OrderStatus.FILLED,
+        created_at=now,
+        updated_at=now,
+    )
+    take_profit = Order(
+        id="tp-1",
+        signal_id="signal-1",
+        exchange_order_id="x-tp-1",
+        symbol="BNB/USDT:USDT",
+        direction=Direction.SHORT,
+        order_type=OrderType.LIMIT,
+        order_role=OrderRole.TP1,
+        price=Decimal("649.23"),
+        requested_qty=Decimal("0.01"),
+        filled_qty=Decimal("0"),
+        status=OrderStatus.OPEN,
+        created_at=now,
+        updated_at=now,
+        reduce_only=True,
+        parent_order_id="entry-1",
+    )
+    exit_order = Order(
+        id="exit-1",
+        signal_id="signal-1",
+        exchange_order_id="x-exit-1",
+        symbol="BNB/USDT:USDT",
+        direction=Direction.SHORT,
+        order_type=OrderType.MARKET,
+        order_role=OrderRole.EXIT,
+        requested_qty=Decimal("0.01"),
+        filled_qty=Decimal("0.01"),
+        average_exec_price=Decimal("644.27"),
+        status=OrderStatus.FILLED,
+        created_at=now,
+        updated_at=now,
+        reduce_only=True,
+        parent_order_id="entry-1",
+        exit_reason="authorized_recovery_close",
+    )
+    repo = PgOrderRepository(session_maker=object())
+
+    async def fake_get_orders_by_signal(signal_id):
+        assert signal_id == "signal-1"
+        return [entry, take_profit, exit_order]
+
+    monkeypatch.setattr(repo, "get_orders_by_signal", fake_get_orders_by_signal)
+
+    chain = asyncio.run(repo.get_order_chain("signal-1"))
+
+    assert chain["entry"] == [entry]
+    assert chain["tps"] == [take_profit]
+    assert chain["sl"] == []
+    assert chain["exits"] == [exit_order]
 
 
 def test_owner_bounded_execution_rejects_unsupported_carrier_before_intent_or_order():
