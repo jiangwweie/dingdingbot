@@ -25,6 +25,33 @@ def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
+def _db_timestamp(value: Any) -> int:
+    """Store timestamps in the legacy positions int column without overflow."""
+    raw = int(value if value is not None else _now_ms())
+    return raw // 1000 if raw > 2_147_483_647 else raw
+
+
+def _domain_timestamp(value: Any) -> int:
+    raw = int(value or 0)
+    return raw * 1000 if 0 < raw < 10_000_000_000 else raw
+
+
+def _decimal(value: Any, default: Decimal = Decimal("0")) -> Decimal:
+    if value is None:
+        return default
+    return Decimal(str(value))
+
+
+def _closed_flag(value: bool) -> int:
+    return 1 if value else 0
+
+
+def _is_closed(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return int(value or 0) != 0
+
+
 class PgPositionRepository:
     """PG 版仓位仓储。"""
 
@@ -63,7 +90,7 @@ class PgPositionRepository:
             stmt = (
                 select(PGPositionORM)
                 .where(PGPositionORM.signal_id == signal_id)
-                .order_by(PGPositionORM.opened_at.asc())
+                .order_by(PGPositionORM.created_at.asc())
             )
             result = await session.execute(stmt)
             return [self._to_domain(orm) for orm in result.scalars().all()]
@@ -78,7 +105,7 @@ class PgPositionRepository:
         async with self._session_maker() as session:
             stmt = (
                 select(PGPositionORM)
-                .where(PGPositionORM.is_closed.is_(False))
+                .where(PGPositionORM.is_closed == 0)
                 .order_by(PGPositionORM.updated_at.desc())
                 .limit(limit)
             )
@@ -101,7 +128,7 @@ class PgPositionRepository:
             if symbol:
                 stmt = stmt.where(PGPositionORM.symbol == symbol)
             if is_closed is not None:
-                stmt = stmt.where(PGPositionORM.is_closed.is_(is_closed))
+                stmt = stmt.where(PGPositionORM.is_closed == _closed_flag(is_closed))
             stmt = stmt.offset(offset).limit(limit)
             result = await session.execute(stmt)
             return [self._to_domain(orm) for orm in result.scalars().all()]
@@ -120,83 +147,42 @@ class PgPositionRepository:
                 f"Expected Position or PGPositionORM, got {type(position).__name__}."
             )
 
-        payload = {
-            "tp_trailing_activated": position.tp_trailing_activated,
-            "original_tp_prices": {
-                key: str(value) for key, value in position.original_tp_prices.items()
-            },
-            "trailing_exit_activated": position.trailing_exit_activated,
-            "trailing_exit_price": str(position.trailing_exit_price) if position.trailing_exit_price is not None else None,
-            "trailing_activation_time": position.trailing_activation_time,
-            "total_fees_paid": str(position.total_fees_paid),
-            "total_funding_paid": str(position.total_funding_paid),
-            "watermark_price": str(position.watermark_price) if position.watermark_price is not None else None,
-            "projected_exit_fills": {
-                key: str(value) for key, value in position.projected_exit_fills.items()
-            },
-            "projected_exit_fees": {
-                key: str(value) for key, value in position.projected_exit_fees.items()
-            },
-        }
-
-        opened_at = getattr(position, "opened_at", None) or (existing.opened_at if existing else _now_ms())
-        closed_at = getattr(position, "closed_at", None)
-        if closed_at is None and existing is not None:
-            closed_at = existing.closed_at
+        opened_at = getattr(position, "opened_at", None) or (
+            existing.created_at if existing else _now_ms()
+        )
+        watermark_price = position.watermark_price or (
+            _decimal(existing.highest_price_since_entry)
+            if existing is not None
+            else position.entry_price
+        )
         return PGPositionORM(
             id=position.id,
             signal_id=position.signal_id,
             symbol=position.symbol,
             direction=position.direction.value,
-            quantity=position.current_qty,
-            entry_price=position.entry_price,
-            mark_price=getattr(position, "mark_price", None) or (existing.mark_price if existing else None),
-            leverage=getattr(position, "leverage", None) or (existing.leverage if existing else None),
-            unrealized_pnl=getattr(position, "unrealized_pnl", None) if getattr(position, "unrealized_pnl", None) is not None else (existing.unrealized_pnl if existing else None),
-            realized_pnl=position.realized_pnl,
-            is_closed=position.is_closed,
-            opened_at=opened_at,
-            closed_at=closed_at,
-            updated_at=_now_ms(),
-            position_payload=payload,
+            entry_price=str(position.entry_price),
+            current_qty=str(position.current_qty),
+            highest_price_since_entry=str(watermark_price),
+            realized_pnl=str(position.realized_pnl),
+            total_fees_paid=str(position.total_fees_paid),
+            is_closed=_closed_flag(position.is_closed),
+            created_at=_db_timestamp(opened_at),
+            updated_at=_db_timestamp(_now_ms()),
         )
 
     @staticmethod
     def _to_domain(orm: PGPositionORM) -> Position:
-        payload = orm.position_payload or {}
-        watermark_raw = payload.get("watermark_price")
-        trailing_exit_price_raw = payload.get("trailing_exit_price")
-        total_fees_raw = payload.get("total_fees_paid", "0")
-        total_funding_raw = payload.get("total_funding_paid", "0")
-        original_tp_prices_raw = payload.get("original_tp_prices") or {}
-        projected_exit_fills_raw = payload.get("projected_exit_fills") or {}
-        projected_exit_fees_raw = payload.get("projected_exit_fees") or {}
-
         return Position(
             id=orm.id,
             signal_id=orm.signal_id or "",
             symbol=orm.symbol,
             direction=Direction(orm.direction),
-            entry_price=orm.entry_price or Decimal("0"),
-            current_qty=orm.quantity,
-            watermark_price=Decimal(watermark_raw) if watermark_raw is not None else None,
-            tp_trailing_activated=bool(payload.get("tp_trailing_activated", False)),
-            original_tp_prices={
-                key: Decimal(value) for key, value in original_tp_prices_raw.items()
-            },
-            trailing_exit_activated=bool(payload.get("trailing_exit_activated", False)),
-            trailing_exit_price=Decimal(trailing_exit_price_raw) if trailing_exit_price_raw is not None else None,
-            trailing_activation_time=payload.get("trailing_activation_time"),
-            realized_pnl=orm.realized_pnl or Decimal("0"),
-            total_fees_paid=Decimal(total_fees_raw),
-            total_funding_paid=Decimal(total_funding_raw),
-            projected_exit_fills={
-                key: Decimal(value) for key, value in projected_exit_fills_raw.items()
-            },
-            projected_exit_fees={
-                key: Decimal(value) for key, value in projected_exit_fees_raw.items()
-            },
-            opened_at=orm.opened_at,
-            closed_at=orm.closed_at,
-            is_closed=orm.is_closed,
+            entry_price=_decimal(orm.entry_price),
+            current_qty=_decimal(orm.current_qty),
+            watermark_price=_decimal(orm.highest_price_since_entry),
+            realized_pnl=_decimal(orm.realized_pnl),
+            total_fees_paid=_decimal(orm.total_fees_paid),
+            opened_at=_domain_timestamp(orm.created_at),
+            closed_at=None,
+            is_closed=_is_closed(orm.is_closed),
         )

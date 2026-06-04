@@ -616,12 +616,12 @@ async def run_application():
         # Phase 1.1: Resolve Runtime Config Snapshot
         # =============================================
         logger.info("Phase 1.1: Resolving runtime config snapshot...")
-        runtime_profile_name = os.environ.get("RUNTIME_PROFILE", "sim1_eth_runtime")
+        runtime_profile_name = os.environ.get("RUNTIME_PROFILE")
         runtime_profile_repo = RuntimeProfileRepository()
         try:
             await runtime_profile_repo.initialize()
             runtime_resolver = RuntimeConfigResolver(runtime_profile_repo)
-            resolved_runtime_config = await runtime_resolver.resolve(runtime_profile_name)
+            resolved_runtime_config = await runtime_resolver.resolve_startup(runtime_profile_name)
             _runtime_config_provider = RuntimeConfigProvider(resolved_runtime_config)
             logger.info(
                 "Runtime config resolved: "
@@ -672,16 +672,22 @@ async def run_application():
         _notification_service = get_notification_service()
         if _runtime_config_provider is not None:
             env = _runtime_config_provider.resolved_config.environment
-            webhook_url_val = env.feishu_webhook_url.get_secret_value()
-            register_secret(webhook_url_val)
-            _notification_service.setup_channels(
-                [
-                    {
-                        "type": "feishu",
-                        "webhook_url": webhook_url_val,
-                    }
-                ]
-            )
+            if env.feishu_webhook_url is not None:
+                webhook_url_val = env.feishu_webhook_url.get_secret_value()
+                register_secret(webhook_url_val)
+                _notification_service.setup_channels(
+                    [
+                        {
+                            "type": "feishu",
+                            "webhook_url": webhook_url_val,
+                        }
+                    ]
+                )
+            else:
+                logger.warning(
+                    "FEISHU_WEBHOOK_URL is not configured; runtime starts with no notification channels"
+                )
+                _notification_service.setup_channels([])
         else:
             _notification_service.setup_channels(
                 [{"type": ch.type, "webhook_url": ch.webhook_url} for ch in user_config.notification.channels]

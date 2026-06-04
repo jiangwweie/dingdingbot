@@ -30,6 +30,7 @@ from src.application.protection_price_planner import (
     ProtectionPricePlanRecord,
     ProtectionPriceSourceUnavailable,
 )
+from src.application.position_projection_service import PositionProjectionService
 from src.application.strategy_trial_preflight_facts import TrialPreflightFactsSnapshot
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.domain.models import (
@@ -46,6 +47,7 @@ from src.infrastructure.database import get_pg_session_maker
 from src.infrastructure.owner_trial_flow_repository import PgOwnerTrialFlowRepository
 from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
 from src.infrastructure.pg_order_repository import PgOrderRepository
+from src.infrastructure.logger import logger
 
 
 OWNER_BOUNDED_EXECUTE_LABEL = "执行这一次小额实盘试验"
@@ -263,6 +265,7 @@ class OwnerBoundedCarrierExecutionAdapter(Protocol):
         executor: BoundedOrderExecutor,
         intent_repository: PgExecutionIntentRepository,
         order_repository: PgOrderRepository,
+        position_projection_service: PositionProjectionService | None = None,
     ) -> OwnerBoundedExecutionResponse:
         ...
 
@@ -317,6 +320,7 @@ class Mi001BnbLongExecutionAdapter:
         executor: BoundedOrderExecutor,
         intent_repository: PgExecutionIntentRepository,
         order_repository: PgOrderRepository,
+        position_projection_service: PositionProjectionService | None = None,
     ) -> OwnerBoundedExecutionResponse:
         readiness = self.readiness(authorization)
         if readiness.blockers:
@@ -332,6 +336,7 @@ class Mi001BnbLongExecutionAdapter:
             executor=executor,
             intent_repository=intent_repository,
             order_repository=order_repository,
+            position_projection_service=position_projection_service,
         )
         return OwnerBoundedExecutionResponse(
             authorization_id=authorization.authorization_id,
@@ -368,6 +373,7 @@ async def _execute_mi001_bnb_long(
     executor: BoundedOrderExecutor,
     intent_repository: PgExecutionIntentRepository,
     order_repository: PgOrderRepository,
+    position_projection_service: PositionProjectionService | None = None,
 ) -> OwnerBoundedEntryExecutionResult:
     intent = _build_execution_intent(authorization, protection_plan)
     await intent_repository.save(intent)
@@ -544,6 +550,8 @@ async def _execute_mi001_bnb_long(
             sl_order_id=sl_order.id,
         )
 
+    await _project_owner_bounded_entry_position(position_projection_service, entry_order)
+
     intent.status = ExecutionIntentStatus.COMPLETED
     intent.updated_at = _now_ms()
     await intent_repository.update(intent)
@@ -581,6 +589,7 @@ class OwnerBoundedExecutionService:
         order_executor: BoundedOrderExecutor | None = None,
         intent_repository: PgExecutionIntentRepository | None = None,
         order_repository: PgOrderRepository | None = None,
+        position_projection_service: PositionProjectionService | None = None,
     ) -> None:
         self._owner_trial_repository = owner_trial_repository or PgOwnerTrialFlowRepository(session_maker)
         self._final_gate_service = final_gate_service
@@ -590,6 +599,7 @@ class OwnerBoundedExecutionService:
         self._order_executor = order_executor
         self._intent_repository = intent_repository or PgExecutionIntentRepository(session_maker)
         self._order_repository = order_repository or PgOrderRepository(session_maker)
+        self._position_projection_service = position_projection_service
 
     @property
     def registry(self) -> OwnerBoundedExecutionRegistry:
@@ -671,6 +681,7 @@ class OwnerBoundedExecutionService:
                 executor=self._order_executor,
                 intent_repository=self._intent_repository,
                 order_repository=self._order_repository,
+                position_projection_service=self._position_projection_service,
             )
         except OwnerBoundedExecutionError as exc:
             if exc.execution_intent_created or exc.order_created:
@@ -1202,6 +1213,25 @@ def _order_from_placement(
         exchange_reduce_only_omit_reason=placement.exchange_reduce_only_omit_reason,
         parent_order_id=parent_order_id,
     )
+
+
+async def _project_owner_bounded_entry_position(
+    position_projection_service: PositionProjectionService | None,
+    entry_order: Order,
+) -> None:
+    if position_projection_service is None:
+        return
+    try:
+        await position_projection_service.project_entry_fill(entry_order)
+    except Exception as exc:
+        logger.warning(
+            "Owner-bounded entry position projection failed: "
+            "order_id=%s signal_id=%s error=%s",
+            entry_order.id,
+            entry_order.signal_id,
+            exc,
+            exc_info=True,
+        )
 
 
 def _direction_for_authorization(authorization: BoundedLiveTrialAuthorization) -> Direction:

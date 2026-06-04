@@ -154,7 +154,13 @@ class PGExecutionIntentORM(PGCoreBase):
 
 
 class PGPositionORM(PGCoreBase):
-    """PG 版核心仓位表。"""
+    """PG 版核心仓位表。
+
+    The first PG positions migration stores decimal values as strings and uses
+    ``current_qty`` / ``highest_price_since_entry``. Keep this ORM aligned with
+    the deployed schema so runtime read models can query existing PG safely
+    without requiring a live-state migration.
+    """
 
     __tablename__ = "positions"
 
@@ -162,25 +168,17 @@ class PGPositionORM(PGCoreBase):
     signal_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
-    entry_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
-    mark_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
-    leverage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    unrealized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
-    realized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
-    is_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    opened_at: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    closed_at: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    entry_price: Mapped[str] = mapped_column(String, nullable=False)
+    current_qty: Mapped[str] = mapped_column(String, nullable=False)
+    highest_price_since_entry: Mapped[str] = mapped_column(String, nullable=False)
+    realized_pnl: Mapped[str] = mapped_column(String, nullable=False, default="0")
+    total_fees_paid: Mapped[str] = mapped_column(String, nullable=False, default="0")
+    is_closed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
-    position_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         CheckConstraint("direction IN ('LONG', 'SHORT')", name="ck_positions_direction"),
-        CheckConstraint("quantity >= 0", name="ck_positions_quantity_non_negative"),
-        CheckConstraint(
-            "leverage IS NULL OR leverage > 0",
-            name="ck_positions_leverage_positive",
-        ),
         Index("idx_positions_symbol", "symbol"),
         Index("idx_positions_is_closed", "is_closed"),
         Index("idx_positions_signal_id", "signal_id"),
@@ -211,7 +209,7 @@ Index(
     PGPositionORM.symbol,
     PGPositionORM.direction,
     unique=True,
-    postgresql_where=PGPositionORM.is_closed.is_(False),
+    postgresql_where=PGPositionORM.is_closed == 0,
 )
 
 

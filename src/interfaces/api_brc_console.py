@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 from decimal import Decimal
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -80,6 +80,7 @@ from src.application.owner_bounded_execution import (
     OwnerBoundedExecutionResponse,
     OwnerBoundedExecutionService,
 )
+from src.application.position_projection_service import PositionProjectionService
 from src.application.protection_price_planner import (
     ExchangeGatewayProtectionPriceSource,
     ProtectionPlannerService,
@@ -3917,6 +3918,9 @@ async def execute_owner_bounded_live_trial_authorization(
         ),
         intent_repository=PgExecutionIntentRepository(injected_session_maker),
         order_repository=PgOrderRepository(injected_session_maker),
+        position_projection_service=PositionProjectionService(
+            PgPositionRepository(injected_session_maker),
+        ),
     )
     try:
         return await execute_service.execute_authorization(
@@ -4410,16 +4414,45 @@ def _bnb_preflight_startup_guard_reader(api_module: Any):
 
         return _runtime_not_started
 
-    async def _read(_profile):
+    async def _read(profile):
         if hasattr(service, "get_state"):
-            return service.get_state()
-        return {
-            "armed": bool(service.is_armed()),
-            "source": "runtime_startup_trading_guard_service",
-        }
+            state = service.get_state()
+        else:
+            state = {
+                "armed": bool(service.is_armed()),
+                "source": "runtime_startup_trading_guard_service",
+            }
+        if _value_from_state(state, "armed") is True:
+            return state
+        try:
+            scoped_arm = await _read_active_bnb_scoped_runtime_safety_clearance(
+                "startup_guard",
+                profile,
+            )
+        except Exception:
+            scoped_arm = None
+        if scoped_arm is not None:
+            return _scoped_startup_guard_state(scoped_arm, runtime_started=True)
+        return state
 
     return _read
 
+
+def _scoped_startup_guard_state(scoped_arm: Mapping[str, Any], *, runtime_started: bool) -> dict[str, Any]:
+    return {
+        "armed": True,
+        "runtime_started": runtime_started,
+        "runtime_safety_context_bound": True,
+        "runtime_state": "scoped_safety_context_bound",
+        "source": "pg_scoped_startup_guard_arm",
+        "reason": scoped_arm.get("reason"),
+        "scoped_arm_valid": True,
+        "authorization_id": scoped_arm.get("authorization_id"),
+        "clearance_id": scoped_arm.get("clearance_id"),
+        "expires_at_ms": scoped_arm.get("expires_at_ms"),
+        "scope_match": True,
+        "updated_at_ms": scoped_arm.get("updated_at_ms"),
+    }
 
 async def _with_bnb_scoped_gks_clearance(profile: Any, state: Any) -> Any:
     active = _value_from_state(state, "active")
@@ -4559,7 +4592,7 @@ async def _pg_table_exists(session: Any, table_name: str) -> bool:
 
 def _bnb_preflight_reconciliation_reader(api_module: Any, bnb_live_facts: Any):
     summary = getattr(api_module, "_startup_reconciliation_summary", None)
-    if summary is None:
+    if _startup_reconciliation_summary_unavailable(summary):
         async def _read_final_gate_reconciliation(profile):
             facts = await bnb_live_facts.read(profile)
             if facts.get("available") is not True:
@@ -4627,6 +4660,19 @@ def _bnb_preflight_reconciliation_reader(api_module: Any, bnb_live_facts: Any):
         return summary
 
     return _read
+
+
+def _startup_reconciliation_summary_unavailable(summary: Any) -> bool:
+    if summary is None:
+        return True
+    status = str(_read_obj_value(summary, "status") or "").strip().lower()
+    source = str(_read_obj_value(summary, "source") or "").strip().lower()
+    reason = str(_read_obj_value(summary, "reason") or "").strip().lower()
+    return (
+        status in {"", "unavailable", "unknown", "not_available"}
+        or source in {"unavailable", "not_available"}
+        or reason == "startup_reconciliation_summary_unavailable"
+    )
 
 
 def _bnb_preflight_account_facts_reader(api_module: Any, bnb_live_facts: Any):
@@ -5051,6 +5097,8 @@ def _bnb_final_gate_symbol_variants(symbol: str) -> list[str]:
 
 
 def _is_closed_owner_trial_intent_row(row: Any) -> bool:
+    if row.get("authorization_consumed") is True and str(row.get("status") or "").lower() == "completed":
+        return True
     metadata = row.get("authorization_metadata") or {}
     if not isinstance(metadata, dict):
         return False

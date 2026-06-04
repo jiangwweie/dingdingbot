@@ -41,7 +41,10 @@ from src.interfaces.api_brc_console import (
     workflow_router,
 )
 from src.interfaces.api_runtime_safety import router as runtime_safety_router
-from src.interfaces.api_trading_console import router as trading_console_router
+from src.interfaces.api_trading_console import (
+    close_trading_console_read_only_exchange_gateway,
+    router as trading_console_router,
+)
 from src.interfaces.operator_auth import router as auth_router
 
 
@@ -243,6 +246,7 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await close_trading_console_read_only_exchange_gateway()
         await close_owner_bounded_exchange_gateway()
         if get_runtime_context() is None:
             await close_db()

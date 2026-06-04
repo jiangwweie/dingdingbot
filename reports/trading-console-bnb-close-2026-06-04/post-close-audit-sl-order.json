@@ -1,0 +1,270 @@
+{
+  "read_model": "audit_chain",
+  "generated_at_ms": 1780578620700,
+  "source": "trading_console_read_model_v1",
+  "freshness_status": "not_live_connected",
+  "warnings": [],
+  "blockers": [],
+  "unavailable": [
+    {
+      "source": "order_audit_logs",
+      "code": "audit_repo_unavailable"
+    }
+  ],
+  "data": {
+    "query": {
+      "authorization_id": null,
+      "intent_id": null,
+      "order_id": "c9a4faae-eaa5-45d1-9606-bb3181e5c644",
+      "exchange_order_id": null,
+      "symbol": null
+    },
+    "authorization": {
+      "carrier_id": "MI-001-BNB-LONG",
+      "status": "not_started",
+      "is_actionable": false,
+      "is_consumed": false,
+      "is_expired": false,
+      "is_cancelled": false,
+      "scope_match": "unknown",
+      "blocking_reason": "missing_active_authorization",
+      "scope": {
+        "carrier_id": "MI-001-BNB-LONG",
+        "strategy_family_id": "MI-001",
+        "strategy_id": "MI-001",
+        "candidate_id": "MI-001-BNB-LONG",
+        "symbol": "BNBUSDT",
+        "runtime_symbol": "BNB/USDT:USDT",
+        "side": "long",
+        "execution_mode": "owner_confirm_each_entry",
+        "max_notional": "20",
+        "quantity": "0.01",
+        "leverage": "1",
+        "protection_plan_type": "single_tp_plus_sl",
+        "live_ready": false,
+        "order_permission_granted": false
+      },
+      "current": {
+        "generated_from": "owner_trial_flow_v1",
+        "selected_carrier_id": "MI-001-BNB-LONG",
+        "carrier": {
+          "carrier_id": "MI-001-BNB-LONG",
+          "strategy_family_id": "MI-001",
+          "strategy_id": "MI-001",
+          "candidate_id": "MI-001-BNB-LONG",
+          "symbol": "BNBUSDT",
+          "runtime_symbol": "BNB/USDT:USDT",
+          "side": "long",
+          "execution_mode": "owner_confirm_each_entry",
+          "max_notional": "20",
+          "quantity": "0.01",
+          "leverage": "1",
+          "protection_plan_type": "single_tp_plus_sl",
+          "live_ready": false,
+          "order_permission_granted": false
+        },
+        "strategy_warnings": [
+          {
+            "warning_id": "strategy_not_proven_profitable",
+            "severity": "warning",
+            "description": "BNB carrier evidence is sufficient for Owner review, not proof of durable alpha.",
+            "owner_ack_required": true,
+            "blocks_after_ack": false,
+            "classification": "strategy_warning"
+          },
+          {
+            "warning_id": "limited_live_observation_sample",
+            "severity": "warning",
+            "description": "Live read-only observation sample remains small.",
+            "owner_ack_required": true,
+            "blocks_after_ack": false,
+            "classification": "strategy_warning"
+          },
+          {
+            "warning_id": "regime_may_be_unfavorable",
+            "severity": "warning",
+            "description": "Current regime may differ from historical high-quality samples.",
+            "owner_ack_required": true,
+            "blocks_after_ack": false,
+            "classification": "strategy_warning"
+          },
+          {
+            "warning_id": "forward_review_incomplete",
+            "severity": "warning",
+            "description": "Forward review is evidence for disclosure, not a permanent execution blocker.",
+            "owner_ack_required": true,
+            "blocks_after_ack": false,
+            "classification": "strategy_warning"
+          },
+          {
+            "warning_id": "historical_fragility_known",
+            "severity": "warning",
+            "description": "Historical fragility and adverse early path risk must be acknowledged.",
+            "owner_ack_required": true,
+            "blocks_after_ack": false,
+            "classification": "strategy_warning"
+          }
+        ],
+        "hard_blockers": [
+          {
+            "blocker_id": "missing_explicit_live_authorization",
+            "active": true,
+            "blocks_after_ack": true,
+            "description": "Real live / real-funds authorization has not been explicitly granted.",
+            "source": "owner_trial_flow",
+            "classification": "hard_safety_blocker"
+          }
+        ],
+        "acknowledged_warnings": [
+          "strategy_not_proven_profitable",
+          "limited_live_observation_sample",
+          "regime_may_be_unfavorable",
+          "forward_review_incomplete",
+          "historical_fragility_known"
+        ],
+        "unacknowledged_warnings": [],
+        "latest_acknowledgement": {
+          "acknowledgement_id": "ack-5f84cc64c93d48539696121bac4c4df5",
+          "carrier_id": "MI-001-BNB-LONG",
+          "strategy_family_id": "MI-001",
+          "acknowledged_warning_codes": [
+            "strategy_not_proven_profitable",
+            "limited_live_observation_sample",
+            "regime_may_be_unfavorable",
+            "forward_review_incomplete",
+            "historical_fragility_known"
+          ],
+          "owner_id": "owner",
+          "acknowledged_at_ms": 1780571464285,
+          "acknowledgement_scope": "strategy_trial_warnings",
+          "source": "owner_console",
+          "non_live_metadata_only": true
+        },
+        "authorization_draft": null,
+        "live_authorization": null,
+        "authorization_status": "not_started",
+        "live_ready": false,
+        "execution_permission_granted": false,
+        "order_permission_granted": false,
+        "execution_intent_created": false,
+        "order_created": false,
+        "hard_blockers_remain_blocking": true,
+        "risk_acknowledgement_is_not_live_authorization": true,
+        "authorization_draft_is_not_executable": true,
+        "live_authorization_is_not_execution_intent": true,
+        "live_authorization_does_not_create_order": true,
+        "source": "backend_metadata"
+      },
+      "future_action_slots": {
+        "void_authorization": "deferred_not_implemented",
+        "cancel_authorization": "deferred_not_implemented"
+      }
+    },
+    "intents": [
+      {
+        "intent_id": "intent-553808370f59461199a010980e92b706",
+        "signal_id": "owner-live-auth-b6678a34a93c44d49849c09d995d98bd",
+        "symbol": "BNB/USDT:USDT",
+        "side": "LONG",
+        "status": "completed",
+        "order_id": "d791fbde-8498-4d3c-953f-0060b5f3a018",
+        "authorization_id": "auth-b6678a34a93c44d49849c09d995d98bd",
+        "exchange_order_id": "91128701174",
+        "blocked_reason": null,
+        "blocked_message": null,
+        "failed_reason": null,
+        "created_at": 1780571952387,
+        "updated_at": 1780571952972
+      }
+    ],
+    "orders": [
+      {
+        "order_id": "c9a4faae-eaa5-45d1-9606-bb3181e5c644",
+        "signal_id": "owner-live-auth-b6678a34a93c44d49849c09d995d98bd",
+        "symbol": "BNB/USDT:USDT",
+        "direction": "LONG",
+        "side": "LONG",
+        "order_type": "STOP_MARKET",
+        "order_role": "SL",
+        "status": "CANCELED",
+        "price": null,
+        "trigger_price": "586.130000000000000000",
+        "requested_qty": "0.010000000000000000",
+        "filled_qty": "0E-18",
+        "average_exec_price": null,
+        "reduce_only": true,
+        "exchange_order_id": "4000001479555379",
+        "parent_order_id": "d791fbde-8498-4d3c-953f-0060b5f3a018",
+        "oco_group_id": null,
+        "exit_reason": "owner_authorized_bnb_position_close_2026_06_04",
+        "filled_at": null,
+        "created_at": 1780571952966,
+        "updated_at": 1780578449377,
+        "source": "pg"
+      },
+      {
+        "order_id": "9f7ad378-16ef-4161-86e1-f94ba79d5ef0",
+        "signal_id": "owner-live-auth-b6678a34a93c44d49849c09d995d98bd",
+        "symbol": "BNB/USDT:USDT",
+        "direction": "LONG",
+        "side": "LONG",
+        "order_type": "LIMIT",
+        "order_role": "TP1",
+        "status": "FILLED",
+        "price": "597.980000000000000000",
+        "trigger_price": null,
+        "requested_qty": "0.010000000000000000",
+        "filled_qty": "0.010000000000000000",
+        "average_exec_price": "597.980000000000000000",
+        "reduce_only": true,
+        "exchange_order_id": "91128701434",
+        "parent_order_id": "d791fbde-8498-4d3c-953f-0060b5f3a018",
+        "oco_group_id": null,
+        "exit_reason": null,
+        "filled_at": null,
+        "created_at": 1780571952741,
+        "updated_at": 1780575776692,
+        "source": "pg"
+      },
+      {
+        "order_id": "d791fbde-8498-4d3c-953f-0060b5f3a018",
+        "signal_id": "owner-live-auth-b6678a34a93c44d49849c09d995d98bd",
+        "symbol": "BNB/USDT:USDT",
+        "direction": "LONG",
+        "side": "LONG",
+        "order_type": "MARKET",
+        "order_role": "ENTRY",
+        "status": "FILLED",
+        "price": null,
+        "trigger_price": null,
+        "requested_qty": "0.010000000000000000",
+        "filled_qty": "0.010000000000000000",
+        "average_exec_price": "592.060000000000000000",
+        "reduce_only": false,
+        "exchange_order_id": "91128701174",
+        "parent_order_id": null,
+        "oco_group_id": null,
+        "exit_reason": null,
+        "filled_at": null,
+        "created_at": 1780571952455,
+        "updated_at": 1780571952455,
+        "source": "pg"
+      }
+    ],
+    "positions": [],
+    "reviews": [],
+    "audit_events": [],
+    "raw_payload_policy": "masked_or_omitted"
+  },
+  "no_action_guarantee": {
+    "places_order": false,
+    "cancels_order": false,
+    "replaces_order": false,
+    "flattens_position": false,
+    "retries_protection": false,
+    "starts_runtime": false,
+    "grants_auto_execution": false,
+    "mutates_pg": false
+  },
+  "live_ready": false
+}

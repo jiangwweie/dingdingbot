@@ -178,6 +178,32 @@ def test_runtime_config_parses_trading_env_and_brc_execution_permission_max():
     assert environment.brc_execution_permission_max == ExecutionPermission.INTENT_RECORDING
 
 
+def test_runtime_config_allows_missing_feishu_webhook_for_no_notification_runtime():
+    resolver = RuntimeConfigResolver(
+        profile_repository=object(),
+        env={
+            "PG_DATABASE_URL": "postgresql://example",
+            "CORE_EXECUTION_INTENT_BACKEND": "postgres",
+            "CORE_ORDER_BACKEND": "postgres",
+            "CORE_POSITION_BACKEND": "postgres",
+            "TRADING_ENV": "live",
+            "EXCHANGE_NAME": "binance",
+            "EXCHANGE_TESTNET": "false",
+            "BRC_EXECUTION_PERMISSION_MAX": "read_only",
+            "EXCHANGE_API_KEY": "key",
+            "EXCHANGE_API_SECRET": "secret",
+            "BACKEND_PORT": "8000",
+        },
+    )
+
+    environment = resolver._resolve_environment()
+
+    assert environment.trading_env == "live"
+    assert environment.exchange_testnet is False
+    assert environment.brc_execution_permission_max == ExecutionPermission.READ_ONLY
+    assert environment.feishu_webhook_url is None
+
+
 def test_runtime_config_rejects_non_postgres_mainline_storage_backend():
     resolver = RuntimeConfigResolver(
         profile_repository=object(),

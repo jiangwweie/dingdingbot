@@ -104,6 +104,29 @@ class _FakePositionRepo:
         return []
 
 
+class _FakeActivePositionRepo:
+    async def list_active(self, *, symbol=None, limit=200):
+        return [
+            SimpleNamespace(
+                id="pos-signal-1",
+                signal_id="signal-1",
+                symbol=BNB,
+                direction="LONG",
+                entry_price=Decimal("630"),
+                current_qty=Decimal("0.01"),
+                watermark_price=Decimal("630"),
+                realized_pnl=Decimal("0"),
+                total_fees_paid=Decimal("0"),
+                total_funding_paid=Decimal("0"),
+                projected_exit_fills={},
+                projected_exit_fees={},
+                opened_at=1780496661000,
+                closed_at=None,
+                is_closed=False,
+            )
+        ]
+
+
 class _FakeIntentRepo:
     async def list(self):
         return []
@@ -242,7 +265,7 @@ class _FakeExchangeGateway:
         raise AssertionError("trading-console read models must not cancel orders")
 
 
-def _patch_deps(monkeypatch, *, exchange=None):
+def _patch_deps(monkeypatch, *, exchange=None, position_repo=None, order_repo=None):
     from src.interfaces import api as api_module
 
     monkeypatch.setattr(api_module, "get_runtime_context", lambda: object())
@@ -252,7 +275,8 @@ def _patch_deps(monkeypatch, *, exchange=None):
     monkeypatch.setattr(
         api_module,
         "_order_repo",
-        _FakeOrderRepo(
+        order_repo
+        or _FakeOrderRepo(
             [
                 _FakeOrder("entry-1", "ENTRY", "91085295446", parent_order_id=None, status="FILLED"),
                 _FakeOrder("tp-1", "TP1", "91085295597"),
@@ -260,7 +284,7 @@ def _patch_deps(monkeypatch, *, exchange=None):
             ]
         ),
     )
-    monkeypatch.setattr(api_module, "_position_repo", _FakePositionRepo())
+    monkeypatch.setattr(api_module, "_position_repo", position_repo or _FakePositionRepo())
     monkeypatch.setattr(api_module, "_execution_intent_repo", _FakeIntentRepo())
     monkeypatch.setattr(api_module, "_execution_recovery_repo", _FakeRecoveryRepo())
     monkeypatch.setattr(api_module, "_audit_logger", _FakeAuditLogger())
@@ -405,6 +429,69 @@ def test_exchange_flat_pg_open_protection_state_blocks_without_actions(monkeypat
     assert exchange.cancel_calls == 0
 
 
+def test_protection_health_counts_current_scope_active_protection_only(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(
+        positions=[
+            {
+                "symbol": BNB,
+                "side": "long",
+                "contracts": "0.01",
+                "entryPrice": "630",
+                "leverage": "1",
+            }
+        ],
+        normal_orders=[
+            {
+                "id": "91085295597",
+                "symbol": BNB,
+                "type": "limit",
+                "side": "sell",
+                "status": "open",
+                "amount": "0.01",
+                "price": "638.57",
+                "info": {"reduceOnly": True, "positionSide": "LONG"},
+            }
+        ],
+    )
+    order_repo = _FakeOrderRepo(
+        [
+            _FakeOrder("entry-1", "ENTRY", "91085295446", parent_order_id=None, status="FILLED"),
+            _FakeOrder("tp-1", "TP1", "91085295597"),
+            _FakeOrder("sl-1", "SL", "4000001470395922"),
+            _FakeOrder("entry-old", "ENTRY", "old-entry", parent_order_id=None, status="FILLED"),
+            _FakeOrder("tp-old", "TP1", "old-tp", parent_order_id="entry-old", status="FILLED"),
+            _FakeOrder("sl-old", "SL", "old-sl", parent_order_id="entry-old", status="CANCELED"),
+        ]
+    )
+    order_repo.orders[-3].signal_id = "signal-old"
+    order_repo.orders[-2].signal_id = "signal-old"
+    order_repo.orders[-1].signal_id = "signal-old"
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        position_repo=_FakeActivePositionRepo(),
+        order_repo=order_repo,
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/protection-health?include_exchange=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    data = payload["data"]
+    assert data["status"] == "protected"
+    assert data["tp_count"] == 1
+    assert data["sl_count"] == 1
+    assert len(data["current_scope_active_protection"]) == 2
+    assert {item["order_id"] for item in data["current_scope_active_protection"]} == {"tp-1", "sl-1"}
+    assert {item["order_id"] for item in data["historical_protection_orders"]} >= {"tp-old", "sl-old"}
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
 def test_execution_control_blocks_consumed_authorization_but_stays_read_only(monkeypatch):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
@@ -426,6 +513,30 @@ def test_execution_control_blocks_consumed_authorization_but_stays_read_only(mon
     assert payload["no_action_guarantee"]["mutates_pg"] is False
     assert payload["no_action_guarantee"]["places_order"] is False
     assert payload["no_action_guarantee"]["retries_protection"] is False
+
+
+def test_authorization_state_degraded_path_keeps_future_action_slots(monkeypatch):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    from src.interfaces import api_trading_console as trading_console_module
+    from src.interfaces.api import app
+
+    monkeypatch.setattr(trading_console_module, "_owner_trial_flow_service", lambda: None)
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/authorization-state")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["status"] == "unknown"
+    assert payload["data"]["is_actionable"] is False
+    assert payload["data"]["future_action_slots"] == {
+        "void_authorization": "deferred_not_implemented",
+        "cancel_authorization": "deferred_not_implemented",
+    }
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
 
 
 def test_review_and_order_models_mark_untracked_cost_fields_unavailable(monkeypatch):

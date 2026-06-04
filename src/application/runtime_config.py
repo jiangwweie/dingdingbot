@@ -35,7 +35,7 @@ class EnvironmentRuntimeConfig(BaseModel):
     brc_execution_permission_max: ExecutionPermission = Field(default=ExecutionPermission.READ_ONLY)
     exchange_api_key: SecretStr
     exchange_api_secret: SecretStr
-    feishu_webhook_url: SecretStr
+    feishu_webhook_url: Optional[SecretStr] = None
     backend_port: int = Field(default=8000, ge=1, le=65535)
 
     @field_validator(
@@ -381,6 +381,35 @@ class RuntimeConfigResolver:
             execution=ExecutionRuntimeConfig.model_validate(payload["execution"]),
         )
 
+    async def resolve_startup(
+        self,
+        profile_name: Optional[str] = None,
+        *,
+        default_profile_name: str = "sim1_eth_runtime",
+    ) -> ResolvedRuntimeConfig:
+        """Resolve the startup profile without using env as live scope selector.
+
+        Production/live startup must come from an active PG runtime profile when
+        `RUNTIME_PROFILE` is absent. Non-live developer/testnet startup keeps
+        the historical default fallback for compatibility.
+        """
+        normalized_name = (profile_name or "").strip()
+        if normalized_name:
+            return await self.resolve(normalized_name)
+
+        get_active = getattr(self._profile_repository, "get_active_profile", None)
+        active_profile = await get_active() if callable(get_active) else None
+        if active_profile is not None:
+            return await self.resolve(active_profile.name)
+
+        if self._is_live_like_environment():
+            raise ValueError(
+                "active runtime profile not found; production/live startup "
+                "requires a PG active runtime profile"
+            )
+
+        return await self.resolve(default_profile_name)
+
     def _resolve_environment(self) -> EnvironmentRuntimeConfig:
         return EnvironmentRuntimeConfig(
             pg_database_url=self._required_env("PG_DATABASE_URL"),
@@ -396,15 +425,24 @@ class RuntimeConfigResolver:
             ),
             exchange_api_key=self._required_env("EXCHANGE_API_KEY"),
             exchange_api_secret=self._required_env("EXCHANGE_API_SECRET"),
-            feishu_webhook_url=self._required_env("FEISHU_WEBHOOK_URL"),
+            feishu_webhook_url=self._optional_env("FEISHU_WEBHOOK_URL"),
             backend_port=int(self._env.get("BACKEND_PORT", "8000")),
         )
+
+    def _is_live_like_environment(self) -> bool:
+        trading_env = self._env.get("TRADING_ENV", "simulation").strip().lower() or "simulation"
+        app_env = self._env.get("APP_ENV", "").strip().lower()
+        return trading_env == "live" or app_env == "production"
 
     def _required_env(self, name: str) -> str:
         value = self._env.get(name)
         if not value:
             raise ValueError(f"required environment variable missing: {name}")
         return value
+
+    def _optional_env(self, name: str) -> Optional[str]:
+        value = self._env.get(name)
+        return value or None
 
     @staticmethod
     def _parse_bool(value: str) -> bool:

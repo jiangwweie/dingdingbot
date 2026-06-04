@@ -1351,6 +1351,13 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
                 client_order_id=kwargs.get("client_order_id"),
             )
 
+    class FakePositionProjection:
+        def __init__(self):
+            self.entry_orders = []
+
+        async def project_entry_fill(self, order):
+            self.entry_orders.append(order)
+
     async def scenario():
         service, bridge, engine = await _bridge_service()
         session_maker = service._repository._session_maker
@@ -1371,6 +1378,7 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
         gateway = FakeWriteGateway()
         intent_repo = _RecordingIntentRepository()
         order_repo = _RecordingOrderRepository()
+        projection = FakePositionProjection()
         execute_service = OwnerBoundedExecutionService(
             final_gate_service=bridge,
             session_maker=session_maker,
@@ -1378,6 +1386,7 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
             order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
             intent_repository=intent_repo,
             order_repository=order_repo,
+            position_projection_service=projection,
         )
         try:
             draft = await _create_valid_draft(service)
@@ -1404,6 +1413,7 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
             assert intent_repo.updates[-1].status == "completed"
             assert len(order_repo.items) == 3
             assert [order.order_role.value for order in order_repo.items] == ["ENTRY", "TP1", "SL"]
+            assert projection.entry_orders == [order_repo.items[0]]
             assert len(gateway.calls) == 3
             entry_call, tp_call, sl_call = gateway.calls
             assert entry_call == {
@@ -1460,6 +1470,7 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
                 )
             assert "authorization_already_consumed" in reuse_exc.value.blockers
             assert len(gateway.calls) == 3
+            assert projection.entry_orders == [order_repo.items[0]]
         finally:
             await engine.dispose()
 
@@ -3069,7 +3080,19 @@ def test_bnb_final_gate_reconciliation_ignores_closed_consumed_owner_trial(monke
 def test_bnb_final_gate_closed_owner_trial_intent_classifier_requires_consumed_closeout():
     from src.interfaces import api_brc_console
 
+    completed_consumed = {
+        "status": "completed",
+        "authorization_consumed": True,
+        "authorization_metadata": {},
+    }
+    assert api_brc_console._is_closed_owner_trial_intent_row(completed_consumed) is True
+
+    completed_not_consumed = dict(completed_consumed)
+    completed_not_consumed["authorization_consumed"] = False
+    assert api_brc_console._is_closed_owner_trial_intent_row(completed_not_consumed) is False
+
     closed_row = {
+        "status": "failed",
         "authorization_consumed": True,
         "authorization_metadata": {
             "trial_final_state": "completed_with_recovery_flat",
@@ -3242,6 +3265,115 @@ def test_bnb_final_gate_scoped_runtime_safety_clearance_reaches_boundary(monkeyp
             assert order_count == 0
         finally:
             await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_bnb_final_gate_scoped_startup_guard_overlays_runtime_guard(monkeypatch):
+    from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
+    from src.interfaces import api_brc_console
+
+    now_ms = int(time.time() * 1000)
+
+    class FakeGks:
+        def get_state(self):
+            return {"active": False, "source": "test_gks_clear"}
+
+    class FakeStartupGuard:
+        def get_state(self):
+            return {
+                "armed": False,
+                "source": "startup_default_block",
+                "reason": "STARTUP_TRADING_GUARD_NOT_ARMED",
+            }
+
+    class FakeApiModule:
+        _global_kill_switch_service = FakeGks()
+        _startup_trading_guard_service = FakeStartupGuard()
+        _startup_reconciliation_summary = {
+            "status": "unavailable",
+            "source": "unavailable",
+            "reason": "startup_reconciliation_summary_unavailable",
+        }
+        _exchange_gateway = None
+
+    class FakeBnbReadOnlyClient:
+        async def fetch_balance(self, params=None):
+            return {
+                "info": {
+                    "totalMarginBalance": "100.00",
+                    "availableBalance": "80.00",
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+
+        async def fetch_positions(self, symbol=None):
+            return []
+
+        async def fetch_open_orders(self, symbol, params=None):
+            return []
+
+        async def close(self):
+            return None
+
+    async def fake_scoped_clearance(clearance_type, _profile):
+        if clearance_type != "startup_guard":
+            return None
+        return {
+            "clearance_id": "startup_guard-auth-scoped",
+            "authorization_id": "auth-scoped",
+            "expires_at_ms": now_ms + 60_000,
+            "updated_at_ms": now_ms,
+            "reason": "test_scoped_startup_guard",
+        }
+
+    async def fake_pg_counts(_symbol):
+        return {
+            "execution_intents": 0,
+            "orders": 0,
+            "pg_bnb_active_positions": 0,
+            "pg_bnb_open_orders": 0,
+        }
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_read_only_client",
+        lambda _api_module: {
+            "client": FakeBnbReadOnlyClient(),
+            "source": "test_bnb_read_only_client",
+            "close_after_read": False,
+        },
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_bnb_final_gate_pg_reconciliation_counts",
+        fake_pg_counts,
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_read_active_bnb_scoped_runtime_safety_clearance",
+        fake_scoped_clearance,
+    )
+
+    async def scenario():
+        profile = build_bnb_strategy_trial_readiness().strategy_profile
+        collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
+        snapshot = await collector.collect(profile)
+        facts = snapshot.fact_map()
+
+        assert facts["startup_guard"].status == "clear"
+        assert facts["startup_guard"].source == "pg_scoped_startup_guard_arm"
+        assert facts["startup_guard"].evidence["armed"] is True
+        assert facts["startup_guard"].evidence["runtime_started"] is True
+        assert facts["startup_guard"].evidence["runtime_safety_context_bound"] is True
+        assert facts["startup_guard"].evidence["authorization_id"] == "auth-scoped"
+        assert facts["reconciliation"].status == "clear"
+        assert facts["reconciliation"].source == "bnb_final_gate_read_only_reconciliation"
 
     asyncio.run(scenario())
 

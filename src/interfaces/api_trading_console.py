@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -19,6 +21,74 @@ router = APIRouter(
     tags=["Trading Console Read Models"],
     dependencies=[Depends(require_operator_session)],
 )
+
+
+class _TradingConsoleLiveReadOnlyGateway:
+    """Lazy, per-event-loop read-only exchange adapter for Trading Console GETs."""
+
+    def __init__(self) -> None:
+        self._gateway: Optional[Any] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    async def _gateway_for_current_loop(self) -> Any:
+        loop = asyncio.get_running_loop()
+        if self._gateway is not None and self._loop is loop and not loop.is_closed():
+            return self._gateway
+        if self._gateway is not None:
+            await self.close()
+
+        if not _live_read_only_exchange_env_safe():
+            raise RuntimeError("trading_console_live_read_only_env_not_safe")
+
+        from src.infrastructure.exchange_gateway import ExchangeGateway
+
+        gateway = ExchangeGateway(
+            os.environ.get("EXCHANGE_NAME", "binance"),
+            os.environ["EXCHANGE_API_KEY"],
+            os.environ["EXCHANGE_API_SECRET"],
+            testnet=False,
+        )
+        await gateway.initialize()
+        await gateway.check_api_key_permissions()
+        self._gateway = gateway
+        self._loop = loop
+        return gateway
+
+    def get_account_snapshot(self) -> Optional[Any]:
+        if self._gateway is None:
+            return None
+        return self._gateway.get_account_snapshot()
+
+    async def fetch_account_balance(self) -> Optional[Any]:
+        gateway = await self._gateway_for_current_loop()
+        return await gateway.fetch_account_balance()
+
+    async def fetch_positions(self, symbol: Optional[str] = None) -> list[Any]:
+        gateway = await self._gateway_for_current_loop()
+        return await gateway.fetch_positions(symbol)
+
+    async def fetch_open_orders(self, symbol: str, params: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
+        gateway = await self._gateway_for_current_loop()
+        return await gateway.fetch_open_orders(symbol, params=params)
+
+    async def close(self) -> None:
+        gateway = self._gateway
+        self._gateway = None
+        self._loop = None
+        if gateway is not None:
+            await gateway.close()
+
+
+def _live_read_only_exchange_env_safe() -> bool:
+    return (
+        os.environ.get("TRADING_ENV") == "live"
+        and os.environ.get("EXCHANGE_TESTNET", "").lower() == "false"
+        and os.environ.get("BRC_EXECUTION_PERMISSION_MAX") == "read_only"
+        and os.environ.get("RUNTIME_CONTROL_API_ENABLED", "").lower() == "false"
+        and os.environ.get("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "").lower() == "false"
+        and bool(os.environ.get("EXCHANGE_API_KEY"))
+        and bool(os.environ.get("EXCHANGE_API_SECRET"))
+    )
 
 
 @router.get("/dashboard-state", response_model=TradingConsoleReadModelResponse)
@@ -151,6 +221,10 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
     from src.interfaces import api as api_module
 
     account_snapshot = None
+    read_only_gateway = getattr(api_module, "_trading_console_read_only_exchange_gateway", None)
+    if include_exchange and read_only_gateway is None and getattr(api_module, "_exchange_gateway", None) is None:
+        read_only_gateway = _TradingConsoleLiveReadOnlyGateway()
+        setattr(api_module, "_trading_console_read_only_exchange_gateway", read_only_gateway)
     if include_exchange:
         account_getter = getattr(api_module, "_account_getter", None)
         if callable(account_getter):
@@ -160,21 +234,39 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
                 account_snapshot = None
         if account_snapshot is None:
             gateway = getattr(api_module, "_exchange_gateway", None)
+            if gateway is None:
+                gateway = read_only_gateway
             if gateway is not None and hasattr(gateway, "get_account_snapshot"):
                 try:
                     account_snapshot = gateway.get_account_snapshot()
                 except Exception:
                     account_snapshot = None
 
+    order_repo = getattr(api_module, "_order_repo", None)
+    position_repo = getattr(api_module, "_position_repo", None)
+    execution_intent_repo = getattr(api_module, "_execution_intent_repo", None)
+    execution_recovery_repo = getattr(api_module, "_execution_recovery_repo", None)
+    if order_repo is None:
+        order_repo = _cached_pg_repo(api_module, "_trading_console_pg_order_repo", _build_pg_order_repo)
+    if position_repo is None:
+        position_repo = _cached_pg_repo(api_module, "_trading_console_pg_position_repo", _build_pg_position_repo)
+    if execution_intent_repo is None:
+        execution_intent_repo = _cached_pg_repo(api_module, "_trading_console_pg_execution_intent_repo", _build_pg_execution_intent_repo)
+    if execution_recovery_repo is None:
+        execution_recovery_repo = _cached_pg_repo(api_module, "_trading_console_pg_execution_recovery_repo", _build_pg_execution_recovery_repo)
+
     return TradingConsoleDependencies(
         runtime_bound=bool(api_module.get_runtime_context() is not None),
         runtime_config_provider=getattr(api_module, "_runtime_config_provider", None),
         account_snapshot=account_snapshot,
-        exchange_gateway=getattr(api_module, "_exchange_gateway", None),
-        order_repo=getattr(api_module, "_order_repo", None),
-        position_repo=getattr(api_module, "_position_repo", None),
-        execution_intent_repo=getattr(api_module, "_execution_intent_repo", None),
-        execution_recovery_repo=getattr(api_module, "_execution_recovery_repo", None),
+        exchange_gateway=(
+            getattr(api_module, "_exchange_gateway", None)
+            or read_only_gateway
+        ),
+        order_repo=order_repo,
+        position_repo=position_repo,
+        execution_intent_repo=execution_intent_repo,
+        execution_recovery_repo=execution_recovery_repo,
         audit_logger=getattr(api_module, "_audit_logger", None),
         signal_repo=getattr(api_module, "_signal_repo", None),
         brc_campaign_service=getattr(api_module, "_brc_campaign_service", None),
@@ -184,6 +276,42 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
         startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
         execution_orchestrator=getattr(api_module, "_execution_orchestrator", None),
     )
+
+
+def _cached_pg_repo(api_module: Any, attr_name: str, factory: Any) -> Optional[Any]:
+    repo = getattr(api_module, attr_name, None)
+    if repo is not None:
+        return repo
+    try:
+        repo = factory()
+    except Exception:
+        return None
+    setattr(api_module, attr_name, repo)
+    return repo
+
+
+def _build_pg_order_repo() -> Any:
+    from src.infrastructure.pg_order_repository import PgOrderRepository
+
+    return PgOrderRepository()
+
+
+def _build_pg_position_repo() -> Any:
+    from src.infrastructure.pg_position_repository import PgPositionRepository
+
+    return PgPositionRepository()
+
+
+def _build_pg_execution_intent_repo() -> Any:
+    from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
+
+    return PgExecutionIntentRepository()
+
+
+def _build_pg_execution_recovery_repo() -> Any:
+    from src.infrastructure.pg_execution_recovery_repository import PgExecutionRecoveryRepository
+
+    return PgExecutionRecoveryRepository()
 
 
 def _owner_trial_flow_service() -> Optional[Any]:
@@ -198,3 +326,12 @@ def _owner_trial_flow_service() -> Optional[Any]:
         return _owner_trial_flow_service_instance()
     except Exception:
         return None
+
+
+async def close_trading_console_read_only_exchange_gateway() -> None:
+    from src.interfaces import api as api_module
+
+    gateway = getattr(api_module, "_trading_console_read_only_exchange_gateway", None)
+    setattr(api_module, "_trading_console_read_only_exchange_gateway", None)
+    if gateway is not None and hasattr(gateway, "close"):
+        await gateway.close()

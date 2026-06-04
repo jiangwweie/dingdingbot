@@ -71,6 +71,45 @@ class StartupReconciliationService:
         self._orchestrator = orchestrator
         self._execution_recovery_repository = execution_recovery_repository
 
+    @staticmethod
+    def _build_exchange_order_update(
+        *,
+        local_order: Order,
+        exchange_order_result: Any,
+        updated_at_ms: int,
+    ) -> Order:
+        """Build the lifecycle update from a fetched exchange order."""
+        requested_qty = exchange_order_result.amount or local_order.requested_qty
+        if exchange_order_result.filled_qty is not None:
+            filled_qty = exchange_order_result.filled_qty
+        elif exchange_order_result.status == OrderStatus.FILLED:
+            filled_qty = requested_qty
+        else:
+            filled_qty = Decimal("0")
+
+        average_exec_price = exchange_order_result.average_exec_price
+        if average_exec_price is None and exchange_order_result.status == OrderStatus.FILLED:
+            average_exec_price = exchange_order_result.price
+
+        return Order(
+            id=exchange_order_result.exchange_order_id or exchange_order_result.order_id,
+            signal_id=local_order.signal_id,
+            exchange_order_id=exchange_order_result.exchange_order_id or exchange_order_result.order_id,
+            symbol=local_order.symbol,
+            direction=local_order.direction,
+            order_type=local_order.order_type,
+            order_role=local_order.order_role,
+            price=exchange_order_result.price,
+            trigger_price=exchange_order_result.trigger_price,
+            requested_qty=requested_qty,
+            filled_qty=filled_qty,
+            average_exec_price=average_exec_price,
+            status=exchange_order_result.status,
+            created_at=local_order.created_at,
+            updated_at=updated_at_ms,
+            reduce_only=local_order.reduce_only,
+        )
+
     async def run_startup_reconciliation(self) -> Dict[str, Any]:
         """
         执行启动对账
@@ -170,20 +209,10 @@ class StartupReconciliationService:
                 )
 
                 # 构建 Order 对象（用于 update_order_from_exchange）
-                exchange_order = Order(
-                    id=exchange_order_id,
-                    signal_id=local_order.signal_id,
-                    exchange_order_id=exchange_order_id,
-                    symbol=local_order.symbol,
-                    direction=local_order.direction,
-                    order_type=local_order.order_type,
-                    order_role=local_order.order_role,
-                    requested_qty=exchange_order_result.amount,
-                    filled_qty=exchange_order_result.amount,  # fetch_order 返回的 amount 是已成交数量
-                    average_exec_price=exchange_order_result.price or Decimal("0"),
-                    status=exchange_order_result.status,
-                    created_at=local_order.created_at,
-                    updated_at=int(time.time() * 1000),
+                exchange_order = self._build_exchange_order_update(
+                    local_order=local_order,
+                    exchange_order_result=exchange_order_result,
+                    updated_at_ms=int(time.time() * 1000),
                 )
 
                 # 推进本地订单状态

@@ -492,11 +492,14 @@ class ConfigManager:
 
         if sql_path.exists():
             with open(sql_path, "r", encoding="utf-8") as f:
-                schema_sql = f.read()
+                schema_sql = "\n".join(
+                    line for line in f
+                    if not line.lstrip().startswith("--")
+                )
             # Execute each statement individually via async connection
             for statement in schema_sql.split(';'):
                 stmt = statement.strip()
-                if stmt and not stmt.startswith('--'):
+                if stmt:
                     try:
                         await self._db.execute(stmt)
                     except Exception:

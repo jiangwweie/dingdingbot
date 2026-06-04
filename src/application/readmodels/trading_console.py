@@ -7,7 +7,9 @@ write APIs.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +23,7 @@ from pydantic import BaseModel, Field
 DEFAULT_SYMBOL = "BNB/USDT:USDT"
 DEFAULT_CARRIER_ID = "MI-001-BNB-LONG"
 DEFAULT_STRATEGY_FAMILY_ID = "MI-001"
+EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
 PROTECTION_ROLES = {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
 TERMINAL_INTENT_STATUSES = {"blocked", "failed", "completed"}
@@ -135,6 +138,10 @@ class TradingConsoleReadModelService:
             include_exchange=include_exchange,
             unavailable=unavailable,
         )
+        if include_exchange and account_summary.get("status") == "not_available":
+            exchange_account = exchange.get("account_snapshot_summary")
+            if isinstance(exchange_account, dict) and exchange_account.get("status") == "available":
+                account_summary = exchange_account
 
         self._append_state_warnings(
             warnings=warnings,
@@ -615,12 +622,33 @@ class TradingConsoleReadModelService:
         config = getattr(provider, "resolved_config", None)
         environment = getattr(config, "environment", None)
         market = getattr(config, "market", None)
+        startup_summary = self._deps.startup_reconciliation_summary or {}
+        env_testnet = _parse_bool_env(os.environ.get("EXCHANGE_TESTNET"))
         return {
             "runtime_bound": self._deps.runtime_bound,
-            "profile": getattr(config, "profile_name", None) or "unknown",
-            "trading_env": getattr(environment, "trading_env", None) or "unknown",
-            "exchange_testnet": getattr(environment, "exchange_testnet", None),
-            "symbols": getattr(market, "symbols", None) or [],
+            "profile": (
+                getattr(config, "profile_name", None)
+                or startup_summary.get("profile")
+                or os.environ.get("RUNTIME_PROFILE")
+                or os.environ.get("APP_ENV")
+                or "unknown"
+            ),
+            "trading_env": (
+                getattr(environment, "trading_env", None)
+                or startup_summary.get("trading_env")
+                or os.environ.get("TRADING_ENV")
+                or "unknown"
+            ),
+            "exchange_testnet": (
+                getattr(environment, "exchange_testnet", None)
+                if getattr(environment, "exchange_testnet", None) is not None
+                else (
+                    startup_summary.get("exchange_testnet")
+                    if startup_summary.get("exchange_testnet") is not None
+                    else env_testnet
+                )
+            ),
+            "symbols": getattr(market, "symbols", None) or startup_summary.get("symbols") or [DEFAULT_SYMBOL],
             "live_ready": False,
         }
 
@@ -863,6 +891,7 @@ class TradingConsoleReadModelService:
                 "status": "unknown",
                 "is_actionable": False,
                 "blocking_reason": "owner_trial_flow_service_unavailable",
+                "future_action_slots": _authorization_future_action_slots(),
             }
         try:
             current = await service.current(carrier_id=carrier_id)
@@ -873,6 +902,7 @@ class TradingConsoleReadModelService:
                 "status": "unknown",
                 "is_actionable": False,
                 "blocking_reason": "authorization_state_read_failed",
+                "future_action_slots": _authorization_future_action_slots(),
             }
         payload = _plain_dict(current)
         authorization = payload.get("live_authorization") or {}
@@ -889,6 +919,7 @@ class TradingConsoleReadModelService:
                 "blocking_reason": "missing_active_authorization",
                 "scope": payload.get("carrier") or {},
                 "current": payload,
+                "future_action_slots": _authorization_future_action_slots(),
             }
         consumed = bool(authorization.get("consumed"))
         expired = _is_expired(authorization.get("expires_at_ms"))
@@ -934,10 +965,7 @@ class TradingConsoleReadModelService:
                 "environment": "not_available",
             },
             "current": payload,
-            "future_action_slots": {
-                "void_authorization": "deferred_not_implemented",
-                "cancel_authorization": "deferred_not_implemented",
-            },
+            "future_action_slots": _authorization_future_action_slots(),
         }
 
     async def _read_exchange(
@@ -968,19 +996,38 @@ class TradingConsoleReadModelService:
         positions: list[dict[str, Any]] = []
         open_orders: list[dict[str, Any]] = []
         errors: list[str] = []
+        account_snapshot_summary: Optional[dict[str, Any]] = None
+        if hasattr(gateway, "fetch_account_balance"):
+            try:
+                account_snapshot = await asyncio.wait_for(
+                    gateway.fetch_account_balance(),
+                    timeout=EXCHANGE_READ_TIMEOUT_SECONDS,
+                )
+                account_snapshot_summary = _account_snapshot_summary_from_snapshot(account_snapshot)
+            except Exception as exc:
+                errors.append(f"account:{exc}")
         for symbol in symbols:
             try:
-                fetched_positions = await gateway.fetch_positions(symbol)
+                fetched_positions = await asyncio.wait_for(
+                    gateway.fetch_positions(symbol),
+                    timeout=EXCHANGE_READ_TIMEOUT_SECONDS,
+                )
                 positions.extend(_position_item(item, source="exchange") for item in fetched_positions)
             except Exception as exc:
                 errors.append(f"positions:{symbol}:{exc}")
             try:
-                normal_orders = await gateway.fetch_open_orders(symbol)
+                normal_orders = await asyncio.wait_for(
+                    gateway.fetch_open_orders(symbol),
+                    timeout=EXCHANGE_READ_TIMEOUT_SECONDS,
+                )
                 open_orders.extend(_exchange_order_item(item, source="exchange_normal") for item in normal_orders)
             except Exception as exc:
                 errors.append(f"open_orders:{symbol}:{exc}")
             try:
-                stop_orders = await gateway.fetch_open_orders(symbol, params={"stop": True})
+                stop_orders = await asyncio.wait_for(
+                    gateway.fetch_open_orders(symbol, params={"stop": True}),
+                    timeout=EXCHANGE_READ_TIMEOUT_SECONDS,
+                )
                 open_orders.extend(_exchange_order_item(item, source="exchange_stop") for item in stop_orders)
             except Exception as exc:
                 errors.append(f"stop_orders:{symbol}:{exc}")
@@ -990,6 +1037,7 @@ class TradingConsoleReadModelService:
             "included": True,
             "positions": positions,
             "open_orders": open_orders,
+            "account_snapshot_summary": account_snapshot_summary,
             "exchange_snapshot_at": _now_ms(),
             "exchange_error": "; ".join(errors) if errors else None,
         }
@@ -1174,9 +1222,50 @@ class TradingConsoleReadModelService:
             or _truthy(item.get("reduce_only"))
         ]
         positions = snap.exchange.get("positions") if snap.include_exchange else snap.pg_positions
-        tp = [item for item in protection if str(item.get("order_role", "")).startswith("TP")]
-        sl = [item for item in protection if item.get("order_role") == "SL" or item.get("source") == "exchange_stop"]
-        if protection and not positions:
+        active_position_signal_ids = {
+            str(item.get("signal_id"))
+            for item in snap.pg_positions
+            if item.get("signal_id")
+        }
+        active_position_symbols = {
+            str(item.get("symbol"))
+            for item in positions
+            if item.get("symbol")
+        }
+        active_protection = [
+            item for item in protection
+            if str(item.get("status")) in OPEN_ORDER_STATUSES
+        ]
+        current_scope_active = [
+            item for item in active_protection
+            if (
+                item.get("signal_id")
+                and str(item.get("signal_id")) in active_position_signal_ids
+            )
+            or (
+                not active_position_signal_ids
+                and item.get("symbol")
+                and str(item.get("symbol")) in active_position_symbols
+            )
+        ]
+        historical_protection = [
+            item for item in protection
+            if item not in current_scope_active
+        ]
+        orphan_protection = [
+            item for item in active_protection
+            if item not in current_scope_active
+        ]
+
+        tp = [
+            item for item in current_scope_active
+            if str(item.get("order_role", "")).startswith("TP")
+        ]
+        sl = [
+            item for item in current_scope_active
+            if item.get("order_role") == "SL" or item.get("source") == "exchange_stop"
+        ]
+        if orphan_protection and not positions:
             status = "orphaned"
         elif positions and tp and sl:
             status = "protected"
@@ -1189,8 +1278,21 @@ class TradingConsoleReadModelService:
         return {
             "status": status,
             "protection_orders": protection,
+            "current_scope_active_protection": current_scope_active,
+            "current_scope_protection": current_scope_active,
+            "historical_protection_orders": historical_protection,
+            "orphan_protection_orders": orphan_protection,
+            "active_position_count": len(positions or []),
             "tp_count": len(tp),
             "sl_count": len(sl),
+            "historical_tp_count": sum(
+                1 for item in historical_protection
+                if str(item.get("order_role", "")).startswith("TP")
+            ),
+            "historical_sl_count": sum(
+                1 for item in historical_protection
+                if item.get("order_role") == "SL" or item.get("source") == "exchange_stop"
+            ),
             "findings": [
                 warning for warning in snap.warnings
                 if "protection" in warning.get("code", "") or "reduce_only" in warning.get("code", "")
@@ -1337,6 +1439,13 @@ def _json_value(value: Any) -> Any:
     return value
 
 
+def _authorization_future_action_slots() -> dict[str, str]:
+    return {
+        "void_authorization": "deferred_not_implemented",
+        "cancel_authorization": "deferred_not_implemented",
+    }
+
+
 def _order_item(order: Any) -> dict[str, Any]:
     status = _enum_value(getattr(order, "status", None))
     order_type = _enum_value(getattr(order, "order_type", getattr(order, "type", None)))
@@ -1414,6 +1523,20 @@ def _position_item(position: Any, *, source: str) -> dict[str, Any]:
     }
 
 
+def _account_snapshot_summary_from_snapshot(snapshot: Any) -> Optional[dict[str, Any]]:
+    if snapshot is None:
+        return None
+    positions = getattr(snapshot, "positions", []) or []
+    return {
+        "status": "available",
+        "total_balance": _scalar(getattr(snapshot, "total_balance", None)),
+        "available_balance": _scalar(getattr(snapshot, "available_balance", None)),
+        "unrealized_pnl": _scalar(getattr(snapshot, "unrealized_pnl", None)),
+        "timestamp_ms": getattr(snapshot, "timestamp", None),
+        "positions_count": len(positions),
+    }
+
+
 def _intent_item(intent: Any) -> dict[str, Any]:
     signal = getattr(intent, "signal", None)
     signal_payload = (
@@ -1470,6 +1593,17 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _parse_bool_env(value: Optional[str]) -> Optional[bool]:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
 
 
 def _normalized_status(value: Any) -> str:
