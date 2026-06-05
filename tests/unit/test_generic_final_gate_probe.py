@@ -5,6 +5,7 @@ from scripts.probe_generic_final_gate_readonly import (
     action_spec_for_carrier,
     build_probe_plan,
     guard_probe_environment,
+    probe_guard_blocker,
 )
 
 
@@ -68,6 +69,19 @@ def test_generic_final_gate_probe_guard_rejects_unsafe_env(
 ):
     with pytest.raises(ValueError, match=message):
         guard_probe_environment(_safe_env(**override))
+
+
+def test_generic_final_gate_probe_guard_blocker_is_structured_and_no_action():
+    blocker = probe_guard_blocker(ValueError("unsafe generic final-gate probe environment"))
+
+    assert blocker["result"] == "blocked"
+    assert blocker["stage"] == "probe_environment_guard"
+    assert blocker["blockers"] == ["unsafe_generic_final_gate_probe_environment"]
+    assert blocker["safety"]["creates_authorization"] is False
+    assert blocker["safety"]["creates_execution_intent"] is False
+    assert blocker["safety"]["places_order"] is False
+    assert blocker["safety"]["starts_runtime"] is False
+    assert blocker["safety"]["exchange_write_methods_called"] is False
 
 
 def test_generic_final_gate_probe_builds_exact_trend_action_spec():

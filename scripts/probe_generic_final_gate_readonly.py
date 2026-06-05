@@ -113,6 +113,22 @@ def build_probe_plan(env: Mapping[str, str]) -> dict:
     }
 
 
+def probe_guard_blocker(error: ValueError) -> dict:
+    return {
+        "result": "blocked",
+        "stage": "probe_environment_guard",
+        "blockers": ["unsafe_generic_final_gate_probe_environment"],
+        "message": str(error),
+        "safety": {
+            "creates_authorization": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "starts_runtime": False,
+            "exchange_write_methods_called": False,
+        },
+    }
+
+
 def action_spec_for_carrier(carrier_id: str) -> GenericActionSpec:
     carrier = get_owner_action_carrier(carrier_id)
     if carrier is None:
@@ -214,17 +230,22 @@ async def run_probe(env: Mapping[str, str]) -> dict:
             setattr(api_module, "_owner_bounded_exchange_gateway", None)
 
 
-async def main() -> None:
+async def main() -> int:
     plan = build_probe_plan(os.environ)
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     if not _bool_env(os.getenv(RUN_ENV)):
         print()
         print("DRY RUN - no PG/exchange reads performed.")
         print(f"Set {RUN_ENV}=true only for a live/read-only evidence probe.")
-        return
-    result = await run_probe(os.environ)
+        return 0
+    try:
+        result = await run_probe(os.environ)
+    except ValueError as exc:
+        print(json.dumps(probe_guard_blocker(exc), ensure_ascii=False, indent=2))
+        return 2
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

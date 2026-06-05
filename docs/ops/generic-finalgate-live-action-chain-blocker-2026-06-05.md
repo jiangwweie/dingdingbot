@@ -80,8 +80,28 @@ retry_condition:
   - FinalGate passes again and post-failure PG/exchange facts remain non-conflicting.
 ```
 
+## Probe Environment Guard BlockerRecord
+
+```yaml
+id: BR-GF-LIVE-20260605-003
+stage: read_only_probe_environment_guard
+path: GenericActionSpec -> guarded read-only PG/exchange evidence probe
+severity: hard_blocker
+evidence:
+  - Follow-up live/read-only probe attempted after commit 6493a94c.
+  - Probe default dry-run remained safe: creates_authorization=false, creates_execution_intent=false, places_order=false, starts_runtime=false, exchange_write_methods_called=false.
+  - Guarded run using .env.local.readonly refused to continue because the process environment contained EXCHANGE_TESTNET=true, BRC_EXECUTION_PERMISSION_MAX=order_allowed, RUNTIME_CONTROL_API_ENABLED=true, and RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true.
+  - No PG read, exchange read, runtime start, authorization creation, execution intent, order, cancel, flatten, retry protection, or credential change was performed by the blocked guarded probe.
+bridge:
+  - Probe now converts unsafe guard failures into a structured BlockerRecord-shaped JSON result instead of a Python traceback.
+  - Guard remains fail-closed before PG/exchange reads.
+retry_condition:
+  - Provide or export a truly read-only probe environment: TRADING_ENV=live, EXCHANGE_TESTNET=false, BRC_EXECUTION_PERMISSION_MAX=read_only, RUNTIME_CONTROL_API_ENABLED=false, RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=false, CORE_*_BACKEND=postgres, and PG_DATABASE_URL set.
+  - Re-run scripts/probe_generic_final_gate_readonly.py with RUN_GENERIC_FINAL_GATE_PROBE=true only after the guard environment is read-only.
+```
+
 ## Safety Outcome
 
 One official bounded execute endpoint attempt was performed after FinalGate passed. Binance rejected the entry order before any exchange order id was returned. Post-attempt read-only evidence showed no active position and no open order for the scoped Trend/SOL path.
 
-No cancel, replace, flatten, retry protection, runtime start, credential change, PG migration, push, or commit was performed in this run.
+No cancel, replace, flatten, retry protection, runtime start, credential change, PG migration, or push was performed in this run.
