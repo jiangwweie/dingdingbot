@@ -43,6 +43,7 @@ config/user.yml
 # Environment
 .env
 .env.local
+.env.local.*
 .local
 docker/.env.docker
 
