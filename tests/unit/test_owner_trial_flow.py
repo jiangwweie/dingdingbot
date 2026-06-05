@@ -164,6 +164,20 @@ async def _acknowledge_all(service: OwnerTrialFlowService):
     )
 
 
+async def _acknowledge_all_trend(service: OwnerTrialFlowService):
+    current = await service.current(carrier_id="TF-001-live-readonly-v0")
+    return await service.create_risk_acknowledgement(
+        OwnerRiskAcknowledgementCreateRequest(
+            carrier_id="TF-001-live-readonly-v0",
+            acknowledged_warning_codes=[
+                str(item["warning_id"])
+                for item in current.strategy_warnings
+            ],
+        ),
+        operator_id="owner",
+    )
+
+
 async def _create_valid_draft(service: OwnerTrialFlowService):
     acknowledgement = await _acknowledge_all(service)
     return await service.create_authorization_draft(
@@ -174,6 +188,23 @@ async def _create_valid_draft(service: OwnerTrialFlowService):
             side="long",
             max_notional="20",
             quantity="0.01",
+            leverage="1",
+            protection_plan_type="single_tp_plus_sl",
+        ),
+        operator_id="owner",
+    )
+
+
+async def _create_valid_trend_draft(service: OwnerTrialFlowService):
+    acknowledgement = await _acknowledge_all_trend(service)
+    return await service.create_authorization_draft(
+        BoundedLiveTrialAuthorizationDraftCreateRequest(
+            carrier_id="TF-001-live-readonly-v0",
+            linked_acknowledgement_id=acknowledgement.acknowledgement_id,
+            symbol="SOL/USDT:USDT",
+            side="long",
+            max_notional="20",
+            quantity="0.1",
             leverage="1",
             protection_plan_type="single_tp_plus_sl",
         ),
@@ -374,6 +405,186 @@ def test_trend_carrier_owner_trial_flow_and_final_gate_are_supported_without_ord
             assert result.non_permissions["order_created"] is False
 
             session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_trend_authorization_draft_rejects_exact_scope_mismatches():
+    async def scenario():
+        service, engine = await _service()
+        try:
+            acknowledgement = await _acknowledge_all_trend(service)
+            bad_requests = [
+                ("symbol_mismatch", {"symbol": "BNB/USDT:USDT"}),
+                ("side_mismatch", {"side": "short"}),
+                ("cap_violation", {"max_notional": "19"}),
+                ("cap_violation", {"quantity": "0.09"}),
+                ("cap_violation", {"leverage": "0.5"}),
+            ]
+            for code, patch in bad_requests:
+                payload = {
+                    "carrier_id": "TF-001-live-readonly-v0",
+                    "linked_acknowledgement_id": acknowledgement.acknowledgement_id,
+                    "symbol": "SOL/USDT:USDT",
+                    "side": "long",
+                    "max_notional": "20",
+                    "quantity": "0.1",
+                    "leverage": "1",
+                    "protection_plan_type": "single_tp_plus_sl",
+                }
+                payload.update(patch)
+                with pytest.raises(OwnerTrialFlowError) as excinfo:
+                    await service.create_authorization_draft(
+                        BoundedLiveTrialAuthorizationDraftCreateRequest(**payload),
+                        operator_id="owner",
+                    )
+                assert excinfo.value.code == code
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_trend_live_authorization_rejects_exact_scope_mismatches():
+    async def scenario():
+        service, engine = await _service()
+        try:
+            draft = await _create_valid_trend_draft(service)
+            bad_requests = [
+                ("symbol_mismatch", {"symbol": "BNB/USDT:USDT"}),
+                ("side_mismatch", {"side": "short"}),
+                ("cap_violation", {"max_notional": "19"}),
+                ("cap_violation", {"quantity": "0.09"}),
+                ("cap_violation", {"leverage": "0.5"}),
+            ]
+            for code, patch in bad_requests:
+                with pytest.raises(OwnerTrialFlowError) as excinfo:
+                    await service.activate_live_authorization(
+                        draft.draft_id,
+                        _trend_activation_request(**patch),
+                        operator_id="owner",
+                    )
+                assert excinfo.value.code == code
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_trend_final_gate_dry_run_blocks_exact_scope_mismatches_without_intent_or_order():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_trend_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+            bad_requests = [
+                ("symbol_mismatch", {"symbol": "BNB/USDT:USDT"}),
+                ("side_mismatch", {"side": "short"}),
+                ("cap_mismatch", {"max_notional": "19"}),
+                ("quantity_mismatch", {"quantity": "0.09"}),
+                ("leverage_mismatch", {"leverage": "0.5"}),
+            ]
+            for blocker, patch in bad_requests:
+                payload = {
+                    "carrier_id": "TF-001-live-readonly-v0",
+                    "symbol": "SOL/USDT:USDT",
+                    "side": "long",
+                    "max_notional": "20",
+                    "quantity": "0.1",
+                    "leverage": "1",
+                    "protection_plan_type": "single_tp_plus_sl",
+                }
+                payload.update(patch)
+                result = await bridge.run(
+                    BnbLiveExecutionBridgeDryRunRequest(**payload),
+                    fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                )
+
+                assert result.final_preflight_result == "blocked"
+                assert blocker in result.hard_blockers
+                assert blocker in result.execution_plan_preview.exact_blockers
+                assert result.non_permissions["execution_intent_created"] is False
+                assert result.non_permissions["order_created"] is False
+
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_trend_bounded_execution_readiness_blocks_tampered_exact_scope():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+        )
+        try:
+            draft = await _create_valid_trend_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+            bad_rows = [
+                ("symbol_mismatch", {"symbol": "BNB/USDT:USDT"}),
+                ("side_mismatch", {"side": "short"}),
+                ("quantity_mismatch", {"quantity": "0.09"}),
+                ("cap_mismatch", {"max_notional": "19"}),
+                ("leverage_mismatch", {"leverage": "0.5"}),
+            ]
+            for blocker, patch in bad_rows:
+                row = {
+                    "carrier_id": "TF-001-live-readonly-v0",
+                    "symbol": "SOL/USDT:USDT",
+                    "side": "long",
+                    "max_notional": "20",
+                    "quantity": "0.1",
+                    "leverage": "1",
+                    "protection_plan_type": "single_tp_plus_sl",
+                }
+                row.update(patch)
+                async with session_maker() as session:
+                    await session.execute(
+                        text(
+                            "UPDATE brc_bounded_live_trial_authorizations "
+                            "SET carrier_id = :carrier_id, symbol = :symbol, side = :side, "
+                            "max_notional = :max_notional, quantity = :quantity, "
+                            "leverage = :leverage, protection_plan_type = :protection_plan_type "
+                            "WHERE authorization_id = :authorization_id"
+                        ),
+                        {
+                            **row,
+                            "authorization_id": authorization.authorization_id,
+                        },
+                    )
+                    await session.commit()
+
+                readiness = await execute_service.readiness(authorization.authorization_id)
+
+                assert readiness.ready is False
+                assert blocker in readiness.blockers
+                assert readiness.creates_execution_intent_on_click is False
+                assert readiness.creates_order_on_click is False
+
             async with session_maker() as session:
                 intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
                 order_count = await session.scalar(text("SELECT count(*) FROM orders"))

@@ -488,12 +488,12 @@ def _validate_draft_scope(
         raise OwnerTrialFlowError("symbol_mismatch", "Draft symbol does not match carrier.")
     if request.side != carrier.side:
         raise OwnerTrialFlowError("side_mismatch", "Draft side does not match carrier.")
-    if request.max_notional > carrier.max_notional:
-        raise OwnerTrialFlowError("cap_violation", "Draft max notional exceeds carrier cap.")
-    if request.quantity > carrier.quantity:
-        raise OwnerTrialFlowError("cap_violation", "Draft quantity exceeds carrier cap.")
-    if request.leverage > carrier.max_leverage_allowed:
-        raise OwnerTrialFlowError("cap_violation", "Draft leverage exceeds carrier cap.")
+    if not _decimal_scope_equal(request.max_notional, carrier.max_notional):
+        raise OwnerTrialFlowError("cap_violation", "Draft max notional does not match carrier scope.")
+    if not _decimal_scope_equal(request.quantity, carrier.quantity):
+        raise OwnerTrialFlowError("cap_violation", "Draft quantity does not match carrier scope.")
+    if not _decimal_scope_equal(request.leverage, carrier.leverage):
+        raise OwnerTrialFlowError("cap_violation", "Draft leverage does not match carrier scope.")
     if request.protection_plan_type != carrier.protection_plan_type:
         raise OwnerTrialFlowError(
             "protection_not_executable",
