@@ -44,6 +44,7 @@ evidence:
   - API error handling was tightened so HTTPException dict details remain structured; official execute retry-safety response now exposes code=owner_bounded_execution_blocked, blockers=[...], execution_intent_created=false, and order_created=false at top level instead of stringifying the blocker payload.
   - Owner-bounded gateway binding and FinalGate permission checks now separate read-only probe mode from official execute mode: read-only probes still require BRC_EXECUTION_PERMISSION_MAX=read_only, while the official execute endpoint requires/evaluates BRC_EXECUTION_PERMISSION_MAX=order_allowed.
   - Follow-up official execute retry-safety call with process-local BRC_EXECUTION_PERMISSION_MAX=order_allowed no longer reported global_permission_not_order_allowed; it still returned 409 before state creation because gateway initialization failed and the authorization has a previous failed intent/order.
+  - Gateway initialization failure reporting was tightened; official execute retry-safety response now exposes gateway_binding_blockers including exchange_gateway_initialization_failed:FatalStartupError and exchange_gateway_initialization_failed:F-004.
 bridge:
   - GenericActionSpec now maps into final-gate dry-run requests.
   - FinalGate now validates ActionSpec-bound fact snapshot scope.
@@ -111,6 +112,7 @@ bridge:
   - The chain now has replayable proof that FinalGate can pass while retry-safety still prevents duplicate live action on the same authorization.
   - Official execute blocker responses now preserve structured blocker fields for Owner/API audit.
   - Official execute env semantics no longer conflict with read-only probe semantics.
+  - Gateway initialization blockers now include the sanitized fatal startup error code for retry triage.
 retry_condition:
   - Resolve Binance API key/IP/futures trade permission for the exact bounded action.
   - Use a fresh Owner authorization or an explicit audited failed-attempt resolution policy before any new execution attempt.

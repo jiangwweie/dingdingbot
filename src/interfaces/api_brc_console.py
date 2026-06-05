@@ -4080,10 +4080,16 @@ async def _owner_bounded_exchange_gateway_binding(
                 await close()
             except Exception:
                 pass
+        error_code = getattr(exc, "error_code", None)
+        error_blockers = [f"exchange_gateway_initialization_failed:{type(exc).__name__}"]
+        if error_code:
+            error_blockers.append(f"exchange_gateway_initialization_failed:{error_code}")
         return {
             "status": "blocked_gateway_initialization_failed",
             "gateway": None,
-            "blockers": [f"exchange_gateway_initialization_failed:{type(exc).__name__}"],
+            "blockers": error_blockers,
+            "error_code": error_code,
+            "error_type": type(exc).__name__,
         }
 
     setattr(api_module, "_owner_bounded_exchange_gateway", gateway)

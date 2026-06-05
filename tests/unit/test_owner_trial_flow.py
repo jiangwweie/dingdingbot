@@ -3406,6 +3406,46 @@ def test_owner_bounded_gateway_env_modes_separate_read_only_probe_from_execute(m
     assert api_brc_console._owner_bounded_gateway_env_blockers(permission_max="order_allowed") == []
 
 
+def test_owner_bounded_gateway_binding_reports_initialization_error_code(monkeypatch):
+    from src.domain.exceptions import FatalStartupError
+    from src.interfaces import api_brc_console
+
+    class FailingGateway:
+        def __init__(self, **_kwargs):
+            self.closed = False
+
+        async def initialize(self):
+            raise FatalStartupError("unit gateway init failure", "F-004")
+
+        async def close(self):
+            self.closed = True
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
+    monkeypatch.setenv("EXCHANGE_NAME", "binance")
+    monkeypatch.setenv("EXCHANGE_API_KEY", "unit-key")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "unit-secret")
+    monkeypatch.setattr(api_brc_console, "ExchangeGateway", FailingGateway)
+
+    async def scenario():
+        result = await api_brc_console._owner_bounded_exchange_gateway_binding(
+            SimpleNamespace(_owner_bounded_exchange_gateway=None),
+            permission_max="order_allowed",
+        )
+
+        assert result["status"] == "blocked_gateway_initialization_failed"
+        assert result["gateway"] is None
+        assert "exchange_gateway_initialization_failed:FatalStartupError" in result["blockers"]
+        assert "exchange_gateway_initialization_failed:F-004" in result["blockers"]
+        assert result["error_code"] == "F-004"
+        assert result["error_type"] == "FatalStartupError"
+
+    asyncio.run(scenario())
+
+
 def test_bnb_live_execution_bridge_official_execute_mode_allows_order_permission_env():
     async def scenario():
         service, _bridge, engine = await _bridge_service()
